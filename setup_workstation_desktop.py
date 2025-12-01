@@ -17,7 +17,6 @@ Example:
 """
 
 import argparse
-import getpass
 import re
 import secrets
 import string
