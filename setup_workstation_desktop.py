@@ -8,7 +8,7 @@ and sets up:
 - XFCE desktop environment
 - xRDP server for RDP access
 - Secure defaults (firewall, SSH hardening, fail2ban for RDP)
-- NTP time synchronization
+- NTP time synchronization (uses local machine's timezone by default)
 - Automatic security updates
 
 Usage:
@@ -55,11 +55,50 @@ def generate_password(length: int = 16) -> str:
     return ''.join(secrets.choice(alphabet) for _ in range(length))
 
 
+def get_local_timezone() -> str:
+    """Get the local machine's timezone."""
+    # Try to read from /etc/timezone (Debian/Ubuntu)
+    if os.path.exists("/etc/timezone"):
+        try:
+            with open("/etc/timezone", "r") as f:
+                tz = f.read().strip()
+                if tz:
+                    return tz
+        except Exception:
+            pass
+    
+    # Try to get from timedatectl
+    try:
+        result = subprocess.run(
+            ["timedatectl", "show", "-p", "Timezone", "--value"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
+    
+    # Try to read the symlink target of /etc/localtime
+    if os.path.islink("/etc/localtime"):
+        try:
+            target = os.readlink("/etc/localtime")
+            # Target is typically /usr/share/zoneinfo/Region/City
+            if "zoneinfo/" in target:
+                tz = target.split("zoneinfo/", 1)[1]
+                return tz
+        except Exception:
+            pass
+    
+    # Fall back to UTC
+    return "UTC"
+
+
 def run_remote_setup(
     ip: str,
     username: str,
     password: Optional[str] = None,
     ssh_key: Optional[str] = None,
+    timezone: Optional[str] = None,
 ) -> int:
     """
     Transfer and run the remote setup script on the target host.
@@ -70,6 +109,7 @@ def run_remote_setup(
         username: Username to create/configure
         password: Password for the user (optional)
         ssh_key: Path to SSH private key (optional)
+        timezone: Timezone to set on the remote host (optional)
     
     Returns:
         Return code from remote script
@@ -93,12 +133,12 @@ def run_remote_setup(
         ssh_opts.extend(["-i", ssh_key])
     
     # Build remote command with arguments
+    # Always pass all three args: username password timezone
+    # Empty string means "don't set" for password, "use UTC" for timezone
     escaped_username = shlex.quote(username)
-    if password:
-        escaped_password = shlex.quote(password)
-        remote_cmd = f"python3 - {escaped_username} {escaped_password}"
-    else:
-        remote_cmd = f"python3 - {escaped_username}"
+    escaped_password = shlex.quote(password if password else "")
+    escaped_timezone = shlex.quote(timezone if timezone else "")
+    remote_cmd = f"python3 - {escaped_username} {escaped_password} {escaped_timezone}"
     
     ssh_cmd = ["ssh"] + ssh_opts + [f"root@{ip}", remote_cmd]
     
@@ -151,6 +191,10 @@ def main() -> int:
         action="store_true",
         help="Don't set/change password (useful for existing users)"
     )
+    parser.add_argument(
+        "-t", "--timezone",
+        help="Timezone for the remote host (defaults to local machine's timezone)"
+    )
     
     args = parser.parse_args()
     
@@ -182,18 +226,22 @@ def main() -> int:
         password = generate_password()
         show_password = True
     
+    # Determine timezone (use provided or detect local)
+    timezone = args.timezone if args.timezone else get_local_timezone()
+    
     print("=" * 60)
     print("Remote Workstation Desktop Setup")
     print("=" * 60)
     print(f"Target host: {args.ip}")
     print(f"User: {args.username}")
+    print(f"Timezone: {timezone}")
     print("Script is idempotent - safe to run multiple times.")
     print("=" * 60)
     print()
     
     # Run the remote setup (streams output in real-time)
     returncode = run_remote_setup(
-        args.ip, args.username, password, args.key
+        args.ip, args.username, password, args.key, timezone
     )
     
     if returncode != 0:
@@ -219,6 +267,10 @@ def main() -> int:
     print("  • SSH hardening (key-only auth)")
     print("  • NTP time sync")
     print("  • Automatic security updates")
+    print("  • Default browser: Brave")
+    print()
+    print("Note: Flatpak apps may not work in unprivileged containers.")
+    print("      Enable nesting or use privileged container if needed.")
     print()
     print("To connect, use an RDP client (e.g., Remmina, Microsoft Remote Desktop)")
     print("=" * 60)
