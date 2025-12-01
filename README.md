@@ -6,6 +6,11 @@ Infrastructure management tools for remote workstation setup.
 
 A Python script that sets up a remote Linux workstation for RDP access.
 
+### Files
+
+- `setup_workstation_desktop.py` - Local script that transfers and runs the remote setup
+- `remote_setup.py` - Setup script that runs on the target host
+
 ### Features
 
 - Connects to a remote host via SSH using key-based authentication
@@ -21,7 +26,8 @@ A Python script that sets up a remote Linux workstation for RDP access.
 
 ### Requirements
 
-- Python 3.9+
+- Python 3.9+ (on local machine)
+- Python 3 on the remote host
 - SSH key-based access to the remote host as root
 - Supported remote OS: Debian, Ubuntu, or Fedora (modern RHEL-based)
 
@@ -95,15 +101,10 @@ The script applies the following security measures:
 
 ### How It Works
 
-The script uses a remote execution approach for efficiency:
-1. Connects to the remote host via SSH
-2. Detects the OS type (Debian/Ubuntu or Fedora)
-3. Generates a Python setup script tailored to the OS
-4. Transfers and executes the script on the remote host
-5. The remote script performs all configuration in a single session
-
-This approach minimizes SSH round-trips and is more reliable than running
-many individual commands.
+1. The local script reads `remote_setup.py` and transfers it via SSH
+2. The remote script runs on the target host with username and password as arguments
+3. OS detection happens on the remote host
+4. All configuration is performed in a single SSH session
 
 ### After Setup
 
