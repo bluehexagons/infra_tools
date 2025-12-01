@@ -64,6 +64,7 @@ The script applies the following security measures:
    - Allow RDP (port 3389)
 
 2. **SSH Hardening**:
+   - Creates a backup of the original SSH config (`/etc/ssh/sshd_config.bak`)
    - Disables root password login (`PermitRootLogin prohibit-password`)
    - Disables password authentication for SSH (`PasswordAuthentication no`)
    - Disables X11 forwarding
@@ -71,6 +72,10 @@ The script applies the following security measures:
 
 3. **Password Generation**: When no password is specified, generates a 16-character
    cryptographically secure random password.
+
+4. **SSH Host Key Handling**: Uses `accept-new` policy which accepts new host keys
+   but rejects changed keys. For maximum security, verify the host key fingerprint
+   manually before running this script in sensitive environments.
 
 ### After Setup
 

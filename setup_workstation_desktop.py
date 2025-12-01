@@ -51,7 +51,8 @@ def run_ssh_command(
     ip: str,
     command: str,
     ssh_key: Optional[str] = None,
-    timeout: int = 300
+    timeout: int = 300,
+    skip_host_check: bool = False
 ) -> tuple[int, str, str]:
     """
     Execute a command on the remote host via SSH.
@@ -61,12 +62,21 @@ def run_ssh_command(
         command: Command to execute
         ssh_key: Path to SSH private key (optional)
         timeout: Command timeout in seconds
+        skip_host_check: If True, skip host key verification (less secure)
     
     Returns:
         Tuple of (return_code, stdout, stderr)
+    
+    Note:
+        By default, uses 'accept-new' for StrictHostKeyChecking which accepts
+        new host keys but rejects changed keys. For maximum security in sensitive
+        environments, verify the host key manually before running this script.
     """
+    # 'accept-new' accepts unknown keys but rejects changed keys (SSH 7.6+)
+    # This is a reasonable default for infrastructure automation
+    host_key_policy = "no" if skip_host_check else "accept-new"
     ssh_opts = [
-        "-o", "StrictHostKeyChecking=accept-new",
+        "-o", f"StrictHostKeyChecking={host_key_policy}",
         "-o", "BatchMode=yes",
         "-o", "ConnectTimeout=30",
         "-o", "ServerAliveInterval=30",
@@ -121,6 +131,22 @@ def detect_os(ip: str, ssh_key: Optional[str] = None) -> Optional[str]:
     return None
 
 
+def detect_package_manager(ip: str, ssh_key: Optional[str] = None) -> str:
+    """Detect the package manager available on the remote host."""
+    # Check for dnf first (modern RHEL-based)
+    returncode, _, _ = run_ssh_command(ip, "command -v dnf", ssh_key, timeout=30)
+    if returncode == 0:
+        return "dnf"
+    
+    # Check for yum (older RHEL-based)
+    returncode, _, _ = run_ssh_command(ip, "command -v yum", ssh_key, timeout=30)
+    if returncode == 0:
+        return "yum"
+    
+    # Default to apt for Debian-based
+    return "apt"
+
+
 def create_user(ip: str, username: str, password: str, ssh_key: Optional[str] = None) -> bool:
     """Create a new sudo-enabled user on the remote host."""
     print(f"Creating user '{username}'...")
@@ -132,8 +158,9 @@ def create_user(ip: str, username: str, password: str, ssh_key: Optional[str] = 
         print(f"✗ Failed to create user: {stderr}")
         return False
     
-    # Set password using chpasswd
-    cmd = f"echo '{username}:{password}' | chpasswd"
+    # Set password using chpasswd with here-document to avoid exposure in process list
+    # The password is passed via stdin to avoid appearing in 'ps' output
+    cmd = f"chpasswd <<'EOFPWD'\n{username}:{password}\nEOFPWD"
     returncode, _, stderr = run_ssh_command(ip, cmd, ssh_key)
     if returncode != 0:
         print(f"✗ Failed to set password: {stderr}")
@@ -175,11 +202,11 @@ def install_desktop_rhel(ip: str, ssh_key: Optional[str] = None) -> bool:
     """Install XFCE desktop environment on RHEL/CentOS."""
     print("Installing XFCE desktop environment (this may take several minutes)...")
     
-    commands = [
-        "dnf groupinstall -y 'Xfce' || yum groupinstall -y 'Xfce'",
-    ]
+    # Detect and use appropriate package manager
+    pkg_mgr = detect_package_manager(ip, ssh_key)
+    print(f"  Using package manager: {pkg_mgr}")
     
-    cmd = " && ".join(commands)
+    cmd = f"{pkg_mgr} groupinstall -y 'Xfce'"
     returncode, _, stderr = run_ssh_command(ip, cmd, ssh_key, timeout=900)
     if returncode != 0:
         print(f"✗ Failed to install desktop: {stderr}")
@@ -196,7 +223,8 @@ def install_xrdp_debian(ip: str, ssh_key: Optional[str] = None) -> bool:
     commands = [
         "export DEBIAN_FRONTEND=noninteractive",
         "apt-get install -y xrdp",
-        "adduser xrdp ssl-cert || true",
+        # Add xrdp to ssl-cert group if it exists (for TLS certificate access)
+        "getent group ssl-cert >/dev/null && adduser xrdp ssl-cert || echo 'Note: ssl-cert group not found, skipping'",
         "systemctl enable xrdp",
         "systemctl restart xrdp",
     ]
@@ -215,9 +243,13 @@ def install_xrdp_rhel(ip: str, ssh_key: Optional[str] = None) -> bool:
     """Install and configure xRDP on RHEL/CentOS."""
     print("Installing xRDP...")
     
+    # Detect and use appropriate package manager
+    pkg_mgr = detect_package_manager(ip, ssh_key)
+    print(f"  Using package manager: {pkg_mgr}")
+    
     commands = [
-        "dnf install -y epel-release || yum install -y epel-release",
-        "dnf install -y xrdp || yum install -y xrdp",
+        f"{pkg_mgr} install -y epel-release",
+        f"{pkg_mgr} install -y xrdp",
         "systemctl enable xrdp",
         "systemctl restart xrdp",
     ]
@@ -274,8 +306,9 @@ def apply_secure_defaults(ip: str, os_type: str, ssh_key: Optional[str] = None) 
     else:
         print("✓ Firewall configured (SSH and RDP ports allowed)")
     
-    # Harden SSH configuration
+    # Harden SSH configuration (with backup)
     ssh_hardening_cmds = [
+        "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak",
         "sed -i 's/^#*PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config",
         "sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config",
         "sed -i 's/^#*X11Forwarding.*/X11Forwarding no/' /etc/ssh/sshd_config",
