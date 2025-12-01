@@ -9,12 +9,11 @@ A Python script that sets up a remote Linux workstation for RDP access.
 ### Files
 
 - `setup_workstation_desktop.py` - Local script that transfers and runs the remote setup
-- `remote_setup.py` - Setup script that runs on the target host
+- `remote_setup.py` - Setup script that runs on the target host (can also be run directly)
 
 ### Features
 
-- Connects to a remote host via SSH using key-based authentication
-- Creates a new sudo-enabled user
+- Creates a new sudo-enabled user or configures an existing one
 - Installs XFCE desktop environment (lightweight)
 - Installs and configures xRDP for remote desktop access
 - Applies secure defaults:
@@ -25,6 +24,7 @@ A Python script that sets up a remote Linux workstation for RDP access.
 - Enables automatic security updates
 - Installs CLI tools: neovim, btop, htop, curl, wget, git, tmux, unzip
 - Installs desktop apps via Flatpak: LibreOffice, Brave, VSCodium, Discord
+- **Idempotent**: Safe to run multiple times to propagate updates
 
 ### Requirements
 
@@ -36,7 +36,14 @@ A Python script that sets up a remote Linux workstation for RDP access.
 ### Usage
 
 ```bash
+# Basic usage (creates user with auto-generated password)
 python3 setup_workstation_desktop.py [IP address] [username]
+
+# With custom password
+python3 setup_workstation_desktop.py [IP address] [username] -p "password"
+
+# Without setting password (for existing users)
+python3 setup_workstation_desktop.py [IP address] [username] --no-password
 ```
 
 ### Examples
@@ -56,14 +63,35 @@ With a custom password:
 python3 setup_workstation_desktop.py 192.168.1.100 johndoe -p "MySecurePassword123!"
 ```
 
+Configure existing user without changing password:
+```bash
+python3 setup_workstation_desktop.py 192.168.1.100 johndoe --no-password
+```
+
+### Running Directly on Host
+
+The `remote_setup.py` script can also be run directly on the target machine:
+
+```bash
+# Set up current user
+python3 remote_setup.py
+
+# Set up specific user (creates if needed)
+python3 remote_setup.py johndoe
+
+# Set up user with password
+python3 remote_setup.py johndoe "mypassword"
+```
+
 ### Options
 
 | Option | Description |
 |--------|-------------|
 | `ip` | IP address of the remote host |
-| `username` | Username for the new sudo-enabled user |
+| `username` | Username for the sudo-enabled user |
 | `-k, --key` | Path to SSH private key (optional) |
-| `-p, --password` | Password for the new user (optional, auto-generated if not specified) |
+| `-p, --password` | Password for the user (optional, auto-generated if not specified) |
+| `--no-password` | Don't set/change password (useful for existing users) |
 
 ### Security
 
@@ -104,6 +132,7 @@ The script applies the following security measures:
 ### Pre-installed Software
 
 **CLI Tools** (installed via system package manager):
+- sudo - Privilege escalation (for minimal distros)
 - neovim - Modern text editor
 - btop - Resource monitor
 - htop - Interactive process viewer
@@ -121,9 +150,10 @@ The script applies the following security measures:
 ### How It Works
 
 1. The local script reads `remote_setup.py` and transfers it via SSH
-2. The remote script runs on the target host with username and password as arguments
-3. OS detection happens on the remote host
-4. All configuration is performed in a single SSH session
+2. Output is streamed in real-time during execution
+3. The remote script runs on the target host with username and password as arguments
+4. OS detection happens on the remote host
+5. All configuration is performed in a single SSH session
 
 ### After Setup
 

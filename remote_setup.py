@@ -2,8 +2,7 @@
 """
 Remote Workstation Setup Script
 
-This script runs on the target host to set up:
-- A new sudo-enabled user
+This script sets up a Linux workstation with:
 - XFCE desktop environment
 - xRDP server for RDP access
 - Secure defaults (firewall, SSH hardening, fail2ban for RDP)
@@ -12,17 +11,28 @@ This script runs on the target host to set up:
 - CLI tools (neovim, btop, htop, etc.)
 - Desktop applications via Flatpak (LibreOffice, Brave, VSCodium, Discord)
 
-Usage (on remote host):
+Usage (on the host):
+    # Set up current user (no new user creation)
+    python3 remote_setup.py
+    
+    # Set up with a specific username (creates user if needed)
+    python3 remote_setup.py <username>
+    
+    # Set up with username and password (creates user with password)
     python3 remote_setup.py <username> <password>
 
 Supported OS: Debian/Ubuntu, Fedora
+
+This script is idempotent and safe to run multiple times.
 """
 
+import getpass
 import os
 import re
 import shlex
 import subprocess
 import sys
+from typing import Optional
 
 
 def validate_username(username: str) -> bool:
@@ -34,10 +44,12 @@ def validate_username(username: str) -> bool:
 def run(cmd: str, check: bool = True) -> subprocess.CompletedProcess:
     """Run a shell command and return the result."""
     print(f"  Running: {cmd[:80]}..." if len(cmd) > 80 else f"  Running: {cmd}")
+    sys.stdout.flush()
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     if check and result.returncode != 0:
         if result.stderr:
             print(f"    Warning: {result.stderr[:200]}")
+            sys.stdout.flush()
     return result
 
 
@@ -59,43 +71,69 @@ def detect_os() -> str:
         sys.exit(1)
 
 
-def create_user(username: str, password: str, os_type: str) -> None:
-    """Create user with sudo privileges."""
-    print("\n[1/10] Creating user...")
+def ensure_sudo_installed(os_type: str) -> None:
+    """Ensure sudo is installed (for minimal distros)."""
+    print("\n[1/11] Ensuring sudo is installed...")
+    sys.stdout.flush()
     
-    # Use shlex.quote for safe shell interpolation
+    if os_type == "debian":
+        os.environ["DEBIAN_FRONTEND"] = "noninteractive"
+        run("apt-get update -qq")
+        run("apt-get install -y -qq sudo")
+    else:
+        run("dnf install -y -q sudo")
+    
+    print("  ✓ sudo is available")
+    sys.stdout.flush()
+
+
+def setup_user(username: str, password: Optional[str], os_type: str) -> None:
+    """Set up user with sudo privileges (creates if doesn't exist)."""
+    print("\n[2/11] Setting up user...")
+    sys.stdout.flush()
+    
     safe_username = shlex.quote(username)
-
+    
+    # Check if user exists
     result = run(f"id {safe_username}", check=False)
-    if result.returncode != 0:
+    user_exists = result.returncode == 0
+    
+    if not user_exists:
         run(f"useradd -m -s /bin/bash {safe_username}")
-
-    # Set password using chpasswd via stdin (safe - no shell interpolation)
-    process = subprocess.run(
-        ["chpasswd"],
-        input=f"{username}:{password}\n",
-        text=True,
-        capture_output=True
-    )
-    if process.returncode != 0:
-        print(f"  Warning: Failed to set password: {process.stderr}")
-
-    # Add to sudo/wheel group
+        print(f"  Created new user: {username}")
+    else:
+        print(f"  User already exists: {username}")
+    
+    # Set password if provided
+    if password:
+        process = subprocess.run(
+            ["chpasswd"],
+            input=f"{username}:{password}\n",
+            text=True,
+            capture_output=True
+        )
+        if process.returncode != 0:
+            print(f"  Warning: Failed to set password: {process.stderr}")
+        else:
+            print("  Password updated")
+    
+    # Ensure user is in sudo/wheel group
     if os_type == "debian":
         run(f"usermod -aG sudo {safe_username}", check=False)
     else:
         run(f"usermod -aG wheel {safe_username}", check=False)
-
-    print("  ✓ User created with sudo privileges")
+    
+    print("  ✓ User configured with sudo privileges")
+    sys.stdout.flush()
 
 
 def configure_time_sync(os_type: str) -> None:
     """Configure NTP time synchronization."""
-    print("\n[2/10] Configuring time synchronization...")
+    print("\n[3/11] Configuring time synchronization...")
+    sys.stdout.flush()
 
     if os_type == "debian":
         os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-        run("apt-get update -qq")
         run("apt-get install -y -qq systemd-timesyncd")
         run("timedatectl set-ntp true")
     else:
@@ -105,12 +143,14 @@ def configure_time_sync(os_type: str) -> None:
 
     run("timedatectl set-timezone UTC")
     print("  ✓ Time synchronization configured (NTP enabled, timezone: UTC)")
+    sys.stdout.flush()
 
 
 def install_desktop(os_type: str) -> None:
     """Install XFCE desktop environment."""
-    print("\n[3/10] Installing XFCE desktop environment...")
+    print("\n[4/11] Installing XFCE desktop environment...")
     print("  (This may take several minutes)")
+    sys.stdout.flush()
 
     if os_type == "debian":
         run("apt-get install -y -qq xfce4 xfce4-goodies")
@@ -118,11 +158,13 @@ def install_desktop(os_type: str) -> None:
         run("dnf groupinstall -y 'Xfce Desktop'")
 
     print("  ✓ XFCE desktop installed")
+    sys.stdout.flush()
 
 
 def install_xrdp(username: str, os_type: str) -> None:
     """Install and configure xRDP."""
-    print("\n[4/10] Installing xRDP...")
+    print("\n[5/11] Installing xRDP...")
+    sys.stdout.flush()
     
     safe_username = shlex.quote(username)
 
@@ -135,18 +177,20 @@ def install_xrdp(username: str, os_type: str) -> None:
     run("systemctl enable xrdp")
     run("systemctl restart xrdp")
 
-    # Configure user session (username already validated, path is safe)
+    # Configure user session (create/update .xsession)
     xsession_path = f"/home/{username}/.xsession"
     with open(xsession_path, "w") as f:
         f.write("xfce4-session\n")
     run(f"chown {safe_username}:{safe_username} {shlex.quote(xsession_path)}")
 
     print("  ✓ xRDP installed and configured")
+    sys.stdout.flush()
 
 
 def configure_firewall(os_type: str) -> None:
     """Configure firewall to allow SSH and RDP."""
-    print("\n[5/10] Configuring firewall...")
+    print("\n[6/11] Configuring firewall...")
+    sys.stdout.flush()
 
     if os_type == "debian":
         run("apt-get install -y -qq ufw")
@@ -163,11 +207,13 @@ def configure_firewall(os_type: str) -> None:
         run("firewall-cmd --reload", check=False)
 
     print("  ✓ Firewall configured (SSH and RDP allowed)")
+    sys.stdout.flush()
 
 
 def configure_fail2ban(os_type: str) -> None:
     """Install and configure fail2ban for RDP protection."""
-    print("\n[6/10] Installing fail2ban for RDP brute-force protection...")
+    print("\n[7/11] Installing fail2ban for RDP brute-force protection...")
+    sys.stdout.flush()
 
     if os_type == "debian":
         run("apt-get install -y -qq fail2ban")
@@ -191,6 +237,10 @@ bantime = 3600
 findtime = 600
 """
 
+    # Create directories if they don't exist
+    os.makedirs("/etc/fail2ban/filter.d", exist_ok=True)
+    os.makedirs("/etc/fail2ban/jail.d", exist_ok=True)
+
     with open("/etc/fail2ban/filter.d/xrdp.conf", "w") as f:
         f.write(fail2ban_xrdp_filter)
 
@@ -201,13 +251,17 @@ findtime = 600
     run("systemctl restart fail2ban")
 
     print("  ✓ fail2ban configured (3 failed attempts = 1 hour ban)")
+    sys.stdout.flush()
 
 
 def harden_ssh() -> None:
     """Harden SSH configuration."""
-    print("\n[7/10] Hardening SSH configuration...")
+    print("\n[8/11] Hardening SSH configuration...")
+    sys.stdout.flush()
 
-    run("cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak")
+    # Only backup if backup doesn't exist (idempotent)
+    if not os.path.exists("/etc/ssh/sshd_config.bak"):
+        run("cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak")
 
     ssh_hardening = [
         ("PermitRootLogin", "prohibit-password"),
@@ -222,11 +276,13 @@ def harden_ssh() -> None:
     run("systemctl reload sshd || systemctl reload ssh", check=False)
 
     print("  ✓ SSH hardened (key-only auth, no root password, max 3 attempts)")
+    sys.stdout.flush()
 
 
 def configure_auto_updates(os_type: str) -> None:
     """Configure automatic security updates."""
-    print("\n[8/10] Configuring automatic security updates...")
+    print("\n[9/11] Configuring automatic security updates...")
+    sys.stdout.flush()
 
     if os_type == "debian":
         run("apt-get install -y -qq unattended-upgrades")
@@ -248,11 +304,13 @@ APT::Periodic::AutocleanInterval "7";
         run("systemctl start dnf-automatic.timer")
 
     print("  ✓ Automatic security updates enabled")
+    sys.stdout.flush()
 
 
 def install_cli_tools(os_type: str) -> None:
     """Install useful CLI tools for development and system monitoring."""
-    print("\n[9/10] Installing CLI tools...")
+    print("\n[10/11] Installing CLI tools...")
+    sys.stdout.flush()
 
     # Common CLI tools useful for Proxmox containers and development
     if os_type == "debian":
@@ -261,11 +319,13 @@ def install_cli_tools(os_type: str) -> None:
         run("dnf install -y -q neovim btop htop curl wget git tmux unzip")
 
     print("  ✓ CLI tools installed (neovim, btop, htop, curl, wget, git, tmux, unzip)")
+    sys.stdout.flush()
 
 
 def install_desktop_apps(os_type: str) -> None:
     """Install desktop applications via Flatpak."""
-    print("\n[10/10] Installing desktop applications via Flatpak...")
+    print("\n[11/11] Installing desktop applications via Flatpak...")
+    sys.stdout.flush()
 
     # Install Flatpak
     if os_type == "debian":
@@ -273,33 +333,45 @@ def install_desktop_apps(os_type: str) -> None:
     else:
         run("dnf install -y -q flatpak")
 
-    # Add Flathub repository
+    # Add Flathub repository (--if-not-exists makes it idempotent)
     run("flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo")
 
-    # Install desktop applications
-    # LibreOffice
+    # Install desktop applications (flatpak install is idempotent)
     run("flatpak install -y flathub org.libreoffice.LibreOffice", check=False)
-
-    # Brave Browser
     run("flatpak install -y flathub com.brave.Browser", check=False)
-
-    # VSCodium
     run("flatpak install -y flathub com.vscodium.codium", check=False)
-
-    # Discord
     run("flatpak install -y flathub com.discordapp.Discord", check=False)
 
     print("  ✓ Desktop apps installed (LibreOffice, Brave, VSCodium, Discord)")
+    sys.stdout.flush()
 
 
 def main() -> int:
     """Main entry point."""
-    if len(sys.argv) != 3:
-        print(f"Usage: {sys.argv[0]} <username> <password>")
+    # Parse arguments: [username] [password]
+    # If no arguments, use current user
+    # If one argument, use it as username (no password change)
+    # If two arguments, use username and password
+    
+    if len(sys.argv) == 1:
+        # No arguments - use current user
+        username = getpass.getuser()
+        password = None
+        print(f"No username specified, using current user: {username}")
+    elif len(sys.argv) == 2:
+        # One argument - username only
+        username = sys.argv[1]
+        password = None
+    elif len(sys.argv) == 3:
+        # Two arguments - username and password
+        username = sys.argv[1]
+        password = sys.argv[2]
+    else:
+        print(f"Usage: {sys.argv[0]} [username] [password]")
+        print("  No args: set up current user")
+        print("  1 arg:   set up specified user (no password change)")
+        print("  2 args:  set up user with password")
         return 1
-
-    username = sys.argv[1]
-    password = sys.argv[2]
     
     # Validate username format for security
     if not validate_username(username):
@@ -312,13 +384,18 @@ def main() -> int:
     print("=" * 60)
     print("Remote Workstation Setup Script")
     print("=" * 60)
+    print(f"Target user: {username}")
+    print("This script is idempotent - safe to run multiple times.")
+    sys.stdout.flush()
 
     # Detect OS
     os_type = detect_os()
     print(f"Detected OS type: {os_type}")
+    sys.stdout.flush()
 
     # Run setup steps
-    create_user(username, password, os_type)
+    ensure_sudo_installed(os_type)
+    setup_user(username, password, os_type)
     configure_time_sync(os_type)
     install_desktop(os_type)
     install_xrdp(username, os_type)
@@ -332,6 +409,7 @@ def main() -> int:
     print("\n" + "=" * 60)
     print("Setup completed successfully!")
     print("=" * 60)
+    sys.stdout.flush()
 
     return 0
 
