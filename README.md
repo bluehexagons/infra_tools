@@ -23,6 +23,8 @@ A Python script that sets up a remote Linux workstation for RDP access.
   - fail2ban protection for RDP (3 failed attempts = 1 hour ban)
 - Configures NTP time synchronization
 - Enables automatic security updates
+- Installs CLI tools: neovim, btop, htop, curl, wget, git, tmux, unzip
+- Installs desktop apps via Flatpak: LibreOffice, Brave, VSCodium, Discord
 
 ### Requirements
 
@@ -98,6 +100,23 @@ The script applies the following security measures:
 
 7. **Time Synchronization**: Configures NTP via systemd-timesyncd (Debian) or
    chrony (Fedora) with UTC timezone as default.
+
+### Pre-installed Software
+
+**CLI Tools** (installed via system package manager):
+- neovim - Modern text editor
+- btop - Resource monitor
+- htop - Interactive process viewer
+- curl, wget - HTTP clients
+- git - Version control
+- tmux - Terminal multiplexer
+- unzip - Archive utility
+
+**Desktop Applications** (installed via Flatpak from Flathub):
+- LibreOffice - Office suite
+- Brave - Privacy-focused web browser
+- VSCodium - Open-source code editor
+- Discord - Communication platform
 
 ### How It Works
 

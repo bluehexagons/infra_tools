@@ -9,6 +9,8 @@ This script runs on the target host to set up:
 - Secure defaults (firewall, SSH hardening, fail2ban for RDP)
 - NTP time synchronization
 - Automatic security updates
+- CLI tools (neovim, btop, htop, etc.)
+- Desktop applications via Flatpak (LibreOffice, Brave, VSCodium, Discord)
 
 Usage (on remote host):
     python3 remote_setup.py <username> <password>
@@ -59,7 +61,7 @@ def detect_os() -> str:
 
 def create_user(username: str, password: str, os_type: str) -> None:
     """Create user with sudo privileges."""
-    print("\n[1/8] Creating user...")
+    print("\n[1/10] Creating user...")
     
     # Use shlex.quote for safe shell interpolation
     safe_username = shlex.quote(username)
@@ -89,7 +91,7 @@ def create_user(username: str, password: str, os_type: str) -> None:
 
 def configure_time_sync(os_type: str) -> None:
     """Configure NTP time synchronization."""
-    print("\n[2/8] Configuring time synchronization...")
+    print("\n[2/10] Configuring time synchronization...")
 
     if os_type == "debian":
         os.environ["DEBIAN_FRONTEND"] = "noninteractive"
@@ -107,7 +109,7 @@ def configure_time_sync(os_type: str) -> None:
 
 def install_desktop(os_type: str) -> None:
     """Install XFCE desktop environment."""
-    print("\n[3/8] Installing XFCE desktop environment...")
+    print("\n[3/10] Installing XFCE desktop environment...")
     print("  (This may take several minutes)")
 
     if os_type == "debian":
@@ -120,7 +122,7 @@ def install_desktop(os_type: str) -> None:
 
 def install_xrdp(username: str, os_type: str) -> None:
     """Install and configure xRDP."""
-    print("\n[4/8] Installing xRDP...")
+    print("\n[4/10] Installing xRDP...")
     
     safe_username = shlex.quote(username)
 
@@ -144,7 +146,7 @@ def install_xrdp(username: str, os_type: str) -> None:
 
 def configure_firewall(os_type: str) -> None:
     """Configure firewall to allow SSH and RDP."""
-    print("\n[5/8] Configuring firewall...")
+    print("\n[5/10] Configuring firewall...")
 
     if os_type == "debian":
         run("apt-get install -y -qq ufw")
@@ -165,7 +167,7 @@ def configure_firewall(os_type: str) -> None:
 
 def configure_fail2ban(os_type: str) -> None:
     """Install and configure fail2ban for RDP protection."""
-    print("\n[6/8] Installing fail2ban for RDP brute-force protection...")
+    print("\n[6/10] Installing fail2ban for RDP brute-force protection...")
 
     if os_type == "debian":
         run("apt-get install -y -qq fail2ban")
@@ -203,7 +205,7 @@ findtime = 600
 
 def harden_ssh() -> None:
     """Harden SSH configuration."""
-    print("\n[7/8] Hardening SSH configuration...")
+    print("\n[7/10] Hardening SSH configuration...")
 
     run("cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak")
 
@@ -224,7 +226,7 @@ def harden_ssh() -> None:
 
 def configure_auto_updates(os_type: str) -> None:
     """Configure automatic security updates."""
-    print("\n[8/8] Configuring automatic security updates...")
+    print("\n[8/10] Configuring automatic security updates...")
 
     if os_type == "debian":
         run("apt-get install -y -qq unattended-upgrades")
@@ -246,6 +248,48 @@ APT::Periodic::AutocleanInterval "7";
         run("systemctl start dnf-automatic.timer")
 
     print("  ✓ Automatic security updates enabled")
+
+
+def install_cli_tools(os_type: str) -> None:
+    """Install useful CLI tools for development and system monitoring."""
+    print("\n[9/10] Installing CLI tools...")
+
+    # Common CLI tools useful for Proxmox containers and development
+    if os_type == "debian":
+        run("apt-get install -y -qq neovim btop htop curl wget git tmux unzip")
+    else:
+        run("dnf install -y -q neovim btop htop curl wget git tmux unzip")
+
+    print("  ✓ CLI tools installed (neovim, btop, htop, curl, wget, git, tmux, unzip)")
+
+
+def install_desktop_apps(os_type: str) -> None:
+    """Install desktop applications via Flatpak."""
+    print("\n[10/10] Installing desktop applications via Flatpak...")
+
+    # Install Flatpak
+    if os_type == "debian":
+        run("apt-get install -y -qq flatpak")
+    else:
+        run("dnf install -y -q flatpak")
+
+    # Add Flathub repository
+    run("flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo")
+
+    # Install desktop applications
+    # LibreOffice
+    run("flatpak install -y flathub org.libreoffice.LibreOffice", check=False)
+
+    # Brave Browser
+    run("flatpak install -y flathub com.brave.Browser", check=False)
+
+    # VSCodium
+    run("flatpak install -y flathub com.vscodium.codium", check=False)
+
+    # Discord
+    run("flatpak install -y flathub com.discordapp.Discord", check=False)
+
+    print("  ✓ Desktop apps installed (LibreOffice, Brave, VSCodium, Discord)")
 
 
 def main() -> int:
@@ -282,6 +326,8 @@ def main() -> int:
     configure_fail2ban(os_type)
     harden_ssh()
     configure_auto_updates(os_type)
+    install_cli_tools(os_type)
+    install_desktop_apps(os_type)
 
     print("\n" + "=" * 60)
     print("Setup completed successfully!")
