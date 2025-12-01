@@ -24,7 +24,7 @@ A Python script that sets up a remote Linux workstation for RDP access.
 - Enables automatic security updates
 - Configures UTF-8 locale (fixes btop and other tools)
 - Installs CLI tools: neovim, btop, htop, curl, wget, git, tmux, unzip
-- Installs desktop apps via Flatpak: LibreOffice, Brave, VSCodium, Discord
+- Installs desktop apps via native packages: LibreOffice, Brave, VSCodium, Discord
 - Sets Brave as the default web browser
 - **Idempotent**: Safe to run multiple times to propagate updates
 

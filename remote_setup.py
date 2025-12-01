@@ -2,33 +2,13 @@
 """
 Remote Workstation Setup Script
 
-This script sets up a Linux workstation with:
-- XFCE desktop environment
-- xRDP server for RDP access
-- Secure defaults (firewall, SSH hardening, fail2ban for RDP)
-- NTP time synchronization
-- Automatic security updates
-- CLI tools (neovim, btop, htop, etc.)
-- Desktop applications (LibreOffice, Brave, VSCodium, Discord)
-- UTF-8 locale configuration
-- Default browser set to Brave
-
 Usage (on the host):
-    # Set up current user (no new user creation)
-    python3 remote_setup.py
-    
-    # Set up with a specific username (creates user if needed)
-    python3 remote_setup.py <username>
-    
-    # Set up with username and password (creates user with password)
-    python3 remote_setup.py <username> <password>
-    
-    # Set up with username, password, and timezone
+    python3 remote_setup.py                           # Set up current user
+    python3 remote_setup.py <username>                # Set up specified user
+    python3 remote_setup.py <username> <password>     # Set up user with password
     python3 remote_setup.py <username> <password> <timezone>
 
 Supported OS: Debian/Ubuntu, Fedora
-
-This script is idempotent and safe to run multiple times.
 """
 
 import getpass
@@ -41,13 +21,11 @@ from typing import Optional
 
 
 def validate_username(username: str) -> bool:
-    """Validate username format (lowercase letters, numbers, underscore, hyphen)."""
     pattern = r'^[a-z_][a-z0-9_-]{0,31}$'
     return bool(re.match(pattern, username))
 
 
 def run(cmd: str, check: bool = True) -> subprocess.CompletedProcess:
-    """Run a shell command and return the result."""
     print(f"  Running: {cmd[:80]}..." if len(cmd) > 80 else f"  Running: {cmd}")
     sys.stdout.flush()
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
@@ -59,7 +37,6 @@ def run(cmd: str, check: bool = True) -> subprocess.CompletedProcess:
 
 
 def detect_os() -> str:
-    """Detect the operating system."""
     try:
         with open("/etc/os-release") as f:
             content = f.read().lower()
@@ -77,7 +54,6 @@ def detect_os() -> str:
 
 
 def ensure_sudo_installed(os_type: str) -> None:
-    """Ensure sudo is installed (for minimal distros)."""
     print("\n[1/13] Ensuring sudo is installed...")
     sys.stdout.flush()
     
@@ -93,25 +69,20 @@ def ensure_sudo_installed(os_type: str) -> None:
 
 
 def configure_locale(os_type: str) -> None:
-    """Configure UTF-8 locale for proper terminal support."""
     print("\n[2/13] Configuring UTF-8 locale...")
     sys.stdout.flush()
     
     if os_type == "debian":
-        # Install locales package and generate en_US.UTF-8
         run("apt-get install -y -qq locales")
         run("sed -i 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen")
         run("locale-gen")
         run("update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8")
     else:
-        # Fedora usually has locales, but ensure glibc-langpack-en is installed
         run("dnf install -y -q glibc-langpack-en")
     
-    # Set environment variables for current session
     os.environ["LANG"] = "en_US.UTF-8"
     os.environ["LC_ALL"] = "en_US.UTF-8"
     
-    # Add to /etc/environment for persistence
     env_content = 'LANG=en_US.UTF-8\nLC_ALL=en_US.UTF-8\n'
     with open("/etc/environment", "a+") as f:
         f.seek(0)
@@ -123,37 +94,42 @@ def configure_locale(os_type: str) -> None:
     sys.stdout.flush()
 
 
+def set_user_password(username: str, password: str) -> bool:
+    process = subprocess.run(
+        ["chpasswd"],
+        input=f"{username}:{password}\n",
+        text=True,
+        capture_output=True
+    )
+    if process.returncode != 0:
+        print(f"  Warning: Failed to set password: {process.stderr}")
+        return False
+    return True
+
+
 def setup_user(username: str, password: Optional[str], os_type: str) -> None:
-    """Set up user with sudo privileges (creates if doesn't exist)."""
     print("\n[3/13] Setting up user...")
     sys.stdout.flush()
     
     safe_username = shlex.quote(username)
     
-    # Check if user exists
     result = run(f"id {safe_username}", check=False)
     user_exists = result.returncode == 0
     
     if not user_exists:
         run(f"useradd -m -s /bin/bash {safe_username}")
         print(f"  Created new user: {username}")
+        if password:
+            if set_user_password(username, password):
+                print("  Password set")
     else:
         print(f"  User already exists: {username}")
-    
-    # Set password if provided
-    if password:
-        process = subprocess.run(
-            ["chpasswd"],
-            input=f"{username}:{password}\n",
-            text=True,
-            capture_output=True
-        )
-        if process.returncode != 0:
-            print(f"  Warning: Failed to set password: {process.stderr}")
+        if password:
+            if set_user_password(username, password):
+                print("  Password updated")
         else:
-            print("  Password updated")
+            print("  Password unchanged")
     
-    # Ensure user is in sudo/wheel group
     if os_type == "debian":
         run(f"usermod -aG sudo {safe_username}", check=False)
     else:
@@ -164,7 +140,6 @@ def setup_user(username: str, password: Optional[str], os_type: str) -> None:
 
 
 def configure_time_sync(os_type: str, timezone: Optional[str] = None) -> None:
-    """Configure NTP time synchronization."""
     print("\n[4/13] Configuring time synchronization...")
     sys.stdout.flush()
 
@@ -177,7 +152,6 @@ def configure_time_sync(os_type: str, timezone: Optional[str] = None) -> None:
         run("systemctl enable chronyd")
         run("systemctl start chronyd")
 
-    # Set timezone (use provided timezone or default to UTC)
     tz = timezone if timezone else "UTC"
     run(f"timedatectl set-timezone {shlex.quote(tz)}")
     print(f"  ✓ Time synchronization configured (NTP enabled, timezone: {tz})")
@@ -185,7 +159,6 @@ def configure_time_sync(os_type: str, timezone: Optional[str] = None) -> None:
 
 
 def install_desktop(os_type: str) -> None:
-    """Install XFCE desktop environment."""
     print("\n[5/13] Installing XFCE desktop environment...")
     print("  (This may take several minutes)")
     sys.stdout.flush()
@@ -200,7 +173,6 @@ def install_desktop(os_type: str) -> None:
 
 
 def install_xrdp(username: str, os_type: str) -> None:
-    """Install and configure xRDP."""
     print("\n[6/13] Installing xRDP...")
     sys.stdout.flush()
     
@@ -215,7 +187,6 @@ def install_xrdp(username: str, os_type: str) -> None:
     run("systemctl enable xrdp")
     run("systemctl restart xrdp")
 
-    # Configure user session (create/update .xsession)
     xsession_path = f"/home/{username}/.xsession"
     with open(xsession_path, "w") as f:
         f.write("xfce4-session\n")
@@ -226,7 +197,6 @@ def install_xrdp(username: str, os_type: str) -> None:
 
 
 def configure_firewall(os_type: str) -> None:
-    """Configure firewall to allow SSH and RDP."""
     print("\n[7/13] Configuring firewall...")
     sys.stdout.flush()
 
@@ -249,7 +219,6 @@ def configure_firewall(os_type: str) -> None:
 
 
 def configure_fail2ban(os_type: str) -> None:
-    """Install and configure fail2ban for RDP protection."""
     print("\n[8/13] Installing fail2ban for RDP brute-force protection...")
     sys.stdout.flush()
 
@@ -275,7 +244,6 @@ bantime = 3600
 findtime = 600
 """
 
-    # Create directories if they don't exist
     os.makedirs("/etc/fail2ban/filter.d", exist_ok=True)
     os.makedirs("/etc/fail2ban/jail.d", exist_ok=True)
 
@@ -293,11 +261,9 @@ findtime = 600
 
 
 def harden_ssh() -> None:
-    """Harden SSH configuration."""
     print("\n[9/13] Hardening SSH configuration...")
     sys.stdout.flush()
 
-    # Only backup if backup doesn't exist (idempotent)
     if not os.path.exists("/etc/ssh/sshd_config.bak"):
         run("cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak")
 
@@ -318,7 +284,6 @@ def harden_ssh() -> None:
 
 
 def configure_auto_updates(os_type: str) -> None:
-    """Configure automatic security updates."""
     print("\n[10/13] Configuring automatic security updates...")
     sys.stdout.flush()
 
@@ -346,11 +311,9 @@ APT::Periodic::AutocleanInterval "7";
 
 
 def install_cli_tools(os_type: str) -> None:
-    """Install useful CLI tools for development and system monitoring."""
     print("\n[11/13] Installing CLI tools...")
     sys.stdout.flush()
 
-    # Common CLI tools useful for Proxmox containers and development
     if os_type == "debian":
         run("apt-get install -y -qq neovim btop htop curl wget git tmux unzip xdg-utils")
     else:
@@ -361,11 +324,9 @@ def install_cli_tools(os_type: str) -> None:
 
 
 def install_desktop_apps(os_type: str, username: str) -> None:
-    """Install desktop applications via native package manager."""
     print("\n[12/13] Installing desktop applications...")
     sys.stdout.flush()
 
-    # Install LibreOffice (available in default repos)
     print("  Installing LibreOffice...")
     sys.stdout.flush()
     if os_type == "debian":
@@ -373,7 +334,6 @@ def install_desktop_apps(os_type: str, username: str) -> None:
     else:
         run("dnf install -y -q libreoffice")
 
-    # Install Brave browser from official repository
     print("  Installing Brave browser...")
     sys.stdout.flush()
     if os_type == "debian":
@@ -387,7 +347,6 @@ def install_desktop_apps(os_type: str, username: str) -> None:
         run("rpm --import https://brave-browser-rpm-release.s3.brave.com/brave-core.asc", check=False)
         run("dnf install -y -q brave-browser", check=False)
 
-    # Install VSCodium from official repository
     print("  Installing VSCodium...")
     sys.stdout.flush()
     if os_type == "debian":
@@ -399,7 +358,6 @@ def install_desktop_apps(os_type: str, username: str) -> None:
         run('printf "[gitlab.com_paulcarroty_vscodium_repo]\\nname=download.vscodium.com\\nbaseurl=https://download.vscodium.com/rpms/\\nenabled=1\\ngpgcheck=1\\nrepo_gpgcheck=1\\ngpgkey=https://gitlab.com/paulcarroty/vscodium-deb-rpm-repo/-/raw/master/pub.gpg\\nmetadata_expire=1h\\n" > /etc/yum.repos.d/vscodium.repo', check=False)
         run("dnf install -y -q codium", check=False)
 
-    # Install Discord from .deb/.rpm
     print("  Installing Discord...")
     sys.stdout.flush()
     if os_type == "debian":
@@ -407,7 +365,6 @@ def install_desktop_apps(os_type: str, username: str) -> None:
         run("apt-get install -y -qq /tmp/discord.deb", check=False)
         run("rm -f /tmp/discord.deb", check=False)
     else:
-        # For Fedora, Discord is not easily available - skip or use alternative
         print("    Note: Discord not easily available for Fedora via packages")
 
     print("  ✓ Desktop apps installed (LibreOffice, Brave, VSCodium, Discord)")
@@ -415,19 +372,15 @@ def install_desktop_apps(os_type: str, username: str) -> None:
 
 
 def configure_default_browser(username: str) -> None:
-    """Set Brave as the default web browser."""
     print("\n[13/13] Configuring default browser...")
     sys.stdout.flush()
     
     safe_username = shlex.quote(username)
     
-    # Create .local/share/applications directory for the user
     user_apps_dir = f"/home/{username}/.local/share/applications"
     os.makedirs(user_apps_dir, exist_ok=True)
     run(f"chown -R {safe_username}:{safe_username} /home/{username}/.local")
     
-    # Create mimeapps.list to set default browser
-    # brave-browser.desktop is the native package name
     mimeapps_path = f"/home/{username}/.config/mimeapps.list"
     os.makedirs(f"/home/{username}/.config", exist_ok=True)
     
@@ -443,7 +396,6 @@ application/xhtml+xml=brave-browser.desktop
     
     run(f"chown -R {safe_username}:{safe_username} /home/{username}/.config")
     
-    # Also try to set it system-wide as fallback
     run("xdg-mime default brave-browser.desktop x-scheme-handler/http", check=False)
     run("xdg-mime default brave-browser.desktop x-scheme-handler/https", check=False)
     
@@ -452,46 +404,27 @@ application/xhtml+xml=brave-browser.desktop
 
 
 def main() -> int:
-    """Main entry point."""
-    # Parse arguments: username password timezone
-    # When called from setup_workstation_desktop.py, all three args are always passed
-    # Empty string for password means "don't change password"
-    # Empty string for timezone means "use UTC"
-    # When run directly, fewer arguments are accepted for convenience
-    
     timezone = None
     password = None
     
     if len(sys.argv) == 1:
-        # No arguments - use current user
         username = getpass.getuser()
         print(f"No username specified, using current user: {username}")
     elif len(sys.argv) == 2:
-        # One argument - username only
         username = sys.argv[1]
     elif len(sys.argv) == 3:
-        # Two arguments - username and password
         username = sys.argv[1]
-        password = sys.argv[2] if sys.argv[2] else None  # Empty string = no password change
+        password = sys.argv[2] if sys.argv[2] else None
     elif len(sys.argv) == 4:
-        # Three arguments - username, password, and timezone
         username = sys.argv[1]
-        password = sys.argv[2] if sys.argv[2] else None  # Empty string = no password change
-        timezone = sys.argv[3] if sys.argv[3] else None  # Empty string = use UTC
+        password = sys.argv[2] if sys.argv[2] else None
+        timezone = sys.argv[3] if sys.argv[3] else None
     else:
         print(f"Usage: {sys.argv[0]} [username] [password] [timezone]")
-        print("  No args: set up current user")
-        print("  1 arg:   set up specified user (no password change)")
-        print("  2 args:  set up user with password (empty string = no change)")
-        print("  3 args:  set up user with password and timezone")
         return 1
     
-    # Validate username format for security
     if not validate_username(username):
         print(f"Error: Invalid username format: {username}")
-        print("Username must start with a lowercase letter or underscore,")
-        print("contain only lowercase letters, numbers, underscores, or hyphens,")
-        print("and be 32 characters or less.")
         return 1
 
     print("=" * 60)
@@ -502,15 +435,12 @@ def main() -> int:
         print(f"Timezone: {timezone}")
     else:
         print("Timezone: UTC (default)")
-    print("This script is idempotent - safe to run multiple times.")
     sys.stdout.flush()
 
-    # Detect OS
     os_type = detect_os()
     print(f"Detected OS type: {os_type}")
     sys.stdout.flush()
 
-    # Run setup steps
     ensure_sudo_installed(os_type)
     configure_locale(os_type)
     setup_user(username, password, os_type)
