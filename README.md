@@ -150,27 +150,11 @@ The script applies the following security measures:
 - tmux - Terminal multiplexer
 - unzip - Archive utility
 
-**Desktop Applications** (installed via Flatpak from Flathub):
+**Desktop Applications** (installed via native packages/official repos):
 - LibreOffice - Office suite
 - Brave - Privacy-focused web browser (set as default)
 - VSCodium - Open-source code editor
-- Discord - Communication platform
-
-### Proxmox Container Notes
-
-Flatpak applications require user namespaces, which are disabled by default in
-unprivileged LXC containers. If you see errors like:
-
-```
-bwrap: cannot open /proc/sys/user/max_user_namespaces: Read-only file system
-```
-
-You have two options:
-1. **Enable nesting**: In Proxmox, edit the container and check "Nesting" under Features
-2. **Use privileged container**: Create a privileged container (less secure)
-
-The script will still complete successfully, but Flatpak apps won't run until
-this is resolved.
+- Discord - Communication platform (Debian only)
 
 ### How It Works
 

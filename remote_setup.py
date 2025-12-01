@@ -9,7 +9,7 @@ This script sets up a Linux workstation with:
 - NTP time synchronization
 - Automatic security updates
 - CLI tools (neovim, btop, htop, etc.)
-- Desktop applications via Flatpak (LibreOffice, Brave, VSCodium, Discord)
+- Desktop applications (LibreOffice, Brave, VSCodium, Discord)
 - UTF-8 locale configuration
 - Default browser set to Brave
 
@@ -29,9 +29,6 @@ Usage (on the host):
 Supported OS: Debian/Ubuntu, Fedora
 
 This script is idempotent and safe to run multiple times.
-
-Note: Flatpak apps may not work in unprivileged containers (e.g., Proxmox LXC)
-due to user namespace restrictions. Enable nesting or use a privileged container.
 """
 
 import getpass
@@ -364,28 +361,56 @@ def install_cli_tools(os_type: str) -> None:
 
 
 def install_desktop_apps(os_type: str, username: str) -> None:
-    """Install desktop applications via Flatpak."""
-    print("\n[12/13] Installing desktop applications via Flatpak...")
+    """Install desktop applications via native package manager."""
+    print("\n[12/13] Installing desktop applications...")
     sys.stdout.flush()
 
-    # Install Flatpak
+    # Install LibreOffice (available in default repos)
+    print("  Installing LibreOffice...")
+    sys.stdout.flush()
     if os_type == "debian":
-        run("apt-get install -y -qq flatpak")
+        run("apt-get install -y -qq libreoffice")
     else:
-        run("dnf install -y -q flatpak")
+        run("dnf install -y -q libreoffice")
 
-    # Add Flathub repository (--if-not-exists makes it idempotent)
-    run("flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo")
+    # Install Brave browser from official repository
+    print("  Installing Brave browser...")
+    sys.stdout.flush()
+    if os_type == "debian":
+        run("apt-get install -y -qq curl gnupg")
+        run("curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg", check=False)
+        run('echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main" > /etc/apt/sources.list.d/brave-browser-release.list', check=False)
+        run("apt-get update -qq", check=False)
+        run("apt-get install -y -qq brave-browser", check=False)
+    else:
+        run("dnf config-manager --add-repo https://brave-browser-rpm-release.s3.brave.com/brave-browser.repo", check=False)
+        run("rpm --import https://brave-browser-rpm-release.s3.brave.com/brave-core.asc", check=False)
+        run("dnf install -y -q brave-browser", check=False)
 
-    # Install desktop applications (flatpak install is idempotent)
-    # Note: These may fail in unprivileged containers due to user namespace restrictions
-    run("flatpak install -y flathub org.libreoffice.LibreOffice", check=False)
-    run("flatpak install -y flathub com.brave.Browser", check=False)
-    run("flatpak install -y flathub com.vscodium.codium", check=False)
-    run("flatpak install -y flathub com.discordapp.Discord", check=False)
+    # Install VSCodium from official repository
+    print("  Installing VSCodium...")
+    sys.stdout.flush()
+    if os_type == "debian":
+        run("wget -qO - https://gitlab.com/paulcarroty/vscodium-deb-rpm-repo/raw/master/pub.gpg | gpg --dearmor | dd of=/usr/share/keyrings/vscodium-archive-keyring.gpg 2>/dev/null", check=False)
+        run('echo "deb [signed-by=/usr/share/keyrings/vscodium-archive-keyring.gpg] https://download.vscodium.com/debs vscodium main" > /etc/apt/sources.list.d/vscodium.list', check=False)
+        run("apt-get update -qq", check=False)
+        run("apt-get install -y -qq codium", check=False)
+    else:
+        run('printf "[gitlab.com_paulcarroty_vscodium_repo]\\nname=download.vscodium.com\\nbaseurl=https://download.vscodium.com/rpms/\\nenabled=1\\ngpgcheck=1\\nrepo_gpgcheck=1\\ngpgkey=https://gitlab.com/paulcarroty/vscodium-deb-rpm-repo/-/raw/master/pub.gpg\\nmetadata_expire=1h\\n" > /etc/yum.repos.d/vscodium.repo', check=False)
+        run("dnf install -y -q codium", check=False)
+
+    # Install Discord from .deb/.rpm
+    print("  Installing Discord...")
+    sys.stdout.flush()
+    if os_type == "debian":
+        run("wget -qO /tmp/discord.deb 'https://discord.com/api/download?platform=linux&format=deb'", check=False)
+        run("apt-get install -y -qq /tmp/discord.deb", check=False)
+        run("rm -f /tmp/discord.deb", check=False)
+    else:
+        # For Fedora, Discord is not easily available - skip or use alternative
+        print("    Note: Discord not easily available for Fedora via packages")
 
     print("  ✓ Desktop apps installed (LibreOffice, Brave, VSCodium, Discord)")
-    print("  Note: Flatpak apps may not work in unprivileged containers")
     sys.stdout.flush()
 
 
@@ -402,14 +427,15 @@ def configure_default_browser(username: str) -> None:
     run(f"chown -R {safe_username}:{safe_username} /home/{username}/.local")
     
     # Create mimeapps.list to set default browser
+    # brave-browser.desktop is the native package name
     mimeapps_path = f"/home/{username}/.config/mimeapps.list"
     os.makedirs(f"/home/{username}/.config", exist_ok=True)
     
     mimeapps_content = """[Default Applications]
-x-scheme-handler/http=com.brave.Browser.desktop
-x-scheme-handler/https=com.brave.Browser.desktop
-text/html=com.brave.Browser.desktop
-application/xhtml+xml=com.brave.Browser.desktop
+x-scheme-handler/http=brave-browser.desktop
+x-scheme-handler/https=brave-browser.desktop
+text/html=brave-browser.desktop
+application/xhtml+xml=brave-browser.desktop
 """
     
     with open(mimeapps_path, "w") as f:
@@ -418,8 +444,8 @@ application/xhtml+xml=com.brave.Browser.desktop
     run(f"chown -R {safe_username}:{safe_username} /home/{username}/.config")
     
     # Also try to set it system-wide as fallback
-    run("xdg-mime default com.brave.Browser.desktop x-scheme-handler/http", check=False)
-    run("xdg-mime default com.brave.Browser.desktop x-scheme-handler/https", check=False)
+    run("xdg-mime default brave-browser.desktop x-scheme-handler/http", check=False)
+    run("xdg-mime default brave-browser.desktop x-scheme-handler/https", check=False)
     
     print("  ✓ Default browser set to Brave")
     sys.stdout.flush()
