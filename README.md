@@ -16,6 +16,7 @@ A Python script that sets up a remote Linux workstation for RDP access.
 - Creates a new sudo-enabled user or configures an existing one
 - Installs XFCE desktop environment (lightweight)
 - Installs and configures xRDP for remote desktop access
+- Configures audio for RDP (PulseAudio + xRDP module)
 - Applies secure defaults:
   - Firewall configuration (UFW/firewalld)
   - SSH hardening (disables root password login, password authentication)
@@ -167,10 +168,19 @@ The script applies the following security measures:
 
 ### After Setup
 
-1. Connect using an RDP client (e.g., Remmina, Microsoft Remote Desktop, Windows Remote Desktop)
+1. Connect using an RDP client (e.g., Remmina, Microsoft Remote Desktop)
 2. Use the IP address and port 3389
 3. Login with the created username and password
 4. Consider changing the password after first login
+
+### Audio Configuration
+
+Audio is configured using PulseAudio with the xRDP sound module. For Remmina:
+1. In connection settings, set "Audio output mode" to "Local"
+2. Audio should work automatically in the RDP session
+
+Note: In unprivileged containers (e.g., Proxmox LXC), audio may require the 
+pulseaudio-module-xrdp package to be built from source on Debian systems.
 
 ## License
 

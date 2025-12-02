@@ -173,7 +173,7 @@ def install_desktop(os_type: str) -> None:
 
 
 def install_xrdp(username: str, os_type: str) -> None:
-    print("\n[6/13] Installing xRDP...")
+    print("\n[6/14] Installing xRDP...")
     sys.stdout.flush()
     
     safe_username = shlex.quote(username)
@@ -196,8 +196,49 @@ def install_xrdp(username: str, os_type: str) -> None:
     sys.stdout.flush()
 
 
+def configure_audio(username: str, os_type: str) -> None:
+    print("\n[7/14] Configuring audio for RDP...")
+    sys.stdout.flush()
+    
+    safe_username = shlex.quote(username)
+
+    if os_type == "debian":
+        run("apt-get install -y -qq pulseaudio pulseaudio-utils")
+        run("apt-get install -y -qq build-essential dpkg-dev libpulse-dev git autoconf libtool", check=False)
+        
+        module_dir = "/tmp/pulseaudio-module-xrdp"
+        if not os.path.exists(module_dir):
+            run(f"git clone https://github.com/neutrinolabs/pulseaudio-module-xrdp.git {module_dir}", check=False)
+        
+        run(f"cd {module_dir} && ./bootstrap", check=False)
+        run(f"cd {module_dir} && ./configure PULSE_DIR=/usr/include/pulse", check=False)
+        run(f"cd {module_dir} && make", check=False)
+        run(f"cd {module_dir} && make install", check=False)
+    else:
+        run("dnf install -y -q pulseaudio pulseaudio-utils")
+        run("dnf install -y -q pulseaudio-module-xrdp", check=False)
+    
+    run(f"usermod -aG audio {safe_username}", check=False)
+    
+    home_dir = f"/home/{username}"
+    pulse_dir = f"{home_dir}/.config/pulse"
+    os.makedirs(pulse_dir, exist_ok=True)
+    
+    client_conf = f"{pulse_dir}/client.conf"
+    with open(client_conf, "w") as f:
+        f.write("autospawn = yes\n")
+        f.write("daemon-binary = /usr/bin/pulseaudio\n")
+    
+    run(f"chown -R {safe_username}:{safe_username} {shlex.quote(pulse_dir)}")
+    
+    run("systemctl restart xrdp", check=False)
+    
+    print("  ✓ Audio configured (PulseAudio + xRDP module)")
+    sys.stdout.flush()
+
+
 def configure_firewall(os_type: str) -> None:
-    print("\n[7/13] Configuring firewall...")
+    print("\n[8/14] Configuring firewall...")
     sys.stdout.flush()
 
     if os_type == "debian":
@@ -219,7 +260,7 @@ def configure_firewall(os_type: str) -> None:
 
 
 def configure_fail2ban(os_type: str) -> None:
-    print("\n[8/13] Installing fail2ban for RDP brute-force protection...")
+    print("\n[9/14] Installing fail2ban for RDP brute-force protection...")
     sys.stdout.flush()
 
     if os_type == "debian":
@@ -261,7 +302,7 @@ findtime = 600
 
 
 def harden_ssh() -> None:
-    print("\n[9/13] Hardening SSH configuration...")
+    print("\n[10/14] Hardening SSH configuration...")
     sys.stdout.flush()
 
     if not os.path.exists("/etc/ssh/sshd_config.bak"):
@@ -284,7 +325,7 @@ def harden_ssh() -> None:
 
 
 def configure_auto_updates(os_type: str) -> None:
-    print("\n[10/13] Configuring automatic security updates...")
+    print("\n[11/14] Configuring automatic security updates...")
     sys.stdout.flush()
 
     if os_type == "debian":
@@ -311,7 +352,7 @@ APT::Periodic::AutocleanInterval "7";
 
 
 def install_cli_tools(os_type: str) -> None:
-    print("\n[11/13] Installing CLI tools...")
+    print("\n[12/14] Installing CLI tools...")
     sys.stdout.flush()
 
     if os_type == "debian":
@@ -324,7 +365,7 @@ def install_cli_tools(os_type: str) -> None:
 
 
 def install_desktop_apps(os_type: str, username: str) -> None:
-    print("\n[12/13] Installing desktop applications...")
+    print("\n[13/14] Installing desktop applications...")
     sys.stdout.flush()
 
     print("  Installing LibreOffice...")
@@ -372,7 +413,7 @@ def install_desktop_apps(os_type: str, username: str) -> None:
 
 
 def configure_default_browser(username: str) -> None:
-    print("\n[13/13] Configuring default browser...")
+    print("\n[14/14] Configuring default browser...")
     sys.stdout.flush()
     
     safe_username = shlex.quote(username)
@@ -447,6 +488,7 @@ def main() -> int:
     configure_time_sync(os_type, timezone)
     install_desktop(os_type)
     install_xrdp(username, os_type)
+    configure_audio(username, os_type)
     configure_firewall(os_type)
     configure_fail2ban(os_type)
     harden_ssh()
