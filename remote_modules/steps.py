@@ -3,7 +3,6 @@
 import os
 import shlex
 import subprocess
-import sys
 from typing import Optional
 
 from .utils import run, is_package_installed, is_service_active, file_contains
@@ -320,8 +319,7 @@ APT::Periodic::AutocleanInterval "7";
 
 
 def install_cli_tools(os_type: str, **_) -> None:
-    check_pkg = "neovim" if os_type == "debian" else "neovim"
-    if is_package_installed(check_pkg, os_type):
+    if is_package_installed("neovim", os_type):
         print("  ✓ CLI tools already installed")
         return
 
@@ -334,15 +332,23 @@ def install_cli_tools(os_type: str, **_) -> None:
 
 
 def install_desktop_apps(os_type: str, username: str, **_) -> None:
-    if is_package_installed("libreoffice", os_type):
+    all_installed = (
+        is_package_installed("libreoffice", os_type) and
+        is_package_installed("brave-browser", os_type) and
+        is_package_installed("codium", os_type)
+    )
+    if all_installed:
         print("  ✓ Desktop apps already installed")
         return
 
-    print("  Installing LibreOffice...")
-    if os_type == "debian":
-        run("apt-get install -y -qq libreoffice")
+    if not is_package_installed("libreoffice", os_type):
+        print("  Installing LibreOffice...")
+        if os_type == "debian":
+            run("apt-get install -y -qq libreoffice")
+        else:
+            run("dnf install -y -q libreoffice")
     else:
-        run("dnf install -y -q libreoffice")
+        print("  ✓ LibreOffice already installed")
 
     print("  Installing Brave browser...")
     if os_type == "debian":

@@ -1,13 +1,11 @@
 """Utility functions for remote setup."""
 
-import os
 import re
 import secrets
 import shlex
 import string
 import subprocess
 import sys
-from typing import Optional
 
 
 def validate_username(username: str) -> bool:
