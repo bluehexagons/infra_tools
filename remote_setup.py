@@ -204,16 +204,53 @@ def configure_audio(username: str, os_type: str) -> None:
 
     if os_type == "debian":
         run("apt-get install -y -qq pulseaudio pulseaudio-utils")
-        run("apt-get install -y -qq build-essential dpkg-dev libpulse-dev git autoconf libtool", check=False)
         
-        module_dir = "/tmp/pulseaudio-module-xrdp"
-        if not os.path.exists(module_dir):
-            run(f"git clone https://github.com/neutrinolabs/pulseaudio-module-xrdp.git {module_dir}", check=False)
+        # Install build dependencies for pulseaudio-module-xrdp
+        # The module requires PulseAudio source configured to generate internal headers
+        run("apt-get install -y -qq build-essential dpkg-dev git autoconf libtool")
+        run("apt-get install -y -qq meson")  # Modern PA versions use meson
         
-        run(f"cd {module_dir} && ./bootstrap", check=False)
-        run(f"cd {module_dir} && ./configure PULSE_DIR=/usr/include/pulse", check=False)
-        run(f"cd {module_dir} && make", check=False)
-        run(f"cd {module_dir} && make install", check=False)
+        # Get PulseAudio build dependencies and source
+        run("apt-get build-dep -y pulseaudio")
+        
+        # Download and configure PulseAudio source to generate required headers
+        pulse_src_dir = "/tmp/pulseaudio-src"
+        run(f"rm -rf {pulse_src_dir}")
+        run(f"mkdir -p {pulse_src_dir}")
+        
+        # Use apt-get source to get matching PA version
+        run(f"cd {pulse_src_dir} && apt-get source pulseaudio")
+        
+        # Find the extracted source directory
+        result = run(f"find {pulse_src_dir} -maxdepth 1 -type d -name 'pulseaudio-*' | head -1")
+        pa_build_dir = result.stdout.strip() if result.stdout else ""
+        
+        if pa_build_dir:
+            # Configure PA source to generate config.h and internal headers
+            # Check if meson or autotools
+            if os.path.exists(f"{pa_build_dir}/meson.build"):
+                run(f"cd {pa_build_dir} && meson setup build", check=False)
+            elif os.path.exists(f"{pa_build_dir}/configure"):
+                run(f"cd {pa_build_dir} && ./configure", check=False)
+            
+            # Clone and build pulseaudio-module-xrdp
+            module_dir = "/tmp/pulseaudio-module-xrdp"
+            run(f"rm -rf {module_dir}")
+            run(f"git clone https://github.com/neutrinolabs/pulseaudio-module-xrdp.git {module_dir}")
+            
+            run(f"cd {module_dir} && ./bootstrap")
+            run(f"cd {module_dir} && ./configure PULSE_DIR={pa_build_dir}")
+            run(f"cd {module_dir} && make")
+            run(f"cd {module_dir} && make install")
+            
+            # Verify installation
+            result = run("ls $(pkg-config --variable=modlibexecdir libpulse) 2>/dev/null | grep xrdp", check=False)
+            if "xrdp" in (result.stdout or ""):
+                print("  Module installed successfully")
+            else:
+                print("  Warning: Module installation may have failed, check logs")
+        else:
+            print("  Warning: Could not find PulseAudio source directory")
     else:
         run("dnf install -y -q pulseaudio pulseaudio-utils")
         run("dnf install -y -q pulseaudio-module-xrdp", check=False)
