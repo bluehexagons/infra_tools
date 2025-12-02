@@ -179,8 +179,10 @@ Audio is configured using PulseAudio with the xRDP sound module. For Remmina:
 1. In connection settings, set "Audio output mode" to "Local"
 2. Audio should work automatically in the RDP session
 
-Note: In unprivileged containers (e.g., Proxmox LXC), audio may require the 
-pulseaudio-module-xrdp package to be built from source on Debian systems.
+The script automatically builds the `pulseaudio-module-xrdp` from source on Debian
+systems, which is required because the module depends on PulseAudio's internal API
+and must be compiled against the matching PulseAudio source version. On Fedora,
+the module is installed from the official repositories.
 
 ## License
 
