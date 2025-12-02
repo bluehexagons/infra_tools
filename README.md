@@ -44,13 +44,13 @@ A Python script that sets up a remote Linux workstation for RDP access.
 ### Usage
 
 ```bash
-# Basic usage (uses current username, generates a secure password)
+# Basic usage (uses current username)
 python3 setup_workstation_desktop.py [IP address]
 
 # With specific username
 python3 setup_workstation_desktop.py [IP address] [username]
 
-# With custom password
+# With custom password (sets password for new or existing user)
 python3 setup_workstation_desktop.py [IP address] [username] -p "password"
 
 # With specific timezone
@@ -59,7 +59,7 @@ python3 setup_workstation_desktop.py [IP address] [username] -t "America/New_Yor
 
 ### Examples
 
-Basic usage (uses current username, generates a random password):
+Basic usage (uses current username, generates password only if creating new user):
 ```bash
 python3 setup_workstation_desktop.py 192.168.1.100
 ```
@@ -105,7 +105,7 @@ python3 /opt/infra_tools/remote_setup.py johndoe "mypassword" "America/New_York"
 | `ip` | IP address of the remote host |
 | `username` | Username for the sudo-enabled user (defaults to current user) |
 | `-k, --key` | Path to SSH private key (optional) |
-| `-p, --password` | Password for the user (optional, auto-generated if not specified) |
+| `-p, --password` | Password for the user (only used when creating new user or updating existing) |
 | `-t, --timezone` | Timezone for remote host (defaults to local machine's timezone) |
 
 ### Security
@@ -130,8 +130,8 @@ The script applies the following security measures:
    - Disables X11 forwarding
    - Limits authentication attempts to 3
 
-4. **Password Generation**: When no password is specified, generates a 16-character
-   cryptographically secure random password.
+4. **Password Generation**: When creating a new user without specifying a password,
+   generates a 16-character cryptographically secure random password.
 
 5. **SSH Host Key Handling**: Uses `accept-new` policy which accepts new host keys
    but rejects changed keys. For maximum security, verify the host key fingerprint

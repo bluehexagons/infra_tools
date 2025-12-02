@@ -100,12 +100,12 @@ def run_remote_setup(
     password: Optional[str] = None,
     ssh_key: Optional[str] = None,
     timezone: Optional[str] = None,
-) -> tuple[int, Optional[str]]:
+) -> int:
     try:
         tar_data = create_tar_archive()
     except FileNotFoundError as e:
         print(f"Error: Remote setup files not found: {e}")
-        return 1, None
+        return 1
     
     ssh_opts = [
         "-o", "StrictHostKeyChecking=accept-new",
@@ -130,8 +130,6 @@ python3 {escaped_install_dir}/remote_setup.py {escaped_username} {escaped_passwo
     
     ssh_cmd = ["ssh"] + ssh_opts + [f"root@{ip}", remote_cmd]
     
-    generated_password = None
-    
     try:
         process = subprocess.Popen(
             ssh_cmd,
@@ -146,17 +144,13 @@ python3 {escaped_install_dir}/remote_setup.py {escaped_username} {escaped_passwo
         process.stdin.close()
         
         for line in io.TextIOWrapper(process.stdout, encoding='utf-8'):
-            if line.startswith("GENERATED_PASSWORD:"):
-                generated_password = line.strip().split(":", 1)[1]
-            else:
-                print(line, end='', flush=True)
+            print(line, end='', flush=True)
         
-        return_code = process.wait()
-        return return_code, generated_password
+        return process.wait()
         
     except Exception as e:
         print(f"Error: {e}")
-        return 1, None
+        return 1
 
 
 def main() -> int:
@@ -177,7 +171,7 @@ def main() -> int:
     )
     parser.add_argument(
         "-p", "--password",
-        help="Password for the user (if not specified, a secure password will be generated)"
+        help="Password for the user (only used when creating new user or updating existing)"
     )
     parser.add_argument(
         "-t", "--timezone",
@@ -220,7 +214,7 @@ def main() -> int:
     print("=" * 60)
     print()
     
-    returncode, generated_password = run_remote_setup(
+    returncode = run_remote_setup(
         args.ip, username, password, args.key, timezone
     )
     
@@ -234,14 +228,6 @@ def main() -> int:
     print("=" * 60)
     print(f"RDP Host: {args.ip}:3389")
     print(f"Username: {username}")
-    if password:
-        print("Password: (as specified)")
-    elif generated_password:
-        print(f"Password: {generated_password}")
-        print()
-        print("IMPORTANT: Save this password securely!")
-    else:
-        print("Password: unchanged")
     print()
     print("Connect using an RDP client (e.g., Remmina, Microsoft Remote Desktop)")
     print("=" * 60)

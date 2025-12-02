@@ -5,7 +5,7 @@ import shlex
 import subprocess
 from typing import Optional
 
-from .utils import run, is_package_installed, is_service_active, file_contains
+from .utils import run, is_package_installed, is_service_active, file_contains, generate_password
 
 
 def set_user_password(username: str, password: str) -> bool:
@@ -61,7 +61,8 @@ def configure_locale(os_type: str, **_) -> None:
     print("  ✓ UTF-8 locale configured (en_US.UTF-8)")
 
 
-def setup_user(username: str, password: Optional[str], os_type: str, **_) -> None:
+def setup_user(username: str, pw: Optional[str], os_type: str, **_) -> None:
+    """Set up user account."""
     safe_username = shlex.quote(username)
     
     result = run(f"id {safe_username}", check=False)
@@ -70,13 +71,17 @@ def setup_user(username: str, password: Optional[str], os_type: str, **_) -> Non
     if not user_exists:
         run(f"useradd -m -s /bin/bash {safe_username}")
         print(f"  Created new user: {username}")
-        if password:
-            if set_user_password(username, password):
+        if pw:
+            if set_user_password(username, pw):
                 print("  Password set")
+        else:
+            generated = generate_password()
+            if set_user_password(username, generated):
+                print(f"  Generated password: {generated}")
     else:
         print(f"  User already exists: {username}")
-        if password:
-            if set_user_password(username, password):
+        if pw:
+            if set_user_password(username, pw):
                 print("  Password updated")
     
     if os_type == "debian":

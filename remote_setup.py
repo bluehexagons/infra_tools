@@ -10,22 +10,21 @@ Usage (on the host):
 
 Supported OS: Debian/Ubuntu, Fedora
 
-When no password is provided, generates a secure random password and prints it.
+When creating a new user without a password, generates a secure random password.
 """
 
 import getpass
 import sys
 from typing import Optional
 
-from remote_modules.utils import validate_username, detect_os, generate_password
+from remote_modules.utils import validate_username, detect_os
 from remote_modules.progress import progress_bar
 from remote_modules.steps import STEPS
 
 
 def main() -> int:
     timezone: Optional[str] = None
-    password: Optional[str] = None
-    generated_password = False
+    pw: Optional[str] = None
     
     if len(sys.argv) == 1:
         username = getpass.getuser()
@@ -33,10 +32,10 @@ def main() -> int:
         username = sys.argv[1]
     elif len(sys.argv) == 3:
         username = sys.argv[1]
-        password = sys.argv[2] if sys.argv[2] else None
+        pw = sys.argv[2] if sys.argv[2] else None
     elif len(sys.argv) == 4:
         username = sys.argv[1]
-        password = sys.argv[2] if sys.argv[2] else None
+        pw = sys.argv[2] if sys.argv[2] else None
         timezone = sys.argv[3] if sys.argv[3] else None
     else:
         print(f"Usage: {sys.argv[0]} [username] [password] [timezone]")
@@ -59,10 +58,6 @@ def main() -> int:
     os_type = detect_os()
     print(f"Detected OS type: {os_type}")
     sys.stdout.flush()
-    
-    if not password:
-        password = generate_password()
-        generated_password = True
 
     total_steps = len(STEPS)
     for i, (name, func) in enumerate(STEPS, 1):
@@ -71,7 +66,7 @@ def main() -> int:
         sys.stdout.flush()
         func(
             username=username,
-            password=password,
+            password=pw,
             os_type=os_type,
             timezone=timezone
         )
@@ -82,10 +77,6 @@ def main() -> int:
     print("\n" + "=" * 60)
     print("Setup completed successfully!")
     print("=" * 60)
-    
-    if generated_password:
-        print(f"GENERATED_PASSWORD:{password}")
-    
     sys.stdout.flush()
 
     return 0
