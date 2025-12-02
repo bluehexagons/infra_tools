@@ -81,20 +81,21 @@ python3 setup_workstation_desktop.py 192.168.1.100 johndoe -p "MySecurePassword1
 
 ### Running Directly on Host
 
-The `remote_setup.py` script can also be run directly on the target machine:
+The `remote_setup.py` script can also be run directly on the target machine. After
+the first remote setup, scripts are installed at `/opt/infra_tools/`:
 
 ```bash
 # Set up current user (generates password)
-python3 remote_setup.py
+python3 /opt/infra_tools/remote_setup.py
 
 # Set up specific user (creates if needed, generates password)
-python3 remote_setup.py johndoe
+python3 /opt/infra_tools/remote_setup.py johndoe
 
 # Set up user with password
-python3 remote_setup.py johndoe "mypassword"
+python3 /opt/infra_tools/remote_setup.py johndoe "mypassword"
 
 # Set up user with password and timezone
-python3 remote_setup.py johndoe "mypassword" "America/New_York"
+python3 /opt/infra_tools/remote_setup.py johndoe "mypassword" "America/New_York"
 ```
 
 ### Options
@@ -163,12 +164,13 @@ The script applies the following security measures:
 
 ### How It Works
 
-1. The local script reads `remote_setup.py` and transfers it via SSH
-2. Output is streamed in real-time during execution
-3. The remote script runs on the target host with username, password, and timezone
+1. The local script creates a tar archive of `remote_setup.py` and `remote_modules/`
+2. The archive is transferred via SSH and extracted to `/opt/infra_tools/` on the remote host
+3. The remote script runs with username, password, and timezone arguments
 4. OS detection happens on the remote host
 5. UTF-8 locale is configured to ensure proper terminal support
 6. All configuration is performed in a single SSH session
+7. The scripts remain installed at `/opt/infra_tools/` for future use
 
 ### After Setup
 
