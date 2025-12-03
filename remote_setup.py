@@ -56,7 +56,7 @@ def main() -> int:
         sys.stdout.flush()
         func(
             username=username,
-            password=args.password,
+            pw=args.password,
             os_type=os_type,
             timezone=args.timezone
         )
