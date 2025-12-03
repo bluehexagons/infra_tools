@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Setup Remote Workstation Desktop for RDP Access
+Setup Remote Server for Development
 
 Usage:
-    python3 setup_workstation_desktop.py [IP address]
-    python3 setup_workstation_desktop.py [IP address] [username]
+    python3 setup_server_dev.py [IP address]
+    python3 setup_server_dev.py [IP address] [username]
 
 Example:
-    python3 setup_workstation_desktop.py 192.168.1.100
-    python3 setup_workstation_desktop.py 192.168.1.100 johndoe
+    python3 setup_server_dev.py 192.168.1.100
+    python3 setup_server_dev.py 192.168.1.100 johndoe
 """
 
 import argparse
@@ -28,8 +28,8 @@ from setup_common import (
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Setup a remote workstation server for RDP access",
-        epilog="Example: python3 setup_workstation_desktop.py 192.168.1.100 johndoe"
+        description="Setup a remote server for development",
+        epilog="Example: python3 setup_server_dev.py 192.168.1.100 johndoe"
     )
     parser.add_argument("ip", help="IP address of the remote host")
     parser.add_argument(
@@ -79,7 +79,7 @@ def main() -> int:
     timezone = args.timezone if args.timezone else get_local_timezone()
     
     print("=" * 60)
-    print("Remote Workstation Desktop Setup")
+    print("Remote Server Development Setup")
     print("=" * 60)
     print(f"Target host: {args.ip}")
     print(f"User: {username}")
@@ -88,7 +88,7 @@ def main() -> int:
     print()
     
     returncode = run_remote_setup(
-        args.ip, username, "workstation_desktop", password, args.key, timezone
+        args.ip, username, "server_dev", password, args.key, timezone
     )
     
     if returncode != 0:
@@ -99,10 +99,11 @@ def main() -> int:
     print("=" * 60)
     print("Setup Complete!")
     print("=" * 60)
-    print(f"RDP Host: {args.ip}:3389")
+    print(f"Server: {args.ip}")
     print(f"Username: {username}")
     print()
-    print("Connect using an RDP client (e.g., Remmina, Microsoft Remote Desktop)")
+    print("Connect via SSH:")
+    print(f"  ssh {username}@{args.ip}")
     print("=" * 60)
     
     return 0

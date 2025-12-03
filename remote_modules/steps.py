@@ -428,7 +428,46 @@ application/xhtml+xml=brave-browser.desktop
     print("  ✓ Default browser set to Brave")
 
 
+# Common steps for all system types
+COMMON_STEPS = [
+    ("Ensuring sudo is installed", ensure_sudo_installed),
+    ("Configuring UTF-8 locale", configure_locale),
+    ("Setting up user", setup_user),
+    ("Configuring time synchronization", configure_time_sync),
+]
+
+# Desktop-specific steps
+DESKTOP_STEPS = [
+    ("Installing XFCE desktop environment", install_desktop),
+    ("Installing xRDP", install_xrdp),
+    ("Configuring audio for RDP", configure_audio),
+]
+
+# Desktop security steps (fail2ban for RDP)
+DESKTOP_SECURITY_STEPS = [
+    ("Installing fail2ban for RDP brute-force protection", configure_fail2ban),
+]
+
+# Security and system hardening steps (common to all)
+SECURITY_STEPS = [
+    ("Configuring firewall", configure_firewall),
+    ("Hardening SSH configuration", harden_ssh),
+    ("Configuring automatic security updates", configure_auto_updates),
+]
+
+# CLI tools step (common to all)
+CLI_STEPS = [
+    ("Installing CLI tools", install_cli_tools),
+]
+
+# Desktop application steps
+DESKTOP_APP_STEPS = [
+    ("Installing desktop applications", install_desktop_apps),
+    ("Configuring default browser", configure_default_browser),
+]
+
 # Step definitions with names for progress tracking
+# Kept for backward compatibility
 STEPS = [
     ("Ensuring sudo is installed", ensure_sudo_installed),
     ("Configuring UTF-8 locale", configure_locale),
@@ -445,3 +484,15 @@ STEPS = [
     ("Installing desktop applications", install_desktop_apps),
     ("Configuring default browser", configure_default_browser),
 ]
+
+
+def get_steps_for_system_type(system_type: str) -> list:
+    """Get the appropriate steps for a given system type."""
+    if system_type == "workstation_desktop":
+        return (COMMON_STEPS + DESKTOP_STEPS + SECURITY_STEPS + 
+                DESKTOP_SECURITY_STEPS + CLI_STEPS + DESKTOP_APP_STEPS)
+    elif system_type == "server_dev":
+        # Server dev: no desktop, audio, RDP, desktop apps, or RDP-related fail2ban
+        return COMMON_STEPS + SECURITY_STEPS + CLI_STEPS
+    else:
+        raise ValueError(f"Unknown system type: {system_type}")
