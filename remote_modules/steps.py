@@ -21,6 +21,21 @@ def set_user_password(username: str, password: str) -> bool:
     return True
 
 
+def update_and_upgrade_packages(os_type: str, **_) -> None:
+    print("  Updating package lists...")
+    if os_type == "debian":
+        os.environ["DEBIAN_FRONTEND"] = "noninteractive"
+        run("apt-get update -qq")
+        print("  Upgrading packages...")
+        run("apt-get upgrade -y -qq")
+        run("apt-get autoremove -y -qq")
+    else:
+        run("dnf upgrade -y -q")
+        run("dnf autoremove -y -q")
+    
+    print("  ✓ System packages updated and upgraded")
+
+
 def ensure_sudo_installed(os_type: str, **_) -> None:
     if is_package_installed("sudo", os_type):
         print("  ✓ sudo already installed")
@@ -90,6 +105,29 @@ def setup_user(username: str, pw: Optional[str], os_type: str, **_) -> None:
         run(f"usermod -aG wheel {safe_username}", check=False)
     
     print("  ✓ User configured with sudo privileges")
+
+
+def copy_ssh_keys_to_user(username: str, **_) -> None:
+    safe_username = shlex.quote(username)
+    user_home = f"/home/{username}"
+    ssh_dir = f"{user_home}/.ssh"
+    authorized_keys = f"{ssh_dir}/authorized_keys"
+    
+    # Check if root has authorized_keys
+    if not os.path.exists("/root/.ssh/authorized_keys"):
+        print("  ℹ No SSH keys found in /root/.ssh/authorized_keys to copy")
+        return
+    
+    # Create .ssh directory for user if it doesn't exist
+    run(f"mkdir -p {shlex.quote(ssh_dir)}")
+    run(f"chmod 700 {shlex.quote(ssh_dir)}")
+    
+    # Copy root's authorized_keys to user
+    run(f"cp /root/.ssh/authorized_keys {shlex.quote(authorized_keys)}")
+    run(f"chown -R {safe_username}:{safe_username} {shlex.quote(ssh_dir)}")
+    run(f"chmod 600 {shlex.quote(authorized_keys)}")
+    
+    print(f"  ✓ SSH keys copied to {username}")
 
 
 def configure_time_sync(os_type: str, timezone: Optional[str] = None, **_) -> None:
@@ -281,6 +319,10 @@ def harden_ssh(**_) -> None:
         ("PasswordAuthentication", "no"),
         ("X11Forwarding", "no"),
         ("MaxAuthTries", "3"),
+        ("ClientAliveInterval", "300"),
+        ("ClientAliveCountMax", "2"),
+        ("PermitEmptyPasswords", "no"),
+        ("Protocol", "2"),
     ]
 
     for key, value in ssh_hardening:
@@ -288,7 +330,27 @@ def harden_ssh(**_) -> None:
 
     run("systemctl reload sshd || systemctl reload ssh", check=False)
 
-    print("  ✓ SSH hardened (key-only auth, no root password, max 3 attempts)")
+    print("  ✓ SSH hardened (key-only auth, timeouts, protocol 2)")
+
+
+def check_restart_required(os_type: str, **_) -> None:
+    needs_restart = False
+    
+    if os_type == "debian":
+        # Check for /var/run/reboot-required
+        if os.path.exists("/var/run/reboot-required"):
+            needs_restart = True
+    else:
+        # For Fedora/RHEL, check if kernel was updated
+        result = run("needs-restarting -r", check=False)
+        if result.returncode != 0:
+            needs_restart = True
+    
+    if needs_restart:
+        print("  ⚠ System restart recommended (kernel/system updates)")
+        print("  Run 'sudo reboot' when convenient")
+    else:
+        print("  ✓ No restart required")
 
 
 def configure_auto_updates(os_type: str, **_) -> None:
@@ -512,9 +574,11 @@ application/xhtml+xml=vivaldi-stable.desktop
 
 # Common steps for all system types
 COMMON_STEPS = [
+    ("Updating and upgrading packages", update_and_upgrade_packages),
     ("Ensuring sudo is installed", ensure_sudo_installed),
     ("Configuring UTF-8 locale", configure_locale),
     ("Setting up user", setup_user),
+    ("Copying SSH keys to user", copy_ssh_keys_to_user),
     ("Configuring time synchronization", configure_time_sync),
 ]
 
@@ -535,6 +599,11 @@ SECURITY_STEPS = [
     ("Configuring firewall", configure_firewall),
     ("Hardening SSH configuration", harden_ssh),
     ("Configuring automatic security updates", configure_auto_updates),
+]
+
+# Final steps
+FINAL_STEPS = [
+    ("Checking if restart required", check_restart_required),
 ]
 
 # CLI tools step (common to all)
@@ -580,13 +649,12 @@ def get_steps_for_system_type(system_type: str, skip_audio: bool = False) -> lis
         if skip_audio:
             desktop_steps = [s for s in DESKTOP_STEPS if s[1] != configure_audio]
         return COMMON_STEPS + desktop_steps + SECURITY_STEPS + \
-               DESKTOP_SECURITY_STEPS + CLI_STEPS + DESKTOP_APP_STEPS
+               DESKTOP_SECURITY_STEPS + CLI_STEPS + DESKTOP_APP_STEPS + FINAL_STEPS
     elif system_type == "workstation_dev":
-        # Workstation dev: no audio, different desktop apps (Vivaldi, VS Code)
         desktop_steps = [s for s in DESKTOP_STEPS if s[1] != configure_audio]
         return COMMON_STEPS + desktop_steps + SECURITY_STEPS + \
-               DESKTOP_SECURITY_STEPS + CLI_STEPS + WORKSTATION_DEV_APP_STEPS
+               DESKTOP_SECURITY_STEPS + CLI_STEPS + WORKSTATION_DEV_APP_STEPS + FINAL_STEPS
     elif system_type == "server_dev":
-        return COMMON_STEPS + SECURITY_STEPS + CLI_STEPS
+        return COMMON_STEPS + SECURITY_STEPS + CLI_STEPS + FINAL_STEPS
     else:
         raise ValueError(f"Unknown system type: {system_type}")
