@@ -26,7 +26,6 @@ from .security_steps import (
     harden_kernel,
     configure_auto_updates,
     configure_firewall_web,
-    configure_firewall_ssh_only,
 )
 from .web_steps import (
     install_nginx,
