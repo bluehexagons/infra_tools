@@ -91,10 +91,6 @@ WEB_FIREWALL_STEPS = [
     ("Configuring firewall for web server", configure_firewall_web),
 ]
 
-SSH_FIREWALL_STEPS = [
-    ("Configuring firewall", configure_firewall_ssh_only),
-]
-
 PROXMOX_HARDENING_STEPS = [
     ("Hardening SSH configuration", harden_ssh),
     ("Hardening kernel parameters", harden_kernel),
