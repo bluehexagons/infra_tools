@@ -705,7 +705,7 @@ http {
     print("  ✓ nginx security configuration applied")
 
 
-def create_hello_world_site(**_) -> None:
+def create_hello_world_site(os_type: str, **_) -> None:
     www_root = "/var/www/html"
     index_html = f"{www_root}/index.html"
     
@@ -732,7 +732,9 @@ def create_hello_world_site(**_) -> None:
     with open(index_html, "w") as f:
         f.write(html_content)
     
-    run("chown -R www-data:www-data /var/www/html", check=False)
+    # Use appropriate user for different OS types
+    web_user = "nginx" if os_type == "fedora" else "www-data"
+    run(f"chown -R {web_user}:{web_user} /var/www/html", check=False)
     run("chmod -R 755 /var/www/html")
     
     print("  ✓ Hello World website created")
@@ -760,15 +762,15 @@ server {
     
     server_name _;
     
-    # Security: Limit HTTP methods to GET, HEAD, POST
-    if ($request_method !~ ^(GET|HEAD|POST)$) {
-        return 405;
-    }
-    
     # Disable directory listing
     autoindex off;
     
     location / {
+        # Security: Limit HTTP methods to GET, HEAD, POST
+        limit_except GET HEAD POST {
+            deny all;
+        }
+        
         try_files $uri $uri/ =404;
     }
     
