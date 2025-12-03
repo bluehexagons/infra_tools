@@ -1,0 +1,23 @@
+#!/usr/bin/env python3
+
+import sys
+from setup_common import setup_main
+
+
+def success_message(ip: str, username: str) -> None:
+    print(f"RDP: {ip}:3389")
+    print(f"Username: {username}")
+    print()
+    print("Connect using RDP client (Remmina, Microsoft Remote Desktop)")
+
+
+def main() -> int:
+    return setup_main(
+        "workstation_dev",
+        "Remote Workstation Dev Setup",
+        success_message
+    )
+
+
+if __name__ == "__main__":
+    sys.exit(main())

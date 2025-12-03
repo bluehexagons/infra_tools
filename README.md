@@ -5,6 +5,7 @@ Automated setup scripts for remote Linux systems.
 ## Scripts
 
 - `setup_workstation_desktop.py` - Desktop workstation with RDP
+- `setup_workstation_dev.py` - Dev workstation with RDP (no audio, VS Code + Vivaldi)
 - `setup_server_dev.py` - Development server (no desktop)
 
 ## Requirements
@@ -19,6 +20,9 @@ Automated setup scripts for remote Linux systems.
 # Workstation with desktop/RDP
 python3 setup_workstation_desktop.py <ip> [username] [-k key] [-p password] [-t timezone] [--skip-audio]
 
+# Workstation dev (no audio, Vivaldi + VS Code)
+python3 setup_workstation_dev.py <ip> [username] [-k key] [-p password] [-t timezone]
+
 # Development server
 python3 setup_server_dev.py <ip> [username] [-k key] [-p password] [-t timezone]
 ```
@@ -30,10 +34,15 @@ python3 setup_server_dev.py <ip> [username] [-k key] [-p password] [-t timezone]
 - Desktop apps: LibreOffice, Brave, VSCodium, Discord
 - fail2ban for RDP
 
+**Workstation Dev:**
+- XFCE desktop + xRDP (no audio)
+- Desktop apps: Vivaldi, Visual Studio Code
+- fail2ban for RDP
+
 **Server Dev:**
 - CLI tools only (no desktop/RDP)
 
-**Both:**
+**All:**
 - User setup with sudo
 - Firewall + SSH hardening
 - Auto security updates
@@ -48,7 +57,7 @@ Scripts are installed to `/opt/infra_tools/` on the remote host:
 python3 /opt/infra_tools/remote_setup.py <system_type> [username] [password] [timezone] [skip_audio]
 ```
 
-System types: `workstation_desktop`, `server_dev`
+System types: `workstation_desktop`, `workstation_dev`, `server_dev`
 
 ## License
 

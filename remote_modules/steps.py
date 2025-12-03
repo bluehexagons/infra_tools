@@ -428,6 +428,80 @@ application/xhtml+xml=brave-browser.desktop
     print("  ✓ Default browser set to Brave")
 
 
+def install_workstation_dev_apps(os_type: str, username: str, **_) -> None:
+    all_installed = (
+        is_package_installed("vivaldi-stable", os_type) and
+        (is_package_installed("code", os_type) or os.path.exists("/usr/bin/code"))
+    )
+    if all_installed:
+        print("  ✓ Workstation dev apps already installed")
+        return
+
+    print("  Installing Vivaldi browser...")
+    if os_type == "debian":
+        if not os.path.exists("/usr/share/keyrings/vivaldi-archive-keyring.gpg"):
+            run("apt-get install -y -qq curl gnupg")
+            run("curl -fsSL https://repo.vivaldi.com/archive/linux_signing_key.pub | gpg --dearmor | dd of=/usr/share/keyrings/vivaldi-archive-keyring.gpg 2>/dev/null", check=False)
+            run('echo "deb [signed-by=/usr/share/keyrings/vivaldi-archive-keyring.gpg] https://repo.vivaldi.com/archive/deb/ stable main" > /etc/apt/sources.list.d/vivaldi.list', check=False)
+            run("apt-get update -qq", check=False)
+        if not is_package_installed("vivaldi-stable", os_type):
+            run("apt-get install -y -qq vivaldi-stable", check=False)
+    else:
+        if not is_package_installed("vivaldi-stable", os_type):
+            run("dnf config-manager --add-repo https://repo.vivaldi.com/archive/vivaldi-fedora.repo", check=False)
+            run("dnf install -y -q vivaldi-stable", check=False)
+
+    print("  Installing Visual Studio Code...")
+    if os_type == "debian":
+        if not os.path.exists("/etc/apt/trusted.gpg.d/microsoft.gpg"):
+            run("apt-get install -y -qq wget gpg")
+            run("wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > /etc/apt/trusted.gpg.d/microsoft.gpg", check=False)
+            run('echo "deb [arch=amd64] https://packages.microsoft.com/repos/code stable main" > /etc/apt/sources.list.d/vscode.list', check=False)
+            run("apt-get update -qq", check=False)
+        if not is_package_installed("code", os_type):
+            run("apt-get install -y -qq code", check=False)
+    else:
+        if not is_package_installed("code", os_type):
+            run("rpm --import https://packages.microsoft.com/keys/microsoft.asc", check=False)
+            run('echo -e "[code]\\nname=Visual Studio Code\\nbaseurl=https://packages.microsoft.com/yumrepos/vscode\\nenabled=1\\ngpgcheck=1\\ngpgkey=https://packages.microsoft.com/keys/microsoft.asc" > /etc/yum.repos.d/vscode.repo', check=False)
+            run("dnf install -y -q code", check=False)
+
+    print("  ✓ Workstation dev apps installed (Vivaldi, VS Code)")
+
+
+def configure_vivaldi_browser(username: str, **_) -> None:
+    safe_username = shlex.quote(username)
+    mimeapps_path = f"/home/{username}/.config/mimeapps.list"
+    
+    if os.path.exists(mimeapps_path):
+        if file_contains(mimeapps_path, "vivaldi-stable.desktop"):
+            print("  ✓ Default browser already set")
+            return
+    
+    user_apps_dir = f"/home/{username}/.local/share/applications"
+    os.makedirs(user_apps_dir, exist_ok=True)
+    run(f"chown -R {safe_username}:{safe_username} /home/{username}/.local")
+    
+    os.makedirs(f"/home/{username}/.config", exist_ok=True)
+    
+    mimeapps_content = """[Default Applications]
+x-scheme-handler/http=vivaldi-stable.desktop
+x-scheme-handler/https=vivaldi-stable.desktop
+text/html=vivaldi-stable.desktop
+application/xhtml+xml=vivaldi-stable.desktop
+"""
+    
+    with open(mimeapps_path, "w") as f:
+        f.write(mimeapps_content)
+    
+    run(f"chown -R {safe_username}:{safe_username} /home/{username}/.config")
+    
+    run("xdg-mime default vivaldi-stable.desktop x-scheme-handler/http", check=False)
+    run("xdg-mime default vivaldi-stable.desktop x-scheme-handler/https", check=False)
+    
+    print("  ✓ Default browser set to Vivaldi")
+
+
 # Common steps for all system types
 COMMON_STEPS = [
     ("Ensuring sudo is installed", ensure_sudo_installed),
@@ -466,6 +540,12 @@ DESKTOP_APP_STEPS = [
     ("Configuring default browser", configure_default_browser),
 ]
 
+# Workstation dev application steps
+WORKSTATION_DEV_APP_STEPS = [
+    ("Installing workstation dev applications", install_workstation_dev_apps),
+    ("Configuring default browser", configure_vivaldi_browser),
+]
+
 # Step definitions with names for progress tracking
 # Kept for backward compatibility
 STEPS = [
@@ -493,6 +573,11 @@ def get_steps_for_system_type(system_type: str, skip_audio: bool = False) -> lis
             desktop_steps = [s for s in DESKTOP_STEPS if s[1] != configure_audio]
         return COMMON_STEPS + desktop_steps + SECURITY_STEPS + \
                DESKTOP_SECURITY_STEPS + CLI_STEPS + DESKTOP_APP_STEPS
+    elif system_type == "workstation_dev":
+        # Workstation dev: no audio, different desktop apps (Vivaldi, VS Code)
+        desktop_steps = [s for s in DESKTOP_STEPS if s[1] != configure_audio]
+        return COMMON_STEPS + desktop_steps + SECURITY_STEPS + \
+               DESKTOP_SECURITY_STEPS + CLI_STEPS + WORKSTATION_DEV_APP_STEPS
     elif system_type == "server_dev":
         return COMMON_STEPS + SECURITY_STEPS + CLI_STEPS
     else:

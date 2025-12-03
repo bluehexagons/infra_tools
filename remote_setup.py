@@ -9,7 +9,7 @@ from remote_modules.progress import progress_bar
 from remote_modules.steps import get_steps_for_system_type
 
 
-VALID_SYSTEM_TYPES = ["workstation_desktop", "server_dev"]
+VALID_SYSTEM_TYPES = ["workstation_desktop", "workstation_dev", "server_dev"]
 
 
 def main() -> int:
