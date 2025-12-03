@@ -21,6 +21,21 @@ def set_user_password(username: str, password: str) -> bool:
     return True
 
 
+def update_and_upgrade_packages(os_type: str, **_) -> None:
+    print("  Updating package lists...")
+    if os_type == "debian":
+        os.environ["DEBIAN_FRONTEND"] = "noninteractive"
+        run("apt-get update -qq")
+        print("  Upgrading packages...")
+        run("apt-get upgrade -y -qq")
+        run("apt-get autoremove -y -qq")
+    else:
+        run("dnf upgrade -y -q")
+        run("dnf autoremove -y -q")
+    
+    print("  ✓ System packages updated and upgraded")
+
+
 def ensure_sudo_installed(os_type: str, **_) -> None:
     if is_package_installed("sudo", os_type):
         print("  ✓ sudo already installed")
@@ -90,6 +105,29 @@ def setup_user(username: str, pw: Optional[str], os_type: str, **_) -> None:
         run(f"usermod -aG wheel {safe_username}", check=False)
     
     print("  ✓ User configured with sudo privileges")
+
+
+def copy_ssh_keys_to_user(username: str, **_) -> None:
+    safe_username = shlex.quote(username)
+    user_home = f"/home/{username}"
+    ssh_dir = f"{user_home}/.ssh"
+    authorized_keys = f"{ssh_dir}/authorized_keys"
+    
+    # Check if root has authorized_keys
+    if not os.path.exists("/root/.ssh/authorized_keys"):
+        print("  ℹ No SSH keys found in /root/.ssh/authorized_keys to copy")
+        return
+    
+    # Create .ssh directory for user if it doesn't exist
+    run(f"mkdir -p {shlex.quote(ssh_dir)}")
+    run(f"chmod 700 {shlex.quote(ssh_dir)}")
+    
+    # Copy root's authorized_keys to user
+    run(f"cp /root/.ssh/authorized_keys {shlex.quote(authorized_keys)}")
+    run(f"chown -R {safe_username}:{safe_username} {shlex.quote(ssh_dir)}")
+    run(f"chmod 600 {shlex.quote(authorized_keys)}")
+    
+    print(f"  ✓ SSH keys copied to {username}")
 
 
 def configure_time_sync(os_type: str, timezone: Optional[str] = None, **_) -> None:
@@ -281,6 +319,9 @@ def harden_ssh(**_) -> None:
         ("PasswordAuthentication", "no"),
         ("X11Forwarding", "no"),
         ("MaxAuthTries", "3"),
+        ("ClientAliveInterval", "300"),
+        ("ClientAliveCountMax", "2"),
+        ("PermitEmptyPasswords", "no"),
     ]
 
     for key, value in ssh_hardening:
@@ -288,7 +329,69 @@ def harden_ssh(**_) -> None:
 
     run("systemctl reload sshd || systemctl reload ssh", check=False)
 
-    print("  ✓ SSH hardened (key-only auth, no root password, max 3 attempts)")
+    print("  ✓ SSH hardened (key-only auth, timeouts)")
+
+
+def harden_kernel(**_) -> None:
+    sysctl_conf = "/etc/sysctl.d/99-security-hardening.conf"
+    
+    if os.path.exists(sysctl_conf):
+        print("  ✓ Kernel already hardened")
+        return
+    
+    kernel_hardening = """
+# Network security
+net.ipv4.conf.default.rp_filter=1
+net.ipv4.conf.all.rp_filter=1
+net.ipv4.tcp_syncookies=1
+net.ipv4.conf.all.accept_redirects=0
+net.ipv4.conf.default.accept_redirects=0
+net.ipv4.conf.all.secure_redirects=0
+net.ipv4.conf.default.secure_redirects=0
+net.ipv6.conf.all.accept_redirects=0
+net.ipv6.conf.default.accept_redirects=0
+net.ipv4.conf.all.send_redirects=0
+net.ipv4.conf.default.send_redirects=0
+net.ipv4.icmp_echo_ignore_broadcasts=1
+net.ipv4.icmp_ignore_bogus_error_responses=1
+net.ipv4.conf.all.log_martians=1
+net.ipv4.conf.default.log_martians=1
+
+# Kernel security
+kernel.dmesg_restrict=1
+kernel.kptr_restrict=2
+kernel.yama.ptrace_scope=1
+fs.suid_dumpable=0
+"""
+    
+    with open(sysctl_conf, "w") as f:
+        f.write(kernel_hardening)
+    
+    result = run("sysctl -p /etc/sysctl.d/99-security-hardening.conf", check=False)
+    if result.returncode != 0:
+        print("  ⚠ Some kernel parameters may not have applied (check logs)")
+    
+    print("  ✓ Kernel hardened (network protection, security restrictions)")
+
+
+def check_restart_required(os_type: str, **_) -> None:
+    needs_restart = False
+    
+    if os_type == "debian":
+        # Check for /var/run/reboot-required
+        if os.path.exists("/var/run/reboot-required"):
+            needs_restart = True
+    else:
+        # For Fedora/RHEL, check if kernel was updated
+        result = run("needs-restarting -r", check=False)
+        if result.returncode != 0:
+            needs_restart = True
+    
+    if needs_restart:
+        print("  ⚠ System restart recommended (kernel/system updates)")
+        print("  Run 'sudo reboot' when convenient")
+    else:
+        print("  ✓ No restart required")
 
 
 def configure_auto_updates(os_type: str, **_) -> None:
@@ -428,7 +531,142 @@ application/xhtml+xml=brave-browser.desktop
     print("  ✓ Default browser set to Brave")
 
 
+def install_workstation_dev_apps(os_type: str, username: str, **_) -> None:
+    all_installed = (
+        is_package_installed("vivaldi-stable", os_type) and
+        (is_package_installed("code", os_type) or os.path.exists("/usr/bin/code"))
+    )
+    if all_installed:
+        print("  ✓ Workstation dev apps already installed")
+        return
+
+    print("  Installing Vivaldi browser...")
+    if os_type == "debian":
+        if not os.path.exists("/usr/share/keyrings/vivaldi-archive-keyring.gpg"):
+            run("apt-get install -y -qq curl gnupg")
+            run("curl -fsSL https://repo.vivaldi.com/archive/linux_signing_key.pub | gpg --dearmor --output /usr/share/keyrings/vivaldi-archive-keyring.gpg", check=False)
+            run('echo "deb [signed-by=/usr/share/keyrings/vivaldi-archive-keyring.gpg] https://repo.vivaldi.com/archive/deb/ stable main" > /etc/apt/sources.list.d/vivaldi.list', check=False)
+            run("apt-get update -qq", check=False)
+        if not is_package_installed("vivaldi-stable", os_type):
+            run("apt-get install -y -qq vivaldi-stable", check=False)
+    else:
+        if not is_package_installed("vivaldi-stable", os_type):
+            run("dnf config-manager --add-repo https://repo.vivaldi.com/archive/vivaldi-fedora.repo", check=False)
+            run("dnf install -y -q vivaldi-stable", check=False)
+
+    print("  Installing Visual Studio Code...")
+    if os_type == "debian":
+        if not os.path.exists("/etc/apt/trusted.gpg.d/microsoft.gpg"):
+            run("apt-get install -y -qq wget gpg")
+            run("wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor --output /etc/apt/trusted.gpg.d/microsoft.gpg", check=False)
+            run('echo "deb [arch=amd64] https://packages.microsoft.com/repos/code stable main" > /etc/apt/sources.list.d/vscode.list', check=False)
+            run("apt-get update -qq", check=False)
+        if not is_package_installed("code", os_type):
+            run("apt-get install -y -qq code", check=False)
+    else:
+        if not is_package_installed("code", os_type):
+            run("rpm --import https://packages.microsoft.com/keys/microsoft.asc", check=False)
+            vscode_repo = """[code]
+name=Visual Studio Code
+baseurl=https://packages.microsoft.com/yumrepos/vscode
+enabled=1
+gpgcheck=1
+gpgkey=https://packages.microsoft.com/keys/microsoft.asc
+"""
+            with open("/etc/yum.repos.d/vscode.repo", "w") as f:
+                f.write(vscode_repo)
+            run("dnf install -y -q code", check=False)
+
+    print("  ✓ Workstation dev apps installed (Vivaldi, VS Code)")
+
+
+def configure_vivaldi_browser(username: str, **_) -> None:
+    safe_username = shlex.quote(username)
+    mimeapps_path = f"/home/{username}/.config/mimeapps.list"
+    
+    if os.path.exists(mimeapps_path):
+        if file_contains(mimeapps_path, "vivaldi-stable.desktop"):
+            print("  ✓ Default browser already set")
+            return
+    
+    user_apps_dir = f"/home/{username}/.local/share/applications"
+    os.makedirs(user_apps_dir, exist_ok=True)
+    run(f"chown -R {safe_username}:{safe_username} /home/{username}/.local")
+    
+    os.makedirs(f"/home/{username}/.config", exist_ok=True)
+    
+    mimeapps_content = """[Default Applications]
+x-scheme-handler/http=vivaldi-stable.desktop
+x-scheme-handler/https=vivaldi-stable.desktop
+text/html=vivaldi-stable.desktop
+application/xhtml+xml=vivaldi-stable.desktop
+"""
+    
+    with open(mimeapps_path, "w") as f:
+        f.write(mimeapps_content)
+    
+    run(f"chown -R {safe_username}:{safe_username} /home/{username}/.config")
+    
+    run("xdg-mime default vivaldi-stable.desktop x-scheme-handler/http", check=False)
+    run("xdg-mime default vivaldi-stable.desktop x-scheme-handler/https", check=False)
+    
+    print("  ✓ Default browser set to Vivaldi")
+
+
+# Common steps for all system types
+COMMON_STEPS = [
+    ("Updating and upgrading packages", update_and_upgrade_packages),
+    ("Ensuring sudo is installed", ensure_sudo_installed),
+    ("Configuring UTF-8 locale", configure_locale),
+    ("Setting up user", setup_user),
+    ("Copying SSH keys to user", copy_ssh_keys_to_user),
+    ("Configuring time synchronization", configure_time_sync),
+]
+
+# Desktop-specific steps
+DESKTOP_STEPS = [
+    ("Installing XFCE desktop environment", install_desktop),
+    ("Installing xRDP", install_xrdp),
+    ("Configuring audio for RDP", configure_audio),
+]
+
+# Desktop security steps (fail2ban for RDP)
+DESKTOP_SECURITY_STEPS = [
+    ("Installing fail2ban for RDP brute-force protection", configure_fail2ban),
+]
+
+# Security and system hardening steps (common to all)
+SECURITY_STEPS = [
+    ("Configuring firewall", configure_firewall),
+    ("Hardening SSH configuration", harden_ssh),
+    ("Hardening kernel parameters", harden_kernel),
+    ("Configuring automatic security updates", configure_auto_updates),
+]
+
+# Final steps
+FINAL_STEPS = [
+    ("Checking if restart required", check_restart_required),
+]
+
+# CLI tools step (common to all)
+CLI_STEPS = [
+    ("Installing CLI tools", install_cli_tools),
+]
+
+# Desktop application steps
+DESKTOP_APP_STEPS = [
+    ("Installing desktop applications", install_desktop_apps),
+    ("Configuring default browser", configure_default_browser),
+]
+
+# Workstation dev application steps
+WORKSTATION_DEV_APP_STEPS = [
+    ("Installing workstation dev applications", install_workstation_dev_apps),
+    ("Configuring default browser", configure_vivaldi_browser),
+]
+
 # Step definitions with names for progress tracking
+# Kept for backward compatibility
 STEPS = [
     ("Ensuring sudo is installed", ensure_sudo_installed),
     ("Configuring UTF-8 locale", configure_locale),
@@ -445,3 +683,20 @@ STEPS = [
     ("Installing desktop applications", install_desktop_apps),
     ("Configuring default browser", configure_default_browser),
 ]
+
+
+def get_steps_for_system_type(system_type: str, skip_audio: bool = False) -> list:
+    if system_type == "workstation_desktop":
+        desktop_steps = DESKTOP_STEPS
+        if skip_audio:
+            desktop_steps = [s for s in DESKTOP_STEPS if s[1] != configure_audio]
+        return COMMON_STEPS + desktop_steps + SECURITY_STEPS + \
+               DESKTOP_SECURITY_STEPS + CLI_STEPS + DESKTOP_APP_STEPS + FINAL_STEPS
+    elif system_type == "workstation_dev":
+        desktop_steps = [s for s in DESKTOP_STEPS if s[1] != configure_audio]
+        return COMMON_STEPS + desktop_steps + SECURITY_STEPS + \
+               DESKTOP_SECURITY_STEPS + CLI_STEPS + WORKSTATION_DEV_APP_STEPS + FINAL_STEPS
+    elif system_type == "server_dev":
+        return COMMON_STEPS + SECURITY_STEPS + CLI_STEPS + FINAL_STEPS
+    else:
+        raise ValueError(f"Unknown system type: {system_type}")

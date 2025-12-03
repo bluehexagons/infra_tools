@@ -5,16 +5,16 @@ from setup_common import setup_main
 
 
 def success_message(ip: str, username: str) -> None:
-    print(f"RDP: {ip}:3389")
+    print(f"Server: {ip}")
     print(f"Username: {username}")
     print()
-    print("Connect using RDP client (Remmina, Microsoft Remote Desktop)")
+    print(f"Connect via SSH: ssh {username}@{ip}")
 
 
 def main() -> int:
     return setup_main(
-        "workstation_desktop",
-        "Remote Workstation Desktop Setup",
+        "server_dev",
+        "Remote Server Development Setup",
         success_message
     )
 

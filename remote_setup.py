@@ -1,78 +1,68 @@
 #!/usr/bin/env python3
-"""
-Remote Workstation Setup Script
 
-Usage (on the host):
-    python3 remote_setup.py                           # Set up current user
-    python3 remote_setup.py <username>                # Set up specified user
-    python3 remote_setup.py <username> <password>     # Set up user with password
-    python3 remote_setup.py <username> <password> <timezone>
-
-Supported OS: Debian/Ubuntu, Fedora
-
-When creating a new user without a password, generates a secure random password.
-"""
-
+import argparse
 import getpass
 import sys
 from typing import Optional
 
 from remote_modules.utils import validate_username, detect_os
 from remote_modules.progress import progress_bar
-from remote_modules.steps import STEPS
+from remote_modules.steps import get_steps_for_system_type
+
+
+VALID_SYSTEM_TYPES = ["workstation_desktop", "workstation_dev", "server_dev"]
 
 
 def main() -> int:
-    timezone: Optional[str] = None
-    pw: Optional[str] = None
+    parser = argparse.ArgumentParser(description="Remote system setup")
+    parser.add_argument("--system-type", required=True, 
+                       choices=VALID_SYSTEM_TYPES,
+                       help="System type to setup")
+    parser.add_argument("--username", default=None,
+                       help="Username (defaults to current user)")
+    parser.add_argument("--password", default=None,
+                       help="User password")
+    parser.add_argument("--timezone", default=None,
+                       help="Timezone (defaults to UTC)")
+    parser.add_argument("--skip-audio", action="store_true",
+                       help="Skip audio setup")
     
-    if len(sys.argv) == 1:
-        username = getpass.getuser()
-    elif len(sys.argv) == 2:
-        username = sys.argv[1]
-    elif len(sys.argv) == 3:
-        username = sys.argv[1]
-        pw = sys.argv[2] if sys.argv[2] else None
-    elif len(sys.argv) == 4:
-        username = sys.argv[1]
-        pw = sys.argv[2] if sys.argv[2] else None
-        timezone = sys.argv[3] if sys.argv[3] else None
-    else:
-        print(f"Usage: {sys.argv[0]} [username] [password] [timezone]")
-        return 1
+    args = parser.parse_args()
+    
+    username = args.username or getpass.getuser()
     
     if not validate_username(username):
-        print(f"Error: Invalid username format: {username}")
+        print(f"Error: Invalid username: {username}")
         return 1
 
     print("=" * 60)
-    print("Remote Workstation Setup Script")
+    print(f"Remote Setup ({args.system_type})")
     print("=" * 60)
-    print(f"Target user: {username}")
-    if timezone:
-        print(f"Timezone: {timezone}")
-    else:
-        print("Timezone: UTC (default)")
+    print(f"User: {username}")
+    print(f"Timezone: {args.timezone or 'UTC'}")
+    if args.skip_audio:
+        print("Skip audio: Yes")
     sys.stdout.flush()
 
     os_type = detect_os()
-    print(f"Detected OS type: {os_type}")
+    print(f"OS: {os_type}")
     sys.stdout.flush()
 
-    total_steps = len(STEPS)
-    for i, (name, func) in enumerate(STEPS, 1):
+    steps = get_steps_for_system_type(args.system_type, args.skip_audio)
+    total_steps = len(steps)
+    for i, (name, func) in enumerate(steps, 1):
         bar = progress_bar(i, total_steps)
         print(f"\n{bar} [{i}/{total_steps}] {name}")
         sys.stdout.flush()
         func(
             username=username,
-            password=pw,
+            pw=args.password,
             os_type=os_type,
-            timezone=timezone
+            timezone=args.timezone
         )
     
     bar = progress_bar(total_steps, total_steps)
-    print(f"\n{bar} All steps completed!")
+    print(f"\n{bar} Complete!")
     
     print("\n" + "=" * 60)
     print("Setup completed successfully!")

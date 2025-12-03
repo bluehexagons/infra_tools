@@ -13,8 +13,8 @@ def success_message(ip: str, username: str) -> None:
 
 def main() -> int:
     return setup_main(
-        "workstation_desktop",
-        "Remote Workstation Desktop Setup",
+        "workstation_dev",
+        "Remote Workstation Dev Setup",
         success_message
     )
 
