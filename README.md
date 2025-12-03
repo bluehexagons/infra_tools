@@ -10,6 +10,10 @@ A Python script that sets up a remote Linux workstation for RDP access.
 
 - `setup_workstation_desktop.py` - Local script that transfers and runs the remote setup
 - `remote_setup.py` - Setup script that runs on the target host (can also be run directly)
+- `remote_modules/` - Modular components for the remote setup:
+  - `utils.py` - Utility functions (validation, OS detection, package checks)
+  - `progress.py` - Progress tracking with visual progress bar
+  - `steps.py` - Individual setup step functions with idempotency checks
 
 ### Features
 
@@ -27,7 +31,8 @@ A Python script that sets up a remote Linux workstation for RDP access.
 - Installs CLI tools: neovim, btop, htop, curl, wget, git, tmux, unzip
 - Installs desktop apps via native packages: LibreOffice, Brave, VSCodium, Discord
 - Sets Brave as the default web browser
-- **Idempotent**: Safe to run multiple times to propagate updates
+- **Idempotent**: Safe to run multiple times; skips already-completed steps
+- **Progress Tracking**: Visual progress bar shows completion status
 
 ### Requirements
 
@@ -39,14 +44,14 @@ A Python script that sets up a remote Linux workstation for RDP access.
 ### Usage
 
 ```bash
-# Basic usage (creates user with auto-generated password)
+# Basic usage (uses current username)
+python3 setup_workstation_desktop.py [IP address]
+
+# With specific username
 python3 setup_workstation_desktop.py [IP address] [username]
 
-# With custom password
+# With custom password (sets password for new or existing user)
 python3 setup_workstation_desktop.py [IP address] [username] -p "password"
-
-# Without setting password (for existing users)
-python3 setup_workstation_desktop.py [IP address] [username] --no-password
 
 # With specific timezone
 python3 setup_workstation_desktop.py [IP address] [username] -t "America/New_York"
@@ -54,7 +59,12 @@ python3 setup_workstation_desktop.py [IP address] [username] -t "America/New_Yor
 
 ### Examples
 
-Basic usage (generates a random password):
+Basic usage (uses current username, generates password only if creating new user):
+```bash
+python3 setup_workstation_desktop.py 192.168.1.100
+```
+
+With specific username:
 ```bash
 python3 setup_workstation_desktop.py 192.168.1.100 johndoe
 ```
@@ -69,27 +79,23 @@ With a custom password:
 python3 setup_workstation_desktop.py 192.168.1.100 johndoe -p "MySecurePassword123!"
 ```
 
-Configure existing user without changing password:
-```bash
-python3 setup_workstation_desktop.py 192.168.1.100 johndoe --no-password
-```
-
 ### Running Directly on Host
 
-The `remote_setup.py` script can also be run directly on the target machine:
+The `remote_setup.py` script can also be run directly on the target machine. After
+the first remote setup, scripts are installed at `/opt/infra_tools/`:
 
 ```bash
-# Set up current user
-python3 remote_setup.py
+# Set up current user (generates password)
+python3 /opt/infra_tools/remote_setup.py
 
-# Set up specific user (creates if needed)
-python3 remote_setup.py johndoe
+# Set up specific user (creates if needed, generates password)
+python3 /opt/infra_tools/remote_setup.py johndoe
 
 # Set up user with password
-python3 remote_setup.py johndoe "mypassword"
+python3 /opt/infra_tools/remote_setup.py johndoe "mypassword"
 
 # Set up user with password and timezone
-python3 remote_setup.py johndoe "mypassword" "America/New_York"
+python3 /opt/infra_tools/remote_setup.py johndoe "mypassword" "America/New_York"
 ```
 
 ### Options
@@ -97,10 +103,9 @@ python3 remote_setup.py johndoe "mypassword" "America/New_York"
 | Option | Description |
 |--------|-------------|
 | `ip` | IP address of the remote host |
-| `username` | Username for the sudo-enabled user |
+| `username` | Username for the sudo-enabled user (defaults to current user) |
 | `-k, --key` | Path to SSH private key (optional) |
-| `-p, --password` | Password for the user (optional, auto-generated if not specified) |
-| `--no-password` | Don't set/change password (useful for existing users) |
+| `-p, --password` | Password for the user (only used when creating new user or updating existing) |
 | `-t, --timezone` | Timezone for remote host (defaults to local machine's timezone) |
 
 ### Security
@@ -125,8 +130,8 @@ The script applies the following security measures:
    - Disables X11 forwarding
    - Limits authentication attempts to 3
 
-4. **Password Generation**: When no password is specified, generates a 16-character
-   cryptographically secure random password.
+4. **Password Generation**: When creating a new user without specifying a password,
+   generates a 16-character cryptographically secure random password.
 
 5. **SSH Host Key Handling**: Uses `accept-new` policy which accepts new host keys
    but rejects changed keys. For maximum security, verify the host key fingerprint
@@ -159,12 +164,13 @@ The script applies the following security measures:
 
 ### How It Works
 
-1. The local script reads `remote_setup.py` and transfers it via SSH
-2. Output is streamed in real-time during execution
-3. The remote script runs on the target host with username, password, and timezone
+1. The local script creates a tar archive of `remote_setup.py` and `remote_modules/`
+2. The archive is transferred via SSH and extracted to `/opt/infra_tools/` on the remote host
+3. The remote script runs with username, password, and timezone arguments
 4. OS detection happens on the remote host
 5. UTF-8 locale is configured to ensure proper terminal support
 6. All configuration is performed in a single SSH session
+7. The scripts remain installed at `/opt/infra_tools/` for future use
 
 ### After Setup
 
