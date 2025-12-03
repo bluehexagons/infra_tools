@@ -7,10 +7,10 @@ from typing import Optional
 
 from remote_modules.utils import validate_username, detect_os
 from remote_modules.progress import progress_bar
-from remote_modules.steps import get_steps_for_system_type
+from remote_modules.system_types import get_steps_for_system_type
 
 
-VALID_SYSTEM_TYPES = ["workstation_desktop", "workstation_dev", "server_dev"]
+VALID_SYSTEM_TYPES = ["workstation_desktop", "workstation_dev", "server_dev", "server_web", "server_proxmox"]
 
 
 def main() -> int:
@@ -19,9 +19,9 @@ def main() -> int:
                        choices=VALID_SYSTEM_TYPES,
                        help="System type to setup")
     parser.add_argument("--username", default=None,
-                       help="Username (defaults to current user)")
+                       help="Username (defaults to current user, not used for server_proxmox)")
     parser.add_argument("--password", default=None,
-                       help="User password")
+                       help="User password (not used for server_proxmox)")
     parser.add_argument("--timezone", default=None,
                        help="Timezone (defaults to UTC)")
     parser.add_argument("--skip-audio", action="store_true",
@@ -29,16 +29,20 @@ def main() -> int:
     
     args = parser.parse_args()
     
-    username = args.username or getpass.getuser()
-    
-    if not validate_username(username):
-        print(f"Error: Invalid username: {username}")
-        return 1
+    # Proxmox systems don't need user creation
+    if args.system_type == "server_proxmox":
+        username = "root"
+    else:
+        username = args.username or getpass.getuser()
+        if not validate_username(username):
+            print(f"Error: Invalid username: {username}")
+            return 1
 
     print("=" * 60)
     print(f"Remote Setup ({args.system_type})")
     print("=" * 60)
-    print(f"User: {username}")
+    if args.system_type != "server_proxmox":
+        print(f"User: {username}")
     print(f"Timezone: {args.timezone or 'UTC'}")
     if args.skip_audio:
         print("Skip audio: Yes")
