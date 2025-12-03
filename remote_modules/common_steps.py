@@ -5,7 +5,7 @@ import shlex
 import subprocess
 from typing import Optional
 
-from .utils import run, is_package_installed, file_contains, generate_password
+from .utils import run, is_package_installed, is_service_active, file_contains, generate_password
 
 
 def set_user_password(username: str, password: str) -> bool:
@@ -141,7 +141,6 @@ def configure_time_sync(os_type: str, timezone: Optional[str] = None, **_) -> No
     else:
         if not is_package_installed("chrony", os_type):
             run("dnf install -y -q chrony")
-        from .utils import is_service_active
         if not is_service_active("chronyd"):
             run("systemctl enable chronyd")
             run("systemctl start chronyd")
