@@ -29,7 +29,7 @@ def main() -> int:
     
     args = parser.parse_args()
     
-    username = args.username if args.username else getpass.getuser()
+    username = args.username or getpass.getuser()
     
     if not validate_username(username):
         print(f"Error: Invalid username: {username}")

@@ -126,10 +126,8 @@ def run_remote_setup(
     cmd_parts = [
         f"python3 {escaped_install_dir}/remote_setup.py",
         f"--system-type {shlex.quote(system_type)}",
+        f"--username {shlex.quote(username)}",
     ]
-    
-    if username:
-        cmd_parts.append(f"--username {shlex.quote(username)}")
     
     if password:
         cmd_parts.append(f"--password {shlex.quote(password)}")
