@@ -54,7 +54,7 @@ python3 setup_server_dev.py <ip> [username] [-k key] [-p password] [-t timezone]
 Scripts are installed to `/opt/infra_tools/` on the remote host:
 
 ```bash
-python3 /opt/infra_tools/remote_setup.py <system_type> [username] [password] [timezone] [skip_audio]
+python3 /opt/infra_tools/remote_setup.py --system-type <type> [--username <user>] [--password <pass>] [--timezone <tz>] [--skip-audio]
 ```
 
 System types: `workstation_desktop`, `workstation_dev`, `server_dev`

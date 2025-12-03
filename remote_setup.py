@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import argparse
 import getpass
 import sys
 from typing import Optional
@@ -13,32 +14,33 @@ VALID_SYSTEM_TYPES = ["workstation_desktop", "workstation_dev", "server_dev"]
 
 
 def main() -> int:
-    if len(sys.argv) < 2:
-        print(f"Usage: {sys.argv[0]} <system_type> [username] [password] [timezone] [skip_audio]")
-        print(f"Valid system types: {', '.join(VALID_SYSTEM_TYPES)}")
-        return 1
+    parser = argparse.ArgumentParser(description="Remote system setup")
+    parser.add_argument("--system-type", required=True, 
+                       choices=VALID_SYSTEM_TYPES,
+                       help="System type to setup")
+    parser.add_argument("--username", default=None,
+                       help="Username (defaults to current user)")
+    parser.add_argument("--password", default=None,
+                       help="User password")
+    parser.add_argument("--timezone", default=None,
+                       help="Timezone (defaults to UTC)")
+    parser.add_argument("--skip-audio", action="store_true",
+                       help="Skip audio setup")
     
-    system_type = sys.argv[1]
-    username = sys.argv[2] if len(sys.argv) > 2 else getpass.getuser()
-    pw: Optional[str] = sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] else None
-    timezone: Optional[str] = sys.argv[4] if len(sys.argv) > 4 and sys.argv[4] else None
-    skip_audio = len(sys.argv) > 5 and sys.argv[5] == "1"
+    args = parser.parse_args()
     
-    if system_type not in VALID_SYSTEM_TYPES:
-        print(f"Error: Invalid system type: {system_type}")
-        print(f"Valid system types: {', '.join(VALID_SYSTEM_TYPES)}")
-        return 1
+    username = args.username if args.username else getpass.getuser()
     
     if not validate_username(username):
         print(f"Error: Invalid username: {username}")
         return 1
 
     print("=" * 60)
-    print(f"Remote Setup ({system_type})")
+    print(f"Remote Setup ({args.system_type})")
     print("=" * 60)
     print(f"User: {username}")
-    print(f"Timezone: {timezone or 'UTC'}")
-    if skip_audio:
+    print(f"Timezone: {args.timezone or 'UTC'}")
+    if args.skip_audio:
         print("Skip audio: Yes")
     sys.stdout.flush()
 
@@ -46,7 +48,7 @@ def main() -> int:
     print(f"OS: {os_type}")
     sys.stdout.flush()
 
-    steps = get_steps_for_system_type(system_type, skip_audio)
+    steps = get_steps_for_system_type(args.system_type, args.skip_audio)
     total_steps = len(steps)
     for i, (name, func) in enumerate(steps, 1):
         bar = progress_bar(i, total_steps)
@@ -54,9 +56,9 @@ def main() -> int:
         sys.stdout.flush()
         func(
             username=username,
-            password=pw,
+            password=args.password,
             os_type=os_type,
-            timezone=timezone
+            timezone=args.timezone
         )
     
     bar = progress_bar(total_steps, total_steps)

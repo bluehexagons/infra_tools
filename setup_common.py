@@ -120,18 +120,31 @@ def run_remote_setup(
     if ssh_key:
         ssh_opts.extend(["-i", ssh_key])
     
-    escaped_system_type = shlex.quote(system_type)
-    escaped_username = shlex.quote(username)
-    escaped_password = shlex.quote(password if password else "")
-    escaped_timezone = shlex.quote(timezone if timezone else "")
-    escaped_skip_audio = "1" if skip_audio else ""
     escaped_install_dir = shlex.quote(REMOTE_INSTALL_DIR)
+    
+    # Build remote command with named arguments
+    cmd_parts = [
+        f"python3 {escaped_install_dir}/remote_setup.py",
+        f"--system-type {shlex.quote(system_type)}",
+    ]
+    
+    if username:
+        cmd_parts.append(f"--username {shlex.quote(username)}")
+    
+    if password:
+        cmd_parts.append(f"--password {shlex.quote(password)}")
+    
+    if timezone:
+        cmd_parts.append(f"--timezone {shlex.quote(timezone)}")
+    
+    if skip_audio:
+        cmd_parts.append("--skip-audio")
     
     remote_cmd = f"""
 mkdir -p {escaped_install_dir} && \
 cd {escaped_install_dir} && \
 tar xzf - && \
-python3 {escaped_install_dir}/remote_setup.py {escaped_system_type} {escaped_username} {escaped_password} {escaped_timezone} {escaped_skip_audio}
+{' '.join(cmd_parts)}
 """
     
     ssh_cmd = ["ssh"] + ssh_opts + [f"root@{ip}", remote_cmd]
