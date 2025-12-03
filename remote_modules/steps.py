@@ -441,7 +441,7 @@ def install_workstation_dev_apps(os_type: str, username: str, **_) -> None:
     if os_type == "debian":
         if not os.path.exists("/usr/share/keyrings/vivaldi-archive-keyring.gpg"):
             run("apt-get install -y -qq curl gnupg")
-            run("curl -fsSL https://repo.vivaldi.com/archive/linux_signing_key.pub | gpg --dearmor | dd of=/usr/share/keyrings/vivaldi-archive-keyring.gpg 2>/dev/null", check=False)
+            run("curl -fsSL https://repo.vivaldi.com/archive/linux_signing_key.pub | gpg --dearmor --output /usr/share/keyrings/vivaldi-archive-keyring.gpg", check=False)
             run('echo "deb [signed-by=/usr/share/keyrings/vivaldi-archive-keyring.gpg] https://repo.vivaldi.com/archive/deb/ stable main" > /etc/apt/sources.list.d/vivaldi.list', check=False)
             run("apt-get update -qq", check=False)
         if not is_package_installed("vivaldi-stable", os_type):
@@ -455,7 +455,7 @@ def install_workstation_dev_apps(os_type: str, username: str, **_) -> None:
     if os_type == "debian":
         if not os.path.exists("/etc/apt/trusted.gpg.d/microsoft.gpg"):
             run("apt-get install -y -qq wget gpg")
-            run("wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > /etc/apt/trusted.gpg.d/microsoft.gpg", check=False)
+            run("wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor --output /etc/apt/trusted.gpg.d/microsoft.gpg", check=False)
             run('echo "deb [arch=amd64] https://packages.microsoft.com/repos/code stable main" > /etc/apt/sources.list.d/vscode.list', check=False)
             run("apt-get update -qq", check=False)
         if not is_package_installed("code", os_type):
@@ -463,7 +463,15 @@ def install_workstation_dev_apps(os_type: str, username: str, **_) -> None:
     else:
         if not is_package_installed("code", os_type):
             run("rpm --import https://packages.microsoft.com/keys/microsoft.asc", check=False)
-            run('echo -e "[code]\\nname=Visual Studio Code\\nbaseurl=https://packages.microsoft.com/yumrepos/vscode\\nenabled=1\\ngpgcheck=1\\ngpgkey=https://packages.microsoft.com/keys/microsoft.asc" > /etc/yum.repos.d/vscode.repo', check=False)
+            vscode_repo = """[code]
+name=Visual Studio Code
+baseurl=https://packages.microsoft.com/yumrepos/vscode
+enabled=1
+gpgcheck=1
+gpgkey=https://packages.microsoft.com/keys/microsoft.asc
+"""
+            with open("/etc/yum.repos.d/vscode.repo", "w") as f:
+                f.write(vscode_repo)
             run("dnf install -y -q code", check=False)
 
     print("  ✓ Workstation dev apps installed (Vivaldi, VS Code)")
