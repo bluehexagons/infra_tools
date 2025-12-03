@@ -322,7 +322,6 @@ def harden_ssh(**_) -> None:
         ("ClientAliveInterval", "300"),
         ("ClientAliveCountMax", "2"),
         ("PermitEmptyPasswords", "no"),
-        ("Protocol", "2"),
     ]
 
     for key, value in ssh_hardening:
@@ -330,7 +329,7 @@ def harden_ssh(**_) -> None:
 
     run("systemctl reload sshd || systemctl reload ssh", check=False)
 
-    print("  ✓ SSH hardened (key-only auth, timeouts, protocol 2)")
+    print("  ✓ SSH hardened (key-only auth, timeouts)")
 
 
 def harden_kernel(**_) -> None:
@@ -368,7 +367,9 @@ fs.suid_dumpable=0
     with open(sysctl_conf, "w") as f:
         f.write(kernel_hardening)
     
-    run("sysctl -p /etc/sysctl.d/99-security-hardening.conf", check=False)
+    result = run("sysctl -p /etc/sysctl.d/99-security-hardening.conf", check=False)
+    if result.returncode != 0:
+        print("  ⚠ Some kernel parameters may not have applied (check logs)")
     
     print("  ✓ Kernel hardened (network protection, security restrictions)")
 
