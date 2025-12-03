@@ -1,19 +1,28 @@
 # infra_tools
 
-Infrastructure management tools for remote workstation setup.
+Infrastructure management tools for remote system setup.
 
-## setup_workstation_desktop.py
+## Overview
 
-A Python script that sets up a remote Linux workstation for RDP access.
+This repository provides automated setup scripts for remote Linux systems with two main configurations:
+
+- **Workstation Desktop** (`setup_workstation_desktop.py`): Full desktop environment with RDP access
+- **Server Dev** (`setup_server_dev.py`): Lightweight development server without desktop/RDP
 
 ### Files
 
-- `setup_workstation_desktop.py` - Local script that transfers and runs the remote setup
-- `remote_setup.py` - Setup script that runs on the target host (can also be run directly)
+- `setup_workstation_desktop.py` - Local script for workstation desktop setup
+- `setup_server_dev.py` - Local script for development server setup
+- `setup_common.py` - Shared functionality between setup scripts
+- `remote_setup.py` - Remote setup script that runs on the target host (can also be run directly)
 - `remote_modules/` - Modular components for the remote setup:
   - `utils.py` - Utility functions (validation, OS detection, package checks)
   - `progress.py` - Progress tracking with visual progress bar
   - `steps.py` - Individual setup step functions with idempotency checks
+
+## setup_workstation_desktop.py
+
+A Python script that sets up a remote Linux workstation for RDP access.
 
 ### Features
 
@@ -85,16 +94,19 @@ The `remote_setup.py` script can also be run directly on the target machine. Aft
 the first remote setup, scripts are installed at `/opt/infra_tools/`:
 
 ```bash
-# Set up current user (generates password)
-python3 /opt/infra_tools/remote_setup.py
+# Workstation desktop setup with current user (generates password)
+python3 /opt/infra_tools/remote_setup.py workstation_desktop
 
-# Set up specific user (creates if needed, generates password)
-python3 /opt/infra_tools/remote_setup.py johndoe
+# Workstation desktop setup with specific user (creates if needed, generates password)
+python3 /opt/infra_tools/remote_setup.py workstation_desktop johndoe
 
-# Set up user with password
-python3 /opt/infra_tools/remote_setup.py johndoe "mypassword"
+# Workstation desktop setup with user and password
+python3 /opt/infra_tools/remote_setup.py workstation_desktop johndoe "mypassword"
 
-# Set up user with password and timezone
+# Workstation desktop setup with user, password and timezone
+python3 /opt/infra_tools/remote_setup.py workstation_desktop johndoe "mypassword" "America/New_York"
+
+# For backward compatibility (defaults to workstation_desktop):
 python3 /opt/infra_tools/remote_setup.py johndoe "mypassword" "America/New_York"
 ```
 
@@ -187,6 +199,107 @@ Audio is configured using PulseAudio with the xRDP sound module. For Remmina:
 
 Note: In unprivileged containers (e.g., Proxmox LXC), audio may require the 
 pulseaudio-module-xrdp package to be built from source on Debian systems.
+
+## setup_server_dev.py
+
+A Python script that sets up a remote Linux server for development without desktop/RDP.
+
+### Features
+
+- Creates a new sudo-enabled user or configures an existing one
+- Applies secure defaults:
+  - Firewall configuration (UFW/firewalld)
+  - SSH hardening (disables root password login, password authentication)
+- Configures NTP time synchronization (uses local machine's timezone by default)
+- Enables automatic security updates
+- Configures UTF-8 locale (fixes btop and other tools)
+- Installs CLI tools: neovim, btop, htop, curl, wget, git, tmux, unzip
+- **No desktop environment**: Lightweight server configuration
+- **No RDP**: Direct SSH access only
+- **No audio or desktop applications**: Focus on development tools
+- **Idempotent**: Safe to run multiple times; skips already-completed steps
+- **Progress Tracking**: Visual progress bar shows completion status
+
+### Requirements
+
+- Python 3.9+ (on local machine)
+- Python 3 on the remote host
+- SSH key-based access to the remote host as root
+- Supported remote OS: Debian, Ubuntu, or Fedora (modern RHEL-based)
+
+### Usage
+
+```bash
+# Basic usage (uses current username)
+python3 setup_server_dev.py [IP address]
+
+# With specific username
+python3 setup_server_dev.py [IP address] [username]
+
+# With custom password
+python3 setup_server_dev.py [IP address] [username] -p "password"
+
+# With specific timezone
+python3 setup_server_dev.py [IP address] [username] -t "America/New_York"
+```
+
+### Examples
+
+Basic usage (uses current username, generates password only if creating new user):
+```bash
+python3 setup_server_dev.py 192.168.1.100
+```
+
+With specific username:
+```bash
+python3 setup_server_dev.py 192.168.1.100 johndoe
+```
+
+With a specific SSH key:
+```bash
+python3 setup_server_dev.py 192.168.1.100 johndoe -k ~/.ssh/my_key
+```
+
+With a custom password:
+```bash
+python3 setup_server_dev.py 192.168.1.100 johndoe -p "MySecurePassword123!"
+```
+
+### Running Directly on Host
+
+The `remote_setup.py` script can also be run directly on the target machine:
+
+```bash
+# Server dev setup with current user (generates password)
+python3 /opt/infra_tools/remote_setup.py server_dev
+
+# Server dev setup with specific user (creates if needed, generates password)
+python3 /opt/infra_tools/remote_setup.py server_dev johndoe
+
+# Server dev setup with user and password
+python3 /opt/infra_tools/remote_setup.py server_dev johndoe "mypassword"
+
+# Server dev setup with user, password and timezone
+python3 /opt/infra_tools/remote_setup.py server_dev johndoe "mypassword" "America/New_York"
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `ip` | IP address of the remote host |
+| `username` | Username for the sudo-enabled user (defaults to current user) |
+| `-k, --key` | Path to SSH private key (optional) |
+| `-p, --password` | Password for the user (only used when creating new user or updating existing) |
+| `-t, --timezone` | Timezone for remote host (defaults to local machine's timezone) |
+
+### After Setup
+
+1. Connect via SSH:
+   ```bash
+   ssh [username]@[IP address]
+   ```
+2. Consider changing the password after first login
 
 ## License
 
