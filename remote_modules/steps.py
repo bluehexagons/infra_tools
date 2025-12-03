@@ -489,8 +489,8 @@ STEPS = [
 def get_steps_for_system_type(system_type: str) -> list:
     """Get the appropriate steps for a given system type."""
     if system_type == "workstation_desktop":
-        return (COMMON_STEPS + DESKTOP_STEPS + SECURITY_STEPS + 
-                DESKTOP_SECURITY_STEPS + CLI_STEPS + DESKTOP_APP_STEPS)
+        return COMMON_STEPS + DESKTOP_STEPS + SECURITY_STEPS + \
+               DESKTOP_SECURITY_STEPS + CLI_STEPS + DESKTOP_APP_STEPS
     elif system_type == "server_dev":
         # Server dev: no desktop, audio, RDP, desktop apps, or RDP-related fail2ban
         return COMMON_STEPS + SECURITY_STEPS + CLI_STEPS
