@@ -8,7 +8,7 @@ Automated setup scripts for remote Linux systems.
 - `setup_workstation_dev.py` - Dev workstation with RDP (no audio, VS Code + Vivaldi)
 - `setup_server_dev.py` - Development server (no desktop)
 - `setup_server_web.py` - Web server with nginx (static content & reverse proxy)
-- `setup_server_proxmox.py` - Proxmox server hardening (for existing Proxmox 8.4+ systems)
+- `setup_server_proxmox.py` - Proxmox server hardening
 
 ## Requirements
 
@@ -59,8 +59,7 @@ python3 setup_server_proxmox.py <ip> [-k key] [-t timezone]
 **Server Proxmox:**
 - SSH & kernel hardening
 - Automatic security updates
-- No user creation or software installation
-- For existing Proxmox 8.4+ systems
+- Preserves Proxmox firewall and cluster functionality
 
 **All:**
 - User setup with sudo

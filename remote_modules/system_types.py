@@ -36,7 +36,6 @@ from .web_steps import (
 )
 
 
-# Common steps for all system types
 COMMON_STEPS = [
     ("Updating and upgrading packages", update_and_upgrade_packages),
     ("Ensuring sudo is installed", ensure_sudo_installed),
@@ -46,19 +45,16 @@ COMMON_STEPS = [
     ("Configuring time synchronization", configure_time_sync),
 ]
 
-# Desktop-specific steps
 DESKTOP_STEPS = [
     ("Installing XFCE desktop environment", install_desktop),
     ("Installing xRDP", install_xrdp),
     ("Configuring audio for RDP", configure_audio),
 ]
 
-# Desktop security steps (fail2ban for RDP)
 DESKTOP_SECURITY_STEPS = [
     ("Installing fail2ban for RDP brute-force protection", configure_fail2ban),
 ]
 
-# Security and system hardening steps (common to most types)
 SECURITY_STEPS = [
     ("Configuring firewall", configure_firewall),
     ("Hardening SSH configuration", harden_ssh),
@@ -66,29 +62,24 @@ SECURITY_STEPS = [
     ("Configuring automatic security updates", configure_auto_updates),
 ]
 
-# Final steps
 FINAL_STEPS = [
     ("Checking if restart required", check_restart_required),
 ]
 
-# CLI tools step (common to all)
 CLI_STEPS = [
     ("Installing CLI tools", install_cli_tools),
 ]
 
-# Desktop application steps
 DESKTOP_APP_STEPS = [
     ("Installing desktop applications", install_desktop_apps),
     ("Configuring default browser", configure_default_browser),
 ]
 
-# Workstation dev application steps
 WORKSTATION_DEV_APP_STEPS = [
     ("Installing workstation dev applications", install_workstation_dev_apps),
     ("Configuring default browser", configure_vivaldi_browser),
 ]
 
-# Web server steps
 WEB_SERVER_STEPS = [
     ("Installing nginx", install_nginx),
     ("Configuring nginx security settings", configure_nginx_security),
@@ -96,18 +87,15 @@ WEB_SERVER_STEPS = [
     ("Configuring default site", configure_default_site),
 ]
 
-# Web server firewall (replaces standard firewall for server_web)
 WEB_FIREWALL_STEPS = [
     ("Configuring firewall for web server", configure_firewall_web),
 ]
 
-# SSH-only firewall (for basic servers)
 SSH_FIREWALL_STEPS = [
-    ("Configuring firewall (SSH only)", configure_firewall_ssh_only),
+    ("Configuring firewall", configure_firewall_ssh_only),
 ]
 
-# Proxmox-specific steps (minimal hardening for existing systems)
-PROXMOX_STEPS = [
+PROXMOX_HARDENING_STEPS = [
     ("Hardening SSH configuration", harden_ssh),
     ("Hardening kernel parameters", harden_kernel),
     ("Configuring automatic security updates", configure_auto_updates),
@@ -129,7 +117,6 @@ def get_steps_for_system_type(system_type: str, skip_audio: bool = False) -> lis
     elif system_type == "server_dev":
         return COMMON_STEPS + SECURITY_STEPS + CLI_STEPS + FINAL_STEPS
     elif system_type == "server_web":
-        # Web server uses web-specific firewall that allows HTTP/HTTPS
         security_steps = [
             ("Hardening SSH configuration", harden_ssh),
             ("Hardening kernel parameters", harden_kernel),
@@ -138,7 +125,6 @@ def get_steps_for_system_type(system_type: str, skip_audio: bool = False) -> lis
         return COMMON_STEPS + WEB_FIREWALL_STEPS + security_steps + \
                WEB_SERVER_STEPS + CLI_STEPS + FINAL_STEPS
     elif system_type == "server_proxmox":
-        # Proxmox systems are already installed, just apply hardening
-        return SSH_FIREWALL_STEPS + PROXMOX_STEPS
+        return PROXMOX_HARDENING_STEPS
     else:
         raise ValueError(f"Unknown system type: {system_type}")
