@@ -488,11 +488,11 @@ STEPS = [
 
 def get_steps_for_system_type(system_type: str, skip_audio: bool = False) -> list:
     if system_type == "workstation_desktop":
-        steps = COMMON_STEPS + DESKTOP_STEPS
+        desktop_steps = DESKTOP_STEPS
         if skip_audio:
-            steps = [s for s in steps if "audio" not in s[0].lower()]
-        return steps + SECURITY_STEPS + DESKTOP_SECURITY_STEPS + \
-               CLI_STEPS + DESKTOP_APP_STEPS
+            desktop_steps = [s for s in DESKTOP_STEPS if s[1] != configure_audio]
+        return COMMON_STEPS + desktop_steps + SECURITY_STEPS + \
+               DESKTOP_SECURITY_STEPS + CLI_STEPS + DESKTOP_APP_STEPS
     elif system_type == "server_dev":
         return COMMON_STEPS + SECURITY_STEPS + CLI_STEPS
     else:

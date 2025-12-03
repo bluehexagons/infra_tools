@@ -189,7 +189,7 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
     print(f"Host: {args.ip}")
     print(f"User: {username}")
     print(f"Timezone: {timezone}")
-    if args.skip_audio:
+    if args.skip_audio and system_type == "workstation_desktop":
         print("Skip audio: Yes")
     print("=" * 60)
     print()
