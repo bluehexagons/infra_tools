@@ -8,6 +8,7 @@ Automated setup scripts for remote Linux systems.
 - `setup_workstation_dev.py` - Dev workstation with RDP (no audio, VS Code + Vivaldi)
 - `setup_server_dev.py` - Development server (no desktop)
 - `setup_server_web.py` - Web server with nginx (static content & reverse proxy)
+- `setup_server_proxmox.py` - Proxmox server hardening (for existing Proxmox 8.4+ systems)
 
 ## Requirements
 
@@ -29,6 +30,9 @@ python3 setup_server_dev.py <ip> [username] [-k key] [-p password] [-t timezone]
 
 # Web server
 python3 setup_server_web.py <ip> [username] [-k key] [-p password] [-t timezone]
+
+# Proxmox server hardening
+python3 setup_server_proxmox.py <ip> [-k key] [-t timezone]
 ```
 
 ## Features
@@ -52,6 +56,12 @@ python3 setup_server_web.py <ip> [username] [-k key] [-p password] [-t timezone]
 - Static content & reverse proxy only (no scripting)
 - Hello World test page
 
+**Server Proxmox:**
+- SSH & kernel hardening
+- Automatic security updates
+- No user creation or software installation
+- For existing Proxmox 8.4+ systems
+
 **All:**
 - User setup with sudo
 - Firewall + SSH hardening
@@ -67,7 +77,7 @@ Scripts are installed to `/opt/infra_tools/` on the remote host:
 python3 /opt/infra_tools/remote_setup.py --system-type <type> [--username <user>] [--password <pass>] [--timezone <tz>] [--skip-audio]
 ```
 
-System types: `workstation_desktop`, `workstation_dev`, `server_dev`, `server_web`
+System types: `workstation_desktop`, `workstation_dev`, `server_dev`, `server_web`, `server_proxmox`
 
 ## License
 
