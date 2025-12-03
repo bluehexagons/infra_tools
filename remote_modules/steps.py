@@ -333,6 +333,46 @@ def harden_ssh(**_) -> None:
     print("  ✓ SSH hardened (key-only auth, timeouts, protocol 2)")
 
 
+def harden_kernel(**_) -> None:
+    sysctl_conf = "/etc/sysctl.d/99-security-hardening.conf"
+    
+    if os.path.exists(sysctl_conf):
+        print("  ✓ Kernel already hardened")
+        return
+    
+    kernel_hardening = """
+# Network security
+net.ipv4.conf.default.rp_filter=1
+net.ipv4.conf.all.rp_filter=1
+net.ipv4.tcp_syncookies=1
+net.ipv4.conf.all.accept_redirects=0
+net.ipv4.conf.default.accept_redirects=0
+net.ipv4.conf.all.secure_redirects=0
+net.ipv4.conf.default.secure_redirects=0
+net.ipv6.conf.all.accept_redirects=0
+net.ipv6.conf.default.accept_redirects=0
+net.ipv4.conf.all.send_redirects=0
+net.ipv4.conf.default.send_redirects=0
+net.ipv4.icmp_echo_ignore_broadcasts=1
+net.ipv4.icmp_ignore_bogus_error_responses=1
+net.ipv4.conf.all.log_martians=1
+net.ipv4.conf.default.log_martians=1
+
+# Kernel security
+kernel.dmesg_restrict=1
+kernel.kptr_restrict=2
+kernel.yama.ptrace_scope=1
+fs.suid_dumpable=0
+"""
+    
+    with open(sysctl_conf, "w") as f:
+        f.write(kernel_hardening)
+    
+    run("sysctl -p /etc/sysctl.d/99-security-hardening.conf", check=False)
+    
+    print("  ✓ Kernel hardened (network protection, security restrictions)")
+
+
 def check_restart_required(os_type: str, **_) -> None:
     needs_restart = False
     
@@ -598,6 +638,7 @@ DESKTOP_SECURITY_STEPS = [
 SECURITY_STEPS = [
     ("Configuring firewall", configure_firewall),
     ("Hardening SSH configuration", harden_ssh),
+    ("Hardening kernel parameters", harden_kernel),
     ("Configuring automatic security updates", configure_auto_updates),
 ]
 
