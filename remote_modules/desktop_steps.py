@@ -78,17 +78,14 @@ def harden_xrdp(os_type: str, **_) -> None:
         else:
             run(f"sed -i '1i crypt_level=high' {xrdp_config}")
     
+    if not file_contains(sesman_config, "[Security]"):
+        run(f"echo '\n[Security]' >> {sesman_config}")
+    
     if not file_contains(sesman_config, "AllowGroups"):
-        if file_contains(sesman_config, "[Security]"):
-            run(f"sed -i '/\\[Security\\]/a AllowGroups=remoteusers' {sesman_config}")
-        else:
-            run(f"echo '\n[Security]\nAllowGroups=remoteusers' >> {sesman_config}")
+        run(f"sed -i '/\\[Security\\]/a AllowGroups=remoteusers' {sesman_config}")
     
     if not file_contains(sesman_config, "DenyUsers"):
-        if file_contains(sesman_config, "[Security]"):
-            run(f"sed -i '/\\[Security\\]/a DenyUsers=root' {sesman_config}")
-        else:
-            run(f"echo 'DenyUsers=root' >> {sesman_config}")
+        run(f"sed -i '/\\[Security\\]/a DenyUsers=root' {sesman_config}")
     
     if os_type == "debian":
         run("getent group ssl-cert && adduser xrdp ssl-cert", check=False)
