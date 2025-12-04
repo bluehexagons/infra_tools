@@ -48,6 +48,63 @@ def install_xrdp(username: str, os_type: str, **_) -> None:
     print("  ✓ xRDP installed and configured")
 
 
+def harden_xrdp(os_type: str, **_) -> None:
+    """Harden xRDP with TLS encryption and group restrictions."""
+    xrdp_config = "/etc/xrdp/xrdp.ini"
+    sesman_config = "/etc/xrdp/sesman.ini"
+    
+    if not os.path.exists(xrdp_config):
+        print("  ⚠ xRDP not installed, skipping hardening")
+        return
+    
+    # Check if already configured
+    if file_contains(xrdp_config, "security_layer=tls"):
+        if file_contains(sesman_config, "AllowGroups=remoteusers"):
+            print("  ✓ xRDP already hardened")
+            return
+    
+    # Backup configs if not already backed up
+    if not os.path.exists(f"{xrdp_config}.bak"):
+        run(f"cp {xrdp_config} {xrdp_config}.bak")
+    if not os.path.exists(f"{sesman_config}.bak"):
+        run(f"cp {sesman_config} {sesman_config}.bak")
+    
+    # Configure TLS encryption and security settings in xrdp.ini
+    run(f"sed -i 's/^security_layer=.*/security_layer=tls/' {xrdp_config}")
+    run(f"sed -i 's/^crypt_level=.*/crypt_level=high/' {xrdp_config}")
+    run(f"sed -i 's/^#\\?security_layer=.*/security_layer=tls/' {xrdp_config}")
+    run(f"sed -i 's/^#\\?crypt_level=.*/crypt_level=high/' {xrdp_config}")
+    
+    # If security_layer is not present, add it
+    if not file_contains(xrdp_config, "security_layer"):
+        run(f"sed -i '/\\[Globals\\]/a security_layer=tls' {xrdp_config}")
+    
+    # If crypt_level is not present, add it  
+    if not file_contains(xrdp_config, "crypt_level"):
+        run(f"sed -i '/\\[Globals\\]/a crypt_level=high' {xrdp_config}")
+    
+    # Configure group restrictions in sesman.ini
+    # Add AllowGroups under [Security] section
+    if not file_contains(sesman_config, "AllowGroups"):
+        # Check if [Security] section exists
+        if file_contains(sesman_config, "[Security]"):
+            run(f"sed -i '/\\[Security\\]/a AllowGroups=remoteusers' {sesman_config}")
+        else:
+            # Add [Security] section at the end
+            run(f"echo '\n[Security]\nAllowGroups=remoteusers' >> {sesman_config}")
+    
+    # Ensure xrdp has access to SSL certificates (for Debian/Ubuntu)
+    if os_type == "debian":
+        run("getent group ssl-cert && adduser xrdp ssl-cert", check=False)
+    
+    # Restart xRDP to apply changes
+    run("systemctl restart xrdp")
+    run("systemctl restart xrdp-sesman", check=False)
+    
+    print("  ✓ xRDP hardened (TLS encryption, restricted to remoteusers group)")
+
+
+
 def configure_audio(username: str, os_type: str, **_) -> None:
     safe_username = shlex.quote(username)
     home_dir = f"/home/{username}"

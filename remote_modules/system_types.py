@@ -13,6 +13,7 @@ from .common_steps import (
 from .desktop_steps import (
     install_desktop,
     install_xrdp,
+    harden_xrdp,
     configure_audio,
     install_desktop_apps,
     configure_default_browser,
@@ -20,6 +21,7 @@ from .desktop_steps import (
     configure_vivaldi_browser,
 )
 from .security_steps import (
+    create_remoteusers_group,
     configure_firewall,
     configure_fail2ban,
     harden_ssh,
@@ -39,6 +41,7 @@ COMMON_STEPS = [
     ("Updating and upgrading packages", update_and_upgrade_packages),
     ("Ensuring sudo is installed", ensure_sudo_installed),
     ("Configuring UTF-8 locale", configure_locale),
+    ("Creating remoteusers group", create_remoteusers_group),
     ("Setting up user", setup_user),
     ("Copying SSH keys to user", copy_ssh_keys_to_user),
     ("Configuring time synchronization", configure_time_sync),
@@ -51,6 +54,7 @@ DESKTOP_STEPS = [
 ]
 
 DESKTOP_SECURITY_STEPS = [
+    ("Hardening xRDP with TLS and group restrictions", harden_xrdp),
     ("Installing fail2ban for RDP brute-force protection", configure_fail2ban),
 ]
 
@@ -91,6 +95,7 @@ WEB_FIREWALL_STEPS = [
 ]
 
 PROXMOX_HARDENING_STEPS = [
+    ("Creating remoteusers group", create_remoteusers_group),
     ("Hardening SSH configuration", harden_ssh),
     ("Hardening kernel parameters", harden_kernel),
     ("Configuring automatic security updates", configure_auto_updates),
