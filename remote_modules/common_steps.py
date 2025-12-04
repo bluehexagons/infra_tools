@@ -138,6 +138,7 @@ def generate_ssh_key(username: str, **_) -> None:
     # Set proper permissions
     run(f"chown -R {safe_username}:{safe_username} {shlex.quote(ssh_dir)}")
     run(f"chmod 600 {shlex.quote(private_key)}")
+    # Public key might not exist if ssh-keygen failed, so check=False is acceptable
     run(f"chmod 644 {shlex.quote(public_key)}", check=False)
     
     print(f"  ✓ SSH key generated for {username} (~/.ssh/id_ed25519)")

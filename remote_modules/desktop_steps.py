@@ -345,6 +345,9 @@ def configure_gnome_keyring(username: str, os_type: str, **_) -> None:
     home_dir = f"/home/{username}"
     profile_path = f"{home_dir}/.profile"
     
+    # The eval command is the official way to start gnome-keyring-daemon
+    # as documented in gnome-keyring documentation. It exports required
+    # environment variables like SSH_AUTH_SOCK for SSH agent integration.
     keyring_env = """
 # Start gnome-keyring-daemon
 if [ -n "$DESKTOP_SESSION" ]; then
