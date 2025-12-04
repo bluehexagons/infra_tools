@@ -23,30 +23,17 @@ def create_remoteusers_group(**_) -> None:
 
 
 def configure_firewall(os_type: str, **_) -> None:
-    if os_type == "debian":
-        result = run("ufw status 2>/dev/null | grep -q 'Status: active'", check=False)
-        if result.returncode == 0:
-            print("  ✓ Firewall already configured")
-            return
-        
-        run("apt-get install -y -qq ufw")
-        run("ufw default deny incoming")
-        run("ufw default allow outgoing")
-        run("ufw allow ssh")
-        run("ufw allow 3389/tcp")
-        run("ufw --force enable")
-    else:
-        if is_service_active("firewalld"):
-            result = run("firewall-cmd --query-port=3389/tcp", check=False)
-            if result.returncode == 0:
-                print("  ✓ Firewall already configured")
-                return
-        
-        run("systemctl enable firewalld", check=False)
-        run("systemctl start firewalld", check=False)
-        run("firewall-cmd --permanent --add-service=ssh", check=False)
-        run("firewall-cmd --permanent --add-port=3389/tcp", check=False)
-        run("firewall-cmd --reload", check=False)
+    result = run("ufw status 2>/dev/null | grep -q 'Status: active'", check=False)
+    if result.returncode == 0:
+        print("  ✓ Firewall already configured")
+        return
+    
+    run("apt-get install -y -qq ufw")
+    run("ufw default deny incoming")
+    run("ufw default allow outgoing")
+    run("ufw allow ssh")
+    run("ufw allow 3389/tcp")
+    run("ufw --force enable")
 
     print("  ✓ Firewall configured (SSH and RDP allowed)")
 
@@ -57,10 +44,7 @@ def configure_fail2ban(os_type: str, **_) -> None:
             print("  ✓ fail2ban already configured")
             return
 
-    if os_type == "debian":
-        run("apt-get install -y -qq fail2ban")
-    else:
-        run("dnf install -y -q fail2ban")
+    run("apt-get install -y -qq fail2ban")
 
     fail2ban_xrdp_filter = """[Definition]
 failregex = ^.*xrdp-sesman.*: .*login failed for user.*from ip <HOST>.*$
@@ -119,7 +103,6 @@ def harden_ssh(**_) -> None:
     for key, value in ssh_hardening:
         run(f"sed -i 's/^#*{key}.*/{key} {value}/' /etc/ssh/sshd_config")
 
-    # Add AllowGroups directive if not present (root is in remoteusers group)
     if not file_contains(sshd_config, "AllowGroups"):
         run(f"echo 'AllowGroups remoteusers' >> /etc/ssh/sshd_config")
 
@@ -171,92 +154,56 @@ fs.suid_dumpable=0
 
 
 def configure_auto_updates(os_type: str, **_) -> None:
-    if os_type == "debian":
-        if os.path.exists("/etc/apt/apt.conf.d/20auto-upgrades"):
-            if is_service_active("unattended-upgrades"):
-                print("  ✓ Automatic updates already configured")
-                return
-        
-        run("apt-get install -y -qq unattended-upgrades")
+    if os.path.exists("/etc/apt/apt.conf.d/20auto-upgrades"):
+        if is_service_active("unattended-upgrades"):
+            print("  ✓ Automatic updates already configured")
+            return
+    
+    run("apt-get install -y -qq unattended-upgrades")
 
-        auto_upgrades = """APT::Periodic::Update-Package-Lists "1";
+    auto_upgrades = """APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "1";
 APT::Periodic::AutocleanInterval "7";
 """
-        with open("/etc/apt/apt.conf.d/20auto-upgrades", "w") as f:
-            f.write(auto_upgrades)
+    with open("/etc/apt/apt.conf.d/20auto-upgrades", "w") as f:
+        f.write(auto_upgrades)
 
-        run("systemctl enable unattended-upgrades")
-        run("systemctl start unattended-upgrades")
-    else:
-        if is_service_active("dnf-automatic.timer"):
-            print("  ✓ Automatic updates already configured")
-            return
-        
-        run("dnf install -y -q dnf-automatic")
-        run("sed -i 's/apply_updates = no/apply_updates = yes/' /etc/dnf/automatic.conf")
-        run("sed -i 's/upgrade_type = default/upgrade_type = security/' /etc/dnf/automatic.conf")
-        run("systemctl enable dnf-automatic.timer")
-        run("systemctl start dnf-automatic.timer")
+    run("systemctl enable unattended-upgrades")
+    run("systemctl start unattended-upgrades")
 
     print("  ✓ Automatic security updates enabled")
 
 
 def configure_firewall_web(os_type: str, **_) -> None:
-    if os_type == "debian":
-        result = run("ufw status 2>/dev/null | grep -q 'Status: active'", check=False)
+    result = run("ufw status 2>/dev/null | grep -q 'Status: active'", check=False)
+    if result.returncode == 0:
+        result = run("ufw status | grep -q '80/tcp'", check=False)
         if result.returncode == 0:
-            # Check if HTTP/HTTPS already allowed
-            result = run("ufw status | grep -q '80/tcp'", check=False)
-            if result.returncode == 0:
-                print("  ✓ Firewall already configured for web")
-                return
-        
-        run("apt-get install -y -qq ufw")
-        run("ufw default deny incoming")
-        run("ufw default allow outgoing")
-        run("ufw allow ssh")
-        run("ufw allow 80/tcp")
-        run("ufw allow 443/tcp")
-        run("ufw --force enable")
-    else:
-        if is_service_active("firewalld"):
-            result = run("firewall-cmd --query-service=http", check=False)
-            if result.returncode == 0:
-                print("  ✓ Firewall already configured for web")
-                return
-        
-        run("systemctl enable firewalld", check=False)
-        run("systemctl start firewalld", check=False)
-        run("firewall-cmd --permanent --add-service=ssh", check=False)
-        run("firewall-cmd --permanent --add-service=http", check=False)
-        run("firewall-cmd --permanent --add-service=https", check=False)
-        run("firewall-cmd --reload", check=False)
+            print("  ✓ Firewall already configured for web")
+            return
+    
+    run("apt-get install -y -qq ufw")
+    run("ufw default deny incoming")
+    run("ufw default allow outgoing")
+    run("ufw allow ssh")
+    run("ufw allow 80/tcp")
+    run("ufw allow 443/tcp")
+    run("ufw --force enable")
     
     print("  ✓ Firewall configured (SSH, HTTP, and HTTPS allowed)")
 
 
 def configure_firewall_ssh_only(os_type: str, **_) -> None:
     """Configure firewall to allow only SSH (for servers without web/RDP)."""
-    if os_type == "debian":
-        result = run("ufw status 2>/dev/null | grep -q 'Status: active'", check=False)
-        if result.returncode == 0:
-            print("  ✓ Firewall already configured")
-            return
-        
-        run("apt-get install -y -qq ufw")
-        run("ufw default deny incoming")
-        run("ufw default allow outgoing")
-        run("ufw allow ssh")
-        run("ufw --force enable")
-    else:
-        if is_service_active("firewalld"):
-            print("  ✓ Firewall already configured")
-            return
-        
-        run("systemctl enable firewalld", check=False)
-        run("systemctl start firewalld", check=False)
-        run("firewall-cmd --permanent --add-service=ssh", check=False)
-        run("firewall-cmd --reload", check=False)
+    result = run("ufw status 2>/dev/null | grep -q 'Status: active'", check=False)
+    if result.returncode == 0:
+        print("  ✓ Firewall already configured")
+        return
+    
+    run("apt-get install -y -qq ufw")
+    run("ufw default deny incoming")
+    run("ufw default allow outgoing")
+    run("ufw allow ssh")
+    run("ufw --force enable")
 
     print("  ✓ Firewall configured (SSH only)")
