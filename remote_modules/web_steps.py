@@ -11,11 +11,8 @@ def install_nginx(os_type: str, **_) -> None:
             print("  ✓ nginx already installed and running")
             return
     
-    if os_type == "debian":
-        os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-        run("apt-get install -y -qq nginx")
-    else:
-        run("dnf install -y -q nginx")
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
+    run("apt-get install -y -qq nginx")
     
     run("systemctl enable nginx")
     run("systemctl start nginx")
@@ -86,11 +83,6 @@ http {
 }
 """
     
-    # For Fedora, adjust the user and module paths
-    if os_type == "fedora":
-        nginx_security_conf = nginx_security_conf.replace("user www-data;", "user nginx;")
-        nginx_security_conf = nginx_security_conf.replace("include /etc/nginx/modules-enabled/*.conf;", "include /usr/share/nginx/modules/*.conf;")
-    
     with open(nginx_conf, "w") as f:
         f.write(nginx_security_conf)
     
@@ -124,26 +116,20 @@ def create_hello_world_site(os_type: str, **_) -> None:
     with open(index_html, "w") as f:
         f.write(html_content)
     
-    # Use appropriate user for different OS types
-    web_user = "nginx" if os_type == "fedora" else "www-data"
-    run(f"chown -R {web_user}:{web_user} /var/www/html", check=False)
+    run("chown -R www-data:www-data /var/www/html", check=False)
     run("chmod -R 755 /var/www/html")
     
     print("  ✓ Hello World website created")
 
 
 def configure_default_site(os_type: str, **_) -> None:
-    if os_type == "debian":
-        site_conf = "/etc/nginx/sites-available/default"
-    else:
-        site_conf = "/etc/nginx/conf.d/default.conf"
+    site_conf = "/etc/nginx/sites-available/default"
     
     if os.path.exists(site_conf):
         if file_contains(site_conf, "Hello World"):
             print("  ✓ Default site already configured")
             return
     
-    # Create a secure default site configuration
     default_site = r"""# Default server configuration
 server {
     listen 80 default_server;
@@ -185,10 +171,8 @@ server {
     with open(site_conf, "w") as f:
         f.write(default_site)
     
-    if os_type == "debian":
-        run("ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default", check=False)
+    run("ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default", check=False)
     
-    # Test nginx configuration
     result = run("nginx -t", check=False)
     if result.returncode != 0:
         print("  ⚠ nginx configuration test failed, reverting...")

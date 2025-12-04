@@ -14,7 +14,7 @@ Automated setup scripts for remote Linux systems.
 
 - Python 3.9+
 - SSH root access to target host
-- Supported OS: Debian, Ubuntu, Fedora
+- Supported OS: Debian, Ubuntu
 
 ## Usage
 

@@ -39,24 +39,16 @@ def detect_os() -> str:
 
     if "ubuntu" in content or "debian" in content:
         return "debian"
-    elif "fedora" in content:
-        return "fedora"
     else:
-        print("Error: Unsupported OS (only Debian/Ubuntu and Fedora are supported)")
+        print("Error: Unsupported OS (only Debian/Ubuntu are supported)")
         sys.exit(1)
 
 
 def is_package_installed(package: str, os_type: str) -> bool:
-    if os_type == "debian":
-        result = subprocess.run(
-            f"dpkg -l {shlex.quote(package)} 2>/dev/null | grep -q ^ii",
-            shell=True, capture_output=True
-        )
-    else:
-        result = subprocess.run(
-            f"rpm -q {shlex.quote(package)} >/dev/null 2>&1",
-            shell=True, capture_output=True
-        )
+    result = subprocess.run(
+        f"dpkg -l {shlex.quote(package)} 2>/dev/null | grep -q ^ii",
+        shell=True, capture_output=True
+    )
     return result.returncode == 0
 
 
