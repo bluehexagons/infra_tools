@@ -104,7 +104,6 @@ def setup_user(username: str, pw: Optional[str], os_type: str, **_) -> None:
     else:
         run(f"usermod -aG wheel {safe_username}", check=False)
     
-    # Add user to remoteusers group for SSH/RDP access
     result = run("getent group remoteusers", check=False)
     if result.returncode == 0:
         run(f"usermod -aG remoteusers {safe_username}", check=False)

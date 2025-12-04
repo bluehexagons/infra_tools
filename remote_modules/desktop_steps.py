@@ -57,59 +57,46 @@ def harden_xrdp(os_type: str, **_) -> None:
         print("  ⚠ xRDP not installed, skipping hardening")
         return
     
-    # Check if already configured
-    if file_contains(xrdp_config, "security_layer=tls"):
-        if file_contains(sesman_config, "AllowGroups=remoteusers"):
-            print("  ✓ xRDP already hardened")
-            return
+    if (file_contains(xrdp_config, "security_layer=tls") and
+        file_contains(sesman_config, "AllowGroups=remoteusers") and
+        file_contains(sesman_config, "DenyUsers=root")):
+        print("  ✓ xRDP already hardened")
+        return
     
-    # Backup configs if not already backed up
-    if not os.path.exists(f"{xrdp_config}.bak"):
-        run(f"cp {xrdp_config} {xrdp_config}.bak")
-    if not os.path.exists(f"{sesman_config}.bak"):
-        run(f"cp {sesman_config} {sesman_config}.bak")
-    
-    # Configure TLS encryption and security settings in xrdp.ini
-    # These sed commands handle both commented and uncommented lines
     run(f"sed -i 's/^#\\?security_layer=.*/security_layer=tls/' {xrdp_config}")
     run(f"sed -i 's/^#\\?crypt_level=.*/crypt_level=high/' {xrdp_config}")
     
-    # If security_layer is not present at all, add it to [Globals] section
     if not file_contains(xrdp_config, "security_layer"):
         if file_contains(xrdp_config, "[Globals]"):
             run(f"sed -i '/\\[Globals\\]/a security_layer=tls' {xrdp_config}")
         else:
-            # If no [Globals] section, add it at the beginning
             run(f"sed -i '1i [Globals]\\nsecurity_layer=tls' {xrdp_config}")
     
-    # If crypt_level is not present at all, add it to [Globals] section
     if not file_contains(xrdp_config, "crypt_level"):
         if file_contains(xrdp_config, "[Globals]"):
             run(f"sed -i '/\\[Globals\\]/a crypt_level=high' {xrdp_config}")
         else:
-            # If no [Globals] section exists, it should have been created above
-            # but add it anyway for safety
             run(f"sed -i '1i crypt_level=high' {xrdp_config}")
     
-    # Configure group restrictions in sesman.ini
-    # Add AllowGroups under [Security] section
     if not file_contains(sesman_config, "AllowGroups"):
-        # Check if [Security] section exists
         if file_contains(sesman_config, "[Security]"):
             run(f"sed -i '/\\[Security\\]/a AllowGroups=remoteusers' {sesman_config}")
         else:
-            # Add [Security] section at the end
             run(f"echo '\n[Security]\nAllowGroups=remoteusers' >> {sesman_config}")
     
-    # Ensure xrdp has access to SSL certificates (for Debian/Ubuntu)
+    if not file_contains(sesman_config, "DenyUsers"):
+        if file_contains(sesman_config, "[Security]"):
+            run(f"sed -i '/\\[Security\\]/a DenyUsers=root' {sesman_config}")
+        else:
+            run(f"echo 'DenyUsers=root' >> {sesman_config}")
+    
     if os_type == "debian":
         run("getent group ssl-cert && adduser xrdp ssl-cert", check=False)
     
-    # Restart xRDP to apply changes
     run("systemctl restart xrdp")
     run("systemctl restart xrdp-sesman", check=False)
     
-    print("  ✓ xRDP hardened (TLS encryption, restricted to remoteusers group)")
+    print("  ✓ xRDP hardened (TLS encryption, root denied, restricted to remoteusers group)")
 
 
 

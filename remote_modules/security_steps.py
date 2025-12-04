@@ -8,14 +8,12 @@ from .utils import run, is_package_installed, is_service_active, file_contains
 
 def create_remoteusers_group(**_) -> None:
     """Create remoteusers group for SSH and RDP access control."""
-    # Check if group exists
     result = run("getent group remoteusers", check=False)
     group_exists = result.returncode == 0
     
     if not group_exists:
         run("groupadd remoteusers")
     
-    # Always ensure root is in the group (idempotent)
     result = run("id -nG root | grep -qw remoteusers", check=False)
     if result.returncode != 0:
         run("usermod -aG remoteusers root")
