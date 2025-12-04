@@ -74,13 +74,22 @@ def harden_xrdp(os_type: str, **_) -> None:
     run(f"sed -i 's/^#\\?security_layer=.*/security_layer=tls/' {xrdp_config}")
     run(f"sed -i 's/^#\\?crypt_level=.*/crypt_level=high/' {xrdp_config}")
     
-    # If security_layer is not present at all, add it
+    # If security_layer is not present at all, add it to [Globals] section
     if not file_contains(xrdp_config, "security_layer"):
-        run(f"sed -i '/\\[Globals\\]/a security_layer=tls' {xrdp_config}")
+        if file_contains(xrdp_config, "[Globals]"):
+            run(f"sed -i '/\\[Globals\\]/a security_layer=tls' {xrdp_config}")
+        else:
+            # If no [Globals] section, add it at the beginning
+            run(f"sed -i '1i [Globals]\\nsecurity_layer=tls' {xrdp_config}")
     
-    # If crypt_level is not present at all, add it  
+    # If crypt_level is not present at all, add it to [Globals] section
     if not file_contains(xrdp_config, "crypt_level"):
-        run(f"sed -i '/\\[Globals\\]/a crypt_level=high' {xrdp_config}")
+        if file_contains(xrdp_config, "[Globals]"):
+            run(f"sed -i '/\\[Globals\\]/a crypt_level=high' {xrdp_config}")
+        else:
+            # If no [Globals] section exists, it should have been created above
+            # but add it anyway for safety
+            run(f"sed -i '1i crypt_level=high' {xrdp_config}")
     
     # Configure group restrictions in sesman.ini
     # Add AllowGroups under [Security] section
