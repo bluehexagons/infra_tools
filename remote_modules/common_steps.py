@@ -104,7 +104,12 @@ def setup_user(username: str, pw: Optional[str], os_type: str, **_) -> None:
     else:
         run(f"usermod -aG wheel {safe_username}", check=False)
     
-    print("  ✓ User configured with sudo privileges")
+    result = run("getent group remoteusers", check=False)
+    if result.returncode == 0:
+        run(f"usermod -aG remoteusers {safe_username}", check=False)
+        print("  ✓ User configured with sudo privileges and remoteusers group")
+    else:
+        print("  ✓ User configured with sudo privileges")
 
 
 def copy_ssh_keys_to_user(username: str, **_) -> None:

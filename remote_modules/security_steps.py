@@ -6,6 +6,22 @@ import shlex
 from .utils import run, is_package_installed, is_service_active, file_contains
 
 
+def create_remoteusers_group(**_) -> None:
+    """Create remoteusers group for SSH and RDP access control."""
+    result = run("getent group remoteusers", check=False)
+    group_exists = result.returncode == 0
+    
+    if not group_exists:
+        run("groupadd remoteusers")
+    
+    result = run("id -nG root | grep -qw remoteusers", check=False)
+    if result.returncode != 0:
+        run("usermod -aG remoteusers root")
+        print("  ✓ remoteusers group created and root user added")
+    else:
+        print("  ✓ remoteusers group already exists with root user")
+
+
 def configure_firewall(os_type: str, **_) -> None:
     if os_type == "debian":
         result = run("ufw status 2>/dev/null | grep -q 'Status: active'", check=False)
@@ -83,8 +99,9 @@ def harden_ssh(**_) -> None:
     
     if file_contains(sshd_config, "PasswordAuthentication no"):
         if file_contains(sshd_config, "MaxAuthTries 3"):
-            print("  ✓ SSH already hardened")
-            return
+            if file_contains(sshd_config, "AllowGroups"):
+                print("  ✓ SSH already hardened")
+                return
 
     if not os.path.exists("/etc/ssh/sshd_config.bak"):
         run("cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak")
@@ -102,9 +119,13 @@ def harden_ssh(**_) -> None:
     for key, value in ssh_hardening:
         run(f"sed -i 's/^#*{key}.*/{key} {value}/' /etc/ssh/sshd_config")
 
+    # Add AllowGroups directive if not present (root is in remoteusers group)
+    if not file_contains(sshd_config, "AllowGroups"):
+        run(f"echo 'AllowGroups remoteusers' >> /etc/ssh/sshd_config")
+
     run("systemctl reload sshd || systemctl reload ssh", check=False)
 
-    print("  ✓ SSH hardened (key-only auth, timeouts)")
+    print("  ✓ SSH hardened (key-only auth, timeouts, restricted to remoteusers group)")
 
 
 def harden_kernel(**_) -> None:

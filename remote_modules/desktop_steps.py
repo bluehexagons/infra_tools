@@ -48,6 +48,55 @@ def install_xrdp(username: str, os_type: str, **_) -> None:
     print("  ✓ xRDP installed and configured")
 
 
+def harden_xrdp(os_type: str, **_) -> None:
+    """Harden xRDP with TLS encryption and group restrictions."""
+    xrdp_config = "/etc/xrdp/xrdp.ini"
+    sesman_config = "/etc/xrdp/sesman.ini"
+    
+    if not os.path.exists(xrdp_config):
+        print("  ⚠ xRDP not installed, skipping hardening")
+        return
+    
+    if (file_contains(xrdp_config, "security_layer=tls") and
+        file_contains(sesman_config, "AllowGroups=remoteusers") and
+        file_contains(sesman_config, "DenyUsers=root")):
+        print("  ✓ xRDP already hardened")
+        return
+    
+    run(f"sed -i 's/^#\\?security_layer=.*/security_layer=tls/' {xrdp_config}")
+    run(f"sed -i 's/^#\\?crypt_level=.*/crypt_level=high/' {xrdp_config}")
+    
+    if not file_contains(xrdp_config, "security_layer"):
+        if file_contains(xrdp_config, "[Globals]"):
+            run(f"sed -i '/\\[Globals\\]/a security_layer=tls' {xrdp_config}")
+        else:
+            run(f"sed -i '1i [Globals]\\nsecurity_layer=tls' {xrdp_config}")
+    
+    if not file_contains(xrdp_config, "crypt_level"):
+        if file_contains(xrdp_config, "[Globals]"):
+            run(f"sed -i '/\\[Globals\\]/a crypt_level=high' {xrdp_config}")
+        else:
+            run(f"sed -i '1i crypt_level=high' {xrdp_config}")
+    
+    if not file_contains(sesman_config, "[Security]"):
+        run(f"echo '\n[Security]' >> {sesman_config}")
+    
+    if not file_contains(sesman_config, "AllowGroups"):
+        run(f"sed -i '/\\[Security\\]/a AllowGroups=remoteusers' {sesman_config}")
+    
+    if not file_contains(sesman_config, "DenyUsers"):
+        run(f"sed -i '/\\[Security\\]/a DenyUsers=root' {sesman_config}")
+    
+    if os_type == "debian":
+        run("getent group ssl-cert && adduser xrdp ssl-cert", check=False)
+    
+    run("systemctl restart xrdp")
+    run("systemctl restart xrdp-sesman", check=False)
+    
+    print("  ✓ xRDP hardened (TLS encryption, root denied, restricted to remoteusers group)")
+
+
+
 def configure_audio(username: str, os_type: str, **_) -> None:
     safe_username = shlex.quote(username)
     home_dir = f"/home/{username}"
