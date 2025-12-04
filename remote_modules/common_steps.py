@@ -118,6 +118,7 @@ def generate_ssh_key(username: str, **_) -> None:
     user_home = f"/home/{username}"
     ssh_dir = f"{user_home}/.ssh"
     private_key = f"{ssh_dir}/id_ed25519"
+    public_key = f"{private_key}.pub"
     
     # Check if user already has SSH key
     if os.path.exists(private_key):
@@ -137,7 +138,7 @@ def generate_ssh_key(username: str, **_) -> None:
     # Set proper permissions
     run(f"chown -R {safe_username}:{safe_username} {shlex.quote(ssh_dir)}")
     run(f"chmod 600 {shlex.quote(private_key)}")
-    run(f"chmod 644 {shlex.quote(private_key)}.pub", check=False)
+    run(f"chmod 644 {shlex.quote(public_key)}", check=False)
     
     print(f"  ✓ SSH key generated for {username} (~/.ssh/id_ed25519)")
 
