@@ -6,6 +6,7 @@ from .common_steps import (
     configure_locale,
     setup_user,
     copy_ssh_keys_to_user,
+    generate_ssh_key,
     configure_time_sync,
     install_cli_tools,
     check_restart_required,
@@ -19,6 +20,7 @@ from .desktop_steps import (
     configure_default_browser,
     install_workstation_dev_apps,
     configure_vivaldi_browser,
+    configure_gnome_keyring,
 )
 from .security_steps import (
     create_remoteusers_group,
@@ -44,6 +46,7 @@ COMMON_STEPS = [
     ("Creating remoteusers group", create_remoteusers_group),
     ("Setting up user", setup_user),
     ("Copying SSH keys to user", copy_ssh_keys_to_user),
+    ("Generating SSH key for user", generate_ssh_key),
     ("Configuring time synchronization", configure_time_sync),
 ]
 
@@ -51,6 +54,7 @@ DESKTOP_STEPS = [
     ("Installing XFCE desktop environment", install_desktop),
     ("Installing xRDP", install_xrdp),
     ("Configuring audio for RDP", configure_audio),
+    ("Configuring gnome-keyring", configure_gnome_keyring),
 ]
 
 DESKTOP_SECURITY_STEPS = [

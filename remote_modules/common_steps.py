@@ -112,6 +112,33 @@ def setup_user(username: str, pw: Optional[str], os_type: str, **_) -> None:
         print("  ✓ User configured with sudo privileges")
 
 
+def generate_ssh_key(username: str, **_) -> None:
+    """Generate SSH key pair for user using default algorithm."""
+    safe_username = shlex.quote(username)
+    user_home = f"/home/{username}"
+    ssh_dir = f"{user_home}/.ssh"
+    private_key = f"{ssh_dir}/id_ed25519"
+    
+    # Check if user already has SSH key
+    if os.path.exists(private_key):
+        print(f"  ✓ SSH key already exists for {username}")
+        return
+    
+    # Create .ssh directory if it doesn't exist
+    run(f"mkdir -p {shlex.quote(ssh_dir)}")
+    run(f"chmod 700 {shlex.quote(ssh_dir)}")
+    
+    # Generate SSH key with default algorithm (ed25519)
+    run(f"su - {safe_username} -c \"ssh-keygen -t ed25519 -f {shlex.quote(private_key)} -N '' -C '{username}@workstation'\"")
+    
+    # Set proper permissions
+    run(f"chown -R {safe_username}:{safe_username} {shlex.quote(ssh_dir)}")
+    run(f"chmod 600 {shlex.quote(private_key)}")
+    run(f"chmod 644 {shlex.quote(private_key)}.pub", check=False)
+    
+    print(f"  ✓ SSH key generated for {username} (~/.ssh/id_ed25519)")
+
+
 def copy_ssh_keys_to_user(username: str, **_) -> None:
     safe_username = shlex.quote(username)
     user_home = f"/home/{username}"

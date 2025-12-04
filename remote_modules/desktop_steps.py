@@ -309,3 +309,56 @@ application/xhtml+xml=vivaldi-stable.desktop
     run("xdg-mime default vivaldi-stable.desktop x-scheme-handler/https", check=False)
     
     print("  ✓ Default browser set to Vivaldi")
+
+
+def configure_gnome_keyring(username: str, os_type: str, **_) -> None:
+    """Configure gnome-keyring for desktop setups."""
+    safe_username = shlex.quote(username)
+    
+    if is_package_installed("gnome-keyring", os_type):
+        print("  ✓ gnome-keyring already installed")
+    else:
+        if os_type == "debian":
+            run("apt-get install -y -qq gnome-keyring libpam-gnome-keyring")
+        else:
+            run("dnf install -y -q gnome-keyring")
+        print("  ✓ gnome-keyring installed")
+    
+    # Configure PAM to automatically unlock keyring on login
+    pam_password = "/etc/pam.d/common-password" if os_type == "debian" else "/etc/pam.d/password-auth"
+    pam_session = "/etc/pam.d/common-session" if os_type == "debian" else "/etc/pam.d/system-auth"
+    
+    # Add gnome-keyring to PAM password stack if not already present
+    if os.path.exists(pam_password):
+        if not file_contains(pam_password, "pam_gnome_keyring.so"):
+            run(f"echo 'password optional pam_gnome_keyring.so' >> {pam_password}")
+    
+    # Add gnome-keyring to PAM session stack if not already present
+    if os.path.exists(pam_session):
+        if not file_contains(pam_session, "pam_gnome_keyring.so"):
+            run(f"echo 'session optional pam_gnome_keyring.so auto_start' >> {pam_session}")
+    
+    # Configure user environment to start gnome-keyring-daemon
+    home_dir = f"/home/{username}"
+    profile_path = f"{home_dir}/.profile"
+    
+    keyring_env = """
+# Start gnome-keyring-daemon
+if [ -n "$DESKTOP_SESSION" ]; then
+    eval $(gnome-keyring-daemon --start --components=pkcs11,secrets,ssh)
+    export SSH_AUTH_SOCK
+fi
+"""
+    
+    # Add to .profile if not already present
+    if os.path.exists(profile_path):
+        if not file_contains(profile_path, "gnome-keyring-daemon"):
+            with open(profile_path, "a") as f:
+                f.write(keyring_env)
+            run(f"chown {safe_username}:{safe_username} {shlex.quote(profile_path)}")
+    else:
+        with open(profile_path, "w") as f:
+            f.write(keyring_env)
+        run(f"chown {safe_username}:{safe_username} {shlex.quote(profile_path)}")
+    
+    print("  ✓ gnome-keyring configured (auto-unlock on login, SSH agent integration)")
