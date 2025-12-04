@@ -70,6 +70,8 @@ python3 setup_server_proxmox.py <ip> [-k key] [-t timezone]
 
 ## Direct Execution
 
+Warning: Direct execution is not tested thoroughly.
+
 Scripts are installed to `/opt/infra_tools/` on the remote host:
 
 ```bash
