@@ -321,7 +321,8 @@ def configure_gnome_keyring(username: str, os_type: str, **_) -> None:
         if os_type == "debian":
             run("apt-get install -y -qq gnome-keyring libpam-gnome-keyring")
         else:
-            run("dnf install -y -q gnome-keyring")
+            # On Fedora, gnome-keyring-pam is the PAM module package
+            run("dnf install -y -q gnome-keyring gnome-keyring-pam")
         print("  ✓ gnome-keyring installed")
     
     # Configure PAM to automatically unlock keyring on login
