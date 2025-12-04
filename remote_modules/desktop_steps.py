@@ -273,11 +273,11 @@ def configure_gnome_keyring(username: str, os_type: str, **_) -> None:
     pam_password = "/etc/pam.d/common-password"
     pam_session = "/etc/pam.d/common-session"
     
-    if os.path.exists(pam_password):
+    if os.path.exists(pam_password) and not file_contains(pam_password, "pam_gnome_keyring.so"):
         with open(pam_password, "a") as f:
             f.write("password optional pam_gnome_keyring.so\n")
     
-    if os.path.exists(pam_session):
+    if os.path.exists(pam_session) and not file_contains(pam_session, "pam_gnome_keyring.so"):
         with open(pam_session, "a") as f:
             f.write("session optional pam_gnome_keyring.so auto_start\n")
     
@@ -296,8 +296,9 @@ fi
 """
     
     if os.path.exists(profile_path):
-        with open(profile_path, "a") as f:
-            f.write(keyring_env)
+        if not file_contains(profile_path, "gnome-keyring-daemon"):
+            with open(profile_path, "a") as f:
+                f.write(keyring_env)
         run(f"chown {safe_username}:{safe_username} {shlex.quote(profile_path)}")
     else:
         with open(profile_path, "w") as f:
