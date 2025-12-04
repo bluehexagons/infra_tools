@@ -70,16 +70,15 @@ def harden_xrdp(os_type: str, **_) -> None:
         run(f"cp {sesman_config} {sesman_config}.bak")
     
     # Configure TLS encryption and security settings in xrdp.ini
-    run(f"sed -i 's/^security_layer=.*/security_layer=tls/' {xrdp_config}")
-    run(f"sed -i 's/^crypt_level=.*/crypt_level=high/' {xrdp_config}")
+    # These sed commands handle both commented and uncommented lines
     run(f"sed -i 's/^#\\?security_layer=.*/security_layer=tls/' {xrdp_config}")
     run(f"sed -i 's/^#\\?crypt_level=.*/crypt_level=high/' {xrdp_config}")
     
-    # If security_layer is not present, add it
+    # If security_layer is not present at all, add it
     if not file_contains(xrdp_config, "security_layer"):
         run(f"sed -i '/\\[Globals\\]/a security_layer=tls' {xrdp_config}")
     
-    # If crypt_level is not present, add it  
+    # If crypt_level is not present at all, add it  
     if not file_contains(xrdp_config, "crypt_level"):
         run(f"sed -i '/\\[Globals\\]/a crypt_level=high' {xrdp_config}")
     
