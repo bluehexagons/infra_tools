@@ -129,7 +129,10 @@ def generate_ssh_key(username: str, **_) -> None:
     run(f"chmod 700 {shlex.quote(ssh_dir)}")
     
     # Generate SSH key with default algorithm (ed25519)
-    run(f"su - {safe_username} -c \"ssh-keygen -t ed25519 -f {shlex.quote(private_key)} -N '' -C '{username}@workstation'\"")
+    # Build the command safely with proper escaping
+    safe_private_key = shlex.quote(private_key)
+    safe_comment = shlex.quote(f"{username}@workstation")
+    run(f"su - {safe_username} -c 'ssh-keygen -t ed25519 -f {safe_private_key} -N \"\" -C {safe_comment}'")
     
     # Set proper permissions
     run(f"chown -R {safe_username}:{safe_username} {shlex.quote(ssh_dir)}")

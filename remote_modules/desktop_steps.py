@@ -331,12 +331,14 @@ def configure_gnome_keyring(username: str, os_type: str, **_) -> None:
     # Add gnome-keyring to PAM password stack if not already present
     if os.path.exists(pam_password):
         if not file_contains(pam_password, "pam_gnome_keyring.so"):
-            run(f"echo 'password optional pam_gnome_keyring.so' >> {pam_password}")
+            safe_pam_password = shlex.quote(pam_password)
+            run(f"echo 'password optional pam_gnome_keyring.so' >> {safe_pam_password}")
     
     # Add gnome-keyring to PAM session stack if not already present
     if os.path.exists(pam_session):
         if not file_contains(pam_session, "pam_gnome_keyring.so"):
-            run(f"echo 'session optional pam_gnome_keyring.so auto_start' >> {pam_session}")
+            safe_pam_session = shlex.quote(pam_session)
+            run(f"echo 'session optional pam_gnome_keyring.so auto_start' >> {safe_pam_session}")
     
     # Configure user environment to start gnome-keyring-daemon
     home_dir = f"/home/{username}"
