@@ -47,20 +47,28 @@ All setup scripts support optional software installation:
 - `--go` - Install latest Go version
 - `--node` - Install nvm + latest Node.js LTS + PNPM + NPM (latest)
 
+Desktop workstation scripts support desktop environment selection:
+
+- `--desktop [xfce|i3|cinnamon]` - Choose desktop environment (default: xfce)
+
 Example:
 ```bash
+# Install Ruby, Go, and Node.js on a dev server
 python3 setup_server_dev.py 192.168.1.100 --ruby --go --node
+
+# Install i3 window manager instead of XFCE on a workstation
+python3 setup_workstation_desktop.py 192.168.1.100 --desktop i3
 ```
 
 ## Features
 
 **Workstation Desktop:**
-- XFCE desktop + xRDP + audio
+- Desktop environment (XFCE, i3, or Cinnamon) + xRDP + audio
 - Desktop apps: LibreOffice, Brave, VSCodium, Discord
 - fail2ban for RDP
 
 **Workstation Dev:**
-- XFCE desktop + xRDP (no audio)
+- Desktop environment (XFCE, i3, or Cinnamon) + xRDP (no audio)
 - Desktop apps: Vivaldi, Visual Studio Code
 - fail2ban for RDP
 

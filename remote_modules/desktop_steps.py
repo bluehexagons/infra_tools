@@ -6,18 +6,45 @@ import shlex
 from .utils import run, is_package_installed, is_service_active, file_contains
 
 
-def install_desktop(os_type: str, **_) -> None:
-    if is_package_installed("xfce4", os_type):
-        print("  ✓ XFCE desktop already installed")
+def install_desktop(os_type: str, desktop: str = "xfce", **_) -> None:
+    if desktop == "xfce":
+        package = "xfce4"
+        install_cmd = "apt-get install -y -qq xfce4 xfce4-goodies"
+        session_name = "xfce4-session"
+    elif desktop == "i3":
+        package = "i3"
+        install_cmd = "apt-get install -y -qq i3 i3status i3lock dmenu"
+        session_name = "i3"
+    elif desktop == "cinnamon":
+        package = "cinnamon"
+        install_cmd = "apt-get install -y -qq cinnamon cinnamon-core"
+        session_name = "cinnamon-session"
+    else:
+        print(f"  ⚠ Unknown desktop environment: {desktop}, defaulting to XFCE")
+        package = "xfce4"
+        install_cmd = "apt-get install -y -qq xfce4 xfce4-goodies"
+        session_name = "xfce4-session"
+    
+    if is_package_installed(package, os_type):
+        print(f"  ✓ {desktop.upper()} desktop already installed")
         return
-    run("apt-get install -y -qq xfce4 xfce4-goodies")
+    
+    run(install_cmd)
+    print(f"  ✓ {desktop.upper()} desktop installed")
 
-    print("  ✓ XFCE desktop installed")
 
-
-def install_xrdp(username: str, os_type: str, **_) -> None:
+def install_xrdp(username: str, os_type: str, desktop: str = "xfce", **_) -> None:
     safe_username = shlex.quote(username)
     xsession_path = f"/home/{username}/.xsession"
+    
+    if desktop == "xfce":
+        session_cmd = "xfce4-session"
+    elif desktop == "i3":
+        session_cmd = "i3"
+    elif desktop == "cinnamon":
+        session_cmd = "cinnamon-session"
+    else:
+        session_cmd = "xfce4-session"
     
     if is_package_installed("xrdp", os_type) and os.path.exists(xsession_path):
         if is_service_active("xrdp"):
@@ -32,7 +59,7 @@ def install_xrdp(username: str, os_type: str, **_) -> None:
     run("systemctl restart xrdp")
 
     with open(xsession_path, "w") as f:
-        f.write("xfce4-session\n")
+        f.write(f"{session_cmd}\n")
     run(f"chown {safe_username}:{safe_username} {shlex.quote(xsession_path)}")
 
     print("  ✓ xRDP installed and configured")

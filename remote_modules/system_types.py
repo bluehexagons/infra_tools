@@ -54,7 +54,7 @@ COMMON_STEPS = [
 ]
 
 DESKTOP_STEPS = [
-    ("Installing XFCE desktop environment", install_desktop),
+    ("Installing desktop environment", install_desktop),
     ("Installing xRDP", install_xrdp),
     ("Configuring audio for RDP", configure_audio),
     ("Configuring gnome-keyring", configure_gnome_keyring),
@@ -146,7 +146,7 @@ STEP_FUNCTIONS = {
 }
 
 
-def get_steps_for_system_type(system_type: str, skip_audio: bool = False, 
+def get_steps_for_system_type(system_type: str, skip_audio: bool = False, desktop: str = "xfce",
                                install_ruby: bool = False, install_go: bool = False,
                                install_node: bool = False, custom_steps_str: str = None) -> list:
     if system_type == "custom_steps" and custom_steps_str:

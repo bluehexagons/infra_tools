@@ -28,6 +28,8 @@ def main() -> int:
                        help="Timezone (defaults to UTC)")
     parser.add_argument("--skip-audio", action="store_true",
                        help="Skip audio setup")
+    parser.add_argument("--desktop", choices=["xfce", "i3", "cinnamon"], default="xfce",
+                       help="Desktop environment to install (default: xfce)")
     parser.add_argument("--ruby", action="store_true",
                        help="Install rbenv + latest Ruby version")
     parser.add_argument("--go", action="store_true",
@@ -61,6 +63,8 @@ def main() -> int:
     print(f"Timezone: {args.timezone or 'UTC'}")
     if args.skip_audio:
         print("Skip audio: Yes")
+    if args.desktop != "xfce" and system_type in ["workstation_desktop", "workstation_dev"]:
+        print(f"Desktop: {args.desktop}")
     if args.steps:
         print(f"Steps: {args.steps}")
     sys.stdout.flush()
@@ -69,7 +73,7 @@ def main() -> int:
     print(f"OS: {os_type}")
     sys.stdout.flush()
 
-    steps = get_steps_for_system_type(system_type, args.skip_audio, args.ruby, args.go, args.node, args.steps)
+    steps = get_steps_for_system_type(system_type, args.skip_audio, args.desktop, args.ruby, args.go, args.node, args.steps)
     total_steps = len(steps)
     for i, (name, func) in enumerate(steps, 1):
         bar = progress_bar(i, total_steps)
@@ -79,7 +83,8 @@ def main() -> int:
             username=username,
             pw=args.password,
             os_type=os_type,
-            timezone=args.timezone
+            timezone=args.timezone,
+            desktop=args.desktop
         )
     
     bar = progress_bar(total_steps, total_steps)
