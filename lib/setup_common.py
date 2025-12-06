@@ -83,7 +83,7 @@ def create_tar_archive() -> bytes:
     return tar_buffer.getvalue()
 
 
-def create_argument_parser(description: str) -> argparse.ArgumentParser:
+def create_argument_parser(description: str, allow_steps: bool = False) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument("ip", help="IP address of the remote host")
     parser.add_argument("username", nargs="?", default=None, 
@@ -91,6 +91,8 @@ def create_argument_parser(description: str) -> argparse.ArgumentParser:
     parser.add_argument("-k", "--key", help="SSH private key path")
     parser.add_argument("-p", "--password", help="User password")
     parser.add_argument("-t", "--timezone", help="Timezone (defaults to local)")
+    if allow_steps:
+        parser.add_argument("--steps", help="Space-separated list of steps to run (e.g., 'install_ruby install_node')")
     parser.add_argument("--skip-audio", action="store_true", 
                        help="Skip audio setup (desktop only)")
     parser.add_argument("--ruby", action="store_true",
@@ -113,6 +115,7 @@ def run_remote_setup(
     install_ruby: bool = False,
     install_go: bool = False,
     install_node: bool = False,
+    custom_steps: Optional[str] = None,
 ) -> int:
     try:
         tar_data = create_tar_archive()
@@ -131,7 +134,6 @@ def run_remote_setup(
     
     escaped_install_dir = shlex.quote(REMOTE_INSTALL_DIR)
     
-    # Build remote command with named arguments
     cmd_parts = [
         f"python3 {escaped_install_dir}/remote_setup.py",
         f"--system-type {shlex.quote(system_type)}",
@@ -155,6 +157,9 @@ def run_remote_setup(
     
     if install_node:
         cmd_parts.append("--node")
+    
+    if custom_steps:
+        cmd_parts.append(f"--steps {shlex.quote(custom_steps)}")
     
     remote_cmd = f"""
 mkdir -p {escaped_install_dir} && \
@@ -189,7 +194,8 @@ tar xzf - && \
 
 
 def setup_main(system_type: str, description: str, success_msg_fn) -> int:
-    parser = create_argument_parser(description)
+    allow_steps = (system_type == "custom_steps")
+    parser = create_argument_parser(description, allow_steps)
     args = parser.parse_args()
     
     if not validate_ip_address(args.ip):
@@ -220,12 +226,16 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
     print(f"Timezone: {timezone}")
     if args.skip_audio and system_type == "workstation_desktop":
         print("Skip audio: Yes")
+    if allow_steps and hasattr(args, 'steps') and args.steps:
+        print(f"Steps: {args.steps}")
     print("=" * 60)
     print()
     
+    custom_steps = args.steps if allow_steps and hasattr(args, 'steps') else None
+    
     returncode = run_remote_setup(
         args.ip, username, system_type, args.password, args.key, 
-        timezone, args.skip_audio, args.ruby, args.go, args.node
+        timezone, args.skip_audio, args.ruby, args.go, args.node, custom_steps
     )
     
     if returncode != 0:

@@ -110,10 +110,56 @@ PROXMOX_HARDENING_STEPS = [
 ]
 
 
+STEP_FUNCTIONS = {
+    'install_ruby': install_ruby_step,
+    'install_go': install_go_step,
+    'install_node': install_node_step,
+    'update_and_upgrade_packages': update_and_upgrade_packages,
+    'ensure_sudo_installed': ensure_sudo_installed,
+    'configure_locale': configure_locale,
+    'setup_user': setup_user,
+    'copy_ssh_keys_to_user': copy_ssh_keys_to_user,
+    'generate_ssh_key': generate_ssh_key,
+    'configure_time_sync': configure_time_sync,
+    'install_cli_tools': install_cli_tools,
+    'check_restart_required': check_restart_required,
+    'install_desktop': install_desktop,
+    'install_xrdp': install_xrdp,
+    'harden_xrdp': harden_xrdp,
+    'configure_audio': configure_audio,
+    'install_desktop_apps': install_desktop_apps,
+    'configure_default_browser': configure_default_browser,
+    'install_workstation_dev_apps': install_workstation_dev_apps,
+    'configure_vivaldi_browser': configure_vivaldi_browser,
+    'configure_gnome_keyring': configure_gnome_keyring,
+    'create_remoteusers_group': create_remoteusers_group,
+    'configure_firewall': configure_firewall,
+    'configure_fail2ban': configure_fail2ban,
+    'harden_ssh': harden_ssh,
+    'harden_kernel': harden_kernel,
+    'configure_auto_updates': configure_auto_updates,
+    'configure_firewall_web': configure_firewall_web,
+    'install_nginx': install_nginx,
+    'configure_nginx_security': configure_nginx_security,
+    'create_hello_world_site': create_hello_world_site,
+    'configure_default_site': configure_default_site,
+}
+
+
 def get_steps_for_system_type(system_type: str, skip_audio: bool = False, 
                                install_ruby: bool = False, install_go: bool = False,
-                               install_node: bool = False) -> list:
-    # Build optional software steps
+                               install_node: bool = False, custom_steps_str: str = None) -> list:
+    if system_type == "custom_steps" and custom_steps_str:
+        step_names = custom_steps_str.split()
+        steps = []
+        for step_name in step_names:
+            if step_name in STEP_FUNCTIONS:
+                func = STEP_FUNCTIONS[step_name]
+                steps.append((f"Running {step_name}", func))
+            else:
+                raise ValueError(f"Unknown step: {step_name}")
+        return steps
+    
     optional_steps = []
     if install_ruby:
         optional_steps.append(("Installing Ruby (rbenv + latest version)", install_ruby_step))
