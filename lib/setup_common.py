@@ -13,8 +13,8 @@ from typing import Optional
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-REMOTE_SCRIPT_PATH = os.path.join(SCRIPT_DIR, "remote_setup.py")
-REMOTE_MODULES_DIR = os.path.join(SCRIPT_DIR, "remote_modules")
+REMOTE_SCRIPT_PATH = os.path.join(SCRIPT_DIR, "..", "remote_setup.py")
+REMOTE_MODULES_DIR = os.path.join(SCRIPT_DIR, "..", "remote_modules")
 REMOTE_INSTALL_DIR = "/opt/infra_tools"
 
 

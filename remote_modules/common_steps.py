@@ -198,8 +198,12 @@ export PATH="$HOME/.rbenv/bin:$PATH"
 eval "$(rbenv init -)"
 '''
     
-    with open(bashrc_path, "a") as f:
-        f.write(rbenv_init)
+    if not os.path.exists(bashrc_path):
+        with open(bashrc_path, "w") as f:
+            f.write(rbenv_init)
+    else:
+        with open(bashrc_path, "a") as f:
+            f.write(rbenv_init)
     run(f"chown {safe_username}:{safe_username} {shlex.quote(bashrc_path)}")
     
     result = run(f"runuser -u {safe_username} -- bash -c 'export PATH=\"{rbenv_dir}/bin:$PATH\" && rbenv install -l | grep -E \"^[0-9]+\\.[0-9]+\\.[0-9]+$\" | tail -1'", check=False)
