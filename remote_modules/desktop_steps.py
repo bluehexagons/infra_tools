@@ -10,20 +10,16 @@ def install_desktop(os_type: str, desktop: str = "xfce", **_) -> None:
     if desktop == "xfce":
         package = "xfce4"
         install_cmd = "apt-get install -y -qq xfce4 xfce4-goodies"
-        session_name = "xfce4-session"
     elif desktop == "i3":
         package = "i3"
         install_cmd = "apt-get install -y -qq i3 i3status i3lock dmenu"
-        session_name = "i3"
     elif desktop == "cinnamon":
         package = "cinnamon"
         install_cmd = "apt-get install -y -qq cinnamon cinnamon-core"
-        session_name = "cinnamon-session"
     else:
         print(f"  ⚠ Unknown desktop environment: {desktop}, defaulting to XFCE")
         package = "xfce4"
         install_cmd = "apt-get install -y -qq xfce4 xfce4-goodies"
-        session_name = "xfce4-session"
     
     if is_package_installed(package, os_type):
         print(f"  ✓ {desktop.upper()} desktop already installed")
