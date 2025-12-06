@@ -190,7 +190,7 @@ def install_ruby(username: str, os_type: str, **_) -> None:
         return
     
     # Install dependencies
-    run("apt-get install -y -qq git curl libssl-dev libreadline-dev zlib1g-dev autoconf bison build-essential libyaml-dev libreadline-dev libncurses5-dev libffi-dev libgdbm-dev")
+    run("apt-get install -y -qq git curl libssl-dev libreadline-dev zlib1g-dev autoconf bison build-essential libyaml-dev libncurses5-dev libffi-dev libgdbm-dev")
     
     # Install rbenv
     run(f"runuser -u {safe_username} -- git clone https://github.com/rbenv/rbenv.git {shlex.quote(rbenv_dir)}")
@@ -240,7 +240,7 @@ def install_go(username: str, os_type: str, **_) -> None:
         return
     
     # Get latest Go version
-    run("apt-get install -y -qq wget")
+    run("apt-get install -y -qq curl wget")
     result = run("curl -s https://go.dev/VERSION?m=text | head -1", check=False)
     if result.returncode != 0 or not result.stdout.strip():
         print("  ⚠ Failed to get latest Go version, skipping")
