@@ -10,6 +10,9 @@ from .common_steps import (
     configure_time_sync,
     install_cli_tools,
     check_restart_required,
+    install_ruby as install_ruby_step,
+    install_go as install_go_step,
+    install_node as install_node_step,
 )
 from .desktop_steps import (
     install_desktop,
@@ -107,19 +110,30 @@ PROXMOX_HARDENING_STEPS = [
 ]
 
 
-def get_steps_for_system_type(system_type: str, skip_audio: bool = False) -> list:
+def get_steps_for_system_type(system_type: str, skip_audio: bool = False, 
+                               install_ruby: bool = False, install_go: bool = False,
+                               install_node: bool = False) -> list:
+    # Build optional software steps
+    optional_steps = []
+    if install_ruby:
+        optional_steps.append(("Installing Ruby (rbenv + latest version)", install_ruby_step))
+    if install_go:
+        optional_steps.append(("Installing Go (latest version)", install_go_step))
+    if install_node:
+        optional_steps.append(("Installing Node.js (nvm + latest LTS + PNPM)", install_node_step))
+    
     if system_type == "workstation_desktop":
         desktop_steps = DESKTOP_STEPS
         if skip_audio:
             desktop_steps = [s for s in DESKTOP_STEPS if s[1] != configure_audio]
         return COMMON_STEPS + desktop_steps + SECURITY_STEPS + \
-               DESKTOP_SECURITY_STEPS + CLI_STEPS + DESKTOP_APP_STEPS + FINAL_STEPS
+               DESKTOP_SECURITY_STEPS + CLI_STEPS + optional_steps + DESKTOP_APP_STEPS + FINAL_STEPS
     elif system_type == "workstation_dev":
         desktop_steps = [s for s in DESKTOP_STEPS if s[1] != configure_audio]
         return COMMON_STEPS + desktop_steps + SECURITY_STEPS + \
-               DESKTOP_SECURITY_STEPS + CLI_STEPS + WORKSTATION_DEV_APP_STEPS + FINAL_STEPS
+               DESKTOP_SECURITY_STEPS + CLI_STEPS + optional_steps + WORKSTATION_DEV_APP_STEPS + FINAL_STEPS
     elif system_type == "server_dev":
-        return COMMON_STEPS + SECURITY_STEPS + CLI_STEPS + FINAL_STEPS
+        return COMMON_STEPS + SECURITY_STEPS + CLI_STEPS + optional_steps + FINAL_STEPS
     elif system_type == "server_web":
         security_steps = [
             ("Hardening SSH configuration", harden_ssh),
@@ -127,7 +141,7 @@ def get_steps_for_system_type(system_type: str, skip_audio: bool = False) -> lis
             ("Configuring automatic security updates", configure_auto_updates),
         ]
         return COMMON_STEPS + WEB_FIREWALL_STEPS + security_steps + \
-               WEB_SERVER_STEPS + CLI_STEPS + FINAL_STEPS
+               WEB_SERVER_STEPS + CLI_STEPS + optional_steps + FINAL_STEPS
     elif system_type == "server_proxmox":
         return PROXMOX_HARDENING_STEPS
     else:

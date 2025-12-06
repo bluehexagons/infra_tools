@@ -26,6 +26,12 @@ def main() -> int:
                        help="Timezone (defaults to UTC)")
     parser.add_argument("--skip-audio", action="store_true",
                        help="Skip audio setup")
+    parser.add_argument("--ruby", action="store_true",
+                       help="Install rbenv + latest Ruby version")
+    parser.add_argument("--go", action="store_true",
+                       help="Install latest Go version")
+    parser.add_argument("--node", action="store_true",
+                       help="Install nvm + latest Node.JS + PNPM + update NPM")
     
     args = parser.parse_args()
     
@@ -52,7 +58,7 @@ def main() -> int:
     print(f"OS: {os_type}")
     sys.stdout.flush()
 
-    steps = get_steps_for_system_type(args.system_type, args.skip_audio)
+    steps = get_steps_for_system_type(args.system_type, args.skip_audio, args.ruby, args.go, args.node)
     total_steps = len(steps)
     for i, (name, func) in enumerate(steps, 1):
         bar = progress_bar(i, total_steps)

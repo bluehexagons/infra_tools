@@ -93,6 +93,12 @@ def create_argument_parser(description: str) -> argparse.ArgumentParser:
     parser.add_argument("-t", "--timezone", help="Timezone (defaults to local)")
     parser.add_argument("--skip-audio", action="store_true", 
                        help="Skip audio setup (desktop only)")
+    parser.add_argument("--ruby", action="store_true",
+                       help="Install rbenv + latest Ruby version")
+    parser.add_argument("--go", action="store_true",
+                       help="Install latest Go version")
+    parser.add_argument("--node", action="store_true",
+                       help="Install nvm + latest Node.JS + PNPM + update NPM")
     return parser
 
 
@@ -104,6 +110,9 @@ def run_remote_setup(
     ssh_key: Optional[str] = None,
     timezone: Optional[str] = None,
     skip_audio: bool = False,
+    install_ruby: bool = False,
+    install_go: bool = False,
+    install_node: bool = False,
 ) -> int:
     try:
         tar_data = create_tar_archive()
@@ -137,6 +146,15 @@ def run_remote_setup(
     
     if skip_audio:
         cmd_parts.append("--skip-audio")
+    
+    if install_ruby:
+        cmd_parts.append("--ruby")
+    
+    if install_go:
+        cmd_parts.append("--go")
+    
+    if install_node:
+        cmd_parts.append("--node")
     
     remote_cmd = f"""
 mkdir -p {escaped_install_dir} && \
@@ -207,7 +225,7 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
     
     returncode = run_remote_setup(
         args.ip, username, system_type, args.password, args.key, 
-        timezone, args.skip_audio
+        timezone, args.skip_audio, args.ruby, args.go, args.node
     )
     
     if returncode != 0:
