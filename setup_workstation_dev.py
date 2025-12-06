@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import sys
-from setup_common import setup_main
+from lib.setup_common import setup_main
 
 
 def success_message(ip: str, username: str) -> None:

@@ -9,6 +9,7 @@ Automated setup scripts for remote Linux systems.
 - `setup_server_dev.py` - Development server (no desktop)
 - `setup_server_web.py` - Web server with nginx (static content & reverse proxy)
 - `setup_server_proxmox.py` - Proxmox server hardening
+- `setup_steps.py` - Run custom steps only
 
 ## Requirements
 
@@ -33,17 +34,41 @@ python3 setup_server_web.py <ip> [username] [-k key] [-p password] [-t timezone]
 
 # Proxmox server hardening
 python3 setup_server_proxmox.py <ip> [-k key] [-t timezone]
+
+# Custom steps only
+python3 setup_steps.py <ip> [username] --steps "install_ruby install_node" [-k key] [-p password] [-t timezone]
+```
+
+## Optional Flags
+
+All setup scripts support optional software installation:
+
+- `--ruby` - Install rbenv + latest Ruby version + bundler
+- `--go` - Install latest Go version
+- `--node` - Install nvm + latest Node.js LTS + PNPM + NPM (latest)
+
+Desktop workstation scripts support desktop environment selection:
+
+- `--desktop [xfce|i3|cinnamon]` - Choose desktop environment (default: xfce)
+
+Example:
+```bash
+# Install Ruby, Go, and Node.js on a dev server
+python3 setup_server_dev.py 192.168.1.100 --ruby --go --node
+
+# Install i3 window manager instead of XFCE on a workstation
+python3 setup_workstation_desktop.py 192.168.1.100 --desktop i3
 ```
 
 ## Features
 
 **Workstation Desktop:**
-- XFCE desktop + xRDP + audio
+- Desktop environment (XFCE, i3, or Cinnamon) + xRDP + audio
 - Desktop apps: LibreOffice, Brave, VSCodium, Discord
 - fail2ban for RDP
 
 **Workstation Dev:**
-- XFCE desktop + xRDP (no audio)
+- Desktop environment (XFCE, i3, or Cinnamon) + xRDP (no audio)
 - Desktop apps: Vivaldi, Visual Studio Code
 - fail2ban for RDP
 
@@ -70,15 +95,19 @@ python3 setup_server_proxmox.py <ip> [-k key] [-t timezone]
 
 ## Direct Execution
 
-Warning: Direct execution is not tested thoroughly.
-
 Scripts are installed to `/opt/infra_tools/` on the remote host:
 
 ```bash
-python3 /opt/infra_tools/remote_setup.py --system-type <type> [--username <user>] [--password <pass>] [--timezone <tz>] [--skip-audio]
+# Run with system type
+python3 /opt/infra_tools/remote_setup.py --system-type <type> --username <user> [--password <pass>] [--timezone <tz>] [--skip-audio]
+
+# Run specific steps only
+python3 /opt/infra_tools/remote_setup.py --steps "install_ruby install_go" --username <user>
 ```
 
 System types: `workstation_desktop`, `workstation_dev`, `server_dev`, `server_web`, `server_proxmox`
+
+Available steps: `install_ruby`, `install_go`, `install_node`, `install_cli_tools`, `setup_user`, `configure_firewall`, etc.
 
 ## License
 

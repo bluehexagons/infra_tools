@@ -13,8 +13,8 @@ from typing import Optional
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-REMOTE_SCRIPT_PATH = os.path.join(SCRIPT_DIR, "remote_setup.py")
-REMOTE_MODULES_DIR = os.path.join(SCRIPT_DIR, "remote_modules")
+REMOTE_SCRIPT_PATH = os.path.join(SCRIPT_DIR, "..", "remote_setup.py")
+REMOTE_MODULES_DIR = os.path.join(SCRIPT_DIR, "..", "remote_modules")
 REMOTE_INSTALL_DIR = "/opt/infra_tools"
 
 
@@ -83,7 +83,7 @@ def create_tar_archive() -> bytes:
     return tar_buffer.getvalue()
 
 
-def create_argument_parser(description: str) -> argparse.ArgumentParser:
+def create_argument_parser(description: str, allow_steps: bool = False) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument("ip", help="IP address of the remote host")
     parser.add_argument("username", nargs="?", default=None, 
@@ -91,8 +91,18 @@ def create_argument_parser(description: str) -> argparse.ArgumentParser:
     parser.add_argument("-k", "--key", help="SSH private key path")
     parser.add_argument("-p", "--password", help="User password")
     parser.add_argument("-t", "--timezone", help="Timezone (defaults to local)")
+    if allow_steps:
+        parser.add_argument("--steps", help="Space-separated list of steps to run (e.g., 'install_ruby install_node')")
     parser.add_argument("--skip-audio", action="store_true", 
                        help="Skip audio setup (desktop only)")
+    parser.add_argument("--desktop", choices=["xfce", "i3", "cinnamon"], default="xfce",
+                       help="Desktop environment to install (default: xfce)")
+    parser.add_argument("--ruby", action="store_true",
+                       help="Install rbenv + latest Ruby version")
+    parser.add_argument("--go", action="store_true",
+                       help="Install latest Go version")
+    parser.add_argument("--node", action="store_true",
+                       help="Install nvm + latest Node.JS + PNPM + update NPM")
     return parser
 
 
@@ -104,6 +114,11 @@ def run_remote_setup(
     ssh_key: Optional[str] = None,
     timezone: Optional[str] = None,
     skip_audio: bool = False,
+    desktop: str = "xfce",
+    install_ruby: bool = False,
+    install_go: bool = False,
+    install_node: bool = False,
+    custom_steps: Optional[str] = None,
 ) -> int:
     try:
         tar_data = create_tar_archive()
@@ -122,7 +137,6 @@ def run_remote_setup(
     
     escaped_install_dir = shlex.quote(REMOTE_INSTALL_DIR)
     
-    # Build remote command with named arguments
     cmd_parts = [
         f"python3 {escaped_install_dir}/remote_setup.py",
         f"--system-type {shlex.quote(system_type)}",
@@ -137,6 +151,21 @@ def run_remote_setup(
     
     if skip_audio:
         cmd_parts.append("--skip-audio")
+    
+    if desktop != "xfce":
+        cmd_parts.append(f"--desktop {shlex.quote(desktop)}")
+    
+    if install_ruby:
+        cmd_parts.append("--ruby")
+    
+    if install_go:
+        cmd_parts.append("--go")
+    
+    if install_node:
+        cmd_parts.append("--node")
+    
+    if custom_steps:
+        cmd_parts.append(f"--steps {shlex.quote(custom_steps)}")
     
     remote_cmd = f"""
 mkdir -p {escaped_install_dir} && \
@@ -171,7 +200,8 @@ tar xzf - && \
 
 
 def setup_main(system_type: str, description: str, success_msg_fn) -> int:
-    parser = create_argument_parser(description)
+    allow_steps = (system_type == "custom_steps")
+    parser = create_argument_parser(description, allow_steps)
     args = parser.parse_args()
     
     if not validate_ip_address(args.ip):
@@ -202,12 +232,19 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
     print(f"Timezone: {timezone}")
     if args.skip_audio and system_type == "workstation_desktop":
         print("Skip audio: Yes")
+    if hasattr(args, 'desktop') and args.desktop != "xfce" and system_type in ["workstation_desktop", "workstation_dev"]:
+        print(f"Desktop: {args.desktop}")
+    if allow_steps and hasattr(args, 'steps') and args.steps:
+        print(f"Steps: {args.steps}")
     print("=" * 60)
     print()
     
+    custom_steps = args.steps if allow_steps and hasattr(args, 'steps') else None
+    desktop = args.desktop if hasattr(args, 'desktop') else "xfce"
+    
     returncode = run_remote_setup(
         args.ip, username, system_type, args.password, args.key, 
-        timezone, args.skip_audio
+        timezone, args.skip_audio, desktop, args.ruby, args.go, args.node, custom_steps
     )
     
     if returncode != 0:
