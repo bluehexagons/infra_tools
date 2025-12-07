@@ -6,6 +6,9 @@ import shlex
 from .utils import run, is_package_installed, is_service_active, file_contains
 
 
+FLATPAK_REMOTE = "flathub"
+
+
 def is_flatpak_installed() -> bool:
     """Check if flatpak is installed."""
     result = run("which flatpak", check=False)
@@ -17,12 +20,12 @@ def install_flatpak_if_needed(os_type: str) -> None:
     if is_flatpak_installed():
         return
     run("apt-get install -y -qq flatpak")
-    run("flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo", check=False)
+    run(f"flatpak remote-add --if-not-exists {FLATPAK_REMOTE} https://flathub.org/repo/flathub.flatpakrepo", check=False)
 
 
 def is_flatpak_app_installed(app_id: str) -> bool:
     """Check if a flatpak app is installed."""
-    result = run(f"flatpak list --app | grep -q {shlex.quote(app_id)}", check=False)
+    result = run(f"flatpak info {shlex.quote(app_id)}", check=False)
     return result.returncode == 0
 
 
@@ -183,19 +186,19 @@ def install_desktop_apps(os_type: str, username: str, use_flatpak: bool = False,
         
         if not is_flatpak_app_installed("org.libreoffice.LibreOffice"):
             print("  Installing LibreOffice...")
-            run("flatpak install -y flathub org.libreoffice.LibreOffice", check=False)
+            run(f"flatpak install -y {FLATPAK_REMOTE} org.libreoffice.LibreOffice", check=False)
         
         if not is_flatpak_app_installed("com.brave.Browser"):
             print("  Installing Brave browser...")
-            run("flatpak install -y flathub com.brave.Browser", check=False)
+            run(f"flatpak install -y {FLATPAK_REMOTE} com.brave.Browser", check=False)
         
         if not is_flatpak_app_installed("com.vscodium.codium"):
             print("  Installing VSCodium...")
-            run("flatpak install -y flathub com.vscodium.codium", check=False)
+            run(f"flatpak install -y {FLATPAK_REMOTE} com.vscodium.codium", check=False)
         
         if not is_flatpak_app_installed("com.discordapp.Discord"):
             print("  Installing Discord...")
-            run("flatpak install -y flathub com.discordapp.Discord", check=False)
+            run(f"flatpak install -y {FLATPAK_REMOTE} com.discordapp.Discord", check=False)
         
         print("  ✓ Desktop apps installed via Flatpak (LibreOffice, Brave, VSCodium, Discord)")
     else:
@@ -289,11 +292,11 @@ def install_workstation_dev_apps(os_type: str, username: str, use_flatpak: bool 
         
         if not is_flatpak_app_installed("com.vivaldi.Vivaldi"):
             print("  Installing Vivaldi browser...")
-            run("flatpak install -y flathub com.vivaldi.Vivaldi", check=False)
+            run(f"flatpak install -y {FLATPAK_REMOTE} com.vivaldi.Vivaldi", check=False)
         
         if not is_flatpak_app_installed("com.visualstudio.code"):
             print("  Installing Visual Studio Code...")
-            run("flatpak install -y flathub com.visualstudio.code", check=False)
+            run(f"flatpak install -y {FLATPAK_REMOTE} com.visualstudio.code", check=False)
         
         print("  ✓ Workstation dev apps installed via Flatpak (Vivaldi, VS Code)")
     else:
