@@ -84,8 +84,6 @@ python3 setup_workstation_dev.py 192.168.1.100 --flatpak --browser vivaldi
 - Browser (Brave, Firefox, Vivaldi, Chromium, Lynx, or Browsh)
 - Desktop apps: Visual Studio Code
 - fail2ban for RDP
-- Desktop apps: Vivaldi, Visual Studio Code
-- fail2ban for RDP
 
 **Server Dev:**
 - CLI tools only (no desktop/RDP)

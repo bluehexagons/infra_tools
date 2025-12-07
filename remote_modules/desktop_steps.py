@@ -254,7 +254,7 @@ def install_browser(browser: str, os_type: str, use_flatpak: bool = False, **_) 
             run("apt-get install -y -qq chromium chromium-l10n", check=False)
         
         print("  Installing uBlock Origin extension for Chromium...")
-        run("wget -qO /tmp/ublock_origin_chromium.crx 'https://clients2.google.com/service/update2/crx?response=redirect&prodversion=49.0&acceptformat=crx3&x=id%3Dcjpalhdlnbpafiamejdnhcphjbkeiagm%26installsource%3Dondemand%26uc'", check=False)
+        run("wget -qO /tmp/ublock_origin_chromium.crx 'https://clients2.google.com/service/update2/crx?response=redirect&prodversion=120.0&acceptformat=crx3&x=id%3Dcjpalhdlnbpafiamejdnhcphjbkeiagm%26installsource%3Dondemand%26uc'", check=False)
         print("  ✓ ungoogled-chromium installed (uBlock Origin downloaded to /tmp/ublock_origin_chromium.crx)")
 
 
