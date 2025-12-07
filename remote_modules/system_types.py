@@ -24,6 +24,7 @@ from .desktop_steps import (
     install_workstation_dev_apps,
     configure_vivaldi_browser,
     configure_gnome_keyring,
+    install_remmina,
 )
 from .security_steps import (
     create_remoteusers_group,
@@ -81,6 +82,12 @@ CLI_STEPS = [
 ]
 
 DESKTOP_APP_STEPS = [
+    ("Installing desktop applications", install_desktop_apps),
+    ("Configuring default browser", configure_default_browser),
+]
+
+PC_DEV_APP_STEPS = [
+    ("Installing Remmina", install_remmina),
     ("Installing desktop applications", install_desktop_apps),
     ("Configuring default browser", configure_default_browser),
 ]
@@ -175,6 +182,12 @@ def get_steps_for_system_type(system_type: str, skip_audio: bool = False, deskto
             desktop_steps = [s for s in DESKTOP_STEPS if s[1] != configure_audio]
         return COMMON_STEPS + desktop_steps + SECURITY_STEPS + \
                DESKTOP_SECURITY_STEPS + CLI_STEPS + optional_steps + DESKTOP_APP_STEPS + FINAL_STEPS
+    elif system_type == "pc_dev":
+        desktop_steps = DESKTOP_STEPS
+        if skip_audio:
+            desktop_steps = [s for s in DESKTOP_STEPS if s[1] != configure_audio]
+        return COMMON_STEPS + desktop_steps + SECURITY_STEPS + \
+               DESKTOP_SECURITY_STEPS + CLI_STEPS + optional_steps + PC_DEV_APP_STEPS + FINAL_STEPS
     elif system_type == "workstation_dev":
         desktop_steps = [s for s in DESKTOP_STEPS if s[1] != configure_audio]
         return COMMON_STEPS + desktop_steps + SECURITY_STEPS + \

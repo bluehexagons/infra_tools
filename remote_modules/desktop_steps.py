@@ -247,19 +247,17 @@ def install_browser(browser: str, os_type: str, use_flatpak: bool = False, **_) 
         print("  Installing Lynx...")
         run("apt-get install -y -qq lynx", check=False)
         print("  ✓ Lynx installed")
+
+
+def install_remmina(os_type: str, **_) -> None:
+    """Install Remmina RDP client."""
+    if is_package_installed("remmina", os_type):
+        print("  ✓ Remmina already installed")
+        return
     
-    elif browser == "chromium":
-        if use_flatpak:
-            if is_flatpak_app_installed("org.chromium.Chromium"):
-                print("  ✓ ungoogled-chromium already installed")
-                return
-            print("  Installing ungoogled-chromium...")
-            run(f"flatpak install -y {FLATPAK_REMOTE} org.chromium.Chromium", check=False)
-            print("  ✓ ungoogled-chromium installed via Flatpak")
-        else:
-            print("  ✗ Error: ungoogled-chromium is only available via Flatpak")
-            print("  Please use --flatpak flag to install ungoogled-chromium")
-            return
+    print("  Installing Remmina...")
+    run("apt-get install -y -qq remmina remmina-plugin-rdp remmina-plugin-vnc", check=False)
+    print("  ✓ Remmina installed")
 
 
 def install_desktop_apps(os_type: str, username: str, browser: str = "brave", use_flatpak: bool = False, install_office: bool = False, **_) -> None:
@@ -338,7 +336,6 @@ def configure_default_browser(username: str, browser: str = "brave", **_) -> Non
         "brave": "brave-browser.desktop",
         "firefox": "firefox.desktop",
         "vivaldi": "vivaldi-stable.desktop",
-        "chromium": "chromium.desktop",
         "lynx": None,
         "browsh": None
     }

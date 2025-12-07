@@ -97,7 +97,7 @@ def create_argument_parser(description: str, allow_steps: bool = False) -> argpa
                        help="Skip audio setup (desktop only)")
     parser.add_argument("--desktop", choices=["xfce", "i3", "cinnamon"], default="xfce",
                        help="Desktop environment to install (default: xfce)")
-    parser.add_argument("--browser", choices=["brave", "firefox", "browsh", "vivaldi", "lynx", "chromium"], default="brave",
+    parser.add_argument("--browser", choices=["brave", "firefox", "browsh", "vivaldi", "lynx"], default="brave",
                        help="Web browser to install (default: brave)")
     parser.add_argument("--flatpak", action="store_true",
                        help="Install desktop apps via Flatpak when available (non-containerized environments)")
@@ -262,7 +262,7 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
         print(f"Browser: {args.browser}")
     if hasattr(args, 'flatpak') and args.flatpak and system_type in ["workstation_desktop", "workstation_dev"]:
         print("Flatpak: Yes")
-    if hasattr(args, 'office') and args.office and system_type in ["workstation_desktop", "workstation_dev"]:
+    if hasattr(args, 'office') and args.office and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
         print("Office: Yes")
     if hasattr(args, 'dry_run') and args.dry_run:
         print("Dry-run: Yes")
@@ -275,7 +275,11 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
     desktop = args.desktop if hasattr(args, 'desktop') else "xfce"
     browser = args.browser if hasattr(args, 'browser') else "brave"
     use_flatpak = args.flatpak if hasattr(args, 'flatpak') else False
-    install_office = args.office if hasattr(args, 'office') else False
+    # Default to installing LibreOffice for pc_dev unless explicitly disabled
+    if system_type == "pc_dev":
+        install_office = True if not hasattr(args, 'office') else args.office
+    else:
+        install_office = args.office if hasattr(args, 'office') else False
     dry_run = args.dry_run if hasattr(args, 'dry_run') else False
     
     returncode = run_remote_setup(

@@ -10,7 +10,7 @@ from remote_modules.progress import progress_bar
 from remote_modules.system_types import get_steps_for_system_type
 
 
-VALID_SYSTEM_TYPES = ["workstation_desktop", "workstation_dev", "server_dev", "server_web", "server_proxmox", "custom_steps"]
+VALID_SYSTEM_TYPES = ["workstation_desktop", "pc_dev", "workstation_dev", "server_dev", "server_web", "server_proxmox", "custom_steps"]
 
 
 def main() -> int:
@@ -30,7 +30,7 @@ def main() -> int:
                        help="Skip audio setup")
     parser.add_argument("--desktop", choices=["xfce", "i3", "cinnamon"], default="xfce",
                        help="Desktop environment to install (default: xfce)")
-    parser.add_argument("--browser", choices=["brave", "firefox", "browsh", "vivaldi", "lynx", "chromium"], default="brave",
+    parser.add_argument("--browser", choices=["brave", "firefox", "browsh", "vivaldi", "lynx"], default="brave",
                        help="Web browser to install (default: brave)")
     parser.add_argument("--flatpak", action="store_true",
                        help="Install desktop apps via Flatpak when available (non-containerized environments)")
@@ -77,13 +77,19 @@ def main() -> int:
     print(f"Timezone: {args.timezone or 'UTC'}")
     if args.skip_audio:
         print("Skip audio: Yes")
-    if args.desktop != "xfce" and system_type in ["workstation_desktop", "workstation_dev"]:
+    if args.desktop != "xfce" and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
         print(f"Desktop: {args.desktop}")
-    if args.browser != "brave" and system_type in ["workstation_desktop", "workstation_dev"]:
+    if args.browser != "brave" and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
         print(f"Browser: {args.browser}")
-    if args.flatpak and system_type in ["workstation_desktop", "workstation_dev"]:
+    if args.flatpak and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
         print("Flatpak: Yes")
-    if args.office and system_type in ["workstation_desktop", "workstation_dev"]:
+    
+    # Default to installing LibreOffice for pc_dev
+    install_office_flag = args.office
+    if system_type == "pc_dev" and not args.office:
+        install_office_flag = True
+    
+    if install_office_flag and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
         print("Office: Yes")
     if args.dry_run:
         print("Dry-run: Yes")
@@ -95,7 +101,7 @@ def main() -> int:
     print(f"OS: {os_type}")
     sys.stdout.flush()
 
-    steps = get_steps_for_system_type(system_type, args.skip_audio, args.desktop, args.browser, args.flatpak, args.office, args.ruby, args.go, args.node, args.steps)
+    steps = get_steps_for_system_type(system_type, args.skip_audio, args.desktop, args.browser, args.flatpak, install_office_flag, args.ruby, args.go, args.node, args.steps)
     total_steps = len(steps)
     for i, (name, func) in enumerate(steps, 1):
         bar = progress_bar(i, total_steps)
@@ -109,7 +115,7 @@ def main() -> int:
             desktop=args.desktop,
             browser=args.browser,
             use_flatpak=args.flatpak,
-            install_office=args.office
+            install_office=install_office_flag
         )
     
     bar = progress_bar(total_steps, total_steps)

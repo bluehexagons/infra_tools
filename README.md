@@ -5,6 +5,7 @@ Automated setup scripts for remote Linux systems.
 ## Scripts
 
 - `setup_workstation_desktop.py` - Desktop workstation with RDP
+- `setup_pc_dev.py` - PC development workstation (bare hardware, includes Remmina + LibreOffice by default)
 - `setup_workstation_dev.py` - Dev workstation with RDP (no audio, VS Code + Vivaldi)
 - `setup_server_dev.py` - Development server (no desktop)
 - `setup_server_web.py` - Web server with nginx (static content & reverse proxy)
@@ -22,6 +23,9 @@ Automated setup scripts for remote Linux systems.
 ```bash
 # Workstation with desktop/RDP
 python3 setup_workstation_desktop.py <ip> [username] [-k key] [-p password] [-t timezone] [--skip-audio]
+
+# PC development workstation (bare hardware, Remmina + LibreOffice by default)
+python3 setup_pc_dev.py <ip> [username] [-k key] [-p password] [-t timezone] [--skip-audio]
 
 # Workstation dev (no audio, Vivaldi + VS Code)
 python3 setup_workstation_dev.py <ip> [username] [-k key] [-p password] [-t timezone]
@@ -50,12 +54,11 @@ All setup scripts support optional software installation:
 Desktop workstation scripts support desktop environment and browser selection:
 
 - `--desktop [xfce|i3|cinnamon]` - Choose desktop environment (default: xfce)
-- `--browser [brave|firefox|browsh|vivaldi|lynx|chromium]` - Choose web browser (default: brave)
+- `--browser [brave|firefox|browsh|vivaldi|lynx]` - Choose web browser (default: brave)
   - Firefox: Installs with uBlock Origin extension
   - Browsh: Requires Firefox (text-based browser)
-  - Chromium: ungoogled-chromium (Flatpak only - returns error without --flatpak)
 - `--flatpak` - Install desktop apps via Flatpak (for non-containerized environments)
-- `--office` - Install LibreOffice (desktop only, not installed by default)
+- `--office` - Install LibreOffice (desktop only, not installed by default except for pc_dev)
 - `--dry-run` - Show what would be done without executing commands
 
 Example:
@@ -72,6 +75,9 @@ python3 setup_workstation_desktop.py 192.168.1.100 --browser firefox
 # Use Flatpak for desktop apps with Vivaldi browser and LibreOffice
 python3 setup_workstation_dev.py 192.168.1.100 --flatpak --browser vivaldi --office
 
+# PC Dev setup (LibreOffice installed by default)
+python3 setup_pc_dev.py 192.168.1.100
+
 # Dry-run to see what would be done
 python3 setup_workstation_desktop.py 192.168.1.100 --dry-run
 ```
@@ -80,14 +86,22 @@ python3 setup_workstation_desktop.py 192.168.1.100 --dry-run
 
 **Workstation Desktop:**
 - Desktop environment (XFCE, i3, or Cinnamon) + xRDP + audio
-- Browser (Brave, Firefox, Vivaldi, Lynx, or Browsh; Chromium via Flatpak only)
+- Browser (Brave, Firefox, Vivaldi, Lynx, or Browsh)
 - Desktop apps: VSCodium, Discord
 - Optional: LibreOffice (with --office flag)
 - fail2ban for RDP
 
+**PC Dev:**
+- Desktop environment (XFCE, i3, or Cinnamon) + xRDP + audio
+- Browser (Brave, Firefox, Vivaldi, Lynx, or Browsh)
+- Desktop apps: VSCodium, Discord, Remmina RDP client
+- LibreOffice (installed by default, can be disabled with --no-office)
+- Designed for bare hardware development PCs
+- fail2ban for RDP
+
 **Workstation Dev:**
 - Desktop environment (XFCE, i3, or Cinnamon) + xRDP (no audio)
-- Browser (Brave, Firefox, Vivaldi, Lynx, or Browsh; Chromium via Flatpak only)
+- Browser (Brave, Firefox, Vivaldi, Lynx, or Browsh)
 - Desktop apps: Visual Studio Code
 - Optional: LibreOffice (with --office flag)
 - fail2ban for RDP
