@@ -168,13 +168,104 @@ def configure_audio(username: str, os_type: str, **_) -> None:
     print("  ✓ Audio configured (PulseAudio + xRDP module)")
 
 
-def install_desktop_apps(os_type: str, username: str, use_flatpak: bool = False, **_) -> None:
+def install_browser(browser: str, os_type: str, use_flatpak: bool = False, **_) -> None:
+    """Install the specified browser."""
+    if browser == "brave":
+        if use_flatpak:
+            if is_flatpak_app_installed("com.brave.Browser"):
+                print("  ✓ Brave browser already installed")
+                return
+            print("  Installing Brave browser...")
+            run(f"flatpak install -y {FLATPAK_REMOTE} com.brave.Browser", check=False)
+        else:
+            if is_package_installed("brave-browser", os_type):
+                print("  ✓ Brave browser already installed")
+                return
+            print("  Installing Brave browser...")
+            if not os.path.exists("/usr/share/keyrings/brave-browser-archive-keyring.gpg"):
+                run("apt-get install -y -qq curl gnupg")
+                run("curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg", check=False)
+                run('echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main" > /etc/apt/sources.list.d/brave-browser-release.list', check=False)
+                run("apt-get update -qq", check=False)
+            run("apt-get install -y -qq brave-browser", check=False)
+        print("  ✓ Brave browser installed")
+    
+    elif browser == "firefox":
+        if use_flatpak:
+            if is_flatpak_app_installed("org.mozilla.firefox"):
+                print("  ✓ Firefox already installed")
+                return
+            print("  Installing Firefox...")
+            run(f"flatpak install -y {FLATPAK_REMOTE} org.mozilla.firefox", check=False)
+        else:
+            if is_package_installed("firefox", os_type) or is_package_installed("firefox-esr", os_type):
+                print("  ✓ Firefox already installed")
+                return
+            print("  Installing Firefox...")
+            run("apt-get install -y -qq firefox-esr", check=False)
+        
+        print("  Installing uBlock Origin extension for Firefox...")
+        run("wget -qO /tmp/ublock_origin.xpi https://addons.mozilla.org/firefox/downloads/latest/ublock-origin/latest.xpi", check=False)
+        print("  ✓ Firefox installed (uBlock Origin downloaded to /tmp/ublock_origin.xpi)")
+    
+    elif browser == "browsh":
+        print("  Installing Browsh (requires Firefox)...")
+        if not (is_package_installed("firefox", os_type) or is_package_installed("firefox-esr", os_type)):
+            print("  Installing Firefox (required for Browsh)...")
+            run("apt-get install -y -qq firefox-esr", check=False)
+        
+        if not os.path.exists("/usr/local/bin/browsh"):
+            run("wget -qO /tmp/browsh.deb https://github.com/browsh-org/browsh/releases/download/v1.8.0/browsh_1.8.0_linux_amd64.deb", check=False)
+            run("apt-get install -y -qq /tmp/browsh.deb", check=False)
+            run("rm -f /tmp/browsh.deb", check=False)
+        print("  ✓ Browsh installed")
+    
+    elif browser == "vivaldi":
+        if use_flatpak:
+            if is_flatpak_app_installed("com.vivaldi.Vivaldi"):
+                print("  ✓ Vivaldi browser already installed")
+                return
+            print("  Installing Vivaldi browser...")
+            run(f"flatpak install -y {FLATPAK_REMOTE} com.vivaldi.Vivaldi", check=False)
+        else:
+            if is_package_installed("vivaldi-stable", os_type):
+                print("  ✓ Vivaldi browser already installed")
+                return
+            print("  Installing Vivaldi browser...")
+            if not os.path.exists("/usr/share/keyrings/vivaldi-archive-keyring.gpg"):
+                run("apt-get install -y -qq curl gnupg")
+                run("curl -fsSL https://repo.vivaldi.com/archive/linux_signing_key.pub | gpg --dearmor --output /usr/share/keyrings/vivaldi-archive-keyring.gpg", check=False)
+                run('echo "deb [signed-by=/usr/share/keyrings/vivaldi-archive-keyring.gpg] https://repo.vivaldi.com/archive/deb/ stable main" > /etc/apt/sources.list.d/vivaldi.list', check=False)
+                run("apt-get update -qq", check=False)
+            run("apt-get install -y -qq vivaldi-stable", check=False)
+        print("  ✓ Vivaldi browser installed")
+    
+    elif browser == "lynx":
+        if is_package_installed("lynx", os_type):
+            print("  ✓ Lynx already installed")
+            return
+        print("  Installing Lynx...")
+        run("apt-get install -y -qq lynx", check=False)
+        print("  ✓ Lynx installed")
+    
+    elif browser == "chromium":
+        print("  Installing ungoogled-chromium...")
+        if not os.path.exists("/usr/bin/chromium"):
+            run("apt-get install -y -qq chromium chromium-l10n", check=False)
+        
+        print("  Installing uBlock Origin extension for Chromium...")
+        run("wget -qO /tmp/ublock_origin_chromium.crx 'https://clients2.google.com/service/update2/crx?response=redirect&prodversion=49.0&acceptformat=crx3&x=id%3Dcjpalhdlnbpafiamejdnhcphjbkeiagm%26installsource%3Dondemand%26uc'", check=False)
+        print("  ✓ ungoogled-chromium installed (uBlock Origin downloaded to /tmp/ublock_origin_chromium.crx)")
+
+
+def install_desktop_apps(os_type: str, username: str, browser: str = "brave", use_flatpak: bool = False, **_) -> None:
+    install_browser(browser, os_type, use_flatpak)
+    
     if use_flatpak:
         install_flatpak_if_needed(os_type)
         
         all_installed = (
             is_flatpak_app_installed("org.libreoffice.LibreOffice") and
-            is_flatpak_app_installed("com.brave.Browser") and
             is_flatpak_app_installed("com.vscodium.codium") and
             is_flatpak_app_installed("com.discordapp.Discord")
         )
@@ -188,10 +279,6 @@ def install_desktop_apps(os_type: str, username: str, use_flatpak: bool = False,
             print("  Installing LibreOffice...")
             run(f"flatpak install -y {FLATPAK_REMOTE} org.libreoffice.LibreOffice", check=False)
         
-        if not is_flatpak_app_installed("com.brave.Browser"):
-            print("  Installing Brave browser...")
-            run(f"flatpak install -y {FLATPAK_REMOTE} com.brave.Browser", check=False)
-        
         if not is_flatpak_app_installed("com.vscodium.codium"):
             print("  Installing VSCodium...")
             run(f"flatpak install -y {FLATPAK_REMOTE} com.vscodium.codium", check=False)
@@ -200,11 +287,10 @@ def install_desktop_apps(os_type: str, username: str, use_flatpak: bool = False,
             print("  Installing Discord...")
             run(f"flatpak install -y {FLATPAK_REMOTE} com.discordapp.Discord", check=False)
         
-        print("  ✓ Desktop apps installed via Flatpak (LibreOffice, Brave, VSCodium, Discord)")
+        print("  ✓ Desktop apps installed via Flatpak (LibreOffice, VSCodium, Discord)")
     else:
         all_installed = (
             is_package_installed("libreoffice", os_type) and
-            is_package_installed("brave-browser", os_type) and
             is_package_installed("codium", os_type)
         )
         if all_installed:
@@ -216,15 +302,6 @@ def install_desktop_apps(os_type: str, username: str, use_flatpak: bool = False,
             run("apt-get install -y -qq libreoffice")
         else:
             print("  ✓ LibreOffice already installed")
-
-        print("  Installing Brave browser...")
-        if not os.path.exists("/usr/share/keyrings/brave-browser-archive-keyring.gpg"):
-            run("apt-get install -y -qq curl gnupg")
-            run("curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg", check=False)
-            run('echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main" > /etc/apt/sources.list.d/brave-browser-release.list', check=False)
-            run("apt-get update -qq", check=False)
-        if not is_package_installed("brave-browser", os_type):
-            run("apt-get install -y -qq brave-browser", check=False)
 
         print("  Installing VSCodium...")
         if not os.path.exists("/usr/share/keyrings/vscodium-archive-keyring.gpg"):
@@ -240,15 +317,29 @@ def install_desktop_apps(os_type: str, username: str, use_flatpak: bool = False,
             run("apt-get install -y -qq /tmp/discord.deb", check=False)
             run("rm -f /tmp/discord.deb", check=False)
 
-        print("  ✓ Desktop apps installed (LibreOffice, Brave, VSCodium, Discord)")
+        print("  ✓ Desktop apps installed (LibreOffice, VSCodium, Discord)")
 
 
-def configure_default_browser(username: str, **_) -> None:
+def configure_default_browser(username: str, browser: str = "brave", **_) -> None:
     safe_username = shlex.quote(username)
     mimeapps_path = f"/home/{username}/.config/mimeapps.list"
     
+    browser_desktops = {
+        "brave": "brave-browser.desktop",
+        "firefox": "firefox.desktop",
+        "vivaldi": "vivaldi-stable.desktop",
+        "chromium": "chromium.desktop",
+        "lynx": None,
+        "browsh": None
+    }
+    
+    desktop_file = browser_desktops.get(browser)
+    if not desktop_file:
+        print(f"  ✓ No default browser configuration needed for {browser}")
+        return
+    
     if os.path.exists(mimeapps_path):
-        if file_contains(mimeapps_path, "brave-browser.desktop"):
+        if file_contains(mimeapps_path, desktop_file):
             print("  ✓ Default browser already set")
             return
     
@@ -258,11 +349,11 @@ def configure_default_browser(username: str, **_) -> None:
     
     os.makedirs(f"/home/{username}/.config", exist_ok=True)
     
-    mimeapps_content = """[Default Applications]
-x-scheme-handler/http=brave-browser.desktop
-x-scheme-handler/https=brave-browser.desktop
-text/html=brave-browser.desktop
-application/xhtml+xml=brave-browser.desktop
+    mimeapps_content = f"""[Default Applications]
+x-scheme-handler/http={desktop_file}
+x-scheme-handler/https={desktop_file}
+text/html={desktop_file}
+application/xhtml+xml={desktop_file}
 """
     
     with open(mimeapps_path, "w") as f:
@@ -270,52 +361,33 @@ application/xhtml+xml=brave-browser.desktop
     
     run(f"chown -R {safe_username}:{safe_username} /home/{username}/.config")
     
-    run("xdg-mime default brave-browser.desktop x-scheme-handler/http", check=False)
-    run("xdg-mime default brave-browser.desktop x-scheme-handler/https", check=False)
+    run(f"xdg-mime default {desktop_file} x-scheme-handler/http", check=False)
+    run(f"xdg-mime default {desktop_file} x-scheme-handler/https", check=False)
     
-    print("  ✓ Default browser set to Brave")
+    print(f"  ✓ Default browser set to {browser.capitalize()}")
 
 
-def install_workstation_dev_apps(os_type: str, username: str, use_flatpak: bool = False, **_) -> None:
+def install_workstation_dev_apps(os_type: str, username: str, browser: str = "vivaldi", use_flatpak: bool = False, **_) -> None:
+    install_browser(browser, os_type, use_flatpak)
+    
     if use_flatpak:
         install_flatpak_if_needed(os_type)
         
-        all_installed = (
-            is_flatpak_app_installed("com.vivaldi.Vivaldi") and
-            is_flatpak_app_installed("com.visualstudio.code")
-        )
-        if all_installed:
+        if is_flatpak_app_installed("com.visualstudio.code"):
             print("  ✓ Workstation dev apps already installed via Flatpak")
             return
         
         print("  Installing workstation dev apps via Flatpak...")
         
-        if not is_flatpak_app_installed("com.vivaldi.Vivaldi"):
-            print("  Installing Vivaldi browser...")
-            run(f"flatpak install -y {FLATPAK_REMOTE} com.vivaldi.Vivaldi", check=False)
-        
         if not is_flatpak_app_installed("com.visualstudio.code"):
             print("  Installing Visual Studio Code...")
             run(f"flatpak install -y {FLATPAK_REMOTE} com.visualstudio.code", check=False)
         
-        print("  ✓ Workstation dev apps installed via Flatpak (Vivaldi, VS Code)")
+        print("  ✓ Workstation dev apps installed via Flatpak (VS Code)")
     else:
-        all_installed = (
-            is_package_installed("vivaldi-stable", os_type) and
-            (is_package_installed("code", os_type) or os.path.exists("/usr/bin/code"))
-        )
-        if all_installed:
+        if is_package_installed("code", os_type) or os.path.exists("/usr/bin/code"):
             print("  ✓ Workstation dev apps already installed")
             return
-
-        print("  Installing Vivaldi browser...")
-        if not os.path.exists("/usr/share/keyrings/vivaldi-archive-keyring.gpg"):
-            run("apt-get install -y -qq curl gnupg")
-            run("curl -fsSL https://repo.vivaldi.com/archive/linux_signing_key.pub | gpg --dearmor --output /usr/share/keyrings/vivaldi-archive-keyring.gpg", check=False)
-            run('echo "deb [signed-by=/usr/share/keyrings/vivaldi-archive-keyring.gpg] https://repo.vivaldi.com/archive/deb/ stable main" > /etc/apt/sources.list.d/vivaldi.list', check=False)
-            run("apt-get update -qq", check=False)
-        if not is_package_installed("vivaldi-stable", os_type):
-            run("apt-get install -y -qq vivaldi-stable", check=False)
 
         print("  Installing Visual Studio Code...")
         if not os.path.exists("/etc/apt/trusted.gpg.d/microsoft.gpg"):
@@ -326,40 +398,11 @@ def install_workstation_dev_apps(os_type: str, username: str, use_flatpak: bool 
         if not is_package_installed("code", os_type):
             run("apt-get install -y -qq code", check=False)
 
-        print("  ✓ Workstation dev apps installed (Vivaldi, VS Code)")
+        print("  ✓ Workstation dev apps installed (VS Code)")
 
 
-def configure_vivaldi_browser(username: str, **_) -> None:
-    safe_username = shlex.quote(username)
-    mimeapps_path = f"/home/{username}/.config/mimeapps.list"
-    
-    if os.path.exists(mimeapps_path):
-        if file_contains(mimeapps_path, "vivaldi-stable.desktop"):
-            print("  ✓ Default browser already set")
-            return
-    
-    user_apps_dir = f"/home/{username}/.local/share/applications"
-    os.makedirs(user_apps_dir, exist_ok=True)
-    run(f"chown -R {safe_username}:{safe_username} /home/{username}/.local")
-    
-    os.makedirs(f"/home/{username}/.config", exist_ok=True)
-    
-    mimeapps_content = """[Default Applications]
-x-scheme-handler/http=vivaldi-stable.desktop
-x-scheme-handler/https=vivaldi-stable.desktop
-text/html=vivaldi-stable.desktop
-application/xhtml+xml=vivaldi-stable.desktop
-"""
-    
-    with open(mimeapps_path, "w") as f:
-        f.write(mimeapps_content)
-    
-    run(f"chown -R {safe_username}:{safe_username} /home/{username}/.config")
-    
-    run("xdg-mime default vivaldi-stable.desktop x-scheme-handler/http", check=False)
-    run("xdg-mime default vivaldi-stable.desktop x-scheme-handler/https", check=False)
-    
-    print("  ✓ Default browser set to Vivaldi")
+def configure_vivaldi_browser(username: str, browser: str = "vivaldi", **_) -> None:
+    configure_default_browser(username, browser)
 
 
 def configure_gnome_keyring(username: str, os_type: str, **_) -> None:

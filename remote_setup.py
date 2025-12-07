@@ -30,6 +30,8 @@ def main() -> int:
                        help="Skip audio setup")
     parser.add_argument("--desktop", choices=["xfce", "i3", "cinnamon"], default="xfce",
                        help="Desktop environment to install (default: xfce)")
+    parser.add_argument("--browser", choices=["brave", "firefox", "browsh", "vivaldi", "lynx", "chromium"], default="brave",
+                       help="Web browser to install (default: brave)")
     parser.add_argument("--flatpak", action="store_true",
                        help="Install desktop apps via Flatpak when available (non-containerized environments)")
     parser.add_argument("--ruby", action="store_true",
@@ -67,6 +69,8 @@ def main() -> int:
         print("Skip audio: Yes")
     if args.desktop != "xfce" and system_type in ["workstation_desktop", "workstation_dev"]:
         print(f"Desktop: {args.desktop}")
+    if args.browser != "brave" and system_type in ["workstation_desktop", "workstation_dev"]:
+        print(f"Browser: {args.browser}")
     if args.flatpak and system_type in ["workstation_desktop", "workstation_dev"]:
         print("Flatpak: Yes")
     if args.steps:
@@ -77,7 +81,7 @@ def main() -> int:
     print(f"OS: {os_type}")
     sys.stdout.flush()
 
-    steps = get_steps_for_system_type(system_type, args.skip_audio, args.desktop, args.flatpak, args.ruby, args.go, args.node, args.steps)
+    steps = get_steps_for_system_type(system_type, args.skip_audio, args.desktop, args.browser, args.flatpak, args.ruby, args.go, args.node, args.steps)
     total_steps = len(steps)
     for i, (name, func) in enumerate(steps, 1):
         bar = progress_bar(i, total_steps)
@@ -89,6 +93,7 @@ def main() -> int:
             os_type=os_type,
             timezone=args.timezone,
             desktop=args.desktop,
+            browser=args.browser,
             use_flatpak=args.flatpak
         )
     

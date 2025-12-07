@@ -47,9 +47,13 @@ All setup scripts support optional software installation:
 - `--go` - Install latest Go version
 - `--node` - Install nvm + latest Node.js LTS + PNPM + NPM (latest)
 
-Desktop workstation scripts support desktop environment selection:
+Desktop workstation scripts support desktop environment and browser selection:
 
 - `--desktop [xfce|i3|cinnamon]` - Choose desktop environment (default: xfce)
+- `--browser [brave|firefox|browsh|vivaldi|lynx|chromium]` - Choose web browser (default: brave)
+  - Firefox: Installs with uBlock Origin extension
+  - Browsh: Requires Firefox (text-based browser)
+  - Chromium: Uses ungoogled-chromium with uBlock Origin extension
 - `--flatpak` - Install desktop apps via Flatpak (for non-containerized environments)
 
 Example:
@@ -60,19 +64,26 @@ python3 setup_server_dev.py 192.168.1.100 --ruby --go --node
 # Install i3 window manager instead of XFCE on a workstation
 python3 setup_workstation_desktop.py 192.168.1.100 --desktop i3
 
-# Use Flatpak for desktop apps
-python3 setup_workstation_desktop.py 192.168.1.100 --flatpak
+# Use Firefox instead of Brave
+python3 setup_workstation_desktop.py 192.168.1.100 --browser firefox
+
+# Use Flatpak for desktop apps with Vivaldi browser
+python3 setup_workstation_dev.py 192.168.1.100 --flatpak --browser vivaldi
 ```
 
 ## Features
 
 **Workstation Desktop:**
 - Desktop environment (XFCE, i3, or Cinnamon) + xRDP + audio
-- Desktop apps: LibreOffice, Brave, VSCodium, Discord
+- Browser (Brave, Firefox, Vivaldi, Chromium, Lynx, or Browsh)
+- Desktop apps: LibreOffice, VSCodium, Discord
 - fail2ban for RDP
 
 **Workstation Dev:**
 - Desktop environment (XFCE, i3, or Cinnamon) + xRDP (no audio)
+- Browser (Brave, Firefox, Vivaldi, Chromium, Lynx, or Browsh)
+- Desktop apps: Visual Studio Code
+- fail2ban for RDP
 - Desktop apps: Vivaldi, Visual Studio Code
 - fail2ban for RDP
 

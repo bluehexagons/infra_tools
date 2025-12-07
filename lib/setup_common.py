@@ -97,6 +97,8 @@ def create_argument_parser(description: str, allow_steps: bool = False) -> argpa
                        help="Skip audio setup (desktop only)")
     parser.add_argument("--desktop", choices=["xfce", "i3", "cinnamon"], default="xfce",
                        help="Desktop environment to install (default: xfce)")
+    parser.add_argument("--browser", choices=["brave", "firefox", "browsh", "vivaldi", "lynx", "chromium"], default="brave",
+                       help="Web browser to install (default: brave)")
     parser.add_argument("--flatpak", action="store_true",
                        help="Install desktop apps via Flatpak when available (non-containerized environments)")
     parser.add_argument("--ruby", action="store_true",
@@ -117,6 +119,7 @@ def run_remote_setup(
     timezone: Optional[str] = None,
     skip_audio: bool = False,
     desktop: str = "xfce",
+    browser: str = "brave",
     use_flatpak: bool = False,
     install_ruby: bool = False,
     install_go: bool = False,
@@ -157,6 +160,9 @@ def run_remote_setup(
     
     if desktop != "xfce":
         cmd_parts.append(f"--desktop {shlex.quote(desktop)}")
+    
+    if browser != "brave":
+        cmd_parts.append(f"--browser {shlex.quote(browser)}")
     
     if use_flatpak:
         cmd_parts.append("--flatpak")
@@ -240,6 +246,8 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
         print("Skip audio: Yes")
     if hasattr(args, 'desktop') and args.desktop != "xfce" and system_type in ["workstation_desktop", "workstation_dev"]:
         print(f"Desktop: {args.desktop}")
+    if hasattr(args, 'browser') and args.browser != "brave" and system_type in ["workstation_desktop", "workstation_dev"]:
+        print(f"Browser: {args.browser}")
     if hasattr(args, 'flatpak') and args.flatpak and system_type in ["workstation_desktop", "workstation_dev"]:
         print("Flatpak: Yes")
     if allow_steps and hasattr(args, 'steps') and args.steps:
@@ -249,11 +257,12 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
     
     custom_steps = args.steps if allow_steps and hasattr(args, 'steps') else None
     desktop = args.desktop if hasattr(args, 'desktop') else "xfce"
+    browser = args.browser if hasattr(args, 'browser') else "brave"
     use_flatpak = args.flatpak if hasattr(args, 'flatpak') else False
     
     returncode = run_remote_setup(
         args.ip, username, system_type, args.password, args.key, 
-        timezone, args.skip_audio, desktop, use_flatpak, args.ruby, args.go, args.node, custom_steps
+        timezone, args.skip_audio, desktop, browser, use_flatpak, args.ruby, args.go, args.node, custom_steps
     )
     
     if returncode != 0:
