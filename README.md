@@ -50,6 +50,7 @@ All setup scripts support optional software installation:
 - `--ruby` - Install rbenv + latest Ruby version + bundler
 - `--go` - Install latest Go version
 - `--node` - Install nvm + latest Node.js LTS + PNPM + NPM (latest)
+- `--deploy LOCATION GIT_URL` - Deploy a git repository to the specified location (can be used multiple times)
 
 Desktop workstation scripts support desktop environment and browser selection:
 
@@ -80,6 +81,36 @@ python3 setup_pc_dev.py 192.168.1.100
 
 # Dry-run to see what would be done
 python3 setup_workstation_desktop.py 192.168.1.100 --dry-run
+
+# Deploy a static website
+python3 setup_server_web.py 192.168.1.100 --deploy /var/www https://github.com/user/mysite.git
+
+# Deploy multiple repositories (Rails app and Node.js site)
+python3 setup_server_web.py 192.168.1.100 --ruby --node \
+  --deploy /var/www https://github.com/user/rails-app.git \
+  --deploy /var/www https://github.com/user/vite-site.git
+```
+
+### Deployment Support
+
+The `--deploy` flag enables automatic deployment of git repositories:
+
+- **Project type detection**: Automatically detects Ruby on Rails (`.ruby-version`), Node.js/Vite (`package.json`), or static HTML (`index.html`) projects
+- **Local cloning**: Repositories are cloned using your local git credentials
+- **Remote building**: Projects are built on the remote server (or locally when using `remote_setup.py` directly)
+- **Standard builds**: 
+  - Rails: `bundle install --deployment` and `rake assets:precompile`
+  - Node.js: `npm install` and `npm run build`
+  - Static: Files copied as-is
+
+Example:
+```bash
+# Deploy a Rails application
+python3 setup_server_web.py 192.168.1.100 --ruby --deploy /var/www https://github.com/user/blog.git
+
+# When using remote_setup.py directly on the server
+python3 /opt/infra_tools/remote_setup.py --system-type server_web --username myuser \
+  --deploy /var/www https://github.com/user/site.git
 ```
 
 ## Features

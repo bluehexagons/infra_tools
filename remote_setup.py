@@ -2,6 +2,8 @@
 
 import argparse
 import getpass
+import os
+import shlex
 import sys
 from typing import Optional
 
@@ -44,6 +46,8 @@ def main() -> int:
                        help="Install latest Go version")
     parser.add_argument("--node", action="store_true",
                        help="Install nvm + latest Node.JS + PNPM + update NPM")
+    parser.add_argument("--deploy", action="append", nargs=2, metavar=("LOCATION", "GIT_URL"),
+                       help="Deploy a git repository to the specified location (can be used multiple times)")
     
     args = parser.parse_args()
     
@@ -95,6 +99,10 @@ def main() -> int:
         print("Dry-run: Yes")
     if args.steps:
         print(f"Steps: {args.steps}")
+    if args.deploy:
+        print(f"Deployments: {len(args.deploy)} repository(ies)")
+        for location, git_url in args.deploy:
+            print(f"  - {git_url} -> {location}")
     sys.stdout.flush()
 
     os_type = detect_os()
@@ -120,6 +128,75 @@ def main() -> int:
     
     bar = progress_bar(total_steps, total_steps)
     print(f"\n{bar} Complete!")
+    
+    # Handle deployments if specified
+    if args.deploy:
+        from remote_modules.deploy_steps import detect_project_type, build_rails_project, build_node_project, build_static_project
+        import shutil
+        import tempfile
+        import subprocess
+        
+        print("\n" + "=" * 60)
+        print("Deploying repositories...")
+        print("=" * 60)
+        
+        temp_dir = tempfile.mkdtemp(prefix="infra_deploy_")
+        try:
+            for location, git_url in args.deploy:
+                repo_name = git_url.rstrip('/').split('/')[-1]
+                if repo_name.endswith('.git'):
+                    repo_name = repo_name[:-4]
+                
+                clone_path = os.path.join(temp_dir, repo_name)
+                dest_path = os.path.join(location, repo_name) if location else repo_name
+                
+                print(f"\nCloning {git_url}...")
+                result = subprocess.run(
+                    ["git", "clone", git_url, clone_path],
+                    capture_output=True,
+                    text=True,
+                    timeout=300
+                )
+                
+                if result.returncode != 0:
+                    print(f"  Error cloning repository: {result.stderr}")
+                    continue
+                
+                print(f"  ✓ Cloned to {clone_path}")
+                
+                # Create destination directory
+                os.makedirs(os.path.dirname(dest_path) if os.path.dirname(dest_path) else '.', exist_ok=True)
+                
+                # Move from temp to destination
+                if os.path.exists(dest_path):
+                    print(f"  Destination {dest_path} already exists, removing...")
+                    shutil.rmtree(dest_path)
+                
+                shutil.move(clone_path, dest_path)
+                print(f"  ✓ Moved to {dest_path}")
+                
+                # Detect project type and build
+                project_type = detect_project_type(dest_path)
+                print(f"  Detected project type: {project_type}")
+                
+                if project_type == 'rails':
+                    build_rails_project(dest_path)
+                elif project_type == 'node':
+                    build_node_project(dest_path)
+                elif project_type == 'static':
+                    build_static_project(dest_path)
+                else:
+                    print(f"  ⚠ Unknown project type, no build performed")
+                
+                # Set proper permissions
+                subprocess.run(f"chown -R www-data:www-data {shlex.quote(dest_path)}", shell=True, check=False)
+                subprocess.run(f"chmod -R 755 {shlex.quote(dest_path)}", shell=True, check=False)
+                
+                print(f"  ✓ Repository deployed to {dest_path}")
+        finally:
+            # Clean up temp directory
+            if os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir)
     
     print("\n" + "=" * 60)
     print("Setup completed successfully!")
