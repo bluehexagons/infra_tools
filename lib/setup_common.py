@@ -254,13 +254,13 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
     print(f"Host: {args.ip}")
     print(f"User: {username}")
     print(f"Timezone: {timezone}")
-    if args.skip_audio and system_type == "workstation_desktop":
+    if args.skip_audio and system_type in ["workstation_desktop", "pc_dev"]:
         print("Skip audio: Yes")
-    if hasattr(args, 'desktop') and args.desktop != "xfce" and system_type in ["workstation_desktop", "workstation_dev"]:
+    if hasattr(args, 'desktop') and args.desktop != "xfce" and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
         print(f"Desktop: {args.desktop}")
-    if hasattr(args, 'browser') and args.browser != "brave" and system_type in ["workstation_desktop", "workstation_dev"]:
+    if hasattr(args, 'browser') and args.browser != "brave" and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
         print(f"Browser: {args.browser}")
-    if hasattr(args, 'flatpak') and args.flatpak and system_type in ["workstation_desktop", "workstation_dev"]:
+    if hasattr(args, 'flatpak') and args.flatpak and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
         print("Flatpak: Yes")
     if hasattr(args, 'office') and args.office and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
         print("Office: Yes")

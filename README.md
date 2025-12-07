@@ -95,7 +95,7 @@ python3 setup_workstation_desktop.py 192.168.1.100 --dry-run
 - Desktop environment (XFCE, i3, or Cinnamon) + xRDP + audio
 - Browser (Brave, Firefox, Vivaldi, Lynx, or Browsh)
 - Desktop apps: VSCodium, Discord, Remmina RDP client
-- LibreOffice (installed by default, can be disabled with --no-office)
+- LibreOffice (installed by default)
 - Designed for bare hardware development PCs
 - fail2ban for RDP
 
@@ -139,7 +139,7 @@ python3 /opt/infra_tools/remote_setup.py --system-type <type> --username <user> 
 python3 /opt/infra_tools/remote_setup.py --steps "install_ruby install_go" --username <user>
 ```
 
-System types: `workstation_desktop`, `workstation_dev`, `server_dev`, `server_web`, `server_proxmox`
+System types: `workstation_desktop`, `pc_dev`, `workstation_dev`, `server_dev`, `server_web`, `server_proxmox`
 
 Available steps: `install_ruby`, `install_go`, `install_node`, `install_cli_tools`, `setup_user`, `configure_firewall`, etc.
 
