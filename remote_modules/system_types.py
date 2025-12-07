@@ -147,7 +147,7 @@ STEP_FUNCTIONS = {
 
 
 def get_steps_for_system_type(system_type: str, skip_audio: bool = False, desktop: str = "xfce",
-                               install_ruby: bool = False, install_go: bool = False,
+                               use_flatpak: bool = False, install_ruby: bool = False, install_go: bool = False,
                                install_node: bool = False, custom_steps_str: str = None) -> list:
     if system_type == "custom_steps" and custom_steps_str:
         step_names = custom_steps_str.split()
