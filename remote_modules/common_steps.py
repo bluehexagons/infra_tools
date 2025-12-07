@@ -177,3 +177,92 @@ def check_restart_required(os_type: str, **_) -> None:
         print("  Run 'sudo reboot' when convenient")
     else:
         print("  ✓ No restart required")
+
+
+def install_ruby(username: str, os_type: str, **_) -> None:
+    safe_username = shlex.quote(username)
+    user_home = f"/home/{username}"
+    rbenv_dir = f"{user_home}/.rbenv"
+    
+    if os.path.exists(rbenv_dir):
+        print("  ✓ rbenv already installed")
+        return
+    
+    run("apt-get install -y -qq git curl libssl-dev libreadline-dev zlib1g-dev autoconf bison build-essential libyaml-dev libncurses5-dev libffi-dev libgdbm-dev")
+    run(f"runuser -u {safe_username} -- git clone https://github.com/rbenv/rbenv.git {shlex.quote(rbenv_dir)}")
+    run(f"runuser -u {safe_username} -- git clone https://github.com/rbenv/ruby-build.git {shlex.quote(rbenv_dir)}/plugins/ruby-build")
+    
+    bashrc_path = f"{user_home}/.bashrc"
+    rbenv_init = '''
+export PATH="$HOME/.rbenv/bin:$PATH"
+eval "$(rbenv init -)"
+'''
+    
+    if not os.path.exists(bashrc_path):
+        with open(bashrc_path, "w") as f:
+            f.write(rbenv_init)
+    else:
+        with open(bashrc_path, "a") as f:
+            f.write(rbenv_init)
+    run(f"chown {safe_username}:{safe_username} {shlex.quote(bashrc_path)}")
+    
+    result = run(f"runuser -u {safe_username} -- bash -c 'export PATH=\"{rbenv_dir}/bin:$PATH\" && rbenv install -l | grep -E \"^[0-9]+\\.[0-9]+\\.[0-9]+$\" | tail -1'", check=False)
+    if result.returncode == 0 and result.stdout.strip():
+        latest_ruby = result.stdout.strip()
+        print(f"  Installing Ruby {latest_ruby}...")
+        run(f"runuser -u {safe_username} -- bash -c 'export PATH=\"{rbenv_dir}/bin:$PATH\" && rbenv install {shlex.quote(latest_ruby)}'")
+        run(f"runuser -u {safe_username} -- bash -c 'export PATH=\"{rbenv_dir}/bin:$PATH\" && rbenv global {shlex.quote(latest_ruby)}'")
+        run(f"runuser -u {safe_username} -- bash -c 'export PATH=\"{rbenv_dir}/bin:$PATH\" && eval \"$(rbenv init -)\" && gem install bundler'")
+        print(f"  ✓ rbenv + Ruby {latest_ruby} + bundler installed")
+    else:
+        print("  ✓ rbenv installed (Ruby installation skipped)")
+
+
+def install_go(username: str, os_type: str, **_) -> None:
+    result = run("which go", check=False)
+    if result.returncode == 0:
+        print("  ✓ Go already installed")
+        return
+    
+    run("apt-get install -y -qq curl wget")
+    result = run("curl -s https://go.dev/VERSION?m=text | head -1", check=False)
+    if result.returncode != 0 or not result.stdout.strip():
+        print("  ⚠ Failed to get latest Go version, skipping")
+        return
+    
+    go_version = result.stdout.strip()
+    if not go_version.startswith("go"):
+        print("  ⚠ Invalid Go version format, skipping")
+        return
+    
+    go_archive = f"{go_version}.linux-amd64.tar.gz"
+    run(f"wget -q https://go.dev/dl/{go_archive} -O /tmp/{go_archive}")
+    run("rm -rf /usr/local/go")
+    run(f"tar -C /usr/local -xzf /tmp/{go_archive}")
+    run(f"rm /tmp/{go_archive}")
+    
+    profile_d_path = "/etc/profile.d/go.sh"
+    with open(profile_d_path, "w") as f:
+        f.write('export PATH=$PATH:/usr/local/go/bin\n')
+    run(f"chmod +x {profile_d_path}")
+    
+    print(f"  ✓ Go {go_version} installed")
+
+
+def install_node(username: str, os_type: str, **_) -> None:
+    safe_username = shlex.quote(username)
+    user_home = f"/home/{username}"
+    nvm_dir = f"{user_home}/.nvm"
+    
+    if os.path.exists(nvm_dir):
+        print("  ✓ nvm already installed")
+        return
+    
+    run("apt-get install -y -qq curl")
+    nvm_version = "v0.39.7"
+    run(f"runuser -u {safe_username} -- bash -c 'curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/{nvm_version}/install.sh | bash'")
+    run(f"runuser -u {safe_username} -- bash -c 'export NVM_DIR=\"{nvm_dir}\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && nvm install --lts'")
+    run(f"runuser -u {safe_username} -- bash -c 'export NVM_DIR=\"{nvm_dir}\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npm install -g npm@latest'")
+    run(f"runuser -u {safe_username} -- bash -c 'export NVM_DIR=\"{nvm_dir}\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npm install -g pnpm'")
+    
+    print("  ✓ nvm + Node.js LTS + NPM (latest) + PNPM installed")

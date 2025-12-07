@@ -8,6 +8,20 @@ import subprocess
 import sys
 
 
+_DRY_RUN = False
+
+
+def set_dry_run(enabled: bool) -> None:
+    """Set dry-run mode globally."""
+    global _DRY_RUN
+    _DRY_RUN = enabled
+
+
+def is_dry_run() -> bool:
+    """Check if dry-run mode is enabled."""
+    return _DRY_RUN
+
+
 def validate_username(username: str) -> bool:
     pattern = r'^[a-z_][a-z0-9_-]{0,31}$'
     return bool(re.match(pattern, username))
@@ -21,6 +35,11 @@ def generate_password(length: int = 16) -> str:
 def run(cmd: str, check: bool = True) -> subprocess.CompletedProcess:
     print(f"  Running: {cmd[:80]}..." if len(cmd) > 80 else f"  Running: {cmd}")
     sys.stdout.flush()
+    
+    if is_dry_run():
+        print("  [DRY-RUN] Command not executed")
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+    
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     if check and result.returncode != 0:
         if result.stderr:

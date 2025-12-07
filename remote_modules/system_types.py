@@ -10,6 +10,9 @@ from .common_steps import (
     configure_time_sync,
     install_cli_tools,
     check_restart_required,
+    install_ruby as install_ruby_step,
+    install_go as install_go_step,
+    install_node as install_node_step,
 )
 from .desktop_steps import (
     install_desktop,
@@ -21,6 +24,7 @@ from .desktop_steps import (
     install_workstation_dev_apps,
     configure_vivaldi_browser,
     configure_gnome_keyring,
+    install_remmina,
 )
 from .security_steps import (
     create_remoteusers_group,
@@ -51,7 +55,7 @@ COMMON_STEPS = [
 ]
 
 DESKTOP_STEPS = [
-    ("Installing XFCE desktop environment", install_desktop),
+    ("Installing desktop environment", install_desktop),
     ("Installing xRDP", install_xrdp),
     ("Configuring audio for RDP", configure_audio),
     ("Configuring gnome-keyring", configure_gnome_keyring),
@@ -82,6 +86,12 @@ DESKTOP_APP_STEPS = [
     ("Configuring default browser", configure_default_browser),
 ]
 
+PC_DEV_APP_STEPS = [
+    ("Installing Remmina", install_remmina),
+    ("Installing desktop applications", install_desktop_apps),
+    ("Configuring default browser", configure_default_browser),
+]
+
 WORKSTATION_DEV_APP_STEPS = [
     ("Installing workstation dev applications", install_workstation_dev_apps),
     ("Configuring default browser", configure_vivaldi_browser),
@@ -107,19 +117,83 @@ PROXMOX_HARDENING_STEPS = [
 ]
 
 
-def get_steps_for_system_type(system_type: str, skip_audio: bool = False) -> list:
+STEP_FUNCTIONS = {
+    'install_ruby': install_ruby_step,
+    'install_go': install_go_step,
+    'install_node': install_node_step,
+    'update_and_upgrade_packages': update_and_upgrade_packages,
+    'ensure_sudo_installed': ensure_sudo_installed,
+    'configure_locale': configure_locale,
+    'setup_user': setup_user,
+    'copy_ssh_keys_to_user': copy_ssh_keys_to_user,
+    'generate_ssh_key': generate_ssh_key,
+    'configure_time_sync': configure_time_sync,
+    'install_cli_tools': install_cli_tools,
+    'check_restart_required': check_restart_required,
+    'install_desktop': install_desktop,
+    'install_xrdp': install_xrdp,
+    'harden_xrdp': harden_xrdp,
+    'configure_audio': configure_audio,
+    'install_desktop_apps': install_desktop_apps,
+    'configure_default_browser': configure_default_browser,
+    'install_workstation_dev_apps': install_workstation_dev_apps,
+    'configure_vivaldi_browser': configure_vivaldi_browser,
+    'configure_gnome_keyring': configure_gnome_keyring,
+    'create_remoteusers_group': create_remoteusers_group,
+    'configure_firewall': configure_firewall,
+    'configure_fail2ban': configure_fail2ban,
+    'harden_ssh': harden_ssh,
+    'harden_kernel': harden_kernel,
+    'configure_auto_updates': configure_auto_updates,
+    'configure_firewall_web': configure_firewall_web,
+    'install_nginx': install_nginx,
+    'configure_nginx_security': configure_nginx_security,
+    'create_hello_world_site': create_hello_world_site,
+    'configure_default_site': configure_default_site,
+}
+
+
+def get_steps_for_system_type(system_type: str, skip_audio: bool = False, desktop: str = "xfce",
+                               browser: str = "brave", use_flatpak: bool = False, install_office: bool = False, 
+                               install_ruby: bool = False, install_go: bool = False,
+                               install_node: bool = False, custom_steps_str: str = None) -> list:
+    if system_type == "custom_steps" and custom_steps_str:
+        step_names = custom_steps_str.split()
+        steps = []
+        for step_name in step_names:
+            if step_name in STEP_FUNCTIONS:
+                func = STEP_FUNCTIONS[step_name]
+                steps.append((f"Running {step_name}", func))
+            else:
+                raise ValueError(f"Unknown step: {step_name}")
+        return steps
+    
+    optional_steps = []
+    if install_ruby:
+        optional_steps.append(("Installing Ruby (rbenv + latest version)", install_ruby_step))
+    if install_go:
+        optional_steps.append(("Installing Go (latest version)", install_go_step))
+    if install_node:
+        optional_steps.append(("Installing Node.js (nvm + latest LTS + PNPM)", install_node_step))
+    
     if system_type == "workstation_desktop":
         desktop_steps = DESKTOP_STEPS
         if skip_audio:
             desktop_steps = [s for s in DESKTOP_STEPS if s[1] != configure_audio]
         return COMMON_STEPS + desktop_steps + SECURITY_STEPS + \
-               DESKTOP_SECURITY_STEPS + CLI_STEPS + DESKTOP_APP_STEPS + FINAL_STEPS
+               DESKTOP_SECURITY_STEPS + CLI_STEPS + optional_steps + DESKTOP_APP_STEPS + FINAL_STEPS
+    elif system_type == "pc_dev":
+        desktop_steps = DESKTOP_STEPS
+        if skip_audio:
+            desktop_steps = [s for s in DESKTOP_STEPS if s[1] != configure_audio]
+        return COMMON_STEPS + desktop_steps + SECURITY_STEPS + \
+               DESKTOP_SECURITY_STEPS + CLI_STEPS + optional_steps + PC_DEV_APP_STEPS + FINAL_STEPS
     elif system_type == "workstation_dev":
         desktop_steps = [s for s in DESKTOP_STEPS if s[1] != configure_audio]
         return COMMON_STEPS + desktop_steps + SECURITY_STEPS + \
-               DESKTOP_SECURITY_STEPS + CLI_STEPS + WORKSTATION_DEV_APP_STEPS + FINAL_STEPS
+               DESKTOP_SECURITY_STEPS + CLI_STEPS + optional_steps + WORKSTATION_DEV_APP_STEPS + FINAL_STEPS
     elif system_type == "server_dev":
-        return COMMON_STEPS + SECURITY_STEPS + CLI_STEPS + FINAL_STEPS
+        return COMMON_STEPS + SECURITY_STEPS + CLI_STEPS + optional_steps + FINAL_STEPS
     elif system_type == "server_web":
         security_steps = [
             ("Hardening SSH configuration", harden_ssh),
@@ -127,7 +201,7 @@ def get_steps_for_system_type(system_type: str, skip_audio: bool = False) -> lis
             ("Configuring automatic security updates", configure_auto_updates),
         ]
         return COMMON_STEPS + WEB_FIREWALL_STEPS + security_steps + \
-               WEB_SERVER_STEPS + CLI_STEPS + FINAL_STEPS
+               WEB_SERVER_STEPS + CLI_STEPS + optional_steps + FINAL_STEPS
     elif system_type == "server_proxmox":
         return PROXMOX_HARDENING_STEPS
     else:

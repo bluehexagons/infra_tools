@@ -9,12 +9,18 @@ def success_message(ip: str, username: str) -> None:
     print(f"Username: {username}")
     print()
     print("Connect using RDP client (Remmina, Microsoft Remote Desktop)")
+    print()
+    print("PC Dev setup includes:")
+    print("  - Desktop environment with RDP access")
+    print("  - Remmina RDP client for remote connections")
+    print("  - LibreOffice (installed by default)")
+    print("  - Standard desktop applications")
 
 
 def main() -> int:
     return setup_main(
-        "workstation_dev",
-        "Remote Workstation Dev Setup",
+        "pc_dev",
+        "PC Development Setup",
         success_message
     )
 
