@@ -132,6 +132,7 @@ def main() -> int:
     # Handle deployments if specified
     if args.deploy:
         from remote_modules.deploy_steps import detect_project_type, build_rails_project, build_node_project, build_static_project
+        from remote_modules.utils import run
         import shutil
         import tempfile
         import subprocess
@@ -189,8 +190,10 @@ def main() -> int:
                     print(f"  ⚠ Unknown project type, no build performed")
                 
                 # Set proper permissions
-                subprocess.run(f"chown -R www-data:www-data {shlex.quote(dest_path)}", shell=True, check=False)
-                subprocess.run(f"chmod -R 755 {shlex.quote(dest_path)}", shell=True, check=False)
+                run(f"chown -R www-data:www-data {shlex.quote(dest_path)}", check=False)
+                run(f"chmod -R 755 {shlex.quote(dest_path)}")
+                
+                print(f"  ✓ Repository deployed to {dest_path}")
                 
                 print(f"  ✓ Repository deployed to {dest_path}")
         finally:

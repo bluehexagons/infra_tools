@@ -69,8 +69,12 @@ def get_current_username() -> str:
     return getpass.getuser()
 
 
-def clone_repository(git_url: str, temp_dir: str) -> str:
-    """Clone a git repository locally using the caller's credentials."""
+def clone_repository(git_url: str, temp_dir: str) -> Optional[str]:
+    """Clone a git repository locally using the caller's credentials.
+    
+    Returns:
+        The path to the cloned repository, or None if cloning fails.
+    """
     repo_name = git_url.rstrip('/').split('/')[-1]
     if repo_name.endswith('.git'):
         repo_name = repo_name[:-4]
@@ -310,6 +314,7 @@ sys.path.insert(0, '{escaped_install_dir}')
 from remote_modules.deploy_steps import deploy_repository, detect_project_type, build_rails_project, build_node_project, build_static_project
 import os
 import shlex
+import shutil
 
 deployments = {repr([(loc, url) for loc, _, url in cloned_repos])}
 
@@ -329,10 +334,8 @@ for location, git_url in deployments:
     # Move from temp to destination
     if os.path.exists(dest_path):
         print(f'  Destination {{dest_path}} already exists, removing...')
-        import shutil
         shutil.rmtree(dest_path)
     
-    import shutil
     shutil.move(source_path, dest_path)
     
     # Detect project type and build

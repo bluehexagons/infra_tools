@@ -5,7 +5,7 @@ import shlex
 import shutil
 import tempfile
 
-from .utils import run, file_contains
+from .utils import run
 
 
 def detect_project_type(repo_path: str) -> str:
@@ -27,7 +27,7 @@ def detect_project_type(repo_path: str) -> str:
     return "unknown"
 
 
-def build_rails_project(project_path: str, **_) -> None:
+def build_rails_project(project_path: str, web_user: str = "www-data", **_) -> None:
     """Build a Ruby on Rails project."""
     print(f"  Building Rails project at {project_path}")
     
@@ -62,7 +62,7 @@ def build_static_project(project_path: str, **_) -> None:
     print("  ✓ Static files ready")
 
 
-def deploy_repository(deploy_location: str, git_url: str, **_) -> None:
+def deploy_repository(deploy_location: str, git_url: str, web_user: str = "www-data", web_group: str = "www-data", **_) -> None:
     """
     Deploy a git repository to a specific location.
     
@@ -97,7 +97,7 @@ def deploy_repository(deploy_location: str, git_url: str, **_) -> None:
     print(f"  Detected project type: {project_type}")
     
     if project_type == "rails":
-        build_rails_project(project_path)
+        build_rails_project(project_path, web_user=web_user)
     elif project_type == "node":
         build_node_project(project_path)
     elif project_type == "static":
@@ -106,7 +106,7 @@ def deploy_repository(deploy_location: str, git_url: str, **_) -> None:
         print(f"  ⚠ Unknown project type, no build performed")
     
     # Set proper permissions
-    run(f"chown -R www-data:www-data {shlex.quote(project_path)}", check=False)
+    run(f"chown -R {shlex.quote(web_user)}:{shlex.quote(web_group)} {shlex.quote(project_path)}", check=False)
     run(f"chmod -R 755 {shlex.quote(project_path)}")
     
     print(f"  ✓ Repository deployed to {project_path}")
