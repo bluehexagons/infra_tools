@@ -249,33 +249,39 @@ def install_browser(browser: str, os_type: str, use_flatpak: bool = False, **_) 
         print("  ✓ Lynx installed")
     
     elif browser == "chromium":
-        print("  Installing ungoogled-chromium...")
-        if not os.path.exists("/usr/bin/chromium"):
-            run("apt-get install -y -qq chromium chromium-l10n", check=False)
-        
-        print("  Installing uBlock Origin extension for Chromium...")
-        run("wget -qO /tmp/ublock_origin_chromium.crx 'https://clients2.google.com/service/update2/crx?response=redirect&prodversion=120.0&acceptformat=crx3&x=id%3Dcjpalhdlnbpafiamejdnhcphjbkeiagm%26installsource%3Dondemand%26uc'", check=False)
-        print("  ✓ ungoogled-chromium installed (uBlock Origin downloaded to /tmp/ublock_origin_chromium.crx)")
+        if use_flatpak:
+            if is_flatpak_app_installed("org.chromium.Chromium"):
+                print("  ✓ ungoogled-chromium already installed")
+                return
+            print("  Installing ungoogled-chromium...")
+            run(f"flatpak install -y {FLATPAK_REMOTE} org.chromium.Chromium", check=False)
+            print("  ✓ ungoogled-chromium installed via Flatpak")
+        else:
+            print("  ✗ Error: ungoogled-chromium is only available via Flatpak")
+            print("  Please use --flatpak flag to install ungoogled-chromium")
+            return
 
 
-def install_desktop_apps(os_type: str, username: str, browser: str = "brave", use_flatpak: bool = False, **_) -> None:
+def install_desktop_apps(os_type: str, username: str, browser: str = "brave", use_flatpak: bool = False, install_office: bool = False, **_) -> None:
     install_browser(browser, os_type, use_flatpak)
     
     if use_flatpak:
         install_flatpak_if_needed(os_type)
         
         all_installed = (
-            is_flatpak_app_installed("org.libreoffice.LibreOffice") and
             is_flatpak_app_installed("com.vscodium.codium") and
             is_flatpak_app_installed("com.discordapp.Discord")
         )
+        if install_office:
+            all_installed = all_installed and is_flatpak_app_installed("org.libreoffice.LibreOffice")
+        
         if all_installed:
             print("  ✓ Desktop apps already installed via Flatpak")
             return
         
         print("  Installing desktop apps via Flatpak...")
         
-        if not is_flatpak_app_installed("org.libreoffice.LibreOffice"):
+        if install_office and not is_flatpak_app_installed("org.libreoffice.LibreOffice"):
             print("  Installing LibreOffice...")
             run(f"flatpak install -y {FLATPAK_REMOTE} org.libreoffice.LibreOffice", check=False)
         
@@ -287,21 +293,22 @@ def install_desktop_apps(os_type: str, username: str, browser: str = "brave", us
             print("  Installing Discord...")
             run(f"flatpak install -y {FLATPAK_REMOTE} com.discordapp.Discord", check=False)
         
-        print("  ✓ Desktop apps installed via Flatpak (LibreOffice, VSCodium, Discord)")
+        apps_list = "VSCodium, Discord"
+        if install_office:
+            apps_list = "LibreOffice, " + apps_list
+        print(f"  ✓ Desktop apps installed via Flatpak ({apps_list})")
     else:
-        all_installed = (
-            is_package_installed("libreoffice", os_type) and
-            is_package_installed("codium", os_type)
-        )
+        all_installed = is_package_installed("codium", os_type)
+        if install_office:
+            all_installed = all_installed and is_package_installed("libreoffice", os_type)
+        
         if all_installed:
             print("  ✓ Desktop apps already installed")
             return
 
-        if not is_package_installed("libreoffice", os_type):
+        if install_office and not is_package_installed("libreoffice", os_type):
             print("  Installing LibreOffice...")
             run("apt-get install -y -qq libreoffice")
-        else:
-            print("  ✓ LibreOffice already installed")
 
         print("  Installing VSCodium...")
         if not os.path.exists("/usr/share/keyrings/vscodium-archive-keyring.gpg"):
@@ -317,7 +324,10 @@ def install_desktop_apps(os_type: str, username: str, browser: str = "brave", us
             run("apt-get install -y -qq /tmp/discord.deb", check=False)
             run("rm -f /tmp/discord.deb", check=False)
 
-        print("  ✓ Desktop apps installed (LibreOffice, VSCodium, Discord)")
+        apps_list = "VSCodium, Discord"
+        if install_office:
+            apps_list = "LibreOffice, " + apps_list
+        print(f"  ✓ Desktop apps installed ({apps_list})")
 
 
 def configure_default_browser(username: str, browser: str = "brave", **_) -> None:

@@ -5,7 +5,7 @@ import getpass
 import sys
 from typing import Optional
 
-from remote_modules.utils import validate_username, detect_os
+from remote_modules.utils import validate_username, detect_os, set_dry_run
 from remote_modules.progress import progress_bar
 from remote_modules.system_types import get_steps_for_system_type
 
@@ -34,6 +34,10 @@ def main() -> int:
                        help="Web browser to install (default: brave)")
     parser.add_argument("--flatpak", action="store_true",
                        help="Install desktop apps via Flatpak when available (non-containerized environments)")
+    parser.add_argument("--office", action="store_true",
+                       help="Install LibreOffice (desktop only)")
+    parser.add_argument("--dry-run", action="store_true",
+                       help="Show what would be done without executing commands")
     parser.add_argument("--ruby", action="store_true",
                        help="Install rbenv + latest Ruby version")
     parser.add_argument("--go", action="store_true",
@@ -42,6 +46,12 @@ def main() -> int:
                        help="Install nvm + latest Node.JS + PNPM + update NPM")
     
     args = parser.parse_args()
+    
+    if args.dry_run:
+        set_dry_run(True)
+        print("=" * 60)
+        print("DRY-RUN MODE ENABLED")
+        print("=" * 60)
     
     if args.steps:
         system_type = "custom_steps"
@@ -73,6 +83,10 @@ def main() -> int:
         print(f"Browser: {args.browser}")
     if args.flatpak and system_type in ["workstation_desktop", "workstation_dev"]:
         print("Flatpak: Yes")
+    if args.office and system_type in ["workstation_desktop", "workstation_dev"]:
+        print("Office: Yes")
+    if args.dry_run:
+        print("Dry-run: Yes")
     if args.steps:
         print(f"Steps: {args.steps}")
     sys.stdout.flush()
@@ -81,7 +95,7 @@ def main() -> int:
     print(f"OS: {os_type}")
     sys.stdout.flush()
 
-    steps = get_steps_for_system_type(system_type, args.skip_audio, args.desktop, args.browser, args.flatpak, args.ruby, args.go, args.node, args.steps)
+    steps = get_steps_for_system_type(system_type, args.skip_audio, args.desktop, args.browser, args.flatpak, args.office, args.ruby, args.go, args.node, args.steps)
     total_steps = len(steps)
     for i, (name, func) in enumerate(steps, 1):
         bar = progress_bar(i, total_steps)
@@ -94,7 +108,8 @@ def main() -> int:
             timezone=args.timezone,
             desktop=args.desktop,
             browser=args.browser,
-            use_flatpak=args.flatpak
+            use_flatpak=args.flatpak,
+            install_office=args.office
         )
     
     bar = progress_bar(total_steps, total_steps)

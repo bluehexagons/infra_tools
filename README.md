@@ -53,8 +53,10 @@ Desktop workstation scripts support desktop environment and browser selection:
 - `--browser [brave|firefox|browsh|vivaldi|lynx|chromium]` - Choose web browser (default: brave)
   - Firefox: Installs with uBlock Origin extension
   - Browsh: Requires Firefox (text-based browser)
-  - Chromium: Uses ungoogled-chromium with uBlock Origin extension
+  - Chromium: ungoogled-chromium (Flatpak only - returns error without --flatpak)
 - `--flatpak` - Install desktop apps via Flatpak (for non-containerized environments)
+- `--office` - Install LibreOffice (desktop only, not installed by default)
+- `--dry-run` - Show what would be done without executing commands
 
 Example:
 ```bash
@@ -67,22 +69,27 @@ python3 setup_workstation_desktop.py 192.168.1.100 --desktop i3
 # Use Firefox instead of Brave
 python3 setup_workstation_desktop.py 192.168.1.100 --browser firefox
 
-# Use Flatpak for desktop apps with Vivaldi browser
-python3 setup_workstation_dev.py 192.168.1.100 --flatpak --browser vivaldi
+# Use Flatpak for desktop apps with Vivaldi browser and LibreOffice
+python3 setup_workstation_dev.py 192.168.1.100 --flatpak --browser vivaldi --office
+
+# Dry-run to see what would be done
+python3 setup_workstation_desktop.py 192.168.1.100 --dry-run
 ```
 
 ## Features
 
 **Workstation Desktop:**
 - Desktop environment (XFCE, i3, or Cinnamon) + xRDP + audio
-- Browser (Brave, Firefox, Vivaldi, Chromium, Lynx, or Browsh)
-- Desktop apps: LibreOffice, VSCodium, Discord
+- Browser (Brave, Firefox, Vivaldi, Lynx, or Browsh; Chromium via Flatpak only)
+- Desktop apps: VSCodium, Discord
+- Optional: LibreOffice (with --office flag)
 - fail2ban for RDP
 
 **Workstation Dev:**
 - Desktop environment (XFCE, i3, or Cinnamon) + xRDP (no audio)
-- Browser (Brave, Firefox, Vivaldi, Chromium, Lynx, or Browsh)
+- Browser (Brave, Firefox, Vivaldi, Lynx, or Browsh; Chromium via Flatpak only)
 - Desktop apps: Visual Studio Code
+- Optional: LibreOffice (with --office flag)
 - fail2ban for RDP
 
 **Server Dev:**

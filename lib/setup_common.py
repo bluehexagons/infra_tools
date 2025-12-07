@@ -101,6 +101,10 @@ def create_argument_parser(description: str, allow_steps: bool = False) -> argpa
                        help="Web browser to install (default: brave)")
     parser.add_argument("--flatpak", action="store_true",
                        help="Install desktop apps via Flatpak when available (non-containerized environments)")
+    parser.add_argument("--office", action="store_true",
+                       help="Install LibreOffice (desktop only)")
+    parser.add_argument("--dry-run", action="store_true",
+                       help="Show what would be done without executing commands")
     parser.add_argument("--ruby", action="store_true",
                        help="Install rbenv + latest Ruby version")
     parser.add_argument("--go", action="store_true",
@@ -121,6 +125,8 @@ def run_remote_setup(
     desktop: str = "xfce",
     browser: str = "brave",
     use_flatpak: bool = False,
+    install_office: bool = False,
+    dry_run: bool = False,
     install_ruby: bool = False,
     install_go: bool = False,
     install_node: bool = False,
@@ -166,6 +172,12 @@ def run_remote_setup(
     
     if use_flatpak:
         cmd_parts.append("--flatpak")
+    
+    if install_office:
+        cmd_parts.append("--office")
+    
+    if dry_run:
+        cmd_parts.append("--dry-run")
     
     if install_ruby:
         cmd_parts.append("--ruby")
@@ -250,6 +262,10 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
         print(f"Browser: {args.browser}")
     if hasattr(args, 'flatpak') and args.flatpak and system_type in ["workstation_desktop", "workstation_dev"]:
         print("Flatpak: Yes")
+    if hasattr(args, 'office') and args.office and system_type in ["workstation_desktop", "workstation_dev"]:
+        print("Office: Yes")
+    if hasattr(args, 'dry_run') and args.dry_run:
+        print("Dry-run: Yes")
     if allow_steps and hasattr(args, 'steps') and args.steps:
         print(f"Steps: {args.steps}")
     print("=" * 60)
@@ -259,10 +275,12 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
     desktop = args.desktop if hasattr(args, 'desktop') else "xfce"
     browser = args.browser if hasattr(args, 'browser') else "brave"
     use_flatpak = args.flatpak if hasattr(args, 'flatpak') else False
+    install_office = args.office if hasattr(args, 'office') else False
+    dry_run = args.dry_run if hasattr(args, 'dry_run') else False
     
     returncode = run_remote_setup(
         args.ip, username, system_type, args.password, args.key, 
-        timezone, args.skip_audio, desktop, browser, use_flatpak, args.ruby, args.go, args.node, custom_steps
+        timezone, args.skip_audio, desktop, browser, use_flatpak, install_office, dry_run, args.ruby, args.go, args.node, custom_steps
     )
     
     if returncode != 0:
