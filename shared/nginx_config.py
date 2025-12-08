@@ -2,18 +2,29 @@
 
 import os
 import shlex
-from typing import Optional
+from typing import Optional, Callable
 
 
-def generate_self_signed_cert(domain: str, run_func) -> tuple:
+SSL_PROTOCOLS = "TLSv1.2 TLSv1.3"
+SSL_CIPHERS = "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384"
+
+
+def get_ssl_cert_path(domain: Optional[str]) -> tuple:
+    """Get SSL certificate and key paths for a domain."""
+    cert_name = domain or 'default'
+    cert_file = f"/etc/nginx/ssl/{cert_name}.crt"
+    key_file = f"/etc/nginx/ssl/{cert_name}.key"
+    return (cert_file, key_file)
+
+
+def generate_self_signed_cert(domain: str, run_func: Callable) -> tuple:
     """Generate self-signed SSL certificate for a domain."""
-    cert_dir = "/etc/nginx/ssl"
-    cert_file = f"{cert_dir}/{domain}.crt"
-    key_file = f"{cert_dir}/{domain}.key"
+    cert_file, key_file = get_ssl_cert_path(domain)
     
     if os.path.exists(cert_file) and os.path.exists(key_file):
         return (cert_file, key_file)
     
+    cert_dir = os.path.dirname(cert_file)
     run_func(f"mkdir -p {cert_dir}")
     run_func(f"openssl req -x509 -nodes -days 365 -newkey rsa:2048 "
              f"-keyout {shlex.quote(key_file)} -out {shlex.quote(cert_file)} "
@@ -28,13 +39,14 @@ def generate_nginx_config(domain: Optional[str], path: str, serve_path: str,
     """Generate nginx configuration for a deployed application."""
     location_path = path.rstrip('/') if path != '/' else '/'
     
+    cert_file, key_file = get_ssl_cert_path(domain)
+    
     if needs_proxy:
         if not proxy_port:
             proxy_port = 3000
         
         server_name_directive = f"server_name {domain};" if domain else "server_name _;"
         default_server = " default_server" if is_default else ""
-        ssl_cert = f"/etc/nginx/ssl/{domain or 'default'}"
         
         config = f"""server {{
     listen 80{default_server};
@@ -44,11 +56,11 @@ def generate_nginx_config(domain: Optional[str], path: str, serve_path: str,
     
     {server_name_directive}
     
-    ssl_certificate {ssl_cert}.crt;
-    ssl_certificate_key {ssl_cert}.key;
-    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_certificate {cert_file};
+    ssl_certificate_key {key_file};
+    ssl_protocols {SSL_PROTOCOLS};
     ssl_prefer_server_ciphers on;
-    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_ciphers {SSL_CIPHERS};
     
     location /.well-known/acme-challenge/ {{
         root /var/www/letsencrypt;
@@ -73,7 +85,6 @@ def generate_nginx_config(domain: Optional[str], path: str, serve_path: str,
         index_file = "index.html index.htm"
         server_name_directive = f"server_name {domain};" if domain else "server_name _;"
         default_server = " default_server" if is_default else ""
-        ssl_cert = f"/etc/nginx/ssl/{domain or 'default'}"
         
         if location_path == '/':
             config = f"""server {{
@@ -84,11 +95,11 @@ def generate_nginx_config(domain: Optional[str], path: str, serve_path: str,
     
     {server_name_directive}
     
-    ssl_certificate {ssl_cert}.crt;
-    ssl_certificate_key {ssl_cert}.key;
-    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_certificate {cert_file};
+    ssl_certificate_key {key_file};
+    ssl_protocols {SSL_PROTOCOLS};
     ssl_prefer_server_ciphers on;
-    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_ciphers {SSL_CIPHERS};
     
     root {serve_path};
     index {index_file};
@@ -124,11 +135,11 @@ def generate_nginx_config(domain: Optional[str], path: str, serve_path: str,
     
     {server_name_directive}
     
-    ssl_certificate {ssl_cert}.crt;
-    ssl_certificate_key {ssl_cert}.key;
-    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_certificate {cert_file};
+    ssl_certificate_key {key_file};
+    ssl_protocols {SSL_PROTOCOLS};
     ssl_prefer_server_ciphers on;
-    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_ciphers {SSL_CIPHERS};
     
     location /.well-known/acme-challenge/ {{
         root /var/www/letsencrypt;
@@ -152,7 +163,7 @@ def generate_nginx_config(domain: Optional[str], path: str, serve_path: str,
 
 
 def create_nginx_site(domain: Optional[str], path: str, serve_path: str,
-                     needs_proxy: bool, proxy_port: Optional[int], run_func,
+                     needs_proxy: bool, proxy_port: Optional[int], run_func: Callable,
                      is_default: bool = False) -> str:
     """Create an nginx site configuration file."""
     cert_domain = domain or 'default'
@@ -200,4 +211,5 @@ def create_nginx_site(domain: Optional[str], path: str, serve_path: str,
     print(f"  ✓ nginx reloaded")
     
     return config_file
+
 
