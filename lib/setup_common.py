@@ -96,8 +96,33 @@ def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = Non
                         print(f"  Error fetching updates: {result.stderr}")
                         return None
                     
+                    # Get the default branch from the remote
                     result = subprocess.run(
-                        ["git", "-C", cache_path, "reset", "--hard", "origin/HEAD"],
+                        ["git", "-C", cache_path, "symbolic-ref", "refs/remotes/origin/HEAD", "--short"],
+                        capture_output=True,
+                        text=True,
+                        timeout=30
+                    )
+                    if result.returncode == 0:
+                        default_branch = result.stdout.strip()
+                    else:
+                        # Fallback: try common default branches
+                        for branch in ["origin/main", "origin/master"]:
+                            result = subprocess.run(
+                                ["git", "-C", cache_path, "rev-parse", "--verify", branch],
+                                capture_output=True,
+                                text=True,
+                                timeout=10
+                            )
+                            if result.returncode == 0:
+                                default_branch = branch
+                                break
+                        else:
+                            print(f"  Error: Could not determine default branch")
+                            return None
+                    
+                    result = subprocess.run(
+                        ["git", "-C", cache_path, "reset", "--hard", default_branch],
                         capture_output=True,
                         text=True,
                         timeout=30
@@ -110,6 +135,8 @@ def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = Non
                 except Exception as e:
                     print(f"  Error updating repository: {e}")
                     return None
+            else:
+                print(f"  [DRY RUN] Would fetch and reset cached repository")
         else:
             print(f"  Caching {git_url}...")
             if not dry_run:
@@ -128,10 +155,11 @@ def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = Non
                 except Exception as e:
                     print(f"  Error caching repository: {e}")
                     return None
+            else:
+                print(f"  [DRY RUN] Would clone to cache")
         
         if not dry_run:
             try:
-                import shutil
                 if os.path.exists(clone_path):
                     shutil.rmtree(clone_path)
                 shutil.copytree(cache_path, clone_path, symlinks=True)
@@ -139,6 +167,8 @@ def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = Non
             except Exception as e:
                 print(f"  Error copying repository: {e}")
                 return None
+        else:
+            print(f"  [DRY RUN] Would copy to {clone_path}")
         
         return clone_path
     else:
