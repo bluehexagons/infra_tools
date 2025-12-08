@@ -165,10 +165,6 @@ def main() -> int:
     print("=" * 60)
     print()
     
-    # Save updated setup command (unless dry-run)
-    if not dry_run:
-        save_setup_command(args.host, system_type, merged_args)
-    
     # Run the setup with merged arguments (uses current script version)
     returncode = run_remote_setup(
         args.host, username, system_type, password, key,
@@ -179,6 +175,10 @@ def main() -> int:
     if returncode != 0:
         print(f"\n✗ Patch failed (exit code: {returncode})")
         return 1
+    
+    # Save updated setup command only after successful execution (unless dry-run)
+    if not dry_run:
+        save_setup_command(args.host, system_type, merged_args)
     
     print()
     print("=" * 60)

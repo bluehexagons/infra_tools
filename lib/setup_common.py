@@ -2,6 +2,7 @@
 
 import argparse
 import getpass
+import hashlib
 import io
 import os
 import re
@@ -34,10 +35,11 @@ def validate_ip_address(ip: str) -> bool:
 
 def validate_host(host: str) -> bool:
     """Validate if host is a valid IP address or hostname."""
-    if validate_ip_address(host):
+    normalized_host = host.lower().rstrip('.')
+    if validate_ip_address(normalized_host):
         return True
     hostname_pattern = r'^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?$'
-    return bool(re.match(hostname_pattern, host))
+    return bool(re.match(hostname_pattern, normalized_host))
 
 
 def validate_username(username: str) -> bool:
@@ -83,9 +85,12 @@ def get_current_username() -> str:
 
 def get_cache_path_for_host(host: str) -> str:
     """Get the cache file path for a given host."""
-    safe_host = re.sub(r'[^a-zA-Z0-9._-]', '_', host)
+    normalized_host = host.lower().rstrip('.')
+    import hashlib
+    host_hash = hashlib.sha256(normalized_host.encode()).hexdigest()[:8]
+    safe_host = re.sub(r'[^a-zA-Z0-9._-]', '_', normalized_host)
     os.makedirs(SETUP_CACHE_DIR, exist_ok=True)
-    return os.path.join(SETUP_CACHE_DIR, f"{safe_host}.json")
+    return os.path.join(SETUP_CACHE_DIR, f"{safe_host}_{host_hash}.json")
 
 
 def save_setup_command(host: str, system_type: str, args_dict: Dict[str, Any]) -> None:
