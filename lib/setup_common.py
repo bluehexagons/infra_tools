@@ -11,7 +11,8 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-from typing import Optional
+import json
+from typing import Optional, Dict, List, Any
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -20,6 +21,7 @@ REMOTE_MODULES_DIR = os.path.join(SCRIPT_DIR, "..", "remote_modules")
 SHARED_DIR = os.path.join(SCRIPT_DIR, "..", "shared")
 REMOTE_INSTALL_DIR = "/opt/infra_tools"
 GIT_CACHE_DIR = os.path.expanduser("~/.cache/infra_tools/git_repos")
+SETUP_CACHE_DIR = os.path.expanduser("~/.cache/infra_tools/setups")
 
 
 def validate_ip_address(ip: str) -> bool:
@@ -28,6 +30,14 @@ def validate_ip_address(ip: str) -> bool:
         return False
     octets = ip.split('.')
     return all(0 <= int(octet) <= 255 for octet in octets)
+
+
+def validate_host(host: str) -> bool:
+    """Validate if host is a valid IP address or hostname."""
+    if validate_ip_address(host):
+        return True
+    hostname_pattern = r'^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?$'
+    return bool(re.match(hostname_pattern, host))
 
 
 def validate_username(username: str) -> bool:
@@ -69,6 +79,63 @@ def get_local_timezone() -> str:
 
 def get_current_username() -> str:
     return getpass.getuser()
+
+
+def get_cache_path_for_host(host: str) -> str:
+    """Get the cache file path for a given host."""
+    safe_host = re.sub(r'[^a-zA-Z0-9._-]', '_', host)
+    os.makedirs(SETUP_CACHE_DIR, exist_ok=True)
+    return os.path.join(SETUP_CACHE_DIR, f"{safe_host}.json")
+
+
+def save_setup_command(host: str, system_type: str, args_dict: Dict[str, Any]) -> None:
+    """Save the setup command for a host."""
+    cache_path = get_cache_path_for_host(host)
+    cache_data = {
+        "host": host,
+        "system_type": system_type,
+        "args": args_dict,
+        "script": f"setup_{system_type}.py"
+    }
+    with open(cache_path, 'w') as f:
+        json.dump(cache_data, f, indent=2)
+
+
+def load_setup_command(host: str) -> Optional[Dict[str, Any]]:
+    """Load the cached setup command for a host."""
+    cache_path = get_cache_path_for_host(host)
+    if not os.path.exists(cache_path):
+        return None
+    try:
+        with open(cache_path, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Warning: Failed to load cached setup for {host}: {e}")
+        return None
+
+
+def merge_setup_args(cached_args: Dict[str, Any], new_args: Dict[str, Any]) -> Dict[str, Any]:
+    """Merge cached args with new args, adding/modifying but not removing."""
+    merged = cached_args.copy()
+    
+    for key, value in new_args.items():
+        if key == 'deploy' and key in merged:
+            if merged[key] is None:
+                merged[key] = value
+            elif value is not None:
+                existing_deploys = {(spec, url) for spec, url in merged[key]}
+                for deploy_spec, git_url in value:
+                    deploy_tuple = (deploy_spec, git_url)
+                    if deploy_tuple not in existing_deploys:
+                        merged[key].append([deploy_spec, git_url])
+                        existing_deploys.add(deploy_tuple)
+        elif value is not None:
+            if isinstance(value, bool) and value:
+                merged[key] = value
+            elif not isinstance(value, bool):
+                merged[key] = value
+    
+    return merged
 
 
 def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = None, dry_run: bool = False) -> Optional[str]:
@@ -449,8 +516,8 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
     parser = create_argument_parser(description, allow_steps)
     args = parser.parse_args()
     
-    if not validate_ip_address(args.ip):
-        print(f"Error: Invalid IP address: {args.ip}")
+    if not validate_host(args.ip):
+        print(f"Error: Invalid IP address or hostname: {args.ip}")
         return 1
     
     username = args.username if args.username else get_current_username()
@@ -507,6 +574,26 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
         install_office = args.office if hasattr(args, 'office') else False
     dry_run = args.dry_run if hasattr(args, 'dry_run') else False
     deploy_specs = args.deploy if hasattr(args, 'deploy') and args.deploy else None
+    
+    # Save setup command for patching later (cache script name and args, not the script itself)
+    args_dict = {
+        'username': username,
+        'password': args.password if args.password else None,
+        'key': args.key if args.key else None,
+        'timezone': timezone,
+        'skip_audio': args.skip_audio,
+        'desktop': desktop if hasattr(args, 'desktop') else None,
+        'browser': browser if hasattr(args, 'browser') else None,
+        'flatpak': use_flatpak if hasattr(args, 'flatpak') else None,
+        'office': install_office if hasattr(args, 'office') else None,
+        'ruby': args.ruby if hasattr(args, 'ruby') else False,
+        'go': args.go if hasattr(args, 'go') else False,
+        'node': args.node if hasattr(args, 'node') else False,
+        'steps': custom_steps,
+        'deploy': deploy_specs
+    }
+    if not dry_run:
+        save_setup_command(args.ip, system_type, args_dict)
     
     returncode = run_remote_setup(
         args.ip, username, system_type, args.password, args.key, 

@@ -11,6 +11,7 @@ Automated setup scripts for remote Linux systems.
 - `setup_server_web.py` - Web server with nginx (static content & reverse proxy)
 - `setup_server_proxmox.py` - Proxmox server hardening
 - `setup_steps.py` - Run custom steps only
+- `patch_setup.py` - Update a previously configured system with new settings
 
 ## Requirements
 
@@ -20,27 +21,53 @@ Automated setup scripts for remote Linux systems.
 
 ## Usage
 
+**Note:** All scripts accept either IP addresses or hostnames.
+
 ```bash
-# Workstation with desktop/RDP
-python3 setup_workstation_desktop.py <ip> [username] [-k key] [-p password] [-t timezone] [--skip-audio]
+# Workstation with desktop/RDP (IP or hostname)
+python3 setup_workstation_desktop.py 192.168.1.100 [username] [-k key] [-p password] [-t timezone] [--skip-audio]
+python3 setup_workstation_desktop.py workstation.local [username] [-k key] [-p password] [-t timezone] [--skip-audio]
 
 # PC development workstation (bare hardware, Remmina + LibreOffice by default)
-python3 setup_pc_dev.py <ip> [username] [-k key] [-p password] [-t timezone] [--skip-audio]
+python3 setup_pc_dev.py <ip-or-hostname> [username] [-k key] [-p password] [-t timezone] [--skip-audio]
 
 # Workstation dev (no audio, Vivaldi + VS Code)
-python3 setup_workstation_dev.py <ip> [username] [-k key] [-p password] [-t timezone]
+python3 setup_workstation_dev.py <ip-or-hostname> [username] [-k key] [-p password] [-t timezone]
 
 # Development server
-python3 setup_server_dev.py <ip> [username] [-k key] [-p password] [-t timezone]
+python3 setup_server_dev.py <ip-or-hostname> [username] [-k key] [-p password] [-t timezone]
 
 # Web server
-python3 setup_server_web.py <ip> [username] [-k key] [-p password] [-t timezone]
+python3 setup_server_web.py <ip-or-hostname> [username] [-k key] [-p password] [-t timezone]
 
 # Proxmox server hardening
-python3 setup_server_proxmox.py <ip> [-k key] [-t timezone]
+python3 setup_server_proxmox.py <ip-or-hostname> [-k key] [-t timezone]
 
 # Custom steps only
-python3 setup_steps.py <ip> [username] --steps "install_ruby install_node" [-k key] [-p password] [-t timezone]
+python3 setup_steps.py <ip-or-hostname> [username] --steps "install_ruby install_node" [-k key] [-p password] [-t timezone]
+
+# Patch a previously configured system (adds/modifies settings, doesn't remove)
+python3 patch_setup.py <ip-or-hostname> [--deploy DOMAIN_OR_PATH GIT_URL] [other-flags...]
+```
+
+## Patching Systems
+
+The `patch_setup.py` script allows you to update a previously configured system without re-running the entire setup:
+
+- **Cached Configuration**: Each setup is cached locally in `~/.cache/infra_tools/setups/`
+- **Intelligent Merging**: New arguments are merged with cached ones (adds/modifies but never removes)
+- **Current Scripts**: Uses the current version of setup scripts, not cached versions
+- **Multiple Deployments**: Can add new `--deploy` targets without affecting existing ones
+
+Example:
+```bash
+# Initial setup
+python3 setup_server_web.py web.example.com --ruby --deploy mysite.com https://github.com/user/site.git
+
+# Later, add Node.js and deploy another site
+python3 patch_setup.py web.example.com --node --deploy api.example.com https://github.com/user/api.git
+
+# Result: System now has Ruby AND Node.js, with BOTH deployments configured
 ```
 
 ## Optional Flags
