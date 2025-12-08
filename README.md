@@ -141,8 +141,6 @@ python3 /opt/infra_tools/remote_setup.py --system-type server_web --username myu
 ```
 
 **Deployment Process**: Setup scripts clone repositories locally using your git credentials, upload them to `/opt/infra_tools/deployments/` on the remote server, then execute `remote_setup.py --lite-deploy` to deploy from the uploaded files.
-  --deploy mysite.com https://github.com/user/site.git
-```
 
 ## Features
 

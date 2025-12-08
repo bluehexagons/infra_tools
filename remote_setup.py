@@ -15,6 +15,14 @@ from remote_modules.system_types import get_steps_for_system_type
 VALID_SYSTEM_TYPES = ["workstation_desktop", "pc_dev", "workstation_dev", "server_dev", "server_web", "server_proxmox", "custom_steps"]
 
 
+def extract_repo_name(git_url: str) -> str:
+    """Extract repository name from git URL."""
+    repo_name = git_url.rstrip('/').split('/')[-1]
+    if repo_name.endswith('.git'):
+        repo_name = repo_name[:-4]
+    return repo_name
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Remote system setup")
     parser.add_argument("--system-type", required=False,
@@ -145,10 +153,7 @@ def main() -> int:
         if args.lite_deploy:
             # Use pre-uploaded files from /opt/infra_tools/deployments/
             for deploy_spec, git_url in args.deploy:
-                repo_name = git_url.rstrip('/').split('/')[-1]
-                if repo_name.endswith('.git'):
-                    repo_name = repo_name[:-4]
-                
+                repo_name = extract_repo_name(git_url)
                 source_path = f'/opt/infra_tools/deployments/{repo_name}'
                 
                 if not os.path.exists(source_path):
@@ -166,10 +171,7 @@ def main() -> int:
             temp_dir = tempfile.mkdtemp(prefix="infra_deploy_")
             try:
                 for deploy_spec, git_url in args.deploy:
-                    repo_name = git_url.rstrip('/').split('/')[-1]
-                    if repo_name.endswith('.git'):
-                        repo_name = repo_name[:-4]
-                    
+                    repo_name = extract_repo_name(git_url)
                     clone_path = os.path.join(temp_dir, repo_name)
                     
                     print(f"\nCloning {git_url}...")
