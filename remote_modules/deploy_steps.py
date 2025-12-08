@@ -10,9 +10,18 @@ from shared.nginx_config import create_nginx_site
 from .utils import run
 
 
+def ensure_app_user(username: str) -> None:
+    result = run(f"id {username}", check=False)
+    if result.returncode != 0:
+        print(f"  Creating application user: {username}")
+        run(f"useradd -m -s /bin/bash {username}")
+
+
 def deploy_repository(source_path: str, deploy_spec: str, git_url: str, 
-                      web_user: str = "www-data", web_group: str = "www-data", **_) -> None:
+                      web_user: str = "rails", web_group: str = "rails", **_) -> None:
     from shared.deploy_utils import parse_deploy_spec
+    
+    ensure_app_user(web_user)
     
     domain, path = parse_deploy_spec(deploy_spec)
     
@@ -43,7 +52,9 @@ def deploy_repository(source_path: str, deploy_spec: str, git_url: str,
             needs_proxy=deployment_info['needs_proxy'],
             proxy_port=3000 if deployment_info['needs_proxy'] else None,
             run_func=run,
-            is_default=is_default
+            is_default=is_default,
+            backend_port=deployment_info.get('backend_port'),
+            frontend_port=deployment_info.get('frontend_port')
         )
     except (OSError, PermissionError, ValueError) as e:
         print(f"  ⚠ Failed to configure nginx: {e}")

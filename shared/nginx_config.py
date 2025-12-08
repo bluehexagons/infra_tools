@@ -35,6 +35,7 @@ def generate_self_signed_cert(domain: str, run_func: Callable) -> tuple:
 
 def generate_nginx_config(domain: Optional[str], path: str, serve_path: str, 
                          needs_proxy: bool, proxy_port: Optional[int] = None,
+                         backend_port: Optional[int] = None, frontend_port: Optional[int] = None,
                          is_default: bool = False) -> str:
     """Generate nginx configuration for a deployed application."""
     location_path = path.rstrip('/') if path != '/' else '/'
@@ -42,13 +43,141 @@ def generate_nginx_config(domain: Optional[str], path: str, serve_path: str,
     cert_file, key_file = get_ssl_cert_path(domain)
     
     if needs_proxy:
-        if not proxy_port:
-            proxy_port = 3000
-        
         server_name_directive = f"server_name {domain};" if domain else "server_name _;"
         default_server = " default_server" if is_default else ""
         
-        config = f"""server {{
+        # Dual proxy configuration (Rails + Node)
+        if backend_port and frontend_port:
+            if domain:
+                # Subdomain strategy: api.domain.com -> Backend, domain.com -> Frontend
+                api_domain = f"api.{domain}"
+                api_cert, api_key = get_ssl_cert_path(api_domain)
+                
+                # API Server Block
+                api_config = f"""server {{
+    listen 80;
+    listen [::]:80;
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    
+    server_name {api_domain};
+    
+    ssl_certificate {api_cert};
+    ssl_certificate_key {api_key};
+    ssl_protocols {SSL_PROTOCOLS};
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers {SSL_CIPHERS};
+    
+    location /.well-known/acme-challenge/ {{
+        root /var/www/letsencrypt;
+    }}
+    
+    location / {{
+        proxy_pass http://127.0.0.1:{backend_port};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }}
+}}
+"""
+                # Frontend Server Block
+                frontend_config = f"""server {{
+    listen 80{default_server};
+    listen [::]:80{default_server};
+    listen 443 ssl http2{default_server};
+    listen [::]:443 ssl http2{default_server};
+    
+    {server_name_directive}
+    
+    ssl_certificate {cert_file};
+    ssl_certificate_key {key_file};
+    ssl_protocols {SSL_PROTOCOLS};
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers {SSL_CIPHERS};
+    
+    location /.well-known/acme-challenge/ {{
+        root /var/www/letsencrypt;
+    }}
+    
+    location / {{
+        proxy_pass http://127.0.0.1:{frontend_port};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # WebSocket support for Vite HMR
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }}
+    
+    location ~ /\\. {{
+        deny all;
+        access_log off;
+        log_not_found off;
+    }}
+}}
+"""
+                return f"{api_config}\n{frontend_config}"
+            
+            else:
+                # Subpath strategy: /api -> Backend, / -> Frontend
+                config = f"""server {{
+    listen 80{default_server};
+    listen [::]:80{default_server};
+    listen 443 ssl http2{default_server};
+    listen [::]:443 ssl http2{default_server};
+    
+    {server_name_directive}
+    
+    ssl_certificate {cert_file};
+    ssl_certificate_key {key_file};
+    ssl_protocols {SSL_PROTOCOLS};
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers {SSL_CIPHERS};
+    
+    location /.well-known/acme-challenge/ {{
+        root /var/www/letsencrypt;
+    }}
+    
+    # Backend API routes (rewrite /api/x -> /x)
+    location /api/ {{
+        rewrite ^/api/(.*) /$1 break;
+        proxy_pass http://127.0.0.1:{backend_port};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }}
+    
+    # Frontend
+    location {location_path} {{
+        proxy_pass http://127.0.0.1:{frontend_port};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # WebSocket support for Vite HMR
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }}
+    
+    location ~ /\\. {{
+        deny all;
+        access_log off;
+        log_not_found off;
+    }}
+}}
+"""
+        else:
+            if not proxy_port:
+                proxy_port = 3000
+            
+            config = f"""server {{
     listen 80{default_server};
     listen [::]:80{default_server};
     listen 443 ssl http2{default_server};
@@ -164,13 +293,18 @@ def generate_nginx_config(domain: Optional[str], path: str, serve_path: str,
 
 def create_nginx_site(domain: Optional[str], path: str, serve_path: str,
                      needs_proxy: bool, proxy_port: Optional[int], run_func: Callable,
-                     is_default: bool = False) -> str:
+                     is_default: bool = False,
+                     backend_port: Optional[int] = None, frontend_port: Optional[int] = None) -> str:
     """Create an nginx site configuration file."""
     cert_domain = domain or 'default'
     
     run_func("mkdir -p /var/www/letsencrypt/.well-known/acme-challenge")
     
     cert_file, key_file = generate_self_signed_cert(cert_domain, run_func)
+    
+    if domain and backend_port and frontend_port:
+        # Generate cert for api subdomain too
+        generate_self_signed_cert(f"api.{domain}", run_func)
     
     if domain:
         safe_domain = domain.replace('.', '_')
@@ -181,7 +315,8 @@ def create_nginx_site(domain: Optional[str], path: str, serve_path: str,
     
     config_file = f"/etc/nginx/sites-available/{config_name}"
     
-    config_content = generate_nginx_config(domain, path, serve_path, needs_proxy, proxy_port, is_default)
+    config_content = generate_nginx_config(domain, path, serve_path, needs_proxy, proxy_port, 
+                                         backend_port, frontend_port, is_default)
     
     try:
         with open(config_file, 'w') as f:

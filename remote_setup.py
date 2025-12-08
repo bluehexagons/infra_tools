@@ -164,7 +164,9 @@ def main() -> int:
                 deploy_repository(
                     source_path=source_path,
                     deploy_spec=deploy_spec,
-                    git_url=git_url
+                    git_url=git_url,
+                    web_user="rails",
+                    web_group="rails"
                 )
         else:
             # Clone repositories directly (local execution)
@@ -191,7 +193,9 @@ def main() -> int:
                     deploy_repository(
                         source_path=clone_path,
                         deploy_spec=deploy_spec,
-                        git_url=git_url
+                        git_url=git_url,
+                        web_user="rails",
+                        web_group="rails"
                     )
             finally:
                 if os.path.exists(temp_dir):

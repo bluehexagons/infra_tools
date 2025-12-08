@@ -459,32 +459,16 @@ tar xzf - && \
         return 0
     
     try:
-        process = subprocess.Popen(
-            ssh_cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=False,
-            bufsize=0,
-        )
-        
-        process.stdin.write(tar_data)
-        process.stdin.close()
-        
-        for line in io.TextIOWrapper(process.stdout, encoding='utf-8'):
-            print(line, end='', flush=True)
-        
-        returncode = process.wait()
-        
-        # Upload deployment repositories if setup succeeded
-        if returncode == 0 and deploy_tar_data:
+        # If we have deployment repositories to upload, send them first so
+        # the remote `remote_setup.py --lite-deploy` run can find
+        # /opt/infra_tools/deployments/<repo> while executing.
+        if deploy_tar_data:
             print(f"\n{'='*60}")
             print("Uploading deployment repositories...")
             print(f"{'='*60}")
-            
-            # Simply extract to /opt/infra_tools/deployments/
+
             deploy_cmd = f"cd {escaped_install_dir} && tar xzf -"
-            
+
             deploy_process = subprocess.Popen(
                 ["ssh"] + ssh_opts + [f"root@{ip}", deploy_cmd],
                 stdin=subprocess.PIPE,
@@ -493,19 +477,37 @@ tar xzf - && \
                 text=False,
                 bufsize=0,
             )
-            
+
             deploy_process.stdin.write(deploy_tar_data)
             deploy_process.stdin.close()
-            
+
             for line in io.TextIOWrapper(deploy_process.stdout, encoding='utf-8'):
                 print(line, end='', flush=True)
-            
+
             deploy_returncode = deploy_process.wait()
             if deploy_returncode != 0:
                 print(f"Warning: Repository upload returned non-zero exit code: {deploy_returncode}")
             else:
                 print(f"  ✓ Uploaded {len(cloned_repos)} repository(ies)")
-        
+
+        # Run the main remote setup (install remote files and execute script)
+        process = subprocess.Popen(
+            ssh_cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=False,
+            bufsize=0,
+        )
+
+        process.stdin.write(tar_data)
+        process.stdin.close()
+
+        for line in io.TextIOWrapper(process.stdout, encoding='utf-8'):
+            print(line, end='', flush=True)
+
+        returncode = process.wait()
+
         return returncode
         
     except Exception as e:

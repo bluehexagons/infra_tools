@@ -12,6 +12,7 @@ from .deploy_utils import (
     get_project_root,
     should_reverse_proxy
 )
+from .systemd_service import create_rails_service, create_node_service
 
 
 class DeploymentOrchestrator:
@@ -59,7 +60,33 @@ class DeploymentOrchestrator:
         if result.returncode != 0:
             print(f"  ⚠ Warning: Could not set ownership to {self.web_user}:{self.web_group}")
         
-        run_func(f"chmod -R 755 {shlex.quote(dest_path)}")
+        # Ensure write permissions for the group so the service user can write temp files
+        run_func(f"chmod -R 775 {shlex.quote(dest_path)}")
+        
+        # Set up systemd service for Rails apps
+        backend_port = None
+        frontend_port = None
+        
+        if project_type == "rails":
+            app_name = os.path.basename(dest_path)
+            create_rails_service(app_name, dest_path, 3000, self.web_user, self.web_group, run_func)
+            backend_port = 3000
+            
+            # Check for frontend
+            frontend_path = os.path.join(dest_path, "frontend")
+            if os.path.exists(frontend_path):
+                print(f"  Detected frontend at {frontend_path}")
+                
+                # Determine API URL
+                api_url = "/api"
+                if domain:
+                    api_url = f"https://api.{domain}"
+                
+                # Build frontend
+                self._build_node_project(frontend_path, run_func, api_url)
+                # Create Node service
+                create_node_service(app_name, frontend_path, 4000, self.web_user, self.web_group, run_func)
+                frontend_port = 4000
         
         print(f"  ✓ Repository deployed to {dest_path}")
         
@@ -69,7 +96,9 @@ class DeploymentOrchestrator:
             'path': path,
             'project_type': project_type,
             'serve_path': get_project_root(dest_path, project_type),
-            'needs_proxy': should_reverse_proxy(project_type)
+            'needs_proxy': should_reverse_proxy(project_type),
+            'backend_port': backend_port,
+            'frontend_port': frontend_port
         }
     
     def build_project(self, project_path: str, project_type: str, run_func):
@@ -86,16 +115,26 @@ class DeploymentOrchestrator:
         print(f"  Building Rails project at {project_path}")
         
         run_func(f"cd {shlex.quote(project_path)} && bundle install --deployment --without development test")
-        run_func(f"cd {shlex.quote(project_path)} && RAILS_ENV=production bundle exec rake assets:precompile")
+        
+        # Only precompile assets if the task exists (skips for API-only apps)
+        check_task = run_func(f"cd {shlex.quote(project_path)} && bundle exec rake -T assets:precompile | grep assets:precompile", check=False)
+        if check_task.returncode == 0:
+            run_func(f"cd {shlex.quote(project_path)} && RAILS_ENV=production bundle exec rake assets:precompile")
+        else:
+            print("  ℹ Skipping assets:precompile (task not found, likely API-only app)")
         
         print("  ✓ Rails project built")
     
-    def _build_node_project(self, project_path: str, run_func):
+    def _build_node_project(self, project_path: str, run_func, api_url: Optional[str] = None):
         print(f"  Building Node.js project at {project_path}")
         
         run_func(f"cd {shlex.quote(project_path)} && npm install")
         
-        result = run_func(f"cd {shlex.quote(project_path)} && npm run build", check=False)
+        build_cmd = "npm run build"
+        if api_url:
+            build_cmd = f"VITE_API_URL={shlex.quote(api_url)} {build_cmd}"
+        
+        result = run_func(f"cd {shlex.quote(project_path)} && {build_cmd}", check=False)
         
         if result.returncode != 0:
             print("  ⚠ npm run build failed or not configured, skipping build step")
