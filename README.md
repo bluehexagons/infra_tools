@@ -131,8 +131,16 @@ python3 setup_server_web.py 192.168.1.100 --ruby \
 python3 setup_server_web.py 192.168.1.100 --node \
   --deploy app.mysite.com https://github.com/user/vite-app.git
 
-# When using remote_setup.py directly on the server
+# When using remote_setup.py directly on the server (clones repositories)
 python3 /opt/infra_tools/remote_setup.py --system-type server_web --username myuser \
+  --deploy mysite.com https://github.com/user/site.git
+
+# Advanced: Use --lite-deploy when repositories are pre-uploaded to /opt/infra_tools/deployments/
+python3 /opt/infra_tools/remote_setup.py --system-type server_web --username myuser \
+  --lite-deploy --deploy mysite.com https://github.com/user/site.git
+```
+
+**Deployment Process**: Setup scripts clone repositories locally using your git credentials, upload them to `/opt/infra_tools/deployments/` on the remote server, then execute `remote_setup.py --lite-deploy` to deploy from the uploaded files.
   --deploy mysite.com https://github.com/user/site.git
 ```
 

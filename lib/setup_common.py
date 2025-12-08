@@ -18,7 +18,6 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REMOTE_SCRIPT_PATH = os.path.join(SCRIPT_DIR, "..", "remote_setup.py")
 REMOTE_MODULES_DIR = os.path.join(SCRIPT_DIR, "..", "remote_modules")
 SHARED_DIR = os.path.join(SCRIPT_DIR, "..", "shared")
-DEPLOY_HELPER_PATH = os.path.join(SCRIPT_DIR, "..", "deploy_helper.py")
 REMOTE_INSTALL_DIR = "/opt/infra_tools"
 
 
@@ -114,7 +113,6 @@ def create_tar_archive() -> bytes:
         tar.add(REMOTE_SCRIPT_PATH, arcname="remote_setup.py", filter=safe_filter)
         tar.add(REMOTE_MODULES_DIR, arcname="remote_modules", filter=safe_filter)
         tar.add(SHARED_DIR, arcname="shared", filter=safe_filter)
-        tar.add(DEPLOY_HELPER_PATH, arcname="deploy_helper.py", filter=safe_filter)
     
     return tar_buffer.getvalue()
 
@@ -231,8 +229,9 @@ def run_remote_setup(
         cmd_parts.append(f"--steps {shlex.quote(custom_steps)}")
     
     if deploy_specs:
-        for location, git_url in deploy_specs:
-            cmd_parts.append(f"--deploy {shlex.quote(location)} {shlex.quote(git_url)}")
+        cmd_parts.append("--lite-deploy")
+        for deploy_spec, git_url in deploy_specs:
+            cmd_parts.append(f"--deploy {shlex.quote(deploy_spec)} {shlex.quote(git_url)}")
     
     remote_cmd = f"""
 mkdir -p {escaped_install_dir} && \
@@ -303,22 +302,14 @@ tar xzf - && \
         
         returncode = process.wait()
         
-        # Upload and deploy repositories if setup succeeded
+        # Upload deployment repositories if setup succeeded
         if returncode == 0 and deploy_tar_data:
             print(f"\n{'='*60}")
-            print("Uploading and deploying repositories...")
+            print("Uploading deployment repositories...")
             print(f"{'='*60}")
             
-            # Prepare deployment specifications for JSON serialization
-            import json
-            deploy_specs_json = json.dumps([(spec, url) for spec, _, url in cloned_repos])
-            
-            # Upload the deployment tar and run deploy_helper.py
-            deploy_cmd = f"""
-cd {escaped_install_dir} && \
-tar xzf - -C /tmp && \
-python3 {escaped_install_dir}/deploy_helper.py {shlex.quote(deploy_specs_json)}
-"""
+            # Simply extract to /opt/infra_tools/deployments/
+            deploy_cmd = f"cd {escaped_install_dir} && tar xzf -"
             
             deploy_process = subprocess.Popen(
                 ["ssh"] + ssh_opts + [f"root@{ip}", deploy_cmd],
@@ -337,7 +328,9 @@ python3 {escaped_install_dir}/deploy_helper.py {shlex.quote(deploy_specs_json)}
             
             deploy_returncode = deploy_process.wait()
             if deploy_returncode != 0:
-                print(f"Warning: Deployment returned non-zero exit code: {deploy_returncode}")
+                print(f"Warning: Repository upload returned non-zero exit code: {deploy_returncode}")
+            else:
+                print(f"  ✓ Uploaded {len(cloned_repos)} repository(ies)")
         
         return returncode
         
@@ -345,7 +338,6 @@ python3 {escaped_install_dir}/deploy_helper.py {shlex.quote(deploy_specs_json)}
         print(f"Error: {e}")
         return 1
     finally:
-        # Clean up temporary directory
         if temp_deploy_dir and os.path.exists(temp_deploy_dir):
             shutil.rmtree(temp_deploy_dir)
 

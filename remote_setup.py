@@ -48,6 +48,8 @@ def main() -> int:
                        help="Install nvm + latest Node.JS + PNPM + update NPM")
     parser.add_argument("--deploy", action="append", nargs=2, metavar=("DOMAIN_OR_PATH", "GIT_URL"),
                        help="Deploy a git repository (domain.com/path or /path) to auto-configure nginx (can be used multiple times)")
+    parser.add_argument("--lite-deploy", action="store_true",
+                       help="Use pre-uploaded repository files instead of cloning (for remote execution)")
     
     args = parser.parse_args()
     
@@ -140,39 +142,58 @@ def main() -> int:
         print("Deploying repositories...")
         print("=" * 60)
         
-        temp_dir = tempfile.mkdtemp(prefix="infra_deploy_")
-        try:
+        if args.lite_deploy:
+            # Use pre-uploaded files from /opt/infra_tools/deployments/
             for deploy_spec, git_url in args.deploy:
                 repo_name = git_url.rstrip('/').split('/')[-1]
                 if repo_name.endswith('.git'):
                     repo_name = repo_name[:-4]
                 
-                clone_path = os.path.join(temp_dir, repo_name)
+                source_path = f'/opt/infra_tools/deployments/{repo_name}'
                 
-                print(f"\nCloning {git_url}...")
-                result = subprocess.run(
-                    ["git", "clone", git_url, clone_path],
-                    capture_output=True,
-                    text=True,
-                    timeout=300
-                )
-                
-                if result.returncode != 0:
-                    print(f"  Error cloning repository: {result.stderr}")
+                if not os.path.exists(source_path):
+                    print(f"\n⚠ Warning: {source_path} not found, skipping {git_url}")
                     continue
                 
-                print(f"  ✓ Cloned to {clone_path}")
-                
-                # Deploy the repository using the shared deployment module
+                print(f"\nDeploying pre-uploaded repository: {repo_name}")
                 deploy_repository(
-                    source_path=clone_path,
+                    source_path=source_path,
                     deploy_spec=deploy_spec,
                     git_url=git_url
                 )
-        finally:
-            # Clean up temp directory
-            if os.path.exists(temp_dir):
-                shutil.rmtree(temp_dir)
+        else:
+            # Clone repositories directly (local execution)
+            temp_dir = tempfile.mkdtemp(prefix="infra_deploy_")
+            try:
+                for deploy_spec, git_url in args.deploy:
+                    repo_name = git_url.rstrip('/').split('/')[-1]
+                    if repo_name.endswith('.git'):
+                        repo_name = repo_name[:-4]
+                    
+                    clone_path = os.path.join(temp_dir, repo_name)
+                    
+                    print(f"\nCloning {git_url}...")
+                    result = subprocess.run(
+                        ["git", "clone", git_url, clone_path],
+                        capture_output=True,
+                        text=True,
+                        timeout=300
+                    )
+                    
+                    if result.returncode != 0:
+                        print(f"  Error cloning repository: {result.stderr}")
+                        continue
+                    
+                    print(f"  ✓ Cloned to {clone_path}")
+                    
+                    deploy_repository(
+                        source_path=clone_path,
+                        deploy_spec=deploy_spec,
+                        git_url=git_url
+                    )
+            finally:
+                if os.path.exists(temp_dir):
+                    shutil.rmtree(temp_dir)
     
     print("\n" + "=" * 60)
     print("Setup completed successfully!")
