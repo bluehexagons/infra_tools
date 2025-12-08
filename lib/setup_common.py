@@ -17,6 +17,8 @@ from typing import Optional
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REMOTE_SCRIPT_PATH = os.path.join(SCRIPT_DIR, "..", "remote_setup.py")
 REMOTE_MODULES_DIR = os.path.join(SCRIPT_DIR, "..", "remote_modules")
+SHARED_DIR = os.path.join(SCRIPT_DIR, "..", "shared")
+DEPLOY_HELPER_PATH = os.path.join(SCRIPT_DIR, "..", "deploy_helper.py")
 REMOTE_INSTALL_DIR = "/opt/infra_tools"
 
 
@@ -111,6 +113,8 @@ def create_tar_archive() -> bytes:
     with tarfile.open(fileobj=tar_buffer, mode='w:gz') as tar:
         tar.add(REMOTE_SCRIPT_PATH, arcname="remote_setup.py", filter=safe_filter)
         tar.add(REMOTE_MODULES_DIR, arcname="remote_modules", filter=safe_filter)
+        tar.add(SHARED_DIR, arcname="shared", filter=safe_filter)
+        tar.add(DEPLOY_HELPER_PATH, arcname="deploy_helper.py", filter=safe_filter)
     
     return tar_buffer.getvalue()
 
@@ -143,8 +147,8 @@ def create_argument_parser(description: str, allow_steps: bool = False) -> argpa
                        help="Install latest Go version")
     parser.add_argument("--node", action="store_true",
                        help="Install nvm + latest Node.JS + PNPM + update NPM")
-    parser.add_argument("--deploy", action="append", nargs=2, metavar=("LOCATION", "GIT_URL"),
-                       help="Deploy a git repository to the specified location (can be used multiple times)")
+    parser.add_argument("--deploy", action="append", nargs=2, metavar=("DOMAIN_OR_PATH", "GIT_URL"),
+                       help="Deploy a git repository (domain.com/path or /path) to auto-configure nginx (can be used multiple times)")
     return parser
 
 
@@ -304,59 +308,15 @@ tar xzf - && \
             print("Uploading and deploying repositories...")
             print(f"{'='*60}")
             
-            # Upload the deployment tar and extract it
+            # Prepare deployment specifications for JSON serialization
+            import json
+            deploy_specs_json = json.dumps([(spec, url) for spec, _, url in cloned_repos])
+            
+            # Upload the deployment tar and run deploy_helper.py
             deploy_cmd = f"""
 cd {escaped_install_dir} && \
 tar xzf - -C /tmp && \
-python3 -c "
-import sys
-sys.path.insert(0, '{escaped_install_dir}')
-from remote_modules.deploy_steps import deploy_repository, detect_project_type, build_rails_project, build_node_project, build_static_project
-import os
-import shlex
-import shutil
-
-deployments = {repr([(loc, url) for loc, _, url in cloned_repos])}
-
-for location, git_url in deployments:
-    repo_name = git_url.rstrip('/').split('/')[-1]
-    if repo_name.endswith('.git'):
-        repo_name = repo_name[:-4]
-    
-    source_path = f'/tmp/deployments/{{repo_name}}'
-    dest_path = os.path.join(location, repo_name) if location else repo_name
-    
-    print(f'Deploying {{repo_name}} to {{dest_path}}...')
-    
-    # Create destination directory
-    os.makedirs(os.path.dirname(dest_path) if os.path.dirname(dest_path) else '.', exist_ok=True)
-    
-    # Move from temp to destination
-    if os.path.exists(dest_path):
-        print(f'  Destination {{dest_path}} already exists, removing...')
-        shutil.rmtree(dest_path)
-    
-    shutil.move(source_path, dest_path)
-    
-    # Detect project type and build
-    project_type = detect_project_type(dest_path)
-    print(f'  Detected project type: {{project_type}}')
-    
-    if project_type == 'rails':
-        build_rails_project(dest_path)
-    elif project_type == 'node':
-        build_node_project(dest_path)
-    elif project_type == 'static':
-        build_static_project(dest_path)
-    else:
-        print(f'  ⚠ Unknown project type, no build performed')
-    
-    # Set proper permissions
-    os.system(f'chown -R www-data:www-data {{shlex.quote(dest_path)}}')
-    os.system(f'chmod -R 755 {{shlex.quote(dest_path)}}')
-    
-    print(f'  ✓ Repository deployed to {{dest_path}}')
-"
+python3 {escaped_install_dir}/deploy_helper.py {shlex.quote(deploy_specs_json)}
 """
             
             deploy_process = subprocess.Popen(

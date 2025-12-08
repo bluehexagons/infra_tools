@@ -50,7 +50,11 @@ All setup scripts support optional software installation:
 - `--ruby` - Install rbenv + latest Ruby version + bundler
 - `--go` - Install latest Go version
 - `--node` - Install nvm + latest Node.js LTS + PNPM + NPM (latest)
-- `--deploy LOCATION GIT_URL` - Deploy a git repository to the specified location (can be used multiple times)
+- `--deploy DOMAIN_OR_PATH GIT_URL` - Deploy a git repository (can be used multiple times)
+  - `DOMAIN_OR_PATH` can be:
+    - `domain.com/path` - Deploy to domain with optional subpath
+    - `domain.com` - Deploy to domain root
+    - `/path` - Deploy to local path without nginx configuration
 
 Desktop workstation scripts support desktop environment and browser selection:
 
@@ -82,35 +86,47 @@ python3 setup_pc_dev.py 192.168.1.100
 # Dry-run to see what would be done
 python3 setup_workstation_desktop.py 192.168.1.100 --dry-run
 
-# Deploy a static website
-python3 setup_server_web.py 192.168.1.100 --deploy /var/www https://github.com/user/mysite.git
+# Deploy a static website with automatic nginx configuration
+python3 setup_server_web.py 192.168.1.100 \
+  --deploy mysite.com https://github.com/user/static-site.git
 
-# Deploy multiple repositories (Rails app and Node.js site)
+# Deploy to subdirectory with path-based routing
+python3 setup_server_web.py 192.168.1.100 \
+  --deploy blog.example.com/articles https://github.com/user/blog.git
+
+# Deploy multiple sites with different domains
 python3 setup_server_web.py 192.168.1.100 --ruby --node \
-  --deploy /var/www https://github.com/user/rails-app.git \
-  --deploy /var/www https://github.com/user/vite-site.git
+  --deploy rails-app.com https://github.com/user/rails-app.git \
+  --deploy vite-site.com https://github.com/user/vite-site.git
 ```
 
 ### Deployment Support
 
-The `--deploy` flag enables automatic deployment of git repositories:
+The `--deploy` flag enables automatic deployment of git repositories with nginx configuration:
 
 - **Project type detection**: Automatically detects Ruby on Rails (`.ruby-version`), Node.js/Vite (`package.json`), or static HTML (`index.html`) projects
 - **Local cloning**: Repositories are cloned using your local git credentials
 - **Remote building**: Projects are built on the remote server (or locally when using `remote_setup.py` directly)
+- **Automatic nginx configuration**: Creates nginx site configs for domains, with static serving or reverse proxy based on project type
+- **Directory naming**: Repositories are stored in `/var/www/domain_com__path` (e.g., `/var/www/blog_example_com__articles`)
 - **Standard builds**: 
-  - Rails: `bundle install --deployment` and `rake assets:precompile`
-  - Node.js: `npm install` and `npm run build`
-  - Static: Files copied as-is
+  - Rails: `bundle install --deployment`, `rake assets:precompile`, and reverse proxy setup
+  - Node.js: `npm install`, `npm run build`, serves from `dist/` or `build/`
+  - Static: Files served as-is from repository root
 
 Example:
 ```bash
-# Deploy a Rails application
-python3 setup_server_web.py 192.168.1.100 --ruby --deploy /var/www https://github.com/user/blog.git
+# Deploy a Rails application with reverse proxy
+python3 setup_server_web.py 192.168.1.100 --ruby \
+  --deploy api.myapp.com https://github.com/user/rails-api.git
+
+# Deploy a Vite/React site
+python3 setup_server_web.py 192.168.1.100 --node \
+  --deploy app.mysite.com https://github.com/user/vite-app.git
 
 # When using remote_setup.py directly on the server
 python3 /opt/infra_tools/remote_setup.py --system-type server_web --username myuser \
-  --deploy /var/www https://github.com/user/site.git
+  --deploy mysite.com https://github.com/user/site.git
 ```
 
 ## Features

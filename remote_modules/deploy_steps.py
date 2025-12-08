@@ -1,112 +1,64 @@
-"""Deployment steps for web applications."""
+"""Deployment steps for web applications on remote systems."""
 
 import os
-import shlex
-import shutil
-import tempfile
+import sys
 
+# Add parent directory to path to import shared modules
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+from shared.deployment import DeploymentOrchestrator
+from shared.nginx_config import create_nginx_site
 from .utils import run
 
 
-def detect_project_type(repo_path: str) -> str:
+def deploy_repository(source_path: str, deploy_spec: str, git_url: str, 
+                      web_user: str = "www-data", web_group: str = "www-data", **_) -> None:
     """
-    Detect project type based on files in the repository.
+    Deploy a repository from an extracted archive.
     
-    Returns:
-        - "rails" for Ruby on Rails projects (.ruby-version)
-        - "node" for Node.js projects (package.json)
-        - "static" for static sites (index.html)
-        - "unknown" if type cannot be determined
+    Args:
+        source_path: Path to the extracted repository
+        deploy_spec: Deployment specification (domain/path or /path)
+        git_url: Git repository URL
+        web_user: Web server user
+        web_group: Web server group
     """
-    if os.path.exists(os.path.join(repo_path, ".ruby-version")):
-        return "rails"
-    elif os.path.exists(os.path.join(repo_path, "package.json")):
-        return "node"
-    elif os.path.exists(os.path.join(repo_path, "index.html")):
-        return "static"
-    return "unknown"
-
-
-def build_rails_project(project_path: str, web_user: str = "www-data", **_) -> None:
-    """Build a Ruby on Rails project."""
-    print(f"  Building Rails project at {project_path}")
+    from shared.deploy_utils import parse_deploy_spec
     
-    # Install dependencies
-    run(f"cd {shlex.quote(project_path)} && bundle install --deployment --without development test")
+    # Parse deployment specification
+    domain, path = parse_deploy_spec(deploy_spec)
     
-    # Precompile assets
-    run(f"cd {shlex.quote(project_path)} && RAILS_ENV=production bundle exec rake assets:precompile")
+    print(f"Deploying {git_url} to {deploy_spec}...")
     
-    print("  ✓ Rails project built")
-
-
-def build_node_project(project_path: str, **_) -> None:
-    """Build a Node.js project (assumes Vite or similar static site generator)."""
-    print(f"  Building Node.js project at {project_path}")
+    # Create orchestrator
+    orchestrator = DeploymentOrchestrator(
+        base_dir="/var/www",
+        web_user=web_user,
+        web_group=web_group
+    )
     
-    # Install dependencies
-    run(f"cd {shlex.quote(project_path)} && npm install")
+    # Deploy the repository
+    deployment_info = orchestrator.deploy_from_archive(
+        source_path=source_path,
+        domain=domain,
+        path=path,
+        git_url=git_url,
+        run_func=run
+    )
     
-    # Build the project (assumes npm run build is configured)
-    result = run(f"cd {shlex.quote(project_path)} && npm run build", check=False)
+    # Configure nginx if domain is provided
+    if domain:
+        print(f"  Configuring nginx for {domain}{path}...")
+        try:
+            create_nginx_site(
+                domain=domain,
+                path=path,
+                serve_path=deployment_info['serve_path'],
+                needs_proxy=deployment_info['needs_proxy'],
+                proxy_port=3000 if deployment_info['needs_proxy'] else None,
+                run_func=run
+            )
+        except Exception as e:
+            print(f"  ⚠ Failed to configure nginx: {e}")
     
-    if result.returncode != 0:
-        print("  ⚠ npm run build failed or not configured, skipping build step")
-    else:
-        print("  ✓ Node.js project built")
-
-
-def build_static_project(project_path: str, **_) -> None:
-    """Process a static website (no build needed)."""
-    print(f"  Static website at {project_path} - no build required")
-    print("  ✓ Static files ready")
-
-
-def deploy_repository(deploy_location: str, git_url: str, web_user: str = "www-data", web_group: str = "www-data", **_) -> None:
-    """
-    Deploy a git repository to a specific location.
-    
-    This function is called on the remote system.
-    """
-    print(f"  Deploying {git_url} to {deploy_location}")
-    
-    # Ensure the parent directory exists
-    parent_dir = os.path.dirname(deploy_location)
-    if parent_dir and not os.path.exists(parent_dir):
-        run(f"mkdir -p {shlex.quote(parent_dir)}")
-    
-    # Extract repository name from URL
-    repo_name = git_url.rstrip('/').split('/')[-1]
-    if repo_name.endswith('.git'):
-        repo_name = repo_name[:-4]
-    
-    project_path = os.path.join(deploy_location, repo_name) if deploy_location else repo_name
-    
-    # Check if directory already exists
-    if os.path.exists(project_path):
-        print(f"  ✓ Repository already exists at {project_path}, skipping clone")
-        # Could add git pull here to update existing repos
-        return
-    
-    # This will receive the tar archive from the local system
-    # For now, we'll just create the directory
-    run(f"mkdir -p {shlex.quote(project_path)}")
-    
-    # Detect project type and build
-    project_type = detect_project_type(project_path)
-    print(f"  Detected project type: {project_type}")
-    
-    if project_type == "rails":
-        build_rails_project(project_path, web_user=web_user)
-    elif project_type == "node":
-        build_node_project(project_path)
-    elif project_type == "static":
-        build_static_project(project_path)
-    else:
-        print(f"  ⚠ Unknown project type, no build performed")
-    
-    # Set proper permissions
-    run(f"chown -R {shlex.quote(web_user)}:{shlex.quote(web_group)} {shlex.quote(project_path)}", check=False)
-    run(f"chmod -R 755 {shlex.quote(project_path)}")
-    
-    print(f"  ✓ Repository deployed to {project_path}")
+    print(f"  ✓ Deployment complete")
