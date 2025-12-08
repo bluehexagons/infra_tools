@@ -58,7 +58,7 @@ def deploy_repository(source_path: str, deploy_spec: str, git_url: str,
                 proxy_port=3000 if deployment_info['needs_proxy'] else None,
                 run_func=run
             )
-        except Exception as e:
+        except (OSError, PermissionError, ValueError) as e:
             print(f"  ⚠ Failed to configure nginx: {e}")
     
     print(f"  ✓ Deployment complete")

@@ -20,8 +20,6 @@ def generate_nginx_config(domain: str, path: str, serve_path: str,
     Returns:
         Nginx configuration string
     """
-    server_name = domain
-    
     # Normalize path
     location_path = path.rstrip('/') if path != '/' else '/'
     
@@ -35,7 +33,7 @@ server {{
     listen 80;
     listen [::]:80;
     
-    server_name {server_name};
+    server_name {domain};
     
     location {location_path} {{
         proxy_pass http://127.0.0.1:{proxy_port};
@@ -64,7 +62,7 @@ server {{
     listen 80;
     listen [::]:80;
     
-    server_name {server_name};
+    server_name {domain};
     
     root {serve_path};
     index {index_file};
@@ -98,7 +96,7 @@ server {{
     listen 80;
     listen [::]:80;
     
-    server_name {server_name};
+    server_name {domain};
     
     location {location_path} {{
         alias {serve_path};
@@ -149,8 +147,13 @@ def create_nginx_site(domain: str, path: str, serve_path: str,
     config_content = generate_nginx_config(domain, path, serve_path, needs_proxy, proxy_port)
     
     # Write configuration file
-    with open(config_file, 'w') as f:
-        f.write(config_content)
+    try:
+        with open(config_file, 'w') as f:
+            f.write(config_content)
+    except PermissionError as e:
+        raise PermissionError(f"Failed to write nginx config to {config_file}. Need root permissions.") from e
+    except OSError as e:
+        raise OSError(f"Failed to create nginx config file {config_file}: {e}") from e
     
     print(f"  ✓ Created nginx config: {config_file}")
     
@@ -169,7 +172,7 @@ def create_nginx_site(domain: str, path: str, serve_path: str,
             os.remove(enabled_link)
         if os.path.exists(config_file):
             os.remove(config_file)
-        raise Exception("Invalid nginx configuration")
+        raise ValueError("Invalid nginx configuration - test failed")
     
     # Reload nginx
     run_func("systemctl reload nginx")

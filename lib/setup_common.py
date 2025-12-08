@@ -252,11 +252,12 @@ tar xzf - && \
         print("Cloning repositories locally...")
         print(f"{'='*60}")
         
+        # List of (deploy_spec, clone_path, git_url) tuples
         cloned_repos = []
-        for location, git_url in deploy_specs:
+        for deploy_spec, git_url in deploy_specs:
             clone_path = clone_repository(git_url, temp_deploy_dir)
             if clone_path:
-                cloned_repos.append((location, clone_path, git_url))
+                cloned_repos.append((deploy_spec, clone_path, git_url))
             else:
                 print(f"Warning: Failed to clone {git_url}, skipping...")
         
@@ -277,7 +278,7 @@ tar xzf - && \
                 return tarinfo
             
             with tarfile.open(fileobj=deploy_tar_buffer, mode='w:gz') as tar:
-                for location, clone_path, git_url in cloned_repos:
+                for deploy_spec, clone_path, git_url in cloned_repos:
                     repo_name = os.path.basename(clone_path)
                     tar.add(clone_path, arcname=f"deployments/{repo_name}", filter=safe_filter)
             

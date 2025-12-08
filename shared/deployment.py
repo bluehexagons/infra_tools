@@ -97,7 +97,11 @@ class DeploymentOrchestrator:
         self.build_project(dest_path, project_type, run_func)
         
         # Set permissions
-        run_func(f"chown -R {shlex.quote(self.web_user)}:{shlex.quote(self.web_group)} {shlex.quote(dest_path)}", check=False)
+        # Try to set ownership, but don't fail if user/group doesn't exist
+        result = run_func(f"chown -R {shlex.quote(self.web_user)}:{shlex.quote(self.web_group)} {shlex.quote(dest_path)}", check=False)
+        if result.returncode != 0:
+            print(f"  ⚠ Warning: Could not set ownership to {self.web_user}:{self.web_group}")
+        
         run_func(f"chmod -R 755 {shlex.quote(dest_path)}")
         
         print(f"  ✓ Repository deployed to {dest_path}")
