@@ -19,6 +19,7 @@ REMOTE_SCRIPT_PATH = os.path.join(SCRIPT_DIR, "..", "remote_setup.py")
 REMOTE_MODULES_DIR = os.path.join(SCRIPT_DIR, "..", "remote_modules")
 SHARED_DIR = os.path.join(SCRIPT_DIR, "..", "shared")
 REMOTE_INSTALL_DIR = "/opt/infra_tools"
+GIT_CACHE_DIR = os.path.expanduser("~/.cache/infra_tools/git_repos")
 
 
 def validate_ip_address(ip: str) -> bool:
@@ -70,34 +71,97 @@ def get_current_username() -> str:
     return getpass.getuser()
 
 
-def clone_repository(git_url: str, temp_dir: str) -> Optional[str]:
-    """Clone a git repository locally using the caller's credentials.
-    
-    Returns:
-        The path to the cloned repository, or None if cloning fails.
-    """
+def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = None, dry_run: bool = False) -> Optional[str]:
+    """Clone or update a git repository, optionally using a local cache."""
     repo_name = git_url.rstrip('/').split('/')[-1]
     if repo_name.endswith('.git'):
         repo_name = repo_name[:-4]
     
     clone_path = os.path.join(temp_dir, repo_name)
     
-    print(f"  Cloning {git_url}...")
-    try:
-        result = subprocess.run(
-            ["git", "clone", git_url, clone_path],
-            capture_output=True,
-            text=True,
-            timeout=300
-        )
-        if result.returncode != 0:
-            print(f"  Error cloning repository: {result.stderr}")
-            return None
-        print(f"  ✓ Cloned to {clone_path}")
+    if cache_dir:
+        cache_path = os.path.join(cache_dir, repo_name)
+        
+        if os.path.exists(cache_path):
+            print(f"  Updating cached repository {repo_name}...")
+            if not dry_run:
+                try:
+                    result = subprocess.run(
+                        ["git", "-C", cache_path, "fetch", "--all"],
+                        capture_output=True,
+                        text=True,
+                        timeout=300
+                    )
+                    if result.returncode != 0:
+                        print(f"  Error fetching updates: {result.stderr}")
+                        return None
+                    
+                    result = subprocess.run(
+                        ["git", "-C", cache_path, "reset", "--hard", "origin/HEAD"],
+                        capture_output=True,
+                        text=True,
+                        timeout=30
+                    )
+                    if result.returncode != 0:
+                        print(f"  Error resetting repository: {result.stderr}")
+                        return None
+                    
+                    print(f"  ✓ Updated cached repository")
+                except Exception as e:
+                    print(f"  Error updating repository: {e}")
+                    return None
+        else:
+            print(f"  Caching {git_url}...")
+            if not dry_run:
+                try:
+                    os.makedirs(cache_dir, exist_ok=True)
+                    result = subprocess.run(
+                        ["git", "clone", git_url, cache_path],
+                        capture_output=True,
+                        text=True,
+                        timeout=300
+                    )
+                    if result.returncode != 0:
+                        print(f"  Error cloning repository: {result.stderr}")
+                        return None
+                    print(f"  ✓ Cached to {cache_path}")
+                except Exception as e:
+                    print(f"  Error caching repository: {e}")
+                    return None
+        
+        if not dry_run:
+            try:
+                import shutil
+                if os.path.exists(clone_path):
+                    shutil.rmtree(clone_path)
+                shutil.copytree(cache_path, clone_path, symlinks=True)
+                print(f"  ✓ Copied to {clone_path}")
+            except Exception as e:
+                print(f"  Error copying repository: {e}")
+                return None
+        
         return clone_path
-    except Exception as e:
-        print(f"  Error cloning repository: {e}")
-        return None
+    else:
+        print(f"  Cloning {git_url}...")
+        if dry_run:
+            print(f"  [DRY RUN] Would clone to {clone_path}")
+            return clone_path
+        
+        try:
+            result = subprocess.run(
+                ["git", "clone", git_url, clone_path],
+                capture_output=True,
+                text=True,
+                timeout=300
+            )
+            if result.returncode != 0:
+                print(f"  Error cloning repository: {result.stderr}")
+                return None
+            print(f"  ✓ Cloned to {clone_path}")
+            return clone_path
+        except Exception as e:
+            print(f"  Error cloning repository: {e}")
+            return None
 
 
 def create_tar_archive() -> bytes:
@@ -251,16 +315,14 @@ tar xzf - && \
         print("Cloning repositories locally...")
         print(f"{'='*60}")
         
-        # List of (deploy_spec, clone_path, git_url) tuples
         cloned_repos = []
         for deploy_spec, git_url in deploy_specs:
-            clone_path = clone_repository(git_url, temp_deploy_dir)
+            clone_path = clone_repository(git_url, temp_deploy_dir, cache_dir=GIT_CACHE_DIR, dry_run=dry_run)
             if clone_path:
                 cloned_repos.append((deploy_spec, clone_path, git_url))
             else:
                 print(f"Warning: Failed to clone {git_url}, skipping...")
         
-        # Create tar archive of cloned repositories
         if cloned_repos:
             print(f"\n{'='*60}")
             print("Packaging repositories for upload...")
@@ -283,6 +345,16 @@ tar xzf - && \
             
             deploy_tar_data = deploy_tar_buffer.getvalue()
             print(f"  ✓ Packaged {len(cloned_repos)} repository(ies)")
+    
+    if dry_run:
+        print("\n" + "=" * 60)
+        print("[DRY RUN] Would execute:")
+        print(f"  SSH command: {' '.join(ssh_cmd[:3])} root@{ip} ...")
+        print(f"  Remote command: {' '.join(cmd_parts)}")
+        if deploy_tar_data:
+            print(f"  Would upload {len(deploy_tar_data)} bytes of deployment data")
+        print("=" * 60)
+        return 0
     
     try:
         process = subprocess.Popen(
