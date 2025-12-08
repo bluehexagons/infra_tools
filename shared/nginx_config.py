@@ -5,35 +5,54 @@ import shlex
 from typing import Optional
 
 
-def generate_nginx_config(domain: str, path: str, serve_path: str, 
-                         needs_proxy: bool, proxy_port: Optional[int] = None) -> str:
-    """
-    Generate nginx configuration for a deployed application.
+def generate_self_signed_cert(domain: str, run_func) -> tuple:
+    """Generate self-signed SSL certificate for a domain."""
+    cert_dir = "/etc/nginx/ssl"
+    cert_file = f"{cert_dir}/{domain}.crt"
+    key_file = f"{cert_dir}/{domain}.key"
     
-    Args:
-        domain: Domain name (e.g., "my.example.com")
-        path: URL path (e.g., "/blog")
-        serve_path: Filesystem path to serve
-        needs_proxy: Whether to use reverse proxy
-        proxy_port: Port for reverse proxy (if needs_proxy is True)
+    if os.path.exists(cert_file) and os.path.exists(key_file):
+        return (cert_file, key_file)
     
-    Returns:
-        Nginx configuration string
-    """
-    # Normalize path
+    run_func(f"mkdir -p {cert_dir}")
+    run_func(f"openssl req -x509 -nodes -days 365 -newkey rsa:2048 "
+             f"-keyout {shlex.quote(key_file)} -out {shlex.quote(cert_file)} "
+             f"-subj '/CN={domain}'")
+    
+    return (cert_file, key_file)
+
+
+def generate_nginx_config(domain: Optional[str], path: str, serve_path: str, 
+                         needs_proxy: bool, proxy_port: Optional[int] = None,
+                         is_default: bool = False) -> str:
+    """Generate nginx configuration for a deployed application."""
     location_path = path.rstrip('/') if path != '/' else '/'
     
     if needs_proxy:
-        # Reverse proxy configuration (for Rails apps)
         if not proxy_port:
-            proxy_port = 3000  # Default Rails port
+            proxy_port = 3000
         
-        config = f"""# Configuration for {domain}{location_path}
-server {{
-    listen 80;
-    listen [::]:80;
+        server_name_directive = f"server_name {domain};" if domain else "server_name _;"
+        default_server = " default_server" if is_default else ""
+        ssl_cert = f"/etc/nginx/ssl/{domain or 'default'}"
+        
+        config = f"""server {{
+    listen 80{default_server};
+    listen [::]:80{default_server};
+    listen 443 ssl http2{default_server};
+    listen [::]:443 ssl http2{default_server};
     
-    server_name {domain};
+    {server_name_directive}
+    
+    ssl_certificate {ssl_cert}.crt;
+    ssl_certificate_key {ssl_cert}.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    
+    location /.well-known/acme-challenge/ {{
+        root /var/www/letsencrypt;
+    }}
     
     location {location_path} {{
         proxy_pass http://127.0.0.1:{proxy_port};
@@ -43,7 +62,6 @@ server {{
         proxy_set_header X-Forwarded-Proto $scheme;
     }}
     
-    # Deny access to hidden files
     location ~ /\\. {{
         deny all;
         access_log off;
@@ -52,36 +70,44 @@ server {{
 }}
 """
     else:
-        # Static file serving configuration
         index_file = "index.html index.htm"
+        server_name_directive = f"server_name {domain};" if domain else "server_name _;"
+        default_server = " default_server" if is_default else ""
+        ssl_cert = f"/etc/nginx/ssl/{domain or 'default'}"
         
         if location_path == '/':
-            # Root path - simple configuration
-            config = f"""# Configuration for {domain}
-server {{
-    listen 80;
-    listen [::]:80;
+            config = f"""server {{
+    listen 80{default_server};
+    listen [::]:80{default_server};
+    listen 443 ssl http2{default_server};
+    listen [::]:443 ssl http2{default_server};
     
-    server_name {domain};
+    {server_name_directive}
+    
+    ssl_certificate {ssl_cert}.crt;
+    ssl_certificate_key {ssl_cert}.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
     
     root {serve_path};
     index {index_file};
-    
-    # Disable directory listing
     autoindex off;
+    
+    location /.well-known/acme-challenge/ {{
+        root /var/www/letsencrypt;
+    }}
     
     location / {{
         try_files $uri $uri/ =404;
     }}
     
-    # Deny access to hidden files
     location ~ /\\. {{
         deny all;
         access_log off;
         log_not_found off;
     }}
     
-    # Deny access to backup files
     location ~ ~$ {{
         deny all;
         access_log off;
@@ -90,13 +116,23 @@ server {{
 }}
 """
         else:
-            # Sub-path - use alias
-            config = f"""# Configuration for {domain}{location_path}
-server {{
-    listen 80;
-    listen [::]:80;
+            config = f"""server {{
+    listen 80{default_server};
+    listen [::]:80{default_server};
+    listen 443 ssl http2{default_server};
+    listen [::]:443 ssl http2{default_server};
     
-    server_name {domain};
+    {server_name_directive}
+    
+    ssl_certificate {ssl_cert}.crt;
+    ssl_certificate_key {ssl_cert}.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    
+    location /.well-known/acme-challenge/ {{
+        root /var/www/letsencrypt;
+    }}
     
     location {location_path} {{
         alias {serve_path};
@@ -104,7 +140,6 @@ server {{
         try_files $uri $uri/ =404;
     }}
     
-    # Deny access to hidden files
     location ~ /\\. {{
         deny all;
         access_log off;
@@ -116,37 +151,27 @@ server {{
     return config
 
 
-def create_nginx_site(domain: str, path: str, serve_path: str,
-                     needs_proxy: bool, proxy_port: Optional[int], run_func) -> str:
-    """
-    Create an nginx site configuration file.
+def create_nginx_site(domain: Optional[str], path: str, serve_path: str,
+                     needs_proxy: bool, proxy_port: Optional[int], run_func,
+                     is_default: bool = False) -> str:
+    """Create an nginx site configuration file."""
+    cert_domain = domain or 'default'
     
-    Args:
-        domain: Domain name
-        path: URL path
-        serve_path: Filesystem path to serve
-        needs_proxy: Whether to use reverse proxy
-        proxy_port: Port for reverse proxy
-        run_func: Function to run commands
+    run_func("mkdir -p /var/www/letsencrypt/.well-known/acme-challenge")
     
-    Returns:
-        Path to the created configuration file
-    """
-    # Generate safe config filename from domain and path
-    safe_domain = domain.replace('.', '_')
-    safe_path = path.strip('/').replace('/', '_')
+    cert_file, key_file = generate_self_signed_cert(cert_domain, run_func)
     
-    if safe_path:
-        config_name = f"{safe_domain}_{safe_path}"
+    if domain:
+        safe_domain = domain.replace('.', '_')
+        safe_path = path.strip('/').replace('/', '_')
+        config_name = f"{safe_domain}_{safe_path}" if safe_path else safe_domain
     else:
-        config_name = safe_domain
+        config_name = "default"
     
     config_file = f"/etc/nginx/sites-available/{config_name}"
     
-    # Generate configuration
-    config_content = generate_nginx_config(domain, path, serve_path, needs_proxy, proxy_port)
+    config_content = generate_nginx_config(domain, path, serve_path, needs_proxy, proxy_port, is_default)
     
-    # Write configuration file
     try:
         with open(config_file, 'w') as f:
             f.write(config_content)
@@ -157,25 +182,22 @@ def create_nginx_site(domain: str, path: str, serve_path: str,
     
     print(f"  ✓ Created nginx config: {config_file}")
     
-    # Enable the site
     enabled_link = f"/etc/nginx/sites-enabled/{config_name}"
     if not os.path.exists(enabled_link):
         run_func(f"ln -s {shlex.quote(config_file)} {shlex.quote(enabled_link)}")
         print(f"  ✓ Enabled nginx site: {config_name}")
     
-    # Test nginx configuration
     result = run_func("nginx -t", check=False)
     if result.returncode != 0:
         print("  ⚠ nginx configuration test failed")
-        # Remove the bad config
         if os.path.exists(enabled_link):
             os.remove(enabled_link)
         if os.path.exists(config_file):
             os.remove(config_file)
         raise ValueError("Invalid nginx configuration - test failed")
     
-    # Reload nginx
     run_func("systemctl reload nginx")
     print(f"  ✓ nginx reloaded")
     
     return config_file
+

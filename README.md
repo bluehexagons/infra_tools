@@ -98,6 +98,10 @@ python3 setup_server_web.py 192.168.1.100 \
 python3 setup_server_web.py 192.168.1.100 --ruby --node \
   --deploy rails-app.com https://github.com/user/rails-app.git \
   --deploy vite-site.com https://github.com/user/vite-site.git
+
+# Deploy as default site (accessible by IP address)
+python3 setup_server_web.py 192.168.1.100 \
+  --deploy /blog https://github.com/user/blog-site.git
 ```
 
 ### Deployment Support
@@ -107,7 +111,10 @@ The `--deploy` flag enables automatic deployment of git repositories with nginx 
 - **Project type detection**: Automatically detects Ruby on Rails (`.ruby-version`), Node.js/Vite (`package.json`), or static HTML (`index.html`) projects
 - **Local cloning**: Repositories are cloned using your local git credentials
 - **Remote building**: Projects are built on the remote server (or locally when using `remote_setup.py` directly)
-- **Automatic nginx configuration**: Creates nginx site configs for domains, with static serving or reverse proxy based on project type
+- **Automatic nginx configuration**: Creates nginx site configs with HTTPS and Let's Encrypt preparation
+- **HTTPS support**: Self-signed certificates generated automatically for all sites
+- **Let's Encrypt ready**: Pre-configured `/.well-known/acme-challenge/` location for certificate verification
+- **Default server**: Deployments without a domain (e.g., `/path`) become the default server, accessible via IP
 - **Directory naming**: Repositories are stored in `/var/www/domain_com__path` (e.g., `/var/www/blog_example_com__articles`)
 - **Standard builds**: 
   - Rails: `bundle install --deployment`, `rake assets:precompile`, and reverse proxy setup
