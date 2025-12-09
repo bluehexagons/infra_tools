@@ -11,6 +11,7 @@ Automated setup scripts for remote Linux systems.
 - `setup_server_web.py` - Web server with nginx (static content & reverse proxy)
 - `setup_server_proxmox.py` - Proxmox server hardening
 - `setup_steps.py` - Run custom steps only
+- `patch_setup.py` - Update a previously configured system with new settings
 
 ## Requirements
 
@@ -20,27 +21,53 @@ Automated setup scripts for remote Linux systems.
 
 ## Usage
 
+**Note:** All scripts accept either IP addresses or hostnames.
+
 ```bash
-# Workstation with desktop/RDP
-python3 setup_workstation_desktop.py <ip> [username] [-k key] [-p password] [-t timezone] [--skip-audio]
+# Workstation with desktop/RDP (IP or hostname)
+python3 setup_workstation_desktop.py 192.168.1.100 [username] [-k key] [-p password] [-t timezone] [--skip-audio]
+python3 setup_workstation_desktop.py workstation.local [username] [-k key] [-p password] [-t timezone] [--skip-audio]
 
 # PC development workstation (bare hardware, Remmina + LibreOffice by default)
-python3 setup_pc_dev.py <ip> [username] [-k key] [-p password] [-t timezone] [--skip-audio]
+python3 setup_pc_dev.py <ip-or-hostname> [username] [-k key] [-p password] [-t timezone] [--skip-audio]
 
 # Workstation dev (no audio, Vivaldi + VS Code)
-python3 setup_workstation_dev.py <ip> [username] [-k key] [-p password] [-t timezone]
+python3 setup_workstation_dev.py <ip-or-hostname> [username] [-k key] [-p password] [-t timezone]
 
 # Development server
-python3 setup_server_dev.py <ip> [username] [-k key] [-p password] [-t timezone]
+python3 setup_server_dev.py <ip-or-hostname> [username] [-k key] [-p password] [-t timezone]
 
 # Web server
-python3 setup_server_web.py <ip> [username] [-k key] [-p password] [-t timezone]
+python3 setup_server_web.py <ip-or-hostname> [username] [-k key] [-p password] [-t timezone]
 
 # Proxmox server hardening
-python3 setup_server_proxmox.py <ip> [-k key] [-t timezone]
+python3 setup_server_proxmox.py <ip-or-hostname> [-k key] [-t timezone]
 
 # Custom steps only
-python3 setup_steps.py <ip> [username] --steps "install_ruby install_node" [-k key] [-p password] [-t timezone]
+python3 setup_steps.py <ip-or-hostname> [username] --steps "install_ruby install_node" [-k key] [-p password] [-t timezone]
+
+# Patch a previously configured system (adds/modifies settings, doesn't remove)
+python3 patch_setup.py <ip-or-hostname> [--deploy DOMAIN_OR_PATH GIT_URL] [other-flags...]
+```
+
+## Patching Systems
+
+The `patch_setup.py` script allows you to update a previously configured system without re-running the entire setup:
+
+- **Cached Configuration**: Each setup is cached locally in `~/.cache/infra_tools/setups/`
+- **Intelligent Merging**: New arguments are merged with cached ones (adds/modifies but never removes)
+- **Current Scripts**: Uses the current version of setup scripts, not cached versions
+- **Multiple Deployments**: Can add new `--deploy` targets without affecting existing ones
+
+Example:
+```bash
+# Initial setup
+python3 setup_server_web.py web.example.com --ruby --deploy mysite.com https://github.com/user/site.git
+
+# Later, add Node.js and deploy another site
+python3 patch_setup.py web.example.com --node --deploy api.example.com https://github.com/user/api.git
+
+# Result: System now has Ruby AND Node.js, with BOTH deployments configured
 ```
 
 ## Optional Flags
@@ -50,6 +77,11 @@ All setup scripts support optional software installation:
 - `--ruby` - Install rbenv + latest Ruby version + bundler
 - `--go` - Install latest Go version
 - `--node` - Install nvm + latest Node.js LTS + PNPM + NPM (latest)
+- `--deploy DOMAIN_OR_PATH GIT_URL` - Deploy a git repository (can be used multiple times)
+  - `DOMAIN_OR_PATH` can be:
+    - `domain.com/path` - Deploy to domain with optional subpath
+    - `domain.com` - Deploy to domain root
+    - `/path` - Deploy to local path without nginx configuration
 
 Desktop workstation scripts support desktop environment and browser selection:
 
@@ -80,7 +112,62 @@ python3 setup_pc_dev.py 192.168.1.100
 
 # Dry-run to see what would be done
 python3 setup_workstation_desktop.py 192.168.1.100 --dry-run
+
+# Deploy a static website with automatic nginx configuration
+python3 setup_server_web.py 192.168.1.100 \
+  --deploy mysite.com https://github.com/user/static-site.git
+
+# Deploy to subdirectory with path-based routing
+python3 setup_server_web.py 192.168.1.100 \
+  --deploy blog.example.com/articles https://github.com/user/blog.git
+
+# Deploy multiple sites with different domains
+python3 setup_server_web.py 192.168.1.100 --ruby --node \
+  --deploy rails-app.com https://github.com/user/rails-app.git \
+  --deploy vite-site.com https://github.com/user/vite-site.git
+
+# Deploy as default site (accessible by IP address)
+python3 setup_server_web.py 192.168.1.100 \
+  --deploy /blog https://github.com/user/blog-site.git
 ```
+
+### Deployment Support
+
+The `--deploy` flag enables automatic deployment of git repositories with nginx configuration:
+
+- **Project type detection**: Automatically detects Ruby on Rails (`.ruby-version`), Node.js/Vite (`package.json`), or static HTML (`index.html`) projects
+- **Local cloning**: Repositories are cloned using your local git credentials
+- **Remote building**: Projects are built on the remote server (or locally when using `remote_setup.py` directly)
+- **Automatic nginx configuration**: Creates nginx site configs with HTTPS and Let's Encrypt preparation
+- **HTTPS support**: Self-signed certificates generated automatically for all sites
+- **Let's Encrypt ready**: Pre-configured `/.well-known/acme-challenge/` location for certificate verification
+- **Default server**: Deployments without a domain (e.g., `/path`) become the default server, accessible via IP
+- **Directory naming**: Repositories are stored in `/var/www/domain_com__path` (e.g., `/var/www/blog_example_com__articles`)
+- **Standard builds**: 
+  - Rails: `bundle install --deployment`, `rake assets:precompile`, and reverse proxy setup
+  - Node.js: `npm install`, `npm run build`, serves from `dist/` or `build/`
+  - Static: Files served as-is from repository root
+
+Example:
+```bash
+# Deploy a Rails application with reverse proxy
+python3 setup_server_web.py 192.168.1.100 --ruby \
+  --deploy api.myapp.com https://github.com/user/rails-api.git
+
+# Deploy a Vite/React site
+python3 setup_server_web.py 192.168.1.100 --node \
+  --deploy app.mysite.com https://github.com/user/vite-app.git
+
+# When using remote_setup.py directly on the server (clones repositories)
+python3 /opt/infra_tools/remote_setup.py --system-type server_web --username myuser \
+  --deploy mysite.com https://github.com/user/site.git
+
+# Advanced: Use --lite-deploy when repositories are pre-uploaded to /opt/infra_tools/deployments/
+python3 /opt/infra_tools/remote_setup.py --system-type server_web --username myuser \
+  --lite-deploy --deploy mysite.com https://github.com/user/site.git
+```
+
+**Deployment Process**: Setup scripts clone repositories locally using your git credentials, upload them to `/opt/infra_tools/deployments/` on the remote server, then execute `remote_setup.py --lite-deploy` to deploy from the uploaded files.
 
 ## Features
 

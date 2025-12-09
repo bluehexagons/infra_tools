@@ -188,7 +188,9 @@ def install_ruby(username: str, os_type: str, **_) -> None:
         print("  ✓ rbenv already installed")
         return
     
-    run("apt-get install -y -qq git curl libssl-dev libreadline-dev zlib1g-dev autoconf bison build-essential libyaml-dev libncurses5-dev libffi-dev libgdbm-dev")
+    run("apt-get install -y -qq git curl libssl-dev libreadline-dev zlib1g-dev autoconf bison build-essential libyaml-dev libncurses5-dev libffi-dev libgdbm-dev ruby ruby-dev")
+    run("gem install bundler", check=False)
+    
     run(f"runuser -u {safe_username} -- git clone https://github.com/rbenv/rbenv.git {shlex.quote(rbenv_dir)}")
     run(f"runuser -u {safe_username} -- git clone https://github.com/rbenv/ruby-build.git {shlex.quote(rbenv_dir)}/plugins/ruby-build")
     
@@ -215,7 +217,7 @@ eval "$(rbenv init -)"
         run(f"runuser -u {safe_username} -- bash -c 'export PATH=\"{rbenv_dir}/bin:$PATH\" && eval \"$(rbenv init -)\" && gem install bundler'")
         print(f"  ✓ rbenv + Ruby {latest_ruby} + bundler installed")
     else:
-        print("  ✓ rbenv installed (Ruby installation skipped)")
+        print("  ✓ rbenv + system Ruby + bundler installed")
 
 
 def install_go(username: str, os_type: str, **_) -> None:
@@ -250,19 +252,49 @@ def install_go(username: str, os_type: str, **_) -> None:
 
 
 def install_node(username: str, os_type: str, **_) -> None:
-    safe_username = shlex.quote(username)
-    user_home = f"/home/{username}"
-    nvm_dir = f"{user_home}/.nvm"
+    # Global install to /opt/nvm to avoid permission issues with service users
+    nvm_dir = "/opt/nvm"
     
-    if os.path.exists(nvm_dir):
-        print("  ✓ nvm already installed")
-        return
-    
-    run("apt-get install -y -qq curl")
-    nvm_version = "v0.39.7"
-    run(f"runuser -u {safe_username} -- bash -c 'curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/{nvm_version}/install.sh | bash'")
-    run(f"runuser -u {safe_username} -- bash -c 'export NVM_DIR=\"{nvm_dir}\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && nvm install --lts'")
-    run(f"runuser -u {safe_username} -- bash -c 'export NVM_DIR=\"{nvm_dir}\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npm install -g npm@latest'")
-    run(f"runuser -u {safe_username} -- bash -c 'export NVM_DIR=\"{nvm_dir}\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npm install -g pnpm'")
-    
-    print("  ✓ nvm + Node.js LTS + NPM (latest) + PNPM installed")
+    if not os.path.exists(nvm_dir):
+        print("  Installing nvm globally to /opt/nvm...")
+        run("apt-get install -y -qq curl")
+        run(f"mkdir -p {nvm_dir}")
+        nvm_version = "v0.39.7"
+        
+        # Install nvm
+        run(f"curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/{nvm_version}/install.sh | NVM_DIR={nvm_dir} bash")
+        
+        # Install Node LTS
+        run(f"bash -c 'export NVM_DIR=\"{nvm_dir}\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && nvm install --lts'")
+        run(f"bash -c 'export NVM_DIR=\"{nvm_dir}\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npm install -g npm@latest'")
+        run(f"bash -c 'export NVM_DIR=\"{nvm_dir}\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npm install -g pnpm'")
+        
+        # Fix permissions so other users (like 'rails') can use it
+        run(f"chmod -R a+rX {nvm_dir}")
+        
+        # Add to profile.d for all users
+        with open("/etc/profile.d/nvm.sh", "w") as f:
+            f.write(f'export NVM_DIR="{nvm_dir}"\n[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"\n')
+        
+        print("  ✓ nvm + Node.js LTS + NPM (latest) + PNPM installed globally")
+    else:
+        print("  ✓ nvm already installed in /opt/nvm")
+
+    # Ensure global symlinks exist so root/other users can use node/npm
+    node_path_result = run(f"bash -c 'export NVM_DIR=\"{nvm_dir}\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && which node'", check=False)
+    if node_path_result.returncode == 0 and node_path_result.stdout.strip():
+        node_bin = node_path_result.stdout.strip()
+        node_dir = os.path.dirname(node_bin)
+        
+        links_created = False
+        for tool in ["node", "npm", "npx", "pnpm"]:
+            tool_path = os.path.join(node_dir, tool)
+            link_path = f"/usr/local/bin/{tool}"
+            if os.path.exists(tool_path):
+                # Only create if it doesn't exist or points somewhere else
+                if not os.path.exists(link_path) or os.path.realpath(link_path) != os.path.realpath(tool_path):
+                    run(f"ln -sf {tool_path} {link_path}")
+                    links_created = True
+        
+        if links_created:
+            print("  ✓ Node.js binaries linked to /usr/local/bin")
