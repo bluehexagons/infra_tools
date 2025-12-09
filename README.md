@@ -82,6 +82,8 @@ All setup scripts support optional software installation:
     - `domain.com/path` - Deploy to domain with optional subpath
     - `domain.com` - Deploy to domain root
     - `/path` - Deploy to local path without nginx configuration
+- `--ssl` - Enable Let's Encrypt SSL/TLS certificates for deployed domains
+- `--ssl-email EMAIL` - Email address for Let's Encrypt registration (optional)
 
 Desktop workstation scripts support desktop environment and browser selection:
 
@@ -129,6 +131,14 @@ python3 setup_server_web.py 192.168.1.100 --ruby --node \
 # Deploy as default site (accessible by IP address)
 python3 setup_server_web.py 192.168.1.100 \
   --deploy /blog https://github.com/user/blog-site.git
+
+# Deploy with Let's Encrypt SSL certificates
+python3 setup_server_web.py 192.168.1.100 \
+  --deploy mysite.com https://github.com/user/site.git \
+  --ssl --ssl-email admin@mysite.com
+
+# Add SSL to existing deployment using patch_setup.py
+python3 patch_setup.py web.example.com --ssl --ssl-email admin@example.com
 ```
 
 ### Deployment Support
@@ -142,7 +152,12 @@ This will run the build process once per location and create a configuration for
 - **Static frontend serving**: The Node frontend build output (dist/build) is served directly by Nginx. The deploy process returns a `frontend_serve_path` which is picked up by generated Nginx configs.
 - **Automatic nginx configuration**: Creates nginx site configs with HTTPS and Let's Encrypt preparation. Nginx serves static frontends and reverse proxies Rails backend API (or Node servers if configured).
 - **API routing strategy**: If a Rails + frontend is deployed at the **root path** for a domain (e.g., `example.com/` or `example.com`), the API uses `api.example.com` (subdomain strategy). Otherwise the API is available under the app's path (e.g., `example.com/rails_test/api`).
-- **HTTPS support**: Self-signed certificates generated for initial setup; Let's Encrypt readiness is included via `/.well-known/acme-challenge/`
+- **HTTPS/SSL support**: 
+  - Self-signed certificates generated automatically for initial setup
+  - Use `--ssl` flag to obtain Let's Encrypt certificates for deployed domains
+  - Let's Encrypt certificates are preserved during redeployment
+  - Automatic certificate renewal configured via certbot systemd timer
+  - ACME challenge location (`/.well-known/acme-challenge/`) configured in all nginx sites
 - **Default server**: Deployments without a domain (e.g., `/path`) become the default server, accessible via IP
 - **Directory naming**: Repositories are stored in `/var/www/domain_com__path` (e.g., `/var/www/blog_example_com__articles`)
 - **Standard builds**: 
