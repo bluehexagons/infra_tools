@@ -41,6 +41,7 @@ from .web_steps import (
     create_hello_world_site,
     configure_default_site,
 )
+from .swap_steps import configure_swap
 
 
 COMMON_STEPS = [
@@ -52,6 +53,7 @@ COMMON_STEPS = [
     ("Copying SSH keys to user", copy_ssh_keys_to_user),
     ("Generating SSH key for user", generate_ssh_key),
     ("Configuring time synchronization", configure_time_sync),
+    ("Configuring swap", configure_swap),
 ]
 
 DESKTOP_STEPS = [
@@ -110,6 +112,7 @@ WEB_FIREWALL_STEPS = [
 
 PROXMOX_HARDENING_STEPS = [
     ("Creating remoteusers group", create_remoteusers_group),
+    ("Configuring swap", configure_swap),
     ("Hardening SSH configuration", harden_ssh),
     ("Hardening kernel parameters", harden_kernel),
     ("Configuring automatic security updates", configure_auto_updates),
@@ -150,6 +153,7 @@ STEP_FUNCTIONS = {
     'configure_nginx_security': configure_nginx_security,
     'create_hello_world_site': create_hello_world_site,
     'configure_default_site': configure_default_site,
+    'configure_swap': configure_swap,
 }
 
 
