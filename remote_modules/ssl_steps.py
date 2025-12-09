@@ -94,71 +94,6 @@ def setup_certificate_renewal(run_func: Optional[Callable] = None) -> None:
     print("  ✓ Automatic renewal configured")
 
 
-def update_nginx_to_use_letsencrypt(domain: str, run_func: Optional[Callable] = None) -> bool:
-    """
-    Update nginx configuration to use Let's Encrypt certificates.
-    
-    Args:
-        domain: Domain name
-        run_func: Function to run commands (defaults to utils.run)
-    
-    Returns:
-        True if successful, False otherwise
-    """
-    if run_func is None:
-        run_func = run
-    
-    cert_path = f"/etc/letsencrypt/live/{domain}/fullchain.pem"
-    key_path = f"/etc/letsencrypt/live/{domain}/privkey.pem"
-    
-    if not os.path.exists(cert_path) or not os.path.exists(key_path):
-        print(f"  ⚠ Let's Encrypt certificates not found for {domain}")
-        return False
-    
-    # Find nginx config file for this domain
-    config_name = domain.replace('.', '_')
-    config_file = f"/etc/nginx/sites-available/{config_name}"
-    
-    if not os.path.exists(config_file):
-        print(f"  ⚠ Nginx config not found: {config_file}")
-        return False
-    
-    print(f"  Updating nginx config to use Let's Encrypt certificates for {domain}...")
-    
-    # Read the config file
-    try:
-        with open(config_file, 'r') as f:
-            content = f.read()
-        
-        # Replace self-signed certificate paths with Let's Encrypt paths
-        old_cert = f"/etc/nginx/ssl/{domain}.crt"
-        old_key = f"/etc/nginx/ssl/{domain}.key"
-        
-        content = content.replace(old_cert, cert_path)
-        content = content.replace(old_key, key_path)
-        
-        # Write back
-        with open(config_file, 'w') as f:
-            f.write(content)
-        
-        print(f"  ✓ Updated nginx config for {domain}")
-        
-        # Test nginx configuration
-        result = run_func("nginx -t", check=False)
-        if result.returncode != 0:
-            print("  ⚠ nginx configuration test failed")
-            return False
-        
-        # Reload nginx
-        run_func("systemctl reload nginx")
-        print("  ✓ nginx reloaded")
-        
-        return True
-    except Exception as e:
-        print(f"  ⚠ Error updating nginx config: {e}")
-        return False
-
-
 def setup_ssl_for_deployments(deployments: List[dict], email: Optional[str] = None, run_func: Optional[Callable] = None) -> None:
     """
     Set up Let's Encrypt SSL certificates for deployed domains.
@@ -201,9 +136,19 @@ def setup_ssl_for_deployments(deployments: List[dict], email: Optional[str] = No
         print("  ⚠ No certificates obtained")
         return
     
-    # Update nginx configs to use the new certificates
-    for domain in successful_domains:
-        update_nginx_to_use_letsencrypt(domain, run_func)
+    # Regenerate nginx configs to use the new Let's Encrypt certificates
+    # Since nginx_config.py's get_ssl_cert_path() now prefers Let's Encrypt certs,
+    # we just need to regenerate the configs
+    print("\n  Regenerating nginx configurations to use Let's Encrypt certificates...")
+    
+    from collections import defaultdict
+    from shared.nginx_config import create_nginx_sites_for_groups
+    
+    grouped_deployments = defaultdict(list)
+    for dep in deployments:
+        grouped_deployments[dep['domain']].append(dep)
+    
+    create_nginx_sites_for_groups(grouped_deployments, run_func)
     
     # Set up automatic renewal
     setup_certificate_renewal(run_func)
