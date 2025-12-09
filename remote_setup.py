@@ -60,6 +60,10 @@ def main() -> int:
                        help="Use pre-uploaded repository files instead of cloning (for remote execution)")
     parser.add_argument("--full-deploy", action="store_true",
                        help="Always rebuild deployments even if they haven't changed (default: skip unchanged deployments)")
+    parser.add_argument("--ssl", action="store_true",
+                       help="Enable Let's Encrypt SSL/TLS certificates for deployed domains")
+    parser.add_argument("--ssl-email",
+                       help="Email address for Let's Encrypt registration (optional)")
     
     args = parser.parse_args()
     
@@ -115,6 +119,10 @@ def main() -> int:
         print(f"Deployments: {len(args.deploy)} repository(ies)")
         for location, git_url in args.deploy:
             print(f"  - {git_url} -> {location}")
+        if args.ssl:
+            print("SSL: Yes (Let's Encrypt)")
+            if args.ssl_email:
+                print(f"SSL Email: {args.ssl_email}")
     sys.stdout.flush()
 
     os_type = detect_os()
@@ -252,6 +260,17 @@ def main() -> int:
                 grouped_deployments[dep['domain']].append(dep)
             
             create_nginx_sites_for_groups(grouped_deployments, run)
+            
+            # Set up SSL if requested
+            if args.ssl:
+                from remote_modules.ssl_steps import install_certbot, setup_ssl_for_deployments
+                
+                print("\n" + "=" * 60)
+                print("Installing certbot...")
+                print("=" * 60)
+                install_certbot(os_type=os_type)
+                
+                setup_ssl_for_deployments(deployments, args.ssl_email, run)
     
     print("\n" + "=" * 60)
     print("Setup completed successfully!")

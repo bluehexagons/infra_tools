@@ -321,6 +321,10 @@ def create_argument_parser(description: str, allow_steps: bool = False) -> argpa
                        help="Deploy a git repository (domain.com/path or /path) to auto-configure nginx (can be used multiple times)")
     parser.add_argument("--full-deploy", dest="full_deploy", action="store_true",
                        help="Always rebuild deployments even if they haven't changed (default: skip unchanged deployments)")
+    parser.add_argument("--ssl", dest="enable_ssl", action=argparse.BooleanOptionalAction, default=None,
+                       help="Enable Let's Encrypt SSL/TLS certificates for deployed domains")
+    parser.add_argument("--ssl-email", dest="ssl_email",
+                       help="Email address for Let's Encrypt registration (optional)")
     return parser
 
 
@@ -343,6 +347,8 @@ def run_remote_setup(
     custom_steps: Optional[str] = None,
     deploy_specs: Optional[list] = None,
     full_deploy: bool = False,
+    enable_ssl: bool = False,
+    ssl_email: Optional[str] = None,
 ) -> int:
     try:
         tar_data = create_tar_archive()
@@ -409,6 +415,11 @@ def run_remote_setup(
             cmd_parts.append("--full-deploy")
         for deploy_spec, git_url in deploy_specs:
             cmd_parts.append(f"--deploy {shlex.quote(deploy_spec)} {shlex.quote(git_url)}")
+    
+    if enable_ssl:
+        cmd_parts.append("--ssl")
+        if ssl_email:
+            cmd_parts.append(f"--ssl-email {shlex.quote(ssl_email)}")
     
     remote_cmd = f"""
 mkdir -p {escaped_install_dir} && \
@@ -590,6 +601,10 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
             print("Full deploy: Yes (rebuild all deployments)")
         else:
             print("Full deploy: No (skip unchanged deployments)")
+        if args.enable_ssl:
+            print("SSL: Yes (Let's Encrypt)")
+            if args.ssl_email:
+                print(f"SSL Email: {args.ssl_email}")
     print("=" * 60)
     print()
     
@@ -632,7 +647,9 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
         install_node=args.install_node,
         custom_steps=args.custom_steps if allow_steps else None,
         deploy_specs=args.deploy_specs,
-        full_deploy=args.full_deploy if args.deploy_specs else False
+        full_deploy=args.full_deploy if args.deploy_specs else False,
+        enable_ssl=args.enable_ssl if args.deploy_specs else False,
+        ssl_email=args.ssl_email if args.enable_ssl else None
     )
     
     if returncode != 0:

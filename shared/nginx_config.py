@@ -10,8 +10,20 @@ SSL_CIPHERS = "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-E
 
 
 def get_ssl_cert_path(domain: Optional[str]) -> tuple:
-    """Get SSL certificate and key paths for a domain."""
+    """
+    Get SSL certificate and key paths for a domain.
+    Prefers Let's Encrypt certificates if they exist, falls back to self-signed.
+    """
     cert_name = domain or 'default'
+    
+    # Check for Let's Encrypt certificate first
+    if domain:
+        letsencrypt_cert = f"/etc/letsencrypt/live/{domain}/fullchain.pem"
+        letsencrypt_key = f"/etc/letsencrypt/live/{domain}/privkey.pem"
+        if os.path.exists(letsencrypt_cert) and os.path.exists(letsencrypt_key):
+            return (letsencrypt_cert, letsencrypt_key)
+    
+    # Fall back to self-signed certificate
     cert_file = f"/etc/nginx/ssl/{cert_name}.crt"
     key_file = f"/etc/nginx/ssl/{cert_name}.key"
     return (cert_file, key_file)

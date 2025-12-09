@@ -42,6 +42,7 @@ from .web_steps import (
     configure_default_site,
 )
 from .swap_steps import configure_swap
+from .ssl_steps import install_certbot
 
 
 COMMON_STEPS = [
@@ -124,6 +125,7 @@ STEP_FUNCTIONS = {
     'install_ruby': install_ruby_step,
     'install_go': install_go_step,
     'install_node': install_node_step,
+    'install_certbot': install_certbot,
     'update_and_upgrade_packages': update_and_upgrade_packages,
     'ensure_sudo_installed': ensure_sudo_installed,
     'configure_locale': configure_locale,
