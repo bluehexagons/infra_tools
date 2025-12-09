@@ -3,6 +3,7 @@
 import os
 import shlex
 import shutil
+import secrets
 from typing import Optional
 
 from .deploy_utils import (
@@ -115,12 +116,21 @@ class DeploymentOrchestrator:
     def _build_rails_project(self, project_path: str, run_func):
         print(f"  Building Rails project at {project_path}")
         
+        # Generate a temporary secret key for build steps
+        build_secret = secrets.token_hex(64)
+        env_vars = f"RAILS_ENV=production SECRET_KEY_BASE={build_secret}"
+        
         run_func(f"cd {shlex.quote(project_path)} && bundle install --deployment --without development test")
+        
+        # Database setup
+        print("  Setting up database...")
+        run_func(f"cd {shlex.quote(project_path)} && {env_vars} bundle exec rake db:create", check=False)
+        run_func(f"cd {shlex.quote(project_path)} && {env_vars} bundle exec rake db:migrate")
         
         # Only precompile assets if the task exists (skips for API-only apps)
         check_task = run_func(f"cd {shlex.quote(project_path)} && bundle exec rake -T assets:precompile | grep assets:precompile", check=False)
         if check_task.returncode == 0:
-            run_func(f"cd {shlex.quote(project_path)} && RAILS_ENV=production bundle exec rake assets:precompile")
+            run_func(f"cd {shlex.quote(project_path)} && {env_vars} bundle exec rake assets:precompile")
         else:
             print("  ℹ Skipping assets:precompile (task not found, likely API-only app)")
         
