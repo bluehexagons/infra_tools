@@ -19,7 +19,8 @@ def ensure_app_user(username: str) -> None:
 
 def deploy_repository(source_path: str, deploy_spec: str, git_url: str, 
                       commit_hash: str = None, full_deploy: bool = True,
-                      web_user: str = "rails", web_group: str = "rails", **_) -> None:
+                      web_user: str = "rails", web_group: str = "rails", 
+                      keep_source: bool = False, **_) -> None:
     from shared.deploy_utils import parse_deploy_spec
     
     ensure_app_user(web_user)
@@ -41,7 +42,8 @@ def deploy_repository(source_path: str, deploy_spec: str, git_url: str,
         git_url=git_url,
         commit_hash=commit_hash,
         run_func=run,
-        full_deploy=full_deploy
+        full_deploy=full_deploy,
+        keep_source=keep_source
     )
     
     return deployment_info

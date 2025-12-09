@@ -55,7 +55,7 @@ def main() -> int:
     parser.add_argument("--node", action="store_true",
                        help="Install nvm + latest Node.JS + PNPM + update NPM")
     parser.add_argument("--deploy", action="append", nargs=2, metavar=("DOMAIN_OR_PATH", "GIT_URL"),
-                       help="Deploy a git repository (domain.com/path or /path) to auto-configure nginx (can be used multiple times)")
+                       help="Deploy a git repository (domain.com/path or /path) to auto-configure nginx. Can be comma-separated for multiple locations.")
     parser.add_argument("--lite-deploy", action="store_true",
                        help="Use pre-uploaded repository files instead of cloning (for remote execution)")
     parser.add_argument("--full-deploy", action="store_true",
@@ -156,7 +156,7 @@ def main() -> int:
         
         if args.lite_deploy:
             # Use pre-uploaded files from /opt/infra_tools/deployments/
-            for deploy_spec, git_url in args.deploy:
+            for deploy_specs_str, git_url in args.deploy:
                 repo_name = extract_repo_name(git_url)
                 source_path = f'/opt/infra_tools/deployments/{repo_name}'
                 
@@ -174,23 +174,28 @@ def main() -> int:
                     except Exception:
                         pass
                 
-                print(f"\nDeploying pre-uploaded repository: {repo_name}")
-                info = deploy_repository(
-                    source_path=source_path,
-                    deploy_spec=deploy_spec,
-                    git_url=git_url,
-                    commit_hash=commit_hash,
-                    full_deploy=args.full_deploy,
-                    web_user="rails",
-                    web_group="rails"
-                )
-                if info:
-                    deployments.append(info)
+                for deploy_spec in deploy_specs_str.split(','):
+                    deploy_spec = deploy_spec.strip()
+                    if not deploy_spec: continue
+
+                    print(f"\nDeploying pre-uploaded repository: {repo_name}")
+                    info = deploy_repository(
+                        source_path=source_path,
+                        deploy_spec=deploy_spec,
+                        git_url=git_url,
+                        commit_hash=commit_hash,
+                        full_deploy=args.full_deploy,
+                        web_user="rails",
+                        web_group="rails",
+                        keep_source=True
+                    )
+                    if info:
+                        deployments.append(info)
         else:
             # Clone repositories directly (local execution)
             temp_dir = tempfile.mkdtemp(prefix="infra_deploy_")
             try:
-                for deploy_spec, git_url in args.deploy:
+                for deploy_specs_str, git_url in args.deploy:
                     repo_name = extract_repo_name(git_url)
                     clone_path = os.path.join(temp_dir, repo_name)
                     
@@ -212,17 +217,22 @@ def main() -> int:
                     from shared.deploy_utils import get_git_commit_hash
                     commit_hash = get_git_commit_hash(clone_path)
                     
-                    info = deploy_repository(
-                        source_path=clone_path,
-                        deploy_spec=deploy_spec,
-                        git_url=git_url,
-                        commit_hash=commit_hash,
-                        full_deploy=args.full_deploy,
-                        web_user="rails",
-                        web_group="rails"
-                    )
-                    if info:
-                        deployments.append(info)
+                    for deploy_spec in deploy_specs_str.split(','):
+                        deploy_spec = deploy_spec.strip()
+                        if not deploy_spec: continue
+
+                        info = deploy_repository(
+                            source_path=clone_path,
+                            deploy_spec=deploy_spec,
+                            git_url=git_url,
+                            commit_hash=commit_hash,
+                            full_deploy=args.full_deploy,
+                            web_user="rails",
+                            web_group="rails",
+                            keep_source=True
+                        )
+                        if info:
+                            deployments.append(info)
             finally:
                 if os.path.exists(temp_dir):
                     shutil.rmtree(temp_dir)

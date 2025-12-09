@@ -107,7 +107,7 @@ class DeploymentOrchestrator:
     
     def deploy_from_archive(self, source_path: str, domain: Optional[str], path: str, 
                            git_url: str, commit_hash: Optional[str], run_func, 
-                           full_deploy: bool = True) -> dict:
+                           full_deploy: bool = True, keep_source: bool = False) -> dict:
         dest_path = self.get_deployment_path(domain, path, git_url)
         
         # Check if we should skip this deployment
@@ -140,8 +140,12 @@ class DeploymentOrchestrator:
             print(f"  Removing existing deployment at {dest_path}...")
             shutil.rmtree(dest_path)
         
-        shutil.move(source_path, dest_path)
-        print(f"  ✓ Moved to {dest_path}")
+        if keep_source:
+            shutil.copytree(source_path, dest_path)
+            print(f"  ✓ Copied to {dest_path}")
+        else:
+            shutil.move(source_path, dest_path)
+            print(f"  ✓ Moved to {dest_path}")
         
         project_type = detect_project_type(dest_path)
         print(f"  Detected project type: {project_type}")
@@ -175,9 +179,11 @@ class DeploymentOrchestrator:
                 
                 # Determine API URL
                 api_url = "/api"
-                if domain:
+                is_root = not path or path == '/'
+                
+                if is_root and domain:
                     api_url = f"https://api.{domain}"
-                elif path and path != '/':
+                elif not is_root:
                     clean_path = path.rstrip('/')
                     if not clean_path.startswith('/'):
                         clean_path = '/' + clean_path

@@ -132,10 +132,11 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: List[Dict],
     api_configs = []
     if domain:
         for dep in sorted_deployments:
-            if dep.get('backend_port') and dep.get('frontend_port'):
-                # Subdomain strategy for Rails apps with domain
-                api_domain = f"api.{domain}"
-                api_configs.append(_make_api_server_block(api_domain, dep['backend_port']))
+            if dep.get('backend_port') and (dep.get('frontend_port') or dep.get('frontend_serve_path')):
+                # Subdomain strategy for Rails apps with domain - ONLY for root path
+                if dep['path'] == '/' or not dep['path']:
+                    api_domain = f"api.{domain}"
+                    api_configs.append(_make_api_server_block(api_domain, dep['backend_port']))
 
     # Main Server Block
     locations = []
@@ -156,7 +157,10 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: List[Dict],
             frontend_serve_path = dep.get('frontend_serve_path')
             
             if backend_port and (frontend_port or frontend_serve_path):
-                if domain:
+                # Use subdomain strategy only if domain exists AND path is root
+                use_subdomain_api = domain and (path == '/' or not path)
+                
+                if use_subdomain_api:
                     # Subdomain strategy: Frontend only in main block
                     # Backend is handled by api_configs above
                     if frontend_serve_path:
