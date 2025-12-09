@@ -146,11 +146,18 @@ class DeploymentOrchestrator:
         project_type = detect_project_type(dest_path)
         print(f"  Detected project type: {project_type}")
         
-        self.build_project(dest_path, project_type, run_func)
+        site_root = path or "/"
+        if not site_root.startswith("/"):
+            site_root = f"/{site_root}"
+        if not site_root.endswith("/"):
+            site_root = f"{site_root}/"
+        
+        self.build_project(dest_path, project_type, run_func, site_root=site_root)
         
         # Set up systemd service for Rails apps
         backend_port = None
         frontend_port = None
+        frontend_serve_path = None
         
         if project_type == "rails":
             app_name = os.path.basename(dest_path)
@@ -185,12 +192,8 @@ class DeploymentOrchestrator:
                 # Build frontend
                 self._build_node_project(frontend_path, run_func, api_url, site_root)
                 
-                # Determine port
-                node_service_name = f"node-{app_name}"
-                frontend_port = self._get_assigned_port(node_service_name, 4000)
-                
-                # Create Node service
-                create_node_service(app_name, frontend_path, frontend_port, self.web_user, self.web_group, run_func)
+                frontend_serve_path = get_project_root(frontend_path, "node")
+                print(f"  Frontend will be served statically from {frontend_serve_path}")
         
         # Fix permissions AFTER all build steps (including frontend)
         result = run_func(f"chown -R {shlex.quote(self.web_user)}:{shlex.quote(self.web_group)} {shlex.quote(dest_path)}", check=False)
@@ -213,14 +216,15 @@ class DeploymentOrchestrator:
             'serve_path': get_project_root(dest_path, project_type),
             'needs_proxy': should_reverse_proxy(project_type),
             'backend_port': backend_port,
-            'frontend_port': frontend_port
+            'frontend_port': frontend_port,
+            'frontend_serve_path': frontend_serve_path
         }
     
-    def build_project(self, project_path: str, project_type: str, run_func):
+    def build_project(self, project_path: str, project_type: str, run_func, site_root: Optional[str] = None):
         if project_type == "rails":
             self._build_rails_project(project_path, run_func)
         elif project_type == "node":
-            self._build_node_project(project_path, run_func)
+            self._build_node_project(project_path, run_func, site_root=site_root)
         elif project_type == "static":
             self._build_static_project(project_path)
         else:

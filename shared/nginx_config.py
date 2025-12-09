@@ -33,6 +33,92 @@ def generate_self_signed_cert(domain: str, run_func: Callable) -> tuple:
     return (cert_file, key_file)
 
 
+def _make_proxy_location(path: str, port: int, comment: str, enable_websocket: bool = False) -> str:
+    """Generate a proxy_pass location block."""
+    slash = "/" if path != "/" else ""
+    
+    content = [
+        f"        proxy_pass http://127.0.0.1:{port}{slash};",
+        "        proxy_set_header Host $host;",
+        "        proxy_set_header X-Real-IP $remote_addr;",
+        "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
+        "        proxy_set_header X-Forwarded-Proto $scheme;"
+    ]
+    
+    if enable_websocket:
+        content.extend([
+            "",
+            "        # WebSocket support for Vite HMR",
+            "        proxy_http_version 1.1;",
+            "        proxy_set_header Upgrade $http_upgrade;",
+            "        proxy_set_header Connection \"upgrade\";"
+        ])
+        
+    body = "\n".join(content)
+    
+    if path == "/":
+        return f"""    {comment}
+    location / {{
+{body}
+    }}"""
+    else:
+        return f"""    {comment}
+    location {path}/ {{
+{body}
+    }}
+    
+    # Redirect {path} to {path}/
+    location = {path} {{
+        return 301 {path}/;
+    }}"""
+
+
+def _make_static_location(path: str, serve_path: str, index_file: str, try_files: str, comment: str) -> str:
+    """Generate a static file serving location block."""
+    directive = "root" if path == "/" else "alias"
+    
+    return f"""    {comment}
+    location {path} {{
+        {directive} {serve_path};
+        index {index_file};
+        autoindex off;
+        charset utf-8;
+        try_files {try_files};
+    }}"""
+
+
+def _make_api_server_block(domain: str, port: int) -> str:
+    """Generate a separate server block for API subdomain."""
+    cert, key = get_ssl_cert_path(domain)
+    return f"""server {{
+    listen 80;
+    listen [::]:80;
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    
+    server_name {domain};
+    
+    ssl_certificate {cert};
+    ssl_certificate_key {key};
+    ssl_protocols {SSL_PROTOCOLS};
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers {SSL_CIPHERS};
+    
+    location /.well-known/acme-challenge/ {{
+        root /var/www/letsencrypt;
+    }}
+    
+    location / {{
+        proxy_pass http://127.0.0.1:{port};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }}
+}}
+"""
+
+
 def generate_merged_nginx_config(domain: Optional[str], deployments: List[Dict], is_default: bool = False) -> str:
     """Generate a merged nginx configuration for multiple deployments on the same domain."""
     cert_file, key_file = get_ssl_cert_path(domain)
@@ -49,36 +135,7 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: List[Dict],
             if dep.get('backend_port') and dep.get('frontend_port'):
                 # Subdomain strategy for Rails apps with domain
                 api_domain = f"api.{domain}"
-                api_cert, api_key = get_ssl_cert_path(api_domain)
-                backend_port = dep['backend_port']
-                
-                api_configs.append(f"""server {{
-    listen 80;
-    listen [::]:80;
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
-    
-    server_name {api_domain};
-    
-    ssl_certificate {api_cert};
-    ssl_certificate_key {api_key};
-    ssl_protocols {SSL_PROTOCOLS};
-    ssl_prefer_server_ciphers on;
-    ssl_ciphers {SSL_CIPHERS};
-    
-    location /.well-known/acme-challenge/ {{
-        root /var/www/letsencrypt;
-    }}
-    
-    location / {{
-        proxy_pass http://127.0.0.1:{backend_port};
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }}
-}}
-""")
+                api_configs.append(_make_api_server_block(api_domain, dep['backend_port']))
 
     # Main Server Block
     locations = []
@@ -96,145 +153,64 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: List[Dict],
             backend_port = dep.get('backend_port')
             frontend_port = dep.get('frontend_port')
             proxy_port = dep.get('proxy_port') or 3000 # Fallback
+            frontend_serve_path = dep.get('frontend_serve_path')
             
-            if backend_port and frontend_port:
+            if backend_port and (frontend_port or frontend_serve_path):
                 if domain:
                     # Subdomain strategy: Frontend only in main block
-                    if location_path == '/':
-                        locations.append(f"""    # Frontend for {path}
-    location / {{
-        proxy_pass http://127.0.0.1:{frontend_port};
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        
-        # WebSocket support for Vite HMR
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-    }}""")
+                    # Backend is handled by api_configs above
+                    if frontend_serve_path:
+                        # Static frontend
+                        try_files = "$uri $uri.html $uri/ /index.html" if location_path == '/' else f"$uri $uri.html $uri/ {location_path}/index.html"
+                        locations.append(_make_static_location(
+                            location_path, frontend_serve_path, "index.html", try_files, f"# Frontend for {path}"
+                        ))
                     else:
-                        locations.append(f"""    # Frontend for {path}
-    location {location_path}/ {{
-        proxy_pass http://127.0.0.1:{frontend_port}/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        
-        # WebSocket support for Vite HMR
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-    }}
-    
-    # Redirect {location_path} to {location_path}/
-    location = {location_path} {{
-        return 301 {location_path}/;
-    }}""")
+                        # Proxy frontend
+                        locations.append(_make_proxy_location(
+                            location_path, frontend_port, f"# Frontend for {path}", enable_websocket=True
+                        ))
                 else:
                     # Subpath strategy: Backend at /path/api, Frontend at /path
-                    # Determine API path
-                    if location_path == '/':
-                        api_path = "/api/"
-                    else:
-                        api_path = f"{location_path}/api/"
                     
-                    backend_block = f"""    # Backend for {path}
-    location {api_path} {{
-        proxy_pass http://127.0.0.1:{backend_port}/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }}"""
+                    # Backend
+                    api_path = "/api" if location_path == '/' else f"{location_path}/api"
+                    locations.append(_make_proxy_location(
+                        api_path, backend_port, f"# Backend for {path}"
+                    ))
 
-                    if location_path == '/':
-                        frontend_block = f"""    # Frontend for {path}
-    location / {{
-        proxy_pass http://127.0.0.1:{frontend_port};
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        
-        # WebSocket support for Vite HMR
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-    }}"""
+                    # Frontend
+                    if frontend_serve_path:
+                        try_files = "$uri $uri.html $uri/ /index.html" if location_path == '/' else f"$uri $uri.html $uri/ {location_path}/index.html"
+                        locations.append(_make_static_location(
+                            location_path, frontend_serve_path, "index.html", try_files, f"# Frontend for {path}"
+                        ))
                     else:
-                        frontend_block = f"""    # Frontend for {path}
-    location {location_path}/ {{
-        proxy_pass http://127.0.0.1:{frontend_port}/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        
-        # WebSocket support for Vite HMR
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-    }}
-    
-    # Redirect {location_path} to {location_path}/
-    location = {location_path} {{
-        return 301 {location_path}/;
-    }}"""
-                    
-                    locations.append(backend_block + "\n\n" + frontend_block)
+                        locations.append(_make_proxy_location(
+                            location_path, frontend_port, f"# Frontend for {path}", enable_websocket=True
+                        ))
             else:
-                # Simple proxy (Node only or Rails API only?)
-                if location_path == '/':
-                    locations.append(f"""    # Proxy for {path}
-    location / {{
-        proxy_pass http://127.0.0.1:{proxy_port};
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }}""")
-                else:
-                    locations.append(f"""    # Proxy for {path}
-    location {location_path}/ {{
-        proxy_pass http://127.0.0.1:{proxy_port}/;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }}
-    
-    # Redirect {location_path} to {location_path}/
-    location = {location_path} {{
-        return 301 {location_path}/;
-    }}""")
+                # Simple proxy
+                locations.append(_make_proxy_location(
+                    location_path, proxy_port, f"# Proxy for {path}"
+                ))
         else:
             # Static site
             serve_path = dep['serve_path']
             index_file = "index.html index.htm"
+            project_type = dep.get('project_type', 'static')
             
-            if location_path == '/':
-                # Root location uses 'root' directive usually, but we can't use 'root' globally if we have aliases.
-                # Actually, we can use 'root' inside location /.
-                locations.append(f"""    # Static site for {path}
-    location / {{
-        root {serve_path};
-        index {index_file};
-        autoindex off;
-        charset utf-8;
-        try_files $uri $uri.html $uri.htm $uri/ =404;
-    }}""")
-            else:
-                locations.append(f"""    # Static site for {path}
-    location {location_path} {{
-        alias {serve_path};
-        index {index_file};
-        autoindex off;
-        charset utf-8;
-        try_files $uri $uri.html $uri.htm $uri/ =404;
-    }}""")
+            try_files = "$uri $uri.html $uri.htm $uri/ =404"
+            if project_type == 'node':
+                 # Assume SPA
+                 if location_path == '/':
+                     try_files = "$uri $uri.html $uri/ /index.html"
+                 else:
+                     try_files = f"$uri $uri.html $uri/ {location_path}/index.html"
+            
+            locations.append(_make_static_location(
+                location_path, serve_path, index_file, try_files, f"# Static site for {path}"
+            ))
 
     # Add deny rules
     locations.append("""    location ~ /\\. {

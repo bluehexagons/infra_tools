@@ -8,7 +8,8 @@ from typing import Callable, Optional
 
 
 def generate_node_service(app_name: str, app_path: str, port: int = 4000,
-                         web_user: str = "www-data", web_group: str = "www-data") -> str:
+                         web_user: str = "www-data", web_group: str = "www-data",
+                         build_dir: str = "dist") -> str:
     """Generate systemd service configuration for a Node.js application."""
     return f"""[Unit]
 Description=Node app: {app_name}
@@ -21,7 +22,7 @@ Group={web_group}
 WorkingDirectory={app_path}
 Environment="NODE_ENV=production"
 Environment="PORT={port}"
-ExecStart=/usr/local/bin/npm run preview -- --port {port} --host
+ExecStart=/usr/local/bin/npx -y serve -s {build_dir} -l {port}
 Restart=always
 RestartSec=10
 
@@ -39,7 +40,14 @@ def create_node_service(app_name: str, app_path: str, port: int,
     if os.path.exists(service_file):
         print(f"  ℹ Service {service_name} already exists, updating...")
     
-    service_content = generate_node_service(app_name, app_path, port, web_user, web_group)
+    # Detect build directory
+    build_dir = "dist"
+    if os.path.exists(os.path.join(app_path, "build")):
+        build_dir = "build"
+    elif os.path.exists(os.path.join(app_path, "out")):
+        build_dir = "out"
+    
+    service_content = generate_node_service(app_name, app_path, port, web_user, web_group, build_dir)
     
     try:
         with open(service_file, 'w') as f:
