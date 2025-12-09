@@ -18,6 +18,7 @@ def ensure_app_user(username: str) -> None:
 
 
 def deploy_repository(source_path: str, deploy_spec: str, git_url: str, 
+                      commit_hash: str = None, full_deploy: bool = True,
                       web_user: str = "rails", web_group: str = "rails", **_) -> None:
     from shared.deploy_utils import parse_deploy_spec
     
@@ -38,26 +39,32 @@ def deploy_repository(source_path: str, deploy_spec: str, git_url: str,
         domain=domain,
         path=path,
         git_url=git_url,
-        run_func=run
+        commit_hash=commit_hash,
+        run_func=run,
+        full_deploy=full_deploy
     )
     
     is_default = domain is None
     
-    print(f"  Configuring nginx{' as default server' if is_default else f' for {domain}{path}'}...")
-    try:
-        create_nginx_site(
-            domain=domain,
-            path=path,
-            serve_path=deployment_info['serve_path'],
-            needs_proxy=deployment_info['needs_proxy'],
-            proxy_port=3000 if deployment_info['needs_proxy'] else None,
-            run_func=run,
-            is_default=is_default,
-            backend_port=deployment_info.get('backend_port'),
-            frontend_port=deployment_info.get('frontend_port')
-        )
-    except (OSError, PermissionError, ValueError) as e:
-        print(f"  ⚠ Failed to configure nginx: {e}")
-    
-    print(f"  ✓ Deployment complete")
+    # Only configure nginx if deployment was not skipped or if we need to ensure config exists
+    if not deployment_info.get('skipped', False):
+        print(f"  Configuring nginx{' as default server' if is_default else f' for {domain}{path}'}...")
+        try:
+            create_nginx_site(
+                domain=domain,
+                path=path,
+                serve_path=deployment_info['serve_path'],
+                needs_proxy=deployment_info['needs_proxy'],
+                proxy_port=3000 if deployment_info['needs_proxy'] else None,
+                run_func=run,
+                is_default=is_default,
+                backend_port=deployment_info.get('backend_port'),
+                frontend_port=deployment_info.get('frontend_port')
+            )
+        except (OSError, PermissionError, ValueError) as e:
+            print(f"  ⚠ Failed to configure nginx: {e}")
+        
+        print(f"  ✓ Deployment complete")
+    else:
+        print(f"  ✓ Deployment skipped (no changes)")
 

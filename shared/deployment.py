@@ -11,7 +11,10 @@ from .deploy_utils import (
     create_safe_directory_name,
     detect_project_type,
     get_project_root,
-    should_reverse_proxy
+    should_reverse_proxy,
+    get_git_commit_hash,
+    save_deployment_metadata,
+    should_redeploy
 )
 from .systemd_service import create_rails_service, create_node_service
 
@@ -36,8 +39,29 @@ class DeploymentOrchestrator:
             return os.path.join(self.base_dir, repo_name)
     
     def deploy_from_archive(self, source_path: str, domain: Optional[str], path: str, 
-                           git_url: str, run_func) -> dict:
+                           git_url: str, commit_hash: Optional[str], run_func, 
+                           full_deploy: bool = True) -> dict:
         dest_path = self.get_deployment_path(domain, path, git_url)
+        
+        # Check if we should skip this deployment
+        if should_redeploy(dest_path, git_url, commit_hash, full_deploy):
+            print(f"Deploying to {dest_path}...")
+        else:
+            print(f"Skipping {dest_path} (already at commit {commit_hash})...")
+            
+            # Still return deployment info for nginx configuration
+            project_type = detect_project_type(dest_path)
+            return {
+                'dest_path': dest_path,
+                'domain': domain,
+                'path': path,
+                'project_type': project_type,
+                'serve_path': get_project_root(dest_path, project_type),
+                'needs_proxy': should_reverse_proxy(project_type),
+                'backend_port': 3000 if project_type == "rails" else None,
+                'frontend_port': 4000 if project_type == "rails" and os.path.exists(os.path.join(dest_path, "frontend")) else None,
+                'skipped': True
+            }
         
         print(f"Deploying to {dest_path}...")
         
@@ -89,6 +113,9 @@ class DeploymentOrchestrator:
         
         # Ensure write permissions for the group so the service user can write temp files
         run_func(f"chmod -R 775 {shlex.quote(dest_path)}")
+        
+        # Save deployment metadata
+        save_deployment_metadata(dest_path, git_url, commit_hash)
         
         print(f"  ✓ Repository deployed to {dest_path}")
         

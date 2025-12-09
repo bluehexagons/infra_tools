@@ -58,6 +58,8 @@ def main() -> int:
                        help="Deploy a git repository (domain.com/path or /path) to auto-configure nginx (can be used multiple times)")
     parser.add_argument("--lite-deploy", action="store_true",
                        help="Use pre-uploaded repository files instead of cloning (for remote execution)")
+    parser.add_argument("--full-deploy", action="store_true",
+                       help="Always rebuild deployments even if they haven't changed (default: skip unchanged deployments)")
     
     args = parser.parse_args()
     
@@ -160,11 +162,23 @@ def main() -> int:
                     print(f"\n⚠ Warning: {source_path} not found, skipping {git_url}")
                     continue
                 
+                # Read commit hash if available
+                commit_hash = None
+                commit_file = f'/opt/infra_tools/deployments/{repo_name}.commit'
+                if os.path.exists(commit_file):
+                    try:
+                        with open(commit_file, 'r') as f:
+                            commit_hash = f.read().strip()
+                    except Exception:
+                        pass
+                
                 print(f"\nDeploying pre-uploaded repository: {repo_name}")
                 deploy_repository(
                     source_path=source_path,
                     deploy_spec=deploy_spec,
                     git_url=git_url,
+                    commit_hash=commit_hash,
+                    full_deploy=args.full_deploy,
                     web_user="rails",
                     web_group="rails"
                 )
@@ -190,10 +204,16 @@ def main() -> int:
                     
                     print(f"  ✓ Cloned to {clone_path}")
                     
+                    # Get commit hash
+                    from shared.deploy_utils import get_git_commit_hash
+                    commit_hash = get_git_commit_hash(clone_path)
+                    
                     deploy_repository(
                         source_path=clone_path,
                         deploy_spec=deploy_spec,
                         git_url=git_url,
+                        commit_hash=commit_hash,
+                        full_deploy=args.full_deploy,
                         web_user="rails",
                         web_group="rails"
                     )

@@ -138,7 +138,8 @@ def merge_setup_args(cached_args: Dict[str, Any], new_args: Dict[str, Any]) -> D
     return merged
 
 
-def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = None, dry_run: bool = False) -> Optional[str]:
+def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = None, dry_run: bool = False) -> Optional[tuple]:
+    """Clone repository and return (clone_path, commit_hash) tuple."""
     repo_name = git_url.rstrip('/').split('/')[-1]
     if repo_name.endswith('.git'):
         repo_name = repo_name[:-4]
@@ -236,12 +237,18 @@ def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = Non
         else:
             print(f"  [DRY RUN] Would copy to {clone_path}")
         
-        return clone_path
+        # Get commit hash
+        commit_hash = None
+        if not dry_run:
+            from shared.deploy_utils import get_git_commit_hash
+            commit_hash = get_git_commit_hash(clone_path)
+        
+        return (clone_path, commit_hash)
     else:
         print(f"  Cloning {git_url}...")
         if dry_run:
             print(f"  [DRY RUN] Would clone to {clone_path}")
-            return clone_path
+            return (clone_path, None)
         
         try:
             result = subprocess.run(
@@ -254,7 +261,12 @@ def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = Non
                 print(f"  Error cloning repository: {result.stderr}")
                 return None
             print(f"  ✓ Cloned to {clone_path}")
-            return clone_path
+            
+            # Get commit hash
+            from shared.deploy_utils import get_git_commit_hash
+            commit_hash = get_git_commit_hash(clone_path)
+            
+            return (clone_path, commit_hash)
         except Exception as e:
             print(f"  Error cloning repository: {e}")
             return None
@@ -307,6 +319,8 @@ def create_argument_parser(description: str, allow_steps: bool = False) -> argpa
                        help="Install nvm + latest Node.JS + PNPM + update NPM")
     parser.add_argument("--deploy", dest="deploy_specs", action="append", nargs=2, metavar=("DOMAIN_OR_PATH", "GIT_URL"),
                        help="Deploy a git repository (domain.com/path or /path) to auto-configure nginx (can be used multiple times)")
+    parser.add_argument("--full-deploy", dest="full_deploy", action="store_true",
+                       help="Always rebuild deployments even if they haven't changed (default: skip unchanged deployments)")
     return parser
 
 
@@ -328,6 +342,7 @@ def run_remote_setup(
     install_node: bool = False,
     custom_steps: Optional[str] = None,
     deploy_specs: Optional[list] = None,
+    full_deploy: bool = False,
 ) -> int:
     try:
         tar_data = create_tar_archive()
@@ -390,6 +405,8 @@ def run_remote_setup(
     
     if deploy_specs:
         cmd_parts.append("--lite-deploy")
+        if full_deploy:
+            cmd_parts.append("--full-deploy")
         for deploy_spec, git_url in deploy_specs:
             cmd_parts.append(f"--deploy {shlex.quote(deploy_spec)} {shlex.quote(git_url)}")
     
@@ -413,9 +430,10 @@ tar xzf - && \
         
         cloned_repos = []
         for deploy_spec, git_url in deploy_specs:
-            clone_path = clone_repository(git_url, temp_deploy_dir, cache_dir=GIT_CACHE_DIR, dry_run=dry_run)
-            if clone_path:
-                cloned_repos.append((deploy_spec, clone_path, git_url))
+            result = clone_repository(git_url, temp_deploy_dir, cache_dir=GIT_CACHE_DIR, dry_run=dry_run)
+            if result:
+                clone_path, commit_hash = result
+                cloned_repos.append((deploy_spec, clone_path, git_url, commit_hash))
             else:
                 print(f"Warning: Failed to clone {git_url}, skipping...")
         
@@ -435,9 +453,16 @@ tar xzf - && \
                 return tarinfo
             
             with tarfile.open(fileobj=deploy_tar_buffer, mode='w:gz') as tar:
-                for deploy_spec, clone_path, git_url in cloned_repos:
+                for deploy_spec, clone_path, git_url, commit_hash in cloned_repos:
                     repo_name = os.path.basename(clone_path)
                     tar.add(clone_path, arcname=f"deployments/{repo_name}", filter=safe_filter)
+                    
+                    # Add commit hash metadata file
+                    if commit_hash:
+                        commit_info = tarfile.TarInfo(name=f"deployments/{repo_name}.commit")
+                        commit_data = commit_hash.encode('utf-8')
+                        commit_info.size = len(commit_data)
+                        tar.addfile(commit_info, io.BytesIO(commit_data))
             
             deploy_tar_data = deploy_tar_buffer.getvalue()
             print(f"  ✓ Packaged {len(cloned_repos)} repository(ies)")
@@ -561,6 +586,10 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
         print(f"Deployments: {len(args.deploy_specs)} repository(ies)")
         for location, git_url in args.deploy_specs:
             print(f"  - {git_url} -> {location}")
+        if args.full_deploy:
+            print("Full deploy: Yes (rebuild all deployments)")
+        else:
+            print("Full deploy: No (skip unchanged deployments)")
     print("=" * 60)
     print()
     
@@ -602,7 +631,8 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
         install_go=args.install_go,
         install_node=args.install_node,
         custom_steps=args.custom_steps if allow_steps else None,
-        deploy_specs=args.deploy_specs
+        deploy_specs=args.deploy_specs,
+        full_deploy=args.full_deploy if args.deploy_specs else False
     )
     
     if returncode != 0:
