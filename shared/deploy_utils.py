@@ -88,9 +88,11 @@ def get_project_root(repo_path: str, project_type: str) -> str:
                 return full_path
         return repo_path
 
-    # For static/unknown projects, prefer public/ if present (many frameworks place built assets there)
-    if os.path.exists(os.path.join(repo_path, 'public')):
-        return os.path.join(repo_path, 'public')
+    # For static/unknown projects, prefer html/, public/, or static/ if present
+    for static_dir in ["html", "public", "static"]:
+        full_path = os.path.join(repo_path, static_dir)
+        if os.path.exists(full_path):
+            return full_path
 
     return repo_path
 

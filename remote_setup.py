@@ -152,6 +152,8 @@ def main() -> int:
         print("Deploying repositories...")
         print("=" * 60)
         
+        deployments = []
+        
         if args.lite_deploy:
             # Use pre-uploaded files from /opt/infra_tools/deployments/
             for deploy_spec, git_url in args.deploy:
@@ -173,7 +175,7 @@ def main() -> int:
                         pass
                 
                 print(f"\nDeploying pre-uploaded repository: {repo_name}")
-                deploy_repository(
+                info = deploy_repository(
                     source_path=source_path,
                     deploy_spec=deploy_spec,
                     git_url=git_url,
@@ -182,6 +184,8 @@ def main() -> int:
                     web_user="rails",
                     web_group="rails"
                 )
+                if info:
+                    deployments.append(info)
         else:
             # Clone repositories directly (local execution)
             temp_dir = tempfile.mkdtemp(prefix="infra_deploy_")
@@ -208,7 +212,7 @@ def main() -> int:
                     from shared.deploy_utils import get_git_commit_hash
                     commit_hash = get_git_commit_hash(clone_path)
                     
-                    deploy_repository(
+                    info = deploy_repository(
                         source_path=clone_path,
                         deploy_spec=deploy_spec,
                         git_url=git_url,
@@ -217,9 +221,27 @@ def main() -> int:
                         web_user="rails",
                         web_group="rails"
                     )
+                    if info:
+                        deployments.append(info)
             finally:
                 if os.path.exists(temp_dir):
                     shutil.rmtree(temp_dir)
+        
+        # Configure Nginx for all deployments
+        if deployments:
+            print("\n" + "=" * 60)
+            print("Configuring Nginx...")
+            print("=" * 60)
+            
+            from collections import defaultdict
+            from shared.nginx_config import create_nginx_sites_for_groups
+            from remote_modules.utils import run
+            
+            grouped_deployments = defaultdict(list)
+            for dep in deployments:
+                grouped_deployments[dep['domain']].append(dep)
+            
+            create_nginx_sites_for_groups(grouped_deployments, run)
     
     print("\n" + "=" * 60)
     print("Setup completed successfully!")

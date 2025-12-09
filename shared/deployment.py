@@ -4,7 +4,9 @@ import os
 import shlex
 import shutil
 import secrets
-from typing import Optional
+import re
+import socket
+from typing import Optional, Set
 
 from .deploy_utils import (
     parse_deploy_spec,
@@ -26,6 +28,71 @@ class DeploymentOrchestrator:
         self.web_user = web_user
         self.web_group = web_group
     
+    def _get_used_ports(self) -> Set[int]:
+        """Get set of ports currently used by infra_tools services."""
+        used_ports = set()
+        try:
+            if not os.path.exists("/etc/systemd/system"):
+                return used_ports
+                
+            files = os.listdir("/etc/systemd/system")
+            for f in files:
+                if (f.startswith("rails-") or f.startswith("node-")) and f.endswith(".service"):
+                    path = os.path.join("/etc/systemd/system", f)
+                    try:
+                        with open(path, 'r') as service_file:
+                            content = service_file.read()
+                            # Rails: -p {port}
+                            match = re.search(r'-p (\d+)', content)
+                            if match:
+                                used_ports.add(int(match.group(1)))
+                            # Node: --port {port}
+                            match = re.search(r'--port (\d+)', content)
+                            if match:
+                                used_ports.add(int(match.group(1)))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        return used_ports
+
+    def _find_free_port(self, start_port: int) -> int:
+        """Find the first free port starting from start_port."""
+        used_ports = self._get_used_ports()
+        port = start_port
+        while port < 65535:
+            if port in used_ports:
+                port += 1
+                continue
+            
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                try:
+                    s.bind(('127.0.0.1', port))
+                    return port
+                except OSError:
+                    port += 1
+        raise RuntimeError("No free ports available")
+
+    def _get_assigned_port(self, service_name: str, default_port: int) -> int:
+        """Get the port assigned to a service, or find a new free one."""
+        service_file = f"/etc/systemd/system/{service_name}.service"
+        if os.path.exists(service_file):
+            try:
+                with open(service_file, 'r') as f:
+                    content = f.read()
+                    # Rails
+                    match = re.search(r'-p (\d+)', content)
+                    if match:
+                        return int(match.group(1))
+                    # Node
+                    match = re.search(r'--port (\d+)', content)
+                    if match:
+                        return int(match.group(1))
+            except Exception:
+                pass
+        
+        return self._find_free_port(default_port)
+
     def get_deployment_path(self, domain: Optional[str], path: str, git_url: str) -> str:
         dir_name = create_safe_directory_name(domain, path)
         
@@ -87,8 +154,12 @@ class DeploymentOrchestrator:
         
         if project_type == "rails":
             app_name = os.path.basename(dest_path)
-            create_rails_service(app_name, dest_path, 3000, self.web_user, self.web_group, run_func)
-            backend_port = 3000
+            
+            # Determine port
+            service_name = f"rails-{app_name}"
+            backend_port = self._get_assigned_port(service_name, 3000)
+            
+            create_rails_service(app_name, dest_path, backend_port, self.web_user, self.web_group, run_func)
             
             # Check for frontend
             frontend_path = os.path.join(dest_path, "frontend")
@@ -99,12 +170,27 @@ class DeploymentOrchestrator:
                 api_url = "/api"
                 if domain:
                     api_url = f"https://api.{domain}"
+                elif path and path != '/':
+                    clean_path = path.rstrip('/')
+                    if not clean_path.startswith('/'):
+                        clean_path = '/' + clean_path
+                    api_url = f"{clean_path}/api"
+
+                site_root = path or "/"
+                if not site_root.startswith("/"):
+                    site_root = f"/{site_root}"
+                if not site_root.endswith("/"):
+                    site_root = f"{site_root}/"
                 
                 # Build frontend
-                self._build_node_project(frontend_path, run_func, api_url)
+                self._build_node_project(frontend_path, run_func, api_url, site_root)
+                
+                # Determine port
+                node_service_name = f"node-{app_name}"
+                frontend_port = self._get_assigned_port(node_service_name, 4000)
+                
                 # Create Node service
-                create_node_service(app_name, frontend_path, 4000, self.web_user, self.web_group, run_func)
-                frontend_port = 4000
+                create_node_service(app_name, frontend_path, frontend_port, self.web_user, self.web_group, run_func)
         
         # Fix permissions AFTER all build steps (including frontend)
         result = run_func(f"chown -R {shlex.quote(self.web_user)}:{shlex.quote(self.web_group)} {shlex.quote(dest_path)}", check=False)
@@ -163,14 +249,26 @@ class DeploymentOrchestrator:
         
         print("  ✓ Rails project built")
     
-    def _build_node_project(self, project_path: str, run_func, api_url: Optional[str] = None):
+    def _build_node_project(self, project_path: str, run_func, api_url: Optional[str] = None, site_root: Optional[str] = None):
         print(f"  Building Node.js project at {project_path}")
         
         run_func(f"cd {shlex.quote(project_path)} && npm install")
         
         build_cmd = "npm run build"
+        env_prefix = []
+
         if api_url:
-            build_cmd = f"VITE_API_URL={shlex.quote(api_url)} {build_cmd}"
+            env_prefix.append(f"VITE_API_URL={shlex.quote(api_url)}")
+
+        if site_root:
+            normalized_root = site_root if site_root.startswith('/') else f"/{site_root}"
+            if not normalized_root.endswith('/'):
+                normalized_root = f"{normalized_root}/"
+            env_prefix.append(f"VITE_SITE_ROOT={shlex.quote(normalized_root)}")
+            build_cmd = f"{build_cmd} -- --base {shlex.quote(normalized_root)}"
+
+        if env_prefix:
+            build_cmd = f"{' '.join(env_prefix)} {build_cmd}"
         
         result = run_func(f"cd {shlex.quote(project_path)} && {build_cmd}", check=False)
         
