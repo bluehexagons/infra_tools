@@ -1,88 +1,41 @@
 # Security
 
-This document outlines the security measures implemented by the setup scripts and provides recommendations for additional hardening.
+This document explains the security measures the setup scripts apply, the defaults enabled during setup, and practical, actionable steps you can run after setup to harden a system further. Most of these recommendations are intended for production or Internet-facing servers.
 
-## Implemented Security Measures
+## What the setup script configures by default
+- Firewall rules (UFW-based on Debian/Ubuntu)
+  - Default-deny incoming, allows essential ports such as 22/80/443
+- SSH hardening
+  - Disallow root password logins; use key-based authentication
+  - Limit authentication attempts and increase session timeouts
+  - Disable X11-forwarding
+- System-level hardening
+  - Kernel network security settings (rp_filter, ICMP redirect off, etc.)
+  - Restrict ptrace via kernel config
+  - Restrict dmesg permissions and kernel pointers where possible
+- Automatic security updates
+  - For Debian/Ubuntu, unattended-upgrades is set to perform security updates
+- Nginx security settings and default site hardening
+  - Basic security headers and HSTS if TLS is enabled
+  - Default site is static-only, no scripting executed by default
+- swap configuration
+  - If swap is absent, the script creates a safe-sized /swapfile based on system RAM and disk.
 
-### Network Security
-- **Firewall**: UFW (Debian/Ubuntu) or firewalld (Fedora) with default-deny incoming
-- **SSH Hardening**:
-  - Key-only authentication (password auth disabled)
-  - Root login requires keys (no passwords)
-  - Max 3 authentication attempts
-  - Client timeouts (300s idle, 2 retries)
-  - Protocol 2 only
-  - No empty passwords allowed
-  - X11 forwarding disabled
-- **fail2ban** (desktop systems): RDP brute-force protection (3 attempts = 1 hour ban)
-- **Kernel Network Hardening**:
-  - SYN cookies enabled (DDoS protection)
-  - ICMP redirects disabled
-  - Reverse path filtering enabled
-  - Martian packet logging
-  - Broadcast echo ignore
+## Recommended server hardening actions for public-facing systems
+- (High) Run the server behind a VPN or a bastion host, and whitelist SSH source IPs.
+- (High) Enable 2FA for SSH if you need to keep password-based access for some users.
+- Add `fail2ban` jails for HTTP endpoints and configure rate-limiting rules to protect against common brute force and DoS attempts.
+  - Example: protect `/admin` paths or CMS endpoints specifically, and add a generic rule for too many requests.
+- Use `ufw` with explicit policies for each service (e.g., only allow 22 from specific IPs, 443 from everyone, etc.).
 
-### System Security
-- **Automatic Updates**: Daily security updates via unattended-upgrades (Debian) or dnf-automatic (Fedora)
-- **Package Management**: System updated and upgraded before setup
-- **User Management**:
-  - Non-root user with sudo privileges
-  - SSH keys automatically copied from root
-  - Strong 16-character passwords generated when not provided
-- **Kernel Hardening**:
-  - dmesg restricted
-  - Kernel pointer hiding
-  - ptrace scope limited
-  - No SUID core dumps
+## Secure system maintenance
+- Use separate accounts for admin/service with specific SSH keys.
+- Schedule automated security updates and verify them with a canary instance if you manage many servers.
+- Execute regular security audits and use infrastructure-as-code with immutable patterns where possible.
 
-### Monitoring
-- Restart detection after kernel/system updates
+## Reporting security issues
+If you find a vulnerability, please report it privately to the repository maintainers using the contact in the project. Avoid disclosing details publicly until a mitigation is available.
 
-## Recommendations for Internet-Facing Servers
+---
 
-### High Priority
-1. **SSH Access**: Use VPN or bastion host instead of direct SSH exposure
-2. **Non-Standard Ports**: Consider moving SSH to non-standard port
-3. **IP Whitelisting**: Restrict SSH to known IPs if possible
-4. **Process Limits**: Configure ulimits to prevent resource exhaustion
-
-### For Web Servers
-1. **HTTPS Only**: Use Let's Encrypt for free SSL/TLS certificates
-2. **WAF**: Install ModSecurity or similar Web Application Firewall
-3. **HTTP Security Headers**:
-   - Enable HSTS (HTTP Strict Transport Security)
-   - Set Content-Security-Policy
-   - Configure X-Frame-Options
-   - Set X-Content-Type-Options
-4. **Rate Limiting**: Implement nginx limit_req or similar
-5. **fail2ban**: Add HTTP-specific jails for common attacks
-6. **Hide Version**: Disable server version headers
-7. **Directory Listing**: Ensure directory browsing is disabled
-
-### Monitoring & Logging
-1. **File Integrity**: Install AIDE or similar for file integrity monitoring
-2. **Log Monitoring**: Configure centralized logging and alerts
-3. **Intrusion Detection**: Consider OSSEC or similar IDS
-4. **Failed Login Alerts**: Set up notifications for failed authentication
-
-### Application Security
-1. **SELinux/AppArmor**: Enable and configure MAC (Mandatory Access Control)
-2. **Container Isolation**: Use containers for application isolation
-3. **Least Privilege**: Run services with minimal permissions
-4. **Regular Audits**: Perform security audits and penetration testing
-
-## Secure Configuration Checklist
-
-- [ ] Review and restrict sudo access
-- [ ] Enable and configure SELinux/AppArmor
-- [ ] Set up monitoring and alerting
-- [ ] Configure backups
-- [ ] Document incident response procedures
-- [ ] Regular security update schedule
-- [ ] Audit user accounts and access
-- [ ] Review firewall rules
-- [ ] Test disaster recovery procedures
-
-## Reporting Security Issues
-
-Security issues should be reported privately to the repository maintainers.
+This file focuses on practical, prioritized recommendations relevant to infra_tools and the environments this toolkit deploys to. It is not a substitute for regular professional security audits for production systems.

@@ -21,7 +21,7 @@ Automated setup scripts for remote Linux systems.
 
 ## Usage
 
-**Note:** All scripts accept either IP addresses or hostnames.
+**Note:** All scripts accept either IP addresses or hostnames. When using `--deploy`, you can provide a comma-separated list of locations for a single repository so it is deployed in multiple places using a single command.
 
 ```bash
 # Workstation with desktop/RDP (IP or hostname)
@@ -133,14 +133,23 @@ python3 setup_server_web.py 192.168.1.100 \
 
 ### Deployment Support
 
-The `--deploy` flag enables automatic deployment of git repositories with nginx configuration:
+The `--deploy` flag enables automatic deployment of git repositories with nginx configuration. You can also pass one repository to multiple targets by providing a comma-separated list in the `DOMAIN_OR_PATH` argument:
 
-- **Project type detection**: Automatically detects Ruby on Rails (`.ruby-version`), Node.js/Vite (`package.json`), or static HTML (`index.html`) projects
-- **Local cloning**: Repositories are cloned using your local git credentials
-- **Remote building**: Projects are built on the remote server (or locally when using `remote_setup.py` directly)
-- **Automatic nginx configuration**: Creates nginx site configs with HTTPS and Let's Encrypt preparation
-- **HTTPS support**: Self-signed certificates generated automatically for all sites
-- **Let's Encrypt ready**: Pre-configured `/.well-known/acme-challenge/` location for certificate verification
+- `--deploy bluehexagons.com/foodguide,foodguide.bluehexagons.com/ https://github.com/bluehexagons/foodguide.git`
+
+This will run the build process once per location and create a configuration forrunning `/opt/infra_tools/remote_setup.py`)
+- **Frontend builds & Vite**: For Node/Vite apps the deploy process sets `VITE_SITE_ROOT` and calls `npm run build -- --base` with the correct base path for subpath deployments.
+- **Static frontend serving**: The Node frontend build output (dist/build) is served directly by Nginx. The deploy process returns a `frontend_serve_path` which is picked up by generated Nginx configs.
+- **Automatic nginx configuration**: Creates nginx site configs with HTTPS and Let's Encrypt preparation. Nginx serves static frontends and reverse proxies Rails backend API (or Node servers if configured).
+- **API routing strategy**: If a Rails + frontend is deployed at the **root path** for a domain (e.g., `example.com/` or `example.com`), the API uses `api.example.com` (subdomain strategy). Otherwise the API is available under the app's path (e.g., `example.com/rails_test/api`).
+- **HTTPS support**: Self-signed certificates generated for initial setup; Let's Encrypt readiness is included via `/.well-known/acme-challenge/`
+- **Default server**: Deployments without a domain (e.g., `/path`) become the default server, accessible via IP
+- **Directory naming**: Repositories are stored in `/var/www/domain_com__path` (e.g., `/var/www/blog_example_com__articles`)
+- **Standard builds**: 
+  - Rails: `bundle install --deployment`, `rake assets:precompile`, and reverse proxy setup
+  - Node.js: `npm install`, `npm run build`, serves from `dist/`, `build/` or `out/` (automatic detection)
+  - Static: Files served as-is from repository `html`, `public`, or `static` directories (defaults) or repository root
+- **Multiple deployment locations**: When you pass comma-separated locations for a single `--deploy` entry, the source is copied instead of moved (keeps the original source intact), and each target uses a fresh build with its own `VITE_SITE_ROOT` setting.nown/acme-challenge/` location for certificate verification
 - **Default server**: Deployments without a domain (e.g., `/path`) become the default server, accessible via IP
 - **Directory naming**: Repositories are stored in `/var/www/domain_com__path` (e.g., `/var/www/blog_example_com__articles`)
 - **Standard builds**: 
@@ -169,7 +178,7 @@ python3 /opt/infra_tools/remote_setup.py --system-type server_web --username myu
 
 **Deployment Process**: Setup scripts clone repositories locally using your git credentials, upload them to `/opt/infra_tools/deployments/` on the remote server, then execute `remote_setup.py --lite-deploy` to deploy from the uploaded files.
 
-## Features
+## Setups
 
 **Workstation Desktop:**
 - Desktop environment (XFCE, i3, or Cinnamon) + xRDP + audio
