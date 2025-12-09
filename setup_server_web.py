@@ -4,12 +4,12 @@ import sys
 from lib.setup_common import setup_main
 
 
-def success_message(ip: str, username: str) -> None:
-    print(f"Server: {ip}")
+def success_message(host: str, username: str) -> None:
+    print(f"Server: {host}")
     print(f"Username: {username}")
     print()
-    print(f"Connect via SSH: ssh {username}@{ip}")
-    print(f"View website: http://{ip}")
+    print(f"Connect via SSH: ssh {username}@{host}")
+    print(f"View website: http://{host}")
 
 
 def main() -> int:

@@ -4,8 +4,8 @@ import sys
 from lib.setup_common import setup_main
 
 
-def success_message(ip: str, username: str) -> None:
-    print(f"RDP: {ip}:3389")
+def success_message(host: str, username: str) -> None:
+    print(f"RDP: {host}:3389")
     print(f"Username: {username}")
     print()
     print("Connect using RDP client (Remmina, Microsoft Remote Desktop)")

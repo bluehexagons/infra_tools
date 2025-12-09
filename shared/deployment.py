@@ -56,13 +56,6 @@ class DeploymentOrchestrator:
         
         self.build_project(dest_path, project_type, run_func)
         
-        result = run_func(f"chown -R {shlex.quote(self.web_user)}:{shlex.quote(self.web_group)} {shlex.quote(dest_path)}", check=False)
-        if result.returncode != 0:
-            print(f"  ⚠ Warning: Could not set ownership to {self.web_user}:{self.web_group}")
-        
-        # Ensure write permissions for the group so the service user can write temp files
-        run_func(f"chmod -R 775 {shlex.quote(dest_path)}")
-        
         # Set up systemd service for Rails apps
         backend_port = None
         frontend_port = None
@@ -87,6 +80,14 @@ class DeploymentOrchestrator:
                 # Create Node service
                 create_node_service(app_name, frontend_path, 4000, self.web_user, self.web_group, run_func)
                 frontend_port = 4000
+        
+        # Fix permissions AFTER all build steps (including frontend)
+        result = run_func(f"chown -R {shlex.quote(self.web_user)}:{shlex.quote(self.web_group)} {shlex.quote(dest_path)}", check=False)
+        if result.returncode != 0:
+            print(f"  ⚠ Warning: Could not set ownership to {self.web_user}:{self.web_group}")
+        
+        # Ensure write permissions for the group so the service user can write temp files
+        run_func(f"chmod -R 775 {shlex.quote(dest_path)}")
         
         print(f"  ✓ Repository deployed to {dest_path}")
         

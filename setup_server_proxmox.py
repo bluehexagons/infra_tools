@@ -4,11 +4,11 @@ import sys
 from lib.setup_common import setup_main
 
 
-def success_message(ip: str, username: str) -> None:
-    print(f"Proxmox Server: {ip}")
+def success_message(host: str, username: str) -> None:
+    print(f"Proxmox Server: {host}")
     print()
-    print(f"Connect via SSH: ssh root@{ip}")
-    print(f"Web UI: https://{ip}:8006")
+    print(f"Connect via SSH: ssh root@{host}")
+    print(f"Web UI: https://{host}:8006")
 
 
 def main() -> int:
