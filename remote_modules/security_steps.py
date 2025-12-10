@@ -1,7 +1,6 @@
 """Security hardening steps."""
 
 import os
-import shlex
 
 from .utils import run, is_package_installed, is_service_active, file_contains
 
@@ -161,6 +160,9 @@ def configure_auto_updates(os_type: str, **_) -> None:
     
     run("apt-get install -y -qq unattended-upgrades")
 
+    # Configure to run daily updates
+    # The default unattended-upgrades timer runs around 6:00 AM + random delay
+    # This is before our 2:00 AM restart window (next day), giving time for updates to settle
     auto_upgrades = """APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "1";
 APT::Periodic::AutocleanInterval "7";
@@ -207,3 +209,55 @@ def configure_firewall_ssh_only(os_type: str, **_) -> None:
     run("ufw --force enable")
 
     print("  ✓ Firewall configured (SSH only)")
+
+
+def configure_auto_restart(os_type: str, **_) -> None:
+    """Configure automatic restart at 2 AM when updates require it."""
+    service_file = "/etc/systemd/system/auto-restart-if-needed.service"
+    timer_file = "/etc/systemd/system/auto-restart-if-needed.timer"
+    
+    # Check if already configured
+    if os.path.exists(service_file) and os.path.exists(timer_file):
+        if is_service_active("auto-restart-if-needed.timer"):
+            print("  ✓ Automatic restart service already configured")
+            return
+    
+    # Script is already installed at /opt/infra_tools/remote_modules/
+    script_path = "/opt/infra_tools/remote_modules/auto_restart_if_needed.py"
+    
+    # Create the systemd service
+    service_content = f"""[Unit]
+Description=Auto-restart system if needed
+Documentation=man:systemd.service(5)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 {script_path}
+"""
+    
+    with open(service_file, "w") as f:
+        f.write(service_content)
+    
+    # Create the systemd timer (runs daily at 2 AM)
+    timer_content = """[Unit]
+Description=Auto-restart system if needed (daily at 2 AM)
+Documentation=man:systemd.timer(5)
+
+[Timer]
+OnCalendar=*-*-* 02:00:00
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target
+"""
+    
+    with open(timer_file, "w") as f:
+        f.write(timer_content)
+    
+    # Enable and start the timer
+    run("systemctl daemon-reload")
+    run("systemctl enable auto-restart-if-needed.timer")
+    run("systemctl start auto-restart-if-needed.timer")
+    
+    print("  ✓ Automatic restart service configured (daily at 2 AM when needed)")

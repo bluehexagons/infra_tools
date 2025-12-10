@@ -74,8 +74,22 @@ def create_node_service(app_name: str, app_path: str, port: int,
 
 
 def generate_rails_service(app_name: str, app_path: str, secret_key_base: str, port: int = 3000,
-                          web_user: str = "www-data", web_group: str = "www-data") -> str:
+                          web_user: str = "www-data", web_group: str = "www-data",
+                          extra_env: Optional[dict] = None) -> str:
     """Generate systemd service configuration for a Rails application."""
+    env_lines = [
+        'Environment="RAILS_ENV=production"',
+        'Environment="RAILS_LOG_TO_STDOUT=true"',
+        'Environment="RAILS_SERVE_STATIC_FILES=true"',
+        f'Environment="SECRET_KEY_BASE={secret_key_base}"'
+    ]
+    
+    if extra_env:
+        for key, value in extra_env.items():
+            env_lines.append(f'Environment="{key}={value}"')
+            
+    env_section = "\n".join(env_lines)
+    
     return f"""[Unit]
 Description=Rails app: {app_name}
 After=network.target
@@ -85,10 +99,7 @@ Type=simple
 User={web_user}
 Group={web_group}
 WorkingDirectory={app_path}
-Environment="RAILS_ENV=production"
-Environment="RAILS_LOG_TO_STDOUT=true"
-Environment="RAILS_SERVE_STATIC_FILES=true"
-Environment="SECRET_KEY_BASE={secret_key_base}"
+{env_section}
 ExecStart=/bin/bash -c 'exec bundle exec rails server -b 127.0.0.1 -p {port}'
 Restart=always
 RestartSec=10
@@ -99,7 +110,8 @@ WantedBy=multi-user.target
 
 
 def create_rails_service(app_name: str, app_path: str, port: int,
-                        web_user: str, web_group: str, run_func: Callable) -> None:
+                        web_user: str, web_group: str, run_func: Callable,
+                        env_vars: Optional[dict] = None) -> None:
     """Create and enable a Rails systemd service."""
     service_name = f"rails-{app_name}"
     service_file = f"/etc/systemd/system/{service_name}.service"
@@ -118,7 +130,7 @@ def create_rails_service(app_name: str, app_path: str, port: int,
         except Exception:
             pass
     
-    service_content = generate_rails_service(app_name, app_path, secret_key_base, port, web_user, web_group)
+    service_content = generate_rails_service(app_name, app_path, secret_key_base, port, web_user, web_group, env_vars)
     
     try:
         with open(service_file, 'w') as f:
