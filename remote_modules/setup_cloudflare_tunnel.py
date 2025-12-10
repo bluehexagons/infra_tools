@@ -13,6 +13,7 @@ import subprocess
 import platform
 import glob
 import re
+import shutil
 from typing import List, Dict, Optional
 
 
@@ -69,9 +70,7 @@ def detect_architecture() -> str:
 
 def install_cloudflared():
     """Install cloudflared if not already installed."""
-    result = run_command(['which', 'cloudflared'], check=False, capture_output=True)
-    
-    if result.returncode == 0:
+    if shutil.which('cloudflared'):
         print("✓ cloudflared already installed")
         return
     
@@ -106,7 +105,8 @@ def authenticate_cloudflare():
         print("✗ Authentication failed")
         sys.exit(1)
     
-    cert_file = os.path.expanduser('~/.cloudflared/cert.pem')
+    # When running as root, cloudflared puts cert in root's home
+    cert_file = '/root/.cloudflared/cert.pem'
     if not os.path.exists(cert_file):
         print(f"✗ Certificate file not found at {cert_file}")
         sys.exit(1)
@@ -132,7 +132,8 @@ def create_tunnel(tunnel_name: str) -> Dict:
         sys.exit(1)
     
     tunnel_id = tunnel_id_match.group(1)
-    credentials_file = os.path.expanduser(f'~/.cloudflared/{tunnel_id}.json')
+    # When running as root, credentials are in /root/.cloudflared/
+    credentials_file = f'/root/.cloudflared/{tunnel_id}.json'
     
     if not os.path.exists(credentials_file):
         print(f"✗ Credentials file not found: {credentials_file}")
@@ -296,24 +297,40 @@ def main():
         print("  2. Create a new tunnel")
         print("  3. Exit")
         
-        choice = input("\nEnter choice (1-3): ").strip()
-        
-        if choice == '3':
-            print("Exiting...")
-            sys.exit(0)
-        elif choice == '2':
-            state = None
-        elif choice != '1':
-            print("✗ Invalid choice")
-            sys.exit(1)
+        while True:
+            choice = input("\nEnter choice (1-3): ").strip().lower()
+            
+            if choice in ['3', 'exit', 'quit', 'q']:
+                print("Exiting...")
+                sys.exit(0)
+            elif choice in ['2', 'new']:
+                state = None
+                break
+            elif choice in ['1', 'update']:
+                break
+            else:
+                print("✗ Invalid choice. Please enter 1, 2, or 3.")
     
     if not state:
         authenticate_cloudflare()
         
-        tunnel_name = input("\nEnter tunnel name (e.g., my-server): ").strip()
-        if not tunnel_name:
-            print("✗ Tunnel name cannot be empty")
-            sys.exit(1)
+        while True:
+            tunnel_name = input("\nEnter tunnel name (e.g., my-server): ").strip()
+            
+            if not tunnel_name:
+                print("✗ Tunnel name cannot be empty")
+                continue
+            
+            # Validate tunnel name (alphanumeric, hyphens, underscores)
+            if not re.match(r'^[a-zA-Z0-9_-]+$', tunnel_name):
+                print("✗ Tunnel name can only contain letters, numbers, hyphens, and underscores")
+                continue
+            
+            if len(tunnel_name) > 64:
+                print("✗ Tunnel name too long (max 64 characters)")
+                continue
+            
+            break
         
         tunnel = create_tunnel(tunnel_name)
     else:
