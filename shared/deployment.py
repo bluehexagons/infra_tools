@@ -291,9 +291,9 @@ class DeploymentOrchestrator:
         
         # Generate a temporary secret key for build steps
         build_secret = secrets.token_hex(64)
-        env_vars = f"RAILS_ENV=production SECRET_KEY_BASE={build_secret}"
+        env_vars = f"RAILS_ENV=production SECRET_KEY_BASE={build_secret} TMPDIR=/var/tmp"
         
-        run_func(f"cd {shlex.quote(project_path)} && bundle install --deployment --without development test")
+        run_func(f"cd {shlex.quote(project_path)} && TMPDIR=/var/tmp bundle install --deployment --without development test")
         
         # Database setup
         print("  Setting up database...")
@@ -312,10 +312,10 @@ class DeploymentOrchestrator:
     def _build_node_project(self, project_path: str, run_func, api_url: Optional[str] = None, site_root: Optional[str] = None):
         print(f"  Building Node.js project at {project_path}")
         
-        run_func(f"cd {shlex.quote(project_path)} && npm install")
+        run_func(f"cd {shlex.quote(project_path)} && TMPDIR=/var/tmp npm install")
         
         build_cmd = "npm run build"
-        env_prefix = []
+        env_prefix = ["TMPDIR=/var/tmp"]
 
         if api_url:
             env_prefix.append(f"VITE_API_URL={shlex.quote(api_url)}")
