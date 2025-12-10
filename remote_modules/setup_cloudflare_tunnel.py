@@ -297,8 +297,7 @@ def main(interactive: bool = True, auto_update: bool = False):
     # Non-interactive mode: only update existing tunnels
     if not interactive:
         if not state:
-            if interactive:
-                print("✗ No existing tunnel found. Run interactively first.")
+            # No existing tunnel - cannot proceed in non-interactive mode
             return False
         
         # Silently update configuration
@@ -306,8 +305,7 @@ def main(interactive: bool = True, auto_update: bool = False):
         sites = discover_nginx_sites()
         
         if not sites:
-            if interactive:
-                print("  ⚠ No sites discovered")
+            # No sites to configure
             return False
         
         # Check if sites have changed
