@@ -2,297 +2,93 @@
 
 Automated setup scripts for remote Linux systems.
 
-## Scripts
-
-- `setup_workstation_desktop.py` - Desktop workstation with RDP
-- `setup_pc_dev.py` - PC development workstation (bare hardware, includes Remmina + LibreOffice by default)
-- `setup_workstation_dev.py` - Dev workstation with RDP (no audio, VS Code + Vivaldi)
-- `setup_server_dev.py` - Development server (no desktop)
-- `setup_server_web.py` - Web server with nginx (static content & reverse proxy)
-- `setup_server_proxmox.py` - Proxmox server hardening
-- `setup_steps.py` - Run custom steps only
-- `patch_setup.py` - Update a previously configured system with new settings
-
-## Requirements
-
-- Python 3.9+
-- SSH root access to target host
-- Supported OS: Debian, Ubuntu
-
-## Usage
-
-**Note:** All scripts accept either IP addresses or hostnames. When using `--deploy`, you can provide a comma-separated list of locations for a single repository so it is deployed in multiple places using a single command.
+## Quick Start
 
 ```bash
-# Workstation with desktop/RDP (IP or hostname)
-python3 setup_workstation_desktop.py 192.168.1.100 [username] [-k key] [-p password] [-t timezone] [--skip-audio]
-python3 setup_workstation_desktop.py workstation.local [username] [-k key] [-p password] [-t timezone] [--skip-audio]
+# Web Server (Nginx, Ruby, Node, Deploy)
+python3 setup_server_web.py example.com --ruby --node --deploy example.com https://github.com/user/repo.git
 
-# PC development workstation (bare hardware, Remmina + LibreOffice by default)
-python3 setup_pc_dev.py <ip-or-hostname> [username] [-k key] [-p password] [-t timezone] [--skip-audio]
+# Development Workstation (Desktop, VS Code, Tools)
+python3 setup_workstation_desktop.py 192.168.1.100 --desktop i3 --browser firefox
 
-# Workstation dev (no audio, Vivaldi + VS Code)
-python3 setup_workstation_dev.py <ip-or-hostname> [username] [-k key] [-p password] [-t timezone]
+# Patch Existing System (Add features/deployments)
+python3 patch_setup.py example.com --ssl --deploy api.example.com https://github.com/user/api.git
+```
 
-# Development server
-python3 setup_server_dev.py <ip-or-hostname> [username] [-k key] [-p password] [-t timezone]
+## System Types
 
-# Web server
-python3 setup_server_web.py <ip-or-hostname> [username] [-k key] [-p password] [-t timezone]
+| Script | Description | Key Features |
+|--------|-------------|--------------|
+| `setup_server_web.py` | Web Server | Nginx, Reverse Proxy, SSL, Deployments |
+| `setup_server_dev.py` | Dev Server | CLI Tools, No Desktop |
+| `setup_workstation_desktop.py` | Desktop Workstation | RDP, Audio, Browser, VS Code |
+| `setup_pc_dev.py` | PC Dev Workstation | Bare Metal, Remmina, LibreOffice |
+| `setup_workstation_dev.py` | Light Dev Workstation | RDP, No Audio, VS Code |
+| `setup_server_proxmox.py` | Proxmox Hardening | Security Updates, SSH Hardening |
+| `setup_steps.py` | Custom | Run specific steps only |
 
-# Proxmox server hardening
-python3 setup_server_proxmox.py <ip-or-hostname> [-k key] [-t timezone]
+**Common Features:** User setup, sudo, Firewall/SSH hardening, Auto-updates, NTP, CLI tools (neovim, btop, git, tmux).
 
-# Custom steps only
-python3 setup_steps.py <ip-or-hostname> [username] --steps "install_ruby install_node" [-k key] [-p password] [-t timezone]
+## Usage & Flags
 
-# Patch a previously configured system (adds/modifies settings, doesn't remove)
-python3 patch_setup.py <ip-or-hostname> [--deploy DOMAIN_OR_PATH GIT_URL] [other-flags...]
+All scripts accept IP/Hostname.
+
+| Flag | Description |
+|------|-------------|
+| `--ruby` | Install rbenv + Ruby + Bundler |
+| `--node` | Install nvm + Node.js + PNPM |
+| `--go` | Install Go |
+| `--desktop [xfce\|i3\|cinnamon]` | Choose desktop environment (Default: xfce) |
+| `--browser [brave\|firefox\|...]` | Choose browser (Default: brave) |
+| `--flatpak` | Install Flatpak support |
+| `--office` | Install LibreOffice |
+| `--dry-run` | Simulate execution |
+
+### Deployment Flags
+
+| Flag | Description |
+|------|-------------|
+| `--deploy [DOMAIN] [GIT_URL]` | Deploy repo to domain/path. Supports multiple. |
+| `--ssl` | Enable Let's Encrypt SSL |
+| `--ssl-email [EMAIL]` | Email for SSL registration |
+| `--cloudflare` | Preconfigure Cloudflare Tunnel |
+| `--api-subdomain` | Deploy Rails API to `api.domain.com` instead of `domain.com/api` |
+
+## Deployment Guide
+
+The `--deploy` flag automates building and serving web applications.
+
+- **Rails**: `bundle install`, `db:migrate`, `assets:precompile`, Systemd service.
+- **Node/Vite**: `npm install`, `npm run build`, Static serving.
+- **Static**: Serves files directly.
+
+**Examples:**
+
+```bash
+# Deploy Rails API to subdomain
+python3 setup_server_web.py web.com --deploy web.com https://github.com/u/repo.git --api-subdomain
+
+# Deploy multiple sites
+python3 setup_server_web.py web.com \
+  --deploy site1.com https://github.com/u/site1.git \
+  --deploy site2.com https://github.com/u/site2.git \
+  --ssl --ssl-email admin@web.com
 ```
 
 ## Patching Systems
 
-The `patch_setup.py` script allows you to update a previously configured system without re-running the entire setup:
-
-- **Cached Configuration**: Each setup is cached locally in `~/.cache/infra_tools/setups/`
-- **Intelligent Merging**: New arguments are merged with cached ones (adds/modifies but never removes)
-- **Current Scripts**: Uses the current version of setup scripts, not cached versions
-- **Multiple Deployments**: Can add new `--deploy` targets without affecting existing ones
-
-Example:
-```bash
-# Initial setup
-python3 setup_server_web.py web.example.com --ruby --deploy mysite.com https://github.com/user/site.git
-
-# Later, add Node.js and deploy another site
-python3 patch_setup.py web.example.com --node --deploy api.example.com https://github.com/user/api.git
-
-# Result: System now has Ruby AND Node.js, with BOTH deployments configured
-```
-
-## Optional Flags
-
-All setup scripts support optional software installation:
-
-- `--ruby` - Install rbenv + latest Ruby version + bundler
-- `--go` - Install latest Go version
-- `--node` - Install nvm + latest Node.js LTS + PNPM + NPM (latest)
-- `--deploy DOMAIN_OR_PATH GIT_URL` - Deploy a git repository (can be used multiple times)
-  - `DOMAIN_OR_PATH` can be:
-    - `domain.com/path` - Deploy to domain with optional subpath
-    - `domain.com` - Deploy to domain root
-    - `/path` - Deploy to local path without nginx configuration
-- `--ssl` - Enable Let's Encrypt SSL/TLS certificates for deployed domains
-- `--ssl-email EMAIL` - Email address for Let's Encrypt registration (optional)
-- `--cloudflare` - Preconfigure server for Cloudflare tunnel (web servers only)
-  - Configures firewall to block public HTTP/HTTPS ports
-  - Sets up nginx to trust Cloudflare IPs
-  - Installs automated setup script that handles complete tunnel configuration
-  - Script discovers deployed sites and generates config automatically
-
-Desktop workstation scripts support desktop environment and browser selection:
-
-- `--desktop [xfce|i3|cinnamon]` - Choose desktop environment (default: xfce)
-- `--browser [brave|firefox|browsh|vivaldi|lynx]` - Choose web browser (default: brave)
-  - Firefox: Installs with uBlock Origin extension
-  - Browsh: Requires Firefox (text-based browser)
-- `--flatpak` - Install desktop apps via Flatpak (for non-containerized environments)
-- `--office` - Install LibreOffice (desktop only, not installed by default except for pc_dev)
-- `--dry-run` - Show what would be done without executing commands
-
-Example:
-```bash
-# Install Ruby, Go, and Node.js on a dev server
-python3 setup_server_dev.py 192.168.1.100 --ruby --go --node
-
-# Install i3 window manager instead of XFCE on a workstation
-python3 setup_workstation_desktop.py 192.168.1.100 --desktop i3
-
-# Use Firefox instead of Brave
-python3 setup_workstation_desktop.py 192.168.1.100 --browser firefox
-
-# Use Flatpak for desktop apps with Vivaldi browser and LibreOffice
-python3 setup_workstation_dev.py 192.168.1.100 --flatpak --browser vivaldi --office
-
-# PC Dev setup (LibreOffice installed by default)
-python3 setup_pc_dev.py 192.168.1.100
-
-# Dry-run to see what would be done
-python3 setup_workstation_desktop.py 192.168.1.100 --dry-run
-
-# Deploy a static website with automatic nginx configuration
-python3 setup_server_web.py 192.168.1.100 \
-  --deploy mysite.com https://github.com/user/static-site.git
-
-# Deploy to subdirectory with path-based routing
-python3 setup_server_web.py 192.168.1.100 \
-  --deploy blog.example.com/articles https://github.com/user/blog.git
-
-# Deploy multiple sites with different domains
-python3 setup_server_web.py 192.168.1.100 --ruby --node \
-  --deploy rails-app.com https://github.com/user/rails-app.git \
-  --deploy vite-site.com https://github.com/user/vite-site.git
-
-# Deploy as default site (accessible by IP address)
-python3 setup_server_web.py 192.168.1.100 \
-  --deploy /blog https://github.com/user/blog-site.git
-
-# Deploy with Let's Encrypt SSL certificates
-python3 setup_server_web.py 192.168.1.100 \
-  --deploy mysite.com https://github.com/user/site.git \
-  --ssl --ssl-email admin@mysite.com
-
-# Add SSL to existing deployment using patch_setup.py
-python3 patch_setup.py web.example.com --ssl --ssl-email admin@example.com
-
-# Preconfigure server for Cloudflare tunnel
-python3 setup_server_web.py 192.168.1.100 \
-  --deploy mysite.com https://github.com/user/site.git \
-  --cloudflare
-
-# Initial setup requires manual authentication (run once):
-# ssh user@192.168.1.100
-# sudo setup-cloudflare-tunnel
-# The script will:
-#  - Install cloudflared
-#  - Guide through authentication
-#  - Create tunnel and discover sites
-#  - Generate config and start service
-
-# After initial setup, the tunnel updates automatically
-# When deploying new sites with --cloudflare flag:
-python3 setup_server_web.py 192.168.1.100 \
-  --deploy newsite.com https://github.com/user/newsite.git \
-  --cloudflare
-# The tunnel configuration updates automatically with the new site
-```
-
-### Deployment Support
-
-The `--deploy` flag enables automatic deployment of git repositories with nginx configuration. You can also pass one repository to multiple targets by providing a comma-separated list in the `DOMAIN_OR_PATH` argument:
-
-- `--deploy bluehexagons.com/foodguide,foodguide.bluehexagons.com/ https://github.com/bluehexagons/foodguide.git`
-
-This will run the build process once per location and create a configuration forrunning `/opt/infra_tools/remote_setup.py`)
-- **Frontend builds & Vite**: For Node/Vite apps the deploy process sets `VITE_SITE_ROOT` and calls `npm run build -- --base` with the correct base path for subpath deployments.
-- **Static frontend serving**: The Node frontend build output (dist/build) is served directly by Nginx. The deploy process returns a `frontend_serve_path` which is picked up by generated Nginx configs.
-- **Automatic nginx configuration**: Creates nginx site configs with HTTPS and Let's Encrypt preparation. Nginx serves static frontends and reverse proxies Rails backend API (or Node servers if configured).
-- **API routing strategy**: If a Rails + frontend is deployed at the **root path** for a domain (e.g., `example.com/` or `example.com`), the API uses `api.example.com` (subdomain strategy). Otherwise the API is available under the app's path (e.g., `example.com/rails_test/api`).
-- **HTTPS/SSL support**: 
-  - Self-signed certificates generated automatically for initial setup
-  - Use `--ssl` flag to obtain Let's Encrypt certificates for deployed domains
-  - Single certificate with Subject Alternative Names (SANs) covers all domains (up to 100)
-  - Symbolic links created for each domain pointing to shared certificate
-  - Let's Encrypt certificates are preserved during redeployment
-  - Automatic certificate renewal configured via certbot systemd timer
-  - ACME challenge location (`/.well-known/acme-challenge/`) configured in all nginx sites
-- **Cloudflare tunnel support**:
-  - Use `--cloudflare` flag to preconfigure server for Cloudflare tunnel
-  - Configures firewall to block public HTTP/HTTPS ports (traffic comes through tunnel)
-  - Sets up nginx to trust Cloudflare IPs and restore real visitor IPs
-  - Installs automated Python script at `/usr/local/bin/setup-cloudflare-tunnel`
-  - Initial setup requires manual authentication (run `sudo setup-cloudflare-tunnel` once)
-  - Script handles complete setup: installation, authentication, tunnel creation, site discovery
-  - Automatically discovers configured sites from nginx and generates config.yml
-  - **Idempotent updates**: When deploying new sites with `--cloudflare`, tunnel config updates automatically
-  - Saves state to `/etc/cloudflared/tunnel-state.json` for tracking configured sites
-  - No manual reconfiguration needed when adding sites after initial setup
-  - No SSL certificates needed (Cloudflare handles SSL termination)
-- **Default server**: Deployments without a domain (e.g., `/path`) become the default server, accessible via IP
-- **Directory naming**: Repositories are stored in `/var/www/domain_com__path` (e.g., `/var/www/blog_example_com__articles`)
-- **Standard builds**: 
-  - Rails: `bundle install --deployment`, `rake assets:precompile`, and reverse proxy setup
-  - Node.js: `npm install`, `npm run build`, serves from `dist/`, `build/` or `out/` (automatic detection)
-  - Static: Files served as-is from repository `html`, `public`, or `static` directories (defaults) or repository root
-- **Multiple deployment locations**: When you pass comma-separated locations for a single `--deploy` entry, the source is copied instead of moved (keeps the original source intact), and each target uses a fresh build with its own `VITE_SITE_ROOT` setting.nown/acme-challenge/` location for certificate verification
-- **Default server**: Deployments without a domain (e.g., `/path`) become the default server, accessible via IP
-- **Directory naming**: Repositories are stored in `/var/www/domain_com__path` (e.g., `/var/www/blog_example_com__articles`)
-- **Standard builds**: 
-  - Rails: `bundle install --deployment`, `rake assets:precompile`, and reverse proxy setup
-  - Node.js: `npm install`, `npm run build`, serves from `dist/` or `build/`
-  - Static: Files served as-is from repository root
-
-Example:
-```bash
-# Deploy a Rails application with reverse proxy
-python3 setup_server_web.py 192.168.1.100 --ruby \
-  --deploy api.myapp.com https://github.com/user/rails-api.git
-
-# Deploy a Vite/React site
-python3 setup_server_web.py 192.168.1.100 --node \
-  --deploy app.mysite.com https://github.com/user/vite-app.git
-
-# When using remote_setup.py directly on the server (clones repositories)
-python3 /opt/infra_tools/remote_setup.py --system-type server_web --username myuser \
-  --deploy mysite.com https://github.com/user/site.git
-
-# Advanced: Use --lite-deploy when repositories are pre-uploaded to /opt/infra_tools/deployments/
-python3 /opt/infra_tools/remote_setup.py --system-type server_web --username myuser \
-  --lite-deploy --deploy mysite.com https://github.com/user/site.git
-```
-
-**Deployment Process**: Setup scripts clone repositories locally using your git credentials, upload them to `/opt/infra_tools/deployments/` on the remote server, then execute `remote_setup.py --lite-deploy` to deploy from the uploaded files.
-
-## Setups
-
-**Workstation Desktop:**
-- Desktop environment (XFCE, i3, or Cinnamon) + xRDP + audio
-- Browser (Brave, Firefox, Vivaldi, Lynx, or Browsh)
-- Desktop apps: VSCodium, Discord
-- Optional: LibreOffice (with --office flag)
-- fail2ban for RDP
-
-**PC Dev:**
-- Desktop environment (XFCE, i3, or Cinnamon) + xRDP + audio
-- Browser (Brave, Firefox, Vivaldi, Lynx, or Browsh)
-- Desktop apps: VSCodium, Discord, Remmina RDP client
-- LibreOffice (installed by default)
-- Designed for bare hardware development PCs
-- fail2ban for RDP
-
-**Workstation Dev:**
-- Desktop environment (XFCE, i3, or Cinnamon) + xRDP (no audio)
-- Browser (Brave, Firefox, Vivaldi, Lynx, or Browsh)
-- Desktop apps: Visual Studio Code
-- Optional: LibreOffice (with --office flag)
-- fail2ban for RDP
-
-**Server Dev:**
-- CLI tools only (no desktop/RDP)
-
-**Server Web:**
-- nginx with security hardened settings
-- HTTP/HTTPS enabled
-- Static content & reverse proxy only (no scripting)
-- Hello World test page
-
-**Server Proxmox:**
-- SSH & kernel hardening
-- Automatic security updates
-- Preserves Proxmox firewall and cluster functionality
-
-**All:**
-- User setup with sudo
-- Firewall + SSH hardening
-- Auto security updates
-- NTP time sync
-- CLI tools: neovim, btop, htop, curl, wget, git, tmux
-
-## Direct Execution
-
-Scripts are installed to `/opt/infra_tools/` on the remote host:
+Use `patch_setup.py` to update existing systems. It merges new flags with the previous configuration.
 
 ```bash
-# Run with system type
-python3 /opt/infra_tools/remote_setup.py --system-type <type> --username <user> [--password <pass>] [--timezone <tz>] [--skip-audio]
-
-# Run specific steps only
-python3 /opt/infra_tools/remote_setup.py --steps "install_ruby install_go" --username <user>
+# Add SSL to existing server
+python3 patch_setup.py web.com --ssl --ssl-email me@web.com
 ```
 
-System types: `workstation_desktop`, `pc_dev`, `workstation_dev`, `server_dev`, `server_web`, `server_proxmox`
+## Requirements
 
-Available steps: `install_ruby`, `install_go`, `install_node`, `install_cli_tools`, `setup_user`, `configure_firewall`, etc.
+- Python 3.9+
+- SSH root access
+- OS: Debian, Ubuntu
 
 ## License
 

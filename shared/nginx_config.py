@@ -141,7 +141,10 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: List[Dict],
         for dep in sorted_deployments:
             if dep.get('backend_port') and (dep.get('frontend_port') or dep.get('frontend_serve_path')):
                 # Subdomain strategy for Rails apps with domain - ONLY for root path
-                if dep['path'] == '/' or not dep['path']:
+                # AND if api_subdomain is requested
+                use_subdomain = dep.get('api_subdomain', False)
+                
+                if (dep['path'] == '/' or not dep['path']) and use_subdomain:
                     api_domain = f"api.{domain}"
                     api_configs.append(_make_api_server_block(api_domain, dep['backend_port']))
 
@@ -164,8 +167,8 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: List[Dict],
             frontend_serve_path = dep.get('frontend_serve_path')
             
             if backend_port and (frontend_port or frontend_serve_path):
-                # Use subdomain strategy only if domain exists AND path is root
-                use_subdomain_api = domain and (path == '/' or not path)
+                # Use subdomain strategy only if domain exists AND path is root AND api_subdomain is True
+                use_subdomain_api = domain and (path == '/' or not path) and dep.get('api_subdomain', False)
                 
                 if use_subdomain_api:
                     # Subdomain strategy: Frontend only in main block
@@ -264,7 +267,8 @@ def create_nginx_sites_for_groups(grouped_deployments: Dict[Optional[str], List[
             # Check for API subdomains
             for dep in deployments:
                 if dep.get('backend_port') and (dep.get('frontend_port') or dep.get('frontend_serve_path')):
-                    generate_self_signed_cert(f"api.{domain}", run_func)
+                    if dep.get('api_subdomain', False):
+                        generate_self_signed_cert(f"api.{domain}", run_func)
             
             config_name = domain.replace('.', '_')
         else:

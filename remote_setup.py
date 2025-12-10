@@ -66,6 +66,8 @@ def main() -> int:
                        help="Email address for Let's Encrypt registration (optional)")
     parser.add_argument("--cloudflare", action="store_true",
                        help="Preconfigure server for Cloudflare tunnel (disables public HTTP/HTTPS ports)")
+    parser.add_argument("--api-subdomain", action="store_true",
+                       help="Deploy Rails API as a subdomain (api.domain.com) instead of a subdirectory (domain.com/api)")
     
     args = parser.parse_args()
     
@@ -227,7 +229,8 @@ def main() -> int:
                         full_deploy=args.full_deploy,
                         web_user="rails",
                         web_group="rails",
-                        keep_source=True
+                        keep_source=True,
+                        api_subdomain=args.api_subdomain
                     )
                     if info:
                         deployments.append(info)
@@ -269,7 +272,8 @@ def main() -> int:
                             full_deploy=args.full_deploy,
                             web_user="rails",
                             web_group="rails",
-                            keep_source=True
+                            keep_source=True,
+                            api_subdomain=args.api_subdomain
                         )
                         if info:
                             deployments.append(info)

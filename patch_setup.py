@@ -109,7 +109,8 @@ def main() -> int:
         full_deploy=merged_args.get('full_deploy', False),
         enable_ssl=merged_args.get('enable_ssl', False),
         ssl_email=merged_args.get('ssl_email'),
-        enable_cloudflare=merged_args.get('enable_cloudflare', False)
+        enable_cloudflare=merged_args.get('enable_cloudflare', False),
+        api_subdomain=merged_args.get('api_subdomain', False)
     )
     
     if returncode != 0:

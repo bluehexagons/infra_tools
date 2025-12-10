@@ -107,7 +107,8 @@ class DeploymentOrchestrator:
     
     def deploy_from_archive(self, source_path: str, domain: Optional[str], path: str, 
                            git_url: str, commit_hash: Optional[str], run_func, 
-                           full_deploy: bool = True, keep_source: bool = False) -> dict:
+                           full_deploy: bool = True, keep_source: bool = False,
+                           api_subdomain: bool = False) -> dict:
         dest_path = self.get_deployment_path(domain, path, git_url)
         
         # Check if we should skip this deployment
@@ -135,7 +136,8 @@ class DeploymentOrchestrator:
                 'backend_port': 3000 if project_type == "rails" else None,
                 'frontend_port': 4000 if project_type == "rails" and os.path.exists(os.path.join(dest_path, "frontend")) else None,
                 'frontend_serve_path': frontend_serve_path,
-                'skipped': True
+                'skipped': True,
+                'api_subdomain': api_subdomain
             }
         
         print(f"Deploying to {dest_path}...")
@@ -198,7 +200,7 @@ class DeploymentOrchestrator:
                 api_url = "/api"
                 is_root = not path or path == '/'
                 
-                if is_root and domain:
+                if api_subdomain and domain:
                     api_url = f"https://api.{domain}"
                 elif not is_root:
                     clean_path = path.rstrip('/')
@@ -243,7 +245,8 @@ class DeploymentOrchestrator:
             'needs_proxy': should_reverse_proxy(project_type),
             'backend_port': backend_port,
             'frontend_port': frontend_port,
-            'frontend_serve_path': frontend_serve_path
+            'frontend_serve_path': frontend_serve_path,
+            'api_subdomain': api_subdomain
         }
     
     def build_project(self, project_path: str, project_type: str, run_func, site_root: Optional[str] = None):

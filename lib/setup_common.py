@@ -327,6 +327,8 @@ def create_argument_parser(description: str, allow_steps: bool = False) -> argpa
                        help="Email address for Let's Encrypt registration (optional)")
     parser.add_argument("--cloudflare", dest="enable_cloudflare", action=argparse.BooleanOptionalAction, default=None,
                        help="Preconfigure server for Cloudflare tunnel (disables public HTTP/HTTPS ports)")
+    parser.add_argument("--api-subdomain", dest="api_subdomain", action=argparse.BooleanOptionalAction, default=None,
+                       help="Deploy Rails API as a subdomain (api.domain.com) instead of a subdirectory (domain.com/api)")
     return parser
 
 
@@ -352,6 +354,7 @@ def run_remote_setup(
     enable_ssl: bool = False,
     ssl_email: Optional[str] = None,
     enable_cloudflare: bool = False,
+    api_subdomain: bool = False,
 ) -> int:
     try:
         tar_data = create_tar_archive()
@@ -426,6 +429,9 @@ def run_remote_setup(
     
     if enable_cloudflare:
         cmd_parts.append("--cloudflare")
+    
+    if api_subdomain:
+        cmd_parts.append("--api-subdomain")
     
     remote_cmd = f"""
 mkdir -p {escaped_install_dir} && \
@@ -663,7 +669,8 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
         full_deploy=args.full_deploy if args.deploy_specs else False,
         enable_ssl=args.enable_ssl if args.deploy_specs else False,
         ssl_email=args.ssl_email if args.enable_ssl else None,
-        enable_cloudflare=args.enable_cloudflare or False
+        enable_cloudflare=args.enable_cloudflare or False,
+        api_subdomain=args.api_subdomain or False
     )
     
     if returncode != 0:
