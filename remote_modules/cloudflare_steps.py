@@ -1,7 +1,6 @@
 """Cloudflare tunnel preconfiguration steps."""
 
 import os
-import shlex
 
 from .utils import run
 
@@ -10,8 +9,9 @@ def configure_cloudflare_firewall(os_type: str, **_) -> None:
     """Configure firewall for Cloudflare tunnel (SSH only, no HTTP/HTTPS)."""
     result = run("ufw status 2>/dev/null | grep -q 'Status: active'", check=False)
     if result.returncode == 0:
-        result = run("ufw status | grep -q '80/tcp'", check=False)
-        if result.returncode != 0:
+        result_80 = run("ufw status | grep -q '80/tcp'", check=False)
+        result_443 = run("ufw status | grep -q '443/tcp'", check=False)
+        if result_80.returncode != 0 and result_443.returncode != 0:
             print("  ✓ Firewall already configured for Cloudflare tunnel")
             return
     
@@ -98,9 +98,12 @@ def configure_nginx_for_cloudflare(**_) -> None:
         print("  ✓ Nginx already configured for Cloudflare")
         return
     
-    # Cloudflare IPv4 and IPv6 ranges (these may need periodic updates)
+    # Cloudflare IPv4 and IPv6 ranges
+    # Note: These ranges may change. Verify current ranges at:
+    # https://www.cloudflare.com/ips/
     cloudflare_config = """# Cloudflare IP ranges for real IP restoration
-# Updated: 2024-12
+# Verify current ranges at: https://www.cloudflare.com/ips/
+# Last updated: 2024-12
 
 # IPv4
 set_real_ip_from 173.245.48.0/20;
@@ -163,12 +166,30 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+# Detect architecture
+ARCH=$(uname -m)
+case $ARCH in
+    x86_64)
+        PACKAGE="cloudflared-linux-amd64.deb"
+        ;;
+    aarch64|arm64)
+        PACKAGE="cloudflared-linux-arm64.deb"
+        ;;
+    armv7l)
+        PACKAGE="cloudflared-linux-arm.deb"
+        ;;
+    *)
+        echo "Error: Unsupported architecture: $ARCH"
+        exit 1
+        ;;
+esac
+
 # Install cloudflared if not already installed
 if ! command -v cloudflared &> /dev/null; then
-    echo "Installing cloudflared..."
-    wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
-    dpkg -i cloudflared-linux-amd64.deb
-    rm cloudflared-linux-amd64.deb
+    echo "Installing cloudflared for $ARCH..."
+    wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/$PACKAGE
+    dpkg -i $PACKAGE
+    rm $PACKAGE
     echo "✓ cloudflared installed"
 else
     echo "✓ cloudflared already installed"
