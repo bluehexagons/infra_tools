@@ -87,7 +87,8 @@ All setup scripts support optional software installation:
 - `--cloudflare` - Preconfigure server for Cloudflare tunnel (web servers only)
   - Configures firewall to block public HTTP/HTTPS ports
   - Sets up nginx to trust Cloudflare IPs
-  - Creates config directory and helper script for cloudflared installation
+  - Installs automated setup script that handles complete tunnel configuration
+  - Script discovers deployed sites and generates config automatically
 
 Desktop workstation scripts support desktop environment and browser selection:
 
@@ -149,9 +150,14 @@ python3 setup_server_web.py 192.168.1.100 \
   --deploy mysite.com https://github.com/user/site.git \
   --cloudflare
 
-# After Cloudflare setup, install cloudflared on the server:
+# Then on the server, run the automated setup:
 # ssh user@192.168.1.100
 # sudo setup-cloudflare-tunnel
+# The script will:
+#  - Install cloudflared
+#  - Guide through authentication
+#  - Create tunnel and discover sites
+#  - Generate config and start service
 ```
 
 ### Deployment Support
@@ -177,9 +183,11 @@ This will run the build process once per location and create a configuration for
   - Use `--cloudflare` flag to preconfigure server for Cloudflare tunnel
   - Configures firewall to block public HTTP/HTTPS ports (traffic comes through tunnel)
   - Sets up nginx to trust Cloudflare IPs and restore real visitor IPs
-  - Creates `/etc/cloudflared/` directory with setup instructions
-  - Installs `/usr/local/bin/setup-cloudflare-tunnel` helper script
-  - Administrator manually installs cloudflared using the helper script
+  - Installs automated Python script at `/usr/local/bin/setup-cloudflare-tunnel`
+  - Script handles complete setup: installation, authentication, tunnel creation, site discovery
+  - Automatically discovers configured sites from nginx and generates config.yml
+  - Saves state to `/etc/cloudflared/tunnel-state.json` for easy updates when adding sites
+  - Re-running script updates configuration with newly deployed sites
   - No SSL certificates needed (Cloudflare handles SSL termination)
 - **Default server**: Deployments without a domain (e.g., `/path`) become the default server, accessible via IP
 - **Directory naming**: Repositories are stored in `/var/www/domain_com__path` (e.g., `/var/www/blog_example_com__articles`)

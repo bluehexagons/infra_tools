@@ -38,7 +38,25 @@ def create_cloudflared_config_directory(**_) -> None:
 
 This directory is preconfigured for cloudflared setup.
 
-## Installation Steps
+## Automated Setup
+
+Run the automated setup script to configure your Cloudflare tunnel:
+
+```bash
+sudo setup-cloudflare-tunnel
+```
+
+This script will:
+1. Install cloudflared (if not installed)
+2. Guide you through Cloudflare authentication
+3. Create a tunnel
+4. Discover configured sites from nginx
+5. Generate config.yml automatically
+6. Install and start the tunnel service
+
+## Manual Configuration
+
+If you prefer manual setup or need to customize:
 
 1. Install cloudflared:
    ```
@@ -80,6 +98,11 @@ ingress:
     service: http://localhost:80
   - service: http_status:404
 ```
+
+## State File
+
+The automated setup script saves its state to `/etc/cloudflared/tunnel-state.json`.
+This allows you to re-run the script to update the configuration when you add new sites.
 
 For more information: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/
 """
@@ -144,71 +167,29 @@ real_ip_header CF-Connecting-IP;
 
 
 def install_cloudflared_service_helper(**_) -> None:
-    """Create helper script for cloudflared installation."""
+    """Install Python script for comprehensive Cloudflare tunnel setup."""
     helper_script = "/usr/local/bin/setup-cloudflare-tunnel"
     
     if os.path.exists(helper_script):
-        print("  ✓ Cloudflare tunnel helper script already exists")
+        print("  ✓ Cloudflare tunnel setup script already exists")
         return
     
-    script_content = """#!/bin/bash
-# Helper script for setting up Cloudflare tunnel
-
-set -e
-
-echo "Cloudflare Tunnel Setup Helper"
-echo "==============================="
-echo ""
-
-# Check if running as root
-if [ "$EUID" -ne 0 ]; then
-    echo "Error: Please run as root (use sudo)"
-    exit 1
-fi
-
-# Detect architecture
-ARCH=$(uname -m)
-case $ARCH in
-    x86_64)
-        PACKAGE="cloudflared-linux-amd64.deb"
-        ;;
-    aarch64|arm64)
-        PACKAGE="cloudflared-linux-arm64.deb"
-        ;;
-    armv7l)
-        PACKAGE="cloudflared-linux-arm.deb"
-        ;;
-    *)
-        echo "Error: Unsupported architecture: $ARCH"
-        exit 1
-        ;;
-esac
-
-# Install cloudflared if not already installed
-if ! command -v cloudflared &> /dev/null; then
-    echo "Installing cloudflared for $ARCH..."
-    wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/$PACKAGE
-    dpkg -i $PACKAGE
-    rm $PACKAGE
-    echo "✓ cloudflared installed"
-else
-    echo "✓ cloudflared already installed"
-fi
-
-echo ""
-echo "Next steps:"
-echo "1. Authenticate: cloudflared tunnel login"
-echo "2. Create tunnel: cloudflared tunnel create <name>"
-echo "3. Create /etc/cloudflared/config.yml (see /etc/cloudflared/README.md)"
-echo "4. Install service: cloudflared service install"
-echo "5. Start service: systemctl start cloudflared && systemctl enable cloudflared"
-echo ""
-echo "Configuration directory: /etc/cloudflared/"
-"""
+    # Read the Python script from the remote_modules directory
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    source_script = os.path.join(script_dir, "setup_cloudflare_tunnel.py")
     
-    with open(helper_script, "w") as f:
-        f.write(script_content)
+    if not os.path.exists(source_script):
+        print(f"  ⚠ Source script not found: {source_script}")
+        return
+    
+    # Copy the script to /usr/local/bin
+    with open(source_script, 'r') as src:
+        script_content = src.read()
+    
+    with open(helper_script, 'w') as dst:
+        dst.write(script_content)
     
     os.chmod(helper_script, 0o755)
     
-    print(f"  ✓ Created helper script: {helper_script}")
+    print(f"  ✓ Installed setup script: {helper_script}")
+    print(f"  Run 'sudo setup-cloudflare-tunnel' to configure the tunnel")
