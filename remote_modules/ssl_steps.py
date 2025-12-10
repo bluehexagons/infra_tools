@@ -121,11 +121,16 @@ def create_domain_cert_links(domains: List[str], cert_name: str, run_func: Optio
         link_path = f"/etc/letsencrypt/live/{domain}"
         
         # Check if link already exists
-        if os.path.exists(link_path):
+        if os.path.exists(link_path) or os.path.islink(link_path):
             # Check if it's already a correct link
             if os.path.islink(link_path):
                 target = os.readlink(link_path)
-                if target == cert_name or target == cert_dir:
+                # Compare with cert_name (relative path we use when creating symlinks)
+                if target == cert_name:
+                    continue
+                # Also check if it points to the absolute path
+                target_abs = os.path.join(os.path.dirname(link_path), target) if not os.path.isabs(target) else target
+                if os.path.normpath(target_abs) == os.path.normpath(cert_dir):
                     continue
             else:
                 print(f"  ⚠ {link_path} exists but is not a symlink, skipping")
