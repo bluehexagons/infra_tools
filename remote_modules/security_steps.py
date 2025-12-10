@@ -1,7 +1,6 @@
 """Security hardening steps."""
 
 import os
-import shlex
 
 from .utils import run, is_package_installed, is_service_active, file_contains
 

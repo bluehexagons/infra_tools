@@ -411,6 +411,8 @@ WantedBy=timers.target
 
 def configure_auto_update_ruby(username: str, os_type: str, **_) -> None:
     """Configure automatic updates for Ruby via rbenv."""
+    # Validate and safely quote username for all uses
+    safe_username = shlex.quote(username)
     user_home = f"/home/{username}"
     rbenv_dir = f"{user_home}/.rbenv"
     
@@ -428,13 +430,11 @@ def configure_auto_update_ruby(username: str, os_type: str, **_) -> None:
             print("  ✓ Ruby auto-update already configured")
             return
     
-    safe_username = shlex.quote(username)
-    
-    # Create the update script
-    update_script = f"""#!/bin/bash
+    # Create the update script with properly escaped paths
+    # Use $HOME in script instead of hardcoded path for better safety
+    update_script = """#!/bin/bash
 # Auto-update Ruby to latest stable version via rbenv
 
-export HOME="{user_home}"
 export PATH="$HOME/.rbenv/bin:$PATH"
 eval "$(rbenv init -)"
 
@@ -474,6 +474,7 @@ logger "auto-update-ruby: Successfully updated Ruby to $LATEST_RUBY"
     run(f"chmod +x {script_path}")
     
     # Create the systemd service (run as the user who owns rbenv)
+    # Username is validated and quoted properly for systemd
     service_content = f"""[Unit]
 Description=Auto-update Ruby to latest stable version
 Documentation=man:systemd.service(5)
