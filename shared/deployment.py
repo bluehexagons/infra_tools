@@ -118,6 +118,13 @@ class DeploymentOrchestrator:
             
             # Still return deployment info for nginx configuration
             project_type = detect_project_type(dest_path)
+            
+            frontend_serve_path = None
+            if project_type == "rails":
+                frontend_path = os.path.join(dest_path, "frontend")
+                if os.path.exists(frontend_path):
+                    frontend_serve_path = get_project_root(frontend_path, "node")
+
             return {
                 'dest_path': dest_path,
                 'domain': domain,
@@ -127,6 +134,7 @@ class DeploymentOrchestrator:
                 'needs_proxy': should_reverse_proxy(project_type),
                 'backend_port': 3000 if project_type == "rails" else None,
                 'frontend_port': 4000 if project_type == "rails" and os.path.exists(os.path.join(dest_path, "frontend")) else None,
+                'frontend_serve_path': frontend_serve_path,
                 'skipped': True
             }
         
@@ -170,7 +178,16 @@ class DeploymentOrchestrator:
             service_name = f"rails-{app_name}"
             backend_port = self._get_assigned_port(service_name, 3000)
             
-            create_rails_service(app_name, dest_path, backend_port, self.web_user, self.web_group, run_func)
+            # Determine allowed origins for CORS
+            cors_origins = []
+            if domain:
+                cors_origins.append(f"https://{domain}")
+                cors_origins.append(f"https://www.{domain}")
+                cors_origins.append(f"http://{domain}")
+                cors_origins.append(f"http://www.{domain}")
+            
+            create_rails_service(app_name, dest_path, backend_port, self.web_user, self.web_group, run_func, 
+                               env_vars={"CORS_ORIGINS": ",".join(cors_origins)})
             
             # Check for frontend
             frontend_path = os.path.join(dest_path, "frontend")
@@ -200,6 +217,9 @@ class DeploymentOrchestrator:
                 
                 frontend_serve_path = get_project_root(frontend_path, "node")
                 print(f"  Frontend will be served statically from {frontend_serve_path}")
+                
+                # Clear frontend_port since we are serving statically
+                frontend_port = None
         
         # Fix permissions AFTER all build steps (including frontend)
         result = run_func(f"chown -R {shlex.quote(self.web_user)}:{shlex.quote(self.web_group)} {shlex.quote(dest_path)}", check=False)
@@ -238,6 +258,33 @@ class DeploymentOrchestrator:
     
     def _build_rails_project(self, project_path: str, run_func):
         print(f"  Building Rails project at {project_path}")
+        
+        # Patch CORS configuration
+        cors_file = os.path.join(project_path, "config", "initializers", "cors.rb")
+        if os.path.exists(cors_file):
+            print("  Patching CORS configuration...")
+            try:
+                with open(cors_file, 'r') as f:
+                    content = f.read()
+                
+                if 'ENV["CORS_ORIGINS"]' not in content:
+                    # Replace the specific line we saw in the repo
+                    new_content = content.replace(
+                        'origins "http://localhost:5173", "http://127.0.0.1:5173"',
+                        'origins((ENV["CORS_ORIGINS"]&.split(",") || []) + ["http://localhost:5173", "http://127.0.0.1:5173"])'
+                    )
+                    # Also try a more generic replacement if the exact string doesn't match
+                    if new_content == content:
+                         new_content = re.sub(
+                            r'origins\s+["\'].*?["\'](?:,\s*["\'].*?["\'])*',
+                            'origins((ENV["CORS_ORIGINS"]&.split(",") || []) + ["http://localhost:5173", "http://127.0.0.1:5173"])',
+                            content
+                        )
+
+                    with open(cors_file, 'w') as f:
+                        f.write(new_content)
+            except Exception as e:
+                print(f"  ⚠ Failed to patch CORS configuration: {e}")
         
         # Generate a temporary secret key for build steps
         build_secret = secrets.token_hex(64)

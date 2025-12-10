@@ -263,7 +263,7 @@ def create_nginx_sites_for_groups(grouped_deployments: Dict[Optional[str], List[
         if domain:
             # Check for API subdomains
             for dep in deployments:
-                if dep.get('backend_port') and dep.get('frontend_port'):
+                if dep.get('backend_port') and (dep.get('frontend_port') or dep.get('frontend_serve_path')):
                     generate_self_signed_cert(f"api.{domain}", run_func)
             
             config_name = domain.replace('.', '_')

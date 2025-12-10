@@ -494,6 +494,9 @@ tar xzf - && \
         print("=" * 60)
         return 0
     
+    ssh_env = os.environ.copy()
+    ssh_env["LC_ALL"] = "C"
+
     try:
         # If we have deployment repositories to upload, send them first so
         # the remote `remote_setup.py --lite-deploy` run can find
@@ -503,7 +506,7 @@ tar xzf - && \
             print("Uploading deployment repositories...")
             print(f"{'='*60}")
 
-            deploy_cmd = f"cd {escaped_install_dir} && tar xzf -"
+            deploy_cmd = f"mkdir -p {escaped_install_dir} && cd {escaped_install_dir} && tar xzf -"
 
             deploy_process = subprocess.Popen(
                 ["ssh"] + ssh_opts + [f"root@{host}", deploy_cmd],
@@ -512,6 +515,7 @@ tar xzf - && \
                 stderr=subprocess.STDOUT,
                 text=False,
                 bufsize=0,
+                env=ssh_env,
             )
 
             deploy_process.stdin.write(deploy_tar_data)
@@ -534,6 +538,7 @@ tar xzf - && \
             stderr=subprocess.STDOUT,
             text=False,
             bufsize=0,
+            env=ssh_env,
         )
 
         process.stdin.write(tar_data)
