@@ -60,6 +60,12 @@ def main() -> int:
                        help="Use pre-uploaded repository files instead of cloning (for remote execution)")
     parser.add_argument("--full-deploy", action="store_true",
                        help="Always rebuild deployments even if they haven't changed (default: skip unchanged deployments)")
+    parser.add_argument("--ssl", action="store_true",
+                       help="Enable Let's Encrypt SSL/TLS certificates for deployed domains")
+    parser.add_argument("--ssl-email",
+                       help="Email address for Let's Encrypt registration (optional)")
+    parser.add_argument("--cloudflare", action="store_true",
+                       help="Preconfigure server for Cloudflare tunnel (disables public HTTP/HTTPS ports)")
     
     args = parser.parse_args()
     
@@ -115,6 +121,12 @@ def main() -> int:
         print(f"Deployments: {len(args.deploy)} repository(ies)")
         for location, git_url in args.deploy:
             print(f"  - {git_url} -> {location}")
+        if args.ssl:
+            print("SSL: Yes (Let's Encrypt)")
+            if args.ssl_email:
+                print(f"SSL Email: {args.ssl_email}")
+    if args.cloudflare:
+        print("Cloudflare: Yes (tunnel preconfiguration)")
     sys.stdout.flush()
 
     os_type = detect_os()
@@ -140,6 +152,34 @@ def main() -> int:
     
     bar = progress_bar(total_steps, total_steps)
     print(f"\n{bar} Complete!")
+    
+    # Configure Cloudflare tunnel if requested
+    if args.cloudflare and system_type == "server_web":
+        from remote_modules.cloudflare_steps import (
+            configure_cloudflare_firewall,
+            create_cloudflared_config_directory,
+            configure_nginx_for_cloudflare,
+            install_cloudflared_service_helper
+        )
+        
+        print("\n" + "=" * 60)
+        print("Configuring Cloudflare tunnel support...")
+        print("=" * 60)
+        
+        print("\n[1/4] Configuring firewall for Cloudflare tunnel")
+        configure_cloudflare_firewall(os_type=os_type)
+        
+        print("\n[2/4] Creating cloudflared configuration directory")
+        create_cloudflared_config_directory()
+        
+        print("\n[3/4] Configuring nginx for Cloudflare")
+        configure_nginx_for_cloudflare()
+        
+        print("\n[4/4] Installing cloudflared setup helper")
+        install_cloudflared_service_helper()
+        
+        print("\n✓ Cloudflare tunnel preconfiguration complete")
+        print("  Run 'sudo setup-cloudflare-tunnel' to install cloudflared")
     
     # Handle deployments if specified
     if args.deploy:
@@ -252,6 +292,26 @@ def main() -> int:
                 grouped_deployments[dep['domain']].append(dep)
             
             create_nginx_sites_for_groups(grouped_deployments, run)
+            
+            # Set up SSL if requested
+            if args.ssl:
+                from remote_modules.ssl_steps import install_certbot, setup_ssl_for_deployments
+                
+                print("\n" + "=" * 60)
+                print("Installing certbot...")
+                print("=" * 60)
+                install_certbot(os_type=os_type)
+                
+                setup_ssl_for_deployments(deployments, args.ssl_email, run)
+            
+            # Update Cloudflare tunnel configuration if configured
+            if args.cloudflare:
+                from remote_modules.cloudflare_steps import run_cloudflare_tunnel_setup
+                
+                print("\n" + "=" * 60)
+                print("Updating Cloudflare tunnel configuration...")
+                print("=" * 60)
+                run_cloudflare_tunnel_setup()
     
     print("\n" + "=" * 60)
     print("Setup completed successfully!")
