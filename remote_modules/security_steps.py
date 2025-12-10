@@ -222,44 +222,12 @@ def configure_auto_restart(os_type: str, **_) -> None:
             print("  ✓ Automatic restart service already configured")
             return
     
-    # Create the restart service script
-    restart_script = """#!/bin/bash
-# Auto-restart system at 2 AM if restart is required and no users are logged in
-
-# Check if restart is required
-if [ ! -f /var/run/reboot-required ]; then
-    echo "No restart required"
-    exit 0
-fi
-
-# Check for interactive user sessions (excluding systemd and system users)
-# Check for SSH sessions
-if who | grep -q .; then
-    echo "Users are logged in (SSH/console), skipping restart"
-    exit 0
-fi
-
-# Check for X11/desktop sessions
-if pgrep -u 1000- Xorg >/dev/null 2>&1 || pgrep -u 1000- gnome-session >/dev/null 2>&1 || pgrep -u 1000- xfce4-session >/dev/null 2>&1; then
-    echo "Desktop session active, skipping restart"
-    exit 0
-fi
-
-# Check for active RDP sessions
-if pgrep -u 1000- xrdp-sesman >/dev/null 2>&1; then
-    echo "RDP session active, skipping restart"
-    exit 0
-fi
-
-# No users logged in and restart required, proceed
-echo "Restart required and no users logged in, restarting system..."
-logger "auto-restart-if-needed: Restarting system due to pending updates"
-/sbin/shutdown -r now "Automatic restart for system updates"
-"""
+    # Copy the Python script to /usr/local/bin
+    script_source = os.path.join(os.path.dirname(__file__), "auto_restart_if_needed.py")
+    script_path = "/usr/local/bin/auto-restart-if-needed"
     
-    script_path = "/usr/local/bin/auto-restart-if-needed.sh"
-    with open(script_path, "w") as f:
-        f.write(restart_script)
+    import shutil
+    shutil.copy2(script_source, script_path)
     run(f"chmod +x {script_path}")
     
     # Create the systemd service
@@ -269,7 +237,7 @@ Documentation=man:systemd.service(5)
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/auto-restart-if-needed.sh
+ExecStart=/usr/bin/python3 /usr/local/bin/auto-restart-if-needed
 """
     
     with open(service_file, "w") as f:

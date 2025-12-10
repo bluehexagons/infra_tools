@@ -318,55 +318,12 @@ def configure_auto_update_node(os_type: str, **_) -> None:
             print("  ✓ Node.js auto-update already configured")
             return
     
-    # Create the update script
-    update_script = f"""#!/bin/bash
-# Auto-update Node.js to latest LTS version via nvm
-
-export NVM_DIR="{nvm_dir}"
-[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-
-# Get current LTS version
-CURRENT_LTS=$(nvm version-remote --lts)
-
-# Get installed version
-CURRENT_VERSION=$(nvm version default)
-
-if [ "$CURRENT_VERSION" = "$CURRENT_LTS" ]; then
-    echo "Node.js already at latest LTS version: $CURRENT_LTS"
-    exit 0
-fi
-
-echo "Updating Node.js from $CURRENT_VERSION to $CURRENT_LTS"
-logger "auto-update-node: Updating Node.js from $CURRENT_VERSION to $CURRENT_LTS"
-
-# Install new LTS version
-nvm install --lts
-
-# Update global packages
-npm install -g npm@latest
-npm install -g pnpm
-
-# Update symlinks
-NODE_PATH=$(which node)
-NODE_DIR=$(dirname "$NODE_PATH")
-
-for tool in node npm npx pnpm; do
-    TOOL_PATH="$NODE_DIR/$tool"
-    if [ -f "$TOOL_PATH" ]; then
-        ln -sf "$TOOL_PATH" "/usr/local/bin/$tool"
-    fi
-done
-
-# Fix permissions
-chmod -R a+rX "{nvm_dir}"
-
-echo "Node.js updated successfully to $CURRENT_LTS"
-logger "auto-update-node: Successfully updated Node.js to $CURRENT_LTS"
-"""
+    # Copy the Python script to /usr/local/bin
+    script_source = os.path.join(os.path.dirname(__file__), "auto_update_node.py")
+    script_path = "/usr/local/bin/auto-update-node"
     
-    script_path = "/usr/local/bin/auto-update-node.sh"
-    with open(script_path, "w") as f:
-        f.write(update_script)
+    import shutil
+    shutil.copy2(script_source, script_path)
     run(f"chmod +x {script_path}")
     
     # Create the systemd service
@@ -376,7 +333,7 @@ Documentation=man:systemd.service(5)
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/auto-update-node.sh
+ExecStart=/usr/bin/python3 /usr/local/bin/auto-update-node
 StandardOutput=journal
 StandardError=journal
 """
@@ -430,47 +387,12 @@ def configure_auto_update_ruby(username: str, os_type: str, **_) -> None:
             print("  ✓ Ruby auto-update already configured")
             return
     
-    # Create the update script with properly escaped paths
-    # Use $HOME in script instead of hardcoded path for better safety
-    update_script = """#!/bin/bash
-# Auto-update Ruby to latest stable version via rbenv
-
-export PATH="$HOME/.rbenv/bin:$PATH"
-eval "$(rbenv init -)"
-
-# Update ruby-build to get latest definitions
-cd "$HOME/.rbenv/plugins/ruby-build" && git pull
-
-# Get latest stable Ruby version (not preview/rc/dev)
-LATEST_RUBY=$(rbenv install -l | grep -v - | grep -E "^\\s*[0-9]+\\.[0-9]+\\.[0-9]+$" | tail -1 | tr -d ' ')
-
-# Get current global version
-CURRENT_VERSION=$(rbenv global)
-
-if [ "$CURRENT_VERSION" = "$LATEST_RUBY" ]; then
-    echo "Ruby already at latest stable version: $LATEST_RUBY"
-    exit 0
-fi
-
-echo "Updating Ruby from $CURRENT_VERSION to $LATEST_RUBY"
-logger "auto-update-ruby: Updating Ruby from $CURRENT_VERSION to $LATEST_RUBY"
-
-# Install new Ruby version
-rbenv install -s "$LATEST_RUBY"
-
-# Set as global version
-rbenv global "$LATEST_RUBY"
-
-# Update bundler
-gem install bundler
-
-echo "Ruby updated successfully to $LATEST_RUBY"
-logger "auto-update-ruby: Successfully updated Ruby to $LATEST_RUBY"
-"""
+    # Copy the Python script to /usr/local/bin
+    script_source = os.path.join(os.path.dirname(__file__), "auto_update_ruby.py")
+    script_path = "/usr/local/bin/auto-update-ruby"
     
-    script_path = "/usr/local/bin/auto-update-ruby.sh"
-    with open(script_path, "w") as f:
-        f.write(update_script)
+    import shutil
+    shutil.copy2(script_source, script_path)
     run(f"chmod +x {script_path}")
     
     # Create the systemd service (run as the user who owns rbenv)
@@ -482,7 +404,7 @@ Documentation=man:systemd.service(5)
 [Service]
 Type=oneshot
 User={username}
-ExecStart=/usr/local/bin/auto-update-ruby.sh
+ExecStart=/usr/bin/python3 /usr/local/bin/auto-update-ruby
 StandardOutput=journal
 StandardError=journal
 """
