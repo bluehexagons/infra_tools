@@ -1,7 +1,6 @@
 """Security hardening steps."""
 
 import os
-import shutil
 
 from .utils import run, is_package_installed, is_service_active, file_contains
 
@@ -223,21 +222,17 @@ def configure_auto_restart(os_type: str, **_) -> None:
             print("  ✓ Automatic restart service already configured")
             return
     
-    # Copy the Python script to /usr/local/bin
-    script_source = os.path.join(os.path.dirname(__file__), "auto_restart_if_needed.py")
-    script_path = "/usr/local/bin/auto-restart-if-needed"
-    
-    shutil.copy2(script_source, script_path)
-    run(f"chmod +x {script_path}")
+    # Script is already installed at /opt/infra_tools/remote_modules/
+    script_path = "/opt/infra_tools/remote_modules/auto_restart_if_needed.py"
     
     # Create the systemd service
-    service_content = """[Unit]
+    service_content = f"""[Unit]
 Description=Auto-restart system if needed
 Documentation=man:systemd.service(5)
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/python3 /usr/local/bin/auto-restart-if-needed
+ExecStart=/usr/bin/python3 {script_path}
 """
     
     with open(service_file, "w") as f:

@@ -2,7 +2,6 @@
 
 import os
 import shlex
-import shutil
 import subprocess
 from typing import Optional
 
@@ -319,21 +318,17 @@ def configure_auto_update_node(os_type: str, **_) -> None:
             print("  ✓ Node.js auto-update already configured")
             return
     
-    # Copy the Python script to /usr/local/bin
-    script_source = os.path.join(os.path.dirname(__file__), "auto_update_node.py")
-    script_path = "/usr/local/bin/auto-update-node"
-    
-    shutil.copy2(script_source, script_path)
-    run(f"chmod +x {script_path}")
+    # Script is already installed at /opt/infra_tools/remote_modules/
+    script_path = "/opt/infra_tools/remote_modules/auto_update_node.py"
     
     # Create the systemd service
-    service_content = """[Unit]
+    service_content = f"""[Unit]
 Description=Auto-update Node.js to latest LTS
 Documentation=man:systemd.service(5)
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/python3 /usr/local/bin/auto-update-node
+ExecStart=/usr/bin/python3 {script_path}
 StandardOutput=journal
 StandardError=journal
 """
@@ -387,12 +382,8 @@ def configure_auto_update_ruby(username: str, os_type: str, **_) -> None:
             print("  ✓ Ruby auto-update already configured")
             return
     
-    # Copy the Python script to /usr/local/bin
-    script_source = os.path.join(os.path.dirname(__file__), "auto_update_ruby.py")
-    script_path = "/usr/local/bin/auto-update-ruby"
-    
-    shutil.copy2(script_source, script_path)
-    run(f"chmod +x {script_path}")
+    # Script is already installed at /opt/infra_tools/remote_modules/
+    script_path = "/opt/infra_tools/remote_modules/auto_update_ruby.py"
     
     # Create the systemd service (run as the user who owns rbenv)
     # Username is validated and quoted properly for systemd
@@ -403,7 +394,7 @@ Documentation=man:systemd.service(5)
 [Service]
 Type=oneshot
 User={username}
-ExecStart=/usr/bin/python3 /usr/local/bin/auto-update-ruby
+ExecStart=/usr/bin/python3 {script_path}
 StandardOutput=journal
 StandardError=journal
 """
