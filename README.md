@@ -155,6 +155,8 @@ This will run the build process once per location and create a configuration for
 - **HTTPS/SSL support**: 
   - Self-signed certificates generated automatically for initial setup
   - Use `--ssl` flag to obtain Let's Encrypt certificates for deployed domains
+  - Single certificate with Subject Alternative Names (SANs) covers all domains (up to 100)
+  - Symbolic links created for each domain pointing to shared certificate
   - Let's Encrypt certificates are preserved during redeployment
   - Automatic certificate renewal configured via certbot systemd timer
   - ACME challenge location (`/.well-known/acme-challenge/`) configured in all nginx sites
