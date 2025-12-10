@@ -1,6 +1,7 @@
 """Security hardening steps."""
 
 import os
+import shutil
 
 from .utils import run, is_package_installed, is_service_active, file_contains
 
@@ -226,7 +227,6 @@ def configure_auto_restart(os_type: str, **_) -> None:
     script_source = os.path.join(os.path.dirname(__file__), "auto_restart_if_needed.py")
     script_path = "/usr/local/bin/auto-restart-if-needed"
     
-    import shutil
     shutil.copy2(script_source, script_path)
     run(f"chmod +x {script_path}")
     
