@@ -13,6 +13,8 @@ from .common_steps import (
     install_ruby as install_ruby_step,
     install_go as install_go_step,
     install_node as install_node_step,
+    configure_auto_update_node,
+    configure_auto_update_ruby,
 )
 from .desktop_steps import (
     install_desktop,
@@ -34,6 +36,7 @@ from .security_steps import (
     harden_kernel,
     configure_auto_updates,
     configure_firewall_web,
+    configure_auto_restart,
 )
 from .web_steps import (
     install_nginx,
@@ -81,6 +84,7 @@ SECURITY_STEPS = [
     ("Hardening SSH configuration", harden_ssh),
     ("Hardening kernel parameters", harden_kernel),
     ("Configuring automatic security updates", configure_auto_updates),
+    ("Configuring automatic restart service", configure_auto_restart),
 ]
 
 FINAL_STEPS = [
@@ -124,6 +128,7 @@ PROXMOX_HARDENING_STEPS = [
     ("Hardening SSH configuration", harden_ssh),
     ("Hardening kernel parameters", harden_kernel),
     ("Configuring automatic security updates", configure_auto_updates),
+    ("Configuring automatic restart service", configure_auto_restart),
     ("Checking if restart required", check_restart_required),
 ]
 
@@ -157,6 +162,9 @@ STEP_FUNCTIONS = {
     'harden_ssh': harden_ssh,
     'harden_kernel': harden_kernel,
     'configure_auto_updates': configure_auto_updates,
+    'configure_auto_restart': configure_auto_restart,
+    'configure_auto_update_node': configure_auto_update_node,
+    'configure_auto_update_ruby': configure_auto_update_ruby,
     'configure_firewall_web': configure_firewall_web,
     'install_nginx': install_nginx,
     'configure_nginx_security': configure_nginx_security,
@@ -189,10 +197,12 @@ def get_steps_for_system_type(system_type: str, skip_audio: bool = False, deskto
     optional_steps = []
     if install_ruby:
         optional_steps.append(("Installing Ruby (rbenv + latest version)", install_ruby_step))
+        optional_steps.append(("Configuring Ruby auto-update", configure_auto_update_ruby))
     if install_go:
         optional_steps.append(("Installing Go (latest version)", install_go_step))
     if install_node:
         optional_steps.append(("Installing Node.js (nvm + latest LTS + PNPM)", install_node_step))
+        optional_steps.append(("Configuring Node.js auto-update", configure_auto_update_node))
     
     if system_type == "workstation_desktop":
         desktop_steps = DESKTOP_STEPS
@@ -217,6 +227,7 @@ def get_steps_for_system_type(system_type: str, skip_audio: bool = False, deskto
             ("Hardening SSH configuration", harden_ssh),
             ("Hardening kernel parameters", harden_kernel),
             ("Configuring automatic security updates", configure_auto_updates),
+            ("Configuring automatic restart service", configure_auto_restart),
         ]
         return COMMON_STEPS + WEB_FIREWALL_STEPS + security_steps + \
                WEB_SERVER_STEPS + CLI_STEPS + optional_steps + FINAL_STEPS

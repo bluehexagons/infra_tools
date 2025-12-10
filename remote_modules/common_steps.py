@@ -298,3 +298,217 @@ def install_node(username: str, os_type: str, **_) -> None:
         
         if links_created:
             print("  ✓ Node.js binaries linked to /usr/local/bin")
+
+
+def configure_auto_update_node(os_type: str, **_) -> None:
+    """Configure automatic updates for Node.js via nvm."""
+    nvm_dir = "/opt/nvm"
+    
+    # Only configure if nvm is installed
+    if not os.path.exists(nvm_dir):
+        print("  ℹ nvm not installed, skipping auto-update configuration")
+        return
+    
+    service_file = "/etc/systemd/system/auto-update-node.service"
+    timer_file = "/etc/systemd/system/auto-update-node.timer"
+    
+    # Check if already configured
+    if os.path.exists(service_file) and os.path.exists(timer_file):
+        if is_service_active("auto-update-node.timer"):
+            print("  ✓ Node.js auto-update already configured")
+            return
+    
+    # Create the update script
+    update_script = f"""#!/bin/bash
+# Auto-update Node.js to latest LTS version via nvm
+
+export NVM_DIR="{nvm_dir}"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+
+# Get current LTS version
+CURRENT_LTS=$(nvm version-remote --lts)
+
+# Get installed version
+CURRENT_VERSION=$(nvm version default)
+
+if [ "$CURRENT_VERSION" = "$CURRENT_LTS" ]; then
+    echo "Node.js already at latest LTS version: $CURRENT_LTS"
+    exit 0
+fi
+
+echo "Updating Node.js from $CURRENT_VERSION to $CURRENT_LTS"
+logger "auto-update-node: Updating Node.js from $CURRENT_VERSION to $CURRENT_LTS"
+
+# Install new LTS version
+nvm install --lts
+
+# Update global packages
+npm install -g npm@latest
+npm install -g pnpm
+
+# Update symlinks
+NODE_PATH=$(which node)
+NODE_DIR=$(dirname "$NODE_PATH")
+
+for tool in node npm npx pnpm; do
+    TOOL_PATH="$NODE_DIR/$tool"
+    if [ -f "$TOOL_PATH" ]; then
+        ln -sf "$TOOL_PATH" "/usr/local/bin/$tool"
+    fi
+done
+
+# Fix permissions
+chmod -R a+rX "{nvm_dir}"
+
+echo "Node.js updated successfully to $CURRENT_LTS"
+logger "auto-update-node: Successfully updated Node.js to $CURRENT_LTS"
+"""
+    
+    script_path = "/usr/local/bin/auto-update-node.sh"
+    with open(script_path, "w") as f:
+        f.write(update_script)
+    run(f"chmod +x {script_path}")
+    
+    # Create the systemd service
+    service_content = """[Unit]
+Description=Auto-update Node.js to latest LTS
+Documentation=man:systemd.service(5)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/auto-update-node.sh
+StandardOutput=journal
+StandardError=journal
+"""
+    
+    with open(service_file, "w") as f:
+        f.write(service_content)
+    
+    # Create the systemd timer (runs weekly on Sunday at 3 AM)
+    timer_content = """[Unit]
+Description=Auto-update Node.js weekly
+Documentation=man:systemd.timer(5)
+
+[Timer]
+OnCalendar=Sun *-*-* 03:00:00
+Persistent=true
+RandomizedDelaySec=30min
+
+[Install]
+WantedBy=timers.target
+"""
+    
+    with open(timer_file, "w") as f:
+        f.write(timer_content)
+    
+    # Enable and start the timer
+    run("systemctl daemon-reload")
+    run("systemctl enable auto-update-node.timer")
+    run("systemctl start auto-update-node.timer")
+    
+    print("  ✓ Node.js auto-update configured (weekly on Sunday at 3 AM)")
+
+
+def configure_auto_update_ruby(username: str, os_type: str, **_) -> None:
+    """Configure automatic updates for Ruby via rbenv."""
+    user_home = f"/home/{username}"
+    rbenv_dir = f"{user_home}/.rbenv"
+    
+    # Only configure if rbenv is installed
+    if not os.path.exists(rbenv_dir):
+        print("  ℹ rbenv not installed, skipping auto-update configuration")
+        return
+    
+    service_file = "/etc/systemd/system/auto-update-ruby.service"
+    timer_file = "/etc/systemd/system/auto-update-ruby.timer"
+    
+    # Check if already configured
+    if os.path.exists(service_file) and os.path.exists(timer_file):
+        if is_service_active("auto-update-ruby.timer"):
+            print("  ✓ Ruby auto-update already configured")
+            return
+    
+    safe_username = shlex.quote(username)
+    
+    # Create the update script
+    update_script = f"""#!/bin/bash
+# Auto-update Ruby to latest stable version via rbenv
+
+export HOME="{user_home}"
+export PATH="$HOME/.rbenv/bin:$PATH"
+eval "$(rbenv init -)"
+
+# Update ruby-build to get latest definitions
+cd "$HOME/.rbenv/plugins/ruby-build" && git pull
+
+# Get latest stable Ruby version (not preview/rc/dev)
+LATEST_RUBY=$(rbenv install -l | grep -v - | grep -E "^\\s*[0-9]+\\.[0-9]+\\.[0-9]+$" | tail -1 | tr -d ' ')
+
+# Get current global version
+CURRENT_VERSION=$(rbenv global)
+
+if [ "$CURRENT_VERSION" = "$LATEST_RUBY" ]; then
+    echo "Ruby already at latest stable version: $LATEST_RUBY"
+    exit 0
+fi
+
+echo "Updating Ruby from $CURRENT_VERSION to $LATEST_RUBY"
+logger "auto-update-ruby: Updating Ruby from $CURRENT_VERSION to $LATEST_RUBY"
+
+# Install new Ruby version
+rbenv install -s "$LATEST_RUBY"
+
+# Set as global version
+rbenv global "$LATEST_RUBY"
+
+# Update bundler
+gem install bundler
+
+echo "Ruby updated successfully to $LATEST_RUBY"
+logger "auto-update-ruby: Successfully updated Ruby to $LATEST_RUBY"
+"""
+    
+    script_path = "/usr/local/bin/auto-update-ruby.sh"
+    with open(script_path, "w") as f:
+        f.write(update_script)
+    run(f"chmod +x {script_path}")
+    
+    # Create the systemd service (run as the user who owns rbenv)
+    service_content = f"""[Unit]
+Description=Auto-update Ruby to latest stable version
+Documentation=man:systemd.service(5)
+
+[Service]
+Type=oneshot
+User={username}
+ExecStart=/usr/local/bin/auto-update-ruby.sh
+StandardOutput=journal
+StandardError=journal
+"""
+    
+    with open(service_file, "w") as f:
+        f.write(service_content)
+    
+    # Create the systemd timer (runs weekly on Sunday at 4 AM)
+    timer_content = """[Unit]
+Description=Auto-update Ruby weekly
+Documentation=man:systemd.timer(5)
+
+[Timer]
+OnCalendar=Sun *-*-* 04:00:00
+Persistent=true
+RandomizedDelaySec=30min
+
+[Install]
+WantedBy=timers.target
+"""
+    
+    with open(timer_file, "w") as f:
+        f.write(timer_content)
+    
+    # Enable and start the timer
+    run("systemctl daemon-reload")
+    run("systemctl enable auto-update-ruby.timer")
+    run("systemctl start auto-update-ruby.timer")
+    
+    print("  ✓ Ruby auto-update configured (weekly on Sunday at 4 AM)")

@@ -161,6 +161,9 @@ def configure_auto_updates(os_type: str, **_) -> None:
     
     run("apt-get install -y -qq unattended-upgrades")
 
+    # Configure to run daily updates
+    # The default unattended-upgrades timer runs around 6:00 AM + random delay
+    # This is before our 2:00 AM restart window (next day), giving time for updates to settle
     auto_upgrades = """APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "1";
 APT::Periodic::AutocleanInterval "7";
@@ -207,3 +210,92 @@ def configure_firewall_ssh_only(os_type: str, **_) -> None:
     run("ufw --force enable")
 
     print("  ✓ Firewall configured (SSH only)")
+
+
+def configure_auto_restart(os_type: str, **_) -> None:
+    """Configure automatic restart at 2 AM when updates require it."""
+    service_file = "/etc/systemd/system/auto-restart-if-needed.service"
+    timer_file = "/etc/systemd/system/auto-restart-if-needed.timer"
+    
+    # Check if already configured
+    if os.path.exists(service_file) and os.path.exists(timer_file):
+        if is_service_active("auto-restart-if-needed.timer"):
+            print("  ✓ Automatic restart service already configured")
+            return
+    
+    # Create the restart service script
+    restart_script = """#!/bin/bash
+# Auto-restart system at 2 AM if restart is required and no users are logged in
+
+# Check if restart is required
+if [ ! -f /var/run/reboot-required ]; then
+    echo "No restart required"
+    exit 0
+fi
+
+# Check for interactive user sessions (excluding systemd and system users)
+# Check for SSH sessions
+if who | grep -q .; then
+    echo "Users are logged in (SSH/console), skipping restart"
+    exit 0
+fi
+
+# Check for X11/desktop sessions
+if pgrep -u 1000- Xorg >/dev/null 2>&1 || pgrep -u 1000- gnome-session >/dev/null 2>&1 || pgrep -u 1000- xfce4-session >/dev/null 2>&1; then
+    echo "Desktop session active, skipping restart"
+    exit 0
+fi
+
+# Check for active RDP sessions
+if pgrep -u 1000- xrdp-sesman >/dev/null 2>&1; then
+    echo "RDP session active, skipping restart"
+    exit 0
+fi
+
+# No users logged in and restart required, proceed
+echo "Restart required and no users logged in, restarting system..."
+logger "auto-restart-if-needed: Restarting system due to pending updates"
+/sbin/shutdown -r now "Automatic restart for system updates"
+"""
+    
+    script_path = "/usr/local/bin/auto-restart-if-needed.sh"
+    with open(script_path, "w") as f:
+        f.write(restart_script)
+    run(f"chmod +x {script_path}")
+    
+    # Create the systemd service
+    service_content = """[Unit]
+Description=Auto-restart system if needed
+Documentation=man:systemd.service(5)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/auto-restart-if-needed.sh
+"""
+    
+    with open(service_file, "w") as f:
+        f.write(service_content)
+    
+    # Create the systemd timer (runs daily at 2 AM)
+    timer_content = """[Unit]
+Description=Auto-restart system if needed (daily at 2 AM)
+Documentation=man:systemd.timer(5)
+
+[Timer]
+OnCalendar=*-*-* 02:00:00
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target
+"""
+    
+    with open(timer_file, "w") as f:
+        f.write(timer_content)
+    
+    # Enable and start the timer
+    run("systemctl daemon-reload")
+    run("systemctl enable auto-restart-if-needed.timer")
+    run("systemctl start auto-restart-if-needed.timer")
+    
+    print("  ✓ Automatic restart service configured (daily at 2 AM when needed)")
