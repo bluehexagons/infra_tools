@@ -43,6 +43,12 @@ from .web_steps import (
 )
 from .swap_steps import configure_swap
 from .ssl_steps import install_certbot
+from .cloudflare_steps import (
+    configure_cloudflare_firewall,
+    create_cloudflared_config_directory,
+    configure_nginx_for_cloudflare,
+    install_cloudflared_service_helper,
+)
 
 
 COMMON_STEPS = [
@@ -156,6 +162,10 @@ STEP_FUNCTIONS = {
     'create_hello_world_site': create_hello_world_site,
     'configure_default_site': configure_default_site,
     'configure_swap': configure_swap,
+    'configure_cloudflare_firewall': configure_cloudflare_firewall,
+    'create_cloudflared_config_directory': create_cloudflared_config_directory,
+    'configure_nginx_for_cloudflare': configure_nginx_for_cloudflare,
+    'install_cloudflared_service_helper': install_cloudflared_service_helper,
 }
 
 

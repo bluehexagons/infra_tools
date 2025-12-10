@@ -84,6 +84,10 @@ All setup scripts support optional software installation:
     - `/path` - Deploy to local path without nginx configuration
 - `--ssl` - Enable Let's Encrypt SSL/TLS certificates for deployed domains
 - `--ssl-email EMAIL` - Email address for Let's Encrypt registration (optional)
+- `--cloudflare` - Preconfigure server for Cloudflare tunnel (web servers only)
+  - Configures firewall to block public HTTP/HTTPS ports
+  - Sets up nginx to trust Cloudflare IPs
+  - Creates config directory and helper script for cloudflared installation
 
 Desktop workstation scripts support desktop environment and browser selection:
 
@@ -139,6 +143,15 @@ python3 setup_server_web.py 192.168.1.100 \
 
 # Add SSL to existing deployment using patch_setup.py
 python3 patch_setup.py web.example.com --ssl --ssl-email admin@example.com
+
+# Preconfigure server for Cloudflare tunnel
+python3 setup_server_web.py 192.168.1.100 \
+  --deploy mysite.com https://github.com/user/site.git \
+  --cloudflare
+
+# After Cloudflare setup, install cloudflared on the server:
+# ssh user@192.168.1.100
+# sudo setup-cloudflare-tunnel
 ```
 
 ### Deployment Support
@@ -160,6 +173,14 @@ This will run the build process once per location and create a configuration for
   - Let's Encrypt certificates are preserved during redeployment
   - Automatic certificate renewal configured via certbot systemd timer
   - ACME challenge location (`/.well-known/acme-challenge/`) configured in all nginx sites
+- **Cloudflare tunnel support**:
+  - Use `--cloudflare` flag to preconfigure server for Cloudflare tunnel
+  - Configures firewall to block public HTTP/HTTPS ports (traffic comes through tunnel)
+  - Sets up nginx to trust Cloudflare IPs and restore real visitor IPs
+  - Creates `/etc/cloudflared/` directory with setup instructions
+  - Installs `/usr/local/bin/setup-cloudflare-tunnel` helper script
+  - Administrator manually installs cloudflared using the helper script
+  - No SSL certificates needed (Cloudflare handles SSL termination)
 - **Default server**: Deployments without a domain (e.g., `/path`) become the default server, accessible via IP
 - **Directory naming**: Repositories are stored in `/var/www/domain_com__path` (e.g., `/var/www/blog_example_com__articles`)
 - **Standard builds**: 

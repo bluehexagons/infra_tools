@@ -64,6 +64,8 @@ def main() -> int:
                        help="Enable Let's Encrypt SSL/TLS certificates for deployed domains")
     parser.add_argument("--ssl-email",
                        help="Email address for Let's Encrypt registration (optional)")
+    parser.add_argument("--cloudflare", action="store_true",
+                       help="Preconfigure server for Cloudflare tunnel (disables public HTTP/HTTPS ports)")
     
     args = parser.parse_args()
     
@@ -123,6 +125,8 @@ def main() -> int:
             print("SSL: Yes (Let's Encrypt)")
             if args.ssl_email:
                 print(f"SSL Email: {args.ssl_email}")
+    if args.cloudflare:
+        print("Cloudflare: Yes (tunnel preconfiguration)")
     sys.stdout.flush()
 
     os_type = detect_os()
@@ -148,6 +152,34 @@ def main() -> int:
     
     bar = progress_bar(total_steps, total_steps)
     print(f"\n{bar} Complete!")
+    
+    # Configure Cloudflare tunnel if requested
+    if args.cloudflare and system_type == "server_web":
+        from remote_modules.cloudflare_steps import (
+            configure_cloudflare_firewall,
+            create_cloudflared_config_directory,
+            configure_nginx_for_cloudflare,
+            install_cloudflared_service_helper
+        )
+        
+        print("\n" + "=" * 60)
+        print("Configuring Cloudflare tunnel support...")
+        print("=" * 60)
+        
+        print("\n[1/4] Configuring firewall for Cloudflare tunnel")
+        configure_cloudflare_firewall(os_type=os_type)
+        
+        print("\n[2/4] Creating cloudflared configuration directory")
+        create_cloudflared_config_directory()
+        
+        print("\n[3/4] Configuring nginx for Cloudflare")
+        configure_nginx_for_cloudflare()
+        
+        print("\n[4/4] Installing cloudflared setup helper")
+        install_cloudflared_service_helper()
+        
+        print("\n✓ Cloudflare tunnel preconfiguration complete")
+        print("  Run 'sudo setup-cloudflare-tunnel' to install cloudflared")
     
     # Handle deployments if specified
     if args.deploy:

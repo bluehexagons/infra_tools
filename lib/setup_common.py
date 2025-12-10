@@ -325,6 +325,8 @@ def create_argument_parser(description: str, allow_steps: bool = False) -> argpa
                        help="Enable Let's Encrypt SSL/TLS certificates for deployed domains")
     parser.add_argument("--ssl-email", dest="ssl_email",
                        help="Email address for Let's Encrypt registration (optional)")
+    parser.add_argument("--cloudflare", dest="enable_cloudflare", action=argparse.BooleanOptionalAction, default=None,
+                       help="Preconfigure server for Cloudflare tunnel (disables public HTTP/HTTPS ports)")
     return parser
 
 
@@ -349,6 +351,7 @@ def run_remote_setup(
     full_deploy: bool = False,
     enable_ssl: bool = False,
     ssl_email: Optional[str] = None,
+    enable_cloudflare: bool = False,
 ) -> int:
     try:
         tar_data = create_tar_archive()
@@ -420,6 +423,9 @@ def run_remote_setup(
         cmd_parts.append("--ssl")
         if ssl_email:
             cmd_parts.append(f"--ssl-email {shlex.quote(ssl_email)}")
+    
+    if enable_cloudflare:
+        cmd_parts.append("--cloudflare")
     
     remote_cmd = f"""
 mkdir -p {escaped_install_dir} && \
@@ -605,6 +611,8 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
             print("SSL: Yes (Let's Encrypt)")
             if args.ssl_email:
                 print(f"SSL Email: {args.ssl_email}")
+        if args.enable_cloudflare:
+            print("Cloudflare: Yes (tunnel preconfiguration)")
     print("=" * 60)
     print()
     
@@ -649,7 +657,8 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
         deploy_specs=args.deploy_specs,
         full_deploy=args.full_deploy if args.deploy_specs else False,
         enable_ssl=args.enable_ssl if args.deploy_specs else False,
-        ssl_email=args.ssl_email if args.enable_ssl else None
+        ssl_email=args.ssl_email if args.enable_ssl else None,
+        enable_cloudflare=args.enable_cloudflare or False
     )
     
     if returncode != 0:
