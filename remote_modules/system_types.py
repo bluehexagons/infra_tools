@@ -48,6 +48,7 @@ from .cloudflare_steps import (
     create_cloudflared_config_directory,
     configure_nginx_for_cloudflare,
     install_cloudflared_service_helper,
+    run_cloudflare_tunnel_setup,
 )
 
 
@@ -166,6 +167,7 @@ STEP_FUNCTIONS = {
     'create_cloudflared_config_directory': create_cloudflared_config_directory,
     'configure_nginx_for_cloudflare': configure_nginx_for_cloudflare,
     'install_cloudflared_service_helper': install_cloudflared_service_helper,
+    'run_cloudflare_tunnel_setup': run_cloudflare_tunnel_setup,
 }
 
 

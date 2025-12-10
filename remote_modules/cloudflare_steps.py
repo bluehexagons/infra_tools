@@ -193,3 +193,29 @@ def install_cloudflared_service_helper(**_) -> None:
     
     print(f"  ✓ Installed setup script: {helper_script}")
     print(f"  Run 'sudo setup-cloudflare-tunnel' to configure the tunnel")
+
+
+def run_cloudflare_tunnel_setup(**_) -> None:
+    """Run Cloudflare tunnel setup in non-interactive mode to update configuration."""
+    helper_script = "/usr/local/bin/setup-cloudflare-tunnel"
+    
+    if not os.path.exists(helper_script):
+        print("  ⚠ Cloudflare tunnel setup script not found")
+        return
+    
+    # Check if there's an existing tunnel configuration
+    state_file = "/etc/cloudflared/tunnel-state.json"
+    if not os.path.exists(state_file):
+        print("  ⚠ No existing Cloudflare tunnel found")
+        print("  Run 'sudo setup-cloudflare-tunnel' interactively to create a tunnel first")
+        return
+    
+    print("  Updating Cloudflare tunnel configuration...")
+    
+    # Run the setup script in non-interactive mode
+    result = run(f"python3 {helper_script} --non-interactive", check=False)
+    
+    if result.returncode == 0:
+        print("  ✓ Cloudflare tunnel configuration updated")
+    else:
+        print("  ⚠ Cloudflare tunnel update skipped (no changes or not configured)")

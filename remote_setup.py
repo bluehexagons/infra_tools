@@ -303,6 +303,15 @@ def main() -> int:
                 install_certbot(os_type=os_type)
                 
                 setup_ssl_for_deployments(deployments, args.ssl_email, run)
+            
+            # Update Cloudflare tunnel configuration if configured
+            if args.cloudflare:
+                from remote_modules.cloudflare_steps import run_cloudflare_tunnel_setup
+                
+                print("\n" + "=" * 60)
+                print("Updating Cloudflare tunnel configuration...")
+                print("=" * 60)
+                run_cloudflare_tunnel_setup()
     
     print("\n" + "=" * 60)
     print("Setup completed successfully!")

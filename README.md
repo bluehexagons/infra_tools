@@ -150,7 +150,7 @@ python3 setup_server_web.py 192.168.1.100 \
   --deploy mysite.com https://github.com/user/site.git \
   --cloudflare
 
-# Then on the server, run the automated setup:
+# Initial setup requires manual authentication (run once):
 # ssh user@192.168.1.100
 # sudo setup-cloudflare-tunnel
 # The script will:
@@ -158,6 +158,13 @@ python3 setup_server_web.py 192.168.1.100 \
 #  - Guide through authentication
 #  - Create tunnel and discover sites
 #  - Generate config and start service
+
+# After initial setup, the tunnel updates automatically
+# When deploying new sites with --cloudflare flag:
+python3 setup_server_web.py 192.168.1.100 \
+  --deploy newsite.com https://github.com/user/newsite.git \
+  --cloudflare
+# The tunnel configuration updates automatically with the new site
 ```
 
 ### Deployment Support
@@ -184,10 +191,12 @@ This will run the build process once per location and create a configuration for
   - Configures firewall to block public HTTP/HTTPS ports (traffic comes through tunnel)
   - Sets up nginx to trust Cloudflare IPs and restore real visitor IPs
   - Installs automated Python script at `/usr/local/bin/setup-cloudflare-tunnel`
+  - Initial setup requires manual authentication (run `sudo setup-cloudflare-tunnel` once)
   - Script handles complete setup: installation, authentication, tunnel creation, site discovery
   - Automatically discovers configured sites from nginx and generates config.yml
-  - Saves state to `/etc/cloudflared/tunnel-state.json` for easy updates when adding sites
-  - Re-running script updates configuration with newly deployed sites
+  - **Idempotent updates**: When deploying new sites with `--cloudflare`, tunnel config updates automatically
+  - Saves state to `/etc/cloudflared/tunnel-state.json` for tracking configured sites
+  - No manual reconfiguration needed when adding sites after initial setup
   - No SSL certificates needed (Cloudflare handles SSL termination)
 - **Default server**: Deployments without a domain (e.g., `/path`) become the default server, accessible via IP
 - **Directory naming**: Repositories are stored in `/var/www/domain_com__path` (e.g., `/var/www/blog_example_com__articles`)

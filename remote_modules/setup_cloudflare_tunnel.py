@@ -274,12 +274,19 @@ def show_tunnel_info(tunnel: Dict, sites: List[Dict]):
     print()
 
 
-def main():
-    """Main setup workflow."""
-    print("=" * 50)
-    print("Cloudflare Tunnel Setup")
-    print("=" * 50)
-    print()
+def main(interactive: bool = True, auto_update: bool = False):
+    """
+    Main setup workflow.
+    
+    Args:
+        interactive: If False, runs in non-interactive mode (auto-update only)
+        auto_update: If True, automatically updates existing tunnel config
+    """
+    if interactive:
+        print("=" * 50)
+        print("Cloudflare Tunnel Setup")
+        print("=" * 50)
+        print()
     
     check_root()
     
@@ -287,29 +294,83 @@ def main():
     
     state = load_state()
     
+    # Non-interactive mode: only update existing tunnels
+    if not interactive:
+        if not state:
+            if interactive:
+                print("✗ No existing tunnel found. Run interactively first.")
+            return False
+        
+        # Silently update configuration
+        tunnel = state['tunnel']
+        sites = discover_nginx_sites()
+        
+        if not sites:
+            if interactive:
+                print("  ⚠ No sites discovered")
+            return False
+        
+        # Check if sites have changed
+        old_sites = state.get('sites', [])
+        old_hostnames = set(s['hostname'] for s in old_sites)
+        new_hostnames = set(s['hostname'] for s in sites)
+        
+        if old_hostnames == new_hostnames:
+            # No changes needed
+            return True
+        
+        # Update configuration
+        config_content = generate_config_yml(tunnel, sites)
+        config_file = f"{CONFIG_DIR}/config.yml"
+        
+        with open(config_file, 'w') as f:
+            f.write(config_content)
+        
+        os.chmod(config_file, 0o600)
+        
+        save_state(tunnel, sites)
+        
+        # Restart service if running
+        result = run_command(['systemctl', 'is-active', 'cloudflared'], check=False, capture_output=True)
+        if result.returncode == 0:
+            run_command(['systemctl', 'restart', 'cloudflared'], check=False)
+        
+        return True
+    
+    # Interactive mode continues as before
     if state:
         print("\n✓ Found existing tunnel configuration")
         tunnel = state['tunnel']
         
         print(f"  Tunnel: {tunnel['name']} (ID: {tunnel['id']})")
-        print("\nOptions:")
-        print("  1. Update tunnel configuration (discover new sites)")
-        print("  2. Create a new tunnel")
-        print("  3. Exit")
         
-        while True:
-            choice = input("\nEnter choice (1-3): ").strip().lower()
+        if auto_update:
+            # Auto-update mode
+            choice = '1'
+        else:
+            print("\nOptions:")
+            print("  1. Update tunnel configuration (discover new sites)")
+            print("  2. Create a new tunnel")
+            print("  3. Exit")
             
-            if choice in ['3', 'exit', 'quit', 'q']:
-                print("Exiting...")
-                sys.exit(0)
-            elif choice in ['2', 'new']:
-                state = None
-                break
-            elif choice in ['1', 'update']:
-                break
-            else:
-                print("✗ Invalid choice. Please enter 1, 2, or 3.")
+            while True:
+                choice = input("\nEnter choice (1-3): ").strip().lower()
+                
+                if choice in ['3', 'exit', 'quit', 'q']:
+                    print("Exiting...")
+                    sys.exit(0)
+                elif choice in ['2', 'new']:
+                    state = None
+                    break
+                elif choice in ['1', 'update']:
+                    break
+                else:
+                    print("✗ Invalid choice. Please enter 1, 2, or 3.")
+        
+        if choice in ['1', 'update']:
+            pass  # Continue with tunnel from state
+        else:
+            state = None
     
     if not state:
         authenticate_cloudflare()
@@ -395,9 +456,35 @@ def main():
         print("  systemctl enable cloudflared")
 
 
-if __name__ == "__main__":
+def run_non_interactive_update() -> bool:
+    """
+    Run tunnel configuration update in non-interactive mode.
+    Only updates existing tunnel configurations with newly discovered sites.
+    Returns True if successful, False otherwise.
+    """
     try:
-        main()
+        return main(interactive=False)
+    except Exception:
+        return False
+
+
+if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Cloudflare Tunnel Setup")
+    parser.add_argument('--non-interactive', action='store_true',
+                       help='Run in non-interactive mode (only updates existing tunnels)')
+    parser.add_argument('--auto-update', action='store_true',
+                       help='Automatically update existing tunnel without prompts')
+    
+    args = parser.parse_args()
+    
+    try:
+        if args.non_interactive:
+            success = main(interactive=False)
+            sys.exit(0 if success else 1)
+        else:
+            main(interactive=True, auto_update=args.auto_update)
     except KeyboardInterrupt:
         print("\n\n✗ Setup cancelled by user")
         sys.exit(1)
