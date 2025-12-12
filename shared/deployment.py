@@ -300,6 +300,13 @@ class DeploymentOrchestrator:
         run_func(f"cd {shlex.quote(project_path)} && {env_vars} bundle exec rake db:create", check=False)
         run_func(f"cd {shlex.quote(project_path)} && {env_vars} bundle exec rake db:migrate")
         
+        # Seed database if seeds.rb exists
+        if os.path.exists(os.path.join(project_path, "db", "seeds.rb")):
+            print("  Seeding database...")
+            seed_result = run_func(f"cd {shlex.quote(project_path)} && {env_vars} bundle exec rake db:seed")
+            if seed_result.stdout:
+                print(seed_result.stdout)
+        
         # Only precompile assets if the task exists (skips for API-only apps)
         check_task = run_func(f"cd {shlex.quote(project_path)} && bundle exec rake -T assets:precompile | grep assets:precompile", check=False)
         if check_task.returncode == 0:
