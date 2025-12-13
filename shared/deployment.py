@@ -280,6 +280,24 @@ class DeploymentOrchestrator:
                 print(f"  ⚠ Warning: Failed to link persistent state: {e}")
 
         self.build_project(dest_path, project_type, run_func, site_root=site_root)
+
+        # Fix permissions AFTER all build steps (including frontend), but BEFORE
+        # we (re)start services. This is critical for SQLite because `chown -R`
+        # on the release directory won't affect symlink targets under
+        # `.infra_tools_shared`, and the Rails service runs as `web_user`.
+        if project_type == "rails":
+            run_func(f"chown -R {shlex.quote(self.web_user)}:{shlex.quote(self.web_group)} {shlex.quote(persistent_root)}", check=False)
+            run_func(f"find {shlex.quote(persistent_root)} -type d -exec chmod 775 {{}} +", check=False)
+            run_func(f"find {shlex.quote(persistent_root)} -type f -exec chmod 664 {{}} +", check=False)
+
+        result = run_func(
+            f"chown -R {shlex.quote(self.web_user)}:{shlex.quote(self.web_group)} {shlex.quote(dest_path)}",
+            check=False,
+        )
+        if result.returncode != 0:
+            print(f"  ⚠ Warning: Could not set ownership to {self.web_user}:{self.web_group}")
+
+        run_func(f"chmod -R 775 {shlex.quote(dest_path)}")
         
         # Set up systemd service for Rails apps
         backend_port = None
@@ -333,14 +351,6 @@ class DeploymentOrchestrator:
                 
                 # Clear frontend_port since we are serving statically
                 frontend_port = None
-        
-        # Fix permissions AFTER all build steps (including frontend)
-        result = run_func(f"chown -R {shlex.quote(self.web_user)}:{shlex.quote(self.web_group)} {shlex.quote(dest_path)}", check=False)
-        if result.returncode != 0:
-            print(f"  ⚠ Warning: Could not set ownership to {self.web_user}:{self.web_group}")
-        
-        # Ensure write permissions for the group so the service user can write temp files
-        run_func(f"chmod -R 775 {shlex.quote(dest_path)}")
         
         # Save deployment metadata
         save_deployment_metadata(dest_path, git_url, commit_hash)
