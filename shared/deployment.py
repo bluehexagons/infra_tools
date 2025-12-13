@@ -27,6 +27,96 @@ class DeploymentOrchestrator:
         self.base_dir = base_dir
         self.web_user = web_user
         self.web_group = web_group
+
+    def _get_persistent_root(self, app_name: str) -> str:
+        return os.path.join(self.base_dir, ".infra_tools_shared", app_name)
+
+    def _ensure_dir(self, path: str) -> None:
+        os.makedirs(path, exist_ok=True)
+
+    def _safe_remove_path(self, path: str) -> None:
+        if not os.path.lexists(path):
+            return
+        if os.path.islink(path) or os.path.isfile(path):
+            os.remove(path)
+        else:
+            shutil.rmtree(path)
+
+    def _is_rails_project(self, project_path: str) -> bool:
+        return os.path.exists(os.path.join(project_path, "bin", "rails"))
+
+    def _persist_rails_state_from_existing_release(self, existing_release_path: str, persistent_root: str) -> None:
+        self._ensure_dir(persistent_root)
+
+        # Persist SQLite databases (default Rails sqlite path).
+        existing_db = os.path.join(existing_release_path, "db", "production.sqlite3")
+        persistent_db_dir = os.path.join(persistent_root, "db")
+        self._ensure_dir(persistent_db_dir)
+
+        if os.path.exists(existing_db) and not os.path.islink(existing_db):
+            # Copy instead of move: if something goes wrong mid-deploy, we don't
+            # want to destroy the only copy.
+            shutil.copy2(existing_db, os.path.join(persistent_db_dir, "production.sqlite3"))
+
+        # Persist common Rails disk-backed state.
+        dirs_to_persist = [
+            ("storage", os.path.join(persistent_root, "storage")),
+            (os.path.join("public", "uploads"), os.path.join(persistent_root, "public", "uploads")),
+            (os.path.join("public", "system"), os.path.join(persistent_root, "public", "system")),
+            ("log", os.path.join(persistent_root, "log")),
+        ]
+
+        for rel_src, persistent_dst in dirs_to_persist:
+            src_path = os.path.join(existing_release_path, rel_src)
+            if not os.path.exists(src_path) or os.path.islink(src_path):
+                continue
+            if os.path.exists(persistent_dst):
+                # Keep the persistent copy; the release copy will be discarded.
+                continue
+            self._ensure_dir(os.path.dirname(persistent_dst))
+            shutil.copytree(src_path, persistent_dst, symlinks=True)
+
+    def _link_rails_persistent_state_into_release(self, release_path: str, persistent_root: str) -> None:
+        """Ensure a release uses persistent storage for runtime state."""
+        self._ensure_dir(persistent_root)
+
+        # SQLite DB file symlink (lets SQLite create the target on first run).
+        persistent_db_dir = os.path.join(persistent_root, "db")
+        self._ensure_dir(persistent_db_dir)
+        release_db_dir = os.path.join(release_path, "db")
+        self._ensure_dir(release_db_dir)
+
+        release_db_file = os.path.join(release_db_dir, "production.sqlite3")
+        persistent_db_file = os.path.join(persistent_db_dir, "production.sqlite3")
+        if os.path.lexists(release_db_file) and not os.path.islink(release_db_file):
+            os.remove(release_db_file)
+        if not os.path.lexists(release_db_file):
+            os.symlink(persistent_db_file, release_db_file)
+
+        # Disk-backed state directories.
+        dirs_to_link = [
+            ("storage", os.path.join(persistent_root, "storage")),
+            (os.path.join("public", "uploads"), os.path.join(persistent_root, "public", "uploads")),
+            (os.path.join("public", "system"), os.path.join(persistent_root, "public", "system")),
+            ("log", os.path.join(persistent_root, "log")),
+        ]
+
+        for rel_path, persistent_path in dirs_to_link:
+            release_path_abs = os.path.join(release_path, rel_path)
+            self._ensure_dir(os.path.dirname(persistent_path))
+            if not os.path.exists(persistent_path):
+                # On first deploy, move whatever the release has into persistent
+                # storage (if present); otherwise create an empty persistent dir.
+                if os.path.exists(release_path_abs) and not os.path.islink(release_path_abs):
+                    shutil.move(release_path_abs, persistent_path)
+                else:
+                    self._ensure_dir(persistent_path)
+
+            # Replace release path with a symlink to persistent storage.
+            if os.path.lexists(release_path_abs):
+                self._safe_remove_path(release_path_abs)
+            self._ensure_dir(os.path.dirname(release_path_abs))
+            os.symlink(persistent_path, release_path_abs)
     
     def _get_used_ports(self) -> Set[int]:
         """Get set of ports currently used by infra_tools services."""
@@ -110,6 +200,8 @@ class DeploymentOrchestrator:
                            full_deploy: bool = True, keep_source: bool = False,
                            api_subdomain: bool = False) -> dict:
         dest_path = self.get_deployment_path(domain, path, git_url)
+        app_name = os.path.basename(dest_path)
+        persistent_root = self._get_persistent_root(app_name)
         
         # Check if we should skip this deployment
         if should_redeploy(dest_path, git_url, commit_hash, full_deploy):
@@ -148,6 +240,19 @@ class DeploymentOrchestrator:
         
         if os.path.exists(dest_path):
             print(f"  Removing existing deployment at {dest_path}...")
+
+            # Stop the existing service first so files (especially SQLite) aren't
+            # being mutated while we snapshot state.
+            run_func(f"systemctl stop {shlex.quote(f'rails-{app_name}.service')}", check=False)
+
+            # Persist Rails runtime state before wiping the release directory.
+            if self._is_rails_project(dest_path):
+                print(f"  Preserving persistent state under {persistent_root}...")
+                try:
+                    self._persist_rails_state_from_existing_release(dest_path, persistent_root)
+                except Exception as e:
+                    print(f"  ⚠ Warning: Failed to preserve persistent state: {e}")
+
             shutil.rmtree(dest_path)
         
         if keep_source:
@@ -166,6 +271,14 @@ class DeploymentOrchestrator:
         if not site_root.endswith("/"):
             site_root = f"{site_root}/"
         
+        # Link persistent runtime state before build steps so db:migrate/db:seed
+        # operate on the durable SQLite DB (and disk-backed uploads remain intact).
+        if project_type == "rails":
+            try:
+                self._link_rails_persistent_state_into_release(dest_path, persistent_root)
+            except Exception as e:
+                print(f"  ⚠ Warning: Failed to link persistent state: {e}")
+
         self.build_project(dest_path, project_type, run_func, site_root=site_root)
         
         # Set up systemd service for Rails apps
@@ -174,8 +287,6 @@ class DeploymentOrchestrator:
         frontend_serve_path = None
         
         if project_type == "rails":
-            app_name = os.path.basename(dest_path)
-            
             # Determine port
             service_name = f"rails-{app_name}"
             backend_port = self._get_assigned_port(service_name, 3000)
