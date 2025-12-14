@@ -94,6 +94,44 @@ def _make_static_location(path: str, serve_path: str, index_file: str, try_files
     }}"""
 
 
+def _make_cache_location_blocks() -> str:
+    """Generate location blocks for caching static assets."""
+    return r"""    # Cache images
+    location ~* \.(jpg|jpeg|png|gif|webp|svg|ico)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        access_log off;
+    }
+    
+    # Cache videos
+    location ~* \.(mp4|webm|ogg|mov|avi|flv|wmv)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        access_log off;
+    }
+    
+    # Cache fonts
+    location ~* \.(woff|woff2|ttf|eot|otf)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        access_log off;
+    }
+    
+    # Cache CSS and JavaScript
+    location ~* \.(css|js)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        access_log off;
+    }
+    
+    # Cache other static files
+    location ~* \.(pdf|txt|xml|json)$ {
+        expires 30d;
+        add_header Cache-Control "public";
+        access_log off;
+    }"""
+
+
 def _make_api_server_block(domain: str, port: int) -> str:
     """Generate a separate server block for API subdomain."""
     cert, key = get_ssl_cert_path(domain)
@@ -225,6 +263,9 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: List[Dict],
             locations.append(_make_static_location(
                 location_path, serve_path, index_file, try_files, f"# Static site for {path}"
             ))
+
+    # Add caching rules for static assets
+    locations.append(_make_cache_location_blocks())
 
     # Add deny rules
     locations.append("""    location ~ /\\. {

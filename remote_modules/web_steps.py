@@ -44,6 +44,7 @@ http {
     # Basic Settings
     sendfile on;
     tcp_nopush on;
+    tcp_nodelay on;
     types_hash_max_size 2048;
     
     # Security: Hide nginx version
@@ -70,6 +71,12 @@ http {
     gzip_proxied any;
     gzip_comp_level 6;
     gzip_types text/plain text/css text/xml text/javascript application/json application/javascript application/xml+rss application/rss+xml font/truetype font/opentype application/vnd.ms-fontobject image/svg+xml;
+    
+    # Caching Settings
+    open_file_cache max=1000 inactive=20s;
+    open_file_cache_valid 30s;
+    open_file_cache_min_uses 2;
+    open_file_cache_errors on;
     
     # Security Headers
     add_header X-Frame-Options "SAMEORIGIN" always;
