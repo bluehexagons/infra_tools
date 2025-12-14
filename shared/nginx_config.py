@@ -96,7 +96,13 @@ def _make_static_location(path: str, serve_path: str, index_file: str, try_files
 
 def _make_cache_location_blocks() -> str:
     """Generate location blocks for caching static assets."""
-    return r"""    # Cache images
+    template_path = os.path.join(os.path.dirname(__file__), 'nginx_cache_locations.conf')
+    try:
+        with open(template_path, 'r') as f:
+            return f.read()
+    except FileNotFoundError:
+        # Fallback to inline template if file not found
+        return r"""    # Cache images
     location ~* \.(jpg|jpeg|png|gif|webp|svg|ico)$ {
         expires 1y;
         add_header Cache-Control "public, immutable";
