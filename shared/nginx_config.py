@@ -98,7 +98,7 @@ def _make_cache_location_blocks() -> str:
     """Generate location blocks for caching static assets."""
     template_path = os.path.join(os.path.dirname(__file__), 'nginx_cache_locations.conf')
     try:
-        with open(template_path, 'r') as f:
+        with open(template_path, 'r', encoding='utf-8') as f:
             return f.read()
     except FileNotFoundError:
         # Fallback to inline template if file not found
