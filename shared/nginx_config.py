@@ -97,45 +97,8 @@ def _make_static_location(path: str, serve_path: str, index_file: str, try_files
 def _make_cache_location_blocks() -> str:
     """Generate location blocks for caching static assets."""
     template_path = os.path.join(os.path.dirname(__file__), 'nginx_cache_locations.conf')
-    try:
-        with open(template_path, 'r', encoding='utf-8') as f:
-            return f.read()
-    except FileNotFoundError:
-        # Fallback to inline template if file not found
-        return r"""    # Cache images
-    location ~* \.(jpg|jpeg|png|gif|webp|svg|ico)$ {
-        expires 1y;
-        add_header Cache-Control "public, immutable";
-        access_log off;
-    }
-    
-    # Cache videos
-    location ~* \.(mp4|webm|ogg|mov|avi|flv|wmv)$ {
-        expires 1y;
-        add_header Cache-Control "public, immutable";
-        access_log off;
-    }
-    
-    # Cache fonts
-    location ~* \.(woff|woff2|ttf|eot|otf)$ {
-        expires 1y;
-        add_header Cache-Control "public, immutable";
-        access_log off;
-    }
-    
-    # Cache CSS and JavaScript
-    location ~* \.(css|js)$ {
-        expires 1y;
-        add_header Cache-Control "public, immutable";
-        access_log off;
-    }
-    
-    # Cache other static files
-    location ~* \.(pdf|txt|xml|json)$ {
-        expires 30d;
-        add_header Cache-Control "public";
-        access_log off;
-    }"""
+    with open(template_path, 'r', encoding='utf-8') as f:
+        return f.read()
 
 
 def _make_api_server_block(domain: str, port: int) -> str:
