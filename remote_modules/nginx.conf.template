@@ -57,10 +57,6 @@ http {
     proxy_send_timeout 60s;
     proxy_read_timeout 60s;
     
-    # Upstream Keepalive Settings (reuse connections to backends)
-    proxy_http_version 1.1;
-    proxy_set_header Connection "";
-    
     # Client Settings
     client_body_buffer_size 128k;
     client_max_body_size 10m;

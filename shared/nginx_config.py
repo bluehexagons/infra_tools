@@ -53,7 +53,6 @@ def _make_proxy_location(path: str, port: int, comment: str, enable_websocket: b
         "",
         "        # Performance optimizations for dynamic backends",
         "        proxy_buffering on;",
-        "        proxy_cache_bypass $http_upgrade;",
         "        proxy_intercept_errors off;"
     ]
     
