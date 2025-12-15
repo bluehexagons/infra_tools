@@ -45,6 +45,27 @@ http {
     open_file_cache_min_uses 2;
     open_file_cache_errors on;
     
+    # Proxy Buffer Settings (for Rails/dynamic backends)
+    proxy_buffering on;
+    proxy_buffer_size 4k;
+    proxy_buffers 8 4k;
+    proxy_busy_buffers_size 8k;
+    proxy_temp_file_write_size 8k;
+    
+    # Proxy Timeout Settings
+    proxy_connect_timeout 60s;
+    proxy_send_timeout 60s;
+    proxy_read_timeout 60s;
+    
+    # Upstream Keepalive Settings (reuse connections to backends)
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    
+    # Client Settings
+    client_body_buffer_size 128k;
+    client_max_body_size 10m;
+    client_body_timeout 60s;
+    
     # Security Headers
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;

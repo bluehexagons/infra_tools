@@ -49,7 +49,12 @@ def _make_proxy_location(path: str, port: int, comment: str, enable_websocket: b
         "        proxy_set_header Host $host;",
         "        proxy_set_header X-Real-IP $remote_addr;",
         "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
-        "        proxy_set_header X-Forwarded-Proto $scheme;"
+        "        proxy_set_header X-Forwarded-Proto $scheme;",
+        "",
+        "        # Performance optimizations for dynamic backends",
+        "        proxy_buffering on;",
+        "        proxy_cache_bypass $http_upgrade;",
+        "        proxy_intercept_errors off;"
     ]
     
     if enable_websocket:
@@ -59,6 +64,13 @@ def _make_proxy_location(path: str, port: int, comment: str, enable_websocket: b
             "        proxy_http_version 1.1;",
             "        proxy_set_header Upgrade $http_upgrade;",
             "        proxy_set_header Connection \"upgrade\";"
+        ])
+    else:
+        content.extend([
+            "",
+            "        # Keepalive for backend connections",
+            "        proxy_http_version 1.1;",
+            "        proxy_set_header Connection \"\";"
         ])
         
     body = "\n".join(content)
@@ -128,6 +140,12 @@ def _make_api_server_block(domain: str, port: int) -> str:
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # Performance optimizations for API backends
+        proxy_buffering on;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_intercept_errors off;
     }}
 }}
 """
