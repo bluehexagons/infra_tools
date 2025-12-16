@@ -1,0 +1,36 @@
+# Default server configuration
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    
+    root /var/www/html;
+    index index.html index.htm;
+    
+    server_name _;
+    
+    # Disable directory listing
+    autoindex off;
+    
+    location / {
+        # Security: Limit HTTP methods to GET, HEAD, POST
+        limit_except GET HEAD POST {
+            deny all;
+        }
+        
+        try_files $uri $uri/ =404;
+    }
+    
+    # Deny access to hidden files
+    location ~ /\. {
+        deny all;
+        access_log off;
+        log_not_found off;
+    }
+    
+    # Deny access to backup files
+    location ~ ~$ {
+        deny all;
+        access_log off;
+        log_not_found off;
+    }
+}

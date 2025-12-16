@@ -30,58 +30,10 @@ def configure_nginx_security(os_type: str, **_) -> None:
     if not os.path.exists("/etc/nginx/nginx.conf.bak"):
         run("cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.bak")
     
-    # Create a security-hardened nginx configuration
-    nginx_security_conf = """user www-data;
-worker_processes auto;
-pid /run/nginx.pid;
-include /etc/nginx/modules-enabled/*.conf;
-
-events {
-    worker_connections 768;
-}
-
-http {
-    # Basic Settings
-    sendfile on;
-    tcp_nopush on;
-    types_hash_max_size 2048;
-    
-    # Security: Hide nginx version
-    server_tokens off;
-    
-    # Security: Disable unwanted HTTP methods
-    # This is handled per-server block
-    
-    include /etc/nginx/mime.types;
-    default_type application/octet-stream;
-    
-    # SSL Settings (for when SSL is configured)
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_prefer_server_ciphers on;
-    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
-    
-    # Logging Settings
-    access_log /var/log/nginx/access.log;
-    error_log /var/log/nginx/error.log;
-    
-    # Gzip Settings
-    gzip on;
-    gzip_vary on;
-    gzip_proxied any;
-    gzip_comp_level 6;
-    gzip_types text/plain text/css text/xml text/javascript application/json application/javascript application/xml+rss application/rss+xml font/truetype font/opentype application/vnd.ms-fontobject image/svg+xml;
-    
-    # Security Headers
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-    add_header Referrer-Policy "no-referrer-when-downgrade" always;
-    
-    # Virtual Host Configs
-    include /etc/nginx/conf.d/*.conf;
-    include /etc/nginx/sites-enabled/*;
-}
-"""
+    # Load nginx configuration from template file
+    template_path = os.path.join(os.path.dirname(__file__), 'nginx.conf.template')
+    with open(template_path, 'r', encoding='utf-8') as f:
+        nginx_security_conf = f.read()
     
     with open(nginx_conf, "w") as f:
         f.write(nginx_security_conf)
@@ -130,43 +82,10 @@ def configure_default_site(os_type: str, **_) -> None:
             print("  ✓ Default site already configured")
             return
     
-    default_site = r"""# Default server configuration
-server {
-    listen 80 default_server;
-    listen [::]:80 default_server;
-    
-    root /var/www/html;
-    index index.html index.htm;
-    
-    server_name _;
-    
-    # Disable directory listing
-    autoindex off;
-    
-    location / {
-        # Security: Limit HTTP methods to GET, HEAD, POST
-        limit_except GET HEAD POST {
-            deny all;
-        }
-        
-        try_files $uri $uri/ =404;
-    }
-    
-    # Deny access to hidden files
-    location ~ /\. {
-        deny all;
-        access_log off;
-        log_not_found off;
-    }
-    
-    # Deny access to backup files
-    location ~ ~$ {
-        deny all;
-        access_log off;
-        log_not_found off;
-    }
-}
-"""
+    # Load default site configuration from template file
+    template_path = os.path.join(os.path.dirname(__file__), 'nginx_default_site.conf.template')
+    with open(template_path, 'r', encoding='utf-8') as f:
+        default_site = f.read()
     
     with open(site_conf, "w") as f:
         f.write(default_site)
