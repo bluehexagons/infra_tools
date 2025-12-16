@@ -161,9 +161,9 @@ def install_cli_tools(os_type: str, **_) -> None:
         print("  ✓ CLI tools already installed")
         return
 
-    run("apt-get install -y -qq neovim btop htop curl wget git tmux unzip xdg-utils")
+    run("apt-get install -y -qq neovim btop htop curl wget git tmux unzip xdg-utils rsync")
 
-    print("  ✓ CLI tools installed (neovim, btop, htop, curl, wget, git, tmux, unzip)")
+    print("  ✓ CLI tools installed (neovim, btop, htop, curl, wget, git, tmux, unzip, rsync)")
 
 
 def check_restart_required(os_type: str, **_) -> None:
