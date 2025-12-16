@@ -19,6 +19,13 @@ def configure_cloudflare_firewall(os_type: str, **_) -> None:
     run("ufw default deny incoming")
     run("ufw default allow outgoing")
     run("ufw allow ssh")
+    
+    # Explicitly remove web ports if they were added by previous steps
+    run("ufw delete allow 80/tcp", check=False)
+    run("ufw delete allow 443/tcp", check=False)
+    run("ufw delete allow 80", check=False)
+    run("ufw delete allow 443", check=False)
+    
     run("ufw --force enable")
     
     print("  ✓ Firewall configured for Cloudflare tunnel (SSH only)")
