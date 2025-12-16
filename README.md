@@ -75,13 +75,25 @@ python3 setup_server_web.py web.com \
   --ssl --ssl-email admin@web.com
 ```
 
-## Patching Systems
+## Patching & Management
 
-Use `patch_setup.py` to update existing systems. It merges new flags with the previous configuration.
+Use `patch_setup.py` to update existing systems or manage saved configurations.
 
 ```bash
 # Add SSL to existing server
 python3 patch_setup.py web.com --ssl --ssl-email me@web.com
+
+# List saved configurations
+python3 patch_setup.py list [pattern]
+
+# Show configuration details
+python3 patch_setup.py info [pattern]
+
+# Remove saved configurations
+python3 patch_setup.py rm [pattern]
+
+# Redeploy/Patch multiple systems
+python3 patch_setup.py deploy [pattern]
 ```
 
 ## Requirements
