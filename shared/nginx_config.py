@@ -40,7 +40,35 @@ def generate_self_signed_cert(domain: str, run_func: Callable) -> tuple:
     return (cert_file, key_file)
 
 
-def _make_proxy_location(path: str, port: int, comment: str, enable_websocket: bool = False) -> str:
+def _make_cache_maps(domain_slug: str) -> tuple:
+    """Generate map blocks for caching and return variable names."""
+    expires_var = f"$assets_expires_{domain_slug}"
+    cc_var = f"$assets_cc_{domain_slug}"
+    
+    maps = f"""
+map $uri {expires_var} {{
+    default                    off;
+    ~*\.(jpg|jpeg|png|gif|webp|svg|ico)$  1y;
+    ~*\.(mp4|webm|ogg|mov|avi|flv|wmv)$   1y;
+    ~*\.(woff|woff2|ttf|eot|otf)$         1y;
+    ~*\.(css|js)$                         1y;
+    ~*\.(pdf|txt|xml|json)$               30d;
+}}
+
+map $uri {cc_var} {{
+    default                    "";
+    ~*\.(jpg|jpeg|png|gif|webp|svg|ico)$  "public, immutable";
+    ~*\.(mp4|webm|ogg|mov|avi|flv|wmv)$   "public, immutable";
+    ~*\.(woff|woff2|ttf|eot|otf)$         "public, immutable";
+    ~*\.(css|js)$                         "public, immutable";
+    ~*\.(pdf|txt|xml|json)$               "public";
+}}
+"""
+    return maps, expires_var, cc_var
+
+
+def _make_proxy_location(path: str, port: int, comment: str, enable_websocket: bool = False,
+                        expires_var: str = None, cc_var: str = None) -> str:
     """Generate a proxy_pass location block."""
     slash = "/" if path != "/" else ""
     
@@ -71,6 +99,11 @@ def _make_proxy_location(path: str, port: int, comment: str, enable_websocket: b
             "        proxy_http_version 1.1;",
             "        proxy_set_header Connection \"\";"
         ])
+
+    if expires_var:
+        content.append(f"        expires {expires_var};")
+    if cc_var:
+        content.append(f"        add_header Cache-Control {cc_var};")
         
     body = "\n".join(content)
     
@@ -91,25 +124,30 @@ def _make_proxy_location(path: str, port: int, comment: str, enable_websocket: b
     }}"""
 
 
-def _make_static_location(path: str, serve_path: str, index_file: str, try_files: str, comment: str) -> str:
+def _make_static_location(path: str, serve_path: str, index_file: str, try_files: str, comment: str,
+                         expires_var: str = None, cc_var: str = None) -> str:
     """Generate a static file serving location block."""
     directive = "root" if path == "/" else "alias"
     
+    content = [
+        f"        {directive} {serve_path};",
+        f"        index {index_file};",
+        "        autoindex off;",
+        "        charset utf-8;",
+        f"        try_files {try_files};"
+    ]
+
+    if expires_var:
+        content.append(f"        expires {expires_var};")
+    if cc_var:
+        content.append(f"        add_header Cache-Control {cc_var};")
+
+    body = "\n".join(content)
+    
     return f"""    {comment}
     location {path} {{
-        {directive} {serve_path};
-        index {index_file};
-        autoindex off;
-        charset utf-8;
-        try_files {try_files};
+{body}
     }}"""
-
-
-def _make_cache_location_blocks() -> str:
-    """Generate location blocks for caching static assets."""
-    template_path = os.path.join(os.path.dirname(__file__), 'nginx_cache_locations.conf')
-    with open(template_path, 'r', encoding='utf-8') as f:
-        return f.read()
 
 
 def _make_api_server_block(domain: str, port: int) -> str:
@@ -156,6 +194,10 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: List[Dict],
     server_name_directive = f"server_name {domain};" if domain else "server_name _;"
     default_server = " default_server" if is_default else ""
     
+    # Generate cache maps
+    domain_slug = domain.replace('.', '_') if domain else 'default'
+    cache_maps, expires_var, cc_var = _make_cache_maps(domain_slug)
+    
     # Sort deployments: longest path first to ensure correct matching in nginx
     sorted_deployments = sorted(deployments, key=lambda d: len(d['path']), reverse=True)
     
@@ -201,12 +243,14 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: List[Dict],
                         # Static frontend
                         try_files = "$uri $uri.html $uri/ /index.html" if location_path == '/' else f"$uri $uri.html $uri/ {location_path}/index.html"
                         locations.append(_make_static_location(
-                            location_path, frontend_serve_path, "index.html", try_files, f"# Frontend for {path}"
+                            location_path, frontend_serve_path, "index.html", try_files, f"# Frontend for {path}",
+                            expires_var=expires_var, cc_var=cc_var
                         ))
                     else:
                         # Proxy frontend
                         locations.append(_make_proxy_location(
-                            location_path, frontend_port, f"# Frontend for {path}", enable_websocket=True
+                            location_path, frontend_port, f"# Frontend for {path}", enable_websocket=True,
+                            expires_var=expires_var, cc_var=cc_var
                         ))
                 else:
                     # Subpath strategy: Backend at /path/api, Frontend at /path
@@ -214,23 +258,27 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: List[Dict],
                     # Backend
                     api_path = "/api" if location_path == '/' else f"{location_path}/api"
                     locations.append(_make_proxy_location(
-                        api_path, backend_port, f"# Backend for {path}"
+                        api_path, backend_port, f"# Backend for {path}",
+                        expires_var=expires_var, cc_var=cc_var
                     ))
 
                     # Frontend
                     if frontend_serve_path:
                         try_files = "$uri $uri.html $uri/ /index.html" if location_path == '/' else f"$uri $uri.html $uri/ {location_path}/index.html"
                         locations.append(_make_static_location(
-                            location_path, frontend_serve_path, "index.html", try_files, f"# Frontend for {path}"
+                            location_path, frontend_serve_path, "index.html", try_files, f"# Frontend for {path}",
+                            expires_var=expires_var, cc_var=cc_var
                         ))
                     else:
                         locations.append(_make_proxy_location(
-                            location_path, frontend_port, f"# Frontend for {path}", enable_websocket=True
+                            location_path, frontend_port, f"# Frontend for {path}", enable_websocket=True,
+                            expires_var=expires_var, cc_var=cc_var
                         ))
             else:
                 # Simple proxy
                 locations.append(_make_proxy_location(
-                    location_path, proxy_port, f"# Proxy for {path}"
+                    location_path, proxy_port, f"# Proxy for {path}",
+                    expires_var=expires_var, cc_var=cc_var
                 ))
         else:
             # Static site
@@ -247,11 +295,9 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: List[Dict],
                      try_files = f"$uri $uri.html $uri/ {location_path}/index.html"
             
             locations.append(_make_static_location(
-                location_path, serve_path, index_file, try_files, f"# Static site for {path}"
+                location_path, serve_path, index_file, try_files, f"# Static site for {path}",
+                expires_var=expires_var, cc_var=cc_var
             ))
-
-    # Add caching rules for static assets
-    locations.append(_make_cache_location_blocks())
 
     # Add deny rules
     locations.append("""    location ~ /\\. {
@@ -278,7 +324,7 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: List[Dict],
 }}
 """
     
-    return "\n".join(api_configs + [main_config])
+    return "\n".join([cache_maps] + api_configs + [main_config])
 
 
 def create_nginx_sites_for_groups(grouped_deployments: Dict[Optional[str], List[Dict]], run_func: Callable) -> None:
