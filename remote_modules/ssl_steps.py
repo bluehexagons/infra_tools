@@ -8,16 +8,9 @@ from .utils import run
 
 
 def install_certbot(**kwargs) -> None:
-    os_type = kwargs.get('os_type', 'debian')
-    
     print("Installing certbot...")
-    if os_type in ['debian', 'ubuntu']:
-        run("apt-get update")
-        run("apt-get install -y certbot python3-certbot-nginx")
-    else:
-        print(f"  ⚠ Unsupported OS type for certbot installation: {os_type}")
-        return
-    
+    run("apt-get update")
+    run("apt-get install -y certbot python3-certbot-nginx")
     print("  ✓ certbot installed")
 
 

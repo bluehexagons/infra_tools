@@ -15,7 +15,7 @@ def is_flatpak_installed() -> bool:
     return result.returncode == 0
 
 
-def install_flatpak_if_needed(os_type: str) -> None:
+def install_flatpak_if_needed() -> None:
     """Install flatpak if not already installed."""
     if is_flatpak_installed():
         return
@@ -29,7 +29,7 @@ def is_flatpak_app_installed(app_id: str) -> bool:
     return result.returncode == 0
 
 
-def install_desktop(os_type: str, desktop: str = "xfce", **_) -> None:
+def install_desktop(desktop: str = "xfce", **_) -> None:
     if desktop == "xfce":
         package = "xfce4"
         install_cmd = "apt-get install -y -qq xfce4 xfce4-goodies"
@@ -44,7 +44,7 @@ def install_desktop(os_type: str, desktop: str = "xfce", **_) -> None:
         package = "xfce4"
         install_cmd = "apt-get install -y -qq xfce4 xfce4-goodies"
     
-    if is_package_installed(package, os_type):
+    if is_package_installed(package):
         print(f"  ✓ {desktop.upper()} desktop already installed")
         return
     
@@ -52,7 +52,7 @@ def install_desktop(os_type: str, desktop: str = "xfce", **_) -> None:
     print(f"  ✓ {desktop.upper()} desktop installed")
 
 
-def install_xrdp(username: str, os_type: str, desktop: str = "xfce", **_) -> None:
+def install_xrdp(username: str, desktop: str = "xfce", **_) -> None:
     safe_username = shlex.quote(username)
     xsession_path = f"/home/{username}/.xsession"
     
@@ -65,12 +65,12 @@ def install_xrdp(username: str, os_type: str, desktop: str = "xfce", **_) -> Non
     else:
         session_cmd = "xfce4-session"
     
-    if is_package_installed("xrdp", os_type) and os.path.exists(xsession_path):
+    if is_package_installed("xrdp") and os.path.exists(xsession_path):
         if is_service_active("xrdp"):
             print("  ✓ xRDP already installed and configured")
             return
 
-    if not is_package_installed("xrdp", os_type):
+    if not is_package_installed("xrdp"):
         run("apt-get install -y -qq xrdp")
     run("getent group ssl-cert && adduser xrdp ssl-cert", check=False)
 
@@ -84,7 +84,7 @@ def install_xrdp(username: str, os_type: str, desktop: str = "xfce", **_) -> Non
     print("  ✓ xRDP installed and configured")
 
 
-def harden_xrdp(os_type: str, **_) -> None:
+def harden_xrdp(**_) -> None:
     """Harden xRDP with TLS encryption and group restrictions."""
     xrdp_config = "/etc/xrdp/xrdp.ini"
     sesman_config = "/etc/xrdp/sesman.ini"
@@ -132,13 +132,13 @@ def harden_xrdp(os_type: str, **_) -> None:
 
 
 
-def configure_audio(username: str, os_type: str, **_) -> None:
+def configure_audio(username: str, **_) -> None:
     safe_username = shlex.quote(username)
     home_dir = f"/home/{username}"
     pulse_dir = f"{home_dir}/.config/pulse"
     client_conf = f"{pulse_dir}/client.conf"
     
-    if os.path.exists(client_conf) and is_package_installed("pulseaudio", os_type):
+    if os.path.exists(client_conf) and is_package_installed("pulseaudio"):
         print("  ✓ Audio already configured")
         return
 
@@ -168,7 +168,7 @@ def configure_audio(username: str, os_type: str, **_) -> None:
     print("  ✓ Audio configured (PulseAudio + xRDP module)")
 
 
-def install_browser(browser: str, os_type: str, use_flatpak: bool = False, **_) -> None:
+def install_browser(browser: str, use_flatpak: bool = False, **_) -> None:
     """Install the specified browser."""
     if browser == "brave":
         if use_flatpak:
@@ -178,7 +178,7 @@ def install_browser(browser: str, os_type: str, use_flatpak: bool = False, **_) 
             print("  Installing Brave browser...")
             run(f"flatpak install -y {FLATPAK_REMOTE} com.brave.Browser", check=False)
         else:
-            if is_package_installed("brave-browser", os_type):
+            if is_package_installed("brave-browser"):
                 print("  ✓ Brave browser already installed")
                 return
             print("  Installing Brave browser...")
@@ -198,7 +198,7 @@ def install_browser(browser: str, os_type: str, use_flatpak: bool = False, **_) 
             print("  Installing Firefox...")
             run(f"flatpak install -y {FLATPAK_REMOTE} org.mozilla.firefox", check=False)
         else:
-            if is_package_installed("firefox", os_type) or is_package_installed("firefox-esr", os_type):
+            if is_package_installed("firefox") or is_package_installed("firefox-esr"):
                 print("  ✓ Firefox already installed")
                 return
             print("  Installing Firefox...")
@@ -210,7 +210,7 @@ def install_browser(browser: str, os_type: str, use_flatpak: bool = False, **_) 
     
     elif browser == "browsh":
         print("  Installing Browsh (requires Firefox)...")
-        if not (is_package_installed("firefox", os_type) or is_package_installed("firefox-esr", os_type)):
+        if not (is_package_installed("firefox") or is_package_installed("firefox-esr")):
             print("  Installing Firefox (required for Browsh)...")
             run("apt-get install -y -qq firefox-esr", check=False)
         
@@ -228,7 +228,7 @@ def install_browser(browser: str, os_type: str, use_flatpak: bool = False, **_) 
             print("  Installing Vivaldi browser...")
             run(f"flatpak install -y {FLATPAK_REMOTE} com.vivaldi.Vivaldi", check=False)
         else:
-            if is_package_installed("vivaldi-stable", os_type):
+            if is_package_installed("vivaldi-stable"):
                 print("  ✓ Vivaldi browser already installed")
                 return
             print("  Installing Vivaldi browser...")
@@ -241,7 +241,7 @@ def install_browser(browser: str, os_type: str, use_flatpak: bool = False, **_) 
         print("  ✓ Vivaldi browser installed")
     
     elif browser == "lynx":
-        if is_package_installed("lynx", os_type):
+        if is_package_installed("lynx"):
             print("  ✓ Lynx already installed")
             return
         print("  Installing Lynx...")
@@ -249,9 +249,9 @@ def install_browser(browser: str, os_type: str, use_flatpak: bool = False, **_) 
         print("  ✓ Lynx installed")
 
 
-def install_remmina(os_type: str, **_) -> None:
+def install_remmina(**_) -> None:
     """Install Remmina RDP client."""
-    if is_package_installed("remmina", os_type):
+    if is_package_installed("remmina"):
         print("  ✓ Remmina already installed")
         return
     
@@ -260,11 +260,11 @@ def install_remmina(os_type: str, **_) -> None:
     print("  ✓ Remmina installed")
 
 
-def install_desktop_apps(os_type: str, username: str, browser: str = "brave", use_flatpak: bool = False, install_office: bool = False, **_) -> None:
-    install_browser(browser, os_type, use_flatpak)
+def install_desktop_apps(username: str, browser: str = "brave", use_flatpak: bool = False, install_office: bool = False, **_) -> None:
+    install_browser(browser, use_flatpak)
     
     if use_flatpak:
-        install_flatpak_if_needed(os_type)
+        install_flatpak_if_needed()
         
         all_installed = (
             is_flatpak_app_installed("com.vscodium.codium") and
@@ -296,15 +296,15 @@ def install_desktop_apps(os_type: str, username: str, browser: str = "brave", us
             apps_list = "LibreOffice, " + apps_list
         print(f"  ✓ Desktop apps installed via Flatpak ({apps_list})")
     else:
-        all_installed = is_package_installed("codium", os_type)
+        all_installed = is_package_installed("codium")
         if install_office:
-            all_installed = all_installed and is_package_installed("libreoffice", os_type)
+            all_installed = all_installed and is_package_installed("libreoffice")
         
         if all_installed:
             print("  ✓ Desktop apps already installed")
             return
 
-        if install_office and not is_package_installed("libreoffice", os_type):
+        if install_office and not is_package_installed("libreoffice"):
             print("  Installing LibreOffice...")
             run("apt-get install -y -qq libreoffice")
 
@@ -313,11 +313,11 @@ def install_desktop_apps(os_type: str, username: str, browser: str = "brave", us
             run("wget -qO - https://gitlab.com/paulcarroty/vscodium-deb-rpm-repo/raw/master/pub.gpg | gpg --dearmor | dd of=/usr/share/keyrings/vscodium-archive-keyring.gpg 2>/dev/null", check=False)
             run('echo "deb [signed-by=/usr/share/keyrings/vscodium-archive-keyring.gpg] https://download.vscodium.com/debs vscodium main" > /etc/apt/sources.list.d/vscodium.list', check=False)
             run("apt-get update -qq", check=False)
-        if not is_package_installed("codium", os_type):
+        if not is_package_installed("codium"):
             run("apt-get install -y -qq codium", check=False)
 
         print("  Installing Discord...")
-        if not is_package_installed("discord", os_type):
+        if not is_package_installed("discord"):
             run("wget -qO /tmp/discord.deb 'https://discord.com/api/download?platform=linux&format=deb'", check=False)
             run("apt-get install -y -qq /tmp/discord.deb", check=False)
             run("rm -f /tmp/discord.deb", check=False)
@@ -374,11 +374,11 @@ application/xhtml+xml={desktop_file}
     print(f"  ✓ Default browser set to {browser.capitalize()}")
 
 
-def install_workstation_dev_apps(os_type: str, username: str, browser: str = "vivaldi", use_flatpak: bool = False, **_) -> None:
-    install_browser(browser, os_type, use_flatpak)
+def install_workstation_dev_apps(username: str, browser: str = "vivaldi", use_flatpak: bool = False, **_) -> None:
+    install_browser(browser, use_flatpak)
     
     if use_flatpak:
-        install_flatpak_if_needed(os_type)
+        install_flatpak_if_needed()
         
         if is_flatpak_app_installed("com.visualstudio.code"):
             print("  ✓ Workstation dev apps already installed via Flatpak")
@@ -392,7 +392,7 @@ def install_workstation_dev_apps(os_type: str, username: str, browser: str = "vi
         
         print("  ✓ Workstation dev apps installed via Flatpak (VS Code)")
     else:
-        if is_package_installed("code", os_type) or os.path.exists("/usr/bin/code"):
+        if is_package_installed("code") or os.path.exists("/usr/bin/code"):
             print("  ✓ Workstation dev apps already installed")
             return
 
@@ -402,7 +402,7 @@ def install_workstation_dev_apps(os_type: str, username: str, browser: str = "vi
             run("wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor --output /etc/apt/trusted.gpg.d/microsoft.gpg", check=False)
             run('echo "deb [arch=amd64] https://packages.microsoft.com/repos/code stable main" > /etc/apt/sources.list.d/vscode.list', check=False)
             run("apt-get update -qq", check=False)
-        if not is_package_installed("code", os_type):
+        if not is_package_installed("code"):
             run("apt-get install -y -qq code", check=False)
 
         print("  ✓ Workstation dev apps installed (VS Code)")
@@ -412,11 +412,11 @@ def configure_vivaldi_browser(username: str, browser: str = "vivaldi", **_) -> N
     configure_default_browser(username, browser)
 
 
-def configure_gnome_keyring(username: str, os_type: str, **_) -> None:
+def configure_gnome_keyring(username: str, **_) -> None:
     """Configure gnome-keyring for desktop setups."""
     safe_username = shlex.quote(username)
     
-    if is_package_installed("gnome-keyring", os_type):
+    if is_package_installed("gnome-keyring"):
         print("  ✓ gnome-keyring already installed")
         return
     

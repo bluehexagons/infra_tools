@@ -5,7 +5,7 @@ import os
 from .utils import run
 
 
-def configure_cloudflare_firewall(os_type: str, **_) -> None:
+def configure_cloudflare_firewall(**_) -> None:
     """Configure firewall for Cloudflare tunnel (SSH only, no HTTP/HTTPS)."""
     result = run("ufw status 2>/dev/null | grep -q 'Status: active'", check=False)
     if result.returncode == 0:

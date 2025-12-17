@@ -48,7 +48,7 @@ def run(cmd: str, check: bool = True) -> subprocess.CompletedProcess:
     return result
 
 
-def detect_os() -> str:
+def detect_os() -> None:
     try:
         with open("/etc/os-release") as f:
             content = f.read().lower()
@@ -56,14 +56,12 @@ def detect_os() -> str:
         print("Error: Cannot detect OS - /etc/os-release not found")
         sys.exit(1)
 
-    if "ubuntu" in content or "debian" in content:
-        return "debian"
-    else:
-        print("Error: Unsupported OS (only Debian/Ubuntu are supported)")
+    if "debian" not in content:
+        print("Error: Unsupported OS (only Debian is supported)")
         sys.exit(1)
 
 
-def is_package_installed(package: str, os_type: str) -> bool:
+def is_package_installed(package: str) -> bool:
     result = subprocess.run(
         f"dpkg -l {shlex.quote(package)} 2>/dev/null | grep -q ^ii",
         shell=True, capture_output=True

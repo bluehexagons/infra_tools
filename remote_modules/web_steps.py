@@ -5,8 +5,8 @@ import os
 from .utils import run, is_package_installed, is_service_active, file_contains
 
 
-def install_nginx(os_type: str, **_) -> None:
-    if is_package_installed("nginx", os_type):
+def install_nginx(**_) -> None:
+    if is_package_installed("nginx"):
         if is_service_active("nginx"):
             print("  ✓ nginx already installed and running")
             return
@@ -20,7 +20,7 @@ def install_nginx(os_type: str, **_) -> None:
     print("  ✓ nginx installed and started")
 
 
-def configure_nginx_security(os_type: str, **_) -> None:
+def configure_nginx_security(**_) -> None:
     nginx_conf = "/etc/nginx/nginx.conf"
     
     if file_contains(nginx_conf, "server_tokens off"):
@@ -41,7 +41,7 @@ def configure_nginx_security(os_type: str, **_) -> None:
     print("  ✓ nginx security configuration applied")
 
 
-def create_hello_world_site(os_type: str, **_) -> None:
+def create_hello_world_site(**_) -> None:
     www_root = "/var/www/html"
     index_html = f"{www_root}/index.html"
     
@@ -74,7 +74,7 @@ def create_hello_world_site(os_type: str, **_) -> None:
     print("  ✓ Hello World website created")
 
 
-def configure_default_site(os_type: str, **_) -> None:
+def configure_default_site(**_) -> None:
     site_conf = "/etc/nginx/sites-available/default"
     
     if os.path.exists(site_conf):

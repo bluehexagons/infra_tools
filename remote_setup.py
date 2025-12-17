@@ -135,8 +135,8 @@ def main() -> int:
         print("Cloudflare: Yes (tunnel preconfiguration)")
     sys.stdout.flush()
 
-    os_type = detect_os()
-    print(f"OS: {os_type}")
+    detect_os()
+    print("OS: Debian")
     sys.stdout.flush()
 
     steps = get_steps_for_system_type(system_type, args.skip_audio, args.desktop, args.browser, args.flatpak, install_office_flag, args.ruby, args.go, args.node, args.steps)
@@ -148,7 +148,6 @@ def main() -> int:
         func(
             username=username,
             pw=args.password,
-            os_type=os_type,
             timezone=args.timezone,
             desktop=args.desktop,
             browser=args.browser,
@@ -173,7 +172,7 @@ def main() -> int:
         print("=" * 60)
         
         print("\n[1/4] Configuring firewall for Cloudflare tunnel")
-        configure_cloudflare_firewall(os_type=os_type)
+        configure_cloudflare_firewall()
         
         print("\n[2/4] Creating cloudflared configuration directory")
         create_cloudflared_config_directory()
@@ -308,7 +307,7 @@ def main() -> int:
                 print("\n" + "=" * 60)
                 print("Installing certbot...")
                 print("=" * 60)
-                install_certbot(os_type=os_type)
+                install_certbot()
                 
                 setup_ssl_for_deployments(deployments, args.ssl_email, run)
             
@@ -335,16 +334,16 @@ def main() -> int:
         print("=" * 60)
         
         print("\n[1/4] Installing Samba")
-        install_samba(os_type=os_type)
+        install_samba()
         
         print("\n[2/4] Configuring global Samba settings with security hardening")
         configure_samba_global_settings()
         
         print("\n[3/4] Configuring firewall for Samba")
-        configure_samba_firewall(os_type=os_type)
+        configure_samba_firewall()
         
         print("\n[4/4] Configuring fail2ban for Samba brute-force protection")
-        configure_samba_fail2ban(os_type=os_type)
+        configure_samba_fail2ban()
         
         if args.share:
             print("\n" + "=" * 60)
