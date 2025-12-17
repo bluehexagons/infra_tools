@@ -103,8 +103,14 @@ def setup_samba_share(share_spec: List[str], **_) -> None:
     primary_path = paths[0]
     safe_path = shlex.quote(primary_path)
     
-    os.makedirs(primary_path, exist_ok=True)
-    print(f"  Ensured path exists: {primary_path}")
+    for path in paths:
+        os.makedirs(path, exist_ok=True)
+    
+    if len(paths) > 1:
+        print(f"  Note: Multiple paths provided, configuring primary path {primary_path} in Samba")
+        print(f"  All paths will have permissions set: {', '.join(paths)}")
+    else:
+        print(f"  Ensured path exists: {primary_path}")
     
     group_name = f"smb_{share_name}_{access_type}"
     safe_group = shlex.quote(group_name)
@@ -123,14 +129,16 @@ def setup_samba_share(share_spec: List[str], **_) -> None:
         run(f"usermod -aG {safe_group} {safe_username}")
         print(f"  Added {username} to group {group_name}")
     
-    run(f"chgrp -R {safe_group} {safe_path}")
+    for path in paths:
+        safe_path_iter = shlex.quote(path)
+        run(f"chgrp -R {safe_group} {safe_path_iter}")
+        
+        if access_type == "write":
+            run(f"chmod -R 2775 {safe_path_iter}")
+        else:
+            run(f"chmod -R 2755 {safe_path_iter}")
     
-    if access_type == "write":
-        run(f"chmod -R 2775 {safe_path}")
-        print(f"  Set write permissions on {primary_path}")
-    else:
-        run(f"chmod -R 2755 {safe_path}")
-        print(f"  Set read-only permissions on {primary_path}")
+    print(f"  Set {'write' if access_type == 'write' else 'read-only'} permissions on {len(paths)} path(s)")
     
     smb_conf = "/etc/samba/smb.conf"
     section_marker = f"[{share_name}_{access_type}]"
@@ -141,18 +149,25 @@ def setup_samba_share(share_spec: List[str], **_) -> None:
             config_exists = section_marker in f.read()
     
     if not config_exists:
-        write_list_line = f"   write list = @{group_name}\n" if access_type == "write" else ""
-        share_config = f"""
-{section_marker}
-   comment = {share_name} ({access_type})
-   path = {primary_path}
-   valid users = @{group_name}
-   browseable = yes
-   read only = {"yes" if access_type == "read" else "no"}
-{write_list_line}   create mask = {"0644" if access_type == "read" else "0664"}
-   directory mask = {"0755" if access_type == "read" else "0775"}
-   force group = {group_name}
-"""
+        share_lines = [
+            section_marker,
+            f"   comment = {share_name} ({access_type})",
+            f"   path = {primary_path}",
+            f"   valid users = @{group_name}",
+            "   browseable = yes",
+            f"   read only = {'yes' if access_type == 'read' else 'no'}",
+        ]
+        
+        if access_type == "write":
+            share_lines.append(f"   write list = @{group_name}")
+        
+        share_lines.extend([
+            f"   create mask = {'0644' if access_type == 'read' else '0664'}",
+            f"   directory mask = {'0755' if access_type == 'read' else '0775'}",
+            f"   force group = {group_name}",
+        ])
+        
+        share_config = "\n" + "\n".join(share_lines) + "\n"
         
         with open(smb_conf, 'a') as f:
             f.write(share_config)
