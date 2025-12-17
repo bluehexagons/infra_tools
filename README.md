@@ -71,12 +71,6 @@ The `--samba` flag installs Samba and configures SMB shares for file sharing. Us
 - **Paths:** Comma-separated paths to share (e.g., `/mnt/store,/data`)
 - **Users:** Comma-separated username:password pairs (e.g., `guest:guest,admin:secret`)
 
-**Security Features:**
-- **fail2ban Protection:** Automatic IP banning after 5 failed authentication attempts (1 hour ban)
-- **Security Hardening:** SMB2+ only, no guest access, authentication logging, restricted anonymous access
-- **Firewall:** Ports 139 and 445 with UFW rules
-- **Access Control:** Group-based permissions with separate read/write groups per share
-
 **Examples:**
 
 ```bash
