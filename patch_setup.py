@@ -235,7 +235,9 @@ def execute_patch(host: str, system_type: str, merged_args: dict, dry_run: bool 
         enable_ssl=merged_args.get('enable_ssl', False),
         ssl_email=merged_args.get('ssl_email'),
         enable_cloudflare=merged_args.get('enable_cloudflare', False),
-        api_subdomain=merged_args.get('api_subdomain', False)
+        api_subdomain=merged_args.get('api_subdomain', False),
+        enable_samba=merged_args.get('enable_samba', False),
+        samba_shares=merged_args.get('samba_shares')
     )
     
     if returncode != 0:

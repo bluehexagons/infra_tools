@@ -54,6 +54,40 @@ All scripts accept IP/Hostname.
 | `--cloudflare` | Preconfigure Cloudflare Tunnel |
 | `--api-subdomain` | Deploy Rails API to `api.domain.com` instead of `domain.com/api` |
 
+### Samba Flags
+
+| Flag | Description |
+|------|-------------|
+| `--samba` | Install and configure Samba for SMB file sharing |
+| `--share [read\|write] [NAME] [PATHS] [USERS]` | Configure share: access type, name, comma-separated paths, comma-separated username:password pairs. Supports multiple. |
+
+## Samba Guide
+
+The `--samba` flag installs Samba and configures SMB shares for file sharing. Use `--share` to define shares.
+
+**Share Configuration:**
+- **Access Type:** `read` (read-only) or `write` (read-write)
+- **Share Name:** Identifier for the share
+- **Paths:** Comma-separated paths to share (e.g., `/mnt/store,/data`)
+- **Users:** Comma-separated username:password pairs (e.g., `guest:guest,admin:secret`)
+
+**Examples:**
+
+```bash
+# Single read-only share
+python3 setup_server_dev.py 192.168.1.10 --samba --share read store /mnt/store guest:guest
+
+# Read and write shares for same path
+python3 setup_server_dev.py 192.168.1.10 --samba \
+  --share read store /mnt/store guest:guest \
+  --share write store /mnt/store admin:password
+
+# Multiple shares
+python3 patch_setup.py 192.168.1.10 --samba \
+  --share read public /mnt/public guest:guest,user:pass \
+  --share write private /mnt/private admin:secret
+```
+
 ## Deployment Guide
 
 The `--deploy` flag automates building and serving web applications.

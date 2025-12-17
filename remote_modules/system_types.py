@@ -53,6 +53,12 @@ from .cloudflare_steps import (
     install_cloudflared_service_helper,
     run_cloudflare_tunnel_setup,
 )
+from .samba_steps import (
+    install_samba,
+    configure_samba_firewall,
+    configure_samba_global_settings,
+    setup_samba_share,
+)
 
 
 COMMON_STEPS = [
@@ -176,6 +182,10 @@ STEP_FUNCTIONS = {
     'configure_nginx_for_cloudflare': configure_nginx_for_cloudflare,
     'install_cloudflared_service_helper': install_cloudflared_service_helper,
     'run_cloudflare_tunnel_setup': run_cloudflare_tunnel_setup,
+    'install_samba': install_samba,
+    'configure_samba_firewall': configure_samba_firewall,
+    'configure_samba_global_settings': configure_samba_global_settings,
+    'setup_samba_share': setup_samba_share,
 }
 
 
