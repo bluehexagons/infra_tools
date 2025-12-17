@@ -194,6 +194,15 @@ def configure_samba_global_settings(**_) -> None:
         "server string": "Samba Server",
         "log file": "/var/log/samba/%m.log",
         "max log size": "50",
+        "log level": "1 auth:3",
+        "security": "user",
+        "map to guest": "Never",
+        "guest account": "nobody",
+        "restrict anonymous": "2",
+        "null passwords": "no",
+        "obey pam restrictions": "yes",
+        "unix password sync": "yes",
+        "pam password change": "yes",
     }
     
     if not os.path.exists(smb_conf):
@@ -212,6 +221,52 @@ def configure_samba_global_settings(**_) -> None:
         with open(smb_conf, 'w') as f:
             f.write(global_config + "\n" + content)
         
-        print("  ✓ Added global Samba configuration")
+        print("  ✓ Added global Samba configuration with security hardening")
     else:
         print("  ✓ Global Samba configuration already exists")
+
+
+def configure_samba_fail2ban(**_) -> None:
+    from .utils import is_service_active
+    
+    if os.path.exists("/etc/fail2ban/jail.d/samba.local"):
+        if is_service_active("fail2ban"):
+            print("  ✓ fail2ban for Samba already configured")
+            return
+    
+    if not is_package_installed("fail2ban", "debian"):
+        run("apt-get install -y -qq fail2ban")
+    
+    fail2ban_samba_filter = """[Definition]
+failregex = ^.*smbd.*: .*Authentication for user .* from <HOST>.*FAILED.*$
+            ^.*smbd.*: .*Failed password for .* from <HOST>.*$
+            ^.*smbd.*: .*check_ntlm_password:  Authentication for user .* failed with NT_STATUS_WRONG_PASSWORD.*$
+ignoreregex =
+"""
+    
+    fail2ban_samba_jail = """[samba]
+enabled = true
+port = 139,445
+protocol = tcp
+filter = samba
+logpath = /var/log/samba/log.smbd
+          /var/log/samba/log.*
+maxretry = 5
+bantime = 3600
+findtime = 600
+"""
+    
+    os.makedirs("/etc/fail2ban/filter.d", exist_ok=True)
+    os.makedirs("/etc/fail2ban/jail.d", exist_ok=True)
+    
+    with open("/etc/fail2ban/filter.d/samba.conf", "w") as f:
+        f.write(fail2ban_samba_filter)
+    
+    with open("/etc/fail2ban/jail.d/samba.local", "w") as f:
+        f.write(fail2ban_samba_jail)
+    
+    run("systemctl enable fail2ban", check=False)
+    run("systemctl restart fail2ban")
+    
+    print("  ✓ fail2ban configured for Samba (5 failed attempts = 1 hour ban)")
+

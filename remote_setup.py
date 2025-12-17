@@ -326,6 +326,7 @@ def main() -> int:
             install_samba,
             configure_samba_firewall,
             configure_samba_global_settings,
+            configure_samba_fail2ban,
             setup_samba_share
         )
         
@@ -333,14 +334,17 @@ def main() -> int:
         print("Configuring Samba...")
         print("=" * 60)
         
-        print("\n[1/3] Installing Samba")
+        print("\n[1/4] Installing Samba")
         install_samba(os_type=os_type)
         
-        print("\n[2/3] Configuring global Samba settings")
+        print("\n[2/4] Configuring global Samba settings with security hardening")
         configure_samba_global_settings()
         
-        print("\n[3/3] Configuring firewall for Samba")
+        print("\n[3/4] Configuring firewall for Samba")
         configure_samba_firewall(os_type=os_type)
+        
+        print("\n[4/4] Configuring fail2ban for Samba brute-force protection")
+        configure_samba_fail2ban()
         
         if args.share:
             print("\n" + "=" * 60)

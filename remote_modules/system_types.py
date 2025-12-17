@@ -57,6 +57,7 @@ from .samba_steps import (
     install_samba,
     configure_samba_firewall,
     configure_samba_global_settings,
+    configure_samba_fail2ban,
     setup_samba_share,
 )
 
@@ -185,6 +186,7 @@ STEP_FUNCTIONS = {
     'install_samba': install_samba,
     'configure_samba_firewall': configure_samba_firewall,
     'configure_samba_global_settings': configure_samba_global_settings,
+    'configure_samba_fail2ban': configure_samba_fail2ban,
     'setup_samba_share': setup_samba_share,
 }
 
