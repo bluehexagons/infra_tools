@@ -648,6 +648,12 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
                 print(f"SSL Email: {args.ssl_email}")
         if args.enable_cloudflare:
             print("Cloudflare: Yes (tunnel preconfiguration)")
+    if args.enable_samba:
+        print("Samba: Yes")
+        if args.samba_shares:
+            print(f"Samba Shares: {len(args.samba_shares)} share(s)")
+            for share in args.samba_shares:
+                print(f"  - {share[1]}_{share[0]}: {share[2]}")
     print("=" * 60)
     print()
     

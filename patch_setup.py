@@ -122,9 +122,18 @@ def show_info(pattern: str = None) -> None:
         if args.get('install_go'): features.append("Go")
         if args.get('install_office'): features.append("Office")
         if args.get('use_flatpak'): features.append("Flatpak")
+        if args.get('enable_samba'): features.append("Samba")
         
         if features:
             print(f"Features: {', '.join(features)}")
+        
+        # Show Samba shares
+        samba_shares = args.get('samba_shares', [])
+        if samba_shares:
+            print("Samba Shares:")
+            for share in samba_shares:
+                if isinstance(share, list) and len(share) >= 4:
+                    print(f"  - {share[1]}_{share[0]}: {share[2]}")
         
         print()
 

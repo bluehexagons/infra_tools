@@ -141,15 +141,15 @@ def setup_samba_share(share_spec: List[str], **_) -> None:
             config_exists = section_marker in f.read()
     
     if not config_exists:
+        write_list_line = f"   write list = @{group_name}\n" if access_type == "write" else ""
         share_config = f"""
 {section_marker}
    comment = {share_name} ({access_type})
    path = {primary_path}
    valid users = @{group_name}
    browseable = yes
-   {"read only = yes" if access_type == "read" else "read only = no"}
-   {"write list = @" + group_name if access_type == "write" else ""}
-   create mask = {"0644" if access_type == "read" else "0664"}
+   read only = {"yes" if access_type == "read" else "no"}
+{write_list_line}   create mask = {"0644" if access_type == "read" else "0664"}
    directory mask = {"0755" if access_type == "read" else "0775"}
    force group = {group_name}
 """
