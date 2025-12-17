@@ -344,7 +344,7 @@ def main() -> int:
         configure_samba_firewall(os_type=os_type)
         
         print("\n[4/4] Configuring fail2ban for Samba brute-force protection")
-        configure_samba_fail2ban()
+        configure_samba_fail2ban(os_type=os_type)
         
         if args.share:
             print("\n" + "=" * 60)

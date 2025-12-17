@@ -226,7 +226,7 @@ def configure_samba_global_settings(**_) -> None:
         print("  ✓ Global Samba configuration already exists")
 
 
-def configure_samba_fail2ban(**_) -> None:
+def configure_samba_fail2ban(os_type: str, **_) -> None:
     from .utils import is_service_active
     
     if os.path.exists("/etc/fail2ban/jail.d/samba.local"):
@@ -234,7 +234,7 @@ def configure_samba_fail2ban(**_) -> None:
             print("  ✓ fail2ban for Samba already configured")
             return
     
-    if not is_package_installed("fail2ban", "debian"):
+    if not is_package_installed("fail2ban", os_type):
         run("apt-get install -y -qq fail2ban")
     
     fail2ban_samba_filter = """[Definition]
@@ -250,7 +250,6 @@ port = 139,445
 protocol = tcp
 filter = samba
 logpath = /var/log/samba/log.smbd
-          /var/log/samba/log.*
 maxretry = 5
 bantime = 3600
 findtime = 600
