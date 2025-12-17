@@ -68,6 +68,10 @@ def main() -> int:
                        help="Preconfigure server for Cloudflare tunnel (disables public HTTP/HTTPS ports)")
     parser.add_argument("--api-subdomain", action="store_true",
                        help="Deploy Rails API as a subdomain (api.domain.com) instead of a subdirectory (domain.com/api)")
+    parser.add_argument("--samba", action="store_true",
+                       help="Install and configure Samba for SMB file sharing")
+    parser.add_argument("--share", action="append", nargs=4, metavar=("ACCESS_TYPE", "SHARE_NAME", "PATHS", "USERS"),
+                       help="Configure Samba share: access_type (read|write), share_name, comma-separated paths, comma-separated username:password pairs (can be used multiple times)")
     
     args = parser.parse_args()
     
@@ -316,6 +320,42 @@ def main() -> int:
                 print("Updating Cloudflare tunnel configuration...")
                 print("=" * 60)
                 run_cloudflare_tunnel_setup()
+    
+    if args.samba:
+        from remote_modules.samba_steps import (
+            install_samba,
+            configure_samba_firewall,
+            configure_samba_global_settings,
+            configure_samba_fail2ban,
+            setup_samba_share
+        )
+        
+        print("\n" + "=" * 60)
+        print("Configuring Samba...")
+        print("=" * 60)
+        
+        print("\n[1/4] Installing Samba")
+        install_samba(os_type=os_type)
+        
+        print("\n[2/4] Configuring global Samba settings with security hardening")
+        configure_samba_global_settings()
+        
+        print("\n[3/4] Configuring firewall for Samba")
+        configure_samba_firewall(os_type=os_type)
+        
+        print("\n[4/4] Configuring fail2ban for Samba brute-force protection")
+        configure_samba_fail2ban(os_type=os_type)
+        
+        if args.share:
+            print("\n" + "=" * 60)
+            print(f"Configuring {len(args.share)} Samba share(s)...")
+            print("=" * 60)
+            
+            for i, share_spec in enumerate(args.share, 1):
+                print(f"\n[{i}/{len(args.share)}] Setting up share: {share_spec[1]}_{share_spec[0]}")
+                setup_samba_share(share_spec=share_spec)
+        
+        print("\n✓ Samba configuration complete")
     
     print("\n" + "=" * 60)
     print("Setup completed successfully!")

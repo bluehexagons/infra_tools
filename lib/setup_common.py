@@ -129,6 +129,16 @@ def merge_setup_args(cached_args: Dict[str, Any], new_args: Dict[str, Any]) -> D
                     if deploy_tuple not in existing_deploys:
                         merged[key].append([deploy_spec, git_url])
                         existing_deploys.add(deploy_tuple)
+        elif key == 'samba_shares' and key in merged:
+            if merged[key] is None:
+                merged[key] = value
+            elif value is not None:
+                existing_shares = {tuple(share) for share in merged[key]}
+                for share_spec in value:
+                    share_tuple = tuple(share_spec)
+                    if share_tuple not in existing_shares:
+                        merged[key].append(share_spec)
+                        existing_shares.add(share_tuple)
         elif value is not None:
             if isinstance(value, bool):
                 merged[key] = value
@@ -329,6 +339,10 @@ def create_argument_parser(description: str, allow_steps: bool = False) -> argpa
                        help="Preconfigure server for Cloudflare tunnel (disables public HTTP/HTTPS ports)")
     parser.add_argument("--api-subdomain", dest="api_subdomain", action=argparse.BooleanOptionalAction, default=None,
                        help="Deploy Rails API as a subdomain (api.domain.com) instead of a subdirectory (domain.com/api)")
+    parser.add_argument("--samba", dest="enable_samba", action=argparse.BooleanOptionalAction, default=None,
+                       help="Install and configure Samba for SMB file sharing")
+    parser.add_argument("--share", dest="samba_shares", action="append", nargs=4, metavar=("ACCESS_TYPE", "SHARE_NAME", "PATHS", "USERS"),
+                       help="Configure Samba share: access_type (read|write), share_name, comma-separated paths, comma-separated username:password pairs (can be used multiple times)")
     return parser
 
 
@@ -355,6 +369,8 @@ def run_remote_setup(
     ssl_email: Optional[str] = None,
     enable_cloudflare: bool = False,
     api_subdomain: bool = False,
+    enable_samba: bool = False,
+    samba_shares: Optional[list] = None,
 ) -> int:
     try:
         tar_data = create_tar_archive()
@@ -432,6 +448,14 @@ def run_remote_setup(
     
     if api_subdomain:
         cmd_parts.append("--api-subdomain")
+    
+    if enable_samba:
+        cmd_parts.append("--samba")
+    
+    if samba_shares:
+        for share_spec in samba_shares:
+            escaped_spec = ' '.join(shlex.quote(str(s)) for s in share_spec)
+            cmd_parts.append(f"--share {escaped_spec}")
     
     remote_cmd = f"""
 mkdir -p {escaped_install_dir} && \
@@ -624,6 +648,12 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
                 print(f"SSL Email: {args.ssl_email}")
         if args.enable_cloudflare:
             print("Cloudflare: Yes (tunnel preconfiguration)")
+    if args.enable_samba:
+        print("Samba: Yes")
+        if args.samba_shares:
+            print(f"Samba Shares: {len(args.samba_shares)} share(s)")
+            for share in args.samba_shares:
+                print(f"  - {share[1]}_{share[0]}: {share[2]}")
     print("=" * 60)
     print()
     
@@ -670,7 +700,9 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
         enable_ssl=args.enable_ssl if args.deploy_specs else False,
         ssl_email=args.ssl_email if args.enable_ssl else None,
         enable_cloudflare=args.enable_cloudflare or False,
-        api_subdomain=args.api_subdomain or False
+        api_subdomain=args.api_subdomain or False,
+        enable_samba=args.enable_samba or False,
+        samba_shares=args.samba_shares
     )
     
     if returncode != 0:
