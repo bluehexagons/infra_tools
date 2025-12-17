@@ -3,7 +3,7 @@
 This document explains the security measures the setup scripts apply, the defaults enabled during setup, and practical, actionable steps you can run after setup to harden a system further. Most of these recommendations are intended for production or Internet-facing servers.
 
 ## What the setup script configures by default
-- Firewall rules (UFW-based on Debian/Ubuntu)
+- Firewall rules (UFW-based)
   - Default-deny incoming, allows essential ports such as 22/80/443
 - SSH hardening
   - Disallow root password logins; use key-based authentication
@@ -14,7 +14,7 @@ This document explains the security measures the setup scripts apply, the defaul
   - Restrict ptrace via kernel config
   - Restrict dmesg permissions and kernel pointers where possible
 - Automatic security updates
-  - For Debian/Ubuntu, unattended-upgrades is set to perform security updates
+  - unattended-upgrades is set to perform security updates
 - Nginx security settings and default site hardening
   - Basic security headers and HSTS if TLS is enabled
   - Default site is static-only, no scripting executed by default

@@ -134,7 +134,7 @@ python3 patch_setup.py deploy [pattern]
 
 - Python 3.9+
 - SSH root access
-- OS: Debian, Ubuntu
+- OS: Debian
 
 ## License
 

@@ -21,7 +21,7 @@ def create_remoteusers_group(**_) -> None:
         print("  ✓ remoteusers group already exists with root user")
 
 
-def configure_firewall(os_type: str, **_) -> None:
+def configure_firewall(**_) -> None:
     result = run("ufw status 2>/dev/null | grep -q 'Status: active'", check=False)
     if result.returncode == 0:
         print("  ✓ Firewall already configured")
@@ -37,7 +37,7 @@ def configure_firewall(os_type: str, **_) -> None:
     print("  ✓ Firewall configured (SSH and RDP allowed)")
 
 
-def configure_fail2ban(os_type: str, **_) -> None:
+def configure_fail2ban(**_) -> None:
     if os.path.exists("/etc/fail2ban/jail.d/xrdp.local"):
         if is_service_active("fail2ban"):
             print("  ✓ fail2ban already configured")
@@ -152,7 +152,7 @@ fs.suid_dumpable=0
     print("  ✓ Kernel hardened (network protection, security restrictions)")
 
 
-def configure_auto_updates(os_type: str, **_) -> None:
+def configure_auto_updates(**_) -> None:
     if os.path.exists("/etc/apt/apt.conf.d/20auto-upgrades"):
         if is_service_active("unattended-upgrades"):
             print("  ✓ Automatic updates already configured")
@@ -176,7 +176,7 @@ APT::Periodic::AutocleanInterval "7";
     print("  ✓ Automatic security updates enabled")
 
 
-def configure_firewall_web(os_type: str, **_) -> None:
+def configure_firewall_web(**_) -> None:
     result = run("ufw status 2>/dev/null | grep -q 'Status: active'", check=False)
     if result.returncode == 0:
         result = run("ufw status | grep -q '80/tcp'", check=False)
@@ -195,7 +195,7 @@ def configure_firewall_web(os_type: str, **_) -> None:
     print("  ✓ Firewall configured (SSH, HTTP, and HTTPS allowed)")
 
 
-def configure_firewall_ssh_only(os_type: str, **_) -> None:
+def configure_firewall_ssh_only(**_) -> None:
     """Configure firewall to allow only SSH (for servers without web/RDP)."""
     result = run("ufw status 2>/dev/null | grep -q 'Status: active'", check=False)
     if result.returncode == 0:
@@ -211,7 +211,7 @@ def configure_firewall_ssh_only(os_type: str, **_) -> None:
     print("  ✓ Firewall configured (SSH only)")
 
 
-def configure_auto_restart(os_type: str, **_) -> None:
+def configure_auto_restart(**_) -> None:
     """Configure automatic restart at 2 AM when updates require it."""
     service_file = "/etc/systemd/system/auto-restart-if-needed.service"
     timer_file = "/etc/systemd/system/auto-restart-if-needed.timer"

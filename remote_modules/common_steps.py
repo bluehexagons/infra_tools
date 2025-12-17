@@ -21,7 +21,7 @@ def set_user_password(username: str, password: str) -> bool:
     return True
 
 
-def update_and_upgrade_packages(os_type: str, **_) -> None:
+def update_and_upgrade_packages(**_) -> None:
     print("  Updating package lists...")
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get update -qq")
@@ -32,8 +32,8 @@ def update_and_upgrade_packages(os_type: str, **_) -> None:
     print("  ✓ System packages updated and upgraded")
 
 
-def ensure_sudo_installed(os_type: str, **_) -> None:
-    if is_package_installed("sudo", os_type):
+def ensure_sudo_installed(**_) -> None:
+    if is_package_installed("sudo"):
         print("  ✓ sudo already installed")
         return
     
@@ -44,7 +44,7 @@ def ensure_sudo_installed(os_type: str, **_) -> None:
     print("  ✓ sudo installed")
 
 
-def configure_locale(os_type: str, **_) -> None:
+def configure_locale(**_) -> None:
     if file_contains("/etc/environment", "LANG=en_US.UTF-8"):
         print("  ✓ UTF-8 locale already configured")
         return
@@ -66,7 +66,7 @@ def configure_locale(os_type: str, **_) -> None:
     print("  ✓ UTF-8 locale configured (en_US.UTF-8)")
 
 
-def setup_user(username: str, pw: Optional[str], os_type: str, **_) -> None:
+def setup_user(username: str, pw: Optional[str], **_) -> None:
     safe_username = shlex.quote(username)
     
     result = run(f"id {safe_username}", check=False)
@@ -144,10 +144,10 @@ def copy_ssh_keys_to_user(username: str, **_) -> None:
     print(f"  ✓ SSH keys copied to {username}")
 
 
-def configure_time_sync(os_type: str, timezone: Optional[str] = None, **_) -> None:
+def configure_time_sync(timezone: Optional[str] = None, **_) -> None:
     tz = timezone if timezone else "UTC"
     
-    if not is_package_installed("systemd-timesyncd", os_type):
+    if not is_package_installed("systemd-timesyncd"):
         os.environ["DEBIAN_FRONTEND"] = "noninteractive"
         run("apt-get install -y -qq systemd-timesyncd")
     run("timedatectl set-ntp true")
@@ -156,8 +156,8 @@ def configure_time_sync(os_type: str, timezone: Optional[str] = None, **_) -> No
     print(f"  ✓ Time synchronization configured (NTP enabled, timezone: {tz})")
 
 
-def install_cli_tools(os_type: str, **_) -> None:
-    if is_package_installed("neovim", os_type):
+def install_cli_tools(**_) -> None:
+    if is_package_installed("neovim"):
         print("  ✓ CLI tools already installed")
         return
 
@@ -166,7 +166,7 @@ def install_cli_tools(os_type: str, **_) -> None:
     print("  ✓ CLI tools installed (neovim, btop, htop, curl, wget, git, tmux, unzip, rsync)")
 
 
-def check_restart_required(os_type: str, **_) -> None:
+def check_restart_required(**_) -> None:
     needs_restart = False
     
     if os.path.exists("/var/run/reboot-required"):
@@ -179,7 +179,7 @@ def check_restart_required(os_type: str, **_) -> None:
         print("  ✓ No restart required")
 
 
-def install_ruby(username: str, os_type: str, **_) -> None:
+def install_ruby(username: str, **_) -> None:
     safe_username = shlex.quote(username)
     user_home = f"/home/{username}"
     rbenv_dir = f"{user_home}/.rbenv"
@@ -220,7 +220,7 @@ eval "$(rbenv init -)"
         print("  ✓ rbenv + system Ruby + bundler installed")
 
 
-def install_go(username: str, os_type: str, **_) -> None:
+def install_go(username: str, **_) -> None:
     result = run("which go", check=False)
     if result.returncode == 0:
         print("  ✓ Go already installed")
@@ -251,7 +251,7 @@ def install_go(username: str, os_type: str, **_) -> None:
     print(f"  ✓ Go {go_version} installed")
 
 
-def install_node(username: str, os_type: str, **_) -> None:
+def install_node(username: str, **_) -> None:
     # Global install to /opt/nvm to avoid permission issues with service users
     nvm_dir = "/opt/nvm"
     
@@ -364,7 +364,7 @@ WantedBy=timers.target
     print(f"  ✓ {check_name} auto-update configured ({schedule})")
 
 
-def configure_auto_update_node(os_type: str, **_) -> None:
+def configure_auto_update_node(**_) -> None:
     """Configure automatic updates for Node.js via nvm."""
     _configure_auto_update_systemd(
         service_name="auto-update-node",
@@ -377,7 +377,7 @@ def configure_auto_update_node(os_type: str, **_) -> None:
     )
 
 
-def configure_auto_update_ruby(username: str, os_type: str, **_) -> None:
+def configure_auto_update_ruby(username: str, **_) -> None:
     """Configure automatic updates for Ruby via rbenv."""
     user_home = f"/home/{username}"
     rbenv_dir = f"{user_home}/.rbenv"
