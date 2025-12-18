@@ -38,7 +38,6 @@ def ensure_sudo_installed(**_) -> None:
         return
     
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    run("apt-get update -qq")
     run("apt-get install -y -qq sudo")
     
     print("  ✓ sudo installed")
@@ -147,13 +146,26 @@ def copy_ssh_keys_to_user(username: str, **_) -> None:
 def configure_time_sync(timezone: Optional[str] = None, **_) -> None:
     tz = timezone if timezone else "UTC"
     
-    if not is_package_installed("systemd-timesyncd"):
+    # Migrate from systemd-timesyncd to chrony if needed
+    if is_package_installed("systemd-timesyncd"):
+        print("  Migrating from systemd-timesyncd to chrony...")
+        run("systemctl stop systemd-timesyncd", check=False)
+        run("systemctl disable systemd-timesyncd", check=False)
+        run("apt-get remove -y -qq systemd-timesyncd")
+        print("  ✓ systemd-timesyncd removed")
+    
+    # Install and configure chrony
+    if not is_package_installed("chrony"):
         os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-        run("apt-get install -y -qq systemd-timesyncd")
-    run("timedatectl set-ntp true")
-
+        run("apt-get install -y -qq chrony")
+        print("  ✓ chrony installed")
+    
+    # Ensure chrony is enabled and running
+    run("systemctl enable chrony")
+    run("systemctl start chrony", check=False)
+    
     run(f"timedatectl set-timezone {shlex.quote(tz)}")
-    print(f"  ✓ Time synchronization configured (NTP enabled, timezone: {tz})")
+    print(f"  ✓ Time synchronization configured (chrony, timezone: {tz})")
 
 
 def install_cli_tools(**_) -> None:

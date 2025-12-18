@@ -11,7 +11,6 @@ def install_samba(**_) -> None:
         return
     
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    run("apt-get update -qq")
     run("apt-get install -y -qq samba samba-common-bin")
     
     run("systemctl enable smbd")
