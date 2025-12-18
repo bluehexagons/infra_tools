@@ -145,6 +145,7 @@ def copy_ssh_keys_to_user(username: str, **_) -> None:
 
 def configure_time_sync(timezone: Optional[str] = None, **_) -> None:
     tz = timezone if timezone else "UTC"
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     
     # Migrate from systemd-timesyncd to chrony if needed
     if is_package_installed("systemd-timesyncd"):
@@ -156,7 +157,6 @@ def configure_time_sync(timezone: Optional[str] = None, **_) -> None:
     
     # Install and configure chrony
     if not is_package_installed("chrony"):
-        os.environ["DEBIAN_FRONTEND"] = "noninteractive"
         run("apt-get install -y -qq chrony")
         print("  ✓ chrony installed")
     
@@ -164,7 +164,7 @@ def configure_time_sync(timezone: Optional[str] = None, **_) -> None:
     run("systemctl enable chrony", check=False)
     run("systemctl start chrony", check=False)
     
-    run(f"timedatectl set-timezone {shlex.quote(tz)}")
+    run(f"timedatectl set-timezone {shlex.quote(tz)}", check=False)
     print(f"  ✓ Time synchronization configured (chrony, timezone: {tz})")
 
 
