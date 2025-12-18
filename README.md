@@ -27,7 +27,7 @@ python3 patch_setup.py example.com --ssl --deploy api.example.com https://github
 | `setup_server_proxmox.py` | Proxmox Hardening | Security Updates, SSH Hardening |
 | `setup_steps.py` | Custom | Run specific steps only |
 
-**Common Features:** User setup, sudo, Firewall/SSH hardening, Auto-updates, NTP, CLI tools (neovim, btop, git, tmux).
+**Common Features:** User setup, sudo, Firewall/SSH hardening, Auto-updates, Chrony (time sync), CLI tools (neovim, btop, git, tmux).
 
 ## Usage & Flags
 
