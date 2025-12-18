@@ -161,7 +161,7 @@ def configure_time_sync(timezone: Optional[str] = None, **_) -> None:
         print("  ✓ chrony installed")
     
     # Ensure chrony is enabled and running
-    run("systemctl enable chrony")
+    run("systemctl enable chrony", check=False)
     run("systemctl start chrony", check=False)
     
     run(f"timedatectl set-timezone {shlex.quote(tz)}")
