@@ -152,7 +152,7 @@ def configure_time_sync(timezone: Optional[str] = None, **_) -> None:
         print("  Migrating from systemd-timesyncd to chrony...")
         run("systemctl stop systemd-timesyncd", check=False)
         run("systemctl disable systemd-timesyncd", check=False)
-        run("apt-get remove -y -qq systemd-timesyncd")
+        run("apt-get remove -y -qq systemd-timesyncd", check=False)
         print("  ✓ systemd-timesyncd removed")
     
     # Install and configure chrony
