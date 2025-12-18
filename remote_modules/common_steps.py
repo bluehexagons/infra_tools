@@ -169,10 +169,6 @@ def configure_time_sync(timezone: Optional[str] = None, **_) -> None:
 
 
 def install_cli_tools(**_) -> None:
-    if is_package_installed("neovim"):
-        print("  ✓ CLI tools already installed")
-        return
-
     run("apt-get install -y -qq neovim btop htop curl wget git tmux unzip xdg-utils rsync")
 
     print("  ✓ CLI tools installed (neovim, btop, htop, curl, wget, git, tmux, unzip, rsync)")
