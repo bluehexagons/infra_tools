@@ -208,7 +208,7 @@ def configure_audio(username: str, os_type: str) -> None:
         # Install build dependencies for pulseaudio-module-xrdp
         # The module requires PulseAudio source configured to generate internal headers
         run("apt-get install -y -qq build-essential dpkg-dev libpulse-dev git autoconf libtool")
-        run("apt-get install -y -qq libconfig-dev libltdl-dev")
+        run("apt-get install -y -qq libconfig-dev libltdl-dev meson")  # meson needed for modern PA versions
         
         # Get PulseAudio build dependencies and source code
         print("  Fetching PulseAudio build dependencies...")
@@ -223,7 +223,7 @@ def configure_audio(username: str, os_type: str) -> None:
         run(f"cd {pulse_src_dir} && apt-get source pulseaudio")
         
         # Find the extracted source directory
-        result = run(f"find {pulse_src_dir} -maxdepth 1 -type d -name 'pulseaudio-*' -print -quit")
+        result = run(f"find {pulse_src_dir} -maxdepth 1 -type d -name 'pulseaudio-*' | head -1")
         pa_build_dir = result.stdout.strip() if result.stdout else ""
         
         if pa_build_dir and os.path.exists(pa_build_dir):
@@ -263,14 +263,27 @@ def configure_audio(username: str, os_type: str) -> None:
                     print(f"  Found module at: {result.stdout.strip()}")
         else:
             print("  Error: Could not find PulseAudio source directory")
-            print("  Attempting simple build without PulseAudio sources...")
+            print("  Attempting fallback build without PulseAudio sources (may fail)...")
             module_dir = "/tmp/pulseaudio-module-xrdp"
             run(f"rm -rf {module_dir}")
-            run(f"git clone https://github.com/neutrinolabs/pulseaudio-module-xrdp.git {module_dir}", check=False)
-            run(f"cd {module_dir} && ./bootstrap", check=False)
-            run(f"cd {module_dir} && ./configure", check=False)
-            run(f"cd {module_dir} && make", check=False)
-            run(f"cd {module_dir} && make install", check=False)
+            
+            clone_result = run(f"git clone https://github.com/neutrinolabs/pulseaudio-module-xrdp.git {module_dir}", check=False)
+            if clone_result.returncode == 0:
+                bootstrap_result = run(f"cd {module_dir} && ./bootstrap", check=False)
+                if bootstrap_result.returncode != 0:
+                    print("  Warning: bootstrap failed")
+                    
+                configure_result = run(f"cd {module_dir} && ./configure", check=False)
+                if configure_result.returncode != 0:
+                    print("  Warning: configure failed - module likely won't work")
+                    
+                make_result = run(f"cd {module_dir} && make", check=False)
+                if make_result.returncode != 0:
+                    print("  Warning: make failed - module not built")
+                else:
+                    run(f"cd {module_dir} && make install", check=False)
+            else:
+                print("  Error: Could not clone pulseaudio-module-xrdp repository")
     else:
         run("dnf install -y -q pulseaudio pulseaudio-utils")
         run("dnf install -y -q pulseaudio-module-xrdp", check=False)
