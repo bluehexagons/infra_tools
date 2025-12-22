@@ -21,6 +21,7 @@ from .desktop_steps import (
     install_xrdp,
     harden_xrdp,
     install_x2go,
+    configure_xfce_for_x2go,
     harden_x2go,
     configure_audio,
     install_desktop_apps,
@@ -80,6 +81,7 @@ DESKTOP_STEPS = [
     ("Installing desktop environment", install_desktop),
     ("Installing xRDP", install_xrdp),
     ("Installing X2Go", install_x2go),
+    ("Configuring Xfce for X2Go", configure_xfce_for_x2go),
     ("Configuring audio for RDP", configure_audio),
     ("Configuring gnome-keyring", configure_gnome_keyring),
 ]
@@ -162,6 +164,7 @@ STEP_FUNCTIONS = {
     'install_xrdp': install_xrdp,
     'harden_xrdp': harden_xrdp,
     'install_x2go': install_x2go,
+    'configure_xfce_for_x2go': configure_xfce_for_x2go,
     'harden_x2go': harden_x2go,
     'configure_audio': configure_audio,
     'install_desktop_apps': install_desktop_apps,
@@ -229,7 +232,9 @@ def get_steps_for_system_type(system_type: str, skip_audio: bool = False, deskto
         if not enable_rdp:
             desktop_steps = [s for s in desktop_steps if s[1] not in [install_xrdp, configure_audio]]
         if not enable_x2go:
-            desktop_steps = [s for s in desktop_steps if s[1] != install_x2go]
+            desktop_steps = [s for s in desktop_steps if s[1] not in [install_x2go, configure_xfce_for_x2go]]
+        if desktop != "xfce":
+            desktop_steps = [s for s in desktop_steps if s[1] != configure_xfce_for_x2go]
         if skip_audio:
             desktop_steps = [s for s in desktop_steps if s[1] != configure_audio]
         
@@ -251,7 +256,9 @@ def get_steps_for_system_type(system_type: str, skip_audio: bool = False, deskto
         if not enable_rdp:
             desktop_steps = [s for s in desktop_steps if s[1] not in [install_xrdp, configure_audio]]
         if not enable_x2go:
-            desktop_steps = [s for s in desktop_steps if s[1] != install_x2go]
+            desktop_steps = [s for s in desktop_steps if s[1] not in [install_x2go, configure_xfce_for_x2go]]
+        if desktop != "xfce":
+            desktop_steps = [s for s in desktop_steps if s[1] != configure_xfce_for_x2go]
         if skip_audio:
             desktop_steps = [s for s in desktop_steps if s[1] != configure_audio]
         
@@ -274,7 +281,9 @@ def get_steps_for_system_type(system_type: str, skip_audio: bool = False, deskto
         if not enable_rdp:
             desktop_steps = [s for s in desktop_steps if s[1] != install_xrdp]
         if not enable_x2go:
-            desktop_steps = [s for s in desktop_steps if s[1] != install_x2go]
+            desktop_steps = [s for s in desktop_steps if s[1] not in [install_x2go, configure_xfce_for_x2go]]
+        if desktop != "xfce":
+            desktop_steps = [s for s in desktop_steps if s[1] != configure_xfce_for_x2go]
         
         # Build security steps
         security_steps = SECURITY_STEPS

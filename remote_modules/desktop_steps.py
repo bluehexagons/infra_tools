@@ -151,6 +151,61 @@ def install_x2go(**_) -> None:
     print("  ✓ X2Go installed (connect via SSH on port 22)")
 
 
+def configure_xfce_for_x2go(username: str, **_) -> None:
+    """Configure Xfce to work properly with X2Go by disabling compositor."""
+    safe_username = shlex.quote(username)
+    home_dir = f"/home/{username}"
+    xfce_config_dir = f"{home_dir}/.config/xfce4/xfconf/xfce-perchannel-xml"
+    xfwm4_config = f"{xfce_config_dir}/xfwm4.xml"
+    
+    # Create config directory if it doesn't exist
+    os.makedirs(xfce_config_dir, exist_ok=True)
+    
+    # Check if compositor is already disabled
+    if os.path.exists(xfwm4_config):
+        if file_contains(xfwm4_config, 'name="use_compositing" type="bool" value="false"'):
+            print("  ✓ Xfce compositor already disabled for X2Go")
+            return
+    
+    # Create or update xfwm4.xml to disable compositor
+    xfwm4_content = """<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfwm4" version="1.0">
+  <property name="general" type="empty">
+    <property name="use_compositing" type="bool" value="false"/>
+    <property name="frame_opacity" type="int" value="100"/>
+    <property name="inactive_opacity" type="int" value="100"/>
+  </property>
+</channel>
+"""
+    
+    with open(xfwm4_config, "w") as f:
+        f.write(xfwm4_content)
+    
+    # Set proper ownership
+    run(f"chown -R {safe_username}:{safe_username} {shlex.quote(home_dir)}/.config")
+    
+    # Create startup script to ensure compositor stays disabled
+    autostart_dir = f"{home_dir}/.config/autostart"
+    os.makedirs(autostart_dir, exist_ok=True)
+    
+    compositor_script = f"{autostart_dir}/disable-compositor.desktop"
+    compositor_content = """[Desktop Entry]
+Type=Application
+Name=Disable Xfce Compositor for X2Go
+Exec=xfconf-query -c xfwm4 -p /general/use_compositing -s false
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+"""
+    
+    with open(compositor_script, "w") as f:
+        f.write(compositor_content)
+    
+    run(f"chown -R {safe_username}:{safe_username} {shlex.quote(autostart_dir)}")
+    
+    print("  ✓ Xfce compositor disabled for X2Go (prevents graphical issues)")
+
+
 def harden_x2go(**_) -> None:
     """Harden X2Go by restricting to remoteusers group."""
     sshd_config = "/etc/ssh/sshd_config"
