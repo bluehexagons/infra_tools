@@ -620,6 +620,20 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
     
     timezone = args.timezone if args.timezone else get_local_timezone()
     
+    # Handle defaults
+    desktop = args.desktop or "xfce"
+    browser = args.browser or "brave"
+    
+    install_office = args.install_office
+    if system_type == "pc_dev" and not install_office:
+        install_office = True
+    
+    enable_rdp = args.enable_rdp
+    if enable_rdp is None and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
+        enable_rdp = True
+    elif enable_rdp is None:
+        enable_rdp = False
+    
     print("=" * 60)
     print(f"{description}")
     print("=" * 60)
@@ -664,20 +678,6 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
                 print(f"  - {share[1]}_{share[0]}: {share[2]}")
     print("=" * 60)
     print()
-    
-    # Handle defaults
-    desktop = args.desktop or "xfce"
-    browser = args.browser or "brave"
-    
-    install_office = args.install_office
-    if system_type == "pc_dev" and not install_office:
-        install_office = True
-    
-    enable_rdp = args.enable_rdp
-    if enable_rdp is None and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        enable_rdp = True
-    elif enable_rdp is None:
-        enable_rdp = False
     
     args_dict = vars(args).copy()
     if 'host' in args_dict:
