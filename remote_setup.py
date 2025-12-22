@@ -105,7 +105,9 @@ def main() -> int:
     if system_type != "server_proxmox":
         print(f"User: {username}")
     print(f"Timezone: {args.timezone or 'UTC'}")
-    if args.rdp and system_type in ["workstation_desktop", "pc_dev", "workstation_dev", "server_dev"]:
+    if system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
+        print(f"RDP: {'Yes' if args.rdp else 'No'}")
+    elif args.rdp and system_type == "server_dev":
         print("RDP: Yes")
     if args.skip_audio:
         print("Skip audio: Yes")

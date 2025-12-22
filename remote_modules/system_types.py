@@ -237,8 +237,10 @@ def get_steps_for_system_type(system_type: str, skip_audio: bool = False, deskto
         return COMMON_STEPS + desktop_steps + security_steps + \
                desktop_security_steps + CLI_STEPS + optional_steps + PC_DEV_APP_STEPS + FINAL_STEPS
     elif system_type == "workstation_dev":
-        desktop_steps = DESKTOP_STEPS if enable_rdp else [s for s in DESKTOP_STEPS if s[1] not in [install_xrdp, configure_audio, harden_xrdp]]
-        desktop_steps = [s for s in desktop_steps if s[1] != configure_audio]
+        if enable_rdp:
+            desktop_steps = [s for s in DESKTOP_STEPS if s[1] not in [configure_audio]]
+        else:
+            desktop_steps = [s for s in DESKTOP_STEPS if s[1] not in [install_xrdp, configure_audio, harden_xrdp]]
         
         security_steps = SECURITY_STEPS
         desktop_security_steps = DESKTOP_SECURITY_STEPS if enable_rdp else []

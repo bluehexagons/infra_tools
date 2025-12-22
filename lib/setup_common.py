@@ -640,7 +640,9 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
     print(f"Host: {args.host}")
     print(f"User: {username}")
     print(f"Timezone: {timezone}")
-    if args.enable_rdp is not None and system_type in ["workstation_desktop", "pc_dev", "workstation_dev", "server_dev"]:
+    if system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
+        print(f"RDP: {'Yes' if enable_rdp else 'No'}")
+    elif args.enable_rdp is not None and system_type == "server_dev":
         print(f"RDP: {'Yes' if enable_rdp else 'No'}")
     if args.skip_audio and system_type in ["workstation_desktop", "pc_dev"]:
         print("Skip audio: Yes")
