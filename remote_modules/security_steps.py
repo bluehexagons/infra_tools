@@ -21,7 +21,7 @@ def create_remoteusers_group(**_) -> None:
         print("  ✓ remoteusers group already exists with root user")
 
 
-def configure_firewall(**_) -> None:
+def configure_firewall(enable_rdp: bool = False, **_) -> None:
     result = run("ufw status 2>/dev/null | grep -q 'Status: active'", check=False)
     if result.returncode == 0:
         print("  ✓ Firewall already configured")
@@ -31,10 +31,14 @@ def configure_firewall(**_) -> None:
     run("ufw default deny incoming")
     run("ufw default allow outgoing")
     run("ufw allow ssh")
-    run("ufw allow 3389/tcp")
+    if enable_rdp:
+        run("ufw allow 3389/tcp")
     run("ufw --force enable")
 
-    print("  ✓ Firewall configured (SSH and RDP allowed)")
+    if enable_rdp:
+        print("  ✓ Firewall configured (SSH and RDP allowed)")
+    else:
+        print("  ✓ Firewall configured (SSH allowed)")
 
 
 def configure_fail2ban(**_) -> None:

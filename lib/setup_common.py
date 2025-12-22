@@ -309,6 +309,8 @@ def create_argument_parser(description: str, allow_steps: bool = False) -> argpa
     parser.add_argument("-t", "--timezone", help="Timezone (defaults to local)")
     if allow_steps:
         parser.add_argument("--steps", dest="custom_steps", help="Space-separated list of steps to run (e.g., 'install_ruby install_node')")
+    parser.add_argument("--rdp", dest="enable_rdp", action=argparse.BooleanOptionalAction, default=None,
+                       help="Enable RDP/XRDP setup (default: enabled for workstation setups)")
     parser.add_argument("--skip-audio", action=argparse.BooleanOptionalAction, default=None,
                        help="Skip audio setup (desktop only)")
     parser.add_argument("--desktop", choices=["xfce", "i3", "cinnamon"], default=None,
@@ -353,6 +355,7 @@ def run_remote_setup(
     password: Optional[str] = None,
     ssh_key: Optional[str] = None,
     timezone: Optional[str] = None,
+    enable_rdp: bool = False,
     skip_audio: bool = False,
     desktop: str = "xfce",
     browser: str = "brave",
@@ -400,6 +403,9 @@ def run_remote_setup(
     
     if timezone:
         cmd_parts.append(f"--timezone {shlex.quote(timezone)}")
+    
+    if enable_rdp:
+        cmd_parts.append("--rdp")
     
     if skip_audio:
         cmd_parts.append("--skip-audio")
@@ -620,6 +626,8 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
     print(f"Host: {args.host}")
     print(f"User: {username}")
     print(f"Timezone: {timezone}")
+    if args.enable_rdp is not None and system_type in ["workstation_desktop", "pc_dev", "workstation_dev", "server_dev"]:
+        print(f"RDP: {'Yes' if enable_rdp else 'No'}")
     if args.skip_audio and system_type in ["workstation_desktop", "pc_dev"]:
         print("Skip audio: Yes")
     if args.desktop and args.desktop != "xfce" and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
@@ -665,6 +673,12 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
     if system_type == "pc_dev" and not install_office:
         install_office = True
     
+    enable_rdp = args.enable_rdp
+    if enable_rdp is None and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
+        enable_rdp = True
+    elif enable_rdp is None:
+        enable_rdp = False
+    
     args_dict = vars(args).copy()
     if 'host' in args_dict:
         del args_dict['host']
@@ -674,6 +688,7 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
     args_dict['desktop'] = desktop
     args_dict['browser'] = browser
     args_dict['install_office'] = install_office
+    args_dict['enable_rdp'] = enable_rdp
     
     if not args.dry_run:
         save_setup_command(args.host, system_type, args_dict)
@@ -685,6 +700,7 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
         password=args.password,
         ssh_key=args.ssh_key,
         timezone=timezone,
+        enable_rdp=enable_rdp,
         skip_audio=args.skip_audio,
         desktop=desktop,
         browser=browser,

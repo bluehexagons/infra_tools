@@ -35,6 +35,7 @@ All scripts accept IP/Hostname.
 
 | Flag | Description |
 |------|-------------|
+| `--rdp` | Enable RDP/XRDP setup (Default: enabled for workstation setups) |
 | `--ruby` | Install rbenv + Ruby + Bundler |
 | `--node` | Install nvm + Node.js + PNPM |
 | `--go` | Install Go |

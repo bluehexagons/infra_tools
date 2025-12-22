@@ -194,7 +194,7 @@ STEP_FUNCTIONS = {
 def get_steps_for_system_type(system_type: str, skip_audio: bool = False, desktop: str = "xfce",
                                browser: str = "brave", use_flatpak: bool = False, install_office: bool = False, 
                                install_ruby: bool = False, install_go: bool = False,
-                               install_node: bool = False, custom_steps_str: str = None) -> list:
+                               install_node: bool = False, custom_steps_str: str = None, enable_rdp: bool = False) -> list:
     if system_type == "custom_steps" and custom_steps_str:
         step_names = custom_steps_str.split()
         steps = []
@@ -217,21 +217,34 @@ def get_steps_for_system_type(system_type: str, skip_audio: bool = False, deskto
         optional_steps.append(("Configuring Node.js auto-update", configure_auto_update_node))
     
     if system_type == "workstation_desktop":
-        desktop_steps = DESKTOP_STEPS
+        desktop_steps = DESKTOP_STEPS if enable_rdp else [s for s in DESKTOP_STEPS if s[1] not in [install_xrdp, configure_audio, harden_xrdp]]
         if skip_audio:
-            desktop_steps = [s for s in DESKTOP_STEPS if s[1] != configure_audio]
-        return COMMON_STEPS + desktop_steps + SECURITY_STEPS + \
-               DESKTOP_SECURITY_STEPS + CLI_STEPS + optional_steps + DESKTOP_APP_STEPS + FINAL_STEPS
+            desktop_steps = [s for s in desktop_steps if s[1] != configure_audio]
+        
+        security_steps = SECURITY_STEPS
+        desktop_security_steps = DESKTOP_SECURITY_STEPS if enable_rdp else []
+        
+        return COMMON_STEPS + desktop_steps + security_steps + \
+               desktop_security_steps + CLI_STEPS + optional_steps + DESKTOP_APP_STEPS + FINAL_STEPS
     elif system_type == "pc_dev":
-        desktop_steps = DESKTOP_STEPS
+        desktop_steps = DESKTOP_STEPS if enable_rdp else [s for s in DESKTOP_STEPS if s[1] not in [install_xrdp, configure_audio, harden_xrdp]]
         if skip_audio:
-            desktop_steps = [s for s in DESKTOP_STEPS if s[1] != configure_audio]
-        return COMMON_STEPS + desktop_steps + SECURITY_STEPS + \
-               DESKTOP_SECURITY_STEPS + CLI_STEPS + optional_steps + PC_DEV_APP_STEPS + FINAL_STEPS
+            desktop_steps = [s for s in desktop_steps if s[1] != configure_audio]
+        
+        security_steps = SECURITY_STEPS
+        desktop_security_steps = DESKTOP_SECURITY_STEPS if enable_rdp else []
+        
+        return COMMON_STEPS + desktop_steps + security_steps + \
+               desktop_security_steps + CLI_STEPS + optional_steps + PC_DEV_APP_STEPS + FINAL_STEPS
     elif system_type == "workstation_dev":
-        desktop_steps = [s for s in DESKTOP_STEPS if s[1] != configure_audio]
-        return COMMON_STEPS + desktop_steps + SECURITY_STEPS + \
-               DESKTOP_SECURITY_STEPS + CLI_STEPS + optional_steps + WORKSTATION_DEV_APP_STEPS + FINAL_STEPS
+        desktop_steps = DESKTOP_STEPS if enable_rdp else [s for s in DESKTOP_STEPS if s[1] not in [install_xrdp, configure_audio, harden_xrdp]]
+        desktop_steps = [s for s in desktop_steps if s[1] != configure_audio]
+        
+        security_steps = SECURITY_STEPS
+        desktop_security_steps = DESKTOP_SECURITY_STEPS if enable_rdp else []
+        
+        return COMMON_STEPS + desktop_steps + security_steps + \
+               desktop_security_steps + CLI_STEPS + optional_steps + WORKSTATION_DEV_APP_STEPS + FINAL_STEPS
     elif system_type == "server_dev":
         return COMMON_STEPS + SECURITY_STEPS + CLI_STEPS + optional_steps + FINAL_STEPS
     elif system_type == "server_web":

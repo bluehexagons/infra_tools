@@ -36,6 +36,8 @@ def main() -> int:
                        help="User password (not used for server_proxmox)")
     parser.add_argument("--timezone", default=None,
                        help="Timezone (defaults to UTC)")
+    parser.add_argument("--rdp", action="store_true",
+                       help="Enable RDP/XRDP setup")
     parser.add_argument("--skip-audio", action="store_true",
                        help="Skip audio setup")
     parser.add_argument("--desktop", choices=["xfce", "i3", "cinnamon"], default="xfce",
@@ -103,6 +105,8 @@ def main() -> int:
     if system_type != "server_proxmox":
         print(f"User: {username}")
     print(f"Timezone: {args.timezone or 'UTC'}")
+    if args.rdp and system_type in ["workstation_desktop", "pc_dev", "workstation_dev", "server_dev"]:
+        print("RDP: Yes")
     if args.skip_audio:
         print("Skip audio: Yes")
     if args.desktop != "xfce" and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
@@ -139,7 +143,7 @@ def main() -> int:
     print("OS: Debian")
     sys.stdout.flush()
 
-    steps = get_steps_for_system_type(system_type, args.skip_audio, args.desktop, args.browser, args.flatpak, install_office_flag, args.ruby, args.go, args.node, args.steps)
+    steps = get_steps_for_system_type(system_type, args.skip_audio, args.desktop, args.browser, args.flatpak, install_office_flag, args.ruby, args.go, args.node, args.steps, args.rdp)
     total_steps = len(steps)
     for i, (name, func) in enumerate(steps, 1):
         bar = progress_bar(i, total_steps)
@@ -152,7 +156,8 @@ def main() -> int:
             desktop=args.desktop,
             browser=args.browser,
             use_flatpak=args.flatpak,
-            install_office=install_office_flag
+            install_office=install_office_flag,
+            enable_rdp=args.rdp
         )
     
     bar = progress_bar(total_steps, total_steps)
