@@ -36,7 +36,7 @@ def main() -> int:
                        help="User password (not used for server_proxmox)")
     parser.add_argument("--timezone", default=None,
                        help="Timezone (defaults to UTC)")
-    parser.add_argument("--rdp", action="store_true",
+    parser.add_argument("--rdp", action=argparse.BooleanOptionalAction, default=False,
                        help="Enable RDP/XRDP setup")
     parser.add_argument("--skip-audio", action="store_true",
                        help="Skip audio setup")
