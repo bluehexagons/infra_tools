@@ -142,7 +142,7 @@ def configure_audio(username: str, **_) -> None:
     run("apt-get install -y -qq pulseaudio pulseaudio-utils")
     
     result = run("find /usr/lib -name 'module-xrdp-sink.so' 2>/dev/null", check=False)
-    modules_installed = result.returncode == 0 and result.stdout.strip()
+    modules_installed = result.returncode == 0 and bool(result.stdout.strip())
     
     configs_exist = os.path.exists(client_conf) and os.path.exists(daemon_conf)
     
@@ -167,7 +167,7 @@ def configure_audio(username: str, **_) -> None:
     run(f"cd {module_dir} && make install", check=False)
     
     result = run("find /usr/lib -name 'module-xrdp-sink.so' 2>/dev/null", check=False)
-    if result.returncode != 0 or not result.stdout.strip():
+    if result.returncode != 0 or not bool(result.stdout.strip()):
         print("  ⚠ Warning: xRDP audio modules may not have installed correctly")
     
     run(f"usermod -aG audio {safe_username}", check=False)
@@ -185,7 +185,7 @@ def configure_audio(username: str, **_) -> None:
     
     run(f"chown -R {safe_username}:{safe_username} {shlex.quote(pulse_dir)}")
     
-    run(f"pkill -u {username} pulseaudio", check=False)
+    run(f"pkill -u {safe_username} pulseaudio", check=False)
     run("systemctl restart xrdp", check=False)
     
     print("  ✓ Audio configured (PulseAudio + xRDP module)")
