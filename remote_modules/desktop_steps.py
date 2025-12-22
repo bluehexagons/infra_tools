@@ -138,21 +138,34 @@ def configure_audio(username: str, **_) -> None:
     pulse_dir = f"{home_dir}/.config/pulse"
     client_conf = f"{pulse_dir}/client.conf"
     
-    if os.path.exists(client_conf) and is_package_installed("pulseaudio"):
+    run("apt-get install -y -qq pulseaudio pulseaudio-utils")
+    
+    result = run("find /usr/lib -name 'module-xrdp-sink.so' 2>/dev/null", check=False)
+    modules_installed = result.returncode == 0 and result.stdout.strip()
+    
+    if modules_installed and os.path.exists(client_conf):
         print("  ✓ Audio already configured")
         return
-
-    run("apt-get install -y -qq pulseaudio pulseaudio-utils")
+    
     run("apt-get install -y -qq build-essential dpkg-dev libpulse-dev git autoconf libtool", check=False)
     
     module_dir = "/tmp/pulseaudio-module-xrdp"
-    if not os.path.exists(module_dir):
-        run(f"git clone https://github.com/neutrinolabs/pulseaudio-module-xrdp.git {module_dir}", check=False)
+    if os.path.exists(module_dir):
+        run(f"rm -rf {module_dir}", check=False)
+    
+    result = run(f"git clone https://github.com/neutrinolabs/pulseaudio-module-xrdp.git {module_dir}", check=False)
+    if result.returncode != 0:
+        print("  ⚠ Warning: Failed to clone pulseaudio-module-xrdp repository")
+        return
     
     run(f"cd {module_dir} && ./bootstrap", check=False)
     run(f"cd {module_dir} && ./configure PULSE_DIR=/usr/include/pulse", check=False)
     run(f"cd {module_dir} && make", check=False)
     run(f"cd {module_dir} && make install", check=False)
+    
+    result = run("find /usr/lib -name 'module-xrdp-sink.so' 2>/dev/null", check=False)
+    if result.returncode != 0 or not result.stdout.strip():
+        print("  ⚠ Warning: xRDP audio modules may not have installed correctly")
     
     run(f"usermod -aG audio {safe_username}", check=False)
     
@@ -163,6 +176,8 @@ def configure_audio(username: str, **_) -> None:
         f.write("daemon-binary = /usr/bin/pulseaudio\n")
     
     run(f"chown -R {safe_username}:{safe_username} {shlex.quote(pulse_dir)}")
+    
+    run(f"pkill -u {username} pulseaudio", check=False)
     run("systemctl restart xrdp", check=False)
     
     print("  ✓ Audio configured (PulseAudio + xRDP module)")
