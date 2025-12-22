@@ -32,7 +32,7 @@ def generate_password(length: int = 16) -> str:
     return ''.join(secrets.choice(alphabet) for _ in range(length))
 
 
-def run(cmd: str, check: bool = True) -> subprocess.CompletedProcess:
+def run(cmd: str, check: bool = True, cwd: str = None) -> subprocess.CompletedProcess:
     print(f"  Running: {cmd[:80]}..." if len(cmd) > 80 else f"  Running: {cmd}")
     sys.stdout.flush()
     
@@ -40,7 +40,7 @@ def run(cmd: str, check: bool = True) -> subprocess.CompletedProcess:
         print("  [DRY-RUN] Command not executed")
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
     
-    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=cwd)
     if check and result.returncode != 0:
         if result.stderr:
             print(f"    Warning: {result.stderr[:200]}")
