@@ -311,6 +311,8 @@ def create_argument_parser(description: str, allow_steps: bool = False) -> argpa
         parser.add_argument("--steps", dest="custom_steps", help="Space-separated list of steps to run (e.g., 'install_ruby install_node')")
     parser.add_argument("--rdp", dest="enable_rdp", action=argparse.BooleanOptionalAction, default=None,
                        help="Enable RDP/XRDP setup (default: enabled for workstation setups)")
+    parser.add_argument("--x2go", dest="enable_x2go", action=argparse.BooleanOptionalAction, default=None,
+                       help="Enable X2Go remote desktop access (default: enabled for workstation setups)")
     parser.add_argument("--skip-audio", action=argparse.BooleanOptionalAction, default=None,
                        help="Skip audio setup (desktop only)")
     parser.add_argument("--desktop", choices=["xfce", "i3", "cinnamon"], default=None,
@@ -356,6 +358,7 @@ def run_remote_setup(
     ssh_key: Optional[str] = None,
     timezone: Optional[str] = None,
     enable_rdp: bool = False,
+    enable_x2go: bool = False,
     skip_audio: bool = False,
     desktop: str = "xfce",
     browser: str = "brave",
@@ -383,7 +386,6 @@ def run_remote_setup(
     
     ssh_opts = [
         "-o", "StrictHostKeyChecking=accept-new",
-        "-o", "BatchMode=yes",
         "-o", "ConnectTimeout=30",
         "-o", "ServerAliveInterval=30",
     ]
@@ -406,6 +408,9 @@ def run_remote_setup(
     
     if enable_rdp:
         cmd_parts.append("--rdp")
+    
+    if enable_x2go:
+        cmd_parts.append("--x2go")
     
     if skip_audio:
         cmd_parts.append("--skip-audio")
@@ -634,6 +639,12 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
     elif enable_rdp is None:
         enable_rdp = False
     
+    enable_x2go = args.enable_x2go
+    if enable_x2go is None and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
+        enable_x2go = True
+    elif enable_x2go is None:
+        enable_x2go = False
+    
     print("=" * 60)
     print(f"{description}")
     print("=" * 60)
@@ -642,8 +653,11 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
     print(f"Timezone: {timezone}")
     if system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
         print(f"RDP: {'Yes' if enable_rdp else 'No'}")
+        print(f"X2Go: {'Yes' if enable_x2go else 'No'}")
     elif args.enable_rdp is not None and system_type == "server_dev":
         print(f"RDP: {'Yes' if enable_rdp else 'No'}")
+    if args.enable_x2go is not None and system_type == "server_dev":
+        print(f"X2Go: {'Yes' if enable_x2go else 'No'}")
     if args.skip_audio and system_type in ["workstation_desktop", "pc_dev"]:
         print("Skip audio: Yes")
     if args.desktop and args.desktop != "xfce" and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
@@ -691,6 +705,7 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
     args_dict['browser'] = browser
     args_dict['install_office'] = install_office
     args_dict['enable_rdp'] = enable_rdp
+    args_dict['enable_x2go'] = enable_x2go
     
     if not args.dry_run:
         save_setup_command(args.host, system_type, args_dict)
@@ -703,6 +718,7 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
         ssh_key=args.ssh_key,
         timezone=timezone,
         enable_rdp=enable_rdp,
+        enable_x2go=enable_x2go,
         skip_audio=args.skip_audio,
         desktop=desktop,
         browser=browser,
@@ -731,7 +747,7 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
     print("=" * 60)
     print("Setup Complete!")
     print("=" * 60)
-    success_msg_fn(args.host, username)
+    success_msg_fn(args.host, username, enable_rdp, enable_x2go)
     print("=" * 60)
     
     return 0

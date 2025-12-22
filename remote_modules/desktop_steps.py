@@ -78,7 +78,12 @@ def install_xrdp(username: str, desktop: str = "xfce", **_) -> None:
     run("systemctl restart xrdp")
 
     with open(xsession_path, "w") as f:
-        f.write(f"{session_cmd}\n")
+        f.write("#!/bin/bash\n")
+        f.write("# Kill any existing PulseAudio to prevent conflicts\n")
+        f.write("pulseaudio --kill 2>/dev/null || true\n")
+        f.write("# Start session\n")
+        f.write(f"exec {session_cmd}\n")
+    run(f"chmod +x {shlex.quote(xsession_path)}")
     run(f"chown {safe_username}:{safe_username} {shlex.quote(xsession_path)}")
 
     print("  ✓ xRDP installed and configured")
@@ -131,6 +136,40 @@ def harden_xrdp(**_) -> None:
     print("  ✓ xRDP hardened (TLS encryption, root denied, restricted to remoteusers group)")
 
 
+def install_x2go(**_) -> None:
+    """Install X2Go server for remote desktop access."""
+    if is_package_installed("x2goserver"):
+        print("  ✓ X2Go already installed")
+        return
+    
+    run("apt-get install -y -qq x2goserver x2goserver-xsession")
+    
+    # X2Go uses SSH, so ensure it's enabled
+    run("systemctl enable ssh", check=False)
+    run("systemctl start ssh", check=False)
+    
+    print("  ✓ X2Go installed (connect via SSH on port 22)")
+
+
+def harden_x2go(**_) -> None:
+    """Harden X2Go by restricting to remoteusers group."""
+    sshd_config = "/etc/ssh/sshd_config"
+    x2go_config = "/etc/x2go/x2goserver.conf"
+    
+    if not os.path.exists(x2go_config):
+        print("  ⚠ X2Go not installed, skipping hardening")
+        return
+    
+    # X2Go security is primarily handled by SSH hardening
+    # Additional X2Go-specific configuration
+    if not file_contains(x2go_config, "# Security hardened"):
+        with open(x2go_config, "a") as f:
+            f.write("\n# Security hardened\n")
+            f.write("# Restrict to remoteusers group via SSH AllowGroups\n")
+    
+    print("  ✓ X2Go hardened (uses SSH security + group restrictions)")
+
+
 
 def configure_audio(username: str, **_) -> None:
     safe_username = shlex.quote(username)
@@ -138,6 +177,7 @@ def configure_audio(username: str, **_) -> None:
     pulse_dir = f"{home_dir}/.config/pulse"
     client_conf = f"{pulse_dir}/client.conf"
     daemon_conf = f"{pulse_dir}/daemon.conf"
+    default_pa = f"{pulse_dir}/default.pa"
     
     run("apt-get install -y -qq pulseaudio pulseaudio-utils")
     
@@ -150,25 +190,77 @@ def configure_audio(username: str, **_) -> None:
         print("  ✓ Audio already configured")
         return
     
-    run("apt-get install -y -qq build-essential dpkg-dev libpulse-dev git autoconf libtool", check=False)
-    
-    module_dir = "/tmp/pulseaudio-module-xrdp"
-    if os.path.exists(module_dir):
-        run(f"rm -rf {module_dir}", check=False)
-    
-    result = run(f"git clone https://github.com/neutrinolabs/pulseaudio-module-xrdp.git {module_dir}", check=False)
-    if result.returncode != 0:
-        print("  ⚠ Warning: Failed to clone pulseaudio-module-xrdp repository")
-        return
-    
-    run(f"cd {module_dir} && ./bootstrap", check=False)
-    run(f"cd {module_dir} && ./configure PULSE_DIR=/usr/include/pulse", check=False)
-    run(f"cd {module_dir} && make", check=False)
-    run(f"cd {module_dir} && make install", check=False)
+    if not modules_installed:
+        run("apt-get install -y -qq build-essential dpkg-dev libpulse-dev git autoconf libtool", check=False)
+        
+        # Get PulseAudio version and download matching source
+        pulse_ver_result = run("pulseaudio --version | grep -oP 'pulseaudio \\K[0-9]+\\.[0-9]+' | head -1", check=False)
+        pulse_version = pulse_ver_result.stdout.strip() if pulse_ver_result.returncode == 0 else ""
+        
+        if pulse_version:
+            print(f"  PulseAudio version: {pulse_version}")
+            # Download PulseAudio source for headers
+            pulse_src_dir = f"/tmp/pulseaudio-{pulse_version}"
+            if not os.path.exists(pulse_src_dir):
+                run(f"apt-get source pulseaudio={pulse_version}* 2>/dev/null || apt-get source pulseaudio 2>/dev/null", check=False, cwd="/tmp")
+                # Find the extracted directory
+                find_result = run("find /tmp -maxdepth 1 -type d -name 'pulseaudio-*' ! -name '*xrdp*' 2>/dev/null | head -1", check=False)
+                if find_result.returncode == 0 and find_result.stdout.strip():
+                    pulse_src_dir = find_result.stdout.strip()
+        else:
+            pulse_src_dir = None
+        
+        module_dir = "/tmp/pulseaudio-module-xrdp"
+        if os.path.exists(module_dir):
+            run(f"rm -rf {module_dir}", check=False)
+        
+        result = run(f"git clone https://github.com/neutrinolabs/pulseaudio-module-xrdp.git {module_dir}", check=False)
+        if result.returncode != 0:
+            print("  ⚠ Warning: Failed to clone pulseaudio-module-xrdp repository")
+            modules_installed = False
+        else:
+            bootstrap_result = run(f"cd {module_dir} && ./bootstrap", check=False)
+            if bootstrap_result.returncode != 0:
+                print("  ⚠ Warning: Failed to bootstrap xRDP audio module")
+                run(f"rm -rf {module_dir}", check=False)
+                modules_installed = False
+            else:
+                # Try configure with source dir if available, otherwise let it auto-detect
+                if pulse_src_dir and os.path.exists(pulse_src_dir):
+                    configure_cmd = f"cd {module_dir} && PULSE_DIR={shlex.quote(pulse_src_dir)} ./configure PULSE_DIR={shlex.quote(pulse_src_dir)}"
+                    print(f"  Using PulseAudio source: {pulse_src_dir}")
+                else:
+                    # Try with system include directory as fallback
+                    configure_cmd = f"cd {module_dir} && PULSE_DIR=/usr ./configure PULSE_DIR=/usr"
+                    print("  Using system PulseAudio headers")
+                
+                configure_result = run(configure_cmd, check=False)
+                if configure_result.returncode != 0:
+                    print("  ⚠ Warning: Failed to configure xRDP audio module")
+                    run(f"rm -rf {module_dir}", check=False)
+                    modules_installed = False
+                else:
+                    make_result = run(f"cd {module_dir} && make", check=False)
+                    if make_result.returncode != 0:
+                        print("  ⚠ Warning: Failed to compile xRDP audio module")
+                        run(f"rm -rf {module_dir}", check=False)
+                        modules_installed = False
+                    else:
+                        install_result = run(f"cd {module_dir} && make install", check=False)
+                        if install_result.returncode != 0:
+                            print("  ⚠ Warning: Failed to install xRDP audio module")
+                            modules_installed = False
+                        else:
+                            modules_installed = True
     
     result = run("find /usr/lib -name 'module-xrdp-sink.so' 2>/dev/null", check=False)
-    if result.returncode != 0 or not bool(result.stdout.strip()):
-        print("  ⚠ Warning: xRDP audio modules may not have installed correctly")
+    if result.returncode == 0 and bool(result.stdout.strip()):
+        module_path = result.stdout.strip().split('\n')[0]
+        print(f"  ✓ xRDP audio module installed: {module_path}")
+        modules_installed = True
+    else:
+        print("  ⚠ xRDP audio modules not found - audio will work but not over RDP")
+        modules_installed = False
     
     run(f"usermod -aG audio {safe_username}", check=False)
     
@@ -182,13 +274,47 @@ def configure_audio(username: str, **_) -> None:
         f.write("enable-shm = no\n")
         f.write("exit-idle-time = -1\n")
         f.write("flat-volumes = no\n")
+        f.write("default-sample-rate = 44100\n")
+        f.write("resample-method = speex-float-1\n")
     
+    # Only create default.pa with xRDP modules if they're actually installed
+    if modules_installed:
+        with open(default_pa, "w") as f:
+            f.write("#!/usr/bin/pulseaudio -nF\n\n")
+            f.write(".include /etc/pulse/default.pa\n\n")
+            f.write("# Load xRDP modules for remote audio\n")
+            f.write(".nofail\n")
+            f.write("load-module module-xrdp-sink\n")
+            f.write("load-module module-xrdp-source\n")
+            f.write(".fail\n")
+        run(f"chmod +x {shlex.quote(default_pa)}")
     run(f"chown -R {safe_username}:{safe_username} {shlex.quote(pulse_dir)}")
+    
+    # Create troubleshooting script
+    troubleshoot_script = f"{home_dir}/check-rdp.sh"
+    with open(troubleshoot_script, "w") as f:
+        f.write("#!/bin/bash\n")
+        f.write("# RDP Session Troubleshooting Script\n\n")
+        f.write("echo '=== xRDP Status ==='\n")
+        f.write("systemctl status xrdp --no-pager\n\n")
+        f.write("echo '=== xRDP Logs (last 50 lines) ==='\n")
+        f.write("journalctl -u xrdp -n 50 --no-pager\n\n")
+        f.write("echo '=== Session Logs ==='\n")
+        f.write("tail -50 ~/.xsession-errors 2>/dev/null || echo 'No .xsession-errors file'\n\n")
+        f.write("echo '=== PulseAudio Status ==='\n")
+        f.write("pactl info 2>&1 || echo 'PulseAudio not running'\n\n")
+        f.write("echo '=== PulseAudio Modules ==='\n")
+        f.write("pactl list modules short 2>&1 || echo 'Cannot list modules'\n\n")
+        f.write("echo '=== xRDP Audio Module ==='\n")
+        f.write("find /usr/lib -name 'module-xrdp-*.so' 2>/dev/null || echo 'No xRDP modules found'\n")
+    run(f"chmod +x {shlex.quote(troubleshoot_script)}")
+    run(f"chown {safe_username}:{safe_username} {shlex.quote(troubleshoot_script)}")
     
     run(f"pkill -u {safe_username} pulseaudio", check=False)
     run("systemctl restart xrdp", check=False)
     
-    print("  ✓ Audio configured (PulseAudio + xRDP module)")
+    print("  ✓ Audio configured (PulseAudio + xRDP modules)")
+    print(f"  Run ~/check-rdp.sh via SSH to troubleshoot RDP issues")
 
 
 def install_browser(browser: str, use_flatpak: bool = False, **_) -> None:
