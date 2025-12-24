@@ -17,7 +17,7 @@ def get_local_timezone() -> str:
                 if tz:
                     return tz
         except Exception:
-            pass
+            pass  # Fall through to next method if file read fails
     
     try:
         result = subprocess.run(
@@ -27,7 +27,7 @@ def get_local_timezone() -> str:
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
     except Exception:
-        pass
+        pass  # Fall through to next method if timedatectl unavailable or fails
     
     if os.path.islink("/etc/localtime"):
         try:
@@ -36,6 +36,6 @@ def get_local_timezone() -> str:
                 tz = target.split("zoneinfo/", 1)[1]
                 return tz
         except Exception:
-            pass
+            pass  # Fall through to UTC default if symlink read fails
     
     return "UTC"

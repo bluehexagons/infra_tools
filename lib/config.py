@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import argparse
-import getpass
 from dataclasses import dataclass, asdict
 from typing import Optional, Dict, List, Any
 

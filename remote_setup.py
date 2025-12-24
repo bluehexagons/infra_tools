@@ -308,7 +308,7 @@ def main() -> int:
                 print("\n" + "=" * 60)
                 print("Installing certbot...")
                 print("=" * 60)
-                install_certbot()
+                install_certbot(config)
                 
                 setup_ssl_for_deployments(deployments, config.ssl_email)
             
@@ -319,7 +319,7 @@ def main() -> int:
                 print("\n" + "=" * 60)
                 print("Updating cloudflared config for deployments...")
                 print("=" * 60)
-                run_cloudflare_tunnel_setup()
+                run_cloudflare_tunnel_setup(config)
     
     # Configure Samba if requested
     if config.enable_samba:
@@ -354,7 +354,7 @@ def main() -> int:
             
             for i, share_spec in enumerate(config.samba_shares, 1):
                 print(f"\n[{i}/{len(config.samba_shares)}] Setting up share: {share_spec[1]}_{share_spec[0]}")
-                setup_samba_share(share_spec=share_spec)
+                setup_samba_share(config, share_spec=share_spec)
         
         print("\n✓ Samba configuration complete")
     

@@ -13,15 +13,8 @@ from typing import Optional
 
 from lib.config import SetupConfig
 from lib.validators import validate_host, validate_username
-from lib.system_utils import get_current_username, get_local_timezone
-from lib.display import print_name_and_tags, print_success_header, print_rdp_x2go_info
-from lib.cache import (
-    get_cache_path_for_host,
-    save_setup_command,
-    load_setup_command,
-    merge_setup_configs,
-    SETUP_CACHE_DIR
-)
+from lib.system_utils import get_current_username
+from lib.cache import save_setup_command
 from lib.arg_parser import create_setup_argument_parser
 
 

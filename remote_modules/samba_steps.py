@@ -87,12 +87,12 @@ def create_samba_user(username: str, password: str) -> None:
 
 
 def setup_samba_share(config: SetupConfig, share_spec: List[str] = None, **_) -> None:
-    config = parse_share_spec(share_spec)
+    share_config = parse_share_spec(share_spec)
     
-    share_name = config['share_name']
-    access_type = config['access_type']
-    paths = config['paths']
-    users = config['users']
+    share_name = share_config['share_name']
+    access_type = share_config['access_type']
+    paths = share_config['paths']
+    users = share_config['users']
     
     if not paths:
         raise ValueError(f"No paths specified for share: {share_name}")

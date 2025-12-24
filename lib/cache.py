@@ -5,7 +5,7 @@ import json
 import os
 import re
 from dataclasses import asdict
-from typing import Optional, Dict, Any
+from typing import Optional
 
 from lib.config import SetupConfig
 
@@ -49,6 +49,10 @@ def load_setup_command(host: str) -> Optional[SetupConfig]:
             data = json.load(f)
             system_type = data.get('system_type')
             args_dict = data.get('args', {})
+            if 'name' in data and 'friendly_name' not in args_dict:
+                args_dict['friendly_name'] = data['name']
+            if 'tags' in data and 'tags' not in args_dict:
+                args_dict['tags'] = data['tags']
             return SetupConfig.from_dict(host, system_type, args_dict)
     except Exception as e:
         print(f"Warning: Failed to load cached setup for {host}: {e}")
