@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 
-"""Common utilities for setup scripts."""
-
 import argparse
 import io
 import os
@@ -36,7 +34,6 @@ GIT_CACHE_DIR = os.path.expanduser("~/.cache/infra_tools/git_repos")
 
 
 def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = None, dry_run: bool = False) -> Optional[tuple]:
-    """Clone repository and return (clone_path, commit_hash) tuple."""
     repo_name = git_url.rstrip('/').split('/')[-1]
     if repo_name.endswith('.git'):
         repo_name = repo_name[:-4]
@@ -187,12 +184,10 @@ def create_tar_archive() -> bytes:
 
 
 def create_argument_parser(description: str, allow_steps: bool = False) -> argparse.ArgumentParser:
-    """Create argument parser for local setup scripts."""
     return create_setup_argument_parser(description, for_remote=False, allow_steps=allow_steps)
 
 
 def run_remote_setup(config: SetupConfig) -> int:
-    """Execute remote setup with the given configuration."""
     try:
         tar_data = create_tar_archive()
     except FileNotFoundError as e:

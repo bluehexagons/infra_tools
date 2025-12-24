@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 
-"""Shared argument parser for setup scripts."""
-
 import argparse
 
 
@@ -10,36 +8,21 @@ def create_setup_argument_parser(
     for_remote: bool = False,
     allow_steps: bool = False
 ) -> argparse.ArgumentParser:
-    """
-    Create argument parser for setup scripts.
-    
-    Args:
-        description: Description for the argument parser
-        for_remote: If True, create parser for remote_setup.py (no host/username positional args)
-        allow_steps: If True, allow --steps argument for custom steps
-    
-    Returns:
-        Configured ArgumentParser instance
-    """
     parser = argparse.ArgumentParser(description=description)
     
-    # Positional arguments (only for local setup scripts)
     if not for_remote:
         parser.add_argument("host", help="IP address or hostname of the remote host")
         parser.add_argument("username", nargs="?", default=None, 
                            help="Username (defaults to current user)")
         parser.add_argument("-k", "--key", dest="ssh_key", help="SSH private key path")
     
-    # Common arguments for both local and remote
     parser.add_argument("-p", "--password", help="User password")
     parser.add_argument("-t", "--timezone", help="Timezone (defaults to UTC)")
     
-    # Name and tags (only for local setup scripts, not used by remote)
     if not for_remote:
         parser.add_argument("--name", dest="friendly_name", help="Friendly name for this configuration")
         parser.add_argument("--tags", dest="tags", help="Comma-separated list of tags for this configuration")
     
-    # System type (only for remote)
     if for_remote:
         parser.add_argument("--system-type", dest="system_type", 
                            choices=["workstation_desktop", "pc_dev", "workstation_dev", "server_dev", "server_web", "server_proxmox", "custom_steps"],
@@ -47,12 +30,9 @@ def create_setup_argument_parser(
         parser.add_argument("--username", default=None,
                            help="Username (defaults to current user, not used for server_proxmox)")
     
-    # Custom steps
     if allow_steps or for_remote:
         parser.add_argument("--steps", dest="custom_steps" if not for_remote else "steps", 
                            help="Space-separated list of steps to run (e.g., 'install_ruby install_node')")
-    
-    # Desktop/workstation options
     parser.add_argument("--rdp", dest="enable_rdp" if not for_remote else "rdp", 
                        action=argparse.BooleanOptionalAction, 
                        default=None if not for_remote else False,
@@ -99,7 +79,6 @@ def create_setup_argument_parser(
                        action="append", nargs=2, metavar=("DOMAIN_OR_PATH", "GIT_URL"),
                        help="Deploy a git repository (domain.com/path or /path) to auto-configure nginx (can be used multiple times)")
     
-    # Deployment-specific flags (only for remote or with deploy)
     if for_remote:
         parser.add_argument("--lite-deploy", action="store_true",
                            help="Use pre-uploaded repository files instead of cloning (for remote execution)")
@@ -121,7 +100,6 @@ def create_setup_argument_parser(
                        default=None if not for_remote else False,
                        help="Deploy Rails API as a subdomain (api.domain.com) instead of a subdirectory (domain.com/api)")
     
-    # Samba options
     parser.add_argument("--samba", dest="enable_samba" if not for_remote else "samba", 
                        action=argparse.BooleanOptionalAction if not for_remote else "store_true", 
                        default=None if not for_remote else False,
@@ -130,7 +108,6 @@ def create_setup_argument_parser(
                        action="append", nargs=4, metavar=("ACCESS_TYPE", "SHARE_NAME", "PATHS", "USERS"),
                        help="Configure Samba share: access_type (read|write), share_name, comma-separated paths, comma-separated username:password pairs (can be used multiple times)")
     
-    # Common flags
     parser.add_argument("--dry-run", action="store_true",
                        help="Show what would be done without executing commands")
     

@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 
-"""Configuration dataclass for setup operations."""
-
 import argparse
 import getpass
 from dataclasses import dataclass, asdict
@@ -10,7 +8,6 @@ from typing import Optional, Dict, List, Any
 
 @dataclass
 class SetupConfig:
-    """Configuration for a setup operation."""
     host: str
     username: str
     system_type: str
@@ -41,26 +38,21 @@ class SetupConfig:
     samba_shares: Optional[List[List[str]]] = None
     
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary, excluding host and system_type."""
         data = asdict(self)
         data.pop('host', None)
         data.pop('system_type', None)
-        # Convert tags list to comma-separated string for storage
         if self.tags:
             data['tags'] = ','.join(self.tags)
         return data
     
     @classmethod
     def from_dict(cls, host: str, system_type: str, data: Dict[str, Any]) -> 'SetupConfig':
-        """Create SetupConfig from dictionary."""
-        # Convert tags string to list
         tags_str = data.get('tags')
         if tags_str and isinstance(tags_str, str):
             data['tags'] = [tag.strip() for tag in tags_str.split(',') if tag.strip()]
         elif not tags_str:
             data['tags'] = None
             
-        # Handle friendly_name
         if 'friendly_name' not in data:
             data['friendly_name'] = None
             
@@ -68,40 +60,29 @@ class SetupConfig:
     
     @classmethod
     def from_args(cls, args: argparse.Namespace, system_type: str) -> 'SetupConfig':
-        """Create SetupConfig from parsed arguments."""
-        # Import here to avoid circular dependency
         from lib.system_utils import get_current_username, get_local_timezone
         
-        # Extract and process tags
         tags = None
         if hasattr(args, 'tags') and args.tags:
             tags = [tag.strip() for tag in args.tags.split(',') if tag.strip()]
         
-        # Get username with default
         username = args.username if args.username else get_current_username()
-        
-        # Get timezone with default
         timezone = args.timezone if args.timezone else get_local_timezone()
-        
-        # Handle defaults for desktop and browser
         desktop = args.desktop or "xfce"
         browser = args.browser or "brave"
         
-        # Handle office default for pc_dev
         install_office = args.install_office
         if system_type == "pc_dev" and install_office is None:
             install_office = True
         elif install_office is None:
             install_office = False
         
-        # Handle RDP default
         enable_rdp = args.enable_rdp
         if enable_rdp is None and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
             enable_rdp = True
         elif enable_rdp is None:
             enable_rdp = False
         
-        # Handle X2Go default
         enable_x2go = args.enable_x2go
         if enable_x2go is None and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
             enable_x2go = True

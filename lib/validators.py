@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
 
-"""Validation utilities for setup scripts."""
-
 import re
 
 
 def validate_ip_address(ip: str) -> bool:
-    """Validate an IPv4 address."""
     pattern = r'^(\d{1,3}\.){3}\d{1,3}$'
     if not re.match(pattern, ip):
         return False
@@ -15,7 +12,6 @@ def validate_ip_address(ip: str) -> bool:
 
 
 def validate_host(host: str) -> bool:
-    """Validate a hostname or IP address."""
     normalized_host = host.lower().rstrip('.')
     if validate_ip_address(normalized_host):
         return True
@@ -24,6 +20,5 @@ def validate_host(host: str) -> bool:
 
 
 def validate_username(username: str) -> bool:
-    """Validate a Unix username."""
     pattern = r'^[a-z_][a-z0-9_-]{0,31}$'
     return bool(re.match(pattern, username))

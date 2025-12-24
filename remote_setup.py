@@ -6,7 +6,6 @@ import os
 import sys
 from typing import Optional
 
-# Add lib to path to import shared modules
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from lib.arg_parser import create_setup_argument_parser
@@ -20,7 +19,6 @@ VALID_SYSTEM_TYPES = ["workstation_desktop", "pc_dev", "workstation_dev", "serve
 
 
 def extract_repo_name(git_url: str) -> str:
-    """Extract repository name from git URL."""
     repo_name = git_url.rstrip('/').split('/')[-1]
     if repo_name.endswith('.git'):
         repo_name = repo_name[:-4]
@@ -28,8 +26,6 @@ def extract_repo_name(git_url: str) -> str:
 
 
 def config_from_remote_args(args: argparse.Namespace) -> SetupConfig:
-    """Create SetupConfig from remote script arguments."""
-    # Determine system type
     if args.steps:
         system_type = "custom_steps"
     elif args.system_type:
@@ -37,28 +33,24 @@ def config_from_remote_args(args: argparse.Namespace) -> SetupConfig:
     else:
         raise ValueError("Either --system-type or --steps must be specified")
     
-    # Determine username
     if system_type == "server_proxmox":
         username = "root"
     else:
         username = args.username or getpass.getuser()
     
-    # Handle office default for pc_dev
     install_office = args.office
     if system_type == "pc_dev" and not args.office:
         install_office = True
     
-    # Create SetupConfig
-    # For remote script, we need to handle the different attribute names
     config = SetupConfig(
-        host="localhost",  # Not used in remote context
+        host="localhost",
         username=username,
         system_type=system_type,
         password=args.password,
-        ssh_key=None,  # Not used in remote context
+        ssh_key=None,
         timezone=args.timezone or "UTC",
-        friendly_name=None,  # Not used in remote context
-        tags=None,  # Not used in remote context
+        friendly_name=None,
+        tags=None,
         enable_rdp=args.rdp,
         enable_x2go=args.x2go,
         skip_audio=args.skip_audio,
@@ -90,8 +82,6 @@ def main() -> int:
         for_remote=True,
         allow_steps=True
     )
-    
-    # Note: --lite-deploy is already added by create_setup_argument_parser when for_remote=True
     
     args = parser.parse_args()
     
