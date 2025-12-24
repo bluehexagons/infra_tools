@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 
 import sys
-from lib.setup_common import setup_main, print_name_and_tags, SetupConfig
+from lib.config import SetupConfig
+from lib.setup_common import setup_main, print_name_and_tags
 
 
 def success_message(config: SetupConfig) -> None:

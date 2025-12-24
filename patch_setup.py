@@ -8,6 +8,7 @@ import json
 # Add parent directory to path to import lib
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from lib.config import SetupConfig
 from lib.setup_common import (
     load_setup_command,
     merge_setup_configs,
@@ -17,7 +18,6 @@ from lib.setup_common import (
     save_setup_command,
     validate_username,
     print_name_and_tags,
-    SetupConfig,
     REMOTE_SCRIPT_PATH,
     REMOTE_MODULES_DIR,
     SETUP_CACHE_DIR,

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 
 import sys
-from lib.setup_common import setup_main, print_success_header, SetupConfig
+from lib.config import SetupConfig
+from lib.setup_common import setup_main, print_success_header
 
 
 def success_message(config: SetupConfig) -> None:
