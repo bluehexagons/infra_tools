@@ -2,10 +2,11 @@
 
 import os
 
-from .utils import run, is_package_installed, is_service_active, file_contains
+from lib.config import SetupConfig
+from .utils import run, is_service_active, file_contains
 
 
-def create_remoteusers_group(**_) -> None:
+def create_remoteusers_group(config: SetupConfig) -> None:
     """Create remoteusers group for SSH and RDP access control."""
     result = run("getent group remoteusers", check=False)
     group_exists = result.returncode == 0
@@ -21,7 +22,7 @@ def create_remoteusers_group(**_) -> None:
         print("  ✓ remoteusers group already exists with root user")
 
 
-def configure_firewall(enable_rdp: bool = False, **_) -> None:
+def configure_firewall(config: SetupConfig) -> None:
     result = run("ufw status 2>/dev/null | grep -q 'Status: active'", check=False)
     if result.returncode == 0:
         print("  ✓ Firewall already configured")
@@ -31,17 +32,17 @@ def configure_firewall(enable_rdp: bool = False, **_) -> None:
     run("ufw default deny incoming")
     run("ufw default allow outgoing")
     run("ufw allow ssh")
-    if enable_rdp:
+    if config.enable_rdp:
         run("ufw allow 3389/tcp")
     run("ufw --force enable")
 
-    if enable_rdp:
+    if config.enable_rdp:
         print("  ✓ Firewall configured (SSH and RDP allowed)")
     else:
         print("  ✓ Firewall configured (SSH allowed)")
 
 
-def configure_fail2ban(**_) -> None:
+def configure_fail2ban(config: SetupConfig) -> None:
     if os.path.exists("/etc/fail2ban/jail.d/xrdp.local"):
         if is_service_active("fail2ban"):
             print("  ✓ fail2ban already configured")
@@ -81,7 +82,7 @@ findtime = 600
     print("  ✓ fail2ban configured (3 failed attempts = 1 hour ban)")
 
 
-def harden_ssh(**_) -> None:
+def harden_ssh(config: SetupConfig) -> None:
     sshd_config = "/etc/ssh/sshd_config"
     
     if file_contains(sshd_config, "PasswordAuthentication no"):
@@ -114,7 +115,7 @@ def harden_ssh(**_) -> None:
     print("  ✓ SSH hardened (key-only auth, timeouts, restricted to remoteusers group)")
 
 
-def harden_kernel(**_) -> None:
+def harden_kernel(config: SetupConfig) -> None:
     sysctl_conf = "/etc/sysctl.d/99-security-hardening.conf"
     
     if os.path.exists(sysctl_conf):
@@ -156,7 +157,7 @@ fs.suid_dumpable=0
     print("  ✓ Kernel hardened (network protection, security restrictions)")
 
 
-def configure_auto_updates(**_) -> None:
+def configure_auto_updates(config: SetupConfig) -> None:
     if os.path.exists("/etc/apt/apt.conf.d/20auto-upgrades"):
         if is_service_active("unattended-upgrades"):
             print("  ✓ Automatic updates already configured")
@@ -180,7 +181,7 @@ APT::Periodic::AutocleanInterval "7";
     print("  ✓ Automatic security updates enabled")
 
 
-def configure_firewall_web(**_) -> None:
+def configure_firewall_web(config: SetupConfig) -> None:
     result = run("ufw status 2>/dev/null | grep -q 'Status: active'", check=False)
     if result.returncode == 0:
         result = run("ufw status | grep -q '80/tcp'", check=False)
@@ -199,7 +200,7 @@ def configure_firewall_web(**_) -> None:
     print("  ✓ Firewall configured (SSH, HTTP, and HTTPS allowed)")
 
 
-def configure_firewall_ssh_only(**_) -> None:
+def configure_firewall_ssh_only(config: SetupConfig) -> None:
     """Configure firewall to allow only SSH (for servers without web/RDP)."""
     result = run("ufw status 2>/dev/null | grep -q 'Status: active'", check=False)
     if result.returncode == 0:
@@ -215,7 +216,7 @@ def configure_firewall_ssh_only(**_) -> None:
     print("  ✓ Firewall configured (SSH only)")
 
 
-def configure_auto_restart(**_) -> None:
+def configure_auto_restart(config: SetupConfig) -> None:
     """Configure automatic restart at 2 AM when updates require it."""
     service_file = "/etc/systemd/system/auto-restart-if-needed.service"
     timer_file = "/etc/systemd/system/auto-restart-if-needed.timer"

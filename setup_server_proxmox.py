@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 
 import sys
-from lib.setup_common import setup_main
+from lib.config import SetupConfig
+from lib.setup_common import setup_main, print_name_and_tags
 
 
-def success_message(host: str, username: str) -> None:
-    print(f"Proxmox Server: {host}")
+def success_message(config: SetupConfig) -> None:
+    print(f"Proxmox Server: {config.host}")
+    print(f"Username: {config.username}")
+    if config.friendly_name or config.tags:
+        print()
+        print_name_and_tags(config)
     print()
-    print(f"Connect via SSH: ssh root@{host}")
-    print(f"Web UI: https://{host}:8006")
+    print(f"Connect via SSH: ssh root@{config.host}")
+    print(f"Web UI: https://{config.host}:8006")
 
 
 def main() -> int:

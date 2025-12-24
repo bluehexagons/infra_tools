@@ -2,10 +2,11 @@ import os
 import shlex
 from typing import List, Dict, Optional
 
+from lib.config import SetupConfig
 from .utils import run, is_package_installed, file_contains
 
 
-def install_samba(**_) -> None:
+def install_samba(config: SetupConfig) -> None:
     if is_package_installed("samba"):
         print("  ✓ Samba already installed")
         return
@@ -19,7 +20,7 @@ def install_samba(**_) -> None:
     print("  ✓ Samba installed and service started")
 
 
-def configure_samba_firewall(**_) -> None:
+def configure_samba_firewall(config: SetupConfig) -> None:
     rules = [
         "ufw allow 139/tcp comment 'Samba NetBIOS'",
         "ufw allow 445/tcp comment 'Samba SMB'",
@@ -85,13 +86,13 @@ def create_samba_user(username: str, password: str) -> None:
     run(f"smbpasswd -e {safe_username}", check=False)
 
 
-def setup_samba_share(share_spec: List[str], **_) -> None:
-    config = parse_share_spec(share_spec)
+def setup_samba_share(config: SetupConfig, share_spec: List[str] = None, **_) -> None:
+    share_config = parse_share_spec(share_spec)
     
-    share_name = config['share_name']
-    access_type = config['access_type']
-    paths = config['paths']
-    users = config['users']
+    share_name = share_config['share_name']
+    access_type = share_config['access_type']
+    paths = share_config['paths']
+    users = share_config['users']
     
     if not paths:
         raise ValueError(f"No paths specified for share: {share_name}")
@@ -183,7 +184,7 @@ def setup_samba_share(share_spec: List[str], **_) -> None:
     print(f"  ✓ Share configured: {share_name}_{access_type} -> {primary_path}")
 
 
-def configure_samba_global_settings(**_) -> None:
+def configure_samba_global_settings(config: SetupConfig) -> None:
     smb_conf = "/etc/samba/smb.conf"
     
     settings = {
@@ -225,7 +226,7 @@ def configure_samba_global_settings(**_) -> None:
         print("  ✓ Global Samba configuration already exists")
 
 
-def configure_samba_fail2ban(**_) -> None:
+def configure_samba_fail2ban(config: SetupConfig) -> None:
     from .utils import is_service_active
     
     if os.path.exists("/etc/fail2ban/jail.d/samba.local"):

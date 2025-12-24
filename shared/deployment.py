@@ -6,7 +6,12 @@ import shutil
 import secrets
 import re
 import socket
+import sys
 from typing import Optional, Set
+
+# Add parent directory to path to import from remote_modules
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from remote_modules.utils import run
 
 from .deploy_utils import (
     parse_deploy_spec,
@@ -196,7 +201,7 @@ class DeploymentOrchestrator:
             return os.path.join(self.base_dir, repo_name)
     
     def deploy_from_archive(self, source_path: str, domain: Optional[str], path: str, 
-                           git_url: str, commit_hash: Optional[str], run_func, 
+                           git_url: str, commit_hash: Optional[str], 
                            full_deploy: bool = True, keep_source: bool = False,
                            api_subdomain: bool = False) -> dict:
         dest_path = self.get_deployment_path(domain, path, git_url)
@@ -243,7 +248,7 @@ class DeploymentOrchestrator:
 
             # Stop the existing service first so files (especially SQLite) aren't
             # being mutated while we snapshot state.
-            run_func(f"systemctl stop {shlex.quote(f'rails-{app_name}.service')}", check=False)
+            run(f"systemctl stop {shlex.quote(f'rails-{app_name}.service')}", check=False)
 
             # Persist Rails runtime state before wiping the release directory.
             if self._is_rails_project(dest_path):
@@ -279,25 +284,25 @@ class DeploymentOrchestrator:
             except Exception as e:
                 print(f"  ⚠ Warning: Failed to link persistent state: {e}")
 
-        self.build_project(dest_path, project_type, run_func, site_root=site_root)
+        self.build_project(dest_path, project_type, site_root=site_root)
 
         # Fix permissions AFTER all build steps (including frontend), but BEFORE
         # we (re)start services. This is critical for SQLite because `chown -R`
         # on the release directory won't affect symlink targets under
         # `.infra_tools_shared`, and the Rails service runs as `web_user`.
         if project_type == "rails":
-            run_func(f"chown -R {shlex.quote(self.web_user)}:{shlex.quote(self.web_group)} {shlex.quote(persistent_root)}", check=False)
-            run_func(f"find {shlex.quote(persistent_root)} -type d -exec chmod 775 {{}} +", check=False)
-            run_func(f"find {shlex.quote(persistent_root)} -type f -exec chmod 664 {{}} +", check=False)
+            run(f"chown -R {shlex.quote(self.web_user)}:{shlex.quote(self.web_group)} {shlex.quote(persistent_root)}", check=False)
+            run(f"find {shlex.quote(persistent_root)} -type d -exec chmod 775 {{}} +", check=False)
+            run(f"find {shlex.quote(persistent_root)} -type f -exec chmod 664 {{}} +", check=False)
 
-        result = run_func(
+        result = run(
             f"chown -R {shlex.quote(self.web_user)}:{shlex.quote(self.web_group)} {shlex.quote(dest_path)}",
             check=False,
         )
         if result.returncode != 0:
             print(f"  ⚠ Warning: Could not set ownership to {self.web_user}:{self.web_group}")
 
-        run_func(f"chmod -R 775 {shlex.quote(dest_path)}")
+        run(f"chmod -R 775 {shlex.quote(dest_path)}")
         
         # Set up systemd service for Rails apps
         backend_port = None
@@ -317,7 +322,7 @@ class DeploymentOrchestrator:
                 cors_origins.append(f"http://{domain}")
                 cors_origins.append(f"http://www.{domain}")
             
-            create_rails_service(app_name, dest_path, backend_port, self.web_user, self.web_group, run_func, 
+            create_rails_service(app_name, dest_path, backend_port, self.web_user, self.web_group, 
                                env_vars={"CORS_ORIGINS": ",".join(cors_origins)})
             
             # Check for frontend
@@ -344,7 +349,7 @@ class DeploymentOrchestrator:
                     site_root = f"{site_root}/"
                 
                 # Build frontend
-                self._build_node_project(frontend_path, run_func, api_url, site_root)
+                self._build_node_project(frontend_path, api_url, site_root)
                 
                 frontend_serve_path = get_project_root(frontend_path, "node")
                 print(f"  Frontend will be served statically from {frontend_serve_path}")
@@ -370,17 +375,17 @@ class DeploymentOrchestrator:
             'api_subdomain': api_subdomain
         }
     
-    def build_project(self, project_path: str, project_type: str, run_func, site_root: Optional[str] = None):
+    def build_project(self, project_path: str, project_type: str, site_root: Optional[str] = None):
         if project_type == "rails":
-            self._build_rails_project(project_path, run_func)
+            self._build_rails_project(project_path)
         elif project_type == "node":
-            self._build_node_project(project_path, run_func, site_root=site_root)
+            self._build_node_project(project_path, site_root=site_root)
         elif project_type == "static":
             self._build_static_project(project_path)
         else:
             print(f"  ⚠ Unknown project type, no build performed")
     
-    def _build_rails_project(self, project_path: str, run_func):
+    def _build_rails_project(self, project_path: str):
         print(f"  Building Rails project at {project_path}")
         
         # Patch CORS configuration
@@ -414,33 +419,33 @@ class DeploymentOrchestrator:
         build_secret = secrets.token_hex(64)
         env_vars = f"RAILS_ENV=production SECRET_KEY_BASE={build_secret} TMPDIR=/var/tmp"
         
-        run_func(f"cd {shlex.quote(project_path)} && TMPDIR=/var/tmp bundle install --deployment --without development test")
+        run(f"cd {shlex.quote(project_path)} && TMPDIR=/var/tmp bundle install --deployment --without development test")
         
         # Database setup
         print("  Setting up database...")
-        run_func(f"cd {shlex.quote(project_path)} && {env_vars} bundle exec rake db:create", check=False)
-        run_func(f"cd {shlex.quote(project_path)} && {env_vars} bundle exec rake db:migrate")
+        run(f"cd {shlex.quote(project_path)} && {env_vars} bundle exec rake db:create", check=False)
+        run(f"cd {shlex.quote(project_path)} && {env_vars} bundle exec rake db:migrate")
         
         # Seed database if seeds.rb exists
         if os.path.exists(os.path.join(project_path, "db", "seeds.rb")):
             print("  Seeding database...")
-            seed_result = run_func(f"cd {shlex.quote(project_path)} && {env_vars} bundle exec rake db:seed")
+            seed_result = run(f"cd {shlex.quote(project_path)} && {env_vars} bundle exec rake db:seed")
             if seed_result.stdout:
                 print(seed_result.stdout)
         
         # Only precompile assets if the task exists (skips for API-only apps)
-        check_task = run_func(f"cd {shlex.quote(project_path)} && bundle exec rake -T assets:precompile | grep assets:precompile", check=False)
+        check_task = run(f"cd {shlex.quote(project_path)} && bundle exec rake -T assets:precompile | grep assets:precompile", check=False)
         if check_task.returncode == 0:
-            run_func(f"cd {shlex.quote(project_path)} && {env_vars} bundle exec rake assets:precompile")
+            run(f"cd {shlex.quote(project_path)} && {env_vars} bundle exec rake assets:precompile")
         else:
             print("  ℹ Skipping assets:precompile (task not found, likely API-only app)")
         
         print("  ✓ Rails project built")
     
-    def _build_node_project(self, project_path: str, run_func, api_url: Optional[str] = None, site_root: Optional[str] = None):
+    def _build_node_project(self, project_path: str, api_url: Optional[str] = None, site_root: Optional[str] = None):
         print(f"  Building Node.js project at {project_path}")
         
-        run_func(f"cd {shlex.quote(project_path)} && TMPDIR=/var/tmp npm install")
+        run(f"cd {shlex.quote(project_path)} && TMPDIR=/var/tmp npm install")
         
         build_cmd = "npm run build"
         env_prefix = ["TMPDIR=/var/tmp"]
@@ -458,7 +463,7 @@ class DeploymentOrchestrator:
         if env_prefix:
             build_cmd = f"{' '.join(env_prefix)} {build_cmd}"
         
-        result = run_func(f"cd {shlex.quote(project_path)} && {build_cmd}", check=False)
+        result = run(f"cd {shlex.quote(project_path)} && {build_cmd}", check=False)
         
         if result.returncode != 0:
             print("  ⚠ npm run build failed or not configured, skipping build step")

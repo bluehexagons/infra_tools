@@ -4,24 +4,22 @@ import os
 import shlex
 from typing import Optional, Callable, List
 
+from lib.config import SetupConfig
 from .utils import run
 
 
-def install_certbot(**kwargs) -> None:
+def install_certbot(config: SetupConfig) -> None:
     print("Installing certbot...")
     run("apt-get update")
     run("apt-get install -y certbot python3-certbot-nginx")
     print("  ✓ certbot installed")
 
 
-def obtain_letsencrypt_certificate(domains: List[str], email: Optional[str] = None, run_func: Optional[Callable] = None, cert_name: Optional[str] = None) -> bool:
+def obtain_letsencrypt_certificate(domains: List[str], email: Optional[str] = None, cert_name: Optional[str] = None) -> bool:
     """
     Obtain a Let's Encrypt certificate for multiple domains using SANs.
     Let's Encrypt allows up to 100 Subject Alternative Names per certificate.
     """
-    if run_func is None:
-        run_func = run
-    
     if not domains:
         return False
     
@@ -35,7 +33,7 @@ def obtain_letsencrypt_certificate(domains: List[str], email: Optional[str] = No
     
     print(f"  Obtaining Let's Encrypt certificate for {len(domains)} domain(s): {', '.join(domains)}")
     
-    run_func("mkdir -p /var/www/letsencrypt/.well-known/acme-challenge")
+    run("mkdir -p /var/www/letsencrypt/.well-known/acme-challenge")
     
     cmd_parts = [
         "certbot certonly",
@@ -57,7 +55,7 @@ def obtain_letsencrypt_certificate(domains: List[str], email: Optional[str] = No
     
     cmd = " ".join(cmd_parts)
     
-    result = run_func(cmd, check=False)
+    result = run(cmd, check=False)
     
     if result.returncode == 0:
         print(f"  ✓ Certificate '{cert_name}' obtained")
@@ -67,11 +65,8 @@ def obtain_letsencrypt_certificate(domains: List[str], email: Optional[str] = No
         return False
 
 
-def create_domain_cert_links(domains: List[str], cert_name: str, run_func: Optional[Callable] = None) -> None:
+def create_domain_cert_links(domains: List[str], cert_name: str) -> None:
     """Create symlinks for each domain to shared certificate for easy SSL status checking."""
-    if run_func is None:
-        run_func = run
-    
     cert_dir = f"/etc/letsencrypt/live/{cert_name}"
     
     if not os.path.exists(cert_dir):
@@ -103,26 +98,20 @@ def create_domain_cert_links(domains: List[str], cert_name: str, run_func: Optio
             print(f"  ⚠ Failed to create symlink for {domain}: {e}")
 
 
-def setup_certificate_renewal(run_func: Optional[Callable] = None) -> None:
-    if run_func is None:
-        run_func = run
-    
+def setup_certificate_renewal() -> None:
     print("  Setting up automatic certificate renewal...")
     
-    run_func("systemctl enable certbot.timer", check=False)
-    run_func("systemctl start certbot.timer", check=False)
+    run("systemctl enable certbot.timer", check=False)
+    run("systemctl start certbot.timer", check=False)
     
     print("  ✓ Automatic renewal configured")
 
 
-def setup_ssl_for_deployments(deployments: List[dict], email: Optional[str] = None, run_func: Optional[Callable] = None) -> None:
+def setup_ssl_for_deployments(deployments: List[dict], email: Optional[str] = None) -> None:
     """
     Set up Let's Encrypt SSL using SANs for all deployed domains.
     Requests single certificate covering all domains for efficiency.
     """
-    if run_func is None:
-        run_func = run
-    
     print("\n" + "=" * 60)
     print("Setting up Let's Encrypt SSL certificates...")
     print("=" * 60)
@@ -152,14 +141,14 @@ def setup_ssl_for_deployments(deployments: List[dict], email: Optional[str] = No
         print(f"  ⚠ Only the first 100 domains will be included in the certificate")
         domain_list = domain_list[:100]
     
-    success = obtain_letsencrypt_certificate(domain_list, email, run_func, cert_name)
+    success = obtain_letsencrypt_certificate(domain_list, email, cert_name)
     
     if not success:
         print("  ⚠ Failed to obtain certificate")
         return
     
     print(f"  Creating symbolic links for domain certificate references...")
-    create_domain_cert_links(domain_list, cert_name, run_func)
+    create_domain_cert_links(domain_list, cert_name)
     
     print("\n  Regenerating nginx configurations to use Let's Encrypt certificates...")
     
@@ -170,9 +159,9 @@ def setup_ssl_for_deployments(deployments: List[dict], email: Optional[str] = No
     for dep in deployments:
         grouped_deployments[dep['domain']].append(dep)
     
-    create_nginx_sites_for_groups(grouped_deployments, run_func)
+    create_nginx_sites_for_groups(grouped_deployments)
     
-    setup_certificate_renewal(run_func)
+    setup_certificate_renewal()
     
     print("  ✓ SSL setup complete")
     print(f"  ✓ Single certificate covers all {len(domain_list)} domain(s)")

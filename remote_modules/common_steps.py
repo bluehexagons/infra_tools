@@ -5,6 +5,7 @@ import shlex
 import subprocess
 from typing import Optional
 
+from lib.config import SetupConfig
 from .utils import run, is_package_installed, is_service_active, file_contains, generate_password
 
 
@@ -21,7 +22,7 @@ def set_user_password(username: str, password: str) -> bool:
     return True
 
 
-def update_and_upgrade_packages(**_) -> None:
+def update_and_upgrade_packages(config: SetupConfig) -> None:
     print("  Updating package lists...")
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get update -qq")
@@ -32,7 +33,7 @@ def update_and_upgrade_packages(**_) -> None:
     print("  ✓ System packages updated and upgraded")
 
 
-def ensure_sudo_installed(**_) -> None:
+def ensure_sudo_installed(config: SetupConfig) -> None:
     if is_package_installed("sudo"):
         print("  ✓ sudo already installed")
         return
@@ -43,7 +44,7 @@ def ensure_sudo_installed(**_) -> None:
     print("  ✓ sudo installed")
 
 
-def configure_locale(**_) -> None:
+def configure_locale(config: SetupConfig) -> None:
     if file_contains("/etc/environment", "LANG=en_US.UTF-8"):
         print("  ✓ UTF-8 locale already configured")
         return
@@ -65,26 +66,26 @@ def configure_locale(**_) -> None:
     print("  ✓ UTF-8 locale configured (en_US.UTF-8)")
 
 
-def setup_user(username: str, pw: Optional[str], **_) -> None:
-    safe_username = shlex.quote(username)
+def setup_user(config: SetupConfig) -> None:
+    safe_username = shlex.quote(config.username)
     
     result = run(f"id {safe_username}", check=False)
     user_exists = result.returncode == 0
     
     if not user_exists:
         run(f"useradd -m -s /bin/bash {safe_username}")
-        print(f"  Created new user: {username}")
-        if pw:
-            if set_user_password(username, pw):
+        print(f"  Created new user: {config.username}")
+        if config.password:
+            if set_user_password(config.username, config.password):
                 print("  Password set")
         else:
             generated = generate_password()
-            if set_user_password(username, generated):
+            if set_user_password(config.username, generated):
                 print(f"  Generated password: {generated}")
     else:
-        print(f"  User already exists: {username}")
-        if pw:
-            if set_user_password(username, pw):
+        print(f"  User already exists: {config.username}")
+        if config.password:
+            if set_user_password(config.username, config.password):
                 print("  Password updated")
     
     run(f"usermod -aG sudo {safe_username}", check=False)
@@ -97,35 +98,35 @@ def setup_user(username: str, pw: Optional[str], **_) -> None:
         print("  ✓ User configured with sudo privileges")
 
 
-def generate_ssh_key(username: str, **_) -> None:
+def generate_ssh_key(config: SetupConfig) -> None:
     """Generate SSH key pair for user using default algorithm."""
-    safe_username = shlex.quote(username)
-    user_home = f"/home/{username}"
+    safe_username = shlex.quote(config.username)
+    user_home = f"/home/{config.username}"
     ssh_dir = f"{user_home}/.ssh"
     private_key = f"{ssh_dir}/id_ed25519"
     public_key = f"{private_key}.pub"
     
     if os.path.exists(private_key):
-        print(f"  ✓ SSH key already exists for {username}")
+        print(f"  ✓ SSH key already exists for {config.username}")
         return
     
     run(f"mkdir -p {shlex.quote(ssh_dir)}")
     run(f"chmod 700 {shlex.quote(ssh_dir)}")
     
     safe_private_key = shlex.quote(private_key)
-    safe_comment = shlex.quote(f"{username}@workstation")
+    safe_comment = shlex.quote(f"{config.username}@workstation")
     run(f"runuser -u {safe_username} -- ssh-keygen -t ed25519 -f {safe_private_key} -N '' -C {safe_comment}")
     
     run(f"chown -R {safe_username}:{safe_username} {shlex.quote(ssh_dir)}")
     run(f"chmod 600 {shlex.quote(private_key)}")
     run(f"chmod 644 {shlex.quote(public_key)}", check=False)
     
-    print(f"  ✓ SSH key generated for {username} (~/.ssh/id_ed25519)")
+    print(f"  ✓ SSH key generated for {config.username} (~/.ssh/id_ed25519)")
 
 
-def copy_ssh_keys_to_user(username: str, **_) -> None:
-    safe_username = shlex.quote(username)
-    user_home = f"/home/{username}"
+def copy_ssh_keys_to_user(config: SetupConfig) -> None:
+    safe_username = shlex.quote(config.username)
+    user_home = f"/home/{config.username}"
     ssh_dir = f"{user_home}/.ssh"
     authorized_keys = f"{ssh_dir}/authorized_keys"
     
@@ -140,11 +141,11 @@ def copy_ssh_keys_to_user(username: str, **_) -> None:
     run(f"chown -R {safe_username}:{safe_username} {shlex.quote(ssh_dir)}")
     run(f"chmod 600 {shlex.quote(authorized_keys)}")
     
-    print(f"  ✓ SSH keys copied to {username}")
+    print(f"  ✓ SSH keys copied to {config.username}")
 
 
-def configure_time_sync(timezone: Optional[str] = None, **_) -> None:
-    tz = timezone if timezone else "UTC"
+def configure_time_sync(config: SetupConfig) -> None:
+    tz = config.timezone if config.timezone else "UTC"
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     
     # Migrate from systemd-timesyncd to chrony if needed
@@ -168,13 +169,13 @@ def configure_time_sync(timezone: Optional[str] = None, **_) -> None:
     print(f"  ✓ Time synchronization configured (chrony, timezone: {tz})")
 
 
-def install_cli_tools(**_) -> None:
+def install_cli_tools(config: SetupConfig) -> None:
     run("apt-get install -y -qq neovim btop htop curl wget git tmux unzip xdg-utils rsync")
 
     print("  ✓ CLI tools installed (neovim, btop, htop, curl, wget, git, tmux, unzip, rsync)")
 
 
-def check_restart_required(**_) -> None:
+def check_restart_required(config: SetupConfig) -> None:
     needs_restart = False
     
     if os.path.exists("/var/run/reboot-required"):
@@ -187,9 +188,9 @@ def check_restart_required(**_) -> None:
         print("  ✓ No restart required")
 
 
-def install_ruby(username: str, **_) -> None:
-    safe_username = shlex.quote(username)
-    user_home = f"/home/{username}"
+def install_ruby(config: SetupConfig) -> None:
+    safe_username = shlex.quote(config.username)
+    user_home = f"/home/{config.username}"
     rbenv_dir = f"{user_home}/.rbenv"
     
     if os.path.exists(rbenv_dir):
@@ -228,7 +229,7 @@ eval "$(rbenv init -)"
         print("  ✓ rbenv + system Ruby + bundler installed")
 
 
-def install_go(username: str, **_) -> None:
+def install_go(config: SetupConfig) -> None:
     result = run("which go", check=False)
     if result.returncode == 0:
         print("  ✓ Go already installed")
@@ -259,7 +260,7 @@ def install_go(username: str, **_) -> None:
     print(f"  ✓ Go {go_version} installed")
 
 
-def install_node(username: str, **_) -> None:
+def install_node(config: SetupConfig) -> None:
     # Global install to /opt/nvm to avoid permission issues with service users
     nvm_dir = "/opt/nvm"
     
@@ -372,7 +373,7 @@ WantedBy=timers.target
     print(f"  ✓ {check_name} auto-update configured ({schedule})")
 
 
-def configure_auto_update_node(**_) -> None:
+def configure_auto_update_node(config: SetupConfig) -> None:
     """Configure automatic updates for Node.js via nvm."""
     _configure_auto_update_systemd(
         service_name="auto-update-node",
@@ -385,9 +386,9 @@ def configure_auto_update_node(**_) -> None:
     )
 
 
-def configure_auto_update_ruby(username: str, **_) -> None:
+def configure_auto_update_ruby(config: SetupConfig) -> None:
     """Configure automatic updates for Ruby via rbenv."""
-    user_home = f"/home/{username}"
+    user_home = f"/home/{config.username}"
     rbenv_dir = f"{user_home}/.rbenv"
     
     _configure_auto_update_systemd(
@@ -398,5 +399,5 @@ def configure_auto_update_ruby(username: str, **_) -> None:
         schedule="Sun *-*-* 04:00:00",
         check_path=rbenv_dir,
         check_name="Ruby",
-        user=username
+        user=config.username
     )

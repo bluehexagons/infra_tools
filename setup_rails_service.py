@@ -29,12 +29,12 @@ def main():
         # Ensure rails user exists
         run("id rails || useradd -m -s /bin/bash rails", check=False)
         
-        create_rails_service(app_name, app_path, 3000, "rails", "rails", run)
+        create_rails_service(app_name, app_path, 3000, "rails", "rails")
         
         frontend_path = os.path.join(app_path, "frontend")
         if os.path.exists(frontend_path):
             print(f"\nDetected frontend at {frontend_path}")
-            create_node_service(app_name, frontend_path, 4000, "rails", "rails", run)
+            create_node_service(app_name, frontend_path, 4000, "rails", "rails")
             
         print("\n✓ Service setup complete!")
         print("\nYou can check the service status with:")

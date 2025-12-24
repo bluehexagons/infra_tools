@@ -4,7 +4,12 @@ import os
 import shlex
 import secrets
 import re
-from typing import Callable, Optional
+import sys
+from typing import Optional
+
+# Add parent directory to path to import from remote_modules
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from remote_modules.utils import run
 
 
 def generate_node_service(app_name: str, app_path: str, port: int = 4000,
@@ -32,7 +37,7 @@ WantedBy=multi-user.target
 
 
 def create_node_service(app_name: str, app_path: str, port: int,
-                       web_user: str, web_group: str, run_func: Callable) -> None:
+                       web_user: str, web_group: str) -> None:
     """Create and enable a Node.js systemd service."""
     service_name = f"node-{app_name}"
     service_file = f"/etc/systemd/system/{service_name}.service"
@@ -55,9 +60,9 @@ def create_node_service(app_name: str, app_path: str, port: int,
     except PermissionError as e:
         raise PermissionError(f"Failed to write service file {service_file}. Need root permissions.") from e
     
-    run_func("systemctl daemon-reload")
-    run_func(f"systemctl enable {service_name}")
-    run_func(f"systemctl restart {service_name}")
+    run("systemctl daemon-reload")
+    run(f"systemctl enable {service_name}")
+    run(f"systemctl restart {service_name}")
     
     print(f"  ✓ Created and started systemd service: {service_name}")
     
@@ -66,7 +71,7 @@ def create_node_service(app_name: str, app_path: str, port: int,
     time.sleep(1)
     
     # Check if service is running
-    result = run_func(f"systemctl is-active {service_name}", check=False)
+    result = run(f"systemctl is-active {service_name}", check=False)
     if result.returncode != 0:
         print(f"  ⚠ Warning: {service_name} may not be running. Check with: systemctl status {service_name}")
     else:
@@ -110,7 +115,7 @@ WantedBy=multi-user.target
 
 
 def create_rails_service(app_name: str, app_path: str, port: int,
-                        web_user: str, web_group: str, run_func: Callable,
+                        web_user: str, web_group: str,
                         env_vars: Optional[dict] = None) -> None:
     """Create and enable a Rails systemd service."""
     service_name = f"rails-{app_name}"
@@ -138,9 +143,9 @@ def create_rails_service(app_name: str, app_path: str, port: int,
     except PermissionError as e:
         raise PermissionError(f"Failed to write service file {service_file}. Need root permissions.") from e
     
-    run_func("systemctl daemon-reload")
-    run_func(f"systemctl enable {service_name}")
-    run_func(f"systemctl restart {service_name}")
+    run("systemctl daemon-reload")
+    run(f"systemctl enable {service_name}")
+    run(f"systemctl restart {service_name}")
     
     print(f"  ✓ Created and started systemd service: {service_name}")
     
@@ -149,7 +154,7 @@ def create_rails_service(app_name: str, app_path: str, port: int,
     time.sleep(1)
     
     # Check if service is running
-    result = run_func(f"systemctl is-active {service_name}", check=False)
+    result = run(f"systemctl is-active {service_name}", check=False)
     if result.returncode != 0:
         print(f"  ⚠ Warning: {service_name} may not be running. Check with: systemctl status {service_name}")
     else:

@@ -1,77 +1,110 @@
 # infra_tools
 
-Automated setup scripts for remote Linux systems.
+Automated setup scripts for remote Linux systems (Debian).
 
 ## Quick Start
 
 ```bash
-# Web Server (Nginx, Ruby, Node, Deploy)
 python3 setup_server_web.py example.com --ruby --node --deploy example.com https://github.com/user/repo.git
-
-# Development Workstation (Desktop, VS Code, Tools)
 python3 setup_workstation_desktop.py 192.168.1.100 --desktop i3 --browser firefox
-
-# Patch Existing System (Add features/deployments)
 python3 patch_setup.py example.com --ssl --deploy api.example.com https://github.com/user/api.git
 ```
 
-## System Types
+## Setup Scripts
 
-| Script | Description | Key Features |
-|--------|-------------|--------------|
-| `setup_server_web.py` | Web Server | Nginx, Reverse Proxy, SSL, Deployments |
-| `setup_server_dev.py` | Dev Server | CLI Tools, No Desktop |
-| `setup_workstation_desktop.py` | Desktop Workstation | RDP, Audio, Browser, VS Code |
-| `setup_pc_dev.py` | PC Dev Workstation | Bare Metal, Remmina, LibreOffice |
-| `setup_workstation_dev.py` | Light Dev Workstation | RDP, No Audio, VS Code |
-| `setup_server_proxmox.py` | Proxmox Hardening | Security Updates, SSH Hardening |
-| `setup_steps.py` | Custom | Run specific steps only |
+| Script | Description |
+|--------|-------------|
+| `setup_server_web.py` | Web server with Nginx, reverse proxy, SSL, deployments |
+| `setup_server_dev.py` | Development server with CLI tools, no desktop |
+| `setup_workstation_desktop.py` | Desktop workstation with RDP, audio, browser, VS Code |
+| `setup_pc_dev.py` | PC dev workstation with bare metal, Remmina, LibreOffice |
+| `setup_workstation_dev.py` | Light dev workstation with RDP, no audio, VS Code |
+| `setup_server_proxmox.py` | Proxmox hardening with security updates, SSH hardening |
+| `setup_steps.py` | Custom setup, run specific steps only |
 
-**Common Features:** User setup, sudo, Firewall/SSH hardening, Auto-updates, Chrony (time sync), CLI tools (neovim, btop, git, tmux).
+Common features: User setup, sudo, firewall/SSH hardening, auto-updates, Chrony, CLI tools (neovim, btop, git, tmux).
 
-## Usage & Flags
+## Command-Line Flags
 
-All scripts accept IP/Hostname.
+### Basic Flags
 
 | Flag | Description |
 |------|-------------|
-| `--rdp` | Enable RDP/XRDP setup (Default: enabled for workstation setups) |
-| `--x2go` | Enable X2Go setup (Default: enabled for workstation setups) |
-| `--ruby` | Install rbenv + Ruby + Bundler |
+| `host` | IP address or hostname (positional argument) |
+| `username` | Username (positional, optional, defaults to current user) |
+| `-k, --key PATH` | SSH private key path |
+| `-p, --password PASS` | User password |
+| `-t, --timezone TZ` | Timezone (defaults to UTC) |
+| `--name NAME` | Friendly name for this configuration |
+| `--tags TAG1,TAG2` | Comma-separated tags for this configuration |
+| `--dry-run` | Simulate execution without making changes |
+
+### Desktop/Workstation Flags
+
+| Flag | Description |
+|------|-------------|
+| `--rdp` / `--no-rdp` | Enable/disable RDP/XRDP (default: enabled for workstation setups) |
+| `--x2go` / `--no-x2go` | Enable/disable X2Go remote desktop (default: enabled for workstation setups) |
+| `--skip-audio` | Skip audio setup (desktop only) |
+| `--desktop [xfce\|i3\|cinnamon]` | Desktop environment (default: xfce) |
+| `--browser [brave\|firefox\|browsh\|vivaldi\|lynx]` | Web browser (default: brave) |
+| `--flatpak` | Install desktop apps via Flatpak |
+| `--office` | Install LibreOffice (default: enabled for pc_dev) |
+
+### Development Flags
+
+| Flag | Description |
+|------|-------------|
+| `--ruby` | Install rbenv + latest Ruby + Bundler |
 | `--node` | Install nvm + Node.js + PNPM |
-| `--go` | Install Go |
-| `--desktop [xfce\|i3\|cinnamon]` | Choose desktop environment (Default: xfce) |
-| `--browser [brave\|firefox\|...]` | Choose browser (Default: brave) |
-| `--flatpak` | Install Flatpak support |
-| `--office` | Install LibreOffice |
-| `--dry-run` | Simulate execution |
+| `--go` | Install latest Go |
+| `--steps STEP1 STEP2` | Run specific custom steps (for setup_steps.py) |
 
 ### Deployment Flags
 
 | Flag | Description |
 |------|-------------|
-| `--deploy [DOMAIN] [GIT_URL]` | Deploy repo to domain/path. Supports multiple. |
-| `--ssl` | Enable Let's Encrypt SSL |
-| `--ssl-email [EMAIL]` | Email for SSL registration |
-| `--cloudflare` | Preconfigure Cloudflare Tunnel |
-| `--api-subdomain` | Deploy Rails API to `api.domain.com` instead of `domain.com/api` |
+| `--deploy DOMAIN GIT_URL` | Deploy repository to domain/path (can use multiple times) |
+| `--full-deploy` | Always rebuild deployments (default: skip unchanged) |
+| `--ssl` | Enable Let's Encrypt SSL/TLS certificates |
+| `--ssl-email EMAIL` | Email for SSL registration (optional) |
+| `--cloudflare` | Preconfigure Cloudflare Tunnel (disables public HTTP/HTTPS ports) |
+| `--api-subdomain` | Deploy Rails API to api.domain.com instead of domain.com/api |
 
 ### Samba Flags
 
 | Flag | Description |
 |------|-------------|
 | `--samba` | Install and configure Samba for SMB file sharing |
-| `--share [read\|write] [NAME] [PATHS] [USERS]` | Configure share: access type, name, comma-separated paths, comma-separated username:password pairs. Supports multiple. |
+| `--share TYPE NAME PATHS USERS` | Configure Samba share (can use multiple times): TYPE (read or write), NAME (share name), PATHS (comma-separated paths), USERS (comma-separated username:password pairs) |
+
+## Deployment Guide
+
+The `--deploy` flag automates building and serving web applications:
+
+- **Rails**: `bundle install`, `db:migrate`, `assets:precompile`, Systemd service
+- **Node/Vite**: `npm install`, `npm run build`, static serving
+- **Static**: Direct file serving
+
+**Examples:**
+
+```bash
+# Single deployment
+python3 setup_server_web.py web.com --deploy web.com https://github.com/user/repo.git
+
+# Multiple sites with SSL
+python3 setup_server_web.py web.com \
+  --deploy site1.com https://github.com/user/site1.git \
+  --deploy site2.com https://github.com/user/site2.git \
+  --ssl --ssl-email admin@web.com
+
+# Rails API as subdomain
+python3 setup_server_web.py api.com --deploy api.com https://github.com/user/api.git --api-subdomain
+```
 
 ## Samba Guide
 
-The `--samba` flag installs Samba and configures SMB shares for file sharing. Use `--share` to define shares.
-
-**Share Configuration:**
-- **Access Type:** `read` (read-only) or `write` (read-write)
-- **Share Name:** Identifier for the share
-- **Paths:** Comma-separated paths to share (e.g., `/mnt/store,/data`)
-- **Users:** Comma-separated username:password pairs (e.g., `guest:guest,admin:secret`)
+Configure SMB file sharing with security hardening, firewall rules, and fail2ban protection.
 
 **Examples:**
 
@@ -79,7 +112,7 @@ The `--samba` flag installs Samba and configures SMB shares for file sharing. Us
 # Single read-only share
 python3 setup_server_dev.py 192.168.1.10 --samba --share read store /mnt/store guest:guest
 
-# Read and write shares for same path
+# Read and write shares for same path with different users
 python3 setup_server_dev.py 192.168.1.10 --samba \
   --share read store /mnt/store guest:guest \
   --share write store /mnt/store admin:password
@@ -90,28 +123,7 @@ python3 patch_setup.py 192.168.1.10 --samba \
   --share write private /mnt/private admin:secret
 ```
 
-## Deployment Guide
-
-The `--deploy` flag automates building and serving web applications.
-
-- **Rails**: `bundle install`, `db:migrate`, `assets:precompile`, Systemd service.
-- **Node/Vite**: `npm install`, `npm run build`, Static serving.
-- **Static**: Serves files directly.
-
-**Examples:**
-
-```bash
-# Deploy Rails API to subdomain
-python3 setup_server_web.py web.com --deploy web.com https://github.com/u/repo.git --api-subdomain
-
-# Deploy multiple sites
-python3 setup_server_web.py web.com \
-  --deploy site1.com https://github.com/u/site1.git \
-  --deploy site2.com https://github.com/u/site2.git \
-  --ssl --ssl-email admin@web.com
-```
-
-## Patching & Management
+## Patch Setup
 
 Use `patch_setup.py` to update existing systems or manage saved configurations.
 
@@ -119,7 +131,7 @@ Use `patch_setup.py` to update existing systems or manage saved configurations.
 # Add SSL to existing server
 python3 patch_setup.py web.com --ssl --ssl-email me@web.com
 
-# List saved configurations
+# List saved configurations (filter by host/name/tag)
 python3 patch_setup.py list [pattern]
 
 # Show configuration details
@@ -128,15 +140,17 @@ python3 patch_setup.py info [pattern]
 # Remove saved configurations
 python3 patch_setup.py rm [pattern]
 
-# Redeploy/Patch multiple systems
+# Redeploy/patch multiple systems matching pattern
 python3 patch_setup.py deploy [pattern]
 ```
+
+Pattern matching is case-insensitive and searches hosts, names, and tags.
 
 ## Requirements
 
 - Python 3.9+
-- SSH root access
-- OS: Debian
+- SSH root access to target system
+- Target OS: Debian
 
 ## License
 

@@ -3,10 +3,13 @@
 import argparse
 import getpass
 import os
-import shlex
 import sys
 from typing import Optional
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from lib.arg_parser import create_setup_argument_parser
+from lib.config import SetupConfig
 from remote_modules.utils import validate_username, detect_os, set_dry_run
 from remote_modules.progress import progress_bar
 from remote_modules.system_types import get_steps_for_system_type
@@ -16,66 +19,69 @@ VALID_SYSTEM_TYPES = ["workstation_desktop", "pc_dev", "workstation_dev", "serve
 
 
 def extract_repo_name(git_url: str) -> str:
-    """Extract repository name from git URL."""
     repo_name = git_url.rstrip('/').split('/')[-1]
     if repo_name.endswith('.git'):
         repo_name = repo_name[:-4]
     return repo_name
 
 
+def config_from_remote_args(args: argparse.Namespace) -> SetupConfig:
+    if args.steps:
+        system_type = "custom_steps"
+    elif args.system_type:
+        system_type = args.system_type
+    else:
+        raise ValueError("Either --system-type or --steps must be specified")
+    
+    if system_type == "server_proxmox":
+        username = "root"
+    else:
+        username = args.username or getpass.getuser()
+    
+    install_office = args.office
+    if system_type == "pc_dev" and not args.office:
+        install_office = True
+    
+    config = SetupConfig(
+        host="localhost",
+        username=username,
+        system_type=system_type,
+        password=args.password,
+        ssh_key=None,
+        timezone=args.timezone or "UTC",
+        friendly_name=None,
+        tags=None,
+        enable_rdp=args.rdp,
+        enable_x2go=args.x2go,
+        skip_audio=args.skip_audio,
+        desktop=args.desktop,
+        browser=args.browser,
+        use_flatpak=args.flatpak,
+        install_office=install_office,
+        dry_run=args.dry_run,
+        install_ruby=args.ruby,
+        install_go=args.go,
+        install_node=args.node,
+        custom_steps=args.steps,
+        deploy_specs=args.deploy,
+        full_deploy=args.full_deploy,
+        enable_ssl=args.ssl,
+        ssl_email=args.ssl_email,
+        enable_cloudflare=args.cloudflare,
+        api_subdomain=args.api_subdomain,
+        enable_samba=args.samba,
+        samba_shares=args.share
+    )
+    
+    return config
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Remote system setup")
-    parser.add_argument("--system-type", required=False,
-                       choices=VALID_SYSTEM_TYPES,
-                       help="System type to setup")
-    parser.add_argument("--steps", default=None,
-                       help="Space-separated list of steps to run (e.g., 'install_ruby install_node')")
-    parser.add_argument("--username", default=None,
-                       help="Username (defaults to current user, not used for server_proxmox)")
-    parser.add_argument("--password", default=None,
-                       help="User password (not used for server_proxmox)")
-    parser.add_argument("--timezone", default=None,
-                       help="Timezone (defaults to UTC)")
-    parser.add_argument("--rdp", action=argparse.BooleanOptionalAction, default=False,
-                       help="Enable RDP/XRDP setup")
-    parser.add_argument("--x2go", action=argparse.BooleanOptionalAction, default=False,
-                       help="Enable X2Go remote desktop access")
-    parser.add_argument("--skip-audio", action="store_true",
-                       help="Skip audio setup")
-    parser.add_argument("--desktop", choices=["xfce", "i3", "cinnamon"], default="xfce",
-                       help="Desktop environment to install (default: xfce)")
-    parser.add_argument("--browser", choices=["brave", "firefox", "browsh", "vivaldi", "lynx"], default="brave",
-                       help="Web browser to install (default: brave)")
-    parser.add_argument("--flatpak", action="store_true",
-                       help="Install desktop apps via Flatpak when available (non-containerized environments)")
-    parser.add_argument("--office", action="store_true",
-                       help="Install LibreOffice (desktop only)")
-    parser.add_argument("--dry-run", action="store_true",
-                       help="Show what would be done without executing commands")
-    parser.add_argument("--ruby", action="store_true",
-                       help="Install rbenv + latest Ruby version")
-    parser.add_argument("--go", action="store_true",
-                       help="Install latest Go version")
-    parser.add_argument("--node", action="store_true",
-                       help="Install nvm + latest Node.JS + PNPM + update NPM")
-    parser.add_argument("--deploy", action="append", nargs=2, metavar=("DOMAIN_OR_PATH", "GIT_URL"),
-                       help="Deploy a git repository (domain.com/path or /path) to auto-configure nginx. Can be comma-separated for multiple locations.")
-    parser.add_argument("--lite-deploy", action="store_true",
-                       help="Use pre-uploaded repository files instead of cloning (for remote execution)")
-    parser.add_argument("--full-deploy", action="store_true",
-                       help="Always rebuild deployments even if they haven't changed (default: skip unchanged deployments)")
-    parser.add_argument("--ssl", action="store_true",
-                       help="Enable Let's Encrypt SSL/TLS certificates for deployed domains")
-    parser.add_argument("--ssl-email",
-                       help="Email address for Let's Encrypt registration (optional)")
-    parser.add_argument("--cloudflare", action="store_true",
-                       help="Preconfigure server for Cloudflare tunnel (disables public HTTP/HTTPS ports)")
-    parser.add_argument("--api-subdomain", action="store_true",
-                       help="Deploy Rails API as a subdomain (api.domain.com) instead of a subdirectory (domain.com/api)")
-    parser.add_argument("--samba", action="store_true",
-                       help="Install and configure Samba for SMB file sharing")
-    parser.add_argument("--share", action="append", nargs=4, metavar=("ACCESS_TYPE", "SHARE_NAME", "PATHS", "USERS"),
-                       help="Configure Samba share: access_type (read|write), share_name, comma-separated paths, comma-separated username:password pairs (can be used multiple times)")
+    parser = create_setup_argument_parser(
+        description="Remote system setup",
+        for_remote=True,
+        allow_steps=True
+    )
     
     args = parser.parse_args()
     
@@ -85,64 +91,55 @@ def main() -> int:
         print("DRY-RUN MODE ENABLED")
         print("=" * 60)
     
-    if args.steps:
-        system_type = "custom_steps"
-    elif args.system_type:
-        system_type = args.system_type
-    else:
-        print("Error: Either --system-type or --steps must be specified")
+    # Create config from arguments
+    try:
+        config = config_from_remote_args(args)
+    except ValueError as e:
+        print(f"Error: {e}")
         return 1
     
-    if system_type == "server_proxmox":
-        username = "root"
-    else:
-        username = args.username or getpass.getuser()
-        if not validate_username(username):
-            print(f"Error: Invalid username: {username}")
-            return 1
-
+    # Validate username
+    if not validate_username(config.username):
+        print(f"Error: Invalid username: {config.username}")
+        return 1
+    
+    # Print configuration
     print("=" * 60)
-    print(f"Remote Setup ({system_type})")
+    print(f"Remote Setup ({config.system_type})")
     print("=" * 60)
-    if system_type != "server_proxmox":
-        print(f"User: {username}")
-    print(f"Timezone: {args.timezone or 'UTC'}")
-    if system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        print(f"RDP: {'Yes' if args.rdp else 'No'}")
-        print(f"X2Go: {'Yes' if args.x2go else 'No'}")
-    elif args.rdp and system_type == "server_dev":
+    if config.system_type != "server_proxmox":
+        print(f"User: {config.username}")
+    print(f"Timezone: {config.timezone}")
+    if config.system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
+        print(f"RDP: {'Yes' if config.enable_rdp else 'No'}")
+        print(f"X2Go: {'Yes' if config.enable_x2go else 'No'}")
+    elif config.enable_rdp and config.system_type == "server_dev":
         print("RDP: Yes")
-    if args.x2go and system_type == "server_dev":
+    if config.enable_x2go and config.system_type == "server_dev":
         print("X2Go: Yes")
-    if args.skip_audio:
+    if config.skip_audio:
         print("Skip audio: Yes")
-    if args.desktop != "xfce" and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        print(f"Desktop: {args.desktop}")
-    if args.browser != "brave" and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        print(f"Browser: {args.browser}")
-    if args.flatpak and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
+    if config.desktop != "xfce" and config.system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
+        print(f"Desktop: {config.desktop}")
+    if config.browser != "brave" and config.system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
+        print(f"Browser: {config.browser}")
+    if config.use_flatpak and config.system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
         print("Flatpak: Yes")
-    
-    # Default to installing LibreOffice for pc_dev
-    install_office_flag = args.office
-    if system_type == "pc_dev" and not args.office:
-        install_office_flag = True
-    
-    if install_office_flag and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
+    if config.install_office and config.system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
         print("Office: Yes")
-    if args.dry_run:
+    if config.dry_run:
         print("Dry-run: Yes")
-    if args.steps:
-        print(f"Steps: {args.steps}")
-    if args.deploy:
-        print(f"Deployments: {len(args.deploy)} repository(ies)")
-        for location, git_url in args.deploy:
+    if config.custom_steps:
+        print(f"Steps: {config.custom_steps}")
+    if config.deploy_specs:
+        print(f"Deployments: {len(config.deploy_specs)} repository(ies)")
+        for location, git_url in config.deploy_specs:
             print(f"  - {git_url} -> {location}")
-        if args.ssl:
+        if config.enable_ssl:
             print("SSL: Yes (Let's Encrypt)")
-            if args.ssl_email:
-                print(f"SSL Email: {args.ssl_email}")
-    if args.cloudflare:
+            if config.ssl_email:
+                print(f"SSL Email: {config.ssl_email}")
+    if config.enable_cloudflare:
         print("Cloudflare: Yes (tunnel preconfiguration)")
     sys.stdout.flush()
 
@@ -150,29 +147,20 @@ def main() -> int:
     print("OS: Debian")
     sys.stdout.flush()
 
-    steps = get_steps_for_system_type(system_type, args.skip_audio, args.desktop, args.browser, args.flatpak, install_office_flag, args.ruby, args.go, args.node, args.steps, args.rdp, args.x2go)
+    steps = get_steps_for_system_type(config)
+    
     total_steps = len(steps)
     for i, (name, func) in enumerate(steps, 1):
         bar = progress_bar(i, total_steps)
         print(f"\n{bar} [{i}/{total_steps}] {name}")
         sys.stdout.flush()
-        func(
-            username=username,
-            pw=args.password,
-            timezone=args.timezone,
-            desktop=args.desktop,
-            browser=args.browser,
-            use_flatpak=args.flatpak,
-            install_office=install_office_flag,
-            enable_rdp=args.rdp,
-            enable_x2go=args.x2go
-        )
+        func(config)
     
     bar = progress_bar(total_steps, total_steps)
     print(f"\n{bar} Complete!")
     
     # Configure Cloudflare tunnel if requested
-    if args.cloudflare and system_type == "server_web":
+    if config.enable_cloudflare and config.system_type == "server_web":
         from remote_modules.cloudflare_steps import (
             configure_cloudflare_firewall,
             create_cloudflared_config_directory,
@@ -200,7 +188,7 @@ def main() -> int:
         print("  Run 'sudo setup-cloudflare-tunnel' to install cloudflared")
     
     # Handle deployments if specified
-    if args.deploy:
+    if config.deploy_specs:
         from remote_modules.deploy_steps import deploy_repository
         import shutil
         import tempfile
@@ -214,7 +202,7 @@ def main() -> int:
         
         if args.lite_deploy:
             # Use pre-uploaded files from /opt/infra_tools/deployments/
-            for deploy_specs_str, git_url in args.deploy:
+            for deploy_specs_str, git_url in config.deploy_specs:
                 repo_name = extract_repo_name(git_url)
                 source_path = f'/opt/infra_tools/deployments/{repo_name}'
                 
@@ -242,11 +230,11 @@ def main() -> int:
                         deploy_spec=deploy_spec,
                         git_url=git_url,
                         commit_hash=commit_hash,
-                        full_deploy=args.full_deploy,
+                        full_deploy=config.full_deploy,
                         web_user="rails",
                         web_group="rails",
                         keep_source=True,
-                        api_subdomain=args.api_subdomain
+                        api_subdomain=config.api_subdomain
                     )
                     if info:
                         deployments.append(info)
@@ -254,7 +242,7 @@ def main() -> int:
             # Clone repositories directly (local execution)
             temp_dir = tempfile.mkdtemp(prefix="infra_deploy_")
             try:
-                for deploy_specs_str, git_url in args.deploy:
+                for deploy_specs_str, git_url in config.deploy_specs:
                     repo_name = extract_repo_name(git_url)
                     clone_path = os.path.join(temp_dir, repo_name)
                     
@@ -285,11 +273,11 @@ def main() -> int:
                             deploy_spec=deploy_spec,
                             git_url=git_url,
                             commit_hash=commit_hash,
-                            full_deploy=args.full_deploy,
+                            full_deploy=config.full_deploy,
                             web_user="rails",
                             web_group="rails",
                             keep_source=True,
-                            api_subdomain=args.api_subdomain
+                            api_subdomain=config.api_subdomain
                         )
                         if info:
                             deployments.append(info)
@@ -311,29 +299,30 @@ def main() -> int:
             for dep in deployments:
                 grouped_deployments[dep['domain']].append(dep)
             
-            create_nginx_sites_for_groups(grouped_deployments, run)
+            create_nginx_sites_for_groups(grouped_deployments)
             
             # Set up SSL if requested
-            if args.ssl:
+            if config.enable_ssl:
                 from remote_modules.ssl_steps import install_certbot, setup_ssl_for_deployments
                 
                 print("\n" + "=" * 60)
                 print("Installing certbot...")
                 print("=" * 60)
-                install_certbot()
+                install_certbot(config)
                 
-                setup_ssl_for_deployments(deployments, args.ssl_email, run)
+                setup_ssl_for_deployments(deployments, config.ssl_email)
             
             # Update Cloudflare tunnel configuration if configured
-            if args.cloudflare:
+            if config.enable_cloudflare:
                 from remote_modules.cloudflare_steps import run_cloudflare_tunnel_setup
                 
                 print("\n" + "=" * 60)
-                print("Updating Cloudflare tunnel configuration...")
+                print("Updating cloudflared config for deployments...")
                 print("=" * 60)
-                run_cloudflare_tunnel_setup()
+                run_cloudflare_tunnel_setup(config)
     
-    if args.samba:
+    # Configure Samba if requested
+    if config.enable_samba:
         from remote_modules.samba_steps import (
             install_samba,
             configure_samba_firewall,
@@ -358,22 +347,21 @@ def main() -> int:
         print("\n[4/4] Configuring fail2ban for Samba brute-force protection")
         configure_samba_fail2ban()
         
-        if args.share:
+        if config.samba_shares:
             print("\n" + "=" * 60)
-            print(f"Configuring {len(args.share)} Samba share(s)...")
+            print(f"Configuring {len(config.samba_shares)} Samba share(s)...")
             print("=" * 60)
             
-            for i, share_spec in enumerate(args.share, 1):
-                print(f"\n[{i}/{len(args.share)}] Setting up share: {share_spec[1]}_{share_spec[0]}")
-                setup_samba_share(share_spec=share_spec)
+            for i, share_spec in enumerate(config.samba_shares, 1):
+                print(f"\n[{i}/{len(config.samba_shares)}] Setting up share: {share_spec[1]}_{share_spec[0]}")
+                setup_samba_share(config, share_spec=share_spec)
         
         print("\n✓ Samba configuration complete")
     
     print("\n" + "=" * 60)
-    print("Setup completed successfully!")
+    print("✓ Remote setup complete!")
     print("=" * 60)
-    sys.stdout.flush()
-
+    
     return 0
 
 
