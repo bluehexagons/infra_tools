@@ -1,22 +1,29 @@
 #!/usr/bin/env python3
 
+"""Common utilities for setup scripts."""
+
 import argparse
-import getpass
-import hashlib
 import io
 import os
-import re
 import shlex
 import shutil
 import subprocess
 import sys
 import tarfile
 import tempfile
-import json
-from dataclasses import asdict
-from typing import Optional, Dict, List, Any
+from typing import Optional
 
 from lib.config import SetupConfig
+from lib.validators import validate_host, validate_username
+from lib.system_utils import get_current_username, get_local_timezone
+from lib.display import print_name_and_tags, print_success_header, print_rdp_x2go_info
+from lib.cache import (
+    get_cache_path_for_host,
+    save_setup_command,
+    load_setup_command,
+    merge_setup_configs,
+    SETUP_CACHE_DIR
+)
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -25,180 +32,6 @@ REMOTE_MODULES_DIR = os.path.join(SCRIPT_DIR, "..", "remote_modules")
 SHARED_DIR = os.path.join(SCRIPT_DIR, "..", "shared")
 REMOTE_INSTALL_DIR = "/opt/infra_tools"
 GIT_CACHE_DIR = os.path.expanduser("~/.cache/infra_tools/git_repos")
-SETUP_CACHE_DIR = os.path.expanduser("~/.cache/infra_tools/setups")
-
-
-def validate_ip_address(ip: str) -> bool:
-    pattern = r'^(\d{1,3}\.){3}\d{1,3}$'
-    if not re.match(pattern, ip):
-        return False
-    octets = ip.split('.')
-    return all(0 <= int(octet) <= 255 for octet in octets)
-
-
-def validate_host(host: str) -> bool:
-    normalized_host = host.lower().rstrip('.')
-    if validate_ip_address(normalized_host):
-        return True
-    hostname_pattern = r'^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?$'
-    return bool(re.match(hostname_pattern, normalized_host))
-
-
-def validate_username(username: str) -> bool:
-    pattern = r'^[a-z_][a-z0-9_-]{0,31}$'
-    return bool(re.match(pattern, username))
-
-
-def get_local_timezone() -> str:
-    if os.path.exists("/etc/timezone"):
-        try:
-            with open("/etc/timezone", "r") as f:
-                tz = f.read().strip()
-                if tz:
-                    return tz
-        except Exception:
-            pass
-    
-    try:
-        result = subprocess.run(
-            ["timedatectl", "show", "-p", "Timezone", "--value"],
-            capture_output=True, text=True, timeout=5
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-    except Exception:
-        pass
-    
-    if os.path.islink("/etc/localtime"):
-        try:
-            target = os.readlink("/etc/localtime")
-            if "zoneinfo/" in target:
-                tz = target.split("zoneinfo/", 1)[1]
-                return tz
-        except Exception:
-            pass
-    
-    return "UTC"
-
-
-def get_current_username() -> str:
-    return getpass.getuser()
-
-
-def print_name_and_tags(config: SetupConfig) -> None:
-    """Print configuration name and tags if present."""
-    if config.friendly_name:
-        print(f"Name: {config.friendly_name}")
-    if config.tags and len(config.tags) > 0:
-        print(f"Tags: {', '.join(config.tags)}")
-
-
-def print_success_header(config: SetupConfig) -> None:
-    """Print common success information for all setup scripts."""
-    print(f"Host: {config.host}")
-    print(f"Username: {config.username}")
-    if config.friendly_name or config.tags:
-        print()
-        print_name_and_tags(config)
-
-
-def print_rdp_x2go_info(config: SetupConfig) -> None:
-    """Print RDP and X2Go connection information."""
-    if config.enable_rdp:
-        print(f"RDP: {config.host}:3389")
-        print(f"  Client: Remmina, Microsoft Remote Desktop")
-    if config.enable_x2go:
-        print(f"X2Go: {config.host}:22 (SSH)")
-        print(f"  Client: x2goclient, Session: XFCE")
-
-
-def get_cache_path_for_host(host: str) -> str:
-    normalized_host = host.lower().rstrip('.')
-    import hashlib
-    host_hash = hashlib.sha256(normalized_host.encode()).hexdigest()[:8]
-    safe_host = re.sub(r'[^a-zA-Z0-9._-]', '_', normalized_host)
-    os.makedirs(SETUP_CACHE_DIR, exist_ok=True)
-    return os.path.join(SETUP_CACHE_DIR, f"{safe_host}_{host_hash}.json")
-
-
-def save_setup_command(config: SetupConfig) -> None:
-    """Save setup configuration to cache."""
-    cache_path = get_cache_path_for_host(config.host)
-    
-    cache_data = {
-        "host": config.host,
-        "system_type": config.system_type,
-        "args": config.to_dict(),
-        "script": f"setup_{config.system_type}.py"
-    }
-    
-    # Add name and tags at top level for easier access
-    if config.friendly_name:
-        cache_data["name"] = config.friendly_name
-    if config.tags:
-        cache_data["tags"] = config.tags
-    
-    with open(cache_path, 'w') as f:
-        json.dump(cache_data, f, indent=2)
-
-
-def load_setup_command(host: str) -> Optional[SetupConfig]:
-    """Load setup configuration from cache."""
-    cache_path = get_cache_path_for_host(host)
-    if not os.path.exists(cache_path):
-        return None
-    try:
-        with open(cache_path, 'r') as f:
-            data = json.load(f)
-            system_type = data.get('system_type')
-            args_dict = data.get('args', {})
-            return SetupConfig.from_dict(host, system_type, args_dict)
-    except Exception as e:
-        print(f"Warning: Failed to load cached setup for {host}: {e}")
-        return None
-
-
-def merge_setup_configs(cached_config: SetupConfig, new_config: SetupConfig) -> SetupConfig:
-    """Merge two SetupConfig objects, with new_config taking precedence."""
-    merged_dict = asdict(cached_config)
-    new_dict = asdict(new_config)
-    
-    for key, value in new_dict.items():
-        # Skip host and system_type as they should remain from cached
-        if key in ('host', 'system_type'):
-            continue
-            
-        # Handle deploy_specs merging
-        if key == 'deploy_specs' and key in merged_dict:
-            if merged_dict[key] is None:
-                merged_dict[key] = value
-            elif value is not None:
-                existing_deploys = {(spec[0], spec[1]) for spec in merged_dict[key]}
-                for deploy_spec in value:
-                    deploy_tuple = (deploy_spec[0], deploy_spec[1])
-                    if deploy_tuple not in existing_deploys:
-                        merged_dict[key].append(deploy_spec)
-                        existing_deploys.add(deploy_tuple)
-        # Handle samba_shares merging
-        elif key == 'samba_shares' and key in merged_dict:
-            if merged_dict[key] is None:
-                merged_dict[key] = value
-            elif value is not None:
-                existing_shares = {tuple(share) for share in merged_dict[key]}
-                for share_spec in value:
-                    share_tuple = tuple(share_spec)
-                    if share_tuple not in existing_shares:
-                        merged_dict[key].append(share_spec)
-                        existing_shares.add(share_tuple)
-        # Handle tags merging
-        elif key == 'tags':
-            if value is not None:
-                merged_dict[key] = value
-        # For all other fields, new value takes precedence if not None
-        elif value is not None:
-            merged_dict[key] = value
-    
-    return SetupConfig(**merged_dict)
 
 
 def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = None, dry_run: bool = False) -> Optional[tuple]:

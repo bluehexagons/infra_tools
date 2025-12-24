@@ -9,19 +9,20 @@ import json
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from lib.config import SetupConfig
-from lib.setup_common import (
+from lib.validators import validate_host, validate_username
+from lib.display import print_name_and_tags
+from lib.cache import (
     load_setup_command,
     merge_setup_configs,
-    validate_host,
+    save_setup_command,
+    get_cache_path_for_host,
+    SETUP_CACHE_DIR
+)
+from lib.setup_common import (
     create_argument_parser,
     run_remote_setup,
-    save_setup_command,
-    validate_username,
-    print_name_and_tags,
     REMOTE_SCRIPT_PATH,
-    REMOTE_MODULES_DIR,
-    SETUP_CACHE_DIR,
-    get_cache_path_for_host
+    REMOTE_MODULES_DIR
 )
 
 
