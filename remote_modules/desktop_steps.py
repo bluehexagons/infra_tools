@@ -3,6 +3,7 @@
 import os
 import shlex
 
+from lib.config import SetupConfig
 from .utils import run, is_package_installed, is_service_active, file_contains
 
 
@@ -29,38 +30,38 @@ def is_flatpak_app_installed(app_id: str) -> bool:
     return result.returncode == 0
 
 
-def install_desktop(desktop: str = "xfce", **_) -> None:
-    if desktop == "xfce":
+def install_desktop(config: SetupConfig) -> None:
+    if config.desktop == "xfce":
         package = "xfce4"
         install_cmd = "apt-get install -y -qq xfce4 xfce4-goodies"
-    elif desktop == "i3":
+    elif config.desktop == "i3":
         package = "i3"
         install_cmd = "apt-get install -y -qq i3 i3status i3lock dmenu"
-    elif desktop == "cinnamon":
+    elif config.desktop == "cinnamon":
         package = "cinnamon"
         install_cmd = "apt-get install -y -qq cinnamon cinnamon-core"
     else:
-        print(f"  ⚠ Unknown desktop environment: {desktop}, defaulting to XFCE")
+        print(f"  ⚠ Unknown desktop environment: {config.desktop}, defaulting to XFCE")
         package = "xfce4"
         install_cmd = "apt-get install -y -qq xfce4 xfce4-goodies"
     
     if is_package_installed(package):
-        print(f"  ✓ {desktop.upper()} desktop already installed")
+        print(f"  ✓ {config.desktop.upper()} desktop already installed")
         return
     
     run(install_cmd)
-    print(f"  ✓ {desktop.upper()} desktop installed")
+    print(f"  ✓ {config.desktop.upper()} desktop installed")
 
 
-def install_xrdp(username: str, desktop: str = "xfce", **_) -> None:
-    safe_username = shlex.quote(username)
-    xsession_path = f"/home/{username}/.xsession"
+def install_xrdp(config: SetupConfig) -> None:
+    safe_username = shlex.quote(config.username)
+    xsession_path = f"/home/{config.username}/.xsession"
     
-    if desktop == "xfce":
+    if config.desktop == "xfce":
         session_cmd = "xfce4-session"
-    elif desktop == "i3":
+    elif config.desktop == "i3":
         session_cmd = "i3"
-    elif desktop == "cinnamon":
+    elif config.desktop == "cinnamon":
         session_cmd = "cinnamon-session"
     else:
         session_cmd = "xfce4-session"
@@ -89,7 +90,7 @@ def install_xrdp(username: str, desktop: str = "xfce", **_) -> None:
     print("  ✓ xRDP installed and configured")
 
 
-def harden_xrdp(**_) -> None:
+def harden_xrdp(config: SetupConfig) -> None:
     """Harden xRDP with TLS encryption and group restrictions."""
     xrdp_config = "/etc/xrdp/xrdp.ini"
     sesman_config = "/etc/xrdp/sesman.ini"
@@ -136,7 +137,7 @@ def harden_xrdp(**_) -> None:
     print("  ✓ xRDP hardened (TLS encryption, root denied, restricted to remoteusers group)")
 
 
-def install_x2go(**_) -> None:
+def install_x2go(config: SetupConfig) -> None:
     """Install X2Go server for remote desktop access."""
     if is_package_installed("x2goserver"):
         print("  ✓ X2Go already installed")
@@ -151,10 +152,10 @@ def install_x2go(**_) -> None:
     print("  ✓ X2Go installed (connect via SSH on port 22)")
 
 
-def configure_xfce_for_x2go(username: str, **_) -> None:
+def configure_xfce_for_x2go(config: SetupConfig) -> None:
     """Configure Xfce to work properly with X2Go by disabling compositor."""
-    safe_username = shlex.quote(username)
-    home_dir = f"/home/{username}"
+    safe_username = shlex.quote(config.username)
+    home_dir = f"/home/{config.username}"
     xfce_config_dir = f"{home_dir}/.config/xfce4/xfconf/xfce-perchannel-xml"
     xfwm4_config = f"{xfce_config_dir}/xfwm4.xml"
     
@@ -206,7 +207,7 @@ X-GNOME-Autostart-enabled=true
     print("  ✓ Xfce compositor disabled for X2Go (prevents graphical issues)")
 
 
-def harden_x2go(**_) -> None:
+def harden_x2go(config: SetupConfig) -> None:
     """Harden X2Go by restricting to remoteusers group."""
     sshd_config = "/etc/ssh/sshd_config"
     x2go_config = "/etc/x2go/x2goserver.conf"
@@ -226,9 +227,9 @@ def harden_x2go(**_) -> None:
 
 
 
-def configure_audio(username: str, **_) -> None:
-    safe_username = shlex.quote(username)
-    home_dir = f"/home/{username}"
+def configure_audio(config: SetupConfig) -> None:
+    safe_username = shlex.quote(config.username)
+    home_dir = f"/home/{config.username}"
     pulse_dir = f"{home_dir}/.config/pulse"
     client_conf = f"{pulse_dir}/client.conf"
     daemon_conf = f"{pulse_dir}/daemon.conf"
@@ -372,10 +373,10 @@ def configure_audio(username: str, **_) -> None:
     print(f"  Run ~/check-rdp.sh via SSH to troubleshoot RDP issues")
 
 
-def install_browser(browser: str, use_flatpak: bool = False, **_) -> None:
+def install_browser(config: SetupConfig) -> None:
     """Install the specified browser."""
-    if browser == "brave":
-        if use_flatpak:
+    if config.browser == "brave":
+        if config.use_flatpak:
             if is_flatpak_app_installed("com.brave.Browser"):
                 print("  ✓ Brave browser already installed")
                 return
@@ -394,8 +395,8 @@ def install_browser(browser: str, use_flatpak: bool = False, **_) -> None:
             run("apt-get install -y -qq brave-browser", check=False)
         print("  ✓ Brave browser installed")
     
-    elif browser == "firefox":
-        if use_flatpak:
+    elif config.browser == "firefox":
+        if config.use_flatpak:
             if is_flatpak_app_installed("org.mozilla.firefox"):
                 print("  ✓ Firefox already installed")
                 return
@@ -412,7 +413,7 @@ def install_browser(browser: str, use_flatpak: bool = False, **_) -> None:
         run("wget -qO /tmp/ublock_origin.xpi https://addons.mozilla.org/firefox/downloads/latest/ublock-origin/latest.xpi", check=False)
         print("  ✓ Firefox installed (uBlock Origin downloaded to /tmp/ublock_origin.xpi)")
     
-    elif browser == "browsh":
+    elif config.browser == "browsh":
         print("  Installing Browsh (requires Firefox)...")
         if not (is_package_installed("firefox") or is_package_installed("firefox-esr")):
             print("  Installing Firefox (required for Browsh)...")
@@ -424,8 +425,8 @@ def install_browser(browser: str, use_flatpak: bool = False, **_) -> None:
             run("rm -f /tmp/browsh.deb", check=False)
         print("  ✓ Browsh installed")
     
-    elif browser == "vivaldi":
-        if use_flatpak:
+    elif config.browser == "vivaldi":
+        if config.use_flatpak:
             if is_flatpak_app_installed("com.vivaldi.Vivaldi"):
                 print("  ✓ Vivaldi browser already installed")
                 return
@@ -444,7 +445,7 @@ def install_browser(browser: str, use_flatpak: bool = False, **_) -> None:
             run("apt-get install -y -qq vivaldi-stable", check=False)
         print("  ✓ Vivaldi browser installed")
     
-    elif browser == "lynx":
+    elif config.browser == "lynx":
         if is_package_installed("lynx"):
             print("  ✓ Lynx already installed")
             return
@@ -453,7 +454,7 @@ def install_browser(browser: str, use_flatpak: bool = False, **_) -> None:
         print("  ✓ Lynx installed")
 
 
-def install_remmina(**_) -> None:
+def install_remmina(config: SetupConfig) -> None:
     """Install Remmina RDP client."""
     if is_package_installed("remmina"):
         print("  ✓ Remmina already installed")
@@ -464,17 +465,17 @@ def install_remmina(**_) -> None:
     print("  ✓ Remmina installed")
 
 
-def install_desktop_apps(username: str, browser: str = "brave", use_flatpak: bool = False, install_office: bool = False, **_) -> None:
-    install_browser(browser, use_flatpak)
+def install_desktop_apps(config: SetupConfig) -> None:
+    install_browser(config)
     
-    if use_flatpak:
+    if config.use_flatpak:
         install_flatpak_if_needed()
         
         all_installed = (
             is_flatpak_app_installed("com.vscodium.codium") and
             is_flatpak_app_installed("com.discordapp.Discord")
         )
-        if install_office:
+        if config.install_office:
             all_installed = all_installed and is_flatpak_app_installed("org.libreoffice.LibreOffice")
         
         if all_installed:
@@ -483,7 +484,7 @@ def install_desktop_apps(username: str, browser: str = "brave", use_flatpak: boo
         
         print("  Installing desktop apps via Flatpak...")
         
-        if install_office and not is_flatpak_app_installed("org.libreoffice.LibreOffice"):
+        if config.install_office and not is_flatpak_app_installed("org.libreoffice.LibreOffice"):
             print("  Installing LibreOffice...")
             run(f"flatpak install -y {FLATPAK_REMOTE} org.libreoffice.LibreOffice", check=False)
         
@@ -496,19 +497,19 @@ def install_desktop_apps(username: str, browser: str = "brave", use_flatpak: boo
             run(f"flatpak install -y {FLATPAK_REMOTE} com.discordapp.Discord", check=False)
         
         apps_list = "VSCodium, Discord"
-        if install_office:
+        if config.install_office:
             apps_list = "LibreOffice, " + apps_list
         print(f"  ✓ Desktop apps installed via Flatpak ({apps_list})")
     else:
         all_installed = is_package_installed("codium")
-        if install_office:
+        if config.install_office:
             all_installed = all_installed and is_package_installed("libreoffice")
         
         if all_installed:
             print("  ✓ Desktop apps already installed")
             return
 
-        if install_office and not is_package_installed("libreoffice"):
+        if config.install_office and not is_package_installed("libreoffice"):
             print("  Installing LibreOffice...")
             run("apt-get install -y -qq libreoffice")
 
@@ -527,14 +528,14 @@ def install_desktop_apps(username: str, browser: str = "brave", use_flatpak: boo
             run("rm -f /tmp/discord.deb", check=False)
 
         apps_list = "VSCodium, Discord"
-        if install_office:
+        if config.install_office:
             apps_list = "LibreOffice, " + apps_list
         print(f"  ✓ Desktop apps installed ({apps_list})")
 
 
-def configure_default_browser(username: str, browser: str = "brave", **_) -> None:
-    safe_username = shlex.quote(username)
-    mimeapps_path = f"/home/{username}/.config/mimeapps.list"
+def configure_default_browser(config: SetupConfig) -> None:
+    safe_username = shlex.quote(config.username)
+    mimeapps_path = f"/home/{config.username}/.config/mimeapps.list"
     
     browser_desktops = {
         "brave": "brave-browser.desktop",
@@ -544,9 +545,9 @@ def configure_default_browser(username: str, browser: str = "brave", **_) -> Non
         "browsh": None
     }
     
-    desktop_file = browser_desktops.get(browser)
+    desktop_file = browser_desktops.get(config.browser)
     if not desktop_file:
-        print(f"  ✓ No default browser configuration needed for {browser}")
+        print(f"  ✓ No default browser configuration needed for {config.browser}")
         return
     
     if os.path.exists(mimeapps_path):
@@ -554,11 +555,11 @@ def configure_default_browser(username: str, browser: str = "brave", **_) -> Non
             print("  ✓ Default browser already set")
             return
     
-    user_apps_dir = f"/home/{username}/.local/share/applications"
+    user_apps_dir = f"/home/{config.username}/.local/share/applications"
     os.makedirs(user_apps_dir, exist_ok=True)
-    run(f"chown -R {safe_username}:{safe_username} /home/{username}/.local")
+    run(f"chown -R {safe_username}:{safe_username} /home/{config.username}/.local")
     
-    os.makedirs(f"/home/{username}/.config", exist_ok=True)
+    os.makedirs(f"/home/{config.username}/.config", exist_ok=True)
     
     mimeapps_content = f"""[Default Applications]
 x-scheme-handler/http={desktop_file}
@@ -570,18 +571,18 @@ application/xhtml+xml={desktop_file}
     with open(mimeapps_path, "w") as f:
         f.write(mimeapps_content)
     
-    run(f"chown -R {safe_username}:{safe_username} /home/{username}/.config")
+    run(f"chown -R {safe_username}:{safe_username} /home/{config.username}/.config")
     
     run(f"xdg-mime default {desktop_file} x-scheme-handler/http", check=False)
     run(f"xdg-mime default {desktop_file} x-scheme-handler/https", check=False)
     
-    print(f"  ✓ Default browser set to {browser.capitalize()}")
+    print(f"  ✓ Default browser set to {config.browser.capitalize()}")
 
 
-def install_workstation_dev_apps(username: str, browser: str = "vivaldi", use_flatpak: bool = False, **_) -> None:
-    install_browser(browser, use_flatpak)
+def install_workstation_dev_apps(config: SetupConfig) -> None:
+    install_browser(config)
     
-    if use_flatpak:
+    if config.use_flatpak:
         install_flatpak_if_needed()
         
         if is_flatpak_app_installed("com.visualstudio.code"):
@@ -612,13 +613,13 @@ def install_workstation_dev_apps(username: str, browser: str = "vivaldi", use_fl
         print("  ✓ Workstation dev apps installed (VS Code)")
 
 
-def configure_vivaldi_browser(username: str, browser: str = "vivaldi", **_) -> None:
-    configure_default_browser(username, browser)
+def configure_vivaldi_browser(config: SetupConfig) -> None:
+    configure_default_browser(config)
 
 
-def configure_gnome_keyring(username: str, **_) -> None:
+def configure_gnome_keyring(config: SetupConfig) -> None:
     """Configure gnome-keyring for desktop setups."""
-    safe_username = shlex.quote(username)
+    safe_username = shlex.quote(config.username)
     
     if is_package_installed("gnome-keyring"):
         print("  ✓ gnome-keyring already installed")
@@ -637,7 +638,7 @@ def configure_gnome_keyring(username: str, **_) -> None:
         with open(pam_session, "a") as f:
             f.write("session optional pam_gnome_keyring.so auto_start\n")
     
-    home_dir = f"/home/{username}"
+    home_dir = f"/home/{config.username}"
     profile_path = f"{home_dir}/.profile"
     
     # The eval command is the official way to start gnome-keyring-daemon

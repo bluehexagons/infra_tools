@@ -157,37 +157,14 @@ def main() -> int:
     print("OS: Debian")
     sys.stdout.flush()
 
-    steps = get_steps_for_system_type(
-        config.system_type,
-        config.skip_audio,
-        config.desktop,
-        config.browser,
-        config.use_flatpak,
-        config.install_office,
-        config.install_ruby,
-        config.install_go,
-        config.install_node,
-        config.custom_steps,
-        config.enable_rdp,
-        config.enable_x2go
-    )
+    steps = get_steps_for_system_type(config)
     
     total_steps = len(steps)
     for i, (name, func) in enumerate(steps, 1):
         bar = progress_bar(i, total_steps)
         print(f"\n{bar} [{i}/{total_steps}] {name}")
         sys.stdout.flush()
-        func(
-            username=config.username,
-            pw=config.password,
-            timezone=config.timezone,
-            desktop=config.desktop,
-            browser=config.browser,
-            use_flatpak=config.use_flatpak,
-            install_office=config.install_office,
-            enable_rdp=config.enable_rdp,
-            enable_x2go=config.enable_x2go
-        )
+        func(config)
     
     bar = progress_bar(total_steps, total_steps)
     print(f"\n{bar} Complete!")
@@ -332,7 +309,7 @@ def main() -> int:
             for dep in deployments:
                 grouped_deployments[dep['domain']].append(dep)
             
-            create_nginx_sites_for_groups(grouped_deployments, run)
+            create_nginx_sites_for_groups(grouped_deployments)
             
             # Set up SSL if requested
             if config.enable_ssl:
@@ -343,7 +320,7 @@ def main() -> int:
                 print("=" * 60)
                 install_certbot()
                 
-                setup_ssl_for_deployments(deployments, config.ssl_email, run)
+                setup_ssl_for_deployments(deployments, config.ssl_email)
             
             # Update Cloudflare tunnel configuration if configured
             if config.enable_cloudflare:

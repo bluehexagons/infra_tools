@@ -6,7 +6,6 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from shared.deployment import DeploymentOrchestrator
-from shared.nginx_config import create_nginx_site
 from .utils import run
 
 
@@ -41,7 +40,6 @@ def deploy_repository(source_path: str, deploy_spec: str, git_url: str,
         path=path,
         git_url=git_url,
         commit_hash=commit_hash,
-        run_func=run,
         full_deploy=full_deploy,
         keep_source=keep_source,
         api_subdomain=api_subdomain

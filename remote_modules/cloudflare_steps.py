@@ -2,10 +2,11 @@
 
 import os
 
+from lib.config import SetupConfig
 from .utils import run
 
 
-def configure_cloudflare_firewall(**_) -> None:
+def configure_cloudflare_firewall(config: SetupConfig) -> None:
     """Configure firewall for Cloudflare tunnel (SSH only, no HTTP/HTTPS)."""
     result = run("ufw status 2>/dev/null | grep -q 'Status: active'", check=False)
     if result.returncode == 0:
@@ -31,7 +32,7 @@ def configure_cloudflare_firewall(**_) -> None:
     print("  ✓ Firewall configured for Cloudflare tunnel (SSH only)")
 
 
-def create_cloudflared_config_directory(**_) -> None:
+def create_cloudflared_config_directory(config: SetupConfig) -> None:
     """Create cloudflared configuration directory structure."""
     config_dir = "/etc/cloudflared"
     
@@ -52,7 +53,7 @@ def create_cloudflared_config_directory(**_) -> None:
     print(f"  ✓ Created {config_dir} with setup instructions")
 
 
-def configure_nginx_for_cloudflare(**_) -> None:
+def configure_nginx_for_cloudflare(config: SetupConfig) -> None:
     """Configure nginx to trust Cloudflare IPs and use real visitor IPs."""
     cloudflare_conf = "/etc/nginx/conf.d/cloudflare.conf"
     
@@ -73,7 +74,7 @@ def configure_nginx_for_cloudflare(**_) -> None:
     print("  ✓ Nginx configured to trust Cloudflare IPs")
 
 
-def install_cloudflared_service_helper(**_) -> None:
+def install_cloudflared_service_helper(config: SetupConfig) -> None:
     """Install Python script for comprehensive Cloudflare tunnel setup."""
     helper_script = "/usr/local/bin/setup-cloudflare-tunnel"
     
@@ -102,7 +103,7 @@ def install_cloudflared_service_helper(**_) -> None:
     print(f"  Run 'sudo setup-cloudflare-tunnel' to configure the tunnel")
 
 
-def run_cloudflare_tunnel_setup(**_) -> None:
+def run_cloudflare_tunnel_setup(config: SetupConfig) -> None:
     """Run Cloudflare tunnel setup in non-interactive mode to update configuration."""
     helper_script = "/usr/local/bin/setup-cloudflare-tunnel"
     

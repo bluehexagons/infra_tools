@@ -2,10 +2,11 @@
 
 import os
 
+from lib.config import SetupConfig
 from .utils import run, is_package_installed, is_service_active, file_contains
 
 
-def install_nginx(**_) -> None:
+def install_nginx(config: SetupConfig) -> None:
     if is_package_installed("nginx"):
         if is_service_active("nginx"):
             print("  ✓ nginx already installed and running")
@@ -20,7 +21,7 @@ def install_nginx(**_) -> None:
     print("  ✓ nginx installed and started")
 
 
-def configure_nginx_security(**_) -> None:
+def configure_nginx_security(config: SetupConfig) -> None:
     nginx_conf = "/etc/nginx/nginx.conf"
     
     if file_contains(nginx_conf, "server_tokens off"):
@@ -41,7 +42,7 @@ def configure_nginx_security(**_) -> None:
     print("  ✓ nginx security configuration applied")
 
 
-def create_hello_world_site(**_) -> None:
+def create_hello_world_site(config: SetupConfig) -> None:
     www_root = "/var/www/html"
     index_html = f"{www_root}/index.html"
     
@@ -74,7 +75,7 @@ def create_hello_world_site(**_) -> None:
     print("  ✓ Hello World website created")
 
 
-def configure_default_site(**_) -> None:
+def configure_default_site(config: SetupConfig) -> None:
     site_conf = "/etc/nginx/sites-available/default"
     
     if os.path.exists(site_conf):

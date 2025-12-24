@@ -1,5 +1,6 @@
 """System type definitions and step configurations."""
 
+from lib.config import SetupConfig
 from .common_steps import (
     update_and_upgrade_packages,
     ensure_sudo_installed,
@@ -200,13 +201,9 @@ STEP_FUNCTIONS = {
 }
 
 
-def get_steps_for_system_type(system_type: str, skip_audio: bool = False, desktop: str = "xfce",
-                               browser: str = "brave", use_flatpak: bool = False, install_office: bool = False, 
-                               install_ruby: bool = False, install_go: bool = False,
-                               install_node: bool = False, custom_steps_str: str = None, enable_rdp: bool = False,
-                               enable_x2go: bool = False) -> list:
-    if system_type == "custom_steps" and custom_steps_str:
-        step_names = custom_steps_str.split()
+def get_steps_for_system_type(config: SetupConfig) -> list:
+    if config.system_type == "custom_steps" and config.custom_steps:
+        step_names = config.custom_steps.split()
         steps = []
         for step_name in step_names:
             if step_name in STEP_FUNCTIONS:
@@ -217,89 +214,89 @@ def get_steps_for_system_type(system_type: str, skip_audio: bool = False, deskto
         return steps
     
     optional_steps = []
-    if install_ruby:
+    if config.install_ruby:
         optional_steps.append(("Installing Ruby (rbenv + latest version)", install_ruby_step))
         optional_steps.append(("Configuring Ruby auto-update", configure_auto_update_ruby))
-    if install_go:
+    if config.install_go:
         optional_steps.append(("Installing Go (latest version)", install_go_step))
-    if install_node:
+    if config.install_node:
         optional_steps.append(("Installing Node.js (nvm + latest LTS + PNPM)", install_node_step))
         optional_steps.append(("Configuring Node.js auto-update", configure_auto_update_node))
     
-    if system_type == "workstation_desktop":
+    if config.system_type == "workstation_desktop":
         # Build desktop steps based on enabled remote access methods
         desktop_steps = list(DESKTOP_STEPS)
-        if not enable_rdp:
+        if not config.enable_rdp:
             desktop_steps = [s for s in desktop_steps if s[1] not in [install_xrdp, configure_audio]]
-        if not enable_x2go:
+        if not config.enable_x2go:
             desktop_steps = [s for s in desktop_steps if s[1] not in [install_x2go, configure_xfce_for_x2go]]
-        if desktop != "xfce":
+        if config.desktop != "xfce":
             desktop_steps = [s for s in desktop_steps if s[1] != configure_xfce_for_x2go]
-        if skip_audio:
+        if config.skip_audio:
             desktop_steps = [s for s in desktop_steps if s[1] != configure_audio]
         
         # Build security steps
         security_steps = SECURITY_STEPS
         desktop_security_steps = []
-        if enable_rdp:
+        if config.enable_rdp:
             desktop_security_steps.append(("Hardening xRDP with TLS and group restrictions", harden_xrdp))
-        if enable_x2go:
+        if config.enable_x2go:
             desktop_security_steps.append(("Hardening X2Go access", harden_x2go))
-        if enable_rdp:  # fail2ban is for RDP brute-force protection
+        if config.enable_rdp:  # fail2ban is for RDP brute-force protection
             desktop_security_steps.append(("Installing fail2ban for RDP brute-force protection", configure_fail2ban))
         
         return COMMON_STEPS + desktop_steps + security_steps + \
                desktop_security_steps + CLI_STEPS + optional_steps + DESKTOP_APP_STEPS + FINAL_STEPS
-    elif system_type == "pc_dev":
+    elif config.system_type == "pc_dev":
         # Build desktop steps based on enabled remote access methods
         desktop_steps = list(DESKTOP_STEPS)
-        if not enable_rdp:
+        if not config.enable_rdp:
             desktop_steps = [s for s in desktop_steps if s[1] not in [install_xrdp, configure_audio]]
-        if not enable_x2go:
+        if not config.enable_x2go:
             desktop_steps = [s for s in desktop_steps if s[1] not in [install_x2go, configure_xfce_for_x2go]]
-        if desktop != "xfce":
+        if config.desktop != "xfce":
             desktop_steps = [s for s in desktop_steps if s[1] != configure_xfce_for_x2go]
-        if skip_audio:
+        if config.skip_audio:
             desktop_steps = [s for s in desktop_steps if s[1] != configure_audio]
         
         # Build security steps
         security_steps = SECURITY_STEPS
         desktop_security_steps = []
-        if enable_rdp:
+        if config.enable_rdp:
             desktop_security_steps.append(("Hardening xRDP with TLS and group restrictions", harden_xrdp))
-        if enable_x2go:
+        if config.enable_x2go:
             desktop_security_steps.append(("Hardening X2Go access", harden_x2go))
-        if enable_rdp:
+        if config.enable_rdp:
             desktop_security_steps.append(("Installing fail2ban for RDP brute-force protection", configure_fail2ban))
         
         return COMMON_STEPS + desktop_steps + security_steps + \
                desktop_security_steps + CLI_STEPS + optional_steps + PC_DEV_APP_STEPS + FINAL_STEPS
-    elif system_type == "workstation_dev":
+    elif config.system_type == "workstation_dev":
         # Build desktop steps (workstation_dev skips audio)
         desktop_steps = list(DESKTOP_STEPS)
         desktop_steps = [s for s in desktop_steps if s[1] != configure_audio]
-        if not enable_rdp:
+        if not config.enable_rdp:
             desktop_steps = [s for s in desktop_steps if s[1] != install_xrdp]
-        if not enable_x2go:
+        if not config.enable_x2go:
             desktop_steps = [s for s in desktop_steps if s[1] not in [install_x2go, configure_xfce_for_x2go]]
-        if desktop != "xfce":
+        if config.desktop != "xfce":
             desktop_steps = [s for s in desktop_steps if s[1] != configure_xfce_for_x2go]
         
         # Build security steps
         security_steps = SECURITY_STEPS
         desktop_security_steps = []
-        if enable_rdp:
+        if config.enable_rdp:
             desktop_security_steps.append(("Hardening xRDP with TLS and group restrictions", harden_xrdp))
-        if enable_x2go:
+        if config.enable_x2go:
             desktop_security_steps.append(("Hardening X2Go access", harden_x2go))
-        if enable_rdp:
+        if config.enable_rdp:
             desktop_security_steps.append(("Installing fail2ban for RDP brute-force protection", configure_fail2ban))
         
         return COMMON_STEPS + desktop_steps + security_steps + \
                desktop_security_steps + CLI_STEPS + optional_steps + WORKSTATION_DEV_APP_STEPS + FINAL_STEPS
-    elif system_type == "server_dev":
+    elif config.system_type == "server_dev":
         return COMMON_STEPS + SECURITY_STEPS + CLI_STEPS + optional_steps + FINAL_STEPS
-    elif system_type == "server_web":
+    elif config.system_type == "server_web":
         security_steps = [
             ("Hardening SSH configuration", harden_ssh),
             ("Hardening kernel parameters", harden_kernel),
@@ -308,7 +305,7 @@ def get_steps_for_system_type(system_type: str, skip_audio: bool = False, deskto
         ]
         return COMMON_STEPS + WEB_FIREWALL_STEPS + security_steps + \
                WEB_SERVER_STEPS + CLI_STEPS + optional_steps + FINAL_STEPS
-    elif system_type == "server_proxmox":
+    elif config.system_type == "server_proxmox":
         return PROXMOX_HARDENING_STEPS
     else:
-        raise ValueError(f"Unknown system type: {system_type}")
+        raise ValueError(f"Unknown system type: {config.system_type}")

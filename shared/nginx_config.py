@@ -2,7 +2,11 @@
 
 import os
 import shlex
-from typing import Optional, Callable, List, Dict
+import sys
+from typing import Optional, List, Dict
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from remote_modules.utils import run
 
 
 SSL_PROTOCOLS = "TLSv1.2 TLSv1.3"
@@ -24,7 +28,7 @@ def get_ssl_cert_path(domain: Optional[str]) -> tuple:
     return (cert_file, key_file)
 
 
-def generate_self_signed_cert(domain: str, run_func: Callable) -> tuple:
+def generate_self_signed_cert(domain: str) -> tuple:
     """Generate self-signed SSL certificate for a domain."""
     cert_file, key_file = get_ssl_cert_path(domain)
     
@@ -32,8 +36,8 @@ def generate_self_signed_cert(domain: str, run_func: Callable) -> tuple:
         return (cert_file, key_file)
     
     cert_dir = os.path.dirname(cert_file)
-    run_func(f"mkdir -p {cert_dir}")
-    run_func(f"openssl req -x509 -nodes -days 365 -newkey rsa:2048 "
+    run(f"mkdir -p {cert_dir}")
+    run(f"openssl req -x509 -nodes -days 365 -newkey rsa:2048 "
              f"-keyout {shlex.quote(key_file)} -out {shlex.quote(cert_file)} "
              f"-subj '/CN={domain}'")
     
@@ -327,21 +331,21 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: List[Dict],
     return "\n".join([cache_maps] + api_configs + [main_config])
 
 
-def create_nginx_sites_for_groups(grouped_deployments: Dict[Optional[str], List[Dict]], run_func: Callable) -> None:
+def create_nginx_sites_for_groups(grouped_deployments: Dict[Optional[str], List[Dict]]) -> None:
     """Create nginx site configurations for grouped deployments."""
     
-    run_func("mkdir -p /var/www/letsencrypt/.well-known/acme-challenge")
+    run("mkdir -p /var/www/letsencrypt/.well-known/acme-challenge")
     
     for domain, deployments in grouped_deployments.items():
         cert_domain = domain or 'default'
-        generate_self_signed_cert(cert_domain, run_func)
+        generate_self_signed_cert(cert_domain)
         
         if domain:
             # Check for API subdomains
             for dep in deployments:
                 if dep.get('backend_port') and (dep.get('frontend_port') or dep.get('frontend_serve_path')):
                     if dep.get('api_subdomain', False):
-                        generate_self_signed_cert(f"api.{domain}", run_func)
+                        generate_self_signed_cert(f"api.{domain}")
             
             config_name = domain.replace('.', '_')
         else:
@@ -365,20 +369,12 @@ def create_nginx_sites_for_groups(grouped_deployments: Dict[Optional[str], List[
         
         enabled_link = f"/etc/nginx/sites-enabled/{config_name}"
         if not os.path.exists(enabled_link):
-            run_func(f"ln -s {shlex.quote(config_file)} {shlex.quote(enabled_link)}")
+            run(f"ln -s {shlex.quote(config_file)} {shlex.quote(enabled_link)}")
             print(f"  ✓ Enabled nginx site: {config_name}")
             
-    result = run_func("nginx -t", check=False)
+    result = run("nginx -t", check=False)
     if result.returncode != 0:
         print("  ⚠ nginx configuration test failed")
-        # Don't remove files immediately to allow debugging, but maybe warn loudly
     else:
-        run_func("systemctl reload nginx")
+        run("systemctl reload nginx")
         print(f"  ✓ nginx reloaded")
-
-
-def create_nginx_site(*args, **kwargs):
-    print("  ⚠ Warning: create_nginx_site is deprecated, use create_nginx_sites_for_groups")
-    pass
-
-
