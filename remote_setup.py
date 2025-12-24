@@ -91,9 +91,7 @@ def main() -> int:
         allow_steps=True
     )
     
-    # Add remote-specific argument
-    parser.add_argument("--lite-deploy", action="store_true",
-                       help="Use pre-uploaded repository files instead of cloning (for remote execution)")
+    # Note: --lite-deploy is already added by create_setup_argument_parser when for_remote=True
     
     args = parser.parse_args()
     
@@ -354,20 +352,44 @@ def main() -> int:
                 print("\n" + "=" * 60)
                 print("Updating cloudflared config for deployments...")
                 print("=" * 60)
-                run_cloudflare_tunnel_setup(deployments)
+                run_cloudflare_tunnel_setup()
     
     # Configure Samba if requested
     if config.enable_samba:
-        from remote_modules.samba_steps import install_samba, configure_samba_shares
+        from remote_modules.samba_steps import (
+            install_samba,
+            configure_samba_firewall,
+            configure_samba_global_settings,
+            configure_samba_fail2ban,
+            setup_samba_share
+        )
         
         print("\n" + "=" * 60)
-        print("Installing and configuring Samba...")
+        print("Configuring Samba...")
         print("=" * 60)
         
+        print("\n[1/4] Installing Samba")
         install_samba()
         
+        print("\n[2/4] Configuring global Samba settings with security hardening")
+        configure_samba_global_settings()
+        
+        print("\n[3/4] Configuring firewall for Samba")
+        configure_samba_firewall()
+        
+        print("\n[4/4] Configuring fail2ban for Samba brute-force protection")
+        configure_samba_fail2ban()
+        
         if config.samba_shares:
-            configure_samba_shares(config.samba_shares)
+            print("\n" + "=" * 60)
+            print(f"Configuring {len(config.samba_shares)} Samba share(s)...")
+            print("=" * 60)
+            
+            for i, share_spec in enumerate(config.samba_shares, 1):
+                print(f"\n[{i}/{len(config.samba_shares)}] Setting up share: {share_spec[1]}_{share_spec[0]}")
+                setup_samba_share(share_spec=share_spec)
+        
+        print("\n✓ Samba configuration complete")
     
     print("\n" + "=" * 60)
     print("✓ Remote setup complete!")
