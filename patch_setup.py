@@ -18,6 +18,7 @@ from lib.setup_common import (
     get_local_timezone,
     get_current_username,
     validate_username,
+    print_name_and_tags,
     REMOTE_SCRIPT_PATH,
     REMOTE_MODULES_DIR,
     SETUP_CACHE_DIR,
@@ -49,7 +50,22 @@ def get_all_configs(pattern: str = None) -> list:
     # Filter by pattern if provided
     if pattern:
         pattern = pattern.lower()
-        configs = [c for c in configs if pattern in c.get('host', '').lower()]
+        filtered = []
+        for c in configs:
+            # Check host
+            if pattern in c.get('host', '').lower():
+                filtered.append(c)
+                continue
+            # Check name
+            if pattern in c.get('name', '').lower():
+                filtered.append(c)
+                continue
+            # Check tags
+            tags = c.get('tags', [])
+            if any(pattern in tag.lower() for tag in tags):
+                filtered.append(c)
+                continue
+        configs = filtered
     
     # Sort by host
     configs.sort(key=lambda x: x.get('host', ''))
@@ -67,16 +83,17 @@ def list_configurations(pattern: str = None) -> None:
             print("No saved configurations found.")
         return
 
-    print(f"{'HOST':<30} {'TYPE':<20} {'USER':<15}")
-    print("-" * 65)
+    print(f"{'HOST':<30} {'NAME':<20} {'TYPE':<20} {'USER':<15}")
+    print("-" * 85)
     
     for config in configs:
         host = config.get('host', 'Unknown')
+        name = config.get('name', '')
         system_type = config.get('system_type', 'Unknown')
         args = config.get('args', {})
         username = args.get('username', 'Unknown')
         
-        print(f"{host:<30} {system_type:<20} {username:<15}")
+        print(f"{host:<30} {name:<20} {system_type:<20} {username:<15}")
 
 
 def show_info(pattern: str = None) -> None:
@@ -91,12 +108,18 @@ def show_info(pattern: str = None) -> None:
 
     for config in configs:
         host = config.get('host', 'Unknown')
+        name = config.get('name')
+        tags = config.get('tags', [])
         system_type = config.get('system_type', 'Unknown')
         args = config.get('args', {})
         username = args.get('username', 'Unknown')
         
         print("=" * 60)
         print(f"Host: {host}")
+        if name:
+            print(f"Name: {name}")
+        if tags:
+            print(f"Tags: {', '.join(tags)}")
         print(f"Type: {system_type}")
         print(f"User: {username}")
         print("-" * 60)
@@ -263,6 +286,17 @@ def execute_patch(host: str, system_type: str, merged_args: dict, dry_run: bool 
     print("=" * 60)
     print(f"Host: {host}")
     print(f"System has been updated with new configuration")
+    
+    # Print name and tags if present
+    friendly_name = merged_args.get('friendly_name')
+    tags_str = merged_args.get('tags')
+    tags = []
+    if tags_str:
+        tags = [tag.strip() for tag in tags_str.split(',') if tag.strip()]
+    if friendly_name or tags:
+        print()
+        print_name_and_tags(friendly_name, tags)
+    
     print("=" * 60)
     
     return 0

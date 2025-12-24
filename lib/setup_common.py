@@ -82,6 +82,14 @@ def get_current_username() -> str:
     return getpass.getuser()
 
 
+def print_name_and_tags(name: Optional[str], tags: Optional[list]) -> None:
+    """Print configuration name and tags if present."""
+    if name:
+        print(f"Name: {name}")
+    if tags and len(tags) > 0:
+        print(f"Tags: {', '.join(tags)}")
+
+
 def get_cache_path_for_host(host: str) -> str:
     normalized_host = host.lower().rstrip('.')
     import hashlib
@@ -93,12 +101,27 @@ def get_cache_path_for_host(host: str) -> str:
 
 def save_setup_command(host: str, system_type: str, args_dict: Dict[str, Any]) -> None:
     cache_path = get_cache_path_for_host(host)
+    
+    # Extract name and tags from args_dict
+    friendly_name = args_dict.get('friendly_name')
+    tags_str = args_dict.get('tags')
+    tags = []
+    if tags_str:
+        tags = [tag.strip() for tag in tags_str.split(',') if tag.strip()]
+    
     cache_data = {
         "host": host,
         "system_type": system_type,
         "args": args_dict,
         "script": f"setup_{system_type}.py"
     }
+    
+    # Add name and tags at top level for easier access
+    if friendly_name:
+        cache_data["name"] = friendly_name
+    if tags:
+        cache_data["tags"] = tags
+    
     with open(cache_path, 'w') as f:
         json.dump(cache_data, f, indent=2)
 
@@ -307,6 +330,8 @@ def create_argument_parser(description: str, allow_steps: bool = False) -> argpa
     parser.add_argument("-k", "--key", dest="ssh_key", help="SSH private key path")
     parser.add_argument("-p", "--password", help="User password")
     parser.add_argument("-t", "--timezone", help="Timezone (defaults to local)")
+    parser.add_argument("--name", dest="friendly_name", help="Friendly name for this configuration")
+    parser.add_argument("--tags", dest="tags", help="Comma-separated list of tags for this configuration")
     if allow_steps:
         parser.add_argument("--steps", dest="custom_steps", help="Space-separated list of steps to run (e.g., 'install_ruby install_node')")
     parser.add_argument("--rdp", dest="enable_rdp", action=argparse.BooleanOptionalAction, default=None,
@@ -748,6 +773,17 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
     print("Setup Complete!")
     print("=" * 60)
     success_msg_fn(args.host, username, enable_rdp, enable_x2go)
+    
+    # Print name and tags if present
+    friendly_name = args_dict.get('friendly_name')
+    tags_str = args_dict.get('tags')
+    tags = []
+    if tags_str:
+        tags = [tag.strip() for tag in tags_str.split(',') if tag.strip()]
+    if friendly_name or tags:
+        print()
+        print_name_and_tags(friendly_name, tags)
+    
     print("=" * 60)
     
     return 0
