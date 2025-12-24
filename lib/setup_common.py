@@ -24,6 +24,7 @@ from lib.cache import (
     merge_setup_configs,
     SETUP_CACHE_DIR
 )
+from lib.arg_parser import create_setup_argument_parser
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -186,56 +187,8 @@ def create_tar_archive() -> bytes:
 
 
 def create_argument_parser(description: str, allow_steps: bool = False) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=description)
-    parser.add_argument("host", help="IP address or hostname of the remote host")
-    parser.add_argument("username", nargs="?", default=None, 
-                       help="Username (defaults to current user)")
-    parser.add_argument("-k", "--key", dest="ssh_key", help="SSH private key path")
-    parser.add_argument("-p", "--password", help="User password")
-    parser.add_argument("-t", "--timezone", help="Timezone (defaults to local)")
-    parser.add_argument("--name", dest="friendly_name", help="Friendly name for this configuration")
-    parser.add_argument("--tags", dest="tags", help="Comma-separated list of tags for this configuration")
-    if allow_steps:
-        parser.add_argument("--steps", dest="custom_steps", help="Space-separated list of steps to run (e.g., 'install_ruby install_node')")
-    parser.add_argument("--rdp", dest="enable_rdp", action=argparse.BooleanOptionalAction, default=None,
-                       help="Enable RDP/XRDP setup (default: enabled for workstation setups)")
-    parser.add_argument("--x2go", dest="enable_x2go", action=argparse.BooleanOptionalAction, default=None,
-                       help="Enable X2Go remote desktop access (default: enabled for workstation setups)")
-    parser.add_argument("--skip-audio", action=argparse.BooleanOptionalAction, default=None,
-                       help="Skip audio setup (desktop only)")
-    parser.add_argument("--desktop", choices=["xfce", "i3", "cinnamon"], default=None,
-                       help="Desktop environment to install (default: xfce)")
-    parser.add_argument("--browser", choices=["brave", "firefox", "browsh", "vivaldi", "lynx"], default=None,
-                       help="Web browser to install (default: brave)")
-    parser.add_argument("--flatpak", dest="use_flatpak", action=argparse.BooleanOptionalAction, default=None,
-                       help="Install desktop apps via Flatpak when available (non-containerized environments)")
-    parser.add_argument("--office", dest="install_office", action=argparse.BooleanOptionalAction, default=None,
-                       help="Install LibreOffice (desktop only)")
-    parser.add_argument("--dry-run", action="store_true",
-                       help="Show what would be done without executing commands")
-    parser.add_argument("--ruby", dest="install_ruby", action=argparse.BooleanOptionalAction, default=None,
-                       help="Install rbenv + latest Ruby version")
-    parser.add_argument("--go", dest="install_go", action=argparse.BooleanOptionalAction, default=None,
-                       help="Install latest Go version")
-    parser.add_argument("--node", dest="install_node", action=argparse.BooleanOptionalAction, default=None,
-                       help="Install nvm + latest Node.JS + PNPM + update NPM")
-    parser.add_argument("--deploy", dest="deploy_specs", action="append", nargs=2, metavar=("DOMAIN_OR_PATH", "GIT_URL"),
-                       help="Deploy a git repository (domain.com/path or /path) to auto-configure nginx (can be used multiple times)")
-    parser.add_argument("--full-deploy", dest="full_deploy", action="store_true",
-                       help="Always rebuild deployments even if they haven't changed (default: skip unchanged deployments)")
-    parser.add_argument("--ssl", dest="enable_ssl", action=argparse.BooleanOptionalAction, default=None,
-                       help="Enable Let's Encrypt SSL/TLS certificates for deployed domains")
-    parser.add_argument("--ssl-email", dest="ssl_email",
-                       help="Email address for Let's Encrypt registration (optional)")
-    parser.add_argument("--cloudflare", dest="enable_cloudflare", action=argparse.BooleanOptionalAction, default=None,
-                       help="Preconfigure server for Cloudflare tunnel (disables public HTTP/HTTPS ports)")
-    parser.add_argument("--api-subdomain", dest="api_subdomain", action=argparse.BooleanOptionalAction, default=None,
-                       help="Deploy Rails API as a subdomain (api.domain.com) instead of a subdirectory (domain.com/api)")
-    parser.add_argument("--samba", dest="enable_samba", action=argparse.BooleanOptionalAction, default=None,
-                       help="Install and configure Samba for SMB file sharing")
-    parser.add_argument("--share", dest="samba_shares", action="append", nargs=4, metavar=("ACCESS_TYPE", "SHARE_NAME", "PATHS", "USERS"),
-                       help="Configure Samba share: access_type (read|write), share_name, comma-separated paths, comma-separated username:password pairs (can be used multiple times)")
-    return parser
+    """Create argument parser for local setup scripts."""
+    return create_setup_argument_parser(description, for_remote=False, allow_steps=allow_steps)
 
 
 def run_remote_setup(config: SetupConfig) -> int:
