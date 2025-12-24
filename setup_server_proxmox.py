@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import sys
-from lib.setup_common import setup_main, print_success_header
+from lib.setup_common import setup_main, print_name_and_tags
 
 
 def success_message(host: str, username: str, enable_rdp: bool = False, enable_x2go: bool = False,
@@ -9,7 +9,6 @@ def success_message(host: str, username: str, enable_rdp: bool = False, enable_x
     print(f"Proxmox Server: {host}")
     print(f"Username: {username}")
     if friendly_name or tags:
-        from lib.setup_common import print_name_and_tags
         print()
         print_name_and_tags(friendly_name, tags)
     print()

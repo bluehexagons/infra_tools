@@ -83,8 +83,15 @@ def list_configurations(pattern: str = None) -> None:
             print("No saved configurations found.")
         return
 
-    print(f"{'HOST':<30} {'NAME':<20} {'TYPE':<20} {'USER':<15}")
-    print("-" * 85)
+    # Column widths
+    host_width = 30
+    name_width = 20
+    type_width = 20
+    user_width = 15
+    total_width = host_width + name_width + type_width + user_width
+    
+    print(f"{'HOST':<{host_width}} {'NAME':<{name_width}} {'TYPE':<{type_width}} {'USER':<{user_width}}")
+    print("-" * total_width)
     
     for config in configs:
         host = config.get('host', 'Unknown')
@@ -93,7 +100,7 @@ def list_configurations(pattern: str = None) -> None:
         args = config.get('args', {})
         username = args.get('username', 'Unknown')
         
-        print(f"{host:<30} {name:<20} {system_type:<20} {username:<15}")
+        print(f"{host:<{host_width}} {name:<{name_width}} {system_type:<{type_width}} {username:<{user_width}}")
 
 
 def show_info(pattern: str = None) -> None:
