@@ -69,7 +69,8 @@ class SetupConfig:
     @classmethod
     def from_args(cls, args: argparse.Namespace, system_type: str) -> 'SetupConfig':
         """Create SetupConfig from parsed arguments."""
-        from lib.setup_common import get_current_username, get_local_timezone
+        # Import here to avoid circular dependency
+        from lib.system_utils import get_current_username, get_local_timezone
         
         # Extract and process tags
         tags = None

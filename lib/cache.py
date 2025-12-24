@@ -5,6 +5,7 @@
 import hashlib
 import json
 import os
+import re
 from dataclasses import asdict
 from typing import Optional, Dict, Any
 
@@ -18,8 +19,10 @@ def get_cache_path_for_host(host: str) -> str:
     """Get the cache file path for a given host."""
     os.makedirs(SETUP_CACHE_DIR, exist_ok=True)
     normalized_host = host.lower().rstrip('.')
+    # Sanitize host for filesystem safety
+    safe_host = re.sub(r'[^a-zA-Z0-9._-]', '_', normalized_host)
     host_hash = hashlib.sha256(normalized_host.encode()).hexdigest()[:8]
-    return os.path.join(SETUP_CACHE_DIR, f"{host}_{host_hash}.json")
+    return os.path.join(SETUP_CACHE_DIR, f"{safe_host}_{host_hash}.json")
 
 
 def save_setup_command(config: SetupConfig) -> None:
