@@ -10,15 +10,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from lib.setup_common import (
     load_setup_command,
-    merge_setup_args,
+    merge_setup_configs,
     validate_host,
     create_argument_parser,
     run_remote_setup,
     save_setup_command,
-    get_local_timezone,
-    get_current_username,
     validate_username,
     print_name_and_tags,
+    SetupConfig,
     REMOTE_SCRIPT_PATH,
     REMOTE_MODULES_DIR,
     SETUP_CACHE_DIR,
@@ -217,21 +216,10 @@ def remove_configurations(args: list) -> int:
     return 0
 
 
-def execute_patch(host: str, system_type: str, merged_args: dict, dry_run: bool = False) -> int:
-    # Extract values with defaults
-    username = merged_args.get('username') or get_current_username()
-    timezone = merged_args.get('timezone') or get_local_timezone()
-    desktop = merged_args.get('desktop') or 'xfce'
-    browser = merged_args.get('browser') or 'brave'
-    
-    # Handle office default for pc_dev
-    install_office = merged_args.get('install_office', False)
-    if system_type == "pc_dev" and 'install_office' not in merged_args:
-        install_office = True
-        merged_args['install_office'] = True
-
-    if not validate_username(username):
-        print(f"Error: Invalid username: {username}")
+def execute_patch(config: SetupConfig) -> int:
+    """Execute patch operation with the given configuration."""
+    if not validate_username(config.username):
+        print(f"Error: Invalid username: {config.username}")
         return 1
     
     if not os.path.exists(REMOTE_SCRIPT_PATH):
@@ -243,66 +231,36 @@ def execute_patch(host: str, system_type: str, merged_args: dict, dry_run: bool 
         return 1
     
     print("=" * 60)
-    print(f"Patching System: {system_type}")
+    print(f"Patching System: {config.system_type}")
     print("=" * 60)
-    print(f"Host: {host}")
-    print(f"User: {username}")
-    print(f"Timezone: {timezone}")
+    print(f"Host: {config.host}")
+    print(f"User: {config.username}")
+    print(f"Timezone: {config.timezone}")
     print("=" * 60)
     print()
     
-    # Run the setup with merged arguments
-    returncode = run_remote_setup(
-        host=host,
-        username=username,
-        system_type=system_type,
-        password=merged_args.get('password'),
-        ssh_key=merged_args.get('ssh_key'),
-        timezone=timezone,
-        skip_audio=merged_args.get('skip_audio', False),
-        desktop=desktop,
-        browser=browser,
-        use_flatpak=merged_args.get('use_flatpak', False),
-        install_office=install_office,
-        dry_run=dry_run,
-        install_ruby=merged_args.get('install_ruby', False),
-        install_go=merged_args.get('install_go', False),
-        install_node=merged_args.get('install_node', False),
-        custom_steps=merged_args.get('custom_steps'),
-        deploy_specs=merged_args.get('deploy_specs'),
-        full_deploy=merged_args.get('full_deploy', False),
-        enable_ssl=merged_args.get('enable_ssl', False),
-        ssl_email=merged_args.get('ssl_email'),
-        enable_cloudflare=merged_args.get('enable_cloudflare', False),
-        api_subdomain=merged_args.get('api_subdomain', False),
-        enable_samba=merged_args.get('enable_samba', False),
-        samba_shares=merged_args.get('samba_shares')
-    )
+    # Run the setup with configuration
+    returncode = run_remote_setup(config)
     
     if returncode != 0:
         print(f"\n✗ Patch failed (exit code: {returncode})")
         return 1
     
     # Save updated setup command only after successful execution (unless dry-run)
-    if not dry_run:
-        save_setup_command(host, system_type, merged_args)
+    if not config.dry_run:
+        save_setup_command(config)
     
     print()
     print("=" * 60)
     print("Patch Complete!")
     print("=" * 60)
-    print(f"Host: {host}")
+    print(f"Host: {config.host}")
     print(f"System has been updated with new configuration")
     
     # Print name and tags if present
-    friendly_name = merged_args.get('friendly_name')
-    tags_str = merged_args.get('tags')
-    tags = []
-    if tags_str:
-        tags = [tag.strip() for tag in tags_str.split(',') if tag.strip()]
-    if friendly_name or tags:
+    if config.friendly_name or config.tags:
         print()
-        print_name_and_tags(friendly_name, tags)
+        print_name_and_tags(config)
     
     print("=" * 60)
     
@@ -342,13 +300,18 @@ def deploy_configurations(args: list) -> int:
             return 0
             
     failures = 0
-    for config in configs:
-        host = config.get('host')
-        system_type = config.get('system_type')
-        args_dict = config.get('args', {})
+    for config_data in configs:
+        host = config_data.get('host')
+        system_type = config_data.get('system_type')
+        args_dict = config_data.get('args', {})
         
         print(f"\nDeploying to {host}...")
-        if execute_patch(host, system_type, args_dict) != 0:
+        try:
+            config = SetupConfig.from_dict(host, system_type, args_dict)
+            if execute_patch(config) != 0:
+                failures += 1
+        except Exception as e:
+            print(f"Error creating config for {host}: {e}")
             failures += 1
             
     if failures > 0:
@@ -387,27 +350,20 @@ def main() -> int:
         print(f"Error: Invalid IP address or hostname: {args.host}")
         return 1
     
-    # Load cached setup command
-    cached = load_setup_command(args.host)
-    if not cached:
+    # Load cached setup configuration
+    cached_config = load_setup_command(args.host)
+    if not cached_config:
         print(f"Error: No cached setup found for {args.host}")
         print(f"Please run the initial setup using the appropriate setup_*.py script first.")
         return 1
     
-    system_type = cached['system_type']
-    cached_args = cached['args']
+    # Create new config from command line args
+    new_config = SetupConfig.from_args(args, cached_config.system_type)
     
-    # Build new args dict from command line, filtering out None values
-    # Note: We allow False values now to support disabling features via --no-feature flags
-    new_args = {k: v for k, v in vars(args).items() if v is not None}
+    # Merge configurations (new values override cached values)
+    merged_config = merge_setup_configs(cached_config, new_config)
     
-    if 'host' in new_args:
-        del new_args['host']
-        
-    # Merge arguments (add/modify but don't remove)
-    merged_args = merge_setup_args(cached_args, new_args)
-    
-    return execute_patch(args.host, system_type, merged_args, args.dry_run)
+    return execute_patch(merged_config)
 
 
 if __name__ == "__main__":

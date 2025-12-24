@@ -13,6 +13,7 @@ import sys
 import tarfile
 import tempfile
 import json
+from dataclasses import dataclass, field, asdict
 from typing import Optional, Dict, List, Any
 
 
@@ -23,6 +24,135 @@ SHARED_DIR = os.path.join(SCRIPT_DIR, "..", "shared")
 REMOTE_INSTALL_DIR = "/opt/infra_tools"
 GIT_CACHE_DIR = os.path.expanduser("~/.cache/infra_tools/git_repos")
 SETUP_CACHE_DIR = os.path.expanduser("~/.cache/infra_tools/setups")
+
+
+@dataclass
+class SetupConfig:
+    """Configuration for a setup operation."""
+    host: str
+    username: str
+    system_type: str
+    password: Optional[str] = None
+    ssh_key: Optional[str] = None
+    timezone: str = "UTC"
+    friendly_name: Optional[str] = None
+    tags: Optional[List[str]] = None
+    enable_rdp: bool = False
+    enable_x2go: bool = False
+    skip_audio: bool = False
+    desktop: str = "xfce"
+    browser: str = "brave"
+    use_flatpak: bool = False
+    install_office: bool = False
+    dry_run: bool = False
+    install_ruby: bool = False
+    install_go: bool = False
+    install_node: bool = False
+    custom_steps: Optional[str] = None
+    deploy_specs: Optional[List[List[str]]] = None
+    full_deploy: bool = False
+    enable_ssl: bool = False
+    ssl_email: Optional[str] = None
+    enable_cloudflare: bool = False
+    api_subdomain: bool = False
+    enable_samba: bool = False
+    samba_shares: Optional[List[List[str]]] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary, excluding host and system_type."""
+        data = asdict(self)
+        data.pop('host', None)
+        data.pop('system_type', None)
+        # Convert tags list to comma-separated string for storage
+        if self.tags:
+            data['tags'] = ','.join(self.tags)
+        return data
+    
+    @classmethod
+    def from_dict(cls, host: str, system_type: str, data: Dict[str, Any]) -> 'SetupConfig':
+        """Create SetupConfig from dictionary."""
+        # Convert tags string to list
+        tags_str = data.get('tags')
+        if tags_str and isinstance(tags_str, str):
+            data['tags'] = [tag.strip() for tag in tags_str.split(',') if tag.strip()]
+        elif not tags_str:
+            data['tags'] = None
+            
+        # Handle friendly_name
+        if 'friendly_name' not in data:
+            data['friendly_name'] = None
+            
+        return cls(host=host, system_type=system_type, **data)
+    
+    @classmethod
+    def from_args(cls, args: argparse.Namespace, system_type: str) -> 'SetupConfig':
+        """Create SetupConfig from parsed arguments."""
+        # Extract and process tags
+        tags = None
+        if args.tags:
+            tags = [tag.strip() for tag in args.tags.split(',') if tag.strip()]
+        
+        # Get username with default
+        username = args.username if args.username else get_current_username()
+        
+        # Get timezone with default
+        timezone = args.timezone if args.timezone else get_local_timezone()
+        
+        # Handle defaults for desktop and browser
+        desktop = args.desktop or "xfce"
+        browser = args.browser or "brave"
+        
+        # Handle office default for pc_dev
+        install_office = args.install_office
+        if system_type == "pc_dev" and install_office is None:
+            install_office = True
+        elif install_office is None:
+            install_office = False
+        
+        # Handle RDP default
+        enable_rdp = args.enable_rdp
+        if enable_rdp is None and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
+            enable_rdp = True
+        elif enable_rdp is None:
+            enable_rdp = False
+        
+        # Handle X2Go default
+        enable_x2go = args.enable_x2go
+        if enable_x2go is None and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
+            enable_x2go = True
+        elif enable_x2go is None:
+            enable_x2go = False
+        
+        return cls(
+            host=args.host,
+            username=username,
+            system_type=system_type,
+            password=getattr(args, 'password', None),
+            ssh_key=getattr(args, 'ssh_key', None),
+            timezone=timezone,
+            friendly_name=getattr(args, 'friendly_name', None),
+            tags=tags,
+            enable_rdp=enable_rdp,
+            enable_x2go=enable_x2go,
+            skip_audio=getattr(args, 'skip_audio', False) or False,
+            desktop=desktop,
+            browser=browser,
+            use_flatpak=getattr(args, 'use_flatpak', False) or False,
+            install_office=install_office,
+            dry_run=getattr(args, 'dry_run', False),
+            install_ruby=getattr(args, 'install_ruby', False) or False,
+            install_go=getattr(args, 'install_go', False) or False,
+            install_node=getattr(args, 'install_node', False) or False,
+            custom_steps=getattr(args, 'custom_steps', None),
+            deploy_specs=getattr(args, 'deploy_specs', None),
+            full_deploy=getattr(args, 'full_deploy', False),
+            enable_ssl=getattr(args, 'enable_ssl', False) or False,
+            ssl_email=getattr(args, 'ssl_email', None),
+            enable_cloudflare=getattr(args, 'enable_cloudflare', False) or False,
+            api_subdomain=getattr(args, 'api_subdomain', False) or False,
+            enable_samba=getattr(args, 'enable_samba', False) or False,
+            samba_shares=getattr(args, 'samba_shares', None)
+        )
 
 
 def validate_ip_address(ip: str) -> bool:
@@ -82,30 +212,30 @@ def get_current_username() -> str:
     return getpass.getuser()
 
 
-def print_name_and_tags(name: Optional[str], tags: Optional[list]) -> None:
+def print_name_and_tags(config: SetupConfig) -> None:
     """Print configuration name and tags if present."""
-    if name:
-        print(f"Name: {name}")
-    if tags and len(tags) > 0:
-        print(f"Tags: {', '.join(tags)}")
+    if config.friendly_name:
+        print(f"Name: {config.friendly_name}")
+    if config.tags and len(config.tags) > 0:
+        print(f"Tags: {', '.join(config.tags)}")
 
 
-def print_success_header(host: str, username: str, name: Optional[str] = None, tags: Optional[list] = None) -> None:
+def print_success_header(config: SetupConfig) -> None:
     """Print common success information for all setup scripts."""
-    print(f"Host: {host}")
-    print(f"Username: {username}")
-    if name or tags:
+    print(f"Host: {config.host}")
+    print(f"Username: {config.username}")
+    if config.friendly_name or config.tags:
         print()
-        print_name_and_tags(name, tags)
+        print_name_and_tags(config)
 
 
-def print_rdp_x2go_info(host: str, enable_rdp: bool, enable_x2go: bool) -> None:
+def print_rdp_x2go_info(config: SetupConfig) -> None:
     """Print RDP and X2Go connection information."""
-    if enable_rdp:
-        print(f"RDP: {host}:3389")
+    if config.enable_rdp:
+        print(f"RDP: {config.host}:3389")
         print(f"  Client: Remmina, Microsoft Remote Desktop")
-    if enable_x2go:
-        print(f"X2Go: {host}:22 (SSH)")
+    if config.enable_x2go:
+        print(f"X2Go: {config.host}:22 (SSH)")
         print(f"  Client: x2goclient, Session: XFCE")
 
 
@@ -118,76 +248,84 @@ def get_cache_path_for_host(host: str) -> str:
     return os.path.join(SETUP_CACHE_DIR, f"{safe_host}_{host_hash}.json")
 
 
-def save_setup_command(host: str, system_type: str, args_dict: Dict[str, Any]) -> None:
-    cache_path = get_cache_path_for_host(host)
-    
-    # Extract name and tags from args_dict
-    friendly_name = args_dict.get('friendly_name')
-    tags_str = args_dict.get('tags')
-    tags = []
-    if tags_str:
-        tags = [tag.strip() for tag in tags_str.split(',') if tag.strip()]
+def save_setup_command(config: SetupConfig) -> None:
+    """Save setup configuration to cache."""
+    cache_path = get_cache_path_for_host(config.host)
     
     cache_data = {
-        "host": host,
-        "system_type": system_type,
-        "args": args_dict,
-        "script": f"setup_{system_type}.py"
+        "host": config.host,
+        "system_type": config.system_type,
+        "args": config.to_dict(),
+        "script": f"setup_{config.system_type}.py"
     }
     
     # Add name and tags at top level for easier access
-    if friendly_name:
-        cache_data["name"] = friendly_name
-    if tags:
-        cache_data["tags"] = tags
+    if config.friendly_name:
+        cache_data["name"] = config.friendly_name
+    if config.tags:
+        cache_data["tags"] = config.tags
     
     with open(cache_path, 'w') as f:
         json.dump(cache_data, f, indent=2)
 
 
-def load_setup_command(host: str) -> Optional[Dict[str, Any]]:
+def load_setup_command(host: str) -> Optional[SetupConfig]:
+    """Load setup configuration from cache."""
     cache_path = get_cache_path_for_host(host)
     if not os.path.exists(cache_path):
         return None
     try:
         with open(cache_path, 'r') as f:
-            return json.load(f)
+            data = json.load(f)
+            system_type = data.get('system_type')
+            args_dict = data.get('args', {})
+            return SetupConfig.from_dict(host, system_type, args_dict)
     except Exception as e:
         print(f"Warning: Failed to load cached setup for {host}: {e}")
         return None
 
 
-def merge_setup_args(cached_args: Dict[str, Any], new_args: Dict[str, Any]) -> Dict[str, Any]:
-    merged = cached_args.copy()
+def merge_setup_configs(cached_config: SetupConfig, new_config: SetupConfig) -> SetupConfig:
+    """Merge two SetupConfig objects, with new_config taking precedence."""
+    merged_dict = asdict(cached_config)
+    new_dict = asdict(new_config)
     
-    for key, value in new_args.items():
-        if key in ('deploy', 'deploy_specs') and key in merged:
-            if merged[key] is None:
-                merged[key] = value
+    for key, value in new_dict.items():
+        # Skip host and system_type as they should remain from cached
+        if key in ('host', 'system_type'):
+            continue
+            
+        # Handle deploy_specs merging
+        if key == 'deploy_specs' and key in merged_dict:
+            if merged_dict[key] is None:
+                merged_dict[key] = value
             elif value is not None:
-                existing_deploys = {(spec, url) for spec, url in merged[key]}
-                for deploy_spec, git_url in value:
-                    deploy_tuple = (deploy_spec, git_url)
+                existing_deploys = {(spec[0], spec[1]) for spec in merged_dict[key]}
+                for deploy_spec in value:
+                    deploy_tuple = (deploy_spec[0], deploy_spec[1])
                     if deploy_tuple not in existing_deploys:
-                        merged[key].append([deploy_spec, git_url])
+                        merged_dict[key].append(deploy_spec)
                         existing_deploys.add(deploy_tuple)
-        elif key == 'samba_shares' and key in merged:
-            if merged[key] is None:
-                merged[key] = value
+        # Handle samba_shares merging
+        elif key == 'samba_shares' and key in merged_dict:
+            if merged_dict[key] is None:
+                merged_dict[key] = value
             elif value is not None:
-                existing_shares = {tuple(share) for share in merged[key]}
+                existing_shares = {tuple(share) for share in merged_dict[key]}
                 for share_spec in value:
                     share_tuple = tuple(share_spec)
                     if share_tuple not in existing_shares:
-                        merged[key].append(share_spec)
+                        merged_dict[key].append(share_spec)
                         existing_shares.add(share_tuple)
+        # Handle tags merging
+        elif key == 'tags':
+            if value is not None:
+                merged_dict[key] = value
+        # For all other fields, new value takes precedence if not None
         elif value is not None:
-            if isinstance(value, bool):
-                merged[key] = value
-            elif not isinstance(value, bool):
-                merged[key] = value
+            merged_dict[key] = value
     
-    return merged
+    return SetupConfig(**merged_dict)
 
 
 def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = None, dry_run: bool = False) -> Optional[tuple]:
@@ -394,34 +532,8 @@ def create_argument_parser(description: str, allow_steps: bool = False) -> argpa
     return parser
 
 
-def run_remote_setup(
-    host: str,
-    username: str,
-    system_type: str,
-    password: Optional[str] = None,
-    ssh_key: Optional[str] = None,
-    timezone: Optional[str] = None,
-    enable_rdp: bool = False,
-    enable_x2go: bool = False,
-    skip_audio: bool = False,
-    desktop: str = "xfce",
-    browser: str = "brave",
-    use_flatpak: bool = False,
-    install_office: bool = False,
-    dry_run: bool = False,
-    install_ruby: bool = False,
-    install_go: bool = False,
-    install_node: bool = False,
-    custom_steps: Optional[str] = None,
-    deploy_specs: Optional[list] = None,
-    full_deploy: bool = False,
-    enable_ssl: bool = False,
-    ssl_email: Optional[str] = None,
-    enable_cloudflare: bool = False,
-    api_subdomain: bool = False,
-    enable_samba: bool = False,
-    samba_shares: Optional[list] = None,
-) -> int:
+def run_remote_setup(config: SetupConfig) -> int:
+    """Execute remote setup with the given configuration."""
     try:
         tar_data = create_tar_archive()
     except FileNotFoundError as e:
@@ -433,82 +545,82 @@ def run_remote_setup(
         "-o", "ConnectTimeout=30",
         "-o", "ServerAliveInterval=30",
     ]
-    if ssh_key:
-        ssh_opts.extend(["-i", ssh_key])
+    if config.ssh_key:
+        ssh_opts.extend(["-i", config.ssh_key])
     
     escaped_install_dir = shlex.quote(REMOTE_INSTALL_DIR)
     
     cmd_parts = [
         f"python3 {escaped_install_dir}/remote_setup.py",
-        f"--system-type {shlex.quote(system_type)}",
-        f"--username {shlex.quote(username)}",
+        f"--system-type {shlex.quote(config.system_type)}",
+        f"--username {shlex.quote(config.username)}",
     ]
     
-    if password:
-        cmd_parts.append(f"--password {shlex.quote(password)}")
+    if config.password:
+        cmd_parts.append(f"--password {shlex.quote(config.password)}")
     
-    if timezone:
-        cmd_parts.append(f"--timezone {shlex.quote(timezone)}")
+    if config.timezone:
+        cmd_parts.append(f"--timezone {shlex.quote(config.timezone)}")
     
-    if enable_rdp:
+    if config.enable_rdp:
         cmd_parts.append("--rdp")
     
-    if enable_x2go:
+    if config.enable_x2go:
         cmd_parts.append("--x2go")
     
-    if skip_audio:
+    if config.skip_audio:
         cmd_parts.append("--skip-audio")
     
-    if desktop and desktop != "xfce":
-        cmd_parts.append(f"--desktop {shlex.quote(desktop)}")
+    if config.desktop and config.desktop != "xfce":
+        cmd_parts.append(f"--desktop {shlex.quote(config.desktop)}")
     
-    if browser and browser != "brave":
-        cmd_parts.append(f"--browser {shlex.quote(browser)}")
+    if config.browser and config.browser != "brave":
+        cmd_parts.append(f"--browser {shlex.quote(config.browser)}")
     
-    if use_flatpak:
+    if config.use_flatpak:
         cmd_parts.append("--flatpak")
     
-    if install_office:
+    if config.install_office:
         cmd_parts.append("--office")
     
-    if dry_run:
+    if config.dry_run:
         cmd_parts.append("--dry-run")
     
-    if install_ruby:
+    if config.install_ruby:
         cmd_parts.append("--ruby")
     
-    if install_go:
+    if config.install_go:
         cmd_parts.append("--go")
     
-    if install_node:
+    if config.install_node:
         cmd_parts.append("--node")
     
-    if custom_steps:
-        cmd_parts.append(f"--steps {shlex.quote(custom_steps)}")
+    if config.custom_steps:
+        cmd_parts.append(f"--steps {shlex.quote(config.custom_steps)}")
     
-    if deploy_specs:
+    if config.deploy_specs:
         cmd_parts.append("--lite-deploy")
-        if full_deploy:
+        if config.full_deploy:
             cmd_parts.append("--full-deploy")
-        for deploy_spec, git_url in deploy_specs:
+        for deploy_spec, git_url in config.deploy_specs:
             cmd_parts.append(f"--deploy {shlex.quote(deploy_spec)} {shlex.quote(git_url)}")
     
-    if enable_ssl:
+    if config.enable_ssl:
         cmd_parts.append("--ssl")
-        if ssl_email:
-            cmd_parts.append(f"--ssl-email {shlex.quote(ssl_email)}")
+        if config.ssl_email:
+            cmd_parts.append(f"--ssl-email {shlex.quote(config.ssl_email)}")
     
-    if enable_cloudflare:
+    if config.enable_cloudflare:
         cmd_parts.append("--cloudflare")
     
-    if api_subdomain:
+    if config.api_subdomain:
         cmd_parts.append("--api-subdomain")
     
-    if enable_samba:
+    if config.enable_samba:
         cmd_parts.append("--samba")
     
-    if samba_shares:
-        for share_spec in samba_shares:
+    if config.samba_shares:
+        for share_spec in config.samba_shares:
             escaped_spec = ' '.join(shlex.quote(str(s)) for s in share_spec)
             cmd_parts.append(f"--share {escaped_spec}")
     
@@ -519,20 +631,20 @@ tar xzf - && \
 {' '.join(cmd_parts)}
 """
     
-    ssh_cmd = ["ssh"] + ssh_opts + [f"root@{host}", remote_cmd]
+    ssh_cmd = ["ssh"] + ssh_opts + [f"root@{config.host}", remote_cmd]
     
     # Handle deployments: clone repositories locally first
     temp_deploy_dir = None
     deploy_tar_data = None
-    if deploy_specs:
+    if config.deploy_specs:
         temp_deploy_dir = tempfile.mkdtemp(prefix="infra_deploy_")
         print(f"\n{'='*60}")
         print("Cloning repositories locally...")
         print(f"{'='*60}")
         
         cloned_repos = []
-        for deploy_spec, git_url in deploy_specs:
-            result = clone_repository(git_url, temp_deploy_dir, cache_dir=GIT_CACHE_DIR, dry_run=dry_run)
+        for deploy_spec, git_url in config.deploy_specs:
+            result = clone_repository(git_url, temp_deploy_dir, cache_dir=GIT_CACHE_DIR, dry_run=config.dry_run)
             if result:
                 clone_path, commit_hash = result
                 cloned_repos.append((deploy_spec, clone_path, git_url, commit_hash))
@@ -569,10 +681,10 @@ tar xzf - && \
             deploy_tar_data = deploy_tar_buffer.getvalue()
             print(f"  ✓ Packaged {len(cloned_repos)} repository(ies)")
     
-    if dry_run:
+    if config.dry_run:
         print("\n" + "=" * 60)
         print("[DRY RUN] Would execute:")
-        print(f"  SSH command: {' '.join(ssh_cmd[:3])} root@{host} ...")
+        print(f"  SSH command: {' '.join(ssh_cmd[:3])} root@{config.host} ...")
         print(f"  Remote command: {' '.join(cmd_parts)}")
         if deploy_tar_data:
             print(f"  Would upload {len(deploy_tar_data)} bytes of deployment data")
@@ -594,7 +706,7 @@ tar xzf - && \
             deploy_cmd = f"mkdir -p {escaped_install_dir} && cd {escaped_install_dir} && tar xzf -"
 
             deploy_process = subprocess.Popen(
-                ["ssh"] + ssh_opts + [f"root@{host}", deploy_cmd],
+                ["ssh"] + ssh_opts + [f"root@{config.host}", deploy_cmd],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -667,138 +779,76 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
         print(f"Error: Remote modules not found: {REMOTE_MODULES_DIR}")
         return 1
     
-    timezone = args.timezone if args.timezone else get_local_timezone()
+    # Create SetupConfig from arguments
+    config = SetupConfig.from_args(args, system_type)
     
-    # Handle defaults
-    desktop = args.desktop or "xfce"
-    browser = args.browser or "brave"
-    
-    install_office = args.install_office
-    if system_type == "pc_dev" and not install_office:
-        install_office = True
-    
-    enable_rdp = args.enable_rdp
-    if enable_rdp is None and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        enable_rdp = True
-    elif enable_rdp is None:
-        enable_rdp = False
-    
-    enable_x2go = args.enable_x2go
-    if enable_x2go is None and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        enable_x2go = True
-    elif enable_x2go is None:
-        enable_x2go = False
-    
+    # Print setup information
     print("=" * 60)
     print(f"{description}")
     print("=" * 60)
-    print(f"Host: {args.host}")
-    print(f"User: {username}")
-    print(f"Timezone: {timezone}")
+    print(f"Host: {config.host}")
+    print(f"User: {config.username}")
+    print(f"Timezone: {config.timezone}")
     if system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        print(f"RDP: {'Yes' if enable_rdp else 'No'}")
-        print(f"X2Go: {'Yes' if enable_x2go else 'No'}")
+        print(f"RDP: {'Yes' if config.enable_rdp else 'No'}")
+        print(f"X2Go: {'Yes' if config.enable_x2go else 'No'}")
     elif args.enable_rdp is not None and system_type == "server_dev":
-        print(f"RDP: {'Yes' if enable_rdp else 'No'}")
+        print(f"RDP: {'Yes' if config.enable_rdp else 'No'}")
     if args.enable_x2go is not None and system_type == "server_dev":
-        print(f"X2Go: {'Yes' if enable_x2go else 'No'}")
-    if args.skip_audio and system_type in ["workstation_desktop", "pc_dev"]:
+        print(f"X2Go: {'Yes' if config.enable_x2go else 'No'}")
+    if config.skip_audio and system_type in ["workstation_desktop", "pc_dev"]:
         print("Skip audio: Yes")
-    if args.desktop and args.desktop != "xfce" and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        print(f"Desktop: {args.desktop}")
-    if args.browser and args.browser != "brave" and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        print(f"Browser: {args.browser}")
-    if args.use_flatpak and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
+    if config.desktop and config.desktop != "xfce" and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
+        print(f"Desktop: {config.desktop}")
+    if config.browser and config.browser != "brave" and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
+        print(f"Browser: {config.browser}")
+    if config.use_flatpak and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
         print("Flatpak: Yes")
-    if args.install_office and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
+    if config.install_office and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
         print("Office: Yes")
-    if args.dry_run:
+    if config.dry_run:
         print("Dry-run: Yes")
-    if allow_steps and args.custom_steps:
-        print(f"Steps: {args.custom_steps}")
-    if args.deploy_specs:
-        print(f"Deployments: {len(args.deploy_specs)} repository(ies)")
-        for location, git_url in args.deploy_specs:
+    if allow_steps and config.custom_steps:
+        print(f"Steps: {config.custom_steps}")
+    if config.deploy_specs:
+        print(f"Deployments: {len(config.deploy_specs)} repository(ies)")
+        for location, git_url in config.deploy_specs:
             print(f"  - {git_url} -> {location}")
-        if args.full_deploy:
+        if config.full_deploy:
             print("Full deploy: Yes (rebuild all deployments)")
         else:
             print("Full deploy: No (skip unchanged deployments)")
-        if args.enable_ssl:
+        if config.enable_ssl:
             print("SSL: Yes (Let's Encrypt)")
-            if args.ssl_email:
-                print(f"SSL Email: {args.ssl_email}")
-        if args.enable_cloudflare:
+            if config.ssl_email:
+                print(f"SSL Email: {config.ssl_email}")
+        if config.enable_cloudflare:
             print("Cloudflare: Yes (tunnel preconfiguration)")
-    if args.enable_samba:
+    if config.enable_samba:
         print("Samba: Yes")
-        if args.samba_shares:
-            print(f"Samba Shares: {len(args.samba_shares)} share(s)")
-            for share in args.samba_shares:
+        if config.samba_shares:
+            print(f"Samba Shares: {len(config.samba_shares)} share(s)")
+            for share in config.samba_shares:
                 print(f"  - {share[1]}_{share[0]}: {share[2]}")
     print("=" * 60)
     print()
     
-    args_dict = vars(args).copy()
-    if 'host' in args_dict:
-        del args_dict['host']
+    # Save configuration before running
+    if not config.dry_run:
+        save_setup_command(config)
     
-    args_dict['username'] = username
-    args_dict['timezone'] = timezone
-    args_dict['desktop'] = desktop
-    args_dict['browser'] = browser
-    args_dict['install_office'] = install_office
-    args_dict['enable_rdp'] = enable_rdp
-    args_dict['enable_x2go'] = enable_x2go
-    
-    if not args.dry_run:
-        save_setup_command(args.host, system_type, args_dict)
-    
-    returncode = run_remote_setup(
-        host=args.host,
-        username=username,
-        system_type=system_type,
-        password=args.password,
-        ssh_key=args.ssh_key,
-        timezone=timezone,
-        enable_rdp=enable_rdp,
-        enable_x2go=enable_x2go,
-        skip_audio=args.skip_audio,
-        desktop=desktop,
-        browser=browser,
-        use_flatpak=args.use_flatpak,
-        install_office=install_office,
-        dry_run=args.dry_run,
-        install_ruby=args.install_ruby,
-        install_go=args.install_go,
-        install_node=args.install_node,
-        custom_steps=args.custom_steps if allow_steps else None,
-        deploy_specs=args.deploy_specs,
-        full_deploy=args.full_deploy if args.deploy_specs else False,
-        enable_ssl=args.enable_ssl if args.deploy_specs else False,
-        ssl_email=args.ssl_email if args.enable_ssl else None,
-        enable_cloudflare=args.enable_cloudflare or False,
-        api_subdomain=args.api_subdomain or False,
-        enable_samba=args.enable_samba or False,
-        samba_shares=args.samba_shares
-    )
+    # Run remote setup
+    returncode = run_remote_setup(config)
     
     if returncode != 0:
         print(f"\n✗ Setup failed (exit code: {returncode})")
         return 1
     
-    # Extract name and tags
-    friendly_name = args_dict.get('friendly_name')
-    tags_str = args_dict.get('tags')
-    tags = []
-    if tags_str:
-        tags = [tag.strip() for tag in tags_str.split(',') if tag.strip()]
-    
     print()
     print("=" * 60)
     print("Setup Complete!")
     print("=" * 60)
-    success_msg_fn(args.host, username, enable_rdp, enable_x2go, friendly_name, tags)
+    success_msg_fn(config)
     print("=" * 60)
     
     return 0

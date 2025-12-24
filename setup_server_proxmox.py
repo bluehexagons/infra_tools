@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
 
 import sys
-from lib.setup_common import setup_main, print_name_and_tags
+from lib.setup_common import setup_main, print_name_and_tags, SetupConfig
 
 
-def success_message(host: str, username: str, enable_rdp: bool = False, enable_x2go: bool = False,
-                   friendly_name: str = None, tags: list = None) -> None:
-    print(f"Proxmox Server: {host}")
-    print(f"Username: {username}")
-    if friendly_name or tags:
+def success_message(config: SetupConfig) -> None:
+    print(f"Proxmox Server: {config.host}")
+    print(f"Username: {config.username}")
+    if config.friendly_name or config.tags:
         print()
-        print_name_and_tags(friendly_name, tags)
+        print_name_and_tags(config)
     print()
-    print(f"Connect via SSH: ssh root@{host}")
-    print(f"Web UI: https://{host}:8006")
+    print(f"Connect via SSH: ssh root@{config.host}")
+    print(f"Web UI: https://{config.host}:8006")
 
 
 def main() -> int:

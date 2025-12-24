@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 
 import sys
-from lib.setup_common import setup_main, print_success_header
+from lib.setup_common import setup_main, print_success_header, SetupConfig
 
 
-def success_message(host: str, username: str, enable_rdp: bool = False, enable_x2go: bool = False,
-                   friendly_name: str = None, tags: list = None) -> None:
-    print_success_header(host, username, friendly_name, tags)
+def success_message(config: SetupConfig) -> None:
+    print_success_header(config)
     print()
-    print(f"Connect via SSH: ssh {username}@{host}")
+    print(f"Connect via SSH: ssh {config.username}@{config.host}")
 
 
 def main() -> int:
