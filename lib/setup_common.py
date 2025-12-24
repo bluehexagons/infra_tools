@@ -90,6 +90,25 @@ def print_name_and_tags(name: Optional[str], tags: Optional[list]) -> None:
         print(f"Tags: {', '.join(tags)}")
 
 
+def print_success_header(host: str, username: str, name: Optional[str] = None, tags: Optional[list] = None) -> None:
+    """Print common success information for all setup scripts."""
+    print(f"Host: {host}")
+    print(f"Username: {username}")
+    if name or tags:
+        print()
+        print_name_and_tags(name, tags)
+
+
+def print_rdp_x2go_info(host: str, enable_rdp: bool, enable_x2go: bool) -> None:
+    """Print RDP and X2Go connection information."""
+    if enable_rdp:
+        print(f"RDP: {host}:3389")
+        print(f"  Client: Remmina, Microsoft Remote Desktop")
+    if enable_x2go:
+        print(f"X2Go: {host}:22 (SSH)")
+        print(f"  Client: x2goclient, Session: XFCE")
+
+
 def get_cache_path_for_host(host: str) -> str:
     normalized_host = host.lower().rstrip('.')
     import hashlib
@@ -768,22 +787,18 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
         print(f"\n✗ Setup failed (exit code: {returncode})")
         return 1
     
-    print()
-    print("=" * 60)
-    print("Setup Complete!")
-    print("=" * 60)
-    success_msg_fn(args.host, username, enable_rdp, enable_x2go)
-    
-    # Print name and tags if present
+    # Extract name and tags
     friendly_name = args_dict.get('friendly_name')
     tags_str = args_dict.get('tags')
     tags = []
     if tags_str:
         tags = [tag.strip() for tag in tags_str.split(',') if tag.strip()]
-    if friendly_name or tags:
-        print()
-        print_name_and_tags(friendly_name, tags)
     
+    print()
+    print("=" * 60)
+    print("Setup Complete!")
+    print("=" * 60)
+    success_msg_fn(args.host, username, enable_rdp, enable_x2go, friendly_name, tags)
     print("=" * 60)
     
     return 0

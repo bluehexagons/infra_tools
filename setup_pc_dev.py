@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
 
 import sys
-from lib.setup_common import setup_main
+from lib.setup_common import setup_main, print_success_header, print_rdp_x2go_info
 
 
-def success_message(host: str, username: str, enable_rdp: bool = True, enable_x2go: bool = True) -> None:
-    if enable_rdp:
-        print(f"RDP: {host}:3389")
-        print(f"  Client: Remmina, Microsoft Remote Desktop")
-    if enable_x2go:
-        print(f"X2Go: {host}:22 (SSH)")
-        print(f"  Client: x2goclient, Session: XFCE")
-    print(f"Username: {username}")
+def success_message(host: str, username: str, enable_rdp: bool = True, enable_x2go: bool = True,
+                   friendly_name: str = None, tags: list = None) -> None:
+    print_rdp_x2go_info(host, enable_rdp, enable_x2go)
+    print_success_header(host, username, friendly_name, tags)
     print()
     print("PC Dev setup includes:")
     print("  - Desktop environment with RDP access")
