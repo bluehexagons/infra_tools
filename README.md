@@ -76,7 +76,7 @@ Common features: User setup, sudo, firewall/SSH hardening, auto-updates, Chrony,
 | Flag | Description |
 |------|-------------|
 | `--samba` | Install and configure Samba for SMB file sharing |
-| `--share TYPE NAME PATHS USERS` | Configure Samba share (can use multiple times)<br>TYPE: read\|write<br>NAME: share name<br>PATHS: comma-separated paths<br>USERS: comma-separated username:password pairs |
+| `--share TYPE NAME PATHS USERS` | Configure Samba share (can use multiple times): TYPE (read or write), NAME (share name), PATHS (comma-separated paths), USERS (comma-separated username:password pairs) |
 
 ## Deployment Guide
 
