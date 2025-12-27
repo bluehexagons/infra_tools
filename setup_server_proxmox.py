@@ -2,7 +2,8 @@
 
 import sys
 from lib.config import SetupConfig
-from lib.setup_common import setup_main, print_name_and_tags
+from lib.setup_common import setup_main
+from lib.display import print_name_and_tags
 
 
 def success_message(config: SetupConfig) -> None:
