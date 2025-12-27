@@ -443,7 +443,7 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
         print(f"RDP: {'Yes' if config.enable_rdp else 'No'}")
     if args.enable_x2go is not None and system_type == "server_dev":
         print(f"X2Go: {'Yes' if config.enable_x2go else 'No'}")
-    if config.enable_audio and system_type in ["workstation_desktop", "pc_dev"]:
+    if config.enable_audio and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
         print("Audio: Yes")
     if config.desktop and config.desktop != "xfce" and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
         print(f"Desktop: {config.desktop}")
