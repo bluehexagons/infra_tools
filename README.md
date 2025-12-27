@@ -16,9 +16,9 @@ python3 patch_setup.py example.com --ssl --deploy api.example.com https://github
 |--------|-------------|
 | `setup_server_web.py` | Web server with Nginx, reverse proxy, SSL, deployments |
 | `setup_server_dev.py` | Development server with CLI tools, no desktop |
-| `setup_workstation_desktop.py` | Desktop workstation with RDP, audio, browser, VS Code |
+| `setup_workstation_desktop.py` | Desktop workstation with RDP, browser, VS Code |
 | `setup_pc_dev.py` | PC dev workstation with bare metal, Remmina, LibreOffice |
-| `setup_workstation_dev.py` | Light dev workstation with RDP, no audio, VS Code |
+| `setup_workstation_dev.py` | Light dev workstation with RDP, VS Code |
 | `setup_server_proxmox.py` | Proxmox hardening with security updates, SSH hardening |
 | `setup_steps.py` | Custom setup, run specific steps only |
 
@@ -44,8 +44,8 @@ Common features: User setup, sudo, firewall/SSH hardening, auto-updates, Chrony,
 | Flag | Description |
 |------|-------------|
 | `--rdp` / `--no-rdp` | Enable/disable RDP/XRDP (default: enabled for workstation setups) |
-| `--x2go` / `--no-x2go` | Enable/disable X2Go remote desktop (default: enabled for workstation setups) |
-| `--skip-audio` | Skip audio setup (desktop only) |
+| `--x2go` / `--no-x2go` | Enable/disable X2Go remote desktop |
+| `--audio` / `--no-audio` | Enable/disable audio setup (desktop only) |
 | `--desktop [xfce\|i3\|cinnamon]` | Desktop environment (default: xfce) |
 | `--browser [brave\|firefox\|browsh\|vivaldi\|lynx]` | Web browser (default: brave) |
 | `--flatpak` | Install desktop apps via Flatpak |

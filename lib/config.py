@@ -17,7 +17,7 @@ class SetupConfig:
     tags: Optional[List[str]] = None
     enable_rdp: bool = False
     enable_x2go: bool = False
-    skip_audio: bool = False
+    enable_audio: bool = False
     desktop: str = "xfce"
     browser: str = "brave"
     use_flatpak: bool = False
@@ -83,10 +83,12 @@ class SetupConfig:
             enable_rdp = False
         
         enable_x2go = args.enable_x2go
-        if enable_x2go is None and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-            enable_x2go = True
-        elif enable_x2go is None:
+        if enable_x2go is None:
             enable_x2go = False
+        
+        enable_audio = getattr(args, 'enable_audio', False)
+        if enable_audio is None:
+            enable_audio = False
         
         return cls(
             host=args.host,
@@ -99,7 +101,7 @@ class SetupConfig:
             tags=tags,
             enable_rdp=enable_rdp,
             enable_x2go=enable_x2go,
-            skip_audio=getattr(args, 'skip_audio', False),
+            enable_audio=enable_audio,
             desktop=desktop,
             browser=browser,
             use_flatpak=getattr(args, 'use_flatpak', False),

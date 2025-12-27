@@ -215,8 +215,8 @@ def run_remote_setup(config: SetupConfig) -> int:
     if config.enable_x2go:
         cmd_parts.append("--x2go")
     
-    if config.skip_audio:
-        cmd_parts.append("--skip-audio")
+    if config.enable_audio:
+        cmd_parts.append("--audio")
     
     if config.desktop and config.desktop != "xfce":
         cmd_parts.append(f"--desktop {shlex.quote(config.desktop)}")
@@ -443,8 +443,8 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
         print(f"RDP: {'Yes' if config.enable_rdp else 'No'}")
     if args.enable_x2go is not None and system_type == "server_dev":
         print(f"X2Go: {'Yes' if config.enable_x2go else 'No'}")
-    if config.skip_audio and system_type in ["workstation_desktop", "pc_dev"]:
-        print("Skip audio: Yes")
+    if config.enable_audio and system_type in ["workstation_desktop", "pc_dev"]:
+        print("Audio: Yes")
     if config.desktop and config.desktop != "xfce" and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
         print(f"Desktop: {config.desktop}")
     if config.browser and config.browser != "brave" and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:

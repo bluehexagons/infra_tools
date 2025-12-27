@@ -53,7 +53,7 @@ def config_from_remote_args(args: argparse.Namespace) -> SetupConfig:
         tags=None,
         enable_rdp=args.rdp,
         enable_x2go=args.x2go,
-        skip_audio=args.skip_audio,
+        enable_audio=args.audio,
         desktop=args.desktop,
         browser=args.browser,
         use_flatpak=args.flatpak,
@@ -117,8 +117,8 @@ def main() -> int:
         print("RDP: Yes")
     if config.enable_x2go and config.system_type == "server_dev":
         print("X2Go: Yes")
-    if config.skip_audio:
-        print("Skip audio: Yes")
+    if config.enable_audio:
+        print("Audio: Yes")
     if config.desktop != "xfce" and config.system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
         print(f"Desktop: {config.desktop}")
     if config.browser != "brave" and config.system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:

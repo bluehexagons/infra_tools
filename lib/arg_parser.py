@@ -40,11 +40,11 @@ def create_setup_argument_parser(
     parser.add_argument("--x2go", dest="enable_x2go" if not for_remote else "x2go", 
                        action=argparse.BooleanOptionalAction, 
                        default=None if not for_remote else False,
-                       help="Enable X2Go remote desktop access" + ("" if for_remote else " (default: enabled for workstation setups)"))
-    parser.add_argument("--skip-audio", 
+                       help="Enable X2Go remote desktop access")
+    parser.add_argument("--audio", dest="enable_audio" if not for_remote else "audio", 
                        action=argparse.BooleanOptionalAction if not for_remote else "store_true", 
                        default=None if not for_remote else False,
-                       help="Skip audio setup (desktop only)")
+                       help="Enable audio setup (desktop only)")
     parser.add_argument("--desktop", choices=["xfce", "i3", "cinnamon"], 
                        default="xfce" if for_remote else None,
                        help="Desktop environment to install (default: xfce)")
