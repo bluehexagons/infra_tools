@@ -25,7 +25,7 @@ def create_setup_argument_parser(
     
     if for_remote:
         parser.add_argument("--system-type", dest="system_type", 
-                           choices=["workstation_desktop", "pc_dev", "workstation_dev", "server_dev", "server_web", "server_proxmox", "custom_steps"],
+                           choices=["workstation_desktop", "pc_dev", "workstation_dev", "server_dev", "server_web", "server_lite", "server_proxmox", "custom_steps"],
                            help="System type to setup")
         parser.add_argument("--username", default=None,
                            help="Username (defaults to current user, not used for server_proxmox)")

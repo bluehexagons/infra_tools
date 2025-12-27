@@ -15,7 +15,7 @@ from remote_modules.progress import progress_bar
 from remote_modules.system_types import get_steps_for_system_type
 
 
-VALID_SYSTEM_TYPES = ["workstation_desktop", "pc_dev", "workstation_dev", "server_dev", "server_web", "server_proxmox", "custom_steps"]
+VALID_SYSTEM_TYPES = ["workstation_desktop", "pc_dev", "workstation_dev", "server_dev", "server_web", "server_lite", "server_proxmox", "custom_steps"]
 
 
 def extract_repo_name(git_url: str) -> str:
@@ -336,16 +336,16 @@ def main() -> int:
         print("=" * 60)
         
         print("\n[1/4] Installing Samba")
-        install_samba()
+        install_samba(config)
         
         print("\n[2/4] Configuring global Samba settings with security hardening")
-        configure_samba_global_settings()
+        configure_samba_global_settings(config)
         
         print("\n[3/4] Configuring firewall for Samba")
-        configure_samba_firewall()
+        configure_samba_firewall(config)
         
         print("\n[4/4] Configuring fail2ban for Samba brute-force protection")
-        configure_samba_fail2ban()
+        configure_samba_fail2ban(config)
         
         if config.samba_shares:
             print("\n" + "=" * 60)

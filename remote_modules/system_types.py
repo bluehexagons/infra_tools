@@ -309,6 +309,14 @@ def get_steps_for_system_type(config: SetupConfig) -> list:
         ]
         return COMMON_STEPS + WEB_FIREWALL_STEPS + security_steps + \
                WEB_SERVER_STEPS + CLI_STEPS + optional_steps + FINAL_STEPS
+    elif config.system_type == "server_lite":
+        security_steps = [
+            ("Hardening SSH configuration", harden_ssh),
+            ("Hardening kernel parameters", harden_kernel),
+            ("Configuring automatic security updates", configure_auto_updates),
+            ("Configuring automatic restart service", configure_auto_restart),
+        ]
+        return COMMON_STEPS + security_steps + optional_steps + FINAL_STEPS
     elif config.system_type == "server_proxmox":
         return PROXMOX_HARDENING_STEPS
     else:
