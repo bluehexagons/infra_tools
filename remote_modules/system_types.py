@@ -232,7 +232,8 @@ def get_steps_for_system_type(config: SetupConfig) -> list:
             desktop_steps = [s for s in desktop_steps if s[1] not in [install_x2go, configure_xfce_for_x2go]]
         if config.desktop != "xfce":
             desktop_steps = [s for s in desktop_steps if s[1] != configure_xfce_for_x2go]
-        if not config.enable_audio:
+        # Audio requires both --audio flag AND RDP to be enabled (audio uses xRDP modules)
+        if not config.enable_audio or not config.enable_rdp:
             desktop_steps = [s for s in desktop_steps if s[1] != configure_audio]
         
         # Build security steps
@@ -256,7 +257,8 @@ def get_steps_for_system_type(config: SetupConfig) -> list:
             desktop_steps = [s for s in desktop_steps if s[1] not in [install_x2go, configure_xfce_for_x2go]]
         if config.desktop != "xfce":
             desktop_steps = [s for s in desktop_steps if s[1] != configure_xfce_for_x2go]
-        if not config.enable_audio:
+        # Audio requires both --audio flag AND RDP to be enabled (audio uses xRDP modules)
+        if not config.enable_audio or not config.enable_rdp:
             desktop_steps = [s for s in desktop_steps if s[1] != configure_audio]
         
         # Build security steps
@@ -280,7 +282,8 @@ def get_steps_for_system_type(config: SetupConfig) -> list:
             desktop_steps = [s for s in desktop_steps if s[1] not in [install_x2go, configure_xfce_for_x2go]]
         if config.desktop != "xfce":
             desktop_steps = [s for s in desktop_steps if s[1] != configure_xfce_for_x2go]
-        if not config.enable_audio:
+        # Audio requires both --audio flag AND RDP to be enabled (audio uses xRDP modules)
+        if not config.enable_audio or not config.enable_rdp:
             desktop_steps = [s for s in desktop_steps if s[1] != configure_audio]
         
         # Build security steps
