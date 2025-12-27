@@ -22,6 +22,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REMOTE_SCRIPT_PATH = os.path.join(SCRIPT_DIR, "..", "remote_setup.py")
 REMOTE_MODULES_DIR = os.path.join(SCRIPT_DIR, "..", "remote_modules")
 SHARED_DIR = os.path.join(SCRIPT_DIR, "..", "shared")
+LIB_DIR = SCRIPT_DIR
 REMOTE_INSTALL_DIR = "/opt/infra_tools"
 GIT_CACHE_DIR = os.path.expanduser("~/.cache/infra_tools/git_repos")
 
@@ -172,6 +173,7 @@ def create_tar_archive() -> bytes:
         tar.add(REMOTE_SCRIPT_PATH, arcname="remote_setup.py", filter=safe_filter)
         tar.add(REMOTE_MODULES_DIR, arcname="remote_modules", filter=safe_filter)
         tar.add(SHARED_DIR, arcname="shared", filter=safe_filter)
+        tar.add(LIB_DIR, arcname="lib", filter=safe_filter)
     
     return tar_buffer.getvalue()
 
@@ -424,6 +426,14 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
     
     if not os.path.exists(REMOTE_MODULES_DIR):
         print(f"Error: Remote modules not found: {REMOTE_MODULES_DIR}")
+        return 1
+    
+    if not os.path.exists(LIB_DIR):
+        print(f"Error: Lib directory not found: {LIB_DIR}")
+        return 1
+    
+    if not os.path.exists(SHARED_DIR):
+        print(f"Error: Shared directory not found: {SHARED_DIR}")
         return 1
     
     # Create SetupConfig from arguments
