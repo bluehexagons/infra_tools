@@ -64,6 +64,10 @@ from .samba_steps import (
     configure_samba_fail2ban,
     setup_samba_share,
 )
+from .sync_steps import (
+    install_rsync,
+    create_sync_service,
+)
 
 
 COMMON_STEPS = [
@@ -198,6 +202,8 @@ STEP_FUNCTIONS = {
     'configure_samba_global_settings': configure_samba_global_settings,
     'configure_samba_fail2ban': configure_samba_fail2ban,
     'setup_samba_share': setup_samba_share,
+    'install_rsync': install_rsync,
+    'create_sync_service': create_sync_service,
 }
 
 

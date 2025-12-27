@@ -79,6 +79,12 @@ Common features: User setup, sudo, firewall/SSH hardening, auto-updates, Chrony,
 | `--samba` | Install and configure Samba for SMB file sharing |
 | `--share TYPE NAME PATHS USERS` | Configure Samba share (can use multiple times): TYPE (read or write), NAME (share name), PATHS (comma-separated paths), USERS (comma-separated username:password pairs) |
 
+### Sync Flags
+
+| Flag | Description |
+|------|-------------|
+| `--sync SOURCE DEST INTERVAL` | Configure directory synchronization with rsync (can use multiple times): SOURCE (source directory), DEST (destination directory), INTERVAL (hourly, daily, weekly, or monthly). Creates systemd timer for automated incremental backups. |
+
 ## Deployment Guide
 
 The `--deploy` flag automates building and serving web applications:

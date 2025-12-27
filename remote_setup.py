@@ -358,6 +358,27 @@ def main() -> int:
         
         print("\n✓ Samba configuration complete")
     
+    # Configure directory synchronization if requested
+    if config.sync_specs:
+        from remote_modules.sync_steps import (
+            install_rsync,
+            create_sync_service
+        )
+        
+        print("\n" + "=" * 60)
+        print("Configuring directory synchronization...")
+        print("=" * 60)
+        
+        print("\n[1/2] Installing rsync")
+        install_rsync(config)
+        
+        print(f"\n[2/2] Configuring {len(config.sync_specs)} sync job(s)...")
+        for i, sync_spec in enumerate(config.sync_specs, 1):
+            print(f"\n  Sync job {i}/{len(config.sync_specs)}: {sync_spec[0]} → {sync_spec[1]} ({sync_spec[2]})")
+            create_sync_service(config, sync_spec=sync_spec)
+        
+        print("\n✓ Directory synchronization configured")
+    
     print("\n" + "=" * 60)
     print("✓ Remote setup complete!")
     print("=" * 60)

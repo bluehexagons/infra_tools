@@ -35,6 +35,7 @@ class SetupConfig:
     api_subdomain: bool = False
     enable_samba: bool = False
     samba_shares: Optional[List[List[str]]] = None
+    sync_specs: Optional[List[List[str]]] = None
     
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)
@@ -118,5 +119,6 @@ class SetupConfig:
             enable_cloudflare=getattr(args, 'enable_cloudflare', False),
             api_subdomain=getattr(args, 'api_subdomain', False),
             enable_samba=getattr(args, 'enable_samba', False),
-            samba_shares=getattr(args, 'samba_shares', None)
+            samba_shares=getattr(args, 'samba_shares', None),
+            sync_specs=getattr(args, 'sync_specs', None)
         )
