@@ -87,9 +87,7 @@ class SetupConfig:
         if enable_x2go is None:
             enable_x2go = False
         
-        enable_audio = getattr(args, 'enable_audio', False)
-        if enable_audio is None:
-            enable_audio = False
+        enable_audio = getattr(args, 'enable_audio', False) or False
         
         return cls(
             host=args.host,

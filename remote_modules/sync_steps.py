@@ -2,6 +2,7 @@
 
 import os
 import shlex
+import hashlib
 from typing import List
 
 from lib.config import SetupConfig
@@ -32,6 +33,12 @@ def parse_sync_spec(sync_spec: List[str]) -> dict:
     
     source, destination, interval = sync_spec
     
+    # Validate that paths are absolute
+    if not source.startswith('/'):
+        raise ValueError(f"Source path must be absolute: {source}")
+    if not destination.startswith('/'):
+        raise ValueError(f"Destination path must be absolute: {destination}")
+    
     # Validate interval
     valid_intervals = ['hourly', 'daily', 'weekly', 'monthly']
     if interval not in valid_intervals:
@@ -42,6 +49,11 @@ def parse_sync_spec(sync_spec: List[str]) -> dict:
         'destination': destination,
         'interval': interval
     }
+
+
+def _escape_systemd_description(value: str) -> str:
+    """Escape value for safe use in a systemd Description field."""
+    return value.replace("\\", "\\\\").replace("\n", " ").replace('"', "'")
 
 
 def get_timer_calendar(interval: str) -> str:
@@ -75,10 +87,12 @@ def create_sync_service(config: SetupConfig, sync_spec: List[str] = None, **_) -
     destination = sync_config['destination']
     interval = sync_config['interval']
     
-    # Create a safe name for the service
+    # Create a unique name for the service using hash to avoid collisions
+    # For example, /home/user and /home_user would otherwise both become 'home_user'
+    path_hash = hashlib.md5(f"{source}:{destination}".encode()).hexdigest()[:8]
     safe_source = source.replace('/', '_').strip('_')
     safe_dest = destination.replace('/', '_').strip('_')
-    service_name = f"sync-{safe_source}-to-{safe_dest}"
+    service_name = f"sync-{safe_source}-to-{safe_dest}-{path_hash}"
     
     # Ensure source directory exists
     if not os.path.exists(source):
@@ -94,10 +108,14 @@ def create_sync_service(config: SetupConfig, sync_spec: List[str] = None, **_) -
         os.makedirs(dest_parent, exist_ok=True)
         run(f"chown {shlex.quote(config.username)}:{shlex.quote(config.username)} {shlex.quote(dest_parent)}")
     
+    # Escape paths for systemd description
+    escaped_source = _escape_systemd_description(source)
+    escaped_destination = _escape_systemd_description(destination)
+    
     # Create systemd service file
     service_file = f"/etc/systemd/system/{service_name}.service"
     service_content = f"""[Unit]
-Description=Sync {source} to {destination}
+Description=Sync {escaped_source} to {escaped_destination}
 After=local-fs.target
 
 [Service]
@@ -119,7 +137,7 @@ StandardError=journal
     calendar = get_timer_calendar(interval)
     
     timer_content = f"""[Unit]
-Description=Timer for syncing {source} to {destination} ({interval})
+Description=Timer for syncing {escaped_source} to {escaped_destination} ({interval})
 Requires={service_name}.service
 
 [Timer]
@@ -138,13 +156,13 @@ WantedBy=timers.target
     
     # Reload systemd, enable and start the timer
     run("systemctl daemon-reload")
-    run(f"systemctl enable {service_name}.timer")
-    run(f"systemctl start {service_name}.timer")
+    run(f"systemctl enable {shlex.quote(service_name)}.timer")
+    run(f"systemctl start {shlex.quote(service_name)}.timer")
     
     print(f"  ✓ Enabled and started timer")
     
     # Show timer status
-    result = run(f"systemctl list-timers {service_name}.timer --no-pager", check=False)
+    result = run(f"systemctl list-timers {shlex.quote(service_name)}.timer --no-pager", check=False)
     if result.returncode == 0:
         print(f"  ℹ Timer status:")
         for line in result.stdout.strip().split('\n'):
@@ -153,10 +171,10 @@ WantedBy=timers.target
     
     # Perform initial sync
     print(f"  ℹ Performing initial sync...")
-    result = run(f"systemctl start {service_name}.service", check=False)
+    result = run(f"systemctl start {shlex.quote(service_name)}.service", check=False)
     if result.returncode == 0:
         print(f"  ✓ Initial sync completed")
     else:
-        print(f"  ⚠ Warning: Initial sync may have failed. Check: journalctl -u {service_name}.service")
+        print(f"  ⚠ Warning: Initial sync may have failed. Check: journalctl -u {shlex.quote(service_name)}.service")
     
     print(f"  ✓ Sync configured: {source} → {destination} ({interval})")
