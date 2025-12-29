@@ -85,7 +85,7 @@ Common features: User setup, sudo, firewall/SSH hardening, auto-updates, Chrony,
 
 | Flag | Description |
 |------|-------------|
-| `--sync SOURCE DEST INTERVAL` | Configure directory synchronization with rsync (can use multiple times): SOURCE (source directory), DEST (destination directory), INTERVAL (hourly, daily, weekly, or monthly). Creates systemd timer for automated incremental backups. Validates mount points for paths under `/mnt` or SMB mounts - sync only runs when mounts are available, preventing data loss from unmounted drives. |
+| `--sync SOURCE DEST INTERVAL` | Configure directory synchronization with rsync (can use multiple times): SOURCE (source directory), DEST (destination directory), INTERVAL (hourly, daily, weekly, or monthly). Creates systemd timer for automated incremental backups. Uses Python-based mount validation - sync only runs when mounts are available (paths under `/mnt` or SMB mounts), preventing data loss from unmounted drives or offline shares. |
 
 ## Deployment Guide
 

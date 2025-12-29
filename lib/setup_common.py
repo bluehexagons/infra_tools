@@ -169,11 +169,14 @@ def create_tar_archive() -> bytes:
             return None
         return tarinfo
     
+    check_sync_mounts_path = os.path.join(SCRIPT_DIR, "..", "check_sync_mounts.py")
+    
     with tarfile.open(fileobj=tar_buffer, mode='w:gz') as tar:
         tar.add(REMOTE_SCRIPT_PATH, arcname="remote_setup.py", filter=safe_filter)
         tar.add(REMOTE_MODULES_DIR, arcname="remote_modules", filter=safe_filter)
         tar.add(SHARED_DIR, arcname="shared", filter=safe_filter)
         tar.add(LIB_DIR, arcname="lib", filter=safe_filter)
+        tar.add(check_sync_mounts_path, arcname="check_sync_mounts.py", filter=safe_filter)
     
     return tar_buffer.getvalue()
 

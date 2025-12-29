@@ -6,7 +6,9 @@ import hashlib
 from typing import List
 
 from lib.config import SetupConfig
+from lib.setup_common import REMOTE_INSTALL_DIR
 from .utils import run, is_package_installed
+from shared.mount_utils import is_path_under_mnt, get_mount_ancestor
 
 
 def install_rsync(config: SetupConfig) -> None:
@@ -62,27 +64,6 @@ def _check_path_on_smb_mount(path: str, config: SetupConfig) -> bool:
     return False
 
 
-def _is_path_under_mnt(path: str) -> bool:
-    """Check if path is under /mnt directory."""
-    return path.startswith('/mnt/')
-
-
-def _get_mount_ancestor(path: str) -> str:
-    """Find the mount point ancestor of a path.
-    
-    Returns the path itself if it's a mount point, or the closest
-    parent directory that is a mount point. Returns empty string if
-    no mount point found.
-    """
-    current = path
-    while current and current != '/':
-        result = run(f"mountpoint -q {shlex.quote(current)}", check=False)
-        if result.returncode == 0:
-            return current
-        current = os.path.dirname(current)
-    return ""
-
-
 def _escape_systemd_description(value: str) -> str:
     """Escape value for safe use in a systemd Description field."""
     return value.replace("\\", "\\\\").replace("\n", " ").replace('"', "'")
@@ -128,9 +109,9 @@ def create_sync_service(config: SetupConfig, sync_spec: List[str] = None, **_) -
     
     # Ensure source directory exists (but don't create under /mnt if not mounted)
     if not os.path.exists(source):
-        if _is_path_under_mnt(source):
+        if is_path_under_mnt(source):
             # Check if any parent is mounted
-            mount_ancestor = _get_mount_ancestor(source)
+            mount_ancestor = get_mount_ancestor(source)
             if not mount_ancestor:
                 print(f"  ⚠ Warning: Source {source} is under /mnt but no mount point found")
                 print(f"    Skipping directory creation - ensure mount is configured first")
@@ -148,9 +129,9 @@ def create_sync_service(config: SetupConfig, sync_spec: List[str] = None, **_) -
     # Ensure destination parent directory exists (but don't create under /mnt if not mounted)
     dest_parent = os.path.dirname(destination)
     if dest_parent and not os.path.exists(dest_parent):
-        if _is_path_under_mnt(dest_parent):
+        if is_path_under_mnt(dest_parent):
             # Check if any parent is mounted
-            mount_ancestor = _get_mount_ancestor(dest_parent)
+            mount_ancestor = get_mount_ancestor(dest_parent)
             if not mount_ancestor:
                 print(f"  ⚠ Warning: Destination parent {dest_parent} is under /mnt but no mount point found")
                 print(f"    Skipping directory creation - ensure mount is configured first")
@@ -171,8 +152,8 @@ def create_sync_service(config: SetupConfig, sync_spec: List[str] = None, **_) -
     # Check if source or destination needs mount validation
     source_on_smb = _check_path_on_smb_mount(source, config)
     dest_on_smb = _check_path_on_smb_mount(destination, config)
-    source_under_mnt = _is_path_under_mnt(source)
-    dest_under_mnt = _is_path_under_mnt(destination)
+    source_under_mnt = is_path_under_mnt(source)
+    dest_under_mnt = is_path_under_mnt(destination)
     
     # Need mount checks if on SMB mount or under /mnt
     needs_mount_check = source_on_smb or dest_on_smb or source_under_mnt or dest_under_mnt
@@ -181,53 +162,8 @@ def create_sync_service(config: SetupConfig, sync_spec: List[str] = None, **_) -
     service_file = f"/etc/systemd/system/{service_name}.service"
     
     if needs_mount_check:
-        check_script = f"/usr/local/bin/check-mounts-{service_name}.sh"
-        check_content = "#!/bin/bash\n\n"
-        
-        # For paths under /mnt or SMB mounts, verify they are actually mounted
-        if source_on_smb or source_under_mnt:
-            check_content += f"# Check if source is mounted\n"
-            check_content += f"if ! mountpoint -q {shlex.quote(source)}; then\n"
-            check_content += f"  # Check if a parent directory is a mount point\n"
-            check_content += f"  CURRENT={shlex.quote(source)}\n"
-            check_content += f"  MOUNTED=0\n"
-            check_content += f"  while [ \"$CURRENT\" != \"/\" ] && [ -n \"$CURRENT\" ]; do\n"
-            check_content += f"    if mountpoint -q \"$CURRENT\"; then\n"
-            check_content += f"      MOUNTED=1\n"
-            check_content += f"      break\n"
-            check_content += f"    fi\n"
-            check_content += f"    CURRENT=$(dirname \"$CURRENT\")\n"
-            check_content += f"  done\n"
-            check_content += f"  if [ $MOUNTED -eq 0 ]; then\n"
-            check_content += f"    echo \"Source path {source} is not on a mounted filesystem\" >&2\n"
-            check_content += f"    exit 1\n"
-            check_content += f"  fi\n"
-            check_content += f"fi\n\n"
-        
-        if dest_on_smb or dest_under_mnt:
-            check_content += f"# Check if destination is mounted\n"
-            check_content += f"if ! mountpoint -q {shlex.quote(destination)}; then\n"
-            check_content += f"  # Check if a parent directory is a mount point\n"
-            check_content += f"  CURRENT={shlex.quote(destination)}\n"
-            check_content += f"  MOUNTED=0\n"
-            check_content += f"  while [ \"$CURRENT\" != \"/\" ] && [ -n \"$CURRENT\" ]; do\n"
-            check_content += f"    if mountpoint -q \"$CURRENT\"; then\n"
-            check_content += f"      MOUNTED=1\n"
-            check_content += f"      break\n"
-            check_content += f"    fi\n"
-            check_content += f"    CURRENT=$(dirname \"$CURRENT\")\n"
-            check_content += f"  done\n"
-            check_content += f"  if [ $MOUNTED -eq 0 ]; then\n"
-            check_content += f"    echo \"Destination path {destination} is not on a mounted filesystem\" >&2\n"
-            check_content += f"    exit 1\n"
-            check_content += f"  fi\n"
-            check_content += f"fi\n\n"
-        
-        check_content += "exit 0\n"
-        
-        with open(check_script, 'w') as f:
-            f.write(check_content)
-        run(f"chmod +x {shlex.quote(check_script)}")
+        # Use Python script for mount checking instead of generated shell script
+        check_script = f"{REMOTE_INSTALL_DIR}/check_sync_mounts.py"
         
         service_content = f"""[Unit]
 Description=Sync {escaped_source} to {escaped_destination}
@@ -237,7 +173,7 @@ After=local-fs.target
 Type=oneshot
 User={config.username}
 Group={config.username}
-ExecCondition={check_script}
+ExecCondition=/usr/bin/python3 {check_script} {shlex.quote(source)} {shlex.quote(destination)}
 ExecStart=/usr/bin/rsync -av --delete --exclude='.git' {shlex.quote(source)}/ {shlex.quote(destination)}/
 StandardOutput=journal
 StandardError=journal
