@@ -62,6 +62,27 @@ def _check_path_on_smb_mount(path: str, config: SetupConfig) -> bool:
     return False
 
 
+def _is_path_under_mnt(path: str) -> bool:
+    """Check if path is under /mnt directory."""
+    return path.startswith('/mnt/')
+
+
+def _get_mount_ancestor(path: str) -> str:
+    """Find the mount point ancestor of a path.
+    
+    Returns the path itself if it's a mount point, or the closest
+    parent directory that is a mount point. Returns empty string if
+    no mount point found.
+    """
+    current = path
+    while current and current != '/':
+        result = run(f"mountpoint -q {shlex.quote(current)}", check=False)
+        if result.returncode == 0:
+            return current
+        current = os.path.dirname(current)
+    return ""
+
+
 def _escape_systemd_description(value: str) -> str:
     """Escape value for safe use in a systemd Description field."""
     return value.replace("\\", "\\\\").replace("\n", " ").replace('"', "'")
@@ -105,39 +126,103 @@ def create_sync_service(config: SetupConfig, sync_spec: List[str] = None, **_) -
     safe_dest = destination.replace('/', '_').strip('_')
     service_name = f"sync-{safe_source}-to-{safe_dest}-{path_hash}"
     
-    # Ensure source directory exists
+    # Ensure source directory exists (but don't create under /mnt if not mounted)
     if not os.path.exists(source):
-        print(f"  ⚠ Warning: Source directory does not exist: {source}")
-        print(f"    Creating directory: {source}")
-        os.makedirs(source, exist_ok=True)
-        run(f"chown {shlex.quote(config.username)}:{shlex.quote(config.username)} {shlex.quote(source)}")
+        if _is_path_under_mnt(source):
+            # Check if any parent is mounted
+            mount_ancestor = _get_mount_ancestor(source)
+            if not mount_ancestor:
+                print(f"  ⚠ Warning: Source {source} is under /mnt but no mount point found")
+                print(f"    Skipping directory creation - ensure mount is configured first")
+            else:
+                # Parent is mounted, safe to create subdirectory
+                print(f"    Creating subdirectory under mount: {source}")
+                os.makedirs(source, exist_ok=True)
+                run(f"chown {shlex.quote(config.username)}:{shlex.quote(config.username)} {shlex.quote(source)}")
+        else:
+            print(f"  ⚠ Warning: Source directory does not exist: {source}")
+            print(f"    Creating directory: {source}")
+            os.makedirs(source, exist_ok=True)
+            run(f"chown {shlex.quote(config.username)}:{shlex.quote(config.username)} {shlex.quote(source)}")
     
-    # Ensure destination parent directory exists
+    # Ensure destination parent directory exists (but don't create under /mnt if not mounted)
     dest_parent = os.path.dirname(destination)
     if dest_parent and not os.path.exists(dest_parent):
-        print(f"    Creating parent directory: {dest_parent}")
-        os.makedirs(dest_parent, exist_ok=True)
-        run(f"chown {shlex.quote(config.username)}:{shlex.quote(config.username)} {shlex.quote(dest_parent)}")
+        if _is_path_under_mnt(dest_parent):
+            # Check if any parent is mounted
+            mount_ancestor = _get_mount_ancestor(dest_parent)
+            if not mount_ancestor:
+                print(f"  ⚠ Warning: Destination parent {dest_parent} is under /mnt but no mount point found")
+                print(f"    Skipping directory creation - ensure mount is configured first")
+            else:
+                # Parent is mounted, safe to create subdirectory
+                print(f"    Creating parent directory under mount: {dest_parent}")
+                os.makedirs(dest_parent, exist_ok=True)
+                run(f"chown {shlex.quote(config.username)}:{shlex.quote(config.username)} {shlex.quote(dest_parent)}")
+        else:
+            print(f"    Creating parent directory: {dest_parent}")
+            os.makedirs(dest_parent, exist_ok=True)
+            run(f"chown {shlex.quote(config.username)}:{shlex.quote(config.username)} {shlex.quote(dest_parent)}")
     
     # Escape paths for systemd description
     escaped_source = _escape_systemd_description(source)
     escaped_destination = _escape_systemd_description(destination)
     
-    # Check if source or destination is on SMB mount
+    # Check if source or destination needs mount validation
     source_on_smb = _check_path_on_smb_mount(source, config)
     dest_on_smb = _check_path_on_smb_mount(destination, config)
-    needs_mount_check = source_on_smb or dest_on_smb
+    source_under_mnt = _is_path_under_mnt(source)
+    dest_under_mnt = _is_path_under_mnt(destination)
+    
+    # Need mount checks if on SMB mount or under /mnt
+    needs_mount_check = source_on_smb or dest_on_smb or source_under_mnt or dest_under_mnt
     
     # Create systemd service file
     service_file = f"/etc/systemd/system/{service_name}.service"
     
     if needs_mount_check:
         check_script = f"/usr/local/bin/check-mounts-{service_name}.sh"
-        check_content = "#!/bin/bash\n"
-        if source_on_smb:
-            check_content += f"mountpoint -q {shlex.quote(source)} || exit 1\n"
-        if dest_on_smb:
-            check_content += f"mountpoint -q {shlex.quote(destination)} || exit 1\n"
+        check_content = "#!/bin/bash\n\n"
+        
+        # For paths under /mnt or SMB mounts, verify they are actually mounted
+        if source_on_smb or source_under_mnt:
+            check_content += f"# Check if source is mounted\n"
+            check_content += f"if ! mountpoint -q {shlex.quote(source)}; then\n"
+            check_content += f"  # Check if a parent directory is a mount point\n"
+            check_content += f"  CURRENT={shlex.quote(source)}\n"
+            check_content += f"  MOUNTED=0\n"
+            check_content += f"  while [ \"$CURRENT\" != \"/\" ] && [ -n \"$CURRENT\" ]; do\n"
+            check_content += f"    if mountpoint -q \"$CURRENT\"; then\n"
+            check_content += f"      MOUNTED=1\n"
+            check_content += f"      break\n"
+            check_content += f"    fi\n"
+            check_content += f"    CURRENT=$(dirname \"$CURRENT\")\n"
+            check_content += f"  done\n"
+            check_content += f"  if [ $MOUNTED -eq 0 ]; then\n"
+            check_content += f"    echo \"Source path {source} is not on a mounted filesystem\" >&2\n"
+            check_content += f"    exit 1\n"
+            check_content += f"  fi\n"
+            check_content += f"fi\n\n"
+        
+        if dest_on_smb or dest_under_mnt:
+            check_content += f"# Check if destination is mounted\n"
+            check_content += f"if ! mountpoint -q {shlex.quote(destination)}; then\n"
+            check_content += f"  # Check if a parent directory is a mount point\n"
+            check_content += f"  CURRENT={shlex.quote(destination)}\n"
+            check_content += f"  MOUNTED=0\n"
+            check_content += f"  while [ \"$CURRENT\" != \"/\" ] && [ -n \"$CURRENT\" ]; do\n"
+            check_content += f"    if mountpoint -q \"$CURRENT\"; then\n"
+            check_content += f"      MOUNTED=1\n"
+            check_content += f"      break\n"
+            check_content += f"    fi\n"
+            check_content += f"    CURRENT=$(dirname \"$CURRENT\")\n"
+            check_content += f"  done\n"
+            check_content += f"  if [ $MOUNTED -eq 0 ]; then\n"
+            check_content += f"    echo \"Destination path {destination} is not on a mounted filesystem\" >&2\n"
+            check_content += f"    exit 1\n"
+            check_content += f"  fi\n"
+            check_content += f"fi\n\n"
+        
         check_content += "exit 0\n"
         
         with open(check_script, 'w') as f:
