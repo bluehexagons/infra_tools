@@ -224,10 +224,10 @@ def run_remote_setup(config: SetupConfig) -> int:
     if config.enable_audio:
         cmd_parts.append("--audio")
     
-    if config.desktop and config.desktop != "xfce":
+    if config.desktop:
         cmd_parts.append(f"--desktop {shlex.quote(config.desktop)}")
     
-    if config.browser and config.browser != "brave":
+    if config.browser:
         cmd_parts.append(f"--browser {shlex.quote(config.browser)}")
     
     if config.use_flatpak:

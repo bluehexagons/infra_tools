@@ -5,6 +5,21 @@ from dataclasses import dataclass, asdict
 from typing import Optional, Dict, List, Any
 
 
+SYSTEM_TYPES = [
+    "workstation_desktop",
+    "pc_dev",
+    "workstation_dev",
+    "server_dev",
+    "server_web",
+    "server_lite",
+    "server_proxmox",
+    "custom_steps"
+]
+
+DESKTOP_SYSTEMS = ["workstation_desktop", "pc_dev", "workstation_dev"]
+CLI_SYSTEMS = ["workstation_desktop", "pc_dev", "workstation_dev", "server_dev", "server_web"]
+
+
 @dataclass
 class SetupConfig:
     host: str
@@ -82,7 +97,7 @@ class SetupConfig:
         
         browser = args.browser
         # Default to brave for standard desktop types if not specified
-        if browser is None and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
+        if browser is None and system_type in DESKTOP_SYSTEMS:
             browser = "brave"
         
         install_office = args.install_office
@@ -92,7 +107,7 @@ class SetupConfig:
             install_office = False
         
         enable_rdp = args.enable_rdp
-        if enable_rdp is None and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
+        if enable_rdp is None and system_type in DESKTOP_SYSTEMS:
             enable_rdp = True
         elif enable_rdp is None:
             enable_rdp = False
@@ -113,11 +128,11 @@ class SetupConfig:
         
         # Set feature flags based on system type and arguments
         include_desktop = (
-            system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]
+            system_type in DESKTOP_SYSTEMS
             or enable_rdp
             or enable_x2go
         )
-        include_cli_tools = system_type in ["workstation_desktop", "pc_dev", "workstation_dev", "server_dev", "server_web"]
+        include_cli_tools = system_type in CLI_SYSTEMS
         include_desktop_apps = system_type == "workstation_desktop"
         include_workstation_dev_apps = system_type == "workstation_dev"
         include_pc_dev_apps = system_type == "pc_dev"

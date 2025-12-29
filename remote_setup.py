@@ -16,9 +16,6 @@ from remote_modules.progress import progress_bar
 from remote_modules.system_types import get_steps_for_system_type
 
 
-VALID_SYSTEM_TYPES = ["workstation_desktop", "pc_dev", "workstation_dev", "server_dev", "server_web", "server_lite", "server_proxmox", "custom_steps"]
-
-
 def extract_repo_name(git_url: str) -> str:
     repo_name = git_url.rstrip('/').split('/')[-1]
     if repo_name.endswith('.git'):
@@ -27,80 +24,20 @@ def extract_repo_name(git_url: str) -> str:
 
 
 def config_from_remote_args(args: argparse.Namespace) -> SetupConfig:
-    if args.steps:
+    if args.custom_steps:
         system_type = "custom_steps"
     elif args.system_type:
         system_type = args.system_type
     else:
         raise ValueError("Either --system-type or --steps must be specified")
     
+    # Set host to localhost for remote execution since it's running locally on the target
+    args.host = "localhost"
+    
+    config = SetupConfig.from_args(args, system_type)
+    
     if system_type == "server_proxmox":
-        username = "root"
-    else:
-        username = args.username or getpass.getuser()
-    
-    install_office = args.office
-    if system_type == "pc_dev" and not args.office:
-        install_office = True
-    
-    smb_mounts = getattr(args, 'mount_smb', None)
-    enable_smbclient = args.smbclient
-    # Auto-enable smbclient if smb_mounts are provided
-    if not enable_smbclient and smb_mounts:
-        enable_smbclient = True
-    
-    include_desktop = (
-        system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]
-        or args.rdp
-        or args.x2go
-    )
-    include_cli_tools = system_type in ["workstation_desktop", "pc_dev", "workstation_dev", "server_dev", "server_web"]
-    include_desktop_apps = system_type == "workstation_desktop"
-    include_workstation_dev_apps = system_type == "workstation_dev"
-    include_pc_dev_apps = system_type == "pc_dev"
-    include_web_server = system_type == "server_web"
-    include_web_firewall = system_type == "server_web"
-    
-    config = SetupConfig(
-        host="localhost",
-        username=username,
-        system_type=system_type,
-        password=args.password,
-        ssh_key=None,
-        timezone=args.timezone or "UTC",
-        friendly_name=None,
-        tags=None,
-        enable_rdp=args.rdp,
-        enable_x2go=args.x2go,
-        enable_audio=args.audio,
-        desktop=args.desktop,
-        browser=args.browser,
-        use_flatpak=args.flatpak,
-        install_office=install_office,
-        dry_run=args.dry_run,
-        install_ruby=args.ruby,
-        install_go=args.go,
-        install_node=args.node,
-        custom_steps=args.steps,
-        deploy_specs=args.deploy,
-        full_deploy=args.full_deploy,
-        enable_ssl=args.ssl,
-        ssl_email=args.ssl_email,
-        enable_cloudflare=args.cloudflare,
-        api_subdomain=args.api_subdomain,
-        enable_samba=args.samba,
-        samba_shares=args.share,
-        enable_smbclient=enable_smbclient,
-        smb_mounts=smb_mounts,
-        sync_specs=getattr(args, 'sync', None),
-        include_desktop=include_desktop,
-        include_cli_tools=include_cli_tools,
-        include_desktop_apps=include_desktop_apps,
-        include_workstation_dev_apps=include_workstation_dev_apps,
-        include_pc_dev_apps=include_pc_dev_apps,
-        include_web_server=include_web_server,
-        include_web_firewall=include_web_firewall,
-    )
+        config.username = "root"
     
     return config
 
