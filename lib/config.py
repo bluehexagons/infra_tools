@@ -36,6 +36,14 @@ class SetupConfig:
     enable_samba: bool = False
     samba_shares: Optional[List[List[str]]] = None
     sync_specs: Optional[List[List[str]]] = None
+    # Feature flags for step inclusion (simplifies system type configuration)
+    include_desktop: bool = False
+    include_cli_tools: bool = False
+    include_desktop_apps: bool = False
+    include_workstation_dev_apps: bool = False
+    include_pc_dev_apps: bool = False
+    include_web_server: bool = False
+    include_web_firewall: bool = False
     
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)
@@ -89,6 +97,15 @@ class SetupConfig:
         
         enable_audio = getattr(args, 'enable_audio', False) or False
         
+        # Set feature flags based on system type
+        include_desktop = system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]
+        include_cli_tools = system_type in ["workstation_desktop", "pc_dev", "workstation_dev", "server_dev", "server_web"]
+        include_desktop_apps = system_type == "workstation_desktop"
+        include_workstation_dev_apps = system_type == "workstation_dev"
+        include_pc_dev_apps = system_type == "pc_dev"
+        include_web_server = system_type == "server_web"
+        include_web_firewall = system_type == "server_web"
+        
         return cls(
             host=args.host,
             username=username,
@@ -118,5 +135,12 @@ class SetupConfig:
             api_subdomain=getattr(args, 'api_subdomain', False),
             enable_samba=getattr(args, 'enable_samba', False),
             samba_shares=getattr(args, 'samba_shares', None),
-            sync_specs=getattr(args, 'sync_specs', None)
+            sync_specs=getattr(args, 'sync_specs', None),
+            include_desktop=include_desktop,
+            include_cli_tools=include_cli_tools,
+            include_desktop_apps=include_desktop_apps,
+            include_workstation_dev_apps=include_workstation_dev_apps,
+            include_pc_dev_apps=include_pc_dev_apps,
+            include_web_server=include_web_server,
+            include_web_firewall=include_web_firewall
         )

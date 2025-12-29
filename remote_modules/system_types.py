@@ -208,6 +208,12 @@ STEP_FUNCTIONS = {
 
 
 def get_steps_for_system_type(config: SetupConfig) -> list:
+    """Build step list based on system type and feature flags.
+    
+    This function uses a declarative approach where each system type is defined
+    by feature flags set in SetupConfig.from_args(). This makes it easier to
+    audit what steps are included for each system type.
+    """
     if config.system_type == "custom_steps" and config.custom_steps:
         step_names = config.custom_steps.split()
         steps = []
@@ -219,111 +225,94 @@ def get_steps_for_system_type(config: SetupConfig) -> list:
                 raise ValueError(f"Unknown step: {step_name}")
         return steps
     
-    optional_steps = []
-    if config.install_ruby:
-        optional_steps.append(("Installing Ruby (rbenv + latest version)", install_ruby_step))
-        optional_steps.append(("Configuring Ruby auto-update", configure_auto_update_ruby))
-    if config.install_go:
-        optional_steps.append(("Installing Go (latest version)", install_go_step))
-    if config.install_node:
-        optional_steps.append(("Installing Node.js (nvm + latest LTS + PNPM)", install_node_step))
-        optional_steps.append(("Configuring Node.js auto-update", configure_auto_update_node))
-    
-    if config.system_type == "workstation_desktop":
-        # Build desktop steps based on enabled remote access methods
-        desktop_steps = list(DESKTOP_STEPS)
-        if not config.enable_rdp:
-            desktop_steps = [s for s in desktop_steps if s[1] != install_xrdp]
-        if not config.enable_x2go:
-            desktop_steps = [s for s in desktop_steps if s[1] not in [install_x2go, configure_xfce_for_x2go]]
-        if config.desktop != "xfce":
-            desktop_steps = [s for s in desktop_steps if s[1] != configure_xfce_for_x2go]
-        # Audio requires both --audio flag AND RDP to be enabled (audio uses xRDP modules)
-        if not config.enable_audio or not config.enable_rdp:
-            desktop_steps = [s for s in desktop_steps if s[1] != configure_audio]
-        
-        # Build security steps
-        security_steps = SECURITY_STEPS
-        desktop_security_steps = []
-        if config.enable_rdp:
-            desktop_security_steps.append(("Hardening xRDP with TLS and group restrictions", harden_xrdp))
-        if config.enable_x2go:
-            desktop_security_steps.append(("Hardening X2Go access", harden_x2go))
-        if config.enable_rdp:  # fail2ban is for RDP brute-force protection
-            desktop_security_steps.append(("Installing fail2ban for RDP brute-force protection", configure_fail2ban))
-        
-        return COMMON_STEPS + desktop_steps + security_steps + \
-               desktop_security_steps + CLI_STEPS + optional_steps + DESKTOP_APP_STEPS + FINAL_STEPS
-    elif config.system_type == "pc_dev":
-        # Build desktop steps based on enabled remote access methods
-        desktop_steps = list(DESKTOP_STEPS)
-        if not config.enable_rdp:
-            desktop_steps = [s for s in desktop_steps if s[1] != install_xrdp]
-        if not config.enable_x2go:
-            desktop_steps = [s for s in desktop_steps if s[1] not in [install_x2go, configure_xfce_for_x2go]]
-        if config.desktop != "xfce":
-            desktop_steps = [s for s in desktop_steps if s[1] != configure_xfce_for_x2go]
-        # Audio requires both --audio flag AND RDP to be enabled (audio uses xRDP modules)
-        if not config.enable_audio or not config.enable_rdp:
-            desktop_steps = [s for s in desktop_steps if s[1] != configure_audio]
-        
-        # Build security steps
-        security_steps = SECURITY_STEPS
-        desktop_security_steps = []
-        if config.enable_rdp:
-            desktop_security_steps.append(("Hardening xRDP with TLS and group restrictions", harden_xrdp))
-        if config.enable_x2go:
-            desktop_security_steps.append(("Hardening X2Go access", harden_x2go))
-        if config.enable_rdp:
-            desktop_security_steps.append(("Installing fail2ban for RDP brute-force protection", configure_fail2ban))
-        
-        return COMMON_STEPS + desktop_steps + security_steps + \
-               desktop_security_steps + CLI_STEPS + optional_steps + PC_DEV_APP_STEPS + FINAL_STEPS
-    elif config.system_type == "workstation_dev":
-        # Build desktop steps
-        desktop_steps = list(DESKTOP_STEPS)
-        if not config.enable_rdp:
-            desktop_steps = [s for s in desktop_steps if s[1] != install_xrdp]
-        if not config.enable_x2go:
-            desktop_steps = [s for s in desktop_steps if s[1] not in [install_x2go, configure_xfce_for_x2go]]
-        if config.desktop != "xfce":
-            desktop_steps = [s for s in desktop_steps if s[1] != configure_xfce_for_x2go]
-        # Audio requires both --audio flag AND RDP to be enabled (audio uses xRDP modules)
-        if not config.enable_audio or not config.enable_rdp:
-            desktop_steps = [s for s in desktop_steps if s[1] != configure_audio]
-        
-        # Build security steps
-        security_steps = SECURITY_STEPS
-        desktop_security_steps = []
-        if config.enable_rdp:
-            desktop_security_steps.append(("Hardening xRDP with TLS and group restrictions", harden_xrdp))
-        if config.enable_x2go:
-            desktop_security_steps.append(("Hardening X2Go access", harden_x2go))
-        if config.enable_rdp:
-            desktop_security_steps.append(("Installing fail2ban for RDP brute-force protection", configure_fail2ban))
-        
-        return COMMON_STEPS + desktop_steps + security_steps + \
-               desktop_security_steps + CLI_STEPS + optional_steps + WORKSTATION_DEV_APP_STEPS + FINAL_STEPS
-    elif config.system_type == "server_dev":
-        return COMMON_STEPS + SECURITY_STEPS + CLI_STEPS + optional_steps + FINAL_STEPS
-    elif config.system_type == "server_web":
-        security_steps = [
-            ("Hardening SSH configuration", harden_ssh),
-            ("Hardening kernel parameters", harden_kernel),
-            ("Configuring automatic security updates", configure_auto_updates),
-            ("Configuring automatic restart service", configure_auto_restart),
-        ]
-        return COMMON_STEPS + WEB_FIREWALL_STEPS + security_steps + \
-               WEB_SERVER_STEPS + CLI_STEPS + optional_steps + FINAL_STEPS
-    elif config.system_type == "server_lite":
-        security_steps = [
-            ("Hardening SSH configuration", harden_ssh),
-            ("Hardening kernel parameters", harden_kernel),
-            ("Configuring automatic security updates", configure_auto_updates),
-            ("Configuring automatic restart service", configure_auto_restart),
-        ]
-        return COMMON_STEPS + security_steps + optional_steps + FINAL_STEPS
-    elif config.system_type == "server_proxmox":
+    # Special case for Proxmox - completely custom step list
+    if config.system_type == "server_proxmox":
         return PROXMOX_HARDENING_STEPS
+    
+    # Build steps declaratively based on feature flags
+    steps = []
+    
+    # Common steps (always included except for proxmox)
+    steps.extend(COMMON_STEPS)
+    
+    # Web server firewall (before security steps for server_web)
+    if config.include_web_firewall:
+        steps.extend(WEB_FIREWALL_STEPS)
+    
+    # Security steps
+    if config.system_type in ["server_web", "server_lite"]:
+        # Custom security steps for server_web and server_lite
+        security_steps = [
+            ("Hardening SSH configuration", harden_ssh),
+            ("Hardening kernel parameters", harden_kernel),
+            ("Configuring automatic security updates", configure_auto_updates),
+            ("Configuring automatic restart service", configure_auto_restart),
+        ]
+        steps.extend(security_steps)
     else:
-        raise ValueError(f"Unknown system type: {config.system_type}")
+        steps.extend(SECURITY_STEPS)
+    
+    # Desktop steps (conditionally included based on flags)
+    if config.include_desktop:
+        desktop_steps = []
+        
+        # Always include desktop environment and gnome-keyring for desktop systems
+        desktop_steps.append(("Installing desktop environment", install_desktop))
+        
+        # RDP/xRDP
+        if config.enable_rdp:
+            desktop_steps.append(("Installing xRDP", install_xrdp))
+        
+        # X2Go
+        if config.enable_x2go:
+            desktop_steps.append(("Installing X2Go", install_x2go))
+            if config.desktop == "xfce":
+                desktop_steps.append(("Configuring Xfce for X2Go", configure_xfce_for_x2go))
+        
+        # Audio (requires both flag and RDP)
+        if config.enable_audio and config.enable_rdp:
+            desktop_steps.append(("Configuring audio for RDP", configure_audio))
+        
+        # Always include gnome-keyring for desktop systems
+        desktop_steps.append(("Configuring gnome-keyring", configure_gnome_keyring))
+        
+        steps.extend(desktop_steps)
+        
+        # Desktop security steps
+        if config.enable_rdp:
+            steps.append(("Hardening xRDP with TLS and group restrictions", harden_xrdp))
+        if config.enable_x2go:
+            steps.append(("Hardening X2Go access", harden_x2go))
+        if config.enable_rdp:
+            steps.append(("Installing fail2ban for RDP brute-force protection", configure_fail2ban))
+    
+    # Web server steps
+    if config.include_web_server:
+        steps.extend(WEB_SERVER_STEPS)
+    
+    # CLI tools
+    if config.include_cli_tools:
+        steps.extend(CLI_STEPS)
+    
+    # Optional development tools (same for all system types)
+    if config.install_ruby:
+        steps.append(("Installing Ruby (rbenv + latest version)", install_ruby_step))
+        steps.append(("Configuring Ruby auto-update", configure_auto_update_ruby))
+    if config.install_go:
+        steps.append(("Installing Go (latest version)", install_go_step))
+    if config.install_node:
+        steps.append(("Installing Node.js (nvm + latest LTS + PNPM)", install_node_step))
+        steps.append(("Configuring Node.js auto-update", configure_auto_update_node))
+    
+    # Desktop application steps
+    if config.include_desktop_apps:
+        steps.extend(DESKTOP_APP_STEPS)
+    elif config.include_pc_dev_apps:
+        steps.extend(PC_DEV_APP_STEPS)
+    elif config.include_workstation_dev_apps:
+        steps.extend(WORKSTATION_DEV_APP_STEPS)
+    
+    # Final steps (always included)
+    steps.extend(FINAL_STEPS)
+    
+    return steps
