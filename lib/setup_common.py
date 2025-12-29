@@ -455,6 +455,8 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
         print(f"X2Go: {'Yes' if config.enable_x2go else 'No'}")
     if config.enable_audio and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
         print("Audio: Yes")
+    if config.enable_smbclient and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
+        print("SMB Client: Yes")
     if config.desktop and config.desktop != "xfce" and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
         print(f"Desktop: {config.desktop}")
     if config.browser and config.browser != "brave" and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:

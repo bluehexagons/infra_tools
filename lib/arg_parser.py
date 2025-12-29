@@ -108,6 +108,11 @@ def create_setup_argument_parser(
                        action="append", nargs=4, metavar=("ACCESS_TYPE", "SHARE_NAME", "PATHS", "USERS"),
                        help="Configure Samba share: access_type (read|write), share_name, comma-separated paths, comma-separated username:password pairs (can be used multiple times)")
     
+    parser.add_argument("--smbclient", dest="enable_smbclient" if not for_remote else "smbclient", 
+                       action=argparse.BooleanOptionalAction if not for_remote else "store_true", 
+                       default=None if not for_remote else False,
+                       help="Install SMB/CIFS client packages for connecting to network shares (default: enabled for pc_dev)")
+    
     parser.add_argument("--sync", dest="sync_specs" if not for_remote else "sync", 
                        action="append", nargs=3, metavar=("SOURCE", "DESTINATION", "INTERVAL"),
                        help="Configure directory synchronization: source_path, destination_path, interval (hourly|daily|weekly|monthly). Uses rsync with systemd timer (can be used multiple times)")

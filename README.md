@@ -78,6 +78,7 @@ Common features: User setup, sudo, firewall/SSH hardening, auto-updates, Chrony,
 |------|-------------|
 | `--samba` | Install and configure Samba for SMB file sharing |
 | `--share TYPE NAME PATHS USERS` | Configure Samba share (can use multiple times): TYPE (read or write), NAME (share name), PATHS (comma-separated paths), USERS (comma-separated username:password pairs) |
+| `--smbclient` | Install SMB/CIFS client packages for connecting to network shares (default: enabled for pc_dev). Enables file managers to browse SMB/Samba shares. |
 
 ### Sync Flags
 

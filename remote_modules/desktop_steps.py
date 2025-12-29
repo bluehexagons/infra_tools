@@ -663,3 +663,28 @@ fi
         run(f"chown {safe_username}:{safe_username} {shlex.quote(profile_path)}")
     
     print("  ✓ gnome-keyring configured (auto-unlock on login, SSH agent integration)")
+
+
+def install_smbclient(config: SetupConfig) -> None:
+    """Install SMB/CIFS client packages for accessing network shares.
+    
+    Installs packages needed for file managers (like Thunar for XFCE) to 
+    connect to SMB/Samba shares. Includes:
+    - cifs-utils: Core SMB/CIFS mounting utilities
+    - smbclient: Command-line SMB client
+    - gvfs-backends: GNOME VFS backends for file manager integration
+    """
+    packages = ["cifs-utils", "smbclient", "gvfs-backends"]
+    
+    # Check if packages are already installed
+    all_installed = all(is_package_installed(pkg) for pkg in packages)
+    if all_installed:
+        print("  ✓ SMB client packages already installed")
+        return
+    
+    # Install packages
+    packages_str = " ".join(packages)
+    run(f"apt-get install -y -qq {packages_str}")
+    
+    print("  ✓ SMB client packages installed (cifs-utils, smbclient, gvfs-backends)")
+    print("    File managers can now browse and mount SMB/Samba shares")

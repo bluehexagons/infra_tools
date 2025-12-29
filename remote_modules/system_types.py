@@ -31,6 +31,7 @@ from .desktop_steps import (
     configure_vivaldi_browser,
     configure_gnome_keyring,
     install_remmina,
+    install_smbclient,
 )
 from .security_steps import (
     create_remoteusers_group,
@@ -177,6 +178,7 @@ STEP_FUNCTIONS = {
     'install_workstation_dev_apps': install_workstation_dev_apps,
     'configure_vivaldi_browser': configure_vivaldi_browser,
     'configure_gnome_keyring': configure_gnome_keyring,
+    'install_smbclient': install_smbclient,
     'create_remoteusers_group': create_remoteusers_group,
     'configure_firewall': configure_firewall,
     'configure_fail2ban': configure_fail2ban,
@@ -275,6 +277,10 @@ def get_steps_for_system_type(config: SetupConfig) -> list:
         
         # Always include gnome-keyring for desktop systems
         desktop_steps.append(("Configuring gnome-keyring", configure_gnome_keyring))
+        
+        # SMB client (for connecting to network shares)
+        if config.enable_smbclient:
+            desktop_steps.append(("Installing SMB client packages", install_smbclient))
         
         steps.extend(desktop_steps)
         

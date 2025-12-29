@@ -119,6 +119,8 @@ def main() -> int:
         print("X2Go: Yes")
     if config.enable_audio and config.system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
         print("Audio: Yes")
+    if config.enable_smbclient and config.system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
+        print("SMB Client: Yes")
     if config.desktop != "xfce" and config.system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
         print(f"Desktop: {config.desktop}")
     if config.browser != "brave" and config.system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
