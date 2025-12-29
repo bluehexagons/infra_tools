@@ -42,6 +42,20 @@ def config_from_remote_args(args: argparse.Namespace) -> SetupConfig:
     if system_type == "pc_dev" and not args.office:
         install_office = True
     
+    smb_mounts = getattr(args, 'mount_smb', None)
+    enable_smbclient = args.smbclient
+    # Auto-enable smbclient if smb_mounts are provided
+    if not enable_smbclient and smb_mounts:
+        enable_smbclient = True
+    
+    include_desktop = system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]
+    include_cli_tools = system_type in ["workstation_desktop", "pc_dev", "workstation_dev", "server_dev", "server_web"]
+    include_desktop_apps = system_type == "workstation_desktop"
+    include_workstation_dev_apps = system_type == "workstation_dev"
+    include_pc_dev_apps = system_type == "pc_dev"
+    include_web_server = system_type == "server_web"
+    include_web_firewall = system_type == "server_web"
+    
     config = SetupConfig(
         host="localhost",
         username=username,
@@ -70,7 +84,17 @@ def config_from_remote_args(args: argparse.Namespace) -> SetupConfig:
         enable_cloudflare=args.cloudflare,
         api_subdomain=args.api_subdomain,
         enable_samba=args.samba,
-        samba_shares=args.share
+        samba_shares=args.share,
+        enable_smbclient=enable_smbclient,
+        smb_mounts=smb_mounts,
+        sync_specs=getattr(args, 'sync', None),
+        include_desktop=include_desktop,
+        include_cli_tools=include_cli_tools,
+        include_desktop_apps=include_desktop_apps,
+        include_workstation_dev_apps=include_workstation_dev_apps,
+        include_pc_dev_apps=include_pc_dev_apps,
+        include_web_server=include_web_server,
+        include_web_firewall=include_web_firewall,
     )
     
     return config
@@ -143,6 +167,14 @@ def main() -> int:
                 print(f"SSL Email: {config.ssl_email}")
     if config.enable_cloudflare:
         print("Cloudflare: Yes (tunnel preconfiguration)")
+    if config.smb_mounts:
+        print(f"SMB Mounts: {len(config.smb_mounts)} mount(s)")
+        for mountpoint, ip, creds, share, subdir in config.smb_mounts:
+            print(f"  - {mountpoint} from //{ip}/{share}{subdir}")
+    if config.sync_specs:
+        print(f"Sync Jobs: {len(config.sync_specs)} job(s)")
+        for source, dest, interval in config.sync_specs:
+            print(f"  - {source} → {dest} ({interval})")
     sys.stdout.flush()
 
     detect_os()
