@@ -113,6 +113,10 @@ def create_setup_argument_parser(
                        default=None if not for_remote else False,
                        help="Install SMB/CIFS client packages for connecting to network shares (default: enabled for pc_dev)")
     
+    parser.add_argument("--mount-smb", dest="smb_mounts" if not for_remote else "mount_smb",
+                       action="append", nargs=5, metavar=("MOUNTPOINT", "IP", "CREDENTIALS", "SHARE", "SUBDIR"),
+                       help="Mount SMB share: /mnt/path, ip_address, username:password, share_name, /share/subdirectory (can be used multiple times). Auto-enables --smbclient")
+    
     parser.add_argument("--sync", dest="sync_specs" if not for_remote else "sync", 
                        action="append", nargs=3, metavar=("SOURCE", "DESTINATION", "INTERVAL"),
                        help="Configure directory synchronization: source_path, destination_path, interval (hourly|daily|weekly|monthly). Uses rsync with systemd timer (can be used multiple times)")

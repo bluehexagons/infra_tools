@@ -36,6 +36,7 @@ class SetupConfig:
     enable_samba: bool = False
     samba_shares: Optional[List[List[str]]] = None
     enable_smbclient: bool = False
+    smb_mounts: Optional[List[List[str]]] = None
     sync_specs: Optional[List[List[str]]] = None
     # Feature flags for step inclusion (simplifies system type configuration)
     include_desktop: bool = False
@@ -98,9 +99,10 @@ class SetupConfig:
         
         enable_audio = getattr(args, 'enable_audio', False) or False
         
-        # Set enable_smbclient default based on system type
+        # Set enable_smbclient default based on system type or if smb_mounts provided
+        smb_mounts = getattr(args, 'smb_mounts', None)
         enable_smbclient = getattr(args, 'enable_smbclient', None)
-        if enable_smbclient is None and system_type == "pc_dev":
+        if enable_smbclient is None and (system_type == "pc_dev" or smb_mounts):
             enable_smbclient = True
         elif enable_smbclient is None:
             enable_smbclient = False
@@ -144,6 +146,7 @@ class SetupConfig:
             enable_samba=getattr(args, 'enable_samba', False),
             samba_shares=getattr(args, 'samba_shares', None),
             enable_smbclient=enable_smbclient,
+            smb_mounts=smb_mounts,
             sync_specs=getattr(args, 'sync_specs', None),
             include_desktop=include_desktop,
             include_cli_tools=include_cli_tools,

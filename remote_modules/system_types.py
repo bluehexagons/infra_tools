@@ -65,6 +65,9 @@ from .samba_steps import (
     configure_samba_fail2ban,
     setup_samba_share,
 )
+from .smb_mount_steps import (
+    configure_smb_mount,
+)
 from .sync_steps import (
     install_rsync,
     create_sync_service,
@@ -204,6 +207,7 @@ STEP_FUNCTIONS = {
     'configure_samba_global_settings': configure_samba_global_settings,
     'configure_samba_fail2ban': configure_samba_fail2ban,
     'setup_samba_share': setup_samba_share,
+    'configure_smb_mount': configure_smb_mount,
     'install_rsync': install_rsync,
     'create_sync_service': create_sync_service,
 }

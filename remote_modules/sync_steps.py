@@ -51,6 +51,17 @@ def parse_sync_spec(sync_spec: List[str]) -> dict:
     }
 
 
+def _check_path_on_smb_mount(path: str, config: SetupConfig) -> bool:
+    """Check if path is on an SMB mount."""
+    if not config.smb_mounts:
+        return False
+    for mount_spec in config.smb_mounts:
+        mountpoint = mount_spec[0]
+        if path.startswith(mountpoint + '/') or path == mountpoint:
+            return True
+    return False
+
+
 def _escape_systemd_description(value: str) -> str:
     """Escape value for safe use in a systemd Description field."""
     return value.replace("\\", "\\\\").replace("\n", " ").replace('"', "'")
@@ -112,9 +123,42 @@ def create_sync_service(config: SetupConfig, sync_spec: List[str] = None, **_) -
     escaped_source = _escape_systemd_description(source)
     escaped_destination = _escape_systemd_description(destination)
     
+    # Check if source or destination is on SMB mount
+    source_on_smb = _check_path_on_smb_mount(source, config)
+    dest_on_smb = _check_path_on_smb_mount(destination, config)
+    needs_mount_check = source_on_smb or dest_on_smb
+    
     # Create systemd service file
     service_file = f"/etc/systemd/system/{service_name}.service"
-    service_content = f"""[Unit]
+    
+    if needs_mount_check:
+        check_script = f"/usr/local/bin/check-mounts-{service_name}.sh"
+        check_content = "#!/bin/bash\n"
+        if source_on_smb:
+            check_content += f"mountpoint -q {shlex.quote(source)} || exit 1\n"
+        if dest_on_smb:
+            check_content += f"mountpoint -q {shlex.quote(destination)} || exit 1\n"
+        check_content += "exit 0\n"
+        
+        with open(check_script, 'w') as f:
+            f.write(check_content)
+        run(f"chmod +x {shlex.quote(check_script)}")
+        
+        service_content = f"""[Unit]
+Description=Sync {escaped_source} to {escaped_destination}
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User={config.username}
+Group={config.username}
+ExecCondition={check_script}
+ExecStart=/usr/bin/rsync -av --delete --exclude='.git' {shlex.quote(source)}/ {shlex.quote(destination)}/
+StandardOutput=journal
+StandardError=journal
+"""
+    else:
+        service_content = f"""[Unit]
 Description=Sync {escaped_source} to {escaped_destination}
 After=local-fs.target
 

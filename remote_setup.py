@@ -360,6 +360,20 @@ def main() -> int:
         
         print("\n✓ Samba configuration complete")
     
+    # Configure SMB mounts if requested
+    if config.smb_mounts:
+        from remote_modules.smb_mount_steps import configure_smb_mount
+        
+        print("\n" + "=" * 60)
+        print("Configuring SMB mounts...")
+        print("=" * 60)
+        
+        for i, mount_spec in enumerate(config.smb_mounts, 1):
+            print(f"\n[{i}/{len(config.smb_mounts)}] Mounting {mount_spec[0]}")
+            configure_smb_mount(config, mount_spec=mount_spec)
+        
+        print("\n✓ SMB mount configuration complete")
+    
     # Configure directory synchronization if requested
     if config.sync_specs:
         from remote_modules.sync_steps import (

@@ -79,12 +79,13 @@ Common features: User setup, sudo, firewall/SSH hardening, auto-updates, Chrony,
 | `--samba` | Install and configure Samba for SMB file sharing |
 | `--share TYPE NAME PATHS USERS` | Configure Samba share (can use multiple times): TYPE (read or write), NAME (share name), PATHS (comma-separated paths), USERS (comma-separated username:password pairs) |
 | `--smbclient` | Install SMB/CIFS client packages for connecting to network shares (default: enabled for pc_dev). Enables file managers to browse SMB/Samba shares. |
+| `--mount-smb MOUNT IP CREDS SHARE SUBDIR` | Mount SMB share persistently (can use multiple times): MOUNT (/mnt/path), IP (ip_address), CREDS (username:password), SHARE (share_name), SUBDIR (/share/subdirectory). Auto-enables --smbclient. Uses systemd automount with nofail for resilience. |
 
 ### Sync Flags
 
 | Flag | Description |
 |------|-------------|
-| `--sync SOURCE DEST INTERVAL` | Configure directory synchronization with rsync (can use multiple times): SOURCE (source directory), DEST (destination directory), INTERVAL (hourly, daily, weekly, or monthly). Creates systemd timer for automated incremental backups. |
+| `--sync SOURCE DEST INTERVAL` | Configure directory synchronization with rsync (can use multiple times): SOURCE (source directory), DEST (destination directory), INTERVAL (hourly, daily, weekly, or monthly). Creates systemd timer for automated incremental backups. Checks mount availability if paths are on SMB mounts. |
 
 ## Deployment Guide
 
