@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from lib.arg_parser import create_setup_argument_parser
 from lib.config import SetupConfig
+from lib.display import print_setup_summary
 from remote_modules.utils import validate_username, detect_os, set_dry_run
 from remote_modules.progress import progress_bar
 from remote_modules.system_types import get_steps_for_system_type
@@ -48,7 +49,11 @@ def config_from_remote_args(args: argparse.Namespace) -> SetupConfig:
     if not enable_smbclient and smb_mounts:
         enable_smbclient = True
     
-    include_desktop = system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]
+    include_desktop = (
+        system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]
+        or args.rdp
+        or args.x2go
+    )
     include_cli_tools = system_type in ["workstation_desktop", "pc_dev", "workstation_dev", "server_dev", "server_web"]
     include_desktop_apps = system_type == "workstation_desktop"
     include_workstation_dev_apps = system_type == "workstation_dev"
@@ -128,53 +133,7 @@ def main() -> int:
         return 1
     
     # Print configuration
-    print("=" * 60)
-    print(f"Remote Setup ({config.system_type})")
-    print("=" * 60)
-    if config.system_type != "server_proxmox":
-        print(f"User: {config.username}")
-    print(f"Timezone: {config.timezone}")
-    if config.system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        print(f"RDP: {'Yes' if config.enable_rdp else 'No'}")
-        print(f"X2Go: {'Yes' if config.enable_x2go else 'No'}")
-    elif config.enable_rdp and config.system_type == "server_dev":
-        print("RDP: Yes")
-    if config.enable_x2go and config.system_type == "server_dev":
-        print("X2Go: Yes")
-    if config.enable_audio and config.system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        print("Audio: Yes")
-    if config.enable_smbclient and config.system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        print("SMB Client: Yes")
-    if config.desktop != "xfce" and config.system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        print(f"Desktop: {config.desktop}")
-    if config.browser != "brave" and config.system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        print(f"Browser: {config.browser}")
-    if config.use_flatpak and config.system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        print("Flatpak: Yes")
-    if config.install_office and config.system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        print("Office: Yes")
-    if config.dry_run:
-        print("Dry-run: Yes")
-    if config.custom_steps:
-        print(f"Steps: {config.custom_steps}")
-    if config.deploy_specs:
-        print(f"Deployments: {len(config.deploy_specs)} repository(ies)")
-        for location, git_url in config.deploy_specs:
-            print(f"  - {git_url} -> {location}")
-        if config.enable_ssl:
-            print("SSL: Yes (Let's Encrypt)")
-            if config.ssl_email:
-                print(f"SSL Email: {config.ssl_email}")
-    if config.enable_cloudflare:
-        print("Cloudflare: Yes (tunnel preconfiguration)")
-    if config.smb_mounts:
-        print(f"SMB Mounts: {len(config.smb_mounts)} mount(s)")
-        for mountpoint, ip, creds, share, subdir in config.smb_mounts:
-            print(f"  - {mountpoint} from //{ip}/{share}{subdir}")
-    if config.sync_specs:
-        print(f"Sync Jobs: {len(config.sync_specs)} job(s)")
-        for source, dest, interval in config.sync_specs:
-            print(f"  - {source} → {dest} ({interval})")
+    print_setup_summary(config, f"Remote Setup ({config.system_type})")
     sys.stdout.flush()
 
     detect_os()

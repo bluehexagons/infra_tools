@@ -19,7 +19,7 @@ class SetupConfig:
     enable_x2go: bool = False
     enable_audio: bool = False
     desktop: str = "xfce"
-    browser: str = "brave"
+    browser: Optional[str] = "brave"
     use_flatpak: bool = False
     install_office: bool = False
     dry_run: bool = False
@@ -79,7 +79,11 @@ class SetupConfig:
         username = args.username if args.username else get_current_username()
         timezone = args.timezone if args.timezone else get_local_timezone()
         desktop = args.desktop or "xfce"
-        browser = args.browser or "brave"
+        
+        browser = args.browser
+        # Default to brave for standard desktop types if not specified
+        if browser is None and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
+            browser = "brave"
         
         install_office = args.install_office
         if system_type == "pc_dev" and install_office is None:
@@ -107,8 +111,12 @@ class SetupConfig:
         elif enable_smbclient is None:
             enable_smbclient = False
         
-        # Set feature flags based on system type
-        include_desktop = system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]
+        # Set feature flags based on system type and arguments
+        include_desktop = (
+            system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]
+            or enable_rdp
+            or enable_x2go
+        )
         include_cli_tools = system_type in ["workstation_desktop", "pc_dev", "workstation_dev", "server_dev", "server_web"]
         include_desktop_apps = system_type == "workstation_desktop"
         include_workstation_dev_apps = system_type == "workstation_dev"

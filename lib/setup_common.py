@@ -16,6 +16,7 @@ from lib.validators import validate_host, validate_username
 from lib.system_utils import get_current_username
 from lib.cache import save_setup_command
 from lib.arg_parser import create_setup_argument_parser
+from lib.display import print_setup_summary
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -456,65 +457,7 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
     config = SetupConfig.from_args(args, system_type)
     
     # Print setup information
-    print("=" * 60)
-    print(f"{description}")
-    print("=" * 60)
-    print(f"Host: {config.host}")
-    print(f"User: {config.username}")
-    print(f"Timezone: {config.timezone}")
-    if system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        print(f"RDP: {'Yes' if config.enable_rdp else 'No'}")
-        print(f"X2Go: {'Yes' if config.enable_x2go else 'No'}")
-    elif args.enable_rdp is not None and system_type == "server_dev":
-        print(f"RDP: {'Yes' if config.enable_rdp else 'No'}")
-    if args.enable_x2go is not None and system_type == "server_dev":
-        print(f"X2Go: {'Yes' if config.enable_x2go else 'No'}")
-    if config.enable_audio and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        print("Audio: Yes")
-    if config.enable_smbclient and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        print("SMB Client: Yes")
-    if config.desktop and config.desktop != "xfce" and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        print(f"Desktop: {config.desktop}")
-    if config.browser and config.browser != "brave" and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        print(f"Browser: {config.browser}")
-    if config.use_flatpak and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        print("Flatpak: Yes")
-    if config.install_office and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        print("Office: Yes")
-    if config.dry_run:
-        print("Dry-run: Yes")
-    if allow_steps and config.custom_steps:
-        print(f"Steps: {config.custom_steps}")
-    if config.deploy_specs:
-        print(f"Deployments: {len(config.deploy_specs)} repository(ies)")
-        for location, git_url in config.deploy_specs:
-            print(f"  - {git_url} -> {location}")
-        if config.full_deploy:
-            print("Full deploy: Yes (rebuild all deployments)")
-        else:
-            print("Full deploy: No (skip unchanged deployments)")
-        if config.enable_ssl:
-            print("SSL: Yes (Let's Encrypt)")
-            if config.ssl_email:
-                print(f"SSL Email: {config.ssl_email}")
-        if config.enable_cloudflare:
-            print("Cloudflare: Yes (tunnel preconfiguration)")
-    if config.enable_samba:
-        print("Samba: Yes")
-        if config.samba_shares:
-            print(f"Samba Shares: {len(config.samba_shares)} share(s)")
-            for share in config.samba_shares:
-                print(f"  - {share[1]}_{share[0]}: {share[2]}")
-    if config.smb_mounts:
-        print(f"SMB Mounts: {len(config.smb_mounts)} mount(s)")
-        for mountpoint, ip, creds, share, subdir in config.smb_mounts:
-            print(f"  - {mountpoint} from //{ip}/{share}{subdir}")
-    if config.sync_specs:
-        print(f"Sync Jobs: {len(config.sync_specs)} job(s)")
-        for source, dest, interval in config.sync_specs:
-            print(f"  - {source} → {dest} ({interval})")
-    print("=" * 60)
-    print()
+    print_setup_summary(config, description)
     
     # Save configuration before running
     if not config.dry_run:

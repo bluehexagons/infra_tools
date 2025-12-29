@@ -49,8 +49,8 @@ def create_setup_argument_parser(
                        default="xfce" if for_remote else None,
                        help="Desktop environment to install (default: xfce)")
     parser.add_argument("--browser", choices=["brave", "firefox", "browsh", "vivaldi", "lynx"], 
-                       default="brave" if for_remote else None,
-                       help="Web browser to install (default: brave)")
+                       default=None,
+                       help="Web browser to install (default: brave for desktop setups)")
     parser.add_argument("--flatpak", dest="use_flatpak" if not for_remote else "flatpak", 
                        action=argparse.BooleanOptionalAction if not for_remote else "store_true", 
                        default=None if not for_remote else False,

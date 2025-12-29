@@ -32,6 +32,8 @@ from .desktop_steps import (
     configure_gnome_keyring,
     install_remmina,
     install_smbclient,
+    install_office_apps,
+    install_browser,
 )
 from .security_steps import (
     create_remoteusers_group,
@@ -321,6 +323,17 @@ def get_steps_for_system_type(config: SetupConfig) -> list:
         steps.extend(PC_DEV_APP_STEPS)
     elif config.include_workstation_dev_apps:
         steps.extend(WORKSTATION_DEV_APP_STEPS)
+    
+    # Ensure browser is installed for custom desktop setups (e.g. server + RDP)
+    # Only if explicitly requested via --browser
+    if config.include_desktop and config.browser and not (config.include_desktop_apps or config.include_pc_dev_apps or config.include_workstation_dev_apps):
+        steps.append(("Installing browser", install_browser))
+        steps.append(("Configuring default browser", configure_default_browser))
+    
+    # Ensure office is installed if requested, if not already covered by standard app groups
+    # (install_desktop_apps handles office, but install_workstation_dev_apps does not)
+    if config.install_office and not (config.include_desktop_apps or config.include_pc_dev_apps):
+        steps.append(("Installing Office", install_office_apps))
     
     # Final steps (always included)
     steps.extend(FINAL_STEPS)
