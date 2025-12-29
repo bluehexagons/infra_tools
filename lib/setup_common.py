@@ -276,6 +276,19 @@ def run_remote_setup(config: SetupConfig) -> int:
             escaped_spec = ' '.join(shlex.quote(str(s)) for s in share_spec)
             cmd_parts.append(f"--share {escaped_spec}")
     
+    if config.enable_smbclient:
+        cmd_parts.append("--smbclient")
+    
+    if config.smb_mounts:
+        for mount_spec in config.smb_mounts:
+            escaped_spec = ' '.join(shlex.quote(str(s)) for s in mount_spec)
+            cmd_parts.append(f"--mount-smb {escaped_spec}")
+    
+    if config.sync_specs:
+        for sync_spec in config.sync_specs:
+            escaped_spec = ' '.join(shlex.quote(str(s)) for s in sync_spec)
+            cmd_parts.append(f"--sync {escaped_spec}")
+    
     remote_cmd = f"""
 mkdir -p {escaped_install_dir} && \
 cd {escaped_install_dir} && \
@@ -492,6 +505,14 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
             print(f"Samba Shares: {len(config.samba_shares)} share(s)")
             for share in config.samba_shares:
                 print(f"  - {share[1]}_{share[0]}: {share[2]}")
+    if config.smb_mounts:
+        print(f"SMB Mounts: {len(config.smb_mounts)} mount(s)")
+        for mountpoint, ip, creds, share, subdir in config.smb_mounts:
+            print(f"  - {mountpoint} from //{ip}/{share}{subdir}")
+    if config.sync_specs:
+        print(f"Sync Jobs: {len(config.sync_specs)} job(s)")
+        for source, dest, interval in config.sync_specs:
+            print(f"  - {source} → {dest} ({interval})")
     print("=" * 60)
     print()
     
