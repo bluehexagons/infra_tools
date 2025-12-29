@@ -171,8 +171,8 @@ After=local-fs.target
 
 [Service]
 Type=oneshot
-User={config.username}
-Group={config.username}
+User=root
+Group=root
 ExecCondition=/usr/bin/python3 {check_script} {shlex.quote(source)} {shlex.quote(destination)}
 ExecStart=/usr/bin/rsync -av --delete --exclude='.git' {shlex.quote(source)}/ {shlex.quote(destination)}/
 StandardOutput=journal
@@ -185,8 +185,8 @@ After=local-fs.target
 
 [Service]
 Type=oneshot
-User={config.username}
-Group={config.username}
+User=root
+Group=root
 ExecStart=/usr/bin/rsync -av --delete --exclude='.git' {shlex.quote(source)}/ {shlex.quote(destination)}/
 StandardOutput=journal
 StandardError=journal
