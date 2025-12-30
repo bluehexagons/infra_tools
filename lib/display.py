@@ -54,7 +54,7 @@ def print_setup_summary(config: SetupConfig, description: str = None) -> None:
     if config.desktop != "xfce" and (config.include_desktop or config.enable_rdp or config.enable_x2go):
         print(f"Desktop: {config.desktop}")
     
-    if config.browser != "brave" and (config.include_desktop or config.include_desktop_apps or config.include_pc_dev_apps or config.include_workstation_dev_apps):
+    if config.browser and config.browser != "brave" and (config.include_desktop or config.include_desktop_apps or config.include_pc_dev_apps or config.include_workstation_dev_apps):
         print(f"Browser: {config.browser}")
     
     if config.use_flatpak:
@@ -95,7 +95,9 @@ def print_setup_summary(config: SetupConfig, description: str = None) -> None:
     if config.smb_mounts:
         print(f"SMB Mounts: {len(config.smb_mounts)} mount(s)")
         for mountpoint, ip, creds, share, subdir in config.smb_mounts:
-            print(f"  - {mountpoint} from //{ip}/{share}{subdir}")
+            # Mask credentials in display
+            username = creds.split(':', 1)[0] if ':' in creds else creds
+            print(f"  - {mountpoint} from //{ip}/{share}{subdir} (user: {username})")
     
     if config.sync_specs:
         print(f"Sync Jobs: {len(config.sync_specs)} job(s)")

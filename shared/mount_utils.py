@@ -7,7 +7,7 @@ from typing import Optional
 
 def is_path_under_mnt(path: str) -> bool:
     """Check if path is under /mnt directory."""
-    return path.startswith('/mnt/')
+    return path == '/mnt' or path.startswith('/mnt/')
 
 
 def get_mount_ancestor(path: str) -> Optional[str]:
@@ -53,6 +53,8 @@ def validate_mount_for_sync(path: str, path_name: str = "path") -> bool:
         
     Prints error messages to stderr if validation fails.
     """
+    import sys
+    
     # Check if path itself is a mount point
     result = subprocess.run(
         ['mountpoint', '-q', path],
@@ -72,7 +74,7 @@ def validate_mount_for_sync(path: str, path_name: str = "path") -> bool:
     
     # No mount point found - this is an error if under /mnt
     if is_path_under_mnt(path):
-        print(f"Error: {path_name.capitalize()} path {path} is not on a mounted filesystem", flush=True)
+        print(f"Error: {path_name.capitalize()} path {path} is not on a mounted filesystem", file=sys.stderr)
         return False
     
     # Not under /mnt and no mount requirement - allow it

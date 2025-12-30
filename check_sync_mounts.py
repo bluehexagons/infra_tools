@@ -16,7 +16,7 @@ from shared.mount_utils import validate_mount_for_sync
 
 def main():
     if len(sys.argv) < 3:
-        print("Usage: check_sync_mounts.py <source_path> <destination_path>", file=sys.stderr)
+        print("Usage: check_sync_mounts.py <source_path> <destination_path>")
         return 1
     
     source = sys.argv[1]

@@ -116,7 +116,7 @@ class SetupConfig:
         if enable_x2go is None:
             enable_x2go = False
         
-        enable_audio = getattr(args, 'enable_audio', False) or False
+        enable_audio = getattr(args, 'enable_audio', False)
         
         # Set enable_smbclient default based on system type or if smb_mounts provided
         smb_mounts = getattr(args, 'smb_mounts', None)

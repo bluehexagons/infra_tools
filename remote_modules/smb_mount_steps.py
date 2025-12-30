@@ -63,6 +63,13 @@ def configure_smb_mount(config: SetupConfig, mount_spec: List[str] = None, **_) 
     os.makedirs(credentials_dir, exist_ok=True)
     run(f"chmod 700 {shlex.quote(credentials_dir)}")
     
+    # Use systemd-escape to generate proper unit name
+    result = run(f"systemd-escape -p {shlex.quote(mountpoint)}", capture_output=True, text=True)
+    escaped_mountpoint = result.stdout.strip()
+    unit_name = f"{escaped_mountpoint}.mount"
+    unit_path = f"/etc/systemd/system/{unit_name}"
+    
+    # Create safe filename for credentials
     safe_mountpoint = mountpoint.replace('/', '_').strip('_')
     creds_file = f"{credentials_dir}/credentials-{safe_mountpoint}"
     
@@ -74,13 +81,24 @@ password={password}
         f.write(creds_content)
     run(f"chmod 600 {shlex.quote(creds_file)}")
     
-    unit_name = f"mnt-{safe_mountpoint}.mount"
-    unit_path = f"/etc/systemd/system/{unit_name}"
+    # Validate and sanitize inputs
+    if not ip.replace('.', '').replace(':', '').isalnum():
+        raise ValueError(f"Invalid IP address format: {ip}")
+    if '/' in share or '\\' in share or ' ' in share:
+        raise ValueError(f"Invalid share name (cannot contain /, \\, or spaces): {share}")
+    if subdir and not subdir.startswith('/'):
+        raise ValueError(f"Subdirectory must start with /: {subdir}")
     
     unc_path = f"//{ip}/{share}{subdir}"
     
+    def _escape_systemd_description(value: str) -> str:
+        """Escape value for safe use in a systemd Description field."""
+        return value.replace("\\", "\\\\").replace("\n", " ").replace('"', "'")
+    
+    escaped_desc = _escape_systemd_description(mountpoint)
+    
     unit_content = f"""[Unit]
-Description=SMB mount for {mountpoint}
+Description=SMB mount for {escaped_desc}
 After=network-online.target
 Wants=network-online.target
 
@@ -107,9 +125,4 @@ WantedBy=multi-user.target
         print(f"  ✓ SMB mount configured: {mountpoint} → {unc_path} (will mount at boot)")
 
 
-def is_mountpoint_available(path: str) -> bool:
-    """Check if a mount point is currently mounted and accessible."""
-    if not os.path.exists(path):
-        return False
-    result = run(f"mountpoint -q {shlex.quote(path)}", check=False)
-    return result.returncode == 0
+
