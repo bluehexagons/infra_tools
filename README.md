@@ -87,6 +87,12 @@ Common features: User setup, sudo, firewall/SSH hardening, auto-updates, Chrony,
 |------|-------------|
 | `--sync SOURCE DEST INTERVAL` | Configure directory synchronization with rsync (can use multiple times): SOURCE (source directory), DEST (destination directory), INTERVAL (hourly, daily, weekly, or monthly). Creates systemd timer for automated incremental backups. Uses Python-based mount validation - sync only runs when mounts are available (paths under `/mnt` or SMB mounts), preventing data loss from unmounted drives or offline shares. |
 
+### Data Integrity Flags
+
+| Flag | Description |
+|------|-------------|
+| `--scrub DIR DBPATH REDUNDANCY FREQ` | Configure automated data integrity checking with par2 (can use multiple times): DIR (directory to protect), DBPATH (relative or absolute path to .pardatabase directory), REDUNDANCY (percentage with %, e.g., 5%), FREQ (hourly, daily, weekly, or monthly). Creates systemd timer for automated parity file creation, verification, and repair. Uses same mount validation as sync. Logs repairs and errors to `/var/log/scrub/`. When both --scrub and --sync are used, scrubbing runs after sync to avoid checking incomplete transfers. |
+
 ## Deployment Guide
 
 The `--deploy` flag automates building and serving web applications:
@@ -131,6 +137,35 @@ python3 patch_setup.py 192.168.1.10 --samba \
   --share read public /mnt/public guest:guest,user:pass \
   --share write private /mnt/private admin:secret
 ```
+
+## Data Integrity Guide
+
+Configure automated data integrity checking with par2 to detect and repair file corruption.
+
+**Examples:**
+
+```bash
+# Protect important data with 5% redundancy, check monthly
+python3 setup_server_dev.py 192.168.1.10 --scrub /mnt/data/important_things .pardatabase 5% monthly
+
+# Multiple directories with different schedules
+python3 setup_server_dev.py 192.168.1.10 \
+  --scrub /mnt/data/critical .pardatabase 10% weekly \
+  --scrub /home/backup /var/lib/pardb 5% monthly
+
+# Combine with sync for automated backup with integrity checking
+python3 setup_server_dev.py 192.168.1.10 \
+  --sync /home/user/documents /mnt/backup/documents daily \
+  --scrub /mnt/backup/documents .pardatabase 5% weekly
+```
+
+When `--scrub` is used:
+- Installs par2cmdline for parity-based error detection/correction
+- Creates par2 files for all files in the directory (excluding .pardatabase)
+- Runs verification and repair on schedule via systemd timer
+- Logs all operations to `/var/log/scrub/scrub-{dir}-{hash}.log`
+- Initial setup only creates new par2 files (fast), scheduled runs verify and repair
+- Uses mount validation - only runs when directory and database are mounted
 
 ## Patch Setup
 
