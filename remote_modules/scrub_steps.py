@@ -246,7 +246,7 @@ verify_repair() {{
 }}
 
 # Process all files in directory
-find "$DIRECTORY" -type f ! -path "$DATABASE/*" | while read -r file; do
+find "$DIRECTORY" -type f ! -path "$DATABASE/*" -print0 | while IFS= read -r -d '' file; do
     create_par2 "$file"
     verify_repair "$file"
 done
@@ -350,13 +350,13 @@ REDUNDANCY={shlex.quote(redundancy[:-1])}
 
 mkdir -p "$DATABASE"
 
-find "$DIRECTORY" -type f ! -path "$DATABASE/*" | while read -r file; do
+find "$DIRECTORY" -type f ! -path "$DATABASE/*" -print0 | while IFS= read -r -d '' file; do
     relative_path="${{file#$DIRECTORY/}}"
     par2_base="$DATABASE/${{relative_path}}.par2"
     
     if [ ! -f "${{par2_base}}" ]; then
         mkdir -p "$(dirname "$par2_base")"
-        par2 create -r"$REDUNDANCY" -n1 "$par2_base" "$file" 2>/dev/null || true
+        par2 create -r"$REDUNDANCY" -n1 "$par2_base" "$file" >/dev/null 2>&1 || true
     fi
 done
 """
