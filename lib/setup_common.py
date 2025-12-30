@@ -163,21 +163,33 @@ def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = Non
 
 def create_tar_archive() -> bytes:
     tar_buffer = io.BytesIO()
+    project_root = os.path.normpath(os.path.join(SCRIPT_DIR, ".."))
     
     def safe_filter(tarinfo: tarfile.TarInfo) -> Optional[tarfile.TarInfo]:
         tarinfo.name = os.path.normpath(tarinfo.name)
         if tarinfo.name.startswith('..') or tarinfo.name.startswith('/'):
             return None
+        if '__pycache__' in tarinfo.name or tarinfo.name.endswith('.pyc'):
+            return None
         return tarinfo
     
-    check_sync_mounts_path = os.path.join(SCRIPT_DIR, "..", "check_sync_mounts.py")
+    items_to_include = [
+        "remote_setup.py",
+        "remote_modules",
+        "shared",
+        "lib",
+        "check_sync_mounts.py",
+        "check_scrub_mounts.py",
+        "scrub_par2.py"
+    ]
     
     with tarfile.open(fileobj=tar_buffer, mode='w:gz') as tar:
-        tar.add(REMOTE_SCRIPT_PATH, arcname="remote_setup.py", filter=safe_filter)
-        tar.add(REMOTE_MODULES_DIR, arcname="remote_modules", filter=safe_filter)
-        tar.add(SHARED_DIR, arcname="shared", filter=safe_filter)
-        tar.add(LIB_DIR, arcname="lib", filter=safe_filter)
-        tar.add(check_sync_mounts_path, arcname="check_sync_mounts.py", filter=safe_filter)
+        for item in items_to_include:
+            full_path = os.path.join(project_root, item)
+            if os.path.exists(full_path):
+                tar.add(full_path, arcname=item, filter=safe_filter)
+            else:
+                print(f"Warning: {item} not found, skipping...")
     
     return tar_buffer.getvalue()
 
@@ -203,92 +215,7 @@ def run_remote_setup(config: SetupConfig) -> int:
     
     escaped_install_dir = shlex.quote(REMOTE_INSTALL_DIR)
     
-    cmd_parts = [
-        f"python3 {escaped_install_dir}/remote_setup.py",
-        f"--system-type {shlex.quote(config.system_type)}",
-        f"--username {shlex.quote(config.username)}",
-    ]
-    
-    if config.password:
-        cmd_parts.append(f"--password {shlex.quote(config.password)}")
-    
-    if config.timezone:
-        cmd_parts.append(f"--timezone {shlex.quote(config.timezone)}")
-    
-    if config.enable_rdp:
-        cmd_parts.append("--rdp")
-    
-    if config.enable_x2go:
-        cmd_parts.append("--x2go")
-    
-    if config.enable_audio:
-        cmd_parts.append("--audio")
-    
-    if config.desktop:
-        cmd_parts.append(f"--desktop {shlex.quote(config.desktop)}")
-    
-    if config.browser:
-        cmd_parts.append(f"--browser {shlex.quote(config.browser)}")
-    
-    if config.use_flatpak:
-        cmd_parts.append("--flatpak")
-    
-    if config.install_office:
-        cmd_parts.append("--office")
-    
-    if config.dry_run:
-        cmd_parts.append("--dry-run")
-    
-    if config.install_ruby:
-        cmd_parts.append("--ruby")
-    
-    if config.install_go:
-        cmd_parts.append("--go")
-    
-    if config.install_node:
-        cmd_parts.append("--node")
-    
-    if config.custom_steps:
-        cmd_parts.append(f"--steps {shlex.quote(config.custom_steps)}")
-    
-    if config.deploy_specs:
-        cmd_parts.append("--lite-deploy")
-        if config.full_deploy:
-            cmd_parts.append("--full-deploy")
-        for deploy_spec, git_url in config.deploy_specs:
-            cmd_parts.append(f"--deploy {shlex.quote(deploy_spec)} {shlex.quote(git_url)}")
-    
-    if config.enable_ssl:
-        cmd_parts.append("--ssl")
-        if config.ssl_email:
-            cmd_parts.append(f"--ssl-email {shlex.quote(config.ssl_email)}")
-    
-    if config.enable_cloudflare:
-        cmd_parts.append("--cloudflare")
-    
-    if config.api_subdomain:
-        cmd_parts.append("--api-subdomain")
-    
-    if config.enable_samba:
-        cmd_parts.append("--samba")
-    
-    if config.samba_shares:
-        for share_spec in config.samba_shares:
-            escaped_spec = ' '.join(shlex.quote(str(s)) for s in share_spec)
-            cmd_parts.append(f"--share {escaped_spec}")
-    
-    if config.enable_smbclient:
-        cmd_parts.append("--smbclient")
-    
-    if config.smb_mounts:
-        for mount_spec in config.smb_mounts:
-            escaped_spec = ' '.join(shlex.quote(str(s)) for s in mount_spec)
-            cmd_parts.append(f"--mount-smb {escaped_spec}")
-    
-    if config.sync_specs:
-        for sync_spec in config.sync_specs:
-            escaped_spec = ' '.join(shlex.quote(str(s)) for s in sync_spec)
-            cmd_parts.append(f"--sync {escaped_spec}")
+    cmd_parts = [f"python3 {escaped_install_dir}/remote_setup.py"] + config.to_remote_args()
     
     remote_cmd = f"""
 mkdir -p {escaped_install_dir} && \

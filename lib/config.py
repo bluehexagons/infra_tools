@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import shlex
 from dataclasses import dataclass, asdict
 from typing import Optional, Dict, List, Any
 
@@ -53,6 +54,7 @@ class SetupConfig:
     enable_smbclient: bool = False
     smb_mounts: Optional[List[List[str]]] = None
     sync_specs: Optional[List[List[str]]] = None
+    scrub_specs: Optional[List[List[str]]] = None
     # Feature flags for step inclusion (simplifies system type configuration)
     include_desktop: bool = False
     include_cli_tools: bool = False
@@ -62,6 +64,101 @@ class SetupConfig:
     include_web_server: bool = False
     include_web_firewall: bool = False
     
+    def to_remote_args(self) -> List[str]:
+        """Generate command line arguments for remote execution."""
+        args = []
+        
+        args.append(f"--system-type {shlex.quote(self.system_type)}")
+        args.append(f"--username {shlex.quote(self.username)}")
+        
+        if self.password:
+            args.append(f"--password {shlex.quote(self.password)}")
+        
+        if self.timezone:
+            args.append(f"--timezone {shlex.quote(self.timezone)}")
+        
+        if self.enable_rdp:
+            args.append("--rdp")
+        
+        if self.enable_x2go:
+            args.append("--x2go")
+        
+        if self.enable_audio:
+            args.append("--audio")
+        
+        if self.desktop:
+            args.append(f"--desktop {shlex.quote(self.desktop)}")
+        
+        if self.browser:
+            args.append(f"--browser {shlex.quote(self.browser)}")
+        
+        if self.use_flatpak:
+            args.append("--flatpak")
+        
+        if self.install_office:
+            args.append("--office")
+        
+        if self.dry_run:
+            args.append("--dry-run")
+        
+        if self.install_ruby:
+            args.append("--ruby")
+        
+        if self.install_go:
+            args.append("--go")
+        
+        if self.install_node:
+            args.append("--node")
+        
+        if self.custom_steps:
+            args.append(f"--steps {shlex.quote(self.custom_steps)}")
+        
+        if self.deploy_specs:
+            args.append("--lite-deploy")
+            if self.full_deploy:
+                args.append("--full-deploy")
+            for deploy_spec, git_url in self.deploy_specs:
+                args.append(f"--deploy {shlex.quote(deploy_spec)} {shlex.quote(git_url)}")
+        
+        if self.enable_ssl:
+            args.append("--ssl")
+            if self.ssl_email:
+                args.append(f"--ssl-email {shlex.quote(self.ssl_email)}")
+        
+        if self.enable_cloudflare:
+            args.append("--cloudflare")
+        
+        if self.api_subdomain:
+            args.append("--api-subdomain")
+        
+        if self.enable_samba:
+            args.append("--samba")
+        
+        if self.samba_shares:
+            for share_spec in self.samba_shares:
+                escaped_spec = ' '.join(shlex.quote(str(s)) for s in share_spec)
+                args.append(f"--share {escaped_spec}")
+        
+        if self.enable_smbclient:
+            args.append("--smbclient")
+        
+        if self.smb_mounts:
+            for mount_spec in self.smb_mounts:
+                escaped_spec = ' '.join(shlex.quote(str(s)) for s in mount_spec)
+                args.append(f"--mount-smb {escaped_spec}")
+        
+        if self.sync_specs:
+            for sync_spec in self.sync_specs:
+                escaped_spec = ' '.join(shlex.quote(str(s)) for s in sync_spec)
+                args.append(f"--sync {escaped_spec}")
+        
+        if self.scrub_specs:
+            for scrub_spec in self.scrub_specs:
+                escaped_spec = ' '.join(shlex.quote(str(s)) for s in scrub_spec)
+                args.append(f"--scrub {escaped_spec}")
+                
+        return args
+
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)
         data.pop('host', None)
@@ -171,6 +268,7 @@ class SetupConfig:
             enable_smbclient=enable_smbclient,
             smb_mounts=smb_mounts,
             sync_specs=getattr(args, 'sync_specs', None),
+            scrub_specs=getattr(args, 'scrub_specs', None),
             include_desktop=include_desktop,
             include_cli_tools=include_cli_tools,
             include_desktop_apps=include_desktop_apps,

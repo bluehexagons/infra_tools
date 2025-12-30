@@ -87,6 +87,12 @@ Common features: User setup, sudo, firewall/SSH hardening, auto-updates, Chrony,
 |------|-------------|
 | `--sync SOURCE DEST INTERVAL` | Configure directory synchronization with rsync (can use multiple times): SOURCE (source directory), DEST (destination directory), INTERVAL (hourly, daily, weekly, or monthly). Creates systemd timer for automated incremental backups. Uses Python-based mount validation - sync only runs when mounts are available (paths under `/mnt` or SMB mounts), preventing data loss from unmounted drives or offline shares. |
 
+### Data Integrity Flags
+
+| Flag | Description |
+|------|-------------|
+| `--scrub DIR DBPATH REDUNDANCY FREQ` | Automated par2 integrity checking: DIR (directory), DBPATH (.pardatabase path, relative or absolute), REDUNDANCY (e.g., 5%), FREQ (hourly, daily, weekly, or monthly). Runs after sync if both configured. |
+
 ## Deployment Guide
 
 The `--deploy` flag automates building and serving web applications:
@@ -130,6 +136,20 @@ python3 setup_server_dev.py 192.168.1.10 --samba \
 python3 patch_setup.py 192.168.1.10 --samba \
   --share read public /mnt/public guest:guest,user:pass \
   --share write private /mnt/private admin:secret
+```
+
+## Data Integrity
+
+Automated file verification and repair with par2.
+
+```bash
+# Basic usage
+python3 setup_server_dev.py host --scrub /mnt/data .pardatabase 5% monthly
+
+# With sync
+python3 setup_server_dev.py host \
+  --sync /home/docs /mnt/backup daily \
+  --scrub /mnt/backup .pardatabase 5% weekly
 ```
 
 ## Patch Setup
