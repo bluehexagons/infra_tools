@@ -323,6 +323,27 @@ def main() -> int:
         
         print("\n✓ Directory synchronization configured")
     
+    # Configure data integrity checking if requested (must run after sync)
+    if config.scrub_specs:
+        from remote_modules.scrub_steps import (
+            install_par2,
+            create_scrub_service
+        )
+        
+        print("\n" + "=" * 60)
+        print("Configuring data integrity checking...")
+        print("=" * 60)
+        
+        print("\n[1/2] Installing par2")
+        install_par2(config)
+        
+        print(f"\n[2/2] Configuring {len(config.scrub_specs)} scrub job(s)...")
+        for i, scrub_spec in enumerate(config.scrub_specs, 1):
+            print(f"\n  Scrub job {i}/{len(config.scrub_specs)}: {scrub_spec[0]} (redundancy: {scrub_spec[2]}, frequency: {scrub_spec[3]})")
+            create_scrub_service(config, scrub_spec=scrub_spec)
+        
+        print("\n✓ Data integrity checking configured")
+    
     print("\n" + "=" * 60)
     print("✓ Remote setup complete!")
     print("=" * 60)

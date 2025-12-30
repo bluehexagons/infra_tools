@@ -124,6 +124,10 @@ def create_setup_argument_parser(
                        action="append", nargs=3, metavar=("SOURCE", "DESTINATION", "INTERVAL"),
                        help="Configure directory synchronization: source_path, destination_path, interval (hourly|daily|weekly|monthly). Uses rsync with systemd timer (can be used multiple times)")
     
+    parser.add_argument("--scrub", dest="scrub_specs",
+                       action="append", nargs=4, metavar=("DIRECTORY", "DATABASE_PATH", "REDUNDANCY", "FREQUENCY"),
+                       help="Configure data integrity checking: /path/to/directory, relative/or/absolute/path/to/.pardatabase, redundancy%%, frequency (hourly|daily|weekly|monthly). Uses par2 with systemd timer (can be used multiple times)")
+    
     parser.add_argument("--dry-run", action="store_true",
                        help="Show what would be done without executing commands")
     

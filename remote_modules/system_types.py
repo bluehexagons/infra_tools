@@ -74,6 +74,10 @@ from .sync_steps import (
     install_rsync,
     create_sync_service,
 )
+from .scrub_steps import (
+    install_par2,
+    create_scrub_service,
+)
 
 
 COMMON_STEPS = [
@@ -212,6 +216,8 @@ STEP_FUNCTIONS = {
     'configure_smb_mount': configure_smb_mount,
     'install_rsync': install_rsync,
     'create_sync_service': create_sync_service,
+    'install_par2': install_par2,
+    'create_scrub_service': create_scrub_service,
 }
 
 

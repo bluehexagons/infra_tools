@@ -53,6 +53,7 @@ class SetupConfig:
     enable_smbclient: bool = False
     smb_mounts: Optional[List[List[str]]] = None
     sync_specs: Optional[List[List[str]]] = None
+    scrub_specs: Optional[List[List[str]]] = None
     # Feature flags for step inclusion (simplifies system type configuration)
     include_desktop: bool = False
     include_cli_tools: bool = False
@@ -171,6 +172,7 @@ class SetupConfig:
             enable_smbclient=enable_smbclient,
             smb_mounts=smb_mounts,
             sync_specs=getattr(args, 'sync_specs', None),
+            scrub_specs=getattr(args, 'scrub_specs', None),
             include_desktop=include_desktop,
             include_cli_tools=include_cli_tools,
             include_desktop_apps=include_desktop_apps,
