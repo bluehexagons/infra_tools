@@ -16,12 +16,14 @@ from lib.validators import validate_host, validate_username
 from lib.system_utils import get_current_username
 from lib.cache import save_setup_command
 from lib.arg_parser import create_setup_argument_parser
+from lib.display import print_setup_summary
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REMOTE_SCRIPT_PATH = os.path.join(SCRIPT_DIR, "..", "remote_setup.py")
 REMOTE_MODULES_DIR = os.path.join(SCRIPT_DIR, "..", "remote_modules")
 SHARED_DIR = os.path.join(SCRIPT_DIR, "..", "shared")
+LIB_DIR = SCRIPT_DIR
 REMOTE_INSTALL_DIR = "/opt/infra_tools"
 GIT_CACHE_DIR = os.path.expanduser("~/.cache/infra_tools/git_repos")
 
@@ -168,10 +170,14 @@ def create_tar_archive() -> bytes:
             return None
         return tarinfo
     
+    check_sync_mounts_path = os.path.join(SCRIPT_DIR, "..", "check_sync_mounts.py")
+    
     with tarfile.open(fileobj=tar_buffer, mode='w:gz') as tar:
         tar.add(REMOTE_SCRIPT_PATH, arcname="remote_setup.py", filter=safe_filter)
         tar.add(REMOTE_MODULES_DIR, arcname="remote_modules", filter=safe_filter)
         tar.add(SHARED_DIR, arcname="shared", filter=safe_filter)
+        tar.add(LIB_DIR, arcname="lib", filter=safe_filter)
+        tar.add(check_sync_mounts_path, arcname="check_sync_mounts.py", filter=safe_filter)
     
     return tar_buffer.getvalue()
 
@@ -215,13 +221,13 @@ def run_remote_setup(config: SetupConfig) -> int:
     if config.enable_x2go:
         cmd_parts.append("--x2go")
     
-    if config.skip_audio:
-        cmd_parts.append("--skip-audio")
+    if config.enable_audio:
+        cmd_parts.append("--audio")
     
-    if config.desktop and config.desktop != "xfce":
+    if config.desktop:
         cmd_parts.append(f"--desktop {shlex.quote(config.desktop)}")
     
-    if config.browser and config.browser != "brave":
+    if config.browser:
         cmd_parts.append(f"--browser {shlex.quote(config.browser)}")
     
     if config.use_flatpak:
@@ -270,6 +276,19 @@ def run_remote_setup(config: SetupConfig) -> int:
         for share_spec in config.samba_shares:
             escaped_spec = ' '.join(shlex.quote(str(s)) for s in share_spec)
             cmd_parts.append(f"--share {escaped_spec}")
+    
+    if config.enable_smbclient:
+        cmd_parts.append("--smbclient")
+    
+    if config.smb_mounts:
+        for mount_spec in config.smb_mounts:
+            escaped_spec = ' '.join(shlex.quote(str(s)) for s in mount_spec)
+            cmd_parts.append(f"--mount-smb {escaped_spec}")
+    
+    if config.sync_specs:
+        for sync_spec in config.sync_specs:
+            escaped_spec = ' '.join(shlex.quote(str(s)) for s in sync_spec)
+            cmd_parts.append(f"--sync {escaped_spec}")
     
     remote_cmd = f"""
 mkdir -p {escaped_install_dir} && \
@@ -426,59 +445,19 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
         print(f"Error: Remote modules not found: {REMOTE_MODULES_DIR}")
         return 1
     
+    if not os.path.exists(LIB_DIR):
+        print(f"Error: Lib directory not found: {LIB_DIR}")
+        return 1
+    
+    if not os.path.exists(SHARED_DIR):
+        print(f"Error: Shared directory not found: {SHARED_DIR}")
+        return 1
+    
     # Create SetupConfig from arguments
     config = SetupConfig.from_args(args, system_type)
     
     # Print setup information
-    print("=" * 60)
-    print(f"{description}")
-    print("=" * 60)
-    print(f"Host: {config.host}")
-    print(f"User: {config.username}")
-    print(f"Timezone: {config.timezone}")
-    if system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        print(f"RDP: {'Yes' if config.enable_rdp else 'No'}")
-        print(f"X2Go: {'Yes' if config.enable_x2go else 'No'}")
-    elif args.enable_rdp is not None and system_type == "server_dev":
-        print(f"RDP: {'Yes' if config.enable_rdp else 'No'}")
-    if args.enable_x2go is not None and system_type == "server_dev":
-        print(f"X2Go: {'Yes' if config.enable_x2go else 'No'}")
-    if config.skip_audio and system_type in ["workstation_desktop", "pc_dev"]:
-        print("Skip audio: Yes")
-    if config.desktop and config.desktop != "xfce" and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        print(f"Desktop: {config.desktop}")
-    if config.browser and config.browser != "brave" and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        print(f"Browser: {config.browser}")
-    if config.use_flatpak and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        print("Flatpak: Yes")
-    if config.install_office and system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        print("Office: Yes")
-    if config.dry_run:
-        print("Dry-run: Yes")
-    if allow_steps and config.custom_steps:
-        print(f"Steps: {config.custom_steps}")
-    if config.deploy_specs:
-        print(f"Deployments: {len(config.deploy_specs)} repository(ies)")
-        for location, git_url in config.deploy_specs:
-            print(f"  - {git_url} -> {location}")
-        if config.full_deploy:
-            print("Full deploy: Yes (rebuild all deployments)")
-        else:
-            print("Full deploy: No (skip unchanged deployments)")
-        if config.enable_ssl:
-            print("SSL: Yes (Let's Encrypt)")
-            if config.ssl_email:
-                print(f"SSL Email: {config.ssl_email}")
-        if config.enable_cloudflare:
-            print("Cloudflare: Yes (tunnel preconfiguration)")
-    if config.enable_samba:
-        print("Samba: Yes")
-        if config.samba_shares:
-            print(f"Samba Shares: {len(config.samba_shares)} share(s)")
-            for share in config.samba_shares:
-                print(f"  - {share[1]}_{share[0]}: {share[2]}")
-    print("=" * 60)
-    print()
+    print_setup_summary(config, description)
     
     # Save configuration before running
     if not config.dry_run:

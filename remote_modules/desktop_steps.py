@@ -375,6 +375,9 @@ def configure_audio(config: SetupConfig) -> None:
 
 def install_browser(config: SetupConfig) -> None:
     """Install the specified browser."""
+    if not config.browser:
+        return
+
     if config.browser == "brave":
         if config.use_flatpak:
             if is_flatpak_app_installed("com.brave.Browser"):
@@ -465,8 +468,31 @@ def install_remmina(config: SetupConfig) -> None:
     print("  ✓ Remmina installed")
 
 
+def install_office_apps(config: SetupConfig) -> None:
+    """Install office suite (LibreOffice)."""
+    if not config.install_office:
+        return
+
+    if config.use_flatpak:
+        install_flatpak_if_needed()
+        if is_flatpak_app_installed("org.libreoffice.LibreOffice"):
+            print("  ✓ LibreOffice already installed via Flatpak")
+            return
+        print("  Installing LibreOffice via Flatpak...")
+        run(f"flatpak install -y {FLATPAK_REMOTE} org.libreoffice.LibreOffice", check=False)
+        print("  ✓ LibreOffice installed via Flatpak")
+    else:
+        if is_package_installed("libreoffice"):
+            print("  ✓ LibreOffice already installed")
+            return
+        print("  Installing LibreOffice...")
+        run("apt-get install -y -qq libreoffice")
+        print("  ✓ LibreOffice installed")
+
+
 def install_desktop_apps(config: SetupConfig) -> None:
     install_browser(config)
+    install_office_apps(config)
     
     if config.use_flatpak:
         install_flatpak_if_needed()
@@ -475,18 +501,12 @@ def install_desktop_apps(config: SetupConfig) -> None:
             is_flatpak_app_installed("com.vscodium.codium") and
             is_flatpak_app_installed("com.discordapp.Discord")
         )
-        if config.install_office:
-            all_installed = all_installed and is_flatpak_app_installed("org.libreoffice.LibreOffice")
         
         if all_installed:
-            print("  ✓ Desktop apps already installed via Flatpak")
+            print("  ✓ Other desktop apps already installed via Flatpak")
             return
         
-        print("  Installing desktop apps via Flatpak...")
-        
-        if config.install_office and not is_flatpak_app_installed("org.libreoffice.LibreOffice"):
-            print("  Installing LibreOffice...")
-            run(f"flatpak install -y {FLATPAK_REMOTE} org.libreoffice.LibreOffice", check=False)
+        print("  Installing other desktop apps via Flatpak...")
         
         if not is_flatpak_app_installed("com.vscodium.codium"):
             print("  Installing VSCodium...")
@@ -496,22 +516,13 @@ def install_desktop_apps(config: SetupConfig) -> None:
             print("  Installing Discord...")
             run(f"flatpak install -y {FLATPAK_REMOTE} com.discordapp.Discord", check=False)
         
-        apps_list = "VSCodium, Discord"
-        if config.install_office:
-            apps_list = "LibreOffice, " + apps_list
-        print(f"  ✓ Desktop apps installed via Flatpak ({apps_list})")
+        print(f"  ✓ Other desktop apps installed via Flatpak (VSCodium, Discord)")
     else:
-        all_installed = is_package_installed("codium")
-        if config.install_office:
-            all_installed = all_installed and is_package_installed("libreoffice")
+        all_installed = is_package_installed("codium") and is_package_installed("discord")
         
         if all_installed:
-            print("  ✓ Desktop apps already installed")
+            print("  ✓ Other desktop apps already installed")
             return
-
-        if config.install_office and not is_package_installed("libreoffice"):
-            print("  Installing LibreOffice...")
-            run("apt-get install -y -qq libreoffice")
 
         print("  Installing VSCodium...")
         if not os.path.exists("/usr/share/keyrings/vscodium-archive-keyring.gpg"):
@@ -527,13 +538,14 @@ def install_desktop_apps(config: SetupConfig) -> None:
             run("apt-get install -y -qq /tmp/discord.deb", check=False)
             run("rm -f /tmp/discord.deb", check=False)
 
-        apps_list = "VSCodium, Discord"
-        if config.install_office:
-            apps_list = "LibreOffice, " + apps_list
-        print(f"  ✓ Desktop apps installed ({apps_list})")
+        print(f"  ✓ Other desktop apps installed (VSCodium, Discord)")
+
 
 
 def configure_default_browser(config: SetupConfig) -> None:
+    if not config.browser:
+        return
+
     safe_username = shlex.quote(config.username)
     mimeapps_path = f"/home/{config.username}/.config/mimeapps.list"
     
@@ -663,3 +675,28 @@ fi
         run(f"chown {safe_username}:{safe_username} {shlex.quote(profile_path)}")
     
     print("  ✓ gnome-keyring configured (auto-unlock on login, SSH agent integration)")
+
+
+def install_smbclient(config: SetupConfig) -> None:
+    """Install SMB/CIFS client packages for accessing network shares.
+    
+    Installs packages needed for file managers (like Thunar for XFCE) to 
+    connect to SMB/Samba shares. Includes:
+    - cifs-utils: Core SMB/CIFS mounting utilities
+    - smbclient: Command-line SMB client
+    - gvfs-backends: GNOME VFS backends for file manager integration
+    """
+    packages = ["cifs-utils", "smbclient", "gvfs-backends"]
+    
+    # Check if packages are already installed
+    all_installed = all(is_package_installed(pkg) for pkg in packages)
+    if all_installed:
+        print("  ✓ SMB client packages already installed")
+        return
+    
+    # Install packages
+    packages_str = " ".join(packages)
+    run(f"apt-get install -y -qq {packages_str}")
+    
+    print("  ✓ SMB client packages installed (cifs-utils, smbclient, gvfs-backends)")
+    print("    File managers can now browse and mount SMB/Samba shares")

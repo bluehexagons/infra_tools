@@ -10,12 +10,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from lib.arg_parser import create_setup_argument_parser
 from lib.config import SetupConfig
+from lib.display import print_setup_summary
 from remote_modules.utils import validate_username, detect_os, set_dry_run
 from remote_modules.progress import progress_bar
 from remote_modules.system_types import get_steps_for_system_type
-
-
-VALID_SYSTEM_TYPES = ["workstation_desktop", "pc_dev", "workstation_dev", "server_dev", "server_web", "server_proxmox", "custom_steps"]
 
 
 def extract_repo_name(git_url: str) -> str:
@@ -26,52 +24,20 @@ def extract_repo_name(git_url: str) -> str:
 
 
 def config_from_remote_args(args: argparse.Namespace) -> SetupConfig:
-    if args.steps:
+    if args.custom_steps:
         system_type = "custom_steps"
     elif args.system_type:
         system_type = args.system_type
     else:
         raise ValueError("Either --system-type or --steps must be specified")
     
+    # Set host to localhost for remote execution since it's running locally on the target
+    args.host = "localhost"
+    
+    config = SetupConfig.from_args(args, system_type)
+    
     if system_type == "server_proxmox":
-        username = "root"
-    else:
-        username = args.username or getpass.getuser()
-    
-    install_office = args.office
-    if system_type == "pc_dev" and not args.office:
-        install_office = True
-    
-    config = SetupConfig(
-        host="localhost",
-        username=username,
-        system_type=system_type,
-        password=args.password,
-        ssh_key=None,
-        timezone=args.timezone or "UTC",
-        friendly_name=None,
-        tags=None,
-        enable_rdp=args.rdp,
-        enable_x2go=args.x2go,
-        skip_audio=args.skip_audio,
-        desktop=args.desktop,
-        browser=args.browser,
-        use_flatpak=args.flatpak,
-        install_office=install_office,
-        dry_run=args.dry_run,
-        install_ruby=args.ruby,
-        install_go=args.go,
-        install_node=args.node,
-        custom_steps=args.steps,
-        deploy_specs=args.deploy,
-        full_deploy=args.full_deploy,
-        enable_ssl=args.ssl,
-        ssl_email=args.ssl_email,
-        enable_cloudflare=args.cloudflare,
-        api_subdomain=args.api_subdomain,
-        enable_samba=args.samba,
-        samba_shares=args.share
-    )
+        config.username = "root"
     
     return config
 
@@ -104,43 +70,7 @@ def main() -> int:
         return 1
     
     # Print configuration
-    print("=" * 60)
-    print(f"Remote Setup ({config.system_type})")
-    print("=" * 60)
-    if config.system_type != "server_proxmox":
-        print(f"User: {config.username}")
-    print(f"Timezone: {config.timezone}")
-    if config.system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        print(f"RDP: {'Yes' if config.enable_rdp else 'No'}")
-        print(f"X2Go: {'Yes' if config.enable_x2go else 'No'}")
-    elif config.enable_rdp and config.system_type == "server_dev":
-        print("RDP: Yes")
-    if config.enable_x2go and config.system_type == "server_dev":
-        print("X2Go: Yes")
-    if config.skip_audio:
-        print("Skip audio: Yes")
-    if config.desktop != "xfce" and config.system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        print(f"Desktop: {config.desktop}")
-    if config.browser != "brave" and config.system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        print(f"Browser: {config.browser}")
-    if config.use_flatpak and config.system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        print("Flatpak: Yes")
-    if config.install_office and config.system_type in ["workstation_desktop", "pc_dev", "workstation_dev"]:
-        print("Office: Yes")
-    if config.dry_run:
-        print("Dry-run: Yes")
-    if config.custom_steps:
-        print(f"Steps: {config.custom_steps}")
-    if config.deploy_specs:
-        print(f"Deployments: {len(config.deploy_specs)} repository(ies)")
-        for location, git_url in config.deploy_specs:
-            print(f"  - {git_url} -> {location}")
-        if config.enable_ssl:
-            print("SSL: Yes (Let's Encrypt)")
-            if config.ssl_email:
-                print(f"SSL Email: {config.ssl_email}")
-    if config.enable_cloudflare:
-        print("Cloudflare: Yes (tunnel preconfiguration)")
+    print_setup_summary(config, f"Remote Setup ({config.system_type})")
     sys.stdout.flush()
 
     detect_os()
@@ -336,16 +266,16 @@ def main() -> int:
         print("=" * 60)
         
         print("\n[1/4] Installing Samba")
-        install_samba()
+        install_samba(config)
         
         print("\n[2/4] Configuring global Samba settings with security hardening")
-        configure_samba_global_settings()
+        configure_samba_global_settings(config)
         
         print("\n[3/4] Configuring firewall for Samba")
-        configure_samba_firewall()
+        configure_samba_firewall(config)
         
         print("\n[4/4] Configuring fail2ban for Samba brute-force protection")
-        configure_samba_fail2ban()
+        configure_samba_fail2ban(config)
         
         if config.samba_shares:
             print("\n" + "=" * 60)
@@ -357,6 +287,41 @@ def main() -> int:
                 setup_samba_share(config, share_spec=share_spec)
         
         print("\n✓ Samba configuration complete")
+    
+    # Configure SMB mounts if requested
+    if config.smb_mounts:
+        from remote_modules.smb_mount_steps import configure_smb_mount
+        
+        print("\n" + "=" * 60)
+        print("Configuring SMB mounts...")
+        print("=" * 60)
+        
+        for i, mount_spec in enumerate(config.smb_mounts, 1):
+            print(f"\n[{i}/{len(config.smb_mounts)}] Mounting {mount_spec[0]}")
+            configure_smb_mount(config, mount_spec=mount_spec)
+        
+        print("\n✓ SMB mount configuration complete")
+    
+    # Configure directory synchronization if requested
+    if config.sync_specs:
+        from remote_modules.sync_steps import (
+            install_rsync,
+            create_sync_service
+        )
+        
+        print("\n" + "=" * 60)
+        print("Configuring directory synchronization...")
+        print("=" * 60)
+        
+        print("\n[1/2] Installing rsync")
+        install_rsync(config)
+        
+        print(f"\n[2/2] Configuring {len(config.sync_specs)} sync job(s)...")
+        for i, sync_spec in enumerate(config.sync_specs, 1):
+            print(f"\n  Sync job {i}/{len(config.sync_specs)}: {sync_spec[0]} → {sync_spec[1]} ({sync_spec[2]})")
+            create_sync_service(config, sync_spec=sync_spec)
+        
+        print("\n✓ Directory synchronization configured")
     
     print("\n" + "=" * 60)
     print("✓ Remote setup complete!")

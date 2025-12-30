@@ -10,13 +10,12 @@ def success_message(config: SetupConfig) -> None:
     print_success_header(config)
     print()
     print(f"Connect via SSH: ssh {config.username}@{config.host}")
-    print(f"View website: http://{config.host}")
 
 
 def main() -> int:
     return setup_main(
-        "server_web",
-        "Remote Web Server Setup",
+        "server_lite",
+        "Remote Server Lite Setup (minimal, no interactive CLI tools)",
         success_message
     )
 
