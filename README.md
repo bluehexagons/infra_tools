@@ -4,6 +4,8 @@ Automated setup scripts for remote Linux systems (Debian).
 
 ## Quick Start
 
+Download the repository and run setup scripts.
+
 ```bash
 python3 setup_server_web.py example.com --ruby --node --deploy example.com https://github.com/user/repo.git
 python3 setup_workstation_desktop.py 192.168.1.100 --desktop i3 --browser firefox
