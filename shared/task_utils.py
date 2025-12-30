@@ -24,12 +24,12 @@ def validate_frequency(frequency: str, label: str = "frequency") -> None:
         )
 
 
-def get_timer_calendar(frequency: str, hour_offset: int = 0) -> str:
+def get_timer_calendar(frequency: str, hour_offset: int = None) -> str:
     """Get systemd timer OnCalendar value for frequency.
     
     Args:
         frequency: 'hourly', 'daily', 'weekly', or 'monthly'
-        hour_offset: Hour to run (0-23), default 0 for hourly, 2 AM for others
+        hour_offset: Hour to run (0-23), default None uses 2 AM for non-hourly
         
     Returns:
         OnCalendar string for systemd timer
@@ -37,7 +37,7 @@ def get_timer_calendar(frequency: str, hour_offset: int = 0) -> str:
     if frequency == 'hourly':
         return '*-*-* *:00:00'
     
-    hour = hour_offset if hour_offset else 2
+    hour = hour_offset if hour_offset is not None else 2
     
     calendars = {
         'daily': f'*-*-* {hour:02d}:00:00',

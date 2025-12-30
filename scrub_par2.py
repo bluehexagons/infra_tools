@@ -13,8 +13,11 @@ from datetime import datetime
 
 def log(message: str, log_file: str) -> None:
     """Append message to log file."""
-    with open(log_file, 'a') as f:
-        f.write(f"{message}\n")
+    try:
+        with open(log_file, 'a') as f:
+            f.write(f"{message}\n")
+    except (IOError, OSError) as e:
+        print(f"Error writing to log {log_file}: {e}", file=sys.stderr)
 
 
 def create_par2(file_path: str, directory: str, database: str, redundancy: int, log_file: str) -> bool:
@@ -117,11 +120,17 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
     
     os.makedirs(database, exist_ok=True)
     
+    directory_path = Path(directory).resolve()
+    database_path = Path(database).resolve()
+    
     for root, dirs, files in os.walk(directory):
-        if root.startswith(database):
+        root_path = Path(root).resolve()
+        
+        if root_path == database_path or database_path in root_path.parents:
             continue
         
-        dirs[:] = [d for d in dirs if not os.path.join(root, d).startswith(database)]
+        dirs[:] = [d for d in dirs if not (root_path / d).resolve() == database_path 
+                   and database_path not in (root_path / d).resolve().parents]
         
         for filename in files:
             file_path = os.path.join(root, filename)
