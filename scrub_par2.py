@@ -129,8 +129,8 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
         if root_path == database_path or database_path in root_path.parents:
             continue
         
-        dirs[:] = [d for d in dirs if not (root_path / d).resolve() == database_path 
-                   and database_path not in (root_path / d).resolve().parents]
+        dirs[:] = [d for d in dirs 
+                   if not _is_under_database(root_path / d, database_path)]
         
         for filename in files:
             file_path = os.path.join(root, filename)
@@ -142,6 +142,12 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
     
     log(f"Scrub completed: {datetime.now()}", log_file)
     log("", log_file)
+
+
+def _is_under_database(path: Path, database_path: Path) -> bool:
+    """Check if path is under database directory."""
+    path_resolved = path.resolve()
+    return path_resolved == database_path or database_path in path_resolved.parents
 
 
 def main():

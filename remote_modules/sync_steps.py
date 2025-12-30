@@ -154,9 +154,8 @@ StandardError=journal
     
     print(f"  ✓ Created service: {service_name}.service")
     
-    # Create systemd timer file
     timer_file = f"/etc/systemd/system/{service_name}.timer"
-    calendar = get_timer_calendar(interval)
+    calendar = get_timer_calendar(interval, hour_offset=2)
     
     timer_content = f"""[Unit]
 Description=Timer for syncing {escaped_source} to {escaped_destination} ({interval})
