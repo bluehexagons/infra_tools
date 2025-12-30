@@ -290,6 +290,11 @@ def run_remote_setup(config: SetupConfig) -> int:
             escaped_spec = ' '.join(shlex.quote(str(s)) for s in sync_spec)
             cmd_parts.append(f"--sync {escaped_spec}")
     
+    if config.scrub_specs:
+        for scrub_spec in config.scrub_specs:
+            escaped_spec = ' '.join(shlex.quote(str(s)) for s in scrub_spec)
+            cmd_parts.append(f"--scrub {escaped_spec}")
+    
     remote_cmd = f"""
 mkdir -p {escaped_install_dir} && \
 cd {escaped_install_dir} && \

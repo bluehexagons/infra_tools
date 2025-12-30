@@ -104,5 +104,10 @@ def print_setup_summary(config: SetupConfig, description: str = None) -> None:
         for source, dest, interval in config.sync_specs:
             print(f"  - {source} → {dest} ({interval})")
     
+    if config.scrub_specs:
+        print(f"Scrub Jobs: {len(config.scrub_specs)} job(s)")
+        for directory, db_path, redundancy, frequency in config.scrub_specs:
+            print(f"  - {directory} ({redundancy}, {frequency})")
+    
     print("=" * 60)
     print()
