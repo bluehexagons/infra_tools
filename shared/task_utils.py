@@ -1,6 +1,5 @@
 """Shared utilities for scheduled tasks (sync, scrub, etc)."""
 
-from typing import List
 from lib.config import SetupConfig
 
 

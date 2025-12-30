@@ -123,13 +123,13 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
     
     os.makedirs(database, exist_ok=True)
     
-    directory_path = Path(directory).resolve()
     database_path = Path(database).resolve()
     
     for root, dirs, files in os.walk(directory):
         root_path = Path(root).resolve()
         
         if root_path == database_path or database_path in root_path.parents:
+            dirs[:] = []
             continue
         
         dirs[:] = [d for d in dirs 

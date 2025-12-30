@@ -121,7 +121,6 @@ def create_scrub_service(config: SetupConfig, scrub_spec: List[str] = None, **_)
             run(f"chown {shlex.quote(config.username)}:{shlex.quote(config.username)} {shlex.quote(db_parent)}")
     
     escaped_directory = escape_systemd_description(directory)
-    escaped_database = escape_systemd_description(database_path)
     
     dir_on_smb = check_path_on_smb_mount(directory, config)
     db_on_smb = check_path_on_smb_mount(database_path, config)
@@ -184,6 +183,7 @@ Description=Timer for data integrity check of {escaped_directory} ({frequency})
 
 [Timer]
 OnCalendar={calendar}
+Persistent=true
 AccuracySec=1m
 Unit={service_name}.service
 
