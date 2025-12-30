@@ -177,6 +177,19 @@ python3 patch_setup.py deploy [pattern]
 
 Pattern matching is case-insensitive and searches hosts, names, and tags.
 
+## System templates
+
+Samba server with scheduled sync and par2 scrubbing on backups using mounted drives:
+```bash
+./setup_server_lite.py IP_ADDRESS \
+  --name my_share_server \
+  --tags nas \
+  --samba \
+  --share write my_share /mnt/share_drive/store shareuser:password \
+  --sync /mnt/share_drive/store /mnt/backup_drive/incoming/share_drive daily \
+  --scrub /mnt/backup_drive/incoming/share_drive .pardatabase 5% monthly
+```
+
 ## Requirements
 
 - Python 3.9+
