@@ -163,21 +163,33 @@ def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = Non
 
 def create_tar_archive() -> bytes:
     tar_buffer = io.BytesIO()
+    project_root = os.path.normpath(os.path.join(SCRIPT_DIR, ".."))
     
     def safe_filter(tarinfo: tarfile.TarInfo) -> Optional[tarfile.TarInfo]:
         tarinfo.name = os.path.normpath(tarinfo.name)
         if tarinfo.name.startswith('..') or tarinfo.name.startswith('/'):
             return None
+        if '__pycache__' in tarinfo.name or tarinfo.name.endswith('.pyc'):
+            return None
         return tarinfo
     
-    check_sync_mounts_path = os.path.join(SCRIPT_DIR, "..", "check_sync_mounts.py")
+    items_to_include = [
+        "remote_setup.py",
+        "remote_modules",
+        "shared",
+        "lib",
+        "check_sync_mounts.py",
+        "check_scrub_mounts.py",
+        "scrub_par2.py"
+    ]
     
     with tarfile.open(fileobj=tar_buffer, mode='w:gz') as tar:
-        tar.add(REMOTE_SCRIPT_PATH, arcname="remote_setup.py", filter=safe_filter)
-        tar.add(REMOTE_MODULES_DIR, arcname="remote_modules", filter=safe_filter)
-        tar.add(SHARED_DIR, arcname="shared", filter=safe_filter)
-        tar.add(LIB_DIR, arcname="lib", filter=safe_filter)
-        tar.add(check_sync_mounts_path, arcname="check_sync_mounts.py", filter=safe_filter)
+        for item in items_to_include:
+            full_path = os.path.join(project_root, item)
+            if os.path.exists(full_path):
+                tar.add(full_path, arcname=item, filter=safe_filter)
+            else:
+                print(f"Warning: {item} not found, skipping...")
     
     return tar_buffer.getvalue()
 

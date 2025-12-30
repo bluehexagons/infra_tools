@@ -45,11 +45,12 @@ def create_par2(file_path: str, directory: str, database: str, redundancy: int, 
     
     try:
         subprocess.run(
-            ['par2', 'create', f'-r{redundancy}', '-n1', par2_base, file_path],
+            ['par2', 'create', '-B', directory, f'-r{redundancy}', '-n1', par2_base, relative_path],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             check=True,
-            text=True
+            text=True,
+            cwd=directory
         )
         return True
     except subprocess.CalledProcessError as e:
@@ -76,11 +77,12 @@ def verify_repair(file_path: str, directory: str, database: str, log_file: str) 
     
     try:
         subprocess.run(
-            ['par2', 'verify', par2_base],
+            ['par2', 'verify', '-B', directory, par2_base],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             check=True,
-            text=True
+            text=True,
+            cwd=directory
         )
     except subprocess.CalledProcessError:
         log(f"Verification failed for: {relative_path}", log_file)
@@ -88,11 +90,12 @@ def verify_repair(file_path: str, directory: str, database: str, log_file: str) 
         
         try:
             subprocess.run(
-                ['par2', 'repair', par2_base],
+                ['par2', 'repair', '-B', directory, par2_base],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 check=True,
-                text=True
+                text=True,
+                cwd=directory
             )
             log(f"✓ Repaired: {relative_path}", log_file)
         except subprocess.CalledProcessError as e:

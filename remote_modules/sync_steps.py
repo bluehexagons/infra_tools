@@ -159,12 +159,12 @@ StandardError=journal
     
     timer_content = f"""[Unit]
 Description=Timer for syncing {escaped_source} to {escaped_destination} ({interval})
-Requires={service_name}.service
 
 [Timer]
 OnCalendar={calendar}
 Persistent=true
 AccuracySec=1m
+Unit={service_name}.service
 
 [Install]
 WantedBy=timers.target

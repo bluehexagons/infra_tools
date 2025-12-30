@@ -181,12 +181,11 @@ StandardError=journal
     
     timer_content = f"""[Unit]
 Description=Timer for data integrity check of {escaped_directory} ({frequency})
-Requires={service_name}.service
 
 [Timer]
 OnCalendar={calendar}
-Persistent=true
 AccuracySec=1m
+Unit={service_name}.service
 
 [Install]
 WantedBy=timers.target
@@ -196,19 +195,6 @@ WantedBy=timers.target
         f.write(timer_content)
     
     print(f"  ✓ Created timer: {service_name}.timer ({frequency})")
-    
-    run("systemctl daemon-reload")
-    run(f"systemctl enable {shlex.quote(service_name)}.timer")
-    run(f"systemctl start {shlex.quote(service_name)}.timer")
-    
-    print(f"  ✓ Enabled and started timer")
-    
-    result = run(f"systemctl list-timers {shlex.quote(service_name)}.timer --no-pager", check=False)
-    if result.returncode == 0:
-        print(f"  ℹ Timer status:")
-        for line in result.stdout.strip().split('\n'):
-            if line.strip():
-                print(f"    {line}")
     
     print(f"  ℹ Performing initial par2 creation (fast mode)...")
     
@@ -222,6 +208,23 @@ WantedBy=timers.target
         print(f"  ✓ Initial par2 creation completed")
     else:
         print(f"  ⚠ Warning: Initial par2 creation may have encountered issues")
+        if result.stderr:
+            print(f"    Error details: {result.stderr.strip()}")
+        if result.stdout:
+            print(f"    Output: {result.stdout.strip()}")
+    
+    run("systemctl daemon-reload")
+    run(f"systemctl enable {shlex.quote(service_name)}.timer")
+    run(f"systemctl start {shlex.quote(service_name)}.timer")
+    
+    print(f"  ✓ Enabled and started timer")
+    
+    result = run(f"systemctl list-timers {shlex.quote(service_name)}.timer --no-pager", check=False)
+    if result.returncode == 0:
+        print(f"  ℹ Timer status:")
+        for line in result.stdout.strip().split('\n'):
+            if line.strip():
+                print(f"    {line}")
     
     print(f"  ✓ Scrub configured: {directory} (redundancy: {redundancy}, frequency: {frequency})")
     print(f"  ℹ Logs: {log_file}")
