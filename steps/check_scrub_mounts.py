@@ -8,7 +8,6 @@ mounts are available before attempting to scrub.
 import sys
 import os
 
-# Add parent directory to path so we can import lib modules
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
 from lib.mount_utils import validate_mount_for_sync
@@ -22,15 +21,12 @@ def main():
     directory = sys.argv[1]
     database_path = sys.argv[2]
     
-    # Validate directory
     if not validate_mount_for_sync(directory, "directory"):
         return 1
     
-    # Validate database path
     if not validate_mount_for_sync(database_path, "database"):
         return 1
     
-    # Both paths are valid
     return 0
 
 
