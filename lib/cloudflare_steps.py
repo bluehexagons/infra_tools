@@ -42,7 +42,6 @@ def create_cloudflared_config_directory(config: SetupConfig) -> None:
     
     os.makedirs(config_dir, mode=0o755, exist_ok=True)
     
-    # Load README from template file
     config_template_dir = os.path.join(os.path.dirname(__file__), '..', 'config')
     template_path = os.path.join(config_template_dir, 'cloudflare_tunnel_readme.md')
     with open(template_path, 'r', encoding='utf-8') as f:
@@ -62,7 +61,6 @@ def configure_nginx_for_cloudflare(config: SetupConfig) -> None:
         print("  ✓ Nginx already configured for Cloudflare")
         return
     
-    # Load Cloudflare configuration from template file
     config_template_dir = os.path.join(os.path.dirname(__file__), '..', 'config')
     template_path = os.path.join(config_template_dir, 'cloudflare_ips.conf')
     with open(template_path, 'r', encoding='utf-8') as f:
@@ -89,7 +87,6 @@ def install_cloudflared_service_helper(config: SetupConfig) -> None:
         print(f"  ⚠ Source script not found: {source_script}")
         return
     
-    # Create symlink instead of copying
     run(f"ln -sf {source_script} {helper_script}")
     
     print(f"  ✓ Linked setup script: {helper_script}")
@@ -98,14 +95,12 @@ def install_cloudflared_service_helper(config: SetupConfig) -> None:
 
 def run_cloudflare_tunnel_setup(config: SetupConfig) -> None:
     """Run Cloudflare tunnel setup in non-interactive mode to update configuration."""
-    # Use the script from infra_tools directory directly
     helper_script = "/opt/infra_tools/service_tools/setup_cloudflare_tunnel.py"
     
     if not os.path.exists(helper_script):
         print(f"  ⚠ Setup script not found: {helper_script}")
         return
     
-    # Check if there's an existing tunnel configuration
     state_file = "/etc/cloudflared/tunnel-state.json"
     if not os.path.exists(state_file):
         print("  ⚠ No existing Cloudflare tunnel found")
@@ -114,7 +109,6 @@ def run_cloudflare_tunnel_setup(config: SetupConfig) -> None:
     
     print("  Updating Cloudflare tunnel configuration...")
     
-    # Run the setup script in non-interactive mode
     result = run(f"python3 {helper_script} --non-interactive", check=False)
     
     if result.returncode == 0:
