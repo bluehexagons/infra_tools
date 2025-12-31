@@ -8,7 +8,6 @@ mounts are available before attempting to sync.
 import sys
 import os
 
-# Add parent directory to path so we can import lib modules
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
 from lib.mount_utils import validate_mount_for_sync
@@ -22,15 +21,12 @@ def main():
     source = sys.argv[1]
     destination = sys.argv[2]
     
-    # Validate source
     if not validate_mount_for_sync(source, "source"):
         return 1
     
-    # Validate destination
     if not validate_mount_for_sync(destination, "destination"):
         return 1
     
-    # Both paths are valid
     return 0
 
 
