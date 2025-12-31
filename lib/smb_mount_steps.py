@@ -5,7 +5,7 @@ import shlex
 from typing import List
 
 from lib.config import SetupConfig
-from .utils import run
+from lib.remote_utils import run
 
 
 def parse_smb_mount_spec(mount_spec: List[str]) -> dict:

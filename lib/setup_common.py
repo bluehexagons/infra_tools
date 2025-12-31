@@ -21,9 +21,9 @@ from lib.display import print_setup_summary
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REMOTE_SCRIPT_PATH = os.path.join(SCRIPT_DIR, "..", "remote_setup.py")
-REMOTE_MODULES_DIR = os.path.join(SCRIPT_DIR, "..", "remote_modules")
-SHARED_DIR = os.path.join(SCRIPT_DIR, "..", "shared")
 LIB_DIR = SCRIPT_DIR
+CONFIG_DIR = os.path.join(SCRIPT_DIR, "..", "config")
+SERVICE_TOOLS_DIR = os.path.join(SCRIPT_DIR, "..", "service_tools")
 REMOTE_INSTALL_DIR = "/opt/infra_tools"
 GIT_CACHE_DIR = os.path.expanduser("~/.cache/infra_tools/git_repos")
 
@@ -129,7 +129,7 @@ def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = Non
         # Get commit hash
         commit_hash = None
         if not dry_run:
-            from shared.deploy_utils import get_git_commit_hash
+            from lib.deploy_utils import get_git_commit_hash
             commit_hash = get_git_commit_hash(clone_path)
         
         return (clone_path, commit_hash)
@@ -152,7 +152,7 @@ def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = Non
             print(f"  ✓ Cloned to {clone_path}")
             
             # Get commit hash
-            from shared.deploy_utils import get_git_commit_hash
+            from lib.deploy_utils import get_git_commit_hash
             commit_hash = get_git_commit_hash(clone_path)
             
             return (clone_path, commit_hash)
@@ -175,12 +175,10 @@ def create_tar_archive() -> bytes:
     
     items_to_include = [
         "remote_setup.py",
-        "remote_modules",
-        "shared",
         "lib",
-        "check_sync_mounts.py",
-        "check_scrub_mounts.py",
-        "scrub_par2.py"
+        "config",
+        "service_tools",
+        "steps"
     ]
     
     with tarfile.open(fileobj=tar_buffer, mode='w:gz') as tar:

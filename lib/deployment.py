@@ -11,7 +11,7 @@ from typing import Optional, Set
 
 # Add parent directory to path to import from remote_modules
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from remote_modules.utils import run
+from lib.remote_utils import run
 
 from .deploy_utils import (
     parse_deploy_spec,

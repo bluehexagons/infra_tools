@@ -1,7 +1,7 @@
 """Swap configuration steps."""
 
 from lib.config import SetupConfig
-from .utils import run
+from lib.remote_utils import run
 
 def get_total_ram_mb() -> int:
     """Get total RAM in MB."""

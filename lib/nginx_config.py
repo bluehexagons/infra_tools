@@ -6,7 +6,7 @@ import sys
 from typing import Optional, List, Dict
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from remote_modules.utils import run
+from lib.remote_utils import run
 
 
 SSL_PROTOCOLS = "TLSv1.2 TLSv1.3"

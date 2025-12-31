@@ -3,7 +3,7 @@ import shlex
 from typing import List, Dict, Optional
 
 from lib.config import SetupConfig
-from .utils import run, is_package_installed, file_contains
+from lib.remote_utils import run, is_package_installed, file_contains
 
 
 def install_samba(config: SetupConfig) -> None:
@@ -227,7 +227,7 @@ def configure_samba_global_settings(config: SetupConfig) -> None:
 
 
 def configure_samba_fail2ban(config: SetupConfig) -> None:
-    from .utils import is_service_active
+    from lib.remote_utils import is_service_active
     
     if os.path.exists("/etc/fail2ban/jail.d/samba.local"):
         if is_service_active("fail2ban"):

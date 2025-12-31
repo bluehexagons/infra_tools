@@ -3,7 +3,7 @@
 import os
 
 from lib.config import SetupConfig
-from .utils import run
+from lib.remote_utils import run
 
 
 def configure_cloudflare_firewall(config: SetupConfig) -> None:
@@ -43,7 +43,8 @@ def create_cloudflared_config_directory(config: SetupConfig) -> None:
     os.makedirs(config_dir, mode=0o755, exist_ok=True)
     
     # Load README from template file
-    template_path = os.path.join(os.path.dirname(__file__), 'cloudflare_tunnel_readme.md')
+    config_template_dir = os.path.join(os.path.dirname(__file__), '..', 'config')
+    template_path = os.path.join(config_template_dir, 'cloudflare_tunnel_readme.md')
     with open(template_path, 'r', encoding='utf-8') as f:
         readme_content = f.read()
     
@@ -62,7 +63,8 @@ def configure_nginx_for_cloudflare(config: SetupConfig) -> None:
         return
     
     # Load Cloudflare configuration from template file
-    template_path = os.path.join(os.path.dirname(__file__), 'cloudflare_ips.conf')
+    config_template_dir = os.path.join(os.path.dirname(__file__), '..', 'config')
+    template_path = os.path.join(config_template_dir, 'cloudflare_ips.conf')
     with open(template_path, 'r', encoding='utf-8') as f:
         cloudflare_config = f.read()
     
@@ -82,9 +84,9 @@ def install_cloudflared_service_helper(config: SetupConfig) -> None:
         print("  ✓ Cloudflare tunnel setup script already exists")
         return
     
-    # Read the Python script from the remote_modules directory
+    # Read the Python script from the service_tools directory
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    source_script = os.path.join(script_dir, "setup_cloudflare_tunnel.py")
+    source_script = os.path.join(script_dir, "..", "service_tools", "setup_cloudflare_tunnel.py")
     
     if not os.path.exists(source_script):
         print(f"  ⚠ Source script not found: {source_script}")

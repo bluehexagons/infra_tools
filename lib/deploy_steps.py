@@ -5,8 +5,8 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from shared.deployment import DeploymentOrchestrator
-from .utils import run
+from lib.deployment import DeploymentOrchestrator
+from lib.remote_utils import run
 
 
 def ensure_app_user(username: str) -> None:
@@ -20,7 +20,7 @@ def deploy_repository(source_path: str, deploy_spec: str, git_url: str,
                       commit_hash: str = None, full_deploy: bool = True,
                       web_user: str = "rails", web_group: str = "rails", 
                       keep_source: bool = False, api_subdomain: bool = False, **_) -> None:
-    from shared.deploy_utils import parse_deploy_spec
+    from lib.deploy_utils import parse_deploy_spec
     
     ensure_app_user(web_user)
     

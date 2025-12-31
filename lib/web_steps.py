@@ -3,7 +3,7 @@
 import os
 
 from lib.config import SetupConfig
-from .utils import run, is_package_installed, is_service_active, file_contains
+from lib.remote_utils import run, is_package_installed, is_service_active, file_contains
 
 
 def install_nginx(config: SetupConfig) -> None:
@@ -32,7 +32,8 @@ def configure_nginx_security(config: SetupConfig) -> None:
         run("cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.bak")
     
     # Load nginx configuration from template file
-    template_path = os.path.join(os.path.dirname(__file__), 'nginx.conf.template')
+    config_template_dir = os.path.join(os.path.dirname(__file__), '..', 'config')
+    template_path = os.path.join(config_template_dir, 'nginx.conf.template')
     with open(template_path, 'r', encoding='utf-8') as f:
         nginx_security_conf = f.read()
     
@@ -84,7 +85,8 @@ def configure_default_site(config: SetupConfig) -> None:
             return
     
     # Load default site configuration from template file
-    template_path = os.path.join(os.path.dirname(__file__), 'nginx_default_site.conf.template')
+    config_template_dir = os.path.join(os.path.dirname(__file__), '..', 'config')
+    template_path = os.path.join(config_template_dir, 'nginx_default_site.conf.template')
     with open(template_path, 'r', encoding='utf-8') as f:
         default_site = f.read()
     

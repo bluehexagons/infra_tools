@@ -7,9 +7,9 @@ from typing import List
 
 from lib.config import SetupConfig
 from lib.setup_common import REMOTE_INSTALL_DIR
-from .utils import run, is_package_installed
-from shared.mount_utils import is_path_under_mnt, get_mount_ancestor
-from shared.task_utils import (
+from lib.remote_utils import run, is_package_installed
+from lib.mount_utils import is_path_under_mnt, get_mount_ancestor
+from lib.task_utils import (
     validate_frequency,
     get_timer_calendar,
     escape_systemd_description,
@@ -135,13 +135,13 @@ def create_scrub_service(config: SetupConfig, scrub_spec: List[str] = None, **_)
     if not os.path.exists(log_dir):
         os.makedirs(log_dir, exist_ok=True)
     
-    scrub_script = f"{REMOTE_INSTALL_DIR}/scrub_par2.py"
+    scrub_script = f"{REMOTE_INSTALL_DIR}/service_tools/scrub_par2.py"
     redundancy_value = redundancy[:-1]
     
     service_file = f"/etc/systemd/system/{service_name}.service"
     
     if needs_mount_check:
-        check_script = f"{REMOTE_INSTALL_DIR}/check_scrub_mounts.py"
+        check_script = f"{REMOTE_INSTALL_DIR}/steps/check_scrub_mounts.py"
         
         service_content = f"""[Unit]
 Description=Data integrity check for {escaped_directory}

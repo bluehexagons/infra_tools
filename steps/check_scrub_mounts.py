@@ -11,7 +11,7 @@ import os
 # Add install directory to path so we can import shared modules
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from shared.mount_utils import validate_mount_for_sync
+from lib.mount_utils import validate_mount_for_sync
 
 
 def main():

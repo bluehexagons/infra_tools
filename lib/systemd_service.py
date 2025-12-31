@@ -9,7 +9,7 @@ from typing import Optional
 
 # Add parent directory to path to import from remote_modules
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from remote_modules.utils import run
+from lib.remote_utils import run
 
 
 def generate_node_service(app_name: str, app_path: str, port: int = 4000,

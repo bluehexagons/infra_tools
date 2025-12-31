@@ -5,7 +5,7 @@ import shlex
 from typing import Optional, Callable, List
 
 from lib.config import SetupConfig
-from .utils import run
+from lib.remote_utils import run
 
 
 def install_certbot(config: SetupConfig) -> None:
@@ -153,7 +153,7 @@ def setup_ssl_for_deployments(deployments: List[dict], email: Optional[str] = No
     print("\n  Regenerating nginx configurations to use Let's Encrypt certificates...")
     
     from collections import defaultdict
-    from shared.nginx_config import create_nginx_sites_for_groups
+    from lib.nginx_config import create_nginx_sites_for_groups
     
     grouped_deployments = defaultdict(list)
     for dep in deployments:

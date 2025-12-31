@@ -3,7 +3,7 @@
 import os
 
 from lib.config import SetupConfig
-from .utils import run, is_service_active, file_contains
+from lib.remote_utils import run, is_service_active, file_contains
 
 
 def create_remoteusers_group(config: SetupConfig) -> None:
@@ -227,8 +227,8 @@ def configure_auto_restart(config: SetupConfig) -> None:
             print("  ✓ Automatic restart service already configured")
             return
     
-    # Script is already installed at /opt/infra_tools/remote_modules/
-    script_path = "/opt/infra_tools/remote_modules/auto_restart_if_needed.py"
+    # Script is already installed at /opt/infra_tools/service_tools/
+    script_path = "/opt/infra_tools/service_tools/auto_restart_if_needed.py"
     
     # Create the systemd service
     service_content = f"""[Unit]

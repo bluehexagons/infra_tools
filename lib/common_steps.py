@@ -6,7 +6,7 @@ import subprocess
 from typing import Optional
 
 from lib.config import SetupConfig
-from .utils import run, is_package_installed, is_service_active, file_contains, generate_password
+from lib.remote_utils import run, is_package_installed, is_service_active, file_contains, generate_password
 
 
 def set_user_password(username: str, password: str) -> bool:
@@ -332,7 +332,7 @@ def _configure_auto_update_systemd(
             print(f"  ✓ {check_name} auto-update already configured")
             return
 
-    script_path = f"/opt/infra_tools/remote_modules/{script_name}"
+    script_path = f"/opt/infra_tools/service_tools/{script_name}"
     
     user_line = f"User={user}\n" if user else ""
     
