@@ -157,34 +157,45 @@ def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = Non
             return None
 
 
-def create_tar_archive() -> bytes:
-    tar_buffer = io.BytesIO()
+def copy_project_files(dest_dir: str) -> None:
     project_root = os.path.normpath(os.path.join(SCRIPT_DIR, ".."))
+    items_to_copy = ["remote_setup.py", "lib", "config", "service_tools", "steps"]
     
-    def safe_filter(tarinfo: tarfile.TarInfo) -> Optional[tarfile.TarInfo]:
-        tarinfo.name = os.path.normpath(tarinfo.name)
-        if tarinfo.name.startswith('..') or tarinfo.name.startswith('/'):
-            return None
-        if '__pycache__' in tarinfo.name or tarinfo.name.endswith('.pyc'):
-            return None
-        return tarinfo
-    
-    items_to_include = [
-        "remote_setup.py",
-        "lib",
-        "config",
-        "service_tools",
-        "steps"
-    ]
-    
-    with tarfile.open(fileobj=tar_buffer, mode='w:gz') as tar:
-        for item in items_to_include:
-            full_path = os.path.join(project_root, item)
-            if os.path.exists(full_path):
-                tar.add(full_path, arcname=item, filter=safe_filter)
+    for item in items_to_copy:
+        src = os.path.join(project_root, item)
+        dst = os.path.join(dest_dir, item)
+        if os.path.exists(src):
+            if os.path.isdir(src):
+                shutil.copytree(src, dst, ignore=shutil.ignore_patterns('__pycache__', '*.pyc', '.git'))
             else:
-                print(f"Warning: {item} not found, skipping...")
+                shutil.copy2(src, dst)
+
+
+def prepare_deployments(config: SetupConfig, target_dir: str) -> None:
+    if not config.deploy_specs:
+        return
+        
+    print(f"\n{'='*60}")
+    print("Cloning repositories locally...")
+    print(f"{'='*60}")
     
+    for deploy_spec, git_url in config.deploy_specs:
+        result = clone_repository(git_url, target_dir, cache_dir=GIT_CACHE_DIR, dry_run=config.dry_run)
+        if result:
+            clone_path, commit_hash = result
+            if commit_hash and not config.dry_run:
+                repo_name = os.path.basename(clone_path)
+                commit_file = os.path.join(target_dir, f"{repo_name}.commit")
+                with open(commit_file, 'w') as f:
+                    f.write(commit_hash)
+        else:
+            print(f"Warning: Failed to clone {git_url}, skipping...")
+
+
+def create_tar_from_dir(source_dir: str) -> bytes:
+    tar_buffer = io.BytesIO()
+    with tarfile.open(fileobj=tar_buffer, mode='w:gz') as tar:
+        tar.add(source_dir, arcname=".")
     return tar_buffer.getvalue()
 
 
@@ -193,147 +204,120 @@ def create_argument_parser(description: str, allow_steps: bool = False) -> argpa
 
 
 def run_remote_setup(config: SetupConfig) -> int:
-    try:
-        tar_data = create_tar_archive()
-    except FileNotFoundError as e:
-        print(f"Error: Remote setup files not found: {e}")
+    is_local = config.host in ["localhost", "127.0.0.1"]
+    
+    if is_local and os.geteuid() != 0:
+        print("Error: Local setup requires root privileges. Please run with sudo.")
         return 1
-    
-    ssh_opts = [
-        "-o", "StrictHostKeyChecking=accept-new",
-        "-o", "ConnectTimeout=30",
-        "-o", "ServerAliveInterval=30",
-    ]
-    if config.ssh_key:
-        ssh_opts.extend(["-i", config.ssh_key])
-    
-    escaped_install_dir = shlex.quote(REMOTE_INSTALL_DIR)
-    
-    cmd_parts = [f"python3 {escaped_install_dir}/remote_setup.py"] + config.to_remote_args()
-    
-    remote_cmd = f"""
+
+    build_dir = tempfile.mkdtemp(prefix="infra_setup_build_")
+    try:
+        copy_project_files(build_dir)
+        
+        if config.deploy_specs:
+            deploy_dir = os.path.join(build_dir, "deployments")
+            os.makedirs(deploy_dir, exist_ok=True)
+            prepare_deployments(config, deploy_dir)
+            
+        cmd_parts = [shlex.quote(sys.executable), shlex.quote(os.path.join(REMOTE_INSTALL_DIR, "remote_setup.py"))] + config.to_remote_args()
+        
+        if config.dry_run:
+            print("\n" + "=" * 60)
+            print("[DRY RUN] Would execute:")
+            if is_local:
+                print(f"  Copy files to {REMOTE_INSTALL_DIR}")
+                print(f"  Run: {' '.join(cmd_parts)}")
+            else:
+                print(f"  Upload files to {config.host}:{REMOTE_INSTALL_DIR}")
+                print(f"  Run: {' '.join(cmd_parts)}")
+            print("=" * 60)
+            return 0
+
+        if is_local:
+            print(f"\n{'='*60}")
+            print("Running setup locally...")
+            print(f"{'='*60}")
+            
+            if os.path.exists(REMOTE_INSTALL_DIR):
+                shutil.rmtree(REMOTE_INSTALL_DIR)
+            shutil.copytree(build_dir, REMOTE_INSTALL_DIR, symlinks=True)
+            
+            env = os.environ.copy()
+            env["LC_ALL"] = "C"
+            
+            try:
+                process = subprocess.Popen(
+                    ' '.join(cmd_parts),
+                    shell=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                    env=env,
+                    cwd=REMOTE_INSTALL_DIR
+                )
+                
+                for line in process.stdout:
+                    print(line, end='', flush=True)
+                    
+                return process.wait()
+            except Exception as e:
+                print(f"Error running local setup: {e}")
+                return 1
+        else:
+            tar_data = create_tar_from_dir(build_dir)
+            
+            ssh_opts = [
+                "-o", "StrictHostKeyChecking=accept-new",
+                "-o", "ConnectTimeout=30",
+                "-o", "ServerAliveInterval=30",
+            ]
+            if config.ssh_key:
+                ssh_opts.extend(["-i", config.ssh_key])
+            
+            escaped_install_dir = shlex.quote(REMOTE_INSTALL_DIR)
+            
+            remote_python = "python3"
+            remote_script = os.path.join(REMOTE_INSTALL_DIR, "remote_setup.py")
+            remote_cmd_args = [remote_python, remote_script] + config.to_remote_args()
+            remote_cmd_str = ' '.join(remote_cmd_args)
+            
+            remote_shell_cmd = f"""
 mkdir -p {escaped_install_dir} && \
 cd {escaped_install_dir} && \
 tar xzf - && \
-{' '.join(cmd_parts)}
+{remote_cmd_str}
 """
-    
-    ssh_cmd = ["ssh"] + ssh_opts + [f"root@{config.host}", remote_cmd]
-    
-    temp_deploy_dir = None
-    deploy_tar_data = None
-    if config.deploy_specs:
-        temp_deploy_dir = tempfile.mkdtemp(prefix="infra_deploy_")
-        print(f"\n{'='*60}")
-        print("Cloning repositories locally...")
-        print(f"{'='*60}")
-        
-        cloned_repos = []
-        for deploy_spec, git_url in config.deploy_specs:
-            result = clone_repository(git_url, temp_deploy_dir, cache_dir=GIT_CACHE_DIR, dry_run=config.dry_run)
-            if result:
-                clone_path, commit_hash = result
-                cloned_repos.append((deploy_spec, clone_path, git_url, commit_hash))
-            else:
-                print(f"Warning: Failed to clone {git_url}, skipping...")
-        
-        if cloned_repos:
-            print(f"\n{'='*60}")
-            print("Packaging repositories for upload...")
-            print(f"{'='*60}")
-            deploy_tar_buffer = io.BytesIO()
+            ssh_cmd = ["ssh"] + ssh_opts + [f"root@{config.host}", remote_shell_cmd]
             
-            def safe_filter(tarinfo: tarfile.TarInfo) -> Optional[tarfile.TarInfo]:
-                tarinfo.name = os.path.normpath(tarinfo.name)
-                if tarinfo.name.startswith('..') or tarinfo.name.startswith('/'):
-                    return None
-                if '/.git/' in tarinfo.name or tarinfo.name.endswith('/.git'):
-                    return None
-                return tarinfo
+            ssh_env = os.environ.copy()
+            ssh_env["LC_ALL"] = "C"
             
-            with tarfile.open(fileobj=deploy_tar_buffer, mode='w:gz') as tar:
-                for deploy_spec, clone_path, git_url, commit_hash in cloned_repos:
-                    repo_name = os.path.basename(clone_path)
-                    tar.add(clone_path, arcname=f"deployments/{repo_name}", filter=safe_filter)
-                    
-                    if commit_hash:
-                        commit_info = tarfile.TarInfo(name=f"deployments/{repo_name}.commit")
-                        commit_data = commit_hash.encode('utf-8')
-                        commit_info.size = len(commit_data)
-                        tar.addfile(commit_info, io.BytesIO(commit_data))
-            
-            deploy_tar_data = deploy_tar_buffer.getvalue()
-            print(f"  ✓ Packaged {len(cloned_repos)} repository(ies)")
-    
-    if config.dry_run:
-        print("\n" + "=" * 60)
-        print("[DRY RUN] Would execute:")
-        print(f"  SSH command: {' '.join(ssh_cmd[:3])} root@{config.host} ...")
-        print(f"  Remote command: {' '.join(cmd_parts)}")
-        if deploy_tar_data:
-            print(f"  Would upload {len(deploy_tar_data)} bytes of deployment data")
-        print("=" * 60)
-        return 0
-    
-    ssh_env = os.environ.copy()
-    ssh_env["LC_ALL"] = "C"
+            try:
+                process = subprocess.Popen(
+                    ssh_cmd,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=False,
+                    bufsize=0,
+                    env=ssh_env,
+                )
 
-    try:
-        if deploy_tar_data:
-            print(f"\n{'='*60}")
-            print("Uploading deployment repositories...")
-            print(f"{'='*60}")
+                process.stdin.write(tar_data)
+                process.stdin.close()
 
-            deploy_cmd = f"mkdir -p {escaped_install_dir} && cd {escaped_install_dir} && tar xzf -"
+                for line in io.TextIOWrapper(process.stdout, encoding='utf-8'):
+                    print(line, end='', flush=True)
 
-            deploy_process = subprocess.Popen(
-                ["ssh"] + ssh_opts + [f"root@{config.host}", deploy_cmd],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=False,
-                bufsize=0,
-                env=ssh_env,
-            )
+                return process.wait()
+            except Exception as e:
+                print(f"Error running remote setup: {e}")
+                return 1
 
-            deploy_process.stdin.write(deploy_tar_data)
-            deploy_process.stdin.close()
-
-            for line in io.TextIOWrapper(deploy_process.stdout, encoding='utf-8'):
-                print(line, end='', flush=True)
-
-            deploy_returncode = deploy_process.wait()
-            if deploy_returncode != 0:
-                print(f"Warning: Repository upload returned non-zero exit code: {deploy_returncode}")
-            else:
-                print(f"  ✓ Uploaded {len(cloned_repos)} repository(ies)")
-
-        process = subprocess.Popen(
-            ssh_cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=False,
-            bufsize=0,
-            env=ssh_env,
-        )
-
-        process.stdin.write(tar_data)
-        process.stdin.close()
-
-        for line in io.TextIOWrapper(process.stdout, encoding='utf-8'):
-            print(line, end='', flush=True)
-
-        returncode = process.wait()
-
-        return returncode
-        
-    except Exception as e:
-        print(f"Error: {e}")
-        return 1
     finally:
-        if temp_deploy_dir and os.path.exists(temp_deploy_dir):
-            shutil.rmtree(temp_deploy_dir)
+        if os.path.exists(build_dir):
+            shutil.rmtree(build_dir)
 
 
 def setup_main(system_type: str, description: str, success_msg_fn) -> int:
