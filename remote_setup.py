@@ -31,7 +31,6 @@ def config_from_remote_args(args: argparse.Namespace) -> SetupConfig:
     else:
         raise ValueError("Either --system-type or --steps must be specified")
     
-    # Set host to localhost for remote execution since it's running locally on the target
     args.host = "localhost"
     
     config = SetupConfig.from_args(args, system_type)
@@ -57,19 +56,16 @@ def main() -> int:
         print("DRY-RUN MODE ENABLED")
         print("=" * 60)
     
-    # Create config from arguments
     try:
         config = config_from_remote_args(args)
     except ValueError as e:
         print(f"Error: {e}")
         return 1
     
-    # Validate username
     if not validate_username(config.username):
         print(f"Error: Invalid username: {config.username}")
         return 1
     
-    # Print configuration
     print_setup_summary(config, f"Remote Setup ({config.system_type})")
     sys.stdout.flush()
 
@@ -89,7 +85,6 @@ def main() -> int:
     bar = progress_bar(total_steps, total_steps)
     print(f"\n{bar} Complete!")
     
-    # Configure Cloudflare tunnel if requested
     if config.enable_cloudflare and config.system_type == "server_web":
         from lib.cloudflare_steps import (
             configure_cloudflare_firewall,
@@ -117,7 +112,6 @@ def main() -> int:
         print("\n✓ Cloudflare tunnel preconfiguration complete")
         print("  Run 'sudo setup-cloudflare-tunnel' to install cloudflared")
     
-    # Handle deployments if specified
     if config.deploy_specs:
         from lib.deploy_steps import deploy_repository
         import shutil
@@ -131,7 +125,6 @@ def main() -> int:
         deployments = []
         
         if args.lite_deploy:
-            # Use pre-uploaded files from /opt/infra_tools/deployments/
             for deploy_specs_str, git_url in config.deploy_specs:
                 repo_name = extract_repo_name(git_url)
                 source_path = f'/opt/infra_tools/deployments/{repo_name}'
@@ -140,7 +133,6 @@ def main() -> int:
                     print(f"\n⚠ Warning: {source_path} not found, skipping {git_url}")
                     continue
                 
-                # Read commit hash if available
                 commit_hash = None
                 commit_file = f'/opt/infra_tools/deployments/{repo_name}.commit'
                 if os.path.exists(commit_file):
@@ -169,7 +161,6 @@ def main() -> int:
                     if info:
                         deployments.append(info)
         else:
-            # Clone repositories directly (local execution)
             temp_dir = tempfile.mkdtemp(prefix="infra_deploy_")
             try:
                 for deploy_specs_str, git_url in config.deploy_specs:
@@ -190,7 +181,6 @@ def main() -> int:
                     
                     print(f"  ✓ Cloned to {clone_path}")
                     
-                    # Get commit hash
                     from lib.deploy_utils import get_git_commit_hash
                     commit_hash = get_git_commit_hash(clone_path)
                     
@@ -215,7 +205,6 @@ def main() -> int:
                 if os.path.exists(temp_dir):
                     shutil.rmtree(temp_dir)
         
-        # Configure Nginx for all deployments
         if deployments:
             print("\n" + "=" * 60)
             print("Configuring Nginx...")
@@ -231,7 +220,6 @@ def main() -> int:
             
             create_nginx_sites_for_groups(grouped_deployments)
             
-            # Set up SSL if requested
             if config.enable_ssl:
                 from lib.ssl_steps import install_certbot, setup_ssl_for_deployments
                 
@@ -242,7 +230,6 @@ def main() -> int:
                 
                 setup_ssl_for_deployments(deployments, config.ssl_email)
             
-            # Update Cloudflare tunnel configuration if configured
             if config.enable_cloudflare:
                 from lib.cloudflare_steps import run_cloudflare_tunnel_setup
                 
@@ -251,7 +238,6 @@ def main() -> int:
                 print("=" * 60)
                 run_cloudflare_tunnel_setup(config)
     
-    # Configure Samba if requested
     if config.enable_samba:
         from lib.samba_steps import (
             install_samba,
@@ -288,7 +274,6 @@ def main() -> int:
         
         print("\n✓ Samba configuration complete")
     
-    # Configure SMB mounts if requested
     if config.smb_mounts:
         from lib.smb_mount_steps import configure_smb_mount
         
@@ -302,7 +287,6 @@ def main() -> int:
         
         print("\n✓ SMB mount configuration complete")
     
-    # Configure directory synchronization if requested
     if config.sync_specs:
         from lib.sync_steps import (
             install_rsync,
@@ -323,7 +307,6 @@ def main() -> int:
         
         print("\n✓ Directory synchronization configured")
     
-    # Configure data integrity checking if requested (must run after sync)
     if config.scrub_specs:
         from lib.scrub_steps import (
             install_par2,

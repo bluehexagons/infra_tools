@@ -25,7 +25,6 @@ def main():
     print()
     
     try:
-        # Ensure rails user exists
         run("id rails || useradd -m -s /bin/bash rails", check=False)
         
         create_rails_service(app_name, app_path, 3000, "rails", "rails")

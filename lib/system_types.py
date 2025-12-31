@@ -239,23 +239,17 @@ def get_steps_for_system_type(config: SetupConfig) -> list:
                 raise ValueError(f"Unknown step: {step_name}")
         return steps
     
-    # Special case for Proxmox - completely custom step list
     if config.system_type == "server_proxmox":
         return PROXMOX_HARDENING_STEPS
     
-    # Build steps declaratively based on feature flags
     steps = []
     
-    # Common steps (always included except for proxmox)
     steps.extend(COMMON_STEPS)
     
-    # Web server firewall (before security steps for server_web)
     if config.include_web_firewall:
         steps.extend(WEB_FIREWALL_STEPS)
     
-    # Security steps
     if config.system_type in ["server_web", "server_lite"]:
-        # Custom security steps for server_web and server_lite
         security_steps = [
             ("Hardening SSH configuration", harden_ssh),
             ("Hardening kernel parameters", harden_kernel),
@@ -266,37 +260,29 @@ def get_steps_for_system_type(config: SetupConfig) -> list:
     else:
         steps.extend(SECURITY_STEPS)
     
-    # Desktop steps (conditionally included based on flags)
     if config.include_desktop:
         desktop_steps = []
         
-        # Always include desktop environment and gnome-keyring for desktop systems
         desktop_steps.append(("Installing desktop environment", install_desktop))
         
-        # RDP/xRDP
         if config.enable_rdp:
             desktop_steps.append(("Installing xRDP", install_xrdp))
         
-        # X2Go
         if config.enable_x2go:
             desktop_steps.append(("Installing X2Go", install_x2go))
             if config.desktop == "xfce":
                 desktop_steps.append(("Configuring Xfce for X2Go", configure_xfce_for_x2go))
         
-        # Audio (requires both flag and RDP)
         if config.enable_audio and config.enable_rdp:
             desktop_steps.append(("Configuring audio for RDP", configure_audio))
         
-        # Always include gnome-keyring for desktop systems
         desktop_steps.append(("Configuring gnome-keyring", configure_gnome_keyring))
         
-        # SMB client (for connecting to network shares)
         if config.enable_smbclient:
             desktop_steps.append(("Installing SMB client packages", install_smbclient))
         
         steps.extend(desktop_steps)
         
-        # Desktop security steps
         if config.enable_rdp:
             steps.append(("Hardening xRDP with TLS and group restrictions", harden_xrdp))
         if config.enable_x2go:
@@ -304,15 +290,12 @@ def get_steps_for_system_type(config: SetupConfig) -> list:
         if config.enable_rdp:
             steps.append(("Installing fail2ban for RDP brute-force protection", configure_fail2ban))
     
-    # Web server steps
     if config.include_web_server:
         steps.extend(WEB_SERVER_STEPS)
     
-    # CLI tools
     if config.include_cli_tools:
         steps.extend(CLI_STEPS)
     
-    # Optional development tools (same for all system types)
     if config.install_ruby:
         steps.append(("Installing Ruby (rbenv + latest version)", install_ruby_step))
         steps.append(("Configuring Ruby auto-update", configure_auto_update_ruby))
@@ -322,7 +305,6 @@ def get_steps_for_system_type(config: SetupConfig) -> list:
         steps.append(("Installing Node.js (nvm + latest LTS + PNPM)", install_node_step))
         steps.append(("Configuring Node.js auto-update", configure_auto_update_node))
     
-    # Desktop application steps
     if config.include_desktop_apps:
         steps.extend(DESKTOP_APP_STEPS)
     elif config.include_pc_dev_apps:
@@ -330,18 +312,13 @@ def get_steps_for_system_type(config: SetupConfig) -> list:
     elif config.include_workstation_dev_apps:
         steps.extend(WORKSTATION_DEV_APP_STEPS)
     
-    # Ensure browser is installed for custom desktop setups (e.g. server + RDP)
-    # Only if explicitly requested via --browser
     if config.include_desktop and config.browser and not (config.include_desktop_apps or config.include_pc_dev_apps or config.include_workstation_dev_apps):
         steps.append(("Installing browser", install_browser))
         steps.append(("Configuring default browser", configure_default_browser))
     
-    # Ensure office is installed if requested, if not already covered by standard app groups
-    # (install_desktop_apps handles office, but install_workstation_dev_apps does not)
     if config.install_office and not (config.include_desktop_apps or config.include_pc_dev_apps):
         steps.append(("Installing Office", install_office_apps))
     
-    # Final steps (always included)
     steps.extend(FINAL_STEPS)
     
     return steps

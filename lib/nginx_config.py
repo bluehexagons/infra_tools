@@ -198,30 +198,23 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: List[Dict],
     server_name_directive = f"server_name {domain};" if domain else "server_name _;"
     default_server = " default_server" if is_default else ""
     
-    # Generate cache maps
     domain_slug = domain.replace('.', '_') if domain else 'default'
     cache_maps, expires_var, cc_var = _make_cache_maps(domain_slug)
     
-    # Sort deployments: longest path first to ensure correct matching in nginx
     sorted_deployments = sorted(deployments, key=lambda d: len(d['path']), reverse=True)
     
-    # Check if we have any API subdomains to handle separately
     api_configs = []
     if domain:
         for dep in sorted_deployments:
             if dep.get('backend_port') and (dep.get('frontend_port') or dep.get('frontend_serve_path')):
-                # Subdomain strategy for Rails apps with domain - ONLY for root path
-                # AND if api_subdomain is requested
                 use_subdomain = dep.get('api_subdomain', False)
                 
                 if (dep['path'] == '/' or not dep['path']) and use_subdomain:
                     api_domain = f"api.{domain}"
                     api_configs.append(_make_api_server_block(api_domain, dep['backend_port']))
 
-    # Main Server Block
     locations = []
     
-    # Add ACME challenge location
     locations.append("""    location /.well-known/acme-challenge/ {
         root /var/www/letsencrypt;
     }""")
@@ -237,21 +230,16 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: List[Dict],
             frontend_serve_path = dep.get('frontend_serve_path')
             
             if backend_port and (frontend_port or frontend_serve_path):
-                # Use subdomain strategy only if domain exists AND path is root AND api_subdomain is True
                 use_subdomain_api = domain and (path == '/' or not path) and dep.get('api_subdomain', False)
                 
                 if use_subdomain_api:
-                    # Subdomain strategy: Frontend only in main block
-                    # Backend is handled by api_configs above
                     if frontend_serve_path:
-                        # Static frontend
                         try_files = "$uri $uri.html $uri/ /index.html" if location_path == '/' else f"$uri $uri.html $uri/ {location_path}/index.html"
                         locations.append(_make_static_location(
                             location_path, frontend_serve_path, "index.html", try_files, f"# Frontend for {path}",
                             expires_var=expires_var, cc_var=cc_var
                         ))
                     else:
-                        # Proxy frontend
                         locations.append(_make_proxy_location(
                             location_path, frontend_port, f"# Frontend for {path}", enable_websocket=True,
                             expires_var=expires_var, cc_var=cc_var
@@ -259,14 +247,12 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: List[Dict],
                 else:
                     # Subpath strategy: Backend at /path/api, Frontend at /path
                     
-                    # Backend
                     api_path = "/api" if location_path == '/' else f"{location_path}/api"
                     locations.append(_make_proxy_location(
                         api_path, backend_port, f"# Backend for {path}",
                         expires_var=expires_var, cc_var=cc_var
                     ))
 
-                    # Frontend
                     if frontend_serve_path:
                         try_files = "$uri $uri.html $uri/ /index.html" if location_path == '/' else f"$uri $uri.html $uri/ {location_path}/index.html"
                         locations.append(_make_static_location(
@@ -279,13 +265,11 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: List[Dict],
                             expires_var=expires_var, cc_var=cc_var
                         ))
             else:
-                # Simple proxy
                 locations.append(_make_proxy_location(
                     location_path, proxy_port, f"# Proxy for {path}",
                     expires_var=expires_var, cc_var=cc_var
                 ))
         else:
-            # Static site
             serve_path = dep['serve_path']
             index_file = "index.html index.htm"
             project_type = dep.get('project_type', 'static')
@@ -303,7 +287,6 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: List[Dict],
                 expires_var=expires_var, cc_var=cc_var
             ))
 
-    # Add deny rules
     locations.append("""    location ~ /\\. {
         deny all;
         access_log off;
@@ -353,7 +336,6 @@ def create_nginx_sites_for_groups(grouped_deployments: Dict[Optional[str], List[
             
         config_file = f"/etc/nginx/sites-available/{config_name}"
         
-        # Determine if this is the default server
         is_default = (domain is None)
         
         config_content = generate_merged_nginx_config(domain, deployments, is_default)

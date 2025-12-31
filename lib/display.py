@@ -95,7 +95,6 @@ def print_setup_summary(config: SetupConfig, description: str = None) -> None:
     if config.smb_mounts:
         print(f"SMB Mounts: {len(config.smb_mounts)} mount(s)")
         for mountpoint, ip, creds, share, subdir in config.smb_mounts:
-            # Mask credentials in display
             username = creds.split(':', 1)[0] if ':' in creds else creds
             print(f"  - {mountpoint} from //{ip}/{share}{subdir} (user: {username})")
     

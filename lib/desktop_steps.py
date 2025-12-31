@@ -145,7 +145,6 @@ def install_x2go(config: SetupConfig) -> None:
     
     run("apt-get install -y -qq x2goserver x2goserver-xsession")
     
-    # X2Go uses SSH, so ensure it's enabled
     run("systemctl enable ssh", check=False)
     run("systemctl start ssh", check=False)
     
@@ -159,16 +158,13 @@ def configure_xfce_for_x2go(config: SetupConfig) -> None:
     xfce_config_dir = f"{home_dir}/.config/xfce4/xfconf/xfce-perchannel-xml"
     xfwm4_config = f"{xfce_config_dir}/xfwm4.xml"
     
-    # Create config directory if it doesn't exist
     os.makedirs(xfce_config_dir, exist_ok=True)
     
-    # Check if compositor is already disabled
     if os.path.exists(xfwm4_config):
         if file_contains(xfwm4_config, 'name="use_compositing" type="bool" value="false"'):
             print("  ✓ Xfce compositor already disabled for X2Go")
             return
     
-    # Create or update xfwm4.xml to disable compositor
     xfwm4_content = """<?xml version="1.0" encoding="UTF-8"?>
 <channel name="xfwm4" version="1.0">
   <property name="general" type="empty">
@@ -182,10 +178,8 @@ def configure_xfce_for_x2go(config: SetupConfig) -> None:
     with open(xfwm4_config, "w") as f:
         f.write(xfwm4_content)
     
-    # Set proper ownership
     run(f"chown -R {safe_username}:{safe_username} {shlex.quote(home_dir)}/.config")
     
-    # Create startup script to ensure compositor stays disabled
     autostart_dir = f"{home_dir}/.config/autostart"
     os.makedirs(autostart_dir, exist_ok=True)
     
@@ -216,8 +210,6 @@ def harden_x2go(config: SetupConfig) -> None:
         print("  ⚠ X2Go not installed, skipping hardening")
         return
     
-    # X2Go security is primarily handled by SSH hardening
-    # Additional X2Go-specific configuration
     if not file_contains(x2go_config, "# Security hardened"):
         with open(x2go_config, "a") as f:
             f.write("\n# Security hardened\n")
@@ -249,17 +241,14 @@ def configure_audio(config: SetupConfig) -> None:
     if not modules_installed:
         run("apt-get install -y -qq build-essential dpkg-dev libpulse-dev git autoconf libtool", check=False)
         
-        # Get PulseAudio version and download matching source
         pulse_ver_result = run("pulseaudio --version | grep -oP 'pulseaudio \\K[0-9]+\\.[0-9]+' | head -1", check=False)
         pulse_version = pulse_ver_result.stdout.strip() if pulse_ver_result.returncode == 0 else ""
         
         if pulse_version:
             print(f"  PulseAudio version: {pulse_version}")
-            # Download PulseAudio source for headers
             pulse_src_dir = f"/tmp/pulseaudio-{pulse_version}"
             if not os.path.exists(pulse_src_dir):
                 run(f"apt-get source pulseaudio={pulse_version}* 2>/dev/null || apt-get source pulseaudio 2>/dev/null", check=False, cwd="/tmp")
-                # Find the extracted directory
                 find_result = run("find /tmp -maxdepth 1 -type d -name 'pulseaudio-*' ! -name '*xrdp*' 2>/dev/null | head -1", check=False)
                 if find_result.returncode == 0 and find_result.stdout.strip():
                     pulse_src_dir = find_result.stdout.strip()
@@ -281,12 +270,10 @@ def configure_audio(config: SetupConfig) -> None:
                 run(f"rm -rf {module_dir}", check=False)
                 modules_installed = False
             else:
-                # Try configure with source dir if available, otherwise let it auto-detect
                 if pulse_src_dir and os.path.exists(pulse_src_dir):
                     configure_cmd = f"cd {module_dir} && PULSE_DIR={shlex.quote(pulse_src_dir)} ./configure PULSE_DIR={shlex.quote(pulse_src_dir)}"
                     print(f"  Using PulseAudio source: {pulse_src_dir}")
                 else:
-                    # Try with system include directory as fallback
                     configure_cmd = f"cd {module_dir} && PULSE_DIR=/usr ./configure PULSE_DIR=/usr"
                     print("  Using system PulseAudio headers")
                 
@@ -333,7 +320,6 @@ def configure_audio(config: SetupConfig) -> None:
         f.write("default-sample-rate = 44100\n")
         f.write("resample-method = speex-float-1\n")
     
-    # Only create default.pa with xRDP modules if they're actually installed
     if modules_installed:
         with open(default_pa, "w") as f:
             f.write("#!/usr/bin/pulseaudio -nF\n\n")
@@ -346,7 +332,6 @@ def configure_audio(config: SetupConfig) -> None:
         run(f"chmod +x {shlex.quote(default_pa)}")
     run(f"chown -R {safe_username}:{safe_username} {shlex.quote(pulse_dir)}")
     
-    # Create troubleshooting script
     troubleshoot_script = f"{home_dir}/check-rdp.sh"
     with open(troubleshoot_script, "w") as f:
         f.write("#!/bin/bash\n")
@@ -653,11 +638,7 @@ def configure_gnome_keyring(config: SetupConfig) -> None:
     home_dir = f"/home/{config.username}"
     profile_path = f"{home_dir}/.profile"
     
-    # The eval command is the official way to start gnome-keyring-daemon
-    # as documented in gnome-keyring documentation. It exports required
-    # environment variables like SSH_AUTH_SOCK for SSH agent integration.
     keyring_env = """
-# Start gnome-keyring-daemon
 if [ -n "$DESKTOP_SESSION" ]; then
     eval $(gnome-keyring-daemon --start --components=pkcs11,secrets,ssh)
     export SSH_AUTH_SOCK
@@ -688,13 +669,11 @@ def install_smbclient(config: SetupConfig) -> None:
     """
     packages = ["cifs-utils", "smbclient", "gvfs-backends"]
     
-    # Check if packages are already installed
     all_installed = all(is_package_installed(pkg) for pkg in packages)
     if all_installed:
         print("  ✓ SMB client packages already installed")
         return
     
-    # Install packages
     packages_str = " ".join(packages)
     run(f"apt-get install -y -qq {packages_str}")
     

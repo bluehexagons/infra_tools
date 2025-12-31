@@ -148,7 +148,6 @@ def configure_time_sync(config: SetupConfig) -> None:
     tz = config.timezone if config.timezone else "UTC"
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     
-    # Migrate from systemd-timesyncd to chrony if needed
     if is_package_installed("systemd-timesyncd"):
         print("  Migrating from systemd-timesyncd to chrony...")
         run("systemctl stop systemd-timesyncd", check=False)
@@ -156,12 +155,10 @@ def configure_time_sync(config: SetupConfig) -> None:
         run("apt-get remove -y -qq systemd-timesyncd", check=False)
         print("  ✓ systemd-timesyncd removed")
     
-    # Install and configure chrony
     if not is_package_installed("chrony"):
         run("apt-get install -y -qq chrony")
         print("  ✓ chrony installed")
     
-    # Ensure chrony is enabled and running
     run("systemctl enable chrony", check=False)
     run("systemctl start chrony", check=False)
     
@@ -261,7 +258,6 @@ def install_go(config: SetupConfig) -> None:
 
 
 def install_node(config: SetupConfig) -> None:
-    # Global install to /opt/nvm to avoid permission issues with service users
     nvm_dir = "/opt/nvm"
     
     if not os.path.exists(nvm_dir):
@@ -270,18 +266,14 @@ def install_node(config: SetupConfig) -> None:
         run(f"mkdir -p {nvm_dir}")
         nvm_version = "v0.39.7"
         
-        # Install nvm
         run(f"curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/{nvm_version}/install.sh | NVM_DIR={nvm_dir} bash")
         
-        # Install Node LTS
         run(f"bash -c 'export NVM_DIR=\"{nvm_dir}\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && nvm install --lts'")
         run(f"bash -c 'export NVM_DIR=\"{nvm_dir}\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npm install -g npm@latest'")
         run(f"bash -c 'export NVM_DIR=\"{nvm_dir}\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npm install -g pnpm'")
         
-        # Fix permissions so other users (like 'rails') can use it
         run(f"chmod -R a+rX {nvm_dir}")
         
-        # Add to profile.d for all users
         with open("/etc/profile.d/nvm.sh", "w") as f:
             f.write(f'export NVM_DIR="{nvm_dir}"\n[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"\n')
         
@@ -289,7 +281,6 @@ def install_node(config: SetupConfig) -> None:
     else:
         print("  ✓ nvm already installed in /opt/nvm")
 
-    # Ensure global symlinks exist so root/other users can use node/npm
     node_path_result = run(f"bash -c 'export NVM_DIR=\"{nvm_dir}\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && which node'", check=False)
     if node_path_result.returncode == 0 and node_path_result.stdout.strip():
         node_bin = node_path_result.stdout.strip()
@@ -300,7 +291,6 @@ def install_node(config: SetupConfig) -> None:
             tool_path = os.path.join(node_dir, tool)
             link_path = f"/usr/local/bin/{tool}"
             if os.path.exists(tool_path):
-                # Only create if it doesn't exist or points somewhere else
                 if not os.path.exists(link_path) or os.path.realpath(link_path) != os.path.realpath(tool_path):
                     run(f"ln -sf {tool_path} {link_path}")
                     links_created = True

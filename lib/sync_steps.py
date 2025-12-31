@@ -115,11 +115,9 @@ def create_sync_service(config: SetupConfig, sync_spec: List[str] = None, **_) -
     
     needs_mount_check = source_on_smb or dest_on_smb or source_under_mnt or dest_under_mnt
     
-    # Create systemd service file
     service_file = f"/etc/systemd/system/{service_name}.service"
     
     if needs_mount_check:
-        # Use Python script for mount checking instead of generated shell script
         check_script = f"{REMOTE_INSTALL_DIR}/steps/check_sync_mounts.py"
         
         service_content = f"""[Unit]
@@ -175,14 +173,12 @@ WantedBy=timers.target
     
     print(f"  ✓ Created timer: {service_name}.timer ({interval})")
     
-    # Reload systemd, enable and start the timer
     run("systemctl daemon-reload")
     run(f"systemctl enable {shlex.quote(service_name)}.timer")
     run(f"systemctl start {shlex.quote(service_name)}.timer")
     
     print(f"  ✓ Enabled and started timer")
     
-    # Show timer status
     result = run(f"systemctl list-timers {shlex.quote(service_name)}.timer --no-pager", check=False)
     if result.returncode == 0:
         print(f"  ℹ Timer status:")
@@ -190,7 +186,6 @@ WantedBy=timers.target
             if line.strip():
                 print(f"    {line}")
     
-    # Perform initial sync
     print(f"  ℹ Performing initial sync...")
     result = run(f"systemctl start {shlex.quote(service_name)}.service", check=False)
     if result.returncode == 0:

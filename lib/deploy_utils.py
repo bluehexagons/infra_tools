@@ -37,7 +37,6 @@ def create_safe_directory_name(domain: str, path: str) -> str:
 
 def detect_project_type(repo_path: str) -> str:
     """Detect project type: rails, node, static, or unknown."""
-    # Detect Rails projects more robustly: check common Rails files or Gemfile.
     if os.path.exists(os.path.join(repo_path, ".ruby-version")):
         return "rails"
 
@@ -51,19 +50,15 @@ def detect_project_type(repo_path: str) -> str:
         except Exception:
             pass
 
-    # config/environment.rb or config.ru are also strong indicators of a Rails app
     if os.path.exists(os.path.join(repo_path, 'config', 'environment.rb')) or os.path.exists(os.path.join(repo_path, 'config.ru')):
         return 'rails'
 
-    # Node projects
     if os.path.exists(os.path.join(repo_path, "package.json")):
         return "node"
 
-    # Static sites: index at repo root or inside public/
     if os.path.exists(os.path.join(repo_path, "index.html")) or os.path.exists(os.path.join(repo_path, "public", "index.html")):
         return "static"
 
-    # If there's a public directory (common for Rails), assume rails
     if os.path.exists(os.path.join(repo_path, 'public')):
         return 'rails'
 
@@ -76,7 +71,6 @@ def get_project_root(repo_path: str, project_type: str) -> str:
         public_dir = os.path.join(repo_path, "public")
         if os.path.exists(public_dir):
             return public_dir
-        # Fall back: if there's an index.html at repo root, serve that directory
         if os.path.exists(os.path.join(repo_path, 'index.html')):
             return repo_path
         return repo_path
@@ -88,7 +82,6 @@ def get_project_root(repo_path: str, project_type: str) -> str:
                 return full_path
         return repo_path
 
-    # For static/unknown projects, prefer html/, public/, or static/ if present
     for static_dir in ["html", "public", "static"]:
         full_path = os.path.join(repo_path, static_dir)
         if os.path.exists(full_path):
@@ -106,7 +99,6 @@ def get_git_commit_hash(repo_path: str) -> Optional[str]:
     """Get current git commit hash from a repository directory."""
     git_dir = os.path.join(repo_path, '.git')
     
-    # Check if .git exists (might be a file in worktrees or might not exist)
     if not os.path.exists(git_dir):
         return None
     
@@ -179,22 +171,17 @@ def should_redeploy(deployment_path: str, git_url: str, new_commit_hash: Optiona
         return True
     
     if new_commit_hash is None:
-        # No version info available, deploy to be safe
         return True
     
     metadata = load_deployment_metadata(deployment_path)
     if metadata is None:
-        # No previous metadata, deploy to be safe
         return True
     
     if metadata.get('git_url') != git_url:
-        # Different repository, definitely redeploy
         return True
     
     if metadata.get('commit_hash') != new_commit_hash:
-        # Different version, redeploy
         return True
     
-    # Same version, skip
     return False
 

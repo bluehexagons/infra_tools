@@ -26,7 +26,6 @@ def get_logged_in_users() -> list:
             text=True,
             check=True
         )
-        # Filter out empty lines
         users = [line for line in result.stdout.strip().split('\n') if line]
         return users
     except subprocess.CalledProcessError:

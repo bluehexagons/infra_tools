@@ -5,7 +5,6 @@ import sys
 import os
 import json
 
-# Add parent directory to path to import lib
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from lib.config import SetupConfig
@@ -46,27 +45,22 @@ def get_all_configs(pattern: str = None) -> list:
         print(f"Error reading configurations: {e}")
         return []
 
-    # Filter by pattern if provided
     if pattern:
         pattern = pattern.lower()
         filtered = []
         for c in configs:
-            # Check host
             if pattern in c.get('host', '').lower():
                 filtered.append(c)
                 continue
-            # Check name
             if pattern in c.get('name', '').lower():
                 filtered.append(c)
                 continue
-            # Check tags
             tags = c.get('tags', [])
             if any(pattern in tag.lower() for tag in tags):
                 filtered.append(c)
                 continue
         configs = filtered
     
-    # Sort by host
     configs.sort(key=lambda x: x.get('host', ''))
     
     return configs
@@ -82,7 +76,6 @@ def list_configurations(pattern: str = None) -> None:
             print("No saved configurations found.")
         return
 
-    # Column widths
     host_width = 30
     name_width = 20
     type_width = 20
@@ -130,7 +123,6 @@ def show_info(pattern: str = None) -> None:
         print(f"User: {username}")
         print("-" * 60)
         
-        # Show deployments
         deploy_specs = args.get('deploy_specs', [])
         if deploy_specs:
             print("Deployments:")
@@ -142,7 +134,6 @@ def show_info(pattern: str = None) -> None:
         else:
             print("Deployments: None")
             
-        # Show key features
         features = []
         if args.get('enable_ssl'): features.append("SSL")
         if args.get('enable_cloudflare'): features.append("Cloudflare")
@@ -156,7 +147,6 @@ def show_info(pattern: str = None) -> None:
         if features:
             print(f"Features: {', '.join(features)}")
         
-        # Show Samba shares
         samba_shares = args.get('samba_shares', [])
         if samba_shares:
             print("Samba Shares:")
@@ -240,14 +230,12 @@ def execute_patch(config: SetupConfig) -> int:
     print("=" * 60)
     print()
     
-    # Run the setup with configuration
     returncode = run_remote_setup(config)
     
     if returncode != 0:
         print(f"\n✗ Patch failed (exit code: {returncode})")
         return 1
     
-    # Save updated setup command only after successful execution (unless dry-run)
     if not config.dry_run:
         save_setup_command(config)
     
@@ -258,7 +246,6 @@ def execute_patch(config: SetupConfig) -> int:
     print(f"Host: {config.host}")
     print(f"System has been updated with new configuration")
     
-    # Print name and tags if present
     if config.friendly_name or config.tags:
         print()
         print_name_and_tags(config)
@@ -324,7 +311,6 @@ def deploy_configurations(args: list) -> int:
 
 
 def main() -> int:
-    # Check for subcommands
     if len(sys.argv) > 1:
         cmd = sys.argv[1]
         if cmd in ['list', 'ls']:
@@ -351,17 +337,14 @@ def main() -> int:
         print(f"Error: Invalid IP address or hostname: {args.host}")
         return 1
     
-    # Load cached setup configuration
     cached_config = load_setup_command(args.host)
     if not cached_config:
         print(f"Error: No cached setup found for {args.host}")
         print(f"Please run the initial setup using the appropriate setup_*.py script first.")
         return 1
     
-    # Create new config from command line args
     new_config = SetupConfig.from_args(args, cached_config.system_type)
     
-    # Merge configurations (new values override cached values)
     merged_config = merge_setup_configs(cached_config, new_config)
     
     return execute_patch(merged_config)
