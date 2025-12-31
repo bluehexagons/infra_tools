@@ -5,11 +5,10 @@ import subprocess
 import sys
 import os
 
-# Add shared module to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from shared.systemd_service import create_rails_service, create_node_service
-from remote_modules.utils import run
+from lib.systemd_service import create_rails_service, create_node_service
+from lib.remote_utils import run
 
 
 def main():
@@ -26,7 +25,6 @@ def main():
     print()
     
     try:
-        # Ensure rails user exists
         run("id rails || useradd -m -s /bin/bash rails", check=False)
         
         create_rails_service(app_name, app_path, 3000, "rails", "rails")

@@ -57,12 +57,10 @@ def install_lts_version():
 
 def update_global_packages():
     """Update global npm and pnpm packages."""
-    # Update npm
     result = run_nvm_command("npm install -g npm@latest")
     if result.returncode != 0:
         print(f"⚠ Warning: Failed to update npm: {result.stderr}")
     
-    # Update pnpm
     result = run_nvm_command("npm install -g pnpm")
     if result.returncode != 0:
         print(f"⚠ Warning: Failed to update pnpm: {result.stderr}")
@@ -70,7 +68,6 @@ def update_global_packages():
 
 def update_symlinks():
     """Update symlinks in /usr/local/bin."""
-    # Get node path
     result = run_nvm_command("which node")
     if result.returncode != 0:
         return
@@ -84,10 +81,8 @@ def update_symlinks():
         
         if os.path.exists(tool_path):
             try:
-                # Remove existing symlink if it exists
                 if os.path.islink(link_path):
                     os.remove(link_path)
-                # Create new symlink
                 os.symlink(tool_path, link_path)
             except Exception as e:
                 print(f"⚠ Warning: Failed to create symlink for {tool}: {e}")
@@ -107,12 +102,10 @@ def fix_permissions():
 
 def main():
     """Main function to update Node.js."""
-    # Check if nvm is installed
     if not os.path.exists(NVM_DIR):
         print(f"✗ nvm not found at {NVM_DIR}")
         return 1
     
-    # Get current versions
     current_lts = get_current_lts_version()
     current_version = get_current_version()
     
@@ -124,25 +117,20 @@ def main():
         print("✗ Failed to get current version")
         return 1
     
-    # Check if update is needed
     if current_version == current_lts:
         print(f"Node.js already at latest LTS version: {current_lts}")
         return 0
     
-    # Perform update
     print(f"Updating Node.js from {current_version} to {current_lts}")
     syslog.syslog(syslog.LOG_INFO, f"auto-update-node: Updating Node.js from {current_version} to {current_lts}")
     
     if not install_lts_version():
         return 1
     
-    # Update global packages
     update_global_packages()
     
-    # Update symlinks
     update_symlinks()
     
-    # Fix permissions
     fix_permissions()
     
     print(f"Node.js updated successfully to {current_lts}")

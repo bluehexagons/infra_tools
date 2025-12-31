@@ -48,11 +48,9 @@ def get_latest_stable_ruby() -> str:
     if result.returncode != 0:
         return ""
     
-    # Filter for stable versions (X.Y.Z format only, no suffixes)
     versions = []
     for line in result.stdout.split('\n'):
         line = line.strip()
-        # Match versions like "3.3.0" but not "3.3.0-preview1"
         if re.match(r'^\d+\.\d+\.\d+$', line):
             versions.append(line)
     
@@ -97,45 +95,36 @@ def update_bundler():
 
 def main():
     """Main function to update Ruby."""
-    # Check if rbenv is installed
     rbenv_dir = os.path.expanduser("~/.rbenv")
     if not os.path.exists(rbenv_dir):
         print(f"✗ rbenv not found at {rbenv_dir}")
         return 1
     
-    # Update ruby-build
     update_ruby_build()
     
-    # Get latest stable version
     latest_ruby = get_latest_stable_ruby()
     if not latest_ruby:
         print("✗ Failed to get latest stable Ruby version")
         return 1
     
-    # Get current version
     current_version = get_current_ruby_version()
     if not current_version:
         print("✗ Failed to get current Ruby version")
         return 1
     
-    # Check if update is needed
     if current_version == latest_ruby:
         print(f"Ruby already at latest stable version: {latest_ruby}")
         return 0
     
-    # Perform update
     print(f"Updating Ruby from {current_version} to {latest_ruby}")
     syslog.syslog(syslog.LOG_INFO, f"auto-update-ruby: Updating Ruby from {current_version} to {latest_ruby}")
     
-    # Install new version
     if not install_ruby_version(latest_ruby):
         return 1
     
-    # Set as global version
     if not set_global_ruby(latest_ruby):
         return 1
     
-    # Update bundler
     update_bundler()
     
     print(f"Ruby updated successfully to {latest_ruby}")

@@ -9,9 +9,8 @@ import socket
 import sys
 from typing import Optional, Set
 
-# Add parent directory to path to import from remote_modules
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from remote_modules.utils import run
+from lib.remote_utils import run
 
 from .deploy_utils import (
     parse_deploy_spec,
@@ -53,17 +52,13 @@ class DeploymentOrchestrator:
     def _persist_rails_state_from_existing_release(self, existing_release_path: str, persistent_root: str) -> None:
         self._ensure_dir(persistent_root)
 
-        # Persist SQLite databases (default Rails sqlite path).
         existing_db = os.path.join(existing_release_path, "db", "production.sqlite3")
         persistent_db_dir = os.path.join(persistent_root, "db")
         self._ensure_dir(persistent_db_dir)
 
         if os.path.exists(existing_db) and not os.path.islink(existing_db):
-            # Copy instead of move: if something goes wrong mid-deploy, we don't
-            # want to destroy the only copy.
             shutil.copy2(existing_db, os.path.join(persistent_db_dir, "production.sqlite3"))
 
-        # Persist common Rails disk-backed state.
         dirs_to_persist = [
             ("storage", os.path.join(persistent_root, "storage")),
             (os.path.join("public", "uploads"), os.path.join(persistent_root, "public", "uploads")),
@@ -76,7 +71,6 @@ class DeploymentOrchestrator:
             if not os.path.exists(src_path) or os.path.islink(src_path):
                 continue
             if os.path.exists(persistent_dst):
-                # Keep the persistent copy; the release copy will be discarded.
                 continue
             self._ensure_dir(os.path.dirname(persistent_dst))
             shutil.copytree(src_path, persistent_dst, symlinks=True)
@@ -85,7 +79,6 @@ class DeploymentOrchestrator:
         """Ensure a release uses persistent storage for runtime state."""
         self._ensure_dir(persistent_root)
 
-        # SQLite DB file symlink (lets SQLite create the target on first run).
         persistent_db_dir = os.path.join(persistent_root, "db")
         self._ensure_dir(persistent_db_dir)
         release_db_dir = os.path.join(release_path, "db")
@@ -98,7 +91,6 @@ class DeploymentOrchestrator:
         if not os.path.lexists(release_db_file):
             os.symlink(persistent_db_file, release_db_file)
 
-        # Disk-backed state directories.
         dirs_to_link = [
             ("storage", os.path.join(persistent_root, "storage")),
             (os.path.join("public", "uploads"), os.path.join(persistent_root, "public", "uploads")),
@@ -110,14 +102,11 @@ class DeploymentOrchestrator:
             release_path_abs = os.path.join(release_path, rel_path)
             self._ensure_dir(os.path.dirname(persistent_path))
             if not os.path.exists(persistent_path):
-                # On first deploy, move whatever the release has into persistent
-                # storage (if present); otherwise create an empty persistent dir.
                 if os.path.exists(release_path_abs) and not os.path.islink(release_path_abs):
                     shutil.move(release_path_abs, persistent_path)
                 else:
                     self._ensure_dir(persistent_path)
 
-            # Replace release path with a symlink to persistent storage.
             if os.path.lexists(release_path_abs):
                 self._safe_remove_path(release_path_abs)
             self._ensure_dir(os.path.dirname(release_path_abs))
@@ -137,11 +126,9 @@ class DeploymentOrchestrator:
                     try:
                         with open(path, 'r') as service_file:
                             content = service_file.read()
-                            # Rails: -p {port}
                             match = re.search(r'-p (\d+)', content)
                             if match:
                                 used_ports.add(int(match.group(1)))
-                            # Node: --port {port}
                             match = re.search(r'--port (\d+)', content)
                             if match:
                                 used_ports.add(int(match.group(1)))
@@ -175,11 +162,9 @@ class DeploymentOrchestrator:
             try:
                 with open(service_file, 'r') as f:
                     content = f.read()
-                    # Rails
                     match = re.search(r'-p (\d+)', content)
                     if match:
                         return int(match.group(1))
-                    # Node
                     match = re.search(r'--port (\d+)', content)
                     if match:
                         return int(match.group(1))
@@ -208,13 +193,11 @@ class DeploymentOrchestrator:
         app_name = os.path.basename(dest_path)
         persistent_root = self._get_persistent_root(app_name)
         
-        # Check if we should skip this deployment
         if should_redeploy(dest_path, git_url, commit_hash, full_deploy):
             print(f"Deploying to {dest_path}...")
         else:
             print(f"Skipping {dest_path} (already at commit {commit_hash})...")
             
-            # Still return deployment info for nginx configuration
             project_type = detect_project_type(dest_path)
             
             frontend_serve_path = None
@@ -246,11 +229,8 @@ class DeploymentOrchestrator:
         if os.path.exists(dest_path):
             print(f"  Removing existing deployment at {dest_path}...")
 
-            # Stop the existing service first so files (especially SQLite) aren't
-            # being mutated while we snapshot state.
             run(f"systemctl stop {shlex.quote(f'rails-{app_name}.service')}", check=False)
 
-            # Persist Rails runtime state before wiping the release directory.
             if self._is_rails_project(dest_path):
                 print(f"  Preserving persistent state under {persistent_root}...")
                 try:
@@ -276,8 +256,6 @@ class DeploymentOrchestrator:
         if not site_root.endswith("/"):
             site_root = f"{site_root}/"
         
-        # Link persistent runtime state before build steps so db:migrate/db:seed
-        # operate on the durable SQLite DB (and disk-backed uploads remain intact).
         if project_type == "rails":
             try:
                 self._link_rails_persistent_state_into_release(dest_path, persistent_root)
@@ -286,10 +264,6 @@ class DeploymentOrchestrator:
 
         self.build_project(dest_path, project_type, site_root=site_root)
 
-        # Fix permissions AFTER all build steps (including frontend), but BEFORE
-        # we (re)start services. This is critical for SQLite because `chown -R`
-        # on the release directory won't affect symlink targets under
-        # `.infra_tools_shared`, and the Rails service runs as `web_user`.
         if project_type == "rails":
             run(f"chown -R {shlex.quote(self.web_user)}:{shlex.quote(self.web_group)} {shlex.quote(persistent_root)}", check=False)
             run(f"find {shlex.quote(persistent_root)} -type d -exec chmod 775 {{}} +", check=False)
@@ -304,17 +278,14 @@ class DeploymentOrchestrator:
 
         run(f"chmod -R 775 {shlex.quote(dest_path)}")
         
-        # Set up systemd service for Rails apps
         backend_port = None
         frontend_port = None
         frontend_serve_path = None
         
         if project_type == "rails":
-            # Determine port
             service_name = f"rails-{app_name}"
             backend_port = self._get_assigned_port(service_name, 3000)
             
-            # Determine allowed origins for CORS
             cors_origins = []
             if domain:
                 cors_origins.append(f"https://{domain}")
@@ -325,12 +296,10 @@ class DeploymentOrchestrator:
             create_rails_service(app_name, dest_path, backend_port, self.web_user, self.web_group, 
                                env_vars={"CORS_ORIGINS": ",".join(cors_origins)})
             
-            # Check for frontend
             frontend_path = os.path.join(dest_path, "frontend")
             if os.path.exists(frontend_path):
                 print(f"  Detected frontend at {frontend_path}")
                 
-                # Determine API URL
                 api_url = "/api"
                 is_root = not path or path == '/'
                 
@@ -348,16 +317,13 @@ class DeploymentOrchestrator:
                 if not site_root.endswith("/"):
                     site_root = f"{site_root}/"
                 
-                # Build frontend
                 self._build_node_project(frontend_path, api_url, site_root)
                 
                 frontend_serve_path = get_project_root(frontend_path, "node")
                 print(f"  Frontend will be served statically from {frontend_serve_path}")
                 
-                # Clear frontend_port since we are serving statically
                 frontend_port = None
         
-        # Save deployment metadata
         save_deployment_metadata(dest_path, git_url, commit_hash)
         
         print(f"  ✓ Repository deployed to {dest_path}")
@@ -388,7 +354,6 @@ class DeploymentOrchestrator:
     def _build_rails_project(self, project_path: str):
         print(f"  Building Rails project at {project_path}")
         
-        # Patch CORS configuration
         cors_file = os.path.join(project_path, "config", "initializers", "cors.rb")
         if os.path.exists(cors_file):
             print("  Patching CORS configuration...")
@@ -397,12 +362,10 @@ class DeploymentOrchestrator:
                     content = f.read()
                 
                 if 'ENV["CORS_ORIGINS"]' not in content:
-                    # Replace the specific line we saw in the repo
                     new_content = content.replace(
                         'origins "http://localhost:5173", "http://127.0.0.1:5173"',
                         'origins((ENV["CORS_ORIGINS"]&.split(",") || []) + ["http://localhost:5173", "http://127.0.0.1:5173"])'
                     )
-                    # Also try a more generic replacement if the exact string doesn't match
                     if new_content == content:
                          new_content = re.sub(
                             r'origins\s+["\'].*?["\'](?:,\s*["\'].*?["\'])*',
@@ -415,25 +378,21 @@ class DeploymentOrchestrator:
             except Exception as e:
                 print(f"  ⚠ Failed to patch CORS configuration: {e}")
         
-        # Generate a temporary secret key for build steps
         build_secret = secrets.token_hex(64)
         env_vars = f"RAILS_ENV=production SECRET_KEY_BASE={build_secret} TMPDIR=/var/tmp"
         
         run(f"cd {shlex.quote(project_path)} && TMPDIR=/var/tmp bundle install --deployment --without development test")
         
-        # Database setup
         print("  Setting up database...")
         run(f"cd {shlex.quote(project_path)} && {env_vars} bundle exec rake db:create", check=False)
         run(f"cd {shlex.quote(project_path)} && {env_vars} bundle exec rake db:migrate")
         
-        # Seed database if seeds.rb exists
         if os.path.exists(os.path.join(project_path, "db", "seeds.rb")):
             print("  Seeding database...")
             seed_result = run(f"cd {shlex.quote(project_path)} && {env_vars} bundle exec rake db:seed")
             if seed_result.stdout:
                 print(seed_result.stdout)
         
-        # Only precompile assets if the task exists (skips for API-only apps)
         check_task = run(f"cd {shlex.quote(project_path)} && bundle exec rake -T assets:precompile | grep assets:precompile", check=False)
         if check_task.returncode == 0:
             run(f"cd {shlex.quote(project_path)} && {env_vars} bundle exec rake assets:precompile")

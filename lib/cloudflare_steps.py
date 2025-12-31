@@ -3,7 +3,7 @@
 import os
 
 from lib.config import SetupConfig
-from .utils import run
+from lib.remote_utils import run
 
 
 def configure_cloudflare_firewall(config: SetupConfig) -> None:
@@ -42,8 +42,8 @@ def create_cloudflared_config_directory(config: SetupConfig) -> None:
     
     os.makedirs(config_dir, mode=0o755, exist_ok=True)
     
-    # Load README from template file
-    template_path = os.path.join(os.path.dirname(__file__), 'cloudflare_tunnel_readme.md')
+    config_template_dir = os.path.join(os.path.dirname(__file__), '..', 'config')
+    template_path = os.path.join(config_template_dir, 'cloudflare_tunnel_readme.md')
     with open(template_path, 'r', encoding='utf-8') as f:
         readme_content = f.read()
     
@@ -61,8 +61,8 @@ def configure_nginx_for_cloudflare(config: SetupConfig) -> None:
         print("  ✓ Nginx already configured for Cloudflare")
         return
     
-    # Load Cloudflare configuration from template file
-    template_path = os.path.join(os.path.dirname(__file__), 'cloudflare_ips.conf')
+    config_template_dir = os.path.join(os.path.dirname(__file__), '..', 'config')
+    template_path = os.path.join(config_template_dir, 'cloudflare_ips.conf')
     with open(template_path, 'r', encoding='utf-8') as f:
         cloudflare_config = f.read()
     
@@ -75,43 +75,32 @@ def configure_nginx_for_cloudflare(config: SetupConfig) -> None:
 
 
 def install_cloudflared_service_helper(config: SetupConfig) -> None:
-    """Install Python script for comprehensive Cloudflare tunnel setup."""
+    """Create symlink for Cloudflare tunnel setup script."""
     helper_script = "/usr/local/bin/setup-cloudflare-tunnel"
+    source_script = "/opt/infra_tools/service_tools/setup_cloudflare_tunnel.py"
     
     if os.path.exists(helper_script):
-        print("  ✓ Cloudflare tunnel setup script already exists")
+        print("  ✓ Cloudflare tunnel setup script already available")
         return
-    
-    # Read the Python script from the remote_modules directory
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    source_script = os.path.join(script_dir, "setup_cloudflare_tunnel.py")
     
     if not os.path.exists(source_script):
         print(f"  ⚠ Source script not found: {source_script}")
         return
     
-    # Copy the script to /usr/local/bin
-    with open(source_script, 'r') as src:
-        script_content = src.read()
+    run(f"ln -sf {source_script} {helper_script}")
     
-    with open(helper_script, 'w') as dst:
-        dst.write(script_content)
-    
-    os.chmod(helper_script, 0o755)
-    
-    print(f"  ✓ Installed setup script: {helper_script}")
+    print(f"  ✓ Linked setup script: {helper_script}")
     print(f"  Run 'sudo setup-cloudflare-tunnel' to configure the tunnel")
 
 
 def run_cloudflare_tunnel_setup(config: SetupConfig) -> None:
     """Run Cloudflare tunnel setup in non-interactive mode to update configuration."""
-    helper_script = "/usr/local/bin/setup-cloudflare-tunnel"
+    helper_script = "/opt/infra_tools/service_tools/setup_cloudflare_tunnel.py"
     
     if not os.path.exists(helper_script):
-        print("  ⚠ Cloudflare tunnel setup script not found")
+        print(f"  ⚠ Setup script not found: {helper_script}")
         return
     
-    # Check if there's an existing tunnel configuration
     state_file = "/etc/cloudflared/tunnel-state.json"
     if not os.path.exists(state_file):
         print("  ⚠ No existing Cloudflare tunnel found")
@@ -120,7 +109,6 @@ def run_cloudflare_tunnel_setup(config: SetupConfig) -> None:
     
     print("  Updating Cloudflare tunnel configuration...")
     
-    # Run the setup script in non-interactive mode
     result = run(f"python3 {helper_script} --non-interactive", check=False)
     
     if result.returncode == 0:

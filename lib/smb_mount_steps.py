@@ -5,7 +5,7 @@ import shlex
 from typing import List
 
 from lib.config import SetupConfig
-from .utils import run
+from lib.remote_utils import run
 
 
 def parse_smb_mount_spec(mount_spec: List[str]) -> dict:
@@ -63,13 +63,11 @@ def configure_smb_mount(config: SetupConfig, mount_spec: List[str] = None, **_) 
     os.makedirs(credentials_dir, exist_ok=True)
     run(f"chmod 700 {shlex.quote(credentials_dir)}")
     
-    # Use systemd-escape to generate proper unit name
     result = run(f"systemd-escape -p {shlex.quote(mountpoint)}", capture_output=True, text=True)
     escaped_mountpoint = result.stdout.strip()
     unit_name = f"{escaped_mountpoint}.mount"
     unit_path = f"/etc/systemd/system/{unit_name}"
     
-    # Create safe filename for credentials
     safe_mountpoint = mountpoint.replace('/', '_').strip('_')
     creds_file = f"{credentials_dir}/credentials-{safe_mountpoint}"
     
@@ -81,7 +79,6 @@ password={password}
         f.write(creds_content)
     run(f"chmod 600 {shlex.quote(creds_file)}")
     
-    # Validate and sanitize inputs
     if not ip.replace('.', '').replace(':', '').isalnum():
         raise ValueError(f"Invalid IP address format: {ip}")
     if '/' in share or '\\' in share or ' ' in share:

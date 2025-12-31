@@ -105,7 +105,6 @@ def authenticate_cloudflare():
         print("✗ Authentication failed")
         sys.exit(1)
     
-    # When running as root, cloudflared puts cert in root's home
     cert_file = '/root/.cloudflared/cert.pem'
     if not os.path.exists(cert_file):
         print(f"✗ Certificate file not found at {cert_file}")
@@ -132,7 +131,6 @@ def create_tunnel(tunnel_name: str) -> Dict:
         sys.exit(1)
     
     tunnel_id = tunnel_id_match.group(1)
-    # When running as root, credentials are in /root/.cloudflared/
     credentials_file = f'/root/.cloudflared/{tunnel_id}.json'
     
     if not os.path.exists(credentials_file):
@@ -294,30 +292,23 @@ def main(interactive: bool = True, auto_update: bool = False):
     
     state = load_state()
     
-    # Non-interactive mode: only update existing tunnels
     if not interactive:
         if not state:
-            # No existing tunnel - cannot proceed in non-interactive mode
             return False
         
-        # Silently update configuration
         tunnel = state['tunnel']
         sites = discover_nginx_sites()
         
         if not sites:
-            # No sites to configure
             return False
         
-        # Check if sites have changed
         old_sites = state.get('sites', [])
         old_hostnames = set(s['hostname'] for s in old_sites)
         new_hostnames = set(s['hostname'] for s in sites)
         
         if old_hostnames == new_hostnames:
-            # No changes needed
             return True
         
-        # Update configuration
         config_content = generate_config_yml(tunnel, sites)
         config_file = f"{CONFIG_DIR}/config.yml"
         
@@ -328,14 +319,12 @@ def main(interactive: bool = True, auto_update: bool = False):
         
         save_state(tunnel, sites)
         
-        # Restart service if running
         result = run_command(['systemctl', 'is-active', 'cloudflared'], check=False, capture_output=True)
         if result.returncode == 0:
             run_command(['systemctl', 'restart', 'cloudflared'], check=False)
         
         return True
     
-    # Interactive mode continues as before
     if state:
         print("\n✓ Found existing tunnel configuration")
         tunnel = state['tunnel']
@@ -343,7 +332,6 @@ def main(interactive: bool = True, auto_update: bool = False):
         print(f"  Tunnel: {tunnel['name']} (ID: {tunnel['id']})")
         
         if auto_update:
-            # Auto-update mode
             choice = '1'
         else:
             print("\nOptions:")
@@ -380,7 +368,6 @@ def main(interactive: bool = True, auto_update: bool = False):
                 print("✗ Tunnel name cannot be empty")
                 continue
             
-            # Validate tunnel name (alphanumeric, hyphens, underscores)
             if not re.match(r'^[a-zA-Z0-9_-]+$', tunnel_name):
                 print("✗ Tunnel name can only contain letters, numbers, hyphens, and underscores")
                 continue

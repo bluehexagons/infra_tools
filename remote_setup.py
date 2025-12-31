@@ -11,9 +11,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib.arg_parser import create_setup_argument_parser
 from lib.config import SetupConfig
 from lib.display import print_setup_summary
-from remote_modules.utils import validate_username, detect_os, set_dry_run
-from remote_modules.progress import progress_bar
-from remote_modules.system_types import get_steps_for_system_type
+from lib.remote_utils import validate_username, detect_os, set_dry_run
+from lib.progress import progress_bar
+from lib.system_types import get_steps_for_system_type
 
 
 def extract_repo_name(git_url: str) -> str:
@@ -31,7 +31,6 @@ def config_from_remote_args(args: argparse.Namespace) -> SetupConfig:
     else:
         raise ValueError("Either --system-type or --steps must be specified")
     
-    # Set host to localhost for remote execution since it's running locally on the target
     args.host = "localhost"
     
     config = SetupConfig.from_args(args, system_type)
@@ -57,19 +56,16 @@ def main() -> int:
         print("DRY-RUN MODE ENABLED")
         print("=" * 60)
     
-    # Create config from arguments
     try:
         config = config_from_remote_args(args)
     except ValueError as e:
         print(f"Error: {e}")
         return 1
     
-    # Validate username
     if not validate_username(config.username):
         print(f"Error: Invalid username: {config.username}")
         return 1
     
-    # Print configuration
     print_setup_summary(config, f"Remote Setup ({config.system_type})")
     sys.stdout.flush()
 
@@ -89,9 +85,8 @@ def main() -> int:
     bar = progress_bar(total_steps, total_steps)
     print(f"\n{bar} Complete!")
     
-    # Configure Cloudflare tunnel if requested
     if config.enable_cloudflare and config.system_type == "server_web":
-        from remote_modules.cloudflare_steps import (
+        from lib.cloudflare_steps import (
             configure_cloudflare_firewall,
             create_cloudflared_config_directory,
             configure_nginx_for_cloudflare,
@@ -117,9 +112,8 @@ def main() -> int:
         print("\n✓ Cloudflare tunnel preconfiguration complete")
         print("  Run 'sudo setup-cloudflare-tunnel' to install cloudflared")
     
-    # Handle deployments if specified
     if config.deploy_specs:
-        from remote_modules.deploy_steps import deploy_repository
+        from lib.deploy_steps import deploy_repository
         import shutil
         import tempfile
         import subprocess
@@ -131,7 +125,6 @@ def main() -> int:
         deployments = []
         
         if args.lite_deploy:
-            # Use pre-uploaded files from /opt/infra_tools/deployments/
             for deploy_specs_str, git_url in config.deploy_specs:
                 repo_name = extract_repo_name(git_url)
                 source_path = f'/opt/infra_tools/deployments/{repo_name}'
@@ -140,7 +133,6 @@ def main() -> int:
                     print(f"\n⚠ Warning: {source_path} not found, skipping {git_url}")
                     continue
                 
-                # Read commit hash if available
                 commit_hash = None
                 commit_file = f'/opt/infra_tools/deployments/{repo_name}.commit'
                 if os.path.exists(commit_file):
@@ -169,7 +161,6 @@ def main() -> int:
                     if info:
                         deployments.append(info)
         else:
-            # Clone repositories directly (local execution)
             temp_dir = tempfile.mkdtemp(prefix="infra_deploy_")
             try:
                 for deploy_specs_str, git_url in config.deploy_specs:
@@ -190,8 +181,7 @@ def main() -> int:
                     
                     print(f"  ✓ Cloned to {clone_path}")
                     
-                    # Get commit hash
-                    from shared.deploy_utils import get_git_commit_hash
+                    from lib.deploy_utils import get_git_commit_hash
                     commit_hash = get_git_commit_hash(clone_path)
                     
                     for deploy_spec in deploy_specs_str.split(','):
@@ -215,15 +205,14 @@ def main() -> int:
                 if os.path.exists(temp_dir):
                     shutil.rmtree(temp_dir)
         
-        # Configure Nginx for all deployments
         if deployments:
             print("\n" + "=" * 60)
             print("Configuring Nginx...")
             print("=" * 60)
             
             from collections import defaultdict
-            from shared.nginx_config import create_nginx_sites_for_groups
-            from remote_modules.utils import run
+            from lib.nginx_config import create_nginx_sites_for_groups
+            from lib.remote_utils import run
             
             grouped_deployments = defaultdict(list)
             for dep in deployments:
@@ -231,9 +220,8 @@ def main() -> int:
             
             create_nginx_sites_for_groups(grouped_deployments)
             
-            # Set up SSL if requested
             if config.enable_ssl:
-                from remote_modules.ssl_steps import install_certbot, setup_ssl_for_deployments
+                from lib.ssl_steps import install_certbot, setup_ssl_for_deployments
                 
                 print("\n" + "=" * 60)
                 print("Installing certbot...")
@@ -242,18 +230,16 @@ def main() -> int:
                 
                 setup_ssl_for_deployments(deployments, config.ssl_email)
             
-            # Update Cloudflare tunnel configuration if configured
             if config.enable_cloudflare:
-                from remote_modules.cloudflare_steps import run_cloudflare_tunnel_setup
+                from lib.cloudflare_steps import run_cloudflare_tunnel_setup
                 
                 print("\n" + "=" * 60)
                 print("Updating cloudflared config for deployments...")
                 print("=" * 60)
                 run_cloudflare_tunnel_setup(config)
     
-    # Configure Samba if requested
     if config.enable_samba:
-        from remote_modules.samba_steps import (
+        from lib.samba_steps import (
             install_samba,
             configure_samba_firewall,
             configure_samba_global_settings,
@@ -288,9 +274,8 @@ def main() -> int:
         
         print("\n✓ Samba configuration complete")
     
-    # Configure SMB mounts if requested
     if config.smb_mounts:
-        from remote_modules.smb_mount_steps import configure_smb_mount
+        from lib.smb_mount_steps import configure_smb_mount
         
         print("\n" + "=" * 60)
         print("Configuring SMB mounts...")
@@ -302,9 +287,8 @@ def main() -> int:
         
         print("\n✓ SMB mount configuration complete")
     
-    # Configure directory synchronization if requested
     if config.sync_specs:
-        from remote_modules.sync_steps import (
+        from lib.sync_steps import (
             install_rsync,
             create_sync_service
         )
@@ -323,9 +307,8 @@ def main() -> int:
         
         print("\n✓ Directory synchronization configured")
     
-    # Configure data integrity checking if requested (must run after sync)
     if config.scrub_specs:
-        from remote_modules.scrub_steps import (
+        from lib.scrub_steps import (
             install_par2,
             create_scrub_service
         )

@@ -55,7 +55,6 @@ class SetupConfig:
     smb_mounts: Optional[List[List[str]]] = None
     sync_specs: Optional[List[List[str]]] = None
     scrub_specs: Optional[List[List[str]]] = None
-    # Feature flags for step inclusion (simplifies system type configuration)
     include_desktop: bool = False
     include_cli_tools: bool = False
     include_desktop_apps: bool = False
@@ -193,7 +192,6 @@ class SetupConfig:
         desktop = args.desktop or "xfce"
         
         browser = args.browser
-        # Default to brave for standard desktop types if not specified
         if browser is None and system_type in DESKTOP_SYSTEMS:
             browser = "brave"
         
@@ -215,7 +213,6 @@ class SetupConfig:
         
         enable_audio = getattr(args, 'enable_audio', False)
         
-        # Set enable_smbclient default based on system type or if smb_mounts provided
         smb_mounts = getattr(args, 'smb_mounts', None)
         enable_smbclient = getattr(args, 'enable_smbclient', None)
         if enable_smbclient is None and (system_type == "pc_dev" or smb_mounts):
@@ -223,7 +220,6 @@ class SetupConfig:
         elif enable_smbclient is None:
             enable_smbclient = False
         
-        # Set feature flags based on system type and arguments
         include_desktop = (
             system_type in DESKTOP_SYSTEMS
             or enable_rdp

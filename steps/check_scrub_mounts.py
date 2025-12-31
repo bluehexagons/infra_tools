@@ -8,10 +8,9 @@ mounts are available before attempting to scrub.
 import sys
 import os
 
-# Add install directory to path so we can import shared modules
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
-from shared.mount_utils import validate_mount_for_sync
+from lib.mount_utils import validate_mount_for_sync
 
 
 def main():
@@ -22,15 +21,12 @@ def main():
     directory = sys.argv[1]
     database_path = sys.argv[2]
     
-    # Validate directory
     if not validate_mount_for_sync(directory, "directory"):
         return 1
     
-    # Validate database path
     if not validate_mount_for_sync(database_path, "database"):
         return 1
     
-    # Both paths are valid
     return 0
 
 

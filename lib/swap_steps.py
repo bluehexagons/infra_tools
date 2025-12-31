@@ -1,7 +1,7 @@
 """Swap configuration steps."""
 
 from lib.config import SetupConfig
-from .utils import run
+from lib.remote_utils import run
 
 def get_total_ram_mb() -> int:
     """Get total RAM in MB."""
@@ -22,13 +22,11 @@ def get_free_disk_mb() -> int:
 def configure_swap(config: SetupConfig) -> None:
     """Configure swap file if not present."""
     
-    # Check if swap is already active
     result = run("swapon --show")
     if result.stdout and result.stdout.strip():
         print("  ✓ Swap is already configured")
         return
 
-    # Check if /swapfile exists
     if run("test -f /swapfile", check=False).returncode == 0:
         print("  ✓ /swapfile exists but not active? Enabling...")
         run("swapon /swapfile")
@@ -39,7 +37,6 @@ def configure_swap(config: SetupConfig) -> None:
         print("  ⚠ Could not detect RAM size, skipping swap setup")
         return
 
-    # Calculate desired swap size
     if ram_mb < 2048:
         swap_size_mb = ram_mb * 2
     elif ram_mb < 8192:
@@ -47,7 +44,6 @@ def configure_swap(config: SetupConfig) -> None:
     else:
         swap_size_mb = 4096
 
-    # Check disk space
     free_disk_mb = get_free_disk_mb()
     if free_disk_mb < (swap_size_mb + 1024): # Leave at least 1GB free after swap
         if free_disk_mb > 2048:
@@ -59,17 +55,14 @@ def configure_swap(config: SetupConfig) -> None:
 
     print(f"  Creating {swap_size_mb}MB swap file...")
     
-    # Create swap file
     run(f"fallocate -l {swap_size_mb}M /swapfile")
     run("chmod 600 /swapfile")
     run("mkswap /swapfile")
     run("swapon /swapfile")
     
-    # Add to fstab
     fstab_entry = "/swapfile none swap sw 0 0"
     run(f"grep -qF '{fstab_entry}' /etc/fstab || echo '{fstab_entry}' >> /etc/fstab")
     
-    # Adjust swappiness (optional, but good practice)
     run("sysctl vm.swappiness=10")
     run("grep -q 'vm.swappiness' /etc/sysctl.conf || echo 'vm.swappiness=10' >> /etc/sysctl.conf")
     

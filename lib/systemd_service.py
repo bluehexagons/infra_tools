@@ -7,9 +7,8 @@ import re
 import sys
 from typing import Optional
 
-# Add parent directory to path to import from remote_modules
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from remote_modules.utils import run
+from lib.remote_utils import run
 
 
 def generate_node_service(app_name: str, app_path: str, port: int = 4000,
@@ -45,7 +44,6 @@ def create_node_service(app_name: str, app_path: str, port: int,
     if os.path.exists(service_file):
         print(f"  ℹ Service {service_name} already exists, updating...")
     
-    # Detect build directory
     build_dir = "dist"
     if os.path.exists(os.path.join(app_path, "build")):
         build_dir = "build"
@@ -66,11 +64,9 @@ def create_node_service(app_name: str, app_path: str, port: int,
     
     print(f"  ✓ Created and started systemd service: {service_name}")
     
-    # Give service a moment to start
     import time
     time.sleep(1)
     
-    # Check if service is running
     result = run(f"systemctl is-active {service_name}", check=False)
     if result.returncode != 0:
         print(f"  ⚠ Warning: {service_name} may not be running. Check with: systemctl status {service_name}")
@@ -149,11 +145,9 @@ def create_rails_service(app_name: str, app_path: str, port: int,
     
     print(f"  ✓ Created and started systemd service: {service_name}")
     
-    # Give service a moment to start
     import time
     time.sleep(1)
     
-    # Check if service is running
     result = run(f"systemctl is-active {service_name}", check=False)
     if result.returncode != 0:
         print(f"  ⚠ Warning: {service_name} may not be running. Check with: systemctl status {service_name}")
