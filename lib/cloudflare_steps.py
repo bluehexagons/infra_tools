@@ -90,7 +90,6 @@ def install_cloudflared_service_helper(config: SetupConfig) -> None:
         return
     
     # Create symlink instead of copying
-    from lib.remote_utils import run
     run(f"ln -sf {source_script} {helper_script}")
     
     print(f"  ✓ Linked setup script: {helper_script}")
