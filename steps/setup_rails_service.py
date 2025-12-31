@@ -5,7 +5,6 @@ import subprocess
 import sys
 import os
 
-# Add shared module to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.systemd_service import create_rails_service, create_node_service

@@ -9,7 +9,6 @@ import socket
 import sys
 from typing import Optional, Set
 
-# Add parent directory to path to import from remote_modules
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from lib.remote_utils import run
 
