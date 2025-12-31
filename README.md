@@ -183,17 +183,45 @@ python3 patch_setup.py deploy [pattern]
 
 Pattern matching is case-insensitive and searches hosts, names, and tags.
 
-## System templates
+## System Templates
 
-Samba server with scheduled sync and par2 scrubbing on backups using mounted drives:
+### Full-Stack Web Server
+Host a Rails API and React frontend monorepo with SSL, reverse proxied behind nginx.
 ```bash
-./setup_server_lite.py IP_ADDRESS \
-  --name my_share_server \
-  --tags nas \
+python3 setup_server_web.py web.example.com \
+  --ruby --node \
+  --ssl --ssl-email admin@example.com \
+  --deploy api.example.com https://github.com/user/repo.git
+```
+
+### Remote Developer Workstation
+Remote desktop with audio, VS Code, and full dev environment.
+```bash
+python3 setup_workstation_desktop.py 192.168.1.50 \
+  --name "Remote Dev" \
+  --desktop xfce --rdp --audio \
+  --browser brave \
+  --ruby --node --go
+```
+
+### NAS & Backup Server
+Samba file sharing with automated backup sync and data integrity verification using par2.
+```bash
+python3 setup_server_lite.py 192.168.1.10 \
+  --name "HomeNAS" \
   --samba \
-  --share write my_share /mnt/share_drive/store shareuser:password \
-  --sync /mnt/share_drive/store /mnt/backup_drive/incoming/share_drive daily \
-  --scrub /mnt/backup_drive/incoming/share_drive .pardatabase 5% monthly
+  --share read media /mnt/data/media guest:guest \
+  --share write documents /mnt/data/docs user:pass \
+  --sync /mnt/data/docs /mnt/backup/docs daily \
+  --scrub /mnt/backup/docs .pardatabase 5% weekly
+```
+
+### Cloudflare Tunnel Gateway
+Expose internal services without opening public ports.
+```bash
+python3 setup_server_web.py tunnel.example.com \
+  --cloudflare \
+  --deploy tunnel.example.com https://github.com/user/internal-app.git
 ```
 
 ## Requirements
