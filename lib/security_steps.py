@@ -165,8 +165,7 @@ def configure_auto_updates(config: SetupConfig) -> None:
     
     run("apt-get install -y -qq unattended-upgrades")
 
-    # Configure to run daily updates
-    # The default unattended-upgrades timer runs around 6:00 AM + random delay
+    # The default unattended-upgrades timer runs daily around 6:00 AM + random delay
     # This is before our 2:00 AM restart window (next day), giving time for updates to settle
     auto_upgrades = """APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "1";
@@ -221,16 +220,13 @@ def configure_auto_restart(config: SetupConfig) -> None:
     service_file = "/etc/systemd/system/auto-restart-if-needed.service"
     timer_file = "/etc/systemd/system/auto-restart-if-needed.timer"
     
-    # Check if already configured
     if os.path.exists(service_file) and os.path.exists(timer_file):
         if is_service_active("auto-restart-if-needed.timer"):
             print("  ✓ Automatic restart service already configured")
             return
     
-    # Script is already installed at /opt/infra_tools/service_tools/
     script_path = "/opt/infra_tools/service_tools/auto_restart_if_needed.py"
     
-    # Create the systemd service
     service_content = f"""[Unit]
 Description=Auto-restart system if needed
 Documentation=man:systemd.service(5)
@@ -243,7 +239,6 @@ ExecStart=/usr/bin/python3 {script_path}
     with open(service_file, "w") as f:
         f.write(service_content)
     
-    # Create the systemd timer (runs daily at 2 AM)
     timer_content = """[Unit]
 Description=Auto-restart system if needed (daily at 2 AM)
 Documentation=man:systemd.timer(5)
@@ -260,7 +255,6 @@ WantedBy=timers.target
     with open(timer_file, "w") as f:
         f.write(timer_content)
     
-    # Enable and start the timer
     run("systemctl daemon-reload")
     run("systemctl enable auto-restart-if-needed.timer")
     run("systemctl start auto-restart-if-needed.timer")
