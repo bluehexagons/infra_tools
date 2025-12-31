@@ -52,7 +52,6 @@ def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = Non
                         print(f"  Error fetching updates: {result.stderr}")
                         return None
                     
-                    # Get the default branch from the remote
                     result = subprocess.run(
                         ["git", "-C", cache_path, "symbolic-ref", "refs/remotes/origin/HEAD", "--short"],
                         capture_output=True,
@@ -62,7 +61,6 @@ def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = Non
                     if result.returncode == 0:
                         default_branch = result.stdout.strip()
                     else:
-                        # Fallback: try common default branches
                         for branch in ["origin/main", "origin/master"]:
                             result = subprocess.run(
                                 ["git", "-C", cache_path, "rev-parse", "--verify", branch],
@@ -126,7 +124,6 @@ def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = Non
         else:
             print(f"  [DRY RUN] Would copy to {clone_path}")
         
-        # Get commit hash
         commit_hash = None
         if not dry_run:
             from lib.deploy_utils import get_git_commit_hash
@@ -151,7 +148,6 @@ def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = Non
                 return None
             print(f"  ✓ Cloned to {clone_path}")
             
-            # Get commit hash
             from lib.deploy_utils import get_git_commit_hash
             commit_hash = get_git_commit_hash(clone_path)
             
@@ -224,7 +220,6 @@ tar xzf - && \
     
     ssh_cmd = ["ssh"] + ssh_opts + [f"root@{config.host}", remote_cmd]
     
-    # Handle deployments: clone repositories locally first
     temp_deploy_dir = None
     deploy_tar_data = None
     if config.deploy_specs:
@@ -252,7 +247,6 @@ tar xzf - && \
                 tarinfo.name = os.path.normpath(tarinfo.name)
                 if tarinfo.name.startswith('..') or tarinfo.name.startswith('/'):
                     return None
-                # Exclude .git directory to save space
                 if '/.git/' in tarinfo.name or tarinfo.name.endswith('/.git'):
                     return None
                 return tarinfo
@@ -262,7 +256,6 @@ tar xzf - && \
                     repo_name = os.path.basename(clone_path)
                     tar.add(clone_path, arcname=f"deployments/{repo_name}", filter=safe_filter)
                     
-                    # Add commit hash metadata file
                     if commit_hash:
                         commit_info = tarfile.TarInfo(name=f"deployments/{repo_name}.commit")
                         commit_data = commit_hash.encode('utf-8')
@@ -286,9 +279,6 @@ tar xzf - && \
     ssh_env["LC_ALL"] = "C"
 
     try:
-        # If we have deployment repositories to upload, send them first so
-        # the remote `remote_setup.py --lite-deploy` run can find
-        # /opt/infra_tools/deployments/<repo> while executing.
         if deploy_tar_data:
             print(f"\n{'='*60}")
             print("Uploading deployment repositories...")
@@ -318,7 +308,6 @@ tar xzf - && \
             else:
                 print(f"  ✓ Uploaded {len(cloned_repos)} repository(ies)")
 
-        # Run the main remote setup (install remote files and execute script)
         process = subprocess.Popen(
             ssh_cmd,
             stdin=subprocess.PIPE,
@@ -362,33 +351,13 @@ def setup_main(system_type: str, description: str, success_msg_fn) -> int:
         print(f"Error: Invalid username: {username}")
         return 1
     
-    if not os.path.exists(REMOTE_SCRIPT_PATH):
-        print(f"Error: Remote setup script not found: {REMOTE_SCRIPT_PATH}")
-        return 1
-    
-    if not os.path.exists(REMOTE_MODULES_DIR):
-        print(f"Error: Remote modules not found: {REMOTE_MODULES_DIR}")
-        return 1
-    
-    if not os.path.exists(LIB_DIR):
-        print(f"Error: Lib directory not found: {LIB_DIR}")
-        return 1
-    
-    if not os.path.exists(SHARED_DIR):
-        print(f"Error: Shared directory not found: {SHARED_DIR}")
-        return 1
-    
-    # Create SetupConfig from arguments
     config = SetupConfig.from_args(args, system_type)
     
-    # Print setup information
     print_setup_summary(config, description)
     
-    # Save configuration before running
     if not config.dry_run:
         save_setup_command(config)
     
-    # Run remote setup
     returncode = run_remote_setup(config)
     
     if returncode != 0:
