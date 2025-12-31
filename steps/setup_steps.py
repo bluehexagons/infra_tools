@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 
 import sys
+import os
+
+# Add parent directory to path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
 from lib.config import SetupConfig
 from lib.setup_common import setup_main
 from lib.display import print_success_header

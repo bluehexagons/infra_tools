@@ -8,8 +8,8 @@ mounts are available before attempting to sync.
 import sys
 import os
 
-# Add install directory to path so we can import shared modules
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# Add parent directory to path so we can import lib modules
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
 from lib.mount_utils import validate_mount_for_sync
 

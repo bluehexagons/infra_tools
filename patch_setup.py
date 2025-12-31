@@ -21,8 +21,7 @@ from lib.cache import (
 from lib.setup_common import (
     create_argument_parser,
     run_remote_setup,
-    REMOTE_SCRIPT_PATH,
-    REMOTE_MODULES_DIR
+    REMOTE_SCRIPT_PATH
 )
 
 
@@ -227,8 +226,9 @@ def execute_patch(config: SetupConfig) -> int:
         print(f"Error: Remote setup script not found: {REMOTE_SCRIPT_PATH}")
         return 1
     
-    if not os.path.exists(REMOTE_MODULES_DIR):
-        print(f"Error: Remote modules not found: {REMOTE_MODULES_DIR}")
+    lib_dir = os.path.join(os.path.dirname(REMOTE_SCRIPT_PATH), "lib")
+    if not os.path.exists(lib_dir):
+        print(f"Error: Library directory not found: {lib_dir}")
         return 1
     
     print("=" * 60)

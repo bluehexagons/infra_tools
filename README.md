@@ -4,13 +4,19 @@ Automated setup scripts for remote Linux systems (Debian).
 
 ## Quick Start
 
-Download the repository and run setup scripts.
-
 ```bash
 python3 setup_server_web.py example.com --ruby --node --deploy example.com https://github.com/user/repo.git
 python3 setup_workstation_desktop.py 192.168.1.100 --desktop i3 --browser firefox
 python3 patch_setup.py example.com --ssl --deploy api.example.com https://github.com/user/api.git
 ```
+
+## Repository Structure
+
+- **Root**: Core setup scripts (`setup_*.py`, `patch_setup.py`, `remote_setup.py`)
+- **`/lib`**: Python modules for setup steps and utilities
+- **`/config`**: Configuration templates (Nginx, Cloudflare)
+- **`/service_tools`**: Tools used by remote services (auto-update, scrub, etc.)
+- **`/steps`**: Step-focused scripts (`setup_steps.py`, `setup_rails_service.py`, mount checkers)
 
 ## Setup Scripts
 
@@ -23,7 +29,7 @@ python3 patch_setup.py example.com --ssl --deploy api.example.com https://github
 | `setup_pc_dev.py` | PC dev workstation with bare metal, Remmina, LibreOffice (audio via --audio) |
 | `setup_workstation_dev.py` | Light dev workstation with RDP, VS Code (audio via --audio) |
 | `setup_server_proxmox.py` | Proxmox hardening with security updates, SSH hardening |
-| `setup_steps.py` | Custom setup, run specific steps only |
+| `steps/setup_steps.py` | Custom setup, run specific steps only |
 
 Common features: User setup, sudo, firewall/SSH hardening, auto-updates, Chrony, CLI tools (neovim, btop, git, tmux).
 
