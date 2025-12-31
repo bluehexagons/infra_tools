@@ -77,40 +77,33 @@ def configure_nginx_for_cloudflare(config: SetupConfig) -> None:
 
 
 def install_cloudflared_service_helper(config: SetupConfig) -> None:
-    """Install Python script for comprehensive Cloudflare tunnel setup."""
+    """Create symlink for Cloudflare tunnel setup script."""
     helper_script = "/usr/local/bin/setup-cloudflare-tunnel"
+    source_script = "/opt/infra_tools/service_tools/setup_cloudflare_tunnel.py"
     
     if os.path.exists(helper_script):
-        print("  ✓ Cloudflare tunnel setup script already exists")
+        print("  ✓ Cloudflare tunnel setup script already available")
         return
-    
-    # Read the Python script from the service_tools directory
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    source_script = os.path.join(script_dir, "..", "service_tools", "setup_cloudflare_tunnel.py")
     
     if not os.path.exists(source_script):
         print(f"  ⚠ Source script not found: {source_script}")
         return
     
-    # Copy the script to /usr/local/bin
-    with open(source_script, 'r') as src:
-        script_content = src.read()
+    # Create symlink instead of copying
+    from lib.remote_utils import run
+    run(f"ln -sf {source_script} {helper_script}")
     
-    with open(helper_script, 'w') as dst:
-        dst.write(script_content)
-    
-    os.chmod(helper_script, 0o755)
-    
-    print(f"  ✓ Installed setup script: {helper_script}")
+    print(f"  ✓ Linked setup script: {helper_script}")
     print(f"  Run 'sudo setup-cloudflare-tunnel' to configure the tunnel")
 
 
 def run_cloudflare_tunnel_setup(config: SetupConfig) -> None:
     """Run Cloudflare tunnel setup in non-interactive mode to update configuration."""
-    helper_script = "/usr/local/bin/setup-cloudflare-tunnel"
+    # Use the script from infra_tools directory directly
+    helper_script = "/opt/infra_tools/service_tools/setup_cloudflare_tunnel.py"
     
     if not os.path.exists(helper_script):
-        print("  ⚠ Cloudflare tunnel setup script not found")
+        print(f"  ⚠ Setup script not found: {helper_script}")
         return
     
     # Check if there's an existing tunnel configuration
