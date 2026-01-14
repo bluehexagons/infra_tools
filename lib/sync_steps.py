@@ -129,7 +129,7 @@ Type=oneshot
 User=root
 Group=root
 ExecCondition=/usr/bin/python3 {check_script} {shlex.quote(source)} {shlex.quote(destination)}
-ExecStart=/usr/bin/rsync -av --delete --exclude='.git' {shlex.quote(source)}/ {shlex.quote(destination)}/
+ExecStart=/usr/bin/rsync -av --delete --delete-delay --partial --exclude='.git' {shlex.quote(source)}/ {shlex.quote(destination)}/
 StandardOutput=journal
 StandardError=journal
 """
@@ -142,7 +142,7 @@ After=local-fs.target
 Type=oneshot
 User=root
 Group=root
-ExecStart=/usr/bin/rsync -av --delete --exclude='.git' {shlex.quote(source)}/ {shlex.quote(destination)}/
+ExecStart=/usr/bin/rsync -av --delete --delete-delay --partial --exclude='.git' {shlex.quote(source)}/ {shlex.quote(destination)}/
 StandardOutput=journal
 StandardError=journal
 """

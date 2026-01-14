@@ -80,6 +80,7 @@ def create_par2(
         return True
     except subprocess.CalledProcessError as e:
         log(f"Error creating par2 for {relative_path}: {e.stdout}", log_file)
+        _remove_par2_files(par2_base, log_file)
         return False
 
 
