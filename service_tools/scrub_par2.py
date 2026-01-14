@@ -21,6 +21,7 @@ PAR2_VOLUME_MARKER = f"{PAR2_EXTENSION}.vol"
 PAR2_MTIME_TOLERANCE_SECONDS = 1.0
 PAR2_CREATE_RETRIES = 3
 PAR2_CREATE_BACKOFF_SECONDS = 2
+PAR2_CREATE_MAX_BACKOFF_SECONDS = 30
 
 
 def log(message: str, log_file: str) -> None:
@@ -87,7 +88,7 @@ def create_par2(
             log(f"Error creating par2 for {relative_path}: {e.stdout}", log_file)
             _remove_par2_files(par2_base, log_file)
             if attempt < PAR2_CREATE_RETRIES - 1:
-                delay = PAR2_CREATE_BACKOFF_SECONDS * (2 ** attempt)
+                delay = min(PAR2_CREATE_BACKOFF_SECONDS * (2 ** attempt), PAR2_CREATE_MAX_BACKOFF_SECONDS)
                 log(f"Retrying par2 create for {relative_path} in {delay}s", log_file)
                 time.sleep(delay)
             else:

@@ -26,8 +26,9 @@ def get_rotating_logger(
 ) -> Logger:
     """Return a logger configured with a rotating file handler."""
     logger = getLogger(name)
-    logger.setLevel(INFO)
-    logger.propagate = False
+    if not logger.handlers:
+        logger.setLevel(INFO)
+        logger.propagate = False
 
     log_path = Path(log_file)
     try:
