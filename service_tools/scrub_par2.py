@@ -93,6 +93,7 @@ def create_par2(
                 time.sleep(delay)
             else:
                 return False
+    return False
 
 
 def _par2_base_from_parity_file(parity_path: str) -> str:
