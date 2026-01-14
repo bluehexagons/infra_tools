@@ -99,7 +99,7 @@ Common features: User setup, sudo, firewall/SSH hardening, auto-updates, Chrony,
 
 | Flag | Description |
 |------|-------------|
-| `--scrub DIR DBPATH REDUNDANCY FREQ` | Automated par2 integrity checking: DIR (directory), DBPATH (.pardatabase path, relative or absolute), REDUNDANCY (e.g., 5%), FREQ (hourly, daily, weekly, or monthly). Runs after sync if both configured. |
+| `--scrub DIR DBPATH REDUNDANCY FREQ` | Automated par2 integrity checking: DIR (directory), DBPATH (.pardatabase path, relative or absolute), REDUNDANCY (e.g., 5%), FREQ (hourly, daily, weekly, or monthly). Runs after sync if both configured. Includes hourly parity updates for new or modified files when the full scrub runs less frequently. |
 
 ## Deployment Guide
 
@@ -148,7 +148,7 @@ python3 patch_setup.py 192.168.1.10 --samba \
 
 ## Data Integrity
 
-Automated file verification and repair with par2.
+Automated file verification and repair with par2. Hourly parity updates ensure new or modified files are protected between full scrub runs.
 
 ```bash
 # Basic usage

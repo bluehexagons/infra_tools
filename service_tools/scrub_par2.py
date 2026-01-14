@@ -7,6 +7,7 @@ This script creates par2 parity files, verifies files, and repairs corrupted fil
 import sys
 import os
 import subprocess
+from glob import glob
 from pathlib import Path
 from datetime import datetime
 
@@ -20,7 +21,23 @@ def log(message: str, log_file: str) -> None:
         print(f"Error writing to log {log_file}: {e}", file=sys.stderr)
 
 
-def create_par2(file_path: str, directory: str, database: str, redundancy: int, log_file: str) -> bool:
+def _remove_par2_files(par2_base: str, log_file: str) -> None:
+    """Remove par2 files for a base path."""
+    for par2_file in glob(f"{par2_base}*"):
+        try:
+            os.remove(par2_file)
+        except (IOError, OSError) as e:
+            log(f"Error removing par2 file {par2_file}: {e}", log_file)
+
+
+def create_par2(
+    file_path: str,
+    directory: str,
+    database: str,
+    redundancy: int,
+    log_file: str,
+    force: bool = False
+) -> bool:
     """Create par2 parity file if it doesn't exist.
     
     Args:
@@ -36,8 +53,11 @@ def create_par2(file_path: str, directory: str, database: str, redundancy: int, 
     relative_path = os.path.relpath(file_path, directory)
     par2_base = os.path.join(database, f"{relative_path}.par2")
     
-    if os.path.exists(par2_base):
+    par2_files = glob(f"{par2_base}*")
+    if par2_files and not force and os.path.exists(par2_base):
         return True
+    if par2_files:
+        _remove_par2_files(par2_base, log_file)
     
     log(f"Creating par2 for: {relative_path}", log_file)
     
@@ -56,6 +76,39 @@ def create_par2(file_path: str, directory: str, database: str, redundancy: int, 
     except subprocess.CalledProcessError as e:
         log(f"Error creating par2 for {relative_path}: {e.stdout}", log_file)
         return False
+
+
+def _par2_base_from_parity_file(parity_path: str) -> str:
+    """Get par2 base path from any parity file."""
+    if ".par2.vol" in parity_path:
+        return parity_path.split(".par2.vol", 1)[0] + ".par2"
+    return parity_path
+
+
+def _cleanup_orphan_par2(
+    directory: str,
+    database: str,
+    existing_files: set[str],
+    log_file: str
+) -> None:
+    """Remove parity files for data files that no longer exist."""
+    checked_bases = set()
+    for root, _, files in os.walk(database):
+        for filename in files:
+            if not filename.endswith(".par2"):
+                continue
+            par2_path = os.path.join(root, filename)
+            par2_base = _par2_base_from_parity_file(par2_path)
+            if par2_base in checked_bases:
+                continue
+            checked_bases.add(par2_base)
+            relative_par2 = os.path.relpath(par2_base, database)
+            relative_data = relative_par2[:-5]
+            data_path = os.path.join(directory, relative_data)
+            if relative_data in existing_files or os.path.exists(data_path):
+                continue
+            log(f"Removing orphan par2 for deleted file: {relative_data}", log_file)
+            _remove_par2_files(par2_base, log_file)
 
 
 def verify_repair(file_path: str, directory: str, database: str, log_file: str) -> None:
@@ -125,6 +178,8 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
     
     database_path = Path(database).resolve()
     
+    existing_files = set()
+    
     for root, dirs, files in os.walk(directory):
         root_path = Path(root).resolve()
         
@@ -137,11 +192,25 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
         
         for filename in files:
             file_path = os.path.join(root, filename)
+            relative_path = os.path.relpath(file_path, directory)
+            existing_files.add(relative_path)
+            par2_base = os.path.join(database, f"{relative_path}.par2")
+            force = False
             
-            create_par2(file_path, directory, database, redundancy, log_file)
+            if os.path.exists(par2_base):
+                try:
+                    if os.path.getmtime(file_path) > os.path.getmtime(par2_base):
+                        log(f"Updating par2 for modified file: {relative_path}", log_file)
+                        force = True
+                except (IOError, OSError):
+                    force = True
+            
+            create_par2(file_path, directory, database, redundancy, log_file, force=force)
             
             if verify:
                 verify_repair(file_path, directory, database, log_file)
+    
+    _cleanup_orphan_par2(directory, database, existing_files, log_file)
     
     log(f"Scrub completed: {datetime.now()}", log_file)
     log("", log_file)

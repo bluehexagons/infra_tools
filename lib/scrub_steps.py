@@ -195,6 +195,62 @@ WantedBy=timers.target
         f.write(timer_content)
     
     print(f"  ✓ Created timer: {service_name}.timer ({frequency})")
+
+    update_service_name = None
+    if frequency != "hourly":
+        update_service_name = f"{service_name}-update"
+        update_service_file = f"/etc/systemd/system/{update_service_name}.service"
+        update_timer_file = f"/etc/systemd/system/{update_service_name}.timer"
+        update_calendar = get_timer_calendar("hourly")
+        
+        if needs_mount_check:
+            update_service_content = f"""[Unit]
+Description=Parity update check for {escaped_directory}
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecCondition=/usr/bin/python3 {check_script} {shlex.quote(directory)} {shlex.quote(database_path)}
+ExecStart=/usr/bin/python3 {scrub_script} {shlex.quote(directory)} {shlex.quote(database_path)} {shlex.quote(redundancy_value)} {shlex.quote(log_file)} --no-verify
+StandardOutput=journal
+StandardError=journal
+"""
+        else:
+            update_service_content = f"""[Unit]
+Description=Parity update check for {escaped_directory}
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/bin/python3 {scrub_script} {shlex.quote(directory)} {shlex.quote(database_path)} {shlex.quote(redundancy_value)} {shlex.quote(log_file)} --no-verify
+StandardOutput=journal
+StandardError=journal
+"""
+        
+        with open(update_service_file, 'w') as f:
+            f.write(update_service_content)
+        
+        update_timer_content = f"""[Unit]
+Description=Timer for parity updates of {escaped_directory} (hourly)
+
+[Timer]
+OnCalendar={update_calendar}
+Persistent=true
+AccuracySec=1m
+Unit={update_service_name}.service
+
+[Install]
+WantedBy=timers.target
+"""
+        
+        with open(update_timer_file, 'w') as f:
+            f.write(update_timer_content)
+        
+        print(f"  ✓ Created parity update timer: {update_service_name}.timer (hourly)")
     
     print(f"  ℹ Performing initial par2 creation (fast mode)...")
     
@@ -216,6 +272,9 @@ WantedBy=timers.target
     run("systemctl daemon-reload")
     run(f"systemctl enable {shlex.quote(service_name)}.timer")
     run(f"systemctl start {shlex.quote(service_name)}.timer")
+    if update_service_name:
+        run(f"systemctl enable {shlex.quote(update_service_name)}.timer")
+        run(f"systemctl start {shlex.quote(update_service_name)}.timer")
     
     print(f"  ✓ Enabled and started timer")
     
@@ -228,4 +287,3 @@ WantedBy=timers.target
     
     print(f"  ✓ Scrub configured: {directory} (redundancy: {redundancy}, frequency: {frequency})")
     print(f"  ℹ Logs: {log_file}")
-
