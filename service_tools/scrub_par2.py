@@ -22,15 +22,11 @@ PAR2_MTIME_TOLERANCE_SECONDS = 1.0
 PAR2_CREATE_RETRIES = 3
 PAR2_CREATE_BACKOFF_SECONDS = 2
 
-_LOGGER = None
-
 
 def log(message: str, log_file: str) -> None:
     """Append message to log file."""
-    global _LOGGER
-    if _LOGGER is None:
-        _LOGGER = get_rotating_logger("scrub_par2", log_file)
-    log_message(_LOGGER, message)
+    logger = get_rotating_logger(f"scrub_par2:{log_file}", log_file)
+    log_message(logger, message)
 
 
 def _remove_par2_files(par2_base: str, log_file: str) -> None:
@@ -91,7 +87,7 @@ def create_par2(
             log(f"Error creating par2 for {relative_path}: {e.stdout}", log_file)
             _remove_par2_files(par2_base, log_file)
             if attempt < PAR2_CREATE_RETRIES - 1:
-                delay = PAR2_CREATE_BACKOFF_SECONDS ** attempt
+                delay = PAR2_CREATE_BACKOFF_SECONDS * (2 ** attempt)
                 log(f"Retrying par2 create for {relative_path} in {delay}s", log_file)
                 time.sleep(delay)
             else:
