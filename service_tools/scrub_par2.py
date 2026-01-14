@@ -7,22 +7,30 @@ This script creates par2 parity files, verifies files, and repairs corrupted fil
 import sys
 import os
 import subprocess
+import time
 from glob import glob, escape
 from pathlib import Path
 from datetime import datetime
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+
+from lib.logging_utils import get_rotating_logger, log_message
+
 PAR2_EXTENSION = ".par2"
 PAR2_VOLUME_MARKER = f"{PAR2_EXTENSION}.vol"
 PAR2_MTIME_TOLERANCE_SECONDS = 1.0
+PAR2_CREATE_RETRIES = 3
+PAR2_CREATE_BACKOFF_SECONDS = 2
+
+_LOGGER = None
 
 
 def log(message: str, log_file: str) -> None:
     """Append message to log file."""
-    try:
-        with open(log_file, 'a') as f:
-            f.write(f"{message}\n")
-    except (IOError, OSError) as e:
-        print(f"Error writing to log {log_file}: {e}", file=sys.stderr)
+    global _LOGGER
+    if _LOGGER is None:
+        _LOGGER = get_rotating_logger("scrub_par2", log_file)
+    log_message(_LOGGER, message, log_file)
 
 
 def _remove_par2_files(par2_base: str, log_file: str) -> None:
@@ -68,20 +76,26 @@ def create_par2(
     
     os.makedirs(os.path.dirname(par2_base), exist_ok=True)
     
-    try:
-        subprocess.run(
-            ['par2', 'create', '-B', directory, f'-r{redundancy}', '-n1', par2_base, relative_path],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            check=True,
-            text=True,
-            cwd=directory
-        )
-        return True
-    except subprocess.CalledProcessError as e:
-        log(f"Error creating par2 for {relative_path}: {e.stdout}", log_file)
-        _remove_par2_files(par2_base, log_file)
-        return False
+    for attempt in range(PAR2_CREATE_RETRIES):
+        try:
+            subprocess.run(
+                ['par2', 'create', '-B', directory, f'-r{redundancy}', '-n1', par2_base, relative_path],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=True,
+                text=True,
+                cwd=directory
+            )
+            return True
+        except subprocess.CalledProcessError as e:
+            log(f"Error creating par2 for {relative_path}: {e.stdout}", log_file)
+            _remove_par2_files(par2_base, log_file)
+            if attempt < PAR2_CREATE_RETRIES - 1:
+                delay = PAR2_CREATE_BACKOFF_SECONDS ** attempt
+                log(f"Retrying par2 create for {relative_path} in {delay}s", log_file)
+                time.sleep(delay)
+            else:
+                return False
 
 
 def _par2_base_from_parity_file(parity_path: str) -> str:
