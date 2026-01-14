@@ -23,10 +23,15 @@ PAR2_CREATE_RETRIES = 3
 PAR2_CREATE_BACKOFF_SECONDS = 2
 PAR2_CREATE_MAX_BACKOFF_SECONDS = 30
 
+_LOGGERS = {}
+
 
 def log(message: str, log_file: str) -> None:
     """Append message to log file."""
-    logger = get_rotating_logger(f"scrub_par2:{log_file}", log_file)
+    logger = _LOGGERS.get(log_file)
+    if logger is None:
+        logger = get_rotating_logger(f"scrub_par2:{log_file}", log_file)
+        _LOGGERS[log_file] = logger
     log_message(logger, message)
 
 
@@ -91,8 +96,6 @@ def create_par2(
                 delay = min(PAR2_CREATE_BACKOFF_SECONDS * (2 ** attempt), PAR2_CREATE_MAX_BACKOFF_SECONDS)
                 log(f"Retrying par2 create for {relative_path} in {delay}s", log_file)
                 time.sleep(delay)
-            else:
-                return False
     return False
 
 

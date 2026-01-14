@@ -59,7 +59,7 @@ def log_message(logger: Logger, message: str) -> None:
     """Write a log message with graceful error handling."""
     try:
         logger.info(message)
-    except (OSError, IOError, ValueError) as e:
+    except (OSError, IOError) as e:
         log_target = "unknown log"
         for handler in logger.handlers:
             if isinstance(handler, RotatingFileHandler):
