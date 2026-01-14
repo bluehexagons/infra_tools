@@ -1,6 +1,6 @@
 """Reusable logging helpers for infra tools services."""
 
-from logging import Logger, Formatter, getLogger
+from logging import Logger, Formatter, INFO, getLogger
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 import sys
@@ -17,7 +17,7 @@ def get_rotating_logger(
 ) -> Logger:
     """Return a logger configured with a rotating file handler."""
     logger = getLogger(name)
-    logger.setLevel("INFO")
+    logger.setLevel(INFO)
     logger.propagate = False
 
     log_path = Path(log_file)
@@ -42,9 +42,14 @@ def get_rotating_logger(
     return logger
 
 
-def log_message(logger: Logger, message: str, log_file: str) -> None:
+def log_message(logger: Logger, message: str) -> None:
     """Write a log message with graceful error handling."""
     try:
         logger.info(message)
     except (OSError, IOError, ValueError) as e:
-        print(f"Error writing to log {log_file}: {e}", file=sys.stderr)
+        log_target = "unknown log"
+        for handler in logger.handlers:
+            if isinstance(handler, RotatingFileHandler):
+                log_target = handler.baseFilename
+                break
+        print(f"Error writing to log {log_target}: {e}", file=sys.stderr)

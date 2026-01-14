@@ -30,7 +30,7 @@ def log(message: str, log_file: str) -> None:
     global _LOGGER
     if _LOGGER is None:
         _LOGGER = get_rotating_logger("scrub_par2", log_file)
-    log_message(_LOGGER, message, log_file)
+    log_message(_LOGGER, message)
 
 
 def _remove_par2_files(par2_base: str, log_file: str) -> None:
