@@ -7,9 +7,13 @@ This script creates par2 parity files, verifies files, and repairs corrupted fil
 import sys
 import os
 import subprocess
-from glob import glob
+from glob import glob, escape
 from pathlib import Path
 from datetime import datetime
+
+PAR2_EXTENSION = ".par2"
+PAR2_VOLUME_MARKER = f"{PAR2_EXTENSION}.vol"
+PAR2_MTIME_TOLERANCE_SECONDS = 1.0
 
 
 def log(message: str, log_file: str) -> None:
@@ -23,7 +27,7 @@ def log(message: str, log_file: str) -> None:
 
 def _remove_par2_files(par2_base: str, log_file: str) -> None:
     """Remove par2 files for a base path."""
-    for par2_file in glob(f"{par2_base}*"):
+    for par2_file in glob(f"{escape(par2_base)}*"):
         try:
             os.remove(par2_file)
         except (IOError, OSError) as e:
@@ -46,17 +50,18 @@ def create_par2(
         database: Database directory for par2 files
         redundancy: Redundancy percentage
         log_file: Log file path
+        force: Whether to recreate existing par2 files
         
     Returns:
         True if created or already exists, False on error
     """
     relative_path = os.path.relpath(file_path, directory)
-    par2_base = os.path.join(database, f"{relative_path}.par2")
+    par2_base = os.path.join(database, f"{relative_path}{PAR2_EXTENSION}")
     
-    par2_files = glob(f"{par2_base}*")
-    if par2_files and not force and os.path.exists(par2_base):
-        return True
+    par2_files = glob(f"{escape(par2_base)}*")
     if par2_files:
+        if not force and os.path.exists(par2_base):
+            return True
         _remove_par2_files(par2_base, log_file)
     
     log(f"Creating par2 for: {relative_path}", log_file)
@@ -80,8 +85,8 @@ def create_par2(
 
 def _par2_base_from_parity_file(parity_path: str) -> str:
     """Get par2 base path from any parity file."""
-    if ".par2.vol" in parity_path:
-        return parity_path.split(".par2.vol", 1)[0] + ".par2"
+    if PAR2_VOLUME_MARKER in parity_path:
+        return parity_path.split(PAR2_VOLUME_MARKER, 1)[0] + PAR2_EXTENSION
     return parity_path
 
 
@@ -95,7 +100,7 @@ def _cleanup_orphan_par2(
     checked_bases = set()
     for root, _, files in os.walk(database):
         for filename in files:
-            if not filename.endswith(".par2"):
+            if not filename.endswith(PAR2_EXTENSION):
                 continue
             par2_path = os.path.join(root, filename)
             par2_base = _par2_base_from_parity_file(par2_path)
@@ -103,9 +108,11 @@ def _cleanup_orphan_par2(
                 continue
             checked_bases.add(par2_base)
             relative_par2 = os.path.relpath(par2_base, database)
-            relative_data = relative_par2[:-5]
-            data_path = os.path.join(directory, relative_data)
-            if relative_data in existing_files or os.path.exists(data_path):
+            if relative_par2.endswith(PAR2_EXTENSION):
+                relative_data = relative_par2[:-len(PAR2_EXTENSION)]
+            else:
+                relative_data = relative_par2
+            if relative_data in existing_files:
                 continue
             log(f"Removing orphan par2 for deleted file: {relative_data}", log_file)
             _remove_par2_files(par2_base, log_file)
@@ -121,7 +128,7 @@ def verify_repair(file_path: str, directory: str, database: str, log_file: str) 
         log_file: Log file path
     """
     relative_path = os.path.relpath(file_path, directory)
-    par2_base = os.path.join(database, f"{relative_path}.par2")
+    par2_base = os.path.join(database, f"{relative_path}{PAR2_EXTENSION}")
     
     if not os.path.exists(par2_base):
         return
@@ -194,15 +201,16 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
             file_path = os.path.join(root, filename)
             relative_path = os.path.relpath(file_path, directory)
             existing_files.add(relative_path)
-            par2_base = os.path.join(database, f"{relative_path}.par2")
+            par2_base = os.path.join(database, f"{relative_path}{PAR2_EXTENSION}")
             force = False
             
             if os.path.exists(par2_base):
                 try:
-                    if os.path.getmtime(file_path) > os.path.getmtime(par2_base):
+                    if os.path.getmtime(file_path) > os.path.getmtime(par2_base) + PAR2_MTIME_TOLERANCE_SECONDS:
                         log(f"Updating par2 for modified file: {relative_path}", log_file)
                         force = True
-                except (IOError, OSError):
+                except (IOError, OSError) as e:
+                    log(f"Error checking par2 timestamps for {relative_path}: {e}", log_file)
                     force = True
             
             create_par2(file_path, directory, database, redundancy, log_file, force=force)

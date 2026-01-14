@@ -201,7 +201,7 @@ WantedBy=timers.target
         update_service_name = f"{service_name}-update"
         update_service_file = f"/etc/systemd/system/{update_service_name}.service"
         update_timer_file = f"/etc/systemd/system/{update_service_name}.timer"
-        update_calendar = get_timer_calendar("hourly")
+        update_calendar = "*-*-* *:30:00"
         
         if needs_mount_check:
             update_service_content = f"""[Unit]
@@ -273,8 +273,16 @@ WantedBy=timers.target
     run(f"systemctl enable {shlex.quote(service_name)}.timer")
     run(f"systemctl start {shlex.quote(service_name)}.timer")
     if update_service_name:
-        run(f"systemctl enable {shlex.quote(update_service_name)}.timer")
-        run(f"systemctl start {shlex.quote(update_service_name)}.timer")
+        enable_result = run(f"systemctl enable {shlex.quote(update_service_name)}.timer", check=False)
+        start_result = run(f"systemctl start {shlex.quote(update_service_name)}.timer", check=False)
+        if enable_result.returncode != 0:
+            print("  ⚠ Warning: Failed to enable parity update timer")
+            if enable_result.stderr:
+                print(f"    Enable error: {enable_result.stderr.strip()}")
+        if start_result.returncode != 0:
+            print("  ⚠ Warning: Failed to start parity update timer")
+            if start_result.stderr:
+                print(f"    Start error: {start_result.stderr.strip()}")
     
     print(f"  ✓ Enabled and started timer")
     
