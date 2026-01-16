@@ -79,6 +79,7 @@ class MemoryMonitor:
                         kb_value = int(line.split()[1])
                         return kb_value * 1024
         except (IOError, ValueError):
+            # If /proc/meminfo is unreadable, treat as no available memory.
             pass
         return 0
     
@@ -137,12 +138,14 @@ class SimpleLockManager:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
             lock_file.close()
         except (IOError, OSError):
+            # Best-effort unlock: ignore failures closing lock handles.
             pass
         
         lock_path = self._get_lock_path(resource)
         try:
             os.unlink(lock_path)
         except (IOError, OSError):
+            # Best-effort cleanup: ignore errors removing lock file.
             pass
     
     def check_locked(self, resource: str, exclusive: bool = True) -> bool:

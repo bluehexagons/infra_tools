@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check if sync source source and destination paths are mounted before syncing.
+"""Check if sync source and destination paths are mounted before syncing.
 
 This script is called by systemd services as an ExecCondition to ensure
 mounts are available before attempting to sync.

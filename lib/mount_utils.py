@@ -141,7 +141,8 @@ def validate_smb_connectivity(path: str) -> bool:
         try:
             if os.path.exists(test_file):
                 os.unlink(test_file)
-        except:
+        except OSError:
+            # Best-effort cleanup: ignore errors removing temporary test file
             pass
         return False
 
@@ -181,6 +182,7 @@ def get_mount_status_details(path: str) -> dict[str, Any]:
         if len(parts) >= 2:
             details['mount_options'] = parts[1]
     except subprocess.CalledProcessError:
+        # If findmnt fails, leave fstype and options as None; details stay usable.
         pass
     
     # Check for remote server (SMB/NFS)
@@ -194,6 +196,7 @@ def get_mount_status_details(path: str) -> dict[str, Any]:
             if '//' in source or ':' in source:
                 details['remote_server'] = source
         except subprocess.CalledProcessError:
+            # If findmnt fails, leave remote_server as None.
             pass
     
     # Test accessibility

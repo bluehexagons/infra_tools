@@ -82,8 +82,6 @@ def create_scrub_service(config: SetupConfig, scrub_spec: Optional[list[str]] = 
     database_path: str = scrub_config['database_path']
     redundancy: str = scrub_config['redundancy']
     frequency: str = scrub_config['frequency']
-    redundancy_value: str = redundancy[:-1]  # trimmed '%' for command-line usage
-    
     logger = create_operation_logger("scrub", directory=directory, database_path=database_path, 
                                     redundancy=redundancy, frequency=frequency)
     transaction = create_transaction(f"scrub_{int(time.time())}", logger, timeout_seconds=3600)
@@ -296,8 +294,8 @@ WantedBy=timers.target
             for file in os.listdir(directory):
                 if file.endswith('.par2'):
                     os.remove(os.path.join(directory, file))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.log_error("rollback_initial_par2_failed", str(e))
     
     try:
         transaction.add_step(perform_initial_par2, rollback_initial_par2, "Initial par2 creation", "initial_par2_creation")

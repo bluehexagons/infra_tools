@@ -330,8 +330,6 @@ def main(interactive: bool = True, auto_update: bool = False):
         return True
     
     # Interactive mode falls through to show configuration and return True on success
-    return True
-    
     if state:
         print("\n✓ Found existing tunnel configuration")
         tunnel = state['tunnel']

@@ -322,6 +322,7 @@ class OperationLoggerManager:
                     log_file.unlink()
                     cleaned_count += 1
                 except OSError:
+                    # Best-effort cleanup: ignore errors removing old log file.
                     pass
         
         return cleaned_count
