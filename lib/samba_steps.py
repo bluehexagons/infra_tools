@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import os
 import shlex
-from typing import List, Dict, Optional
+import re
+from typing import Optional, Any
 
 from lib.config import SetupConfig
-from lib.remote_utils import run, is_package_installed, file_contains
+from lib.remote_utils import run, is_package_installed
 
 
 def install_samba(config: SetupConfig) -> None:
@@ -35,8 +38,8 @@ def configure_samba_firewall(config: SetupConfig) -> None:
     print("  ✓ Firewall configured for Samba")
 
 
-def parse_share_spec(share_spec: List[str]) -> Dict:
-    if len(share_spec) < 4:
+def parse_share_spec(share_spec: Optional[list[str]]) -> dict[str, Any]:
+    if not share_spec or len(share_spec) < 4:
         raise ValueError("Share spec requires: access_type share_name paths users")
     
     access_type = share_spec[0]
@@ -49,7 +52,7 @@ def parse_share_spec(share_spec: List[str]) -> Dict:
     
     paths = [p.strip() for p in paths_str.split(',') if p.strip()]
     
-    users = []
+    users: list[dict[str, str]] = []
     for user_spec in users_str.split(','):
         user_spec = user_spec.strip()
         if not user_spec:
@@ -86,100 +89,107 @@ def create_samba_user(username: str, password: str) -> None:
     run(f"smbpasswd -e {safe_username}", check=False)
 
 
-def setup_samba_share(config: SetupConfig, share_spec: List[str] = None, **_) -> None:
+def setup_samba_share(config: SetupConfig, share_spec: Optional[list[str]] = None, **_ : Any) -> None:
     share_config = parse_share_spec(share_spec)
-    
+
     share_name = share_config['share_name']
     access_type = share_config['access_type']
     paths = share_config['paths']
     users = share_config['users']
-    
+
     if not paths:
         raise ValueError(f"No paths specified for share: {share_name}")
-    
+
     if not users:
         raise ValueError(f"No users specified for share: {share_name}")
-    
+
     primary_path = paths[0]
-    safe_path = shlex.quote(primary_path)
-    
+
     for path in paths:
         os.makedirs(path, exist_ok=True)
-    
+
     if len(paths) > 1:
         print(f"  Note: Multiple paths provided, configuring primary path {primary_path} in Samba")
         print(f"  All paths will have permissions set: {', '.join(paths)}")
     else:
         print(f"  Ensured path exists: {primary_path}")
-    
+
     group_name = f"smb_{share_name}_{access_type}"
     safe_group = shlex.quote(group_name)
-    
+
     result = run(f"getent group {safe_group}", check=False)
     if result.returncode != 0:
         run(f"groupadd {safe_group}")
         print(f"  Created group: {group_name}")
-    
+
     for user_info in users:
         username = user_info['username']
         password = user_info['password']
         safe_username = shlex.quote(username)
-        
+
         create_samba_user(username, password)
         run(f"usermod -aG {safe_group} {safe_username}")
         print(f"  Added {username} to group {group_name}")
-    
+
     for path in paths:
         safe_path_iter = shlex.quote(path)
         run(f"chgrp -R {safe_group} {safe_path_iter}")
-        
+
         if access_type == "write":
             run(f"chmod -R 2775 {safe_path_iter}")
         else:
             run(f"chmod -R 2755 {safe_path_iter}")
-    
+
     print(f"  Set {'write' if access_type == 'write' else 'read-only'} permissions on {len(paths)} path(s)")
-    
+
     smb_conf = "/etc/samba/smb.conf"
     section_marker = f"[{share_name}_{access_type}]"
-    
-    config_exists = False
-    if os.path.exists(smb_conf):
-        with open(smb_conf, 'r') as f:
-            config_exists = section_marker in f.read()
-    
-    if not config_exists:
-        share_lines = [
-            section_marker,
-            f"   comment = {share_name} ({access_type})",
-            f"   path = {primary_path}",
-            f"   valid users = @{group_name}",
-            "   browseable = yes",
-            f"   read only = {'yes' if access_type == 'read' else 'no'}",
-        ]
-        
-        if access_type == "write":
-            share_lines.append(f"   write list = @{group_name}")
-        
-        share_lines.extend([
-            f"   create mask = {'0644' if access_type == 'read' else '0664'}",
-            f"   directory mask = {'0755' if access_type == 'read' else '0775'}",
-            f"   force group = {group_name}",
-        ])
-        
-        share_config = "\n" + "\n".join(share_lines) + "\n"
-        
+
+    share_lines = [
+        section_marker,
+        f"   comment = {share_name} ({access_type})",
+        f"   path = {primary_path}",
+        f"   valid users = @{group_name}",
+        "   browseable = yes",
+        f"   read only = {'yes' if access_type == 'read' else 'no'}",
+    ]
+
+    if access_type == "write":
+        share_lines.append(f"   write list = @{group_name}")
+
+    share_lines.extend([
+        f"   create mask = {'0644' if access_type == 'read' else '0664'}",
+        f"   directory mask = {'0755' if access_type == 'read' else '0775'}",
+        f"   force group = {group_name}",
+    ])
+
+    desired_section = "\n" + "\n".join(share_lines) + "\n"
+
+    if not os.path.exists(smb_conf):
+        run(f"touch {smb_conf}")
+
+    with open(smb_conf, 'r') as f:
+        content = f.read()
+
+    pattern = re.compile(r"(?ms)^\s*" + re.escape(section_marker) + r".*?(?=^\s*\[|\Z)")
+
+    if not pattern.search(content):
         with open(smb_conf, 'a') as f:
-            f.write(share_config)
-        
+            f.write(desired_section)
         print(f"  Added share configuration: {share_name}_{access_type}")
     else:
-        print(f"  Share configuration already exists: {share_name}_{access_type}")
-    
+        new_content = pattern.sub(desired_section.strip() + "\n", content)
+        if new_content != content:
+            with open(smb_conf, 'w') as f:
+                f.write(new_content)
+            print(f"  Updated share configuration: {share_name}_{access_type}")
+        else:
+            print(f"  Share configuration already exists: {share_name}_{access_type}")
+
     result = run("testparm -s", check=False)
     if result.returncode != 0:
         print("  Warning: Samba configuration may have errors")
-    
+
     run("systemctl reload smbd")
     print(f"  ✓ Share configured: {share_name}_{access_type} -> {primary_path}")
 

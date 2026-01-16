@@ -1,9 +1,12 @@
 """Nginx configuration generator for deployed applications."""
 
+from __future__ import annotations
+
 import os
 import shlex
 import sys
-from typing import Optional, List, Dict
+from typing import Optional
+from lib.types import Deployments, StrList, PathPair 
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from lib.remote_utils import run
@@ -13,7 +16,7 @@ SSL_PROTOCOLS = "TLSv1.2 TLSv1.3"
 SSL_CIPHERS = "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384"
 
 
-def get_ssl_cert_path(domain: Optional[str]) -> tuple:
+def get_ssl_cert_path(domain: Optional[str]) -> PathPair:
     """Get SSL certificate paths, preferring Let's Encrypt over self-signed."""
     cert_name = domain or 'default'
     
@@ -28,7 +31,7 @@ def get_ssl_cert_path(domain: Optional[str]) -> tuple:
     return (cert_file, key_file)
 
 
-def generate_self_signed_cert(domain: str) -> tuple:
+def generate_self_signed_cert(domain: str) -> PathPair:
     """Generate self-signed SSL certificate for a domain."""
     cert_file, key_file = get_ssl_cert_path(domain)
     
@@ -44,12 +47,12 @@ def generate_self_signed_cert(domain: str) -> tuple:
     return (cert_file, key_file)
 
 
-def _make_cache_maps(domain_slug: str) -> tuple:
+def _make_cache_maps(domain_slug: str) -> tuple[str, str, str]:
     """Generate map blocks for caching and return variable names."""
     expires_var = f"$assets_expires_{domain_slug}"
     cc_var = f"$assets_cc_{domain_slug}"
     
-    maps = f"""
+    maps = fr"""
 map $uri {expires_var} {{
     default                    off;
     ~*\.(jpg|jpeg|png|gif|webp|svg|ico)$  1y;
@@ -72,7 +75,7 @@ map $uri {cc_var} {{
 
 
 def _make_proxy_location(path: str, port: int, comment: str, enable_websocket: bool = False,
-                        expires_var: str = None, cc_var: str = None) -> str:
+                        expires_var: Optional[str] = None, cc_var: Optional[str] = None) -> str:
     """Generate a proxy_pass location block."""
     slash = "/" if path != "/" else ""
     
@@ -129,7 +132,7 @@ def _make_proxy_location(path: str, port: int, comment: str, enable_websocket: b
 
 
 def _make_static_location(path: str, serve_path: str, index_file: str, try_files: str, comment: str,
-                         expires_var: str = None, cc_var: str = None) -> str:
+                         expires_var: Optional[str] = None, cc_var: Optional[str] = None) -> str:
     """Generate a static file serving location block."""
     directive = "root" if path == "/" else "alias"
     
@@ -192,7 +195,7 @@ def _make_api_server_block(domain: str, port: int) -> str:
 """
 
 
-def generate_merged_nginx_config(domain: Optional[str], deployments: List[Dict], is_default: bool = False) -> str:
+def generate_merged_nginx_config(domain: Optional[str], deployments: Deployments, is_default: bool = False) -> str:
     """Generate a merged nginx configuration for multiple deployments on the same domain."""
     cert_file, key_file = get_ssl_cert_path(domain)
     server_name_directive = f"server_name {domain};" if domain else "server_name _;"
@@ -203,7 +206,7 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: List[Dict],
     
     sorted_deployments = sorted(deployments, key=lambda d: len(d['path']), reverse=True)
     
-    api_configs = []
+    api_configs: StrList = []
     if domain:
         for dep in sorted_deployments:
             if dep.get('backend_port') and (dep.get('frontend_port') or dep.get('frontend_serve_path')):
@@ -213,7 +216,7 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: List[Dict],
                     api_domain = f"api.{domain}"
                     api_configs.append(_make_api_server_block(api_domain, dep['backend_port']))
 
-    locations = []
+    locations: StrList = []
     
     locations.append("""    location /.well-known/acme-challenge/ {
         root /var/www/letsencrypt;
@@ -240,10 +243,13 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: List[Dict],
                             expires_var=expires_var, cc_var=cc_var
                         ))
                     else:
-                        locations.append(_make_proxy_location(
-                            location_path, frontend_port, f"# Frontend for {path}", enable_websocket=True,
-                            expires_var=expires_var, cc_var=cc_var
-                        ))
+                        if frontend_port is not None:
+                            locations.append(_make_proxy_location(
+                                location_path, frontend_port, f"# Frontend for {path}", enable_websocket=True,
+                                expires_var=expires_var, cc_var=cc_var
+                            ))
+                        else:
+                            raise ValueError("frontend_port must be set to create proxy location")
                 else:
                     # Subpath strategy: Backend at /path/api, Frontend at /path
                     
@@ -260,10 +266,13 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: List[Dict],
                             expires_var=expires_var, cc_var=cc_var
                         ))
                     else:
-                        locations.append(_make_proxy_location(
-                            location_path, frontend_port, f"# Frontend for {path}", enable_websocket=True,
-                            expires_var=expires_var, cc_var=cc_var
-                        ))
+                        if frontend_port is not None:
+                            locations.append(_make_proxy_location(
+                                location_path, frontend_port, f"# Frontend for {path}", enable_websocket=True,
+                                expires_var=expires_var, cc_var=cc_var
+                            ))
+                        else:
+                            raise ValueError("frontend_port must be set to create proxy location")
             else:
                 locations.append(_make_proxy_location(
                     location_path, proxy_port, f"# Proxy for {path}",
@@ -314,7 +323,7 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: List[Dict],
     return "\n".join([cache_maps] + api_configs + [main_config])
 
 
-def create_nginx_sites_for_groups(grouped_deployments: Dict[Optional[str], List[Dict]]) -> None:
+def create_nginx_sites_for_groups(grouped_deployments: dict[Optional[str], Deployments]) -> None:
     """Create nginx site configurations for grouped deployments."""
     
     run("mkdir -p /var/www/letsencrypt/.well-known/acme-challenge")

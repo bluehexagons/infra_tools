@@ -1,25 +1,28 @@
 """Utility functions for remote setup."""
 
+from __future__ import annotations
+
 import re
 import secrets
 import shlex
 import string
 import subprocess
 import sys
+from typing import Optional
 
 
-_DRY_RUN = False
+_dry_run = False
 
 
 def set_dry_run(enabled: bool) -> None:
     """Set dry-run mode globally."""
-    global _DRY_RUN
-    _DRY_RUN = enabled
+    global _dry_run
+    _dry_run = enabled
 
 
 def is_dry_run() -> bool:
     """Check if dry-run mode is enabled."""
-    return _DRY_RUN
+    return _dry_run
 
 
 def validate_username(username: str) -> bool:
@@ -32,17 +35,18 @@ def generate_password(length: int = 16) -> str:
     return ''.join(secrets.choice(alphabet) for _ in range(length))
 
 
-def run(cmd: str, check: bool = True, cwd: str = None) -> subprocess.CompletedProcess:
+def run(cmd: str, check: bool = True, cwd: Optional[str] = None, capture_output: bool = False, text: bool = True) -> subprocess.CompletedProcess[str]:
     print(f"  Running: {cmd[:80]}..." if len(cmd) > 80 else f"  Running: {cmd}")
     sys.stdout.flush()
     
     if is_dry_run():
         print("  [DRY-RUN] Command not executed")
-        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+        # CompletedProcess.args expects a sequence; provide a one-element list for consistency
+        return subprocess.CompletedProcess(args=[cmd], returncode=0, stdout="", stderr="")
     
-    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=cwd)
+    result = subprocess.run(cmd, shell=True, capture_output=capture_output, text=text, cwd=cwd)
     if check and result.returncode != 0:
-        if result.stderr:
+        if getattr(result, 'stderr', None):
             print(f"    Warning: {result.stderr[:200]}")
             sys.stdout.flush()
     return result

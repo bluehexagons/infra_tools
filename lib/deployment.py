@@ -1,5 +1,6 @@
 """Deployment orchestration - shared between local and remote environments."""
 
+from __future__ import annotations
 import os
 import shlex
 import shutil
@@ -7,22 +8,20 @@ import secrets
 import re
 import socket
 import sys
-from typing import Optional, Set
+from typing import Optional, Any
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from lib.remote_utils import run
 
 from .deploy_utils import (
-    parse_deploy_spec,
     create_safe_directory_name,
     detect_project_type,
     get_project_root,
     should_reverse_proxy,
-    get_git_commit_hash,
     save_deployment_metadata,
     should_redeploy
 )
-from .systemd_service import create_rails_service, create_node_service
+from .systemd_service import create_rails_service
 
 
 class DeploymentOrchestrator:
@@ -112,9 +111,9 @@ class DeploymentOrchestrator:
             self._ensure_dir(os.path.dirname(release_path_abs))
             os.symlink(persistent_path, release_path_abs)
     
-    def _get_used_ports(self) -> Set[int]:
+    def _get_used_ports(self) -> set[int]:
         """Get set of ports currently used by infra_tools services."""
-        used_ports = set()
+        used_ports: set[int] = set()
         try:
             if not os.path.exists("/etc/systemd/system"):
                 return used_ports
@@ -188,7 +187,7 @@ class DeploymentOrchestrator:
     def deploy_from_archive(self, source_path: str, domain: Optional[str], path: str, 
                            git_url: str, commit_hash: Optional[str], 
                            full_deploy: bool = True, keep_source: bool = False,
-                           api_subdomain: bool = False) -> dict:
+                           api_subdomain: bool = False) -> dict[str, Any]:
         dest_path = self.get_deployment_path(domain, path, git_url)
         app_name = os.path.basename(dest_path)
         persistent_root = self._get_persistent_root(app_name)
@@ -286,7 +285,7 @@ class DeploymentOrchestrator:
             service_name = f"rails-{app_name}"
             backend_port = self._get_assigned_port(service_name, 3000)
             
-            cors_origins = []
+            cors_origins: list[str] = []
             if domain:
                 cors_origins.append(f"https://{domain}")
                 cors_origins.append(f"https://www.{domain}")

@@ -2,6 +2,8 @@
 
 Automated setup scripts for remote Linux systems (Debian).
 
+> **🤖 AI Agents:** See [`.github/ai-agents/`](.github/ai-agents/) for development guidance.
+
 ## Quick Start
 
 ```bash

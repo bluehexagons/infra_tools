@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 
+from __future__ import annotations
+
 import argparse
 import shlex
 from dataclasses import dataclass, asdict
-from typing import Optional, Dict, List, Any
+from typing import Optional
+from lib.types import StrList, NestedStrList, JSONDict, MaybeStr
 
 
 SYSTEM_TYPES = [
@@ -26,11 +29,11 @@ class SetupConfig:
     host: str
     username: str
     system_type: str
-    password: Optional[str] = None
-    ssh_key: Optional[str] = None
+    password: MaybeStr = None
+    ssh_key: MaybeStr = None
     timezone: str = "UTC"
-    friendly_name: Optional[str] = None
-    tags: Optional[List[str]] = None
+    friendly_name: MaybeStr = None
+    tags: Optional[StrList] = None
     enable_rdp: bool = False
     enable_x2go: bool = False
     enable_audio: bool = False
@@ -43,18 +46,18 @@ class SetupConfig:
     install_go: bool = False
     install_node: bool = False
     custom_steps: Optional[str] = None
-    deploy_specs: Optional[List[List[str]]] = None
+    deploy_specs: Optional[NestedStrList] = None
     full_deploy: bool = False
     enable_ssl: bool = False
     ssl_email: Optional[str] = None
     enable_cloudflare: bool = False
     api_subdomain: bool = False
     enable_samba: bool = False
-    samba_shares: Optional[List[List[str]]] = None
+    samba_shares: Optional[NestedStrList] = None
     enable_smbclient: bool = False
-    smb_mounts: Optional[List[List[str]]] = None
-    sync_specs: Optional[List[List[str]]] = None
-    scrub_specs: Optional[List[List[str]]] = None
+    smb_mounts: Optional[NestedStrList] = None
+    sync_specs: Optional[NestedStrList] = None
+    scrub_specs: Optional[NestedStrList] = None
     include_desktop: bool = False
     include_cli_tools: bool = False
     include_desktop_apps: bool = False
@@ -63,9 +66,9 @@ class SetupConfig:
     include_web_server: bool = False
     include_web_firewall: bool = False
     
-    def to_remote_args(self) -> List[str]:
+    def to_remote_args(self) -> StrList:
         """Generate command line arguments for remote execution."""
-        args = []
+        args: StrList = []
         
         args.append(f"--system-type {shlex.quote(self.system_type)}")
         args.append(f"--username {shlex.quote(self.username)}")
@@ -158,7 +161,7 @@ class SetupConfig:
                 
         return args
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> JSONDict:
         data = asdict(self)
         data.pop('host', None)
         data.pop('system_type', None)
@@ -167,7 +170,7 @@ class SetupConfig:
         return data
     
     @classmethod
-    def from_dict(cls, host: str, system_type: str, data: Dict[str, Any]) -> 'SetupConfig':
+    def from_dict(cls, host: str, system_type: str, data: JSONDict) -> 'SetupConfig':
         tags_str = data.get('tags')
         if tags_str and isinstance(tags_str, str):
             data['tags'] = [tag.strip() for tag in tags_str.split(',') if tag.strip()]

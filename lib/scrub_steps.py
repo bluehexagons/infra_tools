@@ -1,14 +1,27 @@
 """Data integrity checking with par2 and systemd timers."""
 
+from __future__ import annotations
+
 import os
 import shlex
 import hashlib
-from typing import List
+import time
+from typing import Optional, Any
 
 from lib.config import SetupConfig
 from lib.setup_common import REMOTE_INSTALL_DIR
 from lib.remote_utils import run, is_package_installed
-from lib.mount_utils import is_path_under_mnt, get_mount_ancestor
+from lib.mount_utils import validate_mount_for_sync, validate_smb_connectivity, is_path_under_mnt, get_mount_ancestor
+from lib.disk_utils import get_disk_usage_details
+from lib.validation import (
+    validate_filesystem_path, 
+    validate_database_path, 
+    validate_redundancy_percentage,
+    validate_service_name_uniqueness
+)
+from lib.operation_log import create_operation_logger
+from lib.transaction import create_transaction
+from lib.service_manager import ServiceManager
 from lib.task_utils import (
     validate_frequency,
     get_timer_calendar,
@@ -18,7 +31,6 @@ from lib.task_utils import (
 
 
 def install_par2(config: SetupConfig) -> None:
-    """Install par2cmdline if not already installed."""
     if is_package_installed("par2"):
         print("  ✓ par2 already installed")
         return
@@ -26,16 +38,7 @@ def install_par2(config: SetupConfig) -> None:
     run("apt-get install -y -qq par2")
     print("  ✓ par2 installed")
 
-
-def parse_scrub_spec(scrub_spec: List[str]) -> dict:
-    """Parse scrub specification.
-    
-    Args:
-        scrub_spec: [directory, database_path, redundancy, frequency]
-        
-    Returns:
-        dict with 'directory', 'database_path', 'redundancy', 'frequency'
-    """
+def parse_scrub_spec(scrub_spec: list[str]) -> dict[str, Any]:
     if len(scrub_spec) != 4:
         raise ValueError(f"Invalid scrub spec: expected 4 arguments, got {len(scrub_spec)}")
     
@@ -69,38 +72,90 @@ def parse_scrub_spec(scrub_spec: List[str]) -> dict:
         'frequency': frequency
     }
 
-
-def create_scrub_service(config: SetupConfig, scrub_spec: List[str] = None, **_) -> None:
-    """Create par2 systemd service and timer for data integrity checking.
+def create_scrub_service(config: SetupConfig, scrub_spec: Optional[list[str]] = None, **_ : Any) -> None:
+    if not scrub_spec:
+        raise ValueError("scrub_spec is required")
     
-    Args:
-        config: SetupConfig object
-        scrub_spec: [directory, database_path, redundancy, frequency]
-    """
     scrub_config = parse_scrub_spec(scrub_spec)
     
-    directory = scrub_config['directory']
-    database_path = scrub_config['database_path']
-    redundancy = scrub_config['redundancy']
-    frequency = scrub_config['frequency']
+    directory: str = scrub_config['directory']
+    database_path: str = scrub_config['database_path']
+    redundancy: str = scrub_config['redundancy']
+    frequency: str = scrub_config['frequency']
+    redundancy_value: str = redundancy[:-1]  # trimmed '%' for command-line usage
     
-    path_hash = hashlib.md5(f"{directory}:{database_path}".encode()).hexdigest()[:8]
-    safe_dir = directory.replace('/', '_').strip('_')
-    service_name = f"scrub-{safe_dir}-{path_hash}"
+    logger = create_operation_logger("scrub", directory=directory, database_path=database_path, 
+                                    redundancy=redundancy, frequency=frequency)
+    transaction = create_transaction(f"scrub_{int(time.time())}", logger, timeout_seconds=3600)
+    
+    try:
+        transaction.add_validation_step(
+            lambda: validate_filesystem_path(directory, must_exist=True, check_writable=False),
+            f"Validate directory path: {directory}",
+            "validate_directory"
+        )
+        transaction.add_validation_step(
+            lambda: validate_database_path(database_path, directory),
+            f"Validate database path: {database_path}",
+            "validate_database"
+        )
+        transaction.add_validation_step(
+            lambda: validate_mount_for_sync(directory, "directory"),
+            f"Validate directory mount: {directory}",
+            "validate_directory_mount"
+        )
+        transaction.add_validation_step(
+            lambda: validate_mount_for_sync(database_path, "database"),
+            f"Validate database mount: {database_path}",
+            "validate_database_mount"
+        )
+        
+        def validate_redundancy():
+            redundancy_int = validate_redundancy_percentage(redundancy)
+            if redundancy_int < 1 or redundancy_int > 100:
+                raise ValueError(f"Redundancy percentage must be between 1 and 100: {redundancy_int}")
+            return redundancy_int
+        
+        transaction.add_validation_step(
+            validate_redundancy,
+            f"Validate redundancy percentage: {redundancy}",
+            "validate_redundancy"
+        )
+        
+        if not transaction.execute():
+            logger.log_error("validation_failed", "Pre-scrub validation failed")
+            transaction.rollback("Validation failed")
+            return
+        
+        logger.log_metric("validation_success", True)
+        
+        path_hash = hashlib.md5(f"{directory}:{database_path}".encode()).hexdigest()[:8]
+        safe_dir = directory.replace('/', '_').strip('_')
+        service_name = f"scrub-{safe_dir}-{path_hash}"
+        
+        if not validate_service_name_uniqueness(service_name, []):
+            service_manager = ServiceManager(config)
+            existing_services = service_manager.list_backup_services()
+            if not validate_service_name_uniqueness(service_name, existing_services):
+                raise ValueError(f"Service name '{service_name}' conflicts with existing service")
+        
+        logger.log_step("service_name_validation", "completed", f"Validated service name: {service_name}")
+        
+    except Exception as e:
+        logger.log_error("scrub_setup_error", str(e))
+        if transaction:
+            transaction.rollback(str(e))
+        raise
     
     if not os.path.exists(directory):
         if is_path_under_mnt(directory):
             mount_ancestor = get_mount_ancestor(directory)
             if not mount_ancestor:
                 print(f"  ⚠ Warning: Directory {directory} is under /mnt but no mount point found")
-                print(f"    Skipping directory creation - ensure mount is configured first")
             else:
-                print(f"    Creating subdirectory under mount: {directory}")
                 os.makedirs(directory, exist_ok=True)
                 run(f"chown {shlex.quote(config.username)}:{shlex.quote(config.username)} {shlex.quote(directory)}")
         else:
-            print(f"  ⚠ Warning: Directory does not exist: {directory}")
-            print(f"    Creating directory: {directory}")
             os.makedirs(directory, exist_ok=True)
             run(f"chown {shlex.quote(config.username)}:{shlex.quote(config.username)} {shlex.quote(directory)}")
     
@@ -110,13 +165,10 @@ def create_scrub_service(config: SetupConfig, scrub_spec: List[str] = None, **_)
             mount_ancestor = get_mount_ancestor(db_parent)
             if not mount_ancestor:
                 print(f"  ⚠ Warning: Database parent {db_parent} is under /mnt but no mount point found")
-                print(f"    Skipping directory creation - ensure mount is configured first")
             else:
-                print(f"    Creating database directory under mount: {db_parent}")
                 os.makedirs(db_parent, exist_ok=True)
                 run(f"chown {shlex.quote(config.username)}:{shlex.quote(config.username)} {shlex.quote(db_parent)}")
         else:
-            print(f"    Creating database directory: {db_parent}")
             os.makedirs(db_parent, exist_ok=True)
             run(f"chown {shlex.quote(config.username)}:{shlex.quote(config.username)} {shlex.quote(db_parent)}")
     
@@ -129,6 +181,15 @@ def create_scrub_service(config: SetupConfig, scrub_spec: List[str] = None, **_)
     
     needs_mount_check = dir_on_smb or db_on_smb or dir_under_mnt or db_under_mnt
     
+    if dir_on_smb or db_on_smb:
+        logger.log_step("mount_validation_enhanced", "started", "Performing enhanced mount validation")
+        if dir_on_smb:
+            logger.log_metric("directory_smb_connectivity", validate_smb_connectivity(directory))
+        if db_on_smb:
+            logger.log_metric("database_smb_connectivity", validate_smb_connectivity(database_path))
+        logger.log_step("mount_validation_enhanced", "completed", "Enhanced mount validation completed")
+    
+    check_script = f"{REMOTE_INSTALL_DIR}/steps/check_scrub_mounts.py"
     log_dir = "/var/log/scrub"
     log_file = f"{log_dir}/{service_name}.log"
     
@@ -139,11 +200,9 @@ def create_scrub_service(config: SetupConfig, scrub_spec: List[str] = None, **_)
     redundancy_value = redundancy[:-1]
     
     service_file = f"/etc/systemd/system/{service_name}.service"
+    exec_condition = f"ExecCondition=/usr/bin/python3 {check_script} {shlex.quote(directory)} {shlex.quote(database_path)}" if needs_mount_check else ""
     
-    if needs_mount_check:
-        check_script = f"{REMOTE_INSTALL_DIR}/steps/check_scrub_mounts.py"
-        
-        service_content = f"""[Unit]
+    service_content = f"""[Unit]
 Description=Data integrity check for {escaped_directory}
 After=local-fs.target
 
@@ -151,20 +210,7 @@ After=local-fs.target
 Type=oneshot
 User=root
 Group=root
-ExecCondition=/usr/bin/python3 {check_script} {shlex.quote(directory)} {shlex.quote(database_path)}
-ExecStart=/usr/bin/python3 {scrub_script} {shlex.quote(directory)} {shlex.quote(database_path)} {shlex.quote(redundancy_value)} {shlex.quote(log_file)}
-StandardOutput=journal
-StandardError=journal
-"""
-    else:
-        service_content = f"""[Unit]
-Description=Data integrity check for {escaped_directory}
-After=local-fs.target
-
-[Service]
-Type=oneshot
-User=root
-Group=root
+{exec_condition}
 ExecStart=/usr/bin/python3 {scrub_script} {shlex.quote(directory)} {shlex.quote(database_path)} {shlex.quote(redundancy_value)} {shlex.quote(log_file)}
 StandardOutput=journal
 StandardError=journal
@@ -201,10 +247,10 @@ WantedBy=timers.target
         update_service_name = f"{service_name}-update"
         update_service_file = f"/etc/systemd/system/{update_service_name}.service"
         update_timer_file = f"/etc/systemd/system/{update_service_name}.timer"
-        update_calendar = "*-*-* *:30:00"
         
-        if needs_mount_check:
-            update_service_content = f"""[Unit]
+        exec_condition_update = f"ExecCondition=/usr/bin/python3 {check_script} {shlex.quote(directory)} {shlex.quote(database_path)}" if needs_mount_check else ""
+        
+        update_service_content = f"""[Unit]
 Description=Parity update check for {escaped_directory}
 After=local-fs.target
 
@@ -212,25 +258,11 @@ After=local-fs.target
 Type=oneshot
 User=root
 Group=root
-ExecCondition=/usr/bin/python3 {check_script} {shlex.quote(directory)} {shlex.quote(database_path)}
+{exec_condition_update}
 ExecStart=/usr/bin/python3 {scrub_script} {shlex.quote(directory)} {shlex.quote(database_path)} {shlex.quote(redundancy_value)} {shlex.quote(log_file)} --no-verify
 StandardOutput=journal
 StandardError=journal
 """
-        else:
-            update_service_content = f"""[Unit]
-Description=Parity update check for {escaped_directory}
-After=local-fs.target
-
-[Service]
-Type=oneshot
-User=root
-Group=root
-ExecStart=/usr/bin/python3 {scrub_script} {shlex.quote(directory)} {shlex.quote(database_path)} {shlex.quote(redundancy_value)} {shlex.quote(log_file)} --no-verify
-StandardOutput=journal
-StandardError=journal
-"""
-        
         with open(update_service_file, 'w') as f:
             f.write(update_service_content)
         
@@ -238,7 +270,7 @@ StandardError=journal
 Description=Timer for parity updates of {escaped_directory} (hourly)
 
 [Timer]
-OnCalendar={update_calendar}
+OnCalendar=*-*-* *:30:00
 Persistent=true
 AccuracySec=1m
 Unit={update_service_name}.service
@@ -246,7 +278,6 @@ Unit={update_service_name}.service
 [Install]
 WantedBy=timers.target
 """
-        
         with open(update_timer_file, 'w') as f:
             f.write(update_timer_content)
         
@@ -254,44 +285,46 @@ WantedBy=timers.target
     
     print(f"  ℹ Performing initial par2 creation (fast mode)...")
     
-    result = run(
-        f"/usr/bin/python3 {scrub_script} {shlex.quote(directory)} {shlex.quote(database_path)} "
-        f"{shlex.quote(redundancy_value)} {shlex.quote(log_file)} --no-verify",
-        check=False
-    )
+    def perform_initial_par2():
+        result = run(f"/usr/bin/python3 {scrub_script} {shlex.quote(directory)} {shlex.quote(database_path)} {shlex.quote(redundancy_value)} {shlex.quote(log_file)} --no-verify", check=False)
+        if result.returncode != 0:
+            raise RuntimeError(f"Initial par2 creation failed: {result.stderr or result.stdout}")
+        return result.stdout
     
-    if result.returncode == 0:
-        print(f"  ✓ Initial par2 creation completed")
-    else:
-        print(f"  ⚠ Warning: Initial par2 creation may have encountered issues")
-        if result.stderr:
-            print(f"    Error details: {result.stderr.strip()}")
-        if result.stdout:
-            print(f"    Output: {result.stdout.strip()}")
+    def rollback_initial_par2():
+        try:
+            for file in os.listdir(directory):
+                if file.endswith('.par2'):
+                    os.remove(os.path.join(directory, file))
+        except Exception:
+            pass
+    
+    try:
+        transaction.add_step(perform_initial_par2, rollback_initial_par2, "Initial par2 creation", "initial_par2_creation")
+        
+        if not transaction.execute():
+            logger.log_error("initial_par2_failed", "Initial par2 failed")
+            transaction.rollback("Initial par2 failed")
+        else:
+            logger.log_step("initial_par2", "completed", "Initial par2 successful")
+        
+        logger.complete("completed", "Scrub service configured")
+        
+    except Exception as e:
+        logger.log_error("initial_par2_error", str(e))
+        if transaction:
+            transaction.rollback(str(e))
     
     run("systemctl daemon-reload")
     run(f"systemctl enable {shlex.quote(service_name)}.timer")
     run(f"systemctl start {shlex.quote(service_name)}.timer")
     if update_service_name:
-        enable_result = run(f"systemctl enable {shlex.quote(update_service_name)}.timer", check=False)
-        start_result = run(f"systemctl start {shlex.quote(update_service_name)}.timer", check=False)
-        if enable_result.returncode != 0:
-            print("  ⚠ Warning: Failed to enable parity update timer")
-            if enable_result.stderr:
-                print(f"    Enable error: {enable_result.stderr.strip()}")
-        if start_result.returncode != 0:
-            print("  ⚠ Warning: Failed to start parity update timer")
-            if start_result.stderr:
-                print(f"    Start error: {start_result.stderr.strip()}")
+        run(f"systemctl enable {shlex.quote(update_service_name)}.timer", check=False)
+        run(f"systemctl start {shlex.quote(update_service_name)}.timer", check=False)
     
-    print(f"  ✓ Enabled and started timer")
+    dir_disk = get_disk_usage_details(directory)
+    db_disk = get_disk_usage_details(os.path.dirname(database_path))
+    logger.log_metric("directory_disk_usage_percent", dir_disk['usage_percent'], "percent")
+    logger.log_metric("database_disk_usage_percent", db_disk['usage_percent'], "percent")
     
-    result = run(f"systemctl list-timers {shlex.quote(service_name)}.timer --no-pager", check=False)
-    if result.returncode == 0:
-        print(f"  ℹ Timer status:")
-        for line in result.stdout.strip().split('\n'):
-            if line.strip():
-                print(f"    {line}")
-    
-    print(f"  ✓ Scrub configured: {directory} (redundancy: {redundancy}, frequency: {frequency})")
-    print(f"  ℹ Logs: {log_file}")
+    print(f"  ✓ Scrub configured: {directory} ({redundancy}, {frequency})")

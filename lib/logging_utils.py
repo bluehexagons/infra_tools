@@ -1,5 +1,7 @@
 """Reusable logging helpers for infra tools services."""
 
+from __future__ import annotations
+
 from logging import Logger, Formatter, INFO, StreamHandler, getLogger
 from logging.handlers import RotatingFileHandler
 from pathlib import Path

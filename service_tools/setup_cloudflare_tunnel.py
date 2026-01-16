@@ -6,6 +6,8 @@ This script automates the complete setup of Cloudflare tunnels for deployed site
 It can be run directly on the server after the initial --cloudflare preconfiguration.
 """
 
+from __future__ import annotations
+
 import os
 import sys
 import json
@@ -14,7 +16,8 @@ import platform
 import glob
 import re
 import shutil
-from typing import List, Dict, Optional
+from typing import Optional, Any
+from lib.types import StrDict, JSONDict
 
 
 CONFIG_DIR = "/etc/cloudflared"
@@ -22,7 +25,7 @@ STATE_FILE = "/etc/cloudflared/tunnel-state.json"
 NGINX_SITES_DIR = "/etc/nginx/sites-enabled"
 
 
-def run_command(cmd: List[str], check: bool = True, capture_output: bool = False) -> subprocess.CompletedProcess:
+def run_command(cmd: list[str], check: bool = True, capture_output: bool = False) -> subprocess.CompletedProcess[str]:
     """Run a command and optionally capture output."""
     try:
         result = subprocess.run(
@@ -38,7 +41,8 @@ def run_command(cmd: List[str], check: bool = True, capture_output: bool = False
             if e.stderr:
                 print(f"  Error: {e.stderr}")
             sys.exit(1)
-        return e
+        raise
+
 
 
 def check_root():
@@ -114,7 +118,7 @@ def authenticate_cloudflare():
     return cert_file
 
 
-def create_tunnel(tunnel_name: str) -> Dict:
+def create_tunnel(tunnel_name: str) -> dict[str, Any]:
     """Create a new Cloudflare tunnel."""
     print(f"\nCreating tunnel: {tunnel_name}")
     
@@ -158,9 +162,9 @@ def create_tunnel(tunnel_name: str) -> Dict:
     }
 
 
-def discover_nginx_sites() -> List[Dict[str, str]]:
+def discover_nginx_sites() -> list[StrDict]:
     """Discover sites from nginx configuration."""
-    sites = []
+    sites: list[StrDict] = []
     
     if not os.path.exists(NGINX_SITES_DIR):
         print(f"  ⚠ Nginx sites directory not found: {NGINX_SITES_DIR}")
@@ -197,7 +201,7 @@ def discover_nginx_sites() -> List[Dict[str, str]]:
     return sites
 
 
-def generate_config_yml(tunnel: Dict, sites: List[Dict]) -> str:
+def generate_config_yml(tunnel: JSONDict, sites: list[StrDict]) -> str:
     """Generate cloudflared config.yml content."""
     config_lines = [
         f"tunnel: {tunnel['id']}",
@@ -216,9 +220,9 @@ def generate_config_yml(tunnel: Dict, sites: List[Dict]) -> str:
     return "\n".join(config_lines)
 
 
-def save_state(tunnel: Dict, sites: List[Dict]):
+def save_state(tunnel: JSONDict, sites: list[StrDict]):
     """Save tunnel state for future runs."""
-    state = {
+    state: JSONDict = {
         'tunnel': tunnel,
         'sites': sites
     }
@@ -231,7 +235,7 @@ def save_state(tunnel: Dict, sites: List[Dict]):
     os.chmod(STATE_FILE, 0o600)
 
 
-def load_state() -> Optional[Dict]:
+def load_state() -> Optional[dict[str, Any]]:
     """Load saved tunnel state."""
     if not os.path.exists(STATE_FILE):
         return None
@@ -259,7 +263,7 @@ def install_and_start_service(tunnel_name: str):
     print("✓ Service started and enabled")
 
 
-def show_tunnel_info(tunnel: Dict, sites: List[Dict]):
+def show_tunnel_info(tunnel: JSONDict, sites: list[StrDict]):
     """Display tunnel configuration information."""
     print("\n" + "=" * 50)
     print("Tunnel Configuration Summary")
@@ -324,6 +328,9 @@ def main(interactive: bool = True, auto_update: bool = False):
             run_command(['systemctl', 'restart', 'cloudflared'], check=False)
         
         return True
+    
+    # Interactive mode falls through to show configuration and return True on success
+    return True
     
     if state:
         print("\n✓ Found existing tunnel configuration")

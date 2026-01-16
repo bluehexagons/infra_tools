@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+from __future__ import annotations
+
 import sys
 from lib.config import SetupConfig
 from lib.setup_common import setup_main

@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 
-import argparse
 import sys
 import os
 import json
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from typing import Optional, cast
+from lib.types import Deployments, JSONDict, StrList, JSONList
 from lib.config import SetupConfig
 from lib.validators import validate_host, validate_username
 from lib.display import print_name_and_tags
@@ -24,11 +26,11 @@ from lib.setup_common import (
 )
 
 
-def get_all_configs(pattern: str = None) -> list:
+def get_all_configs(pattern: Optional[str] = None) -> Deployments:
     if not os.path.exists(SETUP_CACHE_DIR):
         return []
 
-    configs = []
+    configs: Deployments = []
     try:
         for filename in os.listdir(SETUP_CACHE_DIR):
             if not filename.endswith('.json'):
@@ -37,7 +39,8 @@ def get_all_configs(pattern: str = None) -> list:
             filepath = os.path.join(SETUP_CACHE_DIR, filename)
             try:
                 with open(filepath, 'r') as f:
-                    data = json.load(f)
+                    data = cast(JSONDict, json.load(f))
+                    # Leave complex normalization to consumers; keep data as JSONDict
                     configs.append(data)
             except Exception:
                 continue
@@ -47,18 +50,20 @@ def get_all_configs(pattern: str = None) -> list:
 
     if pattern:
         pattern = pattern.lower()
-        filtered = []
+        filtered: Deployments = []
         for c in configs:
-            if pattern in c.get('host', '').lower():
+            if pattern in str(c.get('host', '')).lower():
                 filtered.append(c)
                 continue
-            if pattern in c.get('name', '').lower():
+            if pattern in str(c.get('name', '')).lower():
                 filtered.append(c)
                 continue
-            tags = c.get('tags', [])
-            if any(pattern in tag.lower() for tag in tags):
-                filtered.append(c)
-                continue
+            tags: StrList = cast(StrList, c.get('tags', []))
+            for tag in tags:
+                # tags were normalized when loading, so tag is a str
+                if pattern in tag.lower():
+                    filtered.append(c)
+                    break
         configs = filtered
     
     configs.sort(key=lambda x: x.get('host', ''))
@@ -66,8 +71,8 @@ def get_all_configs(pattern: str = None) -> list:
     return configs
 
 
-def list_configurations(pattern: str = None) -> None:
-    configs = get_all_configs(pattern)
+def list_configurations(pattern: Optional[str] = None) -> None:
+    configs: Deployments = get_all_configs(pattern)
 
     if not configs:
         if pattern:
@@ -95,8 +100,8 @@ def list_configurations(pattern: str = None) -> None:
         print(f"{host:<{host_width}} {name:<{name_width}} {system_type:<{type_width}} {username:<{user_width}}")
 
 
-def show_info(pattern: str = None) -> None:
-    configs = get_all_configs(pattern)
+def show_info(pattern: Optional[str] = None) -> None:
+    configs: Deployments = get_all_configs(pattern)
 
     if not configs:
         if pattern:
@@ -123,18 +128,21 @@ def show_info(pattern: str = None) -> None:
         print(f"User: {username}")
         print("-" * 60)
         
-        deploy_specs = args.get('deploy_specs', [])
+        deploy_specs: JSONList = cast(JSONList, args.get('deploy_specs', []))
         if deploy_specs:
             print("Deployments:")
             for spec in deploy_specs:
-                if isinstance(spec, list) and len(spec) >= 2:
-                    print(f"  - {spec[1]} -> {spec[0]}")
+                if isinstance(spec, list):
+                    try:
+                        print(f"  - {spec[1]} -> {spec[0]}")
+                    except Exception:
+                        print(f"  - {spec}")
                 else:
                     print(f"  - {spec}")
         else:
             print("Deployments: None")
             
-        features = []
+        features: StrList = []
         if args.get('enable_ssl'): features.append("SSL")
         if args.get('enable_cloudflare'): features.append("Cloudflare")
         if args.get('install_ruby'): features.append("Ruby")
@@ -147,19 +155,27 @@ def show_info(pattern: str = None) -> None:
         if features:
             print(f"Features: {', '.join(features)}")
         
-        samba_shares = args.get('samba_shares', [])
+        samba_shares: JSONList = cast(JSONList, args.get('samba_shares', []))
         if samba_shares:
             print("Samba Shares:")
             for share in samba_shares:
-                if isinstance(share, list) and len(share) >= 4:
-                    print(f"  - {share[1]}_{share[0]}: {share[2]}")
+                if isinstance(share, list):
+                    try:
+                        # Attempt to index expected elements safely
+                        share_list: JSONList = cast(JSONList, share)
+                        name_part = str(share_list[1])
+                        host_part = str(share_list[0])
+                        path_part = str(share_list[2])
+                        print(f"  - {name_part}_{host_part}: {path_part}")
+                    except Exception:
+                        continue
         
         print()
 
 
-def remove_configurations(args: list) -> int:
+def remove_configurations(args: StrList) -> int:
     force = False
-    pattern = None
+    pattern: Optional[str] = None
     
     for arg in args:
         if arg == '-y':
@@ -255,9 +271,9 @@ def execute_patch(config: SetupConfig) -> int:
     return 0
 
 
-def deploy_configurations(args: list) -> int:
+def deploy_configurations(args: StrList) -> int:
     force = False
-    pattern = None
+    pattern: Optional[str] = None
     
     for arg in args:
         if arg == '-y':
@@ -269,7 +285,7 @@ def deploy_configurations(args: list) -> int:
         print("Error: Pattern required for deploy command")
         return 1
         
-    configs = get_all_configs(pattern)
+    configs: Deployments = get_all_configs(pattern)
     
     if not configs:
         print(f"No configurations found matching '{pattern}'")
@@ -295,13 +311,15 @@ def deploy_configurations(args: list) -> int:
         
         print(f"\nDeploying to {host}...")
         try:
+            if not isinstance(host, str) or not isinstance(system_type, str) or not isinstance(args_dict, dict):
+                raise ValueError("Invalid cached configuration format")
+            args_dict = cast(JSONDict, args_dict)
             config = SetupConfig.from_dict(host, system_type, args_dict)
             if execute_patch(config) != 0:
                 failures += 1
         except Exception as e:
             print(f"Error creating config for {host}: {e}")
             failures += 1
-            
     if failures > 0:
         print(f"\nCompleted with {failures} failure(s).")
         return 1

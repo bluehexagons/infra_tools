@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 
 import argparse
 import io
@@ -9,7 +10,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-from typing import Optional
+from typing import Optional, Callable
 
 from lib.config import SetupConfig
 from lib.validators import validate_host, validate_username
@@ -28,7 +29,7 @@ REMOTE_INSTALL_DIR = "/opt/infra_tools"
 GIT_CACHE_DIR = os.path.expanduser("~/.cache/infra_tools/git_repos")
 
 
-def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = None, dry_run: bool = False) -> Optional[tuple]:
+def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = None, dry_run: bool = False) -> Optional[tuple[str, Optional[str]]]:
     repo_name = git_url.rstrip('/').split('/')[-1]
     if repo_name.endswith('.git'):
         repo_name = repo_name[:-4]
@@ -179,9 +180,9 @@ def prepare_deployments(config: SetupConfig, target_dir: str) -> None:
     print("Cloning repositories locally...")
     print(f"{'='*60}")
     
-    for deploy_spec, git_url in config.deploy_specs:
+    for _deploy_spec, git_url in config.deploy_specs:
         result = clone_repository(git_url, target_dir, cache_dir=GIT_CACHE_DIR, dry_run=config.dry_run)
-        if result:
+        if result is not None:
             clone_path, commit_hash = result
             if commit_hash and not config.dry_run:
                 repo_name = os.path.basename(clone_path)
@@ -257,8 +258,9 @@ def run_remote_setup(config: SetupConfig) -> int:
                     cwd=REMOTE_INSTALL_DIR
                 )
                 
-                for line in process.stdout:
-                    print(line, end='', flush=True)
+                if process.stdout is not None:
+                    for line in process.stdout:
+                        print(line, end='', flush=True)
                     
                 return process.wait()
             except Exception as e:
@@ -304,11 +306,13 @@ tar xzf - && \
                     env=ssh_env,
                 )
 
-                process.stdin.write(tar_data)
-                process.stdin.close()
+                if process.stdin is not None:
+                    process.stdin.write(tar_data)
+                    process.stdin.close()
 
-                for line in io.TextIOWrapper(process.stdout, encoding='utf-8'):
-                    print(line, end='', flush=True)
+                if process.stdout is not None:
+                    for line in io.TextIOWrapper(process.stdout, encoding='utf-8'):
+                        print(line, end='', flush=True)
 
                 return process.wait()
             except Exception as e:
@@ -320,7 +324,7 @@ tar xzf - && \
             shutil.rmtree(build_dir)
 
 
-def setup_main(system_type: str, description: str, success_msg_fn) -> int:
+def setup_main(system_type: str, description: str, success_msg_fn: Callable[[SetupConfig], None]) -> int:
     allow_steps = (system_type == "custom_steps")
     parser = create_argument_parser(description, allow_steps)
     args = parser.parse_args()

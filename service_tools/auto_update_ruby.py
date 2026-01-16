@@ -6,6 +6,8 @@ This script updates Ruby to the latest stable version via rbenv.
 It also updates the bundler gem.
 """
 
+from __future__ import annotations
+
 import os
 import sys
 import subprocess
@@ -13,7 +15,7 @@ import syslog
 import re
 
 
-def run_rbenv_command(cmd: str) -> subprocess.CompletedProcess:
+def run_rbenv_command(cmd: str) -> subprocess.CompletedProcess[str]:
     """Run a command with rbenv environment loaded."""
     full_cmd = f'export PATH="$HOME/.rbenv/bin:$PATH" && eval "$(rbenv init -)" && {cmd}'
     
@@ -30,7 +32,7 @@ def run_rbenv_command(cmd: str) -> subprocess.CompletedProcess:
 def update_ruby_build():
     """Update ruby-build to get latest Ruby definitions."""
     try:
-        result = subprocess.run(
+        subprocess.run(
             ["git", "-C", os.path.expanduser("~/.rbenv/plugins/ruby-build"), "pull"],
             capture_output=True,
             text=True,
@@ -48,7 +50,7 @@ def get_latest_stable_ruby() -> str:
     if result.returncode != 0:
         return ""
     
-    versions = []
+    versions: list[str] = []
     for line in result.stdout.split('\n'):
         line = line.strip()
         if re.match(r'^\d+\.\d+\.\d+$', line):

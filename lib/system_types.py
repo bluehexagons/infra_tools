@@ -1,6 +1,9 @@
 """System type definitions and step configurations."""
 
+from __future__ import annotations
+
 from lib.config import SetupConfig
+from lib.types import StepFunc
 from .common_steps import (
     update_and_upgrade_packages,
     ensure_sudo_installed,
@@ -80,7 +83,7 @@ from .scrub_steps import (
 )
 
 
-COMMON_STEPS = [
+COMMON_STEPS: list[tuple[str, StepFunc]] = [
     ("Updating and upgrading packages", update_and_upgrade_packages),
     ("Ensuring sudo is installed", ensure_sudo_installed),
     ("Configuring UTF-8 locale", configure_locale),
@@ -92,7 +95,7 @@ COMMON_STEPS = [
     ("Configuring swap", configure_swap),
 ]
 
-DESKTOP_STEPS = [
+DESKTOP_STEPS: list[tuple[str, StepFunc]] = [
     ("Installing desktop environment", install_desktop),
     ("Installing xRDP", install_xrdp),
     ("Installing X2Go", install_x2go),
@@ -101,13 +104,13 @@ DESKTOP_STEPS = [
     ("Configuring gnome-keyring", configure_gnome_keyring),
 ]
 
-DESKTOP_SECURITY_STEPS = [
+DESKTOP_SECURITY_STEPS: list[tuple[str, StepFunc]] = [
     ("Hardening xRDP with TLS and group restrictions", harden_xrdp),
     ("Hardening X2Go access", harden_x2go),
     ("Installing fail2ban for RDP brute-force protection", configure_fail2ban),
 ]
 
-SECURITY_STEPS = [
+SECURITY_STEPS: list[tuple[str, StepFunc]] = [
     ("Configuring firewall", configure_firewall),
     ("Hardening SSH configuration", harden_ssh),
     ("Hardening kernel parameters", harden_kernel),
@@ -115,42 +118,42 @@ SECURITY_STEPS = [
     ("Configuring automatic restart service", configure_auto_restart),
 ]
 
-FINAL_STEPS = [
+FINAL_STEPS: list[tuple[str, StepFunc]] = [
     ("Checking if restart required", check_restart_required),
 ]
 
-CLI_STEPS = [
+CLI_STEPS: list[tuple[str, StepFunc]] = [
     ("Installing CLI tools", install_cli_tools),
 ]
 
-DESKTOP_APP_STEPS = [
+DESKTOP_APP_STEPS: list[tuple[str, StepFunc]] = [
     ("Installing desktop applications", install_desktop_apps),
     ("Configuring default browser", configure_default_browser),
 ]
 
-PC_DEV_APP_STEPS = [
+PC_DEV_APP_STEPS: list[tuple[str, StepFunc]] = [
     ("Installing Remmina", install_remmina),
     ("Installing desktop applications", install_desktop_apps),
     ("Configuring default browser", configure_default_browser),
 ]
 
-WORKSTATION_DEV_APP_STEPS = [
+WORKSTATION_DEV_APP_STEPS: list[tuple[str, StepFunc]] = [
     ("Installing workstation dev applications", install_workstation_dev_apps),
     ("Configuring default browser", configure_vivaldi_browser),
 ]
 
-WEB_SERVER_STEPS = [
+WEB_SERVER_STEPS: list[tuple[str, StepFunc]] = [
     ("Installing nginx", install_nginx),
     ("Configuring nginx security settings", configure_nginx_security),
     ("Creating Hello World website", create_hello_world_site),
     ("Configuring default site", configure_default_site),
 ]
 
-WEB_FIREWALL_STEPS = [
+WEB_FIREWALL_STEPS: list[tuple[str, StepFunc]] = [
     ("Configuring firewall for web server", configure_firewall_web),
 ]
 
-PROXMOX_HARDENING_STEPS = [
+PROXMOX_HARDENING_STEPS: list[tuple[str, StepFunc]] = [
     ("Creating remoteusers group", create_remoteusers_group),
     ("Configuring swap", configure_swap),
     ("Hardening SSH configuration", harden_ssh),
@@ -161,7 +164,7 @@ PROXMOX_HARDENING_STEPS = [
 ]
 
 
-STEP_FUNCTIONS = {
+STEP_FUNCTIONS: dict[str, StepFunc] = {
     'install_ruby': install_ruby_step,
     'install_go': install_go_step,
     'install_node': install_node_step,
@@ -221,7 +224,7 @@ STEP_FUNCTIONS = {
 }
 
 
-def get_steps_for_system_type(config: SetupConfig) -> list:
+def get_steps_for_system_type(config: SetupConfig) -> list[tuple[str, StepFunc]]:
     """Build step list based on system type and feature flags.
     
     This function uses a declarative approach where each system type is defined
@@ -230,7 +233,7 @@ def get_steps_for_system_type(config: SetupConfig) -> list:
     """
     if config.system_type == "custom_steps" and config.custom_steps:
         step_names = config.custom_steps.split()
-        steps = []
+        steps: list[tuple[str, StepFunc]] = []
         for step_name in step_names:
             if step_name in STEP_FUNCTIONS:
                 func = STEP_FUNCTIONS[step_name]
@@ -250,7 +253,7 @@ def get_steps_for_system_type(config: SetupConfig) -> list:
         steps.extend(WEB_FIREWALL_STEPS)
     
     if config.system_type in ["server_web", "server_lite"]:
-        security_steps = [
+        security_steps: list[tuple[str, StepFunc]] = [
             ("Hardening SSH configuration", harden_ssh),
             ("Hardening kernel parameters", harden_kernel),
             ("Configuring automatic security updates", configure_auto_updates),
@@ -261,7 +264,7 @@ def get_steps_for_system_type(config: SetupConfig) -> list:
         steps.extend(SECURITY_STEPS)
     
     if config.include_desktop:
-        desktop_steps = []
+        desktop_steps: list[tuple[str, StepFunc]] = []
         
         desktop_steps.append(("Installing desktop environment", install_desktop))
         

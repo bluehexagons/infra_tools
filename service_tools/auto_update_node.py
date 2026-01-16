@@ -6,6 +6,8 @@ This script updates Node.js to the latest LTS version via nvm.
 It also updates global npm and pnpm packages.
 """
 
+from __future__ import annotations
+
 import os
 import sys
 import subprocess
@@ -15,7 +17,7 @@ import syslog
 NVM_DIR = "/opt/nvm"
 
 
-def run_nvm_command(cmd: str) -> subprocess.CompletedProcess:
+def run_nvm_command(cmd: str) -> subprocess.CompletedProcess[str]:
     """Run a command with nvm environment loaded."""
     full_cmd = f'export NVM_DIR="{NVM_DIR}" && [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && {cmd}'
     

@@ -1,7 +1,7 @@
 """Systemd service creation for deployed applications."""
 
+from __future__ import annotations
 import os
-import shlex
 import secrets
 import re
 import sys
@@ -76,7 +76,7 @@ def create_node_service(app_name: str, app_path: str, port: int,
 
 def generate_rails_service(app_name: str, app_path: str, secret_key_base: str, port: int = 3000,
                           web_user: str = "www-data", web_group: str = "www-data",
-                          extra_env: Optional[dict] = None) -> str:
+                          extra_env: Optional[dict[str, str]] = None) -> str:
     """Generate systemd service configuration for a Rails application."""
     env_lines = [
         'Environment="RAILS_ENV=production"',
@@ -112,7 +112,7 @@ WantedBy=multi-user.target
 
 def create_rails_service(app_name: str, app_path: str, port: int,
                         web_user: str, web_group: str,
-                        env_vars: Optional[dict] = None) -> None:
+                        env_vars: Optional[dict[str, str]] = None) -> None:
     """Create and enable a Rails systemd service."""
     service_name = f"rails-{app_name}"
     service_file = f"/etc/systemd/system/{service_name}.service"

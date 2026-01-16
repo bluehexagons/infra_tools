@@ -1,8 +1,10 @@
 """SSL/TLS and Let's Encrypt certificate management."""
 
+from __future__ import annotations
 import os
 import shlex
-from typing import Optional, Callable, List
+from typing import Optional
+from lib.types import StrList, Deployments
 
 from lib.config import SetupConfig
 from lib.remote_utils import run
@@ -15,7 +17,7 @@ def install_certbot(config: SetupConfig) -> None:
     print("  ✓ certbot installed")
 
 
-def obtain_letsencrypt_certificate(domains: List[str], email: Optional[str] = None, cert_name: Optional[str] = None) -> bool:
+def obtain_letsencrypt_certificate(domains: StrList, email: Optional[str] = None, cert_name: Optional[str] = None) -> bool:
     """
     Obtain a Let's Encrypt certificate for multiple domains using SANs.
     Let's Encrypt allows up to 100 Subject Alternative Names per certificate.
@@ -65,7 +67,7 @@ def obtain_letsencrypt_certificate(domains: List[str], email: Optional[str] = No
         return False
 
 
-def create_domain_cert_links(domains: List[str], cert_name: str) -> None:
+def create_domain_cert_links(domains: list[str], cert_name: str) -> None:
     """Create symlinks for each domain to shared certificate for easy SSL status checking."""
     cert_dir = f"/etc/letsencrypt/live/{cert_name}"
     
@@ -107,7 +109,7 @@ def setup_certificate_renewal() -> None:
     print("  ✓ Automatic renewal configured")
 
 
-def setup_ssl_for_deployments(deployments: List[dict], email: Optional[str] = None) -> None:
+def setup_ssl_for_deployments(deployments: Deployments, email: Optional[str] = None) -> None:
     """
     Set up Let's Encrypt SSL using SANs for all deployed domains.
     Requests single certificate covering all domains for efficiency.
@@ -116,7 +118,7 @@ def setup_ssl_for_deployments(deployments: List[dict], email: Optional[str] = No
     print("Setting up Let's Encrypt SSL certificates...")
     print("=" * 60)
     
-    domains = set()
+    domains: set[str] = set()
     for dep in deployments:
         domain = dep.get('domain')
         if domain:
@@ -125,6 +127,12 @@ def setup_ssl_for_deployments(deployments: List[dict], email: Optional[str] = No
             if dep.get('backend_port') and (dep.get('frontend_port') or dep.get('frontend_serve_path')):
                 if not dep.get('path') or dep.get('path') == '/':
                     domains.add(f"api.{domain}")
+    
+    # grouped deployments for nginx generation
+    grouped_deployments: dict[Optional[str], Deployments] = {}
+    for dep in deployments:
+        key = dep.get('domain')
+        grouped_deployments.setdefault(key, []).append(dep)
     
     if not domains:
         print("  No domains to configure SSL for (only local path deployments)")
@@ -152,13 +160,14 @@ def setup_ssl_for_deployments(deployments: List[dict], email: Optional[str] = No
     
     print("\n  Regenerating nginx configurations to use Let's Encrypt certificates...")
     
-    from collections import defaultdict
     from lib.nginx_config import create_nginx_sites_for_groups
     
-    grouped_deployments = defaultdict(list)
+    grouped_deployments: dict[Optional[str], Deployments] = {}
     for dep in deployments:
-        grouped_deployments[dep['domain']].append(dep)
+        key = dep.get('domain')
+        grouped_deployments.setdefault(key, []).append(dep)
     
+    # Create nginx sites from grouped deployments
     create_nginx_sites_for_groups(grouped_deployments)
     
     setup_certificate_renewal()

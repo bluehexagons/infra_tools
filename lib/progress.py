@@ -1,14 +1,15 @@
 """Progress tracking for remote setup steps."""
 
+from __future__ import annotations
 import sys
-from typing import List, Callable, Any
+from typing import Callable, Any
 
-_steps: List[tuple] = []
+_steps: list[tuple[str, Callable[..., Any]]] = []
 _current_step: int = 0
 _total_steps: int = 0
 
 
-def register_step(name: str, func: Callable) -> None:
+def register_step(name: str, func: Callable[..., Any]) -> None:
     global _steps
     _steps.append((name, func))
 
@@ -24,7 +25,7 @@ def progress_bar(current: int, total: int, width: int = 20) -> str:
     return f"[{bar}] {percent}%"
 
 
-def run_step(step_num: int, name: str, func: Callable, *args: Any, **kwargs: Any) -> Any:
+def run_step(step_num: int, name: str, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
     total = get_total_steps()
     bar = progress_bar(step_num, total)
     print(f"\n{bar} [{step_num}/{total}] {name}")
