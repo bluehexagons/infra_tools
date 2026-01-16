@@ -1,5 +1,7 @@
 """Cloudflare tunnel preconfiguration steps."""
 
+from __future__ import annotations
+
 import os
 
 from lib.config import SetupConfig

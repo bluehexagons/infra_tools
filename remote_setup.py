@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 
+from __future__ import annotations
+
 import argparse
-import getpass
 import os
 import sys
-from typing import Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -14,6 +14,8 @@ from lib.display import print_setup_summary
 from lib.remote_utils import validate_username, detect_os, set_dry_run
 from lib.progress import progress_bar
 from lib.system_types import get_steps_for_system_type
+from typing import Optional
+from lib.types import Deployments 
 
 
 def extract_repo_name(git_url: str) -> str:
@@ -98,16 +100,16 @@ def main() -> int:
         print("=" * 60)
         
         print("\n[1/4] Configuring firewall for Cloudflare tunnel")
-        configure_cloudflare_firewall()
+        configure_cloudflare_firewall(config)
         
         print("\n[2/4] Creating cloudflared configuration directory")
-        create_cloudflared_config_directory()
+        create_cloudflared_config_directory(config)
         
         print("\n[3/4] Configuring nginx for Cloudflare")
-        configure_nginx_for_cloudflare()
+        configure_nginx_for_cloudflare(config)
         
         print("\n[4/4] Installing cloudflared setup helper")
-        install_cloudflared_service_helper()
+        install_cloudflared_service_helper(config)
         
         print("\n✓ Cloudflare tunnel preconfiguration complete")
         print("  Run 'sudo setup-cloudflare-tunnel' to install cloudflared")
@@ -122,7 +124,7 @@ def main() -> int:
         print("Deploying repositories...")
         print("=" * 60)
         
-        deployments = []
+        deployments: Deployments = []
         
         if args.lite_deploy:
             for deploy_specs_str, git_url in config.deploy_specs:
@@ -133,12 +135,14 @@ def main() -> int:
                     print(f"\n⚠ Warning: {source_path} not found, skipping {git_url}")
                     continue
                 
-                commit_hash = None
+                commit_hash: str = ""
                 commit_file = f'/opt/infra_tools/deployments/{repo_name}.commit'
                 if os.path.exists(commit_file):
                     try:
                         with open(commit_file, 'r') as f:
-                            commit_hash = f.read().strip()
+                            content = f.read().strip()
+                            if content:
+                                commit_hash = content
                     except Exception:
                         pass
                 
@@ -182,7 +186,8 @@ def main() -> int:
                     print(f"  ✓ Cloned to {clone_path}")
                     
                     from lib.deploy_utils import get_git_commit_hash
-                    commit_hash = get_git_commit_hash(clone_path)
+                    commit_hash_result = get_git_commit_hash(clone_path)
+                    commit_hash: str = commit_hash_result if commit_hash_result else ""
                     
                     for deploy_spec in deploy_specs_str.split(','):
                         deploy_spec = deploy_spec.strip()
@@ -210,13 +215,12 @@ def main() -> int:
             print("Configuring Nginx...")
             print("=" * 60)
             
-            from collections import defaultdict
             from lib.nginx_config import create_nginx_sites_for_groups
-            from lib.remote_utils import run
             
-            grouped_deployments = defaultdict(list)
+            grouped_deployments: dict[Optional[str], Deployments] = {}
             for dep in deployments:
-                grouped_deployments[dep['domain']].append(dep)
+                key = dep.get('domain')
+                grouped_deployments.setdefault(key, []).append(dep)
             
             create_nginx_sites_for_groups(grouped_deployments)
             
@@ -287,45 +291,33 @@ def main() -> int:
         
         print("\n✓ SMB mount configuration complete")
     
-    if config.sync_specs:
-        from lib.sync_steps import (
-            install_rsync,
-            create_sync_service
-        )
-        
+    if config.sync_specs or config.scrub_specs:
+        from lib.concurrent_sync_scrub import create_concurrent_coordinator
+        from lib.sync_steps import install_rsync
+        from lib.scrub_steps import install_par2
+        from lib.concurrent_operations import OperationPriority
+
         print("\n" + "=" * 60)
-        print("Configuring directory synchronization...")
+        print("Initializing concurrent operations...")
         print("=" * 60)
-        
-        print("\n[1/2] Installing rsync")
-        install_rsync(config)
-        
-        print(f"\n[2/2] Configuring {len(config.sync_specs)} sync job(s)...")
-        for i, sync_spec in enumerate(config.sync_specs, 1):
-            print(f"\n  Sync job {i}/{len(config.sync_specs)}: {sync_spec[0]} → {sync_spec[1]} ({sync_spec[2]})")
-            create_sync_service(config, sync_spec=sync_spec)
-        
-        print("\n✓ Directory synchronization configured")
-    
-    if config.scrub_specs:
-        from lib.scrub_steps import (
-            install_par2,
-            create_scrub_service
-        )
-        
-        print("\n" + "=" * 60)
-        print("Configuring data integrity checking...")
-        print("=" * 60)
-        
-        print("\n[1/2] Installing par2")
-        install_par2(config)
-        
-        print(f"\n[2/2] Configuring {len(config.scrub_specs)} scrub job(s)...")
-        for i, scrub_spec in enumerate(config.scrub_specs, 1):
-            print(f"\n  Scrub job {i}/{len(config.scrub_specs)}: {scrub_spec[0]} (redundancy: {scrub_spec[2]}, frequency: {scrub_spec[3]})")
-            create_scrub_service(config, scrub_spec=scrub_spec)
-        
-        print("\n✓ Data integrity checking configured")
+
+        coordinator = create_concurrent_coordinator(config)
+
+        if config.sync_specs:
+            print(f"\nSubmitting {len(config.sync_specs)} sync job(s) for background execution...")
+            install_rsync(config)
+            for spec in config.sync_specs:
+                coordinator.submit_sync_operation(spec, priority=OperationPriority.NORMAL)
+
+        if config.scrub_specs:
+            print(f"\nSubmitting {len(config.scrub_specs)} scrub job(s) for background execution...")
+            install_par2(config)
+            for spec in config.scrub_specs:
+                coordinator.submit_scrub_operation(spec, priority=OperationPriority.NORMAL)
+
+        print("\nWaiting for background operations to complete...")
+        coordinator.wait_until_idle()
+        print("\n✓ Concurrent operations complete")
     
     print("\n" + "=" * 60)
     print("✓ Remote setup complete!")

@@ -1,14 +1,13 @@
 """Shared deployment utilities for both local and remote environments."""
 
+from __future__ import annotations
 import json
 import os
-import re
-import shlex
 import subprocess
 from typing import Optional
 
 
-def parse_deploy_spec(deploy_spec: str) -> tuple:
+def parse_deploy_spec(deploy_spec: str) -> tuple[Optional[str], str]:
     """Parse deployment spec into (domain, path). Returns (None, path) for local paths."""
     if deploy_spec.startswith('/'):
         return (None, deploy_spec)
@@ -20,7 +19,7 @@ def parse_deploy_spec(deploy_spec: str) -> tuple:
     return (domain, path)
 
 
-def create_safe_directory_name(domain: str, path: str) -> str:
+def create_safe_directory_name(domain: Optional[str], path: str) -> str:
     """Create safe directory name from domain and path."""
     if domain is None:
         safe_path = path.strip('/').replace('/', '_')
@@ -125,7 +124,7 @@ def get_deployment_metadata_path(deployment_path: str) -> str:
 
 def save_deployment_metadata(deployment_path: str, git_url: str, commit_hash: Optional[str]) -> None:
     """Save deployment metadata to track versions."""
-    metadata = {
+    metadata: dict[str, str | None] = {
         'git_url': git_url,
         'commit_hash': commit_hash
     }
@@ -138,7 +137,7 @@ def save_deployment_metadata(deployment_path: str, git_url: str, commit_hash: Op
         print(f"  ⚠ Warning: Could not save deployment metadata: {e}")
 
 
-def load_deployment_metadata(deployment_path: str) -> Optional[dict]:
+def load_deployment_metadata(deployment_path: str) -> Optional[dict[str, str | None]]:
     """Load deployment metadata if it exists."""
     metadata_path = get_deployment_metadata_path(deployment_path)
     

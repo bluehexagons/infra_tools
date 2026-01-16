@@ -5,6 +5,8 @@ This script is called by systemd services as an ExecCondition to ensure
 mounts are available before attempting to scrub.
 """
 
+from __future__ import annotations
+
 import sys
 import os
 

@@ -1,5 +1,7 @@
 """Common setup steps for all system types."""
 
+from __future__ import annotations
+
 import os
 import shlex
 import subprocess

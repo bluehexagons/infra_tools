@@ -6,6 +6,7 @@ This script checks if a system restart is required (e.g., for kernel updates) an
 restarts the system only if no interactive users are logged in.
 """
 
+from __future__ import annotations
 import os
 import sys
 import subprocess
@@ -17,7 +18,7 @@ def check_restart_required() -> bool:
     return os.path.exists("/var/run/reboot-required")
 
 
-def get_logged_in_users() -> list:
+def get_logged_in_users() -> list[str]:
     """Get list of logged in users using 'who' command."""
     try:
         result = subprocess.run(
@@ -26,7 +27,7 @@ def get_logged_in_users() -> list:
             text=True,
             check=True
         )
-        users = [line for line in result.stdout.strip().split('\n') if line]
+        users: list[str] = [line for line in result.stdout.strip().split('\n') if line]
         return users
     except subprocess.CalledProcessError:
         return []

@@ -1,5 +1,7 @@
 """Shared utilities for scheduled tasks (sync, scrub, etc)."""
 
+from __future__ import annotations
+from typing import Optional
 from lib.config import SetupConfig
 
 
@@ -23,7 +25,7 @@ def validate_frequency(frequency: str, label: str = "frequency") -> None:
         )
 
 
-def get_timer_calendar(frequency: str, hour_offset: int = None) -> str:
+def get_timer_calendar(frequency: str, hour_offset: Optional[int] = None) -> str:
     """Get systemd timer OnCalendar value for frequency.
     
     Args:

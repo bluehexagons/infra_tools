@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 
+from __future__ import annotations
+
 import hashlib
 import json
 import os
 import re
 from dataclasses import asdict
-from typing import Optional
+from typing import Optional, Any
 
 from lib.config import SetupConfig
 
@@ -24,7 +26,7 @@ def get_cache_path_for_host(host: str) -> str:
 def save_setup_command(config: SetupConfig) -> None:
     cache_path = get_cache_path_for_host(config.host)
     
-    cache_data = {
+    cache_data: dict[str, Any] = {
         "host": config.host,
         "system_type": config.system_type,
         "args": config.to_dict(),

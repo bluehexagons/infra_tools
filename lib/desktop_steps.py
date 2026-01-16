@@ -1,5 +1,7 @@
 """Desktop and workstation setup steps."""
 
+from __future__ import annotations
+from typing import Optional
 import os
 import shlex
 
@@ -203,7 +205,6 @@ X-GNOME-Autostart-enabled=true
 
 def harden_x2go(config: SetupConfig) -> None:
     """Harden X2Go by restricting to remoteusers group."""
-    sshd_config = "/etc/ssh/sshd_config"
     x2go_config = "/etc/x2go/x2goserver.conf"
     
     if not os.path.exists(x2go_config):
@@ -534,7 +535,7 @@ def configure_default_browser(config: SetupConfig) -> None:
     safe_username = shlex.quote(config.username)
     mimeapps_path = f"/home/{config.username}/.config/mimeapps.list"
     
-    browser_desktops = {
+    browser_desktops: dict[str, Optional[str]] = {
         "brave": "brave-browser.desktop",
         "firefox": "firefox.desktop",
         "vivaldi": "vivaldi-stable.desktop",

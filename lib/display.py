@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 
+from typing import Optional
 from lib.config import SetupConfig
 
 
@@ -27,7 +29,7 @@ def print_rdp_x2go_info(config: SetupConfig) -> None:
         print(f"  Client: x2goclient, Session: XFCE")
 
 
-def print_setup_summary(config: SetupConfig, description: str = None) -> None:
+def print_setup_summary(config: SetupConfig, description: Optional[str] = None) -> None:
     """Print a summary of the setup configuration."""
     if description:
         print("=" * 60)
@@ -105,7 +107,7 @@ def print_setup_summary(config: SetupConfig, description: str = None) -> None:
     
     if config.scrub_specs:
         print(f"Scrub Jobs: {len(config.scrub_specs)} job(s)")
-        for directory, db_path, redundancy, frequency in config.scrub_specs:
+        for directory, _db_path, redundancy, frequency in config.scrub_specs:
             print(f"  - {directory} ({redundancy}, {frequency})")
     
     print("=" * 60)

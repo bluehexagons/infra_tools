@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Manual systemd service setup for deployed Rails applications."""
 
-import subprocess
+from __future__ import annotations
+
 import sys
 import os
 

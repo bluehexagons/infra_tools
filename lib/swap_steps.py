@@ -1,5 +1,7 @@
 """Swap configuration steps."""
 
+from __future__ import annotations
+
 from lib.config import SetupConfig
 from lib.remote_utils import run
 

@@ -1,7 +1,9 @@
 """Deployment steps for web applications on remote systems."""
 
+from __future__ import annotations
 import os
 import sys
+from typing import Any, Optional
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -17,9 +19,9 @@ def ensure_app_user(username: str) -> None:
 
 
 def deploy_repository(source_path: str, deploy_spec: str, git_url: str, 
-                      commit_hash: str = None, full_deploy: bool = True,
+                      commit_hash: Optional[str] = None, full_deploy: bool = True,
                       web_user: str = "rails", web_group: str = "rails", 
-                      keep_source: bool = False, api_subdomain: bool = False, **_) -> None:
+                      keep_source: bool = False, api_subdomain: bool = False, **_ : Any) -> dict[str, Any]:
     from lib.deploy_utils import parse_deploy_spec
     
     ensure_app_user(web_user)

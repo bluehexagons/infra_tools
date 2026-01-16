@@ -1,8 +1,11 @@
 """Mount validation utilities for checking if paths are on mounted filesystems."""
 
+from __future__ import annotations
 import os
 import subprocess
-from typing import Optional
+import time
+import threading
+from typing import Optional, Any, Callable
 
 
 def is_path_under_mnt(path: str) -> bool:
@@ -80,3 +83,174 @@ def validate_mount_for_sync(path: str, path_name: str = "path") -> bool:
     # Not under /mnt and no mount requirement - allow it
     # (could be a local filesystem path)
     return True
+
+
+def validate_smb_connectivity(path: str) -> bool:
+    """Test actual SMB functionality for mounted paths.
+    
+    Args:
+        path: Path to test (should be SMB mount)
+        
+    Returns:
+        bool: True if SMB connectivity is working, False otherwise
+    """
+    if not is_path_mounted(path):
+        print(f"Path is not mounted: {path}")
+        return False
+    
+    # Check if this looks like an SMB mount
+    try:
+        result = subprocess.run(
+            ['findmnt', '-n', '-o', 'FSTYPE', path],
+            capture_output=True, text=True, check=True
+        )
+        fstype = result.stdout.strip()
+        if fstype not in ['cifs', 'smb3', 'smb2']:
+            print(f"Path {path} is not an SMB mount (type: {fstype})")
+            return False
+    except subprocess.CalledProcessError:
+        print(f"Could not determine filesystem type for {path}")
+        return False
+    
+    # Test SMB-specific operations
+    test_file = os.path.join(path, '.smb_connectivity_test')
+    
+    try:
+        # Test file creation
+        with open(test_file, 'w') as f:
+            f.write('smb test')
+        
+        # Test file read
+        with open(test_file, 'r') as f:
+            content = f.read()
+            if content != 'smb test':
+                raise ValueError("Content mismatch")
+        
+        # Test file deletion
+        os.unlink(test_file)
+        
+        # Test directory listing (common SMB operation)
+        # Optionally check a small listing to assert basic directory operations work
+        _ = list(os.listdir(path))[:5]
+        print(f"SMB connectivity test passed for {path}")
+        return True
+        
+    except (OSError, IOError, ValueError) as e:
+        print(f"SMB connectivity test failed for {path}: {e}")
+        # Cleanup test file if it exists
+        try:
+            if os.path.exists(test_file):
+                os.unlink(test_file)
+        except OSError:
+            # Best-effort cleanup: ignore errors removing temporary test file
+            pass
+        return False
+
+
+def get_mount_status_details(path: str) -> dict[str, Any]:
+    """Get detailed mount status information.
+    
+    Args:
+        path: Path to analyze
+        
+    Returns:
+        Dict with detailed mount information
+    """
+    details: dict[str, Any] = {
+        'path': path,
+        'is_mounted': is_path_mounted(path),
+        'mount_ancestor': get_mount_ancestor(path),
+        'is_under_mnt': is_path_under_mnt(path),
+        'fstype': None,
+        'mount_options': None,
+        'remote_server': None,
+        'accessible': False
+    }
+    
+    if not details['is_mounted']:
+        return details
+    
+    try:
+        # Get filesystem type and options
+        result = subprocess.run(
+            ['findmnt', '-n', '-o', 'FSTYPE,OPTIONS', path],
+            capture_output=True, text=True, check=True
+        )
+        parts = result.stdout.strip().split()
+        if len(parts) >= 1:
+            details['fstype'] = parts[0]
+        if len(parts) >= 2:
+            details['mount_options'] = parts[1]
+    except subprocess.CalledProcessError:
+        # If findmnt fails, leave fstype and options as None; details stay usable.
+        pass
+    
+    # Check for remote server (SMB/NFS)
+    if details['fstype'] in ['cifs', 'smb3', 'smb2', 'nfs', 'nfs4']:
+        try:
+            result = subprocess.run(
+                ['findmnt', '-n', '-o', 'SOURCE', path],
+                capture_output=True, text=True, check=True
+            )
+            source = result.stdout.strip()
+            if '//' in source or ':' in source:
+                details['remote_server'] = source
+        except subprocess.CalledProcessError:
+            # If findmnt fails, leave remote_server as None.
+            pass
+    
+    # Test accessibility
+    try:
+        test_file = os.path.join(path, '.accessibility_test')
+        with open(test_file, 'w') as f:
+            f.write('test')
+        os.unlink(test_file)
+        details['accessible'] = True
+    except (OSError, IOError):
+        details['accessible'] = False
+    
+    return details
+
+
+def monitor_mount_with_callback(path: str, callback_func: Callable[[str], Any], check_interval: int = 10) -> threading.Thread:
+    """Monitor mount status in background and call callback on issues.
+    
+    Args:
+        path: Path to monitor
+        callback_func: Function to call when mount issues detected
+        check_interval: Check interval in seconds
+
+    Returns:
+        daemon Thread that is monitoring the mount
+    """
+    def monitor_loop():
+        while True:
+            if not validate_mount_for_sync(path, "monitored path"):
+                try:
+                    callback_func(f"Mount issue detected for {path}")
+                except Exception as e:
+                    print(f"Error in mount monitoring callback: {e}")
+            time.sleep(check_interval)
+    
+    monitor_thread = threading.Thread(target=monitor_loop, daemon=True)
+    monitor_thread.start()
+    return monitor_thread
+
+
+def validate_multiple_paths(paths: list[str], path_names: Optional[list[str]] = None) -> dict[str, bool]:
+    """Validate multiple paths at once.
+    
+    Args:
+        paths: List of paths to validate
+        path_names: Optional list of descriptive names for paths
+        
+    Returns:
+        Dict mapping path to validation result
+    """
+    if path_names is None:
+        path_names = [f"path_{i}" for i in range(len(paths))]
+    
+    results: dict[str, bool] = {}
+    for path, name in zip(paths, path_names):
+        results[path] = validate_mount_for_sync(path, name)
+    return results
