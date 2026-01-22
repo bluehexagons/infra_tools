@@ -1,0 +1,19 @@
+#!/bin/bash
+# xRDP Session Script with Cleanup Handlers
+
+# Cleanup function to run on session exit
+cleanup() {
+    # Kill PulseAudio
+    pulseaudio --kill 2>/dev/null || true
+    # Kill child processes of this session
+    pkill -P $$ 2>/dev/null || true
+}
+
+# Set trap to run cleanup on exit
+trap cleanup EXIT INT TERM
+
+# Kill any existing PulseAudio to prevent conflicts
+pulseaudio --kill 2>/dev/null || true
+
+# Start session with dbus for proper session management
+exec dbus-launch --exit-with-session {SESSION_CMD}
