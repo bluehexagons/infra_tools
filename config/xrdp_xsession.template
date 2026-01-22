@@ -1,8 +1,15 @@
 #!/bin/bash
-# xRDP Session Script with Cleanup Handlers
+# xRDP Session Script with Cleanup Handlers and Error Logging
+
+# Log session start
+logger -t xrdp-session "Session starting for user $USER"
+
+# Redirect errors to session log for troubleshooting
+exec 2> >(tee -a ~/.xsession-errors)
 
 # Cleanup function to run on session exit
 cleanup() {
+    logger -t xrdp-session "Session cleanup triggered for user $USER"
     # Kill PulseAudio
     pulseaudio --kill 2>/dev/null || true
     # Kill child processes of this session
@@ -15,5 +22,12 @@ trap cleanup EXIT INT TERM
 # Kill any existing PulseAudio to prevent conflicts
 pulseaudio --kill 2>/dev/null || true
 
+# Set reasonable resource limits to prevent runaway processes
+# Limit max processes per user (prevents fork bombs)
+ulimit -u 2048 2>/dev/null || true
+# Limit max file size to 10GB (prevents filling disk)
+ulimit -f 10485760 2>/dev/null || true
+
 # Start session with dbus for proper session management
+logger -t xrdp-session "Starting desktop session: {SESSION_CMD}"
 exec dbus-launch --exit-with-session {SESSION_CMD}
