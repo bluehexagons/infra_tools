@@ -583,11 +583,17 @@ def configure_gnome_keyring(config: SetupConfig) -> None:
     """Configure gnome-keyring for desktop setups."""
     safe_username = shlex.quote(config.username)
     
-    # Install keyring packages including seahorse for unlock prompts
-    run("apt-get install -y -qq gnome-keyring libpam-gnome-keyring seahorse libsecret-tools")
+    # Install keyring packages for password storage and auto-unlock
+    run("apt-get install -y -qq gnome-keyring libpam-gnome-keyring libsecret-tools")
     
+    pam_auth = "/etc/pam.d/common-auth"
     pam_password = "/etc/pam.d/common-password"
     pam_session = "/etc/pam.d/common-session"
+    
+    # Add auth line to capture login password for keyring auto-unlock
+    if os.path.exists(pam_auth) and not file_contains(pam_auth, "pam_gnome_keyring.so"):
+        with open(pam_auth, "a") as f:
+            f.write("auth optional pam_gnome_keyring.so\n")
     
     if os.path.exists(pam_password) and not file_contains(pam_password, "pam_gnome_keyring.so"):
         with open(pam_password, "a") as f:
@@ -618,8 +624,10 @@ fi
         run(f"chown {safe_username}:{safe_username} {shlex.quote(profile_path)}")
     
     print("  ✓ gnome-keyring installed/configured (auto-unlock on login, SSH agent integration)")
-    print("    - Seahorse GUI installed for keyring management")
-    print("    - To auto-unlock: set keyring password = login password in Seahorse")
+    print("    - IMPORTANT: For auto-unlock to work:")
+    print("      1. Delete old keyring: rm ~/.local/share/keyrings/login.keyring")
+    print("      2. Log out and log back in - new keyring will be created with login password")
+    print("    - Tip: Install 'seahorse' package if you need a GUI to manage keyrings")
 
 
 def install_smbclient(config: SetupConfig) -> None:
