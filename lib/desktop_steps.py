@@ -97,6 +97,8 @@ def install_xrdp(config: SetupConfig) -> None:
     with open(sesman_config, "w") as f:
         f.write(sesman_content)
     
+    run("systemctl restart xrdp-sesman", check=False)
+    
     if not file_contains(xrdp_config, "tcp_send_buffer_bytes"):
         if file_contains(xrdp_config, "[Globals]"):
             run(f"sed -i '/\\[Globals\\]/a tcp_send_buffer_bytes=32768' {xrdp_config}")
@@ -119,8 +121,16 @@ def install_xrdp(config: SetupConfig) -> None:
     run("systemctl restart xrdp")
 
     xsession_template_path = os.path.join(config_template_dir, 'xrdp_xsession.template')
-    with open(xsession_template_path, 'r', encoding='utf-8') as f:
-        xsession_content = f.read()
+    try:
+        with open(xsession_template_path, 'r', encoding='utf-8') as f:
+            xsession_content = f.read()
+    except FileNotFoundError:
+        print(f"  ⚠ xsession template file not found: {xsession_template_path}")
+        return
+    except Exception as e:
+        print(f"  ⚠ Error reading xsession template: {e}")
+        return
+    
     xsession_content = xsession_content.replace('{SESSION_CMD}', session_cmd)
     
     with open(xsession_path, "w") as f:
@@ -305,7 +315,7 @@ def configure_audio(config: SetupConfig) -> None:
         f.write("echo '=== Session Manager Config ==='\n")
         f.write("grep -A 5 '\\[Sessions\\]' /etc/xrdp/sesman.ini 2>/dev/null || echo 'No Sessions config'\n\n")
         f.write("echo '=== Session Cleanup Script ==='\n")
-        f.write("ls -lh /usr/local/bin/xrdp-session-cleanup.sh 2>/dev/null || echo 'Cleanup script not found'\n\n")
+        f.write("ls -lh /opt/infra_tools/steps/xrdp_session_cleanup.py 2>/dev/null || echo 'Cleanup script not found'\n\n")
         f.write("echo '=== Active Sessions ==='\n")
         f.write("who\n\n")
         f.write("echo '=== User Processes ==='\n")

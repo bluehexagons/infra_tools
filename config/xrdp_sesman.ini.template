@@ -13,7 +13,7 @@ MaxLoginRetry=3
 EndSessionCommand={CLEANUP_SCRIPT_PATH}
 SessionVariables=DBUS_SESSION_BUS_ADDRESS
 Policy=Default
-MaxSessions=1
+MaxSessions=10
 
 [Logging]
 LogFile=/var/log/xrdp-sesman.log

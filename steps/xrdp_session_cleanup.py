@@ -65,7 +65,9 @@ def main() -> int:
     
     # Terminate xRDP-specific processes only (not all user processes)
     # This prevents disrupting other active sessions (SSH, other RDP, etc.)
-    kill_processes(username, "xrdp", exact=False)
+    kill_processes(username, "xrdp-sesexec", exact=True)
+    kill_processes(username, "xrdp-sesman", exact=True)
+    kill_processes(username, "xrdp-chansrv", exact=True)
     
     # Kill session-specific desktop processes
     kill_processes(username, "xfce4-session", exact=False)
