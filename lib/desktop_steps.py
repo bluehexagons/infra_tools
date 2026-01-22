@@ -239,7 +239,6 @@ X-GNOME-Autostart-enabled=true
     run(f"chown -R {safe_username}:{safe_username} {shlex.quote(autostart_dir)}")
     
     print("  ✓ Xfce compositor disabled for X2Go")
-    print("  ✓ Xfce compositor disabled for X2Go (prevents graphical issues)")
 
 
 def harden_x2go(config: SetupConfig) -> None:
