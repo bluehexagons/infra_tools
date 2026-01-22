@@ -25,4 +25,16 @@ SyslogLevel=INFO
 param=Xorg
 
 [Xorg]
-param=Xorg
+; Path to Xorg binary (Debian/Ubuntu standard location)
+param=/usr/lib/xorg/Xorg
+; xrdp-specific xorg.conf for xorgxrdp driver
+param=-config
+param=xrdp/xorg.conf
+; Don't reset after last client disconnects
+param=-noreset
+; Security and networking
+param=-nolisten
+param=tcp
+; Logging
+param=-logfile
+param=.xorgxrdp.%s.log
