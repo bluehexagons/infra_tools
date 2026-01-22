@@ -583,7 +583,8 @@ def configure_gnome_keyring(config: SetupConfig) -> None:
     """Configure gnome-keyring for desktop setups."""
     safe_username = shlex.quote(config.username)
     
-    run("apt-get install -y -qq gnome-keyring libpam-gnome-keyring")
+    # Install keyring packages including seahorse for unlock prompts
+    run("apt-get install -y -qq gnome-keyring libpam-gnome-keyring seahorse libsecret-tools")
     
     pam_password = "/etc/pam.d/common-password"
     pam_session = "/etc/pam.d/common-session"
@@ -617,6 +618,8 @@ fi
         run(f"chown {safe_username}:{safe_username} {shlex.quote(profile_path)}")
     
     print("  ✓ gnome-keyring installed/configured (auto-unlock on login, SSH agent integration)")
+    print("    - Seahorse GUI installed for keyring management")
+    print("    - To auto-unlock: set keyring password = login password in Seahorse")
 
 
 def install_smbclient(config: SetupConfig) -> None:
