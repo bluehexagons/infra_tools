@@ -123,11 +123,15 @@ def install_xrdp(config: SetupConfig) -> None:
     if not file_contains(xrdp_config, "tcp_recv_buffer_bytes"):
         if file_contains(xrdp_config, "[Globals]"):
             run(f"sed -i '/\\[Globals\\]/a tcp_recv_buffer_bytes=32768' {xrdp_config}")
+        else:
+            run(f"sed -i '1i [Globals]\\ntcp_recv_buffer_bytes=32768' {xrdp_config}")
     
-    # Performance: Disable unnecessary features for better performance
+    # Performance: Enable bulk compression for better performance
     if not file_contains(xrdp_config, "bulk_compression="):
         if file_contains(xrdp_config, "[Globals]"):
             run(f"sed -i '/\\[Globals\\]/a bulk_compression=true' {xrdp_config}")
+        else:
+            run(f"sed -i '1i [Globals]\\nbulk_compression=true' {xrdp_config}")
     
     run("systemctl enable xrdp")
     run("systemctl restart xrdp")
@@ -185,6 +189,8 @@ def harden_xrdp(config: SetupConfig) -> None:
         if file_contains(xrdp_config, "[Globals]"):
             # Use strong cipher suites only
             run(f"sed -i '/\\[Globals\\]/a tls_ciphers=HIGH:!aNULL:!eNULL:!EXPORT:!DES:!MD5:!PSK:!RC4' {xrdp_config}")
+        else:
+            run(f"sed -i '1i [Globals]\\ntls_ciphers=HIGH:!aNULL:!eNULL:!EXPORT:!DES:!MD5:!PSK:!RC4' {xrdp_config}")
     
     # Security: User access restrictions
     if not file_contains(sesman_config, "[Security]"):
