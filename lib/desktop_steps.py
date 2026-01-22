@@ -72,8 +72,11 @@ def install_xrdp(config: SetupConfig) -> None:
         session_cmd = "xfce4-session"
     
     if not is_package_installed("xrdp"):
-        run("apt-get install -y -qq xrdp")
+        run("apt-get install -y -qq xrdp xorgxrdp")
         print("  ✓ xRDP installed")
+    elif not is_package_installed("xorgxrdp"):
+        run("apt-get install -y -qq xorgxrdp")
+        print("  ✓ xorgxrdp installed")
     
     run("getent group ssl-cert && adduser xrdp ssl-cert", check=False)
 

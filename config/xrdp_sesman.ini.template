@@ -23,3 +23,7 @@ EnableSyslog=true
 SyslogLevel=INFO
 
 [Xorg]
+param=-config xrdp/xorg.conf
+param=-noreset
+param=-nolisten tcp
+param=-logfile .xorgxrdp.%s.log
