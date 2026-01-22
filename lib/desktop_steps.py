@@ -71,13 +71,10 @@ def install_xrdp(config: SetupConfig) -> None:
     else:
         session_cmd = "xfce4-session"
     
-    if is_package_installed("xrdp") and os.path.exists(xsession_path) and os.path.exists(cleanup_script_path):
-        if is_service_active("xrdp"):
-            print("  ✓ xRDP already installed and configured")
-            return
-
     if not is_package_installed("xrdp"):
         run("apt-get install -y -qq xrdp")
+        print("  ✓ xRDP installed")
+    
     run("getent group ssl-cert && adduser xrdp ssl-cert", check=False)
 
     config_template_dir = os.path.join(os.path.dirname(__file__), '..', 'config')
@@ -132,7 +129,7 @@ def install_xrdp(config: SetupConfig) -> None:
     run(f"chmod +x {shlex.quote(xsession_path)}")
     run(f"chown {safe_username}:{safe_username} {shlex.quote(xsession_path)}")
 
-    print("  ✓ xRDP installed and configured with session cleanup")
+    print("  ✓ xRDP configured with session cleanup")
 
 
 def harden_xrdp(config: SetupConfig) -> None:
@@ -142,12 +139,6 @@ def harden_xrdp(config: SetupConfig) -> None:
     
     if not os.path.exists(xrdp_config):
         print("  ⚠ xRDP not installed, skipping hardening")
-        return
-    
-    if (file_contains(xrdp_config, "security_layer=tls") and
-        file_contains(sesman_config, "AllowGroups=remoteusers") and
-        file_contains(sesman_config, "DenyUsers=root")):
-        print("  ✓ xRDP already hardened")
         return
     
     run(f"sed -i 's/^#\\?security_layer=.*/security_layer=tls/' {xrdp_config}")
@@ -214,11 +205,6 @@ def configure_xfce_for_x2go(config: SetupConfig) -> None:
     
     os.makedirs(xfce_config_dir, exist_ok=True)
     
-    if os.path.exists(xfwm4_config):
-        if file_contains(xfwm4_config, 'name="use_compositing" type="bool" value="false"'):
-            print("  ✓ Xfce compositor already disabled for X2Go")
-            return
-    
     xfwm4_content = """<?xml version="1.0" encoding="UTF-8"?>
 <channel name="xfwm4" version="1.0">
   <property name="general" type="empty">
@@ -252,6 +238,7 @@ X-GNOME-Autostart-enabled=true
     
     run(f"chown -R {safe_username}:{safe_username} {shlex.quote(autostart_dir)}")
     
+    print("  ✓ Xfce compositor disabled for X2Go")
     print("  ✓ Xfce compositor disabled for X2Go (prevents graphical issues)")
 
 

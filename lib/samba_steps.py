@@ -233,7 +233,26 @@ def configure_samba_global_settings(config: SetupConfig) -> None:
         
         print("  ✓ Added global Samba configuration with security hardening")
     else:
-        print("  ✓ Global Samba configuration already exists")
+        updated = False
+        for key, value in settings.items():
+            pattern = re.compile(r"^\s*" + re.escape(key) + r"\s*=.*$", re.MULTILINE)
+            if pattern.search(content):
+                new_content = pattern.sub(f"   {key} = {value}", content)
+                if new_content != content:
+                    content = new_content
+                    updated = True
+            else:
+                global_pattern = re.compile(r"(\[global\])", re.IGNORECASE)
+                content = global_pattern.sub(f"\\1\n   {key} = {value}", content, count=1)
+                updated = True
+        
+        if updated:
+            with open(smb_conf, 'w') as f:
+                f.write(content)
+            print("  ✓ Updated global Samba configuration with security hardening")
+        else:
+            print("  ✓ Global Samba configuration already up to date")
+
 
 
 def configure_samba_fail2ban(config: SetupConfig) -> None:
