@@ -58,6 +58,8 @@ def install_desktop(config: SetupConfig) -> None:
 def install_xrdp(config: SetupConfig) -> None:
     safe_username = shlex.quote(config.username)
     xsession_path = f"/home/{config.username}/.xsession"
+    cleanup_script_path = "/usr/local/bin/xrdp-session-cleanup.sh"
+    sesman_config = "/etc/xrdp/sesman.ini"
     
     if config.desktop == "xfce":
         session_cmd = "xfce4-session"
@@ -68,7 +70,8 @@ def install_xrdp(config: SetupConfig) -> None:
     else:
         session_cmd = "xfce4-session"
     
-    if is_package_installed("xrdp") and os.path.exists(xsession_path):
+    # Check if already fully configured (including cleanup script)
+    if is_package_installed("xrdp") and os.path.exists(xsession_path) and os.path.exists(cleanup_script_path):
         if is_service_active("xrdp"):
             print("  ✓ xRDP already installed and configured")
             return
@@ -77,19 +80,92 @@ def install_xrdp(config: SetupConfig) -> None:
         run("apt-get install -y -qq xrdp")
     run("getent group ssl-cert && adduser xrdp ssl-cert", check=False)
 
+    # Create session cleanup script to handle orphaned processes
+    cleanup_script = """#!/bin/bash
+# xRDP Session Cleanup Script
+# Ensures all user processes are terminated when RDP session ends
+# Addresses issue of orphaned xrdp-sesexec processes
+
+set -e
+
+# Get username from environment or first argument
+CLEANUP_USER="${PAM_USER:-${USER:-$1}}"
+
+if [ -z "$CLEANUP_USER" ]; then
+    logger -t xrdp-cleanup "ERROR: No user specified for cleanup"
+    exit 1
+fi
+
+logger -t xrdp-cleanup "Starting session cleanup for user: $CLEANUP_USER"
+
+# Stop user systemd services gracefully
+systemctl --user stop --all 2>/dev/null || true
+
+# Kill PulseAudio processes for this user
+pkill -u "$CLEANUP_USER" -x pulseaudio 2>/dev/null || true
+
+# Give processes a moment to terminate gracefully
+sleep 1
+
+# Terminate any remaining user processes (excluding this script and essential services)
+# Use SIGTERM first for graceful shutdown
+pkill -u "$CLEANUP_USER" -TERM 2>/dev/null || true
+
+# Wait briefly for graceful termination
+sleep 2
+
+# Force kill any stubborn processes
+pkill -u "$CLEANUP_USER" -KILL 2>/dev/null || true
+
+logger -t xrdp-cleanup "Session cleanup completed for user: $CLEANUP_USER"
+
+exit 0
+"""
+    
+    with open(cleanup_script_path, "w") as f:
+        f.write(cleanup_script)
+    run(f"chmod +x {cleanup_script_path}")
+    
+    # Configure sesman.ini with session cleanup and timeout policies
+    if not file_contains(sesman_config, "SessionVariables="):
+        # Add session configuration section if it doesn't exist
+        if not file_contains(sesman_config, "[Sessions]"):
+            run(f"echo '\n[Sessions]' >> {sesman_config}")
+        
+        # Configure cleanup command to run on session end
+        run(f"sed -i '/\\[Sessions\\]/a SessionVariables=DBUS_SESSION_BUS_ADDRESS' {sesman_config}")
+        run(f"sed -i '/\\[Sessions\\]/a EndSessionCommand={cleanup_script_path}' {sesman_config}")
+        
+        # Add idle timeout (30 minutes) to prevent abandoned sessions
+        run(f"sed -i '/\\[Sessions\\]/a IdleTimeLimit=1800' {sesman_config}")
+        
+        # Maximum session time (8 hours) as a safety measure
+        run(f"sed -i '/\\[Sessions\\]/a DisconnectedTimeLimit=28800' {sesman_config}")
+    
     run("systemctl enable xrdp")
     run("systemctl restart xrdp")
 
+    # Enhanced .xsession with cleanup trap and proper session management
     with open(xsession_path, "w") as f:
         f.write("#!/bin/bash\n")
+        f.write("# xRDP Session Script with Cleanup Handlers\n\n")
+        f.write("# Cleanup function to run on session exit\n")
+        f.write("cleanup() {\n")
+        f.write("    # Kill PulseAudio\n")
+        f.write("    pulseaudio --kill 2>/dev/null || true\n")
+        f.write("    # Kill child processes of this session\n")
+        f.write("    pkill -P $$ 2>/dev/null || true\n")
+        f.write("}\n\n")
+        f.write("# Set trap to run cleanup on exit\n")
+        f.write("trap cleanup EXIT INT TERM\n\n")
         f.write("# Kill any existing PulseAudio to prevent conflicts\n")
-        f.write("pulseaudio --kill 2>/dev/null || true\n")
-        f.write("# Start session\n")
-        f.write(f"exec {session_cmd}\n")
+        f.write("pulseaudio --kill 2>/dev/null || true\n\n")
+        f.write("# Start session with dbus for proper session management\n")
+        f.write(f"exec dbus-launch --exit-with-session {session_cmd}\n")
     run(f"chmod +x {shlex.quote(xsession_path)}")
     run(f"chown {safe_username}:{safe_username} {shlex.quote(xsession_path)}")
 
-    print("  ✓ xRDP installed and configured")
+    print("  ✓ xRDP installed and configured with session cleanup")
 
 
 def harden_xrdp(config: SetupConfig) -> None:
@@ -341,6 +417,14 @@ def configure_audio(config: SetupConfig) -> None:
         f.write("systemctl status xrdp --no-pager\n\n")
         f.write("echo '=== xRDP Logs (last 50 lines) ==='\n")
         f.write("journalctl -u xrdp -n 50 --no-pager\n\n")
+        f.write("echo '=== Session Manager Config ==='\n")
+        f.write("grep -A 5 '\\[Sessions\\]' /etc/xrdp/sesman.ini 2>/dev/null || echo 'No Sessions config'\n\n")
+        f.write("echo '=== Session Cleanup Script ==='\n")
+        f.write("ls -lh /usr/local/bin/xrdp-session-cleanup.sh 2>/dev/null || echo 'Cleanup script not found'\n\n")
+        f.write("echo '=== Active Sessions ==='\n")
+        f.write("who\n\n")
+        f.write("echo '=== User Processes ==='\n")
+        f.write("ps aux | grep -E '(xrdp|$USER)' | grep -v grep\n\n")
         f.write("echo '=== Session Logs ==='\n")
         f.write("tail -50 ~/.xsession-errors 2>/dev/null || echo 'No .xsession-errors file'\n\n")
         f.write("echo '=== PulseAudio Status ==='\n")
