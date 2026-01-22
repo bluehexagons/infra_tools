@@ -83,7 +83,7 @@ def install_xrdp(config: SetupConfig) -> None:
     # Create session cleanup script to handle orphaned processes
     cleanup_script = """#!/bin/bash
 # xRDP Session Cleanup Script
-# Ensures all user processes are terminated when RDP session ends
+# Ensures xRDP-related processes are terminated when RDP session ends
 # Addresses issue of orphaned xrdp-sesexec processes
 
 set -e
@@ -98,24 +98,17 @@ fi
 
 logger -t xrdp-cleanup "Starting session cleanup for user: $CLEANUP_USER"
 
-# Stop user systemd services gracefully
-systemctl --user stop --all 2>/dev/null || true
-
-# Kill PulseAudio processes for this user
+# Kill PulseAudio processes spawned by this xRDP session
 pkill -u "$CLEANUP_USER" -x pulseaudio 2>/dev/null || true
 
-# Give processes a moment to terminate gracefully
-sleep 1
+# Terminate xRDP-specific processes only (not all user processes)
+# This prevents disrupting other active sessions (SSH, other RDP, etc.)
+pkill -u "$CLEANUP_USER" -f "xrdp" 2>/dev/null || true
 
-# Terminate any remaining user processes (excluding this script and essential services)
-# Use SIGTERM first for graceful shutdown
-pkill -u "$CLEANUP_USER" -TERM 2>/dev/null || true
-
-# Wait briefly for graceful termination
-sleep 2
-
-# Force kill any stubborn processes
-pkill -u "$CLEANUP_USER" -KILL 2>/dev/null || true
+# Kill session-specific desktop processes
+pkill -u "$CLEANUP_USER" -f "xfce4-session" 2>/dev/null || true
+pkill -u "$CLEANUP_USER" -f "cinnamon-session" 2>/dev/null || true
+pkill -u "$CLEANUP_USER" -f "^i3$" 2>/dev/null || true
 
 logger -t xrdp-cleanup "Session cleanup completed for user: $CLEANUP_USER"
 
@@ -127,18 +120,21 @@ exit 0
     run(f"chmod +x {cleanup_script_path}")
     
     # Configure sesman.ini with session cleanup and timeout policies
-    if not file_contains(sesman_config, "SessionVariables="):
-        # Add session configuration section if it doesn't exist
-        if not file_contains(sesman_config, "[Sessions]"):
-            run(f"echo '\n[Sessions]' >> {sesman_config}")
-        
-        # Configure cleanup command to run on session end
-        run(f"sed -i '/\\[Sessions\\]/a SessionVariables=DBUS_SESSION_BUS_ADDRESS' {sesman_config}")
+    # Check each setting individually to avoid duplicates
+    if not file_contains(sesman_config, "[Sessions]"):
+        run(f"echo '\n[Sessions]' >> {sesman_config}")
+    
+    if not file_contains(sesman_config, "EndSessionCommand="):
         run(f"sed -i '/\\[Sessions\\]/a EndSessionCommand={cleanup_script_path}' {sesman_config}")
-        
+    
+    if not file_contains(sesman_config, "SessionVariables="):
+        run(f"sed -i '/\\[Sessions\\]/a SessionVariables=DBUS_SESSION_BUS_ADDRESS' {sesman_config}")
+    
+    if not file_contains(sesman_config, "IdleTimeLimit="):
         # Add idle timeout (30 minutes) to prevent abandoned sessions
         run(f"sed -i '/\\[Sessions\\]/a IdleTimeLimit=1800' {sesman_config}")
-        
+    
+    if not file_contains(sesman_config, "DisconnectedTimeLimit="):
         # Maximum session time (8 hours) as a safety measure
         run(f"sed -i '/\\[Sessions\\]/a DisconnectedTimeLimit=28800' {sesman_config}")
     
