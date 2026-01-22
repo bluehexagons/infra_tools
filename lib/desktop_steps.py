@@ -57,7 +57,7 @@ def install_desktop(config: SetupConfig) -> None:
 
 def install_xrdp(config: SetupConfig) -> None:
     safe_username = shlex.quote(config.username)
-    xsession_path = f"/home/{config.username}/.xsession"
+    xsession_path = f"/home/{config.username}/startwm.sh"
     cleanup_script_path = "/opt/infra_tools/steps/xrdp_session_cleanup.py"
     sesman_config = "/etc/xrdp/sesman.ini"
     xrdp_config = "/etc/xrdp/xrdp.ini"
