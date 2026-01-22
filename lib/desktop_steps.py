@@ -71,12 +71,8 @@ def install_xrdp(config: SetupConfig) -> None:
     else:
         session_cmd = "xfce4-session"
     
-    if not is_package_installed("xrdp"):
-        run("apt-get install -y -qq xrdp xorgxrdp")
-        print("  ✓ xRDP installed")
-    elif not is_package_installed("xorgxrdp"):
-        run("apt-get install -y -qq xorgxrdp")
-        print("  ✓ xorgxrdp installed")
+    run("apt-get install -y -qq xrdp xorgxrdp dbus-x11")
+    print("  ✓ xRDP packages installed/updated")
     
     run("getent group ssl-cert && adduser xrdp ssl-cert", check=False)
 
@@ -183,82 +179,6 @@ def harden_xrdp(config: SetupConfig) -> None:
     run("systemctl restart xrdp-sesman", check=False)
     
     print("  ✓ xRDP hardened (TLS encryption, strong ciphers, group restrictions)")
-
-
-def install_x2go(config: SetupConfig) -> None:
-    """Install X2Go server for remote desktop access."""
-    if is_package_installed("x2goserver"):
-        print("  ✓ X2Go already installed")
-        return
-    
-    run("apt-get install -y -qq x2goserver x2goserver-xsession")
-    
-    run("systemctl enable ssh", check=False)
-    run("systemctl start ssh", check=False)
-    
-    print("  ✓ X2Go installed (connect via SSH on port 22)")
-
-
-def configure_xfce_for_x2go(config: SetupConfig) -> None:
-    """Configure Xfce to work properly with X2Go by disabling compositor."""
-    safe_username = shlex.quote(config.username)
-    home_dir = f"/home/{config.username}"
-    xfce_config_dir = f"{home_dir}/.config/xfce4/xfconf/xfce-perchannel-xml"
-    xfwm4_config = f"{xfce_config_dir}/xfwm4.xml"
-    
-    os.makedirs(xfce_config_dir, exist_ok=True)
-    
-    xfwm4_content = """<?xml version="1.0" encoding="UTF-8"?>
-<channel name="xfwm4" version="1.0">
-  <property name="general" type="empty">
-    <property name="use_compositing" type="bool" value="false"/>
-    <property name="frame_opacity" type="int" value="100"/>
-    <property name="inactive_opacity" type="int" value="100"/>
-  </property>
-</channel>
-"""
-    
-    with open(xfwm4_config, "w") as f:
-        f.write(xfwm4_content)
-    
-    run(f"chown -R {safe_username}:{safe_username} {shlex.quote(home_dir)}/.config")
-    
-    autostart_dir = f"{home_dir}/.config/autostart"
-    os.makedirs(autostart_dir, exist_ok=True)
-    
-    compositor_script = f"{autostart_dir}/disable-compositor.desktop"
-    compositor_content = """[Desktop Entry]
-Type=Application
-Name=Disable Xfce Compositor for X2Go
-Exec=xfconf-query -c xfwm4 -p /general/use_compositing -s false
-Hidden=false
-NoDisplay=false
-X-GNOME-Autostart-enabled=true
-"""
-    
-    with open(compositor_script, "w") as f:
-        f.write(compositor_content)
-    
-    run(f"chown -R {safe_username}:{safe_username} {shlex.quote(autostart_dir)}")
-    
-    print("  ✓ Xfce compositor disabled for X2Go")
-
-
-def harden_x2go(config: SetupConfig) -> None:
-    """Harden X2Go by restricting to remoteusers group."""
-    x2go_config = "/etc/x2go/x2goserver.conf"
-    
-    if not os.path.exists(x2go_config):
-        print("  ⚠ X2Go not installed, skipping hardening")
-        return
-    
-    if not file_contains(x2go_config, "# Security hardened"):
-        with open(x2go_config, "a") as f:
-            f.write("\n# Security hardened\n")
-            f.write("# Restrict to remoteusers group via SSH AllowGroups\n")
-    
-    print("  ✓ X2Go hardened (uses SSH security + group restrictions)")
-
 
 
 def configure_audio(config: SetupConfig) -> None:
@@ -494,13 +414,8 @@ def install_browser(config: SetupConfig) -> None:
 
 def install_remmina(config: SetupConfig) -> None:
     """Install Remmina RDP client."""
-    if is_package_installed("remmina"):
-        print("  ✓ Remmina already installed")
-        return
-    
-    print("  Installing Remmina...")
-    run("apt-get install -y -qq remmina remmina-plugin-rdp remmina-plugin-vnc", check=False)
-    print("  ✓ Remmina installed")
+    run("apt-get install -y -qq remmina remmina-plugin-rdp remmina-plugin-vnc")
+    print("  ✓ Remmina installed/updated")
 
 
 def install_office_apps(config: SetupConfig) -> None:
@@ -668,10 +583,6 @@ def configure_gnome_keyring(config: SetupConfig) -> None:
     """Configure gnome-keyring for desktop setups."""
     safe_username = shlex.quote(config.username)
     
-    if is_package_installed("gnome-keyring"):
-        print("  ✓ gnome-keyring already installed")
-        return
-    
     run("apt-get install -y -qq gnome-keyring libpam-gnome-keyring")
     
     pam_password = "/etc/pam.d/common-password"
@@ -705,7 +616,7 @@ fi
             f.write(keyring_env)
         run(f"chown {safe_username}:{safe_username} {shlex.quote(profile_path)}")
     
-    print("  ✓ gnome-keyring configured (auto-unlock on login, SSH agent integration)")
+    print("  ✓ gnome-keyring installed/configured (auto-unlock on login, SSH agent integration)")
 
 
 def install_smbclient(config: SetupConfig) -> None:

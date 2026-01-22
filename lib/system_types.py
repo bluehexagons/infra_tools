@@ -24,9 +24,6 @@ from .desktop_steps import (
     install_desktop,
     install_xrdp,
     harden_xrdp,
-    install_x2go,
-    configure_xfce_for_x2go,
-    harden_x2go,
     configure_audio,
     install_desktop_apps,
     configure_default_browser,
@@ -98,15 +95,12 @@ COMMON_STEPS: list[tuple[str, StepFunc]] = [
 DESKTOP_STEPS: list[tuple[str, StepFunc]] = [
     ("Installing desktop environment", install_desktop),
     ("Installing xRDP", install_xrdp),
-    ("Installing X2Go", install_x2go),
-    ("Configuring Xfce for X2Go", configure_xfce_for_x2go),
     ("Configuring audio for RDP", configure_audio),
     ("Configuring gnome-keyring", configure_gnome_keyring),
 ]
 
 DESKTOP_SECURITY_STEPS: list[tuple[str, StepFunc]] = [
     ("Hardening xRDP with TLS and group restrictions", harden_xrdp),
-    ("Hardening X2Go access", harden_x2go),
     ("Installing fail2ban for RDP brute-force protection", configure_fail2ban),
 ]
 
@@ -181,9 +175,6 @@ STEP_FUNCTIONS: dict[str, StepFunc] = {
     'install_desktop': install_desktop,
     'install_xrdp': install_xrdp,
     'harden_xrdp': harden_xrdp,
-    'install_x2go': install_x2go,
-    'configure_xfce_for_x2go': configure_xfce_for_x2go,
-    'harden_x2go': harden_x2go,
     'configure_audio': configure_audio,
     'install_desktop_apps': install_desktop_apps,
     'configure_default_browser': configure_default_browser,
@@ -271,11 +262,6 @@ def get_steps_for_system_type(config: SetupConfig) -> list[tuple[str, StepFunc]]
         if config.enable_rdp:
             desktop_steps.append(("Installing xRDP", install_xrdp))
         
-        if config.enable_x2go:
-            desktop_steps.append(("Installing X2Go", install_x2go))
-            if config.desktop == "xfce":
-                desktop_steps.append(("Configuring Xfce for X2Go", configure_xfce_for_x2go))
-        
         if config.enable_audio and config.enable_rdp:
             desktop_steps.append(("Configuring audio for RDP", configure_audio))
         
@@ -288,8 +274,6 @@ def get_steps_for_system_type(config: SetupConfig) -> list[tuple[str, StepFunc]]
         
         if config.enable_rdp:
             steps.append(("Hardening xRDP with TLS and group restrictions", harden_xrdp))
-        if config.enable_x2go:
-            steps.append(("Hardening X2Go access", harden_x2go))
         if config.enable_rdp:
             steps.append(("Installing fail2ban for RDP brute-force protection", configure_fail2ban))
     

@@ -10,17 +10,13 @@ from lib.remote_utils import run, is_package_installed
 
 
 def install_samba(config: SetupConfig) -> None:
-    if is_package_installed("samba"):
-        print("  ✓ Samba already installed")
-        return
-    
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get install -y -qq samba samba-common-bin")
     
     run("systemctl enable smbd")
     run("systemctl start smbd")
     
-    print("  ✓ Samba installed and service started")
+    print("  ✓ Samba installed/updated and service started")
 
 
 def configure_samba_firewall(config: SetupConfig) -> None:
