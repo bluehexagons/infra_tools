@@ -1,5 +1,4 @@
 [Globals]
-ListenAddress=127.0.0.1
 EnableUserWindowManager=true
 UserWindowManager=startwm.sh
 DefaultWindowManager=startwm.sh
