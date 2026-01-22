@@ -82,9 +82,20 @@ def install_xrdp(config: SetupConfig) -> None:
 
     config_template_dir = os.path.join(os.path.dirname(__file__), '..', 'config')
     
+    if os.path.exists(sesman_config) and not os.path.exists(f"{sesman_config}.bak"):
+        run(f"cp {sesman_config} {sesman_config}.bak")
+    
     sesman_template_path = os.path.join(config_template_dir, 'xrdp_sesman.ini.template')
-    with open(sesman_template_path, 'r', encoding='utf-8') as f:
-        sesman_content = f.read()
+    try:
+        with open(sesman_template_path, 'r', encoding='utf-8') as f:
+            sesman_content = f.read()
+    except FileNotFoundError:
+        print(f"  ⚠ Template file not found: {sesman_template_path}")
+        return
+    except Exception as e:
+        print(f"  ⚠ Error reading template: {e}")
+        return
+    
     sesman_content = sesman_content.replace('{CLEANUP_SCRIPT_PATH}', cleanup_script_path)
     
     with open(sesman_config, "w") as f:
