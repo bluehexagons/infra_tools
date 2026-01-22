@@ -15,13 +15,6 @@ import subprocess
 import syslog
 
 
-def log(message: str) -> None:
-    """Log message to syslog."""
-    syslog.openlog("xrdp-cleanup", syslog.LOG_PID, syslog.LOG_USER)
-    syslog.syslog(syslog.LOG_INFO, message)
-    syslog.closelog()
-
-
 def kill_processes(username: str, pattern: str, exact: bool = False) -> None:
     """Kill processes matching pattern for the specified user.
     
@@ -52,16 +45,20 @@ def kill_processes(username: str, pattern: str, exact: bool = False) -> None:
 
 def main() -> int:
     """Main cleanup routine."""
+    # Initialize syslog once
+    syslog.openlog("xrdp-cleanup", syslog.LOG_PID, syslog.LOG_USER)
+    
     # Get username from environment or first argument
     username = os.environ.get("PAM_USER") or os.environ.get("USER")
     if not username and len(sys.argv) > 1:
         username = sys.argv[1]
     
     if not username:
-        log("ERROR: No user specified for cleanup")
+        syslog.syslog(syslog.LOG_ERR, "ERROR: No user specified for cleanup")
+        syslog.closelog()
         return 1
     
-    log(f"Starting session cleanup for user: {username}")
+    syslog.syslog(syslog.LOG_INFO, f"Starting session cleanup for user: {username}")
     
     # Kill PulseAudio processes spawned by this xRDP session
     kill_processes(username, "pulseaudio", exact=True)
@@ -73,9 +70,10 @@ def main() -> int:
     # Kill session-specific desktop processes
     kill_processes(username, "xfce4-session", exact=False)
     kill_processes(username, "cinnamon-session", exact=False)
-    kill_processes(username, "^i3$", exact=False)
+    kill_processes(username, "i3", exact=True)
     
-    log(f"Session cleanup completed for user: {username}")
+    syslog.syslog(syslog.LOG_INFO, f"Session cleanup completed for user: {username}")
+    syslog.closelog()
     
     return 0
 
