@@ -71,7 +71,6 @@ def install_xrdp(config: SetupConfig) -> None:
     else:
         session_cmd = "xfce4-session"
     
-    # Check if already fully configured (including cleanup script)
     if is_package_installed("xrdp") and os.path.exists(xsession_path) and os.path.exists(cleanup_script_path):
         if is_service_active("xrdp"):
             print("  ✓ xRDP already installed and configured")
@@ -81,39 +80,16 @@ def install_xrdp(config: SetupConfig) -> None:
         run("apt-get install -y -qq xrdp")
     run("getent group ssl-cert && adduser xrdp ssl-cert", check=False)
 
-    # Configure sesman.ini with session cleanup and timeout policies
-    # Check each setting individually to avoid duplicates
-    if not file_contains(sesman_config, "[Sessions]"):
-        run(f"echo '\n[Sessions]' >> {sesman_config}")
+    config_template_dir = os.path.join(os.path.dirname(__file__), '..', 'config')
     
-    if not file_contains(sesman_config, "EndSessionCommand="):
-        run(f"sed -i '/\\[Sessions\\]/a EndSessionCommand={cleanup_script_path}' {sesman_config}")
+    sesman_template_path = os.path.join(config_template_dir, 'xrdp_sesman.ini.template')
+    with open(sesman_template_path, 'r', encoding='utf-8') as f:
+        sesman_content = f.read()
+    sesman_content = sesman_content.replace('{CLEANUP_SCRIPT_PATH}', cleanup_script_path)
     
-    if not file_contains(sesman_config, "SessionVariables="):
-        run(f"sed -i '/\\[Sessions\\]/a SessionVariables=DBUS_SESSION_BUS_ADDRESS' {sesman_config}")
+    with open(sesman_config, "w") as f:
+        f.write(sesman_content)
     
-    if not file_contains(sesman_config, "IdleTimeLimit="):
-        # Add idle timeout (30 minutes) to prevent abandoned sessions
-        run(f"sed -i '/\\[Sessions\\]/a IdleTimeLimit=1800' {sesman_config}")
-    
-    if not file_contains(sesman_config, "DisconnectedTimeLimit="):
-        # Maximum session time (8 hours) as a safety measure
-        run(f"sed -i '/\\[Sessions\\]/a DisconnectedTimeLimit=28800' {sesman_config}")
-    
-    # Enable session reconnection for better user experience
-    # Users can disconnect and reconnect to the same session
-    if not file_contains(sesman_config, "Policy="):
-        run(f"sed -i '/\\[Sessions\\]/a Policy=Default' {sesman_config}")
-    
-    # Configure logging for better troubleshooting
-    if not file_contains(sesman_config, "[Logging]"):
-        run(f"echo '\n[Logging]' >> {sesman_config}")
-    
-    if not file_contains(sesman_config, "LogLevel="):
-        # INFO level provides good balance between detail and noise
-        run(f"sed -i '/\\[Logging\\]/a LogLevel=INFO' {sesman_config}")
-    
-    # Performance: Enable compression for better performance over slow connections
     if not file_contains(xrdp_config, "tcp_send_buffer_bytes"):
         if file_contains(xrdp_config, "[Globals]"):
             run(f"sed -i '/\\[Globals\\]/a tcp_send_buffer_bytes=32768' {xrdp_config}")
@@ -126,7 +102,6 @@ def install_xrdp(config: SetupConfig) -> None:
         else:
             run(f"sed -i '1i [Globals]\\ntcp_recv_buffer_bytes=32768' {xrdp_config}")
     
-    # Performance: Enable bulk compression for better performance
     if not file_contains(xrdp_config, "bulk_compression="):
         if file_contains(xrdp_config, "[Globals]"):
             run(f"sed -i '/\\[Globals\\]/a bulk_compression=true' {xrdp_config}")
@@ -136,13 +111,9 @@ def install_xrdp(config: SetupConfig) -> None:
     run("systemctl enable xrdp")
     run("systemctl restart xrdp")
 
-    # Create .xsession from template
-    config_template_dir = os.path.join(os.path.dirname(__file__), '..', 'config')
-    template_path = os.path.join(config_template_dir, 'xrdp_xsession.template')
-    with open(template_path, 'r', encoding='utf-8') as f:
+    xsession_template_path = os.path.join(config_template_dir, 'xrdp_xsession.template')
+    with open(xsession_template_path, 'r', encoding='utf-8') as f:
         xsession_content = f.read()
-    
-    # Replace template variables
     xsession_content = xsession_content.replace('{SESSION_CMD}', session_cmd)
     
     with open(xsession_path, "w") as f:
@@ -154,7 +125,7 @@ def install_xrdp(config: SetupConfig) -> None:
 
 
 def harden_xrdp(config: SetupConfig) -> None:
-    """Harden xRDP with TLS encryption, certificate validation, and group restrictions."""
+    """Harden xRDP with TLS encryption and group restrictions."""
     xrdp_config = "/etc/xrdp/xrdp.ini"
     sesman_config = "/etc/xrdp/sesman.ini"
     
@@ -168,7 +139,6 @@ def harden_xrdp(config: SetupConfig) -> None:
         print("  ✓ xRDP already hardened")
         return
     
-    # Security: TLS encryption
     run(f"sed -i 's/^#\\?security_layer=.*/security_layer=tls/' {xrdp_config}")
     run(f"sed -i 's/^#\\?crypt_level=.*/crypt_level=high/' {xrdp_config}")
     
@@ -184,15 +154,12 @@ def harden_xrdp(config: SetupConfig) -> None:
         else:
             run(f"sed -i '1i crypt_level=high' {xrdp_config}")
     
-    # Security: Disable weaker encryption protocols
     if not file_contains(xrdp_config, "tls_ciphers"):
         if file_contains(xrdp_config, "[Globals]"):
-            # Use strong cipher suites only
             run(f"sed -i '/\\[Globals\\]/a tls_ciphers=HIGH:!aNULL:!eNULL:!EXPORT:!DES:!MD5:!PSK:!RC4' {xrdp_config}")
         else:
             run(f"sed -i '1i [Globals]\\ntls_ciphers=HIGH:!aNULL:!eNULL:!EXPORT:!DES:!MD5:!PSK:!RC4' {xrdp_config}")
     
-    # Security: User access restrictions
     if not file_contains(sesman_config, "[Security]"):
         run(f"echo '\n[Security]' >> {sesman_config}")
     
@@ -202,23 +169,15 @@ def harden_xrdp(config: SetupConfig) -> None:
     if not file_contains(sesman_config, "DenyUsers"):
         run(f"sed -i '/\\[Security\\]/a DenyUsers=root' {sesman_config}")
     
-    # Security: Restrict login attempts
     if not file_contains(sesman_config, "MaxLoginRetry"):
         run(f"sed -i '/\\[Security\\]/a MaxLoginRetry=3' {sesman_config}")
-    
-    # Performance: Configure max session limits
-    if not file_contains(sesman_config, "MaxSessions"):
-        if not file_contains(sesman_config, "[Sessions]"):
-            run(f"echo '\n[Sessions]' >> {sesman_config}")
-        # Allow up to 10 concurrent sessions per user (reasonable limit)
-        run(f"sed -i '/\\[Sessions\\]/a MaxSessions=10' {sesman_config}")
     
     run("getent group ssl-cert && adduser xrdp ssl-cert", check=False)
     
     run("systemctl restart xrdp")
     run("systemctl restart xrdp-sesman", check=False)
     
-    print("  ✓ xRDP hardened (TLS encryption, strong ciphers, root denied, restricted to remoteusers group)")
+    print("  ✓ xRDP hardened (TLS encryption, strong ciphers, group restrictions)")
 
 
 def install_x2go(config: SetupConfig) -> None:
