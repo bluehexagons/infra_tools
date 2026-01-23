@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from lib.config import SetupConfig
 from lib.types import StepFunc
-from .common_steps import (
+
+# Import from common module
+from common.steps import (
     update_and_upgrade_packages,
     ensure_sudo_installed,
     configure_locale,
@@ -14,13 +16,22 @@ from .common_steps import (
     configure_time_sync,
     install_cli_tools,
     check_restart_required,
-    install_ruby as install_ruby_step,
-    install_go as install_go_step,
-    install_node as install_node_step,
+    install_ruby,
+    install_go,
+    install_node,
     configure_auto_update_node,
     configure_auto_update_ruby,
+    configure_swap,
+    install_certbot,
+    configure_cloudflare_firewall,
+    create_cloudflared_config_directory,
+    configure_nginx_for_cloudflare,
+    install_cloudflared_service_helper,
+    run_cloudflare_tunnel_setup,
 )
-from .desktop_steps import (
+
+# Import from desktop module
+from desktop.steps import (
     install_desktop,
     install_xrdp,
     harden_xrdp,
@@ -35,7 +46,9 @@ from .desktop_steps import (
     install_office_apps,
     install_browser,
 )
-from .security_steps import (
+
+# Import from security module
+from security.steps import (
     create_remoteusers_group,
     configure_firewall,
     configure_fail2ban,
@@ -45,36 +58,29 @@ from .security_steps import (
     configure_firewall_web,
     configure_auto_restart,
 )
-from .web_steps import (
+
+# Import from web module
+from web.steps import (
     install_nginx,
     configure_nginx_security,
     create_hello_world_site,
     configure_default_site,
 )
-from .swap_steps import configure_swap
-from .ssl_steps import install_certbot
-from .cloudflare_steps import (
-    configure_cloudflare_firewall,
-    create_cloudflared_config_directory,
-    configure_nginx_for_cloudflare,
-    install_cloudflared_service_helper,
-    run_cloudflare_tunnel_setup,
-)
-from .samba_steps import (
+
+# Import from smb module
+from smb.steps import (
     install_samba,
     configure_samba_firewall,
     configure_samba_global_settings,
     configure_samba_fail2ban,
     setup_samba_share,
-)
-from .smb_mount_steps import (
     configure_smb_mount,
 )
-from .sync_steps import (
+
+# Import from sync module
+from sync.steps import (
     install_rsync,
     create_sync_service,
-)
-from .scrub_steps import (
     install_par2,
     create_scrub_service,
 )
@@ -159,9 +165,9 @@ PROXMOX_HARDENING_STEPS: list[tuple[str, StepFunc]] = [
 
 
 STEP_FUNCTIONS: dict[str, StepFunc] = {
-    'install_ruby': install_ruby_step,
-    'install_go': install_go_step,
-    'install_node': install_node_step,
+    'install_ruby': install_ruby,
+    'install_go': install_go,
+    'install_node': install_node,
     'install_certbot': install_certbot,
     'update_and_upgrade_packages': update_and_upgrade_packages,
     'ensure_sudo_installed': ensure_sudo_installed,
@@ -284,12 +290,12 @@ def get_steps_for_system_type(config: SetupConfig) -> list[tuple[str, StepFunc]]
         steps.extend(CLI_STEPS)
     
     if config.install_ruby:
-        steps.append(("Installing Ruby (rbenv + latest version)", install_ruby_step))
+        steps.append(("Installing Ruby (rbenv + latest version)", install_ruby))
         steps.append(("Configuring Ruby auto-update", configure_auto_update_ruby))
     if config.install_go:
-        steps.append(("Installing Go (latest version)", install_go_step))
+        steps.append(("Installing Go (latest version)", install_go))
     if config.install_node:
-        steps.append(("Installing Node.js (nvm + latest LTS + PNPM)", install_node_step))
+        steps.append(("Installing Node.js (nvm + latest LTS + PNPM)", install_node))
         steps.append(("Configuring Node.js auto-update", configure_auto_update_node))
     
     if config.include_desktop_apps:

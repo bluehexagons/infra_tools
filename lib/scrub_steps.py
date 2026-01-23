@@ -187,14 +187,14 @@ def create_scrub_service(config: SetupConfig, scrub_spec: Optional[list[str]] = 
             logger.log_metric("database_smb_connectivity", validate_smb_connectivity(database_path))
         logger.log_step("mount_validation_enhanced", "completed", "Enhanced mount validation completed")
     
-    check_script = f"{REMOTE_INSTALL_DIR}/steps/check_scrub_mounts.py"
+    check_script = f"{REMOTE_INSTALL_DIR}/sync/service_tools/check_scrub_mounts.py"
     log_dir = "/var/log/scrub"
     log_file = f"{log_dir}/{service_name}.log"
     
     if not os.path.exists(log_dir):
         os.makedirs(log_dir, exist_ok=True)
     
-    scrub_script = f"{REMOTE_INSTALL_DIR}/service_tools/scrub_par2.py"
+    scrub_script = f"{REMOTE_INSTALL_DIR}/sync/service_tools/scrub_par2.py"
     redundancy_value = redundancy[:-1]
     
     service_file = f"/etc/systemd/system/{service_name}.service"

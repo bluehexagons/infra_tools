@@ -1,0 +1,40 @@
+[Globals]
+EnableUserWindowManager=true
+UserWindowManager=startwm.sh
+DefaultWindowManager=startwm.sh
+
+[Security]
+AllowRootLogin=false
+AllowGroups=remoteusers
+DenyUsers=root
+MaxLoginRetry=3
+
+[Sessions]
+EndSessionCommand={CLEANUP_SCRIPT_PATH}
+SessionVariables=DBUS_SESSION_BUS_ADDRESS
+Policy=Default
+MaxSessions=10
+
+[Logging]
+LogFile=/var/log/xrdp-sesman.log
+LogLevel=INFO
+EnableSyslog=true
+SyslogLevel=INFO
+
+[X11rdp]
+param=Xorg
+
+[Xorg]
+; Path to Xorg binary (Debian/Ubuntu standard location)
+param=/usr/lib/xorg/Xorg
+; xrdp-specific xorg.conf for xorgxrdp driver
+param=-config
+param=xrdp/xorg.conf
+; Don't reset after last client disconnects
+param=-noreset
+; Security and networking
+param=-nolisten
+param=tcp
+; Logging
+param=-logfile
+param=.xorgxrdp.%s.log
