@@ -9,12 +9,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import functions from deploy_steps
 from lib.deploy_steps import (
-    setup_deployment,
-    rebuild_deployment,
+    ensure_app_user,
+    deploy_repository,
 )
 
 # Re-export all functions
 __all__ = [
-    'setup_deployment',
-    'rebuild_deployment',
+    'ensure_app_user',
+    'deploy_repository',
 ]
