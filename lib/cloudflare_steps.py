@@ -44,7 +44,7 @@ def create_cloudflared_config_directory(config: SetupConfig) -> None:
     
     os.makedirs(config_dir, mode=0o755, exist_ok=True)
     
-    config_template_dir = os.path.join(os.path.dirname(__file__), '..', 'config')
+    config_template_dir = os.path.join(os.path.dirname(__file__), '..', 'web', 'config')
     template_path = os.path.join(config_template_dir, 'cloudflare_tunnel_readme.md')
     with open(template_path, 'r', encoding='utf-8') as f:
         readme_content = f.read()
@@ -63,7 +63,7 @@ def configure_nginx_for_cloudflare(config: SetupConfig) -> None:
         print("  ✓ Nginx already configured for Cloudflare")
         return
     
-    config_template_dir = os.path.join(os.path.dirname(__file__), '..', 'config')
+    config_template_dir = os.path.join(os.path.dirname(__file__), '..', 'web', 'config')
     template_path = os.path.join(config_template_dir, 'cloudflare_ips.conf')
     with open(template_path, 'r', encoding='utf-8') as f:
         cloudflare_config = f.read()

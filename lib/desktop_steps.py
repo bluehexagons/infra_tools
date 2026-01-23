@@ -58,7 +58,7 @@ def install_desktop(config: SetupConfig) -> None:
 def install_xrdp(config: SetupConfig) -> None:
     safe_username = shlex.quote(config.username)
     xsession_path = f"/home/{config.username}/startwm.sh"
-    cleanup_script_path = "/opt/infra_tools/steps/xrdp_session_cleanup.py"
+    cleanup_script_path = "/opt/infra_tools/desktop/service_tools/xrdp_session_cleanup.py"
     sesman_config = "/etc/xrdp/sesman.ini"
     xrdp_config = "/etc/xrdp/xrdp.ini"
     
@@ -76,7 +76,7 @@ def install_xrdp(config: SetupConfig) -> None:
     
     run("getent group ssl-cert && adduser xrdp ssl-cert", check=False)
 
-    config_template_dir = os.path.join(os.path.dirname(__file__), '..', 'config')
+    config_template_dir = os.path.join(os.path.dirname(__file__), '..', 'desktop', 'config')
     
     if os.path.exists(sesman_config) and not os.path.exists(f"{sesman_config}.bak"):
         run(f"cp {sesman_config} {sesman_config}.bak")

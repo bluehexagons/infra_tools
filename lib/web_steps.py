@@ -33,7 +33,7 @@ def configure_nginx_security(config: SetupConfig) -> None:
     if not os.path.exists("/etc/nginx/nginx.conf.bak"):
         run("cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.bak")
     
-    config_template_dir = os.path.join(os.path.dirname(__file__), '..', 'config')
+    config_template_dir = os.path.join(os.path.dirname(__file__), '..', 'web', 'config')
     template_path = os.path.join(config_template_dir, 'nginx.conf.template')
     with open(template_path, 'r', encoding='utf-8') as f:
         nginx_security_conf = f.read()
@@ -85,7 +85,7 @@ def configure_default_site(config: SetupConfig) -> None:
             print("  ✓ Default site already configured")
             return
     
-    config_template_dir = os.path.join(os.path.dirname(__file__), '..', 'config')
+    config_template_dir = os.path.join(os.path.dirname(__file__), '..', 'web', 'config')
     template_path = os.path.join(config_template_dir, 'nginx_default_site.conf.template')
     with open(template_path, 'r', encoding='utf-8') as f:
         default_site = f.read()
