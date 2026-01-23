@@ -19,15 +19,7 @@ from common.steps import (
     install_ruby,
     install_go,
     install_node,
-    configure_auto_update_node,
-    configure_auto_update_ruby,
     configure_swap,
-    install_certbot,
-    configure_cloudflare_firewall,
-    create_cloudflared_config_directory,
-    configure_nginx_for_cloudflare,
-    install_cloudflared_service_helper,
-    run_cloudflare_tunnel_setup,
 )
 
 # Import from desktop module
@@ -65,6 +57,14 @@ from web.steps import (
     configure_nginx_security,
     create_hello_world_site,
     configure_default_site,
+    install_certbot,
+    configure_cloudflare_firewall,
+    create_cloudflared_config_directory,
+    configure_nginx_for_cloudflare,
+    install_cloudflared_service_helper,
+    run_cloudflare_tunnel_setup,
+    configure_auto_update_node,
+    configure_auto_update_ruby,
 )
 
 # Import from smb module
