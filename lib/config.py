@@ -35,7 +35,6 @@ class SetupConfig:
     friendly_name: MaybeStr = None
     tags: Optional[StrList] = None
     enable_rdp: bool = False
-    enable_x2go: bool = False
     enable_audio: bool = False
     desktop: str = "xfce"
     browser: Optional[str] = "brave"
@@ -81,9 +80,6 @@ class SetupConfig:
         
         if self.enable_rdp:
             args.append("--rdp")
-        
-        if self.enable_x2go:
-            args.append("--x2go")
         
         if self.enable_audio:
             args.append("--audio")
@@ -210,10 +206,6 @@ class SetupConfig:
         elif enable_rdp is None:
             enable_rdp = False
         
-        enable_x2go = args.enable_x2go
-        if enable_x2go is None:
-            enable_x2go = False
-        
         enable_audio = getattr(args, 'enable_audio', False)
         
         smb_mounts = getattr(args, 'smb_mounts', None)
@@ -226,7 +218,6 @@ class SetupConfig:
         include_desktop = (
             system_type in DESKTOP_SYSTEMS
             or enable_rdp
-            or enable_x2go
         )
         include_cli_tools = system_type in CLI_SYSTEMS
         include_desktop_apps = system_type == "workstation_desktop"
@@ -245,7 +236,6 @@ class SetupConfig:
             friendly_name=getattr(args, 'friendly_name', None),
             tags=tags,
             enable_rdp=enable_rdp,
-            enable_x2go=enable_x2go,
             enable_audio=enable_audio,
             desktop=desktop,
             browser=browser,

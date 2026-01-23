@@ -5,11 +5,11 @@ from __future__ import annotations
 import sys
 from lib.config import SetupConfig
 from lib.setup_common import setup_main
-from lib.display import print_success_header, print_rdp_x2go_info
+from lib.display import print_success_header, print_rdp_info
 
 
 def success_message(config: SetupConfig) -> None:
-    print_rdp_x2go_info(config)
+    print_rdp_info(config)
     print_success_header(config)
 
 

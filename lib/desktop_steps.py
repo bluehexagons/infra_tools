@@ -57,7 +57,10 @@ def install_desktop(config: SetupConfig) -> None:
 
 def install_xrdp(config: SetupConfig) -> None:
     safe_username = shlex.quote(config.username)
-    xsession_path = f"/home/{config.username}/.xsession"
+    xsession_path = f"/home/{config.username}/startwm.sh"
+    cleanup_script_path = "/opt/infra_tools/steps/xrdp_session_cleanup.py"
+    sesman_config = "/etc/xrdp/sesman.ini"
+    xrdp_config = "/etc/xrdp/xrdp.ini"
     
     if config.desktop == "xfce":
         session_cmd = "xfce4-session"
@@ -68,28 +71,74 @@ def install_xrdp(config: SetupConfig) -> None:
     else:
         session_cmd = "xfce4-session"
     
-    if is_package_installed("xrdp") and os.path.exists(xsession_path):
-        if is_service_active("xrdp"):
-            print("  ✓ xRDP already installed and configured")
-            return
-
-    if not is_package_installed("xrdp"):
-        run("apt-get install -y -qq xrdp")
+    run("apt-get install -y -qq xrdp xorgxrdp dbus-x11")
+    print("  ✓ xRDP packages installed/updated")
+    
     run("getent group ssl-cert && adduser xrdp ssl-cert", check=False)
 
+    config_template_dir = os.path.join(os.path.dirname(__file__), '..', 'config')
+    
+    if os.path.exists(sesman_config) and not os.path.exists(f"{sesman_config}.bak"):
+        run(f"cp {sesman_config} {sesman_config}.bak")
+    
+    sesman_template_path = os.path.join(config_template_dir, 'xrdp_sesman.ini.template')
+    try:
+        with open(sesman_template_path, 'r', encoding='utf-8') as f:
+            sesman_content = f.read()
+    except FileNotFoundError:
+        print(f"  ⚠ Template file not found: {sesman_template_path}")
+        return
+    except Exception as e:
+        print(f"  ⚠ Error reading template: {e}")
+        return
+    
+    sesman_content = sesman_content.replace('{CLEANUP_SCRIPT_PATH}', cleanup_script_path)
+    
+    with open(sesman_config, "w") as f:
+        f.write(sesman_content)
+    
+    run("systemctl restart xrdp-sesman", check=False)
+    
+    if not file_contains(xrdp_config, "tcp_send_buffer_bytes"):
+        if file_contains(xrdp_config, "[Globals]"):
+            run(f"sed -i '/\\[Globals\\]/a tcp_send_buffer_bytes=32768' {xrdp_config}")
+        else:
+            run(f"sed -i '1i [Globals]\\ntcp_send_buffer_bytes=32768' {xrdp_config}")
+    
+    if not file_contains(xrdp_config, "tcp_recv_buffer_bytes"):
+        if file_contains(xrdp_config, "[Globals]"):
+            run(f"sed -i '/\\[Globals\\]/a tcp_recv_buffer_bytes=32768' {xrdp_config}")
+        else:
+            run(f"sed -i '1i [Globals]\\ntcp_recv_buffer_bytes=32768' {xrdp_config}")
+    
+    if not file_contains(xrdp_config, "bulk_compression="):
+        if file_contains(xrdp_config, "[Globals]"):
+            run(f"sed -i '/\\[Globals\\]/a bulk_compression=true' {xrdp_config}")
+        else:
+            run(f"sed -i '1i [Globals]\\nbulk_compression=true' {xrdp_config}")
+    
     run("systemctl enable xrdp")
     run("systemctl restart xrdp")
 
+    xsession_template_path = os.path.join(config_template_dir, 'xrdp_xsession.template')
+    try:
+        with open(xsession_template_path, 'r', encoding='utf-8') as f:
+            xsession_content = f.read()
+    except FileNotFoundError:
+        print(f"  ⚠ xsession template file not found: {xsession_template_path}")
+        return
+    except Exception as e:
+        print(f"  ⚠ Error reading xsession template: {e}")
+        return
+    
+    xsession_content = xsession_content.replace('{SESSION_CMD}', session_cmd)
+    
     with open(xsession_path, "w") as f:
-        f.write("#!/bin/bash\n")
-        f.write("# Kill any existing PulseAudio to prevent conflicts\n")
-        f.write("pulseaudio --kill 2>/dev/null || true\n")
-        f.write("# Start session\n")
-        f.write(f"exec {session_cmd}\n")
+        f.write(xsession_content)
     run(f"chmod +x {shlex.quote(xsession_path)}")
     run(f"chown {safe_username}:{safe_username} {shlex.quote(xsession_path)}")
 
-    print("  ✓ xRDP installed and configured")
+    print("  ✓ xRDP configured with session cleanup")
 
 
 def harden_xrdp(config: SetupConfig) -> None:
@@ -99,12 +148,6 @@ def harden_xrdp(config: SetupConfig) -> None:
     
     if not os.path.exists(xrdp_config):
         print("  ⚠ xRDP not installed, skipping hardening")
-        return
-    
-    if (file_contains(xrdp_config, "security_layer=tls") and
-        file_contains(sesman_config, "AllowGroups=remoteusers") and
-        file_contains(sesman_config, "DenyUsers=root")):
-        print("  ✓ xRDP already hardened")
         return
     
     run(f"sed -i 's/^#\\?security_layer=.*/security_layer=tls/' {xrdp_config}")
@@ -122,6 +165,12 @@ def harden_xrdp(config: SetupConfig) -> None:
         else:
             run(f"sed -i '1i crypt_level=high' {xrdp_config}")
     
+    if not file_contains(xrdp_config, "tls_ciphers"):
+        if file_contains(xrdp_config, "[Globals]"):
+            run(f"sed -i '/\\[Globals\\]/a tls_ciphers=HIGH:!aNULL:!eNULL:!EXPORT:!DES:!MD5:!PSK:!RC4' {xrdp_config}")
+        else:
+            run(f"sed -i '1i [Globals]\\ntls_ciphers=HIGH:!aNULL:!eNULL:!EXPORT:!DES:!MD5:!PSK:!RC4' {xrdp_config}")
+    
     if not file_contains(sesman_config, "[Security]"):
         run(f"echo '\n[Security]' >> {sesman_config}")
     
@@ -131,93 +180,15 @@ def harden_xrdp(config: SetupConfig) -> None:
     if not file_contains(sesman_config, "DenyUsers"):
         run(f"sed -i '/\\[Security\\]/a DenyUsers=root' {sesman_config}")
     
+    if not file_contains(sesman_config, "MaxLoginRetry"):
+        run(f"sed -i '/\\[Security\\]/a MaxLoginRetry=3' {sesman_config}")
+    
     run("getent group ssl-cert && adduser xrdp ssl-cert", check=False)
     
     run("systemctl restart xrdp")
     run("systemctl restart xrdp-sesman", check=False)
     
-    print("  ✓ xRDP hardened (TLS encryption, root denied, restricted to remoteusers group)")
-
-
-def install_x2go(config: SetupConfig) -> None:
-    """Install X2Go server for remote desktop access."""
-    if is_package_installed("x2goserver"):
-        print("  ✓ X2Go already installed")
-        return
-    
-    run("apt-get install -y -qq x2goserver x2goserver-xsession")
-    
-    run("systemctl enable ssh", check=False)
-    run("systemctl start ssh", check=False)
-    
-    print("  ✓ X2Go installed (connect via SSH on port 22)")
-
-
-def configure_xfce_for_x2go(config: SetupConfig) -> None:
-    """Configure Xfce to work properly with X2Go by disabling compositor."""
-    safe_username = shlex.quote(config.username)
-    home_dir = f"/home/{config.username}"
-    xfce_config_dir = f"{home_dir}/.config/xfce4/xfconf/xfce-perchannel-xml"
-    xfwm4_config = f"{xfce_config_dir}/xfwm4.xml"
-    
-    os.makedirs(xfce_config_dir, exist_ok=True)
-    
-    if os.path.exists(xfwm4_config):
-        if file_contains(xfwm4_config, 'name="use_compositing" type="bool" value="false"'):
-            print("  ✓ Xfce compositor already disabled for X2Go")
-            return
-    
-    xfwm4_content = """<?xml version="1.0" encoding="UTF-8"?>
-<channel name="xfwm4" version="1.0">
-  <property name="general" type="empty">
-    <property name="use_compositing" type="bool" value="false"/>
-    <property name="frame_opacity" type="int" value="100"/>
-    <property name="inactive_opacity" type="int" value="100"/>
-  </property>
-</channel>
-"""
-    
-    with open(xfwm4_config, "w") as f:
-        f.write(xfwm4_content)
-    
-    run(f"chown -R {safe_username}:{safe_username} {shlex.quote(home_dir)}/.config")
-    
-    autostart_dir = f"{home_dir}/.config/autostart"
-    os.makedirs(autostart_dir, exist_ok=True)
-    
-    compositor_script = f"{autostart_dir}/disable-compositor.desktop"
-    compositor_content = """[Desktop Entry]
-Type=Application
-Name=Disable Xfce Compositor for X2Go
-Exec=xfconf-query -c xfwm4 -p /general/use_compositing -s false
-Hidden=false
-NoDisplay=false
-X-GNOME-Autostart-enabled=true
-"""
-    
-    with open(compositor_script, "w") as f:
-        f.write(compositor_content)
-    
-    run(f"chown -R {safe_username}:{safe_username} {shlex.quote(autostart_dir)}")
-    
-    print("  ✓ Xfce compositor disabled for X2Go (prevents graphical issues)")
-
-
-def harden_x2go(config: SetupConfig) -> None:
-    """Harden X2Go by restricting to remoteusers group."""
-    x2go_config = "/etc/x2go/x2goserver.conf"
-    
-    if not os.path.exists(x2go_config):
-        print("  ⚠ X2Go not installed, skipping hardening")
-        return
-    
-    if not file_contains(x2go_config, "# Security hardened"):
-        with open(x2go_config, "a") as f:
-            f.write("\n# Security hardened\n")
-            f.write("# Restrict to remoteusers group via SSH AllowGroups\n")
-    
-    print("  ✓ X2Go hardened (uses SSH security + group restrictions)")
-
+    print("  ✓ xRDP hardened (TLS encryption, strong ciphers, group restrictions)")
 
 
 def configure_audio(config: SetupConfig) -> None:
@@ -341,6 +312,14 @@ def configure_audio(config: SetupConfig) -> None:
         f.write("systemctl status xrdp --no-pager\n\n")
         f.write("echo '=== xRDP Logs (last 50 lines) ==='\n")
         f.write("journalctl -u xrdp -n 50 --no-pager\n\n")
+        f.write("echo '=== Session Manager Config ==='\n")
+        f.write("grep -A 5 '\\[Sessions\\]' /etc/xrdp/sesman.ini 2>/dev/null || echo 'No Sessions config'\n\n")
+        f.write("echo '=== Session Cleanup Script ==='\n")
+        f.write("ls -lh /opt/infra_tools/steps/xrdp_session_cleanup.py 2>/dev/null || echo 'Cleanup script not found'\n\n")
+        f.write("echo '=== Active Sessions ==='\n")
+        f.write("who\n\n")
+        f.write("echo '=== User Processes ==='\n")
+        f.write("ps aux | grep -E '(xrdp|$USER)' | grep -v grep\n\n")
         f.write("echo '=== Session Logs ==='\n")
         f.write("tail -50 ~/.xsession-errors 2>/dev/null || echo 'No .xsession-errors file'\n\n")
         f.write("echo '=== PulseAudio Status ==='\n")
@@ -445,13 +424,8 @@ def install_browser(config: SetupConfig) -> None:
 
 def install_remmina(config: SetupConfig) -> None:
     """Install Remmina RDP client."""
-    if is_package_installed("remmina"):
-        print("  ✓ Remmina already installed")
-        return
-    
-    print("  Installing Remmina...")
-    run("apt-get install -y -qq remmina remmina-plugin-rdp remmina-plugin-vnc", check=False)
-    print("  ✓ Remmina installed")
+    run("apt-get install -y -qq remmina remmina-plugin-rdp remmina-plugin-vnc")
+    print("  ✓ Remmina installed/updated")
 
 
 def install_office_apps(config: SetupConfig) -> None:
@@ -619,14 +593,17 @@ def configure_gnome_keyring(config: SetupConfig) -> None:
     """Configure gnome-keyring for desktop setups."""
     safe_username = shlex.quote(config.username)
     
-    if is_package_installed("gnome-keyring"):
-        print("  ✓ gnome-keyring already installed")
-        return
+    # Install keyring packages for password storage and auto-unlock
+    run("apt-get install -y -qq gnome-keyring libpam-gnome-keyring libsecret-tools")
     
-    run("apt-get install -y -qq gnome-keyring libpam-gnome-keyring")
-    
+    pam_auth = "/etc/pam.d/common-auth"
     pam_password = "/etc/pam.d/common-password"
     pam_session = "/etc/pam.d/common-session"
+    
+    # Add auth line to capture login password for keyring auto-unlock
+    if os.path.exists(pam_auth) and not file_contains(pam_auth, "pam_gnome_keyring.so"):
+        with open(pam_auth, "a") as f:
+            f.write("auth optional pam_gnome_keyring.so\n")
     
     if os.path.exists(pam_password) and not file_contains(pam_password, "pam_gnome_keyring.so"):
         with open(pam_password, "a") as f:
@@ -656,7 +633,11 @@ fi
             f.write(keyring_env)
         run(f"chown {safe_username}:{safe_username} {shlex.quote(profile_path)}")
     
-    print("  ✓ gnome-keyring configured (auto-unlock on login, SSH agent integration)")
+    print("  ✓ gnome-keyring installed/configured (auto-unlock on login, SSH agent integration)")
+    print("    - IMPORTANT: For auto-unlock to work:")
+    print("      1. Delete old keyring: rm ~/.local/share/keyrings/login.keyring")
+    print("      2. Log out and log back in - new keyring will be created with login password")
+    print("    - Tip: Install 'seahorse' package if you need a GUI to manage keyrings")
 
 
 def install_smbclient(config: SetupConfig) -> None:

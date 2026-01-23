@@ -42,10 +42,6 @@ def create_setup_argument_parser(
                        action=argparse.BooleanOptionalAction, 
                        default=None if not for_remote else False,
                        help="Enable RDP/XRDP setup" + ("" if for_remote else " (default: enabled for workstation setups)"))
-    parser.add_argument("--x2go", dest="enable_x2go", 
-                       action=argparse.BooleanOptionalAction, 
-                       default=None if not for_remote else False,
-                       help="Enable X2Go remote desktop access")
     parser.add_argument("--audio", dest="enable_audio", 
                        action=argparse.BooleanOptionalAction if not for_remote else "store_true", 
                        default=None if not for_remote else False,

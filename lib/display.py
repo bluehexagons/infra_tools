@@ -20,13 +20,10 @@ def print_success_header(config: SetupConfig) -> None:
         print_name_and_tags(config)
 
 
-def print_rdp_x2go_info(config: SetupConfig) -> None:
+def print_rdp_info(config: SetupConfig) -> None:
     if config.enable_rdp:
         print(f"RDP: {config.host}:3389")
         print(f"  Client: Remmina, Microsoft Remote Desktop")
-    if config.enable_x2go:
-        print(f"X2Go: {config.host}:22 (SSH)")
-        print(f"  Client: x2goclient, Session: XFCE")
 
 
 def print_setup_summary(config: SetupConfig, description: Optional[str] = None) -> None:
@@ -46,14 +43,12 @@ def print_setup_summary(config: SetupConfig, description: Optional[str] = None) 
     
     if config.enable_rdp:
         print("RDP: Yes")
-    if config.enable_x2go:
-        print("X2Go: Yes")
     if config.enable_audio:
         print("Audio: Yes")
     if config.enable_smbclient:
         print("SMB Client: Yes")
     
-    if config.desktop != "xfce" and (config.include_desktop or config.enable_rdp or config.enable_x2go):
+    if config.desktop != "xfce" and (config.include_desktop or config.enable_rdp):
         print(f"Desktop: {config.desktop}")
     
     if config.browser and config.browser != "brave" and (config.include_desktop or config.include_desktop_apps or config.include_pc_dev_apps or config.include_workstation_dev_apps):
