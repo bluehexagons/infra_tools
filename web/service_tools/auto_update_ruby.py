@@ -47,12 +47,10 @@ def update_ruby_build():
             text=True,
             check=True
         )
-        logger.info("Successfully updated ruby-build")
+        logger.info("✓ Successfully updated ruby-build")
         return True
     except subprocess.CalledProcessError as e:
-        warning_msg = f"Failed to update ruby-build: {e}"
-        print(f"⚠ Warning: {warning_msg}")
-        logger.warning(warning_msg)
+        logger.warning(f"⚠ Failed to update ruby-build: {e}")
         return False
 
 
@@ -85,11 +83,9 @@ def install_ruby_version(version: str) -> bool:
     """Install a specific Ruby version."""
     result = run_rbenv_command(f"rbenv install -s {version}")
     if result.returncode != 0:
-        error_msg = f"Failed to install Ruby {version}: {result.stderr}"
-        print(f"✗ {error_msg}")
-        logger.error(error_msg)
+        logger.error(f"✗ Failed to install Ruby {version}: {result.stderr}")
         return False
-    logger.info(f"Successfully installed Ruby {version}")
+    logger.info(f"✓ Successfully installed Ruby {version}")
     return True
 
 
@@ -97,11 +93,9 @@ def set_global_ruby(version: str) -> bool:
     """Set the global Ruby version."""
     result = run_rbenv_command(f"rbenv global {version}")
     if result.returncode != 0:
-        error_msg = f"Failed to set global Ruby to {version}: {result.stderr}"
-        print(f"✗ {error_msg}")
-        logger.error(error_msg)
+        logger.error(f"✗ Failed to set global Ruby to {version}: {result.stderr}")
         return False
-    logger.info(f"Successfully set global Ruby to {version}")
+    logger.info(f"✓ Successfully set global Ruby to {version}")
     return True
 
 
@@ -109,11 +103,9 @@ def update_bundler():
     """Update the bundler gem."""
     result = run_rbenv_command("gem install bundler")
     if result.returncode != 0:
-        warning_msg = f"Failed to update bundler: {result.stderr}"
-        print(f"⚠ Warning: {warning_msg}")
-        logger.warning(warning_msg)
+        logger.warning(f"⚠ Failed to update bundler: {result.stderr}")
     else:
-        logger.info("Successfully updated bundler")
+        logger.info("✓ Successfully updated bundler")
 
 
 def main():
@@ -122,50 +114,38 @@ def main():
     
     rbenv_dir = os.path.expanduser("~/.rbenv")
     if not os.path.exists(rbenv_dir):
-        error_msg = f"rbenv not found at {rbenv_dir}"
-        print(f"✗ {error_msg}")
-        logger.error(error_msg)
+        logger.error(f"✗ rbenv not found at {rbenv_dir}")
         return 1
     
     update_ruby_build()
     
     latest_ruby = get_latest_stable_ruby()
     if not latest_ruby:
-        error_msg = "Failed to get latest stable Ruby version"
-        print(f"✗ {error_msg}")
-        logger.error(error_msg)
+        logger.error("✗ Failed to get latest stable Ruby version")
         return 1
     
     current_version = get_current_ruby_version()
     if not current_version:
-        error_msg = "Failed to get current Ruby version"
-        print(f"✗ {error_msg}")
-        logger.error(error_msg)
+        logger.error("✗ Failed to get current Ruby version")
         return 1
     
     if current_version == latest_ruby:
-        info_msg = f"Ruby already at latest stable version: {latest_ruby}"
-        print(info_msg)
-        logger.info(info_msg)
+        logger.info(f"Ruby already at latest stable version: {latest_ruby}")
         return 0
     
-    update_msg = f"Updating Ruby from {current_version} to {latest_ruby}"
-    print(update_msg)
-    logger.info(update_msg)
+    logger.info(f"Updating Ruby from {current_version} to {latest_ruby}")
     
     if not install_ruby_version(latest_ruby):
-        logger.error("Ruby installation failed")
+        logger.error("✗ Ruby installation failed")
         return 1
     
     if not set_global_ruby(latest_ruby):
-        logger.error("Failed to set global Ruby version")
+        logger.error("✗ Failed to set global Ruby version")
         return 1
     
     update_bundler()
     
-    success_msg = f"Ruby updated successfully to {latest_ruby}"
-    print(success_msg)
-    logger.info(success_msg)
+    logger.info(f"✓ Ruby updated successfully to {latest_ruby}")
     return 0
 
 

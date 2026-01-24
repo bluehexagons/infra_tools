@@ -116,7 +116,8 @@ def get_service_logger(
     service_name: str,
     log_subdir: Optional[str] = None,
     level: int = DEFAULT_LOG_LEVEL,
-    use_syslog: bool = False
+    use_syslog: bool = False,
+    console_output: bool = True
 ) -> Logger:
     """Get a logger configured for a specific service.
     
@@ -125,6 +126,7 @@ def get_service_logger(
     - Standard formatting
     - Rotating file handler
     - Optional syslog integration
+    - Optional console output
     - Centralized log directory
     
     Args:
@@ -132,6 +134,7 @@ def get_service_logger(
         log_subdir: Optional subdirectory under DEFAULT_LOG_DIR (e.g., 'scrub', 'web')
         level: Logging level
         use_syslog: Whether to also send logs to syslog
+        console_output: Whether to also print to console (default: True)
         
     Returns:
         Configured Logger instance
@@ -150,6 +153,19 @@ def get_service_logger(
     
     # Get logger with rotating file handler
     logger = get_rotating_logger(service_name, str(log_file), level=level)
+    
+    # Add console handler if requested
+    if console_output:
+        # Check if console handler already exists
+        has_console = any(isinstance(h, StreamHandler) and h.stream in (sys.stdout, sys.stderr) 
+                         for h in logger.handlers)
+        if not has_console:
+            console_handler = StreamHandler(sys.stdout)
+            console_handler.setLevel(level)
+            # Use simpler format for console: just the message with level prefix
+            console_formatter = Formatter('%(message)s')
+            console_handler.setFormatter(console_formatter)
+            logger.addHandler(console_handler)
     
     # Add syslog handler if requested
     if use_syslog:

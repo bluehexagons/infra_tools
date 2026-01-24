@@ -7,6 +7,7 @@ The infra_tools repository uses a centralized logging system to ensure consisten
 All services in infra_tools write logs to a centralized location (`/var/log/infra_tools/`) with:
 - **Rotating file handlers** to prevent disk space issues
 - **Standardized log format** with timestamps and severity levels
+- **Console output** for immediate visibility
 - **Optional syslog integration** for system-level monitoring
 - **Automatic directory creation** with fallback to stderr
 
@@ -53,9 +54,7 @@ The system supports standard Python logging levels:
 
 ## Using Centralized Logging in Services
 
-### For New Services
-
-Use the `get_service_logger()` function for the simplest integration:
+Use the `get_service_logger()` function for easy integration:
 
 ```python
 #!/usr/bin/env python3
@@ -77,9 +76,9 @@ def main():
     
     try:
         # Do work
-        logger.info('Work completed successfully')
+        logger.info('✓ Work completed successfully')
     except Exception as e:
-        logger.error(f'Service failed: {e}')
+        logger.error(f'✗ Service failed: {e}')
         return 1
     
     return 0
@@ -94,6 +93,7 @@ if __name__ == "__main__":
 - `log_subdir`: Subdirectory under `/var/log/infra_tools/` (e.g., 'web', 'common', 'desktop')
 - `level`: Log level (default: INFO)
 - `use_syslog`: Whether to also send logs to syslog (default: False)
+- `console_output`: Whether to print to console (default: True)
 
 ### Log Rotation
 
@@ -171,25 +171,9 @@ This allows integration with:
 - Remote syslog servers
 - Log aggregation tools (e.g., rsyslog, syslog-ng)
 
-### Monitoring Error and Warning Patterns
+### Monitoring with External Tools
 
-A monitoring script is provided for easy log monitoring:
-
-```bash
-# Monitor all logs with color coding (errors in red, warnings in yellow)
-./scripts/monitor_logs.sh
-
-# Monitor only errors
-./scripts/monitor_logs.sh errors
-
-# Monitor only warnings
-./scripts/monitor_logs.sh warnings
-
-# Monitor a specific service
-./scripts/monitor_logs.sh auto_update_node
-```
-
-You can also use standard Unix tools:
+Use standard Unix tools or integrate with monitoring services:
 
 ```bash
 # Monitor for ERROR level logs
@@ -202,57 +186,12 @@ tail -F /var/log/infra_tools/*/*.log | grep "WARNING"
 tail -F /var/log/infra_tools/web/auto_update_node.log
 ```
 
-### Example Monitoring Script
-
-```bash
-#!/bin/bash
-# Monitor infra_tools logs and send alerts
-
-LOG_DIR="/var/log/infra_tools"
-
-# Check for recent errors
-RECENT_ERRORS=$(find "$LOG_DIR" -name "*.log" -mmin -5 -exec grep -l "ERROR" {} \;)
-
-if [ -n "$RECENT_ERRORS" ]; then
-    # Send alert (customize for your notification system)
-    echo "Errors detected in: $RECENT_ERRORS" | mail -s "infra_tools Alert" admin@example.com
-fi
-```
-
-## Migrating Existing Services
-
-### From print() statements
-
-Replace:
-```python
-print("Starting service")
-print(f"Error: {error_message}")
-```
-
-With:
-```python
-logger.info("Starting service")
-logger.error(f"Error: {error_message}")
-```
-
-### From syslog
-
-Replace:
-```python
-import syslog
-syslog.syslog(syslog.LOG_INFO, "Service started")
-syslog.syslog(syslog.LOG_ERR, f"Error: {error}")
-```
-
-With:
-```python
-from lib.logging_utils import get_service_logger
-logger = get_service_logger('my_service', 'common', use_syslog=True)
+External monitoring services can be configured to watch these logs and forward errors to notification systems.
 logger.info("Service started")
 logger.error(f"Error: {error}")
 ```
 
-The `use_syslog=True` parameter ensures logs still go to syslog while also being written to the centralized log files.
+The `use_syslog=True` parameter ensures logs are also sent to syslog while being written to centralized log files.
 
 ## Best Practices
 
@@ -261,9 +200,9 @@ The `use_syslog=True` parameter ensures logs still go to syslog while also being
    - WARNING for recoverable issues
    - ERROR for failures that require attention
 
-2. **Include context in error messages**:
+2. **Include context in messages**:
    ```python
-   logger.error(f"Failed to update Node.js from {current_version} to {target_version}")
+   logger.error(f"✗ Failed to update Node.js from {current_version} to {target_version}")
    ```
 
 3. **Log at key points**:
@@ -272,12 +211,17 @@ The `use_syslog=True` parameter ensures logs still go to syslog while also being
    - All errors and warnings
    - Important state changes
 
-4. **Don't log sensitive data**:
-   - Passwords
-   - API keys
-   - Personal information
+4. **Keep messages concise and useful**:
+   - Avoid excessive logging
+   - Include relevant information for troubleshooting
+   - Use symbols (✓, ✗, ⚠) for visual clarity in console output
 
-5. **Use structured logging for complex data**:
+5. **Never log sensitive data**:
+   - Passwords, API keys, tokens
+   - Personal information
+   - Financial data
+
+6. **Use structured logging for complex data**:
    ```python
    from lib.operation_log import create_operation_logger
    logger = create_operation_logger('deployment', app='myapp', version='1.2.3')

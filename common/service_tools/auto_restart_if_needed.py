@@ -81,9 +81,7 @@ def check_rdp_sessions() -> bool:
 
 def perform_restart():
     """Perform system restart."""
-    info_msg = "Restart required and no users logged in, restarting system..."
-    print(info_msg)
-    logger.info(info_msg)
+    logger.info("Restart required and no users logged in, restarting system...")
     
     try:
         subprocess.run(
@@ -91,9 +89,7 @@ def perform_restart():
             check=True
         )
     except subprocess.CalledProcessError as e:
-        error_msg = f"Failed to initiate restart: {e}"
-        print(f"✗ {error_msg}")
-        logger.error(error_msg)
+        logger.error(f"✗ Failed to initiate restart: {e}")
         sys.exit(1)
 
 
@@ -103,31 +99,23 @@ def main():
     
     # Check if restart is required
     if not check_restart_required():
-        info_msg = "No restart required"
-        print(info_msg)
-        logger.info(info_msg)
+        logger.info("No restart required")
         return 0
     
     # Check for SSH/console sessions
     logged_in_users = get_logged_in_users()
     if logged_in_users:
-        info_msg = "Users are logged in (SSH/console), skipping restart"
-        print(info_msg)
-        logger.info(info_msg)
+        logger.info("Users are logged in (SSH/console), skipping restart")
         return 0
     
     # Check for desktop sessions
     if check_desktop_sessions():
-        info_msg = "Desktop session active, skipping restart"
-        print(info_msg)
-        logger.info(info_msg)
+        logger.info("Desktop session active, skipping restart")
         return 0
     
     # Check for RDP sessions
     if check_rdp_sessions():
-        info_msg = "RDP session active, skipping restart"
-        print(info_msg)
-        logger.info(info_msg)
+        logger.info("RDP session active, skipping restart")
         return 0
     
     # No users logged in and restart required, proceed
