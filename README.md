@@ -3,6 +3,8 @@
 Automated setup scripts for remote Linux systems (Debian).
 
 > **🤖 AI Agents:** See [`.github/ai-agents/`](.github/ai-agents/) for development guidance.
+> 
+> **📋 Logging:** See [`docs/LOGGING.md`](docs/LOGGING.md) for centralized logging system documentation.
 
 ## Quick Start
 
