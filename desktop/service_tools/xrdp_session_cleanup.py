@@ -5,6 +5,8 @@ Ensures xRDP-related processes are terminated when RDP session ends.
 Addresses issue of orphaned xrdp-sesexec processes that prevent re-login.
 
 This script is called by xrdp's EndSessionCommand in sesman.ini.
+
+Logs to: /var/log/infra_tools/desktop/xrdp_session_cleanup.log
 """
 
 from __future__ import annotations
@@ -12,7 +14,14 @@ from __future__ import annotations
 import os
 import sys
 import subprocess
-import syslog
+
+# Add lib directory to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
+
+from lib.logging_utils import get_service_logger
+
+# Initialize centralized logger
+logger = get_service_logger('xrdp_session_cleanup', 'desktop', use_syslog=True)
 
 
 def kill_processes(username: str, pattern: str, exact: bool = False) -> None:
@@ -45,20 +54,17 @@ def kill_processes(username: str, pattern: str, exact: bool = False) -> None:
 
 def main() -> int:
     """Main cleanup routine."""
-    # Initialize syslog once
-    syslog.openlog("xrdp-cleanup", syslog.LOG_PID, syslog.LOG_USER)
-    
     # Get username from environment or first argument
     username = os.environ.get("PAM_USER") or os.environ.get("USER")
     if not username and len(sys.argv) > 1:
         username = sys.argv[1]
     
     if not username:
-        syslog.syslog(syslog.LOG_ERR, "ERROR: No user specified for cleanup")
-        syslog.closelog()
+        error_msg = "No user specified for cleanup"
+        logger.error(error_msg)
         return 1
     
-    syslog.syslog(syslog.LOG_INFO, f"Starting session cleanup for user: {username}")
+    logger.info(f"Starting session cleanup for user: {username}")
     
     # Kill PulseAudio processes spawned by this xRDP session
     kill_processes(username, "pulseaudio", exact=True)
@@ -74,8 +80,7 @@ def main() -> int:
     kill_processes(username, "cinnamon-session", exact=False)
     kill_processes(username, "i3", exact=True)
     
-    syslog.syslog(syslog.LOG_INFO, f"Session cleanup completed for user: {username}")
-    syslog.closelog()
+    logger.info(f"Session cleanup completed for user: {username}")
     
     return 0
 

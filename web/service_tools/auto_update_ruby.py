@@ -4,6 +4,8 @@ Auto-update Ruby
 
 This script updates Ruby to the latest stable version via rbenv.
 It also updates the bundler gem.
+
+Logs to: /var/log/infra_tools/web/auto_update_ruby.log
 """
 
 from __future__ import annotations
@@ -11,8 +13,15 @@ from __future__ import annotations
 import os
 import sys
 import subprocess
-import syslog
 import re
+
+# Add lib directory to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
+
+from lib.logging_utils import get_service_logger
+
+# Initialize centralized logger
+logger = get_service_logger('auto_update_ruby', 'web', use_syslog=True)
 
 
 def run_rbenv_command(cmd: str) -> subprocess.CompletedProcess[str]:
@@ -38,9 +47,12 @@ def update_ruby_build():
             text=True,
             check=True
         )
+        logger.info("Successfully updated ruby-build")
         return True
     except subprocess.CalledProcessError as e:
-        print(f"⚠ Warning: Failed to update ruby-build: {e}")
+        warning_msg = f"Failed to update ruby-build: {e}"
+        print(f"⚠ Warning: {warning_msg}")
+        logger.warning(warning_msg)
         return False
 
 
@@ -73,9 +85,11 @@ def install_ruby_version(version: str) -> bool:
     """Install a specific Ruby version."""
     result = run_rbenv_command(f"rbenv install -s {version}")
     if result.returncode != 0:
-        print(f"✗ Failed to install Ruby {version}: {result.stderr}")
-        syslog.syslog(syslog.LOG_ERR, f"auto-update-ruby: Failed to install Ruby {version}: {result.stderr}")
+        error_msg = f"Failed to install Ruby {version}: {result.stderr}"
+        print(f"✗ {error_msg}")
+        logger.error(error_msg)
         return False
+    logger.info(f"Successfully installed Ruby {version}")
     return True
 
 
@@ -83,8 +97,11 @@ def set_global_ruby(version: str) -> bool:
     """Set the global Ruby version."""
     result = run_rbenv_command(f"rbenv global {version}")
     if result.returncode != 0:
-        print(f"✗ Failed to set global Ruby to {version}: {result.stderr}")
+        error_msg = f"Failed to set global Ruby to {version}: {result.stderr}"
+        print(f"✗ {error_msg}")
+        logger.error(error_msg)
         return False
+    logger.info(f"Successfully set global Ruby to {version}")
     return True
 
 
@@ -92,45 +109,63 @@ def update_bundler():
     """Update the bundler gem."""
     result = run_rbenv_command("gem install bundler")
     if result.returncode != 0:
-        print(f"⚠ Warning: Failed to update bundler: {result.stderr}")
+        warning_msg = f"Failed to update bundler: {result.stderr}"
+        print(f"⚠ Warning: {warning_msg}")
+        logger.warning(warning_msg)
+    else:
+        logger.info("Successfully updated bundler")
 
 
 def main():
     """Main function to update Ruby."""
+    logger.info("Starting Ruby update check")
+    
     rbenv_dir = os.path.expanduser("~/.rbenv")
     if not os.path.exists(rbenv_dir):
-        print(f"✗ rbenv not found at {rbenv_dir}")
+        error_msg = f"rbenv not found at {rbenv_dir}"
+        print(f"✗ {error_msg}")
+        logger.error(error_msg)
         return 1
     
     update_ruby_build()
     
     latest_ruby = get_latest_stable_ruby()
     if not latest_ruby:
-        print("✗ Failed to get latest stable Ruby version")
+        error_msg = "Failed to get latest stable Ruby version"
+        print(f"✗ {error_msg}")
+        logger.error(error_msg)
         return 1
     
     current_version = get_current_ruby_version()
     if not current_version:
-        print("✗ Failed to get current Ruby version")
+        error_msg = "Failed to get current Ruby version"
+        print(f"✗ {error_msg}")
+        logger.error(error_msg)
         return 1
     
     if current_version == latest_ruby:
-        print(f"Ruby already at latest stable version: {latest_ruby}")
+        info_msg = f"Ruby already at latest stable version: {latest_ruby}"
+        print(info_msg)
+        logger.info(info_msg)
         return 0
     
-    print(f"Updating Ruby from {current_version} to {latest_ruby}")
-    syslog.syslog(syslog.LOG_INFO, f"auto-update-ruby: Updating Ruby from {current_version} to {latest_ruby}")
+    update_msg = f"Updating Ruby from {current_version} to {latest_ruby}"
+    print(update_msg)
+    logger.info(update_msg)
     
     if not install_ruby_version(latest_ruby):
+        logger.error("Ruby installation failed")
         return 1
     
     if not set_global_ruby(latest_ruby):
+        logger.error("Failed to set global Ruby version")
         return 1
     
     update_bundler()
     
-    print(f"Ruby updated successfully to {latest_ruby}")
-    syslog.syslog(syslog.LOG_INFO, f"auto-update-ruby: Successfully updated Ruby to {latest_ruby}")
+    success_msg = f"Ruby updated successfully to {latest_ruby}"
+    print(success_msg)
+    logger.info(success_msg)
     return 0
 
 
