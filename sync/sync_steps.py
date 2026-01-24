@@ -157,7 +157,7 @@ def create_sync_service(config: SetupConfig, sync_spec: Optional[list[str]] = No
         logger.log_step("mount_validation_enhanced", "completed", "Enhanced mount validation completed")
     
     service_file = f"/etc/systemd/system/{service_name}.service"
-    check_script = f"{REMOTE_INSTALL_DIR}/steps/check_sync_mounts.py"
+    check_script = f"{REMOTE_INSTALL_DIR}/sync/service_tools/check_sync_mounts.py"
     
     exec_condition = f"ExecCondition=/usr/bin/python3 {check_script} {shlex.quote(source)} {shlex.quote(destination)}" if needs_mount_check else ""
     

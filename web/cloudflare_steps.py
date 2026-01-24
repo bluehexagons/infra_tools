@@ -44,7 +44,7 @@ def create_cloudflared_config_directory(config: SetupConfig) -> None:
     
     os.makedirs(config_dir, mode=0o755, exist_ok=True)
     
-    config_template_dir = os.path.join(os.path.dirname(__file__), '..', 'config')
+    config_template_dir = os.path.join(os.path.dirname(__file__), '..', 'web', 'config')
     template_path = os.path.join(config_template_dir, 'cloudflare_tunnel_readme.md')
     with open(template_path, 'r', encoding='utf-8') as f:
         readme_content = f.read()
@@ -63,7 +63,7 @@ def configure_nginx_for_cloudflare(config: SetupConfig) -> None:
         print("  ✓ Nginx already configured for Cloudflare")
         return
     
-    config_template_dir = os.path.join(os.path.dirname(__file__), '..', 'config')
+    config_template_dir = os.path.join(os.path.dirname(__file__), '..', 'web', 'config')
     template_path = os.path.join(config_template_dir, 'cloudflare_ips.conf')
     with open(template_path, 'r', encoding='utf-8') as f:
         cloudflare_config = f.read()
@@ -79,7 +79,7 @@ def configure_nginx_for_cloudflare(config: SetupConfig) -> None:
 def install_cloudflared_service_helper(config: SetupConfig) -> None:
     """Create symlink for Cloudflare tunnel setup script."""
     helper_script = "/usr/local/bin/setup-cloudflare-tunnel"
-    source_script = "/opt/infra_tools/service_tools/setup_cloudflare_tunnel.py"
+    source_script = "/opt/infra_tools/web/service_tools/setup_cloudflare_tunnel.py"
     
     if os.path.exists(helper_script):
         print("  ✓ Cloudflare tunnel setup script already available")
@@ -97,7 +97,7 @@ def install_cloudflared_service_helper(config: SetupConfig) -> None:
 
 def run_cloudflare_tunnel_setup(config: SetupConfig) -> None:
     """Run Cloudflare tunnel setup in non-interactive mode to update configuration."""
-    helper_script = "/opt/infra_tools/service_tools/setup_cloudflare_tunnel.py"
+    helper_script = "/opt/infra_tools/web/service_tools/setup_cloudflare_tunnel.py"
     
     if not os.path.exists(helper_script):
         print(f"  ⚠ Setup script not found: {helper_script}")

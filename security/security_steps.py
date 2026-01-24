@@ -227,7 +227,7 @@ def configure_auto_restart(config: SetupConfig) -> None:
             print("  ✓ Automatic restart service already configured")
             return
     
-    script_path = "/opt/infra_tools/service_tools/auto_restart_if_needed.py"
+    script_path = "/opt/infra_tools/common/service_tools/auto_restart_if_needed.py"
     
     service_content = f"""[Unit]
 Description=Auto-restart system if needed

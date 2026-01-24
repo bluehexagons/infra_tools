@@ -324,7 +324,7 @@ def _configure_auto_update_systemd(
             print(f"  ✓ {check_name} auto-update already configured")
             return
 
-    script_path = f"/opt/infra_tools/service_tools/{script_name}"
+    script_path = f"/opt/infra_tools/common/service_tools/{script_name}"
     
     user_line = f"User={user}\n" if user else ""
     

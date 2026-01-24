@@ -14,11 +14,31 @@ python3 patch_setup.py example.com --ssl --deploy api.example.com https://github
 
 ## Repository Structure
 
-- **Root**: Core setup scripts (`setup_*.py`, `patch_setup.py`, `remote_setup.py`)
-- **`/lib`**: Python modules for setup steps and utilities
-- **`/config`**: Configuration templates (Nginx, Cloudflare)
-- **`/service_tools`**: Tools used by remote services (auto-update, scrub, etc.)
-- **`/steps`**: Step-focused scripts (`setup_steps.py`, `setup_rails_service.py`, mount checkers)
+The repository is organized by functionality (module-based) rather than file type:
+
+- **Root**: User-facing setup scripts (`setup_*.py`, `patch_setup.py`, `remote_setup.py`)
+- **`/lib`**: Core shared libraries (config, types, utilities, system configuration)
+- **`/common`**: Common setup functionality
+  - `steps.py`: User setup, packages, locale, CLI tools, Ruby/Node/Go installation
+  - `service_tools/`: Auto-update scripts for Node/Ruby, auto-restart service
+- **`/desktop`**: Desktop and workstation functionality
+  - `steps.py`: Desktop environment, xRDP, audio, browsers, applications
+  - `config/`: xRDP configuration templates
+  - `service_tools/`: xRDP session cleanup script
+- **`/web`**: Web server functionality
+  - `steps.py`: Nginx setup, security, site configuration
+  - `config/`: Nginx and Cloudflare templates
+  - `service_tools/`: Cloudflare tunnel setup script
+- **`/security`**: Security hardening functionality
+  - `steps.py`: Firewall, SSH hardening, kernel hardening, fail2ban, auto-updates
+- **`/smb`**: SMB/Samba functionality
+  - `steps.py`: Samba server and SMB client mount configuration
+- **`/sync`**: Sync and data integrity functionality
+  - `steps.py`: rsync sync and par2 scrub service setup
+  - `service_tools/`: Scrub script, mount checkers
+- **`/deploy`**: Deployment functionality
+  - `steps.py`: Application deployment (Rails, Node/Vite, static)
+  - `service_tools/`: Rails service setup script
 
 ## Setup Scripts
 
