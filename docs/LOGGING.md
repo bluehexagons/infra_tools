@@ -173,7 +173,23 @@ This allows integration with:
 
 ### Monitoring Error and Warning Patterns
 
-To monitor for errors and warnings, configure your monitoring tool to watch for:
+A monitoring script is provided for easy log monitoring:
+
+```bash
+# Monitor all logs with color coding (errors in red, warnings in yellow)
+./scripts/monitor_logs.sh
+
+# Monitor only errors
+./scripts/monitor_logs.sh errors
+
+# Monitor only warnings
+./scripts/monitor_logs.sh warnings
+
+# Monitor a specific service
+./scripts/monitor_logs.sh auto_update_node
+```
+
+You can also use standard Unix tools:
 
 ```bash
 # Monitor for ERROR level logs
