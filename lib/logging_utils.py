@@ -156,9 +156,12 @@ def get_service_logger(
     
     # Add console handler if requested
     if console_output:
-        # Check if console handler already exists
-        has_console = any(isinstance(h, StreamHandler) and h.stream in (sys.stdout, sys.stderr) 
-                         for h in logger.handlers)
+        # Check if stdout console handler already exists
+        has_console = any(
+            isinstance(h, StreamHandler) and 
+            h.stream == sys.stdout 
+            for h in logger.handlers
+        )
         if not has_console:
             console_handler = StreamHandler(sys.stdout)
             console_handler.setLevel(level)
