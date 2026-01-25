@@ -234,8 +234,10 @@ def harden_xrdp(config: SetupConfig) -> None:
 def configure_audio(config: SetupConfig) -> None:
     """Configure audio for RDP sessions.
     
-    For unprivileged containers: Basic PulseAudio setup without xRDP modules
-    For VMs/hardware: Full setup with xRDP audio modules if available
+    For unprivileged containers: Basic PulseAudio setup without xRDP audio modules.
+        Audio over RDP will not work, but local desktop audio may function if hardware is available.
+    For VMs/hardware: Full setup with xRDP audio modules (pre-installed or compiled from source).
+        Provides audio over RDP connection.
     
     Note: Per requirements, audio is not expected to work in unprivileged containers.
     """
@@ -259,10 +261,10 @@ def configure_audio(config: SetupConfig) -> None:
         return
     
     # Skip complex module compilation for unprivileged containers
-    # Audio won't work over RDP but the desktop will function
+    # Audio won't work over RDP but the desktop will function normally
     if is_container() and not modules_installed:
         print("  ℹ Skipping xRDP audio module compilation in unprivileged container")
-        print("  ℹ Local audio (if available) will work, but not over RDP")
+        print("  ℹ Desktop will work but RDP audio is not supported in containers")
         modules_installed = False
     elif not modules_installed:
         run("apt-get install -y -qq build-essential dpkg-dev libpulse-dev git autoconf libtool", check=False)
