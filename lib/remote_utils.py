@@ -81,6 +81,17 @@ def is_service_active(service: str) -> bool:
     return result.returncode == 0
 
 
+def is_flatpak_app_installed(app_id: str) -> bool:
+    """Return True if the given Flatpak application id is installed."""
+    try:
+        result = subprocess.run(
+            f"flatpak info {shlex.quote(app_id)}",
+            shell=True, capture_output=True
+        )
+        return result.returncode == 0
+    except FileNotFoundError:
+        return False
+
 def user_exists(username: str) -> bool:
     result = subprocess.run(
         f"id {shlex.quote(username)}",

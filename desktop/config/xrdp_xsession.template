@@ -14,5 +14,11 @@ trap cleanup EXIT INT TERM
 
 pulseaudio --kill 2>/dev/null || true
 
+# Start dynamic resolution handler in background
+if [ -f /opt/infra_tools/desktop/service_tools/xrdp_resize_handler.py ]; then
+    /opt/infra_tools/desktop/service_tools/xrdp_resize_handler.py &
+    logger -t xrdp-session "Dynamic resolution handler started"
+fi
+
 logger -t xrdp-session "Starting desktop session: {SESSION_CMD}"
 exec dbus-launch --exit-with-session {SESSION_CMD}

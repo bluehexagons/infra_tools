@@ -16,14 +16,12 @@ Key Features:
 from __future__ import annotations
 
 from logging import (
-    Logger, Formatter, StreamHandler, getLogger,
-    DEBUG, INFO, WARNING, ERROR, CRITICAL
+    Logger, Formatter, StreamHandler, getLogger, INFO
 )
 from logging.handlers import RotatingFileHandler, SysLogHandler
 from pathlib import Path
 from typing import Optional
 import sys
-import os
 
 # Default log configuration
 DEFAULT_LOG_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
@@ -145,23 +143,27 @@ def get_service_logger(
         logger.warning('npm update failed, retrying')
         logger.error('Update failed after retries')
     """
-    # Build log file path
     log_dir = Path(DEFAULT_LOG_DIR)
     if log_subdir:
         log_dir = log_dir / log_subdir
     log_file = log_dir / f"{service_name}.log"
     
-    # Get logger with rotating file handler
     logger = get_rotating_logger(service_name, str(log_file), level=level)
     
-    # Add console handler if requested
     if console_output:
-        # Check if stdout console handler already exists
-        has_console = any(
-            isinstance(h, StreamHandler) and 
-            h.stream == sys.stdout 
-            for h in logger.handlers
-        )
+        # Check if stdout console handler already exists (explicit loop helps type-checkers)
+        has_console = False
+        for h in logger.handlers:
+            if isinstance(h, StreamHandler):
+                try:
+                    # Accessing `.stream` is runtime-safe but the type checker
+                    # may not know about this attribute on all handlers.
+                    if h.stream is sys.stdout:  # type: ignore[attr-defined]
+                        has_console = True
+                        break
+                except Exception:
+                    # If handler doesn't expose `stream`, skip it
+                    continue
         if not has_console:
             console_handler = StreamHandler(sys.stdout)
             console_handler.setLevel(level)
@@ -170,10 +172,8 @@ def get_service_logger(
             console_handler.setFormatter(console_formatter)
             logger.addHandler(console_handler)
     
-    # Add syslog handler if requested
     if use_syslog:
         try:
-            # Try to add syslog handler for integration with system logging
             syslog_handler = SysLogHandler(address='/dev/log')
             syslog_handler.setLevel(level)
             syslog_handler.setFormatter(Formatter(f'{service_name}: %(message)s'))

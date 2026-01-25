@@ -38,3 +38,6 @@ param=tcp
 ; Logging
 param=-logfile
 param=.xorgxrdp.%s.log
+; Dynamic resolution support - allow RANDR extension for resize
+param=-extension
+param=RANDR

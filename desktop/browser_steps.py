@@ -6,7 +6,7 @@ import os
 import shlex
 
 from lib.config import SetupConfig
-from lib.remote_utils import run, is_package_installed, is_service_active, file_contains
+from lib.remote_utils import run, is_package_installed, is_flatpak_app_installed, file_contains
 
 
 FLATPAK_REMOTE = "flathub"

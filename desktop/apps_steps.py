@@ -6,7 +6,7 @@ import os
 import shlex
 
 from lib.config import SetupConfig
-from lib.remote_utils import run, is_package_installed, is_service_active, file_contains
+from lib.remote_utils import run, is_package_installed, is_flatpak_app_installed, file_contains
 from desktop.browser_steps import install_browser
 
 
@@ -27,10 +27,6 @@ def install_flatpak_if_needed() -> None:
     run(f"flatpak remote-add --if-not-exists {FLATPAK_REMOTE} https://flathub.org/repo/flathub.flatpakrepo", check=False)
 
 
-def is_flatpak_app_installed(app_id: str) -> bool:
-    """Check if a flatpak app is installed."""
-    result = run(f"flatpak info {shlex.quote(app_id)}", check=False)
-    return result.returncode == 0
 
 def install_remmina(config: SetupConfig) -> None:
     """Install Remmina RDP client."""

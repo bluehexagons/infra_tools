@@ -1,12 +1,11 @@
 """Desktop and workstation setup steps."""
 
 from __future__ import annotations
-from typing import Optional
 import os
 import shlex
 
 from lib.config import SetupConfig
-from lib.remote_utils import run, is_package_installed, is_service_active, file_contains
+from lib.remote_utils import run
 
 
 FLATPAK_REMOTE = "flathub"
@@ -27,7 +26,7 @@ def install_xrdp(config: SetupConfig) -> None:
     else:
         session_cmd = "xfce4-session"
     
-    run("apt-get install -y -qq xrdp xorgxrdp dbus-x11")
+    run("apt-get install -y -qq xrdp xorgxrdp dbus-x11 x11-xserver-utils x11-utils")
     print("  ✓ xRDP packages installed/updated")
     
     run("getent group ssl-cert && adduser xrdp ssl-cert", check=False)
@@ -55,23 +54,20 @@ def install_xrdp(config: SetupConfig) -> None:
     
     run("systemctl restart xrdp-sesman", check=False)
     
-    if not file_contains(xrdp_config, "tcp_send_buffer_bytes"):
-        if file_contains(xrdp_config, "[Globals]"):
-            run(f"sed -i '/\\[Globals\\]/a tcp_send_buffer_bytes=32768' {xrdp_config}")
-        else:
-            run(f"sed -i '1i [Globals]\\ntcp_send_buffer_bytes=32768' {xrdp_config}")
+    if os.path.exists(xrdp_config) and not os.path.exists(f"{xrdp_config}.bak"):
+        run(f"cp {xrdp_config} {xrdp_config}.bak")
     
-    if not file_contains(xrdp_config, "tcp_recv_buffer_bytes"):
-        if file_contains(xrdp_config, "[Globals]"):
-            run(f"sed -i '/\\[Globals\\]/a tcp_recv_buffer_bytes=32768' {xrdp_config}")
-        else:
-            run(f"sed -i '1i [Globals]\\ntcp_recv_buffer_bytes=32768' {xrdp_config}")
-    
-    if not file_contains(xrdp_config, "bulk_compression="):
-        if file_contains(xrdp_config, "[Globals]"):
-            run(f"sed -i '/\\[Globals\\]/a bulk_compression=true' {xrdp_config}")
-        else:
-            run(f"sed -i '1i [Globals]\\nbulk_compression=true' {xrdp_config}")
+    xrdp_template_path = os.path.join(config_template_dir, 'xrdp.ini.template')
+    try:
+        with open(xrdp_template_path, 'r', encoding='utf-8') as f:
+            xrdp_content = f.read()
+        with open(xrdp_config, "w") as f:
+            f.write(xrdp_content)
+        print("  ✓ xRDP configuration deployed from template (dynamic resolution enabled)")
+    except FileNotFoundError:
+        print(f"  ⚠ xrdp.ini template not found: {xrdp_template_path}, using default config")
+    except Exception as e:
+        print(f"  ⚠ Error deploying xrdp.ini template: {e}")
     
     run("systemctl enable xrdp")
     run("systemctl restart xrdp")
@@ -98,47 +94,18 @@ def install_xrdp(config: SetupConfig) -> None:
 
 
 def harden_xrdp(config: SetupConfig) -> None:
-    """Harden xRDP with TLS encryption and group restrictions."""
+    """Harden xRDP with TLS encryption and group restrictions.
+    
+    Note: Security settings are already configured in xrdp.ini and sesman.ini templates.
+    This function ensures the xrdp user has proper permissions and restarts services.
+    """
     xrdp_config = "/etc/xrdp/xrdp.ini"
-    sesman_config = "/etc/xrdp/sesman.ini"
     
     if not os.path.exists(xrdp_config):
         print("  ⚠ xRDP not installed, skipping hardening")
         return
     
-    run(f"sed -i 's/^#\\?security_layer=.*/security_layer=tls/' {xrdp_config}")
-    run(f"sed -i 's/^#\\?crypt_level=.*/crypt_level=high/' {xrdp_config}")
-    
-    if not file_contains(xrdp_config, "security_layer"):
-        if file_contains(xrdp_config, "[Globals]"):
-            run(f"sed -i '/\\[Globals\\]/a security_layer=tls' {xrdp_config}")
-        else:
-            run(f"sed -i '1i [Globals]\\nsecurity_layer=tls' {xrdp_config}")
-    
-    if not file_contains(xrdp_config, "crypt_level"):
-        if file_contains(xrdp_config, "[Globals]"):
-            run(f"sed -i '/\\[Globals\\]/a crypt_level=high' {xrdp_config}")
-        else:
-            run(f"sed -i '1i crypt_level=high' {xrdp_config}")
-    
-    if not file_contains(xrdp_config, "tls_ciphers"):
-        if file_contains(xrdp_config, "[Globals]"):
-            run(f"sed -i '/\\[Globals\\]/a tls_ciphers=HIGH:!aNULL:!eNULL:!EXPORT:!DES:!MD5:!PSK:!RC4' {xrdp_config}")
-        else:
-            run(f"sed -i '1i [Globals]\\ntls_ciphers=HIGH:!aNULL:!eNULL:!EXPORT:!DES:!MD5:!PSK:!RC4' {xrdp_config}")
-    
-    if not file_contains(sesman_config, "[Security]"):
-        run(f"echo '\n[Security]' >> {sesman_config}")
-    
-    if not file_contains(sesman_config, "AllowGroups"):
-        run(f"sed -i '/\\[Security\\]/a AllowGroups=remoteusers' {sesman_config}")
-    
-    if not file_contains(sesman_config, "DenyUsers"):
-        run(f"sed -i '/\\[Security\\]/a DenyUsers=root' {sesman_config}")
-    
-    if not file_contains(sesman_config, "MaxLoginRetry"):
-        run(f"sed -i '/\\[Security\\]/a MaxLoginRetry=3' {sesman_config}")
-    
+    # Ensure xrdp user has access to SSL certificates
     run("getent group ssl-cert && adduser xrdp ssl-cert", check=False)
     
     run("systemctl restart xrdp")

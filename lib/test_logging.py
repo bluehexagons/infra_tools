@@ -16,12 +16,8 @@ import shutil
 # Add lib directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
-from lib.logging_utils import (
-    get_service_logger, 
-    get_rotating_logger,
-    ensure_log_directory,
-    INFO, WARNING, ERROR, DEBUG
-)
+from lib.logging_utils import get_service_logger, get_rotating_logger
+from logging import DEBUG
 from lib.operation_log import create_operation_logger
 
 
@@ -93,13 +89,13 @@ def test_operation_logging():
     try:
         # Override the default log directory for operation logger
         import lib.operation_log as operation_log
-        original_manager = operation_log._logger_manager
-        operation_log._logger_manager = None
+        original_manager = getattr(operation_log, '_logger_manager', None)
+        operation_log.set_operation_logger_manager(None)
         
         # Create manager with temp directory
         from lib.operation_log import OperationLoggerManager
         temp_manager = OperationLoggerManager(temp_dir)
-        operation_log._logger_manager = temp_manager
+        operation_log.set_operation_logger_manager(temp_manager)
         
         # Create operation logger
         logger = create_operation_logger('test_operation', test_param='test_value')
@@ -136,7 +132,7 @@ def test_operation_logging():
         print("✓ Operation logger test completed")
         
         # Restore original manager
-        operation_log._logger_manager = original_manager
+        operation_log.set_operation_logger_manager(original_manager)
         
     finally:
         # Cleanup
