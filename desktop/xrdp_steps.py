@@ -51,7 +51,6 @@ param=-bs
 param=-nolisten
 param=tcp
 param=-localhost
-param=-randr
 param=-dpi
 param=96
 
@@ -299,7 +298,7 @@ def configure_audio(config: SetupConfig) -> None:
         f.write("echo '=== Session Manager Config ==='\n")
         f.write("grep -A 5 '\\[Sessions\\]' /etc/xrdp/sesman.ini 2>/dev/null || echo 'No Sessions config'\n\n")
         f.write("echo '=== Session Cleanup Script ==='\n")
-        f.write("ls -lh /opt/infra_tools/steps/xrdp_session_cleanup.py 2>/dev/null || echo 'Cleanup script not found'\n\n")
+        f.write("ls -lh /opt/infra_tools/desktop/service_tools/xrdp_session_cleanup.py 2>/dev/null || echo 'Cleanup script not found'\n\n")
         f.write("echo '=== Active Sessions ==='\n")
         f.write("who\n\n")
         f.write("echo '=== User Processes ==='\n")
