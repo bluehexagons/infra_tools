@@ -1,4 +1,7 @@
 [Globals]
+; xrdp.ini file version number
+ini_version=1
+
 ; Enable bitmap caching and compression for performance
 bitmap_cache=true
 bitmap_compression=true
@@ -8,11 +11,17 @@ bulk_compression=true
 tcp_send_buffer_bytes=32768
 tcp_recv_buffer_bytes=32768
 tcp_nodelay=true
+tcp_keepalive=true
 
 ; Security settings
-security_layer=tls
+; Use negotiate to allow client/server to agree on best security protocol
+; This provides good security while maintaining compatibility with Remmina
+security_layer=negotiate
 crypt_level=high
+ssl_protocols=TLSv1.2, TLSv1.3
 tls_ciphers=HIGH:!aNULL:!eNULL:!EXPORT:!DES:!MD5:!PSK:!RC4
+certificate=
+key_file=
 
 ; Color depth and display settings
 max_bpp=32
