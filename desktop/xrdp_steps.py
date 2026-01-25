@@ -26,6 +26,7 @@ def _generate_sesman_ini(config: SetupConfig, cleanup_script_path: str) -> str:
 EnableUserWindowManager=true
 UserWindowManager=startwm.sh
 DefaultWindowManager=startwm.sh
+ReconnectScript=/bin/true
 
 [Security]
 AllowRootLogin=false
@@ -51,6 +52,8 @@ param=-bs
 param=-nolisten
 param=tcp
 param=-localhost
+param=+extension
+param=RANDR
 param=-dpi
 param=96
 
