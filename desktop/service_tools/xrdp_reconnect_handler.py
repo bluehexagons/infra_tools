@@ -20,7 +20,9 @@ import subprocess
 import time
 
 # Add lib directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
+# Resolve symlinks to get the actual script location
+script_path = os.path.realpath(__file__)
+sys.path.insert(0, os.path.join(os.path.dirname(script_path), '../..'))
 
 from lib.logging_utils import get_service_logger
 from desktop.service_tools.xrdp_utils import (

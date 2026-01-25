@@ -17,6 +17,9 @@ def install_xrdp(config: SetupConfig) -> None:
     sesman_config = "/etc/xrdp/sesman.ini"
     xrdp_config = "/etc/xrdp/xrdp.ini"
     
+    # Ensure /opt/infra_tools is readable by all users (needed for reconnect script)
+    run("chmod 755 /opt/infra_tools", check=False)
+    
     if config.desktop == "xfce":
         session_cmd = "xfce4-session"
     elif config.desktop == "i3":
@@ -75,6 +78,9 @@ def install_xrdp(config: SetupConfig) -> None:
     # Create symlink to reconnection script in /opt directory
     reconnect_script_path = "/etc/xrdp/reconnectwm.sh"
     reconnect_source = "/opt/infra_tools/desktop/service_tools/xrdp_reconnect_handler.py"
+    
+    # Ensure the Python script is executable
+    run(f"chmod +x {reconnect_source}")
     
     if os.path.exists(reconnect_script_path):
         run(f"rm -f {reconnect_script_path}", check=False)
