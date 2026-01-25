@@ -13,15 +13,15 @@ FLATPAK_REMOTE = "flathub"
 
 
 def _generate_sesman_ini(config: SetupConfig, cleanup_script_path: str) -> str:
-    """Generate complete sesman.ini content using Xvnc backend.
+    """Generate complete sesman.ini content.
     
-    Xvnc is more reliable and doesn't have compatibility issues with X.Org versions.
+    For containers: prefer Xorg+xorgxrdp (better dynamic resize, works in unprivileged LXC)
+    For VMs/hardware: Xvnc works but resize may be limited; Xorg also available
     """
     
-    # Keep this close to upstream sesman.ini defaults, but with:
-    # - group restriction to remoteusers
-    # - EndSessionCommand for cleanup
-    # - Xvnc backend only
+    # Both backends included; XRDP login screen lets user choose
+    # Xorg+xorgxrdp: proper dynamic resize, works in containers
+    # Xvnc: simpler, but resize support varies by client
     return f'''[Globals]
 EnableUserWindowManager=true
 UserWindowManager=startwm.sh
@@ -45,6 +45,16 @@ LogFile=/var/log/xrdp-sesman.log
 LogLevel=INFO
 EnableSyslog=true
 SyslogLevel=INFO
+
+[Xorg]
+param=/usr/lib/xorg/Xorg
+param=-config
+param=xrdp/xorg.conf
+param=-noreset
+param=-nolisten
+param=tcp
+param=-logfile
+param=.xorgxrdp.%s.log
 
 [Xvnc]
 param=Xvnc
@@ -78,8 +88,8 @@ def install_xrdp(config: SetupConfig) -> None:
     else:
         session_cmd = "xfce4-session"
     
-    run("apt-get install -y -qq xrdp tigervnc-standalone-server dbus-x11 x11-xserver-utils x11-utils")
-    print("  ✓ xRDP packages installed (using Xvnc backend)")
+    run("apt-get install -y -qq xrdp xorgxrdp tigervnc-standalone-server dbus-x11 x11-xserver-utils x11-utils")
+    print("  ✓ xRDP packages installed (Xorg+xorgxrdp and Xvnc backends available)")
 
     # Ensure xrdp can create its runtime dirs/sockets
     run("systemctl enable xrdp-sesman", check=False)
@@ -124,6 +134,65 @@ def install_xrdp(config: SetupConfig) -> None:
         print(f"  ⚠ xrdp.ini template not found: {xrdp_template_path}, using default config")
     except Exception as e:
         print(f"  ⚠ Error deploying xrdp.ini template: {e}")
+    
+    # Configure xorgxrdp for container environments if needed
+    xorg_conf_path = "/etc/X11/xrdp/xorg.conf"
+    if is_container() and not os.path.exists(xorg_conf_path):
+        xorg_conf_dir = os.path.dirname(xorg_conf_path)
+        os.makedirs(xorg_conf_dir, exist_ok=True)
+        
+        xorg_conf_content = '''Section "ServerLayout"
+    Identifier "X11 Server"
+    Screen "Screen (xrdpdev)"
+    InputDevice "xrdpMouse" "CorePointer"
+    InputDevice "xrdpKeyboard" "CoreKeyboard"
+EndSection
+
+Section "ServerFlags"
+    Option "DontVTSwitch" "on"
+    Option "AutoAddDevices" "off"
+    Option "AutoAddGPU" "off"
+EndSection
+
+Section "Module"
+    Load "xorgxrdp"
+    Load "fb"
+EndSection
+
+Section "InputDevice"
+    Identifier "xrdpKeyboard"
+    Driver "xrdpkeyb"
+EndSection
+
+Section "InputDevice"
+    Identifier "xrdpMouse"
+    Driver "xrdpmouse"
+EndSection
+
+Section "Monitor"
+    Identifier "Monitor"
+    HorizSync 30-80
+    VertRefresh 50-75
+EndSection
+
+Section "Device"
+    Identifier "Video Card (xrdpdev)"
+    Driver "xrdpdev"
+EndSection
+
+Section "Screen"
+    Identifier "Screen (xrdpdev)"
+    Device "Video Card (xrdpdev)"
+    Monitor "Monitor"
+    DefaultDepth 24
+    SubSection "Display"
+        Depth 24
+    EndSubSection
+EndSection
+'''
+        with open(xorg_conf_path, "w") as f:
+            f.write(xorg_conf_content)
+        print("  ✓ xorgxrdp configuration created for container")
     
     run("systemctl enable xrdp")
     run("systemctl restart xrdp")
