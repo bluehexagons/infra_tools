@@ -26,8 +26,7 @@ key_file=
 ; Color depth and display settings
 max_bpp=32
 
-; Dynamic resize + gfx can be flaky with Xvnc backends on some clients.
-; Disable gfx so we use the classic (non-egfx) pipeline.
+; Use classic RDP pipeline (non-egfx) for best compatibility
 enable_gfx=false
 blue=009cb5
 grey=dedede
@@ -65,11 +64,3 @@ LogFile=xrdp.log
 LogLevel=INFO
 EnableSyslog=true
 SyslogLevel=INFO
-
-[Xvnc]
-name=Xvnc
-lib=libvnc.so
-username=ask
-password=ask
-ip=127.0.0.1
-port=-1

@@ -15,13 +15,16 @@ FLATPAK_REMOTE = "flathub"
 def _generate_sesman_ini(config: SetupConfig, cleanup_script_path: str) -> str:
     """Generate complete sesman.ini content.
     
-    For containers: prefer Xorg+xorgxrdp (better dynamic resize, works in unprivileged LXC)
-    For VMs/hardware: Xvnc works but resize may be limited; Xorg also available
+    Uses Xorg+xorgxrdp backend exclusively for proper dynamic resolution support.
+    Xvnc is NOT included because it doesn't emit RANDR events, causing desktop
+    freezes when the RDP window is resized.
+    
+    Xorg+xorgxrdp works in unprivileged LXC containers (no GPU access needed).
     """
     
-    # Both backends included; XRDP login screen lets user choose
-    # Xorg+xorgxrdp: proper dynamic resize, works in containers
-    # Xvnc: simpler, but resize support varies by client
+    # Only Xorg backend - Xvnc disabled due to resize issues
+    # Xorg+xorgxrdp: proper RANDR events, dynamic resize works correctly
+    # Xvnc: doesn't emit RRScreenChangeNotify -> desktop freezes on resize
     return f'''[Globals]
 EnableUserWindowManager=true
 UserWindowManager=startwm.sh
@@ -56,17 +59,6 @@ param=tcp
 param=-logfile
 param=.xorgxrdp.%s.log
 
-[Xvnc]
-param=Xvnc
-param=-bs
-param=-nolisten
-param=tcp
-param=-localhost
-param=+extension
-param=RANDR
-param=-dpi
-param=96
-
 [SessionVariables]
 PULSE_SCRIPT=/etc/xrdp/pulse/default.pa
 '''
@@ -88,21 +80,21 @@ def install_xrdp(config: SetupConfig) -> None:
     else:
         session_cmd = "xfce4-session"
     
-    run("apt-get install -y -qq xrdp xorgxrdp tigervnc-standalone-server dbus-x11 x11-xserver-utils x11-utils")
-    print("  ✓ xRDP packages installed (Xorg+xorgxrdp and Xvnc backends available)")
+    run("apt-get install -y -qq xrdp xorgxrdp dbus-x11 x11-xserver-utils x11-utils")
+    print("  ✓ xRDP packages installed (Xorg+xorgxrdp backend for dynamic resolution)")
 
     # Ensure xrdp can create its runtime dirs/sockets
     run("systemctl enable xrdp-sesman", check=False)
     
     run("getent group ssl-cert && adduser xrdp ssl-cert", check=False)
     
-    # Xvnc doesn't require GPU access groups, but keep for desktop session compatibility
+    # Xorg requires proper user group access for desktop session
     if has_gpu_access():
         run(f"getent group video && usermod -aG video {safe_username}", check=False)
         run(f"getent group render && usermod -aG render {safe_username}", check=False)
         print("  ✓ User added to video/render groups")
     
-    # Generate sesman.ini with Xvnc backend
+    # Generate sesman.ini with Xorg backend only
     if os.path.exists(sesman_config) and not os.path.exists(f"{sesman_config}.bak"):
         run(f"cp {sesman_config} {sesman_config}.bak")
     
