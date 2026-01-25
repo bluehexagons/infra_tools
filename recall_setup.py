@@ -12,7 +12,6 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
 from typing import Optional, Any, List
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -150,7 +149,8 @@ def generate_command_from_config(config: dict[str, Any], host: str, username: st
     # Add SMB mounts
     smb_mounts = config.get("mount_smb", [])
     if smb_mounts:
-        cmd_parts.append(f"  # Detected {len(smb_mounts)} SMB mount(s): {', '.join(smb_mounts)}")
+        mount_strs = [str(m) for m in smb_mounts]
+        cmd_parts.append(f"  # Detected {len(smb_mounts)} SMB mount(s): {', '.join(mount_strs)}")
         cmd_parts.append("  # Add --mount-smb flags manually")
     
     return " \\\n  ".join(cmd_parts)

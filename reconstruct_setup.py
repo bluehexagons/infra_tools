@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from typing import Any
@@ -112,7 +113,6 @@ def detect_samba_shares() -> list[str]:
         with open(smb_conf, 'r') as f:
             content = f.read()
             # Simple parsing - look for share sections
-            import re
             share_pattern = re.compile(r'^\[([^\]]+)\]', re.MULTILINE)
             matches = share_pattern.findall(content)
             for match in matches:
