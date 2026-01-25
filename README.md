@@ -55,6 +55,9 @@ The repository is organized by functionality (module-based) rather than file typ
 | `setup_pc_dev.py` | PC dev workstation with bare metal, Remmina, LibreOffice (audio via --audio) |
 | `setup_workstation_dev.py` | Light dev workstation with RDP, VS Code (audio via --audio) |
 | `setup_server_proxmox.py` | Proxmox hardening with security updates, SSH hardening |
+| `patch_setup.py` | Update existing systems, manage saved configurations |
+| `recall_setup.py` | Retrieve or reconstruct setup configuration from remote host |
+| `reconstruct_setup.py` | Analyze server state and guess configuration (run on target) |
 | `steps/setup_steps.py` | Custom setup, run specific steps only |
 
 Common features: User setup, sudo, firewall/SSH hardening, auto-updates, Chrony, CLI tools (neovim, btop, git, tmux).
@@ -209,6 +212,30 @@ python3 patch_setup.py deploy [pattern]
 ```
 
 Pattern matching is case-insensitive and searches hosts, names, and tags.
+
+## Configuration Recall
+
+Use `recall_setup.py` to retrieve or reconstruct the setup configuration from a remote host.
+
+```bash
+# Recall configuration from a remote host
+python3 recall_setup.py example.com [username]
+
+# Use SSH key for authentication
+python3 recall_setup.py example.com -k ~/.ssh/id_rsa
+```
+
+The script will:
+1. First attempt to retrieve the stored configuration from `/opt/infra_tools/state/setup.json` on the remote host
+2. If not found, warn the user and run `reconstruct_setup.py` on the remote host to analyze and guess the configuration
+3. Display the configuration and generate a suggested setup command for manual review
+
+The `reconstruct_setup.py` script can also be run locally on a server to analyze its current state:
+
+```bash
+# Run on the server itself
+python3 reconstruct_setup.py
+```
 
 ## System Templates
 
