@@ -145,7 +145,7 @@ def _generate_sesman_xorg_params(config: SetupConfig) -> str:
 param=/usr/lib/xorg/Xorg
 ; xrdp-specific xorg.conf for xorgxrdp driver
 param=-config
-param=xrdp/xorg.conf
+param=/etc/X11/xrdp/xorg.conf
 ; Don't reset after last client disconnects
 param=-noreset
 ; Security and networking
