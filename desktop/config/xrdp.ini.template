@@ -1,0 +1,76 @@
+[Globals]
+; xrdp.ini file version number
+ini_version=1
+
+; Enable bitmap caching and compression for performance
+bitmap_cache=true
+bitmap_compression=true
+bulk_compression=true
+
+; TCP buffer optimization
+tcp_send_buffer_bytes=32768
+tcp_recv_buffer_bytes=32768
+tcp_nodelay=true
+tcp_keepalive=true
+
+; Security settings
+; Use negotiate to allow client/server to agree on best security protocol
+; This provides good security while maintaining compatibility with Remmina
+security_layer=negotiate
+crypt_level=high
+ssl_protocols=TLSv1.2, TLSv1.3
+tls_ciphers=HIGH:!aNULL:!eNULL:!EXPORT:!DES:!MD5:!PSK:!RC4
+certificate=
+key_file=
+
+; Color depth and display settings
+max_bpp=32
+
+; Use classic RDP pipeline (non-egfx) for best compatibility
+enable_gfx=false
+blue=009cb5
+grey=dedede
+ls_top_window_bg_color=009cb5
+ls_width=350
+ls_height=430
+ls_bg_color=dedede
+ls_logo_filename=
+ls_title=xRDP
+ls_logo_x_pos=55
+ls_logo_y_pos=50
+
+; Session management
+autorun=
+use_fastpath=both
+new_cursors=true
+; Allow session reconnection
+allow_channels=true
+allow_multimon=true
+; Disable channel restrictions for better compatibility with Remmina
+channel_code=1
+; Optimize for LAN performance (suitable for Remmina on local network)
+max_idle_time=0
+max_disc_time=0
+
+; Fork a separate process per session for stability
+fork=true
+
+; Address to listen on (0.0.0.0 = all interfaces)
+address=0.0.0.0
+port=3389
+
+[Logging]
+LogFile=xrdp.log
+LogLevel=INFO
+EnableSyslog=true
+SyslogLevel=INFO
+
+; Session types
+[Xorg]
+name=Xorg
+lib=libxup.so
+username=ask
+password=ask
+ip=127.0.0.1
+port=-1
+code=20

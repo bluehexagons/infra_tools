@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib.arg_parser import create_setup_argument_parser
 from lib.config import SetupConfig
 from lib.display import print_setup_summary
+from lib.machine_state import save_machine_state
 from lib.remote_utils import validate_username, detect_os, set_dry_run
 from lib.progress import progress_bar
 from lib.system_types import get_steps_for_system_type
@@ -74,6 +75,15 @@ def main() -> int:
     detect_os()
     print("OS: Debian")
     sys.stdout.flush()
+    
+    # Save machine state for services to reference
+    save_machine_state(
+        machine_type=config.machine_type,
+        system_type=config.system_type,
+        username=config.username
+    )
+    print(f"Machine type: {config.machine_type}")
+    sys.stdout.flush()
 
     steps = get_steps_for_system_type(config)
     
@@ -88,7 +98,7 @@ def main() -> int:
     print(f"\n{bar} Complete!")
     
     if config.enable_cloudflare and config.system_type == "server_web":
-        from lib.cloudflare_steps import (
+        from web.cloudflare_steps import (
             configure_cloudflare_firewall,
             create_cloudflared_config_directory,
             configure_nginx_for_cloudflare,
@@ -115,7 +125,7 @@ def main() -> int:
         print("  Run 'sudo setup-cloudflare-tunnel' to install cloudflared")
     
     if config.deploy_specs:
-        from lib.deploy_steps import deploy_repository
+        from deploy.deploy_steps import deploy_repository
         import shutil
         import tempfile
         import subprocess
@@ -225,7 +235,7 @@ def main() -> int:
             create_nginx_sites_for_groups(grouped_deployments)
             
             if config.enable_ssl:
-                from lib.ssl_steps import install_certbot, setup_ssl_for_deployments
+                from web.ssl_steps import install_certbot, setup_ssl_for_deployments
                 
                 print("\n" + "=" * 60)
                 print("Installing certbot...")
@@ -235,7 +245,7 @@ def main() -> int:
                 setup_ssl_for_deployments(deployments, config.ssl_email)
             
             if config.enable_cloudflare:
-                from lib.cloudflare_steps import run_cloudflare_tunnel_setup
+                from web.cloudflare_steps import run_cloudflare_tunnel_setup
                 
                 print("\n" + "=" * 60)
                 print("Updating cloudflared config for deployments...")
@@ -243,7 +253,7 @@ def main() -> int:
                 run_cloudflare_tunnel_setup(config)
     
     if config.enable_samba:
-        from lib.samba_steps import (
+        from smb.samba_steps import (
             install_samba,
             configure_samba_firewall,
             configure_samba_global_settings,
@@ -279,7 +289,7 @@ def main() -> int:
         print("\n✓ Samba configuration complete")
     
     if config.smb_mounts:
-        from lib.smb_mount_steps import configure_smb_mount
+        from smb.smb_mount_steps import configure_smb_mount
         
         print("\n" + "=" * 60)
         print("Configuring SMB mounts...")
@@ -293,8 +303,8 @@ def main() -> int:
     
     if config.sync_specs or config.scrub_specs:
         from lib.concurrent_sync_scrub import create_concurrent_coordinator
-        from lib.sync_steps import install_rsync
-        from lib.scrub_steps import install_par2
+        from sync.sync_steps import install_rsync
+        from sync.scrub_steps import install_par2
         from lib.concurrent_operations import OperationPriority
 
         print("\n" + "=" * 60)

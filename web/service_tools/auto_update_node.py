@@ -4,6 +4,8 @@ Auto-update Node.js
 
 This script updates Node.js to the latest LTS version via nvm.
 It also updates global npm and pnpm packages.
+
+Logs to: /var/log/infra_tools/web/auto_update_node.log
 """
 
 from __future__ import annotations
@@ -11,10 +13,16 @@ from __future__ import annotations
 import os
 import sys
 import subprocess
-import syslog
 
+# Add lib directory to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
+
+from lib.logging_utils import get_service_logger
 
 NVM_DIR = "/opt/nvm"
+
+# Initialize centralized logger
+logger = get_service_logger('auto_update_node', 'web', use_syslog=True)
 
 
 def run_nvm_command(cmd: str) -> subprocess.CompletedProcess[str]:
@@ -51,9 +59,9 @@ def install_lts_version():
     """Install the latest LTS version."""
     result = run_nvm_command("nvm install --lts")
     if result.returncode != 0:
-        print(f"✗ Failed to install LTS version: {result.stderr}")
-        syslog.syslog(syslog.LOG_ERR, f"auto-update-node: Failed to install LTS: {result.stderr}")
+        logger.error(f"✗ Failed to install LTS version: {result.stderr}")
         return False
+    logger.info("✓ Successfully installed LTS version")
     return True
 
 
@@ -61,17 +69,22 @@ def update_global_packages():
     """Update global npm and pnpm packages."""
     result = run_nvm_command("npm install -g npm@latest")
     if result.returncode != 0:
-        print(f"⚠ Warning: Failed to update npm: {result.stderr}")
+        logger.warning(f"⚠ Failed to update npm: {result.stderr}")
+    else:
+        logger.info("✓ Successfully updated npm")
     
     result = run_nvm_command("npm install -g pnpm")
     if result.returncode != 0:
-        print(f"⚠ Warning: Failed to update pnpm: {result.stderr}")
+        logger.warning(f"⚠ Failed to update pnpm: {result.stderr}")
+    else:
+        logger.info("✓ Successfully updated pnpm")
 
 
 def update_symlinks():
     """Update symlinks in /usr/local/bin."""
     result = run_nvm_command("which node")
     if result.returncode != 0:
+        logger.warning("Failed to locate node binary")
         return
     
     node_path = result.stdout.strip()
@@ -86,8 +99,9 @@ def update_symlinks():
                 if os.path.islink(link_path):
                     os.remove(link_path)
                 os.symlink(tool_path, link_path)
+                logger.info(f"✓ Updated symlink for {tool}")
             except Exception as e:
-                print(f"⚠ Warning: Failed to create symlink for {tool}: {e}")
+                logger.warning(f"⚠ Failed to create symlink for {tool}: {e}")
 
 
 def fix_permissions():
@@ -98,45 +112,45 @@ def fix_permissions():
             check=True,
             capture_output=True
         )
+        logger.info("✓ Successfully fixed permissions on nvm directory")
     except subprocess.CalledProcessError as e:
-        print(f"⚠ Warning: Failed to fix permissions: {e}")
+        logger.warning(f"⚠ Failed to fix permissions: {e}")
 
 
 def main():
     """Main function to update Node.js."""
+    logger.info("Starting Node.js update check")
+    
     if not os.path.exists(NVM_DIR):
-        print(f"✗ nvm not found at {NVM_DIR}")
+        logger.error(f"✗ nvm not found at {NVM_DIR}")
         return 1
     
     current_lts = get_current_lts_version()
     current_version = get_current_version()
     
     if not current_lts:
-        print("✗ Failed to get latest LTS version")
+        logger.error("✗ Failed to get latest LTS version")
         return 1
     
     if not current_version:
-        print("✗ Failed to get current version")
+        logger.error("✗ Failed to get current version")
         return 1
     
     if current_version == current_lts:
-        print(f"Node.js already at latest LTS version: {current_lts}")
+        logger.info(f"Node.js already at latest LTS version: {current_lts}")
         return 0
     
-    print(f"Updating Node.js from {current_version} to {current_lts}")
-    syslog.syslog(syslog.LOG_INFO, f"auto-update-node: Updating Node.js from {current_version} to {current_lts}")
+    logger.info(f"Updating Node.js from {current_version} to {current_lts}")
     
     if not install_lts_version():
+        logger.error("✗ Node.js update failed")
         return 1
     
     update_global_packages()
-    
     update_symlinks()
-    
     fix_permissions()
     
-    print(f"Node.js updated successfully to {current_lts}")
-    syslog.syslog(syslog.LOG_INFO, f"auto-update-node: Successfully updated Node.js to {current_lts}")
+    logger.info(f"✓ Node.js updated successfully to {current_lts}")
     return 0
 
 

@@ -8,6 +8,7 @@ import subprocess
 from typing import Optional
 
 from lib.config import SetupConfig
+from lib.machine_state import can_manage_time_sync
 from lib.remote_utils import run, is_package_installed, is_service_active, file_contains, generate_password
 
 
@@ -147,6 +148,10 @@ def copy_ssh_keys_to_user(config: SetupConfig) -> None:
 
 
 def configure_time_sync(config: SetupConfig) -> None:
+    if not can_manage_time_sync():
+        print("  ✓ Skipping time sync configuration (managed by container host)")
+        return
+    
     tz = config.timezone if config.timezone else "UTC"
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     

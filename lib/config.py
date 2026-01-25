@@ -20,6 +20,9 @@ SYSTEM_TYPES = [
     "custom_steps"
 ]
 
+MACHINE_TYPES = ["unprivileged", "vm", "privileged", "hardware", "oci"]
+DEFAULT_MACHINE_TYPE = "unprivileged"
+
 DESKTOP_SYSTEMS = ["workstation_desktop", "pc_dev", "workstation_dev"]
 CLI_SYSTEMS = ["workstation_desktop", "pc_dev", "workstation_dev", "server_dev", "server_web"]
 
@@ -29,6 +32,7 @@ class SetupConfig:
     host: str
     username: str
     system_type: str
+    machine_type: str = DEFAULT_MACHINE_TYPE
     password: MaybeStr = None
     ssh_key: MaybeStr = None
     timezone: str = "UTC"
@@ -71,6 +75,7 @@ class SetupConfig:
         
         args.append(f"--system-type {shlex.quote(self.system_type)}")
         args.append(f"--username {shlex.quote(self.username)}")
+        args.append(f"--machine {shlex.quote(self.machine_type)}")
         
         if self.password:
             args.append(f"--password {shlex.quote(self.password)}")
@@ -230,6 +235,7 @@ class SetupConfig:
             host=args.host,
             username=username,
             system_type=system_type,
+            machine_type=getattr(args, 'machine_type', None) or DEFAULT_MACHINE_TYPE,
             password=getattr(args, 'password', None),
             ssh_key=getattr(args, 'ssh_key', None),
             timezone=timezone,

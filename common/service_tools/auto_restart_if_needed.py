@@ -4,13 +4,22 @@ Auto-restart System If Needed
 
 This script checks if a system restart is required (e.g., for kernel updates) and
 restarts the system only if no interactive users are logged in.
+
+Logs to: /var/log/infra_tools/common/auto_restart_if_needed.log
 """
 
 from __future__ import annotations
 import os
 import sys
 import subprocess
-import syslog
+
+# Add lib directory to path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
+
+from lib.logging_utils import get_service_logger
+
+# Initialize centralized logger
+logger = get_service_logger('auto_restart_if_needed', 'common', use_syslog=True)
 
 
 def check_restart_required() -> bool:
@@ -72,8 +81,7 @@ def check_rdp_sessions() -> bool:
 
 def perform_restart():
     """Perform system restart."""
-    print("Restart required and no users logged in, restarting system...")
-    syslog.syslog(syslog.LOG_INFO, "auto-restart-if-needed: Restarting system due to pending updates")
+    logger.info("Restart required and no users logged in, restarting system...")
     
     try:
         subprocess.run(
@@ -81,32 +89,33 @@ def perform_restart():
             check=True
         )
     except subprocess.CalledProcessError as e:
-        print(f"✗ Failed to initiate restart: {e}")
-        syslog.syslog(syslog.LOG_ERR, f"auto-restart-if-needed: Failed to restart system: {e}")
+        logger.error(f"✗ Failed to initiate restart: {e}")
         sys.exit(1)
 
 
 def main():
     """Main function to check and perform restart if needed."""
+    logger.info("Starting restart check")
+    
     # Check if restart is required
     if not check_restart_required():
-        print("No restart required")
+        logger.info("No restart required")
         return 0
     
     # Check for SSH/console sessions
     logged_in_users = get_logged_in_users()
     if logged_in_users:
-        print("Users are logged in (SSH/console), skipping restart")
+        logger.info("Users are logged in (SSH/console), skipping restart")
         return 0
     
     # Check for desktop sessions
     if check_desktop_sessions():
-        print("Desktop session active, skipping restart")
+        logger.info("Desktop session active, skipping restart")
         return 0
     
     # Check for RDP sessions
     if check_rdp_sessions():
-        print("RDP session active, skipping restart")
+        logger.info("RDP session active, skipping restart")
         return 0
     
     # No users logged in and restart required, proceed

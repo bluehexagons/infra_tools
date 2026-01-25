@@ -11,8 +11,8 @@ from lib.concurrent_operations import (
 )
 from lib.operation_log import OperationLogger
 from lib.operation_log import create_operation_logger
-from lib.sync_steps import parse_sync_spec, create_sync_service
-from lib.scrub_steps import parse_scrub_spec, create_scrub_service
+from sync.sync_steps import parse_sync_spec, create_sync_service
+from sync.scrub_steps import parse_scrub_spec, create_scrub_service
 
 class ConcurrentSyncScrubCoordinator:
     def __init__(self, config: SetupConfig, max_concurrent: int = 3, 

@@ -453,7 +453,8 @@ def run_non_interactive_update() -> bool:
     Returns True if successful, False otherwise.
     """
     try:
-        return main(interactive=False)
+        result = main(interactive=False)
+        return bool(result)
     except Exception:
         return False
 

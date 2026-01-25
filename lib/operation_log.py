@@ -347,6 +347,12 @@ def get_operation_logger_manager(base_log_dir: str = "/var/log/infra_tools/opera
     return _logger_manager
 
 
+def set_operation_logger_manager(manager: Optional[OperationLoggerManager]) -> None:
+    """Set the global operation logger manager (for tests and programmatic control)."""
+    global _logger_manager
+    _logger_manager = manager
+
+
 def create_operation_logger(operation_type: str, **kwargs: Any) -> OperationLogger:
     """Convenience function to create a new operation logger.
     

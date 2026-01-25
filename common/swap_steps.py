@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from lib.config import SetupConfig
+from lib.machine_state import can_manage_swap
 from lib.remote_utils import run
 
 def get_total_ram_mb() -> int:
@@ -23,6 +24,10 @@ def get_free_disk_mb() -> int:
 
 def configure_swap(config: SetupConfig) -> None:
     """Configure swap file if not present."""
+    
+    if not can_manage_swap():
+        print("  ✓ Skipping swap configuration (managed by container host)")
+        return
     
     result = run("swapon --show")
     if result.stdout and result.stdout.strip():

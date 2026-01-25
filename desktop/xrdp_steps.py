@@ -1,15 +1,68 @@
 """Desktop and workstation setup steps."""
 
 from __future__ import annotations
-from typing import Optional
 import os
 import shlex
 
 from lib.config import SetupConfig
-from lib.remote_utils import run, is_package_installed, is_service_active, file_contains
+from lib.machine_state import has_gpu_access, is_container
+from lib.remote_utils import run
 
 
 FLATPAK_REMOTE = "flathub"
+
+
+def _generate_sesman_ini(config: SetupConfig, cleanup_script_path: str) -> str:
+    """Generate complete sesman.ini content.
+    
+    Uses Xorg+xorgxrdp backend exclusively for proper dynamic resolution support.
+    Xvnc is NOT included because it doesn't emit RANDR events, causing desktop
+    freezes when the RDP window is resized.
+    
+    Xorg+xorgxrdp works in unprivileged LXC containers (no GPU access needed).
+    """
+    
+    # Only Xorg backend - Xvnc disabled due to resize issues
+    # Xorg+xorgxrdp: proper RANDR events, dynamic resize works correctly
+    # Xvnc: doesn't emit RRScreenChangeNotify -> desktop freezes on resize
+    return f'''[Globals]
+EnableUserWindowManager=true
+UserWindowManager=startwm.sh
+DefaultWindowManager=startwm.sh
+ReconnectScript=/bin/true
+
+[Security]
+AllowRootLogin=false
+MaxLoginRetry=3
+TerminalServerUsers=remoteusers
+AlwaysGroupCheck=true
+
+[Sessions]
+X11DisplayOffset=10
+MaxSessions=10
+Policy=Default
+EndSessionCommand={cleanup_script_path}
+
+[Logging]
+LogFile=/var/log/xrdp-sesman.log
+LogLevel=INFO
+EnableSyslog=true
+SyslogLevel=INFO
+
+[Xorg]
+param=/usr/lib/xorg/Xorg
+param=-config
+param=xrdp/xorg.conf
+param=-noreset
+param=-nolisten
+param=tcp
+param=-logfile
+param=.xorgxrdp.%s.log
+
+[SessionVariables]
+PULSE_SCRIPT=/etc/xrdp/pulse/default.pa
+'''
+
 
 def install_xrdp(config: SetupConfig) -> None:
     safe_username = shlex.quote(config.username)
@@ -27,51 +80,111 @@ def install_xrdp(config: SetupConfig) -> None:
     else:
         session_cmd = "xfce4-session"
     
-    run("apt-get install -y -qq xrdp xorgxrdp dbus-x11")
-    print("  ✓ xRDP packages installed/updated")
+    run("apt-get install -y -qq xrdp xorgxrdp dbus-x11 x11-xserver-utils x11-utils")
+    print("  ✓ xRDP packages installed (Xorg+xorgxrdp backend for dynamic resolution)")
+
+    # Ensure xrdp can create its runtime dirs/sockets
+    run("systemctl enable xrdp-sesman", check=False)
     
     run("getent group ssl-cert && adduser xrdp ssl-cert", check=False)
-
-    config_template_dir = os.path.join(os.path.dirname(__file__), '..', 'desktop', 'config')
     
+    # Xorg requires proper user group access for desktop session
+    if has_gpu_access():
+        run(f"getent group video && usermod -aG video {safe_username}", check=False)
+        run(f"getent group render && usermod -aG render {safe_username}", check=False)
+        print("  ✓ User added to video/render groups")
+    
+    # Generate sesman.ini with Xorg backend only
     if os.path.exists(sesman_config) and not os.path.exists(f"{sesman_config}.bak"):
         run(f"cp {sesman_config} {sesman_config}.bak")
     
-    sesman_template_path = os.path.join(config_template_dir, 'xrdp_sesman.ini.template')
+    # Generate sesman.ini based on machine type
     try:
-        with open(sesman_template_path, 'r', encoding='utf-8') as f:
-            sesman_content = f.read()
-    except FileNotFoundError:
-        print(f"  ⚠ Template file not found: {sesman_template_path}")
-        return
+        sesman_content = _generate_sesman_ini(config, cleanup_script_path)
+        with open(sesman_config, "w") as f:
+            f.write(sesman_content)
+        print("  ✓ Session manager configuration deployed")
     except Exception as e:
-        print(f"  ⚠ Error reading template: {e}")
+        print(f"  ⚠ Error deploying sesman.ini: {e}")
         return
-    
-    sesman_content = sesman_content.replace('{CLEANUP_SCRIPT_PATH}', cleanup_script_path)
-    
-    with open(sesman_config, "w") as f:
-        f.write(sesman_content)
     
     run("systemctl restart xrdp-sesman", check=False)
     
-    if not file_contains(xrdp_config, "tcp_send_buffer_bytes"):
-        if file_contains(xrdp_config, "[Globals]"):
-            run(f"sed -i '/\\[Globals\\]/a tcp_send_buffer_bytes=32768' {xrdp_config}")
-        else:
-            run(f"sed -i '1i [Globals]\\ntcp_send_buffer_bytes=32768' {xrdp_config}")
+    if os.path.exists(xrdp_config) and not os.path.exists(f"{xrdp_config}.bak"):
+        run(f"cp {xrdp_config} {xrdp_config}.bak")
     
-    if not file_contains(xrdp_config, "tcp_recv_buffer_bytes"):
-        if file_contains(xrdp_config, "[Globals]"):
-            run(f"sed -i '/\\[Globals\\]/a tcp_recv_buffer_bytes=32768' {xrdp_config}")
-        else:
-            run(f"sed -i '1i [Globals]\\ntcp_recv_buffer_bytes=32768' {xrdp_config}")
+    # xrdp.ini doesn't need machine-type-specific changes, use template
+    config_template_dir = os.path.join(os.path.dirname(__file__), 'config')
+    xrdp_template_path = os.path.join(config_template_dir, 'xrdp.ini.template')
+    try:
+        with open(xrdp_template_path, 'r', encoding='utf-8') as f:
+            xrdp_content = f.read()
+        with open(xrdp_config, "w") as f:
+            f.write(xrdp_content)
+        print("  ✓ xRDP configuration deployed")
+    except FileNotFoundError:
+        print(f"  ⚠ xrdp.ini template not found: {xrdp_template_path}, using default config")
+    except Exception as e:
+        print(f"  ⚠ Error deploying xrdp.ini template: {e}")
     
-    if not file_contains(xrdp_config, "bulk_compression="):
-        if file_contains(xrdp_config, "[Globals]"):
-            run(f"sed -i '/\\[Globals\\]/a bulk_compression=true' {xrdp_config}")
-        else:
-            run(f"sed -i '1i [Globals]\\nbulk_compression=true' {xrdp_config}")
+    # Configure xorgxrdp for container environments if needed
+    xorg_conf_path = "/etc/X11/xrdp/xorg.conf"
+    if is_container() and not os.path.exists(xorg_conf_path):
+        xorg_conf_dir = os.path.dirname(xorg_conf_path)
+        os.makedirs(xorg_conf_dir, exist_ok=True)
+        
+        xorg_conf_content = '''Section "ServerLayout"
+    Identifier "X11 Server"
+    Screen "Screen (xrdpdev)"
+    InputDevice "xrdpMouse" "CorePointer"
+    InputDevice "xrdpKeyboard" "CoreKeyboard"
+EndSection
+
+Section "ServerFlags"
+    Option "DontVTSwitch" "on"
+    Option "AutoAddDevices" "off"
+    Option "AutoAddGPU" "off"
+EndSection
+
+Section "Module"
+    Load "xorgxrdp"
+    Load "fb"
+EndSection
+
+Section "InputDevice"
+    Identifier "xrdpKeyboard"
+    Driver "xrdpkeyb"
+EndSection
+
+Section "InputDevice"
+    Identifier "xrdpMouse"
+    Driver "xrdpmouse"
+EndSection
+
+Section "Monitor"
+    Identifier "Monitor"
+    HorizSync 30-80
+    VertRefresh 50-75
+EndSection
+
+Section "Device"
+    Identifier "Video Card (xrdpdev)"
+    Driver "xrdpdev"
+EndSection
+
+Section "Screen"
+    Identifier "Screen (xrdpdev)"
+    Device "Video Card (xrdpdev)"
+    Monitor "Monitor"
+    DefaultDepth 24
+    SubSection "Display"
+        Depth 24
+    EndSubSection
+EndSection
+'''
+        with open(xorg_conf_path, "w") as f:
+            f.write(xorg_conf_content)
+        print("  ✓ xorgxrdp configuration created for container")
     
     run("systemctl enable xrdp")
     run("systemctl restart xrdp")
@@ -98,47 +211,18 @@ def install_xrdp(config: SetupConfig) -> None:
 
 
 def harden_xrdp(config: SetupConfig) -> None:
-    """Harden xRDP with TLS encryption and group restrictions."""
+    """Harden xRDP with TLS encryption and group restrictions.
+    
+    Note: Security settings are already configured in xrdp.ini and sesman.ini templates.
+    This function ensures the xrdp user has proper permissions and restarts services.
+    """
     xrdp_config = "/etc/xrdp/xrdp.ini"
-    sesman_config = "/etc/xrdp/sesman.ini"
     
     if not os.path.exists(xrdp_config):
         print("  ⚠ xRDP not installed, skipping hardening")
         return
     
-    run(f"sed -i 's/^#\\?security_layer=.*/security_layer=tls/' {xrdp_config}")
-    run(f"sed -i 's/^#\\?crypt_level=.*/crypt_level=high/' {xrdp_config}")
-    
-    if not file_contains(xrdp_config, "security_layer"):
-        if file_contains(xrdp_config, "[Globals]"):
-            run(f"sed -i '/\\[Globals\\]/a security_layer=tls' {xrdp_config}")
-        else:
-            run(f"sed -i '1i [Globals]\\nsecurity_layer=tls' {xrdp_config}")
-    
-    if not file_contains(xrdp_config, "crypt_level"):
-        if file_contains(xrdp_config, "[Globals]"):
-            run(f"sed -i '/\\[Globals\\]/a crypt_level=high' {xrdp_config}")
-        else:
-            run(f"sed -i '1i crypt_level=high' {xrdp_config}")
-    
-    if not file_contains(xrdp_config, "tls_ciphers"):
-        if file_contains(xrdp_config, "[Globals]"):
-            run(f"sed -i '/\\[Globals\\]/a tls_ciphers=HIGH:!aNULL:!eNULL:!EXPORT:!DES:!MD5:!PSK:!RC4' {xrdp_config}")
-        else:
-            run(f"sed -i '1i [Globals]\\ntls_ciphers=HIGH:!aNULL:!eNULL:!EXPORT:!DES:!MD5:!PSK:!RC4' {xrdp_config}")
-    
-    if not file_contains(sesman_config, "[Security]"):
-        run(f"echo '\n[Security]' >> {sesman_config}")
-    
-    if not file_contains(sesman_config, "AllowGroups"):
-        run(f"sed -i '/\\[Security\\]/a AllowGroups=remoteusers' {sesman_config}")
-    
-    if not file_contains(sesman_config, "DenyUsers"):
-        run(f"sed -i '/\\[Security\\]/a DenyUsers=root' {sesman_config}")
-    
-    if not file_contains(sesman_config, "MaxLoginRetry"):
-        run(f"sed -i '/\\[Security\\]/a MaxLoginRetry=3' {sesman_config}")
-    
+    # Ensure xrdp user has access to SSL certificates
     run("getent group ssl-cert && adduser xrdp ssl-cert", check=False)
     
     run("systemctl restart xrdp")
@@ -241,8 +325,15 @@ def configure_audio(config: SetupConfig) -> None:
         f.write("autospawn = yes\n")
         f.write("daemon-binary = /usr/bin/pulseaudio\n")
     
+    # Configure PulseAudio daemon
+    # Containers need SHM disabled; VMs/hardware can use it for better performance
     with open(daemon_conf, "w") as f:
-        f.write("enable-shm = no\n")
+        if is_container():
+            f.write("# Container mode: disable shared memory (not available)\n")
+            f.write("enable-shm = no\n")
+        else:
+            f.write("# VM/hardware mode: enable shared memory for better performance\n")
+            f.write("enable-shm = yes\n")
         f.write("exit-idle-time = -1\n")
         f.write("flat-volumes = no\n")
         f.write("default-sample-rate = 44100\n")
@@ -271,7 +362,7 @@ def configure_audio(config: SetupConfig) -> None:
         f.write("echo '=== Session Manager Config ==='\n")
         f.write("grep -A 5 '\\[Sessions\\]' /etc/xrdp/sesman.ini 2>/dev/null || echo 'No Sessions config'\n\n")
         f.write("echo '=== Session Cleanup Script ==='\n")
-        f.write("ls -lh /opt/infra_tools/steps/xrdp_session_cleanup.py 2>/dev/null || echo 'Cleanup script not found'\n\n")
+        f.write("ls -lh /opt/infra_tools/desktop/service_tools/xrdp_session_cleanup.py 2>/dev/null || echo 'Cleanup script not found'\n\n")
         f.write("echo '=== Active Sessions ==='\n")
         f.write("who\n\n")
         f.write("echo '=== User Processes ==='\n")
@@ -292,4 +383,3 @@ def configure_audio(config: SetupConfig) -> None:
     
     print("  ✓ Audio configured (PulseAudio + xRDP modules)")
     print(f"  Run ~/check-rdp.sh via SSH to troubleshoot RDP issues")
-

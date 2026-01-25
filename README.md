@@ -3,6 +3,10 @@
 Automated setup scripts for remote Linux systems (Debian).
 
 > **🤖 AI Agents:** See [`.github/ai-agents/`](.github/ai-agents/) for development guidance.
+> 
+> **📋 Logging:** See [`docs/LOGGING.md`](docs/LOGGING.md) for centralized logging system documentation.
+>
+> **🖥️ Machine Types:** See [`docs/MACHINE_TYPES.md`](docs/MACHINE_TYPES.md) for environment-specific configuration.
 
 ## Quick Start
 
@@ -66,6 +70,7 @@ Common features: User setup, sudo, firewall/SSH hardening, auto-updates, Chrony,
 | `-k, --key PATH` | SSH private key path |
 | `-p, --password PASS` | User password |
 | `-t, --timezone TZ` | Timezone (defaults to UTC) |
+| `--machine TYPE` | Machine type: `unprivileged` (LXC, default), `vm`, `privileged`, `hardware`, `oci` (Docker/Podman) |
 | `--name NAME` | Friendly name for this configuration |
 | `--tags TAG1,TAG2` | Comma-separated tags for this configuration |
 | `--dry-run` | Simulate execution without making changes |
