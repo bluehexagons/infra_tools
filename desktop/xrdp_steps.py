@@ -128,6 +128,9 @@ def install_xrdp(config: SetupConfig) -> None:
         print(f"  ⚠ Error deploying xrdp.ini template: {e}")
     
     # Configure xorgxrdp - required for all environments
+    # Fix for Debian Trixie/X.Org 21.1.16: glamoregl must be loaded before xorgxrdp
+    # to resolve undefined glamor_xv_init symbol errors.
+    # UseGlamor=false disables acceleration (prevents resize crashes in containers).
     xorg_conf_path = "/etc/X11/xrdp/xorg.conf"
     if not os.path.exists(xorg_conf_path):
         xorg_conf_dir = os.path.dirname(xorg_conf_path)
@@ -147,8 +150,9 @@ Section "ServerFlags"
 EndSection
 
 Section "Module"
-    Load "xorgxrdp"
     Load "fb"
+    Load "glamoregl"
+    Load "xorgxrdp"
 EndSection
 
 Section "InputDevice"
@@ -170,6 +174,8 @@ EndSection
 Section "Device"
     Identifier "Video Card (xrdpdev)"
     Driver "xrdpdev"
+    # Disable glamor acceleration to prevent resize crashes in containers
+    Option "UseGlamor" "false"
 EndSection
 
 Section "Screen"
@@ -179,6 +185,8 @@ Section "Screen"
     DefaultDepth 24
     SubSection "Display"
         Depth 24
+        # Large virtual screen to support dynamic resizing
+        Virtual 8192 8192
     EndSubSection
 EndSection
 '''
