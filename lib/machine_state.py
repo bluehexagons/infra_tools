@@ -12,6 +12,7 @@ from lib.config import DEFAULT_MACHINE_TYPE
 
 STATE_DIR = "/opt/infra_tools/state"
 STATE_FILE = os.path.join(STATE_DIR, "machine.json")
+SETUP_CONFIG_FILE = os.path.join(STATE_DIR, "setup.json")
 
 
 def save_machine_state(
@@ -124,3 +125,24 @@ def can_restart_system() -> bool:
     LXC containers can restart themselves. OCI containers cannot.
     """
     return get_machine_type() != "oci"
+
+
+def save_setup_config(config_dict: dict[str, Any]) -> None:
+    """Save the setup configuration to the target system for later recall."""
+    os.makedirs(STATE_DIR, exist_ok=True)
+    
+    with open(SETUP_CONFIG_FILE, 'w') as f:
+        json.dump(config_dict, f, indent=2)
+
+
+def load_setup_config() -> Optional[dict[str, Any]]:
+    """Load the setup configuration from the target system."""
+    if not os.path.exists(SETUP_CONFIG_FILE):
+        return None
+    
+    try:
+        with open(SETUP_CONFIG_FILE, 'r') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"Warning: Failed to load setup configuration: {e}")
+        return None
