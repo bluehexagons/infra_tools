@@ -6,6 +6,7 @@ import os
 import shlex
 
 from lib.config import SetupConfig
+from lib.machine_state import is_container
 from lib.remote_utils import run, is_package_installed, is_flatpak_app_installed, file_contains
 from desktop.browser_steps import install_browser
 
@@ -19,12 +20,26 @@ def is_flatpak_installed() -> bool:
     return result.returncode == 0
 
 
-def install_flatpak_if_needed() -> None:
-    """Install flatpak if not already installed."""
+def install_flatpak_if_needed() -> bool:
+    """Install flatpak if not already installed.
+    
+    Returns:
+        True if flatpak is available, False if installation failed or not recommended.
+    """
+    if is_container():
+        print("  ⚠ Warning: Flatpak typically does not work well in unprivileged containers")
+        print("    Consider using --machine vm or --machine hardware if Flatpak is needed")
+    
     if is_flatpak_installed():
-        return
-    run("apt-get install -y -qq flatpak")
+        return True
+    
+    result = run("apt-get install -y -qq flatpak", check=False)
+    if result.returncode != 0:
+        print("  ⚠ Failed to install Flatpak")
+        return False
+    
     run(f"flatpak remote-add --if-not-exists {FLATPAK_REMOTE} https://flathub.org/repo/flathub.flatpakrepo", check=False)
+    return True
 
 
 
@@ -40,29 +55,37 @@ def install_office_apps(config: SetupConfig) -> None:
         return
 
     if config.use_flatpak:
-        install_flatpak_if_needed()
-        if is_flatpak_app_installed("org.libreoffice.LibreOffice"):
+        if not install_flatpak_if_needed():
+            print("  Falling back to apt for LibreOffice installation")
+            config.use_flatpak = False
+        elif is_flatpak_app_installed("org.libreoffice.LibreOffice"):
             print("  ✓ LibreOffice already installed via Flatpak")
             return
-        print("  Installing LibreOffice via Flatpak...")
-        run(f"flatpak install -y {FLATPAK_REMOTE} org.libreoffice.LibreOffice", check=False)
-        print("  ✓ LibreOffice installed via Flatpak")
-    else:
-        if is_package_installed("libreoffice"):
-            print("  ✓ LibreOffice already installed")
+        else:
+            print("  Installing LibreOffice via Flatpak...")
+            run(f"flatpak install -y {FLATPAK_REMOTE} org.libreoffice.LibreOffice", check=False)
+            print("  ✓ LibreOffice installed via Flatpak")
             return
-        print("  Installing LibreOffice...")
-        run("apt-get install -y -qq libreoffice")
-        print("  ✓ LibreOffice installed")
+    
+    if is_package_installed("libreoffice"):
+        print("  ✓ LibreOffice already installed")
+        return
+    print("  Installing LibreOffice...")
+    run("apt-get install -y -qq libreoffice")
+    print("  ✓ LibreOffice installed")
 
 
 def install_desktop_apps(config: SetupConfig) -> None:
     install_browser(config)
     install_office_apps(config)
     
-    if config.use_flatpak:
-        install_flatpak_if_needed()
-        
+    use_flatpak = config.use_flatpak
+    if use_flatpak:
+        if not install_flatpak_if_needed():
+            print("  Falling back to apt for desktop app installation")
+            use_flatpak = False
+    
+    if use_flatpak:
         all_installed = (
             is_flatpak_app_installed("com.vscodium.codium") and
             is_flatpak_app_installed("com.discordapp.Discord")
@@ -160,9 +183,13 @@ application/xhtml+xml={desktop_file}
 def install_workstation_dev_apps(config: SetupConfig) -> None:
     install_browser(config)
     
-    if config.use_flatpak:
-        install_flatpak_if_needed()
-        
+    use_flatpak = config.use_flatpak
+    if use_flatpak:
+        if not install_flatpak_if_needed():
+            print("  Falling back to apt for VS Code installation")
+            use_flatpak = False
+    
+    if use_flatpak:
         if is_flatpak_app_installed("com.visualstudio.code"):
             print("  ✓ Workstation dev apps already installed via Flatpak")
             return

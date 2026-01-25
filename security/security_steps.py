@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 
 from lib.config import SetupConfig
+from lib.machine_state import can_modify_kernel, is_container
 from lib.remote_utils import run, is_service_active, file_contains
 
 
@@ -31,12 +32,19 @@ def configure_firewall(config: SetupConfig) -> None:
         return
     
     run("apt-get install -y -qq ufw")
-    run("ufw default deny incoming")
-    run("ufw default allow outgoing")
-    run("ufw allow ssh")
+    run("ufw default deny incoming", check=False)
+    run("ufw default allow outgoing", check=False)
+    run("ufw allow ssh", check=False)
     if config.enable_rdp:
-        run("ufw allow 3389/tcp")
-    run("ufw --force enable")
+        run("ufw allow 3389/tcp", check=False)
+    
+    result = run("ufw --force enable", check=False)
+    if result.returncode != 0:
+        if is_container():
+            print("  ⚠ Firewall could not be enabled (container may lack capabilities)")
+        else:
+            print("  ⚠ Firewall could not be enabled (check logs)")
+        return
 
     if config.enable_rdp:
         print("  ✓ Firewall configured (SSH and RDP allowed)")
@@ -45,6 +53,10 @@ def configure_firewall(config: SetupConfig) -> None:
 
 
 def configure_fail2ban(config: SetupConfig) -> None:
+    if is_container():
+        print("  ✓ Skipping fail2ban configuration (limited functionality in containers)")
+        return
+    
     if os.path.exists("/etc/fail2ban/jail.d/xrdp.local"):
         if is_service_active("fail2ban"):
             print("  ✓ fail2ban already configured")
@@ -118,6 +130,10 @@ def harden_ssh(config: SetupConfig) -> None:
 
 
 def harden_kernel(config: SetupConfig) -> None:
+    if not can_modify_kernel():
+        print("  ✓ Skipping kernel hardening (host kernel manages these settings)")
+        return
+    
     sysctl_conf = "/etc/sysctl.d/99-security-hardening.conf"
     
     if os.path.exists(sysctl_conf):
@@ -176,8 +192,12 @@ APT::Periodic::AutocleanInterval "7";
     with open("/etc/apt/apt.conf.d/20auto-upgrades", "w") as f:
         f.write(auto_upgrades)
 
-    run("systemctl enable unattended-upgrades")
-    run("systemctl start unattended-upgrades")
+    # systemctl may not be available or functional in containers
+    result = run("systemctl enable unattended-upgrades", check=False)
+    if result.returncode != 0:
+        print("  ⚠ Automatic updates configured but systemd service could not be enabled")
+        return
+    run("systemctl start unattended-upgrades", check=False)
 
     print("  ✓ Automatic security updates enabled")
 
@@ -191,12 +211,19 @@ def configure_firewall_web(config: SetupConfig) -> None:
             return
     
     run("apt-get install -y -qq ufw")
-    run("ufw default deny incoming")
-    run("ufw default allow outgoing")
-    run("ufw allow ssh")
-    run("ufw allow 80/tcp")
-    run("ufw allow 443/tcp")
-    run("ufw --force enable")
+    run("ufw default deny incoming", check=False)
+    run("ufw default allow outgoing", check=False)
+    run("ufw allow ssh", check=False)
+    run("ufw allow 80/tcp", check=False)
+    run("ufw allow 443/tcp", check=False)
+    
+    result = run("ufw --force enable", check=False)
+    if result.returncode != 0:
+        if is_container():
+            print("  ⚠ Firewall could not be enabled (container may lack capabilities)")
+        else:
+            print("  ⚠ Firewall could not be enabled (check logs)")
+        return
     
     print("  ✓ Firewall configured (SSH, HTTP, and HTTPS allowed)")
 
@@ -209,10 +236,17 @@ def configure_firewall_ssh_only(config: SetupConfig) -> None:
         return
     
     run("apt-get install -y -qq ufw")
-    run("ufw default deny incoming")
-    run("ufw default allow outgoing")
-    run("ufw allow ssh")
-    run("ufw --force enable")
+    run("ufw default deny incoming", check=False)
+    run("ufw default allow outgoing", check=False)
+    run("ufw allow ssh", check=False)
+    
+    result = run("ufw --force enable", check=False)
+    if result.returncode != 0:
+        if is_container():
+            print("  ⚠ Firewall could not be enabled (container may lack capabilities)")
+        else:
+            print("  ⚠ Firewall could not be enabled (check logs)")
+        return
 
     print("  ✓ Firewall configured (SSH only)")
 

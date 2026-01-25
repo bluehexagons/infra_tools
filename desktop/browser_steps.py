@@ -6,6 +6,7 @@ import os
 import shlex
 
 from lib.config import SetupConfig
+from lib.machine_state import is_container
 from lib.remote_utils import run, is_package_installed, is_flatpak_app_installed, file_contains
 
 
@@ -15,9 +16,15 @@ def install_browser(config: SetupConfig) -> None:
     """Install the specified browser."""
     if not config.browser:
         return
+    
+    # In containers, prefer apt over Flatpak since Flatpak often doesn't work
+    use_flatpak = config.use_flatpak
+    if use_flatpak and is_container():
+        print("  ⚠ Container detected: using apt instead of Flatpak for browser")
+        use_flatpak = False
 
     if config.browser == "brave":
-        if config.use_flatpak:
+        if use_flatpak:
             if is_flatpak_app_installed("com.brave.Browser"):
                 print("  ✓ Brave browser already installed")
                 return
@@ -37,7 +44,7 @@ def install_browser(config: SetupConfig) -> None:
         print("  ✓ Brave browser installed")
     
     elif config.browser == "firefox":
-        if config.use_flatpak:
+        if use_flatpak:
             if is_flatpak_app_installed("org.mozilla.firefox"):
                 print("  ✓ Firefox already installed")
                 return
@@ -67,7 +74,7 @@ def install_browser(config: SetupConfig) -> None:
         print("  ✓ Browsh installed")
     
     elif config.browser == "vivaldi":
-        if config.use_flatpak:
+        if use_flatpak:
             if is_flatpak_app_installed("com.vivaldi.Vivaldi"):
                 print("  ✓ Vivaldi browser already installed")
                 return
