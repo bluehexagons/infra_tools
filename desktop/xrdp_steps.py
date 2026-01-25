@@ -17,9 +17,6 @@ def install_xrdp(config: SetupConfig) -> None:
     sesman_config = "/etc/xrdp/sesman.ini"
     xrdp_config = "/etc/xrdp/xrdp.ini"
     
-    # Ensure /opt/infra_tools is readable by all users (needed for reconnect script)
-    run("chmod 755 /opt/infra_tools", check=False)
-    
     if config.desktop == "xfce":
         session_cmd = "xfce4-session"
     elif config.desktop == "i3":
@@ -35,6 +32,24 @@ def install_xrdp(config: SetupConfig) -> None:
     run("getent group ssl-cert && adduser xrdp ssl-cert", check=False)
 
     config_template_dir = os.path.join(os.path.dirname(__file__), '..', 'desktop', 'config')
+    
+    # Deploy xorg.conf for dynamic resolution support
+    xorg_conf_path = "/etc/X11/xrdp/xorg.conf"
+    xorg_template_path = os.path.join(config_template_dir, 'xorg.conf')
+    run("mkdir -p /etc/X11/xrdp", check=False)
+    try:
+        if os.path.exists(xorg_template_path):
+            with open(xorg_template_path, 'r', encoding='utf-8') as f:
+                xorg_content = f.read()
+            if os.path.exists(xorg_conf_path) and not os.path.exists(f"{xorg_conf_path}.bak"):
+                run(f"cp {xorg_conf_path} {xorg_conf_path}.bak")
+            with open(xorg_conf_path, "w") as f:
+                f.write(xorg_content)
+            print("  ✓ Xorg configuration deployed (dynamic resolution support)")
+        else:
+            print(f"  ⚠ xorg.conf template not found: {xorg_template_path}")
+    except Exception as e:
+        print(f"  ⚠ Error deploying xorg.conf: {e}")
     
     if os.path.exists(sesman_config) and not os.path.exists(f"{sesman_config}.bak"):
         run(f"cp {sesman_config} {sesman_config}.bak")
@@ -66,7 +81,7 @@ def install_xrdp(config: SetupConfig) -> None:
             xrdp_content = f.read()
         with open(xrdp_config, "w") as f:
             f.write(xrdp_content)
-        print("  ✓ xRDP configuration deployed from template (dynamic resolution enabled)")
+        print("  ✓ xRDP configuration deployed")
     except FileNotFoundError:
         print(f"  ⚠ xrdp.ini template not found: {xrdp_template_path}, using default config")
     except Exception as e:
@@ -74,19 +89,6 @@ def install_xrdp(config: SetupConfig) -> None:
     
     run("systemctl enable xrdp")
     run("systemctl restart xrdp")
-
-    # Create symlink to reconnection script in /opt directory
-    reconnect_script_path = "/etc/xrdp/reconnectwm.sh"
-    reconnect_source = "/opt/infra_tools/desktop/service_tools/xrdp_reconnect_handler.py"
-    
-    # Ensure the Python script is executable
-    run(f"chmod +x {reconnect_source}")
-    
-    if os.path.exists(reconnect_script_path):
-        run(f"rm -f {reconnect_script_path}", check=False)
-    
-    run(f"ln -s {reconnect_source} {reconnect_script_path}")
-    print("  ✓ Reconnection handler linked (fixes black screen on resize)")
 
     xsession_template_path = os.path.join(config_template_dir, 'xrdp_xsession.template')
     try:
