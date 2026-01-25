@@ -18,22 +18,28 @@ def _generate_sesman_ini(config: SetupConfig, cleanup_script_path: str) -> str:
     Xvnc is more reliable and doesn't have compatibility issues with X.Org versions.
     """
     
+    # Keep this close to upstream sesman.ini defaults, but with:
+    # - group restriction to remoteusers
+    # - EndSessionCommand for cleanup
+    # - Xvnc backend only
     return f'''[Globals]
+ListenAddress=127.0.0.1
+ListenPort=3350
 EnableUserWindowManager=true
 UserWindowManager=startwm.sh
 DefaultWindowManager=startwm.sh
 
 [Security]
 AllowRootLogin=false
-AllowGroups=remoteusers
-DenyUsers=root
 MaxLoginRetry=3
+TerminalServerUsers=remoteusers
+AlwaysGroupCheck=true
 
 [Sessions]
-EndSessionCommand={cleanup_script_path}
-SessionVariables=DBUS_SESSION_BUS_ADDRESS
-Policy=Default
+X11DisplayOffset=10
 MaxSessions=10
+Policy=Default
+EndSessionCommand={cleanup_script_path}
 
 [Logging]
 LogFile=/var/log/xrdp-sesman.log
@@ -42,14 +48,16 @@ EnableSyslog=true
 SyslogLevel=INFO
 
 [Xvnc]
+param=Xvnc
 param=-bs
 param=-nolisten
 param=tcp
 param=-localhost
 param=-dpi
 param=96
-param=-rfbauth
-param=/dev/null
+
+[SessionVariables]
+PULSE_SCRIPT=/etc/xrdp/pulse/default.pa
 '''
 
 
@@ -71,6 +79,9 @@ def install_xrdp(config: SetupConfig) -> None:
     
     run("apt-get install -y -qq xrdp tigervnc-standalone-server dbus-x11 x11-xserver-utils x11-utils")
     print("  ✓ xRDP packages installed (using Xvnc backend)")
+
+    # Ensure xrdp can create its runtime dirs/sockets
+    run("systemctl enable xrdp-sesman", check=False)
     
     run("getent group ssl-cert && adduser xrdp ssl-cert", check=False)
     
@@ -310,4 +321,3 @@ def configure_audio(config: SetupConfig) -> None:
     
     print("  ✓ Audio configured (PulseAudio + xRDP modules)")
     print(f"  Run ~/check-rdp.sh via SSH to troubleshoot RDP issues")
-

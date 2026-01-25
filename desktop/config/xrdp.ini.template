@@ -62,16 +62,6 @@ LogLevel=INFO
 EnableSyslog=true
 SyslogLevel=INFO
 
-; Session types
-[Xorg]
-name=Xorg
-lib=libxup.so
-username=ask
-password=ask
-ip=127.0.0.1
-port=-1
-code=20
-
 [Xvnc]
 name=Xvnc
 lib=libvnc.so
