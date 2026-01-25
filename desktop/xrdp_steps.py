@@ -52,7 +52,7 @@ SyslogLevel=INFO
 [Xorg]
 param=/usr/lib/xorg/Xorg
 param=-config
-param=xrdp/xorg.conf
+param=/etc/X11/xrdp/xorg.conf
 param=-noreset
 param=-nolisten
 param=tcp
@@ -127,9 +127,9 @@ def install_xrdp(config: SetupConfig) -> None:
     except Exception as e:
         print(f"  ⚠ Error deploying xrdp.ini template: {e}")
     
-    # Configure xorgxrdp for container environments if needed
+    # Configure xorgxrdp - required for all environments
     xorg_conf_path = "/etc/X11/xrdp/xorg.conf"
-    if is_container() and not os.path.exists(xorg_conf_path):
+    if not os.path.exists(xorg_conf_path):
         xorg_conf_dir = os.path.dirname(xorg_conf_path)
         os.makedirs(xorg_conf_dir, exist_ok=True)
         
@@ -184,7 +184,7 @@ EndSection
 '''
         with open(xorg_conf_path, "w") as f:
             f.write(xorg_conf_content)
-        print("  ✓ xorgxrdp configuration created for container")
+        print("  ✓ xorgxrdp configuration created")
     
     run("systemctl enable xrdp")
     run("systemctl restart xrdp")
@@ -232,6 +232,13 @@ def harden_xrdp(config: SetupConfig) -> None:
 
 
 def configure_audio(config: SetupConfig) -> None:
+    """Configure audio for RDP sessions.
+    
+    For unprivileged containers: Basic PulseAudio setup without xRDP modules
+    For VMs/hardware: Full setup with xRDP audio modules if available
+    
+    Note: Per requirements, audio is not expected to work in unprivileged containers.
+    """
     safe_username = shlex.quote(config.username)
     home_dir = f"/home/{config.username}"
     pulse_dir = f"{home_dir}/.config/pulse"
@@ -241,6 +248,7 @@ def configure_audio(config: SetupConfig) -> None:
     
     run("apt-get install -y -qq pulseaudio pulseaudio-utils")
     
+    # Check if xRDP audio modules are already installed
     result = run("find /usr/lib -name 'module-xrdp-sink.so' 2>/dev/null", check=False)
     modules_installed = result.returncode == 0 and bool(result.stdout.strip())
     
@@ -250,7 +258,13 @@ def configure_audio(config: SetupConfig) -> None:
         print("  ✓ Audio already configured")
         return
     
-    if not modules_installed:
+    # Skip complex module compilation for unprivileged containers
+    # Audio won't work over RDP but the desktop will function
+    if is_container() and not modules_installed:
+        print("  ℹ Skipping xRDP audio module compilation in unprivileged container")
+        print("  ℹ Local audio (if available) will work, but not over RDP")
+        modules_installed = False
+    elif not modules_installed:
         run("apt-get install -y -qq build-essential dpkg-dev libpulse-dev git autoconf libtool", check=False)
         
         pulse_ver_result = run("pulseaudio --version | grep -oP 'pulseaudio \\K[0-9]+\\.[0-9]+' | head -1", check=False)
@@ -381,5 +395,8 @@ def configure_audio(config: SetupConfig) -> None:
     run(f"pkill -u {safe_username} pulseaudio", check=False)
     run("systemctl restart xrdp", check=False)
     
-    print("  ✓ Audio configured (PulseAudio + xRDP modules)")
+    if modules_installed:
+        print("  ✓ Audio configured (PulseAudio + xRDP modules)")
+    else:
+        print("  ✓ Audio configured (PulseAudio only - no RDP audio in unprivileged container)")
     print(f"  Run ~/check-rdp.sh via SSH to troubleshoot RDP issues")
