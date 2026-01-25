@@ -4,14 +4,8 @@ logger -t xrdp-session "Session starting for user $USER"
 
 exec 2> >(tee -a ~/.xsession-errors)
 
-# Dynamic resolution helper (safe no-op if unsupported)
-if command -v xrandr >/dev/null 2>&1 && command -v xev >/dev/null 2>&1; then
-    if [ -x /opt/infra_tools/desktop/service_tools/xrdp_resize_handler.py ]; then
-        if ! pgrep -u "$USER" -f "/opt/infra_tools/desktop/service_tools/xrdp_resize_handler.py" >/dev/null 2>&1; then
-            /opt/infra_tools/desktop/service_tools/xrdp_resize_handler.py >/dev/null 2>&1 &
-        fi
-    fi
-fi
+# Dynamic resolution is handled natively by xorgxrdp via RANDR
+# No additional resize handler needed - manual desktop refreshes cause freezing
 
 cleanup() {
     logger -t xrdp-session "Session cleanup triggered for user $USER"
