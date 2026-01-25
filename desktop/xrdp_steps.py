@@ -72,6 +72,16 @@ def install_xrdp(config: SetupConfig) -> None:
     run("systemctl enable xrdp")
     run("systemctl restart xrdp")
 
+    # Create symlink to reconnection script in /opt directory
+    reconnect_script_path = "/etc/xrdp/reconnectwm.sh"
+    reconnect_source = "/opt/infra_tools/desktop/service_tools/xrdp_reconnect_handler.py"
+    
+    if os.path.exists(reconnect_script_path):
+        run(f"rm -f {reconnect_script_path}", check=False)
+    
+    run(f"ln -s {reconnect_source} {reconnect_script_path}")
+    print("  ✓ Reconnection handler linked (fixes black screen on resize)")
+
     xsession_template_path = os.path.join(config_template_dir, 'xrdp_xsession.template')
     try:
         with open(xsession_template_path, 'r', encoding='utf-8') as f:

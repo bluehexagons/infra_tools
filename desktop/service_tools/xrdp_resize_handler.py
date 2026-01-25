@@ -17,38 +17,21 @@ import sys
 import subprocess
 import select
 import time
-import re
 
 # Add lib directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
 from lib.logging_utils import get_service_logger
+from desktop.service_tools.xrdp_utils import (
+    get_rdp_output_name,
+    get_current_resolution,
+    is_resolution_valid,
+    reset_resolution_to_auto,
+    resolution_lock
+)
 
 # Initialize centralized logger
 logger = get_service_logger('xrdp_resize_handler', 'desktop', use_syslog=True)
-
-
-def get_current_resolution() -> str | None:
-    """Get current screen resolution using xrandr.
-    
-    Returns:
-        Resolution string like "1920x1080" or None if unable to detect
-    """
-    try:
-        result = subprocess.run(
-            ['xrandr', '--current'],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False
-        )
-        if result.returncode == 0:
-            match = re.search(r'(\d+x\d+)', result.stdout)
-            if match:
-                return match.group(1)
-    except Exception as e:
-        logger.warning(f"Failed to get current resolution: {e}")
-    return None
 
 
 def handle_resize(desktop_session: str) -> None:
@@ -100,13 +83,11 @@ def handle_resize(desktop_session: str) -> None:
             
         else:
             # Generic approach for other window managers
-            subprocess.run(
-                ['xrandr', '--output', 'default', '--auto'],
-                capture_output=True,
-                timeout=5,
-                check=False
-            )
-            logger.info("Generic resolution refresh applied")
+            rdp_output = get_rdp_output_name()
+            if reset_resolution_to_auto(rdp_output):
+                logger.info(f"Generic resolution refresh applied to output {rdp_output}")
+            else:
+                logger.warning(f"Failed to refresh resolution for output {rdp_output}")
             
     except subprocess.TimeoutExpired:
         logger.warning(f"Timeout while refreshing {desktop_session} desktop")
@@ -148,6 +129,23 @@ def monitor_randr_events(desktop_session: str) -> None:
         
         # Initial resolution setup after brief delay
         time.sleep(2)
+        
+        # First check if we're in a bad state (invalid dimensions)
+        current_res = get_current_resolution()
+        if not is_resolution_valid(current_res):
+            logger.warning(f"Invalid resolution detected: {current_res}, attempting reset")
+            
+            with resolution_lock("resize-startup", timeout=5.0) as acquired:
+                if acquired:
+                    rdp_output = get_rdp_output_name()
+                    if reset_resolution_to_auto(rdp_output):
+                        logger.info("Resolution reset successful")
+                    else:
+                        logger.error("Resolution reset failed")
+                    time.sleep(1)
+                else:
+                    logger.warning("Could not acquire lock for resolution reset, skipping")
+        
         handle_resize(desktop_session)
         
         # Monitor for events
@@ -162,9 +160,15 @@ def monitor_randr_events(desktop_session: str) -> None:
                     
                     if 'RRScreenChangeNotify' in line:
                         logger.info("Screen change event detected")
-                        # Brief delay to let X server settle
-                        time.sleep(0.5)
-                        handle_resize(desktop_session)
+                        
+                        # Acquire lock before handling resize
+                        with resolution_lock("resize-event", timeout=2.0) as acquired:
+                            if acquired:
+                                # Brief delay to let X server settle
+                                time.sleep(0.5)
+                                handle_resize(desktop_session)
+                            else:
+                                logger.info("Resize locked by another process, skipping")
             
             if proc.poll() is not None:
                 break

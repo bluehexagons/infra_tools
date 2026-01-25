@@ -11,6 +11,7 @@ MaxLoginRetry=3
 
 [Sessions]
 EndSessionCommand={CLEANUP_SCRIPT_PATH}
+ReconnectScript=reconnectwm.sh
 SessionVariables=DBUS_SESSION_BUS_ADDRESS
 Policy=Default
 MaxSessions=10
