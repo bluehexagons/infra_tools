@@ -6,6 +6,7 @@ from .desktop_environment_steps import (
     install_desktop,
     configure_gnome_keyring,
     install_smbclient,
+    configure_xfce_for_rdp,
 )
 
 from .xrdp_steps import (
@@ -34,6 +35,7 @@ __all__ = [
     'install_desktop',
     'configure_gnome_keyring',
     'install_smbclient',
+    'configure_xfce_for_rdp',
     'install_xrdp',
     'harden_xrdp',
     'configure_audio',

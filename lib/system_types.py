@@ -37,6 +37,7 @@ from desktop.steps import (
     install_smbclient,
     install_office_apps,
     install_browser,
+    configure_xfce_for_rdp,
 )
 
 # Import from security module
@@ -100,6 +101,7 @@ COMMON_STEPS: list[tuple[str, StepFunc]] = [
 
 DESKTOP_STEPS: list[tuple[str, StepFunc]] = [
     ("Installing desktop environment", install_desktop),
+    ("Configuring desktop for RDP compatibility", configure_xfce_for_rdp),
     ("Installing xRDP", install_xrdp),
     ("Configuring audio for RDP", configure_audio),
     ("Configuring gnome-keyring", configure_gnome_keyring),
