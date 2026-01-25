@@ -12,164 +12,11 @@ from lib.remote_utils import run
 FLATPAK_REMOTE = "flathub"
 
 
-def _generate_xorg_conf(config: SetupConfig) -> str:
-    """Generate xorg.conf content based on machine type.
-    
-    For containers: Disable GPU features, use software rendering
-    For VMs/hardware: Enable GPU acceleration if available
-    """
-    gpu_available = has_gpu_access()
-    
-    # ServerFlags section
-    server_flags = '''Section "ServerFlags"
-    Option "DefaultServerLayout" "X11 Server"
-    Option "DontVTSwitch" "on"
-    Option "AutoAddDevices" "off"
-    Option "AutoAddGPU" "off"'''
-    
-    if not gpu_available:
-        server_flags += '''
-    # Container mode: disable systemd-logind integration
-    Option "AllowEmptyInput" "on"'''
-    
-    server_flags += '\nEndSection'
-    
-    # Module section
-    if gpu_available:
-        module_section = '''Section "Module"
-    Load "dbe"
-    Load "ddc"
-    Load "extmod"
-    Load "glx"
-    Load "xorgxrdp"
-    Load "fb"
-EndSection'''
-    else:
-        module_section = '''Section "Module"
-    Load "dbe"
-    Load "extmod"
-    Load "xorgxrdp"
-    Load "fb"
-    # Container mode: disable GLX (no GPU available)
-    Disable "glx"
-EndSection'''
-    
-    # Monitor section
-    if gpu_available:
-        monitor_section = '''Section "Monitor"
-    Identifier "Monitor"
-    Option "DPMS"
-EndSection'''
-    else:
-        monitor_section = '''Section "Monitor"
-    Identifier "Monitor"
-    # Container mode: provide standard modes for software rendering
-    HorizSync 30-80
-    VertRefresh 50-75
-EndSection'''
-    
-    # Device section
-    if gpu_available:
-        device_section = '''Section "Device"
-    Identifier "Video Card (xrdpdev)"
-    Driver "xrdpdev"
-EndSection'''
-    else:
-        device_section = '''Section "Device"
-    Identifier "Video Card (xrdpdev)"
-    Driver "xrdpdev"
-    # Container mode: force software rendering
-    Option "DRIEnabled" "false"
-EndSection'''
-    
-    # Screen section
-    if gpu_available:
-        screen_section = '''Section "Screen"
-    Identifier "Screen (xrdpdev)"
-    Device "Video Card (xrdpdev)"
-    Monitor "Monitor"
-    DefaultDepth 24
-    SubSection "Display"
-        Depth 24
-        Virtual 8192 8192
-    EndSubSection
-EndSection'''
-    else:
-        screen_section = '''Section "Screen"
-    Identifier "Screen (xrdpdev)"
-    Device "Video Card (xrdpdev)"
-    Monitor "Monitor"
-    DefaultDepth 24
-    SubSection "Display"
-        Depth 24
-        Virtual 8192 8192
-        # Container mode: provide fallback resolutions
-        Modes "1920x1080" "1600x900" "1366x768" "1280x1024" "1280x720" "1024x768" "800x600"
-    EndSubSection
-EndSection'''
-    
-    return f'''Section "ServerLayout"
-    Identifier "X11 Server"
-    Screen "Screen (xrdpdev)"
-    InputDevice "xrdpMouse" "CorePointer"
-    InputDevice "xrdpKeyboard" "CoreKeyboard"
-EndSection
-
-{server_flags}
-
-{module_section}
-
-Section "InputDevice"
-    Identifier "xrdpKeyboard"
-    Driver "xrdpkeyb"
-EndSection
-
-Section "InputDevice"
-    Identifier "xrdpMouse"
-    Driver "xrdpmouse"
-EndSection
-
-{monitor_section}
-
-{device_section}
-
-{screen_section}
-'''
-
-
-def _generate_sesman_xorg_params(config: SetupConfig) -> str:
-    """Generate Xorg parameters for sesman.ini based on machine type."""
-    gpu_available = has_gpu_access()
-    
-    params = '''; Path to Xorg binary (Debian/Ubuntu standard location)
-param=/usr/lib/xorg/Xorg
-; xrdp-specific xorg.conf for xorgxrdp driver
-param=-config
-param=/etc/X11/xrdp/xorg.conf
-; Don't reset after last client disconnects
-param=-noreset
-; Security and networking
-param=-nolisten
-param=tcp
-; Logging
-param=-logfile
-param=.xorgxrdp.%s.log
-; Dynamic resolution support - allow RANDR extension for resize
-param=-extension
-param=RANDR'''
-    
-    if not gpu_available:
-        params += '''
-; Container compatibility - share VTs and avoid logind seat management
-param=-sharevts
-param=-keeptty'''
-    
-    return params
-
-
 def _generate_sesman_ini(config: SetupConfig, cleanup_script_path: str) -> str:
-    """Generate complete sesman.ini content based on machine type."""
-    xorg_params = _generate_sesman_xorg_params(config)
+    """Generate complete sesman.ini content using Xvnc backend.
+    
+    Xvnc is more reliable and doesn't have compatibility issues with X.Org versions.
+    """
     
     return f'''[Globals]
 EnableUserWindowManager=true
@@ -194,12 +41,17 @@ LogLevel=INFO
 EnableSyslog=true
 SyslogLevel=INFO
 
-[X11rdp]
-param=Xorg
-
-[Xorg]
-{xorg_params}
+[Xvnc]
+param=-bs
+param=-nolisten
+param=tcp
+param=-localhost
+param=-dpi
+param=96
+param=-rfbauth
+param=/dev/null
 '''
+
 
 def install_xrdp(config: SetupConfig) -> None:
     safe_username = shlex.quote(config.username)
@@ -217,32 +69,18 @@ def install_xrdp(config: SetupConfig) -> None:
     else:
         session_cmd = "xfce4-session"
     
-    run("apt-get install -y -qq xrdp xorgxrdp dbus-x11 x11-xserver-utils x11-utils")
-    print("  ✓ xRDP packages installed/updated")
+    run("apt-get install -y -qq xrdp tigervnc-standalone-server dbus-x11 x11-xserver-utils x11-utils")
+    print("  ✓ xRDP packages installed (using Xvnc backend)")
+    
     run("getent group ssl-cert && adduser xrdp ssl-cert", check=False)
     
-    # Add user to device access groups (only useful with GPU access)
+    # Xvnc doesn't require GPU access groups, but keep for desktop session compatibility
     if has_gpu_access():
         run(f"getent group video && usermod -aG video {safe_username}", check=False)
         run(f"getent group render && usermod -aG render {safe_username}", check=False)
-        print("  ✓ User added to video/render groups for GPU access")
-    else:
-        print("  ✓ Container mode: skipping GPU device groups (no DRI access)")
-
-    # Generate and deploy xorg.conf based on machine type
-    xorg_conf_path = "/etc/X11/xrdp/xorg.conf"
-    run("mkdir -p /etc/X11/xrdp", check=False)
-    try:
-        xorg_content = _generate_xorg_conf(config)
-        if os.path.exists(xorg_conf_path) and not os.path.exists(f"{xorg_conf_path}.bak"):
-            run(f"cp {xorg_conf_path} {xorg_conf_path}.bak")
-        with open(xorg_conf_path, "w") as f:
-            f.write(xorg_content)
-        mode_desc = "GPU-enabled" if has_gpu_access() else "container/software"
-        print(f"  ✓ Xorg configuration deployed ({mode_desc} mode)")
-    except Exception as e:
-        print(f"  ⚠ Error deploying xorg.conf: {e}")
+        print("  ✓ User added to video/render groups")
     
+    # Generate sesman.ini with Xvnc backend
     if os.path.exists(sesman_config) and not os.path.exists(f"{sesman_config}.bak"):
         run(f"cp {sesman_config} {sesman_config}.bak")
     
