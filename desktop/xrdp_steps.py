@@ -23,8 +23,6 @@ def _generate_sesman_ini(config: SetupConfig, cleanup_script_path: str) -> str:
     # - EndSessionCommand for cleanup
     # - Xvnc backend only
     return f'''[Globals]
-ListenAddress=127.0.0.1
-ListenPort=3350
 EnableUserWindowManager=true
 UserWindowManager=startwm.sh
 DefaultWindowManager=startwm.sh
@@ -53,6 +51,7 @@ param=-bs
 param=-nolisten
 param=tcp
 param=-localhost
+param=-randr
 param=-dpi
 param=96
 

@@ -25,6 +25,10 @@ key_file=
 
 ; Color depth and display settings
 max_bpp=32
+
+; Dynamic resize + gfx can be flaky with Xvnc backends on some clients.
+; Disable gfx so we use the classic (non-egfx) pipeline.
+enable_gfx=false
 blue=009cb5
 grey=dedede
 ls_top_window_bg_color=009cb5
