@@ -16,6 +16,8 @@ from typing import Optional, Any, List
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from lib.config import SetupConfig
+
 
 def build_ssh_command(host: str, username: str, ssh_key: Optional[str] = None) -> List[str]:
     """Build an SSH command for connecting to a remote host."""
@@ -30,7 +32,7 @@ def build_ssh_command(host: str, username: str, ssh_key: Optional[str] = None) -
     return ["ssh"] + ssh_opts + [f"{username}@{host}"]
 
 
-def retrieve_stored_config(host: str, username: str, ssh_key: Optional[str] = None) -> Optional[dict[str, Any]]:
+def retrieve_stored_config(host: str, username: str, ssh_key: Optional[str] = None) -> Optional[SetupConfig]:
     """Retrieve the stored configuration from the remote host."""
     ssh_cmd = build_ssh_command(host, username, ssh_key)
     remote_config_path = "/opt/infra_tools/state/setup.json"
@@ -45,7 +47,10 @@ def retrieve_stored_config(host: str, username: str, ssh_key: Optional[str] = No
         )
         
         if result.returncode == 0 and result.stdout.strip():
-            return json.loads(result.stdout)
+            config_dict = json.loads(result.stdout)
+            system_type = config_dict.get("system_type", "server_dev")
+            # Update host to the current host (in case it changed)
+            return SetupConfig.from_dict(host, system_type, config_dict)
         
     except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError):
         pass
@@ -100,54 +105,63 @@ def reconstruct_remote_config(host: str, username: str, ssh_key: Optional[str] =
     return None
 
 
-def generate_command_from_config(config: dict[str, Any], host: str, username: str, system_type: str = "server_dev") -> str:
-    """Generate a setup command from the configuration."""
+def generate_partial_command_from_reconstruction(
+    reconstructed: dict[str, Any], 
+    host: str, 
+    username: str, 
+    system_type: str = "server_dev"
+) -> str:
+    """Generate a partial setup command from reconstructed configuration.
+    
+    This is used when we only have partial information from server analysis,
+    not a full stored configuration.
+    """
     cmd_parts = [f"python3 setup_{system_type}.py", host]
     
     if username != os.getenv("USER", ""):
         cmd_parts.append(username)
     
     # Add development tools
-    if config.get("ruby"):
+    if reconstructed.get("ruby"):
         cmd_parts.append("--ruby")
     
-    if config.get("go"):
+    if reconstructed.get("go"):
         cmd_parts.append("--go")
     
-    if config.get("node"):
+    if reconstructed.get("node"):
         cmd_parts.append("--node")
     
     # Add Samba
-    if config.get("samba"):
+    if reconstructed.get("samba"):
         cmd_parts.append("--samba")
         
         # Note: Share details need manual reconstruction
-        shares = config.get("samba_shares", [])
+        shares = reconstructed.get("samba_shares", [])
         if shares:
             cmd_parts.append(f"  # Detected {len(shares)} Samba share(s): {', '.join(shares)}")
             cmd_parts.append("  # Add --share flags manually")
     
     # Add deployments
-    deployments = config.get("deploy", [])
+    deployments = reconstructed.get("deploy", [])
     if deployments:
         cmd_parts.append(f"  # Detected {len(deployments)} deployment(s)")
         for name, domain in deployments:
             cmd_parts.append(f"  # --deploy <domain> <git_url>  # for: {name}")
     
     # Add sync operations
-    sync_ops = config.get("sync", [])
+    sync_ops = reconstructed.get("sync", [])
     if sync_ops:
         cmd_parts.append(f"  # Detected {len(sync_ops)} sync operation(s)")
         cmd_parts.append("  # Add --sync flags manually")
     
     # Add scrub operations
-    scrub_ops = config.get("scrub", [])
+    scrub_ops = reconstructed.get("scrub", [])
     if scrub_ops:
         cmd_parts.append(f"  # Detected {len(scrub_ops)} scrub operation(s)")
         cmd_parts.append("  # Add --scrub flags manually")
     
     # Add SMB mounts
-    smb_mounts = config.get("mount_smb", [])
+    smb_mounts = reconstructed.get("mount_smb", [])
     if smb_mounts:
         mount_strs = [str(m) for m in smb_mounts]
         cmd_parts.append(f"  # Detected {len(smb_mounts)} SMB mount(s): {', '.join(mount_strs)}")
@@ -156,14 +170,30 @@ def generate_command_from_config(config: dict[str, Any], host: str, username: st
     return " \\\n  ".join(cmd_parts)
 
 
-def print_config_info(config: dict[str, Any], source: str) -> None:
-    """Print the configuration information."""
+def print_config_info(config: SetupConfig, source: str) -> None:
+    """Print stored configuration information."""
+    print("=" * 60)
+    print(f"Configuration source: {source}")
+    print("=" * 60)
+    print()
+    print(f"System type: {config.system_type}")
+    print(f"Machine type: {config.machine_type}")
+    print(f"Username: {config.username}")
+    if config.friendly_name:
+        print(f"Name: {config.friendly_name}")
+    if config.tags:
+        print(f"Tags: {', '.join(config.tags)}")
+    print()
+
+
+def print_reconstructed_info(config_dict: dict[str, Any], source: str) -> None:
+    """Print reconstructed configuration information."""
     print("=" * 60)
     print(f"Configuration source: {source}")
     print("=" * 60)
     print()
     print("Detected configuration:")
-    print(json.dumps(config, indent=2))
+    print(json.dumps(config_dict, indent=2))
     print()
 
 
@@ -189,15 +219,13 @@ def main() -> int:
     if stored_config:
         print_config_info(stored_config, "Stored configuration file")
         
-        # Extract system_type if available
-        system_type = stored_config.get("system_type", "server_dev")
-        
-        # Generate command from stored config
+        # Generate command from stored config using SetupConfig's method
         print("=" * 60)
         print("Suggested command:")
         print("=" * 60)
         print()
-        print(generate_command_from_config(stored_config, args.host, username, system_type))
+        cmd_parts = stored_config.to_setup_command(include_username=True)
+        print(" \\\n  ".join(cmd_parts))
         print()
         
     else:
@@ -209,13 +237,13 @@ def main() -> int:
         reconstructed_config = reconstruct_remote_config(args.host, username, args.ssh_key)
         
         if reconstructed_config:
-            print_config_info(reconstructed_config, "Reconstructed from server analysis")
+            print_reconstructed_info(reconstructed_config, "Reconstructed from server analysis")
             
             print("=" * 60)
             print("Partial/guessed command (manual review required):")
             print("=" * 60)
             print()
-            print(generate_command_from_config(reconstructed_config, args.host, username))
+            print(generate_partial_command_from_reconstruction(reconstructed_config, args.host, username))
             print()
             print("⚠ Note: This is a partial reconstruction. Please review and complete manually.")
             print()
