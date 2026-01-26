@@ -193,7 +193,7 @@ class SetupConfig:
         if self.friendly_name:
             cmd_parts.append(f"--name {shlex.quote(self.friendly_name)}")
         
-        if self.tags:
+        if self.tags and len(self.tags) > 0:
             cmd_parts.append(f"--tags {shlex.quote(','.join(self.tags))}")
         
         # Desktop/workstation flags

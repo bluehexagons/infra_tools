@@ -181,7 +181,7 @@ def print_config_info(config: SetupConfig, source: str) -> None:
     print(f"Username: {config.username}")
     if config.friendly_name:
         print(f"Name: {config.friendly_name}")
-    if config.tags:
+    if config.tags and len(config.tags) > 0:
         print(f"Tags: {', '.join(config.tags)}")
     print()
 
