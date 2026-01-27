@@ -12,15 +12,18 @@ import json
 import os
 import subprocess
 import sys
-from typing import Optional, Any, List
+from typing import Optional, Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from lib.config import SetupConfig
 
 
-def build_ssh_command(host: str, username: str, ssh_key: Optional[str] = None) -> List[str]:
-    """Build an SSH command for connecting to a remote host."""
+def build_ssh_command(host: str, username: str, ssh_key: Optional[str] = None) -> list[str]:
+    """Build an SSH command for connecting to a remote host.
+    
+    Uses same options as setup_common.py for consistency.
+    """
     ssh_opts = [
         "-o", "StrictHostKeyChecking=accept-new",
         "-o", "ConnectTimeout=30",
@@ -105,69 +108,29 @@ def reconstruct_remote_config(host: str, username: str, ssh_key: Optional[str] =
     return None
 
 
-def generate_partial_command_from_reconstruction(
-    reconstructed: dict[str, Any], 
-    host: str, 
-    username: str, 
-    system_type: str = "server_dev"
-) -> str:
-    """Generate a partial setup command from reconstructed configuration.
+def create_partial_config_from_reconstruction(
+    reconstructed: dict[str, Any],
+    host: str,
+    username: str
+) -> SetupConfig:
+    """Create a partial SetupConfig from reconstructed data.
     
-    This is used when we only have partial information from server analysis,
-    not a full stored configuration.
+    Converts the simple dict from reconstruction into a SetupConfig object
+    so we can use the standard to_setup_command() method.
     """
-    cmd_parts = [f"python3 setup_{system_type}.py", host]
+    # Map reconstructed flags to config fields
+    config_dict: dict[str, Any] = {
+        'username': username,
+        'install_ruby': reconstructed.get('ruby', False),
+        'install_go': reconstructed.get('go', False),
+        'install_node': reconstructed.get('node', False),
+        'enable_samba': reconstructed.get('samba', False),
+    }
     
-    if username != os.getenv("USER", ""):
-        cmd_parts.append(username)
+    # Determine system_type - default to server_dev for reconstructed configs
+    system_type = 'server_dev'
     
-    # Add development tools
-    if reconstructed.get("ruby"):
-        cmd_parts.append("--ruby")
-    
-    if reconstructed.get("go"):
-        cmd_parts.append("--go")
-    
-    if reconstructed.get("node"):
-        cmd_parts.append("--node")
-    
-    # Add Samba
-    if reconstructed.get("samba"):
-        cmd_parts.append("--samba")
-        
-        # Note: Share details need manual reconstruction
-        shares = reconstructed.get("samba_shares", [])
-        if shares:
-            cmd_parts.append(f"  # Detected {len(shares)} Samba share(s): {', '.join(shares)}")
-            cmd_parts.append("  # Add --share flags manually")
-    
-    # Add deployments
-    deployments = reconstructed.get("deploy", [])
-    if deployments:
-        cmd_parts.append(f"  # Detected {len(deployments)} deployment(s)")
-        for name, domain in deployments:
-            cmd_parts.append(f"  # --deploy <domain> <git_url>  # for: {name}")
-    
-    # Add sync operations
-    sync_ops = reconstructed.get("sync", [])
-    if sync_ops:
-        cmd_parts.append(f"  # Detected {len(sync_ops)} sync operation(s)")
-        cmd_parts.append("  # Add --sync flags manually")
-    
-    # Add scrub operations
-    scrub_ops = reconstructed.get("scrub", [])
-    if scrub_ops:
-        cmd_parts.append(f"  # Detected {len(scrub_ops)} scrub operation(s)")
-        cmd_parts.append("  # Add --scrub flags manually")
-    
-    # Add SMB mounts
-    smb_mounts = reconstructed.get("mount_smb", [])
-    if smb_mounts:
-        mount_strs = [str(m) for m in smb_mounts]
-        cmd_parts.append(f"  # Detected {len(smb_mounts)} SMB mount(s): {', '.join(mount_strs)}")
-        cmd_parts.append("  # Add --mount-smb flags manually")
-    
-    return " \\\n  ".join(cmd_parts)
+    return SetupConfig.from_dict(host, system_type, config_dict)
 
 
 def print_config_info(config: SetupConfig, source: str) -> None:
@@ -213,7 +176,7 @@ def main() -> int:
     print(f"Attempting to recall setup configuration for {username}@{args.host}...")
     print()
     
-    # First, try to retrieve stored configuration
+    # First, try to retrieve stored configuration from remote host
     stored_config = retrieve_stored_config(args.host, username, args.ssh_key)
     
     if stored_config:
@@ -234,16 +197,60 @@ def main() -> int:
         print("Attempting to reconstruct configuration by analyzing server state...")
         print()
         
-        reconstructed_config = reconstruct_remote_config(args.host, username, args.ssh_key)
+        reconstructed_data = reconstruct_remote_config(args.host, username, args.ssh_key)
         
-        if reconstructed_config:
-            print_reconstructed_info(reconstructed_config, "Reconstructed from server analysis")
+        if reconstructed_data:
+            print_reconstructed_info(reconstructed_data, "Reconstructed from server analysis")
+            
+            # Create a partial SetupConfig from reconstructed data
+            partial_config = create_partial_config_from_reconstruction(
+                reconstructed_data, args.host, username
+            )
             
             print("=" * 60)
             print("Partial/guessed command (manual review required):")
             print("=" * 60)
             print()
-            print(generate_partial_command_from_reconstruction(reconstructed_config, args.host, username))
+            
+            # Use the standard to_setup_command() method
+            cmd_parts = partial_config.to_setup_command(include_username=True)
+            print(" \\\n  ".join(cmd_parts))
+            
+            # Add notes about complex features that need manual configuration
+            notes = []
+            if reconstructed_data.get('samba_shares'):
+                shares = reconstructed_data['samba_shares']
+                notes.append(f"  # Detected {len(shares)} Samba share(s): {', '.join(shares)}")
+                notes.append("  # Add --share flags manually with access type, paths, and credentials")
+            
+            if reconstructed_data.get('deploy'):
+                deployments = reconstructed_data['deploy']
+                notes.append(f"  # Detected {len(deployments)} deployment(s)")
+                for name, _ in deployments:
+                    notes.append(f"  # Add --deploy <domain> <git_url>  # for: {name}")
+            
+            if reconstructed_data.get('sync'):
+                sync_ops = reconstructed_data['sync']
+                notes.append(f"  # Detected {len(sync_ops)} sync operation(s)")
+                notes.append("  # Add --sync <source> <dest> <interval> flags manually")
+            
+            if reconstructed_data.get('scrub'):
+                scrub_ops = reconstructed_data['scrub']
+                notes.append(f"  # Detected {len(scrub_ops)} scrub operation(s)")
+                notes.append("  # Add --scrub <dir> <db_path> <redundancy> <freq> flags manually")
+            
+            if reconstructed_data.get('mount_smb'):
+                mounts = reconstructed_data['mount_smb']
+                mount_strs = [str(m) for m in mounts]
+                notes.append(f"  # Detected {len(mounts)} SMB mount(s): {', '.join(mount_strs)}")
+                notes.append("  # Add --mount-smb flags manually with credentials")
+            
+            if notes:
+                print()
+                print("# Additional features requiring manual configuration:")
+                for note in notes:
+                    print(note)
+            
             print()
             print("⚠ Note: This is a partial reconstruction. Please review and complete manually.")
             print()
