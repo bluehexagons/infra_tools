@@ -86,9 +86,12 @@ def main() -> int:
     sys.stdout.flush()
     
     # Save setup configuration for later recall
-    config_dict = config.to_dict()
-    config_dict['system_type'] = config.system_type
-    save_setup_config(config_dict)
+    try:
+        config_dict = config.to_dict()
+        config_dict['system_type'] = config.system_type
+        save_setup_config(config_dict)
+    except OSError as e:
+        print(f"Warning: Failed to save setup configuration: {e}", file=sys.stderr)
 
     steps = get_steps_for_system_type(config)
     

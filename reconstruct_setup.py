@@ -64,7 +64,12 @@ def detect_go() -> bool:
 def detect_node() -> bool:
     home_dir = os.path.expanduser("~")
     nvm_path = os.path.join(home_dir, ".nvm")
-    return check_directory_exists(nvm_path) or check_command_exists("nvm")
+    return (
+        check_directory_exists(nvm_path)
+        or check_command_exists("nvm")
+        or check_directory_exists("/opt/nvm")
+        or check_file_exists("/etc/profile.d/nvm.sh")
+    )
 
 
 def detect_deployments() -> list[tuple[str, str]]:
@@ -79,7 +84,8 @@ def detect_deployments() -> list[tuple[str, str]]:
             item_path = os.path.join(deploy_base, item)
             if os.path.isdir(item_path):
                 deployments.append((item, "unknown"))
-    except Exception:
+    except (OSError, PermissionError):
+        # Failed to read deployments directory; return empty list
         pass
     
     return deployments
@@ -106,7 +112,8 @@ def detect_samba_shares() -> list[str]:
             for match in matches:
                 if match not in ['global', 'homes', 'printers']:
                     shares.append(match)
-    except Exception:
+    except (OSError, PermissionError):
+        # Failed to read or parse smb.conf; return empty list
         pass
     
     return shares
@@ -126,7 +133,8 @@ def detect_sync_operations() -> list[str]:
         for line in result.stdout.split('\n'):
             if 'sync' in line.lower() and '.timer' in line:
                 operations.append(line.strip())
-    except Exception:
+    except (subprocess.SubprocessError, OSError):
+        # Failed to query systemd timers; return empty list
         pass
     
     return operations
@@ -146,7 +154,8 @@ def detect_scrub_operations() -> list[str]:
         for line in result.stdout.split('\n'):
             if 'scrub' in line.lower() and '.timer' in line:
                 operations.append(line.strip())
-    except Exception:
+    except (subprocess.SubprocessError, OSError):
+        # Failed to query systemd timers; return empty list
         pass
     
     return operations
@@ -163,7 +172,8 @@ def detect_smb_mounts() -> list[str]:
                     if line and not line.startswith('#'):
                         if 'cifs' in line or 'smb' in line:
                             mounts.append(line.split()[1] if len(line.split()) > 1 else line)
-        except Exception:
+        except (OSError, PermissionError):
+            # Failed to read /etc/fstab; SMB mounts can still be discovered via systemd
             pass
     
     try:
@@ -177,7 +187,8 @@ def detect_smb_mounts() -> list[str]:
         for line in result.stdout.split('\n'):
             if 'mnt' in line and '.mount' in line:
                 mounts.append(line.split()[0])
-    except Exception:
+    except (subprocess.SubprocessError, OSError):
+        # Failed to query systemd mounts; return what we found from fstab
         pass
     
     return mounts

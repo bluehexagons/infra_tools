@@ -41,7 +41,6 @@ def retrieve_stored_config(host: str, username: str, ssh_key: Optional[str] = No
     remote_config_path = "/opt/infra_tools/state/setup.json"
     
     try:
-        # Try to read the stored configuration
         result = subprocess.run(
             ssh_cmd + ["cat", remote_config_path],
             capture_output=True,
@@ -52,11 +51,15 @@ def retrieve_stored_config(host: str, username: str, ssh_key: Optional[str] = No
         if result.returncode == 0 and result.stdout.strip():
             config_dict = json.loads(result.stdout)
             system_type = config_dict.get("system_type", "server_dev")
-            # Update host to the current host (in case it changed)
             return SetupConfig.from_dict(host, system_type, config_dict)
         
-    except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError):
-        pass
+    except subprocess.TimeoutExpired:
+        print(f"Timeout retrieving stored config from {host}", file=sys.stderr)
+    except json.JSONDecodeError as e:
+        print(f"Invalid JSON in stored config: {e}", file=sys.stderr)
+    except FileNotFoundError:
+        # SSH command not found; this is a critical error
+        print("SSH command not available", file=sys.stderr)
     
     return None
 
@@ -67,33 +70,51 @@ def reconstruct_remote_config(host: str, username: str, ssh_key: Optional[str] =
     Returns a tuple of (config, extras) or None on failure.
     """
     ssh_cmd = build_ssh_command(host, username, ssh_key)
-    
-    local_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reconstruct_setup.py")
-    remote_script = "/tmp/reconstruct_setup.py"
+    remote_script = "/opt/infra_tools/reconstruct_setup.py"
     
     try:
-        scp_cmd = ["scp"]
-        if ssh_key:
-            scp_cmd.extend(["-i", ssh_key])
-        scp_cmd.extend([
-            "-o", "StrictHostKeyChecking=accept-new",
-            "-o", "ConnectTimeout=30",
-        ])
-        scp_cmd.extend([local_script, f"{username}@{host}:{remote_script}"])
+        # Check if infra_tools is installed on remote
+        check_result = subprocess.run(
+            ssh_cmd + ["test", "-f", remote_script],
+            capture_output=True,
+            timeout=10
+        )
         
-        subprocess.run(scp_cmd, capture_output=True, check=True, timeout=30)
+        if check_result.returncode != 0:
+            print("Note: infra_tools not found on remote host. Installing...", file=sys.stderr)
+            # Install infra_tools by running a minimal setup
+            # This will install the tools to /opt/infra_tools
+            from lib.setup_common import copy_project_files, create_tar_from_dir, REMOTE_INSTALL_DIR
+            import tempfile
+            
+            build_dir = tempfile.mkdtemp(prefix="infra_recall_")
+            try:
+                copy_project_files(build_dir)
+                tar_data = create_tar_from_dir(build_dir)
+                
+                install_cmd = f"mkdir -p {REMOTE_INSTALL_DIR} && cd {REMOTE_INSTALL_DIR} && tar xzf -"
+                install_process = subprocess.Popen(
+                    ssh_cmd + [install_cmd],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
+                install_process.communicate(input=tar_data, timeout=60)
+                
+                if install_process.returncode != 0:
+                    print(f"Failed to install infra_tools on remote host", file=sys.stderr)
+                    return None
+            finally:
+                import shutil
+                if os.path.exists(build_dir):
+                    shutil.rmtree(build_dir)
         
+        # Run the reconstruct script from the installed location
         result = subprocess.run(
             ssh_cmd + ["python3", remote_script],
             capture_output=True,
             text=True,
             timeout=60
-        )
-        
-        subprocess.run(
-            ssh_cmd + ["rm", "-f", remote_script],
-            capture_output=True,
-            timeout=10
         )
         
         if result.returncode == 0 and result.stdout.strip():

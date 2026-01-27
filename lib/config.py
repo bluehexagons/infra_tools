@@ -177,9 +177,9 @@ class SetupConfig:
         if self.ssh_key:
             cmd_parts.append(f"-k {shlex.quote(self.ssh_key)}")
         
-        # Password (typically not shown in commands for security)
-        # if self.password:
-        #     cmd_parts.append(f"-p {shlex.quote(self.password)}")
+        # Password is intentionally not included in the command line for security reasons.
+        # If a password is required, it should be provided interactively or via a secure
+        # mechanism instead of as a command-line argument.
         
         # Timezone
         if self.timezone and self.timezone != "UTC":
