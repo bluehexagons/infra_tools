@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib.arg_parser import create_setup_argument_parser
 from lib.config import SetupConfig
 from lib.display import print_setup_summary
-from lib.machine_state import save_machine_state
+from lib.machine_state import save_machine_state, save_setup_config
 from lib.remote_utils import validate_username, detect_os, set_dry_run
 from lib.progress import progress_bar
 from lib.system_types import get_steps_for_system_type
@@ -84,6 +84,14 @@ def main() -> int:
     )
     print(f"Machine type: {config.machine_type}")
     sys.stdout.flush()
+    
+    # Save setup configuration for later recall
+    try:
+        config_dict = config.to_dict()
+        config_dict['system_type'] = config.system_type
+        save_setup_config(config_dict)
+    except OSError as e:
+        print(f"Warning: Failed to save setup configuration: {e}", file=sys.stderr)
 
     steps = get_steps_for_system_type(config)
     

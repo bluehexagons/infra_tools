@@ -160,7 +160,7 @@ def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = Non
 
 def copy_project_files(dest_dir: str) -> None:
     project_root = os.path.normpath(os.path.join(SCRIPT_DIR, ".."))
-    items_to_copy = ["remote_setup.py", "lib", "desktop", "web", "smb", "security", "sync", "common", "deploy"]
+    items_to_copy = ["remote_setup.py", "reconstruct_setup.py", "lib", "desktop", "web", "smb", "security", "sync", "common", "deploy"]
     
     for item in items_to_copy:
         src = os.path.join(project_root, item)

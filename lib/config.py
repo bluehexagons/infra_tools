@@ -161,6 +161,126 @@ class SetupConfig:
                 args.append(f"--scrub {escaped_spec}")
                 
         return args
+    
+    def to_setup_command(self, include_username: bool = True) -> StrList:
+        """Generate command line for user-facing setup script.
+        
+        Returns a list of command parts that can be joined with spaces or newlines.
+        """
+        cmd_parts: StrList = [f"python3 setup_{self.system_type}.py", self.host]
+        
+        # Add username if different from current user or if requested
+        if include_username:
+            cmd_parts.append(self.username)
+        
+        # SSH key
+        if self.ssh_key:
+            cmd_parts.append(f"-k {shlex.quote(self.ssh_key)}")
+        
+        # Password is intentionally not included in the command line for security reasons.
+        # If a password is required, it should be provided interactively or via a secure
+        # mechanism instead of as a command-line argument.
+        
+        # Timezone
+        if self.timezone and self.timezone != "UTC":
+            cmd_parts.append(f"-t {shlex.quote(self.timezone)}")
+        
+        # Machine type (if not default)
+        if self.machine_type != DEFAULT_MACHINE_TYPE:
+            cmd_parts.append(f"--machine {shlex.quote(self.machine_type)}")
+        
+        # Name and tags
+        if self.friendly_name:
+            cmd_parts.append(f"--name {shlex.quote(self.friendly_name)}")
+        
+        if self.tags and len(self.tags) > 0:
+            cmd_parts.append(f"--tags {shlex.quote(','.join(self.tags))}")
+        
+        # Desktop/workstation flags
+        if self.enable_rdp:
+            cmd_parts.append("--rdp")
+        
+        if self.enable_audio:
+            cmd_parts.append("--audio")
+        
+        if self.desktop and self.desktop != "xfce":
+            cmd_parts.append(f"--desktop {shlex.quote(self.desktop)}")
+        
+        if self.browser and self.browser != "brave":
+            cmd_parts.append(f"--browser {shlex.quote(self.browser)}")
+        
+        if self.use_flatpak:
+            cmd_parts.append("--flatpak")
+        
+        if self.install_office:
+            cmd_parts.append("--office")
+        
+        # Development tools
+        if self.install_ruby:
+            cmd_parts.append("--ruby")
+        
+        if self.install_go:
+            cmd_parts.append("--go")
+        
+        if self.install_node:
+            cmd_parts.append("--node")
+        
+        # Custom steps
+        if self.custom_steps:
+            cmd_parts.append(f"--steps {shlex.quote(self.custom_steps)}")
+        
+        # Deployments
+        if self.deploy_specs:
+            if self.full_deploy:
+                cmd_parts.append("--full-deploy")
+            for deploy_spec, git_url in self.deploy_specs:
+                cmd_parts.append(f"--deploy {shlex.quote(deploy_spec)} {shlex.quote(git_url)}")
+        
+        # SSL
+        if self.enable_ssl:
+            cmd_parts.append("--ssl")
+            if self.ssl_email:
+                cmd_parts.append(f"--ssl-email {shlex.quote(self.ssl_email)}")
+        
+        # Cloudflare
+        if self.enable_cloudflare:
+            cmd_parts.append("--cloudflare")
+        
+        if self.api_subdomain:
+            cmd_parts.append("--api-subdomain")
+        
+        # Samba
+        if self.enable_samba:
+            cmd_parts.append("--samba")
+        
+        if self.samba_shares:
+            for share_spec in self.samba_shares:
+                escaped_spec = ' '.join(shlex.quote(str(s)) for s in share_spec)
+                cmd_parts.append(f"--share {escaped_spec}")
+        
+        # SMB client
+        if self.enable_smbclient:
+            cmd_parts.append("--smbclient")
+        
+        # SMB mounts
+        if self.smb_mounts:
+            for mount_spec in self.smb_mounts:
+                escaped_spec = ' '.join(shlex.quote(str(s)) for s in mount_spec)
+                cmd_parts.append(f"--mount-smb {escaped_spec}")
+        
+        # Sync
+        if self.sync_specs:
+            for sync_spec in self.sync_specs:
+                escaped_spec = ' '.join(shlex.quote(str(s)) for s in sync_spec)
+                cmd_parts.append(f"--sync {escaped_spec}")
+        
+        # Scrub
+        if self.scrub_specs:
+            for scrub_spec in self.scrub_specs:
+                escaped_spec = ' '.join(shlex.quote(str(s)) for s in scrub_spec)
+                cmd_parts.append(f"--scrub {escaped_spec}")
+        
+        return cmd_parts
 
     def to_dict(self) -> JSONDict:
         data = asdict(self)
