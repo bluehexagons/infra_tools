@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Reconstruct setup configuration by analyzing the server state.
-
-This script analyzes the current server to detect installed components
-and generates a partial configuration that can be used to recall the
-original setup command.
-"""
+"""Reconstruct setup configuration by analyzing the server state."""
 
 from __future__ import annotations
 
@@ -14,6 +9,10 @@ import re
 import subprocess
 import sys
 from typing import Any
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from lib.config import SetupConfig
 
 
 def check_command_exists(command: str) -> bool:
@@ -45,36 +44,30 @@ def check_service_exists(service: str) -> bool:
 
 
 def check_directory_exists(path: str) -> bool:
-    """Check if a directory exists."""
     return os.path.isdir(path)
 
 
 def check_file_exists(path: str) -> bool:
-    """Check if a file exists."""
     return os.path.isfile(path)
 
 
 def detect_ruby() -> bool:
-    """Detect if Ruby is installed via rbenv."""
     home_dir = os.path.expanduser("~")
     rbenv_path = os.path.join(home_dir, ".rbenv")
     return check_directory_exists(rbenv_path) or check_command_exists("rbenv")
 
 
 def detect_go() -> bool:
-    """Detect if Go is installed."""
     return check_command_exists("go")
 
 
 def detect_node() -> bool:
-    """Detect if Node.js is installed via nvm."""
     home_dir = os.path.expanduser("~")
     nvm_path = os.path.join(home_dir, ".nvm")
     return check_directory_exists(nvm_path) or check_command_exists("nvm")
 
 
 def detect_deployments() -> list[tuple[str, str]]:
-    """Detect deployed applications."""
     deployments: list[tuple[str, str]] = []
     deploy_base = "/opt/deployments"
     
@@ -85,8 +78,6 @@ def detect_deployments() -> list[tuple[str, str]]:
         for item in os.listdir(deploy_base):
             item_path = os.path.join(deploy_base, item)
             if os.path.isdir(item_path):
-                # Try to detect the domain from nginx config or deployment metadata
-                # For now, just note that a deployment exists
                 deployments.append((item, "unknown"))
     except Exception:
         pass
@@ -95,14 +86,12 @@ def detect_deployments() -> list[tuple[str, str]]:
 
 
 def detect_samba() -> bool:
-    """Detect if Samba is installed and configured."""
     return (check_service_exists("smbd") or 
             check_service_exists("nmbd") or
             check_file_exists("/etc/samba/smb.conf"))
 
 
 def detect_samba_shares() -> list[str]:
-    """Detect configured Samba shares."""
     shares: list[str] = []
     smb_conf = "/etc/samba/smb.conf"
     
@@ -112,7 +101,6 @@ def detect_samba_shares() -> list[str]:
     try:
         with open(smb_conf, 'r') as f:
             content = f.read()
-            # Simple parsing - look for share sections
             share_pattern = re.compile(r'^\[([^\]]+)\]', re.MULTILINE)
             matches = share_pattern.findall(content)
             for match in matches:
@@ -125,7 +113,6 @@ def detect_samba_shares() -> list[str]:
 
 
 def detect_sync_operations() -> list[str]:
-    """Detect rsync-based sync operations from systemd timers."""
     operations: list[str] = []
     
     try:
@@ -136,7 +123,6 @@ def detect_sync_operations() -> list[str]:
             timeout=10
         )
         
-        # Look for sync-related timers
         for line in result.stdout.split('\n'):
             if 'sync' in line.lower() and '.timer' in line:
                 operations.append(line.strip())
@@ -147,7 +133,6 @@ def detect_sync_operations() -> list[str]:
 
 
 def detect_scrub_operations() -> list[str]:
-    """Detect par2-based scrub operations from systemd timers."""
     operations: list[str] = []
     
     try:
@@ -158,7 +143,6 @@ def detect_scrub_operations() -> list[str]:
             timeout=10
         )
         
-        # Look for scrub-related timers
         for line in result.stdout.split('\n'):
             if 'scrub' in line.lower() and '.timer' in line:
                 operations.append(line.strip())
@@ -169,10 +153,8 @@ def detect_scrub_operations() -> list[str]:
 
 
 def detect_smb_mounts() -> list[str]:
-    """Detect SMB mounts from fstab and systemd mounts."""
     mounts: list[str] = []
     
-    # Check /etc/fstab
     if check_file_exists("/etc/fstab"):
         try:
             with open("/etc/fstab", 'r') as f:
@@ -184,7 +166,6 @@ def detect_smb_mounts() -> list[str]:
         except Exception:
             pass
     
-    # Check systemd mounts
     try:
         result = subprocess.run(
             ["systemctl", "list-units", "--type=mount", "--all", "--no-pager"],
@@ -202,55 +183,67 @@ def detect_smb_mounts() -> list[str]:
     return mounts
 
 
-def reconstruct_configuration() -> dict[str, Any]:
-    """Reconstruct the setup configuration by analyzing the server."""
-    config: dict[str, Any] = {}
+def reconstruct_configuration(host: str = "localhost", username: str = "root") -> SetupConfig:
+    """Reconstruct setup configuration by analyzing the server."""
+    config_dict: dict[str, Any] = {
+        'username': username,
+        'install_ruby': detect_ruby(),
+        'install_go': detect_go(),
+        'install_node': detect_node(),
+        'enable_samba': detect_samba(),
+    }
     
-    # Detect development tools
-    if detect_ruby():
-        config['ruby'] = True
-    
-    if detect_go():
-        config['go'] = True
-    
-    if detect_node():
-        config['node'] = True
-    
-    # Detect deployments
     deployments = detect_deployments()
-    if deployments:
-        config['deploy'] = deployments
+    system_type = 'server_web' if deployments else 'server_dev'
     
-    # Detect Samba
+    # Store extra data for display
+    extra_data: dict[str, Any] = {}
     if detect_samba():
-        config['samba'] = True
         shares = detect_samba_shares()
         if shares:
-            config['samba_shares'] = shares
+            extra_data['samba_shares'] = shares
     
-    # Detect sync operations
+    if deployments:
+        extra_data['deploy'] = deployments
+    
     sync_ops = detect_sync_operations()
     if sync_ops:
-        config['sync'] = sync_ops
+        extra_data['sync'] = sync_ops
     
-    # Detect scrub operations
     scrub_ops = detect_scrub_operations()
     if scrub_ops:
-        config['scrub'] = scrub_ops
+        extra_data['scrub'] = scrub_ops
     
-    # Detect SMB mounts
     smb_mounts = detect_smb_mounts()
     if smb_mounts:
-        config['mount_smb'] = smb_mounts
+        extra_data['mount_smb'] = smb_mounts
+    
+    config = SetupConfig.from_dict(host, system_type, config_dict)
+    
+    # Attach extra data for display purposes
+    if extra_data:
+        config._reconstruction_extras = extra_data  # type: ignore
     
     return config
 
 
 def main() -> int:
-    """Main entry point."""
     try:
         config = reconstruct_configuration()
-        print(json.dumps(config, indent=2))
+        
+        # Output as dict for JSON compatibility
+        output = {
+            'install_ruby': config.install_ruby,
+            'install_go': config.install_go,
+            'install_node': config.install_node,
+            'enable_samba': config.enable_samba,
+        }
+        
+        # Add extras if present
+        if hasattr(config, '_reconstruction_extras'):
+            output.update(config._reconstruction_extras)  # type: ignore
+        
+        print(json.dumps(output, indent=2))
         return 0
     except Exception as e:
         print(f"Error reconstructing configuration: {e}", file=sys.stderr)

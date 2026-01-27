@@ -61,16 +61,14 @@ def retrieve_stored_config(host: str, username: str, ssh_key: Optional[str] = No
     return None
 
 
-def reconstruct_remote_config(host: str, username: str, ssh_key: Optional[str] = None) -> Optional[dict[str, Any]]:
+def reconstruct_remote_config(host: str, username: str, ssh_key: Optional[str] = None) -> Optional[SetupConfig]:
     """Run reconstruct_setup.py on the remote host to analyze configuration."""
     ssh_cmd = build_ssh_command(host, username, ssh_key)
     
-    # First, upload the reconstruct_setup.py script
     local_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reconstruct_setup.py")
     remote_script = "/tmp/reconstruct_setup.py"
     
     try:
-        # Upload the script
         scp_cmd = ["scp"]
         if ssh_key:
             scp_cmd.extend(["-i", ssh_key])
@@ -82,7 +80,6 @@ def reconstruct_remote_config(host: str, username: str, ssh_key: Optional[str] =
         
         subprocess.run(scp_cmd, capture_output=True, check=True, timeout=30)
         
-        # Run the script on the remote host
         result = subprocess.run(
             ssh_cmd + ["python3", remote_script],
             capture_output=True,
@@ -90,7 +87,6 @@ def reconstruct_remote_config(host: str, username: str, ssh_key: Optional[str] =
             timeout=60
         )
         
-        # Clean up the remote script
         subprocess.run(
             ssh_cmd + ["rm", "-f", remote_script],
             capture_output=True,
@@ -98,7 +94,29 @@ def reconstruct_remote_config(host: str, username: str, ssh_key: Optional[str] =
         )
         
         if result.returncode == 0 and result.stdout.strip():
-            return json.loads(result.stdout)
+            reconstructed = json.loads(result.stdout)
+            
+            # Convert to SetupConfig
+            config_dict: dict[str, Any] = {
+                'username': username,
+                'install_ruby': reconstructed.get('install_ruby', False),
+                'install_go': reconstructed.get('install_go', False),
+                'install_node': reconstructed.get('install_node', False),
+                'enable_samba': reconstructed.get('enable_samba', False),
+            }
+            
+            system_type = 'server_web' if reconstructed.get('deploy') else 'server_dev'
+            config = SetupConfig.from_dict(host, system_type, config_dict)
+            
+            # Store extras for display
+            extras = {}
+            for key in ['samba_shares', 'deploy', 'sync', 'scrub', 'mount_smb']:
+                if key in reconstructed:
+                    extras[key] = reconstructed[key]
+            if extras:
+                config._reconstruction_extras = extras  # type: ignore
+            
+            return config
         else:
             print(f"Error running reconstruct script: {result.stderr}", file=sys.stderr)
             
@@ -108,36 +126,7 @@ def reconstruct_remote_config(host: str, username: str, ssh_key: Optional[str] =
     return None
 
 
-def create_partial_config_from_reconstruction(
-    reconstructed: dict[str, Any],
-    host: str,
-    username: str
-) -> SetupConfig:
-    """Create a partial SetupConfig from reconstructed data.
-    
-    Converts the simple dict from reconstruction into a SetupConfig object
-    so we can use the standard to_setup_command() method.
-    """
-    # Map reconstructed flags to config fields
-    config_dict: dict[str, Any] = {
-        'username': username,
-        'install_ruby': reconstructed.get('ruby', False),
-        'install_go': reconstructed.get('go', False),
-        'install_node': reconstructed.get('node', False),
-        'enable_samba': reconstructed.get('samba', False),
-    }
-    
-    # Try to infer system_type from detected features
-    # Default to server_dev, but use server_web if deployments are detected
-    system_type = 'server_dev'
-    if reconstructed.get('deploy'):
-        system_type = 'server_web'
-    
-    return SetupConfig.from_dict(host, system_type, config_dict)
-
-
 def print_config_info(config: SetupConfig, source: str) -> None:
-    """Print stored configuration information."""
     print("=" * 60)
     print(f"Configuration source: {source}")
     print("=" * 60)
@@ -152,19 +141,7 @@ def print_config_info(config: SetupConfig, source: str) -> None:
     print()
 
 
-def print_reconstructed_info(config_dict: dict[str, Any], source: str) -> None:
-    """Print reconstructed configuration information."""
-    print("=" * 60)
-    print(f"Configuration source: {source}")
-    print("=" * 60)
-    print()
-    print("Detected configuration:")
-    print(json.dumps(config_dict, indent=2))
-    print()
-
-
 def main() -> int:
-    """Main entry point."""
     parser = argparse.ArgumentParser(description="Recall setup configuration from a remote host")
     parser.add_argument("host", help="IP address or hostname of the remote host")
     parser.add_argument("username", nargs="?", default=None, 
@@ -173,19 +150,16 @@ def main() -> int:
     
     args = parser.parse_args()
     
-    # Get username
     username = args.username if args.username else os.getenv("USER", "root")
     
     print(f"Attempting to recall setup configuration for {username}@{args.host}...")
     print()
     
-    # First, try to retrieve stored configuration from remote host
     stored_config = retrieve_stored_config(args.host, username, args.ssh_key)
     
     if stored_config:
         print_config_info(stored_config, "Stored configuration file")
         
-        # Generate command from stored config using SetupConfig's method
         print("=" * 60)
         print("Suggested command:")
         print("=" * 60)
@@ -195,67 +169,60 @@ def main() -> int:
         print()
         
     else:
-        # No stored config found, try to reconstruct
         print("⚠ Warning: No stored configuration found on remote host.")
         print("Attempting to reconstruct configuration by analyzing server state...")
         print()
         
-        reconstructed_data = reconstruct_remote_config(args.host, username, args.ssh_key)
+        reconstructed_config = reconstruct_remote_config(args.host, username, args.ssh_key)
         
-        if reconstructed_data:
-            print_reconstructed_info(reconstructed_data, "Reconstructed from server analysis")
-            
-            # Create a partial SetupConfig from reconstructed data
-            partial_config = create_partial_config_from_reconstruction(
-                reconstructed_data, args.host, username
-            )
+        if reconstructed_config:
+            print_config_info(reconstructed_config, "Reconstructed from server analysis")
             
             print("=" * 60)
             print("Partial/guessed command (manual review required):")
             print("=" * 60)
             print()
             
-            # Use the standard to_setup_command() method
-            # Only include username if it differs from current user
             current_user = os.getenv("USER", "")
             include_username = (username != current_user)
-            cmd_parts = partial_config.to_setup_command(include_username=include_username)
+            cmd_parts = reconstructed_config.to_setup_command(include_username=include_username)
             print(" \\\n  ".join(cmd_parts))
             
-            # Add notes about complex features that need manual configuration
-            notes = []
-            if reconstructed_data.get('samba_shares'):
-                shares = reconstructed_data['samba_shares']
-                notes.append(f"  # Detected {len(shares)} Samba share(s): {', '.join(shares)}")
-                notes.append("  # Add --share flags manually with access type, paths, and credentials")
-            
-            if reconstructed_data.get('deploy'):
-                deployments = reconstructed_data['deploy']
-                notes.append(f"  # Detected {len(deployments)} deployment(s)")
-                for name, _ in deployments:
-                    notes.append(f"  # Add --deploy <domain> <git_url>  # for: {name}")
-            
-            if reconstructed_data.get('sync'):
-                sync_ops = reconstructed_data['sync']
-                notes.append(f"  # Detected {len(sync_ops)} sync operation(s)")
-                notes.append("  # Add --sync <source> <dest> <interval> flags manually")
-            
-            if reconstructed_data.get('scrub'):
-                scrub_ops = reconstructed_data['scrub']
-                notes.append(f"  # Detected {len(scrub_ops)} scrub operation(s)")
-                notes.append("  # Add --scrub <dir> <db_path> <redundancy> <freq> flags manually")
-            
-            if reconstructed_data.get('mount_smb'):
-                mounts = reconstructed_data['mount_smb']
-                mount_strs = [str(m) for m in mounts]
-                notes.append(f"  # Detected {len(mounts)} SMB mount(s): {', '.join(mount_strs)}")
-                notes.append("  # Add --mount-smb flags manually with credentials")
-            
-            if notes:
-                print()
-                print("# Additional features requiring manual configuration:")
-                for note in notes:
-                    print(note)
+            # Display notes about complex features
+            if hasattr(reconstructed_config, '_reconstruction_extras'):
+                extras = reconstructed_config._reconstruction_extras  # type: ignore
+                notes = []
+                
+                if 'samba_shares' in extras:
+                    shares = extras['samba_shares']
+                    notes.append(f"  # Detected {len(shares)} Samba share(s): {', '.join(shares)}")
+                    notes.append("  # Add --share flags manually")
+                
+                if 'deploy' in extras:
+                    deployments = extras['deploy']
+                    notes.append(f"  # Detected {len(deployments)} deployment(s)")
+                    for name, _ in deployments:
+                        notes.append(f"  # Add --deploy <domain> <git_url>  # for: {name}")
+                
+                if 'sync' in extras:
+                    notes.append(f"  # Detected {len(extras['sync'])} sync operation(s)")
+                    notes.append("  # Add --sync <source> <dest> <interval> flags")
+                
+                if 'scrub' in extras:
+                    notes.append(f"  # Detected {len(extras['scrub'])} scrub operation(s)")
+                    notes.append("  # Add --scrub <dir> <db_path> <redundancy> <freq> flags")
+                
+                if 'mount_smb' in extras:
+                    mounts = extras['mount_smb']
+                    mount_strs = [str(m) for m in mounts]
+                    notes.append(f"  # Detected {len(mounts)} SMB mount(s): {', '.join(mount_strs)}")
+                    notes.append("  # Add --mount-smb flags manually")
+                
+                if notes:
+                    print()
+                    print("# Additional features requiring manual configuration:")
+                    for note in notes:
+                        print(note)
             
             print()
             print("⚠ Note: This is a partial reconstruction. Please review and complete manually.")
