@@ -3,6 +3,7 @@
 
 This script creates par2 parity files, verifies files, and repairs corrupted files.
 Enhanced with transaction support and improved error recovery.
+Supports sending notifications on completion or failure.
 """
 
 from __future__ import annotations
@@ -325,6 +326,18 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
         log_file: Log file path
         verify: Whether to verify and repair (False for fast initial creation)
     """
+    # Load notification configs from machine state
+    notification_configs = []
+    try:
+        from lib.machine_state import load_setup_config
+        from lib.notifications import parse_notification_args
+        setup_config = load_setup_config()
+        if setup_config and 'notify_specs' in setup_config:
+            notification_configs = parse_notification_args(setup_config['notify_specs'])
+    except Exception as e:
+        # If notification loading fails, just log and continue without notifications
+        log(f"Warning: Failed to load notification configs: {e}", log_file)
+    
     # Enhanced logging with operation logger
     operation_logger = create_operation_logger(
         "scrub_par2", 
@@ -451,9 +464,63 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
         operation_logger.complete("completed", 
                               f"Scrub completed: {files_processed} files processed, {files_repaired} repaired")
         
+        # Send success notification
+        if notification_configs:
+            try:
+                from lib.notifications import send_notification
+                status = "warning" if files_repaired > 0 else "good"
+                message = f"Processed {files_processed} files"
+                if files_updated > 0:
+                    message += f", updated {files_updated}"
+                if files_repaired > 0:
+                    message += f", repaired {files_repaired}"
+                if files_verified > 0:
+                    message += f", verified {files_verified}"
+                
+                details = f"""Scrub Summary:
+Directory: {directory}
+Files processed: {files_processed}
+Files updated: {files_updated}
+Files verified: {files_verified}
+Files repaired: {files_repaired}
+Total size: {total_file_size // (1024 * 1024)} MB
+Redundancy: {redundancy}%
+"""
+                
+                logger = get_rotating_logger(f"scrub_notifications:{log_file}", log_file)
+                send_notification(
+                    notification_configs,
+                    subject=f"{'Warning' if files_repaired > 0 else 'Success'}: Scrub completed",
+                    job="scrub",
+                    status=status,
+                    message=message,
+                    details=details,
+                    logger=logger
+                )
+            except Exception as e:
+                log(f"Warning: Failed to send notification: {e}", log_file)
+        
     except Exception as e:
         operation_logger.log_error("scrub_failed", str(e))
         log(f"Scrub failed: {e}", log_file)
+        
+        # Send error notification
+        if notification_configs:
+            try:
+                from lib.notifications import send_notification
+                logger = get_rotating_logger(f"scrub_notifications:{log_file}", log_file)
+                send_notification(
+                    notification_configs,
+                    subject="Error: Scrub failed",
+                    job="scrub",
+                    status="error",
+                    message=f"Scrub failed for {directory}: {str(e)}",
+                    details=None,
+                    logger=logger
+                )
+            except Exception as notify_error:
+                log(f"Warning: Failed to send error notification: {notify_error}", log_file)
+        
         if transaction:
             transaction.rollback(str(e))
         raise

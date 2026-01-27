@@ -61,6 +61,7 @@ class SetupConfig:
     smb_mounts: Optional[NestedStrList] = None
     sync_specs: Optional[NestedStrList] = None
     scrub_specs: Optional[NestedStrList] = None
+    notify_specs: Optional[NestedStrList] = None
     include_desktop: bool = False
     include_cli_tools: bool = False
     include_desktop_apps: bool = False
@@ -159,6 +160,11 @@ class SetupConfig:
             for scrub_spec in self.scrub_specs:
                 escaped_spec = ' '.join(shlex.quote(str(s)) for s in scrub_spec)
                 args.append(f"--scrub {escaped_spec}")
+        
+        if self.notify_specs:
+            for notify_spec in self.notify_specs:
+                escaped_spec = ' '.join(shlex.quote(str(s)) for s in notify_spec)
+                args.append(f"--notify {escaped_spec}")
                 
         return args
     
@@ -279,6 +285,12 @@ class SetupConfig:
             for scrub_spec in self.scrub_specs:
                 escaped_spec = ' '.join(shlex.quote(str(s)) for s in scrub_spec)
                 cmd_parts.append(f"--scrub {escaped_spec}")
+        
+        # Notifications
+        if self.notify_specs:
+            for notify_spec in self.notify_specs:
+                escaped_spec = ' '.join(shlex.quote(str(s)) for s in notify_spec)
+                cmd_parts.append(f"--notify {escaped_spec}")
         
         return cmd_parts
 

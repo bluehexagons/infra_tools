@@ -130,6 +130,10 @@ def create_setup_argument_parser(
                        action="append", nargs=4, metavar=("DIRECTORY", "DATABASE_PATH", "REDUNDANCY", "FREQUENCY"),
                        help="Configure data integrity checking: /path/to/directory, relative/or/absolute/path/to/.pardatabase, redundancy%%, frequency (hourly|daily|weekly|monthly). Uses par2 with systemd timer (can be used multiple times)")
     
+    parser.add_argument("--notify", dest="notify_specs",
+                       action="append", nargs=2, metavar=("TYPE", "TARGET"),
+                       help="Configure notification target: TYPE (webhook|mailbox), TARGET (URL for webhook or email for mailbox). Sends alerts for important events (errors, warnings, successes). Can be used multiple times for multiple targets.")
+    
     parser.add_argument("--dry-run", action="store_true",
                        help="Show what would be done without executing commands")
     

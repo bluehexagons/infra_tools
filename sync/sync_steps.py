@@ -158,6 +158,7 @@ def create_sync_service(config: SetupConfig, sync_spec: Optional[list[str]] = No
     
     service_file = f"/etc/systemd/system/{service_name}.service"
     check_script = f"{REMOTE_INSTALL_DIR}/sync/service_tools/check_sync_mounts.py"
+    sync_script = f"{REMOTE_INSTALL_DIR}/sync/service_tools/sync_rsync.py"
     
     exec_condition = f"ExecCondition=/usr/bin/python3 {check_script} {shlex.quote(source)} {shlex.quote(destination)}" if needs_mount_check else ""
     
@@ -170,7 +171,7 @@ Type=oneshot
 User=root
 Group=root
 {exec_condition}
-ExecStart=/usr/bin/rsync -av --delete --delete-delay --partial --exclude='.git' {shlex.quote(source)}/ {shlex.quote(destination)}/
+ExecStart=/usr/bin/python3 {sync_script} {shlex.quote(source)} {shlex.quote(destination)}
 StandardOutput=journal
 StandardError=journal
 """
