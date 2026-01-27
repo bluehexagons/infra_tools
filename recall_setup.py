@@ -127,8 +127,11 @@ def create_partial_config_from_reconstruction(
         'enable_samba': reconstructed.get('samba', False),
     }
     
-    # Determine system_type - default to server_dev for reconstructed configs
+    # Try to infer system_type from detected features
+    # Default to server_dev, but use server_web if deployments are detected
     system_type = 'server_dev'
+    if reconstructed.get('deploy'):
+        system_type = 'server_web'
     
     return SetupConfig.from_dict(host, system_type, config_dict)
 
@@ -213,7 +216,10 @@ def main() -> int:
             print()
             
             # Use the standard to_setup_command() method
-            cmd_parts = partial_config.to_setup_command(include_username=True)
+            # Only include username if it differs from current user
+            current_user = os.getenv("USER", "")
+            include_username = (username != current_user)
+            cmd_parts = partial_config.to_setup_command(include_username=include_username)
             print(" \\\n  ".join(cmd_parts))
             
             # Add notes about complex features that need manual configuration
