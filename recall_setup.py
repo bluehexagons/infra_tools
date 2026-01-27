@@ -61,8 +61,11 @@ def retrieve_stored_config(host: str, username: str, ssh_key: Optional[str] = No
     return None
 
 
-def reconstruct_remote_config(host: str, username: str, ssh_key: Optional[str] = None) -> Optional[SetupConfig]:
-    """Run reconstruct_setup.py on the remote host to analyze configuration."""
+def reconstruct_remote_config(host: str, username: str, ssh_key: Optional[str] = None) -> Optional[tuple[SetupConfig, dict[str, Any]]]:
+    """Run reconstruct_setup.py on the remote host to analyze configuration.
+    
+    Returns a tuple of (config, extras) or None on failure.
+    """
     ssh_cmd = build_ssh_command(host, username, ssh_key)
     
     local_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reconstruct_setup.py")
@@ -96,7 +99,6 @@ def reconstruct_remote_config(host: str, username: str, ssh_key: Optional[str] =
         if result.returncode == 0 and result.stdout.strip():
             reconstructed = json.loads(result.stdout)
             
-            # Convert to SetupConfig
             config_dict: dict[str, Any] = {
                 'username': username,
                 'install_ruby': reconstructed.get('install_ruby', False),
@@ -108,15 +110,12 @@ def reconstruct_remote_config(host: str, username: str, ssh_key: Optional[str] =
             system_type = 'server_web' if reconstructed.get('deploy') else 'server_dev'
             config = SetupConfig.from_dict(host, system_type, config_dict)
             
-            # Store extras for display
             extras = {}
             for key in ['samba_shares', 'deploy', 'sync', 'scrub', 'mount_smb']:
                 if key in reconstructed:
                     extras[key] = reconstructed[key]
-            if extras:
-                config._reconstruction_extras = extras  # type: ignore
             
-            return config
+            return config, extras
         else:
             print(f"Error running reconstruct script: {result.stderr}", file=sys.stderr)
             
@@ -173,10 +172,11 @@ def main() -> int:
         print("Attempting to reconstruct configuration by analyzing server state...")
         print()
         
-        reconstructed_config = reconstruct_remote_config(args.host, username, args.ssh_key)
+        result = reconstruct_remote_config(args.host, username, args.ssh_key)
         
-        if reconstructed_config:
-            print_config_info(reconstructed_config, "Reconstructed from server analysis")
+        if result:
+            config, extras = result
+            print_config_info(config, "Reconstructed from server analysis")
             
             print("=" * 60)
             print("Partial/guessed command (manual review required):")
@@ -185,12 +185,10 @@ def main() -> int:
             
             current_user = os.getenv("USER", "")
             include_username = (username != current_user)
-            cmd_parts = reconstructed_config.to_setup_command(include_username=include_username)
+            cmd_parts = config.to_setup_command(include_username=include_username)
             print(" \\\n  ".join(cmd_parts))
             
-            # Display notes about complex features
-            if hasattr(reconstructed_config, '_reconstruction_extras'):
-                extras = reconstructed_config._reconstruction_extras  # type: ignore
+            if extras:
                 notes = []
                 
                 if 'samba_shares' in extras:

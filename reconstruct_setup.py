@@ -183,8 +183,12 @@ def detect_smb_mounts() -> list[str]:
     return mounts
 
 
-def reconstruct_configuration(host: str = "localhost", username: str = "root") -> SetupConfig:
-    """Reconstruct setup configuration by analyzing the server."""
+def reconstruct_configuration(host: str = "localhost", username: str = "root") -> tuple[SetupConfig, dict[str, Any]]:
+    """Reconstruct setup configuration by analyzing the server.
+    
+    Returns a tuple of (config, extras) where extras contains data
+    that can't be fully reconstructed (shares, deployments, etc.).
+    """
     config_dict: dict[str, Any] = {
         'username': username,
         'install_ruby': detect_ruby(),
@@ -196,42 +200,36 @@ def reconstruct_configuration(host: str = "localhost", username: str = "root") -
     deployments = detect_deployments()
     system_type = 'server_web' if deployments else 'server_dev'
     
-    # Store extra data for display
-    extra_data: dict[str, Any] = {}
+    extras: dict[str, Any] = {}
     if detect_samba():
         shares = detect_samba_shares()
         if shares:
-            extra_data['samba_shares'] = shares
+            extras['samba_shares'] = shares
     
     if deployments:
-        extra_data['deploy'] = deployments
+        extras['deploy'] = deployments
     
     sync_ops = detect_sync_operations()
     if sync_ops:
-        extra_data['sync'] = sync_ops
+        extras['sync'] = sync_ops
     
     scrub_ops = detect_scrub_operations()
     if scrub_ops:
-        extra_data['scrub'] = scrub_ops
+        extras['scrub'] = scrub_ops
     
     smb_mounts = detect_smb_mounts()
     if smb_mounts:
-        extra_data['mount_smb'] = smb_mounts
+        extras['mount_smb'] = smb_mounts
     
     config = SetupConfig.from_dict(host, system_type, config_dict)
     
-    # Attach extra data for display purposes
-    if extra_data:
-        config._reconstruction_extras = extra_data  # type: ignore
-    
-    return config
+    return config, extras
 
 
 def main() -> int:
     try:
-        config = reconstruct_configuration()
+        config, extras = reconstruct_configuration()
         
-        # Output as dict for JSON compatibility
         output = {
             'install_ruby': config.install_ruby,
             'install_go': config.install_go,
@@ -239,9 +237,7 @@ def main() -> int:
             'enable_samba': config.enable_samba,
         }
         
-        # Add extras if present
-        if hasattr(config, '_reconstruction_extras'):
-            output.update(config._reconstruction_extras)  # type: ignore
+        output.update(extras)
         
         print(json.dumps(output, indent=2))
         return 0
