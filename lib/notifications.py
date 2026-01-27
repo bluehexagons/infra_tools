@@ -30,6 +30,12 @@ import urllib.error
 # Notification status levels
 NotificationStatus = Literal["good", "info", "warning", "error"]
 
+# Common subprocess timeout for network operations
+NETWORK_TIMEOUT_SECONDS = 30
+
+# Conversion constants
+BYTES_TO_MB = 1024 * 1024
+
 
 @dataclass
 class NotificationConfig:
@@ -138,7 +144,7 @@ class NotificationSender:
         request = urllib.request.Request(url, data=data, headers=headers, method='POST')
         
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with urllib.request.urlopen(request, timeout=NETWORK_TIMEOUT_SECONDS) as response:
                 if response.status not in (200, 201, 202, 204):
                     raise Exception(f"Webhook returned status {response.status}")
                 
@@ -185,7 +191,7 @@ Check system logs for detailed information.
                     input=msg.as_bytes(),
                     check=True,
                     capture_output=True,
-                    timeout=30
+                    timeout=NETWORK_TIMEOUT_SECONDS
                 )
                 if self.logger:
                     self.logger.info(f"✓ Email notification sent to {email}")
@@ -196,7 +202,7 @@ Check system logs for detailed information.
                     input=body.encode('utf-8'),
                     check=True,
                     capture_output=True,
-                    timeout=30
+                    timeout=NETWORK_TIMEOUT_SECONDS
                 )
                 if self.logger:
                     self.logger.info(f"✓ Email notification sent to {email} (via mail)")

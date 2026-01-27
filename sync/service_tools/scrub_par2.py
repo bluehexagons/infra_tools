@@ -487,7 +487,7 @@ Total size: {total_file_size // (1024 * 1024)} MB
 Redundancy: {redundancy}%
 """
                 
-                logger = get_rotating_logger(f"scrub_notifications:{log_file}", log_file)
+                logger = get_rotating_logger("scrub_notifications", log_file)
                 send_notification(
                     notification_configs,
                     subject=f"{'Warning' if files_repaired > 0 else 'Success'}: Scrub completed",
@@ -508,7 +508,7 @@ Redundancy: {redundancy}%
         if notification_configs:
             try:
                 from lib.notifications import send_notification
-                logger = get_rotating_logger(f"scrub_notifications:{log_file}", log_file)
+                logger = get_rotating_logger("scrub_notifications", log_file)
                 send_notification(
                     notification_configs,
                     subject="Error: Scrub failed",

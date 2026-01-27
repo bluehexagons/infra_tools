@@ -13,6 +13,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../
 
 from lib.logging_utils import get_service_logger
 
+# Conversion constants
+BYTES_TO_MB = 1024 * 1024
+
 
 def run_rsync_with_notifications(source: str, destination: str) -> int:
     """Run rsync and send notifications on completion or failure.
@@ -86,7 +89,7 @@ def run_rsync_with_notifications(source: str, destination: str) -> int:
                 from lib.notifications import send_notification
                 message = f"Synced {files_transferred} files"
                 if total_size > 0:
-                    message += f" ({total_size // (1024 * 1024)} MB)"
+                    message += f" ({total_size // BYTES_TO_MB} MB)"
                 message += f" in {duration:.1f}s"
                 
                 details = f"""Sync Summary:
