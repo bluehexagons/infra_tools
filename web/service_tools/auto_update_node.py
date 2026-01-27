@@ -146,6 +146,7 @@ def main():
                     logger=logger
                 )
             except Exception:
+                # Notification failure should not prevent script from completing
                 pass
         return 1
     
@@ -166,11 +167,26 @@ def main():
                     logger=logger
                 )
             except Exception:
+                # Notification failure should not prevent script from completing
                 pass
         return 1
     
     if not current_version:
         logger.error("✗ Failed to get current version")
+        if notification_configs:
+            try:
+                from lib.notifications import send_notification
+                send_notification(
+                    notification_configs,
+                    subject="Error: Node.js update failed",
+                    job="auto_update_node",
+                    status="error",
+                    message="Failed to get current Node.js version",
+                    logger=logger
+                )
+            except Exception:
+                # Notification failure should not prevent script from completing
+                pass
         return 1
     
     if current_version == current_lts:
@@ -193,6 +209,7 @@ def main():
                     logger=logger
                 )
             except Exception:
+                # Notification failure should not prevent script from completing
                 pass
         return 1
     
@@ -214,6 +231,7 @@ def main():
                 logger=logger
             )
         except Exception:
+            # Notification failure should not prevent script from completing
             pass
     
     return 0

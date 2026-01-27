@@ -16,7 +16,6 @@ import urllib.error
 NotificationStatus = Literal["good", "info", "warning", "error"]
 
 NETWORK_TIMEOUT_SECONDS = 30
-BYTES_TO_MB = 1024 * 1024
 
 
 @dataclass
@@ -123,7 +122,7 @@ Check system logs for detailed information.
 """
         
         try:
-            proc = subprocess.run(
+            subprocess.run(
                 ['mail', '-s', notification.subject, email],
                 input=body.encode('utf-8'),
                 check=True,

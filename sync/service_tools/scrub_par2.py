@@ -375,6 +375,25 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
         if not transaction.execute():
             operation_logger.log_error("validation_failed", "Directory validation failed")
             log("Validation failed, aborting scrub", log_file)
+            
+            # Send validation failure notification
+            if notification_configs:
+                try:
+                    from lib.notifications import send_notification
+                    # Reuse existing logger from _LOGGERS cache
+                    notif_logger = _LOGGERS.get(log_file)
+                    send_notification(
+                        notification_configs,
+                        subject="Error: Scrub validation failed",
+                        job="scrub",
+                        status="error",
+                        message=f"Validation failed for {directory}",
+                        details=None,
+                        logger=notif_logger
+                    )
+                except Exception as e:
+                    log(f"Warning: Failed to send notification: {e}", log_file)
+            
             return
         
         os.makedirs(database, exist_ok=True)
@@ -487,7 +506,8 @@ Total size: {total_file_size // (1024 * 1024)} MB
 Redundancy: {redundancy}%
 """
                 
-                logger = get_rotating_logger("scrub_notifications", log_file)
+                # Reuse existing logger from _LOGGERS cache
+                notif_logger = _LOGGERS.get(log_file)
                 send_notification(
                     notification_configs,
                     subject=f"{'Warning' if files_repaired > 0 else 'Success'}: Scrub completed",
@@ -495,7 +515,7 @@ Redundancy: {redundancy}%
                     status=status,
                     message=message,
                     details=details,
-                    logger=logger
+                    logger=notif_logger
                 )
             except Exception as e:
                 log(f"Warning: Failed to send notification: {e}", log_file)
@@ -508,7 +528,8 @@ Redundancy: {redundancy}%
         if notification_configs:
             try:
                 from lib.notifications import send_notification
-                logger = get_rotating_logger("scrub_notifications", log_file)
+                # Reuse existing logger from _LOGGERS cache
+                notif_logger = _LOGGERS.get(log_file)
                 send_notification(
                     notification_configs,
                     subject="Error: Scrub failed",
@@ -516,10 +537,10 @@ Redundancy: {redundancy}%
                     status="error",
                     message=f"Scrub failed for {directory}: {str(e)}",
                     details=None,
-                    logger=logger
+                    logger=notif_logger
                 )
-            except Exception as notify_error:
-                log(f"Warning: Failed to send error notification: {notify_error}", log_file)
+            except Exception as e:
+                log(f"Warning: Failed to send error notification: {e}", log_file)
         
         if transaction:
             transaction.rollback(str(e))

@@ -402,6 +402,15 @@ def configure_auto_update_ruby(config: SetupConfig) -> None:
 
 def install_mail_utils(config: SetupConfig) -> None:
     """Install mail utilities for email notifications."""
+    # Only install if mailbox notifications are configured
+    if not config.notify_specs:
+        return
+    
+    has_mailbox = any(spec[0] == 'mailbox' for spec in config.notify_specs)
+    if not has_mailbox:
+        print("  ℹ No mailbox notifications configured, skipping mail utilities")
+        return
+    
     if is_package_installed("bsd-mailx"):
         print("  ✓ Mail utilities already installed")
         return

@@ -138,6 +138,7 @@ def main():
                     logger=logger
                 )
             except Exception:
+                # Notification failure should not prevent script from completing
                 pass
         return 1
     
@@ -158,6 +159,7 @@ def main():
                     logger=logger
                 )
             except Exception:
+                # Notification failure should not prevent script from completing
                 pass
         return 1
     
@@ -186,6 +188,7 @@ def main():
                     logger=logger
                 )
             except Exception:
+                # Notification failure should not prevent script from completing
                 pass
         return 1
     
@@ -209,6 +212,7 @@ def main():
                 logger=logger
             )
         except Exception:
+            # Notification failure should not prevent script from completing
             pass
     
     return 0

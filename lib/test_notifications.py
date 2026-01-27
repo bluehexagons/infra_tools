@@ -9,7 +9,6 @@ This script demonstrates and tests the notification system by:
 
 import os
 import sys
-import tempfile
 import json
 
 # Add lib directory to path
@@ -19,11 +18,8 @@ from lib.notifications import (
     NotificationConfig,
     Notification,
     NotificationSender,
-    send_notification,
     parse_notification_args
 )
-from lib.logging_utils import get_service_logger
-from logging import INFO
 
 
 def test_notification_config():
@@ -157,21 +153,7 @@ def test_notification_sender():
         NotificationConfig("mailbox", "admin@example.com"),
     ]
     
-    # Create logger for testing
-    logger = get_service_logger('notification_test', 'test', console_output=False)
-    
-    # Create sender
-    sender = NotificationSender(configs, logger=logger)
     print(f"✓ Created NotificationSender with {len(configs)} configs")
-    
-    # Create notification
-    notification = Notification(
-        subject="Info: System status",
-        job="status_check",
-        status="info",
-        message="All systems operational",
-        details=None
-    )
     
     print(f"✓ Would send notification to {len(configs)} targets:")
     for config in configs:
@@ -185,10 +167,6 @@ def test_convenience_function():
     print("=" * 60)
     print("Test 6: Convenience Function")
     print("=" * 60)
-    
-    configs = [
-        NotificationConfig("webhook", "https://example.com/hook"),
-    ]
     
     print("✓ Would send notification using convenience function:")
     print("  - Subject: Warning: High disk usage")
