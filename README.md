@@ -198,37 +198,27 @@ python3 setup_server_dev.py host \
 
 ## Notifications
 
-Receive alerts about important events (errors, warnings, successes) from sync, scrub, and other operations. Supports webhooks and email.
+Get alerts for sync, scrub, and other operations via webhook or email.
 
 ```bash
-# Webhook notification (e.g., to Slack, Discord, or custom endpoint)
+# Webhook (Slack, Discord, custom endpoint)
 python3 setup_server_dev.py host \
   --scrub /mnt/data .pardatabase 5% weekly \
   --notify webhook https://hooks.slack.com/services/YOUR/WEBHOOK/URL
 
-# Email notification
+# Email
 python3 setup_server_dev.py host \
   --sync /home/docs /mnt/backup daily \
   --notify mailbox admin@example.com
 
-# Multiple notification targets
+# Multiple targets
 python3 setup_server_dev.py host \
   --scrub /mnt/data .pardatabase 5% daily \
-  --notify webhook https://hooks.slack.com/services/YOUR/WEBHOOK/URL \
-  --notify mailbox admin@example.com \
-  --notify mailbox ops@example.com
+  --notify webhook https://hooks.slack.com/... \
+  --notify mailbox admin@example.com
 ```
 
-**Webhook Format:**
-Webhooks receive JSON POST requests with:
-- `subject`: Brief description (e.g., "Error: Scrub failed")
-- `job`: Job identifier ("scrub", "sync", etc.)
-- `status`: Severity level ("good", "info", "warning", "error")
-- `message`: Summary information
-- `details`: Additional logs/data
-
-**Mailbox Format:**
-Email notifications include subject, job, status, and message only (no detailed logs). Logs can be referenced on the system.
+Webhooks receive JSON POST with `subject`, `job`, `status` (good/info/warning/error), `message`, and `details`. Email includes subject, job, status, and message only.
 
 ## Patch Setup
 

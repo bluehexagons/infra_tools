@@ -398,3 +398,15 @@ def configure_auto_update_ruby(config: SetupConfig) -> None:
         check_name="Ruby",
         user=config.username
     )
+
+
+def install_mail_utils(config: SetupConfig) -> None:
+    """Install mail utilities for email notifications."""
+    if is_package_installed("bsd-mailx"):
+        print("  ✓ Mail utilities already installed")
+        return
+    
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
+    run("apt-get install -y -qq bsd-mailx")
+    
+    print("  ✓ Mail utilities installed")

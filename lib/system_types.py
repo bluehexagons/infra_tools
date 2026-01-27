@@ -19,6 +19,7 @@ from common.steps import (
     install_ruby,
     install_go,
     install_node,
+    install_mail_utils,
     configure_swap,
 )
 
@@ -313,6 +314,9 @@ def get_steps_for_system_type(config: SetupConfig) -> list[tuple[str, StepFunc]]
     
     if config.install_office and not (config.include_desktop_apps or config.include_pc_dev_apps):
         steps.append(("Installing Office", install_office_apps))
+    
+    if config.notify_specs:
+        steps.append(("Installing mail utilities for notifications", install_mail_utils))
     
     steps.extend(FINAL_STEPS)
     

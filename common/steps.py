@@ -15,6 +15,7 @@ from .common_steps import (
     install_ruby,
     install_go,
     install_node,
+    install_mail_utils,
 )
 
 from .swap_steps import configure_swap
@@ -32,5 +33,6 @@ __all__ = [
     'install_ruby',
     'install_go',
     'install_node',
+    'install_mail_utils',
     'configure_swap',
 ]
