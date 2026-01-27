@@ -10,13 +10,16 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 from typing import Optional, Any
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from lib.config import SetupConfig
+from lib.setup_common import copy_project_files, create_tar_from_dir, REMOTE_INSTALL_DIR
 
 
 def build_ssh_command(host: str, username: str, ssh_key: Optional[str] = None) -> list[str]:
@@ -82,17 +85,16 @@ def reconstruct_remote_config(host: str, username: str, ssh_key: Optional[str] =
         
         if check_result.returncode != 0:
             print("Note: infra_tools not found on remote host. Installing...", file=sys.stderr)
-            # Install infra_tools by running a minimal setup
-            # This will install the tools to /opt/infra_tools
-            from lib.setup_common import copy_project_files, create_tar_from_dir, REMOTE_INSTALL_DIR
-            import tempfile
             
             build_dir = tempfile.mkdtemp(prefix="infra_recall_")
             try:
                 copy_project_files(build_dir)
                 tar_data = create_tar_from_dir(build_dir)
                 
-                install_cmd = f"mkdir -p {REMOTE_INSTALL_DIR} && cd {REMOTE_INSTALL_DIR} && tar xzf -"
+                # Use shlex.quote to safely escape the directory path
+                import shlex
+                escaped_dir = shlex.quote(REMOTE_INSTALL_DIR)
+                install_cmd = f"mkdir -p {escaped_dir} && cd {escaped_dir} && tar xzf -"
                 install_process = subprocess.Popen(
                     ssh_cmd + [install_cmd],
                     stdin=subprocess.PIPE,
@@ -105,7 +107,6 @@ def reconstruct_remote_config(host: str, username: str, ssh_key: Optional[str] =
                     print(f"Failed to install infra_tools on remote host", file=sys.stderr)
                     return None
             finally:
-                import shutil
                 if os.path.exists(build_dir):
                     shutil.rmtree(build_dir)
         
