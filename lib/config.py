@@ -396,6 +396,7 @@ class SetupConfig:
             smb_mounts=smb_mounts,
             sync_specs=getattr(args, 'sync_specs', None),
             scrub_specs=getattr(args, 'scrub_specs', None),
+            notify_specs=getattr(args, 'notify_specs', None),
             include_desktop=include_desktop,
             include_cli_tools=include_cli_tools,
             include_desktop_apps=include_desktop_apps,
