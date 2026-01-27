@@ -61,6 +61,7 @@ class SetupConfig:
     smb_mounts: Optional[NestedStrList] = None
     sync_specs: Optional[NestedStrList] = None
     scrub_specs: Optional[NestedStrList] = None
+    notify_specs: Optional[NestedStrList] = None
     include_desktop: bool = False
     include_cli_tools: bool = False
     include_desktop_apps: bool = False
@@ -159,6 +160,11 @@ class SetupConfig:
             for scrub_spec in self.scrub_specs:
                 escaped_spec = ' '.join(shlex.quote(str(s)) for s in scrub_spec)
                 args.append(f"--scrub {escaped_spec}")
+        
+        if self.notify_specs:
+            for notify_spec in self.notify_specs:
+                escaped_spec = ' '.join(shlex.quote(str(s)) for s in notify_spec)
+                args.append(f"--notify {escaped_spec}")
                 
         return args
     
@@ -280,6 +286,12 @@ class SetupConfig:
                 escaped_spec = ' '.join(shlex.quote(str(s)) for s in scrub_spec)
                 cmd_parts.append(f"--scrub {escaped_spec}")
         
+        # Notifications
+        if self.notify_specs:
+            for notify_spec in self.notify_specs:
+                escaped_spec = ' '.join(shlex.quote(str(s)) for s in notify_spec)
+                cmd_parts.append(f"--notify {escaped_spec}")
+        
         return cmd_parts
 
     def to_dict(self) -> JSONDict:
@@ -384,6 +396,7 @@ class SetupConfig:
             smb_mounts=smb_mounts,
             sync_specs=getattr(args, 'sync_specs', None),
             scrub_specs=getattr(args, 'scrub_specs', None),
+            notify_specs=getattr(args, 'notify_specs', None),
             include_desktop=include_desktop,
             include_cli_tools=include_cli_tools,
             include_desktop_apps=include_desktop_apps,

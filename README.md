@@ -131,6 +131,12 @@ Common features: User setup, sudo, firewall/SSH hardening, auto-updates, Chrony,
 |------|-------------|
 | `--scrub DIR DBPATH REDUNDANCY FREQ` | Automated par2 integrity checking: DIR (directory), DBPATH (.pardatabase path, relative or absolute), REDUNDANCY (e.g., 5%), FREQ (hourly, daily, weekly, or monthly). Runs after sync if both configured. Includes hourly parity updates for new or modified files when the full scrub runs less frequently. |
 
+### Notification Flags
+
+| Flag | Description |
+|------|-------------|
+| `--notify TYPE TARGET` | Configure notification target (can use multiple times): TYPE (webhook or mailbox), TARGET (URL for webhook or email for mailbox). Sends alerts for important events (errors, warnings, successes) from sync, scrub, and other operations. Webhook sends JSON POST with subject, job, status, message, and details. Mailbox sends email with subject, job, status, and message only. |
+
 ## Deployment Guide
 
 The `--deploy` flag automates building and serving web applications:
@@ -189,6 +195,30 @@ python3 setup_server_dev.py host \
   --sync /home/docs /mnt/backup daily \
   --scrub /mnt/backup .pardatabase 5% weekly
 ```
+
+## Notifications
+
+Get alerts for sync, scrub, and other operations via webhook or email.
+
+```bash
+# Webhook (Slack, Discord, custom endpoint)
+python3 setup_server_dev.py host \
+  --scrub /mnt/data .pardatabase 5% weekly \
+  --notify webhook https://hooks.slack.com/services/YOUR/WEBHOOK/URL
+
+# Email
+python3 setup_server_dev.py host \
+  --sync /home/docs /mnt/backup daily \
+  --notify mailbox admin@example.com
+
+# Multiple targets
+python3 setup_server_dev.py host \
+  --scrub /mnt/data .pardatabase 5% daily \
+  --notify webhook https://hooks.slack.com/... \
+  --notify mailbox admin@example.com
+```
+
+Webhooks receive JSON POST with `subject`, `job`, `status` (good/info/warning/error), `message`, and `details`. Email includes subject, job, status, and message only.
 
 ## Patch Setup
 
@@ -255,7 +285,8 @@ python3 setup_server_lite.py 192.168.1.10 \
   --share read media /mnt/data/media guest:guest \
   --share write documents /mnt/data/docs user:pass \
   --sync /mnt/data/docs /mnt/backup/docs daily \
-  --scrub /mnt/backup/docs .pardatabase 5% weekly
+  --scrub /mnt/backup/docs .pardatabase 5% weekly \
+  --notify mailbox admin@example.com
 ```
 
 ### Cloudflare Tunnel Gateway
