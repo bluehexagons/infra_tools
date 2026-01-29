@@ -75,14 +75,18 @@ WantedBy=timers.target
 
 def configure_auto_update_node(config: SetupConfig) -> None:
     """Configure automatic updates for Node.js via nvm."""
+    user_home = f"/home/{config.username}"
+    nvm_dir = f"{user_home}/.nvm"
+    
     _configure_auto_update_systemd(
         service_name="auto-update-node",
         service_desc="Auto-update Node.js to latest LTS",
         timer_desc="Auto-update Node.js weekly",
         script_name="auto_update_node.py",
         schedule="Sun *-*-* 03:00:00",
-        check_path="/opt/nvm",
-        check_name="Node.js"
+        check_path=nvm_dir,
+        check_name="Node.js",
+        user=config.username
     )
 
 

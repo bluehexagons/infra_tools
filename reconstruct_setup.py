@@ -62,13 +62,12 @@ def detect_go() -> bool:
 
 
 def detect_node() -> bool:
+    """Detect user-installed Node.js via nvm in home directory."""
     home_dir = os.path.expanduser("~")
     nvm_path = os.path.join(home_dir, ".nvm")
     return (
         check_directory_exists(nvm_path)
         or check_command_exists("nvm")
-        or check_directory_exists("/opt/nvm")
-        or check_file_exists("/etc/profile.d/nvm.sh")
     )
 
 
