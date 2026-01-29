@@ -8,7 +8,7 @@ from lib.remote_utils import run
 
 def get_total_ram_mb() -> int:
     """Get total RAM in MB."""
-    result = run("free -m | grep Mem | awk '{print $2}'")
+    result = run("free -m | grep Mem | awk '{print $2}'", capture_output=True)
     try:
         return int(result.stdout.strip())
     except (ValueError, AttributeError):
@@ -16,7 +16,7 @@ def get_total_ram_mb() -> int:
 
 def get_free_disk_mb() -> int:
     """Get free disk space on / in MB."""
-    result = run("df -m / | tail -1 | awk '{print $4}'")
+    result = run("df -m / | tail -1 | awk '{print $4}'", capture_output=True)
     try:
         return int(result.stdout.strip())
     except (ValueError, AttributeError):
@@ -29,7 +29,7 @@ def configure_swap(config: SetupConfig) -> None:
         print("  ✓ Skipping swap configuration (managed by container host)")
         return
     
-    result = run("swapon --show")
+    result = run("swapon --show", capture_output=True)
     if result.stdout and result.stdout.strip():
         print("  ✓ Swap is already configured")
         return

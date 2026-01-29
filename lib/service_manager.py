@@ -41,7 +41,7 @@ class ServiceManager:
         """
         # Get existing systemd services
         try:
-            result = run("systemctl list-units --type=service --all", check=False)
+            result = run("systemctl list-units --type=service --all", check=False, capture_output=True)
             if result.returncode == 0:
                 existing_services: list[str] = []
                 for line in result.stdout.split('\n'):
@@ -227,7 +227,7 @@ class ServiceManager:
         status_info['exists'] = True
         
         # Get service status
-        result = run(f"systemctl status {service_name}", check=False)
+        result = run(f"systemctl status {service_name}", check=False, capture_output=True)
         if result.returncode == 0:
             output: str = str(result.stdout)
             
@@ -266,7 +266,7 @@ class ServiceManager:
         """
         services: list[str] = []
         try:
-            result = run("systemctl list-units --type=service --all", check=False)
+            result = run("systemctl list-units --type=service --all", check=False, capture_output=True)
             if result.returncode == 0:
                 for line in result.stdout.split('\n'):
                     if '.service' in line and ('backup' in line.lower() or 'sync' in line.lower()):

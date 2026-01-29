@@ -284,7 +284,7 @@ WantedBy=timers.target
     print(f"  ℹ Performing initial par2 creation (fast mode)...")
     
     def perform_initial_par2():
-        result = run(f"/usr/bin/python3 {scrub_script} {shlex.quote(directory)} {shlex.quote(database_path)} {shlex.quote(redundancy_value)} {shlex.quote(log_file)} --no-verify", check=False)
+        result = run(f"/usr/bin/python3 {scrub_script} {shlex.quote(directory)} {shlex.quote(database_path)} {shlex.quote(redundancy_value)} {shlex.quote(log_file)} --no-verify", check=False, capture_output=True)
         if result.returncode != 0:
             raise RuntimeError(f"Initial par2 creation failed: {result.stderr or result.stdout}")
         return result.stdout

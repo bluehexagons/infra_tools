@@ -388,11 +388,11 @@ class DeploymentOrchestrator:
         
         if os.path.exists(os.path.join(project_path, "db", "seeds.rb")):
             print("  Seeding database...")
-            seed_result = run(f"cd {shlex.quote(project_path)} && {env_vars} bundle exec rake db:seed")
+            seed_result = run(f"cd {shlex.quote(project_path)} && {env_vars} bundle exec rake db:seed", capture_output=True)
             if seed_result.stdout:
                 print(seed_result.stdout)
         
-        check_task = run(f"cd {shlex.quote(project_path)} && bundle exec rake -T assets:precompile | grep assets:precompile", check=False)
+        check_task = run(f"cd {shlex.quote(project_path)} && bundle exec rake -T assets:precompile | grep assets:precompile", check=False, capture_output=True)
         if check_task.returncode == 0:
             run(f"cd {shlex.quote(project_path)} && {env_vars} bundle exec rake assets:precompile")
         else:
