@@ -221,7 +221,7 @@ eval "$(rbenv init -)"
             f.write(rbenv_init)
     run(f"chown {safe_username}:{safe_username} {shlex.quote(bashrc_path)}")
     
-    result = run(f"runuser -u {safe_username} -- bash -c 'export PATH=\"{rbenv_dir}/bin:$PATH\" && rbenv install -l | grep -E \"^[0-9]+\\.[0-9]+\\.[0-9]+$\" | tail -1'", check=False)
+    result = run(f"runuser -u {safe_username} -- bash -c 'export PATH=\"{rbenv_dir}/bin:$PATH\" && rbenv install -l | grep -E \"^[0-9]+\\.[0-9]+\\.[0-9]+$\" | tail -1'", check=False, capture_output=True)
     if result.returncode == 0 and result.stdout.strip():
         latest_ruby = result.stdout.strip()
         print(f"  Installing Ruby {latest_ruby}...")
@@ -240,7 +240,7 @@ def install_go(config: SetupConfig) -> None:
         return
     
     run("apt-get install -y -qq curl wget")
-    result = run("curl -s https://go.dev/VERSION?m=text | head -1", check=False)
+    result = run("curl -s https://go.dev/VERSION?m=text | head -1", check=False, capture_output=True)
     if result.returncode != 0 or not result.stdout.strip():
         print("  ⚠ Failed to get latest Go version, skipping")
         return
@@ -288,7 +288,7 @@ def install_node(config: SetupConfig) -> None:
     else:
         print("  ✓ nvm already installed in /opt/nvm")
 
-    node_path_result = run(f"bash -c 'export NVM_DIR=\"{nvm_dir}\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && which node'", check=False)
+    node_path_result = run(f"bash -c 'export NVM_DIR=\"{nvm_dir}\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && which node'", check=False, capture_output=True)
     if node_path_result.returncode == 0 and node_path_result.stdout.strip():
         node_bin = node_path_result.stdout.strip()
         node_dir = os.path.dirname(node_bin)

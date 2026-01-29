@@ -259,7 +259,7 @@ def configure_audio(config: SetupConfig) -> None:
     run("apt-get install -y -qq pulseaudio pulseaudio-utils")
     
     # Check if xRDP audio modules are already installed
-    result = run("find /usr/lib -name 'module-xrdp-sink.so' 2>/dev/null", check=False)
+    result = run("find /usr/lib -name 'module-xrdp-sink.so' 2>/dev/null", check=False, capture_output=True)
     modules_installed = result.returncode == 0 and bool(result.stdout.strip())
     
     configs_exist = os.path.exists(client_conf) and os.path.exists(daemon_conf)
@@ -277,7 +277,7 @@ def configure_audio(config: SetupConfig) -> None:
     elif not modules_installed:
         run("apt-get install -y -qq build-essential dpkg-dev libpulse-dev git autoconf libtool", check=False)
         
-        pulse_ver_result = run("pulseaudio --version | grep -oP 'pulseaudio \\K[0-9]+\\.[0-9]+' | head -1", check=False)
+        pulse_ver_result = run("pulseaudio --version | grep -oP 'pulseaudio \\K[0-9]+\\.[0-9]+' | head -1", check=False, capture_output=True)
         pulse_version = pulse_ver_result.stdout.strip() if pulse_ver_result.returncode == 0 else ""
         
         if pulse_version:
@@ -285,7 +285,7 @@ def configure_audio(config: SetupConfig) -> None:
             pulse_src_dir = f"/tmp/pulseaudio-{pulse_version}"
             if not os.path.exists(pulse_src_dir):
                 run(f"apt-get source pulseaudio={pulse_version}* 2>/dev/null || apt-get source pulseaudio 2>/dev/null", check=False, cwd="/tmp")
-                find_result = run("find /tmp -maxdepth 1 -type d -name 'pulseaudio-*' ! -name '*xrdp*' 2>/dev/null | head -1", check=False)
+                find_result = run("find /tmp -maxdepth 1 -type d -name 'pulseaudio-*' ! -name '*xrdp*' 2>/dev/null | head -1", check=False, capture_output=True)
                 if find_result.returncode == 0 and find_result.stdout.strip():
                     pulse_src_dir = find_result.stdout.strip()
         else:
@@ -332,7 +332,7 @@ def configure_audio(config: SetupConfig) -> None:
                         else:
                             modules_installed = True
     
-    result = run("find /usr/lib -name 'module-xrdp-sink.so' 2>/dev/null", check=False)
+    result = run("find /usr/lib -name 'module-xrdp-sink.so' 2>/dev/null", check=False, capture_output=True)
     if result.returncode == 0 and bool(result.stdout.strip()):
         module_path = result.stdout.strip().split('\n')[0]
         print(f"  ✓ xRDP audio module installed: {module_path}")
