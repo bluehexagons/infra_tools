@@ -13,16 +13,26 @@ from __future__ import annotations
 import os
 import sys
 import subprocess
+import pwd
 
 # Add lib directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
 from lib.logging_utils import get_service_logger
 
-NVM_DIR = "/opt/nvm"
-
 # Initialize centralized logger
 logger = get_service_logger('auto_update_node', 'web', use_syslog=True)
+
+
+def get_nvm_dir() -> str:
+    """Get the NVM_DIR path for the current user."""
+    # If running as a specific user (via systemd User=), use their home
+    username = os.environ.get('USER', pwd.getpwuid(os.getuid()).pw_name)
+    home_dir = pwd.getpwnam(username).pw_dir
+    return os.path.join(home_dir, '.nvm')
+
+
+NVM_DIR = get_nvm_dir()
 
 
 def run_nvm_command(cmd: str) -> subprocess.CompletedProcess[str]:
@@ -81,40 +91,26 @@ def update_global_packages():
 
 
 def update_symlinks():
-    """Update symlinks in /usr/local/bin."""
-    result = run_nvm_command("which node")
-    if result.returncode != 0:
-        logger.warning("Failed to locate node binary")
-        return
+    """
+    Update symlinks in user's local bin directory.
     
-    node_path = result.stdout.strip()
-    node_dir = os.path.dirname(node_path)
-    
-    for tool in ["node", "npm", "npx", "pnpm"]:
-        tool_path = os.path.join(node_dir, tool)
-        link_path = f"/usr/local/bin/{tool}"
-        
-        if os.path.exists(tool_path):
-            try:
-                if os.path.islink(link_path):
-                    os.remove(link_path)
-                os.symlink(tool_path, link_path)
-                logger.info(f"✓ Updated symlink for {tool}")
-            except Exception as e:
-                logger.warning(f"⚠ Failed to create symlink for {tool}: {e}")
+    Note: For user installations, symlinks are not needed as nvm
+    adds the node bin directory to PATH via bashrc.
+    """
+    # User installations don't need global symlinks
+    # The user's PATH includes the nvm bin directory
+    pass
 
 
 def fix_permissions():
-    """Fix permissions on nvm directory."""
-    try:
-        subprocess.run(
-            ["chmod", "-R", "a+rX", NVM_DIR],
-            check=True,
-            capture_output=True
-        )
-        logger.info("✓ Successfully fixed permissions on nvm directory")
-    except subprocess.CalledProcessError as e:
-        logger.warning(f"⚠ Failed to fix permissions: {e}")
+    """
+    Fix permissions on nvm directory.
+    
+    Note: For user installations, permissions are already correct
+    since nvm is installed in the user's home directory.
+    """
+    # User installations already have correct permissions
+    pass
 
 
 def main():

@@ -265,45 +265,49 @@ def install_go(config: SetupConfig) -> None:
 
 
 def install_node(config: SetupConfig) -> None:
-    nvm_dir = "/opt/nvm"
+    safe_username = shlex.quote(config.username)
+    user_home = f"/home/{config.username}"
+    nvm_dir = f"{user_home}/.nvm"
     
-    if not os.path.exists(nvm_dir):
-        print("  Installing nvm globally to /opt/nvm...")
-        run("apt-get install -y -qq curl")
-        run(f"mkdir -p {nvm_dir}")
-        nvm_version = "v0.39.7"
-        
-        run(f"curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/{nvm_version}/install.sh | NVM_DIR={nvm_dir} bash")
-        
-        run(f"bash -c 'export NVM_DIR=\"{nvm_dir}\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && nvm install --lts'")
-        run(f"bash -c 'export NVM_DIR=\"{nvm_dir}\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npm install -g npm@latest'")
-        run(f"bash -c 'export NVM_DIR=\"{nvm_dir}\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npm install -g pnpm'")
-        
-        run(f"chmod -R a+rX {nvm_dir}")
-        
-        with open("/etc/profile.d/nvm.sh", "w") as f:
-            f.write(f'export NVM_DIR="{nvm_dir}"\n[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"\n')
-        
-        print("  ✓ nvm + Node.js LTS + NPM (latest) + PNPM installed globally")
+    if os.path.exists(nvm_dir):
+        print("  ✓ nvm already installed")
+        return
+    
+    run("apt-get install -y -qq curl")
+    
+    nvm_version = "v0.39.7"
+    
+    # Install nvm as the user
+    run(f"runuser -u {safe_username} -- bash -c 'curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/{nvm_version}/install.sh | bash'")
+    
+    # Install Node.js LTS
+    run(f"runuser -u {safe_username} -- bash -c 'export NVM_DIR=\"{nvm_dir}\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && nvm install --lts'")
+    
+    # Update npm and install pnpm
+    run(f"runuser -u {safe_username} -- bash -c 'export NVM_DIR=\"{nvm_dir}\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npm install -g npm@latest'")
+    run(f"runuser -u {safe_username} -- bash -c 'export NVM_DIR=\"{nvm_dir}\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npm install -g pnpm'")
+    
+    # Add nvm initialization to .bashrc if not already present
+    bashrc_path = f"{user_home}/.bashrc"
+    nvm_init = '''
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+[ -s "$NVM_DIR/bash_completion" ] && . "$NVM_DIR/bash_completion"
+'''
+    
+    if os.path.exists(bashrc_path):
+        with open(bashrc_path, "r") as f:
+            bashrc_content = f.read()
+        if 'NVM_DIR' not in bashrc_content:
+            with open(bashrc_path, "a") as f:
+                f.write(nvm_init)
     else:
-        print("  ✓ nvm already installed in /opt/nvm")
-
-    node_path_result = run(f"bash -c 'export NVM_DIR=\"{nvm_dir}\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && which node'", check=False, capture_output=True)
-    if node_path_result.returncode == 0 and node_path_result.stdout.strip():
-        node_bin = node_path_result.stdout.strip()
-        node_dir = os.path.dirname(node_bin)
-        
-        links_created = False
-        for tool in ["node", "npm", "npx", "pnpm"]:
-            tool_path = os.path.join(node_dir, tool)
-            link_path = f"/usr/local/bin/{tool}"
-            if os.path.exists(tool_path):
-                if not os.path.exists(link_path) or os.path.realpath(link_path) != os.path.realpath(tool_path):
-                    run(f"ln -sf {tool_path} {link_path}")
-                    links_created = True
-        
-        if links_created:
-            print("  ✓ Node.js binaries linked to /usr/local/bin")
+        with open(bashrc_path, "w") as f:
+            f.write(nvm_init)
+    
+    run(f"chown {safe_username}:{safe_username} {shlex.quote(bashrc_path)}")
+    
+    print("  ✓ nvm + Node.js LTS + NPM (latest) + PNPM installed for user")
 
 
 def _configure_auto_update_systemd(
@@ -368,19 +372,6 @@ WantedBy=timers.target
     run(f"systemctl start {service_name}.timer")
 
     print(f"  ✓ {check_name} auto-update configured ({schedule})")
-
-
-def configure_auto_update_node(config: SetupConfig) -> None:
-    """Configure automatic updates for Node.js via nvm."""
-    _configure_auto_update_systemd(
-        service_name="auto-update-node",
-        service_desc="Auto-update Node.js to latest LTS",
-        timer_desc="Auto-update Node.js weekly",
-        script_name="auto_update_node.py",
-        schedule="Sun *-*-* 03:00:00",
-        check_path="/opt/nvm",
-        check_name="Node.js"
-    )
 
 
 def configure_auto_update_ruby(config: SetupConfig) -> None:
