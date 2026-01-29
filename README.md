@@ -23,7 +23,7 @@ The repository is organized by functionality (module-based) rather than file typ
 - **Root**: User-facing setup scripts (`setup_*.py`, `patch_setup.py`, `remote_setup.py`)
 - **`/lib`**: Core shared libraries (config, types, utilities, system configuration)
 - **`/common`**: Common setup functionality
-  - `steps.py`: User setup, packages, locale, CLI tools, Ruby/Node/Go installation
+  - `steps.py`: User setup, packages, locale, CLI tools, Ruby/Node/Go installation (per-user)
   - `service_tools/`: Auto-update scripts for Node/Ruby, auto-restart service
 - **`/desktop`**: Desktop and workstation functionality
   - `steps.py`: Desktop environment, xRDP, audio, browsers, applications
@@ -94,8 +94,8 @@ Common features: User setup, sudo, firewall/SSH hardening, auto-updates, Chrony,
 
 | Flag | Description |
 |------|-------------|
-| `--ruby` | Install rbenv + latest Ruby + Bundler |
-| `--node` | Install nvm + Node.js + PNPM |
+| `--ruby` | Install rbenv + latest Ruby + Bundler (user installation in ~/.rbenv) |
+| `--node` | Install nvm + Node.js + PNPM (user installation in ~/.nvm) |
 | `--go` | Install latest Go |
 | `--steps STEP1 STEP2` | Run specific custom steps (for setup_steps.py) |
 

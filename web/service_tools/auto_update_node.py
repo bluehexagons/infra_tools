@@ -26,18 +26,16 @@ logger = get_service_logger('auto_update_node', 'web', use_syslog=True)
 
 def get_nvm_dir() -> str:
     """Get the NVM_DIR path for the current user."""
-    # If running as a specific user (via systemd User=), use their home
-    username = os.environ.get('USER', pwd.getpwuid(os.getuid()).pw_name)
+    # Get the effective user running this process (systemd User= sets this)
+    username = pwd.getpwuid(os.getuid()).pw_name
     home_dir = pwd.getpwnam(username).pw_dir
     return os.path.join(home_dir, '.nvm')
 
 
-NVM_DIR = get_nvm_dir()
-
-
 def run_nvm_command(cmd: str) -> subprocess.CompletedProcess[str]:
     """Run a command with nvm environment loaded."""
-    full_cmd = f'export NVM_DIR="{NVM_DIR}" && [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && {cmd}'
+    nvm_dir = get_nvm_dir()
+    full_cmd = f'export NVM_DIR="{nvm_dir}" && [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && {cmd}'
     
     result = subprocess.run(
         full_cmd,
@@ -117,6 +115,8 @@ def main():
     """Main function to update Node.js."""
     logger.info("Starting Node.js update check")
     
+    nvm_dir = get_nvm_dir()
+    
     # Load notification configs
     notification_configs = []
     try:
@@ -128,8 +128,8 @@ def main():
     except Exception as e:
         logger.warning(f"Failed to load notification configs: {e}")
     
-    if not os.path.exists(NVM_DIR):
-        logger.error(f"✗ nvm not found at {NVM_DIR}")
+    if not os.path.exists(nvm_dir):
+        logger.error(f"✗ nvm not found at {nvm_dir}")
         if notification_configs:
             try:
                 from lib.notifications import send_notification
@@ -138,7 +138,7 @@ def main():
                     subject="Error: Node.js update failed",
                     job="auto_update_node",
                     status="error",
-                    message=f"nvm not found at {NVM_DIR}",
+                    message=f"nvm not found at {nvm_dir}",
                     logger=logger
                 )
             except Exception:

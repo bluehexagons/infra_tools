@@ -298,12 +298,21 @@ export NVM_DIR="$HOME/.nvm"
     if os.path.exists(bashrc_path):
         with open(bashrc_path, "r") as f:
             bashrc_content = f.read()
-        if 'NVM_DIR' not in bashrc_content:
+        # Check for the specific export line to avoid false positives
+        if 'export NVM_DIR="$HOME/.nvm"' not in bashrc_content:
             with open(bashrc_path, "a") as f:
                 f.write(nvm_init)
     else:
-        with open(bashrc_path, "w") as f:
-            f.write(nvm_init)
+        # .bashrc doesn't exist - this is unusual but we'll create it with nvm config
+        # Copy from skeleton first if available
+        skel_bashrc = "/etc/skel/.bashrc"
+        if os.path.exists(skel_bashrc):
+            run(f"cp {shlex.quote(skel_bashrc)} {shlex.quote(bashrc_path)}")
+            with open(bashrc_path, "a") as f:
+                f.write(nvm_init)
+        else:
+            with open(bashrc_path, "w") as f:
+                f.write(nvm_init)
     
     run(f"chown {safe_username}:{safe_username} {shlex.quote(bashrc_path)}")
     
