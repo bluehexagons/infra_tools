@@ -4,8 +4,9 @@ logger -t xrdp-session "Session starting for user $USER"
 
 exec 2> >(tee -a ~/.xsession-errors)
 
-# Dynamic resolution is handled natively by xorgxrdp via RANDR
-# No additional resize handler needed - manual desktop refreshes cause freezing
+# Dynamic resolution changes are handled natively by xorgxrdp driver via RANDR events.
+# The xorgxrdp driver automatically adjusts the display when the RDP window is resized.
+# Manual desktop refresh scripts cause session freezing and should NOT be used.
 
 cleanup() {
     logger -t xrdp-session "Session cleanup triggered for user $USER"
