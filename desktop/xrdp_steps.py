@@ -89,12 +89,28 @@ allowed_users=anybody
 # Don't require root privileges
 needs_root_rights=no
 """
+    
+    # Ensure directory exists
+    xwrapper_dir = os.path.dirname(xwrapper_config)
+    if not os.path.exists(xwrapper_dir):
+        try:
+            os.makedirs(xwrapper_dir, exist_ok=True)
+        except OSError as e:
+            print(f"  ⚠ ERROR: Could not create {xwrapper_dir}: {e}")
+            print(f"  ⚠ XRDP may experience session startup issues without proper Xwrapper configuration")
+            print(f"  ⚠ Manually create the directory and file if needed")
+    
     try:
         with open(xwrapper_config, "w") as f:
             f.write(xwrapper_content)
         print("  ✓ Xwrapper configured (allows XRDP to start X server)")
-    except Exception as e:
-        print(f"  ⚠ Warning: Could not configure Xwrapper: {e}")
+    except (IOError, OSError) as e:
+        print(f"  ⚠ ERROR: Could not write to {xwrapper_config}: {e}")
+        print(f"  ⚠ CRITICAL: XRDP sessions may freeze or fail to start")
+        print(f"  ⚠ Manual fix required:")
+        print(f"      sudo mkdir -p {xwrapper_dir}")
+        print(f"      echo 'allowed_users=anybody' | sudo tee {xwrapper_config}")
+        print(f"      echo 'needs_root_rights=no' | sudo tee -a {xwrapper_config}")
 
     # Ensure xrdp can create its runtime dirs/sockets
     run("systemctl enable xrdp-sesman", check=False)

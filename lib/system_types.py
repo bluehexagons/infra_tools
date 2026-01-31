@@ -99,18 +99,6 @@ COMMON_STEPS: list[tuple[str, StepFunc]] = [
     ("Configuring swap", configure_swap),
 ]
 
-DESKTOP_STEPS: list[tuple[str, StepFunc]] = [
-    ("Installing desktop environment", install_desktop),
-    ("Installing xRDP", install_xrdp),
-    ("Configuring desktop for RDP compatibility", configure_xfce_for_rdp),
-    ("Configuring gnome-keyring", configure_gnome_keyring),
-]
-
-DESKTOP_SECURITY_STEPS: list[tuple[str, StepFunc]] = [
-    ("Hardening xRDP with TLS and group restrictions", harden_xrdp),
-    ("Installing fail2ban for RDP brute-force protection", configure_fail2ban),
-]
-
 SECURITY_STEPS: list[tuple[str, StepFunc]] = [
     ("Configuring firewall", configure_firewall),
     ("Hardening SSH configuration", harden_ssh),
