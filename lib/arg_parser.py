@@ -46,10 +46,6 @@ def create_setup_argument_parser(
                        action=argparse.BooleanOptionalAction, 
                        default=None if not for_remote else False,
                        help="Enable RDP/XRDP setup" + ("" if for_remote else " (default: enabled for workstation setups)"))
-    parser.add_argument("--audio", dest="enable_audio", 
-                       action=argparse.BooleanOptionalAction if not for_remote else "store_true", 
-                       default=None if not for_remote else False,
-                       help="Enable audio setup (desktop only)")
     parser.add_argument("--desktop", choices=["xfce", "i3", "cinnamon"], 
                        default="xfce" if for_remote else None,
                        help="Desktop environment to install (default: xfce)")

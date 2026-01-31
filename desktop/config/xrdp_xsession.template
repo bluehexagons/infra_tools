@@ -8,15 +8,5 @@ exec 2> >(tee -a ~/.xsession-errors)
 # The xorgxrdp driver automatically adjusts the display when the RDP window is resized.
 # Manual desktop refresh scripts cause session freezing and should NOT be used.
 
-cleanup() {
-    logger -t xrdp-session "Session cleanup triggered for user $USER"
-    pulseaudio --kill 2>/dev/null || true
-    pkill -P $$ 2>/dev/null || true
-}
-
-trap cleanup EXIT INT TERM
-
-pulseaudio --kill 2>/dev/null || true
-
 logger -t xrdp-session "Starting desktop session: {SESSION_CMD}"
 exec dbus-launch --exit-with-session {SESSION_CMD}

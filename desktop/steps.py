@@ -12,7 +12,6 @@ from .desktop_environment_steps import (
 from .xrdp_steps import (
     install_xrdp,
     harden_xrdp,
-    configure_audio,
 )
 
 from .browser_steps import (
@@ -38,7 +37,6 @@ __all__ = [
     'configure_xfce_for_rdp',
     'install_xrdp',
     'harden_xrdp',
-    'configure_audio',
     'install_browser',
     'configure_default_browser',
     'configure_vivaldi_browser',

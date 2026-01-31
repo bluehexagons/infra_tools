@@ -39,7 +39,6 @@ class SetupConfig:
     friendly_name: MaybeStr = None
     tags: Optional[StrList] = None
     enable_rdp: bool = False
-    enable_audio: bool = False
     desktop: str = "xfce"
     browser: Optional[str] = "brave"
     use_flatpak: bool = False
@@ -86,9 +85,6 @@ class SetupConfig:
         
         if self.enable_rdp:
             args.append("--rdp")
-        
-        if self.enable_audio:
-            args.append("--audio")
         
         if self.desktop:
             args.append(f"--desktop {shlex.quote(self.desktop)}")
@@ -205,9 +201,6 @@ class SetupConfig:
         # Desktop/workstation flags
         if self.enable_rdp:
             cmd_parts.append("--rdp")
-        
-        if self.enable_audio:
-            cmd_parts.append("--audio")
         
         if self.desktop and self.desktop != "xfce":
             cmd_parts.append(f"--desktop {shlex.quote(self.desktop)}")
@@ -343,8 +336,6 @@ class SetupConfig:
         elif enable_rdp is None:
             enable_rdp = False
         
-        enable_audio = getattr(args, 'enable_audio', False)
-        
         smb_mounts = getattr(args, 'smb_mounts', None)
         enable_smbclient = getattr(args, 'enable_smbclient', None)
         if enable_smbclient is None and (system_type == "pc_dev" or smb_mounts):
@@ -374,7 +365,6 @@ class SetupConfig:
             friendly_name=getattr(args, 'friendly_name', None),
             tags=tags,
             enable_rdp=enable_rdp,
-            enable_audio=enable_audio,
             desktop=desktop,
             browser=browser,
             use_flatpak=getattr(args, 'use_flatpak', False),
