@@ -43,8 +43,6 @@ def print_setup_summary(config: SetupConfig, description: Optional[str] = None) 
     
     if config.enable_rdp:
         print("RDP: Yes")
-    if config.enable_audio:
-        print("Audio: Yes")
     if config.enable_smbclient:
         print("SMB Client: Yes")
     

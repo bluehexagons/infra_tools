@@ -8,8 +8,8 @@ bitmap_compression=true
 bulk_compression=true
 
 ; TCP buffer optimization
-tcp_send_buffer_bytes=32768
-tcp_recv_buffer_bytes=32768
+tcp_send_buffer_bytes=65536
+tcp_recv_buffer_bytes=65536
 tcp_nodelay=true
 tcp_keepalive=true
 

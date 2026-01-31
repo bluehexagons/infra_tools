@@ -66,9 +66,6 @@ def main() -> int:
     
     logger.info(f"Starting session cleanup for user: {username}")
     
-    # Kill PulseAudio processes spawned by this xRDP session
-    kill_processes(username, "pulseaudio", exact=True)
-    
     # Terminate xRDP-specific processes only (not all user processes)
     # This prevents disrupting other active sessions (SSH, other RDP, etc.)
     kill_processes(username, "xrdp-sesexec", exact=True)
