@@ -101,8 +101,8 @@ COMMON_STEPS: list[tuple[str, StepFunc]] = [
 
 DESKTOP_STEPS: list[tuple[str, StepFunc]] = [
     ("Installing desktop environment", install_desktop),
-    ("Configuring desktop for RDP compatibility", configure_xfce_for_rdp),
     ("Installing xRDP", install_xrdp),
+    ("Configuring desktop for RDP compatibility", configure_xfce_for_rdp),
     ("Configuring gnome-keyring", configure_gnome_keyring),
 ]
 
@@ -267,6 +267,7 @@ def get_steps_for_system_type(config: SetupConfig) -> list[tuple[str, StepFunc]]
         
         if config.enable_rdp:
             desktop_steps.append(("Installing xRDP", install_xrdp))
+            desktop_steps.append(("Configuring desktop for RDP compatibility", configure_xfce_for_rdp))
         
         desktop_steps.append(("Configuring gnome-keyring", configure_gnome_keyring))
         

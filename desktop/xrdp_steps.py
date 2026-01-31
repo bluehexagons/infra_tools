@@ -80,6 +80,22 @@ def install_xrdp(config: SetupConfig) -> None:
     run("apt-get install -y -qq xrdp xorgxrdp dbus-x11 x11-xserver-utils x11-utils")
     print("  ✓ xRDP packages installed (Xorg+xorgxrdp backend for dynamic resolution)")
 
+    # Configure Xwrapper to allow XRDP sessions to start X server
+    # This is critical for preventing session freezes and startup issues
+    xwrapper_config = "/etc/X11/Xwrapper.config"
+    xwrapper_content = """# Xwrapper configuration for XRDP
+# Allow any user to start X server (required for remote desktop sessions)
+allowed_users=anybody
+# Don't require root privileges
+needs_root_rights=no
+"""
+    try:
+        with open(xwrapper_config, "w") as f:
+            f.write(xwrapper_content)
+        print("  ✓ Xwrapper configured (allows XRDP to start X server)")
+    except Exception as e:
+        print(f"  ⚠ Warning: Could not configure Xwrapper: {e}")
+
     # Ensure xrdp can create its runtime dirs/sockets
     run("systemctl enable xrdp-sesman", check=False)
     
