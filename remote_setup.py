@@ -105,7 +105,7 @@ def main() -> int:
     bar = progress_bar(total_steps, total_steps)
     print(f"\n{bar} Complete!")
     
-    if config.enable_cloudflare and config.system_type == "server_web":
+    if config.enable_cloudflare:
         from web.cloudflare_steps import (
             configure_cloudflare_firewall,
             create_cloudflared_config_directory,
