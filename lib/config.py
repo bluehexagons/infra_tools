@@ -97,12 +97,12 @@ class SetupConfig:
         if self.desktop:
             args.append(f"--desktop {shlex.quote(self.desktop)}")
         
-        if self.browser:
-            args.append(f"--browser {shlex.quote(self.browser)}")
-        
+        # Send browsers - only use browsers list if available, otherwise use browser
         if self.browsers:
             for browser in self.browsers:
                 args.append(f"--browser {shlex.quote(browser)}")
+        elif self.browser:
+            args.append(f"--browser {shlex.quote(self.browser)}")
         
         if self.use_flatpak:
             args.append("--flatpak")
@@ -231,12 +231,12 @@ class SetupConfig:
         if self.desktop and self.desktop != "xfce":
             cmd_parts.append(f"--desktop {shlex.quote(self.desktop)}")
         
-        if self.browser and self.browser != "librewolf":
-            cmd_parts.append(f"--browser {shlex.quote(self.browser)}")
-        
+        # Only include browser args if not default or if using multiple browsers
         if self.browsers:
             for browser in self.browsers:
                 cmd_parts.append(f"--browser {shlex.quote(browser)}")
+        elif self.browser and self.browser != "librewolf":
+            cmd_parts.append(f"--browser {shlex.quote(self.browser)}")
         
         if self.use_flatpak:
             cmd_parts.append("--flatpak")
@@ -254,7 +254,6 @@ class SetupConfig:
         
         if self.dark_theme:
             cmd_parts.append("--dark")
-            cmd_parts.append("--office")
         
         # Development tools
         if self.install_ruby:
