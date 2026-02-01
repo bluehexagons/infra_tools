@@ -291,5 +291,3 @@ style=kvantum-dark
     
     else:
         print(f"  ℹ Dark theme configuration not implemented for {config.desktop}")
-    print("  ✓ SMB client packages installed (cifs-utils, smbclient, gvfs-backends)")
-    print("    File managers can now browse and mount SMB/Samba shares")
