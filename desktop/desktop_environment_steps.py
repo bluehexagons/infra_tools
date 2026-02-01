@@ -9,7 +9,7 @@ from lib.remote_utils import run, is_package_installed, file_contains
 
 
 def install_desktop(config: SetupConfig) -> None:
-    """Install a desktop environment (XFCE, i3, or Cinnamon)."""
+    """Install a desktop environment (XFCE, i3, Cinnamon, or LXQt)."""
     if config.desktop == "xfce":
         package = "xfce4"
         install_cmd = "apt-get install -y -qq xfce4 xfce4-goodies"
@@ -19,6 +19,9 @@ def install_desktop(config: SetupConfig) -> None:
     elif config.desktop == "cinnamon":
         package = "cinnamon"
         install_cmd = "apt-get install -y -qq cinnamon cinnamon-core"
+    elif config.desktop == "lxqt":
+        package = "lxqt-core"
+        install_cmd = "apt-get install -y -qq lxqt-core lxqt-config lxqt-session sddm"
     else:
         print(f"  ⚠ Unknown desktop environment: {config.desktop}, defaulting to XFCE")
         package = "xfce4"
@@ -202,5 +205,91 @@ def install_smbclient(config: SetupConfig) -> None:
     packages_str = " ".join(packages)
     run(f"apt-get install -y -qq {packages_str}")
     
+    print("  ✓ SMB client packages installed (cifs-utils, smbclient, gvfs-backends)")
+    print("    File managers can now browse and mount SMB/Samba shares")
+
+
+def configure_dark_theme(config: SetupConfig) -> None:
+    """Configure desktop environment to use dark theme.
+    
+    Configures dark theme settings for supported desktop environments:
+    - XFCE: Sets appearance and window manager themes
+    - LXQt: Sets Qt theme to dark
+    - Cinnamon: Sets GTK and window manager themes
+    - i3: Informational message (requires manual configuration)
+    """
+    if not config.dark_theme:
+        return
+    
+    safe_username = shlex.quote(config.username)
+    home_dir = f"/home/{config.username}"
+    
+    if config.desktop == "xfce":
+        xfce_config_dir = f"{home_dir}/.config/xfce4/xfconf/xfce-perchannel-xml"
+        os.makedirs(xfce_config_dir, exist_ok=True)
+        
+        # Configure XFCE appearance settings
+        xsettings_config = f"{xfce_config_dir}/xsettings.xml"
+        xsettings_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xsettings" version="1.0">
+  <property name="Net" type="empty">
+    <property name="ThemeName" type="string" value="Adwaita-dark"/>
+    <property name="IconThemeName" type="string" value="Adwaita"/>
+  </property>
+</channel>
+"""
+        with open(xsettings_config, "w") as f:
+            f.write(xsettings_xml)
+        
+        # Configure XFCE window manager theme
+        xfwm4_config = f"{xfce_config_dir}/xfwm4.xml"
+        xfwm4_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfwm4" version="1.0">
+  <property name="general" type="empty">
+    <property name="theme" type="string" value="Default-xhdpi"/>
+  </property>
+</channel>
+"""
+        with open(xfwm4_config, "w") as f:
+            f.write(xfwm4_xml)
+        
+        run(f"chown -R {safe_username}:{safe_username} {shlex.quote(xfce_config_dir)}")
+        print("  ✓ XFCE configured with dark theme (Adwaita-dark)")
+        
+    elif config.desktop == "lxqt":
+        lxqt_config_dir = f"{home_dir}/.config/lxqt"
+        os.makedirs(lxqt_config_dir, exist_ok=True)
+        
+        # Configure LXQt to use dark theme
+        lxqt_config_file = f"{lxqt_config_dir}/lxqt.conf"
+        lxqt_config = """[General]
+theme=kvantum-dark
+icon_theme=breeze-dark
+
+[Qt]
+style=kvantum-dark
+"""
+        with open(lxqt_config_file, "w") as f:
+            f.write(lxqt_config)
+        
+        run(f"chown -R {safe_username}:{safe_username} {shlex.quote(lxqt_config_dir)}")
+        print("  ✓ LXQt configured with dark theme")
+        print("    Note: Install kvantum theme packages for best results")
+        
+    elif config.desktop == "cinnamon":
+        # Configure Cinnamon dark theme using gsettings
+        # Note: This needs to be run as the user
+        run(f"sudo -u {safe_username} dbus-launch gsettings set org.cinnamon.desktop.interface gtk-theme 'Adwaita-dark'", check=False)
+        run(f"sudo -u {safe_username} dbus-launch gsettings set org.cinnamon.desktop.wm.preferences theme 'Adwaita-dark'", check=False)
+        run(f"sudo -u {safe_username} dbus-launch gsettings set org.cinnamon.theme name 'Adwaita-dark'", check=False)
+        print("  ✓ Cinnamon configured with dark theme (Adwaita-dark)")
+        
+    elif config.desktop == "i3":
+        print("  ℹ i3 window manager detected")
+        print("    Dark theme configuration requires manual i3 config file editing")
+        print("    Edit ~/.config/i3/config to customize colors")
+    
+    else:
+        print(f"  ℹ Dark theme configuration not implemented for {config.desktop}")
     print("  ✓ SMB client packages installed (cifs-utils, smbclient, gvfs-backends)")
     print("    File managers can now browse and mount SMB/Samba shares")
