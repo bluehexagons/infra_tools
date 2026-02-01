@@ -12,18 +12,9 @@ from lib.remote_utils import run, is_package_installed, is_flatpak_app_installed
 
 FLATPAK_REMOTE = "flathub"
 
-def install_browser(config: SetupConfig) -> None:
-    """Install the specified browser."""
-    if not config.browser:
-        return
-    
-    # In containers, prefer apt over Flatpak since Flatpak often doesn't work
-    use_flatpak = config.use_flatpak
-    if use_flatpak and is_container():
-        print("  ⚠ Container detected: using apt instead of Flatpak for browser")
-        use_flatpak = False
-
-    if config.browser == "brave":
+def install_single_browser(browser: str, use_flatpak: bool) -> None:
+    """Install a single browser."""
+    if browser == "brave":
         if use_flatpak:
             if is_flatpak_app_installed("com.brave.Browser"):
                 print("  ✓ Brave browser already installed")
@@ -43,7 +34,7 @@ def install_browser(config: SetupConfig) -> None:
             run("apt-get install -y -qq brave-browser", check=False)
         print("  ✓ Brave browser installed")
     
-    elif config.browser == "firefox":
+    elif browser == "firefox":
         if use_flatpak:
             if is_flatpak_app_installed("org.mozilla.firefox"):
                 print("  ✓ Firefox already installed")
@@ -61,7 +52,27 @@ def install_browser(config: SetupConfig) -> None:
         run("wget -qO /tmp/ublock_origin.xpi https://addons.mozilla.org/firefox/downloads/latest/ublock-origin/latest.xpi", check=False)
         print("  ✓ Firefox installed (uBlock Origin downloaded to /tmp/ublock_origin.xpi)")
     
-    elif config.browser == "browsh":
+    elif browser == "librewolf":
+        if use_flatpak:
+            if is_flatpak_app_installed("io.gitlab.librewolf-community"):
+                print("  ✓ LibreWolf browser already installed")
+                return
+            print("  Installing LibreWolf browser...")
+            run(f"flatpak install -y {FLATPAK_REMOTE} io.gitlab.librewolf-community", check=False)
+        else:
+            if is_package_installed("librewolf"):
+                print("  ✓ LibreWolf browser already installed")
+                return
+            print("  Installing LibreWolf browser...")
+            if not os.path.exists("/usr/share/keyrings/librewolf.gpg"):
+                run("apt-get install -y -qq curl gnupg")
+                run("curl -fsSL https://deb.librewolf.net/keyring.gpg | gpg --dearmor --output /usr/share/keyrings/librewolf.gpg", check=False)
+                run('echo "deb [signed-by=/usr/share/keyrings/librewolf.gpg] http://deb.librewolf.net bookworm main" > /etc/apt/sources.list.d/librewolf.list', check=False)
+                run("apt-get update -qq", check=False)
+            run("apt-get install -y -qq librewolf", check=False)
+        print("  ✓ LibreWolf browser installed")
+    
+    elif browser == "browsh":
         print("  Installing Browsh (requires Firefox)...")
         if not (is_package_installed("firefox") or is_package_installed("firefox-esr")):
             print("  Installing Firefox (required for Browsh)...")
@@ -73,7 +84,7 @@ def install_browser(config: SetupConfig) -> None:
             run("rm -f /tmp/browsh.deb", check=False)
         print("  ✓ Browsh installed")
     
-    elif config.browser == "vivaldi":
+    elif browser == "vivaldi":
         if use_flatpak:
             if is_flatpak_app_installed("com.vivaldi.Vivaldi"):
                 print("  ✓ Vivaldi browser already installed")
@@ -93,13 +104,29 @@ def install_browser(config: SetupConfig) -> None:
             run("apt-get install -y -qq vivaldi-stable", check=False)
         print("  ✓ Vivaldi browser installed")
     
-    elif config.browser == "lynx":
+    elif browser == "lynx":
         if is_package_installed("lynx"):
             print("  ✓ Lynx already installed")
             return
         print("  Installing Lynx...")
         run("apt-get install -y -qq lynx", check=False)
         print("  ✓ Lynx installed")
+
+
+def install_browser(config: SetupConfig) -> None:
+    """Install the specified browser(s)."""
+    # In containers, prefer apt over Flatpak since Flatpak often doesn't work
+    use_flatpak = config.use_flatpak
+    if use_flatpak and is_container():
+        print("  ⚠ Container detected: using apt instead of Flatpak for browser")
+        use_flatpak = False
+    
+    # Install multiple browsers if specified
+    if config.browsers:
+        for browser in config.browsers:
+            install_single_browser(browser, use_flatpak)
+    elif config.browser:
+        install_single_browser(config.browser, use_flatpak)
 
 
 def configure_default_browser(config: SetupConfig) -> None:
@@ -112,6 +139,7 @@ def configure_default_browser(config: SetupConfig) -> None:
     browser_desktops: dict[str, Optional[str]] = {
         "brave": "brave-browser.desktop",
         "firefox": "firefox.desktop",
+        "librewolf": "librewolf.desktop",
         "vivaldi": "vivaldi-stable.desktop",
         "lynx": None,
         "browsh": None
