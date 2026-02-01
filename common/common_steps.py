@@ -445,6 +445,7 @@ def install_flatpak_packages(config: SetupConfig) -> None:
         return
     
     from lib.machine_state import is_container
+    from lib.remote_utils import is_flatpak_app_installed
     from desktop.apps_steps import is_flatpak_installed, install_flatpak_if_needed
     
     # In containers, flatpak often doesn't work
@@ -463,16 +464,13 @@ def install_flatpak_packages(config: SetupConfig) -> None:
     FLATPAK_REMOTE = "flathub"
     
     for package in config.flatpak_packages:
-        # Check if package is already installed
-        result = run(f"flatpak info {shlex.quote(package)}", check=False, capture_output=True)
-        if result and result.returncode == 0:
+        if is_flatpak_app_installed(package):
             print(f"  ✓ {package} already installed")
         else:
             print(f"  Installing {package}...")
             run(f"flatpak install -y {FLATPAK_REMOTE} {shlex.quote(package)}", check=False)
             # Verify installation
-            result = run(f"flatpak info {shlex.quote(package)}", check=False, capture_output=True)
-            if result and result.returncode == 0:
+            if is_flatpak_app_installed(package):
                 print(f"  ✓ {package} installed")
             else:
                 print(f"  ⚠ Failed to install {package}")
