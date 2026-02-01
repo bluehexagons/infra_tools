@@ -277,11 +277,14 @@ style=kvantum-dark
         print("    Note: Install kvantum theme packages for best results")
         
     elif config.desktop == "cinnamon":
-        # Configure Cinnamon dark theme using gsettings
-        # Note: This needs to be run as the user
-        run(f"sudo -u {safe_username} dbus-launch gsettings set org.cinnamon.desktop.interface gtk-theme 'Adwaita-dark'", check=False)
-        run(f"sudo -u {safe_username} dbus-launch gsettings set org.cinnamon.desktop.wm.preferences theme 'Adwaita-dark'", check=False)
-        run(f"sudo -u {safe_username} dbus-launch gsettings set org.cinnamon.theme name 'Adwaita-dark'", check=False)
+        # Configure Cinnamon dark theme using gsettings in a single dbus session
+        gsettings_script = f"""
+sudo -u {safe_username} sh -c 'eval $(dbus-launch --sh-syntax) && \\
+gsettings set org.cinnamon.desktop.interface gtk-theme "Adwaita-dark" && \\
+gsettings set org.cinnamon.desktop.wm.preferences theme "Adwaita-dark" && \\
+gsettings set org.cinnamon.theme name "Adwaita-dark"'
+"""
+        run(gsettings_script, check=False)
         print("  ✓ Cinnamon configured with dark theme (Adwaita-dark)")
         
     elif config.desktop == "i3":

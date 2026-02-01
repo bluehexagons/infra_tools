@@ -29,6 +29,12 @@ CLI_SYSTEMS = ["workstation_desktop", "pc_dev", "workstation_dev", "server_dev",
 
 @dataclass
 class SetupConfig:
+    """Configuration for system setup.
+    
+    Note on browser fields:
+    - browser: The primary/default browser. If browsers list is set, this will be browsers[0]
+    - browsers: Optional list of browsers to install. When set, browser is the first element
+    """
     host: str
     username: str
     system_type: str
@@ -41,8 +47,8 @@ class SetupConfig:
     enable_rdp: bool = False
     enable_audio: bool = False
     desktop: str = "xfce"
-    browser: Optional[str] = "librewolf"
-    browsers: Optional[StrList] = None
+    browser: Optional[str] = "librewolf"  # Primary browser, or first from browsers list
+    browsers: Optional[StrList] = None  # List of browsers to install
     use_flatpak: bool = False
     install_office: bool = False
     apt_packages: Optional[StrList] = None
