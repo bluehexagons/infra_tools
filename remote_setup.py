@@ -12,6 +12,7 @@ from lib.arg_parser import create_setup_argument_parser
 from lib.config import SetupConfig
 from lib.display import print_setup_summary
 from lib.machine_state import save_machine_state, save_setup_config
+from lib.notifications import send_setup_notification
 from lib.remote_utils import validate_username, detect_os, set_dry_run
 from lib.progress import progress_bar
 from lib.system_types import get_steps_for_system_type
@@ -109,7 +110,6 @@ def main() -> int:
             print(f"  ✗ {error_msg}")
             setup_errors.append(error_msg)
             if config.notify_specs:
-                from lib.notifications import send_setup_notification
                 send_setup_notification(
                     notify_specs=config.notify_specs,
                     system_type=config.system_type,
@@ -359,7 +359,6 @@ def main() -> int:
     print("=" * 60)
     
     if config.notify_specs:
-        from lib.notifications import send_setup_notification
         send_setup_notification(
             notify_specs=config.notify_specs,
             system_type=config.system_type,
