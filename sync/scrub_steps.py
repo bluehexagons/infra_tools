@@ -11,7 +11,7 @@ from typing import Optional, Any
 from lib.config import SetupConfig
 from lib.setup_common import REMOTE_INSTALL_DIR
 from lib.remote_utils import run, is_package_installed
-from lib.mount_utils import validate_mount_for_sync, validate_smb_connectivity, is_path_under_mnt, get_mount_ancestor
+from lib.mount_utils import validate_mount_for_sync, validate_smb_connectivity, is_path_under_mnt
 from lib.disk_utils import get_disk_usage_details
 from lib.validation import (
     validate_filesystem_path, 
@@ -26,7 +26,8 @@ from lib.task_utils import (
     validate_frequency,
     get_timer_calendar,
     escape_systemd_description,
-    check_path_on_smb_mount
+    check_path_on_smb_mount,
+    ensure_directory
 )
 
 
@@ -145,30 +146,11 @@ def create_scrub_service(config: SetupConfig, scrub_spec: Optional[list[str]] = 
             transaction.rollback(str(e))
         raise
     
-    if not os.path.exists(directory):
-        if is_path_under_mnt(directory):
-            mount_ancestor = get_mount_ancestor(directory)
-            if not mount_ancestor:
-                print(f"  ⚠ Warning: Directory {directory} is under /mnt but no mount point found")
-            else:
-                os.makedirs(directory, exist_ok=True)
-                run(f"chown {shlex.quote(config.username)}:{shlex.quote(config.username)} {shlex.quote(directory)}")
-        else:
-            os.makedirs(directory, exist_ok=True)
-            run(f"chown {shlex.quote(config.username)}:{shlex.quote(config.username)} {shlex.quote(directory)}")
+    ensure_directory(directory, config.username)
     
     db_parent = os.path.dirname(database_path)
-    if db_parent and not os.path.exists(db_parent):
-        if is_path_under_mnt(db_parent):
-            mount_ancestor = get_mount_ancestor(db_parent)
-            if not mount_ancestor:
-                print(f"  ⚠ Warning: Database parent {db_parent} is under /mnt but no mount point found")
-            else:
-                os.makedirs(db_parent, exist_ok=True)
-                run(f"chown {shlex.quote(config.username)}:{shlex.quote(config.username)} {shlex.quote(db_parent)}")
-        else:
-            os.makedirs(db_parent, exist_ok=True)
-            run(f"chown {shlex.quote(config.username)}:{shlex.quote(config.username)} {shlex.quote(db_parent)}")
+    if db_parent:
+        ensure_directory(db_parent, config.username)
     
     escaped_directory = escape_systemd_description(directory)
     
