@@ -320,6 +320,21 @@ python3 setup_server_web.py tunnel.example.com \
 - SSH root access to target system
 - Target OS: Debian
 
+## Testing
+
+Unit tests live in `tests/` and are designed to run on a Debian system without modifying it.
+
+```bash
+# Run all tests
+python3 -m pytest tests/ -v
+
+# Compile check
+python3 -m py_compile lib/modified_file.py
+
+# Dry run test
+python3 setup_server_web.py test.example.com --dry-run
+```
+
 ## License
 
 Apache License 2.0
