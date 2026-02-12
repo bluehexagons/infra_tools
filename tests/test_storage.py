@@ -193,6 +193,11 @@ class TestValidateFrequency(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_frequency('never')
 
+    def test_custom_label_in_error(self):
+        with self.assertRaises(ValueError) as ctx:
+            validate_frequency('bad', label='interval')
+        self.assertIn('interval', str(ctx.exception))
+
 
 # ---------------------------------------------------------------------------
 # get_timer_calendar
@@ -215,6 +220,10 @@ class TestGetTimerCalendar(unittest.TestCase):
     def test_monthly(self):
         result = get_timer_calendar('monthly')
         self.assertIn('-01', result)
+
+    def test_unknown_frequency_fallback(self):
+        result = get_timer_calendar('unknown')
+        self.assertIn('02:00:00', result)
 
 
 # ---------------------------------------------------------------------------
@@ -295,27 +304,31 @@ class TestValidateFilesystemPath(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_filesystem_path('/does/not/exist/xyz', must_exist=True)
 
+    def test_check_writable_existing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            validate_filesystem_path(tmpdir, check_writable=True)  # should not raise
+
+    def test_check_writable_nonexistent_parent_writable(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, 'newdir')
+            validate_filesystem_path(path, check_writable=True)  # should not raise
+
+    def test_check_writable_no_parent(self):
+        with self.assertRaises(ValueError):
+            validate_filesystem_path('/no/such/parent/child', check_writable=True)
+
 
 # ---------------------------------------------------------------------------
 # validate_database_path
 # ---------------------------------------------------------------------------
 
 class TestValidateDatabasePath(unittest.TestCase):
-    def test_pardatabase_inside_protected_dir_is_allowed(self):
-        """The common pattern is .pardatabase inside the protected dir."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = os.path.join(tmpdir, '.pardatabase')
-            # Should not raise — subdirectory is allowed now
-            validate_database_path(db_path, tmpdir)
-
-    def test_pardatabase_outside_dir(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            db_path = '/tmp/somedb'
-            validate_database_path(db_path, tmpdir)
+    def test_valid_path(self):
+        validate_database_path('/tmp/somedb')  # should not raise
 
     def test_empty_path(self):
         with self.assertRaises(ValueError):
-            validate_database_path('', '/tmp')
+            validate_database_path('')
 
 
 # ---------------------------------------------------------------------------
@@ -359,6 +372,12 @@ class TestValidateRedundancyPercentage(unittest.TestCase):
     def test_without_percent(self):
         self.assertEqual(validate_redundancy_percentage('10'), 10)
 
+    def test_boundary_zero(self):
+        self.assertEqual(validate_redundancy_percentage('0'), 0)
+
+    def test_boundary_hundred(self):
+        self.assertEqual(validate_redundancy_percentage('100%'), 100)
+
     def test_out_of_range(self):
         with self.assertRaises(ValueError):
             validate_redundancy_percentage('101%')
@@ -368,6 +387,10 @@ class TestValidateRedundancyPercentage(unittest.TestCase):
     def test_empty(self):
         with self.assertRaises(ValueError):
             validate_redundancy_percentage('')
+
+    def test_non_numeric(self):
+        with self.assertRaises(ValueError):
+            validate_redundancy_percentage('abc%')
 
 
 # ---------------------------------------------------------------------------
@@ -406,6 +429,18 @@ class TestDiskUtils(unittest.TestCase):
         self.assertGreater(duration, 0)
         duration_par2 = estimate_operation_duration('par2', 1000)
         self.assertGreater(duration_par2, duration)  # par2 is slower
+
+    def test_estimate_operation_duration_unknown_type(self):
+        duration = estimate_operation_duration('unknown', 500)
+        self.assertGreater(duration, 0)
+
+    def test_get_free_disk_mb_invalid_path(self):
+        free = get_free_disk_mb('/nonexistent/path/xyz')
+        self.assertEqual(free, 0)
+
+    def test_get_total_disk_mb_invalid_path(self):
+        total = get_total_disk_mb('/nonexistent/path/xyz')
+        self.assertEqual(total, 0)
 
 
 # ---------------------------------------------------------------------------

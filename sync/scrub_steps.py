@@ -94,7 +94,7 @@ def create_scrub_service(config: SetupConfig, scrub_spec: Optional[list[str]] = 
             "validate_directory"
         )
         transaction.add_validation_step(
-            lambda: validate_database_path(database_path, directory),
+            lambda: validate_database_path(database_path),
             f"Validate database path: {database_path}",
             "validate_database"
         )

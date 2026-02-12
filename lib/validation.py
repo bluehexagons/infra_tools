@@ -42,8 +42,8 @@ def validate_filesystem_path(path: str, must_exist: bool = False, check_writable
                 raise ValueError(f"Parent directory is not writable: {parent}")
 
 
-def validate_database_path(db_path: str, protected_dir: str) -> None:
-    """Validate database path to prevent circular references.
+def validate_database_path(db_path: str) -> None:
+    """Validate database path for parity file storage.
     
     The database path is a directory (e.g. .pardatabase) used to store parity
     files.  It may live inside the protected directory as a hidden subdirectory,
@@ -51,13 +51,10 @@ def validate_database_path(db_path: str, protected_dir: str) -> None:
     
     Args:
         db_path: Database directory path to validate
-        protected_dir: Directory being protected (kept for API compatibility)
         
     Raises:
         ValueError: If validation fails
     """
-    # Keep protected_dir for API compatibility; currently unused.
-    _protected_dir = protected_dir
     # Don't require existence - database may not exist on first run
     validate_filesystem_path(db_path, must_exist=False)
 
