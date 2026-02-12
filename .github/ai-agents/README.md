@@ -43,8 +43,8 @@ def setup_feature(config: SetupConfig) -> None:
 | Validation | `lib/validators.py`, `lib/validation.py` |
 | Task Utilities | `lib/task_utils.py` |
 | Setup Steps | `common/`, `desktop/`, `security/`, `web/`, `smb/`, `sync/`, `deploy/` |
-| Tests | `tests/test_storage.py` |
-| Docs | `docs/STORAGE.md`, `docs/LOGGING.md`, `docs/MACHINE_TYPES.md` |
+| Tests | `tests/test_storage.py`, `tests/test_xrdp.py` |
+| Docs | `docs/STORAGE.md`, `docs/LOGGING.md`, `docs/MACHINE_TYPES.md`, `docs/XRDP.md` |
 
 ## 📂 Directory Structure
 
@@ -104,6 +104,17 @@ python3 -m py_compile lib/modified_file.py
 - **Unused function parameters** — remove them rather than keeping for "API compatibility". Update all callers and tests.
 - **Duplicate logic** — watch for copy-pasted blocks across step modules (e.g., directory creation). Extract to shared helpers in `lib/task_utils.py`.
 - **String-based checks** — be wary of `if "text" in variable` where `variable` might be a filename rather than file contents. Verify the variable actually holds what you expect.
+
+### Known XRDP Issues
+
+**Session freezing on window resize** is a persistent issue with xrdp/xorgxrdp dynamic resolution:
+- **Root causes**: Race conditions in xorgxrdp driver, XFCE desktop environment conflicts with RANDR, X server state issues
+- **Mitigations implemented**: Xwrapper.config for permissions, XFCE RDP compatibility tweaks (disable light-locker, DPMS), simplified session startup, optimized TCP buffers
+- **Current status**: Freezing reduced but not eliminated; disconnect/reconnect often resolves temporarily
+- **Debugging**: See `docs/XRDP.md` for comprehensive troubleshooting guide including log locations, test procedures, and known workarounds
+- **Tests**: `tests/test_xrdp.py` covers configuration generation and file creation, but cannot test runtime behavior
+
+For XRDP issues, refer users to `docs/XRDP.md` which includes diagnostic checklists, log analysis, and upstream issue tracking.
 
 ## 🖥️ Machine Type Awareness
 
