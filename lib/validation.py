@@ -51,21 +51,26 @@ def validate_database_path(db_path: str, protected_dir: str) -> None:
     
     Args:
         db_path: Database directory path to validate
-        protected_dir: Directory being protected
+        protected_dir: Directory being protected (kept for API compatibility)
         
     Raises:
         ValueError: If validation fails
     """
+    # Keep protected_dir for API compatibility; currently unused.
+    _protected_dir = protected_dir
     # Don't require existence - database may not exist on first run
     validate_filesystem_path(db_path, must_exist=False)
 
 
-def validate_service_name_uniqueness(service_name: str, existing_services: list[str]) -> None:
+def validate_service_name_uniqueness(service_name: str, existing_services: list[str]) -> bool:
     """Validate service name uniqueness and format.
     
     Args:
         service_name: Service name to validate
         existing_services: List of existing service names
+        
+    Returns:
+        True if validation passes
         
     Raises:
         ValueError: If validation fails
@@ -74,7 +79,7 @@ def validate_service_name_uniqueness(service_name: str, existing_services: list[
         raise ValueError("Service name must be a non-empty string")
     
     # Systemd unit names allow letters, digits, hyphens, underscores, and dots.
-    # Max 256 chars (well within systemd limits).
+    # Max 255 chars (well within systemd limits).
     pattern = r'^[a-z_][a-z0-9_.-]{0,254}$'
     if not re.match(pattern, service_name):
         raise ValueError(f"Service name '{service_name}' must follow pattern: {pattern}")
@@ -86,6 +91,8 @@ def validate_service_name_uniqueness(service_name: str, existing_services: list[
     systemd_reserved = ['system', 'user', 'service', 'target', 'slice', 'scope']
     if service_name in systemd_reserved:
         raise ValueError(f"Service name '{service_name}' is reserved by systemd")
+    
+    return True
 
 
 def validate_redundancy_percentage(redundancy: str) -> int:

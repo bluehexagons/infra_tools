@@ -10,6 +10,9 @@ import unittest
 # Ensure project root is on the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
+import subprocess
+
+import lib.task_utils as tu
 from smb.samba_steps import parse_share_spec
 from smb.smb_mount_steps import parse_smb_mount_spec
 from sync.sync_steps import parse_sync_spec
@@ -321,12 +324,12 @@ class TestValidateDatabasePath(unittest.TestCase):
 
 class TestValidateServiceNameUniqueness(unittest.TestCase):
     def test_valid_short_name(self):
-        validate_service_name_uniqueness('my-service', [])
+        self.assertTrue(validate_service_name_uniqueness('my-service', []))
 
     def test_valid_long_name(self):
         """Generated names like sync-_mnt_data-to-_mnt_backup-a1b2c3d4 should pass."""
         name = 'sync-_mnt_data_docs-to-_mnt_backup_docs-a1b2c3d4'
-        validate_service_name_uniqueness(name, [])
+        self.assertTrue(validate_service_name_uniqueness(name, []))
 
     def test_empty_name(self):
         with self.assertRaises(ValueError):
@@ -414,8 +417,6 @@ class TestEnsureDirectory(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             new_dir = os.path.join(tmpdir, 'new_sub')
             # Mock run to avoid actual chown
-            import subprocess
-            import lib.task_utils as tu
             original_run = tu.run
             calls: list[str] = []
             def mock_run(cmd, **kw):
@@ -431,7 +432,6 @@ class TestEnsureDirectory(unittest.TestCase):
 
     def test_existing_directory_no_op(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            import lib.task_utils as tu
             original_run = tu.run
             calls: list[str] = []
             def mock_run(cmd, **kw):
@@ -442,6 +442,14 @@ class TestEnsureDirectory(unittest.TestCase):
                 self.assertEqual(len(calls), 0)  # no chown on existing dir
             finally:
                 tu.run = original_run
+
+    def test_existing_file_raises_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            file_path = os.path.join(tmpdir, 'a_file')
+            with open(file_path, 'w') as f:
+                f.write('content')
+            with self.assertRaises(NotADirectoryError):
+                ensure_directory(file_path, 'testuser')
 
 
 if __name__ == '__main__':

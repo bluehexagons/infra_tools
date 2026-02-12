@@ -79,6 +79,8 @@ def ensure_directory(path: str, username: str) -> None:
         username: Owner username for the directory
     """
     if os.path.exists(path):
+        if not os.path.isdir(path):
+            raise NotADirectoryError(f"Path exists but is not a directory: {path}")
         return
     if is_path_under_mnt(path):
         mount_ancestor = get_mount_ancestor(path)
