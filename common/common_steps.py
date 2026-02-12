@@ -454,7 +454,7 @@ def install_flatpak_packages(config: SetupConfig) -> None:
         return
     
     # Ensure flatpak is installed
-    install_flatpak_if_needed(config)
+    install_flatpak_if_needed()
     
     if not is_flatpak_installed():
         print("  ⚠ Flatpak not available, skipping flatpak package installation")

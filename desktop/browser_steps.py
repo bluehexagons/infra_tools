@@ -67,7 +67,11 @@ def install_single_browser(browser: str, use_flatpak: bool) -> None:
             if not os.path.exists("/usr/share/keyrings/librewolf.gpg"):
                 run("apt-get install -y -qq curl gnupg")
                 run("curl -fsSL https://deb.librewolf.net/keyring.gpg | gpg --dearmor --output /usr/share/keyrings/librewolf.gpg", check=False)
-                run('echo "deb [signed-by=/usr/share/keyrings/librewolf.gpg] http://deb.librewolf.net bookworm main" > /etc/apt/sources.list.d/librewolf.list', check=False)
+                # Detect Debian codename from /etc/os-release
+                import subprocess
+                result = subprocess.run(['bash', '-c', '. /etc/os-release && echo $VERSION_CODENAME'], capture_output=True, text=True)
+                codename = result.stdout.strip() or "bookworm"
+                run(f'echo "deb [signed-by=/usr/share/keyrings/librewolf.gpg] https://deb.librewolf.net {codename} main" > /etc/apt/sources.list.d/librewolf.list', check=False)
                 run("apt-get update -qq", check=False)
             run("apt-get install -y -qq librewolf", check=False)
         print("  ✓ LibreWolf browser installed")
