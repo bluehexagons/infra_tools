@@ -175,3 +175,55 @@ def parse_notification_args(notify_args: Optional[list[list[str]]]) -> list[Noti
         configs.append(NotificationConfig(type=notif_type, target=target))  # type: ignore
     
     return configs
+
+
+def send_setup_notification(
+    notify_specs: Optional[list[list[str]]],
+    system_type: str,
+    host: str,
+    success: bool,
+    errors: Optional[list[str]] = None,
+    logger: Optional[Logger] = None
+) -> bool:
+    """Send a notification summarizing setup results.
+
+    Args:
+        notify_specs: Raw notify specs from SetupConfig (list of [type, target] pairs)
+        system_type: The system type that was set up
+        host: The host that was set up
+        success: Whether setup completed successfully
+        errors: Optional list of error messages encountered during setup
+        logger: Optional logger for debugging
+
+    Returns:
+        True if all notifications were sent successfully, False otherwise
+    """
+    configs = parse_notification_args(notify_specs)
+    if not configs:
+        return True
+
+    if success:
+        status: NotificationStatus = "good"
+        subject = f"Setup complete: {system_type} on {host}"
+        message = f"Setup of {system_type} on {host} completed successfully."
+    else:
+        status = "error"
+        subject = f"Setup failed: {system_type} on {host}"
+        message = f"Setup of {system_type} on {host} failed."
+
+    details_parts = [f"System type: {system_type}", f"Host: {host}"]
+    if errors:
+        details_parts.append(f"\nErrors ({len(errors)}):")
+        for error in errors:
+            details_parts.append(f"  - {error}")
+    details = "\n".join(details_parts)
+
+    return send_notification(
+        configs,
+        subject=subject,
+        job="setup",
+        status=status,
+        message=message,
+        details=details,
+        logger=logger
+    )

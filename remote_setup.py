@@ -95,12 +95,29 @@ def main() -> int:
 
     steps = get_steps_for_system_type(config)
     
+    setup_errors: list[str] = []
+    
     total_steps = len(steps)
     for i, (name, func) in enumerate(steps, 1):
         bar = progress_bar(i, total_steps)
         print(f"\n{bar} [{i}/{total_steps}] {name}")
         sys.stdout.flush()
-        func(config)
+        try:
+            func(config)
+        except Exception as e:
+            error_msg = f"Step '{name}' failed: {e}"
+            print(f"  ✗ {error_msg}")
+            setup_errors.append(error_msg)
+            if config.notify_specs:
+                from lib.notifications import send_setup_notification
+                send_setup_notification(
+                    notify_specs=config.notify_specs,
+                    system_type=config.system_type,
+                    host=config.host,
+                    success=False,
+                    errors=setup_errors,
+                )
+            raise
     
     bar = progress_bar(total_steps, total_steps)
     print(f"\n{bar} Complete!")
@@ -340,6 +357,15 @@ def main() -> int:
     print("\n" + "=" * 60)
     print("✓ Remote setup complete!")
     print("=" * 60)
+    
+    if config.notify_specs:
+        from lib.notifications import send_setup_notification
+        send_setup_notification(
+            notify_specs=config.notify_specs,
+            system_type=config.system_type,
+            host=config.host,
+            success=True,
+        )
     
     return 0
 
