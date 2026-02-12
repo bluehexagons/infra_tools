@@ -284,9 +284,9 @@ LXQt desktop with dark theme, multiple browsers, and custom packages.
 python3 setup_workstation_desktop.py 192.168.1.60 \
   --name "Light Desktop" \
   --desktop lxqt --dark \
-  --browser librewolf --browser firefox --browser brave \
+  --browser librewolf --browser lynx --browser vivaldi \
   --apt-install htop --apt-install vim \
-  --flatpak-install org.gimp.GIMP
+  --flatpak-install org.kde.kdenlive
 ```
 
 ### NAS & Backup Server
