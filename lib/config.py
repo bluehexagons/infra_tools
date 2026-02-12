@@ -29,6 +29,12 @@ CLI_SYSTEMS = ["workstation_desktop", "pc_dev", "workstation_dev", "server_dev",
 
 @dataclass
 class SetupConfig:
+    """Configuration for system setup.
+    
+    Note on browser fields:
+    - browser: The primary/default browser. If browsers list is set, this will be browsers[0]
+    - browsers: Optional list of browsers to install. When set, browser is the first element
+    """
     host: str
     username: str
     system_type: str
@@ -40,9 +46,13 @@ class SetupConfig:
     tags: Optional[StrList] = None
     enable_rdp: bool = False
     desktop: str = "xfce"
-    browser: Optional[str] = "brave"
+    browser: Optional[str] = "librewolf"  # Primary browser, or first from browsers list
+    browsers: Optional[StrList] = None  # List of browsers to install
     use_flatpak: bool = False
     install_office: bool = False
+    apt_packages: Optional[StrList] = None
+    flatpak_packages: Optional[StrList] = None
+    dark_theme: bool = False
     dry_run: bool = False
     install_ruby: bool = False
     install_go: bool = False
@@ -89,7 +99,11 @@ class SetupConfig:
         if self.desktop:
             args.append(f"--desktop {shlex.quote(self.desktop)}")
         
-        if self.browser:
+        # Send browsers - only use browsers list if available, otherwise use browser
+        if self.browsers:
+            for browser in self.browsers:
+                args.append(f"--browser {shlex.quote(browser)}")
+        elif self.browser:
             args.append(f"--browser {shlex.quote(self.browser)}")
         
         if self.use_flatpak:
@@ -97,6 +111,17 @@ class SetupConfig:
         
         if self.install_office:
             args.append("--office")
+        
+        if self.apt_packages:
+            for package in self.apt_packages:
+                args.append(f"--apt-install {shlex.quote(package)}")
+        
+        if self.flatpak_packages:
+            for package in self.flatpak_packages:
+                args.append(f"--flatpak-install {shlex.quote(package)}")
+        
+        if self.dark_theme:
+            args.append("--dark")
         
         if self.dry_run:
             args.append("--dry-run")
@@ -205,7 +230,11 @@ class SetupConfig:
         if self.desktop and self.desktop != "xfce":
             cmd_parts.append(f"--desktop {shlex.quote(self.desktop)}")
         
-        if self.browser and self.browser != "brave":
+        # Only include browser args if not default or if using multiple browsers
+        if self.browsers:
+            for browser in self.browsers:
+                cmd_parts.append(f"--browser {shlex.quote(browser)}")
+        elif self.browser and self.browser != "librewolf":
             cmd_parts.append(f"--browser {shlex.quote(self.browser)}")
         
         if self.use_flatpak:
@@ -213,6 +242,17 @@ class SetupConfig:
         
         if self.install_office:
             cmd_parts.append("--office")
+        
+        if self.apt_packages:
+            for package in self.apt_packages:
+                cmd_parts.append(f"--apt-install {shlex.quote(package)}")
+        
+        if self.flatpak_packages:
+            for package in self.flatpak_packages:
+                cmd_parts.append(f"--flatpak-install {shlex.quote(package)}")
+        
+        if self.dark_theme:
+            cmd_parts.append("--dark")
         
         # Development tools
         if self.install_ruby:
@@ -320,9 +360,20 @@ class SetupConfig:
         timezone = args.timezone if args.timezone else get_local_timezone()
         desktop = args.desktop or "xfce"
         
-        browser = args.browser
-        if browser is None and system_type in DESKTOP_SYSTEMS:
-            browser = "brave"
+        # Handle browser - support both single value and list
+        browser = None
+        browsers = getattr(args, 'browsers', None)
+        
+        # If browsers list is provided, use it
+        if browsers and len(browsers) > 0:
+            # First browser becomes the default
+            browser = browsers[0]
+        elif hasattr(args, 'browser') and args.browser:
+            # Single browser provided
+            browser = args.browser
+        elif system_type in DESKTOP_SYSTEMS:
+            # Default browser for desktop systems
+            browser = "librewolf"
         
         install_office = args.install_office
         if system_type == "pc_dev" and install_office is None:
@@ -367,8 +418,12 @@ class SetupConfig:
             enable_rdp=enable_rdp,
             desktop=desktop,
             browser=browser,
+            browsers=browsers,
             use_flatpak=getattr(args, 'use_flatpak', False),
             install_office=install_office,
+            apt_packages=getattr(args, 'apt_packages', None),
+            flatpak_packages=getattr(args, 'flatpak_packages', None),
+            dark_theme=getattr(args, 'dark_theme', False),
             dry_run=getattr(args, 'dry_run', False),
             install_ruby=getattr(args, 'install_ruby', False),
             install_go=getattr(args, 'install_go', False),

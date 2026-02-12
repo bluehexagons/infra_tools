@@ -21,6 +21,8 @@ from common.steps import (
     install_node,
     install_mail_utils,
     configure_swap,
+    install_apt_packages,
+    install_flatpak_packages,
 )
 
 # Import from desktop module
@@ -38,6 +40,7 @@ from desktop.steps import (
     install_office_apps,
     install_browser,
     configure_xfce_for_rdp,
+    configure_dark_theme,
 )
 
 # Import from security module
@@ -176,6 +179,9 @@ STEP_FUNCTIONS: dict[str, StepFunc] = {
     'configure_vivaldi_browser': configure_vivaldi_browser,
     'configure_gnome_keyring': configure_gnome_keyring,
     'install_smbclient': install_smbclient,
+    'configure_dark_theme': configure_dark_theme,
+    'install_apt_packages': install_apt_packages,
+    'install_flatpak_packages': install_flatpak_packages,
     'create_remoteusers_group': create_remoteusers_group,
     'configure_firewall': configure_firewall,
     'configure_fail2ban': configure_fail2ban,
@@ -262,6 +268,9 @@ def get_steps_for_system_type(config: SetupConfig) -> list[tuple[str, StepFunc]]
         if config.enable_smbclient:
             desktop_steps.append(("Installing SMB client packages", install_smbclient))
         
+        if config.dark_theme:
+            desktop_steps.append(("Configuring dark theme", configure_dark_theme))
+        
         steps.extend(desktop_steps)
         
         if config.enable_rdp:
@@ -291,12 +300,18 @@ def get_steps_for_system_type(config: SetupConfig) -> list[tuple[str, StepFunc]]
     elif config.include_workstation_dev_apps:
         steps.extend(WORKSTATION_DEV_APP_STEPS)
     
-    if config.include_desktop and config.browser and not (config.include_desktop_apps or config.include_pc_dev_apps or config.include_workstation_dev_apps):
+    if config.include_desktop and (config.browser or config.browsers) and not (config.include_desktop_apps or config.include_pc_dev_apps or config.include_workstation_dev_apps):
         steps.append(("Installing browser", install_browser))
         steps.append(("Configuring default browser", configure_default_browser))
     
     if config.install_office and not (config.include_desktop_apps or config.include_pc_dev_apps):
         steps.append(("Installing Office", install_office_apps))
+    
+    if config.apt_packages:
+        steps.append(("Installing custom apt packages", install_apt_packages))
+    
+    if config.flatpak_packages:
+        steps.append(("Installing custom flatpak packages", install_flatpak_packages))
     
     if config.notify_specs:
         steps.append(("Installing mail utilities for notifications", install_mail_utils))

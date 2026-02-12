@@ -7,6 +7,8 @@ Automated setup scripts for remote Linux systems (Debian).
 > **📋 Logging:** See [`docs/LOGGING.md`](docs/LOGGING.md) for centralized logging system documentation.
 >
 > **🖥️ Machine Types:** See [`docs/MACHINE_TYPES.md`](docs/MACHINE_TYPES.md) for environment-specific configuration.
+>
+> **💾 Storage & Backup:** See [`docs/STORAGE.md`](docs/STORAGE.md) for NAS, backup sync, and data integrity system documentation.
 
 ## Quick Start
 
@@ -43,6 +45,8 @@ The repository is organized by functionality (module-based) rather than file typ
 - **`/deploy`**: Deployment functionality
   - `steps.py`: Application deployment (Rails, Node/Vite, static)
   - `service_tools/`: Rails service setup script
+- **`/docs`**: Documentation ([Storage](docs/STORAGE.md), [Logging](docs/LOGGING.md), [Machine Types](docs/MACHINE_TYPES.md))
+- **`/tests`**: Unit tests for core logic
 
 ## Setup Scripts
 
@@ -83,12 +87,14 @@ Common features: User setup, sudo, firewall/SSH hardening, auto-updates, Chrony,
 | Flag | Description |
 |------|-------------|
 | `--rdp` / `--no-rdp` | Enable/disable RDP/XRDP (default: enabled for workstation setups) |
-| `--x2go` / `--no-x2go` | Enable/disable X2Go remote desktop |
 | `--audio` / `--no-audio` | Enable/disable audio setup (desktop only) |
-| `--desktop [xfce\|i3\|cinnamon]` | Desktop environment (default: xfce) |
-| `--browser [brave\|firefox\|browsh\|vivaldi\|lynx]` | Web browser (default: brave) |
+| `--desktop [xfce\|i3\|cinnamon\|lxqt]` | Desktop environment (default: xfce) |
+| `--browser [brave\|firefox\|browsh\|vivaldi\|lynx\|librewolf]` | Web browser to install (can be used multiple times, default: librewolf) |
 | `--flatpak` | Install desktop apps via Flatpak |
 | `--office` | Install LibreOffice (default: enabled for pc_dev) |
+| `--apt-install PACKAGE` | Install package via apt (can be used multiple times) |
+| `--flatpak-install PACKAGE` | Install package via flatpak (can be used multiple times) |
+| `--dark` | Configure desktop to use dark theme |
 
 ### Development Flags
 
@@ -272,8 +278,19 @@ Remote desktop with audio, VS Code, and full dev environment.
 python3 setup_workstation_desktop.py 192.168.1.50 \
   --name "Remote Dev" \
   --desktop xfce --rdp --audio \
-  --browser brave \
+  --browser librewolf \
   --ruby --node --go
+```
+
+### Lightweight Desktop with Multiple Browsers and Custom Packages
+LXQt desktop with dark theme, multiple browsers, and custom packages.
+```bash
+python3 setup_workstation_desktop.py 192.168.1.60 \
+  --name "Light Desktop" \
+  --desktop lxqt --dark \
+  --browser librewolf --browser lynx --browser vivaldi \
+  --apt-install htop --apt-install vim \
+  --flatpak-install org.kde.kdenlive
 ```
 
 ### NAS & Backup Server
@@ -302,6 +319,21 @@ python3 setup_server_web.py tunnel.example.com \
 - Python 3.9+
 - SSH root access to target system
 - Target OS: Debian
+
+## Testing
+
+Unit tests live in `tests/` and are designed to run on a Debian system without modifying it.
+
+```bash
+# Run all tests
+python3 -m pytest tests/ -v
+
+# Compile check
+python3 -m py_compile lib/modified_file.py
+
+# Dry run test
+python3 setup_server_web.py test.example.com --dry-run
+```
 
 ## License
 

@@ -104,7 +104,23 @@ grep -r "pattern" lib/ common/ desktop/
 
 - **Always** use `from __future__ import annotations`
 - **Never** commit secrets or credentials
-- **Always** validate inputs with `lib/validators.py`
-- **Never** break existing function signatures without updating all references
+- **Always** validate inputs with `lib/validators.py` or `lib/validation.py`
+- **Never** break existing function signatures without updating all callers and tests
 - **Always** read complete file before changing
 - **Always** check machine type capabilities for system-level operations
+- **Always** keep these agent instructions and docs up to date when changing patterns or conventions
+- **Always** remove unused parameters and dead code — don't keep things for "API compatibility"
+
+## 🧪 Testing
+
+Tests live in `tests/` using Python `unittest`. Run with `python3 -m pytest tests/ -v`.
+
+**Key rules:**
+- Tests must run on Debian and **must not modify the local system** (no installs, no writes outside temp dirs)
+- Optimize for code coverage, avoid redundant cases
+- Assert return values, not just "doesn't raise"
+- Mock system calls (`run`, `chown`, etc.) to avoid side effects
+- Use `tempfile.TemporaryDirectory()` for filesystem tests
+- Import all modules at top of file, not inside test methods
+
+See `README.md` for known testing challenges and patterns.
