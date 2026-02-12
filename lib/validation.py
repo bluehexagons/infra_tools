@@ -42,40 +42,32 @@ def validate_filesystem_path(path: str, must_exist: bool = False, check_writable
                 raise ValueError(f"Parent directory is not writable: {parent}")
 
 
-def validate_database_path(db_path: str, protected_dir: str) -> None:
-    """Validate database path to prevent circular references.
+def validate_database_path(db_path: str) -> None:
+    """Validate database path for parity file storage.
+    
+    The database path is a directory (e.g. .pardatabase) used to store parity
+    files.  It may live inside the protected directory as a hidden subdirectory,
+    which is the common usage pattern.
     
     Args:
-        db_path: Database path to validate
-        protected_dir: Directory that should not be in database path
+        db_path: Database directory path to validate
         
     Raises:
         ValueError: If validation fails
     """
     # Don't require existence - database may not exist on first run
-    validate_filesystem_path(db_path, must_exist=False, check_writable=True)
-    
-    # Normalize paths for comparison
-    db_normalized = os.path.normpath(db_path)
-    protected_normalized = os.path.normpath(protected_dir)
-    
-    # Check if database is within protected directory
-    if db_normalized.startswith(protected_normalized + os.sep) or db_normalized == protected_normalized:
-        raise ValueError(f"Database path cannot be within protected directory: {db_path} in {protected_dir}")
-    
-    # Check for common database extensions
-    db_extensions = ['.db', '.sqlite', '.sqlite3', '.par2']
-    has_db_extension = any(db_normalized.lower().endswith(ext) for ext in db_extensions)
-    if not has_db_extension:
-        raise ValueError(f"Database path should have database extension: {db_path}")
+    validate_filesystem_path(db_path, must_exist=False)
 
 
-def validate_service_name_uniqueness(service_name: str, existing_services: list[str]) -> None:
+def validate_service_name_uniqueness(service_name: str, existing_services: list[str]) -> bool:
     """Validate service name uniqueness and format.
     
     Args:
         service_name: Service name to validate
         existing_services: List of existing service names
+        
+    Returns:
+        True if validation passes
         
     Raises:
         ValueError: If validation fails
@@ -83,8 +75,9 @@ def validate_service_name_uniqueness(service_name: str, existing_services: list[
     if not service_name:
         raise ValueError("Service name must be a non-empty string")
     
-    # Use existing username validation pattern (similar naming constraints)
-    pattern = r'^[a-z_][a-z0-9_-]{0,31}$'
+    # Systemd unit names allow letters, digits, hyphens, underscores, and dots.
+    # Max 255 chars (well within systemd limits).
+    pattern = r'^[a-z_][a-z0-9_.-]{0,254}$'
     if not re.match(pattern, service_name):
         raise ValueError(f"Service name '{service_name}' must follow pattern: {pattern}")
     
@@ -95,6 +88,8 @@ def validate_service_name_uniqueness(service_name: str, existing_services: list[
     systemd_reserved = ['system', 'user', 'service', 'target', 'slice', 'scope']
     if service_name in systemd_reserved:
         raise ValueError(f"Service name '{service_name}' is reserved by systemd")
+    
+    return True
 
 
 def validate_redundancy_percentage(redundancy: str) -> int:

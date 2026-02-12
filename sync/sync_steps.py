@@ -11,7 +11,7 @@ from typing import Optional, Any
 from lib.config import SetupConfig
 from lib.setup_common import REMOTE_INSTALL_DIR
 from lib.remote_utils import run, is_package_installed
-from lib.mount_utils import validate_mount_for_sync, validate_smb_connectivity, is_path_under_mnt, get_mount_ancestor
+from lib.mount_utils import validate_mount_for_sync, validate_smb_connectivity, is_path_under_mnt
 from lib.disk_utils import get_disk_usage_details
 from lib.validation import validate_filesystem_path, validate_service_name_uniqueness
 from lib.operation_log import create_operation_logger
@@ -21,7 +21,8 @@ from lib.task_utils import (
     validate_frequency,
     get_timer_calendar,
     escape_systemd_description,
-    check_path_on_smb_mount
+    check_path_on_smb_mount,
+    ensure_directory
 )
 
 
@@ -113,30 +114,11 @@ def create_sync_service(config: SetupConfig, sync_spec: Optional[list[str]] = No
             transaction.rollback(str(e))
         raise
     
-    if not os.path.exists(source):
-        if is_path_under_mnt(source):
-            mount_ancestor = get_mount_ancestor(source)
-            if not mount_ancestor:
-                print(f"  ⚠ Warning: Source {source} is under /mnt but no mount point found")
-            else:
-                os.makedirs(source, exist_ok=True)
-                run(f"chown {shlex.quote(config.username)}:{shlex.quote(config.username)} {shlex.quote(source)}")
-        else:
-            os.makedirs(source, exist_ok=True)
-            run(f"chown {shlex.quote(config.username)}:{shlex.quote(config.username)} {shlex.quote(source)}")
+    ensure_directory(source, config.username)
     
     dest_parent = os.path.dirname(destination)
-    if dest_parent and not os.path.exists(dest_parent):
-        if is_path_under_mnt(dest_parent):
-            mount_ancestor = get_mount_ancestor(dest_parent)
-            if not mount_ancestor:
-                print(f"  ⚠ Warning: Destination parent {dest_parent} is under /mnt but no mount point found")
-            else:
-                os.makedirs(dest_parent, exist_ok=True)
-                run(f"chown {shlex.quote(config.username)}:{shlex.quote(config.username)} {shlex.quote(dest_parent)}")
-        else:
-            os.makedirs(dest_parent, exist_ok=True)
-            run(f"chown {shlex.quote(config.username)}:{shlex.quote(config.username)} {shlex.quote(dest_parent)}")
+    if dest_parent:
+        ensure_directory(dest_parent, config.username)
     
     escaped_source = escape_systemd_description(source)
     escaped_destination = escape_systemd_description(destination)

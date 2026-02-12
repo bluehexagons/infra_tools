@@ -7,6 +7,8 @@ Automated setup scripts for remote Linux systems (Debian).
 > **📋 Logging:** See [`docs/LOGGING.md`](docs/LOGGING.md) for centralized logging system documentation.
 >
 > **🖥️ Machine Types:** See [`docs/MACHINE_TYPES.md`](docs/MACHINE_TYPES.md) for environment-specific configuration.
+>
+> **💾 Storage & Backup:** See [`docs/STORAGE.md`](docs/STORAGE.md) for NAS, backup sync, and data integrity system documentation.
 
 ## Quick Start
 
@@ -43,6 +45,8 @@ The repository is organized by functionality (module-based) rather than file typ
 - **`/deploy`**: Deployment functionality
   - `steps.py`: Application deployment (Rails, Node/Vite, static)
   - `service_tools/`: Rails service setup script
+- **`/docs`**: Documentation ([Storage](docs/STORAGE.md), [Logging](docs/LOGGING.md), [Machine Types](docs/MACHINE_TYPES.md))
+- **`/tests`**: Unit tests for core logic
 
 ## Setup Scripts
 
@@ -315,6 +319,21 @@ python3 setup_server_web.py tunnel.example.com \
 - Python 3.9+
 - SSH root access to target system
 - Target OS: Debian
+
+## Testing
+
+Unit tests live in `tests/` and are designed to run on a Debian system without modifying it.
+
+```bash
+# Run all tests
+python3 -m pytest tests/ -v
+
+# Compile check
+python3 -m py_compile lib/modified_file.py
+
+# Dry run test
+python3 setup_server_web.py test.example.com --dry-run
+```
 
 ## License
 

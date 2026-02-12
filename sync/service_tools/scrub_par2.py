@@ -271,7 +271,7 @@ def _cleanup_orphan_par2(
             operation_logger.log_metric("total_orphan_size_mb", total_orphan_size // 1024 // 1024, "MB")
 
 
-def verify_repair(file_path: str, directory: str, database: str, log_file: str) -> None:
+def verify_repair(file_path: str, directory: str, database: str, log_file: str) -> bool:
     """Verify file integrity and repair if needed.
     
     Args:
@@ -279,12 +279,15 @@ def verify_repair(file_path: str, directory: str, database: str, log_file: str) 
         directory: Base directory being protected
         database: Database directory for par2 files
         log_file: Log file path
+        
+    Returns:
+        True if a repair was performed, False otherwise
     """
     relative_path = os.path.relpath(file_path, directory)
     par2_base = os.path.join(database, f"{relative_path}{PAR2_EXTENSION}")
     
     if not os.path.exists(par2_base):
-        return
+        return False
     
     log(f"Verifying: {relative_path}", log_file)
     
@@ -297,6 +300,7 @@ def verify_repair(file_path: str, directory: str, database: str, log_file: str) 
             text=True,
             cwd=directory
         )
+        return False
     except subprocess.CalledProcessError:
         log(f"Verification failed for: {relative_path}", log_file)
         log("Attempting repair...", log_file)
@@ -311,9 +315,11 @@ def verify_repair(file_path: str, directory: str, database: str, log_file: str) 
                 cwd=directory
             )
             log(f"✓ Repaired: {relative_path}", log_file)
+            return True
         except subprocess.CalledProcessError as e:
             log(f"✗ Repair failed: {relative_path}", log_file)
             log(f"  Error: {e.stdout}", log_file)
+            return False
 
 
 def scrub_directory(directory: str, database: str, redundancy: int, log_file: str, verify: bool = True) -> None:
@@ -449,10 +455,9 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
                     files_processed += 1
                 
                 if verify:
-                    verify_repair(file_path, directory, database, log_file)
+                    was_repaired = verify_repair(file_path, directory, database, log_file)
                     files_verified += 1
-                    # Count repairs by checking logs (simplified)
-                    if "Repaired" in log_file or "repaired" in log_file:
+                    if was_repaired:
                         files_repaired += 1
         
         # Create checkpoint before cleanup

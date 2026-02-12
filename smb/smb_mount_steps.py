@@ -3,13 +3,11 @@
 from __future__ import annotations
 import os
 import shlex
-from typing import Any
+from typing import Any, Optional
 
 from lib.config import SetupConfig
 from lib.remote_utils import run
 
-
-from typing import Optional
 
 def parse_smb_mount_spec(mount_spec: Optional[list[str]]) -> dict[str, Any]:
     """Parse SMB mount specification.
@@ -22,14 +20,6 @@ def parse_smb_mount_spec(mount_spec: Optional[list[str]]) -> dict[str, Any]:
     """
     if not mount_spec:
         raise ValueError("mount_spec is required")
-    """Parse SMB mount specification.
-    
-    Args:
-        mount_spec: [mountpoint, ip, credentials, share, subdir]
-        
-    Returns:
-        dict with mount configuration
-    """
     if len(mount_spec) != 5:
         raise ValueError(f"Invalid SMB mount spec: expected 5 arguments, got {len(mount_spec)}")
     
@@ -52,8 +42,6 @@ def parse_smb_mount_spec(mount_spec: Optional[list[str]]) -> dict[str, Any]:
         'subdir': subdir
     }
 
-
-from typing import Optional
 
 def configure_smb_mount(config: SetupConfig, mount_spec: Optional[list[str]] = None, **_ : Any) -> None:
     """Configure persistent SMB mount using systemd.
