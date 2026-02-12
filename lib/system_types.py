@@ -30,7 +30,6 @@ from desktop.steps import (
     install_desktop,
     install_xrdp,
     harden_xrdp,
-    configure_audio,
     install_desktop_apps,
     configure_default_browser,
     install_workstation_dev_apps,
@@ -101,19 +100,6 @@ COMMON_STEPS: list[tuple[str, StepFunc]] = [
     ("Generating SSH key for user", generate_ssh_key),
     ("Configuring time synchronization", configure_time_sync),
     ("Configuring swap", configure_swap),
-]
-
-DESKTOP_STEPS: list[tuple[str, StepFunc]] = [
-    ("Installing desktop environment", install_desktop),
-    ("Configuring desktop for RDP compatibility", configure_xfce_for_rdp),
-    ("Installing xRDP", install_xrdp),
-    ("Configuring audio for RDP", configure_audio),
-    ("Configuring gnome-keyring", configure_gnome_keyring),
-]
-
-DESKTOP_SECURITY_STEPS: list[tuple[str, StepFunc]] = [
-    ("Hardening xRDP with TLS and group restrictions", harden_xrdp),
-    ("Installing fail2ban for RDP brute-force protection", configure_fail2ban),
 ]
 
 SECURITY_STEPS: list[tuple[str, StepFunc]] = [
@@ -187,7 +173,6 @@ STEP_FUNCTIONS: dict[str, StepFunc] = {
     'install_desktop': install_desktop,
     'install_xrdp': install_xrdp,
     'harden_xrdp': harden_xrdp,
-    'configure_audio': configure_audio,
     'install_desktop_apps': install_desktop_apps,
     'configure_default_browser': configure_default_browser,
     'install_workstation_dev_apps': install_workstation_dev_apps,
@@ -276,9 +261,7 @@ def get_steps_for_system_type(config: SetupConfig) -> list[tuple[str, StepFunc]]
         
         if config.enable_rdp:
             desktop_steps.append(("Installing xRDP", install_xrdp))
-        
-        if config.enable_audio and config.enable_rdp:
-            desktop_steps.append(("Configuring audio for RDP", configure_audio))
+            desktop_steps.append(("Configuring desktop for RDP compatibility", configure_xfce_for_rdp))
         
         desktop_steps.append(("Configuring gnome-keyring", configure_gnome_keyring))
         

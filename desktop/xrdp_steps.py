@@ -58,9 +58,6 @@ param=-nolisten
 param=tcp
 param=-logfile
 param=.xorgxrdp.%s.log
-
-[SessionVariables]
-PULSE_SCRIPT=/etc/xrdp/pulse/default.pa
 '''
 
 
@@ -82,6 +79,42 @@ def install_xrdp(config: SetupConfig) -> None:
     
     run("apt-get install -y -qq xrdp xorgxrdp dbus-x11 x11-xserver-utils x11-utils")
     print("  ✓ xRDP packages installed (Xorg+xorgxrdp backend for dynamic resolution)")
+
+    # Configure Xwrapper to allow XRDP sessions to start X server
+    # This is critical for preventing session freezes and startup issues
+    xwrapper_config = "/etc/X11/Xwrapper.config"
+    xwrapper_content = """# Xwrapper configuration for XRDP
+# Allow any user to start X server (required for remote desktop sessions)
+allowed_users=anybody
+# Don't require root privileges
+needs_root_rights=no
+"""
+    
+    # Ensure directory exists
+    xwrapper_dir = os.path.dirname(xwrapper_config)
+    if not os.path.exists(xwrapper_dir):
+        try:
+            os.makedirs(xwrapper_dir, exist_ok=True)
+        except OSError as e:
+            print(f"  ⚠ ERROR: Could not create {xwrapper_dir}: {e}")
+            print(f"  ⚠ XRDP may experience session startup issues without proper Xwrapper configuration")
+            print(f"  ⚠ Manually create the directory and file if needed")
+    
+    # Backup existing Xwrapper.config before overwriting
+    if os.path.exists(xwrapper_config) and not os.path.exists(f"{xwrapper_config}.bak"):
+        run(f"cp {xwrapper_config} {xwrapper_config}.bak")
+    
+    try:
+        with open(xwrapper_config, "w") as f:
+            f.write(xwrapper_content)
+        print("  ✓ Xwrapper configured (allows XRDP to start X server)")
+    except (IOError, OSError) as e:
+        print(f"  ⚠ ERROR: Could not write to {xwrapper_config}: {e}")
+        print(f"  ⚠ CRITICAL: XRDP sessions may freeze or fail to start")
+        print(f"  ⚠ Manual fix required:")
+        print(f"      sudo mkdir -p {xwrapper_dir}")
+        print(f"      echo 'allowed_users=anybody' | sudo tee {xwrapper_config}")
+        print(f"      echo 'needs_root_rights=no' | sudo tee -a {xwrapper_config}")
 
     # Ensure xrdp can create its runtime dirs/sockets
     run("systemctl enable xrdp-sesman", check=False)
@@ -185,8 +218,8 @@ Section "Screen"
     DefaultDepth 24
     SubSection "Display"
         Depth 24
-        # Large virtual screen to support dynamic resizing
-        Virtual 8192 8192
+        # Virtual screen size to support dynamic resizing (up to 2560x1600)
+        Virtual 2560 1600
     EndSubSection
 EndSection
 '''
@@ -239,174 +272,4 @@ def harden_xrdp(config: SetupConfig) -> None:
     print("  ✓ xRDP hardened (TLS encryption, strong ciphers, group restrictions)")
 
 
-def configure_audio(config: SetupConfig) -> None:
-    """Configure audio for RDP sessions.
-    
-    For unprivileged containers: Basic PulseAudio setup without xRDP audio modules.
-        Audio over RDP will not work, but local desktop audio may function if hardware is available.
-    For VMs/hardware: Full setup with xRDP audio modules (pre-installed or compiled from source).
-        Provides audio over RDP connection.
-    
-    Note: Per requirements, audio is not expected to work in unprivileged containers.
-    """
-    safe_username = shlex.quote(config.username)
-    home_dir = f"/home/{config.username}"
-    pulse_dir = f"{home_dir}/.config/pulse"
-    client_conf = f"{pulse_dir}/client.conf"
-    daemon_conf = f"{pulse_dir}/daemon.conf"
-    default_pa = f"{pulse_dir}/default.pa"
-    
-    run("apt-get install -y -qq pulseaudio pulseaudio-utils")
-    
-    # Check if xRDP audio modules are already installed
-    result = run("find /usr/lib -name 'module-xrdp-sink.so' 2>/dev/null", check=False, capture_output=True)
-    modules_installed = result.returncode == 0 and bool(result.stdout.strip())
-    
-    configs_exist = os.path.exists(client_conf) and os.path.exists(daemon_conf)
-    
-    if modules_installed and configs_exist:
-        print("  ✓ Audio already configured")
-        return
-    
-    # Skip complex module compilation for unprivileged containers
-    # Audio won't work over RDP but the desktop will function normally
-    if is_container() and not modules_installed:
-        print("  ℹ Skipping xRDP audio module compilation in unprivileged container")
-        print("  ℹ Desktop will work but RDP audio is not supported in containers")
-        modules_installed = False
-    elif not modules_installed:
-        run("apt-get install -y -qq build-essential dpkg-dev libpulse-dev git autoconf libtool", check=False)
-        
-        pulse_ver_result = run("pulseaudio --version | grep -oP 'pulseaudio \\K[0-9]+\\.[0-9]+' | head -1", check=False, capture_output=True)
-        pulse_version = pulse_ver_result.stdout.strip() if pulse_ver_result.returncode == 0 else ""
-        
-        if pulse_version:
-            print(f"  PulseAudio version: {pulse_version}")
-            pulse_src_dir = f"/tmp/pulseaudio-{pulse_version}"
-            if not os.path.exists(pulse_src_dir):
-                run(f"apt-get source pulseaudio={pulse_version}* 2>/dev/null || apt-get source pulseaudio 2>/dev/null", check=False, cwd="/tmp")
-                find_result = run("find /tmp -maxdepth 1 -type d -name 'pulseaudio-*' ! -name '*xrdp*' 2>/dev/null | head -1", check=False, capture_output=True)
-                if find_result.returncode == 0 and find_result.stdout.strip():
-                    pulse_src_dir = find_result.stdout.strip()
-        else:
-            pulse_src_dir = None
-        
-        module_dir = "/tmp/pulseaudio-module-xrdp"
-        if os.path.exists(module_dir):
-            run(f"rm -rf {module_dir}", check=False)
-        
-        result = run(f"git clone https://github.com/neutrinolabs/pulseaudio-module-xrdp.git {module_dir}", check=False)
-        if result.returncode != 0:
-            print("  ⚠ Warning: Failed to clone pulseaudio-module-xrdp repository")
-            modules_installed = False
-        else:
-            bootstrap_result = run(f"cd {module_dir} && ./bootstrap", check=False)
-            if bootstrap_result.returncode != 0:
-                print("  ⚠ Warning: Failed to bootstrap xRDP audio module")
-                run(f"rm -rf {module_dir}", check=False)
-                modules_installed = False
-            else:
-                if pulse_src_dir and os.path.exists(pulse_src_dir):
-                    configure_cmd = f"cd {module_dir} && PULSE_DIR={shlex.quote(pulse_src_dir)} ./configure PULSE_DIR={shlex.quote(pulse_src_dir)}"
-                    print(f"  Using PulseAudio source: {pulse_src_dir}")
-                else:
-                    configure_cmd = f"cd {module_dir} && PULSE_DIR=/usr ./configure PULSE_DIR=/usr"
-                    print("  Using system PulseAudio headers")
-                
-                configure_result = run(configure_cmd, check=False)
-                if configure_result.returncode != 0:
-                    print("  ⚠ Warning: Failed to configure xRDP audio module")
-                    run(f"rm -rf {module_dir}", check=False)
-                    modules_installed = False
-                else:
-                    make_result = run(f"cd {module_dir} && make", check=False)
-                    if make_result.returncode != 0:
-                        print("  ⚠ Warning: Failed to compile xRDP audio module")
-                        run(f"rm -rf {module_dir}", check=False)
-                        modules_installed = False
-                    else:
-                        install_result = run(f"cd {module_dir} && make install", check=False)
-                        if install_result.returncode != 0:
-                            print("  ⚠ Warning: Failed to install xRDP audio module")
-                            modules_installed = False
-                        else:
-                            modules_installed = True
-    
-    result = run("find /usr/lib -name 'module-xrdp-sink.so' 2>/dev/null", check=False, capture_output=True)
-    if result.returncode == 0 and bool(result.stdout.strip()):
-        module_path = result.stdout.strip().split('\n')[0]
-        print(f"  ✓ xRDP audio module installed: {module_path}")
-        modules_installed = True
-    else:
-        print("  ⚠ xRDP audio modules not found - audio will work but not over RDP")
-        modules_installed = False
-    
-    run(f"usermod -aG audio {safe_username}", check=False)
-    
-    os.makedirs(pulse_dir, exist_ok=True)
-    
-    with open(client_conf, "w") as f:
-        f.write("autospawn = yes\n")
-        f.write("daemon-binary = /usr/bin/pulseaudio\n")
-    
-    # Configure PulseAudio daemon
-    # Containers need SHM disabled; VMs/hardware can use it for better performance
-    with open(daemon_conf, "w") as f:
-        if is_container():
-            f.write("# Container mode: disable shared memory (not available)\n")
-            f.write("enable-shm = no\n")
-        else:
-            f.write("# VM/hardware mode: enable shared memory for better performance\n")
-            f.write("enable-shm = yes\n")
-        f.write("exit-idle-time = -1\n")
-        f.write("flat-volumes = no\n")
-        f.write("default-sample-rate = 44100\n")
-        f.write("resample-method = speex-float-1\n")
-    
-    if modules_installed:
-        with open(default_pa, "w") as f:
-            f.write("#!/usr/bin/pulseaudio -nF\n\n")
-            f.write(".include /etc/pulse/default.pa\n\n")
-            f.write("# Load xRDP modules for remote audio\n")
-            f.write(".nofail\n")
-            f.write("load-module module-xrdp-sink\n")
-            f.write("load-module module-xrdp-source\n")
-            f.write(".fail\n")
-        run(f"chmod +x {shlex.quote(default_pa)}")
-    run(f"chown -R {safe_username}:{safe_username} {shlex.quote(pulse_dir)}")
-    
-    troubleshoot_script = f"{home_dir}/check-rdp.sh"
-    with open(troubleshoot_script, "w") as f:
-        f.write("#!/bin/bash\n")
-        f.write("# RDP Session Troubleshooting Script\n\n")
-        f.write("echo '=== xRDP Status ==='\n")
-        f.write("systemctl status xrdp --no-pager\n\n")
-        f.write("echo '=== xRDP Logs (last 50 lines) ==='\n")
-        f.write("journalctl -u xrdp -n 50 --no-pager\n\n")
-        f.write("echo '=== Session Manager Config ==='\n")
-        f.write("grep -A 5 '\\[Sessions\\]' /etc/xrdp/sesman.ini 2>/dev/null || echo 'No Sessions config'\n\n")
-        f.write("echo '=== Session Cleanup Script ==='\n")
-        f.write("ls -lh /opt/infra_tools/desktop/service_tools/xrdp_session_cleanup.py 2>/dev/null || echo 'Cleanup script not found'\n\n")
-        f.write("echo '=== Active Sessions ==='\n")
-        f.write("who\n\n")
-        f.write("echo '=== User Processes ==='\n")
-        f.write("ps aux | grep -E '(xrdp|$USER)' | grep -v grep\n\n")
-        f.write("echo '=== Session Logs ==='\n")
-        f.write("tail -50 ~/.xsession-errors 2>/dev/null || echo 'No .xsession-errors file'\n\n")
-        f.write("echo '=== PulseAudio Status ==='\n")
-        f.write("pactl info 2>&1 || echo 'PulseAudio not running'\n\n")
-        f.write("echo '=== PulseAudio Modules ==='\n")
-        f.write("pactl list modules short 2>&1 || echo 'Cannot list modules'\n\n")
-        f.write("echo '=== xRDP Audio Module ==='\n")
-        f.write("find /usr/lib -name 'module-xrdp-*.so' 2>/dev/null || echo 'No xRDP modules found'\n")
-    run(f"chmod +x {shlex.quote(troubleshoot_script)}")
-    run(f"chown {safe_username}:{safe_username} {shlex.quote(troubleshoot_script)}")
-    
-    run(f"pkill -u {safe_username} pulseaudio", check=False)
-    run("systemctl restart xrdp", check=False)
-    
-    if modules_installed:
-        print("  ✓ Audio configured (PulseAudio + xRDP modules)")
-    else:
-        print("  ✓ Audio configured (PulseAudio only - no RDP audio in unprivileged container)")
-    print(f"  Run ~/check-rdp.sh via SSH to troubleshoot RDP issues")
+
