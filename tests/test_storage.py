@@ -1,0 +1,442 @@
+"""Tests for storage system core logic: parsing, validation, and utilities."""
+
+from __future__ import annotations
+
+import os
+import sys
+import tempfile
+import unittest
+
+# Ensure project root is on the path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+from smb.samba_steps import parse_share_spec
+from smb.smb_mount_steps import parse_smb_mount_spec
+from sync.sync_steps import parse_sync_spec
+from sync.scrub_steps import parse_scrub_spec
+from lib.task_utils import (
+    validate_frequency,
+    get_timer_calendar,
+    escape_systemd_description,
+    check_path_on_smb_mount,
+    ensure_directory,
+    VALID_FREQUENCIES,
+)
+from lib.validation import (
+    validate_filesystem_path,
+    validate_database_path,
+    validate_service_name_uniqueness,
+    validate_redundancy_percentage,
+)
+from lib.disk_utils import (
+    get_free_disk_mb,
+    get_total_disk_mb,
+    get_disk_usage_details,
+    check_disk_space_threshold,
+    estimate_operation_duration,
+)
+from lib.mount_utils import is_path_under_mnt
+from lib.config import SetupConfig
+
+
+# ---------------------------------------------------------------------------
+# parse_share_spec
+# ---------------------------------------------------------------------------
+
+class TestParseShareSpec(unittest.TestCase):
+    def test_valid_read_share(self):
+        result = parse_share_spec(['read', 'myshare', '/mnt/data', 'user1:pass1'])
+        self.assertEqual(result['access_type'], 'read')
+        self.assertEqual(result['share_name'], 'myshare')
+        self.assertEqual(result['paths'], ['/mnt/data'])
+        self.assertEqual(result['users'], [{'username': 'user1', 'password': 'pass1'}])
+
+    def test_valid_write_share(self):
+        result = parse_share_spec(['write', 'docs', '/mnt/docs', 'admin:secret'])
+        self.assertEqual(result['access_type'], 'write')
+
+    def test_multiple_paths_and_users(self):
+        result = parse_share_spec(['read', 's', '/a,/b', 'u1:p1,u2:p2'])
+        self.assertEqual(result['paths'], ['/a', '/b'])
+        self.assertEqual(len(result['users']), 2)
+
+    def test_invalid_access_type(self):
+        with self.assertRaises(ValueError):
+            parse_share_spec(['execute', 'x', '/x', 'u:p'])
+
+    def test_too_few_args(self):
+        with self.assertRaises(ValueError):
+            parse_share_spec(['read', 'x'])
+
+    def test_none_spec(self):
+        with self.assertRaises(ValueError):
+            parse_share_spec(None)
+
+    def test_user_without_password(self):
+        with self.assertRaises(ValueError):
+            parse_share_spec(['read', 's', '/a', 'nopassword'])
+
+
+# ---------------------------------------------------------------------------
+# parse_smb_mount_spec
+# ---------------------------------------------------------------------------
+
+class TestParseSmbMountSpec(unittest.TestCase):
+    def test_valid_mount_spec(self):
+        result = parse_smb_mount_spec(['/mnt/share', '192.168.1.10', 'user:pass', 'docs', '/sub'])
+        self.assertEqual(result['mountpoint'], '/mnt/share')
+        self.assertEqual(result['ip'], '192.168.1.10')
+        self.assertEqual(result['username'], 'user')
+        self.assertEqual(result['password'], 'pass')
+        self.assertEqual(result['share'], 'docs')
+        self.assertEqual(result['subdir'], '/sub')
+
+    def test_wrong_arg_count(self):
+        with self.assertRaises(ValueError):
+            parse_smb_mount_spec(['/mnt/share', '192.168.1.10'])
+
+    def test_relative_mountpoint(self):
+        with self.assertRaises(ValueError):
+            parse_smb_mount_spec(['relative/path', '1.2.3.4', 'u:p', 'share', '/'])
+
+    def test_credentials_no_colon(self):
+        with self.assertRaises(ValueError):
+            parse_smb_mount_spec(['/mnt/x', '1.2.3.4', 'nopassword', 'share', '/'])
+
+    def test_none_spec(self):
+        with self.assertRaises(ValueError):
+            parse_smb_mount_spec(None)
+
+    def test_empty_spec(self):
+        with self.assertRaises(ValueError):
+            parse_smb_mount_spec([])
+
+
+# ---------------------------------------------------------------------------
+# parse_sync_spec
+# ---------------------------------------------------------------------------
+
+class TestParseSyncSpec(unittest.TestCase):
+    def test_valid_sync(self):
+        result = parse_sync_spec(['/src', '/dst', 'daily'])
+        self.assertEqual(result['source'], '/src')
+        self.assertEqual(result['destination'], '/dst')
+        self.assertEqual(result['interval'], 'daily')
+
+    def test_all_frequencies(self):
+        for freq in VALID_FREQUENCIES:
+            result = parse_sync_spec(['/a', '/b', freq])
+            self.assertEqual(result['interval'], freq)
+
+    def test_invalid_frequency(self):
+        with self.assertRaises(ValueError):
+            parse_sync_spec(['/a', '/b', 'biweekly'])
+
+    def test_relative_source(self):
+        with self.assertRaises(ValueError):
+            parse_sync_spec(['relative', '/dst', 'daily'])
+
+    def test_relative_dest(self):
+        with self.assertRaises(ValueError):
+            parse_sync_spec(['/src', 'relative', 'daily'])
+
+    def test_wrong_arg_count(self):
+        with self.assertRaises(ValueError):
+            parse_sync_spec(['/src', '/dst'])
+
+
+# ---------------------------------------------------------------------------
+# parse_scrub_spec
+# ---------------------------------------------------------------------------
+
+class TestParseScrubSpec(unittest.TestCase):
+    def test_valid_scrub_absolute_db(self):
+        result = parse_scrub_spec(['/mnt/data', '/mnt/db', '5%', 'weekly'])
+        self.assertEqual(result['directory'], '/mnt/data')
+        self.assertEqual(result['database_path'], '/mnt/db')
+        self.assertEqual(result['redundancy'], '5%')
+        self.assertEqual(result['frequency'], 'weekly')
+
+    def test_relative_db_path_becomes_absolute(self):
+        result = parse_scrub_spec(['/mnt/data', '.pardatabase', '10%', 'daily'])
+        self.assertTrue(result['database_path'].startswith('/'))
+        self.assertIn('.pardatabase', result['database_path'])
+
+    def test_invalid_redundancy_no_percent(self):
+        with self.assertRaises(ValueError):
+            parse_scrub_spec(['/mnt/data', '/mnt/db', '5', 'daily'])
+
+    def test_redundancy_out_of_range(self):
+        with self.assertRaises(ValueError):
+            parse_scrub_spec(['/mnt/data', '/mnt/db', '0%', 'daily'])
+        with self.assertRaises(ValueError):
+            parse_scrub_spec(['/mnt/data', '/mnt/db', '101%', 'daily'])
+
+    def test_wrong_arg_count(self):
+        with self.assertRaises(ValueError):
+            parse_scrub_spec(['/mnt/data', '/mnt/db'])
+
+
+# ---------------------------------------------------------------------------
+# validate_frequency
+# ---------------------------------------------------------------------------
+
+class TestValidateFrequency(unittest.TestCase):
+    def test_all_valid(self):
+        for freq in VALID_FREQUENCIES:
+            validate_frequency(freq)  # should not raise
+
+    def test_invalid(self):
+        with self.assertRaises(ValueError):
+            validate_frequency('never')
+
+
+# ---------------------------------------------------------------------------
+# get_timer_calendar
+# ---------------------------------------------------------------------------
+
+class TestGetTimerCalendar(unittest.TestCase):
+    def test_hourly(self):
+        self.assertEqual(get_timer_calendar('hourly'), '*-*-* *:00:00')
+
+    def test_daily_default(self):
+        self.assertIn('02:00:00', get_timer_calendar('daily'))
+
+    def test_daily_custom_hour(self):
+        self.assertIn('05:00:00', get_timer_calendar('daily', hour_offset=5))
+
+    def test_weekly(self):
+        result = get_timer_calendar('weekly')
+        self.assertIn('Mon', result)
+
+    def test_monthly(self):
+        result = get_timer_calendar('monthly')
+        self.assertIn('-01', result)
+
+
+# ---------------------------------------------------------------------------
+# escape_systemd_description
+# ---------------------------------------------------------------------------
+
+class TestEscapeSystemdDescription(unittest.TestCase):
+    def test_backslash(self):
+        self.assertEqual(escape_systemd_description('a\\b'), 'a\\\\b')
+
+    def test_newline(self):
+        self.assertEqual(escape_systemd_description('a\nb'), 'a b')
+
+    def test_quotes(self):
+        self.assertEqual(escape_systemd_description('a"b'), "a'b")
+
+    def test_plain(self):
+        self.assertEqual(escape_systemd_description('/mnt/data'), '/mnt/data')
+
+
+# ---------------------------------------------------------------------------
+# check_path_on_smb_mount
+# ---------------------------------------------------------------------------
+
+class TestCheckPathOnSmbMount(unittest.TestCase):
+    def _make_config(self, smb_mounts):
+        return SetupConfig(
+            host='test', username='test', system_type='server_lite',
+            smb_mounts=smb_mounts,
+        )
+
+    def test_path_on_mount(self):
+        config = self._make_config([['/mnt/share', '1.2.3.4', 'u:p', 'share', '/']])
+        self.assertTrue(check_path_on_smb_mount('/mnt/share/dir', config))
+
+    def test_exact_mount(self):
+        config = self._make_config([['/mnt/share', '1.2.3.4', 'u:p', 'share', '/']])
+        self.assertTrue(check_path_on_smb_mount('/mnt/share', config))
+
+    def test_path_not_on_mount(self):
+        config = self._make_config([['/mnt/share', '1.2.3.4', 'u:p', 'share', '/']])
+        self.assertFalse(check_path_on_smb_mount('/mnt/other', config))
+
+    def test_no_mounts(self):
+        config = self._make_config(None)
+        self.assertFalse(check_path_on_smb_mount('/mnt/share', config))
+
+
+# ---------------------------------------------------------------------------
+# is_path_under_mnt
+# ---------------------------------------------------------------------------
+
+class TestIsPathUnderMnt(unittest.TestCase):
+    def test_under_mnt(self):
+        self.assertTrue(is_path_under_mnt('/mnt/data'))
+
+    def test_exact_mnt(self):
+        self.assertTrue(is_path_under_mnt('/mnt'))
+
+    def test_not_under_mnt(self):
+        self.assertFalse(is_path_under_mnt('/home/user'))
+        self.assertFalse(is_path_under_mnt('/mntextra'))
+
+
+# ---------------------------------------------------------------------------
+# validate_filesystem_path
+# ---------------------------------------------------------------------------
+
+class TestValidateFilesystemPath(unittest.TestCase):
+    def test_empty_path(self):
+        with self.assertRaises(ValueError):
+            validate_filesystem_path('')
+
+    def test_valid_path(self):
+        validate_filesystem_path('/tmp')  # should not raise
+
+    def test_must_exist_missing(self):
+        with self.assertRaises(ValueError):
+            validate_filesystem_path('/does/not/exist/xyz', must_exist=True)
+
+
+# ---------------------------------------------------------------------------
+# validate_database_path
+# ---------------------------------------------------------------------------
+
+class TestValidateDatabasePath(unittest.TestCase):
+    def test_pardatabase_inside_protected_dir_is_allowed(self):
+        """The common pattern is .pardatabase inside the protected dir."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, '.pardatabase')
+            # Should not raise — subdirectory is allowed now
+            validate_database_path(db_path, tmpdir)
+
+    def test_pardatabase_outside_dir(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = '/tmp/somedb'
+            validate_database_path(db_path, tmpdir)
+
+    def test_empty_path(self):
+        with self.assertRaises(ValueError):
+            validate_database_path('', '/tmp')
+
+
+# ---------------------------------------------------------------------------
+# validate_service_name_uniqueness
+# ---------------------------------------------------------------------------
+
+class TestValidateServiceNameUniqueness(unittest.TestCase):
+    def test_valid_short_name(self):
+        validate_service_name_uniqueness('my-service', [])
+
+    def test_valid_long_name(self):
+        """Generated names like sync-_mnt_data-to-_mnt_backup-a1b2c3d4 should pass."""
+        name = 'sync-_mnt_data_docs-to-_mnt_backup_docs-a1b2c3d4'
+        validate_service_name_uniqueness(name, [])
+
+    def test_empty_name(self):
+        with self.assertRaises(ValueError):
+            validate_service_name_uniqueness('', [])
+
+    def test_duplicate_name(self):
+        with self.assertRaises(ValueError):
+            validate_service_name_uniqueness('my-service', ['my-service'])
+
+    def test_reserved_name(self):
+        with self.assertRaises(ValueError):
+            validate_service_name_uniqueness('service', [])
+
+    def test_invalid_chars(self):
+        with self.assertRaises(ValueError):
+            validate_service_name_uniqueness('My Service!', [])
+
+
+# ---------------------------------------------------------------------------
+# validate_redundancy_percentage
+# ---------------------------------------------------------------------------
+
+class TestValidateRedundancyPercentage(unittest.TestCase):
+    def test_with_percent(self):
+        self.assertEqual(validate_redundancy_percentage('5%'), 5)
+
+    def test_without_percent(self):
+        self.assertEqual(validate_redundancy_percentage('10'), 10)
+
+    def test_out_of_range(self):
+        with self.assertRaises(ValueError):
+            validate_redundancy_percentage('101%')
+        with self.assertRaises(ValueError):
+            validate_redundancy_percentage('-1')
+
+    def test_empty(self):
+        with self.assertRaises(ValueError):
+            validate_redundancy_percentage('')
+
+
+# ---------------------------------------------------------------------------
+# disk_utils
+# ---------------------------------------------------------------------------
+
+class TestDiskUtils(unittest.TestCase):
+    def test_get_free_disk_mb(self):
+        free = get_free_disk_mb('/')
+        self.assertGreater(free, 0)
+
+    def test_get_total_disk_mb(self):
+        total = get_total_disk_mb('/')
+        self.assertGreater(total, 0)
+
+    def test_get_disk_usage_details(self):
+        details = get_disk_usage_details('/')
+        self.assertIn('total_mb', details)
+        self.assertIn('used_mb', details)
+        self.assertIn('free_mb', details)
+        self.assertIn('usage_percent', details)
+        self.assertGreaterEqual(details['usage_percent'], 0)
+        self.assertLessEqual(details['usage_percent'], 100)
+
+    def test_get_disk_usage_invalid_path(self):
+        details = get_disk_usage_details('/nonexistent/path/xyz')
+        self.assertEqual(details['total_mb'], 0)
+
+    def test_check_disk_space_threshold(self):
+        status, pct = check_disk_space_threshold('/')
+        self.assertIn(status, ['ok', 'warning', 'critical'])
+        self.assertGreaterEqual(pct, 0)
+
+    def test_estimate_operation_duration(self):
+        duration = estimate_operation_duration('sync', 1000)
+        self.assertGreater(duration, 0)
+        duration_par2 = estimate_operation_duration('par2', 1000)
+        self.assertGreater(duration_par2, duration)  # par2 is slower
+
+
+# ---------------------------------------------------------------------------
+# ensure_directory
+# ---------------------------------------------------------------------------
+
+class TestEnsureDirectory(unittest.TestCase):
+    def test_creates_directory(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            new_dir = os.path.join(tmpdir, 'new_sub')
+            # Mock run to avoid actual chown
+            import lib.task_utils as tu
+            original_run = tu.run
+            calls = []
+            tu.run = lambda cmd, **kw: calls.append(cmd) or type('R', (), {'returncode': 0})()
+            try:
+                ensure_directory(new_dir, 'testuser')
+                self.assertTrue(os.path.isdir(new_dir))
+                self.assertTrue(any('chown' in c for c in calls))
+            finally:
+                tu.run = original_run
+
+    def test_existing_directory_no_op(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            import lib.task_utils as tu
+            original_run = tu.run
+            calls = []
+            tu.run = lambda cmd, **kw: calls.append(cmd)
+            try:
+                ensure_directory(tmpdir, 'testuser')
+                self.assertEqual(len(calls), 0)  # no chown on existing dir
+            finally:
+                tu.run = original_run
+
+
+if __name__ == '__main__':
+    unittest.main()

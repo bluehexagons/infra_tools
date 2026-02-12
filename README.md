@@ -7,6 +7,8 @@ Automated setup scripts for remote Linux systems (Debian).
 > **📋 Logging:** See [`docs/LOGGING.md`](docs/LOGGING.md) for centralized logging system documentation.
 >
 > **🖥️ Machine Types:** See [`docs/MACHINE_TYPES.md`](docs/MACHINE_TYPES.md) for environment-specific configuration.
+>
+> **💾 Storage & Backup:** See [`docs/STORAGE.md`](docs/STORAGE.md) for NAS, backup sync, and data integrity system documentation.
 
 ## Quick Start
 
@@ -43,6 +45,8 @@ The repository is organized by functionality (module-based) rather than file typ
 - **`/deploy`**: Deployment functionality
   - `steps.py`: Application deployment (Rails, Node/Vite, static)
   - `service_tools/`: Rails service setup script
+- **`/docs`**: Documentation ([Storage](docs/STORAGE.md), [Logging](docs/LOGGING.md), [Machine Types](docs/MACHINE_TYPES.md))
+- **`/tests`**: Unit tests for core logic
 
 ## Setup Scripts
 
