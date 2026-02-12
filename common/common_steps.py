@@ -419,3 +419,58 @@ def install_mail_utils(config: SetupConfig) -> None:
     run("apt-get install -y -qq bsd-mailx")
     
     print("  ✓ Mail utilities installed")
+
+
+def install_apt_packages(config: SetupConfig) -> None:
+    """Install additional packages via apt."""
+    if not config.apt_packages:
+        return
+    
+    print("  Installing custom apt packages...")
+    for package in config.apt_packages:
+        if is_package_installed(package):
+            print(f"  ✓ {package} already installed")
+        else:
+            print(f"  Installing {package}...")
+            run(f"apt-get install -y -qq {shlex.quote(package)}", check=False)
+            if is_package_installed(package):
+                print(f"  ✓ {package} installed")
+            else:
+                print(f"  ⚠ Failed to install {package}")
+
+
+def install_flatpak_packages(config: SetupConfig) -> None:
+    """Install additional packages via flatpak."""
+    if not config.flatpak_packages:
+        return
+    
+    from lib.machine_state import is_container
+    from lib.remote_utils import is_flatpak_app_installed
+    from desktop.apps_steps import is_flatpak_installed, install_flatpak_if_needed
+    
+    # In containers, flatpak often doesn't work
+    if is_container():
+        print("  ⚠ Container detected: skipping flatpak package installation")
+        return
+    
+    # Ensure flatpak is installed
+    install_flatpak_if_needed()
+    
+    if not is_flatpak_installed():
+        print("  ⚠ Flatpak not available, skipping flatpak package installation")
+        return
+    
+    print("  Installing custom flatpak packages...")
+    FLATPAK_REMOTE = "flathub"
+    
+    for package in config.flatpak_packages:
+        if is_flatpak_app_installed(package):
+            print(f"  ✓ {package} already installed")
+        else:
+            print(f"  Installing {package}...")
+            run(f"flatpak install -y {FLATPAK_REMOTE} {shlex.quote(package)}", check=False)
+            # Verify installation
+            if is_flatpak_app_installed(package):
+                print(f"  ✓ {package} installed")
+            else:
+                print(f"  ⚠ Failed to install {package}")

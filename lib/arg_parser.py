@@ -50,12 +50,13 @@ def create_setup_argument_parser(
                        action=argparse.BooleanOptionalAction if not for_remote else "store_true", 
                        default=None if not for_remote else False,
                        help="Enable audio setup (desktop only)")
-    parser.add_argument("--desktop", choices=["xfce", "i3", "cinnamon"], 
+    parser.add_argument("--desktop", choices=["xfce", "i3", "cinnamon", "lxqt"], 
                        default="xfce" if for_remote else None,
                        help="Desktop environment to install (default: xfce)")
-    parser.add_argument("--browser", choices=["brave", "firefox", "browsh", "vivaldi", "lynx"], 
-                       default=None,
-                       help="Web browser to install (default: brave for desktop setups)")
+    parser.add_argument("--browser", dest="browsers", 
+                       action="append",
+                       choices=["brave", "firefox", "browsh", "vivaldi", "lynx", "librewolf"], 
+                       help="Web browser to install (can be used multiple times, default: librewolf for desktop setups)")
     parser.add_argument("--flatpak", dest="use_flatpak", 
                        action=argparse.BooleanOptionalAction if not for_remote else "store_true", 
                        default=None if not for_remote else False,
@@ -64,6 +65,22 @@ def create_setup_argument_parser(
                        action=argparse.BooleanOptionalAction if not for_remote else "store_true", 
                        default=None if not for_remote else False,
                        help="Install LibreOffice (desktop only)")
+    
+    # Package installation
+    parser.add_argument("--apt-install", dest="apt_packages",
+                       action="append",
+                       metavar="PACKAGE",
+                       help="Install package via apt (can be used multiple times)")
+    parser.add_argument("--flatpak-install", dest="flatpak_packages",
+                       action="append",
+                       metavar="PACKAGE",
+                       help="Install package via flatpak (can be used multiple times)")
+    
+    # Theme customization
+    parser.add_argument("--dark", dest="dark_theme",
+                       action=argparse.BooleanOptionalAction if not for_remote else "store_true",
+                       default=None if not for_remote else False,
+                       help="Configure desktop to use dark theme")
     
     # Development tools
     parser.add_argument("--ruby", dest="install_ruby", 
