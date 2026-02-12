@@ -71,6 +71,9 @@ def check_path_on_smb_mount(path: str, config: SetupConfig) -> bool:
 def ensure_directory(path: str, username: str) -> None:
     """Ensure a directory exists, warn if under /mnt with no mount point.
     
+    If the directory already exists, no ownership change is performed.
+    Ownership is only set when the directory is first created.
+    
     Args:
         path: Directory path to ensure exists
         username: Owner username for the directory

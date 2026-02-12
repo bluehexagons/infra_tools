@@ -414,10 +414,14 @@ class TestEnsureDirectory(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             new_dir = os.path.join(tmpdir, 'new_sub')
             # Mock run to avoid actual chown
+            import subprocess
             import lib.task_utils as tu
             original_run = tu.run
-            calls = []
-            tu.run = lambda cmd, **kw: calls.append(cmd) or type('R', (), {'returncode': 0})()
+            calls: list[str] = []
+            def mock_run(cmd, **kw):
+                calls.append(cmd)
+                return subprocess.CompletedProcess(args=[cmd], returncode=0, stdout='', stderr='')
+            tu.run = mock_run
             try:
                 ensure_directory(new_dir, 'testuser')
                 self.assertTrue(os.path.isdir(new_dir))
@@ -429,8 +433,10 @@ class TestEnsureDirectory(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             import lib.task_utils as tu
             original_run = tu.run
-            calls = []
-            tu.run = lambda cmd, **kw: calls.append(cmd)
+            calls: list[str] = []
+            def mock_run(cmd, **kw):
+                calls.append(cmd)
+            tu.run = mock_run
             try:
                 ensure_directory(tmpdir, 'testuser')
                 self.assertEqual(len(calls), 0)  # no chown on existing dir
