@@ -100,6 +100,10 @@ needs_root_rights=no
             print(f"  ⚠ XRDP may experience session startup issues without proper Xwrapper configuration")
             print(f"  ⚠ Manually create the directory and file if needed")
     
+    # Backup existing Xwrapper.config before overwriting
+    if os.path.exists(xwrapper_config) and not os.path.exists(f"{xwrapper_config}.bak"):
+        run(f"cp {xwrapper_config} {xwrapper_config}.bak")
+    
     try:
         with open(xwrapper_config, "w") as f:
             f.write(xwrapper_content)

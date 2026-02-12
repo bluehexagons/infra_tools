@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 import unittest
-import tempfile
-import os
-from unittest.mock import Mock, patch, MagicMock, call
-from typing import Any
+from unittest.mock import Mock, patch
 
 from lib.config import SetupConfig
 from desktop.xrdp_steps import _generate_sesman_ini, install_xrdp, harden_xrdp
 from desktop.desktop_environment_steps import configure_xfce_for_rdp
 
 
-class TestGenerateSemanIni(unittest.TestCase):
+class TestGenerateSesmanIni(unittest.TestCase):
     """Test sesman.ini generation."""
     
     def test_generates_valid_ini_format(self):
@@ -108,7 +105,7 @@ class TestInstallXrdp(unittest.TestCase):
         
         # Check apt-get install was called with correct packages
         install_calls = [c for c in mock_run.call_args_list if 'apt-get install' in str(c)]
-        self.assertTrue(len(install_calls) > 0)
+        self.assertGreater(len(install_calls), 0)
         
         # First install call should have xrdp packages
         first_install = str(install_calls[0])
@@ -382,7 +379,7 @@ class TestConfigureXfceForRdp(unittest.TestCase):
         
         # Check chmod was called to make it executable
         chmod_calls = [c for c in mock_run.call_args_list if 'chmod' in str(c)]
-        self.assertTrue(len(chmod_calls) > 0)
+        self.assertGreater(len(chmod_calls), 0)
 
 
 if __name__ == '__main__':
