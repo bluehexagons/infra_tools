@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 import unittest
+import uuid
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -15,9 +16,10 @@ from lib.transaction import Transaction, TransactionManager
 
 class TestTransaction(unittest.TestCase):
     def _make_transaction(self, tmpdir, timeout_seconds=3600):
-        log_file = os.path.join(tmpdir, 'tx.log')
-        logger = OperationLogger('tx-001', log_file)
-        return Transaction('tx-001', logger, timeout_seconds=timeout_seconds)
+        op_id = f'tx-{uuid.uuid4().hex[:8]}'
+        log_file = os.path.join(tmpdir, f'{op_id}.log')
+        logger = OperationLogger(op_id, log_file)
+        return Transaction(op_id, logger, timeout_seconds=timeout_seconds)
 
     def test_initial_status(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -149,8 +151,9 @@ class TestTransaction(unittest.TestCase):
 
 class TestTransactionManager(unittest.TestCase):
     def _make_logger(self, tmpdir):
-        log_file = os.path.join(tmpdir, 'mgr.log')
-        return OperationLogger('mgr-001', log_file)
+        op_id = f'mgr-{uuid.uuid4().hex[:8]}'
+        log_file = os.path.join(tmpdir, f'{op_id}.log')
+        return OperationLogger(op_id, log_file)
 
     def test_create_and_get(self):
         with tempfile.TemporaryDirectory() as tmpdir:

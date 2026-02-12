@@ -7,6 +7,7 @@ import sys
 import tempfile
 import time
 import unittest
+import uuid
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -19,14 +20,14 @@ from lib.operation_log import (
 
 class TestOperationLogger(unittest.TestCase):
     def _make_logger(self, tmpdir):
-        log_file = os.path.join(tmpdir, 'test_op.log')
-        return OperationLogger('test-op-001', log_file)
+        op_id = f'test-op-{uuid.uuid4().hex[:8]}'
+        log_file = os.path.join(tmpdir, f'{op_id}.log')
+        return OperationLogger(op_id, log_file)
 
     def test_initial_status(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             logger = self._make_logger(tmpdir)
             self.assertEqual(logger.status, 'running')
-            self.assertEqual(logger.operation_id, 'test-op-001')
             self.assertIsNone(logger.current_step)
 
     def test_log_step(self):
@@ -100,7 +101,7 @@ class TestOperationLogger(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             logger = self._make_logger(tmpdir)
             summary = logger.get_operation_summary()
-            self.assertEqual(summary['operation_id'], 'test-op-001')
+            self.assertEqual(summary['operation_id'], logger.operation_id)
             self.assertEqual(summary['status'], 'running')
             self.assertIn('elapsed_time_seconds', summary)
 
@@ -143,8 +144,8 @@ class TestOperationLoggerManager(unittest.TestCase):
     def test_get_active_operations(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             manager = OperationLoggerManager(tmpdir)
-            logger1 = manager.create_logger('sync')
-            logger2 = manager.create_logger('scrub')
+            manager.create_logger('sync')
+            manager.create_logger('scrub')
             active = manager.get_active_operations()
             self.assertEqual(len(active), 2)
 

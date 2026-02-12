@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import sys
-import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -17,7 +16,6 @@ from lib.nginx_config import (
     _make_static_location,
     generate_merged_nginx_config,
     SSL_PROTOCOLS,
-    SSL_CIPHERS,
 )
 
 
@@ -35,22 +33,22 @@ class TestGetSslCertPath(unittest.TestCase):
         self.assertTrue(key.endswith('.key'))
 
     def test_letsencrypt_exists(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            domain = 'example.com'
-            le_dir = os.path.join(tmpdir, 'letsencrypt', 'live', domain)
-            os.makedirs(le_dir)
-            cert_file = os.path.join(le_dir, 'fullchain.pem')
-            key_file = os.path.join(le_dir, 'privkey.pem')
-            with open(cert_file, 'w') as f:
-                f.write('cert')
-            with open(key_file, 'w') as f:
-                f.write('key')
-            # We need to patch os.path.exists to handle letsencrypt paths
-            # Since get_ssl_cert_path checks hardcoded /etc/letsencrypt paths,
-            # let's just test the fallback path
+        domain = 'example.com'
+        le_cert = f'/etc/letsencrypt/live/{domain}/fullchain.pem'
+        le_key = f'/etc/letsencrypt/live/{domain}/privkey.pem'
+
+        real_exists = os.path.exists
+
+        def fake_exists(path):
+            if path in (le_cert, le_key):
+                return True
+            return real_exists(path)
+
+        with patch('os.path.exists', side_effect=fake_exists):
             cert, key = get_ssl_cert_path(domain)
-            # Without real letsencrypt, falls back to self-signed paths
-            self.assertTrue(cert.endswith('.crt') or cert.endswith('.pem'))
+
+        self.assertEqual(cert, le_cert)
+        self.assertEqual(key, le_key)
 
 
 class TestMakeCacheMaps(unittest.TestCase):

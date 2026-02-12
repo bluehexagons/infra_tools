@@ -8,7 +8,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from lib.config import SetupConfig, DEFAULT_MACHINE_TYPE, SYSTEM_TYPES
+from lib.config import SetupConfig, DEFAULT_MACHINE_TYPE
 
 
 class TestSetupConfigDefaults(unittest.TestCase):

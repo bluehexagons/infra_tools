@@ -7,17 +7,15 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.logging_utils import (
     get_standard_formatter,
     get_rotating_logger,
-    get_service_logger,
     log_message,
     ensure_log_directory,
-    STANDARD_LOG_FORMAT,
-    DEFAULT_LOG_MAX_BYTES,
 )
 
 
@@ -38,7 +36,7 @@ class TestGetRotatingLogger(unittest.TestCase):
             log_file = os.path.join(tmpdir, 'test.log')
             logger = get_rotating_logger('test_logger_1', log_file)
             self.assertIsInstance(logger, logging.Logger)
-            self.assertTrue(len(logger.handlers) > 0)
+            self.assertGreater(len(logger.handlers), 0)
 
     def test_idempotent(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -65,7 +63,7 @@ class TestGetRotatingLogger(unittest.TestCase):
         logger = get_rotating_logger('test_logger_fallback', '/proc/nonexistent/test.log')
         self.assertIsInstance(logger, logging.Logger)
         # Should have a fallback handler
-        self.assertTrue(len(logger.handlers) > 0)
+        self.assertGreater(len(logger.handlers), 0)
 
 
 class TestLogMessage(unittest.TestCase):
@@ -84,14 +82,13 @@ class TestLogMessage(unittest.TestCase):
 class TestEnsureLogDirectory(unittest.TestCase):
     def test_creates_directory(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            subdir = os.path.join(tmpdir, 'logs', 'sub')
-            with unittest.mock.patch('lib.logging_utils.DEFAULT_LOG_DIR', os.path.join(tmpdir, 'logs')):
+            with patch('lib.logging_utils.DEFAULT_LOG_DIR', os.path.join(tmpdir, 'logs')):
                 result = ensure_log_directory('sub')
                 self.assertTrue(result.exists())
 
     def test_no_subdir(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            with unittest.mock.patch('lib.logging_utils.DEFAULT_LOG_DIR', os.path.join(tmpdir, 'logs')):
+            with patch('lib.logging_utils.DEFAULT_LOG_DIR', os.path.join(tmpdir, 'logs')):
                 result = ensure_log_directory()
                 self.assertTrue(result.exists())
 

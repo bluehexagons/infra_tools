@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -34,10 +35,32 @@ class TestGetMultiplePathsUsage(unittest.TestCase):
 
 
 class TestCheckDiskSpaceThresholdCustom(unittest.TestCase):
-    def test_custom_thresholds(self):
-        status, pct = check_disk_space_threshold('/', warning_threshold=1, critical_threshold=2)
-        # Since usage is almost certainly > 2%, expect warning or critical
-        self.assertIn(status, ['ok', 'warning', 'critical'])
+    def _fake_usage(self, total, used, free):
+        """Create a mock disk_usage result."""
+        from collections import namedtuple
+        Usage = namedtuple('usage', ['total', 'used', 'free'])
+        return Usage(total, used, free)
+
+    def test_ok_status(self):
+        # 50% usage → ok
+        with patch('shutil.disk_usage', return_value=self._fake_usage(1000, 500, 500)):
+            status, pct = check_disk_space_threshold('/')
+            self.assertEqual(status, 'ok')
+            self.assertEqual(pct, 50)
+
+    def test_warning_status(self):
+        # 85% usage → warning (>=80, <90)
+        with patch('shutil.disk_usage', return_value=self._fake_usage(1000, 850, 150)):
+            status, pct = check_disk_space_threshold('/')
+            self.assertEqual(status, 'warning')
+            self.assertEqual(pct, 85)
+
+    def test_critical_status(self):
+        # 95% usage → critical (>=90)
+        with patch('shutil.disk_usage', return_value=self._fake_usage(1000, 950, 50)):
+            status, pct = check_disk_space_threshold('/')
+            self.assertEqual(status, 'critical')
+            self.assertEqual(pct, 95)
 
 
 if __name__ == '__main__':

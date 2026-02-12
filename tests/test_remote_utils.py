@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import string
 import subprocess
 import sys
 import tempfile
@@ -78,15 +79,11 @@ class TestGeneratePassword(unittest.TestCase):
         passwords = {generate_password() for _ in range(10)}
         self.assertEqual(len(passwords), 10)
 
-    def test_contains_variety(self):
+    def test_uses_allowed_characters(self):
         pwd = generate_password(100)
-        has_upper = any(c.isupper() for c in pwd)
-        has_lower = any(c.islower() for c in pwd)
-        has_digit = any(c.isdigit() for c in pwd)
-        # With 100 chars, extremely unlikely to miss any category
-        self.assertTrue(has_upper)
-        self.assertTrue(has_lower)
-        self.assertTrue(has_digit)
+        allowed = set(string.ascii_letters + string.digits + "!@#$%^&*")
+        for c in pwd:
+            self.assertIn(c, allowed)
 
 
 class TestFileContains(unittest.TestCase):
