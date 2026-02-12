@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -13,6 +14,7 @@ from lib.notifications import (
     Notification,
     NotificationSender,
     parse_notification_args,
+    send_setup_notification,
 )
 
 
@@ -98,6 +100,90 @@ class TestParseNotificationArgs(unittest.TestCase):
     def test_wrong_arg_count_skipped(self):
         configs = parse_notification_args([['webhook']])
         self.assertEqual(len(configs), 0)
+
+
+class TestSendSetupNotification(unittest.TestCase):
+    @patch('lib.notifications.NotificationSender.send')
+    def test_success_notification(self, mock_send):
+        mock_send.return_value = True
+        result = send_setup_notification(
+            notify_specs=[['webhook', 'https://example.com/hook']],
+            system_type='server_web',
+            host='10.0.0.1',
+            success=True,
+        )
+        self.assertTrue(result)
+        mock_send.assert_called_once()
+        notification = mock_send.call_args[0][0]
+        self.assertEqual(notification.job, 'setup')
+        self.assertEqual(notification.status, 'good')
+        self.assertIn('server_web', notification.subject)
+        self.assertIn('10.0.0.1', notification.subject)
+        self.assertIn('successfully', notification.message)
+
+    @patch('lib.notifications.NotificationSender.send')
+    def test_failure_notification(self, mock_send):
+        mock_send.return_value = True
+        result = send_setup_notification(
+            notify_specs=[['webhook', 'https://example.com/hook']],
+            system_type='server_web',
+            host='10.0.0.1',
+            success=False,
+            errors=["Step 'install_nginx' failed: command error"],
+        )
+        self.assertTrue(result)
+        notification = mock_send.call_args[0][0]
+        self.assertEqual(notification.status, 'error')
+        self.assertIn('failed', notification.subject)
+        self.assertIn('install_nginx', notification.details)
+
+    @patch('lib.notifications.NotificationSender.send')
+    def test_failure_with_multiple_errors(self, mock_send):
+        mock_send.return_value = True
+        errors = ["Error 1", "Error 2"]
+        send_setup_notification(
+            notify_specs=[['webhook', 'https://example.com/hook']],
+            system_type='server_web',
+            host='10.0.0.1',
+            success=False,
+            errors=errors,
+        )
+        notification = mock_send.call_args[0][0]
+        self.assertIn('Errors (2)', notification.details)
+        self.assertIn('Error 1', notification.details)
+        self.assertIn('Error 2', notification.details)
+
+    def test_no_notify_specs_returns_true(self):
+        result = send_setup_notification(
+            notify_specs=None,
+            system_type='server_web',
+            host='10.0.0.1',
+            success=True,
+        )
+        self.assertTrue(result)
+
+    def test_empty_notify_specs_returns_true(self):
+        result = send_setup_notification(
+            notify_specs=[],
+            system_type='server_web',
+            host='10.0.0.1',
+            success=True,
+        )
+        self.assertTrue(result)
+
+    @patch('lib.notifications.NotificationSender.send')
+    def test_success_no_errors_in_details(self, mock_send):
+        mock_send.return_value = True
+        send_setup_notification(
+            notify_specs=[['webhook', 'https://example.com/hook']],
+            system_type='server_lite',
+            host='localhost',
+            success=True,
+        )
+        notification = mock_send.call_args[0][0]
+        self.assertNotIn('Errors', notification.details)
+        self.assertIn('server_lite', notification.details)
+        self.assertIn('localhost', notification.details)
 
 
 if __name__ == '__main__':

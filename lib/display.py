@@ -103,5 +103,10 @@ def print_setup_summary(config: SetupConfig, description: Optional[str] = None) 
         for directory, _db_path, redundancy, frequency in config.scrub_specs:
             print(f"  - {directory} ({redundancy}, {frequency})")
     
+    if config.notify_specs:
+        print(f"Notifications: {len(config.notify_specs)} target(s)")
+        for notify_type, target in config.notify_specs:
+            print(f"  - {notify_type}: {target}")
+    
     print("=" * 60)
     print()
