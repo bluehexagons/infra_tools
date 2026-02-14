@@ -6,7 +6,7 @@ from __future__ import annotations
 import sys
 import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 from lib.systemd_service import create_rails_service, create_node_service
 from lib.remote_utils import run
