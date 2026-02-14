@@ -54,7 +54,7 @@ def parse_sync_spec(sync_spec: list[str]) -> dict[str, Any]:
         'interval': interval
     }
 
-def create_sync_service(config: SetupConfig, sync_spec: Optional[list[str]] = None, **_ : Any) -> None:
+def create_sync_service(config: SetupConfig, sync_spec: Optional[list[str]] = None, skip_initial_sync: bool = False, **_ : Any) -> None:
     if not sync_spec:
         raise ValueError("sync_spec is required")
     
@@ -110,7 +110,8 @@ def create_sync_service(config: SetupConfig, sync_spec: Optional[list[str]] = No
         logger.log_step("service_name_validation", "completed", f"Validated service name: {service_name}")
         
         # Clean up any existing service/timer with the same name before creating new ones
-        cleanup_service(service_name)
+        # Use longer timeout since sync operations can take time to shut down gracefully
+        cleanup_service(service_name, timeout_seconds=600)
         logger.log_step("service_cleanup", "completed", f"Cleaned up existing service if present: {service_name}")
         
     except Exception as e:
@@ -155,8 +156,11 @@ After=local-fs.target
 
 [Service]
 Type=oneshot
+RemainAfterExit=no
 User=root
 Group=root
+TimeoutStartSec=24h
+TimeoutStopSec=2h
 {exec_condition}
 ExecStart=/usr/bin/python3 {sync_script} {shlex.quote(source)} {shlex.quote(destination)}
 StandardOutput=journal
@@ -200,13 +204,17 @@ WantedBy=timers.target
         return True
     
     try:
-        transaction.add_step(perform_initial_sync, lambda: run(f"systemctl stop {shlex.quote(service_name)}.service", check=False), "Initial sync", "initial_sync")
+        if not skip_initial_sync:
+            transaction.add_step(perform_initial_sync, lambda: run(f"systemctl stop {shlex.quote(service_name)}.service", check=False), "Initial sync", "initial_sync")
         
         if not transaction.execute():
             logger.log_error("initial_sync_failed", "Initial sync failed")
             transaction.rollback("Initial sync failed")
         else:
-            logger.log_step("initial_sync", "completed", "Initial sync successful")
+            if not skip_initial_sync:
+                logger.log_step("initial_sync", "completed", "Initial sync successful")
+            else:
+                logger.log_step("sync_configured", "completed", "Sync service configured (initial sync skipped)")
         
         logger.complete("completed", "Sync service configured")
         
@@ -220,4 +228,7 @@ WantedBy=timers.target
     logger.log_metric("source_disk_usage_percent", source_disk['usage_percent'], "percent")
     logger.log_metric("destination_disk_usage_percent", dest_disk['usage_percent'], "percent")
     
-    print(f"  ✓ Sync configured: {source} → {destination} ({interval})")
+    if skip_initial_sync:
+        print(f"  ✓ Sync configured: {source} → {destination} ({interval}) - initial sync skipped")
+    else:
+        print(f"  ✓ Sync configured: {source} → {destination} ({interval})")

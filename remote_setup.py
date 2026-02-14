@@ -99,10 +99,22 @@ def main() -> int:
     # This treats the current deployment command as the desired baseline
     print("\nCleaning up existing infra_tools services...")
     sys.stdout.flush()
-    cleanup_all_infra_services(dry_run=args.dry_run)
+    # Use longer timeout for cleanup - scrub operations can take days
+    cleanup_all_infra_services(dry_run=args.dry_run, wait_for_completion=True, timeout_seconds=600)
     sys.stdout.flush()
 
     steps = get_steps_for_system_type(config)
+    
+    # Send start notification
+    if config.notify_specs:
+        send_setup_notification(
+            notify_specs=config.notify_specs,
+            system_type=config.system_type,
+            host=config.host,
+            success=True,  # Not used for start notifications
+            friendly_name=config.friendly_name,
+            started=True,
+        )
     
     setup_errors: list[str] = []
     
@@ -124,6 +136,7 @@ def main() -> int:
                     host=config.host,
                     success=False,
                     errors=setup_errors,
+                    friendly_name=config.friendly_name,
                 )
             raise
     
@@ -335,32 +348,66 @@ def main() -> int:
         print("\n✓ SMB mount configuration complete")
     
     if config.sync_specs or config.scrub_specs:
-        from lib.concurrent_sync_scrub import create_concurrent_coordinator
-        from sync.sync_steps import install_rsync
-        from sync.scrub_steps import install_par2
-        from lib.concurrent_operations import OperationPriority
+        from sync.sync_steps import install_rsync, create_sync_service
+        from sync.scrub_steps import install_par2, create_scrub_service
 
         print("\n" + "=" * 60)
-        print("Initializing concurrent operations...")
+        print("Configuring sync and scrub services...")
         print("=" * 60)
 
-        coordinator = create_concurrent_coordinator(config)
+        # Only run initial sync/scrub if flags are set
+        run_initial = config.run_initial_sync or config.run_initial_scrub
+        
+        if run_initial:
+            from lib.concurrent_sync_scrub import create_concurrent_coordinator
+            from lib.concurrent_operations import OperationPriority
+            
+            print("Initializing concurrent operations...")
+            coordinator = create_concurrent_coordinator(config)
 
-        if config.sync_specs:
-            print(f"\nSubmitting {len(config.sync_specs)} sync job(s) for background execution...")
-            install_rsync(config)
-            for spec in config.sync_specs:
-                coordinator.submit_sync_operation(spec, priority=OperationPriority.NORMAL)
+            if config.sync_specs:
+                install_rsync(config)
+                if config.run_initial_sync:
+                    print(f"\nSubmitting {len(config.sync_specs)} sync job(s) for background execution...")
+                    for spec in config.sync_specs:
+                        coordinator.submit_sync_operation(spec, priority=OperationPriority.NORMAL)
+                else:
+                    print(f"\nConfiguring {len(config.sync_specs)} sync service(s) (initial sync will run on first timer trigger)...")
+                    for spec in config.sync_specs:
+                        create_sync_service(config, spec, skip_initial_sync=True)
 
-        if config.scrub_specs:
-            print(f"\nSubmitting {len(config.scrub_specs)} scrub job(s) for background execution...")
-            install_par2(config)
-            for spec in config.scrub_specs:
-                coordinator.submit_scrub_operation(spec, priority=OperationPriority.NORMAL)
+            if config.scrub_specs:
+                install_par2(config)
+                if config.run_initial_scrub:
+                    print(f"\nSubmitting {len(config.scrub_specs)} scrub job(s) for background execution...")
+                    for spec in config.scrub_specs:
+                        coordinator.submit_scrub_operation(spec, priority=OperationPriority.NORMAL)
+                else:
+                    print(f"\nConfiguring {len(config.scrub_specs)} scrub service(s) (initial scrub will run on first timer trigger)...")
+                    for spec in config.scrub_specs:
+                        create_scrub_service(config, spec, skip_initial_scrub=True)
 
-        print("\nWaiting for background operations to complete...")
-        coordinator.wait_until_idle()
-        print("\n✓ Concurrent operations complete")
+            print("\nWaiting for background operations to complete...")
+            coordinator.wait_until_idle()
+            print("\n✓ Concurrent operations complete")
+        else:
+            # Skip initial operations - just configure services
+            if config.sync_specs:
+                install_rsync(config)
+                print(f"\nConfiguring {len(config.sync_specs)} sync service(s) (initial sync will run on first timer trigger)...")
+                for spec in config.sync_specs:
+                    create_sync_service(config, spec, skip_initial_sync=True)
+
+            if config.scrub_specs:
+                install_par2(config)
+                print(f"\nConfiguring {len(config.scrub_specs)} scrub service(s) (initial scrub will run on first timer trigger)...")
+                for spec in config.scrub_specs:
+                    create_scrub_service(config, spec, skip_initial_scrub=True)
+            
+            print("\n✓ Sync and scrub services configured")
+            print("Note: Initial sync/scrub operations will run when the timers trigger.")
+            print("You can manually trigger them by starting the systemd services.")
+    
     
     print("\n" + "=" * 60)
     print("✓ Remote setup complete!")
@@ -372,6 +419,7 @@ def main() -> int:
             system_type=config.system_type,
             host=config.host,
             success=True,
+            friendly_name=config.friendly_name,
         )
     
     return 0

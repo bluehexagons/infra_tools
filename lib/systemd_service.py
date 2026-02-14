@@ -33,7 +33,7 @@ def cleanup_systemd_unit(unit_name: str, unit_type: str = "service") -> None:
         run("systemctl daemon-reload", check=False)
 
 
-def cleanup_service(service_name: str) -> None:
+def cleanup_service(service_name: str, wait_for_completion: bool = True, timeout_seconds: int = 60) -> None:
     """Stop, disable, and remove a service and its timer if they exist.
     
     This is the primary cleanup function for systemd services. It automatically
@@ -44,6 +44,8 @@ def cleanup_service(service_name: str) -> None:
         service_name: Base name of the service (without .service/.timer extension)
                       If the service has a timer (service_name.timer), it will be
                       automatically detected and cleaned up as well.
+        wait_for_completion: If True, wait for running service to complete before stopping
+        timeout_seconds: Maximum seconds to wait for service completion
     
     Examples:
         # Cleans up both myapp.service and myapp.timer (if timer exists)
@@ -52,6 +54,9 @@ def cleanup_service(service_name: str) -> None:
         # Cleans up just the timer
         cleanup_service("myapp-update")
     """
+    import subprocess
+    import time
+    
     service_file = f"/etc/systemd/system/{service_name}.service"
     timer_file = f"/etc/systemd/system/{service_name}.timer"
     
@@ -63,6 +68,21 @@ def cleanup_service(service_name: str) -> None:
         run(f"systemctl disable {shlex.quote(service_name)}.timer", check=False)
         os.remove(timer_file)
         needs_reload = True
+    
+    # Wait for running service to complete if requested
+    if wait_for_completion and os.path.exists(service_file):
+        # Check if service is active
+        result = run(f"systemctl is-active {shlex.quote(service_name)}.service", check=False, capture_output=True)
+        if result.returncode == 0:  # Service is active
+            print(f"  ℹ Waiting for {service_name} to complete (max {timeout_seconds}s)...")
+            start_time = time.time()
+            while time.time() - start_time < timeout_seconds:
+                result = run(f"systemctl is-active {shlex.quote(service_name)}.service", check=False, capture_output=True)
+                if result.returncode != 0:  # Service no longer active
+                    break
+                time.sleep(2)
+            else:
+                print(f"  ⚠ Service {service_name} did not complete within {timeout_seconds}s, forcing stop...")
     
     # Stop service (but don't disable - only timers should be enabled/disabled)
     # Services triggered by timers typically have no [Install] section
@@ -83,7 +103,7 @@ cleanup_existing_systemd_unit = cleanup_systemd_unit
 cleanup_service_and_timer = cleanup_service
 
 
-def cleanup_all_infra_services(dry_run: bool = False) -> None:
+def cleanup_all_infra_services(dry_run: bool = False, wait_for_completion: bool = True, timeout_seconds: int = 60) -> None:
     """Remove all systemd units created by infra_tools to ensure clean deployment state.
     
     This function treats the current deployment command as the desired baseline state.
@@ -93,6 +113,8 @@ def cleanup_all_infra_services(dry_run: bool = False) -> None:
     
     Args:
         dry_run: If True, only print what would be removed without actually removing
+        wait_for_completion: If True, wait for running services to complete before stopping
+        timeout_seconds: Maximum seconds to wait for each service completion
     
     Examples:
         # Clean up all infra_tools services before applying new configuration
@@ -162,16 +184,51 @@ def cleanup_all_infra_services(dry_run: bool = False) -> None:
     mounts = [u for u in units_to_remove if u.endswith(".mount")]
     others = [u for u in units_to_remove if not any(u.endswith(ext) for ext in [".timer", ".service", ".mount"])]
     
-    # Stop in order: timers first (they trigger services), then services, then mounts, then others
-    for unit in timers + services + mounts + others:
+    # Stop timers first to prevent new service triggers
+    for unit in timers:
+        run(f"systemctl stop {shlex.quote(unit)}", check=False)
+        run(f"systemctl disable {shlex.quote(unit)}", check=False)
+    
+    # Wait for services to complete if requested
+    if wait_for_completion:
+        import time
+        active_services = []
+        
+        # Check which services are active
+        for unit in services:
+            result = run(f"systemctl is-active {shlex.quote(unit)}", check=False, capture_output=True)
+            if result.returncode == 0:  # Service is active
+                active_services.append(unit)
+        
+        if active_services:
+            print(f"  ℹ Waiting for {len(active_services)} running service(s) to complete (max {timeout_seconds}s)...")
+            start_time = time.time()
+            
+            while active_services and (time.time() - start_time < timeout_seconds):
+                # Check if services are still active
+                still_active = []
+                for unit in active_services:
+                    result = run(f"systemctl is-active {shlex.quote(unit)}", check=False, capture_output=True)
+                    if result.returncode == 0:  # Still active
+                        still_active.append(unit)
+                
+                active_services = still_active
+                if active_services:
+                    time.sleep(2)
+            
+            if active_services:
+                print(f"  ⚠ {len(active_services)} service(s) did not complete within {timeout_seconds}s, forcing stop...")
+    
+    # Stop in order: services, then mounts, then others
+    for unit in services + mounts + others:
         unit_name = unit.rsplit(".", 1)[0]
         unit_type = unit.rsplit(".", 1)[1]
         
         # Stop the unit (ignore errors if not running)
         run(f"systemctl stop {shlex.quote(unit)}", check=False)
         
-        # Disable timers and mounts (services triggered by timers shouldn't be disabled)
-        if unit_type in ("timer", "mount"):
+        # Disable mounts (services triggered by timers shouldn't be disabled)
+        if unit_type == "mount":
             run(f"systemctl disable {shlex.quote(unit)}", check=False)
         
         # Remove the file

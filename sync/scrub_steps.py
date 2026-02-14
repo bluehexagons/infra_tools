@@ -74,7 +74,7 @@ def parse_scrub_spec(scrub_spec: list[str]) -> dict[str, Any]:
         'frequency': frequency
     }
 
-def create_scrub_service(config: SetupConfig, scrub_spec: Optional[list[str]] = None, **_ : Any) -> None:
+def create_scrub_service(config: SetupConfig, scrub_spec: Optional[list[str]] = None, skip_initial_scrub: bool = False, **_ : Any) -> None:
     if not scrub_spec:
         raise ValueError("scrub_spec is required")
     
@@ -143,8 +143,9 @@ def create_scrub_service(config: SetupConfig, scrub_spec: Optional[list[str]] = 
         
         # Clean up any existing service/timer with the same name before creating new ones
         # For scrub, this includes both the main timer and the optional -update timer
-        cleanup_service(service_name)
-        cleanup_service(f"{service_name}-update")
+        # Use longer timeout since scrub operations can take a long time to shut down gracefully
+        cleanup_service(service_name, timeout_seconds=600)
+        cleanup_service(f"{service_name}-update", timeout_seconds=600)
         logger.log_step("service_cleanup", "completed", f"Cleaned up existing service if present: {service_name}")
         
     except Exception as e:
@@ -195,8 +196,11 @@ After=local-fs.target
 
 [Service]
 Type=oneshot
+RemainAfterExit=no
 User=root
 Group=root
+TimeoutStartSec=7d
+TimeoutStopSec=4h
 {exec_condition}
 ExecStart=/usr/bin/python3 {scrub_script} {shlex.quote(directory)} {shlex.quote(database_path)} {shlex.quote(redundancy_value)} {shlex.quote(log_file)}
 StandardOutput=journal
@@ -243,8 +247,11 @@ After=local-fs.target
 
 [Service]
 Type=oneshot
+RemainAfterExit=no
 User=root
 Group=root
+TimeoutStartSec=48h
+TimeoutStopSec=2h
 {exec_condition_update}
 ExecStart=/usr/bin/python3 {scrub_script} {shlex.quote(directory)} {shlex.quote(database_path)} {shlex.quote(redundancy_value)} {shlex.quote(log_file)} --no-verify
 StandardOutput=journal
@@ -270,7 +277,8 @@ WantedBy=timers.target
         
         print(f"  ✓ Created parity update timer: {update_service_name}.timer (hourly)")
     
-    print(f"  ℹ Performing initial par2 creation (fast mode)...")
+    if not skip_initial_scrub:
+        print(f"  ℹ Performing initial par2 creation (fast mode)...")
     
     def perform_initial_par2():
         result = run(f"/usr/bin/python3 {scrub_script} {shlex.quote(directory)} {shlex.quote(database_path)} {shlex.quote(redundancy_value)} {shlex.quote(log_file)} --no-verify", check=False, capture_output=True)
@@ -287,13 +295,17 @@ WantedBy=timers.target
             logger.log_error("rollback_initial_par2_failed", str(e))
     
     try:
-        transaction.add_step(perform_initial_par2, rollback_initial_par2, "Initial par2 creation", "initial_par2_creation")
+        if not skip_initial_scrub:
+            transaction.add_step(perform_initial_par2, rollback_initial_par2, "Initial par2 creation", "initial_par2_creation")
         
         if not transaction.execute():
             logger.log_error("initial_par2_failed", "Initial par2 failed")
             transaction.rollback("Initial par2 failed")
         else:
-            logger.log_step("initial_par2", "completed", "Initial par2 successful")
+            if not skip_initial_scrub:
+                logger.log_step("initial_par2", "completed", "Initial par2 successful")
+            else:
+                logger.log_step("scrub_configured", "completed", "Scrub service configured (initial scrub skipped)")
         
         logger.complete("completed", "Scrub service configured")
         
@@ -314,4 +326,7 @@ WantedBy=timers.target
     logger.log_metric("directory_disk_usage_percent", dir_disk['usage_percent'], "percent")
     logger.log_metric("database_disk_usage_percent", db_disk['usage_percent'], "percent")
     
-    print(f"  ✓ Scrub configured: {directory} ({redundancy}, {frequency})")
+    if skip_initial_scrub:
+        print(f"  ✓ Scrub configured: {directory} ({redundancy}, {frequency}) - initial scrub skipped")
+    else:
+        print(f"  ✓ Scrub configured: {directory} ({redundancy}, {frequency})")

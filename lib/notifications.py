@@ -183,7 +183,9 @@ def send_setup_notification(
     host: str,
     success: bool,
     errors: Optional[list[str]] = None,
-    logger: Optional[Logger] = None
+    logger: Optional[Logger] = None,
+    friendly_name: Optional[str] = None,
+    started: bool = False
 ) -> bool:
     """Send a notification summarizing setup results.
 
@@ -194,6 +196,8 @@ def send_setup_notification(
         success: Whether setup completed successfully
         errors: Optional list of error messages encountered during setup
         logger: Optional logger for debugging
+        friendly_name: Optional friendly name for the host (from --name flag)
+        started: If True, send start notification instead of completion
 
     Returns:
         True if all notifications were sent successfully, False otherwise
@@ -202,20 +206,35 @@ def send_setup_notification(
     if not configs:
         return True
 
-    if success:
-        status: NotificationStatus = "good"
-        subject = f"Setup complete: {system_type} on {host}"
-        message = f"Setup of {system_type} on {host} completed successfully."
+    # Use friendly name if provided, otherwise use hostname
+    display_name = friendly_name if friendly_name else host
+    
+    if started:
+        status: NotificationStatus = "info"
+        subject = f"Setup starting: {system_type} on {display_name}"
+        message = f"Starting setup of {system_type} on {display_name}..."
+        details_parts = [f"System type: {system_type}", f"Host: {host}"]
+        if friendly_name:
+            details_parts.insert(1, f"Name: {friendly_name}")
+    elif success:
+        status = "good"
+        subject = f"Setup complete: {system_type} on {display_name}"
+        message = f"Setup of {system_type} on {display_name} completed successfully."
+        details_parts = [f"System type: {system_type}", f"Host: {host}"]
+        if friendly_name:
+            details_parts.insert(1, f"Name: {friendly_name}")
     else:
         status = "error"
-        subject = f"Setup failed: {system_type} on {host}"
-        message = f"Setup of {system_type} on {host} failed."
-
-    details_parts = [f"System type: {system_type}", f"Host: {host}"]
-    if errors:
-        details_parts.append(f"\nErrors ({len(errors)}):")
-        for error in errors:
-            details_parts.append(f"  - {error}")
+        subject = f"Setup failed: {system_type} on {display_name}"
+        message = f"Setup of {system_type} on {display_name} failed."
+        details_parts = [f"System type: {system_type}", f"Host: {host}"]
+        if friendly_name:
+            details_parts.insert(1, f"Name: {friendly_name}")
+        if errors:
+            details_parts.append(f"\nErrors ({len(errors)}):")
+            for error in errors:
+                details_parts.append(f"  - {error}")
+    
     details = "\n".join(details_parts)
 
     return send_notification(

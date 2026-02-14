@@ -71,6 +71,8 @@ class SetupConfig:
     sync_specs: Optional[NestedStrList] = None
     scrub_specs: Optional[NestedStrList] = None
     notify_specs: Optional[NestedStrList] = None
+    run_initial_sync: bool = False
+    run_initial_scrub: bool = False
     include_desktop: bool = False
     include_cli_tools: bool = False
     include_desktop_apps: bool = False
@@ -186,6 +188,12 @@ class SetupConfig:
             for notify_spec in self.notify_specs:
                 escaped_spec = ' '.join(shlex.quote(str(s)) for s in notify_spec)
                 args.append(f"--notify {escaped_spec}")
+        
+        if self.run_initial_sync:
+            args.append("--run-initial-sync")
+        
+        if self.run_initial_scrub:
+            args.append("--run-initial-scrub")
                 
         return args
     
@@ -442,6 +450,8 @@ class SetupConfig:
             sync_specs=getattr(args, 'sync_specs', None),
             scrub_specs=getattr(args, 'scrub_specs', None),
             notify_specs=getattr(args, 'notify_specs', None),
+            run_initial_sync=getattr(args, 'run_initial_sync', False),
+            run_initial_scrub=getattr(args, 'run_initial_scrub', False),
             include_desktop=include_desktop,
             include_cli_tools=include_cli_tools,
             include_desktop_apps=include_desktop_apps,

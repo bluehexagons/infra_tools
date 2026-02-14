@@ -147,6 +147,16 @@ def create_setup_argument_parser(
                        action="append", nargs=2, metavar=("TYPE", "TARGET"),
                        help="Configure notification target: TYPE (webhook|mailbox), TARGET (URL for webhook or email for mailbox). Sends alerts for important events (errors, warnings, successes). Can be used multiple times for multiple targets.")
     
+    parser.add_argument("--run-initial-sync", dest="run_initial_sync",
+                       action=argparse.BooleanOptionalAction if not for_remote else "store_true",
+                       default=None if not for_remote else False,
+                       help="Run initial sync during setup (default: false, sync will start on first timer trigger)")
+    
+    parser.add_argument("--run-initial-scrub", dest="run_initial_scrub",
+                       action=argparse.BooleanOptionalAction if not for_remote else "store_true",
+                       default=None if not for_remote else False,
+                       help="Run initial scrub during setup (default: false, scrub will start on first timer trigger)")
+    
     parser.add_argument("--dry-run", action="store_true",
                        help="Show what would be done without executing commands")
     
