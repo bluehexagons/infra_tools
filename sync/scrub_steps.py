@@ -29,6 +29,7 @@ from lib.task_utils import (
     check_path_on_smb_mount,
     ensure_directory
 )
+from lib.systemd_service import cleanup_service
 
 
 def install_par2(config: SetupConfig) -> None:
@@ -139,6 +140,12 @@ def create_scrub_service(config: SetupConfig, scrub_spec: Optional[list[str]] = 
                 raise ValueError(f"Service name '{service_name}' conflicts with existing service")
         
         logger.log_step("service_name_validation", "completed", f"Validated service name: {service_name}")
+        
+        # Clean up any existing service/timer with the same name before creating new ones
+        # For scrub, this includes both the main timer and the optional -update timer
+        cleanup_service(service_name)
+        cleanup_service(f"{service_name}-update")
+        logger.log_step("service_cleanup", "completed", f"Cleaned up existing service if present: {service_name}")
         
     except Exception as e:
         logger.log_error("scrub_setup_error", str(e))

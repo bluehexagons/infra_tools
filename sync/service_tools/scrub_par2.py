@@ -17,7 +17,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, Any
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
 from lib.logging_utils import get_rotating_logger, log_message
 from lib.operation_log import create_operation_logger

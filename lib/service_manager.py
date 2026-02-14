@@ -5,12 +5,13 @@ import os
 import re
 import secrets
 import time
+import shlex
 from typing import Optional, Any, Callable
 
 from lib.config import SetupConfig
 from lib.remote_utils import run
 from lib.validation import validate_service_name_uniqueness
-
+from lib.systemd_service import cleanup_service
 
 
 class ServiceManager:
@@ -76,6 +77,9 @@ class ServiceManager:
         if not self.validate_service_uniqueness(service_name):
             raise ValueError(f"Service name '{service_name}' already exists or is invalid")
         
+        # Clean up existing service before creating new one
+        cleanup_service(service_name)
+        
         service_content = self._generate_backup_service_template(service_config)
         service_file = f"/etc/systemd/system/{service_name}.service"
         
@@ -124,6 +128,9 @@ class ServiceManager:
         if not self.validate_service_uniqueness(service_name):
             raise ValueError(f"Service name '{service_name}' already exists or is invalid")
         
+        # Clean up existing service before creating new one
+        cleanup_service(service_name)
+        
         service_content = self._generate_scrub_service_template(service_config)
         service_file = f"/etc/systemd/system/{service_name}.service"
         
@@ -168,6 +175,9 @@ class ServiceManager:
         
         if not self.validate_service_uniqueness(service_name):
             raise ValueError(f"Service name '{service_name}' already exists or is invalid")
+        
+        # Clean up existing service before creating new one
+        cleanup_service(service_name)
         
         service_content = self._generate_sync_service_template(service_config)
         service_file = f"/etc/systemd/system/{service_name}.service"
