@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import os
+import shlex
 from typing import Optional
 
 from lib.config import SetupConfig
 from lib.remote_utils import run, is_service_active
+from lib.systemd_service import cleanup_service
 
 
 def _configure_auto_update_systemd(
@@ -27,10 +29,8 @@ def _configure_auto_update_systemd(
     service_file = f"/etc/systemd/system/{service_name}.service"
     timer_file = f"/etc/systemd/system/{service_name}.timer"
 
-    if os.path.exists(service_file) and os.path.exists(timer_file):
-        if is_service_active(f"{service_name}.timer"):
-            print(f"  ✓ {check_name} auto-update already configured")
-            return
+    # Clean up any existing service/timer before creating new ones
+    cleanup_service(service_name)
 
     script_path = f"/opt/infra_tools/web/service_tools/{script_name}"
     

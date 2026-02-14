@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 from lib.config import SetupConfig
 from lib.remote_utils import run
+from lib.systemd_service import cleanup_systemd_unit
 
 
 def parse_smb_mount_spec(mount_spec: Optional[list[str]]) -> dict[str, Any]:
@@ -96,6 +97,9 @@ password={password}
         return value.replace("\\", "\\\\").replace("\n", " ").replace('"', "'")
     
     escaped_desc = _escape_systemd_description(mountpoint)
+    
+    # Clean up existing mount unit before creating new one
+    cleanup_systemd_unit(unit_name, "mount")
     
     unit_content = f"""[Unit]
 Description=SMB mount for {escaped_desc}

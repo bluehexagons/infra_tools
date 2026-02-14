@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import os
+import shlex
 
 from lib.config import SetupConfig
 from lib.machine_state import can_modify_kernel, is_container
 from lib.remote_utils import run, is_service_active, file_contains
+from lib.systemd_service import cleanup_service
 
 
 def create_remoteusers_group(config: SetupConfig) -> None:
@@ -253,13 +255,12 @@ def configure_firewall_ssh_only(config: SetupConfig) -> None:
 
 def configure_auto_restart(config: SetupConfig) -> None:
     """Configure automatic restart at 2 AM when updates require it."""
-    service_file = "/etc/systemd/system/auto-restart-if-needed.service"
-    timer_file = "/etc/systemd/system/auto-restart-if-needed.timer"
+    service_name = "auto-restart-if-needed"
+    service_file = f"/etc/systemd/system/{service_name}.service"
+    timer_file = f"/etc/systemd/system/{service_name}.timer"
     
-    if os.path.exists(service_file) and os.path.exists(timer_file):
-        if is_service_active("auto-restart-if-needed.timer"):
-            print("  ✓ Automatic restart service already configured")
-            return
+    # Clean up any existing service/timer before creating new ones
+    cleanup_service(service_name)
     
     script_path = "/opt/infra_tools/common/service_tools/auto_restart_if_needed.py"
     
