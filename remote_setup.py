@@ -16,6 +16,7 @@ from lib.notifications import send_setup_notification
 from lib.remote_utils import validate_username, detect_os, set_dry_run
 from lib.progress import progress_bar
 from lib.system_types import get_steps_for_system_type
+from lib.systemd_service import cleanup_all_infra_services
 from typing import Optional
 from lib.types import Deployments 
 
@@ -93,6 +94,13 @@ def main() -> int:
         save_setup_config(config_dict)
     except OSError as e:
         print(f"Warning: Failed to save setup configuration: {e}", file=sys.stderr)
+    
+    # Clean up all previously deployed services to ensure clean state
+    # This treats the current deployment command as the desired baseline
+    print("\nCleaning up existing infra_tools services...")
+    sys.stdout.flush()
+    cleanup_all_infra_services(dry_run=args.dry_run)
+    sys.stdout.flush()
 
     steps = get_steps_for_system_type(config)
     
