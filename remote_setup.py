@@ -129,6 +129,7 @@ def main() -> int:
                     host=config.host,
                     success=False,
                     errors=setup_errors,
+                    friendly_name=config.friendly_name,
                 )
             raise
     
@@ -384,6 +385,7 @@ def main() -> int:
             system_type=config.system_type,
             host=config.host,
             success=True,
+            friendly_name=config.friendly_name,
         )
     
     return 0

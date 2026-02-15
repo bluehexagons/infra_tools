@@ -185,6 +185,75 @@ class TestSendSetupNotification(unittest.TestCase):
         self.assertIn('server_lite', notification.details)
         self.assertIn('localhost', notification.details)
 
+    @patch('lib.notifications.NotificationSender.send')
+    def test_friendly_name_in_success_subject(self, mock_send):
+        mock_send.return_value = True
+        send_setup_notification(
+            notify_specs=[['webhook', 'https://example.com/hook']],
+            system_type='server_lite',
+            host='192.168.0.33',
+            success=True,
+            friendly_name='scrapbox',
+        )
+        notification = mock_send.call_args[0][0]
+        self.assertIn('scrapbox', notification.subject)
+        self.assertIn('192.168.0.33', notification.subject)
+        self.assertIn('scrapbox', notification.message)
+
+    @patch('lib.notifications.NotificationSender.send')
+    def test_friendly_name_in_failure_subject(self, mock_send):
+        mock_send.return_value = True
+        send_setup_notification(
+            notify_specs=[['webhook', 'https://example.com/hook']],
+            system_type='server_lite',
+            host='192.168.0.33',
+            success=False,
+            errors=['Step failed'],
+            friendly_name='scrapbox',
+        )
+        notification = mock_send.call_args[0][0]
+        self.assertIn('scrapbox', notification.subject)
+        self.assertIn('failed', notification.subject)
+
+    @patch('lib.notifications.NotificationSender.send')
+    def test_friendly_name_in_details(self, mock_send):
+        mock_send.return_value = True
+        send_setup_notification(
+            notify_specs=[['webhook', 'https://example.com/hook']],
+            system_type='server_lite',
+            host='localhost',
+            success=True,
+            friendly_name='mybox',
+        )
+        notification = mock_send.call_args[0][0]
+        self.assertIn('Name: mybox', notification.details)
+
+    @patch('lib.notifications.NotificationSender.send')
+    def test_no_friendly_name_no_name_in_details(self, mock_send):
+        mock_send.return_value = True
+        send_setup_notification(
+            notify_specs=[['webhook', 'https://example.com/hook']],
+            system_type='server_lite',
+            host='localhost',
+            success=True,
+        )
+        notification = mock_send.call_args[0][0]
+        self.assertNotIn('Name:', notification.details)
+
+    @patch('lib.notifications.NotificationSender.send')
+    def test_no_friendly_name_host_only_in_subject(self, mock_send):
+        mock_send.return_value = True
+        send_setup_notification(
+            notify_specs=[['webhook', 'https://example.com/hook']],
+            system_type='server_lite',
+            host='10.0.0.1',
+            success=True,
+        )
+        notification = mock_send.call_args[0][0]
+        self.assertIn('10.0.0.1', notification.subject)
+        # Should not have parentheses around host when no friendly_name
+        self.assertNotIn('(', notification.subject)
+
 
 if __name__ == '__main__':
     unittest.main()

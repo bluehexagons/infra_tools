@@ -6,6 +6,7 @@ import re
 from typing import Optional, Any
 
 from lib.config import SetupConfig
+from lib.mount_utils import is_path_under_mnt, get_mount_ancestor
 from lib.remote_utils import run, is_package_installed
 
 
@@ -85,6 +86,54 @@ def create_samba_user(username: str, password: str) -> None:
     run(f"smbpasswd -e {safe_username}", check=False)
 
 
+def _get_veto_dirs_for_share(share_path: str, config: SetupConfig) -> list[str]:
+    """Determine which internal directories should be hidden from a Samba share.
+    
+    Checks scrub specs to find database directories that are subdirectories of
+    the share path. These should be hidden from Samba clients via veto files.
+    
+    Args:
+        share_path: The primary path of the Samba share
+        config: SetupConfig with scrub_specs
+        
+    Returns:
+        List of directory basenames to veto (e.g. ['.pardatabase'])
+    """
+    veto_dirs: list[str] = []
+    
+    if not config.scrub_specs:
+        return veto_dirs
+    
+    normalized_share = os.path.normpath(share_path)
+    
+    for spec in config.scrub_specs:
+        if len(spec) < 2:
+            continue
+        scrub_dir = os.path.normpath(spec[0])
+        db_path = spec[1]
+        
+        # Only relevant if the scrub directory matches or is under the share path
+        if scrub_dir != normalized_share and not scrub_dir.startswith(normalized_share + '/'):
+            continue
+        
+        # Resolve relative database path against the scrub directory
+        if not db_path.startswith('/'):
+            resolved_db = os.path.normpath(os.path.join(scrub_dir, db_path))
+        else:
+            resolved_db = os.path.normpath(db_path)
+        
+        # Check if the resolved database path is under the share path
+        if resolved_db.startswith(normalized_share + '/'):
+            # Extract the directory basename relative to share
+            relative = os.path.relpath(resolved_db, normalized_share)
+            # Only veto top-level directories within the share
+            top_level = relative.split('/')[0]
+            if top_level and top_level not in veto_dirs:
+                veto_dirs.append(top_level)
+    
+    return veto_dirs
+
+
 def setup_samba_share(config: SetupConfig, share_spec: Optional[list[str]] = None, **_ : Any) -> None:
     share_config = parse_share_spec(share_spec)
 
@@ -102,6 +151,13 @@ def setup_samba_share(config: SetupConfig, share_spec: Optional[list[str]] = Non
     primary_path = paths[0]
 
     for path in paths:
+        if is_path_under_mnt(path):
+            mount_ancestor = get_mount_ancestor(path)
+            if not mount_ancestor:
+                raise RuntimeError(
+                    f"Share path {path} is under /mnt but no mounted filesystem found. "
+                    f"Is the drive mounted?"
+                )
         os.makedirs(path, exist_ok=True)
 
     if len(paths) > 1:
@@ -159,6 +215,16 @@ def setup_samba_share(config: SetupConfig, share_spec: Optional[list[str]] = Non
         f"   force group = {group_name}",
     ])
 
+    # Veto internal directories that should not be visible to Samba clients.
+    # Detect scrub database directories that fall within this share's path.
+    veto_dirs = _get_veto_dirs_for_share(primary_path, config)
+    if veto_dirs:
+        veto_pattern = "/".join(f".{d}/" if not d.startswith('.') else f"{d}/" for d in veto_dirs)
+        veto_pattern = f"/{veto_pattern}"
+        share_lines.append(f"   veto files = {veto_pattern}")
+        share_lines.append("   delete veto files = no")
+        print(f"  Hiding internal directories from share: {', '.join(veto_dirs)}")
+
     desired_section = "\n" + "\n".join(share_lines) + "\n"
 
     if not os.path.exists(smb_conf):
@@ -184,7 +250,9 @@ def setup_samba_share(config: SetupConfig, share_spec: Optional[list[str]] = Non
 
     result = run("testparm -s", check=False)
     if result.returncode != 0:
-        print("  Warning: Samba configuration may have errors")
+        print("  ✗ Samba configuration has errors, skipping reload")
+        print("  Fix the configuration and run 'systemctl reload smbd' manually")
+        return
 
     run("systemctl reload smbd")
     print(f"  ✓ Share configured: {share_name}_{access_type} -> {primary_path}")

@@ -185,7 +185,7 @@ def run_sync(source: str, destination: str, logger) -> tuple[bool, str]:
     logger.info(f"Starting sync: {source} -> {destination}")
     
     try:
-        result = run_rsync_with_notifications(source, destination)
+        result = run_rsync_with_notifications(source, destination, suppress_notifications=True)
         return result == 0, f"Sync completed with exit code {result}"
     except Exception as e:
         logger.error(f"Sync failed: {e}")
@@ -209,7 +209,7 @@ def run_scrub(directory: str, database: str, redundancy: str, verify: bool, logg
     
     try:
         redundancy_int = int(redundancy.rstrip('%'))
-        scrub_directory(directory, database, redundancy_int, log_file, verify)
+        scrub_directory(directory, database, redundancy_int, log_file, verify, suppress_notifications=True)
         return True, f"Scrub completed for {directory}"
     except ValueError as e:
         error_msg = f"Invalid redundancy value '{redundancy}': {e}"
@@ -368,12 +368,14 @@ def execute_storage_operations() -> dict:
     
     # Send notification if configured
     if notification_configs:
-        send_operation_notification(results, notification_configs, logger)
+        send_operation_notification(results, notification_configs, logger, 
+                                   friendly_name=config.friendly_name)
     
     return results
 
 
-def send_operation_notification(results: dict, notification_configs: list, logger) -> None:
+def send_operation_notification(results: dict, notification_configs: list, logger, 
+                                friendly_name: str | None = None) -> None:
     """Send summary notification for operations."""
     success_count = sum(1 for s in results["syncs"] if s.get("success"))
     total_syncs = len(results["syncs"])
@@ -384,12 +386,14 @@ def send_operation_notification(results: dict, notification_configs: list, logge
     parity_success_count = sum(1 for s in results["parity_updates"] if s.get("success"))
     total_parity = len(results["parity_updates"])
     
+    name_prefix = f"[{friendly_name}] " if friendly_name else ""
+    
     if results["success"]:
         status = "good"
-        subject = "Storage operations completed"
+        subject = f"{name_prefix}Storage operations completed"
     else:
         status = "error"
-        subject = "Storage operations completed with errors"
+        subject = f"{name_prefix}Storage operations completed with errors"
     
     message = f"Syncs: {success_count}/{total_syncs}, Scrubs: {scrub_success_count}/{total_scrubs}, Parity updates: {parity_success_count}/{total_parity}"
     

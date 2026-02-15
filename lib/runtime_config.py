@@ -21,6 +21,7 @@ class RuntimeConfig:
 
     Attributes:
         username: System user for file operations
+        friendly_name: Human-readable name for this system (e.g. 'scrapbox')
         sync_specs: List of sync specifications [source, dest, interval]
         scrub_specs: List of scrub specifications [dir, db, redundancy, freq]
         notify_specs: List of notification specifications [type, target]
@@ -30,6 +31,7 @@ class RuntimeConfig:
     sync_specs: list[list[str]]
     scrub_specs: list[list[str]]
     notify_specs: list[list[str]]
+    friendly_name: Optional[str] = None
     smb_mounts: Optional[list[list[str]]] = None
 
     @classmethod
@@ -47,6 +49,7 @@ class RuntimeConfig:
             sync_specs=data.get("sync_specs") or [],
             scrub_specs=data.get("scrub_specs") or [],
             notify_specs=data.get("notify_specs") or [],
+            friendly_name=data.get("friendly_name"),
             smb_mounts=data.get("smb_mounts"),
         )
 
@@ -65,6 +68,7 @@ class RuntimeConfig:
             sync_specs=config.sync_specs or [],
             scrub_specs=config.scrub_specs or [],
             notify_specs=config.notify_specs or [],
+            friendly_name=getattr(config, 'friendly_name', None),
             smb_mounts=config.smb_mounts,
         )
 
@@ -76,6 +80,7 @@ class RuntimeConfig:
         """
         return {
             "username": self.username,
+            "friendly_name": self.friendly_name,
             "sync_specs": self.sync_specs,
             "scrub_specs": self.scrub_specs,
             "notify_specs": self.notify_specs,

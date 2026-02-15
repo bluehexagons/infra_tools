@@ -31,6 +31,9 @@ def create_setup_argument_parser(
     if not for_remote:
         parser.add_argument("--name", dest="friendly_name", help="Friendly name for this configuration")
         parser.add_argument("--tags", dest="tags", help="Comma-separated list of tags for this configuration")
+    else:
+        parser.add_argument("--name", dest="friendly_name", default=None,
+                           help="Friendly name for this configuration")
     
     if for_remote:
         parser.add_argument("--system-type", dest="system_type", 

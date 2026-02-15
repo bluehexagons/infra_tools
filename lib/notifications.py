@@ -218,6 +218,7 @@ def send_setup_notification(
     host: str,
     success: bool,
     errors: Optional[list[str]] = None,
+    friendly_name: Optional[str] = None,
     logger: Optional[Logger] = None
 ) -> bool:
     """Send a notification summarizing setup results.
@@ -228,6 +229,7 @@ def send_setup_notification(
         host: The host that was set up
         success: Whether setup completed successfully
         errors: Optional list of error messages encountered during setup
+        friendly_name: Optional human-readable name for this system
         logger: Optional logger for debugging
 
     Returns:
@@ -237,16 +239,21 @@ def send_setup_notification(
     if not configs:
         return True
 
+    # Build a descriptive identifier: prefer friendly_name, fall back to host
+    identifier = f"{friendly_name} ({host})" if friendly_name else host
+
     if success:
         status: NotificationStatus = "good"
-        subject = f"Setup complete: {system_type} on {host}"
-        message = f"Setup of {system_type} on {host} completed successfully."
+        subject = f"Setup complete: {system_type} on {identifier}"
+        message = f"Setup of {system_type} on {identifier} completed successfully."
     else:
         status = "error"
-        subject = f"Setup failed: {system_type} on {host}"
-        message = f"Setup of {system_type} on {host} failed."
+        subject = f"Setup failed: {system_type} on {identifier}"
+        message = f"Setup of {system_type} on {identifier} failed."
 
     details_parts = [f"System type: {system_type}", f"Host: {host}"]
+    if friendly_name:
+        details_parts.append(f"Name: {friendly_name}")
     if errors:
         details_parts.append(f"\nErrors ({len(errors)}):")
         for error in errors:

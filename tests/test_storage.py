@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 import subprocess
 
 import lib.task_utils as tu
-from smb.samba_steps import parse_share_spec
+from smb.samba_steps import parse_share_spec, _get_veto_dirs_for_share
 from smb.smb_mount_steps import parse_smb_mount_spec
 from sync.sync_steps import parse_sync_spec
 from sync.scrub_steps import parse_scrub_spec
@@ -605,6 +605,115 @@ class TestRuntimeConfig(unittest.TestCase):
         self.assertEqual(result["username"], "testuser")
         self.assertEqual(result["sync_specs"], [["/src", "/dst", "daily"]])
         self.assertEqual(result["smb_mounts"], None)
+
+    def test_friendly_name_from_dict(self):
+        from lib.runtime_config import RuntimeConfig
+        config = RuntimeConfig.from_dict({
+            "username": "test",
+            "friendly_name": "scrapbox",
+        })
+        self.assertEqual(config.friendly_name, "scrapbox")
+
+    def test_friendly_name_from_dict_missing(self):
+        from lib.runtime_config import RuntimeConfig
+        config = RuntimeConfig.from_dict({"username": "test"})
+        self.assertIsNone(config.friendly_name)
+
+    def test_friendly_name_in_to_dict(self):
+        from lib.runtime_config import RuntimeConfig
+        config = RuntimeConfig(
+            username="test",
+            sync_specs=[],
+            scrub_specs=[],
+            notify_specs=[],
+            friendly_name="mybox",
+        )
+        result = config.to_dict()
+        self.assertEqual(result["friendly_name"], "mybox")
+
+
+# ---------------------------------------------------------------------------
+# _get_veto_dirs_for_share
+# ---------------------------------------------------------------------------
+
+class TestGetVetoDirsForShare(unittest.TestCase):
+    def _make_config(self, **kwargs):
+        defaults = dict(host='testhost', username='testuser', system_type='server_lite')
+        defaults.update(kwargs)
+        return SetupConfig(**defaults)
+
+    def test_no_scrub_specs(self):
+        config = self._make_config(scrub_specs=None)
+        result = _get_veto_dirs_for_share('/mnt/data/store', config)
+        self.assertEqual(result, [])
+
+    def test_scrub_db_under_share_path(self):
+        """When scrub directory matches share path and db is relative, veto the db dir."""
+        config = self._make_config(scrub_specs=[
+            ['/mnt/data/store', '.pardatabase', '5%', 'monthly']
+        ])
+        result = _get_veto_dirs_for_share('/mnt/data/store', config)
+        self.assertEqual(result, ['.pardatabase'])
+
+    def test_scrub_db_absolute_under_share(self):
+        """When scrub db is an absolute path under the share."""
+        config = self._make_config(scrub_specs=[
+            ['/mnt/data/store', '/mnt/data/store/.pardb', '5%', 'monthly']
+        ])
+        result = _get_veto_dirs_for_share('/mnt/data/store', config)
+        self.assertEqual(result, ['.pardb'])
+
+    def test_scrub_db_outside_share(self):
+        """When scrub db is outside the share path, no veto."""
+        config = self._make_config(scrub_specs=[
+            ['/mnt/other', '.pardatabase', '5%', 'monthly']
+        ])
+        result = _get_veto_dirs_for_share('/mnt/data/store', config)
+        self.assertEqual(result, [])
+
+    def test_multiple_scrub_specs_same_share(self):
+        """Multiple scrub specs matching the same share."""
+        config = self._make_config(scrub_specs=[
+            ['/mnt/data/store', '.pardatabase', '5%', 'monthly'],
+            ['/mnt/data/store', '.checksums', '3%', 'weekly'],
+        ])
+        result = _get_veto_dirs_for_share('/mnt/data/store', config)
+        self.assertEqual(result, ['.pardatabase', '.checksums'])
+
+    def test_no_duplicates(self):
+        """Same db name from different specs should only appear once."""
+        config = self._make_config(scrub_specs=[
+            ['/mnt/data/store', '.pardatabase', '5%', 'monthly'],
+            ['/mnt/data/store', '.pardatabase', '3%', 'weekly'],
+        ])
+        result = _get_veto_dirs_for_share('/mnt/data/store', config)
+        self.assertEqual(result, ['.pardatabase'])
+
+    def test_scrub_spec_too_short(self):
+        """Scrub spec with fewer than 2 elements is skipped."""
+        config = self._make_config(scrub_specs=[
+            ['/mnt/data/store'],
+        ])
+        result = _get_veto_dirs_for_share('/mnt/data/store', config)
+        self.assertEqual(result, [])
+
+    def test_scrub_dir_is_subdir_of_share(self):
+        """When scrub directory is a subdirectory of the share."""
+        config = self._make_config(scrub_specs=[
+            ['/mnt/data/store/subdir', '.pardatabase', '5%', 'monthly']
+        ])
+        result = _get_veto_dirs_for_share('/mnt/data/store', config)
+        # The db resolves to /mnt/data/store/subdir/.pardatabase
+        # Top-level relative to share is 'subdir'
+        self.assertEqual(result, ['subdir'])
+
+    def test_absolute_db_not_under_share(self):
+        """Absolute db path not under the share should not be vetoed."""
+        config = self._make_config(scrub_specs=[
+            ['/mnt/data/store', '/var/lib/pardb', '5%', 'monthly']
+        ])
+        result = _get_veto_dirs_for_share('/mnt/data/store', config)
+        self.assertEqual(result, [])
 
 
 if __name__ == '__main__':

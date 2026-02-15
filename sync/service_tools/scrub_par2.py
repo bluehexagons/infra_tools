@@ -322,7 +322,7 @@ def verify_repair(file_path: str, directory: str, database: str, log_file: str) 
             return False
 
 
-def scrub_directory(directory: str, database: str, redundancy: int, log_file: str, verify: bool = True) -> None:
+def scrub_directory(directory: str, database: str, redundancy: int, log_file: str, verify: bool = True, suppress_notifications: bool = False) -> None:
     """Scrub directory: create par2 files and optionally verify/repair.
     
     Args:
@@ -331,18 +331,23 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
         redundancy: Redundancy percentage
         log_file: Log file path
         verify: Whether to verify and repair (False for fast initial creation)
+        suppress_notifications: If True, skip sending notifications (caller will handle)
     """
     # Load notification configs from machine state
     notification_configs = []
-    try:
-        from lib.machine_state import load_setup_config
-        from lib.notifications import parse_notification_args
-        setup_config = load_setup_config()
-        if setup_config and 'notify_specs' in setup_config:
-            notification_configs = parse_notification_args(setup_config['notify_specs'])
-    except (ImportError, OSError, ValueError, KeyError, TypeError) as e:
-        # If notification loading fails, just log and continue without notifications
-        log(f"Warning: Failed to load notification configs: {e}", log_file)
+    friendly_name = None
+    if not suppress_notifications:
+        try:
+            from lib.machine_state import load_setup_config
+            from lib.notifications import parse_notification_args
+            setup_config = load_setup_config()
+            if setup_config:
+                if 'notify_specs' in setup_config:
+                    notification_configs = parse_notification_args(setup_config['notify_specs'])
+                friendly_name = setup_config.get('friendly_name')
+        except (ImportError, OSError, ValueError, KeyError, TypeError) as e:
+            # If notification loading fails, just log and continue without notifications
+            log(f"Warning: Failed to load notification configs: {e}", log_file)
     
     # Enhanced logging with operation logger
     operation_logger = create_operation_logger(
@@ -492,6 +497,7 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
         if notification_configs:
             try:
                 from lib.notifications import send_notification
+                name_prefix = f"[{friendly_name}] " if friendly_name else ""
                 status = "warning" if files_repaired > 0 else "good"
                 message = f"Processed {files_processed} files"
                 if files_updated > 0:
@@ -515,7 +521,7 @@ Redundancy: {redundancy}%
                 notif_logger = _LOGGERS.get(log_file)
                 send_notification(
                     notification_configs,
-                    subject=f"{'Warning' if files_repaired > 0 else 'Success'}: Scrub completed",
+                    subject=f"{name_prefix}{'Warning' if files_repaired > 0 else 'Success'}: Scrub completed",
                     job="scrub",
                     status=status,
                     message=message,
@@ -533,11 +539,12 @@ Redundancy: {redundancy}%
         if notification_configs:
             try:
                 from lib.notifications import send_notification
+                name_prefix = f"[{friendly_name}] " if friendly_name else ""
                 # Reuse existing logger from _LOGGERS cache
                 notif_logger = _LOGGERS.get(log_file)
                 send_notification(
                     notification_configs,
-                    subject="Error: Scrub failed",
+                    subject=f"{name_prefix}Error: Scrub failed",
                     job="scrub",
                     status="error",
                     message=f"Scrub failed for {directory}: {str(e)}",
