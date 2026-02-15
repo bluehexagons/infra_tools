@@ -13,7 +13,8 @@ from lib.config import SetupConfig
 from lib.display import print_setup_summary
 from lib.machine_state import save_machine_state, save_setup_config
 from lib.notifications import send_setup_notification
-from lib.remote_utils import validate_username, detect_os, set_dry_run
+from lib.remote_utils import detect_os, set_dry_run
+from lib.validators import validate_username
 from lib.progress import progress_bar
 from lib.system_types import get_steps_for_system_type
 from lib.systemd_service import cleanup_all_infra_services

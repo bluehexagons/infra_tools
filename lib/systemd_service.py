@@ -5,10 +5,8 @@ import os
 import secrets
 import re
 import shlex
-import sys
 from typing import Optional
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from lib.remote_utils import run
 
 

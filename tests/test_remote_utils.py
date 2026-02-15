@@ -14,11 +14,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from lib.remote_utils import (
     set_dry_run,
     is_dry_run,
-    validate_username,
     generate_password,
     run,
     file_contains,
 )
+from lib.validators import validate_username
 
 
 class TestDryRun(unittest.TestCase):

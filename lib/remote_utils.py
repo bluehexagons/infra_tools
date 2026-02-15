@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 import secrets
 import shlex
 import string
@@ -23,11 +22,6 @@ def set_dry_run(enabled: bool) -> None:
 def is_dry_run() -> bool:
     """Check if dry-run mode is enabled."""
     return _dry_run
-
-
-def validate_username(username: str) -> bool:
-    pattern = r'^[a-z_][a-z0-9_-]{0,31}$'
-    return bool(re.match(pattern, username))
 
 
 def generate_password(length: int = 16) -> str:

@@ -10,10 +10,8 @@ import socket
 import sys
 from typing import Optional, Any
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from lib.remote_utils import run
-
-from .deploy_utils import (
+from lib.deploy_utils import (
     create_safe_directory_name,
     detect_project_type,
     get_project_root,
@@ -21,7 +19,7 @@ from .deploy_utils import (
     save_deployment_metadata,
     should_redeploy
 )
-from .systemd_service import create_rails_service
+from lib.systemd_service import create_rails_service
 
 
 class DeploymentOrchestrator:

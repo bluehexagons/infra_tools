@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import shutil
+from lib.types import BYTES_PER_MB
 
 # Note: os/subprocess/Path not used directly in this module - removed to keep strict checks clean
 
@@ -17,7 +18,7 @@ def get_free_disk_mb(path: str = "/") -> int:
     """
     try:
         stat = shutil.disk_usage(path)
-        return stat.free // (1024 * 1024)  # Convert to MB
+        return stat.free // BYTES_PER_MB  # Convert to MB
     except (OSError, AttributeError) as e:
         print(f"Error getting disk space for {path}: {e}")
         return 0
@@ -34,7 +35,7 @@ def get_total_disk_mb(path: str = "/") -> int:
     """
     try:
         stat = shutil.disk_usage(path)
-        return stat.total // (1024 * 1024)  # Convert to MB
+        return stat.total // BYTES_PER_MB  # Convert to MB
     except (OSError, AttributeError) as e:
         print(f"Error getting total disk space for {path}: {e}")
         return 0
@@ -52,9 +53,9 @@ def get_disk_usage_details(path: str) -> dict[str, int]:
     try:
         stat = shutil.disk_usage(path)
         return {
-            'total_mb': stat.total // (1024 * 1024),
-            'used_mb': stat.used // (1024 * 1024),
-            'free_mb': stat.free // (1024 * 1024),
+            'total_mb': stat.total // BYTES_PER_MB,
+            'used_mb': stat.used // BYTES_PER_MB,
+            'free_mb': stat.free // BYTES_PER_MB,
             'usage_percent': int((stat.used / stat.total) * 100) if stat.total > 0 else 0
         }
     except (OSError, AttributeError) as e:

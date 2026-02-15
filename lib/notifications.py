@@ -177,6 +177,36 @@ def parse_notification_args(notify_args: Optional[list[list[str]]]) -> list[Noti
     return configs
 
 
+def load_notification_configs_from_state(logger: Optional[Logger] = None) -> list[NotificationConfig]:
+    """Load notification configs from saved machine state.
+    
+    This helper loads notification configurations that were previously saved during
+    setup, allowing service tools to use the same notification targets without
+    re-parsing command-line arguments.
+    
+    Args:
+        logger: Optional logger for debugging
+    
+    Returns:
+        List of NotificationConfig objects, empty list if state not found or parsing fails
+    
+    Example:
+        # In a service tool (e.g., auto_update_node.py)
+        configs = load_notification_configs_from_state(logger)
+        sender = NotificationSender(configs, logger=logger)
+    """
+    try:
+        from lib.machine_state import load_setup_config
+        setup_config = load_setup_config()
+        if setup_config and 'notify_specs' in setup_config:
+            return parse_notification_args(setup_config['notify_specs'])
+    except Exception as e:
+        if logger:
+            logger.warning(f"Failed to load notification configs from machine state: {e}")
+    
+    return []
+
+
 def send_setup_notification(
     notify_specs: Optional[list[list[str]]],
     system_type: str,
