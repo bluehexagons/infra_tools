@@ -110,8 +110,6 @@ def cleanup_all_infra_services(dry_run: bool = False) -> None:
         cleanup_all_infra_services(dry_run=True)
     """
     systemd_dir = "/etc/systemd/system"
-    auto_update_services = ("auto-update-ruby", "auto-update-node")
-    
     # Patterns for infra_tools-created units
     # These patterns match services, timers, and mounts created by various components
     infra_patterns = [
@@ -131,8 +129,10 @@ def cleanup_all_infra_services(dry_run: bool = False) -> None:
         # Rails app services
         r"^rails-.*\.service$",
         # Auto-update timers
-        *[f"^{re.escape(name)}\\.service$" for name in auto_update_services],
-        *[f"^{re.escape(name)}\\.timer$" for name in auto_update_services],
+        r"^auto-update-ruby\.service$",
+        r"^auto-update-ruby\.timer$",
+        r"^auto-update-node\.service$",
+        r"^auto-update-node\.timer$",
         # Auto-restart service
         r"^auto-restart-if-needed\.service$",
         r"^auto-restart-if-needed\.timer$",
