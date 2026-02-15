@@ -205,6 +205,8 @@ def get_mount_points_from_config(config: SetupConfig) -> set[str]:
                 # Derive expected mount root for unmounted paths under /mnt:
                 # e.g. /mnt/data/source -> /mnt/data
                 parts = path.split('/')
+                # '/mnt/data/source'.split('/') -> ['', 'mnt', 'data', 'source']
+                # so index 2 is the expected top-level mount directory name.
                 if len(parts) >= 3 and parts[2]:
                     mount_points.add(f"/mnt/{parts[2]}")
 

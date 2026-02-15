@@ -62,31 +62,36 @@ class OperationLock:
         
         # Open without truncation so a failed lock attempt doesn't modify the file.
         self.lock_file = open(self.lock_path, 'a+')
-        
-        if blocking:
-            start_time = time.time()
-            while True:
+        try:
+            if blocking:
+                start_time = time.time()
+                while True:
+                    try:
+                        fcntl.flock(self.lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        self.acquired = True
+                        return True
+                    except (IOError, OSError):
+                        if time.time() - start_time >= timeout:
+                            if self.lock_file:
+                                self.lock_file.close()
+                                self.lock_file = None
+                            return False
+                        time.sleep(1.0)
+            else:
                 try:
                     fcntl.flock(self.lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                     self.acquired = True
                     return True
                 except (IOError, OSError):
-                    if time.time() - start_time >= timeout:
-                        if self.lock_file:
-                            self.lock_file.close()
-                            self.lock_file = None
-                        return False
-                    time.sleep(1.0)
-        else:
-            try:
-                fcntl.flock(self.lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                self.acquired = True
-                return True
-            except (IOError, OSError):
-                if self.lock_file:
-                    self.lock_file.close()
-                    self.lock_file = None
-                return False
+                    if self.lock_file:
+                        self.lock_file.close()
+                        self.lock_file = None
+                    return False
+        except Exception:
+            if self.lock_file:
+                self.lock_file.close()
+                self.lock_file = None
+            raise
     
     def release(self) -> None:
         """Release lock and cleanup."""
