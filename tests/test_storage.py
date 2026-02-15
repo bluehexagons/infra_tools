@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 # Ensure project root is on the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -13,7 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 import subprocess
 
 import lib.task_utils as tu
-from smb.samba_steps import parse_share_spec
+from smb.samba_steps import parse_share_spec, _get_veto_dirs_for_share
 from smb.smb_mount_steps import parse_smb_mount_spec
 from sync.sync_steps import parse_sync_spec
 from sync.scrub_steps import parse_scrub_spec
@@ -23,6 +24,7 @@ from lib.task_utils import (
     escape_systemd_description,
     check_path_on_smb_mount,
     ensure_directory,
+    get_mount_points_from_config,
     VALID_FREQUENCIES,
 )
 from lib.validation import (
@@ -133,7 +135,7 @@ class TestParseSyncSpec(unittest.TestCase):
 
     def test_invalid_frequency(self):
         with self.assertRaises(ValueError):
-            parse_sync_spec(['/a', '/b', 'biweekly'])
+            parse_sync_spec(['/a', '/b', 'yearly'])
 
     def test_relative_source(self):
         with self.assertRaises(ValueError):
@@ -221,6 +223,18 @@ class TestGetTimerCalendar(unittest.TestCase):
         result = get_timer_calendar('monthly')
         self.assertIn('-01', result)
 
+    def test_biweekly(self):
+        result = get_timer_calendar('biweekly')
+        self.assertIn('Mon', result)
+        # Biweekly runs weekly; orchestrator handles 14-day interval
+        self.assertNotIn('1,15', result)
+
+    def test_bimonthly(self):
+        result = get_timer_calendar('bimonthly')
+        # Bimonthly runs monthly; orchestrator handles 60-day interval
+        self.assertIn('-01', result)
+        self.assertNotIn('01/2', result)  # Step syntax not valid in systemd
+
     def test_unknown_frequency_fallback(self):
         result = get_timer_calendar('unknown')
         self.assertIn('02:00:00', result)
@@ -270,6 +284,32 @@ class TestCheckPathOnSmbMount(unittest.TestCase):
     def test_no_mounts(self):
         config = self._make_config(None)
         self.assertFalse(check_path_on_smb_mount('/mnt/share', config))
+
+
+# ---------------------------------------------------------------------------
+# get_mount_points_from_config
+# ---------------------------------------------------------------------------
+
+class TestGetMountPointsFromConfig(unittest.TestCase):
+    def test_derives_expected_mnt_mountpoint_when_unmounted(self):
+        config = SetupConfig(
+            host='test', username='test', system_type='server_lite',
+            sync_specs=[['/mnt/data/source', '/home/test/backup', 'daily']],
+            scrub_specs=[],
+        )
+        with patch.object(tu, 'get_mount_ancestor', return_value=None):
+            mount_points = get_mount_points_from_config(config)
+        self.assertIn('/mnt/data', mount_points)
+
+    def test_includes_smb_mount_points(self):
+        config = SetupConfig(
+            host='test', username='test', system_type='server_lite',
+            sync_specs=[],
+            scrub_specs=[],
+            smb_mounts=[['/srv/nas', '1.2.3.4', 'u:p', 'share', '/']],
+        )
+        mount_points = get_mount_points_from_config(config)
+        self.assertIn('/srv/nas', mount_points)
 
 
 # ---------------------------------------------------------------------------
@@ -485,6 +525,195 @@ class TestEnsureDirectory(unittest.TestCase):
                 f.write('content')
             with self.assertRaises(NotADirectoryError):
                 ensure_directory(file_path, 'testuser')
+
+
+# ---------------------------------------------------------------------------
+# RuntimeConfig
+# ---------------------------------------------------------------------------
+
+class TestRuntimeConfig(unittest.TestCase):
+    def test_from_dict_basic(self):
+        from lib.runtime_config import RuntimeConfig
+        data = {
+            "username": "testuser",
+            "sync_specs": [["/src", "/dst", "daily"]],
+            "scrub_specs": [["/data", ".par", "5%", "weekly"]],
+            "notify_specs": [["webhook", "http://example.com"]],
+        }
+        config = RuntimeConfig.from_dict(data)
+        self.assertEqual(config.username, "testuser")
+        self.assertEqual(len(config.sync_specs), 1)
+        self.assertEqual(len(config.scrub_specs), 1)
+        self.assertEqual(len(config.notify_specs), 1)
+
+    def test_from_dict_defaults(self):
+        from lib.runtime_config import RuntimeConfig
+        config = RuntimeConfig.from_dict({})
+        self.assertEqual(config.username, "root")
+        self.assertEqual(config.sync_specs, [])
+        self.assertEqual(config.scrub_specs, [])
+        self.assertEqual(config.notify_specs, [])
+        self.assertIsNone(config.smb_mounts)
+
+    def test_has_storage_ops_true(self):
+        from lib.runtime_config import RuntimeConfig
+        config = RuntimeConfig(
+            username="test",
+            sync_specs=[["/src", "/dst", "daily"]],
+            scrub_specs=[],
+            notify_specs=[],
+        )
+        self.assertTrue(config.has_storage_ops())
+
+    def test_has_storage_ops_false(self):
+        from lib.runtime_config import RuntimeConfig
+        config = RuntimeConfig(
+            username="test",
+            sync_specs=[],
+            scrub_specs=[],
+            notify_specs=[],
+        )
+        self.assertFalse(config.has_storage_ops())
+
+    def test_get_all_paths(self):
+        from lib.runtime_config import RuntimeConfig
+        config = RuntimeConfig(
+            username="test",
+            sync_specs=[["/src1", "/dst1", "daily"], ["/src2", "/dst2", "hourly"]],
+            scrub_specs=[["/data1", ".par1", "5%", "weekly"]],
+            notify_specs=[],
+        )
+        paths = config.get_all_paths()
+        self.assertEqual(len(paths), 6)  # 2 sync sources + 2 sync dests + 1 scrub dir + 1 scrub db
+        self.assertIn("/src1", paths)
+        self.assertIn("/dst1", paths)
+        self.assertIn("/src2", paths)
+        self.assertIn("/dst2", paths)
+        self.assertIn("/data1", paths)
+        self.assertIn(".par1", paths)
+
+    def test_to_dict(self):
+        from lib.runtime_config import RuntimeConfig
+        config = RuntimeConfig(
+            username="testuser",
+            sync_specs=[["/src", "/dst", "daily"]],
+            scrub_specs=[],
+            notify_specs=[],
+            smb_mounts=None,
+        )
+        result = config.to_dict()
+        self.assertEqual(result["username"], "testuser")
+        self.assertEqual(result["sync_specs"], [["/src", "/dst", "daily"]])
+        self.assertEqual(result["smb_mounts"], None)
+
+    def test_friendly_name_from_dict(self):
+        from lib.runtime_config import RuntimeConfig
+        config = RuntimeConfig.from_dict({
+            "username": "test",
+            "friendly_name": "scrapbox",
+        })
+        self.assertEqual(config.friendly_name, "scrapbox")
+
+    def test_friendly_name_from_dict_missing(self):
+        from lib.runtime_config import RuntimeConfig
+        config = RuntimeConfig.from_dict({"username": "test"})
+        self.assertIsNone(config.friendly_name)
+
+    def test_friendly_name_in_to_dict(self):
+        from lib.runtime_config import RuntimeConfig
+        config = RuntimeConfig(
+            username="test",
+            sync_specs=[],
+            scrub_specs=[],
+            notify_specs=[],
+            friendly_name="mybox",
+        )
+        result = config.to_dict()
+        self.assertEqual(result["friendly_name"], "mybox")
+
+
+# ---------------------------------------------------------------------------
+# _get_veto_dirs_for_share
+# ---------------------------------------------------------------------------
+
+class TestGetVetoDirsForShare(unittest.TestCase):
+    def _make_config(self, **kwargs):
+        defaults = dict(host='testhost', username='testuser', system_type='server_lite')
+        defaults.update(kwargs)
+        return SetupConfig(**defaults)
+
+    def test_no_scrub_specs(self):
+        config = self._make_config(scrub_specs=None)
+        result = _get_veto_dirs_for_share('/mnt/data/store', config)
+        self.assertEqual(result, [])
+
+    def test_scrub_db_under_share_path(self):
+        """When scrub directory matches share path and db is relative, veto the db dir."""
+        config = self._make_config(scrub_specs=[
+            ['/mnt/data/store', '.pardatabase', '5%', 'monthly']
+        ])
+        result = _get_veto_dirs_for_share('/mnt/data/store', config)
+        self.assertEqual(result, ['.pardatabase'])
+
+    def test_scrub_db_absolute_under_share(self):
+        """When scrub db is an absolute path under the share."""
+        config = self._make_config(scrub_specs=[
+            ['/mnt/data/store', '/mnt/data/store/.pardb', '5%', 'monthly']
+        ])
+        result = _get_veto_dirs_for_share('/mnt/data/store', config)
+        self.assertEqual(result, ['.pardb'])
+
+    def test_scrub_db_outside_share(self):
+        """When scrub db is outside the share path, no veto."""
+        config = self._make_config(scrub_specs=[
+            ['/mnt/other', '.pardatabase', '5%', 'monthly']
+        ])
+        result = _get_veto_dirs_for_share('/mnt/data/store', config)
+        self.assertEqual(result, [])
+
+    def test_multiple_scrub_specs_same_share(self):
+        """Multiple scrub specs matching the same share."""
+        config = self._make_config(scrub_specs=[
+            ['/mnt/data/store', '.pardatabase', '5%', 'monthly'],
+            ['/mnt/data/store', '.checksums', '3%', 'weekly'],
+        ])
+        result = _get_veto_dirs_for_share('/mnt/data/store', config)
+        self.assertEqual(result, ['.pardatabase', '.checksums'])
+
+    def test_no_duplicates(self):
+        """Same db name from different specs should only appear once."""
+        config = self._make_config(scrub_specs=[
+            ['/mnt/data/store', '.pardatabase', '5%', 'monthly'],
+            ['/mnt/data/store', '.pardatabase', '3%', 'weekly'],
+        ])
+        result = _get_veto_dirs_for_share('/mnt/data/store', config)
+        self.assertEqual(result, ['.pardatabase'])
+
+    def test_scrub_spec_too_short(self):
+        """Scrub spec with fewer than 2 elements is skipped."""
+        config = self._make_config(scrub_specs=[
+            ['/mnt/data/store'],
+        ])
+        result = _get_veto_dirs_for_share('/mnt/data/store', config)
+        self.assertEqual(result, [])
+
+    def test_scrub_dir_is_subdir_of_share(self):
+        """When scrub directory is a subdirectory of the share."""
+        config = self._make_config(scrub_specs=[
+            ['/mnt/data/store/subdir', '.pardatabase', '5%', 'monthly']
+        ])
+        result = _get_veto_dirs_for_share('/mnt/data/store', config)
+        # The db resolves to /mnt/data/store/subdir/.pardatabase
+        # Top-level relative to share is 'subdir'
+        self.assertEqual(result, ['subdir'])
+
+    def test_absolute_db_not_under_share(self):
+        """Absolute db path not under the share should not be vetoed."""
+        config = self._make_config(scrub_specs=[
+            ['/mnt/data/store', '/var/lib/pardb', '5%', 'monthly']
+        ])
+        result = _get_veto_dirs_for_share('/mnt/data/store', config)
+        self.assertEqual(result, [])
 
 
 if __name__ == '__main__':

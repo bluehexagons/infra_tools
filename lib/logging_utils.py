@@ -22,9 +22,10 @@ from logging.handlers import RotatingFileHandler, SysLogHandler
 from pathlib import Path
 from typing import Optional
 import sys
+from lib.types import BYTES_PER_MB
 
 # Default log configuration
-DEFAULT_LOG_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
+DEFAULT_LOG_MAX_BYTES = 5 * BYTES_PER_MB  # 5 MB
 DEFAULT_LOG_BACKUP_COUNT = 5
 DEFAULT_LOG_LEVEL = INFO
 DEFAULT_LOG_DIR = "/var/log/infra_tools"
@@ -161,7 +162,7 @@ def get_service_logger(
                     if h.stream is sys.stdout:  # type: ignore[attr-defined]
                         has_console = True
                         break
-                except Exception:
+                except AttributeError:
                     # If handler doesn't expose `stream`, skip it
                     continue
         if not has_console:

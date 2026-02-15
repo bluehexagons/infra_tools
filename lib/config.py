@@ -93,6 +93,9 @@ class SetupConfig:
         if self.timezone:
             args.append(f"--timezone {shlex.quote(self.timezone)}")
         
+        if self.friendly_name:
+            args.append(f"--name {shlex.quote(self.friendly_name)}")
+        
         if self.enable_rdp:
             args.append("--rdp")
         

@@ -19,6 +19,7 @@ import pwd
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
 from lib.logging_utils import get_service_logger
+from lib.notifications import load_notification_configs_from_state, send_notification
 
 # Initialize centralized logger
 logger = get_service_logger('auto_update_node', 'web', use_syslog=True)
@@ -117,22 +118,13 @@ def main():
     
     nvm_dir = get_nvm_dir()
     
-    # Load notification configs
-    notification_configs = []
-    try:
-        from lib.machine_state import load_setup_config
-        from lib.notifications import parse_notification_args
-        setup_config = load_setup_config()
-        if setup_config and 'notify_specs' in setup_config:
-            notification_configs = parse_notification_args(setup_config['notify_specs'])
-    except Exception as e:
-        logger.warning(f"Failed to load notification configs: {e}")
+    # Load notification configs from saved machine state
+    notification_configs = load_notification_configs_from_state(logger)
     
     if not os.path.exists(nvm_dir):
         logger.error(f"✗ nvm not found at {nvm_dir}")
         if notification_configs:
             try:
-                from lib.notifications import send_notification
                 send_notification(
                     notification_configs,
                     subject="Error: Node.js update failed",
@@ -153,7 +145,6 @@ def main():
         logger.error("✗ Failed to get latest LTS version")
         if notification_configs:
             try:
-                from lib.notifications import send_notification
                 send_notification(
                     notification_configs,
                     subject="Error: Node.js update failed",
@@ -171,7 +162,6 @@ def main():
         logger.error("✗ Failed to get current version")
         if notification_configs:
             try:
-                from lib.notifications import send_notification
                 send_notification(
                     notification_configs,
                     subject="Error: Node.js update failed",
@@ -195,7 +185,6 @@ def main():
         logger.error("✗ Node.js update failed")
         if notification_configs:
             try:
-                from lib.notifications import send_notification
                 send_notification(
                     notification_configs,
                     subject="Error: Node.js update failed",
@@ -217,7 +206,6 @@ def main():
     
     if notification_configs:
         try:
-            from lib.notifications import send_notification
             send_notification(
                 notification_configs,
                 subject="Success: Node.js updated",

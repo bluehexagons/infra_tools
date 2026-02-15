@@ -5,11 +5,18 @@ import os
 import secrets
 import re
 import shlex
-import sys
 from typing import Optional
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from lib.remote_utils import run
+
+
+def _unit_has_install_section(unit_file: str) -> bool:
+    """Return True when a unit file contains an [Install] section."""
+    try:
+        with open(unit_file, "r", encoding="utf-8") as f:
+            return "[Install]" in f.read()
+    except OSError:
+        return False
 
 
 def cleanup_systemd_unit(unit_name: str, unit_type: str = "service") -> None:
@@ -64,12 +71,11 @@ def cleanup_service(service_name: str) -> None:
         os.remove(timer_file)
         needs_reload = True
     
-    # Stop service (but don't disable - only timers should be enabled/disabled)
-    # Services triggered by timers typically have no [Install] section
+    # Stop service; disable only when it declares an [Install] section
     if os.path.exists(service_file):
         run(f"systemctl stop {shlex.quote(service_name)}.service", check=False)
-        # Note: We don't disable the service because timer-triggered services
-        # usually don't have [Install] sections and shouldn't be enabled/disabled
+        if _unit_has_install_section(service_file):
+            run(f"systemctl disable {shlex.quote(service_name)}.service", check=False)
         os.remove(service_file)
         needs_reload = True
     
@@ -102,14 +108,16 @@ def cleanup_all_infra_services(dry_run: bool = False) -> None:
         cleanup_all_infra_services(dry_run=True)
     """
     systemd_dir = "/etc/systemd/system"
-    
     # Patterns for infra_tools-created units
     # These patterns match services, timers, and mounts created by various components
     infra_patterns = [
-        # Sync services and timers
+        # Unified storage operations service (new style)
+        r"^storage-ops\.service$",
+        r"^storage-ops\.timer$",
+        # Sync services and timers (legacy, kept for migration)
         r"^sync-.*\.service$",
         r"^sync-.*\.timer$",
-        # Scrub services and timers
+        # Scrub services and timers (legacy, kept for migration)
         r"^scrub-.*\.service$",
         r"^scrub-.*\.timer$",
         r"^scrub-.*-update\.service$",
@@ -122,10 +130,10 @@ def cleanup_all_infra_services(dry_run: bool = False) -> None:
         # Rails app services
         r"^rails-.*\.service$",
         # Auto-update timers
-        r"^ruby-auto-update\.service$",
-        r"^ruby-auto-update\.timer$",
-        r"^node-auto-update\.service$",
-        r"^node-auto-update\.timer$",
+        r"^auto-update-ruby\.service$",
+        r"^auto-update-ruby\.timer$",
+        r"^auto-update-node\.service$",
+        r"^auto-update-node\.timer$",
         # Auto-restart service
         r"^auto-restart-if-needed\.service$",
         r"^auto-restart-if-needed\.timer$",
@@ -164,18 +172,19 @@ def cleanup_all_infra_services(dry_run: bool = False) -> None:
     
     # Stop in order: timers first (they trigger services), then services, then mounts, then others
     for unit in timers + services + mounts + others:
-        unit_name = unit.rsplit(".", 1)[0]
         unit_type = unit.rsplit(".", 1)[1]
+        unit_path = os.path.join(systemd_dir, unit)
         
         # Stop the unit (ignore errors if not running)
         run(f"systemctl stop {shlex.quote(unit)}", check=False)
         
-        # Disable timers and mounts (services triggered by timers shouldn't be disabled)
-        if unit_type in ("timer", "mount"):
+        # Disable timers/mounts and services with an [Install] section.
+        if unit_type in ("timer", "mount") or (
+            unit_type == "service" and _unit_has_install_section(unit_path)
+        ):
             run(f"systemctl disable {shlex.quote(unit)}", check=False)
         
         # Remove the file
-        unit_path = os.path.join(systemd_dir, unit)
         try:
             os.remove(unit_path)
             print(f"    ✓ Removed {unit}")
@@ -306,7 +315,7 @@ def create_rails_service(app_name: str, app_path: str, port: int,
                 if match:
                     secret_key_base = match.group(1)  # Value preserved in variable
                     print(f"  ℹ Preserving existing SECRET_KEY_BASE")
-        except Exception:
+        except OSError:
             pass
     
     # Clean up existing service before creating new one

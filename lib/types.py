@@ -66,6 +66,13 @@ SystemType = Literal[
 
 DesktopType = Literal["xfce", "gnome", "kde"]
 
+# Byte size constants (for consistent unit conversions)
+BYTES_PER_KB = 1024
+BYTES_PER_MB = 1024 * 1024
+BYTES_PER_GB = 1024 * 1024 * 1024
+KB_PER_MB = 1024
+MB_PER_GB = 1024
+
 __all__ = [
     # Basic JSON types
     "JSON",
@@ -114,4 +121,11 @@ __all__ = [
     # System type literals
     "SystemType",
     "DesktopType",
+    
+    # Byte size constants
+    "BYTES_PER_KB",
+    "BYTES_PER_MB",
+    "BYTES_PER_GB",
+    "KB_PER_MB",
+    "MB_PER_GB",
 ]

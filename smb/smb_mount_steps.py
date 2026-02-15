@@ -99,7 +99,7 @@ password={password}
     escaped_desc = _escape_systemd_description(mountpoint)
     
     # Clean up existing mount unit before creating new one
-    cleanup_systemd_unit(unit_name, "mount")
+    cleanup_systemd_unit(escaped_mountpoint, "mount")
     
     unit_content = f"""[Unit]
 Description=SMB mount for {escaped_desc}
@@ -127,6 +127,5 @@ WantedBy=multi-user.target
         print(f"  ✓ SMB mount configured and mounted: {mountpoint} → {unc_path}")
     else:
         print(f"  ✓ SMB mount configured: {mountpoint} → {unc_path} (will mount at boot)")
-
 
 

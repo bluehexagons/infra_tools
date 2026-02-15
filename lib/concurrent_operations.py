@@ -11,8 +11,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from collections import deque
 
-
 from lib.operation_log import OperationLogger
+from lib.types import BYTES_PER_MB, BYTES_PER_KB
 
 
 class OperationType(Enum):
@@ -65,8 +65,8 @@ class MemoryMonitor:
     """Simple memory monitoring with configurable thresholds."""
     
     def __init__(self, warning_threshold_mb: int = 512, critical_threshold_mb: int = 256):
-        self.warning_threshold = warning_threshold_mb * 1024 * 1024
-        self.critical_threshold = critical_threshold_mb * 1024 * 1024
+        self.warning_threshold = warning_threshold_mb * BYTES_PER_MB
+        self.critical_threshold = critical_threshold_mb * BYTES_PER_MB
         self._lock = threading.Lock()
     
     def get_available_memory(self) -> int:
@@ -77,7 +77,7 @@ class MemoryMonitor:
                     if line.startswith('MemAvailable:'):
                         # Format: "MemAvailable:    1234567 kB"
                         kb_value = int(line.split()[1])
-                        return kb_value * 1024
+                        return kb_value * BYTES_PER_KB
         except (IOError, ValueError):
             # If /proc/meminfo is unreadable, treat as no available memory.
             pass
@@ -92,7 +92,7 @@ class MemoryMonitor:
         return 'normal'
     
     def can_allocate_memory(self, required_mb: int) -> bool:
-        required_bytes = required_mb * 1024 * 1024
+        required_bytes = required_mb * BYTES_PER_MB
         available = self.get_available_memory()
         return (available - required_bytes) > self.critical_threshold
 

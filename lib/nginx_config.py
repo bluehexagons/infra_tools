@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import os
 import shlex
-import sys
 from typing import Optional
-from lib.types import Deployments, StrList, PathPair 
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from lib.types import Deployments, StrList, PathPair
 from lib.remote_utils import run
 
 

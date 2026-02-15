@@ -13,7 +13,8 @@ from lib.config import SetupConfig
 from lib.display import print_setup_summary
 from lib.machine_state import save_machine_state, save_setup_config
 from lib.notifications import send_setup_notification
-from lib.remote_utils import validate_username, detect_os, set_dry_run
+from lib.remote_utils import detect_os, set_dry_run
+from lib.validators import validate_username
 from lib.progress import progress_bar
 from lib.system_types import get_steps_for_system_type
 from lib.systemd_service import cleanup_all_infra_services
@@ -95,9 +96,13 @@ def main() -> int:
     except OSError as e:
         print(f"Warning: Failed to save setup configuration: {e}", file=sys.stderr)
     
-    # Clean up all previously deployed services to ensure clean state
-    # This treats the current deployment command as the desired baseline
+    # Clean up all previously deployed services to ensure clean state.
+    # This treats the current deployment command as the desired baseline.
+    # NOTE: If a later setup step fails, services remain removed until
+    # a future successful deployment run.
     print("\nCleaning up existing infra_tools services...")
+    print("WARNING: Previously deployed infra_tools services will be removed.")
+    print("If this run fails partway through, they remain removed until a future successful run.")
     sys.stdout.flush()
     cleanup_all_infra_services(dry_run=args.dry_run)
     sys.stdout.flush()
@@ -124,6 +129,7 @@ def main() -> int:
                     host=config.host,
                     success=False,
                     errors=setup_errors,
+                    friendly_name=config.friendly_name,
                 )
             raise
     
@@ -361,6 +367,13 @@ def main() -> int:
         print("\nWaiting for background operations to complete...")
         coordinator.wait_until_idle()
         print("\n✓ Concurrent operations complete")
+        
+        # Create unified storage operations service and timer
+        if args.dry_run:
+            print("  [DRY-RUN] Skipping storage-ops systemd service/timer creation")
+        else:
+            from sync.storage_ops_steps import create_storage_ops_service
+            create_storage_ops_service(config)
     
     print("\n" + "=" * 60)
     print("✓ Remote setup complete!")
@@ -372,6 +385,7 @@ def main() -> int:
             system_type=config.system_type,
             host=config.host,
             success=True,
+            friendly_name=config.friendly_name,
         )
     
     return 0

@@ -3,28 +3,21 @@
 from __future__ import annotations
 
 import os
-import shlex
-import hashlib
 import time
 from typing import Optional, Any
 
 from lib.config import SetupConfig
-from lib.setup_common import REMOTE_INSTALL_DIR
 from lib.remote_utils import run, is_package_installed
-from lib.mount_utils import validate_mount_for_sync, validate_smb_connectivity, is_path_under_mnt
+from lib.mount_utils import validate_mount_for_sync, validate_smb_connectivity
 from lib.disk_utils import get_disk_usage_details
-from lib.validation import validate_filesystem_path, validate_service_name_uniqueness
+from lib.validation import validate_filesystem_path
 from lib.operation_log import create_operation_logger
 from lib.transaction import create_transaction
-from lib.service_manager import ServiceManager
 from lib.task_utils import (
     validate_frequency,
-    get_timer_calendar,
-    escape_systemd_description,
     check_path_on_smb_mount,
     ensure_directory
 )
-from lib.systemd_service import cleanup_service
 
 
 def install_rsync(config: SetupConfig) -> None:
@@ -96,23 +89,6 @@ def create_sync_service(config: SetupConfig, sync_spec: Optional[list[str]] = No
         
         logger.log_metric("validation_success", True)
         
-        path_hash = hashlib.md5(f"{source}:{destination}".encode()).hexdigest()[:8]
-        safe_source = source.replace('/', '_').strip('_')
-        safe_dest = destination.replace('/', '_').strip('_')
-        service_name = f"sync-{safe_source}-to-{safe_dest}-{path_hash}"
-        
-        if not validate_service_name_uniqueness(service_name, []):
-            service_manager = ServiceManager(config)
-            existing_services = service_manager.list_backup_services()
-            if not validate_service_name_uniqueness(service_name, existing_services):
-                raise ValueError(f"Service name '{service_name}' conflicts with existing service")
-        
-        logger.log_step("service_name_validation", "completed", f"Validated service name: {service_name}")
-        
-        # Clean up any existing service/timer with the same name before creating new ones
-        cleanup_service(service_name)
-        logger.log_step("service_cleanup", "completed", f"Cleaned up existing service if present: {service_name}")
-        
     except Exception as e:
         logger.log_error("sync_setup_error", str(e))
         if transaction:
@@ -125,15 +101,8 @@ def create_sync_service(config: SetupConfig, sync_spec: Optional[list[str]] = No
     if dest_parent:
         ensure_directory(dest_parent, config.username)
     
-    escaped_source = escape_systemd_description(source)
-    escaped_destination = escape_systemd_description(destination)
-    
     source_on_smb = check_path_on_smb_mount(source, config)
     dest_on_smb = check_path_on_smb_mount(destination, config)
-    source_under_mnt = is_path_under_mnt(source)
-    dest_under_mnt = is_path_under_mnt(destination)
-    
-    needs_mount_check = source_on_smb or dest_on_smb or source_under_mnt or dest_under_mnt
     
     if source_on_smb or dest_on_smb:
         logger.log_step("mount_validation_enhanced", "started", "Performing enhanced mount validation")
@@ -143,64 +112,20 @@ def create_sync_service(config: SetupConfig, sync_spec: Optional[list[str]] = No
             logger.log_metric("destination_smb_connectivity", validate_smb_connectivity(destination))
         logger.log_step("mount_validation_enhanced", "completed", "Enhanced mount validation completed")
     
-    service_file = f"/etc/systemd/system/{service_name}.service"
-    check_script = f"{REMOTE_INSTALL_DIR}/sync/service_tools/check_sync_mounts.py"
-    sync_script = f"{REMOTE_INSTALL_DIR}/sync/service_tools/sync_rsync.py"
+    print(f"  ✓ Sync spec validated: {source} → {destination}")
     
-    exec_condition = f"ExecCondition=/usr/bin/python3 {check_script} {shlex.quote(source)} {shlex.quote(destination)}" if needs_mount_check else ""
-    
-    service_content = f"""[Unit]
-Description=Sync {escaped_source} to {escaped_destination}
-After=local-fs.target
-
-[Service]
-Type=oneshot
-User=root
-Group=root
-{exec_condition}
-ExecStart=/usr/bin/python3 {sync_script} {shlex.quote(source)} {shlex.quote(destination)}
-StandardOutput=journal
-StandardError=journal
-"""
-    
-    with open(service_file, 'w') as f:
-        f.write(service_content)
-    
-    print(f"  ✓ Created service: {service_name}.service")
-    
-    timer_file = f"/etc/systemd/system/{service_name}.timer"
-    calendar = get_timer_calendar(interval, hour_offset=2)
-    
-    timer_content = f"""[Unit]
-Description=Timer for syncing {escaped_source} to {escaped_destination} ({interval})
-
-[Timer]
-OnCalendar={calendar}
-Persistent=true
-AccuracySec=1m
-Unit={service_name}.service
-
-[Install]
-WantedBy=timers.target
-"""
-    
-    with open(timer_file, 'w') as f:
-        f.write(timer_content)
-    
-    print(f"  ✓ Created timer: {service_name}.timer ({interval})")
-    
-    run("systemctl daemon-reload")
-    run(f"systemctl enable {shlex.quote(service_name)}.timer")
-    run(f"systemctl start {shlex.quote(service_name)}.timer")
+    # Perform initial sync
+    print(f"  ℹ Performing initial sync...")
     
     def perform_initial_sync():
-        result = run(f"systemctl start {shlex.quote(service_name)}.service", check=False)
-        if result.returncode != 0:
-            raise RuntimeError(f"Initial sync failed: {shlex.quote(service_name)}.service")
+        from sync.service_tools.sync_rsync import run_rsync_with_notifications
+        result = run_rsync_with_notifications(source, destination)
+        if result != 0:
+            raise RuntimeError(f"Initial sync failed with exit code {result}")
         return True
     
     try:
-        transaction.add_step(perform_initial_sync, lambda: run(f"systemctl stop {shlex.quote(service_name)}.service", check=False), "Initial sync", "initial_sync")
+        transaction.add_step(perform_initial_sync, lambda: None, "Initial sync", "initial_sync")
         
         if not transaction.execute():
             logger.log_error("initial_sync_failed", "Initial sync failed")
@@ -208,7 +133,7 @@ WantedBy=timers.target
         else:
             logger.log_step("initial_sync", "completed", "Initial sync successful")
         
-        logger.complete("completed", "Sync service configured")
+        logger.complete("completed", "Sync configured")
         
     except Exception as e:
         logger.log_error("initial_sync_error", str(e))

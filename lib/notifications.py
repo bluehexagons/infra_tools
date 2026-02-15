@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from typing import Optional, Literal
+from typing import Optional, Literal, cast
 from dataclasses import dataclass, asdict
 from logging import Logger
 import urllib.request
@@ -39,7 +39,7 @@ class NotificationConfig:
         if notif_type not in ["webhook", "mailbox"]:
             raise ValueError(f"Invalid notification type: {notif_type}")
         
-        return cls(type=notif_type, target=target)  # type: ignore
+        return cls(type=cast(Literal["webhook", "mailbox"], notif_type), target=target)
 
 
 @dataclass
@@ -71,23 +71,28 @@ class NotificationSender:
         self.logger = logger
     
     def send(self, notification: Notification) -> bool:
-        """Send notification to all configured targets."""
+        """Send notification to all configured targets.
+        
+        Returns:
+            True only if ALL configured targets were sent successfully.
+            Returns True if no targets are configured (nothing to fail).
+        """
         if not self.configs:
             return True
         
-        success = False
+        all_succeeded = True
         for config in self.configs:
             try:
                 if config.type == "webhook":
                     self._send_webhook(config.target, notification)
                 elif config.type == "mailbox":
                     self._send_mailbox(config.target, notification)
-                success = True
             except Exception as e:
+                all_succeeded = False
                 if self.logger:
                     self.logger.error(f"Failed to send {config.type} notification to {config.target}: {e}")
         
-        return success
+        return all_succeeded
     
     def _send_webhook(self, url: str, notification: Notification) -> None:
         """Send webhook notification via HTTP POST."""
@@ -172,9 +177,39 @@ def parse_notification_args(notify_args: Optional[list[list[str]]]) -> list[Noti
         if notif_type not in ["webhook", "mailbox"]:
             continue
         
-        configs.append(NotificationConfig(type=notif_type, target=target))  # type: ignore
+        configs.append(NotificationConfig(type=cast(Literal["webhook", "mailbox"], notif_type), target=target))
     
     return configs
+
+
+def load_notification_configs_from_state(logger: Optional[Logger] = None) -> list[NotificationConfig]:
+    """Load notification configs from saved machine state.
+    
+    This helper loads notification configurations that were previously saved during
+    setup, allowing service tools to use the same notification targets without
+    re-parsing command-line arguments.
+    
+    Args:
+        logger: Optional logger for debugging
+    
+    Returns:
+        List of NotificationConfig objects, empty list if state not found or parsing fails
+    
+    Example:
+        # In a service tool (e.g., auto_update_node.py)
+        configs = load_notification_configs_from_state(logger)
+        sender = NotificationSender(configs, logger=logger)
+    """
+    try:
+        from lib.machine_state import load_setup_config
+        setup_config = load_setup_config()
+        if setup_config and 'notify_specs' in setup_config:
+            return parse_notification_args(setup_config['notify_specs'])
+    except (ImportError, OSError, ValueError, KeyError, TypeError) as e:
+        if logger:
+            logger.warning(f"Failed to load notification configs from machine state: {e}")
+    
+    return []
 
 
 def send_setup_notification(
@@ -183,6 +218,7 @@ def send_setup_notification(
     host: str,
     success: bool,
     errors: Optional[list[str]] = None,
+    friendly_name: Optional[str] = None,
     logger: Optional[Logger] = None
 ) -> bool:
     """Send a notification summarizing setup results.
@@ -193,6 +229,7 @@ def send_setup_notification(
         host: The host that was set up
         success: Whether setup completed successfully
         errors: Optional list of error messages encountered during setup
+        friendly_name: Optional human-readable name for this system
         logger: Optional logger for debugging
 
     Returns:
@@ -202,16 +239,21 @@ def send_setup_notification(
     if not configs:
         return True
 
+    # Build a descriptive identifier: prefer friendly_name, fall back to host
+    identifier = f"{friendly_name} ({host})" if friendly_name else host
+
     if success:
         status: NotificationStatus = "good"
-        subject = f"Setup complete: {system_type} on {host}"
-        message = f"Setup of {system_type} on {host} completed successfully."
+        subject = f"Setup complete: {system_type} on {identifier}"
+        message = f"Setup of {system_type} on {identifier} completed successfully."
     else:
         status = "error"
-        subject = f"Setup failed: {system_type} on {host}"
-        message = f"Setup of {system_type} on {host} failed."
+        subject = f"Setup failed: {system_type} on {identifier}"
+        message = f"Setup of {system_type} on {identifier} failed."
 
     details_parts = [f"System type: {system_type}", f"Host: {host}"]
+    if friendly_name:
+        details_parts.append(f"Name: {friendly_name}")
     if errors:
         details_parts.append(f"\nErrors ({len(errors)}):")
         for error in errors:

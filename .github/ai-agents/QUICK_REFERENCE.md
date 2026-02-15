@@ -18,6 +18,7 @@ from lib.types import (
 | Purpose | File |
 |---------|------|
 | Configuration | `lib/config.py` |
+| Runtime Config | `lib/runtime_config.py` |
 | Types | `lib/types.py` |
 | Machine State | `lib/machine_state.py` |
 | SSH Operations | `lib/remote_utils.py` |
@@ -25,6 +26,30 @@ from lib.types import (
 | Arguments | `lib/arg_parser.py` |
 | Setup Steps | Module directories: `common/`, `desktop/`, `security/`, `web/`, `smb/`, `sync/`, `deploy/` |
 | Entry Points | `setup_*.py`, `patch_setup.py`, `remote_setup.py` |
+
+## 🔄 Runtime Configuration
+
+Use `RuntimeConfig` for type-safe runtime operations (orchestrators, service tools):
+
+```python
+from lib.runtime_config import RuntimeConfig
+from lib.machine_state import load_setup_config
+
+# Load from JSON state at runtime
+config_dict = load_setup_config()
+config = RuntimeConfig.from_dict(config_dict)
+
+# Or convert from SetupConfig
+config = RuntimeConfig.from_setup_config(setup_config)
+
+# Check operations
+if config.has_storage_ops():
+    paths = config.get_all_paths()
+```
+
+**When to use:**
+- **SetupConfig** (`lib/config.py`): During initial setup, CLI parsing, full configuration
+- **RuntimeConfig** (`lib/runtime_config.py`): During periodic operations, service tools, lightweight runtime use
 
 ## 🖥️ Machine Type Helpers
 

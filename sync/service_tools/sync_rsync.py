@@ -17,12 +17,13 @@ from lib.logging_utils import get_service_logger
 BYTES_TO_MB = 1024 * 1024
 
 
-def run_rsync_with_notifications(source: str, destination: str) -> int:
+def run_rsync_with_notifications(source: str, destination: str, suppress_notifications: bool = False) -> int:
     """Run rsync and send notifications on completion or failure.
     
     Args:
         source: Source directory
         destination: Destination directory
+        suppress_notifications: If True, skip sending notifications (caller will handle)
         
     Returns:
         Exit code (0 for success, non-zero for failure)
@@ -31,14 +32,18 @@ def run_rsync_with_notifications(source: str, destination: str) -> int:
     
     # Load notification configs from machine state
     notification_configs = []
-    try:
-        from lib.machine_state import load_setup_config
-        from lib.notifications import parse_notification_args
-        setup_config = load_setup_config()
-        if setup_config and 'notify_specs' in setup_config:
-            notification_configs = parse_notification_args(setup_config['notify_specs'])
-    except Exception as e:
-        logger.warning(f"Failed to load notification configs: {e}")
+    friendly_name = None
+    if not suppress_notifications:
+        try:
+            from lib.machine_state import load_setup_config
+            from lib.notifications import parse_notification_args
+            setup_config = load_setup_config()
+            if setup_config:
+                if 'notify_specs' in setup_config:
+                    notification_configs = parse_notification_args(setup_config['notify_specs'])
+                friendly_name = setup_config.get('friendly_name')
+        except (ImportError, OSError, ValueError, KeyError, TypeError) as e:
+            logger.warning(f"Failed to load notification configs: {e}")
     
     logger.info(f"Starting sync: {source} -> {destination}")
     start_time = datetime.now()
@@ -93,6 +98,7 @@ def run_rsync_with_notifications(source: str, destination: str) -> int:
         if notification_configs:
             try:
                 from lib.notifications import send_notification
+                name_prefix = f"[{friendly_name}] " if friendly_name else ""
                 message = f"Synced {files_transferred} files"
                 if total_size > 0:
                     message += f" ({total_size // BYTES_TO_MB} MB)"
@@ -110,7 +116,7 @@ Output:
                 
                 send_notification(
                     notification_configs,
-                    subject="Success: Sync completed",
+                    subject=f"{name_prefix}Success: Sync completed",
                     job="sync",
                     status="good",
                     message=message,
@@ -131,10 +137,11 @@ Output:
         if notification_configs:
             try:
                 from lib.notifications import send_notification
+                name_prefix = f"[{friendly_name}] " if friendly_name else ""
                 error_msg = e.stderr or e.stdout or str(e)
                 send_notification(
                     notification_configs,
-                    subject="Error: Sync failed",
+                    subject=f"{name_prefix}Error: Sync failed",
                     job="sync",
                     status="error",
                     message=f"Sync failed: {source} -> {destination}",
@@ -154,9 +161,10 @@ Output:
         if notification_configs:
             try:
                 from lib.notifications import send_notification
+                name_prefix = f"[{friendly_name}] " if friendly_name else ""
                 send_notification(
                     notification_configs,
-                    subject="Error: Sync failed",
+                    subject=f"{name_prefix}Error: Sync failed",
                     job="sync",
                     status="error",
                     message=f"Sync failed with unexpected error: {source} -> {destination}",

@@ -4,8 +4,8 @@ from __future__ import annotations
 import os
 import re
 import secrets
+import subprocess
 import time
-import shlex
 from typing import Optional, Any, Callable
 
 from lib.config import SetupConfig
@@ -57,11 +57,18 @@ class ServiceManager:
                 except ValueError as e:
                     print(f"Service validation failed: {e}")
                     return False
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             print(f"Error checking existing services: {e}")
             return False
         
         return True
+
+    def _prepare_service_name(self, service_name: str) -> None:
+        """Clean up existing units and validate service name."""
+        validate_service_name_uniqueness(service_name, [])
+        if not self.validate_service_uniqueness(service_name):
+            raise ValueError(f"Service name '{service_name}' is already in use")
+        cleanup_service(service_name)
     
     def create_backup_service(self, service_config: dict[str, Any]) -> str:
         """Create a backup service.
@@ -73,12 +80,7 @@ class ServiceManager:
             str: Service name
         """
         service_name = service_config.get('name', f"backup-{secrets.token_hex(4)}")
-        
-        if not self.validate_service_uniqueness(service_name):
-            raise ValueError(f"Service name '{service_name}' already exists or is invalid")
-        
-        # Clean up existing service before creating new one
-        cleanup_service(service_name)
+        self._prepare_service_name(service_name)
         
         service_content = self._generate_backup_service_template(service_config)
         service_file = f"/etc/systemd/system/{service_name}.service"
@@ -124,12 +126,7 @@ class ServiceManager:
             str: Service name
         """
         service_name = service_config.get('name', f"scrub-{secrets.token_hex(4)}")
-        
-        if not self.validate_service_uniqueness(service_name):
-            raise ValueError(f"Service name '{service_name}' already exists or is invalid")
-        
-        # Clean up existing service before creating new one
-        cleanup_service(service_name)
+        self._prepare_service_name(service_name)
         
         service_content = self._generate_scrub_service_template(service_config)
         service_file = f"/etc/systemd/system/{service_name}.service"
@@ -172,12 +169,7 @@ class ServiceManager:
             str: Service name
         """
         service_name = service_config.get('name', f"sync-{secrets.token_hex(4)}")
-        
-        if not self.validate_service_uniqueness(service_name):
-            raise ValueError(f"Service name '{service_name}' already exists or is invalid")
-        
-        # Clean up existing service before creating new one
-        cleanup_service(service_name)
+        self._prepare_service_name(service_name)
         
         service_content = self._generate_sync_service_template(service_config)
         service_file = f"/etc/systemd/system/{service_name}.service"
@@ -283,7 +275,7 @@ class ServiceManager:
                         service_match = re.search(r'([a-zA-Z0-9_-]+)\.service', line)
                         if service_match:
                             services.append(service_match.group(1))
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             print(f"Error listing backup services: {e}")
         
         return services
@@ -301,7 +293,7 @@ class ServiceManager:
             run(f"systemctl stop {service_name}")
             print(f"✓ Stopped service: {service_name}")
             return True
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             print(f"Error stopping service {service_name}: {e}")
             return False
     
@@ -323,7 +315,7 @@ class ServiceManager:
                 del self.active_services[service_name]
             
             return True
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             print(f"Error disabling service {service_name}: {e}")
             return False
     
@@ -352,7 +344,7 @@ class ServiceManager:
                 del self.active_services[service_name]
             
             return True
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             print(f"Error removing service {service_name}: {e}")
             return False
     

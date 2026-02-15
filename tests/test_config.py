@@ -154,6 +154,18 @@ class TestSetupConfigToRemoteArgs(unittest.TestCase):
         args_str = ' '.join(args)
         self.assertIn('--notify', args_str)
 
+    def test_friendly_name_included(self):
+        config = self._make_config(friendly_name='scrapbox')
+        args = config.to_remote_args()
+        args_str = ' '.join(args)
+        self.assertIn('--name scrapbox', args_str)
+
+    def test_friendly_name_none_omitted(self):
+        config = self._make_config(friendly_name=None)
+        args = config.to_remote_args()
+        args_str = ' '.join(args)
+        self.assertNotIn('--name', args_str)
+
 
 class TestSetupConfigToSetupCommand(unittest.TestCase):
     def _make_config(self, **kwargs):
