@@ -162,7 +162,7 @@ def get_service_logger(
                     if h.stream is sys.stdout:  # type: ignore[attr-defined]
                         has_console = True
                         break
-                except Exception:
+                except AttributeError:
                     # If handler doesn't expose `stream`, skip it
                     continue
         if not has_console:

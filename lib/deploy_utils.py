@@ -46,7 +46,7 @@ def detect_project_type(repo_path: str) -> str:
                 content = f.read()
                 if 'rails' in content:
                     return 'rails'
-        except Exception:
+        except OSError:
             pass
 
     if os.path.exists(os.path.join(repo_path, 'config', 'environment.rb')) or os.path.exists(os.path.join(repo_path, 'config.ru')):
@@ -111,7 +111,7 @@ def get_git_commit_hash(repo_path: str) -> Optional[str]:
         )
         if result.returncode == 0:
             return result.stdout.strip()
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         pass
     
     return None
@@ -133,7 +133,7 @@ def save_deployment_metadata(deployment_path: str, git_url: str, commit_hash: Op
     try:
         with open(metadata_path, 'w') as f:
             json.dump(metadata, f, indent=2)
-    except Exception as e:
+    except OSError as e:
         print(f"  ⚠ Warning: Could not save deployment metadata: {e}")
 
 
@@ -147,7 +147,7 @@ def load_deployment_metadata(deployment_path: str) -> Optional[dict[str, str | N
     try:
         with open(metadata_path, 'r') as f:
             return json.load(f)
-    except Exception:
+    except (OSError, json.JSONDecodeError, ValueError):
         return None
 
 

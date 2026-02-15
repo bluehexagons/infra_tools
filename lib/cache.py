@@ -56,7 +56,7 @@ def load_setup_command(host: str) -> Optional[SetupConfig]:
             if 'tags' in data and 'tags' not in args_dict:
                 args_dict['tags'] = data['tags']
             return SetupConfig.from_dict(host, system_type, args_dict)
-    except Exception as e:
+    except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
         print(f"Warning: Failed to load cached setup for {host}: {e}")
         return None
 

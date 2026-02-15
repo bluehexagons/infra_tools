@@ -142,6 +142,17 @@ def is_operation_due(last_run: dict, op_id: str, interval: str) -> bool:
     return (time.time() - last_time) >= interval_sec
 
 
+def resolve_scrub_database_path(directory: str, database: str) -> str:
+    """Resolve scrub database path, handling relative paths.
+    
+    Scrub specs may store the database as a relative path (e.g. '.pardatabase').
+    This must be resolved relative to the scrub directory before use.
+    """
+    if not database.startswith('/'):
+        database = os.path.join(directory, database)
+    return os.path.normpath(database)
+
+
 def get_sync_op_id(source: str, destination: str) -> str:
     """Generate unique ID for sync operation."""
     return f"sync:{source}:{destination}"
@@ -289,10 +300,11 @@ def execute_storage_operations() -> dict:
         
         directory, database, redundancy, interval = spec
         op_id = get_scrub_op_id(directory, database)
+        resolved_database = resolve_scrub_database_path(directory, database)
         
         if is_operation_due(last_run, op_id, interval):
             # Validate mounts
-            valid, error_msg = validate_mounts_for_operation([directory, database], config, "scrub")
+            valid, error_msg = validate_mounts_for_operation([directory, resolved_database], config, "scrub")
             if not valid:
                 logger.warning(f"Skipping scrub {directory}: {error_msg}")
                 results["scrubs"].append({
@@ -303,10 +315,10 @@ def execute_storage_operations() -> dict:
                 })
                 continue
             
-            success, message = run_scrub(directory, database, redundancy, verify=True, logger=logger)
+            success, message = run_scrub(directory, resolved_database, redundancy, verify=True, logger=logger)
             results["scrubs"].append({
                 "directory": directory,
-                "database": database,
+                "database": resolved_database,
                 "success": success,
                 "message": message,
                 "full": True
@@ -324,9 +336,10 @@ def execute_storage_operations() -> dict:
             continue
         
         directory, database, redundancy, interval = spec
+        resolved_database = resolve_scrub_database_path(directory, database)
         
         # Validate mounts
-        valid, error_msg = validate_mounts_for_operation([directory, database], config, "parity update")
+        valid, error_msg = validate_mounts_for_operation([directory, resolved_database], config, "parity update")
         if not valid:
             logger.warning(f"Skipping parity update for {directory}: {error_msg}")
             results["parity_updates"].append({
@@ -337,10 +350,10 @@ def execute_storage_operations() -> dict:
             })
             continue
         
-        success, message = run_scrub(directory, database, redundancy, verify=False, logger=logger)
+        success, message = run_scrub(directory, resolved_database, redundancy, verify=False, logger=logger)
         results["parity_updates"].append({
             "directory": directory,
-            "database": database,
+            "database": resolved_database,
             "success": success,
             "message": message
         })
@@ -438,11 +451,12 @@ def format_operation_results(operations: list) -> str:
 
 def main():
     """Main entry point."""
+    logger = get_service_logger('storage-ops', 'lock', use_syslog=True, console_output=True)
+    
     # Acquire lock (non-blocking) - if another instance is running, exit cleanly
     with OperationLock(LOCK_FILE) as lock:
         if not lock.acquire(blocking=False):
-            # Another instance is running, exit successfully
-            # The running instance will handle all operations
+            logger.info("Another storage-ops instance is already running, skipping this run")
             return 0
         
         # Execute operations

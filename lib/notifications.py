@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from typing import Optional, Literal
+from typing import Optional, Literal, cast
 from dataclasses import dataclass, asdict
 from logging import Logger
 import urllib.request
@@ -39,7 +39,7 @@ class NotificationConfig:
         if notif_type not in ["webhook", "mailbox"]:
             raise ValueError(f"Invalid notification type: {notif_type}")
         
-        return cls(type=notif_type, target=target)  # type: ignore
+        return cls(type=cast(Literal["webhook", "mailbox"], notif_type), target=target)
 
 
 @dataclass
@@ -71,23 +71,28 @@ class NotificationSender:
         self.logger = logger
     
     def send(self, notification: Notification) -> bool:
-        """Send notification to all configured targets."""
+        """Send notification to all configured targets.
+        
+        Returns:
+            True only if ALL configured targets were sent successfully.
+            Returns True if no targets are configured (nothing to fail).
+        """
         if not self.configs:
             return True
         
-        success = False
+        all_succeeded = True
         for config in self.configs:
             try:
                 if config.type == "webhook":
                     self._send_webhook(config.target, notification)
                 elif config.type == "mailbox":
                     self._send_mailbox(config.target, notification)
-                success = True
             except Exception as e:
+                all_succeeded = False
                 if self.logger:
                     self.logger.error(f"Failed to send {config.type} notification to {config.target}: {e}")
         
-        return success
+        return all_succeeded
     
     def _send_webhook(self, url: str, notification: Notification) -> None:
         """Send webhook notification via HTTP POST."""
@@ -172,7 +177,7 @@ def parse_notification_args(notify_args: Optional[list[list[str]]]) -> list[Noti
         if notif_type not in ["webhook", "mailbox"]:
             continue
         
-        configs.append(NotificationConfig(type=notif_type, target=target))  # type: ignore
+        configs.append(NotificationConfig(type=cast(Literal["webhook", "mailbox"], notif_type), target=target))
     
     return configs
 
@@ -200,7 +205,7 @@ def load_notification_configs_from_state(logger: Optional[Logger] = None) -> lis
         setup_config = load_setup_config()
         if setup_config and 'notify_specs' in setup_config:
             return parse_notification_args(setup_config['notify_specs'])
-    except Exception as e:
+    except (ImportError, OSError, ValueError, KeyError, TypeError) as e:
         if logger:
             logger.warning(f"Failed to load notification configs from machine state: {e}")
     

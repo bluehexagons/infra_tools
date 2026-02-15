@@ -1,5 +1,6 @@
 
 from __future__ import annotations
+import hashlib
 import time
 import threading
 from typing import Optional, Any
@@ -33,7 +34,7 @@ class ConcurrentSyncScrubCoordinator:
     def submit_sync_operation(self, sync_spec: list[str], priority: OperationPriority = OperationPriority.NORMAL) -> str:
         try:
             sync_config = parse_sync_spec(sync_spec)
-            operation_id = f"sync_{int(time.time())}_{hash(sync_config['source']) % 10000}"
+            operation_id = f"sync_{int(time.time())}_{hashlib.md5(sync_config['source'].encode()).hexdigest()[:8]}"
             
             logger = create_operation_logger("concurrent_sync", 
                                            source=sync_config['source'],
@@ -82,7 +83,7 @@ class ConcurrentSyncScrubCoordinator:
     def submit_scrub_operation(self, scrub_spec: list[str], priority: OperationPriority = OperationPriority.NORMAL) -> str:
         try:
             scrub_config = parse_scrub_spec(scrub_spec)
-            operation_id = f"scrub_{int(time.time())}_{hash(scrub_config['directory']) % 10000}"
+            operation_id = f"scrub_{int(time.time())}_{hashlib.md5(scrub_config['directory'].encode()).hexdigest()[:8]}"
             
             logger = create_operation_logger("concurrent_scrub",
                                            directory=scrub_config['directory'],

@@ -315,7 +315,7 @@ def create_rails_service(app_name: str, app_path: str, port: int,
                 if match:
                     secret_key_base = match.group(1)  # Value preserved in variable
                     print(f"  ℹ Preserving existing SECRET_KEY_BASE")
-        except Exception:
+        except OSError:
             pass
     
     # Clean up existing service before creating new one

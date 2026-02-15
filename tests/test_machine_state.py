@@ -110,9 +110,10 @@ class TestSaveLoadSetupConfig(unittest.TestCase):
             config_file = os.path.join(tmpdir, 'setup.json')
             with patch.object(ms, 'STATE_DIR', tmpdir), \
                  patch.object(ms, 'SETUP_CONFIG_FILE', config_file):
-                ms.save_setup_config({'timezone': 'UTC', 'username': 'test'})
+                ms.save_setup_config({'timezone': 'UTC', 'username': 'test',
+                                      'host': '10.0.0.1', 'system_type': 'server_lite'})
                 loaded = ms.load_setup_config()
-                self.assertIsNotNone(loaded)
+                assert loaded is not None
                 self.assertEqual(loaded['timezone'], 'UTC')
 
     def test_load_missing_setup_config(self):
@@ -128,6 +129,149 @@ class TestSaveLoadSetupConfig(unittest.TestCase):
                 f.write('{broken')
             with patch.object(ms, 'SETUP_CONFIG_FILE', config_file):
                 self.assertIsNone(ms.load_setup_config())
+
+
+class TestMachineStateValidation(unittest.TestCase):
+    """Test structural validation of loaded machine state."""
+
+    def _write_state(self, tmpdir, data):
+        state_file = os.path.join(tmpdir, 'machine.json')
+        import json
+        with open(state_file, 'w') as f:
+            json.dump(data, f)
+        return state_file
+
+    def test_valid_state_passes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_file = self._write_state(tmpdir, {
+                'machine_type': 'vm', 'system_type': 'server_dev', 'username': 'admin'
+            })
+            with patch.object(ms, 'STATE_FILE', state_file):
+                state = ms.load_machine_state()
+                self.assertEqual(state['machine_type'], 'vm')
+
+    def test_missing_required_key_returns_defaults(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Missing 'username'
+            state_file = self._write_state(tmpdir, {
+                'machine_type': 'vm', 'system_type': 'server_dev'
+            })
+            with patch.object(ms, 'STATE_FILE', state_file):
+                state = ms.load_machine_state()
+                self.assertEqual(state['machine_type'], 'unprivileged')
+                self.assertIsNone(state['username'])
+
+    def test_unknown_machine_type_returns_defaults(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_file = self._write_state(tmpdir, {
+                'machine_type': 'quantum_computer', 'system_type': 'server_dev', 'username': 'test'
+            })
+            with patch.object(ms, 'STATE_FILE', state_file):
+                state = ms.load_machine_state()
+                self.assertEqual(state['machine_type'], 'unprivileged')
+
+    def test_json_list_instead_of_dict_returns_defaults(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_file = self._write_state(tmpdir, ["not", "a", "dict"])
+            with patch.object(ms, 'STATE_FILE', state_file):
+                state = ms.load_machine_state()
+                self.assertEqual(state['machine_type'], 'unprivileged')
+
+    def test_null_machine_type_accepted(self):
+        """machine_type=None is accepted (edge case for partial state)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_file = self._write_state(tmpdir, {
+                'machine_type': None, 'system_type': None, 'username': None
+            })
+            with patch.object(ms, 'STATE_FILE', state_file):
+                state = ms.load_machine_state()
+                self.assertIsNone(state['machine_type'])
+
+    def test_extra_keys_preserved(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_file = self._write_state(tmpdir, {
+                'machine_type': 'hardware', 'system_type': 'server_web',
+                'username': 'root', 'gpu': True, 'custom_flag': 42
+            })
+            with patch.object(ms, 'STATE_FILE', state_file):
+                state = ms.load_machine_state()
+                self.assertTrue(state['gpu'])
+                self.assertEqual(state['custom_flag'], 42)
+
+
+class TestSetupConfigValidation(unittest.TestCase):
+    """Test structural validation of loaded setup config."""
+
+    def _write_config(self, tmpdir, data):
+        config_file = os.path.join(tmpdir, 'setup.json')
+        import json
+        with open(config_file, 'w') as f:
+            json.dump(data, f)
+        return config_file
+
+    def test_valid_config_passes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_file = self._write_config(tmpdir, {
+                'host': '10.0.0.1', 'username': 'admin', 'system_type': 'server_lite'
+            })
+            with patch.object(ms, 'SETUP_CONFIG_FILE', config_file):
+                config = ms.load_setup_config()
+                assert config is not None
+                self.assertEqual(config['host'], '10.0.0.1')
+
+    def test_missing_required_key_returns_none(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Missing 'host'
+            config_file = self._write_config(tmpdir, {
+                'username': 'admin', 'system_type': 'server_lite'
+            })
+            with patch.object(ms, 'SETUP_CONFIG_FILE', config_file):
+                self.assertIsNone(ms.load_setup_config())
+
+    def test_unknown_system_type_returns_none(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_file = self._write_config(tmpdir, {
+                'host': '10.0.0.1', 'username': 'admin', 'system_type': 'moon_base'
+            })
+            with patch.object(ms, 'SETUP_CONFIG_FILE', config_file):
+                self.assertIsNone(ms.load_setup_config())
+
+    def test_unknown_machine_type_returns_none(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_file = self._write_config(tmpdir, {
+                'host': '10.0.0.1', 'username': 'admin',
+                'system_type': 'server_lite', 'machine_type': 'invalid'
+            })
+            with patch.object(ms, 'SETUP_CONFIG_FILE', config_file):
+                self.assertIsNone(ms.load_setup_config())
+
+    def test_json_list_instead_of_dict_returns_none(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_file = self._write_config(tmpdir, [1, 2, 3])
+            with patch.object(ms, 'SETUP_CONFIG_FILE', config_file):
+                self.assertIsNone(ms.load_setup_config())
+
+    def test_valid_machine_type_in_config_accepted(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_file = self._write_config(tmpdir, {
+                'host': '10.0.0.1', 'username': 'admin',
+                'system_type': 'server_lite', 'machine_type': 'vm'
+            })
+            with patch.object(ms, 'SETUP_CONFIG_FILE', config_file):
+                config = ms.load_setup_config()
+                assert config is not None
+                self.assertEqual(config['machine_type'], 'vm')
+
+    def test_no_machine_type_key_accepted(self):
+        """Config without machine_type is valid (it's optional)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_file = self._write_config(tmpdir, {
+                'host': '10.0.0.1', 'username': 'admin', 'system_type': 'server_dev'
+            })
+            with patch.object(ms, 'SETUP_CONFIG_FILE', config_file):
+                config = ms.load_setup_config()
+                assert config is not None
+                self.assertNotIn('machine_type', config)
 
 
 if __name__ == '__main__':

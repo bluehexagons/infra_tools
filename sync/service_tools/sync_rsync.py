@@ -37,7 +37,7 @@ def run_rsync_with_notifications(source: str, destination: str) -> int:
         setup_config = load_setup_config()
         if setup_config and 'notify_specs' in setup_config:
             notification_configs = parse_notification_args(setup_config['notify_specs'])
-    except Exception as e:
+    except (ImportError, OSError, ValueError, KeyError, TypeError) as e:
         logger.warning(f"Failed to load notification configs: {e}")
     
     logger.info(f"Starting sync: {source} -> {destination}")

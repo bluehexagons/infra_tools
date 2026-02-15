@@ -258,7 +258,7 @@ def _cleanup_orphan_par2(
                 
                 orphan_count += 1
                 
-            except Exception as e:
+            except OSError as e:
                 log(f"Error removing orphan par2 for {relative_data}: {e}", log_file)
                 if operation_logger:
                     operation_logger.log_error("orphan_removal_failed", str(e), 
@@ -340,7 +340,7 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
         setup_config = load_setup_config()
         if setup_config and 'notify_specs' in setup_config:
             notification_configs = parse_notification_args(setup_config['notify_specs'])
-    except Exception as e:
+    except (ImportError, OSError, ValueError, KeyError, TypeError) as e:
         # If notification loading fails, just log and continue without notifications
         log(f"Warning: Failed to load notification configs: {e}", log_file)
     
@@ -397,8 +397,8 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
                         details=None,
                         logger=notif_logger
                     )
-                except Exception as e:
-                    log(f"Warning: Failed to send notification: {e}", log_file)
+                except Exception as notify_err:
+                    log(f"Warning: Failed to send notification: {notify_err}", log_file)
             
             return
         
@@ -522,8 +522,8 @@ Redundancy: {redundancy}%
                     details=details,
                     logger=notif_logger
                 )
-            except Exception as e:
-                log(f"Warning: Failed to send notification: {e}", log_file)
+            except Exception as notify_err:
+                log(f"Warning: Failed to send notification: {notify_err}", log_file)
         
     except Exception as e:
         operation_logger.log_error("scrub_failed", str(e))
@@ -544,8 +544,8 @@ Redundancy: {redundancy}%
                     details=None,
                     logger=notif_logger
                 )
-            except Exception as e:
-                log(f"Warning: Failed to send error notification: {e}", log_file)
+            except Exception as notify_err:
+                log(f"Warning: Failed to send error notification: {notify_err}", log_file)
         
         if transaction:
             transaction.rollback(str(e))

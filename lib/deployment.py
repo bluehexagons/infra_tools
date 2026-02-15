@@ -129,9 +129,9 @@ class DeploymentOrchestrator:
                             match = re.search(r'--port (\d+)', content)
                             if match:
                                 used_ports.add(int(match.group(1)))
-                    except Exception:
+                    except OSError:
                         pass
-        except Exception:
+        except OSError:
             pass
         return used_ports
 
@@ -165,7 +165,7 @@ class DeploymentOrchestrator:
                     match = re.search(r'--port (\d+)', content)
                     if match:
                         return int(match.group(1))
-            except Exception:
+            except OSError:
                 pass
         
         return self._find_free_port(default_port)
@@ -232,7 +232,7 @@ class DeploymentOrchestrator:
                 print(f"  Preserving persistent state under {persistent_root}...")
                 try:
                     self._persist_rails_state_from_existing_release(dest_path, persistent_root)
-                except Exception as e:
+                except OSError as e:
                     print(f"  ⚠ Warning: Failed to preserve persistent state: {e}")
 
             shutil.rmtree(dest_path)
@@ -256,7 +256,7 @@ class DeploymentOrchestrator:
         if project_type == "rails":
             try:
                 self._link_rails_persistent_state_into_release(dest_path, persistent_root)
-            except Exception as e:
+            except OSError as e:
                 print(f"  ⚠ Warning: Failed to link persistent state: {e}")
 
         self.build_project(dest_path, project_type, site_root=site_root)
@@ -372,7 +372,7 @@ class DeploymentOrchestrator:
 
                     with open(cors_file, 'w') as f:
                         f.write(new_content)
-            except Exception as e:
+            except OSError as e:
                 print(f"  ⚠ Failed to patch CORS configuration: {e}")
         
         build_secret = secrets.token_hex(64)

@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import re
 import secrets
+import subprocess
 import time
 from typing import Optional, Any, Callable
 
@@ -56,7 +57,7 @@ class ServiceManager:
                 except ValueError as e:
                     print(f"Service validation failed: {e}")
                     return False
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             print(f"Error checking existing services: {e}")
             return False
         
@@ -274,7 +275,7 @@ class ServiceManager:
                         service_match = re.search(r'([a-zA-Z0-9_-]+)\.service', line)
                         if service_match:
                             services.append(service_match.group(1))
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             print(f"Error listing backup services: {e}")
         
         return services
@@ -292,7 +293,7 @@ class ServiceManager:
             run(f"systemctl stop {service_name}")
             print(f"✓ Stopped service: {service_name}")
             return True
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             print(f"Error stopping service {service_name}: {e}")
             return False
     
@@ -314,7 +315,7 @@ class ServiceManager:
                 del self.active_services[service_name]
             
             return True
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             print(f"Error disabling service {service_name}: {e}")
             return False
     
@@ -343,7 +344,7 @@ class ServiceManager:
                 del self.active_services[service_name]
             
             return True
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             print(f"Error removing service {service_name}: {e}")
             return False
     
