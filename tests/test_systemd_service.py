@@ -94,7 +94,11 @@ class TestCleanupFunctions(unittest.TestCase):
     @patch("lib.systemd_service.os.remove")
     @patch("lib.systemd_service.run")
     @patch("lib.systemd_service.os.path.exists", return_value=True)
-    @patch("lib.systemd_service.open", new_callable=mock_open, read_data="[Unit]\n[Install]\n")
+    @patch(
+        "lib.systemd_service.open",
+        new_callable=mock_open,
+        read_data="[Unit]\nDescription=Demo\n[Service]\nExecStart=/bin/true\n[Install]\nWantedBy=multi-user.target\n",
+    )
     def test_cleanup_service_disables_service_with_install(self, _open, _exists, mock_run, mock_remove):
         cleanup_service("demo")
 
