@@ -95,9 +95,15 @@ def main() -> int:
     except OSError as e:
         print(f"Warning: Failed to save setup configuration: {e}", file=sys.stderr)
     
-    # Clean up all previously deployed services to ensure clean state
-    # This treats the current deployment command as the desired baseline
-    print("\nCleaning up existing infra_tools services...")
+    # Clean up all previously deployed services to ensure clean state.
+    # This treats the current deployment command as the desired baseline.
+    # NOTE: If a later setup step fails, services remain removed until
+    # a future successful deployment run.
+    print(
+        "\nCleaning up existing infra_tools services...\n"
+        "WARNING: Previously deployed infra_tools services will be removed.\n"
+        "If this run fails partway through, they remain removed until a future successful run."
+    )
     sys.stdout.flush()
     cleanup_all_infra_services(dry_run=args.dry_run)
     sys.stdout.flush()

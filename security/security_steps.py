@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import shlex
 
 from lib.config import SetupConfig
 from lib.machine_state import can_modify_kernel, is_container

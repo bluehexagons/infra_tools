@@ -5,7 +5,6 @@ import os
 import re
 import secrets
 import time
-import shlex
 from typing import Optional, Any, Callable
 
 from lib.config import SetupConfig
@@ -62,6 +61,12 @@ class ServiceManager:
             return False
         
         return True
+
+    def _prepare_service_name(self, service_name: str) -> None:
+        """Clean up existing units and validate service name."""
+        cleanup_service(service_name)
+        if not self.validate_service_uniqueness(service_name):
+            raise ValueError(f"Service name '{service_name}' already exists or is invalid")
     
     def create_backup_service(self, service_config: dict[str, Any]) -> str:
         """Create a backup service.
@@ -73,12 +78,7 @@ class ServiceManager:
             str: Service name
         """
         service_name = service_config.get('name', f"backup-{secrets.token_hex(4)}")
-        
-        if not self.validate_service_uniqueness(service_name):
-            raise ValueError(f"Service name '{service_name}' already exists or is invalid")
-        
-        # Clean up existing service before creating new one
-        cleanup_service(service_name)
+        self._prepare_service_name(service_name)
         
         service_content = self._generate_backup_service_template(service_config)
         service_file = f"/etc/systemd/system/{service_name}.service"
@@ -124,12 +124,7 @@ class ServiceManager:
             str: Service name
         """
         service_name = service_config.get('name', f"scrub-{secrets.token_hex(4)}")
-        
-        if not self.validate_service_uniqueness(service_name):
-            raise ValueError(f"Service name '{service_name}' already exists or is invalid")
-        
-        # Clean up existing service before creating new one
-        cleanup_service(service_name)
+        self._prepare_service_name(service_name)
         
         service_content = self._generate_scrub_service_template(service_config)
         service_file = f"/etc/systemd/system/{service_name}.service"
@@ -172,12 +167,7 @@ class ServiceManager:
             str: Service name
         """
         service_name = service_config.get('name', f"sync-{secrets.token_hex(4)}")
-        
-        if not self.validate_service_uniqueness(service_name):
-            raise ValueError(f"Service name '{service_name}' already exists or is invalid")
-        
-        # Clean up existing service before creating new one
-        cleanup_service(service_name)
+        self._prepare_service_name(service_name)
         
         service_content = self._generate_sync_service_template(service_config)
         service_file = f"/etc/systemd/system/{service_name}.service"
