@@ -129,8 +129,8 @@ Credentials are written to `/root/.smb/credentials-<escaped_mountpoint>` with mo
 ### What it does
 
 1. Installs rsync.
-2. Creates a systemd oneshot service + timer for each source → destination pair.
-3. Before each sync run, a Python-based mount checker validates that source and destination are accessible (especially important for SMB-mounted paths).
+2. During setup an initial oneshot service + timer may be created for each source → destination pair to perform validation and the initial run. At runtime a unified orchestrator (`storage-ops.service` / `storage-ops.timer`) manages scheduled syncs.
+3. Before each sync run, the orchestrator validates mounts using a static mount-check script (especially important for SMB-mounted paths).
 4. Uses `rsync -av --delete --partial` for incremental, delete-propagating backups.
 
 ### Sync specification
@@ -143,20 +143,24 @@ Credentials are written to `/root/.smb/credentials-<escaped_mountpoint>` with mo
 |----------|-------------|
 | `SOURCE` | Absolute path to source directory |
 | `DESTINATION` | Absolute path to backup destination |
-| `INTERVAL` | `hourly`, `daily`, `weekly`, or `monthly` |
+| `INTERVAL` | `hourly`, `daily`, `weekly`, `biweekly`, `monthly`, or `bimonthly` |
 
 ```bash
 --sync /mnt/data/docs /mnt/backup/docs daily
 ```
 
-### Systemd units created
+### Runtime orchestration
 
-- `sync-<source>-to-<dest>-<hash>.service` — oneshot rsync job.
-- `sync-<source>-to-<dest>-<hash>.timer` — schedules the service.
+Runtime scheduling no longer uses per-task systemd timers. A single unified orchestrator handles all sync and scrub work on an hourly timer:
+
+- `storage-ops.service` — oneshot orchestrator that runs due syncs, due full scrubs, then parity updates.
+- `storage-ops.timer` — hourly timer that schedules the orchestrator.
+
+At deployment time the setup process may still create per-task oneshot services/timers to perform initial runs and for migration; however, these are legacy and the running system uses the unified `storage-ops` model. The codebase retains cleanup/migration logic to remove legacy units on upgrade.
 
 ### Mount safety
 
-If either path is under `/mnt` or on an SMB mount, the service includes an `ExecCondition` that runs `check_sync_mounts.py`. If the mount is not available, the sync is skipped silently, preventing accidental writes to an empty mount point.
+The orchestrator uses a static mount-check script (`sync/service_tools/check_storage_ops_mounts.py`) to validate mounts before running any operation. The script accepts a list of mount points and exits non-zero when a required mount is not available; the orchestrator skips operations when mounts are missing to avoid accidental writes to empty mount points.
 
 ---
 
@@ -181,19 +185,18 @@ If either path is under `/mnt` or on an SMB mount, the service includes an `Exec
 | `DIRECTORY` | Absolute path to the directory to protect |
 | `DATABASE_PATH` | Path to the parity database directory (relative paths are resolved under `DIRECTORY`) |
 | `REDUNDANCY` | Parity percentage, e.g., `5%` |
-| `FREQUENCY` | `hourly`, `daily`, `weekly`, or `monthly` |
+| `FREQUENCY` | `hourly`, `daily`, `weekly`, `biweekly`, `monthly`, or `bimonthly` |
 
 ```bash
 # Protect /mnt/backup/docs with 5% parity, full scrub weekly
 --scrub /mnt/backup/docs .pardatabase 5% weekly
 ```
 
-### Systemd units created
+### Runtime orchestration
 
-- `scrub-<dir>-<hash>.service` — full verify + repair run.
-- `scrub-<dir>-<hash>.timer` — schedules the full scrub at `FREQUENCY`.
-- `scrub-<dir>-<hash>-update.service` — parity-only update (no verify), runs hourly when the full scrub runs less frequently than hourly.
-- `scrub-<dir>-<hash>-update.timer` — hourly timer for parity updates.
+Full scrubs and parity updates are managed by the unified orchestrator (`storage-ops.service` / `storage-ops.timer`). The orchestrator runs full scrubs only when due according to the configured frequency and performs parity-only updates hourly for all configured scrub targets so new and modified files are protected quickly.
+
+As with sync, per-task scrub units may be generated during setup for initial runs and are considered legacy; upgrade/cleanup code removes or migrates them so the runtime uses the single `storage-ops` model.
 
 ### Parity database
 
@@ -285,8 +288,8 @@ This is used by `lib/concurrent_sync_scrub.py` to coordinate bulk operations. Si
 | `sync/scrub_steps.py` | par2 scrub service/timer creation |
 | `sync/service_tools/sync_rsync.py` | Rsync runner with notification support |
 | `sync/service_tools/scrub_par2.py` | Par2 create/verify/repair with transaction support |
-| `sync/service_tools/check_sync_mounts.py` | Pre-sync mount validation |
-| `sync/service_tools/check_scrub_mounts.py` | Pre-scrub mount validation |
+| `sync/service_tools/check_storage_ops_mounts.py` | Static mount validation script used by the unified orchestrator |
+| `sync/service_tools/storage_ops.py` | Unified orchestrator (runtime): `storage-ops.service` / `storage-ops.timer` |
 | `lib/task_utils.py` | Shared utilities: frequency validation, timer calendars, directory creation |
 | `lib/mount_utils.py` | Mount point detection and validation |
 | `lib/disk_utils.py` | Disk space checking and estimation |
@@ -299,17 +302,12 @@ This is used by `lib/concurrent_sync_scrub.py` to coordinate bulk operations. Si
 
 ## Troubleshooting
 
-### Sync not running
+### Storage operations not running
 
-1. Check timer status: `systemctl list-timers | grep sync`
-2. Check service logs: `journalctl -u sync-*`
-3. Verify mounts: `python3 /opt/infra_tools/sync/service_tools/check_sync_mounts.py /source /dest`
-
-### Scrub not running
-
-1. Check timer status: `systemctl list-timers | grep scrub`
-2. Check service logs: `journalctl -u scrub-*`
-3. Check scrub logs: `cat /var/log/scrub/scrub-*.log`
+1. Check timer status: `systemctl list-timers | grep storage-ops`
+2. Check orchestrator logs: `journalctl -u storage-ops` or inspect logs in `/var/log/storage-ops/`.
+3. Verify mounts: `python3 /opt/infra_tools/sync/service_tools/check_storage_ops_mounts.py /source /dest` (returns non-zero when mounts are unavailable).
+4. For scrub-specific logs (par2 output): `cat /var/log/scrub/scrub-*.log`
 
 ### Samba issues
 

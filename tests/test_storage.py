@@ -133,7 +133,7 @@ class TestParseSyncSpec(unittest.TestCase):
 
     def test_invalid_frequency(self):
         with self.assertRaises(ValueError):
-            parse_sync_spec(['/a', '/b', 'biweekly'])
+            parse_sync_spec(['/a', '/b', 'yearly'])
 
     def test_relative_source(self):
         with self.assertRaises(ValueError):
@@ -220,6 +220,18 @@ class TestGetTimerCalendar(unittest.TestCase):
     def test_monthly(self):
         result = get_timer_calendar('monthly')
         self.assertIn('-01', result)
+
+    def test_biweekly(self):
+        result = get_timer_calendar('biweekly')
+        self.assertIn('Mon', result)
+        # Biweekly runs weekly; orchestrator handles 14-day interval
+        self.assertNotIn('1,15', result)
+
+    def test_bimonthly(self):
+        result = get_timer_calendar('bimonthly')
+        # Bimonthly runs monthly; orchestrator handles 60-day interval
+        self.assertIn('-01', result)
+        self.assertNotIn('01/2', result)  # Step syntax not valid in systemd
 
     def test_unknown_frequency_fallback(self):
         result = get_timer_calendar('unknown')
@@ -485,6 +497,86 @@ class TestEnsureDirectory(unittest.TestCase):
                 f.write('content')
             with self.assertRaises(NotADirectoryError):
                 ensure_directory(file_path, 'testuser')
+
+
+# ---------------------------------------------------------------------------
+# RuntimeConfig
+# ---------------------------------------------------------------------------
+
+class TestRuntimeConfig(unittest.TestCase):
+    def test_from_dict_basic(self):
+        from lib.runtime_config import RuntimeConfig
+        data = {
+            "username": "testuser",
+            "sync_specs": [["/src", "/dst", "daily"]],
+            "scrub_specs": [["/data", ".par", "5%", "weekly"]],
+            "notify_specs": [["webhook", "http://example.com"]],
+        }
+        config = RuntimeConfig.from_dict(data)
+        self.assertEqual(config.username, "testuser")
+        self.assertEqual(len(config.sync_specs), 1)
+        self.assertEqual(len(config.scrub_specs), 1)
+        self.assertEqual(len(config.notify_specs), 1)
+
+    def test_from_dict_defaults(self):
+        from lib.runtime_config import RuntimeConfig
+        config = RuntimeConfig.from_dict({})
+        self.assertEqual(config.username, "root")
+        self.assertEqual(config.sync_specs, [])
+        self.assertEqual(config.scrub_specs, [])
+        self.assertEqual(config.notify_specs, [])
+        self.assertIsNone(config.smb_mounts)
+
+    def test_has_storage_ops_true(self):
+        from lib.runtime_config import RuntimeConfig
+        config = RuntimeConfig(
+            username="test",
+            sync_specs=[["/src", "/dst", "daily"]],
+            scrub_specs=[],
+            notify_specs=[],
+        )
+        self.assertTrue(config.has_storage_ops())
+
+    def test_has_storage_ops_false(self):
+        from lib.runtime_config import RuntimeConfig
+        config = RuntimeConfig(
+            username="test",
+            sync_specs=[],
+            scrub_specs=[],
+            notify_specs=[],
+        )
+        self.assertFalse(config.has_storage_ops())
+
+    def test_get_all_paths(self):
+        from lib.runtime_config import RuntimeConfig
+        config = RuntimeConfig(
+            username="test",
+            sync_specs=[["/src1", "/dst1", "daily"], ["/src2", "/dst2", "hourly"]],
+            scrub_specs=[["/data1", ".par1", "5%", "weekly"]],
+            notify_specs=[],
+        )
+        paths = config.get_all_paths()
+        self.assertEqual(len(paths), 6)  # 2 sync sources + 2 sync dests + 1 scrub dir + 1 scrub db
+        self.assertIn("/src1", paths)
+        self.assertIn("/dst1", paths)
+        self.assertIn("/src2", paths)
+        self.assertIn("/dst2", paths)
+        self.assertIn("/data1", paths)
+        self.assertIn(".par1", paths)
+
+    def test_to_dict(self):
+        from lib.runtime_config import RuntimeConfig
+        config = RuntimeConfig(
+            username="testuser",
+            sync_specs=[["/src", "/dst", "daily"]],
+            scrub_specs=[],
+            notify_specs=[],
+            smb_mounts=None,
+        )
+        result = config.to_dict()
+        self.assertEqual(result["username"], "testuser")
+        self.assertEqual(result["sync_specs"], [["/src", "/dst", "daily"]])
+        self.assertEqual(result["smb_mounts"], None)
 
 
 if __name__ == '__main__':

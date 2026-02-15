@@ -28,6 +28,8 @@ from lib.logging_utils import get_service_logger
 from lib.notifications import send_notification, parse_notification_args
 from lib.machine_state import load_setup_config
 from lib.mount_utils import is_path_under_mnt, get_mount_ancestor
+from lib.task_utils import needs_mount_check
+from lib.runtime_config import RuntimeConfig
 
 # Constants
 LOCK_FILE = "/run/lock/storage-ops.lock"
@@ -39,7 +41,9 @@ FREQUENCY_SECONDS = {
     "hourly": 3600,
     "daily": 86400,
     "weekly": 604800,
+    "biweekly": 1209600,  # 14 days
     "monthly": 2592000,
+    "bimonthly": 5184000,  # ~60 days
 }
 
 
@@ -136,22 +140,7 @@ def get_scrub_op_id(directory: str, database: str) -> str:
     return f"scrub:{directory}:{database}"
 
 
-def needs_mount_check(path: str, config: dict) -> bool:
-    """Check if path needs mount validation."""
-    if is_path_under_mnt(path):
-        return True
-    
-    # Check if on SMB mount
-    if config.get('smb_mounts'):
-        for mount_spec in config['smb_mounts']:
-            mountpoint = mount_spec[0]
-            if path.startswith(mountpoint + '/') or path == mountpoint:
-                return True
-    
-    return False
-
-
-def validate_mounts_for_operation(paths: list[str], config: dict, operation_type: str) -> tuple[bool, str]:
+def validate_mounts_for_operation(paths: list[str], config: RuntimeConfig, operation_type: str) -> tuple[bool, str]:
     """Validate that all required mounts are available."""
     for path in paths:
         if not os.path.ismount(path) and os.path.exists(path):
@@ -163,7 +152,7 @@ def validate_mounts_for_operation(paths: list[str], config: dict, operation_type
         elif not os.path.exists(path):
             if needs_mount_check(path, config):
                 return False, f"Path {path} not available (possibly unmounted)"
-    
+
     return True, ""
 
 
@@ -221,19 +210,18 @@ def execute_storage_operations() -> dict:
     }
     
     # Load configuration
-    config = load_setup_config()
-    if not config:
+    config_dict = load_setup_config()
+    if not config_dict:
         logger.error("No configuration found in machine state")
         results["success"] = False
         return results
     
-    sync_specs = config.get('sync_specs', [])
-    scrub_specs = config.get('scrub_specs', [])
-    notification_configs = parse_notification_args(config.get('notify_specs', []))
+    config = RuntimeConfig.from_dict(config_dict)
+    notification_configs = parse_notification_args(config.notify_specs)
     
-    logger.info(f"Loaded {len(sync_specs)} sync specs, {len(scrub_specs)} scrub specs")
+    logger.info(f"Loaded {len(config.sync_specs)} sync specs, {len(config.scrub_specs)} scrub specs")
     
-    if not sync_specs and not scrub_specs:
+    if not config.has_storage_ops():
         logger.info("No storage operations configured")
         results["end_time"] = datetime.now().isoformat()
         return results
@@ -243,7 +231,7 @@ def execute_storage_operations() -> dict:
     new_state = last_run.copy()
     
     # Execute syncs first (always run if due)
-    for spec in sync_specs:
+    for spec in config.sync_specs:
         if len(spec) != 3:
             logger.error(f"Invalid sync spec: {spec}")
             results["syncs"].append({"spec": spec, "success": False, "error": "Invalid spec"})
@@ -280,7 +268,7 @@ def execute_storage_operations() -> dict:
                 results["success"] = False
     
     # Execute full scrubs if due
-    for spec in scrub_specs:
+    for spec in config.scrub_specs:
         if len(spec) != 4:
             logger.error(f"Invalid scrub spec: {spec}")
             results["scrubs"].append({"spec": spec, "success": False, "error": "Invalid spec"})
@@ -318,7 +306,7 @@ def execute_storage_operations() -> dict:
     
     # Execute parity updates for all scrub specs (always run)
     # This ensures new files get parity protection quickly
-    for spec in scrub_specs:
+    for spec in config.scrub_specs:
         if len(spec) != 4:
             continue
         
