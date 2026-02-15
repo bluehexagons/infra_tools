@@ -26,6 +26,24 @@ SERVICE_FILE = f"/etc/systemd/system/{SERVICE_NAME}.service"
 TIMER_FILE = f"/etc/systemd/system/{SERVICE_NAME}.timer"
 
 
+def schedule_storage_ops_update(delay_minutes: int = 2) -> None:
+    """Schedule a near-term storage operations run via systemd-run."""
+    run(
+        " ".join(
+            [
+                "systemd-run",
+                "--unit=storage-ops-initial-update",
+                "--on-active",
+                f"{delay_minutes}m",
+                "--property=Type=oneshot",
+                f"/usr/bin/systemctl start {SERVICE_NAME}.service",
+            ]
+        ),
+        check=False,
+    )
+    print(f"    ✓ Scheduled initial storage-ops run in ~{delay_minutes} minute(s)")
+
+
 def create_storage_ops_service(config: SetupConfig, **_kwargs: Any) -> None:
     """Create unified storage operations service and timer.
 
@@ -111,6 +129,7 @@ WantedBy=timers.target
     run("systemctl daemon-reload")
     run(f"systemctl enable {SERVICE_NAME}.timer")
     run(f"systemctl start {SERVICE_NAME}.timer")
+    run(f"systemctl --no-pager status {SERVICE_NAME}.timer", check=False)
 
     print(f"    ✓ Storage operations timer started")
     print(f"    ℹ Run 'systemctl status {SERVICE_NAME}.timer' to check status")

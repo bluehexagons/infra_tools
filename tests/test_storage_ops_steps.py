@@ -10,7 +10,11 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.config import SetupConfig
-from sync.storage_ops_steps import create_storage_ops_service, generate_mount_check_condition
+from sync.storage_ops_steps import (
+    create_storage_ops_service,
+    generate_mount_check_condition,
+    schedule_storage_ops_update,
+)
 
 
 class TestGenerateMountCheckCondition(unittest.TestCase):
@@ -47,6 +51,16 @@ class TestCreateStorageOpsService(unittest.TestCase):
         makedirs.assert_not_called()
         file_open.assert_not_called()
         run_cmd.assert_not_called()
+
+
+class TestScheduleStorageOpsUpdate(unittest.TestCase):
+    @patch("sync.storage_ops_steps.run")
+    def test_schedules_initial_update(self, run_cmd):
+        schedule_storage_ops_update()
+        run_cmd.assert_called_once_with(
+            "systemd-run --unit=storage-ops-initial-update --on-active 2m --property=Type=oneshot /usr/bin/systemctl start storage-ops.service",
+            check=False,
+        )
 
 
 if __name__ == "__main__":
