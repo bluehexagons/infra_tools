@@ -113,10 +113,13 @@ def cleanup_all_infra_services(dry_run: bool = False) -> None:
     # Patterns for infra_tools-created units
     # These patterns match services, timers, and mounts created by various components
     infra_patterns = [
-        # Sync services and timers
+        # Unified storage operations service (new style)
+        r"^storage-ops\.service$",
+        r"^storage-ops\.timer$",
+        # Sync services and timers (legacy, kept for migration)
         r"^sync-.*\.service$",
         r"^sync-.*\.timer$",
-        # Scrub services and timers
+        # Scrub services and timers (legacy, kept for migration)
         r"^scrub-.*\.service$",
         r"^scrub-.*\.timer$",
         r"^scrub-.*-update\.service$",

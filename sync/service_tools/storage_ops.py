@@ -1,0 +1,455 @@
+#!/usr/bin/env python3
+"""Unified storage operations orchestrator for sync and scrub.
+
+This script is the single entry point for all storage operations.
+It reads sync/scrub specs from machine state and executes them in order:
+1. Sync operations (rsync source -> destination)
+2. Scrub full verify+repair (if interval elapsed)
+3. Parity updates (fast mode for new/changed files)
+
+Uses file locking to prevent concurrent runs.
+"""
+
+from __future__ import annotations
+
+import sys
+import os
+import io
+import json
+import fcntl
+import time
+from datetime import datetime
+from typing import Optional
+
+# Add lib directory to path
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
+
+from lib.logging_utils import get_service_logger
+from lib.notifications import send_notification, parse_notification_args
+from lib.machine_state import load_setup_config
+from lib.mount_utils import is_path_under_mnt, get_mount_ancestor
+
+# Constants
+LOCK_FILE = "/run/lock/storage-ops.lock"
+STATE_FILE = "/var/lib/storage-ops/last_run.json"
+LOG_DIR = "/var/log/storage-ops"
+
+# Frequency in seconds
+FREQUENCY_SECONDS = {
+    "hourly": 3600,
+    "daily": 86400,
+    "weekly": 604800,
+    "monthly": 2592000,
+}
+
+
+class OperationLock:
+    """Context manager for storage operations lock."""
+    
+    def __init__(self, lock_path: str):
+        self.lock_path = lock_path
+        self.lock_file: Optional[io.TextIOWrapper] = None
+        self.acquired = False
+    
+    def acquire(self, blocking: bool = False, timeout: float = 300.0) -> bool:
+        """Acquire lock with optional blocking and timeout."""
+        # Ensure parent directory exists
+        os.makedirs(os.path.dirname(self.lock_path), exist_ok=True)
+        
+        self.lock_file = open(self.lock_path, 'w')
+        
+        if blocking:
+            start_time = time.time()
+            while True:
+                try:
+                    fcntl.flock(self.lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    self.acquired = True
+                    return True
+                except (IOError, OSError):
+                    if time.time() - start_time >= timeout:
+                        return False
+                    time.sleep(1.0)
+        else:
+            try:
+                fcntl.flock(self.lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                self.acquired = True
+                return True
+            except (IOError, OSError):
+                return False
+    
+    def release(self) -> None:
+        """Release lock and cleanup."""
+        if self.acquired and self.lock_file:
+            try:
+                fcntl.flock(self.lock_file.fileno(), fcntl.LOCK_UN)
+                self.lock_file.close()
+                os.unlink(self.lock_path)
+            except (IOError, OSError):
+                pass
+            finally:
+                self.acquired = False
+                self.lock_file = None
+    
+    def __enter__(self):
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.release()
+        return False
+
+
+def load_last_run() -> dict:
+    """Load last run timestamps from state file."""
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, 'r') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            pass
+    return {}
+
+
+def save_last_run(state: dict) -> None:
+    """Save last run timestamps to state file."""
+    os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+    with open(STATE_FILE, 'w') as f:
+        json.dump(state, f, indent=2)
+
+
+def is_operation_due(last_run: dict, op_id: str, interval: str) -> bool:
+    """Check if an operation is due based on its interval."""
+    last_time = last_run.get(op_id)
+    if last_time is None:
+        return True
+    
+    interval_sec = FREQUENCY_SECONDS.get(interval, FREQUENCY_SECONDS["hourly"])
+    return (time.time() - last_time) >= interval_sec
+
+
+def get_sync_op_id(source: str, destination: str) -> str:
+    """Generate unique ID for sync operation."""
+    return f"sync:{source}:{destination}"
+
+
+def get_scrub_op_id(directory: str, database: str) -> str:
+    """Generate unique ID for scrub operation."""
+    return f"scrub:{directory}:{database}"
+
+
+def needs_mount_check(path: str, config: dict) -> bool:
+    """Check if path needs mount validation."""
+    if is_path_under_mnt(path):
+        return True
+    
+    # Check if on SMB mount
+    if config.get('smb_mounts'):
+        for mount_spec in config['smb_mounts']:
+            mountpoint = mount_spec[0]
+            if path.startswith(mountpoint + '/') or path == mountpoint:
+                return True
+    
+    return False
+
+
+def validate_mounts_for_operation(paths: list[str], config: dict, operation_type: str) -> tuple[bool, str]:
+    """Validate that all required mounts are available."""
+    for path in paths:
+        if not os.path.ismount(path) and os.path.exists(path):
+            # Path exists but might be on unmounted parent
+            if is_path_under_mnt(path):
+                mount_ancestor = get_mount_ancestor(path)
+                if mount_ancestor and not os.path.ismount(mount_ancestor):
+                    return False, f"Mount {mount_ancestor} not available for {operation_type}"
+        elif not os.path.exists(path):
+            if needs_mount_check(path, config):
+                return False, f"Path {path} not available (possibly unmounted)"
+    
+    return True, ""
+
+
+def run_sync(source: str, destination: str, logger) -> tuple[bool, str]:
+    """Execute rsync sync operation."""
+    from sync.service_tools.sync_rsync import run_rsync_with_notifications
+    
+    logger.info(f"Starting sync: {source} -> {destination}")
+    
+    try:
+        result = run_rsync_with_notifications(source, destination)
+        return result == 0, f"Sync completed with exit code {result}"
+    except Exception as e:
+        logger.error(f"Sync failed: {e}")
+        return False, str(e)
+
+
+def run_scrub(directory: str, database: str, redundancy: str, verify: bool, logger) -> tuple[bool, str]:
+    """Execute scrub operation."""
+    from sync.service_tools.scrub_par2 import scrub_directory
+    
+    mode = "full verify+repair" if verify else "parity update only"
+    logger.info(f"Starting scrub ({mode}): {directory}")
+    
+    log_dir = LOG_DIR
+    os.makedirs(log_dir, exist_ok=True)
+    
+    # Generate log file path for this scrub
+    from hashlib import md5
+    scrub_id = md5(f"{directory}:{database}".encode()).hexdigest()[:8]
+    log_file = f"{log_dir}/scrub-{scrub_id}.log"
+    
+    # Parse redundancy
+    redundancy_int = int(redundancy.rstrip('%'))
+    
+    try:
+        scrub_directory(directory, database, redundancy_int, log_file, verify)
+        return True, f"Scrub completed for {directory}"
+    except Exception as e:
+        logger.error(f"Scrub failed: {e}")
+        return False, str(e)
+
+
+def execute_storage_operations() -> dict:
+    """Main orchestrator function."""
+    logger = get_service_logger('storage-ops', 'operations', use_syslog=True, console_output=True)
+    
+    results = {
+        "syncs": [],
+        "scrubs": [],
+        "parity_updates": [],
+        "start_time": datetime.now().isoformat(),
+        "end_time": None,
+        "success": True,
+    }
+    
+    # Load configuration
+    config = load_setup_config()
+    if not config:
+        logger.error("No configuration found in machine state")
+        results["success"] = False
+        return results
+    
+    sync_specs = config.get('sync_specs', [])
+    scrub_specs = config.get('scrub_specs', [])
+    notification_configs = parse_notification_args(config.get('notify_specs', []))
+    
+    logger.info(f"Loaded {len(sync_specs)} sync specs, {len(scrub_specs)} scrub specs")
+    
+    if not sync_specs and not scrub_specs:
+        logger.info("No storage operations configured")
+        results["end_time"] = datetime.now().isoformat()
+        return results
+    
+    # Load last run state
+    last_run = load_last_run()
+    new_state = last_run.copy()
+    
+    # Execute syncs first (always run if due)
+    for spec in sync_specs:
+        if len(spec) != 3:
+            logger.error(f"Invalid sync spec: {spec}")
+            results["syncs"].append({"spec": spec, "success": False, "error": "Invalid spec"})
+            continue
+        
+        source, destination, interval = spec
+        op_id = get_sync_op_id(source, destination)
+        
+        if is_operation_due(last_run, op_id, interval):
+            # Validate mounts
+            valid, error_msg = validate_mounts_for_operation([source, destination], config, "sync")
+            if not valid:
+                logger.warning(f"Skipping sync {source} -> {destination}: {error_msg}")
+                results["syncs"].append({
+                    "source": source,
+                    "destination": destination,
+                    "success": False,
+                    "error": error_msg,
+                    "skipped": True
+                })
+                continue
+            
+            success, message = run_sync(source, destination, logger)
+            results["syncs"].append({
+                "source": source,
+                "destination": destination,
+                "success": success,
+                "message": message
+            })
+            
+            if success:
+                new_state[op_id] = time.time()
+            else:
+                results["success"] = False
+    
+    # Execute full scrubs if due
+    for spec in scrub_specs:
+        if len(spec) != 4:
+            logger.error(f"Invalid scrub spec: {spec}")
+            results["scrubs"].append({"spec": spec, "success": False, "error": "Invalid spec"})
+            continue
+        
+        directory, database, redundancy, interval = spec
+        op_id = get_scrub_op_id(directory, database)
+        
+        if is_operation_due(last_run, op_id, interval):
+            # Validate mounts
+            valid, error_msg = validate_mounts_for_operation([directory, database], config, "scrub")
+            if not valid:
+                logger.warning(f"Skipping scrub {directory}: {error_msg}")
+                results["scrubs"].append({
+                    "directory": directory,
+                    "success": False,
+                    "error": error_msg,
+                    "skipped": True
+                })
+                continue
+            
+            success, message = run_scrub(directory, database, redundancy, verify=True, logger=logger)
+            results["scrubs"].append({
+                "directory": directory,
+                "database": database,
+                "success": success,
+                "message": message,
+                "full": True
+            })
+            
+            if success:
+                new_state[op_id] = time.time()
+            else:
+                results["success"] = False
+    
+    # Execute parity updates for all scrub specs (always run)
+    # This ensures new files get parity protection quickly
+    for spec in scrub_specs:
+        if len(spec) != 4:
+            continue
+        
+        directory, database, redundancy, interval = spec
+        
+        # Validate mounts
+        valid, error_msg = validate_mounts_for_operation([directory, database], config, "parity update")
+        if not valid:
+            logger.warning(f"Skipping parity update for {directory}: {error_msg}")
+            results["parity_updates"].append({
+                "directory": directory,
+                "success": False,
+                "error": error_msg,
+                "skipped": True
+            })
+            continue
+        
+        success, message = run_scrub(directory, database, redundancy, verify=False, logger=logger)
+        results["parity_updates"].append({
+            "directory": directory,
+            "database": database,
+            "success": success,
+            "message": message
+        })
+        
+        if not success:
+            results["success"] = False
+    
+    # Save updated state
+    save_last_run(new_state)
+    
+    results["end_time"] = datetime.now().isoformat()
+    
+    # Send notification if configured
+    if notification_configs:
+        send_operation_notification(results, notification_configs, logger)
+    
+    return results
+
+
+def send_operation_notification(results: dict, notification_configs: list, logger) -> None:
+    """Send summary notification for operations."""
+    success_count = sum(1 for s in results["syncs"] if s.get("success"))
+    total_syncs = len(results["syncs"])
+    
+    scrub_success_count = sum(1 for s in results["scrubs"] if s.get("success"))
+    total_scrubs = len(results["scrubs"])
+    
+    parity_success_count = sum(1 for s in results["parity_updates"] if s.get("success"))
+    total_parity = len(results["parity_updates"])
+    
+    if results["success"]:
+        status = "good"
+        subject = "Storage operations completed"
+    else:
+        status = "error"
+        subject = "Storage operations completed with errors"
+    
+    message = f"Syncs: {success_count}/{total_syncs}, Scrubs: {scrub_success_count}/{total_scrubs}, Parity updates: {parity_success_count}/{total_parity}"
+    
+    details = f"""Storage Operations Summary
+==========================
+Start: {results["start_time"]}
+End: {results["end_time"]}
+
+Sync Operations:
+{format_operation_results(results["syncs"])}
+
+Full Scrub Operations:
+{format_operation_results(results["scrubs"])}
+
+Parity Update Operations:
+{format_operation_results(results["parity_updates"])}
+"""
+    
+    try:
+        send_notification(
+            notification_configs,
+            subject=subject,
+            job="storage-ops",
+            status=status,
+            message=message,
+            details=details,
+            logger=logger
+        )
+    except Exception as e:
+        logger.error(f"Failed to send notification: {e}")
+
+
+def format_operation_results(operations: list) -> str:
+    """Format operation results for notification."""
+    if not operations:
+        return "  None"
+    
+    lines = []
+    for op in operations:
+        success_mark = "✓" if op.get("success") else "✗"
+        if op.get("skipped"):
+            success_mark = "○"
+        
+        if "source" in op:
+            name = f"{op['source']} -> {op['destination']}"
+        elif "directory" in op:
+            name = op['directory']
+        else:
+            name = str(op.get("spec", "unknown"))
+        
+        lines.append(f"  {success_mark} {name}")
+        if op.get("error"):
+            lines.append(f"    Error: {op['error']}")
+        elif op.get("message"):
+            lines.append(f"    {op['message']}")
+    
+    return "\n".join(lines)
+
+
+def main():
+    """Main entry point."""
+    # Acquire lock (non-blocking) - if another instance is running, exit cleanly
+    with OperationLock(LOCK_FILE) as lock:
+        if not lock.acquire(blocking=False):
+            # Another instance is running, exit successfully
+            # The running instance will handle all operations
+            return 0
+        
+        # Execute operations
+        results = execute_storage_operations()
+        
+        # Return exit code based on success
+        return 0 if results["success"] else 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

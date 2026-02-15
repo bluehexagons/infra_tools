@@ -365,6 +365,10 @@ def main() -> int:
         print("\nWaiting for background operations to complete...")
         coordinator.wait_until_idle()
         print("\n✓ Concurrent operations complete")
+        
+        # Create unified storage operations service and timer
+        from sync.storage_ops_steps import create_storage_ops_service
+        create_storage_ops_service(config)
     
     print("\n" + "=" * 60)
     print("✓ Remote setup complete!")
