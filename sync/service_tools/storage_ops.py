@@ -100,9 +100,6 @@ class OperationLock:
             finally:
                 self.acquired = False
                 self.lock_file = None
-        elif self.lock_file:
-            self.lock_file.close()
-            self.lock_file = None
     
     def __enter__(self):
         return self

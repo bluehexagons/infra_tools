@@ -205,7 +205,7 @@ def get_mount_points_from_config(config: SetupConfig) -> set[str]:
                 # Derive expected mount root for unmounted paths under /mnt:
                 # e.g. /mnt/data/source -> /mnt/data
                 parts = path.split('/')
-                if len(parts) > 2 and parts[2]:
+                if len(parts) >= 3 and parts[2]:
                     mount_points.add(f"/mnt/{parts[2]}")
 
     smb_mounts = getattr(config, 'smb_mounts', None) or []
