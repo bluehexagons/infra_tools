@@ -68,11 +68,6 @@ def run_rsync_with_notifications(source: str, destination: str, suppress_notific
         )
         
         duration = (datetime.now() - start_time).total_seconds()
-        logger.info(f"✓ Sync completed in {duration:.1f}s")
-        
-        # Log rsync output for observability
-        if result.stdout:
-            logger.info(f"Rsync output:\n{result.stdout}")
         
         # Parse rsync stats for notification
         stats_lines = result.stdout.split('\n')
@@ -84,15 +79,16 @@ def run_rsync_with_notifications(source: str, destination: str, suppress_notific
                 try:
                     files_transferred = int(line.split(':')[1].strip())
                 except (IndexError, ValueError):
-                    # Ignore malformed stats line
                     pass
             elif 'Total file size:' in line:
                 try:
                     size_str = line.split(':')[1].strip().split()[0].replace(',', '')
                     total_size = int(size_str)
                 except (IndexError, ValueError):
-                    # Ignore malformed stats line
                     pass
+        
+        # Log summary only (not full file list)
+        logger.info(f"✓ Sync completed: {files_transferred} files, {total_size // BYTES_TO_MB} MB, {duration:.1f}s")
         
         # Send success notification
         if notification_configs:

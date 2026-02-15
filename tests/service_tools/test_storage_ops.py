@@ -227,17 +227,22 @@ class TestOpIdStability(unittest.TestCase):
     @patch("sync.service_tools.storage_ops.run_scrub", return_value=(True, "OK"))
     @patch("sync.service_tools.storage_ops.validate_mounts_for_operation", return_value=(True, ""))
     @patch("sync.service_tools.storage_ops.save_last_run")
-    @patch("sync.service_tools.storage_ops.load_last_run", return_value={})
+    @patch("sync.service_tools.storage_ops.load_last_run")
     @patch("sync.service_tools.storage_ops.parse_notification_args", return_value=[])
     @patch("sync.service_tools.storage_ops.load_setup_config")
     @patch("sync.service_tools.storage_ops.get_service_logger")
     def test_scrub_op_id_uses_raw_database_path(
         self, mock_logger, mock_load_config, _notif_args,
-        _load_last, mock_save_last, _validate, mock_run_scrub, _send_notif
+        mock_load_last, mock_save_last, _validate, mock_run_scrub, _send_notif
     ):
         """Op IDs saved to last_run.json must use raw (unresolved) database paths."""
         from sync.service_tools.storage_ops import execute_storage_operations
+        import time
 
+        # Mock an old timestamp so the scrub is due (weekly interval = 7 days)
+        old_time = time.time() - (8 * 24 * 3600)  # 8 days ago
+        mock_load_last.return_value = {"scrub:/data:.pardatabase": old_time}
+        
         mock_logger.return_value = MagicMock()
         mock_load_config.return_value = {
             "username": "test",

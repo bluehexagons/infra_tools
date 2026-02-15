@@ -14,7 +14,8 @@ STATE_DIR = "/opt/infra_tools/state"
 
 # Required keys for each state file
 _MACHINE_STATE_REQUIRED_KEYS = ("machine_type", "system_type", "username")
-_SETUP_CONFIG_REQUIRED_KEYS = ("host", "username", "system_type")
+# host is optional for runtime operations (services don't need it)
+_SETUP_CONFIG_REQUIRED_KEYS = ("username", "system_type")
 STATE_FILE = os.path.join(STATE_DIR, "machine.json")
 SETUP_CONFIG_FILE = os.path.join(STATE_DIR, "setup.json")
 

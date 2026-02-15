@@ -26,22 +26,53 @@ SERVICE_FILE = f"/etc/systemd/system/{SERVICE_NAME}.service"
 TIMER_FILE = f"/etc/systemd/system/{SERVICE_NAME}.timer"
 
 
-def schedule_storage_ops_update(delay_minutes: int = 2) -> None:
-    """Schedule a near-term storage operations run via systemd-run."""
-    run(
-        " ".join(
-            [
-                "systemd-run",
-                "--unit=storage-ops-initial-update",
-                "--on-active",
-                f"{delay_minutes}m",
-                "--property=Type=oneshot",
-                f"/usr/bin/systemctl start {SERVICE_NAME}.service",
-            ]
-        ),
-        check=False,
-    )
-    print(f"    ✓ Scheduled initial storage-ops run in ~{delay_minutes} minute(s)")
+def schedule_storage_ops_update(delay_minutes: int = 0, immediate: bool = True) -> None:
+    """Schedule and/or run storage operations after setup.
+    
+    Args:
+        delay_minutes: Schedule a delayed run via timer (0 = don't schedule delayed run)
+        immediate: Run the service immediately in background (default True)
+    
+    By default, this triggers an immediate background run so the first sync/scrub
+    happens right away. This can be disabled for testing or if you want only
+    scheduled runs.
+    
+    To check status:
+      - journalctl -u storage-ops.service -f
+      - systemctl status storage-ops.service
+    """
+    if immediate:
+        # Trigger immediate run in background (non-blocking)
+        # Use systemd-run to ensure proper service isolation and logging
+        result = run(
+            f"systemd-run --unit=storage-ops-immediate --no-block "
+            f"/usr/bin/systemctl start {SERVICE_NAME}.service",
+            check=False,
+        )
+        if result == 0:
+            print(f"    ✓ Triggered immediate storage-ops run in background")
+            print(f"    ℹ Check progress: journalctl -u {SERVICE_NAME}.service -f")
+        else:
+            print(f"    ⚠ Failed to trigger immediate run (will rely on scheduled timer)")
+    
+    if delay_minutes > 0:
+        # Also schedule a delayed run as backup
+        run(
+            " ".join(
+                [
+                    "systemd-run",
+                    "--unit=storage-ops-delayed-update",
+                    "--timer-property=AccuracySec=1s",
+                    "--on-active",
+                    f"{delay_minutes}m",
+                    f"/usr/bin/systemctl start {SERVICE_NAME}.service",
+                ]
+            ),
+            check=False,
+        )
+        print(f"    ✓ Also scheduled backup run in ~{delay_minutes} minute(s)")
+    
+    print(f"    ℹ To trigger manually: systemctl start {SERVICE_NAME}.service")
 
 
 def create_storage_ops_service(config: SetupConfig, **_kwargs: Any) -> None:
@@ -62,6 +93,9 @@ def create_storage_ops_service(config: SetupConfig, **_kwargs: Any) -> None:
 
     # Clean up any existing service
     cleanup_service(SERVICE_NAME)
+    
+    # Lock files are automatically cleaned up on reboot (stored in /run/lock tmpfs)
+    # Don't remove them during service creation as they may belong to running operations
 
     # Create required directories
     os.makedirs("/var/lib/storage-ops", exist_ok=True)

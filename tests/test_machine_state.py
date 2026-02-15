@@ -221,9 +221,9 @@ class TestSetupConfigValidation(unittest.TestCase):
 
     def test_missing_required_key_returns_none(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            # Missing 'host'
+            # Missing 'username' (required for runtime operations)
             config_file = self._write_config(tmpdir, {
-                'username': 'admin', 'system_type': 'server_lite'
+                'system_type': 'server_lite'
             })
             with patch.object(ms, 'SETUP_CONFIG_FILE', config_file):
                 self.assertIsNone(ms.load_setup_config())

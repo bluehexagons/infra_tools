@@ -54,21 +54,29 @@ class TestCreateStorageOpsService(unittest.TestCase):
 
 
 class TestScheduleStorageOpsUpdate(unittest.TestCase):
-    @patch("sync.storage_ops_steps.run")
-    def test_schedules_initial_update(self, run_cmd):
+    @patch("sync.storage_ops_steps.run", return_value=0)
+    def test_schedules_immediate_update_by_default(self, run_cmd):
         schedule_storage_ops_update()
-        run_cmd.assert_called_once_with(
-            "systemd-run --unit=storage-ops-initial-update --on-active 2m --property=Type=oneshot /usr/bin/systemctl start storage-ops.service",
-            check=False,
-        )
+        # Should trigger immediate run (first call)
+        run_cmd.assert_called_once()
+        call_args = run_cmd.call_args[0][0]
+        self.assertIn("storage-ops-immediate", call_args)
+        self.assertIn("systemctl start storage-ops.service", call_args)
 
-    @patch("sync.storage_ops_steps.run")
-    def test_schedules_initial_update_with_custom_delay(self, run_cmd):
-        schedule_storage_ops_update(delay_minutes=7)
-        run_cmd.assert_called_once_with(
-            "systemd-run --unit=storage-ops-initial-update --on-active 7m --property=Type=oneshot /usr/bin/systemctl start storage-ops.service",
-            check=False,
-        )
+    @patch("sync.storage_ops_steps.run", return_value=0)
+    def test_schedules_delayed_update_when_requested(self, run_cmd):
+        schedule_storage_ops_update(delay_minutes=5, immediate=False)
+        # Should only schedule delayed run
+        run_cmd.assert_called_once()
+        call_args = run_cmd.call_args[0][0]
+        self.assertIn("storage-ops-delayed-update", call_args)
+        self.assertIn("--on-active 5m", call_args)
+
+    @patch("sync.storage_ops_steps.run", return_value=0)
+    def test_schedules_both_immediate_and_delayed(self, run_cmd):
+        schedule_storage_ops_update(delay_minutes=10, immediate=True)
+        # Should call run twice (immediate + delayed)
+        self.assertEqual(run_cmd.call_count, 2)
 
 
 if __name__ == "__main__":
