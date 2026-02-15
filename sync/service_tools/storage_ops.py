@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../
 from lib.logging_utils import get_service_logger
 from lib.notifications import send_notification, parse_notification_args
 from lib.machine_state import load_setup_config
-from lib.mount_utils import is_path_under_mnt, get_mount_ancestor
+from lib.mount_utils import get_mount_ancestor
 from lib.task_utils import needs_mount_check
 from lib.runtime_config import RuntimeConfig
 
@@ -60,7 +60,7 @@ class OperationLock:
         # Ensure parent directory exists
         os.makedirs(os.path.dirname(self.lock_path), exist_ok=True)
         
-        self.lock_file = open(self.lock_path, 'w')
+        self.lock_file = open(self.lock_path, 'a+')
         
         if blocking:
             start_time = time.time()
@@ -71,6 +71,9 @@ class OperationLock:
                     return True
                 except (IOError, OSError):
                     if time.time() - start_time >= timeout:
+                        if self.lock_file:
+                            self.lock_file.close()
+                            self.lock_file = None
                         return False
                     time.sleep(1.0)
         else:
@@ -79,6 +82,9 @@ class OperationLock:
                 self.acquired = True
                 return True
             except (IOError, OSError):
+                if self.lock_file:
+                    self.lock_file.close()
+                    self.lock_file = None
                 return False
     
     def release(self) -> None:
@@ -93,6 +99,9 @@ class OperationLock:
             finally:
                 self.acquired = False
                 self.lock_file = None
+        elif self.lock_file:
+            self.lock_file.close()
+            self.lock_file = None
     
     def __enter__(self):
         return self
@@ -143,15 +152,14 @@ def get_scrub_op_id(directory: str, database: str) -> str:
 def validate_mounts_for_operation(paths: list[str], config: RuntimeConfig, operation_type: str) -> tuple[bool, str]:
     """Validate that all required mounts are available."""
     for path in paths:
-        if not os.path.ismount(path) and os.path.exists(path):
-            # Path exists but might be on unmounted parent
-            if is_path_under_mnt(path):
-                mount_ancestor = get_mount_ancestor(path)
-                if mount_ancestor and not os.path.ismount(mount_ancestor):
-                    return False, f"Mount {mount_ancestor} not available for {operation_type}"
-        elif not os.path.exists(path):
-            if needs_mount_check(path, config):
+        if needs_mount_check(path, config):
+            if not os.path.exists(path):
                 return False, f"Path {path} not available (possibly unmounted)"
+            mount_ancestor = get_mount_ancestor(path)
+            if not mount_ancestor:
+                return False, f"No mounted filesystem found for {path} ({operation_type})"
+            if not os.path.ismount(mount_ancestor):
+                return False, f"Mount {mount_ancestor} not available for {operation_type}"
 
     return True, ""
 

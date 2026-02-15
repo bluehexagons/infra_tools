@@ -129,7 +129,7 @@ Credentials are written to `/root/.smb/credentials-<escaped_mountpoint>` with mo
 ### What it does
 
 1. Installs rsync.
-2. During setup an initial oneshot service + timer may be created for each source → destination pair to perform validation and the initial run. At runtime a unified orchestrator (`storage-ops.service` / `storage-ops.timer`) manages scheduled syncs.
+2. During setup, performs validation and a first sync run for each source → destination pair. Ongoing scheduled syncs are managed by a unified orchestrator (`storage-ops.service` / `storage-ops.timer`), rather than per-task oneshot units.
 3. Before each sync run, the orchestrator validates mounts using a static mount-check script (especially important for SMB-mounted paths).
 4. Uses `rsync -av --delete --partial` for incremental, delete-propagating backups.
 
@@ -156,7 +156,7 @@ Runtime scheduling no longer uses per-task systemd timers. A single unified orch
 - `storage-ops.service` — oneshot orchestrator that runs due syncs, due full scrubs, then parity updates.
 - `storage-ops.timer` — hourly timer that schedules the orchestrator.
 
-At deployment time the setup process may still create per-task oneshot services/timers to perform initial runs and for migration; however, these are legacy and the running system uses the unified `storage-ops` model. The codebase retains cleanup/migration logic to remove legacy units on upgrade.
+At deployment time, setup performs initial runs directly for validation. Runtime scheduling uses only the unified `storage-ops` model; legacy per-task units are cleaned up during upgrades.
 
 ### Mount safety
 
@@ -196,7 +196,7 @@ The orchestrator uses a static mount-check script (`sync/service_tools/check_sto
 
 Full scrubs and parity updates are managed by the unified orchestrator (`storage-ops.service` / `storage-ops.timer`). The orchestrator runs full scrubs only when due according to the configured frequency and performs parity-only updates hourly for all configured scrub targets so new and modified files are protected quickly.
 
-As with sync, per-task scrub units may be generated during setup for initial runs and are considered legacy; upgrade/cleanup code removes or migrates them so the runtime uses the single `storage-ops` model.
+As with sync, setup performs the initial scrub/parity run directly. Runtime scheduling uses the single `storage-ops` model, and legacy per-task units are removed during cleanup/migration.
 
 ### Parity database
 

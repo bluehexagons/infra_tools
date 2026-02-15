@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 # Ensure project root is on the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -23,6 +24,7 @@ from lib.task_utils import (
     escape_systemd_description,
     check_path_on_smb_mount,
     ensure_directory,
+    get_mount_points_from_config,
     VALID_FREQUENCIES,
 )
 from lib.validation import (
@@ -282,6 +284,32 @@ class TestCheckPathOnSmbMount(unittest.TestCase):
     def test_no_mounts(self):
         config = self._make_config(None)
         self.assertFalse(check_path_on_smb_mount('/mnt/share', config))
+
+
+# ---------------------------------------------------------------------------
+# get_mount_points_from_config
+# ---------------------------------------------------------------------------
+
+class TestGetMountPointsFromConfig(unittest.TestCase):
+    def test_derives_expected_mnt_mountpoint_when_unmounted(self):
+        config = SetupConfig(
+            host='test', username='test', system_type='server_lite',
+            sync_specs=[['/mnt/data/source', '/home/test/backup', 'daily']],
+            scrub_specs=[],
+        )
+        with patch.object(tu, 'get_mount_ancestor', return_value=None):
+            mount_points = get_mount_points_from_config(config)
+        self.assertIn('/mnt/data', mount_points)
+
+    def test_includes_smb_mount_points(self):
+        config = SetupConfig(
+            host='test', username='test', system_type='server_lite',
+            sync_specs=[],
+            scrub_specs=[],
+            smb_mounts=[['/srv/nas', '1.2.3.4', 'u:p', 'share', '/']],
+        )
+        mount_points = get_mount_points_from_config(config)
+        self.assertIn('/srv/nas', mount_points)
 
 
 # ---------------------------------------------------------------------------

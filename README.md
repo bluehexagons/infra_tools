@@ -129,13 +129,13 @@ Common features: User setup, sudo, firewall/SSH hardening, auto-updates, Chrony,
 
 | Flag | Description |
 |------|-------------|
-| `--sync SOURCE DEST INTERVAL` | Configure directory synchronization with rsync (can use multiple times): SOURCE (source directory), DEST (destination directory), INTERVAL (hourly, daily, weekly, biweekly, monthly, or bimonthly). At runtime a unified orchestrator (`storage-ops.service` / `storage-ops.timer`) manages scheduled syncs (hourly). During setup an initial oneshot service may be created to perform validation and the initial run. The orchestrator validates mounts before running operations to prevent accidental writes to unmounted paths. |
+| `--sync SOURCE DEST INTERVAL` | Configure directory synchronization with rsync (can use multiple times): SOURCE (source directory), DEST (destination directory), INTERVAL (hourly, daily, weekly, biweekly, monthly, or bimonthly). At runtime a unified orchestrator (`storage-ops.service` / `storage-ops.timer`) manages scheduled syncs (hourly). During setup, an initial validation and sync run is executed directly (no per-spec oneshot units are created). The orchestrator validates mounts before running operations to prevent accidental writes to unmounted paths. |
 
 ### Data Integrity Flags
 
 | Flag | Description |
 |------|-------------|
-| `--scrub DIR DBPATH REDUNDANCY FREQ` | Automated par2 integrity checking: DIR (directory), DBPATH (.pardatabase path, relative or absolute), REDUNDANCY (e.g., 5%), FREQ (hourly, daily, weekly, biweekly, monthly, or bimonthly). Managed at runtime by the unified orchestrator: full scrubs run when due and parity-only updates are executed hourly to protect new/modified files. During setup an initial parity/full scrub may be scheduled via a legacy oneshot for validation; this is migration-only behavior. |
+| `--scrub DIR DBPATH REDUNDANCY FREQ` | Automated par2 integrity checking: DIR (directory), DBPATH (.pardatabase path, relative or absolute), REDUNDANCY (e.g., 5%), FREQ (hourly, daily, weekly, biweekly, monthly, or bimonthly). Managed at runtime by the unified orchestrator: full scrubs run when due and parity-only updates are executed hourly to protect new/modified files. During setup an initial parity/full scrub is executed directly for validation; no per-task systemd scrub units are created. |
 
 ### Notification Flags
 

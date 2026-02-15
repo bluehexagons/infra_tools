@@ -198,5 +198,16 @@ def get_mount_points_from_config(config: SetupConfig) -> set[str]:
             mount_ancestor = get_mount_ancestor(path)
             if mount_ancestor:
                 mount_points.add(mount_ancestor)
+            else:
+                if path == "/mnt":
+                    mount_points.add("/mnt")
+                parts = path.split('/')
+                if len(parts) > 2 and parts[2]:
+                    mount_points.add(f"/mnt/{parts[2]}")
+
+    smb_mounts = getattr(config, 'smb_mounts', None) or []
+    for mount_spec in smb_mounts:
+        if mount_spec:
+            mount_points.add(mount_spec[0])
 
     return mount_points
