@@ -367,8 +367,11 @@ def main() -> int:
         print("\n✓ Concurrent operations complete")
         
         # Create unified storage operations service and timer
-        from sync.storage_ops_steps import create_storage_ops_service
-        create_storage_ops_service(config)
+        if args.dry_run:
+            print("  [DRY-RUN] Skipping storage-ops systemd service/timer creation")
+        else:
+            from sync.storage_ops_steps import create_storage_ops_service
+            create_storage_ops_service(config)
     
     print("\n" + "=" * 60)
     print("✓ Remote setup complete!")

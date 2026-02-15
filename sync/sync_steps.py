@@ -8,7 +8,7 @@ from typing import Optional, Any
 
 from lib.config import SetupConfig
 from lib.remote_utils import run, is_package_installed
-from lib.mount_utils import validate_mount_for_sync, validate_smb_connectivity, is_path_under_mnt
+from lib.mount_utils import validate_mount_for_sync, validate_smb_connectivity
 from lib.disk_utils import get_disk_usage_details
 from lib.validation import validate_filesystem_path
 from lib.operation_log import create_operation_logger
@@ -103,8 +103,6 @@ def create_sync_service(config: SetupConfig, sync_spec: Optional[list[str]] = No
     
     source_on_smb = check_path_on_smb_mount(source, config)
     dest_on_smb = check_path_on_smb_mount(destination, config)
-    source_under_mnt = is_path_under_mnt(source)
-    dest_under_mnt = is_path_under_mnt(destination)
     
     if source_on_smb or dest_on_smb:
         logger.log_step("mount_validation_enhanced", "started", "Performing enhanced mount validation")

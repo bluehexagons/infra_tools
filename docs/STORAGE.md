@@ -160,7 +160,7 @@ At deployment time, setup performs initial runs directly for validation. Runtime
 
 ### Mount safety
 
-The orchestrator uses a static mount-check script (`sync/service_tools/check_storage_ops_mounts.py`) to validate mounts before running any operation. The script accepts a list of mount points and exits non-zero when a required mount is not available; the orchestrator skips operations when mounts are missing to avoid accidental writes to empty mount points.
+The orchestrator uses a static mount-check script (`sync/service_tools/check_storage_ops_mounts.py`) to validate mounts before running any operation. The script accepts a list of mount points and exits non-zero when a required mount is not available; this is wired into `storage-ops.service` as a systemd `ExecCondition`, so when required mounts are missing the entire `storage-ops` run is blocked, preventing any operations and avoiding accidental writes to empty mount points.
 
 ---
 

@@ -13,7 +13,7 @@ from typing import Any
 
 from lib.config import SetupConfig
 from lib.setup_common import REMOTE_INSTALL_DIR
-from lib.remote_utils import run
+from lib.remote_utils import run, is_dry_run
 from lib.systemd_service import cleanup_service
 from lib.task_utils import (
     get_mount_points_from_config,
@@ -35,6 +35,9 @@ def create_storage_ops_service(config: SetupConfig, **_kwargs: Any) -> None:
     """
     if not config.sync_specs and not config.scrub_specs:
         print("  No storage operations configured, skipping unified service creation")
+        return
+    if is_dry_run():
+        print("  [DRY-RUN] Skipping unified storage operations service creation")
         return
 
     print("\n  Creating unified storage operations service...")

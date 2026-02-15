@@ -183,13 +183,14 @@ def has_mount_paths(config: "SetupConfig | RuntimeConfig") -> bool:
 def get_mount_points_from_config(config: SetupConfig) -> set[str]:
     """Get all unique mount points from storage specs.
 
-    Collects mount points for paths that are under /mnt.
+    Collects mount points for paths that are under /mnt and SMB mount points
+    defined in ``config.smb_mounts``.
 
     Args:
         config: Setup configuration
 
     Returns:
-        Set of mount point paths
+        Set of mount point paths (including both /mnt-based and SMB mounts)
     """
     mount_points: set[str] = set()
 

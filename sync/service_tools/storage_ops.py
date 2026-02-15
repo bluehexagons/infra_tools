@@ -196,12 +196,14 @@ def run_scrub(directory: str, database: str, redundancy: str, verify: bool, logg
     scrub_id = md5(f"{directory}:{database}".encode()).hexdigest()[:8]
     log_file = f"{log_dir}/scrub-{scrub_id}.log"
     
-    # Parse redundancy
-    redundancy_int = int(redundancy.rstrip('%'))
-    
     try:
+        redundancy_int = int(redundancy.rstrip('%'))
         scrub_directory(directory, database, redundancy_int, log_file, verify)
         return True, f"Scrub completed for {directory}"
+    except ValueError as e:
+        error_msg = f"Invalid redundancy value '{redundancy}': {e}"
+        logger.error(error_msg)
+        return False, error_msg
     except Exception as e:
         logger.error(f"Scrub failed: {e}")
         return False, str(e)

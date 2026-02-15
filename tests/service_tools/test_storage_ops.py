@@ -5,12 +5,12 @@ from __future__ import annotations
 import os
 import sys
 import unittest
-from unittest.mock import mock_open, patch
+from unittest.mock import MagicMock, mock_open, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 from lib.runtime_config import RuntimeConfig
-from sync.service_tools.storage_ops import OperationLock, validate_mounts_for_operation
+from sync.service_tools.storage_ops import OperationLock, run_scrub, validate_mounts_for_operation
 
 
 class TestOperationLock(unittest.TestCase):
@@ -34,6 +34,16 @@ class TestValidateMountsForOperation(unittest.TestCase):
         valid, message = validate_mounts_for_operation(["/mnt/data/source"], config, "sync")
         self.assertFalse(valid)
         self.assertIn("No mounted filesystem found", message)
+
+
+class TestRunScrub(unittest.TestCase):
+    @patch("sync.service_tools.storage_ops.os.makedirs")
+    def test_invalid_redundancy_returns_failure_tuple(self, _makedirs):
+        logger = MagicMock()
+        success, message = run_scrub("/mnt/data", "/mnt/data/.pardb", "abc%", True, logger)
+        self.assertFalse(success)
+        self.assertIn("Invalid redundancy value", message)
+        logger.error.assert_called()
 
 
 if __name__ == "__main__":

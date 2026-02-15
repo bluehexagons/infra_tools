@@ -9,7 +9,7 @@ from typing import Optional, Any
 
 from lib.config import SetupConfig
 from lib.remote_utils import run, is_package_installed
-from lib.mount_utils import validate_mount_for_sync, validate_smb_connectivity, is_path_under_mnt
+from lib.mount_utils import validate_mount_for_sync, validate_smb_connectivity
 from lib.disk_utils import get_disk_usage_details
 from lib.validation import (
     validate_filesystem_path, 
@@ -136,8 +136,6 @@ def create_scrub_service(config: SetupConfig, scrub_spec: Optional[list[str]] = 
     
     dir_on_smb = check_path_on_smb_mount(directory, config)
     db_on_smb = check_path_on_smb_mount(database_path, config)
-    dir_under_mnt = is_path_under_mnt(directory)
-    db_under_mnt = is_path_under_mnt(database_path)
     
     if dir_on_smb or db_on_smb:
         logger.log_step("mount_validation_enhanced", "started", "Performing enhanced mount validation")
