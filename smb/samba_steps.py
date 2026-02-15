@@ -219,8 +219,8 @@ def setup_samba_share(config: SetupConfig, share_spec: Optional[list[str]] = Non
     # Detect scrub database directories that fall within this share's path.
     veto_dirs = _get_veto_dirs_for_share(primary_path, config)
     if veto_dirs:
-        veto_pattern = "/".join(f".{d}/" if not d.startswith('.') else f"{d}/" for d in veto_dirs)
-        veto_pattern = f"/{veto_pattern}"
+        veto_pattern = "/".join(f".{d}" if not d.startswith('.') else d for d in veto_dirs)
+        veto_pattern = f"/{veto_pattern}/"
         share_lines.append(f"   veto files = {veto_pattern}")
         share_lines.append("   delete veto files = no")
         print(f"  Hiding internal directories from share: {', '.join(veto_dirs)}")
