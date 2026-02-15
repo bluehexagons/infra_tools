@@ -62,6 +62,14 @@ class TestScheduleStorageOpsUpdate(unittest.TestCase):
             check=False,
         )
 
+    @patch("sync.storage_ops_steps.run")
+    def test_schedules_initial_update_with_custom_delay(self, run_cmd):
+        schedule_storage_ops_update(delay_minutes=7)
+        run_cmd.assert_called_once_with(
+            "systemd-run --unit=storage-ops-initial-update --on-active 7m --property=Type=oneshot /usr/bin/systemctl start storage-ops.service",
+            check=False,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
