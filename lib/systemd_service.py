@@ -131,8 +131,8 @@ def cleanup_all_infra_services(dry_run: bool = False) -> None:
         # Rails app services
         r"^rails-.*\.service$",
         # Auto-update timers
-        *[rf"^{re.escape(name)}\.service$" for name in auto_update_services],
-        *[rf"^{re.escape(name)}\.timer$" for name in auto_update_services],
+        *[f"^{re.escape(name)}\\.service$" for name in auto_update_services],
+        *[f"^{re.escape(name)}\\.timer$" for name in auto_update_services],
         # Auto-restart service
         r"^auto-restart-if-needed\.service$",
         r"^auto-restart-if-needed\.timer$",
