@@ -60,6 +60,7 @@ class OperationLock:
         # Ensure parent directory exists
         os.makedirs(os.path.dirname(self.lock_path), exist_ok=True)
         
+        # Open without truncation so a failed lock attempt doesn't modify the file.
         self.lock_file = open(self.lock_path, 'a+')
         
         if blocking:

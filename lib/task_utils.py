@@ -199,8 +199,11 @@ def get_mount_points_from_config(config: SetupConfig) -> set[str]:
             if mount_ancestor:
                 mount_points.add(mount_ancestor)
             else:
+                # If /mnt itself is configured, require /mnt to be mounted.
                 if path == "/mnt":
                     mount_points.add("/mnt")
+                # Derive expected mount root for unmounted paths under /mnt:
+                # e.g. /mnt/data/source -> /mnt/data
                 parts = path.split('/')
                 if len(parts) > 2 and parts[2]:
                     mount_points.add(f"/mnt/{parts[2]}")

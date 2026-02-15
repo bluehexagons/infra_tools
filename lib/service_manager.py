@@ -64,8 +64,9 @@ class ServiceManager:
 
     def _prepare_service_name(self, service_name: str) -> None:
         """Clean up existing units and validate service name."""
+        validate_service_name_uniqueness(service_name, [])
         if not self.validate_service_uniqueness(service_name):
-            raise ValueError(f"Service name '{service_name}' is invalid or already in use")
+            raise ValueError(f"Service name '{service_name}' is already in use")
         cleanup_service(service_name)
     
     def create_backup_service(self, service_config: dict[str, Any]) -> str:
