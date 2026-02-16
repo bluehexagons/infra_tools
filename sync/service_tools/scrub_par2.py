@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import sys
 import os
+import re
 import subprocess
 import time
 from glob import glob, escape
@@ -24,6 +25,7 @@ from lib.operation_log import create_operation_logger
 from lib.transaction import create_transaction
 from lib.validation import validate_filesystem_path
 from lib.disk_utils import estimate_operation_duration
+from lib.progress_utils import ProgressTracker, ProgressMessage
 
 PAR2_EXTENSION = ".par2"
 PAR2_VOLUME_MARKER = f"{PAR2_EXTENSION}.vol"
@@ -36,17 +38,39 @@ _LOGGERS: dict[str, Any] = {}
 
 
 def log(message: str, log_file: str) -> None:
-    """Append message to log file."""
+    """Append message to log file and print to console for systemd journal."""
     logger = _LOGGERS.get(log_file)
     if logger is None:
         logger = get_rotating_logger(f"scrub_par2:{log_file}", log_file)
         _LOGGERS[log_file] = logger
     log_message(logger, message)
+    # Also print to stdout for systemd journal capture
+    print(message, flush=True)
 
 
 def _remove_par2_files(par2_base: str, log_file: str) -> None:
-    """Remove par2 files for a base path."""
-    for par2_file in glob(f"{escape(par2_base)}*"):
+    """Remove par2 files for a base path (including volume files).
+    
+    Par2 can create either:
+    - Base file: filename.par2 (with -n2+)
+    - Volume files: filename.par2.vol00+01.par2 (when base exists)
+    - Volume-only: filename.vol00+01.par2 (with -n1, strips .par2 before adding .vol)
+    """
+    # Pattern 1: Match base file and volumes that append to base (e.g., file.par2.vol00+01.par2)
+    base_pattern_files = glob(f"{escape(par2_base)}*")
+    
+    # Pattern 2: Match volume-only files where par2 strips .par2 extension first
+    # e.g., if par2_base is "file.par2", also check for "file.vol*.par2"
+    volume_only_files = []
+    if par2_base.endswith('.par2'):
+        base_without_par2 = par2_base[:-5]  # Remove '.par2'
+        volume_only_files = glob(f"{escape(base_without_par2)}.vol*.par2")
+    
+    files_to_remove = list(set(base_pattern_files + volume_only_files))
+    
+    if files_to_remove:
+        log(f"Removing {len(files_to_remove)} existing par2 file(s)", log_file)
+    for par2_file in files_to_remove:
         try:
             os.remove(par2_file)
         except (IOError, OSError) as e:
@@ -91,44 +115,71 @@ def create_par2(
             operation_logger.log_error("validation_failed", str(e), {"file": relative_path})
         return False
     
+    # Skip 0-byte files silently (par2 cannot create parity for empty files)
+    try:
+        if os.path.getsize(file_path) == 0:
+            return True
+    except OSError:
+        return False
+    
+    # Check for existing par2 files (base and/or volume files)
+    # Par2 with -n1 creates volume-only files like filename.vol00+01.par2 (strips .par2 first)
+    # Par2 with -n2+ creates base file filename.par2 and volumes filename.par2.vol00+01.par2
+    
+    # Pattern 1: Base file and volumes that append to it
     par2_files = glob(f"{escape(par2_base)}*")
+    
+    # Pattern 2: Volume-only files (par2 strips .par2 extension before adding .vol)
+    if par2_base.endswith('.par2'):
+        base_without_par2 = par2_base[:-5]  # Remove '.par2' 
+        volume_only = glob(f"{escape(base_without_par2)}.vol*.par2")
+        par2_files.extend(volume_only)
+        par2_files = list(set(par2_files))  # Remove duplicates
     
     if par2_files:
         if not force:
-            # Check if par2 file is newer than source file
+            # Check if par2 files are newer than source file
+            # Check the newest par2 file (could be base or volume file)
             try:
-                if os.path.exists(par2_base):
-                    file_mtime = os.path.getmtime(file_path)
-                    par2_mtime = os.path.getmtime(par2_base)
-                    
-                    if file_mtime <= par2_mtime + PAR2_MTIME_TOLERANCE_SECONDS:
-                        log(f"Par2 already up-to-date for: {relative_path}", log_file)
-                        if operation_logger:
-                            operation_logger.log_step("par2_check", "completed", f"Par2 up-to-date: {relative_path}")
-                        return True
+                file_mtime = os.path.getmtime(file_path)
+                par2_mtime = max(os.path.getmtime(f) for f in par2_files)
+                
+                if file_mtime <= par2_mtime + PAR2_MTIME_TOLERANCE_SECONDS:
+                    # Silently skip - file is up to date
+                    if operation_logger:
+                        operation_logger.log_step("par2_check", "completed", f"Par2 up-to-date: {relative_path}")
+                    return True
             except OSError as e:
                 log(f"Cannot check file times for {relative_path}: {e}, forcing recreation", log_file)
                 force = True
         
-        # Atomic removal of existing par2 files
-        def remove_existing_par2():
-            _remove_par2_files(par2_base, log_file)
-        
-        def restore_par2_backup():
-            # In a real implementation, this would restore from backup
-            log(f"Warning: Cannot restore par2 files for {relative_path} (no backup available)", log_file)
-        
-        if transaction:
-            transaction.add_step(
-                remove_existing_par2,
-                restore_par2_backup,
-                f"Remove existing par2 files for {relative_path}",
-                f"remove_par2_{relative_path.replace('/', '_')}"
-            )
+        # Only remove if we're forcing recreation (file was modified or check failed)
+        if force:
+            # Atomic removal of existing par2 files
+            def remove_existing_par2():
+                _remove_par2_files(par2_base, log_file)
+            
+            def restore_par2_backup():
+                # In a real implementation, this would restore from backup
+                log(f"Warning: Cannot restore par2 files for {relative_path} (no backup available)", log_file)
+            
+            if transaction:
+                transaction.add_step(
+                    remove_existing_par2,
+                    restore_par2_backup,
+                    f"Remove existing par2 files for {relative_path}",
+                    f"remove_par2_{relative_path.replace('/', '_')}"
+                )
+            else:
+                remove_existing_par2()
         else:
-            remove_existing_par2()
+            # Files exist and are up-to-date, silently skip
+            return True
     
-    log(f"Creating par2 for: {relative_path} (redundancy: {redundancy}%)", log_file)
+    # Only log when actually creating par2 (not for every file check)
+    
+    # Don't log file size or creation message for every file
+    # Progress will be logged periodically during scrub
     
     # Estimate operation duration
     try:
@@ -155,11 +206,13 @@ def create_par2(
                 )
                 
                 creation_time = time.time() - start_time
+                # Only log individual file creation if it took a long time (>5s) or failed
+                if creation_time > 5.0:
+                    log(f"✓ Created par2 for {relative_path} in {creation_time:.1f}s", log_file)
                 if operation_logger:
                     operation_logger.log_metric("par2_creation_time_seconds", creation_time, "seconds")
                     operation_logger.log_metric("par2_file_size_mb", os.path.getsize(file_path) // (1024 * 1024), "MB")
                 
-                log(f"✓ Created par2 for {relative_path} in {creation_time:.1f}s", log_file)
                 return True
                 
             except subprocess.CalledProcessError as e:
@@ -194,9 +247,19 @@ def create_par2(
 
 
 def _par2_base_from_parity_file(parity_path: str) -> str:
-    """Get par2 base path from any parity file."""
+    """Get par2 base path from any parity file.
+    
+    Handles two volume file formats:
+    - Base + volume: filename.par2.vol00+01.par2 (uses PAR2_VOLUME_MARKER)
+    - Volume-only: filename.vol00+01.par2 (created with -n1, no base file)
+    """
     if PAR2_VOLUME_MARKER in parity_path:
+        # Base + volume format: filename.par2.vol00+01.par2
         return parity_path.split(PAR2_VOLUME_MARKER, 1)[0] + PAR2_EXTENSION
+    elif re.search(r'\.vol\d+\+\d+\.par2$', parity_path):
+        # Volume-only format: filename.vol00+01.par2
+        # Extract base by removing .vol<digits>+<digits>.par2 suffix and adding .par2
+        return re.sub(r'\.vol\d+\+\d+\.par2$', PAR2_EXTENSION, parity_path)
     return parity_path
 
 
@@ -289,7 +352,7 @@ def verify_repair(file_path: str, directory: str, database: str, log_file: str) 
     if not os.path.exists(par2_base):
         return False
     
-    log(f"Verifying: {relative_path}", log_file)
+    # Don't log every file verification - only failures and repairs
     
     try:
         subprocess.run(
@@ -415,12 +478,31 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
         files_updated = 0
         files_verified = 0
         files_repaired = 0
+        files_created = 0  # Track newly created par2 files
+        files_skipped_empty = 0  # Track 0-byte files skipped
+        files_skipped_uptodate = 0  # Track files with up-to-date par2
         total_file_size = 0
+        start_time = time.time()
+        
+        # Initialize progress tracker with custom log function
+        progress_tracker = ProgressTracker(
+            interval_seconds=30,
+            log_func=lambda msg: log(msg, log_file)
+        )
         
         # Create checkpoint after validation
         transaction.create_checkpoint("validation_complete")
         
+        mode_str = "verify+repair" if verify else "parity update"
+        log(f"Starting {mode_str} for {directory}", log_file)
+        log(f"Scanning directory tree: {directory}", log_file)
+        
+        files_found = 0
+        dirs_found = 0
         for root, dirs, files in os.walk(directory):
+            dirs_found += len(dirs)
+            files_found += len(files)
+            
             root_path = Path(root).resolve()
             
             if root_path == database_path or database_path in root_path.parents:
@@ -435,10 +517,19 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
                 relative_path = os.path.relpath(file_path, directory)
                 existing_files.add(relative_path)
                 par2_base = os.path.join(database, f"{relative_path}{PAR2_EXTENSION}")
+                has_base_parity = os.path.exists(par2_base)
+                has_volume_parity = False
+                if not has_base_parity:
+                    par2_volume_pattern = os.path.join(database, f"{relative_path}{PAR2_VOLUME_MARKER}*")
+                    has_volume_parity = bool(glob(par2_volume_pattern))
                 force = False
+                is_new_par2 = not (has_base_parity or has_volume_parity)
                 
                 try:
                     file_size = os.path.getsize(file_path)
+                    if file_size == 0:
+                        files_skipped_empty += 1
+                        continue  # Skip 0-byte files (create_par2 will skip them anyway)
                     total_file_size += file_size
                 except OSError:
                     continue
@@ -446,18 +537,37 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
                 if os.path.exists(par2_base):
                     try:
                         if os.path.getmtime(file_path) > os.path.getmtime(par2_base) + PAR2_MTIME_TOLERANCE_SECONDS:
-                            log(f"Updating par2 for modified file: {relative_path}", log_file)
+                            # Don't log every update - will be in periodic progress
                             force = True
                             files_updated += 1
                     except (IOError, OSError) as e:
                         log(f"Error checking par2 timestamps for {relative_path}: {e}", log_file)
                         force = True
                 
-                # Create par2 with transaction support
+                # Create par2 with transaction support (disabled for performance)
+                # Using transactions causes O(n²) slowdown as each file re-executes all previous steps
                 success = create_par2(file_path, directory, database, redundancy, log_file, 
-                                    force=force, operation_logger=operation_logger, transaction=transaction)
+                                    force=force, operation_logger=operation_logger, transaction=None)
                 if success:
                     files_processed += 1
+                    if is_new_par2:
+                        files_created += 1
+                    elif not force:
+                        # File was skipped because par2 is up-to-date
+                        files_skipped_uptodate += 1
+                
+                # Log progress periodically with detailed stats
+                if progress_tracker.should_log():
+                    msg = (ProgressMessage("Progress")
+                           .add_custom(f"{files_processed} files processed ({files_created} new, {files_updated} updated)")
+                           .add_bytes(total_file_size, label="processed")
+                           .add_duration(progress_tracker.get_elapsed_seconds())
+                           .add_custom("[scanning...]"))
+                    
+                    if verify:
+                        msg.add_custom(f"Verified: {files_verified}, Repaired: {files_repaired}")
+                    
+                    progress_tracker.force_log(msg.build())
                 
                 if verify:
                     was_repaired = verify_repair(file_path, directory, database, log_file)
@@ -465,16 +575,22 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
                     if was_repaired:
                         files_repaired += 1
         
+        log(f"Directory scan complete: {files_found} files in {dirs_found} directories", log_file)
+        
         # Create checkpoint before cleanup
         transaction.create_checkpoint("par2_creation_complete")
         
         # Enhanced orphan cleanup
+        log("Starting orphan cleanup...", log_file)
         _cleanup_orphan_par2(directory, database, existing_files, log_file, 
                            operation_logger=operation_logger, transaction=transaction)
         
         # Final metrics
         operation_logger.log_metric("files_processed", files_processed, "count")
+        operation_logger.log_metric("files_created", files_created, "count")
         operation_logger.log_metric("files_updated", files_updated, "count")
+        operation_logger.log_metric("files_skipped_empty", files_skipped_empty, "count")
+        operation_logger.log_metric("files_skipped_uptodate", files_skipped_uptodate, "count")
         operation_logger.log_metric("files_verified", files_verified, "count")
         operation_logger.log_metric("files_repaired", files_repaired, "count")
         operation_logger.log_metric("total_file_size_mb", total_file_size // (1024 * 1024), "MB")
@@ -487,8 +603,16 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
                                    f"Successfully processed {files_processed} files")
         
         log(f"Scrub completed: {datetime.now()}", log_file)
-        log(f"Files processed: {files_processed}, Updated: {files_updated}, Verified: {files_verified}, Repaired: {files_repaired}", log_file)
+        log(f"Files: {files_processed} processed, {files_created} created, {files_updated} updated, {files_verified} verified, {files_repaired} repaired", log_file)
+        if files_skipped_empty > 0 or files_skipped_uptodate > 0:
+            log(f"Skipped: {files_skipped_empty} empty files, {files_skipped_uptodate} up-to-date files", log_file)
         log("", log_file)
+        
+        # Log completion summary
+        summary_msg = f"✓ Scrub completed: {files_processed} processed, {files_created} new, {files_updated} updated"
+        if verify:
+            summary_msg += f", {files_verified} verified, {files_repaired} repaired"
+        log(summary_msg, log_file)
         
         operation_logger.complete("completed", 
                               f"Scrub completed: {files_processed} files processed, {files_repaired} repaired")
@@ -500,6 +624,8 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
                 name_prefix = f"[{friendly_name}] " if friendly_name else ""
                 status = "warning" if files_repaired > 0 else "good"
                 message = f"Processed {files_processed} files"
+                if files_created > 0:
+                    message += f", created {files_created} new"
                 if files_updated > 0:
                     message += f", updated {files_updated}"
                 if files_repaired > 0:
@@ -510,6 +636,7 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
                 details = f"""Scrub Summary:
 Directory: {directory}
 Files processed: {files_processed}
+Files created: {files_created}
 Files updated: {files_updated}
 Files verified: {files_verified}
 Files repaired: {files_repaired}

@@ -8,6 +8,7 @@ services per task.
 from __future__ import annotations
 
 import os
+import time
 import shlex
 from typing import Any
 
@@ -24,6 +25,30 @@ from lib.task_utils import (
 SERVICE_NAME = "storage-ops"
 SERVICE_FILE = f"/etc/systemd/system/{SERVICE_NAME}.service"
 TIMER_FILE = f"/etc/systemd/system/{SERVICE_NAME}.timer"
+
+
+def schedule_storage_ops_update(delay_minutes: int = 2) -> None:
+    """Schedule a near-term storage operations run via systemd-run."""
+    transient_unit_name = f"storage-ops-initial-update-{os.getpid()}-{int(time.time())}"
+    result = run(
+        " ".join(
+            [
+                "systemd-run",
+                "--collect",
+                f"--unit={transient_unit_name}",
+                "--on-active",
+                f"{delay_minutes}m",
+                "--property=Type=oneshot",
+                f"/usr/bin/systemctl start {SERVICE_NAME}.service",
+            ]
+        ),
+        check=False,
+    )
+    if result.returncode == 0:
+        print(f"    ✓ Scheduled initial storage-ops run in ~{delay_minutes} minute(s)")
+    else:
+        print("    ⚠ Failed to schedule initial storage-ops run (hourly timer remains active)")
+    print(f"    ℹ To trigger manually: systemctl start {SERVICE_NAME}.service")
 
 
 def create_storage_ops_service(config: SetupConfig, **_kwargs: Any) -> None:
@@ -44,6 +69,9 @@ def create_storage_ops_service(config: SetupConfig, **_kwargs: Any) -> None:
 
     # Clean up any existing service
     cleanup_service(SERVICE_NAME)
+    
+    # Lock files are automatically cleaned up on reboot (stored in /run/lock tmpfs)
+    # Don't remove them during service creation as they may belong to running operations
 
     # Create required directories
     os.makedirs("/var/lib/storage-ops", exist_ok=True)
@@ -111,6 +139,7 @@ WantedBy=timers.target
     run("systemctl daemon-reload")
     run(f"systemctl enable {SERVICE_NAME}.timer")
     run(f"systemctl start {SERVICE_NAME}.timer")
+    run(f"systemctl --no-pager status {SERVICE_NAME}.timer", check=False)
 
     print(f"    ✓ Storage operations timer started")
     print(f"    ℹ Run 'systemctl status {SERVICE_NAME}.timer' to check status")

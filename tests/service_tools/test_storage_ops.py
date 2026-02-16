@@ -16,6 +16,7 @@ from lib.runtime_config import RuntimeConfig
 from sync.service_tools.storage_ops import (
     FREQUENCY_SECONDS,
     OperationLock,
+    get_parity_op_id,
     get_scrub_op_id,
     get_sync_op_id,
     is_operation_due,
@@ -48,6 +49,48 @@ class TestValidateMountsForOperation(unittest.TestCase):
         valid, message = validate_mounts_for_operation(["/mnt/data/source"], config, "sync")
         self.assertFalse(valid)
         self.assertIn("No mounted filesystem found", message)
+    
+    @patch("sync.service_tools.storage_ops.os.path.ismount", return_value=True)
+    @patch("sync.service_tools.storage_ops.get_mount_ancestor", return_value="/mnt/scrap_100_1")
+    @patch("sync.service_tools.storage_ops.os.path.exists")
+    def test_accepts_nonexistent_destination_on_mounted_parent(self, mock_exists, mock_ancestor, mock_ismount):
+        """Test that sync destinations can be created on mounted filesystems.
+        
+        Simulates the case where /mnt/scrap_100_1 is mounted but
+        /mnt/scrap_100_1/incoming/scrap_100_2 doesn't exist yet.
+        """
+        def exists_side_effect(path):
+            # Mount point exists, but destination subdirectory doesn't
+            if path == "/mnt/scrap_100_1":
+                return True
+            if path == "/mnt/scrap_100_1/incoming":
+                return False
+            if path == "/mnt/scrap_100_1/incoming/scrap_100_2":
+                return False
+            return False
+        
+        mock_exists.side_effect = exists_side_effect
+        
+        config = RuntimeConfig(username="test", sync_specs=[], scrub_specs=[], notify_specs=[])
+        valid, message = validate_mounts_for_operation(
+            ["/mnt/scrap_100_1/incoming/scrap_100_2"], 
+            config, 
+            "sync"
+        )
+        self.assertTrue(valid, f"Should accept non-existent path on mounted filesystem: {message}")
+    
+    @patch("sync.service_tools.storage_ops.os.path.exists", return_value=False)
+    def test_rejects_nonexistent_path_with_no_mounted_parent(self, mock_exists):
+        """Test that paths with no mounted parent are rejected."""
+        config = RuntimeConfig(username="test", sync_specs=[], scrub_specs=[], notify_specs=[])
+        valid, message = validate_mounts_for_operation(
+            ["/mnt/nonexistent/path"], 
+            config, 
+            "sync"
+        )
+        self.assertFalse(valid)
+        self.assertIn("not available", message)
+
 
 
 class TestRunScrub(unittest.TestCase):
@@ -95,6 +138,12 @@ class TestGetScrubOpId(unittest.TestCase):
         id1 = get_scrub_op_id("/mnt/data1", ".pardb")
         id2 = get_scrub_op_id("/mnt/data2", ".pardb")
         self.assertNotEqual(id1, id2)
+
+
+class TestGetParityOpId(unittest.TestCase):
+    def test_basic_format(self):
+        op_id = get_parity_op_id("/mnt/data", ".pardatabase")
+        self.assertEqual(op_id, "parity:/mnt/data:.pardatabase")
 
 
 class TestResolveScrubDatabasePath(unittest.TestCase):
@@ -227,17 +276,22 @@ class TestOpIdStability(unittest.TestCase):
     @patch("sync.service_tools.storage_ops.run_scrub", return_value=(True, "OK"))
     @patch("sync.service_tools.storage_ops.validate_mounts_for_operation", return_value=(True, ""))
     @patch("sync.service_tools.storage_ops.save_last_run")
-    @patch("sync.service_tools.storage_ops.load_last_run", return_value={})
+    @patch("sync.service_tools.storage_ops.load_last_run")
     @patch("sync.service_tools.storage_ops.parse_notification_args", return_value=[])
     @patch("sync.service_tools.storage_ops.load_setup_config")
     @patch("sync.service_tools.storage_ops.get_service_logger")
     def test_scrub_op_id_uses_raw_database_path(
         self, mock_logger, mock_load_config, _notif_args,
-        _load_last, mock_save_last, _validate, mock_run_scrub, _send_notif
+        mock_load_last, mock_save_last, _validate, mock_run_scrub, _send_notif
     ):
         """Op IDs saved to last_run.json must use raw (unresolved) database paths."""
         from sync.service_tools.storage_ops import execute_storage_operations
+        import time
 
+        # Mock an old timestamp so the scrub is due (weekly interval = 7 days)
+        old_time = time.time() - (8 * 24 * 3600)  # 8 days ago
+        mock_load_last.return_value = {"scrub:/data:.pardatabase": old_time}
+        
         mock_logger.return_value = MagicMock()
         mock_load_config.return_value = {
             "username": "test",
@@ -269,6 +323,139 @@ class TestOpIdStability(unittest.TestCase):
             database_arg = call[0][1]  # second positional arg is database
             self.assertEqual(database_arg, "/data/.pardatabase",
                             f"run_scrub should receive resolved path, got: {database_arg}")
+
+
+class TestParityCadence(unittest.TestCase):
+    @patch("sync.service_tools.storage_ops.send_operation_notification")
+    @patch("sync.service_tools.storage_ops.run_scrub", return_value=(True, "OK"))
+    @patch("sync.service_tools.storage_ops.validate_mounts_for_operation", return_value=(True, ""))
+    @patch("sync.service_tools.storage_ops.save_last_run")
+    @patch("sync.service_tools.storage_ops.load_last_run")
+    @patch("sync.service_tools.storage_ops.parse_notification_args", return_value=[])
+    @patch("sync.service_tools.storage_ops.load_setup_config")
+    @patch("sync.service_tools.storage_ops.get_service_logger")
+    def test_skips_parity_update_when_last_run_is_recent(
+        self, mock_logger, mock_load_config, _notif_args,
+        mock_load_last, _mock_save_last, _validate, mock_run_scrub, _send_notif
+    ):
+        from sync.service_tools.storage_ops import execute_storage_operations
+
+        EIGHT_DAYS_IN_SECONDS = 8 * 24 * 3600
+        ONE_HOUR_IN_SECONDS = 3600
+        now = time.time()
+        mock_load_last.return_value = {
+            "scrub:/data:.pardatabase": now - EIGHT_DAYS_IN_SECONDS,  # full scrub due
+            "parity:/data:.pardatabase": now - ONE_HOUR_IN_SECONDS,  # parity not due for daily cadence
+        }
+
+        mock_logger.return_value = MagicMock()
+        mock_load_config.return_value = {
+            "username": "test",
+            "sync_specs": [],
+            "scrub_specs": [["/data", ".pardatabase", "5%", "weekly"]],
+            "notify_specs": [],
+        }
+
+        execute_storage_operations()
+
+        self.assertEqual(mock_run_scrub.call_count, 1)
+        self.assertTrue(mock_run_scrub.call_args[1]["verify"])
+
+
+class TestOperationLogging(unittest.TestCase):
+    """Test visibility into operation scheduling and execution."""
+    
+    @patch("sync.service_tools.storage_ops.run_sync")
+    @patch("sync.service_tools.storage_ops.validate_mounts_for_operation", return_value=(True, ""))
+    @patch("sync.service_tools.storage_ops.load_last_run")
+    @patch("sync.service_tools.storage_ops.save_last_run")
+    @patch("sync.service_tools.storage_ops.get_service_logger")
+    @patch("sync.service_tools.storage_ops.load_setup_config")
+    @patch("sync.service_tools.storage_ops.parse_notification_args", return_value=[])
+    def test_logs_no_operations_due_message(
+        self, _parse_notify, mock_load_config, mock_logger, mock_save, mock_load_last, _validate, _run_sync
+    ):
+        """Test that when no operations are due, appropriate log message is shown."""
+        from sync.service_tools.storage_ops import execute_storage_operations
+        
+        # Create a mock logger to capture log calls
+        logger_mock = MagicMock()
+        mock_logger.return_value = logger_mock
+        
+        # Set up configuration with syncs and scrubs
+        mock_load_config.return_value = {
+            "username": "test",
+            "sync_specs": [["/src1", "/dst1", "daily"], ["/src2", "/dst2", "hourly"]],
+            "scrub_specs": [["/data", ".pardatabase", "5%", "monthly"]],
+            "notify_specs": [],
+        }
+        
+        # Mock last_run to indicate all operations ran recently (not due)
+        current_time = time.time()
+        mock_load_last.return_value = {
+            "sync:/src1:/dst1": current_time - 100,  # Ran 100s ago (daily not due)
+            "sync:/src2:/dst2": current_time - 100,  # Ran 100s ago (hourly not due)
+            "scrub:/data:.pardatabase": current_time - 100,  # Ran 100s ago (monthly not due)
+            "parity:/data:.pardatabase": current_time - 100,  # Ran 100s ago (daily not due)
+        }
+        
+        results = execute_storage_operations()
+        
+        # Verify the "No operations due at this time" message was logged
+        info_calls = [call[0][0] for call in logger_mock.info.call_args_list]
+        self.assertTrue(
+            any("No operations due at this time" in msg for msg in info_calls),
+            f"Expected 'No operations due at this time' log message. Got: {info_calls}"
+        )
+        
+        # Verify the final summary message about skipped tasks
+        self.assertTrue(
+            any("No operations executed" in msg and "all tasks skipped" in msg for msg in info_calls),
+            f"Expected 'No operations executed - all tasks skipped' message. Got: {info_calls}"
+        )
+        
+        # Verify no operations were executed
+        self.assertEqual(len(results["syncs"]), 0)
+        self.assertEqual(len(results["scrubs"]), 0)
+        self.assertEqual(len(results["parity_updates"]), 0)
+    
+    @patch("sync.service_tools.storage_ops.send_operation_notification")
+    @patch("sync.service_tools.storage_ops.run_sync", return_value=(True, "Success"))
+    @patch("sync.service_tools.storage_ops.validate_mounts_for_operation", return_value=(True, ""))
+    @patch("sync.service_tools.storage_ops.save_last_run")
+    @patch("sync.service_tools.storage_ops.load_last_run", return_value={})
+    @patch("sync.service_tools.storage_ops.parse_notification_args", return_value=[])
+    @patch("sync.service_tools.storage_ops.load_setup_config")
+    @patch("sync.service_tools.storage_ops.get_service_logger")
+    def test_logs_operations_due_summary(
+        self, mock_logger, mock_load_config, _parse_notify, _load_last, mock_save, _validate, _run_sync, _send_notif
+    ):
+        """Test that when operations are due, appropriate summary is logged."""
+        from sync.service_tools.storage_ops import execute_storage_operations
+        
+        # Create a mock logger to capture log calls
+        logger_mock = MagicMock()
+        mock_logger.return_value = logger_mock
+        
+        # Set up configuration with syncs (first run, should execute)
+        mock_load_config.return_value = {
+            "username": "test",
+            "sync_specs": [["/src1", "/dst1", "daily"]],
+            "scrub_specs": [],
+            "notify_specs": [],
+        }
+        
+        results = execute_storage_operations()
+        
+        # Verify the "Operations due" message was logged
+        info_calls = [call[0][0] for call in logger_mock.info.call_args_list]
+        self.assertTrue(
+            any("Operations due: 1 sync(s)" in msg for msg in info_calls),
+            f"Expected 'Operations due: 1 sync(s)' log message. Got: {info_calls}"
+        )
+        
+        # Verify sync was executed
+        self.assertEqual(len(results["syncs"]), 1)
 
 
 if __name__ == "__main__":

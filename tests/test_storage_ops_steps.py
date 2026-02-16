@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import unittest
 from unittest.mock import patch
@@ -10,7 +11,11 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.config import SetupConfig
-from sync.storage_ops_steps import create_storage_ops_service, generate_mount_check_condition
+from sync.storage_ops_steps import (
+    create_storage_ops_service,
+    generate_mount_check_condition,
+    schedule_storage_ops_update,
+)
 
 
 class TestGenerateMountCheckCondition(unittest.TestCase):
@@ -47,6 +52,32 @@ class TestCreateStorageOpsService(unittest.TestCase):
         makedirs.assert_not_called()
         file_open.assert_not_called()
         run_cmd.assert_not_called()
+
+
+class TestScheduleStorageOpsUpdate(unittest.TestCase):
+    @patch(
+        "sync.storage_ops_steps.run",
+        return_value=subprocess.CompletedProcess(args=["cmd"], returncode=0),
+    )
+    def test_schedules_delayed_update_by_default(self, run_cmd):
+        schedule_storage_ops_update()
+        run_cmd.assert_called_once()
+        command = run_cmd.call_args[0][0]
+        self.assertIn("systemd-run --collect", command)
+        self.assertIn("--unit=storage-ops-initial-update-", command)
+        self.assertIn("--on-active 2m", command)
+        self.assertIn("systemctl start storage-ops.service", command)
+        self.assertEqual(run_cmd.call_args[1], {"check": False})
+
+    @patch(
+        "sync.storage_ops_steps.run",
+        return_value=subprocess.CompletedProcess(args=["cmd"], returncode=0),
+    )
+    def test_schedules_delayed_update_with_custom_delay(self, run_cmd):
+        schedule_storage_ops_update(delay_minutes=7)
+        run_cmd.assert_called_once()
+        command = run_cmd.call_args[0][0]
+        self.assertIn("--on-active 7m", command)
 
 
 if __name__ == "__main__":

@@ -129,13 +129,13 @@ Common features: User setup, sudo, firewall/SSH hardening, auto-updates, Chrony,
 
 | Flag | Description |
 |------|-------------|
-| `--sync SOURCE DEST INTERVAL` | Configure directory synchronization with rsync (can use multiple times): SOURCE (source directory), DEST (destination directory), INTERVAL (hourly, daily, weekly, biweekly, monthly, or bimonthly). At runtime a unified orchestrator (`storage-ops.service` / `storage-ops.timer`) manages scheduled syncs (hourly). During setup, an initial validation and sync run is executed directly (no per-spec oneshot units are created). The orchestrator validates mounts before running operations to prevent accidental writes to unmounted paths. |
+| `--sync SOURCE DEST INTERVAL` | Configure directory synchronization with rsync (can use multiple times): SOURCE (source directory), DEST (destination directory), INTERVAL (hourly, daily, weekly, biweekly, monthly, or bimonthly). At runtime a unified orchestrator (`storage-ops.service` / `storage-ops.timer`) manages scheduled syncs (hourly). During setup, infra_tools configures the service/timer and schedules a fast follow-up run (no per-spec oneshot units are created). The orchestrator validates mounts before running operations to prevent accidental writes to unmounted paths. |
 
 ### Data Integrity Flags
 
 | Flag | Description |
 |------|-------------|
-| `--scrub DIR DBPATH REDUNDANCY FREQ` | Automated par2 integrity checking: DIR (directory), DBPATH (.pardatabase path, relative or absolute), REDUNDANCY (e.g., 5%), FREQ (hourly, daily, weekly, biweekly, monthly, or bimonthly). Managed at runtime by the unified orchestrator: full scrubs run when due and parity-only updates are executed hourly to protect new/modified files. During setup an initial parity/full scrub is executed directly for validation; no per-task systemd scrub units are created. |
+| `--scrub DIR DBPATH REDUNDANCY FREQ` | Automated par2 integrity checking: DIR (directory), DBPATH (.pardatabase path, relative or absolute), REDUNDANCY (e.g., 5%), FREQ (hourly, daily, weekly, biweekly, monthly, or bimonthly). Managed at runtime by the unified orchestrator: full scrubs run when due and parity-only updates are executed daily to protect new/modified files. During setup infra_tools configures the service/timer and schedules a fast follow-up run; no per-task systemd scrub units are created. |
 
 ### Notification Flags
 
@@ -322,11 +322,40 @@ python3 setup_server_web.py tunnel.example.com \
 
 ## Testing
 
-Unit tests live in `tests/` and are designed to run on a Debian system without modifying it.
+Unit tests live in `tests/` and use Python's `unittest` framework. See [`TESTING.md`](TESTING.md) for detailed testing documentation.
+
+### Quick Test Commands
 
 ```bash
 # Run all tests
-python3 -m pytest tests/ -v
+make test
+
+# Run specific test file
+make test TEST=test_scrub_par2
+
+# Run with verbose output
+make test-verbose
+
+# Alternative: Use run_tests.py directly
+./run_tests.py
+./run_tests.py test_config
+./run_tests.py -v
+
+# Check all Python files compile
+make compile
+
+# Clean Python cache files
+make clean
+```
+
+### Using unittest directly
+
+```bash
+# Run all tests
+python3 -m unittest discover -s tests -p 'test_*.py'
+
+# Run specific test file
+python3 -m unittest tests.service_tools.test_scrub_par2
 
 # Compile check
 python3 -m py_compile lib/modified_file.py
@@ -334,6 +363,8 @@ python3 -m py_compile lib/modified_file.py
 # Dry run test
 python3 setup_server_web.py test.example.com --dry-run
 ```
+
+See [`TESTING.md`](TESTING.md) for more details on writing and running tests.
 
 ## License
 

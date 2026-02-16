@@ -341,39 +341,31 @@ def main() -> int:
         print("\n✓ SMB mount configuration complete")
     
     if config.sync_specs or config.scrub_specs:
-        from lib.concurrent_sync_scrub import create_concurrent_coordinator
         from sync.sync_steps import install_rsync
         from sync.scrub_steps import install_par2
-        from lib.concurrent_operations import OperationPriority
+        from sync.storage_ops_steps import (
+            create_storage_ops_service,
+            schedule_storage_ops_update,
+        )
 
         print("\n" + "=" * 60)
-        print("Initializing concurrent operations...")
+        print("Configuring storage operations service...")
         print("=" * 60)
 
-        coordinator = create_concurrent_coordinator(config)
-
         if config.sync_specs:
-            print(f"\nSubmitting {len(config.sync_specs)} sync job(s) for background execution...")
+            print(f"\nPreparing {len(config.sync_specs)} sync job(s)...")
             install_rsync(config)
-            for spec in config.sync_specs:
-                coordinator.submit_sync_operation(spec, priority=OperationPriority.NORMAL)
 
         if config.scrub_specs:
-            print(f"\nSubmitting {len(config.scrub_specs)} scrub job(s) for background execution...")
+            print(f"\nPreparing {len(config.scrub_specs)} scrub job(s)...")
             install_par2(config)
-            for spec in config.scrub_specs:
-                coordinator.submit_scrub_operation(spec, priority=OperationPriority.NORMAL)
-
-        print("\nWaiting for background operations to complete...")
-        coordinator.wait_until_idle()
-        print("\n✓ Concurrent operations complete")
         
         # Create unified storage operations service and timer
         if args.dry_run:
             print("  [DRY-RUN] Skipping storage-ops systemd service/timer creation")
         else:
-            from sync.storage_ops_steps import create_storage_ops_service
             create_storage_ops_service(config)
+            schedule_storage_ops_update()
     
     print("\n" + "=" * 60)
     print("✓ Remote setup complete!")
