@@ -29,13 +29,13 @@ TIMER_FILE = f"/etc/systemd/system/{SERVICE_NAME}.timer"
 
 def schedule_storage_ops_update(delay_minutes: int = 2) -> None:
     """Schedule a near-term storage operations run via systemd-run."""
-    transient_unit = f"storage-ops-initial-update-{os.getpid()}-{int(time.time())}"
+    transient_unit_name = f"storage-ops-initial-update-{os.getpid()}-{int(time.time())}"
     result = run(
         " ".join(
             [
                 "systemd-run",
                 "--collect",
-                f"--unit={transient_unit}",
+                f"--unit={transient_unit_name}",
                 "--on-active",
                 f"{delay_minutes}m",
                 "--property=Type=oneshot",

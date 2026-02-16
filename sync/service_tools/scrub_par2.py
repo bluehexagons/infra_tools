@@ -501,10 +501,13 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
                 relative_path = os.path.relpath(file_path, directory)
                 existing_files.add(relative_path)
                 par2_base = os.path.join(database, f"{relative_path}{PAR2_EXTENSION}")
-                par2_volume_pattern = os.path.join(database, f"{relative_path}{PAR2_VOLUME_MARKER}*")
-                has_volume_parity = bool(glob(par2_volume_pattern))
+                has_base_parity = os.path.exists(par2_base)
+                has_volume_parity = False
+                if not has_base_parity:
+                    par2_volume_pattern = os.path.join(database, f"{relative_path}{PAR2_VOLUME_MARKER}*")
+                    has_volume_parity = bool(glob(par2_volume_pattern))
                 force = False
-                is_new_par2 = not (os.path.exists(par2_base) or has_volume_parity)
+                is_new_par2 = not (has_base_parity or has_volume_parity)
                 
                 try:
                     file_size = os.path.getsize(file_path)

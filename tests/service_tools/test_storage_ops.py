@@ -298,10 +298,12 @@ class TestParityCadence(unittest.TestCase):
     ):
         from sync.service_tools.storage_ops import execute_storage_operations
 
+        EIGHT_DAYS_IN_SECONDS = 8 * 24 * 3600
+        ONE_HOUR_IN_SECONDS = 3600
         now = time.time()
         mock_load_last.return_value = {
-            "scrub:/data:.pardatabase": now - (8 * 24 * 3600),  # full scrub due
-            "parity:/data:.pardatabase": now - 3600,  # parity not due for daily cadence
+            "scrub:/data:.pardatabase": now - EIGHT_DAYS_IN_SECONDS,  # full scrub due
+            "parity:/data:.pardatabase": now - ONE_HOUR_IN_SECONDS,  # parity not due for daily cadence
         }
 
         mock_logger.return_value = MagicMock()
