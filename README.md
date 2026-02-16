@@ -322,11 +322,40 @@ python3 setup_server_web.py tunnel.example.com \
 
 ## Testing
 
-Unit tests live in `tests/` and are designed to run on a Debian system without modifying it.
+Unit tests live in `tests/` and use Python's `unittest` framework. See [`TESTING.md`](TESTING.md) for detailed testing documentation.
+
+### Quick Test Commands
 
 ```bash
 # Run all tests
-python3 -m pytest tests/ -v
+make test
+
+# Run specific test file
+make test TEST=test_scrub_par2
+
+# Run with verbose output
+make test-verbose
+
+# Alternative: Use run_tests.py directly
+./run_tests.py
+./run_tests.py test_config
+./run_tests.py -v
+
+# Check all Python files compile
+make compile
+
+# Clean Python cache files
+make clean
+```
+
+### Using unittest directly
+
+```bash
+# Run all tests
+python3 -m unittest discover -s tests -p 'test_*.py'
+
+# Run specific test file
+python3 -m unittest tests.service_tools.test_scrub_par2
 
 # Compile check
 python3 -m py_compile lib/modified_file.py
@@ -334,6 +363,8 @@ python3 -m py_compile lib/modified_file.py
 # Dry run test
 python3 setup_server_web.py test.example.com --dry-run
 ```
+
+See [`TESTING.md`](TESTING.md) for more details on writing and running tests.
 
 ## License
 

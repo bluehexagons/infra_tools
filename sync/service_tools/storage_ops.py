@@ -180,16 +180,45 @@ def get_parity_op_id(directory: str, database: str) -> str:
 
 
 def validate_mounts_for_operation(paths: list[str], config: RuntimeConfig, operation_type: str) -> tuple[bool, str]:
-    """Validate that all required mounts are available."""
+    """Validate that all required mounts are available.
+    
+    For paths that don't exist yet (e.g., sync destinations), validates that
+    the mount ancestor exists. This allows rsync to create the destination
+    directory on a mounted filesystem.
+    """
     for path in paths:
         if needs_mount_check(path, config):
-            if not os.path.exists(path):
-                return False, f"Path {path} not available (possibly unmounted)"
-            mount_ancestor = get_mount_ancestor(path)
-            if not mount_ancestor:
-                return False, f"No mounted filesystem found for {path} ({operation_type})"
-            if not os.path.ismount(mount_ancestor):
-                return False, f"Mount {mount_ancestor} not available for {operation_type}"
+            # Check if path exists
+            path_exists = os.path.exists(path)
+            
+            if path_exists:
+                # Path exists - validate it's on a mounted filesystem
+                mount_ancestor = get_mount_ancestor(path)
+                if not mount_ancestor:
+                    return False, f"No mounted filesystem found for {path} ({operation_type})"
+                if not os.path.ismount(mount_ancestor):
+                    return False, f"Mount {mount_ancestor} not available for {operation_type}"
+            else:
+                # Path doesn't exist - check if parent mount exists
+                # Walk up the directory tree to find an existing ancestor
+                current = path
+                while current and current != '/':
+                    parent = os.path.dirname(current)
+                    if parent == current:  # Reached root
+                        break
+                    if os.path.exists(parent):
+                        # Found an existing parent - verify it's mounted
+                        mount_ancestor = get_mount_ancestor(parent)
+                        if not mount_ancestor:
+                            return False, f"No mounted filesystem found for {path} (parent {parent} not mounted)"
+                        if not os.path.ismount(mount_ancestor):
+                            return False, f"Mount {mount_ancestor} not available for {operation_type}"
+                        # Mount is valid - path can be created on this filesystem
+                        break
+                    current = parent
+                else:
+                    # No existing parent found - error
+                    return False, f"Path {path} not available (possibly unmounted)"
 
     return True, ""
 

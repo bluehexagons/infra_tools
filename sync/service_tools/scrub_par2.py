@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import sys
 import os
+import re
 import subprocess
 import time
 from glob import glob, escape
@@ -24,6 +25,7 @@ from lib.operation_log import create_operation_logger
 from lib.transaction import create_transaction
 from lib.validation import validate_filesystem_path
 from lib.disk_utils import estimate_operation_duration
+from lib.progress_utils import ProgressTracker, ProgressMessage
 
 PAR2_EXTENSION = ".par2"
 PAR2_VOLUME_MARKER = f"{PAR2_EXTENSION}.vol"
@@ -245,9 +247,19 @@ def create_par2(
 
 
 def _par2_base_from_parity_file(parity_path: str) -> str:
-    """Get par2 base path from any parity file."""
+    """Get par2 base path from any parity file.
+    
+    Handles two volume file formats:
+    - Base + volume: filename.par2.vol00+01.par2 (uses PAR2_VOLUME_MARKER)
+    - Volume-only: filename.vol00+01.par2 (created with -n1, no base file)
+    """
     if PAR2_VOLUME_MARKER in parity_path:
+        # Base + volume format: filename.par2.vol00+01.par2
         return parity_path.split(PAR2_VOLUME_MARKER, 1)[0] + PAR2_EXTENSION
+    elif re.search(r'\.vol\d+\+\d+\.par2$', parity_path):
+        # Volume-only format: filename.vol00+01.par2
+        # Extract base by removing .vol<digits>+<digits>.par2 suffix and adding .par2
+        return re.sub(r'\.vol\d+\+\d+\.par2$', PAR2_EXTENSION, parity_path)
     return parity_path
 
 
@@ -471,8 +483,12 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
         files_skipped_uptodate = 0  # Track files with up-to-date par2
         total_file_size = 0
         start_time = time.time()
-        last_progress_log = time.time()
-        progress_log_interval = 30  # Log progress every 30 seconds
+        
+        # Initialize progress tracker with custom log function
+        progress_tracker = ProgressTracker(
+            interval_seconds=30,
+            log_func=lambda msg: log(msg, log_file)
+        )
         
         # Create checkpoint after validation
         transaction.create_checkpoint("validation_complete")
@@ -541,14 +557,17 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
                         files_skipped_uptodate += 1
                 
                 # Log progress periodically with detailed stats
-                current_time = time.time()
-                if current_time - last_progress_log >= progress_log_interval:
-                    elapsed = current_time - start_time
-                    progress_msg = f"Progress: {files_processed} files processed ({files_created} new, {files_updated} updated), {total_file_size / (1024*1024):.1f} MB, {elapsed:.0f}s elapsed [scanning...]"
+                if progress_tracker.should_log():
+                    msg = (ProgressMessage("Progress")
+                           .add_custom(f"{files_processed} files processed ({files_created} new, {files_updated} updated)")
+                           .add_bytes(total_file_size, label="processed")
+                           .add_duration(progress_tracker.get_elapsed_seconds())
+                           .add_custom("[scanning...]"))
+                    
                     if verify:
-                        progress_msg += f" | Verified: {files_verified}, Repaired: {files_repaired}"
-                    log(progress_msg, log_file)
-                    last_progress_log = current_time
+                        msg.add_custom(f"Verified: {files_verified}, Repaired: {files_repaired}")
+                    
+                    progress_tracker.force_log(msg.build())
                 
                 if verify:
                     was_repaired = verify_repair(file_path, directory, database, log_file)

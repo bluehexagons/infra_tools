@@ -49,6 +49,48 @@ class TestValidateMountsForOperation(unittest.TestCase):
         valid, message = validate_mounts_for_operation(["/mnt/data/source"], config, "sync")
         self.assertFalse(valid)
         self.assertIn("No mounted filesystem found", message)
+    
+    @patch("sync.service_tools.storage_ops.os.path.ismount", return_value=True)
+    @patch("sync.service_tools.storage_ops.get_mount_ancestor", return_value="/mnt/scrap_100_1")
+    @patch("sync.service_tools.storage_ops.os.path.exists")
+    def test_accepts_nonexistent_destination_on_mounted_parent(self, mock_exists, mock_ancestor, mock_ismount):
+        """Test that sync destinations can be created on mounted filesystems.
+        
+        Simulates the case where /mnt/scrap_100_1 is mounted but
+        /mnt/scrap_100_1/incoming/scrap_100_2 doesn't exist yet.
+        """
+        def exists_side_effect(path):
+            # Mount point exists, but destination subdirectory doesn't
+            if path == "/mnt/scrap_100_1":
+                return True
+            if path == "/mnt/scrap_100_1/incoming":
+                return False
+            if path == "/mnt/scrap_100_1/incoming/scrap_100_2":
+                return False
+            return False
+        
+        mock_exists.side_effect = exists_side_effect
+        
+        config = RuntimeConfig(username="test", sync_specs=[], scrub_specs=[], notify_specs=[])
+        valid, message = validate_mounts_for_operation(
+            ["/mnt/scrap_100_1/incoming/scrap_100_2"], 
+            config, 
+            "sync"
+        )
+        self.assertTrue(valid, f"Should accept non-existent path on mounted filesystem: {message}")
+    
+    @patch("sync.service_tools.storage_ops.os.path.exists", return_value=False)
+    def test_rejects_nonexistent_path_with_no_mounted_parent(self, mock_exists):
+        """Test that paths with no mounted parent are rejected."""
+        config = RuntimeConfig(username="test", sync_specs=[], scrub_specs=[], notify_specs=[])
+        valid, message = validate_mounts_for_operation(
+            ["/mnt/nonexistent/path"], 
+            config, 
+            "sync"
+        )
+        self.assertFalse(valid)
+        self.assertIn("not available", message)
+
 
 
 class TestRunScrub(unittest.TestCase):
