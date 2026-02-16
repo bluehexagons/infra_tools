@@ -483,8 +483,6 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
         
         files_found = 0
         dirs_found = 0
-        scan_complete = False  # Track when directory scan is complete
-        
         for root, dirs, files in os.walk(directory):
             dirs_found += len(dirs)
             files_found += len(files)
@@ -503,8 +501,10 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
                 relative_path = os.path.relpath(file_path, directory)
                 existing_files.add(relative_path)
                 par2_base = os.path.join(database, f"{relative_path}{PAR2_EXTENSION}")
+                par2_volume_pattern = os.path.join(database, f"{relative_path}{PAR2_VOLUME_MARKER}*")
+                has_volume_parity = bool(glob(par2_volume_pattern))
                 force = False
-                is_new_par2 = not os.path.exists(par2_base)
+                is_new_par2 = not (os.path.exists(par2_base) or has_volume_parity)
                 
                 try:
                     file_size = os.path.getsize(file_path)
@@ -541,11 +541,7 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
                 current_time = time.time()
                 if current_time - last_progress_log >= progress_log_interval:
                     elapsed = current_time - start_time
-                    # Show different format while scanning vs after scan complete
-                    if scan_complete:
-                        progress_msg = f"Progress: {files_processed}/{files_found} files ({files_created} new, {files_updated} updated), {total_file_size / (1024*1024):.1f} MB, {elapsed:.0f}s elapsed"
-                    else:
-                        progress_msg = f"Progress: {files_processed} files processed ({files_created} new, {files_updated} updated), {total_file_size / (1024*1024):.1f} MB, {elapsed:.0f}s elapsed [scanning...]"
+                    progress_msg = f"Progress: {files_processed} files processed ({files_created} new, {files_updated} updated), {total_file_size / (1024*1024):.1f} MB, {elapsed:.0f}s elapsed [scanning...]"
                     if verify:
                         progress_msg += f" | Verified: {files_verified}, Repaired: {files_repaired}"
                     log(progress_msg, log_file)
@@ -557,8 +553,6 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
                     if was_repaired:
                         files_repaired += 1
         
-        # Mark scan as complete
-        scan_complete = True
         log(f"Directory scan complete: {files_found} files in {dirs_found} directories", log_file)
         
         # Create checkpoint before cleanup

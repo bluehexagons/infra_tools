@@ -16,6 +16,7 @@ from lib.runtime_config import RuntimeConfig
 from sync.service_tools.storage_ops import (
     FREQUENCY_SECONDS,
     OperationLock,
+    get_parity_op_id,
     get_scrub_op_id,
     get_sync_op_id,
     is_operation_due,
@@ -95,6 +96,12 @@ class TestGetScrubOpId(unittest.TestCase):
         id1 = get_scrub_op_id("/mnt/data1", ".pardb")
         id2 = get_scrub_op_id("/mnt/data2", ".pardb")
         self.assertNotEqual(id1, id2)
+
+
+class TestGetParityOpId(unittest.TestCase):
+    def test_basic_format(self):
+        op_id = get_parity_op_id("/mnt/data", ".pardatabase")
+        self.assertEqual(op_id, "parity:/mnt/data:.pardatabase")
 
 
 class TestResolveScrubDatabasePath(unittest.TestCase):
@@ -274,6 +281,41 @@ class TestOpIdStability(unittest.TestCase):
             database_arg = call[0][1]  # second positional arg is database
             self.assertEqual(database_arg, "/data/.pardatabase",
                             f"run_scrub should receive resolved path, got: {database_arg}")
+
+
+class TestParityCadence(unittest.TestCase):
+    @patch("sync.service_tools.storage_ops.send_operation_notification")
+    @patch("sync.service_tools.storage_ops.run_scrub", return_value=(True, "OK"))
+    @patch("sync.service_tools.storage_ops.validate_mounts_for_operation", return_value=(True, ""))
+    @patch("sync.service_tools.storage_ops.save_last_run")
+    @patch("sync.service_tools.storage_ops.load_last_run")
+    @patch("sync.service_tools.storage_ops.parse_notification_args", return_value=[])
+    @patch("sync.service_tools.storage_ops.load_setup_config")
+    @patch("sync.service_tools.storage_ops.get_service_logger")
+    def test_skips_parity_update_when_last_run_is_recent(
+        self, mock_logger, mock_load_config, _notif_args,
+        mock_load_last, _mock_save_last, _validate, mock_run_scrub, _send_notif
+    ):
+        from sync.service_tools.storage_ops import execute_storage_operations
+
+        now = time.time()
+        mock_load_last.return_value = {
+            "scrub:/data:.pardatabase": now - (8 * 24 * 3600),  # full scrub due
+            "parity:/data:.pardatabase": now - 3600,  # parity not due for daily cadence
+        }
+
+        mock_logger.return_value = MagicMock()
+        mock_load_config.return_value = {
+            "username": "test",
+            "sync_specs": [],
+            "scrub_specs": [["/data", ".pardatabase", "5%", "weekly"]],
+            "notify_specs": [],
+        }
+
+        execute_storage_operations()
+
+        self.assertEqual(mock_run_scrub.call_count, 1)
+        self.assertTrue(mock_run_scrub.call_args[1]["verify"])
 
 
 if __name__ == "__main__":

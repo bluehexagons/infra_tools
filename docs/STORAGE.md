@@ -194,7 +194,7 @@ The orchestrator uses a static mount-check script (`sync/service_tools/check_sto
 
 ### Runtime orchestration
 
-Full scrubs and parity updates are managed by the unified orchestrator (`storage-ops.service` / `storage-ops.timer`). The orchestrator runs full scrubs only when due according to the configured frequency and performs parity-only updates hourly for all configured scrub targets so new and modified files are protected quickly.
+Full scrubs and parity updates are managed by the unified orchestrator (`storage-ops.service` / `storage-ops.timer`). The orchestrator runs full scrubs only when due according to the configured frequency and performs parity-only updates daily for all configured scrub targets so new and modified files are protected.
 
 As with sync, setup configures the runtime service/timer and schedules a fast follow-up run. Runtime scheduling uses the single `storage-ops` model, and legacy per-task units are removed during cleanup/migration.
 

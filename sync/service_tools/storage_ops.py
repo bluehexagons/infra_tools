@@ -174,6 +174,11 @@ def get_scrub_op_id(directory: str, database: str) -> str:
     return f"scrub:{directory}:{database}"
 
 
+def get_parity_op_id(directory: str, database: str) -> str:
+    """Generate unique ID for parity update operation."""
+    return f"parity:{directory}:{database}"
+
+
 def validate_mounts_for_operation(paths: list[str], config: RuntimeConfig, operation_type: str) -> tuple[bool, str]:
     """Validate that all required mounts are available."""
     for path in paths:
@@ -270,7 +275,11 @@ def execute_storage_operations() -> dict:
     # Calculate total operations for progress tracking
     total_syncs = sum(1 for spec in config.sync_specs if len(spec) == 3 and is_operation_due(last_run, get_sync_op_id(spec[0], spec[1]), spec[2]))
     total_scrubs = sum(1 for spec in config.scrub_specs if len(spec) == 4 and is_operation_due(last_run, get_scrub_op_id(spec[0], spec[1]), spec[3], first_run_default=False))
-    total_parity = len([spec for spec in config.scrub_specs if len(spec) == 4])
+    total_parity = sum(
+        1
+        for spec in config.scrub_specs
+        if len(spec) == 4 and is_operation_due(last_run, get_parity_op_id(spec[0], spec[1]), "daily")
+    )
     
     # Execute syncs first (always run if due)
     if total_syncs > 0 and notification_configs:
@@ -375,8 +384,7 @@ def execute_storage_operations() -> dict:
             else:
                 results["success"] = False
     
-    # Execute parity updates for all scrub specs (always run)
-    # This ensures new files get parity protection quickly
+    # Execute parity updates daily for scrub specs
     if total_parity > 0 and notification_configs:
         try:
             send_notification(
@@ -396,7 +404,10 @@ def execute_storage_operations() -> dict:
             continue
         
         directory, database, redundancy, interval = spec
+        parity_op_id = get_parity_op_id(directory, database)
         resolved_database = resolve_scrub_database_path(directory, database)
+        if not is_operation_due(last_run, parity_op_id, "daily"):
+            continue
         
         # Validate mounts
         valid, error_msg = validate_mounts_for_operation([directory, resolved_database], config, "parity update")
@@ -420,6 +431,8 @@ def execute_storage_operations() -> dict:
         
         if not success:
             results["success"] = False
+        else:
+            new_state[parity_op_id] = time.time()
     
     # Save updated state
     save_last_run(new_state)

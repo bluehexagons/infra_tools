@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import unittest
 from unittest.mock import patch
@@ -54,29 +55,29 @@ class TestCreateStorageOpsService(unittest.TestCase):
 
 
 class TestScheduleStorageOpsUpdate(unittest.TestCase):
-    @patch("sync.storage_ops_steps.run", return_value=0)
-    def test_schedules_immediate_update_by_default(self, run_cmd):
+    @patch(
+        "sync.storage_ops_steps.run",
+        return_value=subprocess.CompletedProcess(args=["cmd"], returncode=0),
+    )
+    def test_schedules_delayed_update_by_default(self, run_cmd):
         schedule_storage_ops_update()
-        # Should trigger immediate run (first call)
         run_cmd.assert_called_once()
-        call_args = run_cmd.call_args[0][0]
-        self.assertIn("storage-ops-immediate", call_args)
-        self.assertIn("systemctl start storage-ops.service", call_args)
+        command = run_cmd.call_args[0][0]
+        self.assertIn("systemd-run --collect", command)
+        self.assertIn("--unit=storage-ops-initial-update-", command)
+        self.assertIn("--on-active 2m", command)
+        self.assertIn("systemctl start storage-ops.service", command)
+        self.assertEqual(run_cmd.call_args[1], {"check": False})
 
-    @patch("sync.storage_ops_steps.run", return_value=0)
-    def test_schedules_delayed_update_when_requested(self, run_cmd):
-        schedule_storage_ops_update(delay_minutes=5, immediate=False)
-        # Should only schedule delayed run
+    @patch(
+        "sync.storage_ops_steps.run",
+        return_value=subprocess.CompletedProcess(args=["cmd"], returncode=0),
+    )
+    def test_schedules_delayed_update_with_custom_delay(self, run_cmd):
+        schedule_storage_ops_update(delay_minutes=7)
         run_cmd.assert_called_once()
-        call_args = run_cmd.call_args[0][0]
-        self.assertIn("storage-ops-delayed-update", call_args)
-        self.assertIn("--on-active 5m", call_args)
-
-    @patch("sync.storage_ops_steps.run", return_value=0)
-    def test_schedules_both_immediate_and_delayed(self, run_cmd):
-        schedule_storage_ops_update(delay_minutes=10, immediate=True)
-        # Should call run twice (immediate + delayed)
-        self.assertEqual(run_cmd.call_count, 2)
+        command = run_cmd.call_args[0][0]
+        self.assertIn("--on-active 7m", command)
 
 
 if __name__ == "__main__":

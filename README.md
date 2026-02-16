@@ -135,7 +135,7 @@ Common features: User setup, sudo, firewall/SSH hardening, auto-updates, Chrony,
 
 | Flag | Description |
 |------|-------------|
-| `--scrub DIR DBPATH REDUNDANCY FREQ` | Automated par2 integrity checking: DIR (directory), DBPATH (.pardatabase path, relative or absolute), REDUNDANCY (e.g., 5%), FREQ (hourly, daily, weekly, biweekly, monthly, or bimonthly). Managed at runtime by the unified orchestrator: full scrubs run when due and parity-only updates are executed hourly to protect new/modified files. During setup infra_tools configures the service/timer and schedules a fast follow-up run; no per-task systemd scrub units are created. |
+| `--scrub DIR DBPATH REDUNDANCY FREQ` | Automated par2 integrity checking: DIR (directory), DBPATH (.pardatabase path, relative or absolute), REDUNDANCY (e.g., 5%), FREQ (hourly, daily, weekly, biweekly, monthly, or bimonthly). Managed at runtime by the unified orchestrator: full scrubs run when due and parity-only updates are executed daily to protect new/modified files. During setup infra_tools configures the service/timer and schedules a fast follow-up run; no per-task systemd scrub units are created. |
 
 ### Notification Flags
 
