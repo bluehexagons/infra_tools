@@ -310,6 +310,12 @@ def execute_storage_operations() -> dict:
         if len(spec) == 4 and is_operation_due(last_run, get_parity_op_id(spec[0], spec[1]), "daily")
     )
     
+    # Log operation summary
+    if total_syncs > 0 or total_scrubs > 0 or total_parity > 0:
+        logger.info(f"Operations due: {total_syncs} sync(s), {total_scrubs} scrub(s), {total_parity} parity update(s)")
+    else:
+        logger.info("No operations due at this time")
+    
     # Execute syncs first (always run if due)
     if total_syncs > 0 and notification_configs:
         try:
@@ -334,32 +340,41 @@ def execute_storage_operations() -> dict:
         source, destination, interval = spec
         op_id = get_sync_op_id(source, destination)
         
-        if is_operation_due(last_run, op_id, interval):
-            # Validate mounts
-            valid, error_msg = validate_mounts_for_operation([source, destination], config, "sync")
-            if not valid:
-                logger.warning(f"Skipping sync {source} -> {destination}: {error_msg}")
-                results["syncs"].append({
-                    "source": source,
-                    "destination": destination,
-                    "success": False,
-                    "error": error_msg,
-                    "skipped": True
-                })
-                continue
-            
-            success, message = run_sync(source, destination, logger)
+        if not is_operation_due(last_run, op_id, interval):
+            # Not due yet - log for visibility
+            last_time = last_run.get(op_id)
+            if last_time:
+                elapsed = time.time() - last_time
+                logger.debug(f"Skipping sync {source} -> {destination} ({interval}): ran {elapsed/3600:.1f}h ago")
+            else:
+                logger.debug(f"Skipping sync {source} -> {destination} ({interval}): never run")
+            continue
+        
+        # Validate mounts
+        valid, error_msg = validate_mounts_for_operation([source, destination], config, "sync")
+        if not valid:
+            logger.warning(f"Skipping sync {source} -> {destination}: {error_msg}")
             results["syncs"].append({
                 "source": source,
                 "destination": destination,
-                "success": success,
-                "message": message
+                "success": False,
+                "error": error_msg,
+                "skipped": True
             })
-            
-            if success:
-                new_state[op_id] = time.time()
-            else:
-                results["success"] = False
+            continue
+        
+        success, message = run_sync(source, destination, logger)
+        results["syncs"].append({
+            "source": source,
+            "destination": destination,
+            "success": success,
+            "message": message
+        })
+        
+        if success:
+            new_state[op_id] = time.time()
+        else:
+            results["success"] = False
     
     # Execute full scrubs if due
     if total_scrubs > 0 and notification_configs:
@@ -386,32 +401,41 @@ def execute_storage_operations() -> dict:
         op_id = get_scrub_op_id(directory, database)
         resolved_database = resolve_scrub_database_path(directory, database)
         
-        if is_operation_due(last_run, op_id, interval, first_run_default=False):
-            # Validate mounts
-            valid, error_msg = validate_mounts_for_operation([directory, resolved_database], config, "scrub")
-            if not valid:
-                logger.warning(f"Skipping scrub {directory}: {error_msg}")
-                results["scrubs"].append({
-                    "directory": directory,
-                    "success": False,
-                    "error": error_msg,
-                    "skipped": True
-                })
-                continue
-            
-            success, message = run_scrub(directory, resolved_database, redundancy, verify=True, logger=logger)
+        if not is_operation_due(last_run, op_id, interval, first_run_default=False):
+            # Not due yet - log for visibility
+            last_time = last_run.get(op_id)
+            if last_time:
+                elapsed = time.time() - last_time
+                logger.debug(f"Skipping scrub {directory} ({interval}): ran {elapsed/86400:.1f}d ago")
+            else:
+                logger.debug(f"Skipping scrub {directory} ({interval}): never run (deferred until scheduled)")
+            continue
+        
+        # Validate mounts
+        valid, error_msg = validate_mounts_for_operation([directory, resolved_database], config, "scrub")
+        if not valid:
+            logger.warning(f"Skipping scrub {directory}: {error_msg}")
             results["scrubs"].append({
                 "directory": directory,
-                "database": resolved_database,
-                "success": success,
-                "message": message,
-                "full": True
+                "success": False,
+                "error": error_msg,
+                "skipped": True
             })
-            
-            if success:
-                new_state[op_id] = time.time()
-            else:
-                results["success"] = False
+            continue
+        
+        success, message = run_scrub(directory, resolved_database, redundancy, verify=True, logger=logger)
+        results["scrubs"].append({
+            "directory": directory,
+            "database": resolved_database,
+            "success": success,
+            "message": message,
+            "full": True
+        })
+        
+        if success:
+            new_state[op_id] = time.time()
+        else:
+            results["success"] = False
     
     # Execute parity updates daily for scrub specs
     if total_parity > 0 and notification_configs:
@@ -435,7 +459,15 @@ def execute_storage_operations() -> dict:
         directory, database, redundancy, interval = spec
         parity_op_id = get_parity_op_id(directory, database)
         resolved_database = resolve_scrub_database_path(directory, database)
+        
         if not is_operation_due(last_run, parity_op_id, "daily"):
+            # Not due yet - log for visibility
+            last_time = last_run.get(parity_op_id)
+            if last_time:
+                elapsed = time.time() - last_time
+                logger.debug(f"Skipping parity update {directory} (daily): ran {elapsed/3600:.1f}h ago")
+            else:
+                logger.debug(f"Skipping parity update {directory} (daily): never run (deferred until scheduled)")
             continue
         
         # Validate mounts
@@ -468,10 +500,13 @@ def execute_storage_operations() -> dict:
     
     results["end_time"] = datetime.now().isoformat()
     
-    # Send notification if configured
-    if notification_configs:
+    # Send notification if configured and operations actually ran
+    total_operations = len(results["syncs"]) + len(results["scrubs"]) + len(results["parity_updates"])
+    if notification_configs and total_operations > 0:
         send_operation_notification(results, notification_configs, logger, 
                                    friendly_name=config.friendly_name)
+    elif total_operations == 0:
+        logger.info("No operations executed - all tasks skipped (not due yet or validation failed)")
     
     return results
 

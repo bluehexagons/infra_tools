@@ -362,5 +362,101 @@ class TestParityCadence(unittest.TestCase):
         self.assertTrue(mock_run_scrub.call_args[1]["verify"])
 
 
+class TestOperationLogging(unittest.TestCase):
+    """Test visibility into operation scheduling and execution."""
+    
+    @patch("sync.service_tools.storage_ops.run_sync")
+    @patch("sync.service_tools.storage_ops.validate_mounts_for_operation", return_value=(True, ""))
+    @patch("sync.service_tools.storage_ops.load_last_run")
+    @patch("sync.service_tools.storage_ops.save_last_run")
+    @patch("sync.service_tools.storage_ops.get_service_logger")
+    @patch("sync.service_tools.storage_ops.load_setup_config")
+    @patch("sync.service_tools.storage_ops.parse_notification_args", return_value=[])
+    def test_logs_no_operations_due_message(
+        self, _parse_notify, mock_load_config, mock_logger, mock_save, mock_load_last, _validate, _run_sync
+    ):
+        """Test that when no operations are due, appropriate log message is shown."""
+        from sync.service_tools.storage_ops import execute_storage_operations
+        
+        # Create a mock logger to capture log calls
+        logger_mock = MagicMock()
+        mock_logger.return_value = logger_mock
+        
+        # Set up configuration with syncs and scrubs
+        mock_load_config.return_value = {
+            "username": "test",
+            "sync_specs": [["/src1", "/dst1", "daily"], ["/src2", "/dst2", "hourly"]],
+            "scrub_specs": [["/data", ".pardatabase", "5%", "monthly"]],
+            "notify_specs": [],
+        }
+        
+        # Mock last_run to indicate all operations ran recently (not due)
+        current_time = time.time()
+        mock_load_last.return_value = {
+            "sync:/src1:/dst1": current_time - 100,  # Ran 100s ago (daily not due)
+            "sync:/src2:/dst2": current_time - 100,  # Ran 100s ago (hourly not due)
+            "scrub:/data:.pardatabase": current_time - 100,  # Ran 100s ago (monthly not due)
+            "parity:/data:.pardatabase": current_time - 100,  # Ran 100s ago (daily not due)
+        }
+        
+        results = execute_storage_operations()
+        
+        # Verify the "No operations due at this time" message was logged
+        info_calls = [call[0][0] for call in logger_mock.info.call_args_list]
+        self.assertTrue(
+            any("No operations due at this time" in msg for msg in info_calls),
+            f"Expected 'No operations due at this time' log message. Got: {info_calls}"
+        )
+        
+        # Verify the final summary message about skipped tasks
+        self.assertTrue(
+            any("No operations executed" in msg and "all tasks skipped" in msg for msg in info_calls),
+            f"Expected 'No operations executed - all tasks skipped' message. Got: {info_calls}"
+        )
+        
+        # Verify no operations were executed
+        self.assertEqual(len(results["syncs"]), 0)
+        self.assertEqual(len(results["scrubs"]), 0)
+        self.assertEqual(len(results["parity_updates"]), 0)
+    
+    @patch("sync.service_tools.storage_ops.send_operation_notification")
+    @patch("sync.service_tools.storage_ops.run_sync", return_value=(True, "Success"))
+    @patch("sync.service_tools.storage_ops.validate_mounts_for_operation", return_value=(True, ""))
+    @patch("sync.service_tools.storage_ops.save_last_run")
+    @patch("sync.service_tools.storage_ops.load_last_run", return_value={})
+    @patch("sync.service_tools.storage_ops.parse_notification_args", return_value=[])
+    @patch("sync.service_tools.storage_ops.load_setup_config")
+    @patch("sync.service_tools.storage_ops.get_service_logger")
+    def test_logs_operations_due_summary(
+        self, mock_logger, mock_load_config, _parse_notify, _load_last, mock_save, _validate, _run_sync, _send_notif
+    ):
+        """Test that when operations are due, appropriate summary is logged."""
+        from sync.service_tools.storage_ops import execute_storage_operations
+        
+        # Create a mock logger to capture log calls
+        logger_mock = MagicMock()
+        mock_logger.return_value = logger_mock
+        
+        # Set up configuration with syncs (first run, should execute)
+        mock_load_config.return_value = {
+            "username": "test",
+            "sync_specs": [["/src1", "/dst1", "daily"]],
+            "scrub_specs": [],
+            "notify_specs": [],
+        }
+        
+        results = execute_storage_operations()
+        
+        # Verify the "Operations due" message was logged
+        info_calls = [call[0][0] for call in logger_mock.info.call_args_list]
+        self.assertTrue(
+            any("Operations due: 1 sync(s)" in msg for msg in info_calls),
+            f"Expected 'Operations due: 1 sync(s)' log message. Got: {info_calls}"
+        )
+        
+        # Verify sync was executed
+        self.assertEqual(len(results["syncs"]), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
