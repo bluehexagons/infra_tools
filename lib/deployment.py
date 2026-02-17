@@ -611,7 +611,8 @@ class DeploymentOrchestrator:
             print("  ⚠ This will load the current schema and mark all migrations as run")
             
             # Load current schema structure
-            result = run(f"cd {shlex.quote(project_path)} && {env_vars} bundle exec rake db:schema:load", capture_output=True)
+            # Note: DISABLE_DATABASE_ENVIRONMENT_CHECK=1 allows schema:load to run in production
+            result = run(f"cd {shlex.quote(project_path)} && {env_vars} DISABLE_DATABASE_ENVIRONMENT_CHECK=1 bundle exec rake db:schema:load", capture_output=True)
             if result.returncode != 0:
                 print(f"  ✗ Schema load failed with exit code {result.returncode}")
                 if result.stderr:
