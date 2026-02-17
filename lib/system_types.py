@@ -69,6 +69,16 @@ from web.steps import (
     run_cloudflare_tunnel_setup,
     configure_auto_update_node,
     configure_auto_update_ruby,
+    install_cicd_dependencies,
+    create_cicd_user,
+    create_cicd_directories,
+    generate_webhook_secret,
+    create_default_webhook_config,
+    create_webhook_receiver_service,
+    create_cicd_executor_service,
+    configure_nginx_for_webhook,
+    update_cloudflare_tunnel_for_webhook,
+    install_webhook_manager_helper,
 )
 
 # Import from smb module
@@ -202,6 +212,16 @@ STEP_FUNCTIONS: dict[str, StepFunc] = {
     'configure_nginx_for_cloudflare': configure_nginx_for_cloudflare,
     'install_cloudflared_service_helper': install_cloudflared_service_helper,
     'run_cloudflare_tunnel_setup': run_cloudflare_tunnel_setup,
+    'install_cicd_dependencies': install_cicd_dependencies,
+    'create_cicd_user': create_cicd_user,
+    'create_cicd_directories': create_cicd_directories,
+    'generate_webhook_secret': generate_webhook_secret,
+    'create_default_webhook_config': create_default_webhook_config,
+    'create_webhook_receiver_service': create_webhook_receiver_service,
+    'create_cicd_executor_service': create_cicd_executor_service,
+    'configure_nginx_for_webhook': configure_nginx_for_webhook,
+    'update_cloudflare_tunnel_for_webhook': update_cloudflare_tunnel_for_webhook,
+    'install_webhook_manager_helper': install_webhook_manager_helper,
     'install_samba': install_samba,
     'configure_samba_firewall': configure_samba_firewall,
     'configure_samba_global_settings': configure_samba_global_settings,
@@ -315,6 +335,21 @@ def get_steps_for_system_type(config: SetupConfig) -> list[tuple[str, StepFunc]]
     
     if config.notify_specs:
         steps.append(("Installing mail utilities for notifications", install_mail_utils))
+    
+    if config.enable_cicd:
+        cicd_steps: list[tuple[str, StepFunc]] = [
+            ("Installing CI/CD dependencies", install_cicd_dependencies),
+            ("Creating CI/CD user", create_cicd_user),
+            ("Creating CI/CD directories", create_cicd_directories),
+            ("Generating webhook secret", generate_webhook_secret),
+            ("Creating default webhook configuration", create_default_webhook_config),
+            ("Creating webhook receiver service", create_webhook_receiver_service),
+            ("Creating CI/CD executor service", create_cicd_executor_service),
+            ("Configuring nginx for webhook endpoint", configure_nginx_for_webhook),
+            ("Updating Cloudflare tunnel for webhook", update_cloudflare_tunnel_for_webhook),
+            ("Installing webhook manager helper", install_webhook_manager_helper),
+        ]
+        steps.extend(cicd_steps)
     
     steps.extend(FINAL_STEPS)
     

@@ -121,6 +121,11 @@ def create_setup_argument_parser(
                        default=None if not for_remote else False,
                        help="Deploy Rails API as a subdomain (api.domain.com) instead of a subdirectory (domain.com/api)")
     
+    parser.add_argument("--cicd", dest="enable_cicd", 
+                       action=argparse.BooleanOptionalAction if not for_remote else "store_true", 
+                       default=None if not for_remote else False,
+                       help="Install webhook-based CI/CD system for GitHub Actions")
+    
     parser.add_argument("--samba", dest="enable_samba", 
                        action=argparse.BooleanOptionalAction if not for_remote else "store_true", 
                        default=None if not for_remote else False,

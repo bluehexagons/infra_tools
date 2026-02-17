@@ -63,6 +63,7 @@ class SetupConfig:
     enable_ssl: bool = False
     ssl_email: Optional[str] = None
     enable_cloudflare: bool = False
+    enable_cicd: bool = False
     api_subdomain: bool = False
     enable_samba: bool = False
     samba_shares: Optional[NestedStrList] = None
@@ -155,6 +156,9 @@ class SetupConfig:
         
         if self.enable_cloudflare:
             args.append("--cloudflare")
+        
+        if self.enable_cicd:
+            args.append("--cicd")
         
         if self.api_subdomain:
             args.append("--api-subdomain")
@@ -287,6 +291,10 @@ class SetupConfig:
         # Cloudflare
         if self.enable_cloudflare:
             cmd_parts.append("--cloudflare")
+        
+        # CI/CD
+        if self.enable_cicd:
+            cmd_parts.append("--cicd")
         
         if self.api_subdomain:
             cmd_parts.append("--api-subdomain")
@@ -437,6 +445,7 @@ class SetupConfig:
             enable_ssl=getattr(args, 'enable_ssl', False),
             ssl_email=getattr(args, 'ssl_email', None),
             enable_cloudflare=getattr(args, 'enable_cloudflare', False),
+            enable_cicd=getattr(args, 'enable_cicd', False),
             api_subdomain=getattr(args, 'api_subdomain', False),
             enable_samba=getattr(args, 'enable_samba', False),
             samba_shares=getattr(args, 'samba_shares', None),

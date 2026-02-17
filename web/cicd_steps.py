@@ -309,3 +309,23 @@ def update_cloudflare_tunnel_for_webhook(config: SetupConfig) -> None:
     print("  Add the following to your tunnel ingress rules:")
     print("    - hostname: webhook.yourdomain.com")
     print("      service: http://localhost:8080")
+
+
+def install_webhook_manager_helper(config: SetupConfig) -> None:
+    """Create symlink for webhook manager helper script."""
+    helper_script = "/usr/local/bin/webhook-manager"
+    source_script = "/opt/infra_tools/web/service_tools/webhook_manager.py"
+    
+    if os.path.exists(helper_script):
+        print("  ✓ Webhook manager helper already available")
+        return
+    
+    if not os.path.exists(source_script):
+        print(f"  ⚠ Source script not found: {source_script}")
+        return
+    
+    run(f"ln -sf {source_script} {helper_script}")
+    run(f"chmod +x {source_script}")
+    
+    print(f"  ✓ Installed webhook manager: {helper_script}")
+    print(f"  Run 'sudo webhook-manager list' to manage configurations")

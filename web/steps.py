@@ -34,6 +34,7 @@ from .cicd_steps import (
     create_cicd_executor_service,
     configure_nginx_for_webhook,
     update_cloudflare_tunnel_for_webhook,
+    install_webhook_manager_helper,
 )
 
 __all__ = [
@@ -58,4 +59,5 @@ __all__ = [
     'create_cicd_executor_service',
     'configure_nginx_for_webhook',
     'update_cloudflare_tunnel_for_webhook',
+    'install_webhook_manager_helper',
 ]
