@@ -399,8 +399,12 @@ class DeploymentOrchestrator:
             
             project_type = detect_project_type(dest_path)
             
+            # Get the actual assigned port from the service file for Rails projects
+            backend_port = None
             frontend_serve_path = None
             if project_type == "rails":
+                service_name = f"rails-{app_name}"
+                backend_port = self._get_assigned_port(service_name, 3000)
                 frontend_path = os.path.join(dest_path, "frontend")
                 if os.path.exists(frontend_path):
                     frontend_serve_path = get_project_root(frontend_path, "node")
@@ -412,7 +416,7 @@ class DeploymentOrchestrator:
                 'project_type': project_type,
                 'serve_path': get_project_root(dest_path, project_type),
                 'needs_proxy': should_reverse_proxy(project_type),
-                'backend_port': 3000 if project_type == "rails" else None,
+                'backend_port': backend_port,
                 'frontend_port': 4000 if project_type == "rails" and os.path.exists(os.path.join(dest_path, "frontend")) else None,
                 'frontend_serve_path': frontend_serve_path,
                 'skipped': True,
