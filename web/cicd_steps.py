@@ -65,35 +65,46 @@ def create_cicd_directories(config: SetupConfig) -> None:
 
 
 def generate_webhook_secret(config: SetupConfig) -> str:
-    """Generate a secure webhook secret and store it."""
+    """Generate a secure webhook secret and store it in an environment file."""
     secret_file = "/etc/infra_tools/cicd/webhook_secret"
+    env_file = "/etc/infra_tools/cicd/webhook.env"
     
     if os.path.exists(secret_file):
         with open(secret_file, 'r') as f:
             secret = f.read().strip()
-        print("  ✓ Using existing webhook secret")
+        
+        if os.path.exists(env_file):
+            print("  ✓ Using existing webhook secret")
+            return secret
+        
+        _create_env_file(env_file, secret)
+        print("  ✓ Created environment file for webhook secret")
         return secret
     
-    # Generate a secure random secret
     secret = secrets.token_urlsafe(32)
     
-    # Save secret to file with restricted permissions
     with open(secret_file, 'w') as f:
         f.write(secret)
     
     os.chmod(secret_file, 0o600)
+    run("chown root:root /etc/infra_tools/cicd/webhook_secret")
     
-    # Set ownership - critical for security
-    try:
-        run("chown root:root /etc/infra_tools/cicd/webhook_secret")
-    except Exception as e:
-        print(f"  ⚠ Warning: Failed to set secret file ownership: {e}")
-        print(f"  The webhook secret may be accessible to non-root users.")
+    _create_env_file(env_file, secret)
     
     print("  ✓ Generated webhook secret")
     print(f"  ℹ Secret stored in: {secret_file}")
     
     return secret
+
+
+def _create_env_file(env_file: str, secret: str) -> None:
+    """Create environment file for systemd service with restricted permissions."""
+    with open(env_file, 'w') as f:
+        f.write(f"WEBHOOK_SECRET={secret}\n")
+        f.write("WEBHOOK_PORT=8765\n")
+    
+    os.chmod(env_file, 0o600)
+    run(f"chown root:root {env_file}")
 
 
 def create_default_webhook_config(config: SetupConfig) -> None:
@@ -133,21 +144,21 @@ def create_webhook_receiver_service(config: SetupConfig) -> None:
     """Create systemd service for webhook receiver."""
     service_name = "webhook-receiver"
     
-    # Cleanup existing service
     cleanup_service(service_name)
     
-    # Get webhook secret
     secret_file = "/etc/infra_tools/cicd/webhook_secret"
+    env_file = "/etc/infra_tools/cicd/webhook.env"
     if not os.path.exists(secret_file):
         print("  ⚠ Webhook secret not found, generating...")
         generate_webhook_secret(config)
     
-    # Read secret
-    with open(secret_file, 'r') as f:
-        secret = f.read().strip()
+    if not os.path.exists(env_file):
+        print("  ⚠ Environment file not found, creating...")
+        with open(secret_file, 'r') as f:
+            secret = f.read().strip()
+        _create_env_file(env_file, secret)
     
-    # Create service unit file
-    service_content = f"""[Unit]
+    service_content = """[Unit]
 Description=Webhook Receiver for CI/CD
 After=network.target
 
@@ -156,8 +167,7 @@ Type=simple
 User=webhook
 Group=webhook
 WorkingDirectory=/opt/infra_tools/web/service_tools
-Environment="WEBHOOK_SECRET={secret}"
-Environment="WEBHOOK_PORT=8765"
+EnvironmentFile=/etc/infra_tools/cicd/webhook.env
 ExecStart=/usr/bin/python3 /opt/infra_tools/web/service_tools/webhook_receiver.py
 Restart=always
 RestartSec=10

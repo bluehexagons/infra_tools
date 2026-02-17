@@ -284,15 +284,13 @@ def main():
         parser.print_help()
         return 1
     
-    # Check if running as root for commands that need write access or view secrets
-    # list command can be run by anyone who can read the config file
-    if args.command in ['add', 'remove', 'show-secret', 'logs', 'status', 'test']:
+    root_required_commands = ['add', 'remove', 'show-secret', 'logs', 'status']
+    if args.command in root_required_commands:
         if os.geteuid() != 0:
             print("Error: This command requires root privileges")
             print("Run with: sudo webhook-manager.py ...")
             return 1
     
-    # Execute command
     commands = {
         'list': list_repositories,
         'add': add_repository,

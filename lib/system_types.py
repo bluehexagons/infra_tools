@@ -79,6 +79,17 @@ from web.steps import (
     configure_nginx_for_webhook,
     update_cloudflare_tunnel_for_webhook,
     install_webhook_manager_helper,
+    install_app_server_dependencies,
+    create_deploy_user,
+    configure_deploy_sudoers,
+    create_app_directories,
+    configure_deploy_ssh_access,
+    configure_app_nginx,
+    generate_deploy_ssh_key,
+    configure_deploy_targets,
+    configure_deploy_known_hosts,
+    create_build_workspace_dirs,
+    install_build_dependencies,
 )
 
 # Import from smb module
@@ -222,6 +233,17 @@ STEP_FUNCTIONS: dict[str, StepFunc] = {
     'configure_nginx_for_webhook': configure_nginx_for_webhook,
     'update_cloudflare_tunnel_for_webhook': update_cloudflare_tunnel_for_webhook,
     'install_webhook_manager_helper': install_webhook_manager_helper,
+    'install_app_server_dependencies': install_app_server_dependencies,
+    'create_deploy_user': create_deploy_user,
+    'configure_deploy_sudoers': configure_deploy_sudoers,
+    'create_app_directories': create_app_directories,
+    'configure_deploy_ssh_access': configure_deploy_ssh_access,
+    'configure_app_nginx': configure_app_nginx,
+    'generate_deploy_ssh_key': generate_deploy_ssh_key,
+    'configure_deploy_targets': configure_deploy_targets,
+    'configure_deploy_known_hosts': configure_deploy_known_hosts,
+    'create_build_workspace_dirs': create_build_workspace_dirs,
+    'install_build_dependencies': install_build_dependencies,
     'install_samba': install_samba,
     'configure_samba_firewall': configure_samba_firewall,
     'configure_samba_global_settings': configure_samba_global_settings,
@@ -350,6 +372,36 @@ def get_steps_for_system_type(config: SetupConfig) -> list[tuple[str, StepFunc]]
             ("Installing webhook manager helper", install_webhook_manager_helper),
         ]
         steps.extend(cicd_steps)
+    
+    if config.is_app_server:
+        app_server_steps: list[tuple[str, StepFunc]] = [
+            ("Installing app server dependencies", install_app_server_dependencies),
+            ("Creating deploy user", create_deploy_user),
+            ("Configuring deploy sudoers", configure_deploy_sudoers),
+            ("Creating app directories", create_app_directories),
+            ("Configuring deploy SSH access", configure_deploy_ssh_access),
+            ("Configuring nginx for app server", configure_app_nginx),
+        ]
+        steps.extend(app_server_steps)
+    
+    if config.is_build_server:
+        build_server_steps: list[tuple[str, StepFunc]] = [
+            ("Installing build dependencies", install_build_dependencies),
+            ("Installing CI/CD dependencies", install_cicd_dependencies),
+            ("Creating CI/CD user", create_cicd_user),
+            ("Creating build workspace directories", create_build_workspace_dirs),
+            ("Generating webhook secret", generate_webhook_secret),
+            ("Creating default webhook configuration", create_default_webhook_config),
+            ("Creating webhook receiver service", create_webhook_receiver_service),
+            ("Creating CI/CD executor service", create_cicd_executor_service),
+            ("Generating deploy SSH key", generate_deploy_ssh_key),
+            ("Configuring deploy targets", configure_deploy_targets),
+            ("Configuring deploy known hosts", configure_deploy_known_hosts),
+            ("Configuring nginx for webhook endpoint", configure_nginx_for_webhook),
+            ("Updating Cloudflare tunnel for webhook", update_cloudflare_tunnel_for_webhook),
+            ("Installing webhook manager helper", install_webhook_manager_helper),
+        ]
+        steps.extend(build_server_steps)
     
     steps.extend(FINAL_STEPS)
     

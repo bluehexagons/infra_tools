@@ -100,14 +100,14 @@ def trigger_cicd_job(repo_url: str, ref: str, commit_sha: str, pusher: str) -> b
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
         
-        # Write job file with commit SHA as filename
-        job_file = os.path.join(JOBS_DIR, f"{commit_sha[:8]}.json")
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        safe_repo_name = repo_url.rstrip('/').split('/')[-1].replace('.git', '')
+        job_file = os.path.join(JOBS_DIR, f"{timestamp}_{safe_repo_name}_{commit_sha}.json")
         with open(job_file, 'w') as f:
             json.dump(job_data, f, indent=2)
         
         logger.info(f"Created CI/CD job: {job_file}")
         
-        # Trigger executor service to process the new job
         result = subprocess.run(
             ['systemctl', 'start', 'cicd-executor.service'],
             capture_output=True,

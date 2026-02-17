@@ -117,14 +117,18 @@ class TestCICDSteps(unittest.TestCase):
         
         self.assertEqual(secret, "test-secret-token")
         mock_token.assert_called_once_with(32)
-        mock_file.assert_called_once()
-        mock_chmod.assert_called_once()
+        self.assertEqual(mock_file.call_count, 2)
+        self.assertEqual(mock_chmod.call_count, 2)
     
     @patch('web.cicd_steps.os.path.exists')
+    @patch('web.cicd_steps.os.chmod')
     @patch('builtins.open', new_callable=mock_open, read_data="existing-secret")
-    def test_generate_webhook_secret_existing(self, mock_file, mock_exists):
+    @patch('web.cicd_steps.run')
+    def test_generate_webhook_secret_existing(self, mock_run, mock_file, mock_chmod, mock_exists):
         """Test that we reuse existing webhook secret."""
-        mock_exists.return_value = True
+        def exists_side_effect(path):
+            return path.endswith('webhook_secret')
+        mock_exists.side_effect = exists_side_effect
         mock_config = MagicMock()
         
         secret = generate_webhook_secret(mock_config)
@@ -252,6 +256,151 @@ class TestWebhookSignatureVerification(unittest.TestCase):
         wrong_signature = hmac.new("wrong-secret".encode('utf-8'), payload, hashlib.sha256).hexdigest()
         
         self.assertNotEqual(correct_signature, wrong_signature)
+
+
+class TestAppServerSteps(unittest.TestCase):
+    """Test app server setup steps."""
+    
+    @patch('web.app_server_steps.is_package_installed')
+    @patch('web.app_server_steps.run')
+    def test_install_app_server_dependencies_already_installed(self, mock_run, mock_is_installed):
+        """Test that we skip installation if dependencies are already installed."""
+        mock_is_installed.return_value = True
+        mock_config = MagicMock()
+        
+        from web.app_server_steps import install_app_server_dependencies
+        install_app_server_dependencies(mock_config)
+        
+        mock_run.assert_not_called()
+    
+    @patch('web.app_server_steps.is_package_installed')
+    @patch('web.app_server_steps.run')
+    def test_install_app_server_dependencies_missing(self, mock_run, mock_is_installed):
+        """Test that we install missing dependencies."""
+        mock_is_installed.return_value = False
+        mock_config = MagicMock()
+        
+        from web.app_server_steps import install_app_server_dependencies
+        install_app_server_dependencies(mock_config)
+        
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args[0][0]
+        self.assertIn('apt-get install', call_args)
+    
+    @patch('web.app_server_steps.run')
+    def test_create_deploy_user_already_exists(self, mock_run):
+        """Test that we skip user creation if user exists."""
+        mock_run.return_value = MagicMock(returncode=0)
+        mock_config = MagicMock()
+        
+        from web.app_server_steps import create_deploy_user
+        create_deploy_user(mock_config)
+        
+        self.assertEqual(mock_run.call_count, 1)
+        self.assertIn('id deploy', mock_run.call_args[0][0])
+    
+    @patch('web.app_server_steps.run')
+    def test_create_deploy_user_new(self, mock_run):
+        """Test that we create user if it doesn't exist."""
+        mock_run.side_effect = [
+            MagicMock(returncode=1),
+            MagicMock(returncode=0),
+            MagicMock(returncode=0),
+            MagicMock(returncode=0),
+            MagicMock(returncode=0),
+        ]
+        mock_config = MagicMock()
+        
+        from web.app_server_steps import create_deploy_user
+        create_deploy_user(mock_config)
+        
+        self.assertGreater(mock_run.call_count, 1)
+
+
+class TestBuildServerSteps(unittest.TestCase):
+    """Test build server setup steps."""
+    
+    @patch('web.build_server_steps.os.path.exists')
+    @patch('web.build_server_steps.run')
+    def test_generate_deploy_ssh_key_existing(self, mock_run, mock_exists):
+        """Test that we skip key generation if key already exists."""
+        mock_exists.return_value = True
+        mock_config = MagicMock()
+        
+        from web.build_server_steps import generate_deploy_ssh_key
+        generate_deploy_ssh_key(mock_config)
+        
+        mock_run.assert_not_called()
+    
+    @patch('web.build_server_steps.os.path.exists')
+    @patch('web.build_server_steps.os.makedirs')
+    @patch('web.build_server_steps.run')
+    def test_generate_deploy_ssh_key_new(self, mock_run, mock_makedirs, mock_exists):
+        """Test that we generate a new SSH key."""
+        mock_exists.return_value = False
+        mock_config = MagicMock()
+        
+        from web.build_server_steps import generate_deploy_ssh_key
+        generate_deploy_ssh_key(mock_config)
+        
+        ssh_keygen_calls = [call for call in mock_run.call_args_list if 'ssh-keygen' in str(call)]
+        self.assertEqual(len(ssh_keygen_calls), 1)
+    
+    @patch('web.build_server_steps.os.path.exists')
+    @patch('web.build_server_steps.os.makedirs')
+    @patch('web.build_server_steps.os.chmod')
+    @patch('builtins.open', new_callable=mock_open)
+    @patch('web.build_server_steps.json.dump')
+    def test_configure_deploy_targets(self, mock_json_dump, mock_file, mock_chmod, mock_makedirs, mock_exists):
+        """Test that we configure deploy targets."""
+        mock_exists.return_value = False
+        mock_config = MagicMock()
+        mock_config.deploy_targets = ['app1.example.com', 'app2.example.com']
+        
+        from web.build_server_steps import configure_deploy_targets
+        configure_deploy_targets(mock_config)
+        
+        mock_json_dump.assert_called_once()
+        config_data = mock_json_dump.call_args[0][0]
+        self.assertIn('app1.example.com', config_data)
+        self.assertIn('app2.example.com', config_data)
+
+
+class TestRemoteDeploy(unittest.TestCase):
+    """Test remote deployment utilities."""
+    
+    @patch('lib.remote_deploy.os.path.exists')
+    @patch('builtins.open', new_callable=mock_open, read_data='{"app1.example.com": {"host": "app1.example.com"}}')
+    def test_load_deploy_targets(self, mock_file, mock_exists):
+        """Test loading deploy targets configuration."""
+        mock_exists.return_value = True
+        
+        from lib.remote_deploy import load_deploy_targets
+        targets = load_deploy_targets()
+        
+        self.assertIn('app1.example.com', targets)
+    
+    @patch('lib.remote_deploy.load_deploy_targets')
+    def test_get_deploy_target(self, mock_load):
+        """Test getting a specific deploy target."""
+        mock_load.return_value = {'app1.example.com': {'host': 'app1.example.com'}}
+        
+        from lib.remote_deploy import get_deploy_target
+        target = get_deploy_target('app1.example.com')
+        
+        self.assertIsNotNone(target)
+        if target:
+            self.assertEqual(target['host'], 'app1.example.com')
+    
+    @patch('lib.remote_deploy.load_deploy_targets')
+    def test_get_deploy_target_not_found(self, mock_load):
+        """Test getting a non-existent deploy target."""
+        mock_load.return_value = {}
+        
+        from lib.remote_deploy import get_deploy_target
+        target = get_deploy_target('unknown.example.com')
+        
+        self.assertIsNone(target)
 
 
 if __name__ == '__main__':
