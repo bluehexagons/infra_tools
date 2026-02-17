@@ -29,8 +29,9 @@ def generate_password(length: int = 16) -> str:
     return ''.join(secrets.choice(alphabet) for _ in range(length))
 
 
-def run(cmd: str, check: bool = True, cwd: Optional[str] = None, capture_output: bool = False, text: bool = True) -> subprocess.CompletedProcess[str]:
-    print(f"  Running: {cmd[:80]}..." if len(cmd) > 80 else f"  Running: {cmd}")
+def run(cmd: str, check: bool = True, cwd: Optional[str] = None, capture_output: bool = False, text: bool = True, display_cmd: Optional[str] = None) -> subprocess.CompletedProcess[str]:
+    log_cmd = display_cmd if display_cmd is not None else cmd
+    print(f"  Running: {log_cmd[:80]}..." if len(log_cmd) > 80 else f"  Running: {log_cmd}")
     sys.stdout.flush()
     
     if is_dry_run():

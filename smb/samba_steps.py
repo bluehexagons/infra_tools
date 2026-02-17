@@ -77,10 +77,16 @@ def create_samba_user(username: str, password: str) -> None:
     
     result = run(f"pdbedit -L {safe_username}", check=False)
     if result.returncode != 0:
-        run(f"(echo {shlex.quote(password)}; echo {shlex.quote(password)}) | smbpasswd -a -s {safe_username}")
+        run(
+            f"(echo {shlex.quote(password)}; echo {shlex.quote(password)}) | smbpasswd -a -s {safe_username}",
+            display_cmd=f"(echo [REDACTED]; echo [REDACTED]) | smbpasswd -a -s {safe_username}"
+        )
         print(f"  Created Samba user: {username}")
     else:
-        run(f"(echo {shlex.quote(password)}; echo {shlex.quote(password)}) | smbpasswd -s {safe_username}")
+        run(
+            f"(echo {shlex.quote(password)}; echo {shlex.quote(password)}) | smbpasswd -s {safe_username}",
+            display_cmd=f"(echo [REDACTED]; echo [REDACTED]) | smbpasswd -s {safe_username}"
+        )
         print(f"  Updated Samba user password: {username}")
     
     run(f"smbpasswd -e {safe_username}", check=False)
@@ -248,9 +254,11 @@ def setup_samba_share(config: SetupConfig, share_spec: Optional[list[str]] = Non
         else:
             print(f"  Share configuration already exists: {share_name}_{access_type}")
 
-    result = run("testparm -s", check=False)
+    result = run("testparm -s", check=False, capture_output=True)
     if result.returncode != 0:
         print("  ✗ Samba configuration has errors, skipping reload")
+        if result.stderr:
+            print(f"  Error: {result.stderr[:200]}")
         print("  Fix the configuration and run 'systemctl reload smbd' manually")
         return
 
@@ -273,7 +281,6 @@ def configure_samba_global_settings(config: SetupConfig) -> None:
         "map to guest": "Never",
         "guest account": "nobody",
         "restrict anonymous": "2",
-        "null passwords": "no",
         "obey pam restrictions": "yes",
         "unix password sync": "yes",
         "pam password change": "yes",
