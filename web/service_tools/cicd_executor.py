@@ -384,7 +384,11 @@ def perform_remote_deployment(
         
         script_path = deploy_script if os.path.isabs(deploy_script) else os.path.join(workspace, deploy_script)
         
-        if os.path.exists(script_path):
+        if not os.path.exists(script_path):
+            logger.warning(f"Deploy script configured but not found: {script_path}")
+            with open(log_file, 'a') as log:
+                log.write(f"\n⚠ Deploy script not found: {script_path}\n")
+        else:
             with open(script_path, 'r') as f:
                 script_content = f.read()
             
