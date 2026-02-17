@@ -93,12 +93,19 @@ class TestCICDSteps(unittest.TestCase):
         mock_exists.return_value = False
         mock_config = MagicMock()
         
+        # Mock that webhook user exists (id command succeeds)
+        mock_run.return_value = MagicMock(returncode=0)
+        
         create_cicd_directories(mock_config)
         
         # Should create multiple directories
         self.assertGreaterEqual(mock_makedirs.call_count, 4)
         
-        # Should set ownership
+        # Should check for webhook user existence
+        user_check_calls = [call for call in mock_run.call_args_list if 'id webhook' in str(call)]
+        self.assertGreater(len(user_check_calls), 0)
+        
+        # Should set ownership (when user exists)
         ownership_calls = [call for call in mock_run.call_args_list if 'chown' in str(call)]
         self.assertGreater(len(ownership_calls), 0)
     

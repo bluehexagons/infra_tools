@@ -284,8 +284,11 @@ def main():
         parser.print_help()
         return 1
     
-    root_required_commands = ['add', 'remove', 'show-secret', 'logs', 'status']
-    if args.command in root_required_commands:
+    # Commands explicitly grouped by privilege level to follow least-privilege principle
+    privileged_commands = ['add', 'remove', 'show-secret', 'logs', 'status']
+    # list and test commands don't require root (list only reads config, test validates config)
+    
+    if args.command in privileged_commands:
         if os.geteuid() != 0:
             print("Error: This command requires root privileges")
             print("Run with: sudo webhook-manager.py ...")

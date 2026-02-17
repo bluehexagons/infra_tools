@@ -57,7 +57,13 @@ def push_artifact(
     remote_path: str,
     exclude_patterns: Optional[list[str]] = None
 ) -> bool:
-    """Push artifact directory to remote server using rsync."""
+    """Push artifact directory to remote server using rsync.
+    
+    Security Note: Uses StrictHostKeyChecking=accept-new which accepts new host keys
+    without verification on first connection. This is vulnerable to MITM attacks during
+    first connection. For production, consider using ssh-keyscan during setup to
+    populate known_hosts, or manually verify host keys before first deployment.
+    """
     target = get_deploy_target(target_host)
     if not target:
         print(f"  ✗ Unknown deploy target: {target_host}")

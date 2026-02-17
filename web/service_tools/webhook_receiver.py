@@ -22,6 +22,7 @@ import json
 import hmac
 import hashlib
 import subprocess
+from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Optional
 
@@ -43,6 +44,10 @@ JOBS_DIR = os.path.join(STATE_DIR, "jobs")
 # Server configuration
 DEFAULT_PORT = 8765
 WEBHOOK_SECRET_ENV = "WEBHOOK_SECRET"
+
+# Timestamp format for job creation
+TIMESTAMP_FORMAT = '%Y-%m-%d %H:%M:%S'
+TIMESTAMP_FORMAT_FILE = '%Y%m%d_%H%M%S'
 
 
 def verify_github_signature(secret: str, payload: bytes, signature_header: Optional[str]) -> bool:
@@ -90,17 +95,15 @@ def trigger_cicd_job(repo_url: str, ref: str, commit_sha: str, pusher: str) -> b
     try:
         os.makedirs(JOBS_DIR, exist_ok=True)
         
-        from datetime import datetime
-        
         job_data = {
             "repo_url": repo_url,
             "ref": ref,
             "commit_sha": commit_sha,
             "pusher": pusher,
-            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            "timestamp": datetime.now().strftime(TIMESTAMP_FORMAT)
         }
         
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        timestamp = datetime.now().strftime(TIMESTAMP_FORMAT_FILE)
         safe_repo_name = repo_url.rstrip('/').split('/')[-1].replace('.git', '')
         job_file = os.path.join(JOBS_DIR, f"{timestamp}_{safe_repo_name}_{commit_sha}.json")
         with open(job_file, 'w') as f:

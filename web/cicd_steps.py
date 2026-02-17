@@ -54,12 +54,18 @@ def create_cicd_directories(config: SetupConfig) -> None:
             os.makedirs(directory, mode=0o755, exist_ok=True)
     
     # Set ownership - critical for security
-    try:
-        run("chown -R webhook:webhook /var/lib/infra_tools/cicd")
-        run("chmod -R 750 /var/lib/infra_tools/cicd")
-    except Exception as e:
-        print(f"  ⚠ Warning: Failed to set directory permissions: {e}")
-        print(f"  This may cause security or permission issues.")
+    # Ensure the 'webhook' user exists before attempting chown
+    user_check = run("id webhook", check=False)
+    if user_check.returncode != 0:
+        print("  ⚠ Warning: Cannot set ownership for CI/CD directories because user 'webhook' does not exist.")
+        print("    Please run the user creation step before creating CI/CD directories.")
+    else:
+        try:
+            run("chown -R webhook:webhook /var/lib/infra_tools/cicd")
+            run("chmod -R 750 /var/lib/infra_tools/cicd")
+        except Exception as e:
+            print(f"  ⚠ Warning: Failed to set directory permissions: {e}")
+            print("  This may cause security or permission issues.")
     
     print("  ✓ Created CI/CD directories")
 
@@ -250,7 +256,12 @@ def configure_nginx_for_webhook(config: SetupConfig) -> None:
     
     # Create nginx configuration with rate limiting
     nginx_content = """# Webhook receiver reverse proxy
-# Rate limiting zone: 10 requests per minute per IP
+# Rate limiting zone: default 10 requests per minute per IP.
+# NOTE: This conservative default may be too restrictive for repositories with
+# frequent commits or for instances handling multiple repositories. If you see
+# HTTP 429 responses from the webhook endpoint under normal load, consider
+# increasing the `rate` (and optionally `burst`) values below to better match
+# your expected webhook traffic pattern.
 limit_req_zone $binary_remote_addr zone=webhook_limit:10m rate=10r/m;
 
 server {

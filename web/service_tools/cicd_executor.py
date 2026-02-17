@@ -98,7 +98,7 @@ def clone_or_update_repo(repo_url: str, workspace: str, ref: str) -> bool:
             return False
         
         result = subprocess.run(
-            ['git', 'clean', '-fdx'],
+            ['git', 'clean', '-fd'],
             cwd=workspace,
             capture_output=True,
             text=True,
