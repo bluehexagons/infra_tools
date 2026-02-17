@@ -376,7 +376,7 @@ def execute_storage_operations() -> dict:
         else:
             results["success"] = False
     
-    # Execute full scrubs if due
+    # Execute full scrubs if due (send start notification for long-running operations)
     if total_scrubs > 0 and notification_configs:
         try:
             send_notification(
@@ -437,21 +437,7 @@ def execute_storage_operations() -> dict:
         else:
             results["success"] = False
     
-    # Execute parity updates daily for scrub specs
-    if total_parity > 0 and notification_configs:
-        try:
-            send_notification(
-                notification_configs,
-                subject=f"{'[' + config.friendly_name + '] ' if config.friendly_name else ''}Starting parity updates",
-                job="storage-ops",
-                status="info",
-                message=f"Processing {total_parity} parity update operation(s)",
-                details="Fast mode: creating parity for new/modified files only",
-                logger=logger
-            )
-        except Exception as e:
-            logger.error(f"Failed to send parity start notification: {e}")
-    
+    # Execute parity updates daily for scrub specs (no start notification - fast operation)
     for spec in config.scrub_specs:
         if len(spec) != 4:
             continue
@@ -627,23 +613,7 @@ def main():
             
             return 0
         
-        # Send start notification
-        if notification_configs:
-            name_prefix = f"[{friendly_name}] " if friendly_name else ""
-            try:
-                send_notification(
-                    notification_configs,
-                    subject=f"{name_prefix}Storage operations starting",
-                    job="storage-ops",
-                    status="info",
-                    message="Beginning sync, scrub, and parity operations",
-                    details=f"Started at {datetime.now().isoformat()}",
-                    logger=logger
-                )
-            except Exception as e:
-                logger.error(f"Failed to send start notification: {e}")
-        
-        # Execute operations
+        # Execute operations (individual start notifications sent for long-running operations)
         results = execute_storage_operations()
         
         # Return exit code based on success

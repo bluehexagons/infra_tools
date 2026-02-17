@@ -121,6 +121,26 @@ def create_setup_argument_parser(
                        default=None if not for_remote else False,
                        help="Deploy Rails API as a subdomain (api.domain.com) instead of a subdirectory (domain.com/api)")
     
+    parser.add_argument("--cicd", dest="enable_cicd", 
+                       action=argparse.BooleanOptionalAction if not for_remote else "store_true", 
+                       default=None if not for_remote else False,
+                       help="Install webhook-based CI/CD system for GitHub Actions")
+    
+    parser.add_argument("--build-server", dest="is_build_server",
+                       action=argparse.BooleanOptionalAction if not for_remote else "store_true",
+                       default=None if not for_remote else False,
+                       help="Configure as a build server that deploys to app servers")
+    
+    parser.add_argument("--app-server", dest="is_app_server",
+                       action=argparse.BooleanOptionalAction if not for_remote else "store_true",
+                       default=None if not for_remote else False,
+                       help="Configure as a lightweight app server to receive deployments from build server")
+    
+    parser.add_argument("--deploy-target", dest="deploy_targets",
+                       action="append",
+                       metavar="HOST",
+                       help="Target app server for deployments (can be used multiple times). Subsequent --deploy flags deploy to the last specified target")
+    
     parser.add_argument("--samba", dest="enable_samba", 
                        action=argparse.BooleanOptionalAction if not for_remote else "store_true", 
                        default=None if not for_remote else False,

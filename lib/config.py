@@ -63,6 +63,10 @@ class SetupConfig:
     enable_ssl: bool = False
     ssl_email: Optional[str] = None
     enable_cloudflare: bool = False
+    enable_cicd: bool = False
+    is_build_server: bool = False
+    is_app_server: bool = False
+    deploy_targets: Optional[StrList] = None
     api_subdomain: bool = False
     enable_samba: bool = False
     samba_shares: Optional[NestedStrList] = None
@@ -155,6 +159,19 @@ class SetupConfig:
         
         if self.enable_cloudflare:
             args.append("--cloudflare")
+        
+        if self.enable_cicd:
+            args.append("--cicd")
+        
+        if self.is_build_server:
+            args.append("--build-server")
+        
+        if self.is_app_server:
+            args.append("--app-server")
+        
+        if self.deploy_targets:
+            for target in self.deploy_targets:
+                args.append(f"--deploy-target {shlex.quote(target)}")
         
         if self.api_subdomain:
             args.append("--api-subdomain")
@@ -287,6 +304,21 @@ class SetupConfig:
         # Cloudflare
         if self.enable_cloudflare:
             cmd_parts.append("--cloudflare")
+        
+        # CI/CD
+        if self.enable_cicd:
+            cmd_parts.append("--cicd")
+        
+        # Build/App Server
+        if self.is_build_server:
+            cmd_parts.append("--build-server")
+        
+        if self.is_app_server:
+            cmd_parts.append("--app-server")
+        
+        if self.deploy_targets:
+            for target in self.deploy_targets:
+                cmd_parts.append(f"--deploy-target {shlex.quote(target)}")
         
         if self.api_subdomain:
             cmd_parts.append("--api-subdomain")
@@ -437,6 +469,10 @@ class SetupConfig:
             enable_ssl=getattr(args, 'enable_ssl', False),
             ssl_email=getattr(args, 'ssl_email', None),
             enable_cloudflare=getattr(args, 'enable_cloudflare', False),
+            enable_cicd=getattr(args, 'enable_cicd', False),
+            is_build_server=getattr(args, 'is_build_server', False),
+            is_app_server=getattr(args, 'is_app_server', False),
+            deploy_targets=getattr(args, 'deploy_targets', None),
             api_subdomain=getattr(args, 'api_subdomain', False),
             enable_samba=getattr(args, 'enable_samba', False),
             samba_shares=getattr(args, 'samba_shares', None),
