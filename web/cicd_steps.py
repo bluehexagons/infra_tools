@@ -53,9 +53,13 @@ def create_cicd_directories(config: SetupConfig) -> None:
         if not os.path.exists(directory):
             os.makedirs(directory, mode=0o755, exist_ok=True)
     
-    # Set ownership
-    run("chown -R webhook:webhook /var/lib/infra_tools/cicd", check=False)
-    run("chmod -R 750 /var/lib/infra_tools/cicd", check=False)
+    # Set ownership - critical for security
+    try:
+        run("chown -R webhook:webhook /var/lib/infra_tools/cicd")
+        run("chmod -R 750 /var/lib/infra_tools/cicd")
+    except Exception as e:
+        print(f"  ⚠ Warning: Failed to set directory permissions: {e}")
+        print(f"  This may cause security or permission issues.")
     
     print("  ✓ Created CI/CD directories")
 
@@ -78,7 +82,13 @@ def generate_webhook_secret(config: SetupConfig) -> str:
         f.write(secret)
     
     os.chmod(secret_file, 0o600)
-    run("chown root:root /etc/infra_tools/cicd/webhook_secret", check=False)
+    
+    # Set ownership - critical for security
+    try:
+        run("chown root:root /etc/infra_tools/cicd/webhook_secret")
+    except Exception as e:
+        print(f"  ⚠ Warning: Failed to set secret file ownership: {e}")
+        print(f"  The webhook secret may be accessible to non-root users.")
     
     print("  ✓ Generated webhook secret")
     print(f"  ℹ Secret stored in: {secret_file}")

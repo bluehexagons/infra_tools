@@ -126,6 +126,10 @@ def clone_or_update_repo(repo_url: str, workspace: str, ref: str) -> bool:
 
 def run_script(script_path: str, workspace: str, log_file: str) -> bool:
     """Run a CI/CD script and log output."""
+    # Resolve relative paths against workspace
+    if not os.path.isabs(script_path):
+        script_path = os.path.join(workspace, script_path)
+    
     if not os.path.exists(script_path):
         logger.error(f"Script not found: {script_path}")
         return False
@@ -229,10 +233,7 @@ def process_job(job_file: str) -> bool:
         for script_name in ['install', 'build', 'test', 'deploy']:
             script_path = scripts.get(script_name)
             if script_path:
-                # Resolve script path relative to workspace
-                if not os.path.isabs(script_path):
-                    script_path = os.path.join(workspace, script_path)
-                
+                # run_script will resolve relative paths against workspace
                 if not run_script(script_path, workspace, log_file):
                     logger.error(f"Failed at stage: {script_name}")
                     success = False

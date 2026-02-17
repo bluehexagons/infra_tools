@@ -90,12 +90,14 @@ def trigger_cicd_job(repo_url: str, ref: str, commit_sha: str, pusher: str) -> b
     try:
         os.makedirs(JOBS_DIR, exist_ok=True)
         
+        from datetime import datetime
+        
         job_data = {
             "repo_url": repo_url,
             "ref": ref,
             "commit_sha": commit_sha,
             "pusher": pusher,
-            "timestamp": subprocess.check_output(['date', '+%Y-%m-%d %H:%M:%S']).decode().strip()
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
         
         # Write job file with commit SHA as filename
