@@ -60,6 +60,7 @@ class SetupConfig:
     custom_steps: Optional[str] = None
     deploy_specs: Optional[NestedStrList] = None
     full_deploy: bool = False
+    reset_migrations: bool = False
     enable_ssl: bool = False
     ssl_email: Optional[str] = None
     enable_cloudflare: bool = False
@@ -151,6 +152,9 @@ class SetupConfig:
                 args.append("--full-deploy")
             for deploy_spec, git_url in self.deploy_specs:
                 args.append(f"--deploy {shlex.quote(deploy_spec)} {shlex.quote(git_url)}")
+        
+        if self.reset_migrations:
+            args.append("--reset-migrations")
         
         if self.enable_ssl:
             args.append("--ssl")
@@ -294,6 +298,9 @@ class SetupConfig:
                 cmd_parts.append("--full-deploy")
             for deploy_spec, git_url in self.deploy_specs:
                 cmd_parts.append(f"--deploy {shlex.quote(deploy_spec)} {shlex.quote(git_url)}")
+        
+        if self.reset_migrations:
+            cmd_parts.append("--reset-migrations")
         
         # SSL
         if self.enable_ssl:
@@ -466,6 +473,7 @@ class SetupConfig:
             custom_steps=getattr(args, 'custom_steps', None),
             deploy_specs=getattr(args, 'deploy_specs', None),
             full_deploy=getattr(args, 'full_deploy', False),
+            reset_migrations=getattr(args, 'reset_migrations', False),
             enable_ssl=getattr(args, 'enable_ssl', False),
             ssl_email=getattr(args, 'ssl_email', None),
             enable_cloudflare=getattr(args, 'enable_cloudflare', False),

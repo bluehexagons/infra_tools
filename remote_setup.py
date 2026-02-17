@@ -209,7 +209,8 @@ def main() -> int:
                         web_user="rails",
                         web_group="rails",
                         keep_source=True,
-                        api_subdomain=config.api_subdomain
+                        api_subdomain=config.api_subdomain,
+                        reset_migrations=config.reset_migrations
                     )
                     if info:
                         deployments.append(info)
@@ -251,7 +252,8 @@ def main() -> int:
                             web_user="rails",
                             web_group="rails",
                             keep_source=True,
-                            api_subdomain=config.api_subdomain
+                            api_subdomain=config.api_subdomain,
+                            reset_migrations=config.reset_migrations
                         )
                         if info:
                             deployments.append(info)

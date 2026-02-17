@@ -21,7 +21,8 @@ def ensure_app_user(username: str) -> None:
 def deploy_repository(source_path: str, deploy_spec: str, git_url: str, 
                       commit_hash: Optional[str] = None, full_deploy: bool = True,
                       web_user: str = "rails", web_group: str = "rails", 
-                      keep_source: bool = False, api_subdomain: bool = False, **_ : Any) -> dict[str, Any]:
+                      keep_source: bool = False, api_subdomain: bool = False,
+                      reset_migrations: bool = False, **_ : Any) -> dict[str, Any]:
     from lib.deploy_utils import parse_deploy_spec
     
     ensure_app_user(web_user)
@@ -44,7 +45,8 @@ def deploy_repository(source_path: str, deploy_spec: str, git_url: str,
         commit_hash=commit_hash,
         full_deploy=full_deploy,
         keep_source=keep_source,
-        api_subdomain=api_subdomain
+        api_subdomain=api_subdomain,
+        reset_migrations=reset_migrations
     )
     
     return deployment_info

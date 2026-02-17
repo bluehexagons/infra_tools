@@ -106,6 +106,8 @@ def create_setup_argument_parser(
     
     parser.add_argument("--full-deploy", dest="full_deploy", action="store_true",
                        help="Always rebuild deployments even if they haven't changed (default: skip unchanged deployments)")
+    parser.add_argument("--reset-migrations", dest="reset_migrations", action="store_true",
+                       help="Reset Rails database schema using db:schema:load (use when migrations were squashed or reset)")
     parser.add_argument("--ssl", dest="enable_ssl", 
                        action=argparse.BooleanOptionalAction if not for_remote else "store_true", 
                        default=None if not for_remote else False,
