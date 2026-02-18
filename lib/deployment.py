@@ -745,18 +745,6 @@ class DeploymentOrchestrator:
                         print(f"    cd {project_path} && {env_vars} bundle exec rails runner {seeds_file}")
                     else:
                         print(f"    cd {project_path} && {env_vars} bundle exec rake db:seed")
-        else:
-            # Check for environment-specific alternatives
-            alt_paths = [
-                os.path.join(project_path, "db", "seeds", "production_seeds.rb"),
-                os.path.join(project_path, "db", "production_seeds.rb"),
-            ]
-            
-            for alt_path in alt_paths:
-                if os.path.exists(alt_path):
-                    print(f"  ℹ Found alternative seed file: {os.path.relpath(alt_path, project_path)}")
-                    print("    Not loaded automatically. Create db/seeds.rb to use it.")
-                    break
         
         check_task = run(f"cd {shlex.quote(project_path)} && bundle exec rake -T assets:precompile | grep assets:precompile", check=False, capture_output=True)
         if check_task.returncode == 0:

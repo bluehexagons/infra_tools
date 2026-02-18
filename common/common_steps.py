@@ -269,6 +269,7 @@ def install_node(config: SetupConfig) -> None:
     safe_username = shlex.quote(config.username)
     user_home = f"/home/{config.username}"
     nvm_dir = f"{user_home}/.nvm"
+    safe_nvm_dir = shlex.quote(nvm_dir)
     
     if os.path.exists(nvm_dir):
         print("  ✓ nvm already installed")
@@ -282,7 +283,7 @@ def install_node(config: SetupConfig) -> None:
     # any system-wide NVM_DIR (e.g. /opt/nvm) from the environment
     result = run(
         f"runuser -u {safe_username} -- bash -c "
-        f"'export NVM_DIR=\"{nvm_dir}\" && "
+        f"'export NVM_DIR={safe_nvm_dir} && "
         f"curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/{nvm_version}/install.sh | bash'",
         check=False
     )
@@ -291,11 +292,11 @@ def install_node(config: SetupConfig) -> None:
         return
     
     # Install Node.js LTS
-    run(f"runuser -u {safe_username} -- bash -c 'export NVM_DIR=\"{nvm_dir}\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && nvm install --lts'")
+    run(f"runuser -u {safe_username} -- bash -c 'export NVM_DIR={safe_nvm_dir} && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && nvm install --lts'")
     
     # Update npm and install pnpm
-    run(f"runuser -u {safe_username} -- bash -c 'export NVM_DIR=\"{nvm_dir}\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npm install -g npm@latest'")
-    run(f"runuser -u {safe_username} -- bash -c 'export NVM_DIR=\"{nvm_dir}\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npm install -g pnpm'")
+    run(f"runuser -u {safe_username} -- bash -c 'export NVM_DIR={safe_nvm_dir} && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npm install -g npm@latest'")
+    run(f"runuser -u {safe_username} -- bash -c 'export NVM_DIR={safe_nvm_dir} && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npm install -g pnpm'")
     
     # Add nvm initialization to .bashrc if not already present
     bashrc_path = f"{user_home}/.bashrc"
