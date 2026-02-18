@@ -75,8 +75,14 @@ def get_project_root(repo_path: str, project_type: str) -> str:
         return repo_path
     
     elif project_type == "node":
+        # Check for build output directories first
         for build_dir in ["dist", "build", "out"]:
             full_path = os.path.join(repo_path, build_dir)
+            if os.path.exists(full_path):
+                return full_path
+        # For projects without a build step (e.g., static sites served via http-server)
+        for source_dir in ["html", "public"]:
+            full_path = os.path.join(repo_path, source_dir)
             if os.path.exists(full_path):
                 return full_path
         return repo_path

@@ -38,7 +38,18 @@ class DeploymentOrchestrator:
     def _get_backup_dir(self, app_name: str) -> str:
         """Get the backup directory for database backups."""
         return os.path.join(self.base_dir, ".infra_tools_shared", app_name, "backups")
-
+    
+    def _build_cors_origins(self, domain: str | None) -> list[str]:
+        """Build CORS origins list for a domain."""
+        if not domain:
+            return []
+        return [
+            f"https://{domain}",
+            f"https://www.{domain}",
+            f"http://{domain}",
+            f"http://www.{domain}",
+        ]
+    
     def _ensure_dir(self, path: str) -> None:
         os.makedirs(path, exist_ok=True)
 
@@ -400,8 +411,25 @@ class DeploymentOrchestrator:
             
             project_type = detect_project_type(dest_path)
             
+            # Get the actual assigned port from the service file for Rails projects
+            backend_port = None
             frontend_serve_path = None
             if project_type == "rails":
+                service_name = f"rails-{app_name}"
+                service_file = f"/etc/systemd/system/{service_name}.service"
+                backend_port = self._get_assigned_port(service_name, 3000)
+                
+                # Ensure service exists and is running (may have been
+                # removed by cleanup_all_infra_services before this run)
+                if not os.path.exists(service_file):
+                    print(f"  Service {service_name} missing, recreating...")
+                    
+                    cors_origins = self._build_cors_origins(domain)
+                    
+                    create_rails_service(app_name, dest_path, backend_port,
+                                        self.web_user, self.web_group,
+                                        env_vars={"CORS_ORIGINS": ",".join(cors_origins)})
+                
                 frontend_path = os.path.join(dest_path, "frontend")
                 if os.path.exists(frontend_path):
                     frontend_serve_path = get_project_root(frontend_path, "node")
@@ -413,7 +441,7 @@ class DeploymentOrchestrator:
                 'project_type': project_type,
                 'serve_path': get_project_root(dest_path, project_type),
                 'needs_proxy': should_reverse_proxy(project_type),
-                'backend_port': 3000 if project_type == "rails" else None,
+                'backend_port': backend_port,
                 'frontend_port': 4000 if project_type == "rails" and os.path.exists(os.path.join(dest_path, "frontend")) else None,
                 'frontend_serve_path': frontend_serve_path,
                 'skipped': True,
@@ -486,12 +514,7 @@ class DeploymentOrchestrator:
             service_name = f"rails-{app_name}"
             backend_port = self._get_assigned_port(service_name, 3000)
             
-            cors_origins: list[str] = []
-            if domain:
-                cors_origins.append(f"https://{domain}")
-                cors_origins.append(f"https://www.{domain}")
-                cors_origins.append(f"http://{domain}")
-                cors_origins.append(f"http://www.{domain}")
+            cors_origins = self._build_cors_origins(domain)
             
             create_rails_service(app_name, dest_path, backend_port, self.web_user, self.web_group, 
                                env_vars={"CORS_ORIGINS": ",".join(cors_origins)})
@@ -612,7 +635,8 @@ class DeploymentOrchestrator:
             print("  ⚠ This will load the current schema and mark all migrations as run")
             
             # Load current schema structure
-            result = run(f"cd {shlex.quote(project_path)} && {env_vars} bundle exec rake db:schema:load", capture_output=True)
+            # Note: DISABLE_DATABASE_ENVIRONMENT_CHECK=1 allows schema:load to run in production
+            result = run(f"cd {shlex.quote(project_path)} && {env_vars} DISABLE_DATABASE_ENVIRONMENT_CHECK=1 bundle exec rake db:schema:load", capture_output=True)
             if result.returncode != 0:
                 print(f"  ✗ Schema load failed with exit code {result.returncode}")
                 if result.stderr:

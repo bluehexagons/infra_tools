@@ -13,6 +13,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.deployment import DeploymentOrchestrator
 
+# Capture the real os.path.exists before any @patch decorators replace it.
+# This is needed by TestSkippedDeploymentServiceRecreation to avoid infinite
+# recursion when selectively mocking os.path.exists.
+_real_exists = os.path.exists
+
 
 class TestDatabaseBackup(unittest.TestCase):
     def setUp(self):
@@ -501,6 +506,95 @@ class TestIntelligentSeeding(unittest.TestCase):
         runner_calls = [call for call in mock_run.call_args_list 
                        if 'rails runner' in str(call) and 'production_seeds.rb' in str(call)]
         self.assertGreater(len(runner_calls), 0, "Production-specific seeds should be used")
+
+
+class TestSkippedDeploymentServiceRecreation(unittest.TestCase):
+    """Tests for ensuring Rails services are recreated when deployments are skipped."""
+    
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.orchestrator = DeploymentOrchestrator(base_dir=self.tmpdir)
+        
+        # Create a fake Rails project directory
+        self.app_dir = os.path.join(self.tmpdir, "example_com")
+        os.makedirs(self.app_dir)
+        
+        # Make it detectable as Rails
+        with open(os.path.join(self.app_dir, '.ruby-version'), 'w') as f:
+            f.write('3.3.0')
+        os.makedirs(os.path.join(self.app_dir, 'bin'), exist_ok=True)
+        with open(os.path.join(self.app_dir, 'bin', 'rails'), 'w') as f:
+            f.write('#!/usr/bin/env ruby')
+        os.makedirs(os.path.join(self.app_dir, 'public'), exist_ok=True)
+        
+        # Save deployment metadata so it can be skipped
+        from lib.deploy_utils import save_deployment_metadata
+        save_deployment_metadata(self.app_dir, 'https://git.example.com/repo.git', 'abc123')
+        
+    def tearDown(self):
+        import shutil
+        if os.path.exists(self.tmpdir):
+            shutil.rmtree(self.tmpdir)
+    
+    @patch('lib.deployment.create_rails_service')
+    @patch('lib.deployment.run')
+    @patch('os.path.exists')
+    def test_skipped_deploy_recreates_missing_service(self, mock_exists, mock_run, mock_create_service):
+        """When a deployment is skipped but the service file is missing, recreate it."""
+        def selective_exists(path):
+            # Service file does NOT exist (simulates cleanup_all_infra_services)
+            if path.startswith('/etc/systemd/system/') and path.endswith('.service'):
+                return False
+            return _real_exists(path)
+        
+        mock_exists.side_effect = selective_exists
+        mock_run.return_value = MagicMock(returncode=0)
+        
+        result = self.orchestrator.deploy_from_archive(
+            source_path='/tmp/fake_source',
+            domain='example.com',
+            path='/',
+            git_url='https://git.example.com/repo.git',
+            commit_hash='abc123',
+            full_deploy=False,
+        )
+        
+        # Should have been skipped
+        self.assertTrue(result.get('skipped'))
+        
+        # Service should have been recreated since the file was missing
+        mock_create_service.assert_called_once()
+        call_args = mock_create_service.call_args
+        self.assertEqual(call_args[0][0], 'example_com')  # app_name
+        self.assertIsNotNone(call_args[0][2])  # port
+    
+    @patch('lib.deployment.create_rails_service')
+    @patch('lib.deployment.run')
+    @patch('os.path.exists')
+    def test_skipped_deploy_does_not_recreate_existing_service(self, mock_exists, mock_run, mock_create_service):
+        """When a deployment is skipped and the service file exists, don't recreate it."""
+        def selective_exists(path):
+            # Service file DOES exist
+            if path == '/etc/systemd/system/rails-example_com.service':
+                return True
+            return _real_exists(path)
+        
+        mock_exists.side_effect = selective_exists
+        mock_run.return_value = MagicMock(returncode=0)
+        
+        result = self.orchestrator.deploy_from_archive(
+            source_path='/tmp/fake_source',
+            domain='example.com',
+            path='/',
+            git_url='https://git.example.com/repo.git',
+            commit_hash='abc123',
+            full_deploy=False,
+        )
+        
+        self.assertTrue(result.get('skipped'))
+        
+        # Service should NOT have been recreated
+        mock_create_service.assert_not_called()
 
 
 if __name__ == '__main__':
