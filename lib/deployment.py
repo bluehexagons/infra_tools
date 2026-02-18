@@ -1,6 +1,7 @@
 """Deployment orchestration - shared between local and remote environments."""
 
 from __future__ import annotations
+import json
 import os
 import shlex
 import shutil
@@ -746,6 +747,21 @@ class DeploymentOrchestrator:
         
         run(f"cd {shlex.quote(project_path)} && TMPDIR=/var/tmp npm install")
         
+        # Check if a build script is defined in package.json before running it
+        package_json = os.path.join(project_path, "package.json")
+        has_build_script = False
+        if os.path.exists(package_json):
+            try:
+                with open(package_json) as f:
+                    pkg = json.load(f)
+                has_build_script = "build" in pkg.get("scripts", {})
+            except Exception:
+                pass
+        
+        if not has_build_script:
+            print("  ℹ No build script in package.json, skipping build step")
+            return
+
         build_cmd = "npm run build"
         env_prefix = ["TMPDIR=/var/tmp"]
 
@@ -765,7 +781,7 @@ class DeploymentOrchestrator:
         result = run(f"cd {shlex.quote(project_path)} && {build_cmd}", check=False)
         
         if result.returncode != 0:
-            print("  ⚠ npm run build failed or not configured, skipping build step")
+            print("  ⚠ npm run build failed, skipping build step")
         else:
             print("  ✓ Node.js project built")
     

@@ -17,6 +17,9 @@ import glob
 import re
 import shutil
 from typing import Optional, Any
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
+
 from lib.types import StrDict, JSONDict
 
 

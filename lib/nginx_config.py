@@ -161,8 +161,9 @@ def _make_api_server_block(domain: str, port: int) -> str:
     return f"""server {{
     listen 80;
     listen [::]:80;
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
     
     server_name {domain};
     
@@ -303,8 +304,9 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: Deployments
     main_config = f"""server {{
     listen 80{default_server};
     listen [::]:80{default_server};
-    listen 443 ssl http2{default_server};
-    listen [::]:443 ssl http2{default_server};
+    listen 443 ssl{default_server};
+    listen [::]:443 ssl{default_server};
+    http2 on;
     
     {server_name_directive}
     
