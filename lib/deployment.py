@@ -37,7 +37,18 @@ class DeploymentOrchestrator:
     def _get_backup_dir(self, app_name: str) -> str:
         """Get the backup directory for database backups."""
         return os.path.join(self.base_dir, ".infra_tools_shared", app_name, "backups")
-
+    
+    def _build_cors_origins(self, domain: str | None) -> list[str]:
+        """Build CORS origins list for a domain."""
+        if not domain:
+            return []
+        return [
+            f"https://{domain}",
+            f"https://www.{domain}",
+            f"http://{domain}",
+            f"http://www.{domain}",
+        ]
+    
     def _ensure_dir(self, path: str) -> None:
         os.makedirs(path, exist_ok=True)
 
@@ -404,7 +415,20 @@ class DeploymentOrchestrator:
             frontend_serve_path = None
             if project_type == "rails":
                 service_name = f"rails-{app_name}"
+                service_file = f"/etc/systemd/system/{service_name}.service"
                 backend_port = self._get_assigned_port(service_name, 3000)
+                
+                # Ensure service exists and is running (may have been
+                # removed by cleanup_all_infra_services before this run)
+                if not os.path.exists(service_file):
+                    print(f"  Service {service_name} missing, recreating...")
+                    
+                    cors_origins = self._build_cors_origins(domain)
+                    
+                    create_rails_service(app_name, dest_path, backend_port,
+                                        self.web_user, self.web_group,
+                                        env_vars={"CORS_ORIGINS": ",".join(cors_origins)})
+                
                 frontend_path = os.path.join(dest_path, "frontend")
                 if os.path.exists(frontend_path):
                     frontend_serve_path = get_project_root(frontend_path, "node")
@@ -489,12 +513,7 @@ class DeploymentOrchestrator:
             service_name = f"rails-{app_name}"
             backend_port = self._get_assigned_port(service_name, 3000)
             
-            cors_origins: list[str] = []
-            if domain:
-                cors_origins.append(f"https://{domain}")
-                cors_origins.append(f"https://www.{domain}")
-                cors_origins.append(f"http://{domain}")
-                cors_origins.append(f"http://www.{domain}")
+            cors_origins = self._build_cors_origins(domain)
             
             create_rails_service(app_name, dest_path, backend_port, self.web_user, self.web_group, 
                                env_vars={"CORS_ORIGINS": ",".join(cors_origins)})
