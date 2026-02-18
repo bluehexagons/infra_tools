@@ -1,6 +1,7 @@
 """Deployment orchestration - shared between local and remote environments."""
 
 from __future__ import annotations
+import json
 import os
 import shlex
 import shutil
@@ -744,18 +745,6 @@ class DeploymentOrchestrator:
                         print(f"    cd {project_path} && {env_vars} bundle exec rails runner {seeds_file}")
                     else:
                         print(f"    cd {project_path} && {env_vars} bundle exec rake db:seed")
-        else:
-            # Check for environment-specific alternatives
-            alt_paths = [
-                os.path.join(project_path, "db", "seeds", "production_seeds.rb"),
-                os.path.join(project_path, "db", "production_seeds.rb"),
-            ]
-            
-            for alt_path in alt_paths:
-                if os.path.exists(alt_path):
-                    print(f"  ℹ Found alternative seed file: {os.path.relpath(alt_path, project_path)}")
-                    print("    Not loaded automatically. Create db/seeds.rb to use it.")
-                    break
         
         check_task = run(f"cd {shlex.quote(project_path)} && bundle exec rake -T assets:precompile | grep assets:precompile", check=False, capture_output=True)
         if check_task.returncode == 0:
@@ -770,6 +759,21 @@ class DeploymentOrchestrator:
         
         run(f"cd {shlex.quote(project_path)} && TMPDIR=/var/tmp npm install")
         
+        # Check if a build script is defined in package.json before running it
+        package_json = os.path.join(project_path, "package.json")
+        has_build_script = False
+        if os.path.exists(package_json):
+            try:
+                with open(package_json) as f:
+                    pkg = json.load(f)
+                has_build_script = "build" in pkg.get("scripts", {})
+            except Exception:
+                pass
+        
+        if not has_build_script:
+            print("  ℹ No build script in package.json, skipping build step")
+            return
+
         build_cmd = "npm run build"
         env_prefix = ["TMPDIR=/var/tmp"]
 
@@ -789,7 +793,7 @@ class DeploymentOrchestrator:
         result = run(f"cd {shlex.quote(project_path)} && {build_cmd}", check=False)
         
         if result.returncode != 0:
-            print("  ⚠ npm run build failed or not configured, skipping build step")
+            print("  ⚠ npm run build failed, skipping build step")
         else:
             print("  ✓ Node.js project built")
     

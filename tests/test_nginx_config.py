@@ -144,6 +144,19 @@ class TestGenerateMergedNginxConfig(unittest.TestCase):
         config = generate_merged_nginx_config('example.com', deployments)
         self.assertIn('acme-challenge', config)
 
+    def test_http2_directive_not_deprecated(self):
+        """http2 should use the standalone directive, not the deprecated listen parameter."""
+        deployments = [{
+            'path': '/',
+            'needs_proxy': False,
+            'serve_path': '/var/www/html',
+            'project_type': 'static',
+        }]
+        config = generate_merged_nginx_config('example.com', deployments)
+        self.assertNotIn('listen 443 ssl http2', config)
+        self.assertNotIn('listen [::]:443 ssl http2', config)
+        self.assertIn('http2 on', config)
+
 
 if __name__ == '__main__':
     unittest.main()

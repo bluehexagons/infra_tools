@@ -202,7 +202,7 @@ def install_ruby(config: SetupConfig) -> None:
         print("  ✓ rbenv already installed")
         return
     
-    run("apt-get install -y -qq git curl libssl-dev libreadline-dev zlib1g-dev autoconf bison build-essential libyaml-dev libncurses5-dev libffi-dev libgdbm-dev ruby ruby-dev")
+    run("apt-get -o DPkg::Lock::Timeout=60 install -y -qq git curl libssl-dev libreadline-dev zlib1g-dev autoconf bison build-essential libyaml-dev libncurses5-dev libffi-dev libgdbm-dev ruby ruby-dev")
     run("gem install bundler", check=False)
     
     run(f"runuser -u {safe_username} -- git clone https://github.com/rbenv/rbenv.git {shlex.quote(rbenv_dir)}")
@@ -269,6 +269,7 @@ def install_node(config: SetupConfig) -> None:
     safe_username = shlex.quote(config.username)
     user_home = f"/home/{config.username}"
     nvm_dir = f"{user_home}/.nvm"
+    safe_nvm_dir = shlex.quote(nvm_dir)
     
     if os.path.exists(nvm_dir):
         print("  ✓ nvm already installed")
@@ -278,15 +279,24 @@ def install_node(config: SetupConfig) -> None:
     
     nvm_version = "v0.39.7"
     
-    # Install nvm as the user
-    run(f"runuser -u {safe_username} -- bash -c 'curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/{nvm_version}/install.sh | bash'")
+    # Install nvm as the user, explicitly setting NVM_DIR to avoid picking up
+    # any system-wide NVM_DIR (e.g. /opt/nvm) from the environment
+    result = run(
+        f"runuser -u {safe_username} -- bash -c "
+        f"'export NVM_DIR={safe_nvm_dir} && "
+        f"curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/{nvm_version}/install.sh | bash'",
+        check=False
+    )
+    if result.returncode != 0 or not os.path.exists(os.path.join(nvm_dir, "nvm.sh")):
+        print("  ✗ nvm installation failed")
+        return
     
     # Install Node.js LTS
-    run(f"runuser -u {safe_username} -- bash -c 'export NVM_DIR=\"{nvm_dir}\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && nvm install --lts'")
+    run(f"runuser -u {safe_username} -- bash -c 'export NVM_DIR={safe_nvm_dir} && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && nvm install --lts'")
     
     # Update npm and install pnpm
-    run(f"runuser -u {safe_username} -- bash -c 'export NVM_DIR=\"{nvm_dir}\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npm install -g npm@latest'")
-    run(f"runuser -u {safe_username} -- bash -c 'export NVM_DIR=\"{nvm_dir}\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npm install -g pnpm'")
+    run(f"runuser -u {safe_username} -- bash -c 'export NVM_DIR={safe_nvm_dir} && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npm install -g npm@latest'")
+    run(f"runuser -u {safe_username} -- bash -c 'export NVM_DIR={safe_nvm_dir} && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npm install -g pnpm'")
     
     # Add nvm initialization to .bashrc if not already present
     bashrc_path = f"{user_home}/.bashrc"
