@@ -9,6 +9,8 @@ from lib.machine_state import can_modify_kernel, is_container
 from lib.remote_utils import run, is_service_active, file_contains
 from lib.systemd_service import cleanup_service
 
+UNATTENDED_ORIGINS_FILE = "/etc/apt/apt.conf.d/52infra-tools-unattended-upgrades"
+
 
 def create_remoteusers_group(config: SetupConfig) -> None:
     """Create remoteusers group for SSH and RDP access control."""
@@ -178,7 +180,7 @@ fs.suid_dumpable=0
 
 def configure_auto_updates(config: SetupConfig) -> None:
     if os.path.exists("/etc/apt/apt.conf.d/20auto-upgrades"):
-        if os.path.exists("/etc/apt/apt.conf.d/52infra-tools-unattended-upgrades") and is_service_active("unattended-upgrades"):
+        if os.path.exists(UNATTENDED_ORIGINS_FILE) and is_service_active("unattended-upgrades"):
             print("  ✓ Automatic updates already configured")
             return
     
@@ -193,16 +195,22 @@ APT::Periodic::AutocleanInterval "7";
     with open("/etc/apt/apt.conf.d/20auto-upgrades", "w") as f:
         f.write(auto_upgrades)
 
-    # Include third-party apt repositories (e.g. VSCode/Brave) in unattended updates
-    update_origins = """Unattended-Upgrade::Origins-Pattern {
-        "origin=${distro_id},codename=${distro_codename}";
-        "origin=${distro_id},codename=${distro_codename}-security";
-        "origin=${distro_id},codename=${distro_codename}-updates";
-        "origin=packages.microsoft.com";
-        "origin=Brave Software";
-};
-"""
-    with open("/etc/apt/apt.conf.d/52infra-tools-unattended-upgrades", "w") as f:
+    origins = [
+        "origin=${distro_id},codename=${distro_codename}",
+        "origin=${distro_id},codename=${distro_codename}-security",
+        "origin=${distro_id},codename=${distro_codename}-updates",
+    ]
+    if os.path.exists("/etc/apt/sources.list.d/vscode.list"):
+        origins.append("origin=packages.microsoft.com")
+    if os.path.exists("/etc/apt/sources.list.d/brave-browser-release.list"):
+        origins.append("origin=Brave Software")
+
+    update_origins = "Unattended-Upgrade::Origins-Pattern {\n"
+    for origin in origins:
+        update_origins += f'        "{origin}";\n'
+    update_origins += "};\n"
+
+    with open(UNATTENDED_ORIGINS_FILE, "w") as f:
         f.write(update_origins)
 
     # systemctl may not be available or functional in containers
@@ -212,7 +220,31 @@ APT::Periodic::AutocleanInterval "7";
         return
     run("systemctl start unattended-upgrades", check=False)
 
-    print("  ✓ Automatic package updates enabled (including third-party apt repos)")
+    print("  ✓ Automatic package updates enabled")
+
+
+def ensure_unattended_upgrade_origin(origin: str) -> None:
+    """Ensure a specific origin is included in unattended-upgrades origins file."""
+    if not os.path.exists(UNATTENDED_ORIGINS_FILE):
+        return
+
+    entry = f'"origin={origin}";'
+    with open(UNATTENDED_ORIGINS_FILE, "r") as f:
+        content = f.read()
+    if entry in content:
+        return
+
+    lines = content.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        if line.strip() == "};":
+            lines.insert(i, f"        {entry}\n")
+            break
+    else:
+        print("  ⚠ unattended-upgrades origins file format unexpected; could not add origin")
+        return
+
+    with open(UNATTENDED_ORIGINS_FILE, "w") as f:
+        f.write("".join(lines))
 
 
 def configure_firewall_web(config: SetupConfig) -> None:
