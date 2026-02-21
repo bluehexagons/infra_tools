@@ -14,6 +14,7 @@ from lib.notifications import (
     Notification,
     NotificationSender,
     parse_notification_args,
+    send_notification_safe,
     send_setup_notification,
 )
 
@@ -253,6 +254,23 @@ class TestSendSetupNotification(unittest.TestCase):
         self.assertIn('10.0.0.1', notification.subject)
         # Should not have parentheses around host when no friendly_name
         self.assertNotIn('(', notification.subject)
+
+
+class TestSendNotificationSafe(unittest.TestCase):
+    @patch('lib.notifications.send_notification')
+    def test_returns_without_configs(self, mock_send):
+        send_notification_safe([], "Subject", "job", "info", "msg")
+        mock_send.assert_not_called()
+
+    @patch('lib.notifications.send_notification', side_effect=RuntimeError('boom'))
+    def test_suppresses_errors(self, _mock_send):
+        send_notification_safe(
+            [NotificationConfig(type='webhook', target='https://example.com/hook')],
+            "Subject",
+            "job",
+            "error",
+            "msg"
+        )
 
 
 if __name__ == '__main__':

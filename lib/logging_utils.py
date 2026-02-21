@@ -16,12 +16,13 @@ Key Features:
 from __future__ import annotations
 
 from logging import (
-    Logger, Formatter, StreamHandler, getLogger, INFO
+    Logger, Formatter, StreamHandler, getLogger, INFO, WARNING
 )
 from logging.handlers import RotatingFileHandler, SysLogHandler
 from pathlib import Path
 from typing import Optional
 import sys
+import subprocess
 from lib.types import BYTES_PER_MB
 
 # Default log configuration
@@ -224,3 +225,21 @@ def ensure_log_directory(subdir: Optional[str] = None) -> Path:
         print(f"Error creating log directory {log_dir}: {e}", file=sys.stderr)
     
     return log_dir
+
+
+def log_subprocess_result(
+    logger: Logger,
+    action: str,
+    result: subprocess.CompletedProcess[str],
+    success_level: int = INFO,
+    failure_level: int = WARNING
+) -> bool:
+    """Log concise command result details and return success state."""
+    if result.returncode == 0:
+        logger.log(success_level, f"✓ {action}")
+        return True
+
+    stderr = (result.stderr or "").strip().splitlines()
+    details = stderr[0] if stderr else f"exit code {result.returncode}"
+    logger.log(failure_level, f"⚠ {action} failed: {details}")
+    return False

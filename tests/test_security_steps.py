@@ -1,0 +1,52 @@
+"""Tests for security.security_steps auto-update configuration."""
+
+from __future__ import annotations
+
+import os
+import sys
+import unittest
+from types import SimpleNamespace
+from unittest.mock import mock_open, patch
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+from lib.config import SetupConfig
+from security.security_steps import configure_auto_updates
+
+
+class TestConfigureAutoUpdates(unittest.TestCase):
+    @patch("security.security_steps.run")
+    @patch("security.security_steps.is_service_active", return_value=True)
+    @patch(
+        "security.security_steps.os.path.exists",
+        side_effect=lambda p: p in {"/etc/apt/apt.conf.d/20auto-upgrades", "/etc/apt/apt.conf.d/52infra-tools-unattended-upgrades"},
+    )
+    def test_already_configured(self, _exists, _active, mock_run):
+        configure_auto_updates(SetupConfig(username="u", host="h", system_type="server_lite"))
+        mock_run.assert_not_called()
+
+    @patch("security.security_steps.open", new_callable=mock_open)
+    @patch(
+        "security.security_steps.run",
+        side_effect=[
+            SimpleNamespace(returncode=0),  # apt-get install unattended-upgrades
+            SimpleNamespace(returncode=0),  # systemctl enable unattended-upgrades
+            SimpleNamespace(returncode=0),  # systemctl start unattended-upgrades
+        ],
+    )
+    @patch("security.security_steps.is_service_active", return_value=False)
+    @patch("security.security_steps.os.path.exists", return_value=False)
+    def test_writes_third_party_origins_config(self, _exists, _active, mock_run, mock_file):
+        configure_auto_updates(SetupConfig(username="u", host="h", system_type="server_lite"))
+
+        opened_paths = [args[0] for args, _ in mock_file.call_args_list]
+        self.assertIn("/etc/apt/apt.conf.d/20auto-upgrades", opened_paths)
+        self.assertIn("/etc/apt/apt.conf.d/52infra-tools-unattended-upgrades", opened_paths)
+
+        run_commands = [args[0] for args, _ in mock_run.call_args_list]
+        self.assertIn("systemctl enable unattended-upgrades", run_commands)
+        self.assertIn("systemctl start unattended-upgrades", run_commands)
+
+
+if __name__ == "__main__":
+    unittest.main()

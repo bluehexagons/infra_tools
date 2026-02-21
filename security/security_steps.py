@@ -178,7 +178,7 @@ fs.suid_dumpable=0
 
 def configure_auto_updates(config: SetupConfig) -> None:
     if os.path.exists("/etc/apt/apt.conf.d/20auto-upgrades"):
-        if is_service_active("unattended-upgrades"):
+        if os.path.exists("/etc/apt/apt.conf.d/52infra-tools-unattended-upgrades") and is_service_active("unattended-upgrades"):
             print("  ✓ Automatic updates already configured")
             return
     
@@ -193,6 +193,14 @@ APT::Periodic::AutocleanInterval "7";
     with open("/etc/apt/apt.conf.d/20auto-upgrades", "w") as f:
         f.write(auto_upgrades)
 
+    # Include third-party apt repositories (e.g. VSCode/Brave) in unattended updates
+    update_origins = """Unattended-Upgrade::Origins-Pattern {
+        "origin=*";
+};
+"""
+    with open("/etc/apt/apt.conf.d/52infra-tools-unattended-upgrades", "w") as f:
+        f.write(update_origins)
+
     # systemctl may not be available or functional in containers
     result = run("systemctl enable unattended-upgrades", check=False)
     if result.returncode != 0:
@@ -200,7 +208,7 @@ APT::Periodic::AutocleanInterval "7";
         return
     run("systemctl start unattended-upgrades", check=False)
 
-    print("  ✓ Automatic security updates enabled")
+    print("  ✓ Automatic package updates enabled (including third-party apt repos)")
 
 
 def configure_firewall_web(config: SetupConfig) -> None:

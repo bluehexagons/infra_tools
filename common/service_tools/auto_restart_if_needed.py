@@ -17,6 +17,7 @@ import subprocess
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
 from lib.logging_utils import get_service_logger
+from lib.notifications import load_notification_configs_from_state, send_notification_safe
 
 # Initialize centralized logger
 logger = get_service_logger('auto_restart_if_needed', 'common', use_syslog=True)
@@ -79,23 +80,41 @@ def check_rdp_sessions() -> bool:
         return False
 
 
-def perform_restart():
+def perform_restart(notification_configs) -> int:
     """Perform system restart."""
     logger.info("Restart required and no users logged in, restarting system...")
+    send_notification_safe(
+        notification_configs,
+        subject="Restart required: restarting now",
+        job="auto_restart_if_needed",
+        status="warning",
+        message="A restart is required and no active sessions were detected. Automatic restart is starting now.",
+        logger=logger
+    )
     
     try:
         subprocess.run(
             ["/sbin/shutdown", "-r", "now", "Automatic restart for system updates"],
             check=True
         )
+        return 0
     except subprocess.CalledProcessError as e:
         logger.error(f"✗ Failed to initiate restart: {e}")
-        sys.exit(1)
+        send_notification_safe(
+            notification_configs,
+            subject="Error: automatic restart failed",
+            job="auto_restart_if_needed",
+            status="error",
+            message=f"Restart required but automatic restart failed: {e}",
+            logger=logger
+        )
+        return 1
 
 
 def main():
     """Main function to check and perform restart if needed."""
     logger.info("Starting restart check")
+    notification_configs = load_notification_configs_from_state(logger)
     
     # Check if restart is required
     if not check_restart_required():
@@ -106,21 +125,45 @@ def main():
     logged_in_users = get_logged_in_users()
     if logged_in_users:
         logger.info("Users are logged in (SSH/console), skipping restart")
+        send_notification_safe(
+            notification_configs,
+            subject="Restart required: manual restart needed",
+            job="auto_restart_if_needed",
+            status="warning",
+            message="A restart is required, but active SSH/console sessions were detected. Manual restart is required.",
+            details="\n".join(logged_in_users),
+            logger=logger
+        )
         return 0
     
     # Check for desktop sessions
     if check_desktop_sessions():
         logger.info("Desktop session active, skipping restart")
+        send_notification_safe(
+            notification_configs,
+            subject="Restart required: manual restart needed",
+            job="auto_restart_if_needed",
+            status="warning",
+            message="A restart is required, but an active desktop session was detected. Manual restart is required.",
+            logger=logger
+        )
         return 0
     
     # Check for RDP sessions
     if check_rdp_sessions():
         logger.info("RDP session active, skipping restart")
+        send_notification_safe(
+            notification_configs,
+            subject="Restart required: manual restart needed",
+            job="auto_restart_if_needed",
+            status="warning",
+            message="A restart is required, but an active RDP session was detected. Manual restart is required.",
+            logger=logger
+        )
         return 0
     
     # No users logged in and restart required, proceed
-    perform_restart()
-    return 0
+    return perform_restart(notification_configs)
 
 
 if __name__ == "__main__":
