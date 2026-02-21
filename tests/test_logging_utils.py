@@ -113,10 +113,10 @@ class TestLogSubprocessResult(unittest.TestCase):
             ok = log_subprocess_result(
                 logger,
                 "Did thing",
-                subprocess.CompletedProcess(args=['x'], returncode=1, stdout='', stderr='error line\nmore')
+                subprocess.CompletedProcess(args=['x'], returncode=1, stdout='', stderr='error line\nmore\nthird\nfourth')
             )
         self.assertFalse(ok)
-        self.assertIn("⚠ Did thing failed: error line", logs.output[0])
+        self.assertIn("⚠ Did thing failed: error line | more | third | ...", logs.output[0])
 
 
 if __name__ == '__main__':

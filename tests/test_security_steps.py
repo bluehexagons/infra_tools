@@ -47,6 +47,10 @@ class TestConfigureAutoUpdates(unittest.TestCase):
         self.assertIn("systemctl enable unattended-upgrades", run_commands)
         self.assertIn("systemctl start unattended-upgrades", run_commands)
 
+        written_text = "".join(call.args[0] for call in mock_file().write.call_args_list)
+        self.assertIn("origin=packages.microsoft.com", written_text)
+        self.assertIn("origin=Brave Software", written_text)
+
 
 if __name__ == "__main__":
     unittest.main()

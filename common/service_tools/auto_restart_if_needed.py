@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import sys
 import subprocess
+import shutil
 
 # Add lib directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
@@ -93,12 +94,15 @@ def perform_restart(notification_configs) -> int:
     )
     
     try:
+        shutdown_cmd = shutil.which("shutdown")
+        if not shutdown_cmd:
+            raise FileNotFoundError("shutdown command not found")
         subprocess.run(
-            ["/sbin/shutdown", "-r", "now", "Automatic restart for system updates"],
+            [shutdown_cmd, "-r", "now", "Automatic restart for system updates"],
             check=True
         )
         return 0
-    except subprocess.CalledProcessError as e:
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
         logger.error(f"✗ Failed to initiate restart: {e}")
         send_notification_safe(
             notification_configs,

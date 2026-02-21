@@ -239,7 +239,16 @@ def log_subprocess_result(
         logger.log(success_level, f"✓ {action}")
         return True
 
-    stderr = (result.stderr or "").strip().splitlines()
-    details = stderr[0] if stderr else f"exit code {result.returncode}"
+    stderr_raw = result.stderr or ""
+    if isinstance(stderr_raw, bytes):
+        stderr_raw = stderr_raw.decode(errors="replace")
+    stderr = stderr_raw.strip().splitlines()
+    if stderr:
+        detail_lines = stderr[:3]
+        details = " | ".join(detail_lines)
+        if len(stderr) > 3:
+            details += " | ..."
+    else:
+        details = f"exit code {result.returncode}"
     logger.log(failure_level, f"⚠ {action} failed: {details}")
     return False

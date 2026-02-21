@@ -195,7 +195,11 @@ APT::Periodic::AutocleanInterval "7";
 
     # Include third-party apt repositories (e.g. VSCode/Brave) in unattended updates
     update_origins = """Unattended-Upgrade::Origins-Pattern {
-        "origin=*";
+        "origin=${distro_id},codename=${distro_codename}";
+        "origin=${distro_id},codename=${distro_codename}-security";
+        "origin=${distro_id},codename=${distro_codename}-updates";
+        "origin=packages.microsoft.com";
+        "origin=Brave Software";
 };
 """
     with open("/etc/apt/apt.conf.d/52infra-tools-unattended-upgrades", "w") as f:
