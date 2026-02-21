@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import fcntl
 
 from lib.config import SetupConfig
 from lib.machine_state import can_modify_kernel, is_container
@@ -10,6 +11,31 @@ from lib.remote_utils import run, is_service_active, file_contains
 from lib.systemd_service import cleanup_service
 
 UNATTENDED_ORIGINS_FILE = "/etc/apt/apt.conf.d/52infra-tools-unattended-upgrades"
+UNATTENDED_MANAGED_ORIGINS_FILE = "/etc/infra_tools/unattended_upgrades_origins.list"
+
+
+def _load_managed_unattended_origins() -> list[str]:
+    """Load additional unattended-upgrades origins managed by setup steps."""
+    if not os.path.exists(UNATTENDED_MANAGED_ORIGINS_FILE):
+        return []
+    with open(UNATTENDED_MANAGED_ORIGINS_FILE, "r") as f:
+        return [line.strip() for line in f.readlines() if line.strip()]
+
+
+def _store_managed_unattended_origin(origin: str) -> None:
+    """Persist an unattended-upgrades origin for future config generation."""
+    os.makedirs(os.path.dirname(UNATTENDED_MANAGED_ORIGINS_FILE), exist_ok=True)
+    fd = os.open(UNATTENDED_MANAGED_ORIGINS_FILE, os.O_CREAT | os.O_RDWR, 0o644)
+    with os.fdopen(fd, "r+") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            f.seek(0)
+            origins = {line.strip() for line in f.readlines() if line.strip()}
+            if origin not in origins:
+                f.seek(0, os.SEEK_END)
+                f.write(f"{origin}\n")
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
 
 
 def create_remoteusers_group(config: SetupConfig) -> None:
@@ -200,10 +226,8 @@ APT::Periodic::AutocleanInterval "7";
         "origin=${distro_id},codename=${distro_codename}-security",
         "origin=${distro_id},codename=${distro_codename}-updates",
     ]
-    if os.path.exists("/etc/apt/sources.list.d/vscode.list"):
-        origins.append("origin=packages.microsoft.com")
-    if os.path.exists("/etc/apt/sources.list.d/brave-browser-release.list"):
-        origins.append("origin=Brave Software")
+    for origin in _load_managed_unattended_origins():
+        origins.append(f"origin={origin}")
 
     update_origins = "Unattended-Upgrade::Origins-Pattern {\n"
     for origin in origins:
@@ -225,6 +249,8 @@ APT::Periodic::AutocleanInterval "7";
 
 def ensure_unattended_upgrade_origin(origin: str) -> None:
     """Ensure a specific origin is included in unattended-upgrades origins file."""
+    _store_managed_unattended_origin(origin)
+
     if not os.path.exists(UNATTENDED_ORIGINS_FILE):
         return
 

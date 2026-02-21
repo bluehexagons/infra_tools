@@ -52,6 +52,7 @@ class TestConfigureAutoUpdates(unittest.TestCase):
         self.assertNotIn("origin=packages.microsoft.com", written_text)
         self.assertNotIn("origin=Brave Software", written_text)
 
+    @patch("security.security_steps._load_managed_unattended_origins", return_value=["packages.microsoft.com", "Brave Software"])
     @patch("security.security_steps.open", new_callable=mock_open)
     @patch(
         "security.security_steps.run",
@@ -62,14 +63,8 @@ class TestConfigureAutoUpdates(unittest.TestCase):
         ],
     )
     @patch("security.security_steps.is_service_active", return_value=False)
-    @patch(
-        "security.security_steps.os.path.exists",
-        side_effect=lambda p: p in {
-            "/etc/apt/sources.list.d/vscode.list",
-            "/etc/apt/sources.list.d/brave-browser-release.list",
-        },
-    )
-    def test_writes_optional_origins_when_sources_exist(self, _exists, _active, _run, mock_file):
+    @patch("security.security_steps.os.path.exists", return_value=False)
+    def test_writes_optional_origins_when_managed(self, _exists, _active, _run, mock_file, _managed):
         configure_auto_updates(SetupConfig(username="u", host="h", system_type="server_lite"))
         written_text = "".join(call.args[0] for call in mock_file().write.call_args_list)
         self.assertIn("origin=packages.microsoft.com", written_text)
@@ -83,9 +78,11 @@ class TestEnsureUnattendedUpgradeOrigin(unittest.TestCase):
 """
 
     @patch("security.security_steps.open", new_callable=mock_open, read_data=BASE_ORIGINS_CONTENT)
+    @patch("security.security_steps._store_managed_unattended_origin")
     @patch("security.security_steps.os.path.exists", return_value=True)
-    def test_adds_missing_origin(self, _exists, mock_file):
+    def test_adds_missing_origin(self, _exists, _store, mock_file):
         ensure_unattended_upgrade_origin("packages.microsoft.com")
+        _store.assert_called_once_with("packages.microsoft.com")
         written_text = "".join(call.args[0] for call in mock_file().write.call_args_list)
         self.assertIn('"origin=packages.microsoft.com";', written_text)
 
