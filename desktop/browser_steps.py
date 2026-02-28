@@ -8,6 +8,7 @@ import shlex
 from lib.config import SetupConfig
 from lib.machine_state import is_container
 from lib.remote_utils import run, is_package_installed, is_flatpak_app_installed, file_contains
+from security.security_steps import ensure_unattended_upgrade_origin
 
 
 FLATPAK_REMOTE = "flathub"
@@ -31,6 +32,7 @@ def install_single_browser(browser: str, use_flatpak: bool) -> None:
                 run("curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg", check=False)
                 run('echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main" > /etc/apt/sources.list.d/brave-browser-release.list', check=False)
                 run("apt-get update -qq", check=False)
+            ensure_unattended_upgrade_origin("Brave Software")
             run("apt-get install -y -qq brave-browser", check=False)
         print("  ✓ Brave browser installed")
     

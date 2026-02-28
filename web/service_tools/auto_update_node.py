@@ -14,12 +14,14 @@ import os
 import sys
 import subprocess
 import pwd
+from logging import ERROR
 
 # Add lib directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
 from lib.logging_utils import get_service_logger
-from lib.notifications import load_notification_configs_from_state, send_notification
+from lib.logging_utils import log_subprocess_result
+from lib.notifications import load_notification_configs_from_state, send_notification_safe
 
 # Initialize centralized logger
 logger = get_service_logger('auto_update_node', 'web', use_syslog=True)
@@ -67,26 +69,16 @@ def get_current_version() -> str:
 def install_lts_version():
     """Install the latest LTS version."""
     result = run_nvm_command("nvm install --lts")
-    if result.returncode != 0:
-        logger.error(f"✗ Failed to install LTS version: {result.stderr}")
-        return False
-    logger.info("✓ Successfully installed LTS version")
-    return True
+    return log_subprocess_result(logger, "Installed latest Node.js LTS", result, failure_level=ERROR)
 
 
 def update_global_packages():
     """Update global npm and pnpm packages."""
     result = run_nvm_command("npm install -g npm@latest")
-    if result.returncode != 0:
-        logger.warning(f"⚠ Failed to update npm: {result.stderr}")
-    else:
-        logger.info("✓ Successfully updated npm")
+    log_subprocess_result(logger, "Updated npm", result)
     
     result = run_nvm_command("npm install -g pnpm")
-    if result.returncode != 0:
-        logger.warning(f"⚠ Failed to update pnpm: {result.stderr}")
-    else:
-        logger.info("✓ Successfully updated pnpm")
+    log_subprocess_result(logger, "Updated pnpm", result)
 
 
 def update_symlinks():
@@ -123,19 +115,14 @@ def main():
     
     if not os.path.exists(nvm_dir):
         logger.error(f"✗ nvm not found at {nvm_dir}")
-        if notification_configs:
-            try:
-                send_notification(
-                    notification_configs,
-                    subject="Error: Node.js update failed",
-                    job="auto_update_node",
-                    status="error",
-                    message=f"nvm not found at {nvm_dir}",
-                    logger=logger
-                )
-            except Exception:
-                # Notification failure should not prevent script from completing
-                pass
+        send_notification_safe(
+            notification_configs,
+            subject="Error: Node.js update failed",
+            job="auto_update_node",
+            status="error",
+            message=f"nvm not found at {nvm_dir}",
+            logger=logger
+        )
         return 1
     
     current_lts = get_current_lts_version()
@@ -143,36 +130,26 @@ def main():
     
     if not current_lts:
         logger.error("✗ Failed to get latest LTS version")
-        if notification_configs:
-            try:
-                send_notification(
-                    notification_configs,
-                    subject="Error: Node.js update failed",
-                    job="auto_update_node",
-                    status="error",
-                    message="Failed to get latest LTS version",
-                    logger=logger
-                )
-            except Exception:
-                # Notification failure should not prevent script from completing
-                pass
+        send_notification_safe(
+            notification_configs,
+            subject="Error: Node.js update failed",
+            job="auto_update_node",
+            status="error",
+            message="Failed to get latest LTS version",
+            logger=logger
+        )
         return 1
     
     if not current_version:
         logger.error("✗ Failed to get current version")
-        if notification_configs:
-            try:
-                send_notification(
-                    notification_configs,
-                    subject="Error: Node.js update failed",
-                    job="auto_update_node",
-                    status="error",
-                    message="Failed to get current Node.js version",
-                    logger=logger
-                )
-            except Exception:
-                # Notification failure should not prevent script from completing
-                pass
+        send_notification_safe(
+            notification_configs,
+            subject="Error: Node.js update failed",
+            job="auto_update_node",
+            status="error",
+            message="Failed to get current Node.js version",
+            logger=logger
+        )
         return 1
     
     if current_version == current_lts:
@@ -183,19 +160,14 @@ def main():
     
     if not install_lts_version():
         logger.error("✗ Node.js update failed")
-        if notification_configs:
-            try:
-                send_notification(
-                    notification_configs,
-                    subject="Error: Node.js update failed",
-                    job="auto_update_node",
-                    status="error",
-                    message=f"Failed to update from {current_version} to {current_lts}",
-                    logger=logger
-                )
-            except Exception:
-                # Notification failure should not prevent script from completing
-                pass
+        send_notification_safe(
+            notification_configs,
+            subject="Error: Node.js update failed",
+            job="auto_update_node",
+            status="error",
+            message=f"Failed to update from {current_version} to {current_lts}",
+            logger=logger
+        )
         return 1
     
     update_global_packages()
@@ -204,19 +176,14 @@ def main():
     
     logger.info(f"✓ Node.js updated successfully to {current_lts}")
     
-    if notification_configs:
-        try:
-            send_notification(
-                notification_configs,
-                subject="Success: Node.js updated",
-                job="auto_update_node",
-                status="good",
-                message=f"Updated from {current_version} to {current_lts}",
-                logger=logger
-            )
-        except Exception:
-            # Notification failure should not prevent script from completing
-            pass
+    send_notification_safe(
+        notification_configs,
+        subject="Success: Node.js updated",
+        job="auto_update_node",
+        status="good",
+        message=f"Updated from {current_version} to {current_lts}",
+        logger=logger
+    )
     
     return 0
 

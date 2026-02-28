@@ -3,11 +3,39 @@
 from __future__ import annotations
 
 import os
+import fcntl
 
 from lib.config import SetupConfig
 from lib.machine_state import can_modify_kernel, is_container
 from lib.remote_utils import run, is_service_active, file_contains
 from lib.systemd_service import cleanup_service
+
+UNATTENDED_ORIGINS_FILE = "/etc/apt/apt.conf.d/52infra-tools-unattended-upgrades"
+UNATTENDED_MANAGED_ORIGINS_FILE = "/etc/infra_tools/unattended_upgrades_origins.list"
+
+
+def _load_managed_unattended_origins() -> list[str]:
+    """Load additional unattended-upgrades origins managed by setup steps."""
+    if not os.path.exists(UNATTENDED_MANAGED_ORIGINS_FILE):
+        return []
+    with open(UNATTENDED_MANAGED_ORIGINS_FILE, "r") as f:
+        return [line.strip() for line in f.readlines() if line.strip()]
+
+
+def _store_managed_unattended_origin(origin: str) -> None:
+    """Persist an unattended-upgrades origin for future config generation."""
+    os.makedirs(os.path.dirname(UNATTENDED_MANAGED_ORIGINS_FILE), exist_ok=True)
+    fd = os.open(UNATTENDED_MANAGED_ORIGINS_FILE, os.O_CREAT | os.O_RDWR, 0o644)
+    with os.fdopen(fd, "r+") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            f.seek(0)
+            origins = {line.strip() for line in f.readlines() if line.strip()}
+            if origin not in origins:
+                f.seek(0, os.SEEK_END)
+                f.write(f"{origin}\n")
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
 
 
 def create_remoteusers_group(config: SetupConfig) -> None:
@@ -178,7 +206,7 @@ fs.suid_dumpable=0
 
 def configure_auto_updates(config: SetupConfig) -> None:
     if os.path.exists("/etc/apt/apt.conf.d/20auto-upgrades"):
-        if is_service_active("unattended-upgrades"):
+        if os.path.exists(UNATTENDED_ORIGINS_FILE) and is_service_active("unattended-upgrades"):
             print("  ✓ Automatic updates already configured")
             return
     
@@ -193,6 +221,22 @@ APT::Periodic::AutocleanInterval "7";
     with open("/etc/apt/apt.conf.d/20auto-upgrades", "w") as f:
         f.write(auto_upgrades)
 
+    origins = [
+        "origin=${distro_id},codename=${distro_codename}",
+        "origin=${distro_id},codename=${distro_codename}-security",
+        "origin=${distro_id},codename=${distro_codename}-updates",
+    ]
+    for origin in _load_managed_unattended_origins():
+        origins.append(f"origin={origin}")
+
+    update_origins = "Unattended-Upgrade::Origins-Pattern {\n"
+    for origin in origins:
+        update_origins += f'        "{origin}";\n'
+    update_origins += "};\n"
+
+    with open(UNATTENDED_ORIGINS_FILE, "w") as f:
+        f.write(update_origins)
+
     # systemctl may not be available or functional in containers
     result = run("systemctl enable unattended-upgrades", check=False)
     if result.returncode != 0:
@@ -200,7 +244,33 @@ APT::Periodic::AutocleanInterval "7";
         return
     run("systemctl start unattended-upgrades", check=False)
 
-    print("  ✓ Automatic security updates enabled")
+    print("  ✓ Automatic package updates enabled")
+
+
+def ensure_unattended_upgrade_origin(origin: str) -> None:
+    """Ensure a specific origin is included in unattended-upgrades origins file."""
+    _store_managed_unattended_origin(origin)
+
+    if not os.path.exists(UNATTENDED_ORIGINS_FILE):
+        return
+
+    entry = f'"origin={origin}";'
+    with open(UNATTENDED_ORIGINS_FILE, "r") as f:
+        content = f.read()
+    if entry in content:
+        return
+
+    lines = content.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        if line.strip() == "};":
+            lines.insert(i, f"        {entry}\n")
+            break
+    else:
+        print("  ⚠ unattended-upgrades origins file format unexpected; could not add origin")
+        return
+
+    with open(UNATTENDED_ORIGINS_FILE, "w") as f:
+        f.write("".join(lines))
 
 
 def configure_firewall_web(config: SetupConfig) -> None:

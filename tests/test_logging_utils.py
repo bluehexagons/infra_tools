@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -15,6 +16,7 @@ from lib.logging_utils import (
     get_standard_formatter,
     get_rotating_logger,
     log_message,
+    log_subprocess_result,
     ensure_log_directory,
 )
 
@@ -91,6 +93,30 @@ class TestEnsureLogDirectory(unittest.TestCase):
             with patch('lib.logging_utils.DEFAULT_LOG_DIR', os.path.join(tmpdir, 'logs')):
                 result = ensure_log_directory()
                 self.assertTrue(result.exists())
+
+
+class TestLogSubprocessResult(unittest.TestCase):
+    def test_success(self):
+        logger = logging.getLogger('test_log_subprocess_result_success')
+        with self.assertLogs(logger, level='INFO') as logs:
+            ok = log_subprocess_result(
+                logger,
+                "Did thing",
+                subprocess.CompletedProcess(args=['x'], returncode=0, stdout='ok', stderr='')
+            )
+        self.assertTrue(ok)
+        self.assertIn("✓ Did thing", logs.output[0])
+
+    def test_failure_uses_stderr(self):
+        logger = logging.getLogger('test_log_subprocess_result_failure')
+        with self.assertLogs(logger, level='WARNING') as logs:
+            ok = log_subprocess_result(
+                logger,
+                "Did thing",
+                subprocess.CompletedProcess(args=['x'], returncode=1, stdout='', stderr='error line\nmore\nthird\nfourth')
+            )
+        self.assertFalse(ok)
+        self.assertIn("⚠ Did thing failed: error line | more | third | ...", logs.output[0])
 
 
 if __name__ == '__main__':

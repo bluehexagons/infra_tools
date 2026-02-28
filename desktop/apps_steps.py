@@ -9,6 +9,7 @@ from lib.config import SetupConfig
 from lib.machine_state import is_container
 from lib.remote_utils import run, is_package_installed, is_flatpak_app_installed, file_contains
 from desktop.browser_steps import install_browser
+from security.security_steps import ensure_unattended_upgrade_origin
 
 
 FLATPAK_REMOTE = "flathub"
@@ -212,6 +213,7 @@ def install_workstation_dev_apps(config: SetupConfig) -> None:
             run("wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor --output /etc/apt/trusted.gpg.d/microsoft.gpg", check=False)
             run('echo "deb [arch=amd64] https://packages.microsoft.com/repos/code stable main" > /etc/apt/sources.list.d/vscode.list', check=False)
             run("apt-get update -qq", check=False)
+        ensure_unattended_upgrade_origin("packages.microsoft.com")
         if not is_package_installed("code"):
             run("apt-get install -y -qq code", check=False)
 

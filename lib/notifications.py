@@ -163,6 +163,33 @@ def send_notification(
     return sender.send(notification)
 
 
+def send_notification_safe(
+    configs: list[NotificationConfig],
+    subject: str,
+    job: str,
+    status: NotificationStatus,
+    message: str,
+    details: Optional[str] = None,
+    logger: Optional[Logger] = None
+) -> None:
+    """Send a notification and suppress delivery errors."""
+    if not configs:
+        return
+    try:
+        send_notification(
+            configs,
+            subject=subject,
+            job=job,
+            status=status,
+            message=message,
+            details=details,
+            logger=logger
+        )
+    except Exception as e:
+        if logger:
+            logger.warning(f"Failed to send notification for job '{job}': {e}")
+
+
 def parse_notification_args(notify_args: Optional[list[list[str]]]) -> list[NotificationConfig]:
     """Parse notification arguments from command line."""
     if not notify_args:

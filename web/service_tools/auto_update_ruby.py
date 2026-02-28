@@ -14,11 +14,14 @@ import os
 import sys
 import subprocess
 import re
+from logging import ERROR
 
 # Add lib directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
 from lib.logging_utils import get_service_logger
+from lib.logging_utils import log_subprocess_result
+from lib.notifications import load_notification_configs_from_state, send_notification_safe
 
 # Initialize centralized logger
 logger = get_service_logger('auto_update_ruby', 'web', use_syslog=True)
@@ -82,64 +85,39 @@ def get_current_ruby_version() -> str:
 def install_ruby_version(version: str) -> bool:
     """Install a specific Ruby version."""
     result = run_rbenv_command(f"rbenv install -s {version}")
-    if result.returncode != 0:
-        logger.error(f"✗ Failed to install Ruby {version}: {result.stderr}")
-        return False
-    logger.info(f"✓ Successfully installed Ruby {version}")
-    return True
+    return log_subprocess_result(logger, f"Installed Ruby {version}", result, failure_level=ERROR)
 
 
 def set_global_ruby(version: str) -> bool:
     """Set the global Ruby version."""
     result = run_rbenv_command(f"rbenv global {version}")
-    if result.returncode != 0:
-        logger.error(f"✗ Failed to set global Ruby to {version}: {result.stderr}")
-        return False
-    logger.info(f"✓ Successfully set global Ruby to {version}")
-    return True
+    return log_subprocess_result(logger, f"Set global Ruby to {version}", result, failure_level=ERROR)
 
 
 def update_bundler():
     """Update the bundler gem."""
     result = run_rbenv_command("gem install bundler")
-    if result.returncode != 0:
-        logger.warning(f"⚠ Failed to update bundler: {result.stderr}")
-    else:
-        logger.info("✓ Successfully updated bundler")
+    log_subprocess_result(logger, "Updated bundler", result)
 
 
 def main():
     """Main function to update Ruby."""
     logger.info("Starting Ruby update check")
     
-    # Load notification configs
-    notification_configs = []
-    try:
-        from lib.machine_state import load_setup_config
-        from lib.notifications import parse_notification_args
-        setup_config = load_setup_config()
-        if setup_config and 'notify_specs' in setup_config:
-            notification_configs = parse_notification_args(setup_config['notify_specs'])
-    except Exception as e:
-        logger.warning(f"Failed to load notification configs: {e}")
+    # Load notification configs from saved machine state
+    notification_configs = load_notification_configs_from_state(logger)
     
     rbenv_dir = os.path.expanduser("~/.rbenv")
     if not os.path.exists(rbenv_dir):
         logger.error(f"✗ rbenv not found at {rbenv_dir}")
-        if notification_configs:
-            try:
-                from lib.notifications import send_notification
-                send_notification(
-                    notification_configs,
-                    subject="Error: Ruby update failed",
-                    job="auto_update_ruby",
-                    status="error",
-                    message=f"rbenv not found at {rbenv_dir}",
-                    logger=logger
-                )
-            except Exception:
-                # Notification failure should not prevent script from completing
-                pass
+        send_notification_safe(
+            notification_configs,
+            subject="Error: Ruby update failed",
+            job="auto_update_ruby",
+            status="error",
+            message=f"rbenv not found at {rbenv_dir}",
+            logger=logger
+        )
         return 1
     
     update_ruby_build()
@@ -147,25 +125,27 @@ def main():
     latest_ruby = get_latest_stable_ruby()
     if not latest_ruby:
         logger.error("✗ Failed to get latest stable Ruby version")
-        if notification_configs:
-            try:
-                from lib.notifications import send_notification
-                send_notification(
-                    notification_configs,
-                    subject="Error: Ruby update failed",
-                    job="auto_update_ruby",
-                    status="error",
-                    message="Failed to get latest stable Ruby version",
-                    logger=logger
-                )
-            except Exception:
-                # Notification failure should not prevent script from completing
-                pass
+        send_notification_safe(
+            notification_configs,
+            subject="Error: Ruby update failed",
+            job="auto_update_ruby",
+            status="error",
+            message="Failed to get latest stable Ruby version",
+            logger=logger
+        )
         return 1
     
     current_version = get_current_ruby_version()
     if not current_version:
         logger.error("✗ Failed to get current Ruby version")
+        send_notification_safe(
+            notification_configs,
+            subject="Error: Ruby update failed",
+            job="auto_update_ruby",
+            status="error",
+            message="Failed to get current Ruby version",
+            logger=logger
+        )
         return 1
     
     if current_version == latest_ruby:
@@ -176,44 +156,40 @@ def main():
     
     if not install_ruby_version(latest_ruby):
         logger.error("✗ Ruby installation failed")
-        if notification_configs:
-            try:
-                from lib.notifications import send_notification
-                send_notification(
-                    notification_configs,
-                    subject="Error: Ruby update failed",
-                    job="auto_update_ruby",
-                    status="error",
-                    message=f"Failed to install Ruby {latest_ruby}",
-                    logger=logger
-                )
-            except Exception:
-                # Notification failure should not prevent script from completing
-                pass
+        send_notification_safe(
+            notification_configs,
+            subject="Error: Ruby update failed",
+            job="auto_update_ruby",
+            status="error",
+            message=f"Failed to install Ruby {latest_ruby}",
+            logger=logger
+        )
         return 1
     
     if not set_global_ruby(latest_ruby):
         logger.error("✗ Failed to set global Ruby version")
+        send_notification_safe(
+            notification_configs,
+            subject="Error: Ruby update failed",
+            job="auto_update_ruby",
+            status="error",
+            message=f"Failed to set global Ruby version to {latest_ruby}",
+            logger=logger
+        )
         return 1
     
     update_bundler()
     
     logger.info(f"✓ Ruby updated successfully to {latest_ruby}")
     
-    if notification_configs:
-        try:
-            from lib.notifications import send_notification
-            send_notification(
-                notification_configs,
-                subject="Success: Ruby updated",
-                job="auto_update_ruby",
-                status="good",
-                message=f"Updated from {current_version} to {latest_ruby}",
-                logger=logger
-            )
-        except Exception:
-            # Notification failure should not prevent script from completing
-            pass
+    send_notification_safe(
+        notification_configs,
+        subject="Success: Ruby updated",
+        job="auto_update_ruby",
+        status="good",
+        message=f"Updated from {current_version} to {latest_ruby}",
+        logger=logger
+    )
     
     return 0
 
