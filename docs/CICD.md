@@ -490,6 +490,6 @@ sudo rm -rf /var/lib/infra_tools/cicd/workspaces/<repo-name>
 
 ## See Also
 
-- [Logging Documentation](LOGGING.md) - Centralized logging system
+- [Logging Documentation](../lib/logging_utils.py) - Centralized logging utilities (see `lib/logging_utils.py`)
 - [Cloudflare Tunnel Setup](../web/config/webhook_cloudflare_setup.md) - Cloudflare configuration
 - [GitHub Webhooks Documentation](https://docs.github.com/en/webhooks) - Official GitHub docs

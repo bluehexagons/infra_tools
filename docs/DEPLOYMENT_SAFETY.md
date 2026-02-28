@@ -575,8 +575,8 @@ Backups contain the full production database, including:
 ## Related Documentation
 
 - [CI/CD System](CICD.md) - Continuous deployment integration
-- [Storage Operations](STORAGE.md) - Data integrity and backup systems
-- [Logging](LOGGING.md) - Troubleshooting and monitoring
+- [Storage Operations](../sync/README.md) - Data integrity and backup systems (see `sync/` module)
+- [Logging](../lib/logging_utils.py) - Troubleshooting and monitoring (see `lib/logging_utils.py`)
 
 ## Summary
 
