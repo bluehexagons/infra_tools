@@ -67,6 +67,62 @@ python3 setup_server_lite.py 192.168.1.10 \
 - SSH root access to target system
 - Target OS: Debian
 
+## Shell Completion
+
+All setup scripts support tab completion for bash, zsh, and fish shells. This provides auto-completion for flags, options, and arguments.
+
+### Quick Setup
+
+```bash
+# Install argcomplete
+pip install argcomplete
+
+# Enable completions for your shell
+python3 setup_completions.py
+```
+
+The `setup_completions.py` script auto-detects your shell and configures completions for all infra_tools commands:
+- `setup_workstation_desktop`
+- `setup_workstation_dev`
+- `setup_server_web`
+- `setup_server_dev`
+- `setup_server_proxmox`
+- `setup_server_lite`
+- `setup_pc_dev`
+- `patch_setup`
+- `recall_setup`
+- `reconstruct_setup`
+- `webhook_manager`
+
+### Manual Setup
+
+**Bash:**
+```bash
+eval "$(register-python-argcomplete setup_workstation_desktop)"
+eval "$(register-python-argcomplete setup_server_web)"
+# ... repeat for each script you use
+```
+
+**Zsh:**
+```bash
+eval "$(register-python-argcomplete setup_workstation_desktop)"
+eval "$(register-python-argcomplete setup_server_web)"
+# ... repeat for each script you use
+```
+
+**Fish:**
+```bash
+register-python-argcomplete --shell fish setup_workstation_desktop > ~/.config/fish/completions/setup_workstation_desktop.fish
+register-python-argcomplete --shell fish setup_server_web > ~/.config/fish/completions/setup_server_web.fish
+```
+
+### System-wide Installation
+
+For system-wide completion (requires sudo):
+```bash
+sudo python3 setup_completions.py --global --shell bash
+```
+
 ## Testing
 
 ```bash

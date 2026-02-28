@@ -5,6 +5,11 @@ import sys
 import os
 import json
 
+try:
+    import argcomplete
+except ImportError:
+    argcomplete = None
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from typing import Optional, cast
@@ -348,6 +353,9 @@ def main() -> int:
         description="Patch a previously configured system with new or modified settings",
         allow_steps=True
     )
+    
+    if argcomplete:
+        argcomplete.autocomplete(parser)
     
     args = parser.parse_args()
     

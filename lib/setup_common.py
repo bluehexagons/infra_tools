@@ -12,6 +12,11 @@ import tarfile
 import tempfile
 from typing import Optional, Callable
 
+try:
+    import argcomplete
+except ImportError:
+    argcomplete = None
+
 from lib.config import SetupConfig
 from lib.validators import validate_host, validate_username
 from lib.system_utils import get_current_username
@@ -327,6 +332,10 @@ tar xzf - && \
 def setup_main(system_type: str, description: str, success_msg_fn: Callable[[SetupConfig], None]) -> int:
     allow_steps = (system_type == "custom_steps")
     parser = create_argument_parser(description, allow_steps)
+    
+    if argcomplete:
+        argcomplete.autocomplete(parser)
+    
     args = parser.parse_args()
     
     if not validate_host(args.host):
