@@ -16,6 +16,11 @@ import sys
 import tempfile
 from typing import Optional, Any
 
+try:
+    import argcomplete
+except ImportError:
+    argcomplete = None
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from lib.config import SetupConfig
@@ -168,6 +173,9 @@ def main() -> int:
     parser.add_argument("username", nargs="?", default=None, 
                        help="Username (defaults to current user)")
     parser.add_argument("-k", "--key", dest="ssh_key", help="SSH private key path")
+    
+    if argcomplete:
+        argcomplete.autocomplete(parser)
     
     args = parser.parse_args()
     

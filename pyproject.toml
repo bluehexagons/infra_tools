@@ -1,0 +1,25 @@
+[project]
+name = "infra_tools"
+version = "1.0.0"
+description = "Automated setup scripts for remote Linux systems"
+requires-python = ">=3.8"
+dependencies = []
+
+[project.optional-dependencies]
+completion = ["argcomplete>=3.0.0"]
+
+[project.scripts]
+setup_workstation_desktop = "setup_workstation_desktop:main"
+setup_workstation_dev = "setup_workstation_dev:main"
+setup_server_web = "setup_server_web:main"
+setup_server_dev = "setup_server_dev:main"
+setup_server_proxmox = "setup_server_proxmox:main"
+setup_server_lite = "setup_server_lite:main"
+setup_pc_dev = "setup_pc_dev:main"
+patch_setup = "patch_setup:main"
+recall_setup = "recall_setup:main"
+reconstruct_setup = "reconstruct_setup:main"
+webhook_manager = "web.service_tools.webhook_manager:main"
+
+[tool.setuptools]
+py-modules = []

@@ -23,6 +23,11 @@ import subprocess
 import argparse
 from typing import Optional
 
+try:
+    import argcomplete
+except ImportError:
+    argcomplete = None
+
 CONFIG_FILE = "/etc/infra_tools/cicd/webhook_config.json"
 SECRET_FILE = "/etc/infra_tools/cicd/webhook_secret"
 
@@ -277,6 +282,9 @@ def main():
     
     # status command
     subparsers.add_parser('status', help='Show service status')
+    
+    if argcomplete:
+        argcomplete.autocomplete(parser)
     
     args = parser.parse_args()
     

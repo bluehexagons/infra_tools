@@ -3,12 +3,18 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
 import subprocess
 import sys
 from typing import Any
+
+try:
+    import argcomplete
+except ImportError:
+    argcomplete = None
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -237,6 +243,20 @@ def reconstruct_configuration(host: str = "localhost", username: str = "root") -
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Reconstruct setup configuration by analyzing the server state"
+    )
+    parser.add_argument(
+        "--compact", "-c",
+        action="store_true",
+        help="Output compact JSON (default: pretty-printed)"
+    )
+    
+    if argcomplete:
+        argcomplete.autocomplete(parser)
+    
+    args = parser.parse_args()
+    
     try:
         config, extras = reconstruct_configuration()
         
@@ -249,7 +269,10 @@ def main() -> int:
         
         output.update(extras)
         
-        print(json.dumps(output, indent=2))
+        if args.compact:
+            print(json.dumps(output))
+        else:
+            print(json.dumps(output, indent=2))
         return 0
     except Exception as e:
         print(f"Error reconstructing configuration: {e}", file=sys.stderr)
