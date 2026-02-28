@@ -204,8 +204,8 @@ class TestInstallXrdp(unittest.TestCase):
         self.assertIn('UseGlamor', combined_content)
         self.assertIn('false', combined_content)
         
-        # Check for virtual screen size
-        self.assertIn('Virtual 2560 1600', combined_content)
+        # Check for virtual screen size (updated for 4K support)
+        self.assertIn('Virtual 3840 2160', combined_content)
         
     @patch('desktop.xrdp_steps.run')
     @patch('desktop.xrdp_steps.os.path.exists')

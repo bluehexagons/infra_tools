@@ -8,5 +8,18 @@ exec 2> >(tee -a ~/.xsession-errors)
 # The xorgxrdp driver automatically adjusts the display when the RDP window is resized.
 # Manual desktop refresh scripts cause session freezing and should NOT be used.
 
+# Set environment variables to indicate this is an RDP session
+# This helps desktop environments and applications behave appropriately
+export XRDP_SESSION=1
+export XRDP_SOCKET=/tmp/xrdp
+
+# Tell XFCE not to manage displays (let xorgxrdp handle it)
+export XFCE_DISABLE_DISPLAY_MANAGEMENT=1
+
+# Disable X screen saver and DPMS
+xset s off 2>/dev/null
+xset -dpms 2>/dev/null
+xset s noblank 2>/dev/null
+
 logger -t xrdp-session "Starting desktop session: {SESSION_CMD}"
 exec dbus-launch --exit-with-session {SESSION_CMD}

@@ -164,6 +164,7 @@ needs_root_rights=no
     # Fix for Debian Trixie/X.Org 21.1.16: glamoregl must be loaded before xorgxrdp
     # to resolve undefined glamor_xv_init symbol errors.
     # UseGlamor=false disables acceleration (prevents resize crashes in containers).
+    # Large virtual screen supports up to 4K+ resolutions for dynamic resizing.
     xorg_conf_path = "/etc/X11/xrdp/xorg.conf"
     if not os.path.exists(xorg_conf_path):
         xorg_conf_dir = os.path.dirname(xorg_conf_path)
@@ -180,6 +181,11 @@ Section "ServerFlags"
     Option "DontVTSwitch" "on"
     Option "AutoAddDevices" "off"
     Option "AutoAddGPU" "off"
+    # Disable screen saver and DPMS to prevent display management conflicts
+    Option "StandbyTime" "0"
+    Option "SuspendTime" "0"
+    Option "OffTime" "0"
+    Option "BlankTime" "0"
 EndSection
 
 Section "Module"
@@ -209,6 +215,8 @@ Section "Device"
     Driver "xrdpdev"
     # Disable glamor acceleration to prevent resize crashes in containers
     Option "UseGlamor" "false"
+    # Software cursor prevents cursor-related resize issues
+    Option "SWCursor" "true"
 EndSection
 
 Section "Screen"
@@ -218,8 +226,9 @@ Section "Screen"
     DefaultDepth 24
     SubSection "Display"
         Depth 24
-        # Virtual screen size to support dynamic resizing (up to 2560x1600)
-        Virtual 2560 1600
+        # Virtual screen size to support dynamic resizing (up to 4K: 3840x2160)
+        # Supports 4K and common ultrawide resolutions
+        Virtual 3840 2160
     EndSubSection
 EndSection
 '''

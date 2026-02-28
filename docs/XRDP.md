@@ -28,14 +28,19 @@ We use **Xorg with xorgxrdp driver** exclusively, not Xvnc:
 | `Xwrapper.config` | X server permissions | `/etc/X11/Xwrapper.config` |
 | `startwm.sh` | Session startup script | `~/startwm.sh` |
 
-### Session Flow
+### Session Startup Script
 
-1. User connects via RDP client (e.g., Remmina)
-2. xrdp validates credentials and creates session
-3. xrdp-sesman starts X server (Xorg with xorgxrdp driver)
-4. startwm.sh launches desktop environment (XFCE)
-5. Desktop session runs with RDP compatibility tweaks applied
-6. On disconnect, EndSessionCommand runs cleanup script
+Located at `~/startwm.sh`, this script:
+
+1. Sets XRDP-specific environment variables:
+   - `XRDP_SESSION=1` - Indicates RDP session to applications
+   - `XFCE_DISABLE_DISPLAY_MANAGEMENT=1` - Prevents XFCE from managing displays
+
+2. Disables X screen saver and DPMS via `xset` commands
+
+3. Launches the desktop environment through dbus-launch
+
+**Note:** The script explicitly disables display management because xorgxrdp handles RANDR events natively. Any additional display management scripts or manual refresh mechanisms will cause session freezing.
 
 ## Configuration Details
 
@@ -56,12 +61,15 @@ Without this, XRDP sessions cannot start X server, causing:
 
 ### XFCE RDP Compatibility
 
-The `configure_xfce_for_rdp()` function disables components that crash in RDP:
+The `configure_xfce_for_rdp()` function disables components that interfere with RDP sessions:
 
 1. **light-locker** - Screen locker (crashes without display manager)
-2. **DPMS** - Display power management (no hardware in RDP)
-3. **xfce4-power-manager** - Power management features
-4. **Invalid autostart entries** - Removed to prevent startup errors
+2. **xfsettingsd** - Settings daemon (interferes with RANDR events - CRITICAL for dynamic resolution)
+3. **DPMS** - Display power management (no hardware in RDP)
+4. **xfce4-power-manager** - Power management features
+5. **Invalid autostart entries** - Removed to prevent startup errors
+
+**Critical:** xfsettingsd's display management is disabled because it conflicts with xorgxrdp's RANDR event handling. This is the most common cause of session freezes on resize.
 
 ### X.Org Configuration
 
@@ -69,14 +77,27 @@ The `configure_xfce_for_rdp()` function disables components that crash in RDP:
 Section "Device"
     Driver "xrdpdev"
     Option "UseGlamor" "false"  # Disabled to prevent resize crashes
+    Option "SWCursor" "true"      # Software cursor for stability
 EndSection
 
 Section "Screen"
-    Virtual 2560 1600  # Max resolution for dynamic resizing
+    Virtual 3840 2160  # Max resolution for dynamic resizing (4K support)
+EndSection
+
+Section "ServerFlags"
+    # Disable screen saver and DPMS to prevent conflicts with XRDP
+    Option "StandbyTime" "0"
+    Option "SuspendTime" "0"
+    Option "OffTime" "0"
+    Option "BlankTime" "0"
 EndSection
 ```
 
-**Note:** Glamor acceleration is disabled because it can cause crashes during resolution changes in containers.
+**Key Changes:**
+- **Glamor disabled** - Prevents GPU-related crashes during resolution changes
+- **Software cursor (SWCursor)** - Avoids cursor rendering issues during resize
+- **4K virtual screen** - Supports up to 3840x2160 resolution
+- **DPMS/Screensaver disabled** - Prevents X server from managing display state
 
 ### Network Optimization
 

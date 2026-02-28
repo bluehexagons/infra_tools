@@ -43,6 +43,8 @@ def configure_xfce_for_rdp(config: SetupConfig) -> None:
     - Disables xfce4-power-manager display features (no DPMS in RDP)
     - Creates stub pm-is-supported to suppress warnings
     - Removes problematic autostart entries
+    - Disables xfsettingsd display management
+    - Sets XRDP-specific environment indicators
     """
     if config.desktop != "xfce":
         return
@@ -65,7 +67,18 @@ Comment=Screen Locker (disabled for RDP)
 Hidden=true
 """)
     
-    # 2. Create stub pm-is-supported to suppress xfce4-session warnings
+    # 2. Disable xfsettingsd from managing displays - CRITICAL for dynamic resolution
+    # This prevents xfsettingsd from interfering with xorgxrdp's RANDR events
+    xfsettingsd_desktop = f"{autostart_dir}/xfsettingsd.desktop"
+    with open(xfsettingsd_desktop, "w") as f:
+        f.write("""[Desktop Entry]
+Type=Application
+Name=XFCE Settings Daemon
+Comment=Settings daemon (display management disabled for RDP)
+Hidden=true
+""")
+    
+    # 3. Create stub pm-is-supported to suppress xfce4-session warnings
     pm_stub = "/usr/local/bin/pm-is-supported"
     if not os.path.exists(pm_stub):
         with open(pm_stub, "w") as f:
@@ -76,12 +89,12 @@ exit 1
 """)
         run(f"chmod +x {shlex.quote(pm_stub)}")
     
-    # 3. Remove invalid XKBOPTIONS autostart entry if it exists
+    # 4. Remove invalid XKBOPTIONS autostart entry if it exists
     swap_escape_desktop = f"{autostart_dir}/swap escape.desktop"
     if os.path.exists(swap_escape_desktop):
         os.remove(swap_escape_desktop)
     
-    # 4. Configure xfce4-power-manager to not manage displays
+    # 5. Configure xfce4-power-manager to not manage displays
     os.makedirs(xfce_config_dir, exist_ok=True)
     power_manager_config = f"{xfce_config_dir}/xfce4-power-manager.xml"
     
@@ -102,18 +115,21 @@ exit 1
     with open(power_manager_config, "w") as f:
         f.write(power_manager_xml)
     
-    # 5. Configure xfsettingsd to not manage displays (prevents "Failed to apply display settings")
-    xfsettingsd_config = f"{xfce_config_dir}/displays.xml"
+    # 6. Create an empty displays config to prevent xfsettingsd from managing displays
+    # This is critical - xfsettingsd's display management conflicts with xorgxrdp
+    displays_config = f"{xfce_config_dir}/displays.xml"
     displays_xml = """<?xml version="1.0" encoding="UTF-8"?>
 <channel name="displays" version="1.0">
+  <property name="ActiveProfile" type="string" value=""/>
   <property name="Default" type="empty">
-    <property name="HDMI-1" type="string" value="Laptop">
+    <property name="DP-1" type="string" value="Virtual Display">
       <property name="Active" type="bool" value="true"/>
-      <property name="Resolution" type="string" value=""/>
-      <property name="RefreshRate" type="double" value="0"/>
+      <property name="EDID" type="string" value=""/>
+      <property name="Resolution" type="string" value="1920x1080"/>
+      <property name="RefreshRate" type="double" value="60"/>
       <property name="Rotation" type="int" value="0"/>
       <property name="Reflection" type="string" value="0"/>
-      <property name="Primary" type="bool" value="false"/>
+      <property name="Primary" type="bool" value="true"/>
       <property name="Position" type="empty">
         <property name="X" type="int" value="0"/>
         <property name="Y" type="int" value="0"/>
@@ -122,15 +138,30 @@ exit 1
   </property>
 </channel>
 """
-    with open(xfsettingsd_config, "w") as f:
+    with open(displays_config, "w") as f:
         f.write(displays_xml)
     
-    # Set ownership
+    # 7. Create xfwm4 configuration that doesn't interfere with RANDR
+    xfwm4_config = f"{xfce_config_dir}/xfwm4.xml"
+    xfwm4_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfwm4" version="1.0">
+  <property name="general" type="empty">
+    <property name="Xfwm" type="empty">
+      <property name="Xinerama" type="bool" value="false"/>
+    </property>
+  </property>
+</channel>
+"""
+    with open(xfwm4_config, "w") as f:
+        f.write(xfwm4_xml)
+    
+    # 8. Set ownership
     run(f"chown -R {safe_username}:{safe_username} {shlex.quote(autostart_dir)}")
     run(f"chown -R {safe_username}:{safe_username} {shlex.quote(xfce_config_dir)}")
     
     print("  ✓ XFCE configured for RDP compatibility")
     print("    - light-locker disabled (prevents crashes)")
+    print("    - xfsettingsd display management disabled")
     print("    - Display power management disabled (no DPMS in RDP)")
     print("    - Power management warnings suppressed")
 
@@ -190,17 +221,64 @@ def configure_dark_theme(config: SetupConfig) -> None:
         with open(xsettings_config, "w") as f:
             f.write(xsettings_xml)
         
-        # Configure XFCE window manager theme
+        # Configure XFCE window manager theme (merge with RDP config to preserve Xinerama=false)
         xfwm4_config = f"{xfce_config_dir}/xfwm4.xml"
-        xfwm4_xml = """<?xml version="1.0" encoding="UTF-8"?>
+        
+        # Parse existing xfwm4.xml if it exists (from configure_xfce_for_rdp)
+        # to keep Xinerama=false setting needed for RDP dynamic resolution
+        import xml.etree.ElementTree as ET
+        
+        xfwm4_root = None
+        if os.path.exists(xfwm4_config):
+            try:
+                tree = ET.parse(xfwm4_config)
+                xfwm4_root = tree.getroot()
+            except (ET.ParseError, IOError, OSError):
+                pass
+        
+        if xfwm4_root is not None:
+            # Existing config - add theme to Xfwm section
+            general = xfwm4_root.find('.//property[@name="general"]')
+            if general is not None:
+                xfwm = general.find('.//property[@name="Xfwm"]')
+                if xfwm is not None:
+                    # Check if theme already exists
+                    existing_theme = xfwm.find('.//property[@name="theme"]')
+                    if existing_theme is None:
+                        theme_elem = ET.SubElement(xfwm, 'property')
+                        theme_elem.set('name', 'theme')
+                        theme_elem.set('type', 'string')
+                        theme_elem.set('value', 'Default-xhdpi')
+                else:
+                    # Create Xfwm section with theme and Xinerama
+                    xfwm = ET.SubElement(general, 'property')
+                    xfwm.set('name', 'Xfwm')
+                    xfwm.set('type', 'empty')
+                    theme_elem = ET.SubElement(xfwm, 'property')
+                    theme_elem.set('name', 'theme')
+                    theme_elem.set('type', 'string')
+                    theme_elem.set('value', 'Default-xhdpi')
+                    xinerama_elem = ET.SubElement(xfwm, 'property')
+                    xinerama_elem.set('name', 'Xinerama')
+                    xinerama_elem.set('type', 'bool')
+                    xinerama_elem.set('value', 'false')
+            # Write back with proper formatting
+            tree = ET.ElementTree(xfwm4_root)
+            tree.write(xfwm4_config, encoding='UTF-8', xml_declaration=True)
+        else:
+            # No existing config - create new with both theme and Xinerama
+            xfwm4_xml = """<?xml version="1.0" encoding="UTF-8"?>
 <channel name="xfwm4" version="1.0">
   <property name="general" type="empty">
     <property name="theme" type="string" value="Default-xhdpi"/>
+    <property name="Xfwm" type="empty">
+      <property name="Xinerama" type="bool" value="false"/>
+    </property>
   </property>
 </channel>
 """
-        with open(xfwm4_config, "w") as f:
-            f.write(xfwm4_xml)
+            with open(xfwm4_config, "w") as f:
+                f.write(xfwm4_xml)
         
         run(f"chown -R {safe_username}:{safe_username} {shlex.quote(xfce_config_dir)}")
         print("  ✓ XFCE configured with dark theme (Adwaita-dark)")
