@@ -35,57 +35,6 @@ def install_desktop(config: SetupConfig) -> None:
     print(f"  ✓ {config.desktop.upper()} desktop installed")
 
 
-def configure_gnome_keyring(config: SetupConfig) -> None:
-    """Configure gnome-keyring for desktop setups."""
-    safe_username = shlex.quote(config.username)
-    
-    # Install keyring packages for password storage and auto-unlock
-    run("apt-get install -y -qq gnome-keyring libpam-gnome-keyring libsecret-tools")
-    
-    pam_auth = "/etc/pam.d/common-auth"
-    pam_password = "/etc/pam.d/common-password"
-    pam_session = "/etc/pam.d/common-session"
-    
-    # Add auth line to capture login password for keyring auto-unlock
-    if os.path.exists(pam_auth) and not file_contains(pam_auth, "pam_gnome_keyring.so"):
-        with open(pam_auth, "a") as f:
-            f.write("auth optional pam_gnome_keyring.so\n")
-    
-    if os.path.exists(pam_password) and not file_contains(pam_password, "pam_gnome_keyring.so"):
-        with open(pam_password, "a") as f:
-            f.write("password optional pam_gnome_keyring.so\n")
-    
-    if os.path.exists(pam_session) and not file_contains(pam_session, "pam_gnome_keyring.so"):
-        with open(pam_session, "a") as f:
-            f.write("session optional pam_gnome_keyring.so auto_start\n")
-    
-    home_dir = f"/home/{config.username}"
-    profile_path = f"{home_dir}/.profile"
-    
-    keyring_env = """
-if [ -n "$DESKTOP_SESSION" ]; then
-    eval $(gnome-keyring-daemon --start --components=pkcs11,secrets,ssh)
-    export SSH_AUTH_SOCK
-fi
-"""
-    
-    if os.path.exists(profile_path):
-        if not file_contains(profile_path, "gnome-keyring-daemon"):
-            with open(profile_path, "a") as f:
-                f.write(keyring_env)
-        run(f"chown {safe_username}:{safe_username} {shlex.quote(profile_path)}")
-    else:
-        with open(profile_path, "w") as f:
-            f.write(keyring_env)
-        run(f"chown {safe_username}:{safe_username} {shlex.quote(profile_path)}")
-    
-    print("  ✓ gnome-keyring installed/configured (auto-unlock on login, SSH agent integration)")
-    print("    - IMPORTANT: For auto-unlock to work:")
-    print("      1. Delete old keyring: rm ~/.local/share/keyrings/login.keyring")
-    print("      2. Log out and log back in - new keyring will be created with login password")
-    print("    - Tip: Install 'seahorse' package if you need a GUI to manage keyrings")
-
-
 def configure_xfce_for_rdp(config: SetupConfig) -> None:
     """Configure XFCE to work properly in RDP sessions.
     

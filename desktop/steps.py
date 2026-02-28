@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from .desktop_environment_steps import (
     install_desktop,
-    configure_gnome_keyring,
     install_smbclient,
     configure_xfce_for_rdp,
     configure_dark_theme,
@@ -33,7 +32,6 @@ from .apps_steps import (
 
 __all__ = [
     'install_desktop',
-    'configure_gnome_keyring',
     'install_smbclient',
     'configure_xfce_for_rdp',
     'configure_dark_theme',
