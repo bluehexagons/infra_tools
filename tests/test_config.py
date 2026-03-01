@@ -115,6 +115,11 @@ class TestSetupConfigToRemoteArgs(unittest.TestCase):
         args = config.to_remote_args()
         self.assertIn('--dry-run', args)
 
+    def test_python_flag(self):
+        config = self._make_config(install_python=True)
+        args = config.to_remote_args()
+        self.assertIn('--python', args)
+
     def test_deploy_specs(self):
         config = self._make_config(deploy_specs=[['example.com/', 'https://github.com/user/repo.git']])
         args = config.to_remote_args()
@@ -214,6 +219,11 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
         parts = config.to_setup_command()
         cmd = ' '.join(parts)
         self.assertNotIn('secret', cmd)
+
+    def test_python_flag_included(self):
+        config = self._make_config(install_python=True)
+        parts = config.to_setup_command()
+        self.assertIn('--python', parts)
 
 
 if __name__ == '__main__':

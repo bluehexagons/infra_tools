@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import os
 import shlex
+import shutil
 import subprocess
+import tempfile
 from typing import Optional
 
 from lib.config import SetupConfig
 from lib.machine_state import can_manage_time_sync
-from lib.remote_utils import run, is_package_installed, is_service_active, file_contains, generate_password
+from lib.remote_utils import run, is_dry_run, is_package_installed, is_service_active, file_contains, generate_password
 from lib.systemd_service import cleanup_service
 
 
@@ -330,6 +332,137 @@ export NVM_DIR="$HOME/.nvm"
     print("  ✓ nvm + Node.js LTS + NPM (latest) + PNPM installed for user")
 
 
+def _find_setup_completions_script() -> Optional[str]:
+    candidates = [
+        "/opt/infra_tools/setup_completions.py",
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), "setup_completions.py"),
+    ]
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def _validate_uv_install_script(script_path: str) -> bool:
+    """Basic validation for uv installer script content before execution."""
+    try:
+        with open(script_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except OSError:
+        return False
+
+    stripped_content = content.lstrip()
+    if not stripped_content.startswith("#!/bin/sh") and not stripped_content.startswith("#!/usr/bin/env sh"):
+        return False
+    if "astral.sh/uv" not in content and "github.com/astral-sh/uv" not in content:
+        return False
+    if "uv" not in content:
+        return False
+    suspicious_patterns = ["rm -rf /", "chmod -R 777 /", "mkfs.", "dd if=", "curl | sh", "wget | sh"]
+    if any(pattern in content for pattern in suspicious_patterns):
+        return False
+    return True
+
+
+def install_or_update_uv(user_home: str, username: Optional[str] = None) -> bool:
+    """Install or update uv for a user. Returns True if uv is available afterwards."""
+    uv_path = os.path.join(user_home, ".local", "bin", "uv")
+    safe_home = shlex.quote(user_home)
+    safe_username = shlex.quote(username) if username else None
+
+    if is_dry_run():
+        print("  [DRY-RUN] Skipping uv install/update")
+        return True
+
+    if not os.path.exists(uv_path):
+        fd, installer_path = tempfile.mkstemp(prefix="infra_tools_uv_install_", suffix=".sh")
+        os.close(fd)
+        safe_installer = shlex.quote(installer_path)
+
+        try:
+            download_result = run(
+                f"curl -fsSL --proto '=https' --tlsv1.2 https://astral.sh/uv/install.sh -o {safe_installer}",
+                check=False
+            )
+            if download_result.returncode != 0:
+                return False
+
+            file_mode = os.stat(installer_path).st_mode & 0o777
+            if (file_mode & 0o077) != 0 or (file_mode & 0o400) == 0:
+                print("  ✗ Downloaded uv installer file permissions are too broad")
+                return False
+
+            if not _validate_uv_install_script(installer_path):
+                print("  ✗ Downloaded uv installer failed validation")
+                return False
+
+            if username:
+                install_result = run(
+                    f"runuser -u {safe_username} -- env HOME={safe_home} sh {safe_installer}",
+                    check=False
+                )
+            else:
+                install_result = run(f"env HOME={safe_home} sh {safe_installer}", check=False)
+
+            if install_result.returncode != 0 or not os.path.exists(uv_path):
+                return False
+        finally:
+            try:
+                os.unlink(installer_path)
+            except OSError:
+                pass
+
+    safe_uv_path = shlex.quote(uv_path)
+    if username:
+        update_result = run(
+            f"runuser -u {safe_username} -- env HOME={safe_home} {safe_uv_path} self update",
+            check=False
+        )
+    else:
+        update_result = run(f"env HOME={safe_home} {safe_uv_path} self update", check=False)
+
+    if update_result.returncode == 0:
+        print("  ✓ uv updated")
+    else:
+        print("  ⚠ uv update failed")
+
+    return os.path.exists(uv_path)
+
+
+def install_python(config: SetupConfig) -> None:
+    """Install Python tooling (aliases and uv)."""
+    user_home = f"/home/{config.username}"
+
+    run("apt-get install -y -qq python3 python3-venv curl")
+
+    python3_path = shutil.which("python3")
+    python_path = shutil.which("python")
+
+    if python3_path and not python_path:
+        run(f"ln -sfn {shlex.quote(python3_path)} /usr/local/bin/python")
+        print("  ✓ Added python alias to python3")
+    elif python_path:
+        print("  ✓ python command already available")
+
+    if python3_path:
+        print("  ✓ python3 command already available")
+    else:
+        raise RuntimeError("python3 command unavailable after package installation")
+
+    uv_preexisting = os.path.exists(f"{user_home}/.local/bin/uv")
+    if install_or_update_uv(user_home=user_home, username=config.username):
+        if uv_preexisting:
+            print("  ✓ uv already installed")
+        else:
+            print("  ✓ uv installed")
+    else:
+        raise RuntimeError("uv installation failed")
+
+    if _find_setup_completions_script() is None:
+        print("  ℹ setup_completions.py not found in installed location")
+    print("  ℹ Remote systems skip shell autocompletion setup")
+
+
 def _configure_auto_update_systemd(
     service_name: str,
     service_desc: str,
@@ -405,6 +538,23 @@ def configure_auto_update_ruby(config: SetupConfig) -> None:
         schedule="Sun *-*-* 04:00:00",
         check_path=rbenv_dir,
         check_name="Ruby",
+        user=config.username
+    )
+
+
+def configure_auto_update_uv(config: SetupConfig) -> None:
+    """Configure automatic updates for uv."""
+    user_home = f"/home/{config.username}"
+    uv_path = f"{user_home}/.local/bin/uv"
+
+    _configure_auto_update_systemd(
+        service_name="auto-update-uv",
+        service_desc="Auto-update uv package manager",
+        timer_desc="Auto-update uv weekly",
+        script_name="auto_update_uv.py",
+        schedule="Sun *-*-* 05:00:00",
+        check_path=uv_path,
+        check_name="uv",
         user=config.username
     )
 

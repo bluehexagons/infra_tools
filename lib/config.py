@@ -57,6 +57,7 @@ class SetupConfig:
     install_ruby: bool = False
     install_go: bool = False
     install_node: bool = False
+    install_python: bool = False
     custom_steps: Optional[str] = None
     deploy_specs: Optional[NestedStrList] = None
     full_deploy: bool = False
@@ -142,6 +143,9 @@ class SetupConfig:
         
         if self.install_node:
             args.append("--node")
+        
+        if self.install_python:
+            args.append("--python")
         
         if self.custom_steps:
             args.append(f"--steps {shlex.quote(self.custom_steps)}")
@@ -287,6 +291,9 @@ class SetupConfig:
         
         if self.install_node:
             cmd_parts.append("--node")
+        
+        if self.install_python:
+            cmd_parts.append("--python")
         
         # Custom steps
         if self.custom_steps:
@@ -470,6 +477,7 @@ class SetupConfig:
             install_ruby=getattr(args, 'install_ruby', False),
             install_go=getattr(args, 'install_go', False),
             install_node=getattr(args, 'install_node', False),
+            install_python=getattr(args, 'install_python', False),
             custom_steps=getattr(args, 'custom_steps', None),
             deploy_specs=getattr(args, 'deploy_specs', None),
             full_deploy=getattr(args, 'full_deploy', False),

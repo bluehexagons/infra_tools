@@ -5,7 +5,7 @@ All setup scripts support tab completion for bash, zsh, and fish.
 ## Quick Setup
 
 ```bash
-pip install argcomplete
+uv tool install --upgrade argcomplete
 python3 setup_completions.py
 ```
 

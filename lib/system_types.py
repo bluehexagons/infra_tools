@@ -19,6 +19,8 @@ from common.steps import (
     install_ruby,
     install_go,
     install_node,
+    install_python,
+    configure_auto_update_uv,
     install_mail_utils,
     configure_swap,
     install_apt_packages,
@@ -180,6 +182,8 @@ STEP_FUNCTIONS: dict[str, StepFunc] = {
     'install_ruby': install_ruby,
     'install_go': install_go,
     'install_node': install_node,
+    'install_python': install_python,
+    'configure_auto_update_uv': configure_auto_update_uv,
     'install_certbot': install_certbot,
     'update_and_upgrade_packages': update_and_upgrade_packages,
     'ensure_sudo_installed': ensure_sudo_installed,
@@ -330,6 +334,9 @@ def get_steps_for_system_type(config: SetupConfig) -> list[tuple[str, StepFunc]]
     if config.install_node:
         steps.append(("Installing Node.js (nvm + latest LTS + PNPM)", install_node))
         steps.append(("Configuring Node.js auto-update", configure_auto_update_node))
+    if config.install_python:
+        steps.append(("Installing Python tooling (aliases + uv)", install_python))
+        steps.append(("Configuring uv auto-update", configure_auto_update_uv))
     
     if config.include_desktop_apps:
         steps.extend(DESKTOP_APP_STEPS)
