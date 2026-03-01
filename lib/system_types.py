@@ -20,6 +20,7 @@ from common.steps import (
     install_go,
     install_node,
     install_python,
+    configure_auto_update_ruby,
     configure_auto_update_uv,
     install_mail_utils,
     configure_swap,
@@ -69,7 +70,6 @@ from web.steps import (
     install_cloudflared_service_helper,
     run_cloudflare_tunnel_setup,
     configure_auto_update_node,
-    configure_auto_update_ruby,
     install_cicd_dependencies,
     create_cicd_user,
     create_cicd_directories,
@@ -327,8 +327,8 @@ def get_steps_for_system_type(config: SetupConfig) -> list[tuple[str, StepFunc]]
         steps.extend(CLI_STEPS)
     
     if config.install_ruby:
-        steps.append(("Installing Ruby (rbenv + latest version)", install_ruby))
-        steps.append(("Configuring Ruby auto-update", configure_auto_update_ruby))
+        steps.append(("Installing Ruby (apt packages)", install_ruby))
+        steps.append(("Cleaning up legacy Ruby auto-update timer", configure_auto_update_ruby))
     if config.install_go:
         steps.append(("Installing Go (latest version)", install_go))
     if config.install_node:
