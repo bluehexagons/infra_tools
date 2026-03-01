@@ -6,6 +6,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import tempfile
 from typing import Optional
 
 from lib.config import SetupConfig
@@ -342,13 +343,78 @@ def _find_setup_completions_script() -> Optional[str]:
     return None
 
 
-def install_python(config: SetupConfig) -> None:
-    """Install Python tooling (aliases, uv, and shell completion support)."""
-    safe_username = shlex.quote(config.username)
-    user_home = f"/home/{config.username}"
-    user_uv = f"{user_home}/.local/bin/uv"
+def _validate_uv_install_script(script_path: str) -> bool:
+    """Basic validation for uv installer script content before execution."""
+    try:
+        with open(script_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except OSError:
+        return False
 
-    run("apt-get install -y -qq python3 python3-venv python3-pip python3-argcomplete bash-completion")
+    if not content.startswith("#!/bin/sh") and not content.startswith("#!/usr/bin/env sh"):
+        return False
+    if "astral.sh/uv" not in content and "github.com/astral-sh/uv" not in content:
+        return False
+    if "uv" not in content:
+        return False
+    return True
+
+
+def install_or_update_uv(user_home: str, username: Optional[str] = None) -> bool:
+    """Install or update uv for a user. Returns True if uv is available afterwards."""
+    uv_path = os.path.join(user_home, ".local", "bin", "uv")
+    safe_home = shlex.quote(user_home)
+    safe_username = shlex.quote(username) if username else None
+
+    if not os.path.exists(uv_path):
+        fd, installer_path = tempfile.mkstemp(prefix="infra_tools_uv_install_", suffix=".sh", dir="/tmp")
+        os.close(fd)
+        safe_installer = shlex.quote(installer_path)
+
+        try:
+            download_result = run(f"curl -fsSL https://astral.sh/uv/install.sh -o {safe_installer}", check=False)
+            if download_result.returncode != 0:
+                return False
+
+            if not _validate_uv_install_script(installer_path):
+                print("  ✗ Downloaded uv installer failed validation")
+                return False
+
+            if username:
+                install_result = run(
+                    f"runuser -u {safe_username} -- env HOME={safe_home} sh {safe_installer}",
+                    check=False
+                )
+            else:
+                install_result = run(f"env HOME={safe_home} sh {safe_installer}", check=False)
+
+            if install_result.returncode != 0 or not os.path.exists(uv_path):
+                return False
+        finally:
+            run(f"rm -f {safe_installer}", check=False)
+
+    safe_uv_path = shlex.quote(uv_path)
+    if username:
+        update_result = run(
+            f"runuser -u {safe_username} -- env HOME={safe_home} {safe_uv_path} self update",
+            check=False
+        )
+    else:
+        update_result = run(f"env HOME={safe_home} {safe_uv_path} self update", check=False)
+
+    if update_result.returncode == 0:
+        print("  ✓ uv updated")
+    else:
+        print("  ⚠ uv update failed")
+
+    return os.path.exists(uv_path)
+
+
+def install_python(config: SetupConfig) -> None:
+    """Install Python tooling (aliases and uv)."""
+    user_home = f"/home/{config.username}"
+
+    run("apt-get install -y -qq python3 python3-venv curl")
 
     python3_path = shutil.which("python3")
     python_path = shutil.which("python")
@@ -364,45 +430,18 @@ def install_python(config: SetupConfig) -> None:
     else:
         raise RuntimeError("python3 command unavailable after package installation")
 
-    if not os.path.exists(user_uv):
-        result = run(
-            f"runuser -u {safe_username} -- python3 -m pip install --user --upgrade uv --break-system-packages",
-            check=False
-        )
-        if result.returncode != 0:
-            result = run(
-                f"runuser -u {safe_username} -- python3 -m pip install --user --upgrade uv",
-                check=False
-            )
-        if result.returncode != 0 or not os.path.exists(user_uv):
-            raise RuntimeError("uv installation failed")
-        print("  ✓ uv installed")
+    uv_preexisting = os.path.exists(f"{user_home}/.local/bin/uv")
+    if install_or_update_uv(user_home=user_home, username=config.username):
+        if uv_preexisting:
+            print("  ✓ uv already installed")
+        else:
+            print("  ✓ uv installed")
     else:
-        print("  ✓ uv already installed")
+        raise RuntimeError("uv installation failed")
 
-    update_result = run(
-        f"runuser -u {safe_username} -- python3 -m pip install --user --upgrade uv --break-system-packages",
-        check=False
-    )
-    if update_result.returncode != 0:
-        update_result = run(
-            f"runuser -u {safe_username} -- python3 -m pip install --user --upgrade uv",
-            check=False
-        )
-    if update_result.returncode == 0:
-        print("  ✓ uv updated")
-    else:
-        print("  ⚠ uv update failed")
-
-    completions_script = _find_setup_completions_script()
-    if completions_script:
-        run(
-            f"python3 {shlex.quote(completions_script)} --global --shell bash",
-            check=False
-        )
-        print("  ✓ Bash autocompletion configured")
-    else:
-        print("  ⚠ setup_completions.py not found, skipping autocompletion setup")
+    if _find_setup_completions_script() is None:
+        print("  ℹ setup_completions.py not found in installed location")
+    print("  ℹ Remote systems skip shell autocompletion setup")
 
 
 def _configure_auto_update_systemd(

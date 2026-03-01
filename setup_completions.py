@@ -91,7 +91,7 @@ def setup_bash_completions(global_install: bool = False) -> bool:
     """Setup bash completions for infra_tools."""
     if not argcomplete:
         print("Error: argcomplete is not installed. Install it with:")
-        print("  pip install argcomplete")
+        print("  uv tool install --upgrade argcomplete")
         return False
     
     try:
@@ -104,7 +104,7 @@ def setup_bash_completions(global_install: bool = False) -> bool:
         )
         if result.returncode != 0:
             print("Error: register-python-argcomplete not found in PATH")
-            print("Make sure argcomplete is installed: pip install argcomplete")
+            print("Make sure argcomplete is installed: uv tool install --upgrade argcomplete")
             return False
         
         register_cmd = result.stdout.strip()
@@ -170,7 +170,7 @@ def setup_zsh_completions(global_install: bool = False) -> bool:
     """Setup zsh completions for infra_tools."""
     if not argcomplete:
         print("Error: argcomplete is not installed. Install it with:")
-        print("  pip install argcomplete")
+        print("  uv tool install --upgrade argcomplete")
         return False
     
     try:
@@ -261,7 +261,7 @@ def setup_fish_completions(global_install: bool = False) -> bool:
     """Setup fish completions for infra_tools."""
     if not argcomplete:
         print("Error: argcomplete is not installed. Install it with:")
-        print("  pip install argcomplete")
+        print("  uv tool install --upgrade argcomplete")
         return False
     
     try:

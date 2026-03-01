@@ -335,7 +335,7 @@ def get_steps_for_system_type(config: SetupConfig) -> list[tuple[str, StepFunc]]
         steps.append(("Installing Node.js (nvm + latest LTS + PNPM)", install_node))
         steps.append(("Configuring Node.js auto-update", configure_auto_update_node))
     if config.install_python:
-        steps.append(("Installing Python tooling (aliases + uv + completion)", install_python))
+        steps.append(("Installing Python tooling (aliases + uv)", install_python))
         steps.append(("Configuring uv auto-update", configure_auto_update_uv))
     
     if config.include_desktop_apps:

@@ -28,17 +28,7 @@ def main() -> int:
         logger.info("uv not found, skipping update")
         return 0
 
-    result = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "--user", "--upgrade", "uv", "--break-system-packages"],
-        capture_output=True,
-        text=True
-    )
-    if result.returncode != 0:
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "--user", "--upgrade", "uv"],
-            capture_output=True,
-            text=True
-        )
+    result = subprocess.run([uv_path, "self", "update"], capture_output=True, text=True)
     if result.returncode != 0:
         logger.error("uv update failed: %s", result.stderr.strip())
         return 1
