@@ -77,6 +77,13 @@ def detect_node() -> bool:
     )
 
 
+def detect_python() -> bool:
+    """Detect uv-managed Python tooling."""
+    home_dir = os.path.expanduser("~")
+    uv_path = os.path.join(home_dir, ".local", "bin", "uv")
+    return check_file_exists(uv_path) or check_command_exists("uv")
+
+
 def detect_deployments() -> list[tuple[str, str]]:
     deployments: list[tuple[str, str]] = []
     deploy_base = "/opt/deployments"
@@ -210,6 +217,7 @@ def reconstruct_configuration(host: str = "localhost", username: str = "root") -
         'install_ruby': detect_ruby(),
         'install_go': detect_go(),
         'install_node': detect_node(),
+        'install_python': detect_python(),
         'enable_samba': detect_samba(),
     }
     
@@ -264,6 +272,7 @@ def main() -> int:
             'install_ruby': config.install_ruby,
             'install_go': config.install_go,
             'install_node': config.install_node,
+            'install_python': config.install_python,
             'enable_samba': config.enable_samba,
         }
         

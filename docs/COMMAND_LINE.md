@@ -37,6 +37,7 @@ Complete reference for all setup script flags.
 | `--ruby` | Install rbenv + Ruby + Bundler |
 | `--node` | Install nvm + Node.js + PNPM |
 | `--go` | Install latest Go |
+| `--python` | Install Python aliases + uv + bash autocompletion |
 
 ## Deployment Flags
 

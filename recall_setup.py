@@ -131,6 +131,7 @@ def reconstruct_remote_config(host: str, username: str, ssh_key: Optional[str] =
                 'install_ruby': reconstructed.get('install_ruby', False),
                 'install_go': reconstructed.get('install_go', False),
                 'install_node': reconstructed.get('install_node', False),
+                'install_python': reconstructed.get('install_python', False),
                 'enable_samba': reconstructed.get('enable_samba', False),
             }
             

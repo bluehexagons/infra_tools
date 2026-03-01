@@ -29,6 +29,7 @@ python3 patch_setup.py example.com --ssl --deploy api.example.com https://github
 | `setup_server_web.py` | Web server with Nginx, reverse proxy, SSL, deployments |
 | `setup_server_dev.py` | Development server with CLI tools |
 | `setup_workstation_desktop.py` | Desktop workstation with RDP, browsers |
+| `setup_admin_python.py` | Local admin installer for Python aliases, uv, and shell completion |
 | `patch_setup.py` | Update existing systems, manage saved configurations |
 | `recall_setup.py` | Retrieve configuration from remote host |
 

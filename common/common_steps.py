@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shlex
+import shutil
 import subprocess
 from typing import Optional
 
@@ -330,6 +331,68 @@ export NVM_DIR="$HOME/.nvm"
     print("  ✓ nvm + Node.js LTS + NPM (latest) + PNPM installed for user")
 
 
+def _find_setup_completions_script() -> Optional[str]:
+    candidates = [
+        "/opt/infra_tools/setup_completions.py",
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), "setup_completions.py"),
+    ]
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def install_python(config: SetupConfig) -> None:
+    """Install Python tooling (aliases, uv, and shell completion support)."""
+    safe_username = shlex.quote(config.username)
+    user_home = f"/home/{config.username}"
+    user_uv = f"{user_home}/.local/bin/uv"
+
+    run("apt-get install -y -qq python3 python3-venv python3-pip python3-argcomplete bash-completion curl")
+
+    python3_path = shutil.which("python3")
+    python_path = shutil.which("python")
+
+    if python3_path and not python_path:
+        run(f"ln -sfn {shlex.quote(python3_path)} /usr/local/bin/python")
+        print("  ✓ Added python alias to python3")
+    elif python3_path:
+        print("  ✓ python command already available")
+
+    if python_path and not python3_path:
+        run(f"ln -sfn {shlex.quote(python_path)} /usr/local/bin/python3")
+        print("  ✓ Added python3 alias to python")
+    elif python3_path:
+        print("  ✓ python3 command already available")
+
+    if not os.path.exists(user_uv):
+        result = run(
+            f"runuser -u {safe_username} -- bash -c 'curl -LsSf https://astral.sh/uv/install.sh | sh'",
+            check=False
+        )
+        if result.returncode != 0 or not os.path.exists(user_uv):
+            raise RuntimeError("uv installation failed")
+        print("  ✓ uv installed")
+    else:
+        print("  ✓ uv already installed")
+
+    run(
+        f"runuser -u {safe_username} -- bash -c \"if [ -x {shlex.quote(user_uv)} ]; then {shlex.quote(user_uv)} self update; fi\"",
+        check=False
+    )
+    print("  ✓ uv updated")
+
+    completions_script = _find_setup_completions_script()
+    if completions_script:
+        run(
+            f"python3 {shlex.quote(completions_script)} --global --shell bash",
+            check=False
+        )
+        print("  ✓ Bash autocompletion configured")
+    else:
+        print("  ⚠ setup_completions.py not found, skipping autocompletion setup")
+
+
 def _configure_auto_update_systemd(
     service_name: str,
     service_desc: str,
@@ -405,6 +468,23 @@ def configure_auto_update_ruby(config: SetupConfig) -> None:
         schedule="Sun *-*-* 04:00:00",
         check_path=rbenv_dir,
         check_name="Ruby",
+        user=config.username
+    )
+
+
+def configure_auto_update_uv(config: SetupConfig) -> None:
+    """Configure automatic updates for uv."""
+    user_home = f"/home/{config.username}"
+    uv_path = f"{user_home}/.local/bin/uv"
+
+    _configure_auto_update_systemd(
+        service_name="auto-update-uv",
+        service_desc="Auto-update uv package manager",
+        timer_desc="Auto-update uv weekly",
+        script_name="auto_update_uv.py",
+        schedule="Sun *-*-* 05:00:00",
+        check_path=uv_path,
+        check_name="uv",
         user=config.username
     )
 

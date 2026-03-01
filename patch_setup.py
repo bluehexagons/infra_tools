@@ -153,6 +153,7 @@ def show_info(pattern: Optional[str] = None) -> None:
         if args.get('install_ruby'): features.append("Ruby")
         if args.get('install_node'): features.append("Node")
         if args.get('install_go'): features.append("Go")
+        if args.get('install_python'): features.append("Python")
         if args.get('install_office'): features.append("Office")
         if args.get('use_flatpak'): features.append("Flatpak")
         if args.get('enable_samba'): features.append("Samba")
