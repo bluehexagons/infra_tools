@@ -10,6 +10,7 @@ from unittest.mock import call, patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.config import SetupConfig
+from lib.system_types import get_steps_for_system_type
 import common.common_steps as common_steps
 
 
@@ -46,6 +47,14 @@ class TestRubySetup(unittest.TestCase):
         config = SetupConfig(host="host", username="user", system_type="server_dev", install_ruby=True)
         common_steps.configure_auto_update_ruby(config)
         mock_cleanup.assert_called_once_with("auto-update-ruby")
+
+    def test_ruby_auto_update_step_uses_common_cleanup_implementation(self):
+        config = SetupConfig(host="host", username="user", system_type="server_dev", install_ruby=True)
+        ruby_steps = [(name, func) for name, func in get_steps_for_system_type(config) if "Ruby" in name]
+        self.assertIn(
+            ("Cleaning up legacy Ruby auto-update timer", common_steps.configure_auto_update_ruby),
+            ruby_steps,
+        )
 
 
 if __name__ == "__main__":
