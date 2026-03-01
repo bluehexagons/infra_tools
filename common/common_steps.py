@@ -11,7 +11,7 @@ from typing import Optional
 
 from lib.config import SetupConfig
 from lib.machine_state import can_manage_time_sync
-from lib.remote_utils import run, is_package_installed, is_service_active, file_contains, generate_password
+from lib.remote_utils import run, is_dry_run, is_package_installed, is_service_active, file_contains, generate_password
 from lib.systemd_service import cleanup_service
 
 
@@ -369,6 +369,10 @@ def install_or_update_uv(user_home: str, username: Optional[str] = None) -> bool
     uv_path = os.path.join(user_home, ".local", "bin", "uv")
     safe_home = shlex.quote(user_home)
     safe_username = shlex.quote(username) if username else None
+
+    if is_dry_run():
+        print("  [DRY-RUN] Skipping uv install/update")
+        return True
 
     if not os.path.exists(uv_path):
         fd, installer_path = tempfile.mkstemp(prefix="infra_tools_uv_install_", suffix=".sh")

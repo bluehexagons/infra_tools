@@ -26,11 +26,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-try:
-    import argcomplete
-except ImportError:
-    argcomplete = None
-
 # List of all infra_tools entry points
 INFRA_TOOLS_SCRIPTS = [
     "setup_workstation_desktop",
@@ -89,11 +84,6 @@ def get_fish_config_dir() -> Path:
 
 def setup_bash_completions(global_install: bool = False) -> bool:
     """Setup bash completions for infra_tools."""
-    if not argcomplete:
-        print("Error: argcomplete is not installed. Install it with:")
-        print("  uv tool install --upgrade argcomplete")
-        return False
-    
     try:
         # Get the register-python-argcomplete command
         result = subprocess.run(
@@ -168,11 +158,6 @@ def setup_bash_completions(global_install: bool = False) -> bool:
 
 def setup_zsh_completions(global_install: bool = False) -> bool:
     """Setup zsh completions for infra_tools."""
-    if not argcomplete:
-        print("Error: argcomplete is not installed. Install it with:")
-        print("  uv tool install --upgrade argcomplete")
-        return False
-    
     try:
         result = subprocess.run(
             ["which", "register-python-argcomplete"],
@@ -182,6 +167,7 @@ def setup_zsh_completions(global_install: bool = False) -> bool:
         )
         if result.returncode != 0:
             print("Error: register-python-argcomplete not found in PATH")
+            print("Make sure argcomplete is installed: uv tool install --upgrade argcomplete")
             return False
         
         register_cmd = result.stdout.strip()
@@ -259,11 +245,6 @@ def setup_zsh_completions(global_install: bool = False) -> bool:
 
 def setup_fish_completions(global_install: bool = False) -> bool:
     """Setup fish completions for infra_tools."""
-    if not argcomplete:
-        print("Error: argcomplete is not installed. Install it with:")
-        print("  uv tool install --upgrade argcomplete")
-        return False
-    
     try:
         result = subprocess.run(
             ["which", "register-python-argcomplete"],
@@ -273,6 +254,7 @@ def setup_fish_completions(global_install: bool = False) -> bool:
         )
         if result.returncode != 0:
             print("Error: register-python-argcomplete not found in PATH")
+            print("Make sure argcomplete is installed: uv tool install --upgrade argcomplete")
             return False
         
         register_cmd = result.stdout.strip()
@@ -335,8 +317,11 @@ def main() -> int:
         help="Install completions for current user only (default)"
     )
     
-    if argcomplete:
+    try:
+        import argcomplete  # type: ignore
         argcomplete.autocomplete(parser)
+    except ImportError:
+        pass
     
     args = parser.parse_args()
     

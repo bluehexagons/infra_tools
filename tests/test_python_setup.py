@@ -44,15 +44,21 @@ class TestPythonFlag(unittest.TestCase):
         commands = [args[0] for args, _ in mock_run.call_args_list]
         self.assertFalse(any("setup_completions.py" in cmd for cmd in commands))
 
+    @patch("common.common_steps.is_dry_run", return_value=True)
+    def test_install_or_update_uv_returns_true_in_dry_run(self, _is_dry_run):
+        self.assertTrue(common_steps.install_or_update_uv(user_home="/home/user", username="user"))
+
 
 class TestSetupAdminPython(unittest.TestCase):
     @patch("setup_admin_python.os.path.expanduser", return_value="/tmp/testuser")
+    @patch("setup_admin_python.os.symlink")
+    @patch("setup_admin_python.os.makedirs")
     @patch("setup_admin_python.subprocess.run")
     @patch("setup_admin_python.install_or_update_uv", return_value=True)
     @patch("setup_admin_python.validate_username", return_value=True)
     @patch("setup_admin_python.parse_args", return_value=argparse.Namespace(shell="bash"))
     @patch("setup_admin_python.get_current_username", return_value="admin")
-    @patch("setup_admin_python.shutil.which", side_effect=["/usr/bin/python3"])
+    @patch("setup_admin_python.shutil.which", side_effect=["/usr/bin/python3", None])
     def test_main_runs_shared_setup_steps(
         self,
         _which,
@@ -61,14 +67,24 @@ class TestSetupAdminPython(unittest.TestCase):
         _validate_username,
         mock_install_or_update_uv,
         mock_subprocess_run,
+        mock_makedirs,
+        mock_symlink,
         _expanduser,
     ):
         mock_subprocess_run.return_value = argparse.Namespace(returncode=0, stdout="", stderr="")
-        with patch("setup_admin_python.os.path.exists", side_effect=lambda p: str(p).endswith("setup_completions.py")):
+        with patch(
+            "setup_admin_python.os.path.exists",
+            side_effect=lambda p: str(p).endswith("setup_completions.py"),
+        ):
             result = setup_admin_python.main()
         self.assertEqual(result, 0)
+        mock_makedirs.assert_called_once()
+        mock_symlink.assert_called_once_with("/usr/bin/python3", "/tmp/testuser/.local/bin/python")
         mock_install_or_update_uv.assert_called_once()
-        _which.assert_has_calls([call("python3")])
+        _which.assert_has_calls([call("python3"), call("python")])
+        self.assertEqual(mock_subprocess_run.call_count, 2)
+        completion_env = mock_subprocess_run.call_args_list[1].kwargs["env"]
+        self.assertTrue(completion_env["PATH"].startswith("/tmp/testuser/.local/bin"))
 
     @patch("setup_admin_python.validate_username", return_value=False)
     @patch("setup_admin_python.parse_args", return_value=argparse.Namespace(shell="bash"))

@@ -43,14 +43,18 @@ def main() -> int:
     os.makedirs(local_bin, exist_ok=True)
 
     python_alias = os.path.join(local_bin, "python")
-    if not os.path.exists(python_alias):
-        try:
-            os.symlink(python3_path, python_alias)
-            print(f"✓ Added local python alias: {python_alias} -> {python3_path}")
-        except FileExistsError:
+    python_cmd = shutil.which("python")
+    if python_cmd is None:
+        if not os.path.exists(python_alias):
+            try:
+                os.symlink(python3_path, python_alias)
+                print(f"✓ Added local python alias: {python_alias} -> {python3_path}")
+            except FileExistsError:
+                print("✓ local python alias already exists")
+        else:
             print("✓ local python alias already exists")
     else:
-        print("✓ python command already available")
+        print("✓ python command already available on PATH")
 
     if not install_or_update_uv(user_home=user_home, username=None):
         print("Error: failed to install/update uv.")
@@ -76,10 +80,14 @@ def main() -> int:
         print(f"Error: setup_completions.py not found: {completions_script}")
         return 1
 
+    completion_env = os.environ.copy()
+    completion_env["PATH"] = os.pathsep.join([local_bin, completion_env.get("PATH", "")])
+
     completion_result = subprocess.run(
         [sys.executable, completions_script, "--user", "--shell", args.shell],
         capture_output=True,
-        text=True
+        text=True,
+        env=completion_env
     )
     if completion_result.returncode != 0:
         print(completion_result.stdout, end="")
