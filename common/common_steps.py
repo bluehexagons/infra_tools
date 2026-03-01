@@ -348,7 +348,7 @@ def install_python(config: SetupConfig) -> None:
     user_home = f"/home/{config.username}"
     user_uv = f"{user_home}/.local/bin/uv"
 
-    run("apt-get install -y -qq python3 python3-venv python3-pip python3-argcomplete bash-completion curl")
+    run("apt-get install -y -qq python3 python3-venv python3-pip python3-argcomplete bash-completion")
 
     python3_path = shutil.which("python3")
     python_path = shutil.which("python")
@@ -356,31 +356,43 @@ def install_python(config: SetupConfig) -> None:
     if python3_path and not python_path:
         run(f"ln -sfn {shlex.quote(python3_path)} /usr/local/bin/python")
         print("  ✓ Added python alias to python3")
-    elif python3_path:
+    elif python_path:
         print("  ✓ python command already available")
 
-    if python_path and not python3_path:
-        run(f"ln -sfn {shlex.quote(python_path)} /usr/local/bin/python3")
-        print("  ✓ Added python3 alias to python")
-    elif python3_path:
+    if python3_path:
         print("  ✓ python3 command already available")
+    else:
+        raise RuntimeError("python3 command unavailable after package installation")
 
     if not os.path.exists(user_uv):
         result = run(
-            f"runuser -u {safe_username} -- bash -c 'curl -LsSf https://astral.sh/uv/install.sh | sh'",
+            f"runuser -u {safe_username} -- python3 -m pip install --user --upgrade uv --break-system-packages",
             check=False
         )
+        if result.returncode != 0:
+            result = run(
+                f"runuser -u {safe_username} -- python3 -m pip install --user --upgrade uv",
+                check=False
+            )
         if result.returncode != 0 or not os.path.exists(user_uv):
             raise RuntimeError("uv installation failed")
         print("  ✓ uv installed")
     else:
         print("  ✓ uv already installed")
 
-    run(
-        f"runuser -u {safe_username} -- bash -c \"if [ -x {shlex.quote(user_uv)} ]; then {shlex.quote(user_uv)} self update; fi\"",
+    update_result = run(
+        f"runuser -u {safe_username} -- python3 -m pip install --user --upgrade uv --break-system-packages",
         check=False
     )
-    print("  ✓ uv updated")
+    if update_result.returncode != 0:
+        update_result = run(
+            f"runuser -u {safe_username} -- python3 -m pip install --user --upgrade uv",
+            check=False
+        )
+    if update_result.returncode == 0:
+        print("  ✓ uv updated")
+    else:
+        print("  ⚠ uv update failed")
 
     completions_script = _find_setup_completions_script()
     if completions_script:

@@ -26,7 +26,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     if os.geteuid() != 0:
-        print("Error: This script must be run as root (use sudo).")
+        print("Error: This script requires root privileges.")
         return 1
 
     args = parse_args()

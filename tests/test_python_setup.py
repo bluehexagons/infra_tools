@@ -53,6 +53,18 @@ class TestSetupAdminPython(unittest.TestCase):
         mock_install_python.assert_called_once()
         mock_configure_auto_update_uv.assert_called_once()
 
+    @patch("setup_admin_python.os.geteuid", return_value=1000)
+    def test_main_requires_root(self, _geteuid):
+        result = setup_admin_python.main()
+        self.assertEqual(result, 1)
+
+    @patch("setup_admin_python.validate_username", return_value=False)
+    @patch("setup_admin_python.parse_args", return_value=argparse.Namespace(username="bad user"))
+    @patch("setup_admin_python.os.geteuid", return_value=0)
+    def test_main_rejects_invalid_username(self, _geteuid, _parse_args, _validate_username):
+        result = setup_admin_python.main()
+        self.assertEqual(result, 1)
+
 
 if __name__ == "__main__":
     unittest.main()
