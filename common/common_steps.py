@@ -196,44 +196,12 @@ def check_restart_required(config: SetupConfig) -> None:
 
 
 def install_ruby(config: SetupConfig) -> None:
-    safe_username = shlex.quote(config.username)
-    user_home = f"/home/{config.username}"
-    rbenv_dir = f"{user_home}/.rbenv"
-    
-    if os.path.exists(rbenv_dir):
-        print("  ✓ rbenv already installed")
+    if shutil.which("ruby") and shutil.which("bundle"):
+        print("  ✓ Ruby + bundler already installed")
         return
-    
-    run("apt-get -o DPkg::Lock::Timeout=60 install -y -qq git curl libssl-dev libreadline-dev zlib1g-dev autoconf bison build-essential libyaml-dev libncurses5-dev libffi-dev libgdbm-dev ruby ruby-dev")
+    run("apt-get -o DPkg::Lock::Timeout=60 install -y -qq ruby ruby-dev bundler")
     run("gem install bundler", check=False)
-    
-    run(f"runuser -u {safe_username} -- git clone https://github.com/rbenv/rbenv.git {shlex.quote(rbenv_dir)}")
-    run(f"runuser -u {safe_username} -- git clone https://github.com/rbenv/ruby-build.git {shlex.quote(rbenv_dir)}/plugins/ruby-build")
-    
-    bashrc_path = f"{user_home}/.bashrc"
-    rbenv_init = '''
-export PATH="$HOME/.rbenv/bin:$PATH"
-eval "$(rbenv init -)"
-'''
-    
-    if not os.path.exists(bashrc_path):
-        with open(bashrc_path, "w") as f:
-            f.write(rbenv_init)
-    else:
-        with open(bashrc_path, "a") as f:
-            f.write(rbenv_init)
-    run(f"chown {safe_username}:{safe_username} {shlex.quote(bashrc_path)}")
-    
-    result = run(f"runuser -u {safe_username} -- bash -c 'export PATH=\"{rbenv_dir}/bin:$PATH\" && rbenv install -l | grep -E \"^[0-9]+\\.[0-9]+\\.[0-9]+$\" | tail -1'", check=False, capture_output=True)
-    if result.returncode == 0 and result.stdout.strip():
-        latest_ruby = result.stdout.strip()
-        print(f"  Installing Ruby {latest_ruby}...")
-        run(f"runuser -u {safe_username} -- bash -c 'export PATH=\"{rbenv_dir}/bin:$PATH\" && rbenv install {shlex.quote(latest_ruby)}'")
-        run(f"runuser -u {safe_username} -- bash -c 'export PATH=\"{rbenv_dir}/bin:$PATH\" && rbenv global {shlex.quote(latest_ruby)}'")
-        run(f"runuser -u {safe_username} -- bash -c 'export PATH=\"{rbenv_dir}/bin:$PATH\" && eval \"$(rbenv init -)\" && gem install bundler'")
-        print(f"  ✓ rbenv + Ruby {latest_ruby} + bundler installed")
-    else:
-        print("  ✓ rbenv + system Ruby + bundler installed")
+    print("  ✓ Ruby + bundler installed from apt packages")
 
 
 def install_go(config: SetupConfig) -> None:
@@ -526,20 +494,9 @@ WantedBy=timers.target
 
 
 def configure_auto_update_ruby(config: SetupConfig) -> None:
-    """Configure automatic updates for Ruby via rbenv."""
-    user_home = f"/home/{config.username}"
-    rbenv_dir = f"{user_home}/.rbenv"
-    
-    _configure_auto_update_systemd(
-        service_name="auto-update-ruby",
-        service_desc="Auto-update Ruby to latest stable version",
-        timer_desc="Auto-update Ruby weekly",
-        script_name="auto_update_ruby.py",
-        schedule="Sun *-*-* 04:00:00",
-        check_path=rbenv_dir,
-        check_name="Ruby",
-        user=config.username
-    )
+    """Ruby package updates are handled by apt unattended-upgrades."""
+    cleanup_service("auto-update-ruby")
+    print("  ✓ Ruby updates are handled by apt unattended-upgrades")
 
 
 def configure_auto_update_uv(config: SetupConfig) -> None:

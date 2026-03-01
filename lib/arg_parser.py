@@ -85,7 +85,7 @@ def create_setup_argument_parser(
     parser.add_argument("--ruby", dest="install_ruby", 
                        action=argparse.BooleanOptionalAction if not for_remote else "store_true", 
                        default=None if not for_remote else False,
-                       help="Install rbenv + latest Ruby version")
+                       help="Install Ruby + Bundler from apt packages")
     parser.add_argument("--go", dest="install_go", 
                        action=argparse.BooleanOptionalAction if not for_remote else "store_true", 
                        default=None if not for_remote else False,
