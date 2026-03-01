@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import shlex
 import shutil
 import subprocess
 import sys
@@ -44,9 +43,12 @@ def main() -> int:
     os.makedirs(local_bin, exist_ok=True)
 
     python_alias = os.path.join(local_bin, "python")
-    if shutil.which("python") is None and not os.path.exists(python_alias):
-        os.symlink(python3_path, python_alias)
-        print(f"✓ Added local python alias: {python_alias} -> {python3_path}")
+    if not os.path.exists(python_alias):
+        try:
+            os.symlink(python3_path, python_alias)
+            print(f"✓ Added local python alias: {python_alias} -> {python3_path}")
+        except FileExistsError:
+            print("✓ local python alias already exists")
     else:
         print("✓ python command already available")
 
@@ -55,16 +57,16 @@ def main() -> int:
         return 1
 
     uv_path = os.path.join(local_bin, "uv")
-    safe_uv = shlex.quote(uv_path)
     argcomplete_result = subprocess.run(
-        f"{safe_uv} tool install --upgrade argcomplete",
-        shell=True,
-        executable="/bin/bash",
+        [uv_path, "tool", "install", "--upgrade", "argcomplete"],
         capture_output=True,
         text=True
     )
     if argcomplete_result.returncode != 0:
-        print(f"Error: failed to install argcomplete with uv: {argcomplete_result.stderr.strip()}")
+        output = "\n".join(
+            part for part in [argcomplete_result.stdout.strip(), argcomplete_result.stderr.strip()] if part
+        )
+        print(f"Error: failed to install argcomplete with uv.{f' Output: {output}' if output else ''}")
         return 1
     print("✓ argcomplete installed via uv")
 

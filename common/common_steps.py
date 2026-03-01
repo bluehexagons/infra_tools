@@ -351,11 +351,15 @@ def _validate_uv_install_script(script_path: str) -> bool:
     except OSError:
         return False
 
-    if not content.startswith("#!/bin/sh") and not content.startswith("#!/usr/bin/env sh"):
+    stripped_content = content.lstrip()
+    if not stripped_content.startswith("#!/bin/sh") and not stripped_content.startswith("#!/usr/bin/env sh"):
         return False
     if "astral.sh/uv" not in content and "github.com/astral-sh/uv" not in content:
         return False
     if "uv" not in content:
+        return False
+    suspicious_patterns = ["rm -rf /", "chmod -R 777 /", "mkfs.", "dd if=", "curl | sh", "wget | sh"]
+    if any(pattern in content for pattern in suspicious_patterns):
         return False
     return True
 
@@ -367,13 +371,21 @@ def install_or_update_uv(user_home: str, username: Optional[str] = None) -> bool
     safe_username = shlex.quote(username) if username else None
 
     if not os.path.exists(uv_path):
-        fd, installer_path = tempfile.mkstemp(prefix="infra_tools_uv_install_", suffix=".sh", dir="/tmp")
+        fd, installer_path = tempfile.mkstemp(prefix="infra_tools_uv_install_", suffix=".sh")
         os.close(fd)
         safe_installer = shlex.quote(installer_path)
 
         try:
-            download_result = run(f"curl -fsSL https://astral.sh/uv/install.sh -o {safe_installer}", check=False)
+            download_result = run(
+                f"curl -fsSL --proto '=https' --tlsv1.2 https://astral.sh/uv/install.sh -o {safe_installer}",
+                check=False
+            )
             if download_result.returncode != 0:
+                return False
+
+            file_mode = os.stat(installer_path).st_mode & 0o777
+            if (file_mode & 0o077) != 0 or (file_mode & 0o400) == 0:
+                print("  ✗ Downloaded uv installer file permissions are too broad")
                 return False
 
             if not _validate_uv_install_script(installer_path):
@@ -391,7 +403,10 @@ def install_or_update_uv(user_home: str, username: Optional[str] = None) -> bool
             if install_result.returncode != 0 or not os.path.exists(uv_path):
                 return False
         finally:
-            run(f"rm -f {safe_installer}", check=False)
+            try:
+                os.unlink(installer_path)
+            except OSError:
+                pass
 
     safe_uv_path = shlex.quote(uv_path)
     if username:

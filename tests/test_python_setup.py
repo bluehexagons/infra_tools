@@ -6,7 +6,7 @@ import argparse
 import os
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -52,7 +52,7 @@ class TestSetupAdminPython(unittest.TestCase):
     @patch("setup_admin_python.validate_username", return_value=True)
     @patch("setup_admin_python.parse_args", return_value=argparse.Namespace(shell="bash"))
     @patch("setup_admin_python.get_current_username", return_value="admin")
-    @patch("setup_admin_python.shutil.which", side_effect=["/usr/bin/python3", "/usr/bin/python"])
+    @patch("setup_admin_python.shutil.which", side_effect=["/usr/bin/python3"])
     def test_main_runs_shared_setup_steps(
         self,
         _which,
@@ -68,6 +68,7 @@ class TestSetupAdminPython(unittest.TestCase):
             result = setup_admin_python.main()
         self.assertEqual(result, 0)
         mock_install_or_update_uv.assert_called_once()
+        _which.assert_has_calls([call("python3")])
 
     @patch("setup_admin_python.validate_username", return_value=False)
     @patch("setup_admin_python.parse_args", return_value=argparse.Namespace(shell="bash"))
