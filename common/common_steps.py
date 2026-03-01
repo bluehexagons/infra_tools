@@ -196,7 +196,7 @@ def check_restart_required(config: SetupConfig) -> None:
 
 
 def install_ruby(config: SetupConfig) -> None:
-    if shutil.which("ruby") and shutil.which("bundle"):
+    if shutil.which("ruby") and (shutil.which("bundle") or shutil.which("bundler")):
         print("  ✓ Ruby + bundler already installed")
         return
     run("apt-get -o DPkg::Lock::Timeout=60 install -y -qq ruby ruby-dev bundler")
