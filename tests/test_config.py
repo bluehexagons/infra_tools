@@ -226,6 +226,16 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
         cmd = ' '.join(parts)
         self.assertNotIn('secret', cmd)
 
+    def test_share_credentials_not_included(self):
+        config = self._make_config(
+            share_credentials=[['user1', 'secret1']],
+            samba_shares=[['read', 'share', '/mnt/data', 'user1']],
+        )
+        parts = config.to_setup_command()
+        cmd = ' '.join(parts)
+        self.assertNotIn('--credential', cmd)
+        self.assertNotIn('secret1', cmd)
+
     def test_python_flag_included(self):
         config = self._make_config(install_python=True)
         parts = config.to_setup_command()
