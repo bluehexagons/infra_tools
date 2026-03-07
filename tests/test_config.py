@@ -146,6 +146,12 @@ class TestSetupConfigToRemoteArgs(unittest.TestCase):
         self.assertIn('--samba', args_str)
         self.assertIn('--share', args_str)
 
+    def test_share_credentials(self):
+        config = self._make_config(share_credentials=[['user1', 'pass1']])
+        args = config.to_remote_args()
+        args_str = ' '.join(args)
+        self.assertIn('--credential user1 pass1', args_str)
+
     def test_smb_mounts(self):
         config = self._make_config(enable_smbclient=True, smb_mounts=[['/mnt/share', '1.2.3.4', 'u:p', 'share', '/']])
         args = config.to_remote_args()
@@ -219,6 +225,50 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
         parts = config.to_setup_command()
         cmd = ' '.join(parts)
         self.assertNotIn('secret', cmd)
+
+    def test_share_credentials_redacted_for_username_only_shares(self):
+        config = self._make_config(
+            share_credentials=[['user1', 'secret1']],
+            samba_shares=[['read', 'share', '/mnt/data', 'user1']],
+        )
+        parts = config.to_setup_command()
+        cmd = ' '.join(parts)
+        self.assertIn('--credential user1 [REDACTED]', cmd)
+        self.assertNotIn('secret1', cmd)
+
+    def test_share_credentials_omitted_for_inline_share_passwords(self):
+        config = self._make_config(
+            share_credentials=[['user1', 'secret1']],
+            samba_shares=[['read', 'share', '/mnt/data', 'user1:secret1']],
+        )
+        parts = config.to_setup_command()
+        cmd = ' '.join(parts)
+        self.assertNotIn('--credential user1 [REDACTED]', cmd)
+        self.assertIn('user1:[REDACTED]', cmd)
+        self.assertNotIn('secret1', cmd)
+
+    def test_share_command_handles_incomplete_share_specs(self):
+        config = self._make_config(
+            samba_shares=[['read', 'share', '/mnt/data']],
+        )
+        parts = config.to_setup_command()
+        cmd = ' '.join(parts)
+        self.assertIn('--share read share /mnt/data', cmd)
+        self.assertNotIn('[REDACTED]', cmd)
+
+    def test_share_command_redacts_mixed_share_users(self):
+        config = self._make_config(
+            share_credentials=[['user1', 'secret1'], ['user2', 'secret2']],
+            # Intentional whitespace, duplicates, and empty entries to exercise user list cleanup.
+            samba_shares=[['read', 'share', '/mnt/data', ' user1 , , user2:secret2 ,user1,user3:secret3 ']],
+        )
+        parts = config.to_setup_command()
+        cmd = ' '.join(parts)
+        self.assertIn('--credential user1 [REDACTED]', cmd)
+        self.assertEqual(cmd.count('--credential user1 [REDACTED]'), 1)
+        self.assertIn('user1,user2:[REDACTED],user1,user3:[REDACTED]', cmd)
+        self.assertNotIn('secret2', cmd)
+        self.assertNotIn('secret3', cmd)
 
     def test_python_flag_included(self):
         config = self._make_config(install_python=True)

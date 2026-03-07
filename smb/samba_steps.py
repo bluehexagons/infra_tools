@@ -10,6 +10,29 @@ from lib.mount_utils import is_path_under_mnt, get_mount_ancestor
 from lib.remote_utils import run, is_package_installed
 
 
+def parse_share_credentials(
+    credential_specs: Optional[list[list[str]]]
+) -> dict[str, str]:
+    credentials: dict[str, str] = {}
+    if not credential_specs:
+        return credentials
+
+    for credential_spec in credential_specs:
+        if not credential_spec or len(credential_spec) < 2:
+            raise ValueError(
+                f"Credential spec requires: username password (got: {credential_spec})"
+            )
+
+        username = credential_spec[0].strip()
+        password = credential_spec[1].strip()
+        if not username:
+            raise ValueError("Credential username must not be empty")
+
+        credentials[username] = password
+
+    return credentials
+
+
 def install_samba(config: SetupConfig) -> None:
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get install -y -qq samba samba-common-bin")
@@ -35,7 +58,10 @@ def configure_samba_firewall(config: SetupConfig) -> None:
     print("  ✓ Firewall configured for Samba")
 
 
-def parse_share_spec(share_spec: Optional[list[str]]) -> dict[str, Any]:
+def parse_share_spec(
+    share_spec: Optional[list[str]],
+    credentials: Optional[dict[str, str]] = None
+) -> dict[str, Any]:
     if not share_spec or len(share_spec) < 4:
         raise ValueError("Share spec requires: access_type share_name paths users")
     
@@ -54,9 +80,16 @@ def parse_share_spec(share_spec: Optional[list[str]]) -> dict[str, Any]:
         user_spec = user_spec.strip()
         if not user_spec:
             continue
-        if ':' not in user_spec:
-            raise ValueError(f"Invalid user spec: {user_spec}. Must be 'username:password'")
-        username, password = user_spec.split(':', 1)
+        if ':' in user_spec:
+            username, password = user_spec.split(':', 1)
+        elif credentials and user_spec in credentials:
+            username = user_spec
+            password = credentials[user_spec]
+        else:
+            raise ValueError(
+                f"Missing credential for share user: {user_spec}. "
+                "Use 'username:password' or provide --credential USERNAME PASSWORD"
+            )
         users.append({'username': username.strip(), 'password': password.strip()})
     
     return {
@@ -65,6 +98,15 @@ def parse_share_spec(share_spec: Optional[list[str]]) -> dict[str, Any]:
         'paths': paths,
         'users': users
     }
+
+
+def validate_samba_share_credentials(config: SetupConfig) -> None:
+    if not config.samba_shares:
+        return
+
+    credentials = parse_share_credentials(config.share_credentials)
+    for share_spec in config.samba_shares:
+        parse_share_spec(share_spec, credentials)
 
 
 def create_samba_user(username: str, password: str) -> None:
@@ -141,7 +183,10 @@ def _get_veto_dirs_for_share(share_path: str, config: SetupConfig) -> list[str]:
 
 
 def setup_samba_share(config: SetupConfig, share_spec: Optional[list[str]] = None, **_ : Any) -> None:
-    share_config = parse_share_spec(share_spec)
+    share_config = parse_share_spec(
+        share_spec,
+        parse_share_credentials(config.share_credentials)
+    )
 
     share_name = share_config['share_name']
     access_type = share_config['access_type']
@@ -368,4 +413,3 @@ findtime = 600
     run("systemctl restart fail2ban")
     
     print("  ✓ fail2ban configured for Samba (5 failed attempts = 1 hour ban)")
-

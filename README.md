@@ -57,10 +57,15 @@ python3 setup_workstation_desktop.py 192.168.1.50 \
 ```bash
 python3 setup_server_lite.py 192.168.1.10 \
   --samba \
-  --share read media /mnt/data/media guest:guest \
+  --credential guest guest \
+  --share read media /mnt/data/media guest \
   --sync /mnt/data/docs /mnt/backup daily \
   --scrub /mnt/backup .pardatabase 5% weekly
 ```
+
+Use `--credential USERNAME PASSWORD` to define share passwords once, then reference those users by name in
+`--share`. The `USERS` field accepts a comma-separated list of `username` or `username:password` entries, and
+each bare username must have a matching `--credential`.
 
 ## Requirements
 

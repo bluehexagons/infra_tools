@@ -55,9 +55,21 @@ Complete reference for all setup script flags.
 | Flag | Description |
 |------|-------------|
 | `--samba` | Install and configure Samba |
-| `--share TYPE NAME PATHS USERS` | Configure Samba share |
+| `--share TYPE NAME PATHS USERS` | Configure a Samba share with comma-separated `username` or `username:password` user entries |
+| `--credential USERNAME PASSWORD` | Define a password for username-only `--share` user entries |
 | `--smbclient` | Install SMB/CIFS client |
 | `--mount-smb MOUNT IP CREDS SHARE` | Mount SMB share persistently |
+
+Example:
+
+```bash
+python3 setup_server_lite.py 192.168.1.10 \
+  --samba \
+  --credential mediauser supersecret \
+  --share read media /mnt/data/media mediauser,guest:guest
+```
+
+Each bare username in `USERS` must have a matching `--credential USERNAME PASSWORD` entry.
 
 ## Sync Flags
 

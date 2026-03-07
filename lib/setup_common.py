@@ -23,6 +23,7 @@ from lib.system_utils import get_current_username
 from lib.cache import save_setup_command
 from lib.arg_parser import create_setup_argument_parser
 from lib.display import print_setup_summary
+from smb.samba_steps import validate_samba_share_credentials
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -349,6 +350,12 @@ def setup_main(system_type: str, description: str, success_msg_fn: Callable[[Set
         return 1
     
     config = SetupConfig.from_args(args, system_type)
+
+    try:
+        validate_samba_share_credentials(config)
+    except ValueError as e:
+        print(f"Error: {e}")
+        return 1
     
     print_setup_summary(config, description)
     

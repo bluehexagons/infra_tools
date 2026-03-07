@@ -72,6 +72,7 @@ class SetupConfig:
     api_subdomain: bool = False
     enable_samba: bool = False
     samba_shares: Optional[NestedStrList] = None
+    share_credentials: Optional[NestedStrList] = None
     enable_smbclient: bool = False
     smb_mounts: Optional[NestedStrList] = None
     sync_specs: Optional[NestedStrList] = None
@@ -191,6 +192,11 @@ class SetupConfig:
             for share_spec in self.samba_shares:
                 escaped_spec = ' '.join(shlex.quote(str(s)) for s in share_spec)
                 args.append(f"--share {escaped_spec}")
+
+        if self.share_credentials:
+            for credential_spec in self.share_credentials:
+                escaped_spec = ' '.join(shlex.quote(str(s)) for s in credential_spec)
+                args.append(f"--credential {escaped_spec}")
         
         if self.enable_smbclient:
             args.append("--smbclient")
@@ -340,11 +346,40 @@ class SetupConfig:
         # Samba
         if self.enable_samba:
             cmd_parts.append("--samba")
-        
+
+        SHARE_USERS_INDEX = 3
+        MIN_SHARE_FIELDS = SHARE_USERS_INDEX + 1
+        required_share_credentials: StrList = []
+        seen_share_credentials: set[str] = set()
+        redacted_share_specs: list[list[str]] = []
         if self.samba_shares:
             for share_spec in self.samba_shares:
-                escaped_spec = ' '.join(shlex.quote(str(s)) for s in share_spec)
-                cmd_parts.append(f"--share {escaped_spec}")
+                redacted_share_spec = list(share_spec)
+                if len(redacted_share_spec) >= MIN_SHARE_FIELDS:
+                    users_field = redacted_share_spec[SHARE_USERS_INDEX]
+                    redacted_users: StrList = []
+                    for user_spec in users_field.split(','):
+                        user_spec = user_spec.strip()
+                        if not user_spec:
+                            continue
+                        if ':' in user_spec:
+                            username, _ = user_spec.split(':', 1)
+                            username = username.strip()
+                            redacted_users.append(f"{username}:[REDACTED]")
+                        else:
+                            redacted_users.append(user_spec)
+                            if user_spec not in seen_share_credentials:
+                                seen_share_credentials.add(user_spec)
+                                required_share_credentials.append(user_spec)
+                    redacted_share_spec[SHARE_USERS_INDEX] = ','.join(redacted_users)
+                redacted_share_specs.append(redacted_share_spec)
+
+        for username in required_share_credentials:
+            cmd_parts.append(f"--credential {shlex.quote(username)} [REDACTED]")
+
+        for redacted_share_spec in redacted_share_specs:
+            escaped_spec = ' '.join(shlex.quote(str(s)) for s in redacted_share_spec)
+            cmd_parts.append(f"--share {escaped_spec}")
         
         # SMB client
         if self.enable_smbclient:
@@ -492,6 +527,7 @@ class SetupConfig:
             api_subdomain=getattr(args, 'api_subdomain', False),
             enable_samba=getattr(args, 'enable_samba', False),
             samba_shares=getattr(args, 'samba_shares', None),
+            share_credentials=getattr(args, 'share_credentials', None),
             enable_smbclient=enable_smbclient,
             smb_mounts=smb_mounts,
             sync_specs=getattr(args, 'sync_specs', None),

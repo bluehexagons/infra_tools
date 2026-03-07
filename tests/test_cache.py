@@ -108,6 +108,12 @@ class TestMergeSetupConfigs(unittest.TestCase):
         merged = merge_setup_configs(cached, new)
         self.assertEqual(len(merged.samba_shares), 2)
 
+    def test_share_credentials_merge(self):
+        cached = self._make_config(share_credentials=[['user1', 'pass1']])
+        new = self._make_config(share_credentials=[['user2', 'pass2']])
+        merged = merge_setup_configs(cached, new)
+        self.assertEqual(merged.share_credentials, [['user1', 'pass1'], ['user2', 'pass2']])
+
     def test_tags_overwritten(self):
         cached = self._make_config(tags=['old'])
         new = self._make_config(tags=['new1', 'new2'])
