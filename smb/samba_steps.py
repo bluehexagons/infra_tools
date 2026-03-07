@@ -19,7 +19,9 @@ def parse_share_credentials(
 
     for credential_spec in credential_specs:
         if not credential_spec or len(credential_spec) < 2:
-            raise ValueError("Credential spec requires: username password")
+            raise ValueError(
+                f"Credential spec requires: username password (got: {credential_spec})"
+            )
 
         username = credential_spec[0].strip()
         password = credential_spec[1].strip()
@@ -86,7 +88,7 @@ def parse_share_spec(
         else:
             raise ValueError(
                 f"Missing credential for share user: {user_spec}. "
-                "Use 'username:password' or provide --credential username password"
+                "Use 'username:password' or provide --credential USERNAME PASSWORD"
             )
         users.append({'username': username.strip(), 'password': password.strip()})
     

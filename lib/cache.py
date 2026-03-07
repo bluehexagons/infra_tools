@@ -96,10 +96,10 @@ def merge_setup_configs(cached_config: SetupConfig, new_config: SetupConfig) -> 
                 merged_credentials = {
                     credential_spec[0]: credential_spec
                     for credential_spec in merged_dict[key]
-                    if credential_spec
+                    if credential_spec and len(credential_spec) >= 2
                 }
                 for credential_spec in value:
-                    if credential_spec:
+                    if credential_spec and len(credential_spec) >= 2:
                         merged_credentials[credential_spec[0]] = credential_spec
                 merged_dict[key] = list(merged_credentials.values())
         elif key == 'tags':
