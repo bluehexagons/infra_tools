@@ -347,17 +347,17 @@ class SetupConfig:
         if self.enable_samba:
             cmd_parts.append("--samba")
 
-        users_field_index = 3
-        required_share_fields = users_field_index + 1
+        SHARE_USERS_INDEX = 3
+        MIN_SHARE_FIELDS = SHARE_USERS_INDEX + 1
         required_share_credentials: StrList = []
         seen_share_credentials: set[str] = set()
         redacted_share_specs: list[list[str]] = []
         if self.samba_shares:
             for share_spec in self.samba_shares:
                 redacted_share_spec = list(share_spec)
-                if len(redacted_share_spec) >= required_share_fields:
+                if len(redacted_share_spec) >= MIN_SHARE_FIELDS:
                     redacted_users: StrList = []
-                    for user_spec in redacted_share_spec[users_field_index].split(','):
+                    for user_spec in redacted_share_spec[SHARE_USERS_INDEX].split(','):
                         user_spec = user_spec.strip()
                         if not user_spec:
                             continue
@@ -370,7 +370,7 @@ class SetupConfig:
                             if user_spec not in seen_share_credentials:
                                 seen_share_credentials.add(user_spec)
                                 required_share_credentials.append(user_spec)
-                    redacted_share_spec[users_field_index] = ','.join(redacted_users)
+                    redacted_share_spec[SHARE_USERS_INDEX] = ','.join(redacted_users)
                 redacted_share_specs.append(redacted_share_spec)
 
         for username in required_share_credentials:

@@ -247,6 +247,28 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
         self.assertIn('user1:[REDACTED]', cmd)
         self.assertNotIn('secret1', cmd)
 
+    def test_share_command_handles_incomplete_share_specs(self):
+        config = self._make_config(
+            samba_shares=[['read', 'share', '/mnt/data']],
+        )
+        parts = config.to_setup_command()
+        cmd = ' '.join(parts)
+        self.assertIn('--share read share /mnt/data', cmd)
+        self.assertNotIn('[REDACTED]', cmd)
+
+    def test_share_command_redacts_mixed_share_users(self):
+        config = self._make_config(
+            share_credentials=[['user1', 'secret1'], ['user2', 'secret2']],
+            samba_shares=[['read', 'share', '/mnt/data', ' user1 , , user2:secret2 ,user1,user3:secret3 ']],
+        )
+        parts = config.to_setup_command()
+        cmd = ' '.join(parts)
+        self.assertIn('--credential user1 [REDACTED]', cmd)
+        self.assertEqual(cmd.count('--credential user1 [REDACTED]'), 1)
+        self.assertIn('user1,user2:[REDACTED],user1,user3:[REDACTED]', cmd)
+        self.assertNotIn('secret2', cmd)
+        self.assertNotIn('secret3', cmd)
+
     def test_python_flag_included(self):
         config = self._make_config(install_python=True)
         parts = config.to_setup_command()
