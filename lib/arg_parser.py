@@ -153,7 +153,10 @@ def create_setup_argument_parser(
                        help="Install and configure Samba for SMB file sharing")
     parser.add_argument("--share", dest="samba_shares", 
                        action="append", nargs=4, metavar=("ACCESS_TYPE", "SHARE_NAME", "PATHS", "USERS"),
-                       help="Configure Samba share: access_type (read|write), share_name, comma-separated paths, comma-separated username:password pairs (can be used multiple times)")
+                       help="Configure Samba share: access_type (read|write), share_name, comma-separated paths, comma-separated username:password pairs or usernames that resolve via --credential (can be used multiple times)")
+    parser.add_argument("--credential", dest="share_credentials",
+                       action="append", nargs=2, metavar=("USERNAME", "PASSWORD"),
+                       help="Store a Samba credential for share users so --share can reference usernames without inline passwords (can be used multiple times)")
     
     parser.add_argument("--smbclient", dest="enable_smbclient", 
                        action=argparse.BooleanOptionalAction if not for_remote else "store_true", 

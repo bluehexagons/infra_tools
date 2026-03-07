@@ -146,6 +146,12 @@ class TestSetupConfigToRemoteArgs(unittest.TestCase):
         self.assertIn('--samba', args_str)
         self.assertIn('--share', args_str)
 
+    def test_share_credentials(self):
+        config = self._make_config(share_credentials=[['user1', 'pass1']])
+        args = config.to_remote_args()
+        args_str = ' '.join(args)
+        self.assertIn('--credential user1 pass1', args_str)
+
     def test_smb_mounts(self):
         config = self._make_config(enable_smbclient=True, smb_mounts=[['/mnt/share', '1.2.3.4', 'u:p', 'share', '/']])
         args = config.to_remote_args()

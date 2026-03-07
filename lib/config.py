@@ -72,6 +72,7 @@ class SetupConfig:
     api_subdomain: bool = False
     enable_samba: bool = False
     samba_shares: Optional[NestedStrList] = None
+    share_credentials: Optional[NestedStrList] = None
     enable_smbclient: bool = False
     smb_mounts: Optional[NestedStrList] = None
     sync_specs: Optional[NestedStrList] = None
@@ -191,6 +192,11 @@ class SetupConfig:
             for share_spec in self.samba_shares:
                 escaped_spec = ' '.join(shlex.quote(str(s)) for s in share_spec)
                 args.append(f"--share {escaped_spec}")
+
+        if self.share_credentials:
+            for credential_spec in self.share_credentials:
+                escaped_spec = ' '.join(shlex.quote(str(s)) for s in credential_spec)
+                args.append(f"--credential {escaped_spec}")
         
         if self.enable_smbclient:
             args.append("--smbclient")
@@ -492,6 +498,7 @@ class SetupConfig:
             api_subdomain=getattr(args, 'api_subdomain', False),
             enable_samba=getattr(args, 'enable_samba', False),
             samba_shares=getattr(args, 'samba_shares', None),
+            share_credentials=getattr(args, 'share_credentials', None),
             enable_smbclient=enable_smbclient,
             smb_mounts=smb_mounts,
             sync_specs=getattr(args, 'sync_specs', None),

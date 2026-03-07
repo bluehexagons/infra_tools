@@ -14,7 +14,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 import subprocess
 
 import lib.task_utils as tu
-from smb.samba_steps import parse_share_spec, _get_veto_dirs_for_share
+from smb.samba_steps import (
+    parse_share_spec,
+    parse_share_credentials,
+    validate_samba_share_credentials,
+    _get_veto_dirs_for_share,
+)
 from smb.smb_mount_steps import parse_smb_mount_spec
 from sync.sync_steps import parse_sync_spec
 from sync.scrub_steps import parse_scrub_spec
@@ -80,6 +85,39 @@ class TestParseShareSpec(unittest.TestCase):
     def test_user_without_password(self):
         with self.assertRaises(ValueError):
             parse_share_spec(['read', 's', '/a', 'nopassword'])
+
+    def test_user_without_password_uses_named_credential(self):
+        credentials = parse_share_credentials([['user1', 'pass1']])
+        result = parse_share_spec(['read', 's', '/a', 'user1'], credentials)
+        self.assertEqual(result['users'], [{'username': 'user1', 'password': 'pass1'}])
+
+    def test_missing_named_credential(self):
+        with self.assertRaisesRegex(ValueError, 'Missing credential for share user: user1'):
+            parse_share_spec(['read', 's', '/a', 'user1'], {})
+
+
+class TestValidateSambaShareCredentials(unittest.TestCase):
+    def test_accepts_username_only_share_users_with_credentials(self):
+        config = SetupConfig(
+            host='testhost',
+            username='testuser',
+            system_type='server_lite',
+            samba_shares=[['read', 'share', '/mnt/data', 'user1']],
+            share_credentials=[['user1', 'pass1']],
+        )
+
+        validate_samba_share_credentials(config)
+
+    def test_rejects_missing_username_only_share_credentials(self):
+        config = SetupConfig(
+            host='testhost',
+            username='testuser',
+            system_type='server_lite',
+            samba_shares=[['read', 'share', '/mnt/data', 'user1']],
+        )
+
+        with self.assertRaisesRegex(ValueError, 'Missing credential for share user: user1'):
+            validate_samba_share_credentials(config)
 
 
 # ---------------------------------------------------------------------------

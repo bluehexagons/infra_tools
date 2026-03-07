@@ -89,6 +89,19 @@ def merge_setup_configs(cached_config: SetupConfig, new_config: SetupConfig) -> 
                     if share_tuple not in existing_shares:
                         merged_dict[key].append(share_spec)
                         existing_shares.add(share_tuple)
+        elif key == 'share_credentials' and key in merged_dict:
+            if merged_dict[key] is None:
+                merged_dict[key] = value
+            elif value is not None:
+                merged_credentials = {
+                    credential_spec[0]: credential_spec
+                    for credential_spec in merged_dict[key]
+                    if credential_spec
+                }
+                for credential_spec in value:
+                    if credential_spec:
+                        merged_credentials[credential_spec[0]] = credential_spec
+                merged_dict[key] = list(merged_credentials.values())
         elif key == 'tags':
             if value is not None:
                 merged_dict[key] = value

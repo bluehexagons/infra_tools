@@ -18,6 +18,7 @@ from lib.validators import validate_username
 from lib.progress import progress_bar
 from lib.system_types import get_steps_for_system_type
 from lib.systemd_service import cleanup_all_infra_services
+from smb.samba_steps import validate_samba_share_credentials
 from typing import Optional
 from lib.types import Deployments 
 
@@ -40,6 +41,7 @@ def config_from_remote_args(args: argparse.Namespace) -> SetupConfig:
     args.host = "localhost"
     
     config = SetupConfig.from_args(args, system_type)
+    validate_samba_share_credentials(config)
     
     if system_type == "server_proxmox":
         config.username = "root"
