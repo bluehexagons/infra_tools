@@ -347,24 +347,17 @@ class SetupConfig:
         if self.enable_samba:
             cmd_parts.append("--samba")
 
-        required_share_credentials: set[str] = set()
-        if self.samba_shares:
-            for share_spec in self.samba_shares:
-                if len(share_spec) < 4:
-                    continue
-                for user_spec in share_spec[3].split(','):
-                    user_spec = user_spec.strip()
-                    if not user_spec or ':' in user_spec or user_spec in required_share_credentials:
-                        continue
-                    required_share_credentials.add(user_spec)
-                    cmd_parts.append(f"--credential {shlex.quote(user_spec)} [REDACTED]")
-        
+        share_users_index = 3
+        share_spec_min_length = share_users_index + 1
+        required_share_credentials: StrList = []
+        seen_share_credentials: set[str] = set()
+        redacted_share_specs: list[list[str]] = []
         if self.samba_shares:
             for share_spec in self.samba_shares:
                 redacted_share_spec = list(share_spec)
-                if len(redacted_share_spec) >= 4:
+                if len(redacted_share_spec) >= share_spec_min_length:
                     redacted_users: StrList = []
-                    for user_spec in str(redacted_share_spec[3]).split(','):
+                    for user_spec in str(redacted_share_spec[share_users_index]).split(','):
                         user_spec = user_spec.strip()
                         if not user_spec:
                             continue
@@ -373,9 +366,18 @@ class SetupConfig:
                             redacted_users.append(f"{username.strip()}:[REDACTED]")
                         else:
                             redacted_users.append(user_spec)
-                    redacted_share_spec[3] = ','.join(redacted_users)
-                escaped_spec = ' '.join(shlex.quote(str(s)) for s in redacted_share_spec)
-                cmd_parts.append(f"--share {escaped_spec}")
+                            if user_spec not in seen_share_credentials:
+                                seen_share_credentials.add(user_spec)
+                                required_share_credentials.append(user_spec)
+                    redacted_share_spec[share_users_index] = ','.join(redacted_users)
+                redacted_share_specs.append(redacted_share_spec)
+
+        for username in required_share_credentials:
+            cmd_parts.append(f"--credential {shlex.quote(username)} [REDACTED]")
+
+        for redacted_share_spec in redacted_share_specs:
+            escaped_spec = ' '.join(shlex.quote(str(s)) for s in redacted_share_spec)
+            cmd_parts.append(f"--share {escaped_spec}")
         
         # SMB client
         if self.enable_smbclient:
