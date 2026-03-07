@@ -356,8 +356,9 @@ class SetupConfig:
             for share_spec in self.samba_shares:
                 redacted_share_spec = list(share_spec)
                 if len(redacted_share_spec) >= MIN_SHARE_FIELDS:
+                    users_field = redacted_share_spec[SHARE_USERS_INDEX]
                     redacted_users: StrList = []
-                    for user_spec in redacted_share_spec[SHARE_USERS_INDEX].split(','):
+                    for user_spec in users_field.split(','):
                         user_spec = user_spec.strip()
                         if not user_spec:
                             continue

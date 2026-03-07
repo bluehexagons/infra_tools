@@ -259,6 +259,7 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
     def test_share_command_redacts_mixed_share_users(self):
         config = self._make_config(
             share_credentials=[['user1', 'secret1'], ['user2', 'secret2']],
+            # Intentional whitespace, duplicates, and empty entries to exercise user list cleanup.
             samba_shares=[['read', 'share', '/mnt/data', ' user1 , , user2:secret2 ,user1,user3:secret3 ']],
         )
         parts = config.to_setup_command()
