@@ -226,14 +226,25 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
         cmd = ' '.join(parts)
         self.assertNotIn('secret', cmd)
 
-    def test_share_credentials_not_included(self):
+    def test_share_credentials_redacted_for_username_only_shares(self):
         config = self._make_config(
             share_credentials=[['user1', 'secret1']],
             samba_shares=[['read', 'share', '/mnt/data', 'user1']],
         )
         parts = config.to_setup_command()
         cmd = ' '.join(parts)
-        self.assertNotIn('--credential', cmd)
+        self.assertIn('--credential user1 [REDACTED]', cmd)
+        self.assertNotIn('secret1', cmd)
+
+    def test_share_credentials_omitted_for_inline_share_passwords(self):
+        config = self._make_config(
+            share_credentials=[['user1', 'secret1']],
+            samba_shares=[['read', 'share', '/mnt/data', 'user1:secret1']],
+        )
+        parts = config.to_setup_command()
+        cmd = ' '.join(parts)
+        self.assertNotIn('--credential user1 [REDACTED]', cmd)
+        self.assertIn('user1:[REDACTED]', cmd)
         self.assertNotIn('secret1', cmd)
 
     def test_python_flag_included(self):

@@ -55,8 +55,8 @@ Complete reference for all setup script flags.
 | Flag | Description |
 |------|-------------|
 | `--samba` | Install and configure Samba |
-| `--share TYPE NAME PATHS USERS` | Configure Samba share using comma-separated `username:password` entries or username-only entries that resolve via `--credential` |
-| `--credential USERNAME PASSWORD` | Store reusable Samba share credentials for username-only `--share` entries |
+| `--share TYPE NAME PATHS USERS` | Configure a Samba share with comma-separated `username` or `username:password` user entries |
+| `--credential USERNAME PASSWORD` | Define a password for username-only `--share` user entries |
 | `--smbclient` | Install SMB/CIFS client |
 | `--mount-smb MOUNT IP CREDS SHARE` | Mount SMB share persistently |
 
@@ -69,8 +69,7 @@ python3 setup_server_lite.py 192.168.1.10 \
   --share read media /mnt/data/media mediauser,guest:guest
 ```
 
-If `USERS` contains a bare username such as `mediauser`, it must have a matching
-`--credential mediauser PASSWORD` entry. Inline `username:password` values remain supported.
+Each bare username in `USERS` must have a matching `--credential USERNAME PASSWORD` entry.
 
 ## Sync Flags
 

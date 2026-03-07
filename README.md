@@ -19,7 +19,7 @@ python3 patch_setup.py example.com --ssl --deploy api.example.com https://github
 
 - **Servers**: Security hardening, Nginx/SSL, Ruby/Node/Go, app deployment
 - **Workstations**: Desktop environments (XFCE, i3, LXQt), RDP, browsers, audio
-- **Storage**: Samba shares with reusable credentials, rsync sync, par2 integrity verification
+- **Storage**: Samba shares, rsync sync, par2 integrity verification
 - **Security**: Firewall, SSH hardening, fail2ban, auto-updates
 
 ## Setup Scripts
@@ -63,9 +63,9 @@ python3 setup_server_lite.py 192.168.1.10 \
   --scrub /mnt/backup .pardatabase 5% weekly
 ```
 
-You can still provide inline share credentials as `username:password`, but `--credential USERNAME PASSWORD`
-lets multiple `--share` flags reuse the same password without repeating it inline. Any username-only share
-entry must have a matching `--credential` or setup exits with an error before making changes.
+Use `--credential USERNAME PASSWORD` to define share passwords once, then reference those users by name in
+`--share`. The `USERS` field accepts a comma-separated list of `username` or `username:password` entries, and
+each bare username must have a matching `--credential`.
 
 ## Requirements
 

@@ -346,10 +346,35 @@ class SetupConfig:
         # Samba
         if self.enable_samba:
             cmd_parts.append("--samba")
+
+        required_share_credentials: set[str] = set()
+        if self.samba_shares:
+            for share_spec in self.samba_shares:
+                if len(share_spec) < 4:
+                    continue
+                for user_spec in share_spec[3].split(','):
+                    user_spec = user_spec.strip()
+                    if not user_spec or ':' in user_spec or user_spec in required_share_credentials:
+                        continue
+                    required_share_credentials.add(user_spec)
+                    cmd_parts.append(f"--credential {shlex.quote(user_spec)} [REDACTED]")
         
         if self.samba_shares:
             for share_spec in self.samba_shares:
-                escaped_spec = ' '.join(shlex.quote(str(s)) for s in share_spec)
+                redacted_share_spec = list(share_spec)
+                if len(redacted_share_spec) >= 4:
+                    redacted_users: StrList = []
+                    for user_spec in str(redacted_share_spec[3]).split(','):
+                        user_spec = user_spec.strip()
+                        if not user_spec:
+                            continue
+                        if ':' in user_spec:
+                            username, _ = user_spec.split(':', 1)
+                            redacted_users.append(f"{username.strip()}:[REDACTED]")
+                        else:
+                            redacted_users.append(user_spec)
+                    redacted_share_spec[3] = ','.join(redacted_users)
+                escaped_spec = ' '.join(shlex.quote(str(s)) for s in redacted_share_spec)
                 cmd_parts.append(f"--share {escaped_spec}")
         
         # SMB client
