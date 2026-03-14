@@ -179,6 +179,11 @@ def create_setup_argument_parser(
                        action="append", nargs=2, metavar=("TYPE", "TARGET"),
                        help="Configure notification target: TYPE (webhook|mailbox), TARGET (URL for webhook or email for mailbox). Sends alerts for important events (errors, warnings, successes). Can be used multiple times for multiple targets.")
     
+    parser.add_argument("--no-restart", dest="no_restart",
+                        action="store_true",
+                        default=None if not for_remote else False,
+                        help="Disable automatic restarts after updates. Instead of restarting, a notification will be sent. Default for server_proxmox.")
+    
     parser.add_argument("--dry-run", action="store_true",
                        help="Show what would be done without executing commands")
     

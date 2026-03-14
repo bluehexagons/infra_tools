@@ -58,9 +58,8 @@ def check_file_exists(path: str) -> bool:
 
 
 def detect_ruby() -> bool:
-    home_dir = os.path.expanduser("~")
-    rbenv_path = os.path.join(home_dir, ".rbenv")
-    return check_directory_exists(rbenv_path) or check_command_exists("rbenv")
+    """Detect Ruby installed via apt packages."""
+    return check_command_exists("ruby") and check_command_exists("bundler")
 
 
 def detect_go() -> bool:

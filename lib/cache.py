@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import time
 from dataclasses import asdict
 from typing import Optional, Any
 
@@ -23,7 +24,8 @@ def get_cache_path_for_host(host: str) -> str:
     return os.path.join(SETUP_CACHE_DIR, f"{safe_host}_{host_hash}.json")
 
 
-def save_setup_command(config: SetupConfig) -> None:
+def save_setup_command(config: SetupConfig, start_time: Optional[float] = None, 
+                      end_time: Optional[float] = None, success: Optional[bool] = None) -> None:
     cache_path = get_cache_path_for_host(config.host)
     
     cache_data: dict[str, Any] = {
@@ -37,6 +39,14 @@ def save_setup_command(config: SetupConfig) -> None:
         cache_data["name"] = config.friendly_name
     if config.tags:
         cache_data["tags"] = config.tags
+        
+    # Add metadata if provided
+    if start_time is not None:
+        cache_data["last_start_time"] = start_time
+    if end_time is not None:
+        cache_data["last_end_time"] = end_time
+    if success is not None:
+        cache_data["last_success"] = success
     
     with open(cache_path, 'w') as f:
         json.dump(cache_data, f, indent=2)

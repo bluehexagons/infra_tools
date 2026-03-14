@@ -78,6 +78,7 @@ class SetupConfig:
     sync_specs: Optional[NestedStrList] = None
     scrub_specs: Optional[NestedStrList] = None
     notify_specs: Optional[NestedStrList] = None
+    no_restart: bool = False
     include_desktop: bool = False
     include_cli_tools: bool = False
     include_desktop_apps: bool = False
@@ -220,6 +221,9 @@ class SetupConfig:
             for notify_spec in self.notify_specs:
                 escaped_spec = ' '.join(shlex.quote(str(s)) for s in notify_spec)
                 args.append(f"--notify {escaped_spec}")
+        
+        if self.no_restart:
+            args.append("--no-restart")
                 
         return args
     
@@ -409,6 +413,10 @@ class SetupConfig:
                 escaped_spec = ' '.join(shlex.quote(str(s)) for s in notify_spec)
                 cmd_parts.append(f"--notify {escaped_spec}")
         
+        # Restart control
+        if self.no_restart:
+            cmd_parts.append("--no-restart")
+        
         return cmd_parts
 
     def to_dict(self) -> JSONDict:
@@ -489,6 +497,10 @@ class SetupConfig:
         include_web_server = system_type == "server_web"
         include_web_firewall = system_type == "server_web"
         
+        no_restart = getattr(args, 'no_restart', None)
+        if no_restart is None:
+            no_restart = system_type == "server_proxmox"
+        
         return cls(
             host=args.host,
             username=username,
@@ -533,6 +545,7 @@ class SetupConfig:
             sync_specs=getattr(args, 'sync_specs', None),
             scrub_specs=getattr(args, 'scrub_specs', None),
             notify_specs=getattr(args, 'notify_specs', None),
+            no_restart=no_restart,
             include_desktop=include_desktop,
             include_cli_tools=include_cli_tools,
             include_desktop_apps=include_desktop_apps,

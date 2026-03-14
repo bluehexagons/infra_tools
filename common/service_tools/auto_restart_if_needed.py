@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../
 
 from lib.logging_utils import get_service_logger
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
+from lib.machine_state import load_setup_config
 
 # Initialize centralized logger
 logger = get_service_logger('auto_restart_if_needed', 'common', use_syslog=True)
@@ -115,6 +116,17 @@ def perform_restart(notification_configs) -> int:
         return 1
 
 
+def is_no_restart_mode() -> bool:
+    """Check if automatic restarts are disabled via the no_restart config flag."""
+    try:
+        config = load_setup_config()
+        if config:
+            return bool(config.get("no_restart", False))
+    except Exception:
+        pass
+    return False
+
+
 def main():
     """Main function to check and perform restart if needed."""
     logger.info("Starting restart check")
@@ -123,6 +135,19 @@ def main():
     # Check if restart is required
     if not check_restart_required():
         logger.info("No restart required")
+        return 0
+    
+    # When no_restart is configured, always notify instead of restarting
+    if is_no_restart_mode():
+        logger.info("Restart required but automatic restarts are disabled (no_restart mode)")
+        send_notification_safe(
+            notification_configs,
+            subject="Restart required: automatic restart disabled",
+            job="auto_restart_if_needed",
+            status="warning",
+            message="A restart is required, but automatic restarts are disabled (--no-restart). Manual restart is required.",
+            logger=logger
+        )
         return 0
     
     # Check for SSH/console sessions

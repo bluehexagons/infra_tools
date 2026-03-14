@@ -4,6 +4,7 @@ from __future__ import annotations
 import sys
 import os
 import json
+import time
 
 try:
     import argcomplete
@@ -77,6 +78,8 @@ def get_all_configs(pattern: Optional[str] = None) -> Deployments:
 
 
 def list_configurations(pattern: Optional[str] = None) -> None:
+    from datetime import datetime
+    
     configs: Deployments = get_all_configs(pattern)
 
     if not configs:
@@ -90,9 +93,11 @@ def list_configurations(pattern: Optional[str] = None) -> None:
     name_width = 20
     type_width = 20
     user_width = 15
-    total_width = host_width + name_width + type_width + user_width
+    date_width = 20
+    status_width = 10
+    total_width = host_width + name_width + type_width + user_width + date_width + status_width
     
-    print(f"{'HOST':<{host_width}} {'NAME':<{name_width}} {'TYPE':<{type_width}} {'USER':<{user_width}}")
+    print(f"{'HOST':<{host_width}} {'NAME':<{name_width}} {'TYPE':<{type_width}} {'USER':<{user_width}} {'LAST RUN':<{date_width}} {'STATUS':<{status_width}}")
     print("-" * total_width)
     
     for config in configs:
@@ -102,7 +107,31 @@ def list_configurations(pattern: Optional[str] = None) -> None:
         args = config.get('args', {})
         username = args.get('username', 'Unknown')
         
-        print(f"{host:<{host_width}} {name:<{name_width}} {system_type:<{type_width}} {username:<{user_width}}")
+        # Format last run time
+        last_start_time = config.get('last_start_time')
+        last_end_time = config.get('last_end_time')
+        last_success = config.get('last_success')
+        
+        if last_start_time and last_end_time:
+            start_dt = datetime.fromtimestamp(last_start_time)
+            end_dt = datetime.fromtimestamp(last_end_time)
+            duration = end_dt - start_dt
+            last_run_str = f"{start_dt.strftime('%m/%d %H:%M')} ({duration.total_seconds():.0f}s)"
+        elif last_start_time:
+            start_dt = datetime.fromtimestamp(last_start_time)
+            last_run_str = f"{start_dt.strftime('%m/%d %H:%M')} (running)"
+        else:
+            last_run_str = "Never"
+        
+        # Format status
+        if last_success is True:
+            status_str = "PASS"
+        elif last_success is False:
+            status_str = "FAIL"
+        else:
+            status_str = "UNKNOWN"
+        
+        print(f"{host:<{host_width}} {name:<{name_width}} {system_type:<{type_width}} {username:<{user_width}} {last_run_str:<{date_width}} {status_str:<{status_width}}")
 
 
 def show_info(pattern: Optional[str] = None) -> None:
@@ -167,7 +196,6 @@ def show_info(pattern: Optional[str] = None) -> None:
             for share in samba_shares:
                 if isinstance(share, list):
                     try:
-                        # Attempt to index expected elements safely
                         share_list: JSONList = cast(JSONList, share)
                         name_part = str(share_list[1])
                         host_part = str(share_list[0])
@@ -175,6 +203,25 @@ def show_info(pattern: Optional[str] = None) -> None:
                         print(f"  - {name_part}_{host_part}: {path_part}")
                     except Exception:
                         continue
+        
+        from datetime import datetime
+        last_start_time = config.get('last_start_time')
+        last_end_time = config.get('last_end_time')
+        last_success = config.get('last_success')
+        
+        if last_start_time:
+            start_dt = datetime.fromtimestamp(last_start_time)
+            print(f"Last Run: {start_dt.strftime('%Y-%m-%d %H:%M:%S')}")
+            
+            if last_end_time:
+                end_dt = datetime.fromtimestamp(last_end_time)
+                duration = end_dt - start_dt
+                print(f"Duration: {duration.total_seconds():.1f}s")
+                print(f"Status: {'PASS' if last_success else 'FAIL'}")
+            else:
+                print("Status: In Progress")
+        else:
+            print("Last Run: Never")
         
         print()
 
@@ -252,14 +299,21 @@ def execute_patch(config: SetupConfig) -> int:
     print("=" * 60)
     print()
     
+    start_time = time.time()
+    
     returncode = run_remote_setup(config)
+    
+    end_time = time.time()
+    success = (returncode == 0)
     
     if returncode != 0:
         print(f"\n✗ Patch failed (exit code: {returncode})")
-        return 1
     
     if not config.dry_run:
-        save_setup_command(config)
+        save_setup_command(config, start_time, end_time, success)
+    
+    if returncode != 0:
+        return 1
     
     print()
     print("=" * 60)

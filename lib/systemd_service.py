@@ -134,6 +134,8 @@ def cleanup_all_infra_services(dry_run: bool = False) -> None:
         r"^auto-update-ruby\.timer$",
         r"^auto-update-node\.service$",
         r"^auto-update-node\.timer$",
+        r"^auto-update-apt\.service$",
+        r"^auto-update-apt\.timer$",
         # Auto-restart service
         r"^auto-restart-if-needed\.service$",
         r"^auto-restart-if-needed\.timer$",
