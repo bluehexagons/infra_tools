@@ -60,7 +60,7 @@ class TestConfigureAutoUpdates(unittest.TestCase):
     @patch("security.security_steps.os.path.exists", return_value=True)
     def test_cleans_up_legacy_unattended_upgrades(self, mock_exists, mock_file, _cleanup, mock_run):
         mock_run.return_value = SimpleNamespace(returncode=0)
-        removed_paths: list[str] = []
+        removed_paths = []
         with patch("security.security_steps.os.remove", side_effect=lambda p: removed_paths.append(p)):
             configure_auto_updates(SetupConfig(username="u", host="h", system_type="server_lite"))
         self.assertIn("/etc/apt/apt.conf.d/52infra-tools-unattended-upgrades", removed_paths)
