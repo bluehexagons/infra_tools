@@ -114,6 +114,24 @@ class TestMergeSetupConfigs(unittest.TestCase):
         merged = merge_setup_configs(cached, new)
         self.assertEqual(merged.share_credentials, [['user1', 'pass1'], ['user2', 'pass2']])
 
+    def test_share_credentials_update_existing(self):
+        cached = self._make_config(share_credentials=[['user1', 'oldpass']])
+        new = self._make_config(share_credentials=[['user1', 'newpass']])
+        merged = merge_setup_configs(cached, new)
+        self.assertEqual(merged.share_credentials, [['user1', 'newpass']])
+
+    def test_share_credentials_mixed_update_and_add(self):
+        cached = self._make_config(share_credentials=[['user1', 'pass1']])
+        new = self._make_config(share_credentials=[['user1', 'updated'], ['user2', 'pass2']])
+        merged = merge_setup_configs(cached, new)
+        self.assertEqual(merged.share_credentials, [['user1', 'updated'], ['user2', 'pass2']])
+
+    def test_share_credentials_none_cached(self):
+        cached = self._make_config(share_credentials=None)
+        new = self._make_config(share_credentials=[['user1', 'pass1']])
+        merged = merge_setup_configs(cached, new)
+        self.assertEqual(merged.share_credentials, [['user1', 'pass1']])
+
     def test_tags_overwritten(self):
         cached = self._make_config(tags=['old'])
         new = self._make_config(tags=['new1', 'new2'])

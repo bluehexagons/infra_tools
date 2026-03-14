@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from typing import Optional
 
+from common.common_steps import configure_auto_update_ruby as _configure_auto_update_ruby_common
 from lib.config import SetupConfig
 from lib.remote_utils import run, is_service_active
 from lib.systemd_service import cleanup_service
@@ -90,17 +91,5 @@ def configure_auto_update_node(config: SetupConfig) -> None:
 
 
 def configure_auto_update_ruby(config: SetupConfig) -> None:
-    """Configure automatic updates for Ruby via rbenv."""
-    user_home = f"/home/{config.username}"
-    rbenv_dir = f"{user_home}/.rbenv"
-    
-    _configure_auto_update_systemd(
-        service_name="auto-update-ruby",
-        service_desc="Auto-update Ruby to latest stable version",
-        timer_desc="Auto-update Ruby weekly",
-        script_name="auto_update_ruby.py",
-        schedule="Sun *-*-* 04:00:00",
-        check_path=rbenv_dir,
-        check_name="Ruby",
-        user=config.username
-    )
+    """Configure automatic updates for Ruby via apt packages."""
+    _configure_auto_update_ruby_common(config)

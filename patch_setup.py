@@ -90,9 +90,11 @@ def list_configurations(pattern: Optional[str] = None) -> None:
     name_width = 20
     type_width = 20
     user_width = 15
-    total_width = host_width + name_width + type_width + user_width
+    date_width = 20
+    status_width = 10
+    total_width = host_width + name_width + type_width + user_width + date_width + status_width
     
-    print(f"{'HOST':<{host_width}} {'NAME':<{name_width}} {'TYPE':<{type_width}} {'USER':<{user_width}}")
+    print(f"{'HOST':<{host_width}} {'NAME':<{name_width}} {'TYPE':<{type_width}} {'USER':<{user_width}} {'LAST RUN':<{date_width}} {'STATUS':<{status_width}}")
     print("-" * total_width)
     
     for config in configs:
@@ -102,7 +104,34 @@ def list_configurations(pattern: Optional[str] = None) -> None:
         args = config.get('args', {})
         username = args.get('username', 'Unknown')
         
-        print(f"{host:<{host_width}} {name:<{name_width}} {system_type:<{type_width}} {username:<{user_width}}")
+        # Format last run time
+        last_start_time = config.get('last_start_time')
+        last_end_time = config.get('last_end_time')
+        last_success = config.get('last_success')
+        
+        if last_start_time and last_end_time:
+            # Format as MM/DD HH:MM
+            from datetime import datetime
+            start_dt = datetime.fromtimestamp(last_start_time)
+            end_dt = datetime.fromtimestamp(last_end_time)
+            duration = end_dt - start_dt
+            last_run_str = f"{start_dt.strftime('%m/%d %H:%M')} ({duration.total_seconds():.0f}s)"
+        elif last_start_time:
+            from datetime import datetime
+            start_dt = datetime.fromtimestamp(last_start_time)
+            last_run_str = f"{start_dt.strftime('%m/%d %H:%M')} (running)"
+        else:
+            last_run_str = "Never"
+        
+        # Format status
+        if last_success is True:
+            status_str = "PASS"
+        elif last_success is False:
+            status_str = "FAIL"
+        else:
+            status_str = "UNKNOWN"
+        
+        print(f"{host:<{host_width}} {name:<{name_width}} {system_type:<{type_width}} {username:<{user_width}} {last_run_str:<{date_width}} {status_str:<{status_width}}")
 
 
 def show_info(pattern: Optional[str] = None) -> None:

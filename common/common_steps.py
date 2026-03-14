@@ -356,7 +356,7 @@ def install_or_update_uv(user_home: str, username: Optional[str] = None) -> bool
                 return False
 
             file_mode = os.stat(installer_path).st_mode & 0o777
-            if (file_mode & 0o077) != 0 or (file_mode & 0o400) == 0:
+            if (file_mode & 0o033) != 0 or (file_mode & 0o100) == 0:
                 print("  ✗ Downloaded uv installer file permissions are too broad")
                 return False
 
