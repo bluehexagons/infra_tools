@@ -3,39 +3,14 @@
 from __future__ import annotations
 
 import os
-import fcntl
 
 from lib.config import SetupConfig
 from lib.machine_state import can_modify_kernel, is_container
 from lib.remote_utils import run, is_service_active, file_contains
 from lib.systemd_service import cleanup_service
 
-UNATTENDED_ORIGINS_FILE = "/etc/apt/apt.conf.d/52infra-tools-unattended-upgrades"
-UNATTENDED_MANAGED_ORIGINS_FILE = "/etc/infra_tools/unattended_upgrades_origins.list"
-
-
-def _load_managed_unattended_origins() -> list[str]:
-    """Load additional unattended-upgrades origins managed by setup steps."""
-    if not os.path.exists(UNATTENDED_MANAGED_ORIGINS_FILE):
-        return []
-    with open(UNATTENDED_MANAGED_ORIGINS_FILE, "r") as f:
-        return [line.strip() for line in f.readlines() if line.strip()]
-
-
-def _store_managed_unattended_origin(origin: str) -> None:
-    """Persist an unattended-upgrades origin for future config generation."""
-    os.makedirs(os.path.dirname(UNATTENDED_MANAGED_ORIGINS_FILE), exist_ok=True)
-    fd = os.open(UNATTENDED_MANAGED_ORIGINS_FILE, os.O_CREAT | os.O_RDWR, 0o644)
-    with os.fdopen(fd, "r+") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        try:
-            f.seek(0)
-            origins = {line.strip() for line in f.readlines() if line.strip()}
-            if origin not in origins:
-                f.seek(0, os.SEEK_END)
-                f.write(f"{origin}\n")
-        finally:
-            fcntl.flock(f, fcntl.LOCK_UN)
+_LEGACY_UNATTENDED_ORIGINS_FILE = "/etc/apt/apt.conf.d/52infra-tools-unattended-upgrades"
+_LEGACY_MANAGED_ORIGINS_FILE = "/etc/infra_tools/unattended_upgrades_origins.list"
 
 
 def create_remoteusers_group(config: SetupConfig) -> None:
@@ -204,73 +179,72 @@ fs.suid_dumpable=0
     print("  ✓ Kernel hardened (network protection, security restrictions)")
 
 
+def _cleanup_legacy_unattended_upgrades() -> None:
+    """Remove legacy unattended-upgrades config files created by older versions."""
+    for path in (_LEGACY_UNATTENDED_ORIGINS_FILE, _LEGACY_MANAGED_ORIGINS_FILE):
+        if os.path.exists(path):
+            os.remove(path)
+
+
 def configure_auto_updates(config: SetupConfig) -> None:
-    if os.path.exists("/etc/apt/apt.conf.d/20auto-upgrades"):
-        if os.path.exists(UNATTENDED_ORIGINS_FILE) and is_service_active("unattended-upgrades"):
-            print("  ✓ Automatic updates already configured")
-            return
-    
-    run("apt-get install -y -qq unattended-upgrades")
+    """Configure automatic package updates using a custom systemd service.
 
-    # The default unattended-upgrades timer runs daily around 6:00 AM + random delay
-    # This is before our 2:00 AM restart window (next day), giving time for updates to settle
-    auto_upgrades = """APT::Periodic::Update-Package-Lists "1";
-APT::Periodic::Unattended-Upgrade "1";
-APT::Periodic::AutocleanInterval "7";
+    This replaces the legacy unattended-upgrades approach. The new service
+    runs ``apt-get update && apt-get dist-upgrade`` which:
+    - Does not require any hardcoded origins or codenames
+    - Automatically handles all configured repositories
+    - Supports release version switches (dist-upgrade resolves dependency changes)
+    """
+    service_name = "auto-update-apt"
+    service_file = f"/etc/systemd/system/{service_name}.service"
+    timer_file = f"/etc/systemd/system/{service_name}.timer"
+
+    # Clean up any existing service/timer before creating new ones
+    cleanup_service(service_name)
+
+    # Remove legacy unattended-upgrades config files from older setups
+    _cleanup_legacy_unattended_upgrades()
+
+    script_path = "/opt/infra_tools/common/service_tools/auto_update_apt.py"
+
+    service_content = f"""[Unit]
+Description=Auto-update APT packages
+Documentation=man:systemd.service(5)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 {script_path}
+StandardOutput=journal
+StandardError=journal
 """
-    with open("/etc/apt/apt.conf.d/20auto-upgrades", "w") as f:
-        f.write(auto_upgrades)
 
-    origins = [
-        "origin=${distro_id},codename=${distro_codename}",
-        "origin=${distro_id},codename=${distro_codename}-security",
-        "origin=${distro_id},codename=${distro_codename}-updates",
-    ]
-    for origin in _load_managed_unattended_origins():
-        origins.append(f"origin={origin}")
+    with open(service_file, "w") as f:
+        f.write(service_content)
 
-    update_origins = "Unattended-Upgrade::Origins-Pattern {\n"
-    for origin in origins:
-        update_origins += f'        "{origin}";\n'
-    update_origins += "};\n"
+    timer_content = """[Unit]
+Description=Auto-update APT packages (daily at 6 AM)
+Documentation=man:systemd.timer(5)
 
-    with open(UNATTENDED_ORIGINS_FILE, "w") as f:
-        f.write(update_origins)
+[Timer]
+OnCalendar=*-*-* 06:00:00
+Persistent=true
+RandomizedDelaySec=30min
 
-    # systemctl may not be available or functional in containers
-    result = run("systemctl enable unattended-upgrades", check=False)
+[Install]
+WantedBy=timers.target
+"""
+
+    with open(timer_file, "w") as f:
+        f.write(timer_content)
+
+    result = run("systemctl daemon-reload", check=False)
     if result.returncode != 0:
-        print("  ⚠ Automatic updates configured but systemd service could not be enabled")
+        print("  ⚠ Automatic updates configured but systemd could not reload")
         return
-    run("systemctl start unattended-upgrades", check=False)
+    run("systemctl enable auto-update-apt.timer", check=False)
+    run("systemctl start auto-update-apt.timer", check=False)
 
-    print("  ✓ Automatic package updates enabled")
-
-
-def ensure_unattended_upgrade_origin(origin: str) -> None:
-    """Ensure a specific origin is included in unattended-upgrades origins file."""
-    _store_managed_unattended_origin(origin)
-
-    if not os.path.exists(UNATTENDED_ORIGINS_FILE):
-        return
-
-    entry = f'"origin={origin}";'
-    with open(UNATTENDED_ORIGINS_FILE, "r") as f:
-        content = f.read()
-    if entry in content:
-        return
-
-    lines = content.splitlines(keepends=True)
-    for i, line in enumerate(lines):
-        if line.strip() == "};":
-            lines.insert(i, f"        {entry}\n")
-            break
-    else:
-        print("  ⚠ unattended-upgrades origins file format unexpected; could not add origin")
-        return
-
-    with open(UNATTENDED_ORIGINS_FILE, "w") as f:
-        f.write("".join(lines))
+    print("  ✓ Automatic package updates enabled (daily at 6 AM)")
 
 
 def configure_firewall_web(config: SetupConfig) -> None:
