@@ -205,6 +205,11 @@ def configure_auto_updates(config: SetupConfig) -> None:
     # Remove legacy unattended-upgrades config files from older setups
     _cleanup_legacy_unattended_upgrades()
 
+    # Stop and disable unattended-upgrades to prevent dpkg lock conflicts
+    # with our custom auto-update service.
+    run("systemctl stop unattended-upgrades", check=False)
+    run("systemctl disable unattended-upgrades", check=False)
+
     script_path = "/opt/infra_tools/common/service_tools/auto_update_apt.py"
 
     service_content = f"""[Unit]

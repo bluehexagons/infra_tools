@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import socket
+import subprocess
 import sys
 import unittest
 from unittest.mock import patch
@@ -62,12 +64,40 @@ class TestNotification(unittest.TestCase):
         d = n.to_dict()
         self.assertEqual(d['details'], 'traceback')
 
+    def test_to_dict_includes_hostname(self):
+        n = Notification(subject='Test', job='sync', status='good', message='ok')
+        d = n.to_dict()
+        self.assertIn('hostname', d)
+        self.assertIsInstance(d['hostname'], str)
+        self.assertTrue(d['hostname'])  # hostname should be non-empty
+
+    def test_hostname_default_is_gethostname(self):
+        n = Notification(subject='Test', job='sync', status='good', message='ok')
+        self.assertEqual(n.hostname, socket.gethostname())
+
+    def test_hostname_can_be_overridden(self):
+        n = Notification(subject='Test', job='sync', status='good', message='ok', hostname='custom-host')
+        self.assertEqual(n.hostname, 'custom-host')
+        self.assertEqual(n.to_dict()['hostname'], 'custom-host')
+
 
 class TestNotificationSender(unittest.TestCase):
     def test_empty_configs_returns_true(self):
         sender = NotificationSender([])
         notification = Notification(subject='Test', job='sync', status='good', message='ok')
         self.assertTrue(sender.send(notification))
+
+    @patch('subprocess.run')
+    def test_mailbox_body_includes_hostname(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout=b'', stderr=b'')
+        sender = NotificationSender([NotificationConfig(type='mailbox', target='admin@example.com')])
+        notification = Notification(
+            subject='Test', job='sync', status='error', message='Something failed', hostname='myserver'
+        )
+        sender.send(notification)
+        _, kwargs = mock_run.call_args
+        body = kwargs['input'].decode('utf-8')
+        self.assertIn('myserver', body)
 
 
 class TestParseNotificationArgs(unittest.TestCase):
