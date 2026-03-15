@@ -34,6 +34,12 @@ DPKG_OPTIONS = [
     '-o', 'Dpkg::Options::=--force-confold',
 ]
 
+# Wait up to 5 minutes for apt/dpkg locks to be released before failing.
+# This handles races with other apt processes (e.g. residual unattended-upgrades).
+APT_LOCK_OPTIONS = [
+    '-o', 'DPkg::Lock::Timeout=300',
+]
+
 
 def run_apt_command(args: list[str]) -> subprocess.CompletedProcess[str]:
     """Run an apt-get command with non-interactive settings."""
@@ -45,7 +51,7 @@ def run_apt_command(args: list[str]) -> subprocess.CompletedProcess[str]:
 
 def update_package_lists() -> bool:
     """Run apt-get update to refresh package lists."""
-    result = run_apt_command(['update', '-qq'])
+    result = run_apt_command(['update', '-qq'] + APT_LOCK_OPTIONS)
     if result.returncode != 0:
         logger.error("apt-get update failed: %s", result.stderr.strip())
         return False
@@ -59,7 +65,7 @@ def upgrade_packages() -> tuple[bool, str]:
     Returns:
         Tuple of (success, output_summary).
     """
-    result = run_apt_command(['dist-upgrade', '-y', '-qq'] + DPKG_OPTIONS)
+    result = run_apt_command(['dist-upgrade', '-y', '-qq'] + DPKG_OPTIONS + APT_LOCK_OPTIONS)
     output = result.stdout.strip()
     if result.returncode != 0:
         logger.error("apt-get dist-upgrade failed: %s", result.stderr.strip())
@@ -70,7 +76,7 @@ def upgrade_packages() -> tuple[bool, str]:
 
 def autoremove_packages() -> None:
     """Run apt-get autoremove to clean up unused packages."""
-    result = run_apt_command(['autoremove', '-y', '-qq'])
+    result = run_apt_command(['autoremove', '-y', '-qq'] + APT_LOCK_OPTIONS)
     if result.returncode != 0:
         logger.warning("apt-get autoremove failed: %s", result.stderr.strip())
     else:

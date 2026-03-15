@@ -6,9 +6,10 @@ Supports webhook and email notifications for important events.
 from __future__ import annotations
 
 import json
+import socket
 import subprocess
 from typing import Optional, Literal, cast
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from logging import Logger
 import urllib.request
 import urllib.error
@@ -51,6 +52,7 @@ class Notification:
     status: NotificationStatus
     message: str
     details: Optional[str] = None
+    hostname: str = field(default_factory=lambda: socket.gethostname())
     
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -118,6 +120,7 @@ class NotificationSender:
         """Send email notification."""
         body = f"""Job: {notification.job}
 Status: {notification.status.upper()}
+System: {notification.hostname}
 
 {notification.message}
 

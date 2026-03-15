@@ -66,6 +66,18 @@ class TestConfigureAutoUpdates(unittest.TestCase):
         self.assertIn("/etc/apt/apt.conf.d/52infra-tools-unattended-upgrades", removed_paths)
         self.assertIn("/etc/infra_tools/unattended_upgrades_origins.list", removed_paths)
 
+    @patch("security.security_steps.run")
+    @patch("security.security_steps.cleanup_service")
+    @patch("security.security_steps.open", new_callable=mock_open)
+    @patch("security.security_steps.os.path.exists", return_value=False)
+    def test_stops_and_disables_unattended_upgrades(self, _exists, mock_file, _cleanup, mock_run):
+        mock_run.return_value = SimpleNamespace(returncode=0)
+        configure_auto_updates(SetupConfig(username="u", host="h", system_type="server_lite"))
+
+        run_commands = [args[0] for args, _ in mock_run.call_args_list]
+        self.assertIn("systemctl stop unattended-upgrades", run_commands)
+        self.assertIn("systemctl disable unattended-upgrades", run_commands)
+
 
 if __name__ == "__main__":
     unittest.main()

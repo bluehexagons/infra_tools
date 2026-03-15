@@ -74,6 +74,33 @@ class TestUpgradePackages(unittest.TestCase):
         self.assertIn("Dpkg::Options::=--force-confdef", args)
         self.assertIn("Dpkg::Options::=--force-confold", args)
 
+    @patch("common.service_tools.auto_update_apt.run_apt_command")
+    def test_upgrade_uses_lock_timeout(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
+        auto_update_apt.upgrade_packages()
+        args = mock_run.call_args[0][0]
+        self.assertIn("DPkg::Lock::Timeout=300", args)
+
+    @patch("common.service_tools.auto_update_apt.run_apt_command")
+    def test_update_uses_lock_timeout(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
+        auto_update_apt.update_package_lists()
+        args = mock_run.call_args[0][0]
+        self.assertIn("DPkg::Lock::Timeout=300", args)
+
+    @patch("common.service_tools.auto_update_apt.run_apt_command")
+    def test_autoremove_uses_lock_timeout(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
+        auto_update_apt.autoremove_packages()
+        args = mock_run.call_args[0][0]
+        self.assertIn("DPkg::Lock::Timeout=300", args)
+
 
 if __name__ == "__main__":
     unittest.main()
