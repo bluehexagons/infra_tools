@@ -6,6 +6,8 @@ import unittest
 import json
 import hmac
 import hashlib
+import tempfile
+import time
 from unittest.mock import patch, mock_open, MagicMock
 import sys
 import os
@@ -408,6 +410,150 @@ class TestRemoteDeploy(unittest.TestCase):
         target = get_deploy_target('unknown.example.com')
         
         self.assertIsNone(target)
+
+
+class TestCleanupOldBuildLogs(unittest.TestCase):
+    """Test build log cleanup."""
+
+    def test_cleanup_removes_old_logs(self):
+        """Old log files are removed."""
+        from web.service_tools.cicd_executor import cleanup_old_build_logs
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            old_log = os.path.join(tmpdir, 'abc12345.log')
+            with open(old_log, 'w') as f:
+                f.write('old build log')
+            old_time = time.time() - (40 * 24 * 60 * 60)
+            os.utime(old_log, (old_time, old_time))
+
+            with patch('web.service_tools.cicd_executor.LOGS_DIR', tmpdir):
+                removed = cleanup_old_build_logs(days_to_keep=30)
+
+            self.assertEqual(removed, 1)
+            self.assertFalse(os.path.exists(old_log))
+
+    def test_cleanup_keeps_recent_logs(self):
+        """Recent log files are not removed."""
+        from web.service_tools.cicd_executor import cleanup_old_build_logs
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            recent_log = os.path.join(tmpdir, 'def67890.log')
+            with open(recent_log, 'w') as f:
+                f.write('recent build log')
+
+            with patch('web.service_tools.cicd_executor.LOGS_DIR', tmpdir):
+                removed = cleanup_old_build_logs(days_to_keep=30)
+
+            self.assertEqual(removed, 0)
+            self.assertTrue(os.path.exists(recent_log))
+
+    def test_cleanup_ignores_non_log_files(self):
+        """Non-.log files in the logs directory are not removed."""
+        from web.service_tools.cicd_executor import cleanup_old_build_logs
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            other_file = os.path.join(tmpdir, 'somefile.txt')
+            with open(other_file, 'w') as f:
+                f.write('not a log')
+            old_time = time.time() - (60 * 24 * 60 * 60)
+            os.utime(other_file, (old_time, old_time))
+
+            with patch('web.service_tools.cicd_executor.LOGS_DIR', tmpdir):
+                removed = cleanup_old_build_logs(days_to_keep=30)
+
+            self.assertEqual(removed, 0)
+            self.assertTrue(os.path.exists(other_file))
+
+    def test_cleanup_missing_logs_dir(self):
+        """Returns 0 when the logs directory does not exist."""
+        from web.service_tools.cicd_executor import cleanup_old_build_logs
+
+        with patch('web.service_tools.cicd_executor.LOGS_DIR', '/nonexistent/logs/dir'):
+            removed = cleanup_old_build_logs(days_to_keep=30)
+
+        self.assertEqual(removed, 0)
+
+
+class TestCleanupStaleWorkspaces(unittest.TestCase):
+    """Test stale workspace cleanup."""
+
+    def test_removes_workspace_not_in_config(self):
+        """Workspaces for repos not in config are removed."""
+        from web.service_tools.cicd_executor import cleanup_stale_workspaces
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            stale_ws = os.path.join(tmpdir, 'old-repo')
+            os.makedirs(stale_ws)
+
+            config = {'repositories': []}
+
+            with patch('web.service_tools.cicd_executor.WORKSPACES_DIR', tmpdir):
+                removed = cleanup_stale_workspaces(config)
+
+            self.assertEqual(removed, 1)
+            self.assertFalse(os.path.exists(stale_ws))
+
+    def test_keeps_workspace_in_config(self):
+        """Workspaces for configured repos are kept."""
+        from web.service_tools.cicd_executor import cleanup_stale_workspaces
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            active_ws = os.path.join(tmpdir, 'my-repo')
+            os.makedirs(active_ws)
+
+            config = {'repositories': [{'url': 'https://github.com/org/my-repo.git'}]}
+
+            with patch('web.service_tools.cicd_executor.WORKSPACES_DIR', tmpdir):
+                removed = cleanup_stale_workspaces(config)
+
+            self.assertEqual(removed, 0)
+            self.assertTrue(os.path.exists(active_ws))
+
+    def test_removes_stale_keeps_active(self):
+        """Only stale workspaces are removed when both are present."""
+        from web.service_tools.cicd_executor import cleanup_stale_workspaces
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            active_ws = os.path.join(tmpdir, 'active-repo')
+            stale_ws = os.path.join(tmpdir, 'stale-repo')
+            os.makedirs(active_ws)
+            os.makedirs(stale_ws)
+
+            config = {'repositories': [{'url': 'https://github.com/org/active-repo.git'}]}
+
+            with patch('web.service_tools.cicd_executor.WORKSPACES_DIR', tmpdir):
+                removed = cleanup_stale_workspaces(config)
+
+            self.assertEqual(removed, 1)
+            self.assertTrue(os.path.exists(active_ws))
+            self.assertFalse(os.path.exists(stale_ws))
+
+    def test_missing_workspaces_dir(self):
+        """Returns 0 when workspaces directory does not exist."""
+        from web.service_tools.cicd_executor import cleanup_stale_workspaces
+
+        config = {'repositories': []}
+        with patch('web.service_tools.cicd_executor.WORKSPACES_DIR', '/nonexistent/workspaces'):
+            removed = cleanup_stale_workspaces(config)
+
+        self.assertEqual(removed, 0)
+
+    def test_ignores_files_in_workspaces_dir(self):
+        """Regular files in the workspaces dir are not deleted."""
+        from web.service_tools.cicd_executor import cleanup_stale_workspaces
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            stray_file = os.path.join(tmpdir, 'somefile.txt')
+            with open(stray_file, 'w') as f:
+                f.write('stray file')
+
+            config = {'repositories': []}
+
+            with patch('web.service_tools.cicd_executor.WORKSPACES_DIR', tmpdir):
+                removed = cleanup_stale_workspaces(config)
+
+            self.assertEqual(removed, 0)
+            self.assertTrue(os.path.exists(stray_file))
 
 
 if __name__ == '__main__':
