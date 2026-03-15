@@ -483,6 +483,9 @@ def cleanup_old_build_logs(days_to_keep: int = 30) -> int:
 def cleanup_stale_workspaces(config: dict) -> int:
     """Remove workspace directories for repos no longer in config.
 
+    Skips cleanup if config appears invalid (empty or missing repositories),
+    to avoid destroying workspaces due to a transient config read error.
+
     Args:
         config: Loaded webhook configuration
 
@@ -493,6 +496,10 @@ def cleanup_stale_workspaces(config: dict) -> int:
         return 0
 
     repos = config.get('repositories', [])
+    if not repos:
+        logger.debug("Skipping stale workspace cleanup: no repositories in config")
+        return 0
+
     configured_workspaces = set()
     for repo in repos:
         url = repo.get('url', '')
@@ -534,12 +541,14 @@ def main():
             return 0
         
         job_files = sorted(Path(JOBS_DIR).glob('*.json'))
+        config = load_config()
         
         if not job_files:
             logger.info("No pending jobs")
+            cleanup_old_build_logs()
+            cleanup_stale_workspaces(config)
             return 0
         
-        config = load_config()
         logger.info(f"Found {len(job_files)} pending job(s)")
         
         success_count = 0

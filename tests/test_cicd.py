@@ -485,13 +485,28 @@ class TestCleanupStaleWorkspaces(unittest.TestCase):
             stale_ws = os.path.join(tmpdir, 'old-repo')
             os.makedirs(stale_ws)
 
-            config = {'repositories': []}
+            # Config has one repo, but it's not 'old-repo'
+            config = {'repositories': [{'url': 'https://github.com/org/other-repo.git'}]}
 
             with patch('web.service_tools.cicd_executor.WORKSPACES_DIR', tmpdir):
                 removed = cleanup_stale_workspaces(config)
 
             self.assertEqual(removed, 1)
             self.assertFalse(os.path.exists(stale_ws))
+
+    def test_empty_config_skips_cleanup(self):
+        """Empty or invalid config does not delete any workspaces."""
+        from web.service_tools.cicd_executor import cleanup_stale_workspaces
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ws = os.path.join(tmpdir, 'some-repo')
+            os.makedirs(ws)
+
+            for config in [{}, {'repositories': []}]:
+                with patch('web.service_tools.cicd_executor.WORKSPACES_DIR', tmpdir):
+                    removed = cleanup_stale_workspaces(config)
+                self.assertEqual(removed, 0)
+                self.assertTrue(os.path.exists(ws))
 
     def test_keeps_workspace_in_config(self):
         """Workspaces for configured repos are kept."""
@@ -532,7 +547,7 @@ class TestCleanupStaleWorkspaces(unittest.TestCase):
         """Returns 0 when workspaces directory does not exist."""
         from web.service_tools.cicd_executor import cleanup_stale_workspaces
 
-        config = {'repositories': []}
+        config = {'repositories': [{'url': 'https://github.com/org/my-repo.git'}]}
         with patch('web.service_tools.cicd_executor.WORKSPACES_DIR', '/nonexistent/workspaces'):
             removed = cleanup_stale_workspaces(config)
 
@@ -547,7 +562,9 @@ class TestCleanupStaleWorkspaces(unittest.TestCase):
             with open(stray_file, 'w') as f:
                 f.write('stray file')
 
-            config = {'repositories': []}
+            # Config has repos so the guard doesn't skip; the stray file is
+            # not a directory so it should be left alone.
+            config = {'repositories': [{'url': 'https://github.com/org/my-repo.git'}]}
 
             with patch('web.service_tools.cicd_executor.WORKSPACES_DIR', tmpdir):
                 removed = cleanup_stale_workspaces(config)
