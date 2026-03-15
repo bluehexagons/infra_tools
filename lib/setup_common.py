@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 from typing import Optional, Callable
 
 try:
@@ -362,7 +363,13 @@ def setup_main(system_type: str, description: str, success_msg_fn: Callable[[Set
     if not config.dry_run:
         save_setup_command(config)
     
+    start_time = time.time()
     returncode = run_remote_setup(config)
+    end_time = time.time()
+    success = (returncode == 0)
+    
+    if not config.dry_run:
+        save_setup_command(config, start_time, end_time, success)
     
     if returncode != 0:
         print(f"\n✗ Setup failed (exit code: {returncode})")

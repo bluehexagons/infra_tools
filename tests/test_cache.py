@@ -76,6 +76,60 @@ class TestSaveAndLoadSetupCommand(unittest.TestCase):
                 self.assertEqual(loaded.friendly_name, 'My Server')
                 self.assertEqual(loaded.tags, ['web', 'prod'])
 
+    def test_save_with_timing_and_success(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch('lib.cache.SETUP_CACHE_DIR', tmpdir):
+                import json
+                config = self._make_config()
+                start = 1700000000.0
+                end = 1700000060.0
+                save_setup_command(config, start_time=start, end_time=end, success=True)
+                cache_path = get_cache_path_for_host('testhost')
+                with open(cache_path) as f:
+                    data = json.load(f)
+                self.assertEqual(data['last_start_time'], start)
+                self.assertEqual(data['last_end_time'], end)
+                self.assertIs(data['last_success'], True)
+
+    def test_save_with_failure_status(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch('lib.cache.SETUP_CACHE_DIR', tmpdir):
+                import json
+                config = self._make_config()
+                start = 1700000000.0
+                end = 1700000030.0
+                save_setup_command(config, start_time=start, end_time=end, success=False)
+                cache_path = get_cache_path_for_host('testhost')
+                with open(cache_path) as f:
+                    data = json.load(f)
+                self.assertIs(data['last_success'], False)
+
+    def test_second_save_updates_timing(self):
+        """Verify that a second save (with timing) overwrites the first (without timing)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch('lib.cache.SETUP_CACHE_DIR', tmpdir):
+                import json
+                config = self._make_config(timezone='UTC')
+                # First save: no timing (pre-run)
+                save_setup_command(config)
+                cache_path = get_cache_path_for_host('testhost')
+                with open(cache_path) as f:
+                    data = json.load(f)
+                self.assertNotIn('last_start_time', data)
+                self.assertNotIn('last_success', data)
+                # Second save: with timing (post-run)
+                start = 1700000000.0
+                end = 1700000045.0
+                save_setup_command(config, start_time=start, end_time=end, success=True)
+                with open(cache_path) as f:
+                    data = json.load(f)
+                self.assertEqual(data['last_start_time'], start)
+                self.assertEqual(data['last_end_time'], end)
+                self.assertIs(data['last_success'], True)
+                # Config data still present
+                self.assertEqual(data['host'], 'testhost')
+                self.assertEqual(data['system_type'], 'server_lite')
+
 
 class TestMergeSetupConfigs(unittest.TestCase):
     def _make_config(self, **kwargs):
