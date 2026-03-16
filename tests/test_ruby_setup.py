@@ -55,7 +55,7 @@ class TestRubySetup(unittest.TestCase):
         config = SetupConfig(host="host", username="user", system_type="server_dev", install_ruby=True)
         ruby_steps = [(name, func) for name, func in get_steps_for_system_type(config) if "Ruby" in name]
         self.assertIn(
-            ("Cleaning up legacy Ruby auto-update timer", common_steps.configure_auto_update_ruby),
+            ("Configuring Ruby auto-update", common_steps.configure_auto_update_ruby),
             ruby_steps,
         )
 

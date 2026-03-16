@@ -76,6 +76,54 @@ class TestSaveAndLoadSetupCommand(unittest.TestCase):
                 self.assertEqual(loaded.friendly_name, 'My Server')
                 self.assertEqual(loaded.tags, ['web', 'prod'])
 
+    def test_load_by_friendly_name_fallback(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch('lib.cache.SETUP_CACHE_DIR', tmpdir):
+                config = self._make_config(host='10.0.0.5', friendly_name='My Server')
+                save_setup_command(config)
+
+                loaded = load_setup_command('My Server')
+
+                self.assertIsNotNone(loaded)
+                self.assertEqual(loaded.host, '10.0.0.5')
+                self.assertEqual(loaded.friendly_name, 'My Server')
+
+    def test_load_by_tag_fallback(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch('lib.cache.SETUP_CACHE_DIR', tmpdir):
+                config = self._make_config(host='10.0.0.5', tags=['web', 'prod'])
+                save_setup_command(config)
+
+                loaded = load_setup_command('prod')
+
+                self.assertIsNotNone(loaded)
+                self.assertEqual(loaded.host, '10.0.0.5')
+                self.assertEqual(loaded.tags, ['web', 'prod'])
+
+    def test_load_by_name_returns_none_when_no_match_found(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch('lib.cache.SETUP_CACHE_DIR', tmpdir):
+                config = self._make_config(host='10.0.0.5', friendly_name='My Server', tags=['prod'])
+                save_setup_command(config)
+
+                loaded = load_setup_command('unknown-name')
+
+                self.assertIsNone(loaded)
+
+    def test_load_by_name_skips_corrupted_cache_files(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch('lib.cache.SETUP_CACHE_DIR', tmpdir):
+                with open(os.path.join(tmpdir, 'broken.json'), 'w') as f:
+                    f.write('{not valid json')
+
+                config = self._make_config(host='10.0.0.5', friendly_name='My Server', tags=['prod'])
+                save_setup_command(config)
+
+                loaded = load_setup_command('My Server')
+
+                self.assertIsNotNone(loaded)
+                self.assertEqual(loaded.host, '10.0.0.5')
+
     def test_save_with_timing_and_success(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch('lib.cache.SETUP_CACHE_DIR', tmpdir):

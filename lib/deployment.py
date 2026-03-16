@@ -587,6 +587,10 @@ class DeploymentOrchestrator:
                 self._build_node_project(frontend_path, api_url, site_root, require_build_output=True)
                 
                 frontend_serve_path = self._get_frontend_serve_path(frontend_path)
+                if frontend_serve_path is None:
+                    raise RuntimeError(
+                        "Frontend build output could not be located after validation; expected index.html in dist, build, or out"
+                    )
                 print(f"  Frontend will be served statically from {frontend_serve_path}")
                 
                 frontend_port = None

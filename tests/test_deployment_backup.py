@@ -697,6 +697,51 @@ class TestRailsFrontendServePathDetection(unittest.TestCase):
 
         mock_create_service.assert_not_called()
 
+    @patch.object(DeploymentOrchestrator, '_link_rails_persistent_state_into_release')
+    @patch.object(DeploymentOrchestrator, '_get_assigned_port', return_value=3000)
+    @patch.object(DeploymentOrchestrator, '_get_frontend_serve_path', return_value=None)
+    @patch.object(DeploymentOrchestrator, '_build_node_project')
+    @patch.object(DeploymentOrchestrator, 'build_project')
+    @patch('lib.deployment.create_rails_service')
+    @patch('lib.deployment.run')
+    def test_full_deploy_raises_if_frontend_serve_path_missing_after_validation(
+        self,
+        mock_run,
+        mock_create_service,
+        mock_build_project,
+        mock_build_node_project,
+        mock_get_frontend_serve_path,
+        mock_get_assigned_port,
+        mock_link_state,
+    ):
+        source_dir = os.path.join(self.tmpdir, "source")
+        os.makedirs(os.path.join(source_dir, 'bin'), exist_ok=True)
+        with open(os.path.join(source_dir, '.ruby-version'), 'w') as f:
+            f.write('3.3.0')
+        with open(os.path.join(source_dir, 'bin', 'rails'), 'w') as f:
+            f.write('#!/usr/bin/env ruby')
+        os.makedirs(os.path.join(source_dir, 'public'), exist_ok=True)
+        os.makedirs(os.path.join(source_dir, 'frontend'), exist_ok=True)
+
+        mock_run.return_value = MagicMock(returncode=0, stdout='', stderr='')
+
+        with self.assertRaisesRegex(RuntimeError, 'Frontend build output could not be located after validation'):
+            self.orchestrator.deploy_from_archive(
+                source_path=source_dir,
+                domain='example.com',
+                path='/',
+                git_url='https://git.example.com/repo.git',
+                commit_hash='abc123',
+                keep_source=True,
+            )
+
+        mock_build_project.assert_called_once()
+        mock_build_node_project.assert_called_once()
+        mock_get_frontend_serve_path.assert_called_once()
+        mock_get_assigned_port.assert_called_once()
+        mock_link_state.assert_called_once()
+        mock_create_service.assert_called_once()
+
 
 if __name__ == '__main__':
     unittest.main()
