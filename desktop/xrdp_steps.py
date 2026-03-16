@@ -65,14 +65,24 @@ def _ensure_user_in_group(username: str, group: str) -> bool:
     """Ensure the given user is a member of the given group."""
     quoted_username = shlex.quote(username)
     quoted_group = shlex.quote(group)
-    membership_check = run(
-        f"id -nG {quoted_username} | tr ' ' '\\n' | grep -Fxq {quoted_group}",
-        check=False,
-    )
+    membership_check_cmd = f"id -nG {quoted_username} | tr ' ' '\\n' | grep -Fxq {quoted_group}"
+    membership_check = run(membership_check_cmd, check=False)
     if membership_check.returncode == 0:
         return False
 
-    run(f"getent group {quoted_group} && adduser {quoted_username} {quoted_group}", check=False)
+    add_result = run(
+        f"getent group {quoted_group} && adduser {quoted_username} {quoted_group}",
+        check=False,
+    )
+    if add_result.returncode != 0:
+        print(f"  ⚠ Could not add {username} to group {group}")
+        return False
+
+    membership_check = run(membership_check_cmd, check=False)
+    if membership_check.returncode != 0:
+        print(f"  ⚠ Could not verify that {username} was added to group {group}")
+        return False
+
     return True
 
 

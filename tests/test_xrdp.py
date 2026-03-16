@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from lib.config import SetupConfig
-from desktop.xrdp_steps import _generate_sesman_ini, install_xrdp, harden_xrdp
+from desktop.xrdp_steps import _ensure_user_in_group, _generate_sesman_ini, install_xrdp, harden_xrdp
 from desktop.desktop_environment_steps import configure_xfce_for_rdp
 
 
@@ -78,6 +78,35 @@ class TestGenerateSesmanIni(unittest.TestCase):
         self.assertIn("AllowRootLogin=false", result)
         self.assertIn("TerminalServerUsers=remoteusers", result)
         self.assertIn("AlwaysGroupCheck=true", result)
+
+
+class TestEnsureUserInGroup(unittest.TestCase):
+    """Test xRDP group membership helper."""
+
+    @patch('desktop.xrdp_steps.run')
+    def test_returns_false_when_adduser_fails(self, mock_run):
+        """Should not report a change if adduser fails."""
+        mock_run.side_effect = [
+            Mock(returncode=1, stdout="", stderr=""),
+            Mock(returncode=1, stdout="", stderr="permission denied"),
+        ]
+
+        result = _ensure_user_in_group("xrdp", "ssl-cert")
+
+        self.assertFalse(result)
+
+    @patch('desktop.xrdp_steps.run')
+    def test_returns_true_only_after_verified_membership_change(self, mock_run):
+        """Should verify membership after a successful add."""
+        mock_run.side_effect = [
+            Mock(returncode=1, stdout="", stderr=""),
+            Mock(returncode=0, stdout="", stderr=""),
+            Mock(returncode=0, stdout="", stderr=""),
+        ]
+
+        result = _ensure_user_in_group("xrdp", "ssl-cert")
+
+        self.assertTrue(result)
 
 
 class TestInstallXrdp(unittest.TestCase):
@@ -305,7 +334,12 @@ class TestHardenXrdp(unittest.TestCase):
 
         def run_side_effect(cmd, **kwargs):
             if cmd.startswith("id -nG xrdp"):
-                return Mock(returncode=1, stdout="", stderr="")
+                if not hasattr(run_side_effect, "membership_checks"):
+                    run_side_effect.membership_checks = 0
+                run_side_effect.membership_checks += 1
+                if run_side_effect.membership_checks == 1:
+                    return Mock(returncode=1, stdout="", stderr="")
+                return Mock(returncode=0, stdout="", stderr="")
             return Mock(returncode=0, stdout="", stderr="")
 
         mock_run.side_effect = run_side_effect
@@ -340,6 +374,36 @@ class TestHardenXrdp(unittest.TestCase):
         harden_xrdp(config)
 
         run_commands = [call.args[0] for call in mock_run.call_args_list]
+        self.assertFalse(any("reload-or-restart" in command for command in run_commands))
+        self.assertFalse(any(command.startswith("systemctl start ") for command in run_commands))
+
+    @patch('desktop.xrdp_steps.run')
+    @patch('desktop.xrdp_steps.os.path.exists')
+    @patch('desktop.xrdp_steps.is_service_active')
+    def test_skips_service_refresh_when_ssl_cert_add_fails(self, mock_is_active, mock_exists, mock_run):
+        """Should not refresh running services if ssl-cert membership was not changed."""
+        mock_exists.return_value = True
+        mock_is_active.return_value = True
+
+        def run_side_effect(cmd, **kwargs):
+            if cmd.startswith("id -nG xrdp"):
+                return Mock(returncode=1, stdout="", stderr="")
+            if cmd == "getent group ssl-cert && adduser xrdp ssl-cert":
+                return Mock(returncode=1, stdout="", stderr="permission denied")
+            return Mock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
+
+        config = SetupConfig(
+            host="test.example.com",
+            username="testuser",
+            system_type="workstation_dev"
+        )
+
+        harden_xrdp(config)
+
+        run_commands = [call.args[0] for call in mock_run.call_args_list]
+        self.assertIn("getent group ssl-cert && adduser xrdp ssl-cert", run_commands)
         self.assertFalse(any("reload-or-restart" in command for command in run_commands))
         self.assertFalse(any(command.startswith("systemctl start ") for command in run_commands))
 
