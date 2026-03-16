@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import sys
 import json
+import shutil
 import subprocess
 import shlex
 import time
@@ -447,6 +448,80 @@ def notify_failure(repo_url: str, commit_sha: str, reason: str, notification_con
             logger.warning(f"Failed to send failure notification: {e}")
 
 
+def cleanup_old_build_logs(days_to_keep: int = 30) -> int:
+    """Remove build log files older than days_to_keep days.
+
+    Args:
+        days_to_keep: Number of days to keep build logs
+
+    Returns:
+        Number of files removed
+    """
+    if not os.path.exists(LOGS_DIR):
+        return 0
+
+    cutoff_time = time.time() - (days_to_keep * 24 * 60 * 60)
+    removed_count = 0
+
+    for filename in os.listdir(LOGS_DIR):
+        if not filename.endswith('.log'):
+            continue
+        log_path = os.path.join(LOGS_DIR, filename)
+        try:
+            if os.path.getmtime(log_path) < cutoff_time:
+                os.remove(log_path)
+                removed_count += 1
+        except OSError as e:
+            logger.warning(f"Failed to remove old build log {filename}: {e}")
+
+    if removed_count > 0:
+        logger.info(f"Cleaned up {removed_count} old build log(s) (older than {days_to_keep} days)")
+
+    return removed_count
+
+
+def cleanup_stale_workspaces(config: dict) -> int:
+    """Remove workspace directories for repos no longer in config.
+
+    Skips cleanup if config appears invalid (empty or missing repositories),
+    to avoid destroying workspaces due to a transient config read error.
+
+    Args:
+        config: Loaded webhook configuration
+
+    Returns:
+        Number of directories removed
+    """
+    if not os.path.exists(WORKSPACES_DIR):
+        return 0
+
+    repos = config.get('repositories', [])
+    if not repos:
+        logger.debug("Skipping stale workspace cleanup: no repositories in config")
+        return 0
+
+    configured_workspaces = set()
+    for repo in repos:
+        url = repo.get('url', '')
+        if url:
+            repo_name = url.rstrip('/').split('/')[-1].replace('.git', '')
+            configured_workspaces.add(repo_name)
+
+    removed_count = 0
+    for name in os.listdir(WORKSPACES_DIR):
+        if name not in configured_workspaces:
+            workspace_path = os.path.join(WORKSPACES_DIR, name)
+            if os.path.isdir(workspace_path):
+                try:
+                    shutil.rmtree(workspace_path)
+                    removed_count += 1
+                    logger.info(f"Removed stale workspace: {name}")
+                except OSError as e:
+                    logger.warning(f"Failed to remove stale workspace {name}: {e}")
+
+    return removed_count
+
+
 def main():
     """Main function to process CI/CD jobs."""
     logger.info("Starting CI/CD executor")
@@ -466,9 +541,12 @@ def main():
             return 0
         
         job_files = sorted(Path(JOBS_DIR).glob('*.json'))
+        config = load_config()
         
         if not job_files:
             logger.info("No pending jobs")
+            cleanup_old_build_logs()
+            cleanup_stale_workspaces(config)
             return 0
         
         logger.info(f"Found {len(job_files)} pending job(s)")
@@ -483,6 +561,9 @@ def main():
                 failure_count += 1
         
         logger.info(f"CI/CD executor finished: {success_count} successful, {failure_count} failed")
+        
+        cleanup_old_build_logs()
+        cleanup_stale_workspaces(config)
         
         return 0 if failure_count == 0 else 1
     finally:
