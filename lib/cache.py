@@ -89,6 +89,7 @@ def _find_cache_by_name(name: str) -> Optional[SetupConfig]:
                 actual_host = data.get('host', '')
                 if actual_host:
                     return _load_cache_file(filepath, actual_host)
+                continue
             tags = data.get('tags', [])
             if isinstance(tags, list) and any(needle == str(t).lower() for t in tags):
                 actual_host = data.get('host', '')

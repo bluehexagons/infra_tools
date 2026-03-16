@@ -328,7 +328,7 @@ def get_steps_for_system_type(config: SetupConfig) -> list[tuple[str, StepFunc]]
     
     if config.install_ruby:
         steps.append(("Installing Ruby (apt packages)", install_ruby))
-        steps.append(("Cleaning up legacy Ruby auto-update timer", configure_auto_update_ruby))
+        steps.append(("Configuring Ruby auto-update", configure_auto_update_ruby))
     if config.install_go:
         steps.append(("Installing Go (latest version)", install_go))
     if config.install_node:
