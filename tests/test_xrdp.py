@@ -108,6 +108,19 @@ class TestEnsureUserInGroup(unittest.TestCase):
 
         self.assertTrue(result)
 
+    @patch('desktop.xrdp_steps.run')
+    def test_returns_false_when_membership_cannot_be_verified(self, mock_run):
+        """Should not report a change if membership cannot be verified after adduser."""
+        mock_run.side_effect = [
+            Mock(returncode=1, stdout="", stderr=""),
+            Mock(returncode=0, stdout="", stderr=""),
+            Mock(returncode=1, stdout="", stderr=""),
+        ]
+
+        result = _ensure_user_in_group("xrdp", "ssl-cert")
+
+        self.assertFalse(result)
+
 
 class TestInstallXrdp(unittest.TestCase):
     """Test XRDP installation and configuration."""
@@ -331,15 +344,11 @@ class TestHardenXrdp(unittest.TestCase):
         """Should refresh xrdp services if ssl-cert access changes."""
         mock_exists.return_value = True
         mock_is_active.return_value = True
+        membership_results = iter([1, 0])
 
         def run_side_effect(cmd, **kwargs):
             if cmd.startswith("id -nG xrdp"):
-                if not hasattr(run_side_effect, "membership_checks"):
-                    run_side_effect.membership_checks = 0
-                run_side_effect.membership_checks += 1
-                if run_side_effect.membership_checks == 1:
-                    return Mock(returncode=1, stdout="", stderr="")
-                return Mock(returncode=0, stdout="", stderr="")
+                return Mock(returncode=next(membership_results), stdout="", stderr="")
             return Mock(returncode=0, stdout="", stderr="")
 
         mock_run.side_effect = run_side_effect

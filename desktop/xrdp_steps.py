@@ -80,7 +80,7 @@ def _ensure_user_in_group(username: str, group: str) -> bool:
 
     membership_check = run(membership_check_cmd, check=False)
     if membership_check.returncode != 0:
-        print(f"  ⚠ Could not verify that {username} was added to group {group}")
+        print(f"  ⚠ Could not verify membership after adding {username} to group {group}")
         return False
 
     return True
