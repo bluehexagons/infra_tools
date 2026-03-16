@@ -52,10 +52,8 @@ def save_setup_command(config: SetupConfig, start_time: Optional[float] = None,
         json.dump(cache_data, f, indent=2)
 
 
-def load_setup_command(host: str) -> Optional[SetupConfig]:
-    cache_path = get_cache_path_for_host(host)
-    if not os.path.exists(cache_path):
-        return None
+def _load_cache_file(cache_path: str, host: str) -> Optional[SetupConfig]:
+    """Load a SetupConfig from a cache file, using the provided host string."""
     try:
         with open(cache_path, 'r') as f:
             data = json.load(f)
@@ -69,6 +67,46 @@ def load_setup_command(host: str) -> Optional[SetupConfig]:
     except (OSError, json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
         print(f"Warning: Failed to load cached setup for {host}: {e}")
         return None
+
+
+def _find_cache_by_name(name: str) -> Optional[SetupConfig]:
+    """Search all cache files for one matching by friendly name or tag."""
+    if not os.path.exists(SETUP_CACHE_DIR):
+        return None
+    needle = name.lower()
+    try:
+        for filename in os.listdir(SETUP_CACHE_DIR):
+            if not filename.endswith('.json'):
+                continue
+            filepath = os.path.join(SETUP_CACHE_DIR, filename)
+            try:
+                with open(filepath, 'r') as f:
+                    data = json.load(f)
+            except Exception:
+                continue
+            cached_name = str(data.get('name', '')).lower()
+            if needle == cached_name:
+                actual_host = data.get('host', '')
+                if actual_host:
+                    return _load_cache_file(filepath, actual_host)
+                continue
+            tags = data.get('tags', [])
+            if isinstance(tags, list) and any(needle == str(t).lower() for t in tags):
+                actual_host = data.get('host', '')
+                if actual_host:
+                    return _load_cache_file(filepath, actual_host)
+    except Exception:
+        pass
+    return None
+
+
+def load_setup_command(host: str) -> Optional[SetupConfig]:
+    cache_path = get_cache_path_for_host(host)
+    if os.path.exists(cache_path):
+        return _load_cache_file(cache_path, host)
+    # Fall back to searching by friendly name / tag so callers can use
+    # names like "devweb" instead of the raw IP address.
+    return _find_cache_by_name(host)
 
 
 def merge_setup_configs(cached_config: SetupConfig, new_config: SetupConfig) -> SetupConfig:

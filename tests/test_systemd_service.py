@@ -152,7 +152,7 @@ class TestCleanupFunctions(unittest.TestCase):
 
     @patch("lib.systemd_service.os.remove")
     @patch("lib.systemd_service.run")
-    @patch("lib.systemd_service.os.listdir", return_value=["auto-update-ruby.service", "auto-update-ruby.timer"])
+    @patch("lib.systemd_service.os.listdir", return_value=["auto-update-apt.service", "auto-update-apt.timer"])
     @patch("lib.systemd_service.os.path.exists", return_value=True)
     def test_cleanup_all_infra_services_dry_run(self, _exists, _listdir, mock_run, mock_remove):
         cleanup_all_infra_services(dry_run=True)

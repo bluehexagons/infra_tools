@@ -28,7 +28,7 @@ from lib.notifications import load_notification_configs_from_state, send_notific
 # Initialize centralized logger
 logger = get_service_logger('auto_update_apt', 'security', use_syslog=True)
 
-# dpkg options to avoid interactive prompts during unattended upgrades
+# dpkg options to avoid interactive prompts during automated upgrades
 DPKG_OPTIONS = [
     '-o', 'Dpkg::Options::=--force-confdef',
     '-o', 'Dpkg::Options::=--force-confold',

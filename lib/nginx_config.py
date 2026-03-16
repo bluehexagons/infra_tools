@@ -228,7 +228,7 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: Deployments
         if dep['needs_proxy']:
             backend_port = dep.get('backend_port')
             frontend_port = dep.get('frontend_port')
-            proxy_port = dep.get('proxy_port') or 3000 # Fallback
+            proxy_port = dep.get('proxy_port') or backend_port or 3000
             frontend_serve_path = dep.get('frontend_serve_path')
             
             if backend_port and (frontend_port or frontend_serve_path):
