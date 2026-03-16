@@ -300,19 +300,17 @@ def execute_patch(config: SetupConfig) -> int:
     print()
     
     start_time = time.time()
-    
-    returncode = run_remote_setup(config)
-    
-    end_time = time.time()
-    success = (returncode == 0)
+    returncode = 1
+    try:
+        returncode = run_remote_setup(config)
+    finally:
+        end_time = time.time()
+        success = (returncode == 0)
+        if not config.dry_run:
+            save_setup_command(config, start_time, end_time, success)
     
     if returncode != 0:
         print(f"\n✗ Patch failed (exit code: {returncode})")
-    
-    if not config.dry_run:
-        save_setup_command(config, start_time, end_time, success)
-    
-    if returncode != 0:
         return 1
     
     print()
