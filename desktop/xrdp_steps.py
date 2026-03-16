@@ -6,7 +6,7 @@ import shlex
 
 from lib.config import SetupConfig
 from lib.machine_state import has_gpu_access, is_container
-from lib.remote_utils import run
+from lib.remote_utils import is_service_active, run
 
 
 FLATPAK_REMOTE = "flathub"
@@ -59,6 +59,35 @@ param=tcp
 param=-logfile
 param=.xorgxrdp.%s.log
 '''
+
+
+def _ensure_user_in_group(username: str, group: str) -> bool:
+    """Ensure the given user is a member of the given group."""
+    quoted_username = shlex.quote(username)
+    quoted_group = shlex.quote(group)
+    membership_check = run(
+        f"id -nG {quoted_username} | tr ' ' '\\n' | grep -Fxq {quoted_group}",
+        check=False,
+    )
+    if membership_check.returncode == 0:
+        return False
+
+    run(f"getent group {quoted_group} && adduser {quoted_username} {quoted_group}", check=False)
+    return True
+
+
+def _refresh_services(*services: str, reload_active: bool = True) -> None:
+    """Refresh active services and start inactive ones."""
+    active_services = [service for service in services if is_service_active(service)]
+    inactive_services = [service for service in services if service not in active_services]
+
+    if reload_active and active_services:
+        active_list = " ".join(shlex.quote(service) for service in active_services)
+        run(f"systemctl reload-or-restart {active_list}", check=False)
+
+    if inactive_services:
+        inactive_list = " ".join(shlex.quote(service) for service in inactive_services)
+        run(f"systemctl start {inactive_list}", check=False)
 
 
 def install_xrdp(config: SetupConfig) -> None:
@@ -119,7 +148,7 @@ needs_root_rights=no
     # Ensure xrdp can create its runtime dirs/sockets
     run("systemctl enable xrdp-sesman", check=False)
     
-    run("getent group ssl-cert && adduser xrdp ssl-cert", check=False)
+    _ensure_user_in_group("xrdp", "ssl-cert")
     
     # Xorg requires proper user group access for desktop session
     if has_gpu_access():
@@ -140,8 +169,6 @@ needs_root_rights=no
     except Exception as e:
         print(f"  ⚠ Error deploying sesman.ini: {e}")
         return
-    
-    run("systemctl restart xrdp-sesman", check=False)
     
     if os.path.exists(xrdp_config) and not os.path.exists(f"{xrdp_config}.bak"):
         run(f"cp {xrdp_config} {xrdp_config}.bak")
@@ -237,7 +264,7 @@ EndSection
         print("  ✓ xorgxrdp configuration created")
     
     run("systemctl enable xrdp")
-    run("systemctl restart xrdp")
+    _refresh_services("xrdp-sesman", "xrdp")
 
     xsession_template_path = os.path.join(config_template_dir, 'xrdp_xsession.template')
     try:
@@ -273,12 +300,8 @@ def harden_xrdp(config: SetupConfig) -> None:
         return
     
     # Ensure xrdp user has access to SSL certificates
-    run("getent group ssl-cert && adduser xrdp ssl-cert", check=False)
-    
-    run("systemctl restart xrdp")
-    run("systemctl restart xrdp-sesman", check=False)
+    ssl_cert_changed = _ensure_user_in_group("xrdp", "ssl-cert")
+    _refresh_services("xrdp-sesman", "xrdp", reload_active=ssl_cert_changed)
     
     print("  ✓ xRDP hardened (TLS encryption, strong ciphers, group restrictions)")
-
-
 

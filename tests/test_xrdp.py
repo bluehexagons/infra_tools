@@ -88,9 +88,11 @@ class TestInstallXrdp(unittest.TestCase):
     @patch('desktop.xrdp_steps.os.makedirs')
     @patch('builtins.open', new_callable=unittest.mock.mock_open)
     @patch('desktop.xrdp_steps.has_gpu_access')
-    def test_installs_required_packages(self, mock_gpu, mock_open, mock_makedirs, mock_exists, mock_run):
+    @patch('desktop.xrdp_steps.is_service_active')
+    def test_installs_required_packages(self, mock_is_active, mock_gpu, mock_open, mock_makedirs, mock_exists, mock_run):
         """Should install xrdp, xorgxrdp, and utilities."""
         mock_exists.return_value = True
+        mock_is_active.return_value = True
         mock_gpu.return_value = False
         mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
         
@@ -118,9 +120,11 @@ class TestInstallXrdp(unittest.TestCase):
     @patch('desktop.xrdp_steps.os.makedirs')
     @patch('builtins.open', new_callable=unittest.mock.mock_open)
     @patch('desktop.xrdp_steps.has_gpu_access')
-    def test_creates_xwrapper_config(self, mock_gpu, mock_open_func, mock_makedirs, mock_exists, mock_run):
+    @patch('desktop.xrdp_steps.is_service_active')
+    def test_creates_xwrapper_config(self, mock_is_active, mock_gpu, mock_open_func, mock_makedirs, mock_exists, mock_run):
         """Should create /etc/X11/Xwrapper.config with correct content."""
         mock_exists.return_value = True
+        mock_is_active.return_value = True
         mock_gpu.return_value = False
         mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
         
@@ -145,9 +149,11 @@ class TestInstallXrdp(unittest.TestCase):
     @patch('desktop.xrdp_steps.os.makedirs')
     @patch('builtins.open', new_callable=unittest.mock.mock_open)
     @patch('desktop.xrdp_steps.has_gpu_access')
-    def test_writes_sesman_ini(self, mock_gpu, mock_open_func, mock_makedirs, mock_exists, mock_run):
+    @patch('desktop.xrdp_steps.is_service_active')
+    def test_writes_sesman_ini(self, mock_is_active, mock_gpu, mock_open_func, mock_makedirs, mock_exists, mock_run):
         """Should write sesman.ini with Xorg backend."""
         mock_exists.return_value = True
+        mock_is_active.return_value = True
         mock_gpu.return_value = False
         mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
         
@@ -172,7 +178,8 @@ class TestInstallXrdp(unittest.TestCase):
     @patch('desktop.xrdp_steps.os.makedirs')
     @patch('builtins.open', new_callable=unittest.mock.mock_open)
     @patch('desktop.xrdp_steps.has_gpu_access')
-    def test_creates_xorg_conf_with_correct_settings(self, mock_gpu, mock_open_func, mock_makedirs, mock_exists, mock_run):
+    @patch('desktop.xrdp_steps.is_service_active')
+    def test_creates_xorg_conf_with_correct_settings(self, mock_is_active, mock_gpu, mock_open_func, mock_makedirs, mock_exists, mock_run):
         """X.Org config should have correct driver and screen size."""
         # Mock that xorg.conf doesn't exist yet
         def exists_side_effect(path):
@@ -181,6 +188,7 @@ class TestInstallXrdp(unittest.TestCase):
             return True
         mock_exists.side_effect = exists_side_effect
         
+        mock_is_active.return_value = True
         mock_gpu.return_value = False
         mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
         
@@ -212,9 +220,11 @@ class TestInstallXrdp(unittest.TestCase):
     @patch('desktop.xrdp_steps.os.makedirs')
     @patch('builtins.open', new_callable=unittest.mock.mock_open)
     @patch('desktop.xrdp_steps.has_gpu_access')
-    def test_adds_user_to_video_groups_when_gpu_available(self, mock_gpu, mock_open_func, mock_makedirs, mock_exists, mock_run):
+    @patch('desktop.xrdp_steps.is_service_active')
+    def test_adds_user_to_video_groups_when_gpu_available(self, mock_is_active, mock_gpu, mock_open_func, mock_makedirs, mock_exists, mock_run):
         """Should add user to video/render groups when GPU is available."""
         mock_exists.return_value = True
+        mock_is_active.return_value = True
         mock_gpu.return_value = True  # GPU available
         mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
         
@@ -235,13 +245,41 @@ class TestInstallXrdp(unittest.TestCase):
         self.assertIn("video", combined)
         self.assertIn("render", combined)
 
+    @patch('desktop.xrdp_steps.run')
+    @patch('desktop.xrdp_steps.os.path.exists')
+    @patch('desktop.xrdp_steps.os.makedirs')
+    @patch('builtins.open', new_callable=unittest.mock.mock_open)
+    @patch('desktop.xrdp_steps.has_gpu_access')
+    @patch('desktop.xrdp_steps.is_service_active')
+    def test_refreshes_xrdp_services_once_after_configuration(self, mock_is_active, mock_gpu, mock_open_func, mock_makedirs, mock_exists, mock_run):
+        """Should refresh xrdp services once after writing configuration."""
+        mock_exists.return_value = True
+        mock_is_active.return_value = True
+        mock_gpu.return_value = False
+        mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
+
+        config = SetupConfig(
+            host="test.example.com",
+            username="testuser",
+            system_type="workstation_dev",
+            desktop="xfce"
+        )
+
+        install_xrdp(config)
+
+        run_commands = [call.args[0] for call in mock_run.call_args_list]
+        self.assertIn("systemctl reload-or-restart xrdp-sesman xrdp", run_commands)
+        self.assertNotIn("systemctl restart xrdp-sesman", run_commands)
+        self.assertNotIn("systemctl restart xrdp", run_commands)
+
 
 class TestHardenXrdp(unittest.TestCase):
     """Test XRDP hardening."""
     
     @patch('desktop.xrdp_steps.run')
     @patch('desktop.xrdp_steps.os.path.exists')
-    def test_skips_if_xrdp_not_installed(self, mock_exists, mock_run):
+    @patch('desktop.xrdp_steps.is_service_active')
+    def test_skips_if_xrdp_not_installed(self, mock_is_active, mock_exists, mock_run):
         """Should skip if xrdp.ini doesn't exist."""
         mock_exists.return_value = False
         
@@ -259,10 +297,18 @@ class TestHardenXrdp(unittest.TestCase):
         
     @patch('desktop.xrdp_steps.run')
     @patch('desktop.xrdp_steps.os.path.exists')
-    def test_restarts_xrdp_services(self, mock_exists, mock_run):
-        """Should restart xrdp and xrdp-sesman."""
+    @patch('desktop.xrdp_steps.is_service_active')
+    def test_refreshes_xrdp_services_when_ssl_cert_membership_changes(self, mock_is_active, mock_exists, mock_run):
+        """Should refresh xrdp services if ssl-cert access changes."""
         mock_exists.return_value = True
-        mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
+        mock_is_active.return_value = True
+
+        def run_side_effect(cmd, **kwargs):
+            if cmd.startswith("id -nG xrdp"):
+                return Mock(returncode=1, stdout="", stderr="")
+            return Mock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
         
         config = SetupConfig(
             host="test.example.com",
@@ -272,11 +318,30 @@ class TestHardenXrdp(unittest.TestCase):
         
         harden_xrdp(config)
         
-        # Check that restart commands were called
-        run_commands = [str(c) for c in mock_run.call_args_list]
-        combined = ' '.join(run_commands)
-        
-        self.assertIn("systemctl restart xrdp", combined)
+        run_commands = [call.args[0] for call in mock_run.call_args_list]
+        self.assertIn("getent group ssl-cert && adduser xrdp ssl-cert", run_commands)
+        self.assertIn("systemctl reload-or-restart xrdp-sesman xrdp", run_commands)
+
+    @patch('desktop.xrdp_steps.run')
+    @patch('desktop.xrdp_steps.os.path.exists')
+    @patch('desktop.xrdp_steps.is_service_active')
+    def test_skips_service_refresh_when_already_hardened(self, mock_is_active, mock_exists, mock_run):
+        """Should skip reloading active services when ssl-cert access already exists."""
+        mock_exists.return_value = True
+        mock_is_active.return_value = True
+        mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
+
+        config = SetupConfig(
+            host="test.example.com",
+            username="testuser",
+            system_type="workstation_dev"
+        )
+
+        harden_xrdp(config)
+
+        run_commands = [call.args[0] for call in mock_run.call_args_list]
+        self.assertFalse(any("reload-or-restart" in command for command in run_commands))
+        self.assertFalse(any(command.startswith("systemctl start ") for command in run_commands))
 
 
 class TestConfigureXfceForRdp(unittest.TestCase):
