@@ -494,9 +494,8 @@ WantedBy=timers.target
 
 
 def configure_auto_update_ruby(config: SetupConfig) -> None:
-    """Ruby package updates are handled by apt unattended-upgrades."""
-    cleanup_service("auto-update-ruby")
-    print("  ✓ Ruby updates are handled by apt unattended-upgrades")
+    """Ruby package updates are handled by the custom apt auto-update service."""
+    print("  ✓ Ruby updates are handled by the apt auto-update service")
 
 
 def configure_auto_update_uv(config: SetupConfig) -> None:

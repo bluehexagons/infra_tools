@@ -124,6 +124,17 @@ class TestGenerateMergedNginxConfig(unittest.TestCase):
         config = generate_merged_nginx_config('example.com', deployments)
         self.assertIn('proxy_pass', config)
 
+    def test_rails_proxy_uses_backend_port_when_proxy_port_missing(self):
+        deployments = [{
+            'path': '/',
+            'needs_proxy': True,
+            'backend_port': 3007,
+            'frontend_port': None,
+            'frontend_serve_path': None,
+        }]
+        config = generate_merged_nginx_config('example.com', deployments)
+        self.assertIn('proxy_pass http://127.0.0.1:3007', config)
+
     def test_hidden_files_denied(self):
         deployments = [{
             'path': '/',

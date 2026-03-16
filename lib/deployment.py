@@ -64,6 +64,51 @@ class DeploymentOrchestrator:
     def _is_rails_project(self, project_path: str) -> bool:
         return os.path.exists(os.path.join(project_path, "bin", "rails"))
 
+    def _get_frontend_serve_path(self, frontend_path: str) -> Optional[str]:
+        """Return a frontend build output path only when it is actually serveable.
+
+        Only checks known build output directories (dist, build, out). Does not
+        fall back to source directories like public/ or html/, which can exist
+        before a build runs (e.g. Vite's public/ for static assets).
+        """
+        if not os.path.exists(frontend_path):
+            return None
+
+        for build_dir in ("dist", "build", "out"):
+            candidate = os.path.join(frontend_path, build_dir)
+            if os.path.exists(os.path.join(candidate, "index.html")):
+                return candidate
+
+        return None
+
+    def _get_frontend_urls(self, domain: Optional[str], path: str, api_subdomain: bool) -> tuple[str, str]:
+        """Build frontend API and site root URLs for a deployment."""
+        api_url = "/api"
+        is_root = not path or path == '/'
+
+        if api_subdomain and domain:
+            api_url = f"https://api.{domain}"
+        elif not is_root:
+            clean_path = path.rstrip('/')
+            if not clean_path.startswith('/'):
+                clean_path = '/' + clean_path
+            api_url = f"{clean_path}/api"
+
+        site_root = path or "/"
+        if not site_root.startswith("/"):
+            site_root = f"/{site_root}"
+        if not site_root.endswith("/"):
+            site_root = f"{site_root}/"
+
+        return api_url, site_root
+
+    def _get_command_error(self, result: Any, fallback: str) -> str:
+        """Extract a concise error message from a command result."""
+        stderr = getattr(result, 'stderr', '') or ''
+        stdout = getattr(result, 'stdout', '') or ''
+        output = stderr.strip() or stdout.strip() or fallback
+        return output[:500]
+
     def _persist_rails_state_from_existing_release(self, existing_release_path: str, persistent_root: str) -> None:
         self._ensure_dir(persistent_root)
 
@@ -414,6 +459,7 @@ class DeploymentOrchestrator:
             # Get the actual assigned port from the service file for Rails projects
             backend_port = None
             frontend_serve_path = None
+            frontend_port = None
             if project_type == "rails":
                 service_name = f"rails-{app_name}"
                 service_file = f"/etc/systemd/system/{service_name}.service"
@@ -429,10 +475,20 @@ class DeploymentOrchestrator:
                     create_rails_service(app_name, dest_path, backend_port,
                                         self.web_user, self.web_group,
                                         env_vars={"CORS_ORIGINS": ",".join(cors_origins)})
-                
+
                 frontend_path = os.path.join(dest_path, "frontend")
                 if os.path.exists(frontend_path):
-                    frontend_serve_path = get_project_root(frontend_path, "node")
+                    frontend_serve_path = self._get_frontend_serve_path(frontend_path)
+                    if frontend_serve_path is None:
+                        print("  Frontend build output missing, rebuilding in place...")
+                        api_url, site_root = self._get_frontend_urls(domain, path, api_subdomain)
+                        self._build_node_project(
+                            frontend_path,
+                            api_url,
+                            site_root,
+                            require_build_output=True,
+                        )
+                        frontend_serve_path = self._get_frontend_serve_path(frontend_path)
 
             return {
                 'dest_path': dest_path,
@@ -442,7 +498,11 @@ class DeploymentOrchestrator:
                 'serve_path': get_project_root(dest_path, project_type),
                 'needs_proxy': should_reverse_proxy(project_type),
                 'backend_port': backend_port,
-                'frontend_port': 4000 if project_type == "rails" and os.path.exists(os.path.join(dest_path, "frontend")) else None,
+                # frontend_port is intentionally None: Rails frontends are always
+                # served statically (frontend_serve_path) after this point.
+                # The nginx config only needs frontend_port when proxying a dev
+                # server, which never happens in a skipped (already-deployed) path.
+                'frontend_port': frontend_port,
                 'frontend_serve_path': frontend_serve_path,
                 'skipped': True,
                 'api_subdomain': api_subdomain
@@ -522,27 +582,11 @@ class DeploymentOrchestrator:
             frontend_path = os.path.join(dest_path, "frontend")
             if os.path.exists(frontend_path):
                 print(f"  Detected frontend at {frontend_path}")
-                
-                api_url = "/api"
-                is_root = not path or path == '/'
-                
-                if api_subdomain and domain:
-                    api_url = f"https://api.{domain}"
-                elif not is_root:
-                    clean_path = path.rstrip('/')
-                    if not clean_path.startswith('/'):
-                        clean_path = '/' + clean_path
-                    api_url = f"{clean_path}/api"
 
-                site_root = path or "/"
-                if not site_root.startswith("/"):
-                    site_root = f"/{site_root}"
-                if not site_root.endswith("/"):
-                    site_root = f"{site_root}/"
+                api_url, site_root = self._get_frontend_urls(domain, path, api_subdomain)
+                self._build_node_project(frontend_path, api_url, site_root, require_build_output=True)
                 
-                self._build_node_project(frontend_path, api_url, site_root)
-                
-                frontend_serve_path = get_project_root(frontend_path, "node")
+                frontend_serve_path = self._get_frontend_serve_path(frontend_path)
                 print(f"  Frontend will be served statically from {frontend_serve_path}")
                 
                 frontend_port = None
@@ -604,7 +648,15 @@ class DeploymentOrchestrator:
         build_secret = secrets.token_hex(64)
         env_vars = f"RAILS_ENV=production SECRET_KEY_BASE={build_secret} TMPDIR=/var/tmp"
         
-        run(f"cd {shlex.quote(project_path)} && TMPDIR=/var/tmp bundle install --deployment --without development test")
+        # Configure bundler and install in a single shell command so that a
+        # kill or failure between config writes cannot leave .bundle/config in
+        # a partial state that affects subsequent runs.
+        run(
+            f"cd {shlex.quote(project_path)} && "
+            "bundle config set --local deployment true && "
+            "bundle config set --local without 'development test' && "
+            "BUNDLE_ALLOW_ROOT=1 TMPDIR=/var/tmp bundle install"
+        )
         
         print("  Setting up database...")
         
@@ -754,10 +806,21 @@ class DeploymentOrchestrator:
         
         print("  ✓ Rails project built")
     
-    def _build_node_project(self, project_path: str, api_url: Optional[str] = None, site_root: Optional[str] = None):
+    def _build_node_project(self, project_path: str, api_url: Optional[str] = None,
+                            site_root: Optional[str] = None, require_build_output: bool = False) -> bool:
         print(f"  Building Node.js project at {project_path}")
         
-        run(f"cd {shlex.quote(project_path)} && TMPDIR=/var/tmp npm install")
+        install_result = run(
+            f"cd {shlex.quote(project_path)} && TMPDIR=/var/tmp npm install",
+            check=False,
+            capture_output=True,
+        )
+        if install_result.returncode != 0:
+            error = self._get_command_error(install_result, "npm install failed")
+            if require_build_output:
+                raise RuntimeError(f"Frontend dependency install failed: {error}")
+            print(f"  ⚠ npm install failed, skipping build step: {error}")
+            return False
         
         # Check if a build script is defined in package.json before running it
         package_json = os.path.join(project_path, "package.json")
@@ -771,8 +834,11 @@ class DeploymentOrchestrator:
                 pass
         
         if not has_build_script:
-            print("  ℹ No build script in package.json, skipping build step")
-            return
+            message = "No build script in package.json"
+            if require_build_output:
+                raise RuntimeError(f"Frontend build required but {message.lower()}")
+            print(f"  ℹ {message}, skipping build step")
+            return False
 
         build_cmd = "npm run build"
         env_prefix = ["TMPDIR=/var/tmp"]
@@ -790,14 +856,28 @@ class DeploymentOrchestrator:
         if env_prefix:
             build_cmd = f"{' '.join(env_prefix)} {build_cmd}"
         
-        result = run(f"cd {shlex.quote(project_path)} && {build_cmd}", check=False)
+        result = run(
+            f"cd {shlex.quote(project_path)} && {build_cmd}",
+            check=False,
+            capture_output=True,
+        )
         
         if result.returncode != 0:
-            print("  ⚠ npm run build failed, skipping build step")
-        else:
-            print("  ✓ Node.js project built")
+            error = self._get_command_error(result, "npm run build failed")
+            if require_build_output:
+                raise RuntimeError(f"Frontend build failed: {error}")
+            print(f"  ⚠ npm run build failed, skipping build step: {error}")
+            return False
+
+        print("  ✓ Node.js project built")
+
+        if require_build_output and self._get_frontend_serve_path(project_path) is None:
+            raise RuntimeError(
+                "Frontend build completed but no serveable index.html was found in dist, build, or out"
+            )
+
+        return True
     
     def _build_static_project(self, project_path: str):
         print(f"  Static website at {project_path} - no build required")
         print("  ✓ Static files ready")
-

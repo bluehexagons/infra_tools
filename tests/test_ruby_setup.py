@@ -42,11 +42,14 @@ class TestRubySetup(unittest.TestCase):
             call("gem install bundler", check=False),
         ])
 
-    @patch("common.common_steps.cleanup_service")
-    def test_configure_auto_update_ruby_cleans_up_legacy_service(self, mock_cleanup):
+    def test_configure_auto_update_ruby_uses_apt_auto_update(self):
+        """Ruby updates are handled by the apt auto-update service, no cleanup needed."""
         config = SetupConfig(host="host", username="user", system_type="server_dev", install_ruby=True)
-        common_steps.configure_auto_update_ruby(config)
-        mock_cleanup.assert_called_once_with("auto-update-ruby")
+        with patch("common.common_steps.print") as mock_print:
+            common_steps.configure_auto_update_ruby(config)
+            mock_print.assert_called_once()
+            args = mock_print.call_args[0][0]
+            self.assertIn("auto-update", args)
 
     def test_ruby_auto_update_step_uses_common_cleanup_implementation(self):
         config = SetupConfig(host="host", username="user", system_type="server_dev", install_ruby=True)

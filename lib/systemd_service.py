@@ -130,8 +130,6 @@ def cleanup_all_infra_services(dry_run: bool = False) -> None:
         # Rails app services
         r"^rails-.*\.service$",
         # Auto-update timers
-        r"^auto-update-ruby\.service$",
-        r"^auto-update-ruby\.timer$",
         r"^auto-update-node\.service$",
         r"^auto-update-node\.timer$",
         r"^auto-update-apt\.service$",

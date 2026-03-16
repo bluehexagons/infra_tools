@@ -7,6 +7,7 @@ import sys
 import tempfile
 import time
 import unittest
+from typing import cast
 from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -46,6 +47,7 @@ class TestDatabaseBackup(unittest.TestCase):
         backup_path = self.orchestrator._backup_database(db_path, backup_dir, "test_app")
         
         self.assertIsNotNone(backup_path)
+        backup_path = cast(str, backup_path)
         self.assertTrue(os.path.exists(backup_path))
         self.assertIn("test_app_production_", backup_path)
         self.assertTrue(backup_path.endswith(".sqlite3"))
@@ -91,6 +93,7 @@ class TestDatabaseBackup(unittest.TestCase):
         backup_path = self.orchestrator._backup_database(link_path, backup_dir, "test_app")
         
         self.assertIsNotNone(backup_path)
+        backup_path = cast(str, backup_path)
         with open(backup_path, 'r') as f:
             content = f.read()
         self.assertEqual(content, "actual database")
@@ -594,6 +597,104 @@ class TestSkippedDeploymentServiceRecreation(unittest.TestCase):
         self.assertTrue(result.get('skipped'))
         
         # Service should NOT have been recreated
+        mock_create_service.assert_not_called()
+
+
+class TestRailsFrontendServePathDetection(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.orchestrator = DeploymentOrchestrator(base_dir=self.tmpdir)
+
+    def tearDown(self):
+        import shutil
+        if os.path.exists(self.tmpdir):
+            shutil.rmtree(self.tmpdir)
+
+    def test_requires_index_html_for_frontend_serve_path(self):
+        frontend_path = os.path.join(self.tmpdir, "frontend")
+        public_dir = os.path.join(frontend_path, "public")
+        os.makedirs(public_dir)
+
+        result = self.orchestrator._get_frontend_serve_path(frontend_path)
+
+        self.assertIsNone(result)
+
+    def test_accepts_built_frontend_with_index_html(self):
+        frontend_path = os.path.join(self.tmpdir, "frontend")
+        dist_dir = os.path.join(frontend_path, "dist")
+        os.makedirs(dist_dir)
+        with open(os.path.join(dist_dir, "index.html"), 'w') as f:
+            f.write("<html></html>")
+
+        result = self.orchestrator._get_frontend_serve_path(frontend_path)
+
+        self.assertEqual(result, dist_dir)
+
+    @patch('lib.deployment.run')
+    def test_build_node_project_requires_output_when_requested(self, mock_run):
+        frontend_path = os.path.join(self.tmpdir, "frontend")
+        os.makedirs(frontend_path)
+        with open(os.path.join(frontend_path, 'package.json'), 'w') as f:
+            f.write('{"scripts": {"build": "vite build"}}')
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        with self.assertRaisesRegex(RuntimeError, "no serveable index.html"):
+            self.orchestrator._build_node_project(frontend_path, require_build_output=True)
+
+    @patch('lib.deployment.run')
+    def test_build_node_project_raises_on_build_failure_when_required(self, mock_run):
+        frontend_path = os.path.join(self.tmpdir, "frontend")
+        os.makedirs(frontend_path)
+        with open(os.path.join(frontend_path, 'package.json'), 'w') as f:
+            f.write('{"scripts": {"build": "vite build"}}')
+
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=1, stdout="", stderr="vite build failed"),
+        ]
+
+        with self.assertRaisesRegex(RuntimeError, "Frontend build failed"):
+            self.orchestrator._build_node_project(frontend_path, require_build_output=True)
+
+    @patch('lib.deployment.create_rails_service')
+    @patch('lib.deployment.run')
+    @patch('os.path.exists')
+    def test_skipped_deploy_raises_for_unbuilt_frontend(self, mock_exists, mock_run, mock_create_service):
+        app_dir = os.path.join(self.tmpdir, "example_com")
+        os.makedirs(app_dir)
+        with open(os.path.join(app_dir, '.ruby-version'), 'w') as f:
+            f.write('3.3.0')
+        os.makedirs(os.path.join(app_dir, 'bin'), exist_ok=True)
+        with open(os.path.join(app_dir, 'bin', 'rails'), 'w') as f:
+            f.write('#!/usr/bin/env ruby')
+        os.makedirs(os.path.join(app_dir, 'public'), exist_ok=True)
+        os.mkdir(os.path.join(app_dir, 'frontend'))
+        os.mkdir(os.path.join(app_dir, 'frontend', 'public'))
+        with open(os.path.join(app_dir, 'frontend', 'package.json'), 'w') as f:
+            f.write('{}')
+
+        from lib.deploy_utils import save_deployment_metadata
+        save_deployment_metadata(app_dir, 'https://git.example.com/repo.git', 'abc123')
+
+        def selective_exists(path):
+            if path == '/etc/systemd/system/rails-example_com.service':
+                return True
+            return _real_exists(path)
+
+        mock_exists.side_effect = selective_exists
+        mock_run.return_value = MagicMock(returncode=0, stdout='', stderr='')
+
+        with self.assertRaisesRegex(RuntimeError, 'Frontend build required'):
+            self.orchestrator.deploy_from_archive(
+                source_path='/tmp/fake_source',
+                domain='example.com',
+                path='/',
+                git_url='https://git.example.com/repo.git',
+                commit_hash='abc123',
+                full_deploy=False,
+            )
+
         mock_create_service.assert_not_called()
 
 
