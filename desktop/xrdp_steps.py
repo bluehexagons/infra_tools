@@ -76,12 +76,12 @@ def _ensure_user_in_group(username: str, group: str) -> bool:
     return True
 
 
-def _refresh_services(*services: str, reload_active: bool = True) -> None:
+def _refresh_services(*services: str, reload_running_services: bool = True) -> None:
     """Refresh active services and start inactive ones."""
     active_services = [service for service in services if is_service_active(service)]
     inactive_services = [service for service in services if service not in active_services]
 
-    if reload_active and active_services:
+    if reload_running_services and active_services:
         active_list = " ".join(shlex.quote(service) for service in active_services)
         run(f"systemctl reload-or-restart {active_list}", check=False)
 
@@ -291,7 +291,8 @@ def harden_xrdp(config: SetupConfig) -> None:
     """Harden xRDP with TLS encryption and group restrictions.
     
     Note: Security settings are already configured in xrdp.ini and sesman.ini templates.
-    This function ensures the xrdp user has proper permissions and restarts services.
+    This function ensures the xrdp user has proper permissions and only refreshes
+    services when that access changes or the services are not running.
     """
     xrdp_config = "/etc/xrdp/xrdp.ini"
     
@@ -301,7 +302,6 @@ def harden_xrdp(config: SetupConfig) -> None:
     
     # Ensure xrdp user has access to SSL certificates
     ssl_cert_changed = _ensure_user_in_group("xrdp", "ssl-cert")
-    _refresh_services("xrdp-sesman", "xrdp", reload_active=ssl_cert_changed)
+    _refresh_services("xrdp-sesman", "xrdp", reload_running_services=ssl_cert_changed)
     
     print("  ✓ xRDP hardened (TLS encryption, strong ciphers, group restrictions)")
-
