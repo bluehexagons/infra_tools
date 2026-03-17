@@ -501,8 +501,18 @@ WantedBy=timers.target
 
 
 def configure_auto_update_ruby(config: SetupConfig) -> None:
-    """Ruby package updates are handled by the custom apt auto-update service."""
-    print("  ✓ Ruby updates are handled by the apt auto-update service")
+    """Configure automatic updates for global Ruby gems."""
+    gem_path = shutil.which("gem") or "/usr/bin/gem"
+
+    _configure_auto_update_systemd(
+        service_name="auto-update-ruby",
+        service_desc="Auto-update global Ruby gems",
+        timer_desc="Auto-update Ruby gems weekly",
+        script_name="auto_update_ruby.py",
+        schedule="Sun *-*-* 04:00:00",
+        check_path=gem_path,
+        check_name="Ruby gems",
+    )
 
 
 def configure_auto_update_uv(config: SetupConfig) -> None:

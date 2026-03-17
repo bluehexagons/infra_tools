@@ -80,7 +80,7 @@ def configure_auto_update_node(config: SetupConfig) -> None:
     
     _configure_auto_update_systemd(
         service_name="auto-update-node",
-        service_desc="Auto-update Node.js to latest LTS",
+        service_desc="Auto-update Node.js via nvm",
         timer_desc="Auto-update Node.js weekly",
         script_name="auto_update_node.py",
         schedule="Sun *-*-* 03:00:00",

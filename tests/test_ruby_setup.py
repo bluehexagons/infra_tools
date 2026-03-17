@@ -42,14 +42,20 @@ class TestRubySetup(unittest.TestCase):
             call("gem install bundler", check=False),
         ])
 
-    def test_configure_auto_update_ruby_uses_apt_auto_update(self):
-        """Ruby updates are handled by the apt auto-update service, no cleanup needed."""
+    @patch("common.common_steps._configure_auto_update_systemd")
+    @patch("common.common_steps.shutil.which", return_value="/usr/bin/gem")
+    def test_configure_auto_update_ruby_configures_gem_update_service(self, _which, mock_configure):
         config = SetupConfig(host="host", username="user", system_type="server_dev", install_ruby=True)
-        with patch("common.common_steps.print") as mock_print:
-            common_steps.configure_auto_update_ruby(config)
-            mock_print.assert_called_once()
-            args = mock_print.call_args[0][0]
-            self.assertIn("auto-update", args)
+        common_steps.configure_auto_update_ruby(config)
+        mock_configure.assert_called_once_with(
+            service_name="auto-update-ruby",
+            service_desc="Auto-update global Ruby gems",
+            timer_desc="Auto-update Ruby gems weekly",
+            script_name="auto_update_ruby.py",
+            schedule="Sun *-*-* 04:00:00",
+            check_path="/usr/bin/gem",
+            check_name="Ruby gems",
+        )
 
     def test_ruby_auto_update_step_uses_common_cleanup_implementation(self):
         config = SetupConfig(host="host", username="user", system_type="server_dev", install_ruby=True)

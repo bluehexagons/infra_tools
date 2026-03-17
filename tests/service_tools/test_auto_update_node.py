@@ -1,0 +1,92 @@
+"""Tests for web.service_tools.auto_update_node."""
+
+from __future__ import annotations
+
+import os
+import sys
+import unittest
+from unittest.mock import patch
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
+
+from web.service_tools import auto_update_node
+
+
+class TestAutoUpdateNode(unittest.TestCase):
+    def test_determine_update_track_from_lts_alias(self):
+        self.assertEqual(
+            auto_update_node.determine_update_track("default -> lts/* (-> v20.12.2)"),
+            "lts",
+        )
+
+    def test_determine_update_track_from_latest_alias(self):
+        self.assertEqual(
+            auto_update_node.determine_update_track("default -> node (-> v22.1.0)"),
+            "latest",
+        )
+
+    @patch("web.service_tools.auto_update_node.send_notification_safe")
+    @patch("web.service_tools.auto_update_node.update_global_packages", return_value=(True, ""))
+    @patch("web.service_tools.auto_update_node.install_target_version")
+    @patch("web.service_tools.auto_update_node.get_default_alias", return_value="default -> node (-> v22.1.0)")
+    @patch("web.service_tools.auto_update_node.get_current_version", return_value="v22.1.0")
+    @patch("web.service_tools.auto_update_node.get_latest_version", return_value="v22.1.0")
+    @patch("web.service_tools.auto_update_node.get_current_lts_version", return_value="v20.12.2")
+    @patch("web.service_tools.auto_update_node.load_notification_configs_from_state", return_value=[])
+    @patch("web.service_tools.auto_update_node.os.path.exists", return_value=True)
+    @patch("web.service_tools.auto_update_node.get_nvm_dir", return_value="/home/user/.nvm")
+    def test_main_updates_global_packages_when_current_node_is_latest(
+        self,
+        _nvm_dir,
+        _exists,
+        _configs,
+        _lts,
+        _latest,
+        _current,
+        _alias,
+        mock_install,
+        mock_update_packages,
+        mock_notify,
+    ):
+        result = auto_update_node.main()
+        self.assertEqual(result, 0)
+        mock_install.assert_not_called()
+        mock_update_packages.assert_called_once()
+        mock_notify.assert_called_once()
+        self.assertIn("Success", mock_notify.call_args.kwargs["subject"])
+
+    @patch("web.service_tools.auto_update_node.send_notification_safe")
+    @patch(
+        "web.service_tools.auto_update_node.update_global_packages",
+        return_value=(False, "Updated pnpm: permission denied"),
+    )
+    @patch("web.service_tools.auto_update_node.install_target_version")
+    @patch("web.service_tools.auto_update_node.get_default_alias", return_value="default -> lts/* (-> v20.12.2)")
+    @patch("web.service_tools.auto_update_node.get_current_version", return_value="v20.12.2")
+    @patch("web.service_tools.auto_update_node.get_latest_version", return_value="v22.1.0")
+    @patch("web.service_tools.auto_update_node.get_current_lts_version", return_value="v20.12.2")
+    @patch("web.service_tools.auto_update_node.load_notification_configs_from_state", return_value=["cfg"])
+    @patch("web.service_tools.auto_update_node.os.path.exists", return_value=True)
+    @patch("web.service_tools.auto_update_node.get_nvm_dir", return_value="/home/user/.nvm")
+    def test_main_notifies_on_global_package_failure(
+        self,
+        _nvm_dir,
+        _exists,
+        _configs,
+        _lts,
+        _latest,
+        _current,
+        _alias,
+        mock_install,
+        _update_packages,
+        mock_notify,
+    ):
+        result = auto_update_node.main()
+        self.assertEqual(result, 1)
+        mock_install.assert_not_called()
+        mock_notify.assert_called_once()
+        self.assertIn("Failed to update global Node.js packages", mock_notify.call_args.kwargs["message"])
+
+
+if __name__ == "__main__":
+    unittest.main()
