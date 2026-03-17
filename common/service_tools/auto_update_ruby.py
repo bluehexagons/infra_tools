@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../
 
 from lib.logging_utils import get_service_logger
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
+from lib.types import MaybeStr
 
 
 logger = get_service_logger('auto_update_ruby', 'common', use_syslog=True)
@@ -30,7 +31,7 @@ def gem_installed(gem_name: str) -> bool:
     return result.returncode == 0 and result.stdout.strip().lower() == "true"
 
 
-def update_gem(gem_name: str) -> tuple[bool, str]:
+def update_gem(gem_name: str) -> tuple[bool, MaybeStr]:
     """Update an installed gem."""
     result = run_gem_command(["update", gem_name])
     if result.returncode != 0:
@@ -39,7 +40,7 @@ def update_gem(gem_name: str) -> tuple[bool, str]:
         return False, details
 
     logger.info("%s updated successfully", gem_name)
-    return True, result.stdout.strip()
+    return True, result.stdout.strip() or None
 
 
 def main() -> int:

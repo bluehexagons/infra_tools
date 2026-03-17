@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../
 from lib.logging_utils import get_service_logger
 from lib.logging_utils import log_subprocess_result
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
+from lib.types import MaybeStr
 
 # Initialize centralized logger
 logger = get_service_logger('auto_update_node', 'web', use_syslog=True)
@@ -107,7 +108,7 @@ def install_target_version(update_track: str) -> bool:
     return log_subprocess_result(logger, action, result, failure_level=ERROR)
 
 
-def update_global_packages() -> tuple[bool, str]:
+def update_global_packages() -> tuple[bool, MaybeStr]:
     """Update npm itself and global npm packages."""
     commands = (
         ("Updated npm", "npm install -g npm@latest"),
@@ -124,7 +125,7 @@ def update_global_packages() -> tuple[bool, str]:
 
     if failures:
         return False, "\n".join(failures)
-    return True, ""
+    return True, None
 
 
 def update_symlinks():
@@ -176,6 +177,7 @@ def main():
     current_version = get_current_version()
     update_track = determine_update_track(get_default_alias())
     target_version = latest_version if update_track == "latest" else current_lts
+    track_label = "latest" if update_track == "latest" else "LTS"
     
     if not current_lts:
         logger.error("✗ Failed to get latest LTS version")
@@ -214,9 +216,9 @@ def main():
         return 1
     
     if current_version == target_version:
-        logger.info(f"Node.js already at latest {update_track} version: {target_version}")
+        logger.info(f"Node.js already at latest {track_label} version: {target_version}")
     else:
-        logger.info(f"Updating Node.js ({update_track}) from {current_version} to {target_version}")
+        logger.info(f"Updating Node.js ({track_label}) from {current_version} to {target_version}")
         
         if not install_target_version(update_track):
             logger.error("✗ Node.js update failed")
@@ -254,7 +256,7 @@ def main():
         subject="Success: Node.js updated",
         job="auto_update_node",
         status="good",
-        message=f"Node.js {update_track} track checked (current: {current_version}, target: {target_version}) and global packages were updated",
+        message=f"Node.js {track_label} track checked (current: {current_version}, target: {target_version}) and global packages were updated",
         logger=logger
     )
     
