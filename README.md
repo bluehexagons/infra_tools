@@ -10,6 +10,12 @@ Automated setup scripts for remote Linux systems (Debian).
 ## Quick Start
 
 ```bash
+# Using unified infra_tools.py (recommended)
+python3 infra_tools.py setup server_web example.com --ruby --node --deploy example.com https://github.com/user/repo.git
+python3 infra_tools.py setup workstation_desktop 192.168.1.100 --desktop i3 --browser firefox
+python3 infra_tools.py patch example.com --ssl --deploy api.example.com https://github.com/user/api.git
+
+# Or use individual scripts
 python3 setup_server_web.py example.com --ruby --node --deploy example.com https://github.com/user/repo.git
 python3 setup_workstation_desktop.py 192.168.1.100 --desktop i3 --browser firefox
 python3 patch_setup.py example.com --ssl --deploy api.example.com https://github.com/user/api.git
@@ -26,6 +32,7 @@ python3 patch_setup.py example.com --ssl --deploy api.example.com https://github
 
 | Script | Description |
 |--------|-------------|
+| `infra_tools.py` | **Unified entry point** - Use `setup` or `patch` subcommands for all operations |
 | `setup_server_web.py` | Web server with Nginx, reverse proxy, SSL, deployments |
 | `setup_server_dev.py` | Development server with CLI tools |
 | `setup_workstation_desktop.py` | Desktop workstation with RDP, browsers |
@@ -33,12 +40,21 @@ python3 patch_setup.py example.com --ssl --deploy api.example.com https://github
 | `patch_setup.py` | Update existing systems, manage saved configurations |
 | `recall_setup.py` | Retrieve configuration from remote host |
 
+**Recommendation**: Use `infra_tools.py` as your primary entry point. It provides a consistent interface for both initial setup and patching operations.
+
 See [Command-Line Reference](./docs/COMMAND_LINE.md) for all flags.
 
 ## Common Examples
 
 ### Web Server with Deployment
 ```bash
+# Using unified tool
+python3 infra_tools.py setup server_web web.com \
+  --ruby --node \
+  --ssl --ssl-email admin@web.com \
+  --deploy web.com https://github.com/user/repo.git
+
+# Or use individual script
 python3 setup_server_web.py web.com \
   --ruby --node \
   --ssl --ssl-email admin@web.com \
@@ -47,6 +63,13 @@ python3 setup_server_web.py web.com \
 
 ### Remote Desktop Workstation
 ```bash
+# Using unified tool
+python3 infra_tools.py setup workstation_desktop 192.168.1.50 \
+  --desktop xfce --rdp --audio \
+  --browser librewolf \
+  --ruby --node
+
+# Or use individual script
 python3 setup_workstation_desktop.py 192.168.1.50 \
   --desktop xfce --rdp --audio \
   --browser librewolf \
@@ -55,6 +78,15 @@ python3 setup_workstation_desktop.py 192.168.1.50 \
 
 ### NAS with Backup
 ```bash
+# Using unified tool
+python3 infra_tools.py setup server_lite 192.168.1.10 \
+  --samba \
+  --credential guest guest \
+  --share read media /mnt/data/media guest \
+  --sync /mnt/data/docs /mnt/backup daily \
+  --scrub /mnt/backup .pardatabase 5% weekly
+
+# Or use individual script
 python3 setup_server_lite.py 192.168.1.10 \
   --samba \
   --credential guest guest \

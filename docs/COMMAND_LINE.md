@@ -2,6 +2,45 @@
 
 Complete reference for all setup script flags.
 
+## Unified Entry Point (Recommended)
+
+The `infra_tools.py` script provides a unified interface for all operations:
+
+```bash
+# Setup a new system
+infra_tools.py setup <system_type> <host> [username] [options]
+
+# Patch/update an existing system  
+infra_tools.py patch <host> [username] [options]
+```
+
+### System Types for `setup` command
+
+| Type | Description |
+|------|-------------|
+| `workstation_desktop` | Desktop workstation with GUI |
+| `pc_dev` | PC development environment |
+| `workstation_dev` | Developer workstation |
+| `server_dev` | Development server |
+| `server_web` | Web server |
+| `server_lite` | Lightweight server |
+| `server_proxmox` | Proxmox host server |
+
+### Examples
+
+```bash
+# Setup a web server
+infra_tools.py setup server_web 192.168.1.100 admin --ruby --ssl
+
+# Setup a desktop workstation
+infra_tools.py setup workstation_desktop 192.168.1.50 --desktop i3 --browser firefox
+
+# Patch an existing server
+infra_tools.py patch web.com --deploy api.web.com https://github.com/user/api.git
+```
+
+---
+
 ## Basic Flags
 
 | Flag | Description |
@@ -91,9 +130,15 @@ Each bare username in `USERS` must have a matching `--credential USERNAME PASSWO
 
 ## Patch Commands
 
+When using `infra_tools.py patch` or the legacy `patch_setup.py`:
+
 ```bash
-patch_setup.py list [pattern]   # List saved configurations
-patch_setup.py info [pattern]    # Show configuration details
-patch_setup.py rm [pattern]      # Remove configurations
-patch_setup.py deploy [pattern]  # Redeploy systems
+infra_tools.py patch <host> [options]     # Using unified tool
+
+# Legacy commands still work:
+patch_setup.py list [pattern]             # List saved configurations
+patch_setup.py info [pattern]             # Show configuration details
+patch_setup.py cmd [pattern]              # Show reconstructed command
+patch_setup.py rm [pattern]               # Remove configurations
+patch_setup.py deploy [pattern]           # Redeploy systems
 ```
