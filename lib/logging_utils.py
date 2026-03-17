@@ -11,10 +11,12 @@ Key Features:
 - Centralized log directory (/var/log/infra_tools/)
 - Automatic fallback to stderr if file logging fails
 - Service-specific loggers with consistent configuration
+- Test mode: Set INFRA_TOOLS_TEST=1 to disable console output
 """
 
 from __future__ import annotations
 
+import os
 from logging import (
     Logger, Formatter, StreamHandler, getLogger, INFO, WARNING
 )
@@ -30,6 +32,9 @@ DEFAULT_LOG_MAX_BYTES = 5 * BYTES_PER_MB  # 5 MB
 DEFAULT_LOG_BACKUP_COUNT = 5
 DEFAULT_LOG_LEVEL = INFO
 DEFAULT_LOG_DIR = "/var/log/infra_tools"
+
+# Check if running in test mode (suppresses console output)
+TEST_MODE = os.environ.get('INFRA_TOOLS_TEST', '0') == '1'
 
 # Standard log format for all services
 # Format: timestamp - severity - service - message
@@ -150,9 +155,12 @@ def get_service_logger(
         log_dir = log_dir / log_subdir
     log_file = log_dir / f"{service_name}.log"
     
+    # In test mode, disable console output (use local variable, don't mutate param)
+    effective_console_output = console_output and not TEST_MODE
+    
     logger = get_rotating_logger(service_name, str(log_file), level=level)
     
-    if console_output:
+    if effective_console_output:
         # Check if stdout console handler already exists (explicit loop helps type-checkers)
         has_console = False
         for h in logger.handlers:

@@ -321,12 +321,15 @@ class ConcurrentOperationManager:
                     execution_context.completed_at = time.time()
                     execution_context.logger.log_step("execution", "completed", 
                                                     f"Completed {execution_context.type.value} operation")
-                    self._metrics['operations_completed'] += 1
                     
                 except Exception as e:
                     execution_context.completed_at = time.time()
                     execution_context.logger.log_error("execution_failed", str(e))
-                    self._metrics['operations_failed'] += 1
+                    with self._operation_lock:
+                        self._metrics['operations_failed'] += 1
+                else:
+                    with self._operation_lock:
+                        self._metrics['operations_completed'] += 1
                 
                 finally:
                     for lock_path in acquired_locks:
