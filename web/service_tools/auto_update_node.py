@@ -2,8 +2,8 @@
 """
 Auto-update Node.js
 
-This script updates Node.js to the latest LTS version via nvm.
-It also updates global npm and pnpm packages.
+This script updates Node.js via nvm, following the current default alias
+track (LTS or latest). It also updates global npm packages.
 
 Logs to: /var/log/infra_tools/web/auto_update_node.log
 """
@@ -58,6 +58,14 @@ def get_current_lts_version() -> str:
     return ""
 
 
+def get_latest_version() -> str:
+    """Get the latest non-LTS stable version available."""
+    result = run_nvm_command("nvm version-remote node")
+    if result.returncode == 0:
+        return result.stdout.strip()
+    return ""
+
+
 def get_current_version() -> str:
     """Get the currently installed default version."""
     result = run_nvm_command("nvm version default")
@@ -66,19 +74,57 @@ def get_current_version() -> str:
     return ""
 
 
-def install_lts_version():
-    """Install the latest LTS version."""
-    result = run_nvm_command("nvm install --lts")
-    return log_subprocess_result(logger, "Installed latest Node.js LTS", result, failure_level=ERROR)
+def get_default_alias() -> str:
+    """Get the nvm default alias definition."""
+    result = run_nvm_command("nvm alias default")
+    if result.returncode == 0:
+        return result.stdout.strip()
+    return ""
 
 
-def update_global_packages():
-    """Update global npm and pnpm packages."""
-    result = run_nvm_command("npm install -g npm@latest")
-    log_subprocess_result(logger, "Updated npm", result)
-    
-    result = run_nvm_command("npm install -g pnpm")
-    log_subprocess_result(logger, "Updated pnpm", result)
+def determine_update_track(alias_output: str) -> str:
+    """Determine whether the current default alias tracks LTS or latest."""
+    alias_lower = alias_output.lower()
+    if "->" in alias_output:
+        alias_target = alias_output.split("->", 1)[1].strip().split()[0].lower()
+        if alias_target == "node":
+            return "latest"
+        if alias_target.startswith("lts"):
+            return "lts"
+
+    if "lts" in alias_lower:
+        return "lts"
+    if "default -> node" in alias_lower:
+        return "latest"
+    return "lts"
+
+
+def install_target_version(update_track: str) -> bool:
+    """Install the latest Node.js version for the selected track."""
+    install_arg = "node" if update_track == "latest" else "--lts"
+    result = run_nvm_command(f"nvm install {install_arg}")
+    action = "Installed latest Node.js version" if update_track == "latest" else "Installed latest Node.js LTS"
+    return log_subprocess_result(logger, action, result, failure_level=ERROR)
+
+
+def update_global_packages() -> tuple[bool, str]:
+    """Update npm itself and global npm packages."""
+    commands = (
+        ("Updated npm", "npm install -g npm@latest"),
+        ("Updated global npm packages", "npm update -g"),
+        ("Updated pnpm", "npm install -g pnpm"),
+    )
+    failures: list[str] = []
+
+    for action, command in commands:
+        result = run_nvm_command(command)
+        if not log_subprocess_result(logger, action, result):
+            details = result.stderr.strip() or result.stdout.strip() or command
+            failures.append(f"{action}: {details}")
+
+    if failures:
+        return False, "\n".join(failures)
+    return True, ""
 
 
 def update_symlinks():
@@ -126,7 +172,10 @@ def main():
         return 1
     
     current_lts = get_current_lts_version()
+    latest_version = get_latest_version()
     current_version = get_current_version()
+    update_track = determine_update_track(get_default_alias())
+    target_version = latest_version if update_track == "latest" else current_lts
     
     if not current_lts:
         logger.error("✗ Failed to get latest LTS version")
@@ -140,6 +189,18 @@ def main():
         )
         return 1
     
+    if update_track == "latest" and not latest_version:
+        logger.error("✗ Failed to get latest Node.js version")
+        send_notification_safe(
+            notification_configs,
+            subject="Error: Node.js update failed",
+            job="auto_update_node",
+            status="error",
+            message="Failed to get latest Node.js version",
+            logger=logger
+        )
+        return 1
+
     if not current_version:
         logger.error("✗ Failed to get current version")
         send_notification_safe(
@@ -152,36 +213,48 @@ def main():
         )
         return 1
     
-    if current_version == current_lts:
-        logger.info(f"Node.js already at latest LTS version: {current_lts}")
-        return 0
-    
-    logger.info(f"Updating Node.js from {current_version} to {current_lts}")
-    
-    if not install_lts_version():
-        logger.error("✗ Node.js update failed")
+    if current_version == target_version:
+        logger.info(f"Node.js already at latest {update_track} version: {target_version}")
+    else:
+        logger.info(f"Updating Node.js ({update_track}) from {current_version} to {target_version}")
+        
+        if not install_target_version(update_track):
+            logger.error("✗ Node.js update failed")
+            send_notification_safe(
+                notification_configs,
+                subject="Error: Node.js update failed",
+                job="auto_update_node",
+                status="error",
+                message=f"Failed to update from {current_version} to {target_version}",
+                logger=logger
+            )
+            return 1
+
+    packages_updated, package_error = update_global_packages()
+    if not packages_updated:
+        logger.error("✗ Node.js global package update failed")
         send_notification_safe(
             notification_configs,
             subject="Error: Node.js update failed",
             job="auto_update_node",
             status="error",
-            message=f"Failed to update from {current_version} to {current_lts}",
+            message="Failed to update global Node.js packages",
+            details=package_error,
             logger=logger
         )
         return 1
-    
-    update_global_packages()
+
     update_symlinks()
     fix_permissions()
     
-    logger.info(f"✓ Node.js updated successfully to {current_lts}")
+    logger.info(f"✓ Node.js update tasks completed successfully for {target_version}")
     
     send_notification_safe(
         notification_configs,
         subject="Success: Node.js updated",
         job="auto_update_node",
         status="good",
-        message=f"Updated from {current_version} to {current_lts}",
+        message=f"Node.js {update_track} track checked (current: {current_version}, target: {target_version}) and global packages were updated",
         logger=logger
     )
     
