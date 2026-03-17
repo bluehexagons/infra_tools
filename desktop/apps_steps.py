@@ -107,25 +107,32 @@ def install_desktop_apps(config: SetupConfig) -> None:
         
         print(f"  ✓ Other desktop apps installed via Flatpak (VSCodium, Discord)")
     else:
-        all_installed = is_package_installed("codium") and is_package_installed("discord")
-        
-        if all_installed:
+        codium_installed = is_package_installed("codium")
+        discord_installed = is_package_installed("discord")
+
+        if codium_installed and discord_installed:
             print("  ✓ Other desktop apps already installed")
             return
 
-        print("  Installing VSCodium...")
-        if not os.path.exists("/usr/share/keyrings/vscodium-archive-keyring.gpg"):
-            run("wget -qO - https://gitlab.com/paulcarroty/vscodium-deb-rpm-repo/raw/master/pub.gpg | gpg --dearmor | dd of=/usr/share/keyrings/vscodium-archive-keyring.gpg 2>/dev/null", check=False)
-            run('echo "deb [signed-by=/usr/share/keyrings/vscodium-archive-keyring.gpg] https://download.vscodium.com/debs vscodium main" > /etc/apt/sources.list.d/vscodium.list', check=False)
-            run("apt-get update -qq", check=False)
-        if not is_package_installed("codium"):
-            run("apt-get install -y -qq codium", check=False)
+        if not codium_installed:
+            print("  Installing VSCodium...")
+            from desktop.browser_steps import _ensure_extrepo_and_update
+            run("extrepo enable vscodium", check=False)
+            if os.path.exists("/etc/apt/sources.list.d/extrepo_vscodium.sources"):
+                _ensure_extrepo_and_update()
+                run("apt-get install -y -qq codium", check=False)
+            else:
+                print("  ✗ Failed to enable VSCodium repository")
+        else:
+            print("  ✓ VSCodium already installed")
 
-        print("  Installing Discord...")
-        if not is_package_installed("discord"):
+        if not discord_installed:
+            print("  Installing Discord...")
             run("wget -qO /tmp/discord.deb 'https://discord.com/api/download?platform=linux&format=deb'", check=False)
             run("apt-get install -y -qq /tmp/discord.deb", check=False)
             run("rm -f /tmp/discord.deb", check=False)
+        else:
+            print("  ✓ Discord already installed")
 
         print(f"  ✓ Other desktop apps installed (VSCodium, Discord)")
 
@@ -207,13 +214,13 @@ def install_workstation_dev_apps(config: SetupConfig) -> None:
             return
 
         print("  Installing Visual Studio Code...")
-        if not os.path.exists("/etc/apt/trusted.gpg.d/microsoft.gpg"):
-            run("apt-get install -y -qq wget gpg")
-            run("wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor --output /etc/apt/trusted.gpg.d/microsoft.gpg", check=False)
-            run('echo "deb [arch=amd64] https://packages.microsoft.com/repos/code stable main" > /etc/apt/sources.list.d/vscode.list', check=False)
-            run("apt-get update -qq", check=False)
-        if not is_package_installed("code"):
+        from desktop.browser_steps import _ensure_extrepo_and_update
+        run("extrepo enable vscode", check=False)
+        if os.path.exists("/etc/apt/sources.list.d/extrepo_vscode.sources"):
+            _ensure_extrepo_and_update()
             run("apt-get install -y -qq code", check=False)
+        else:
+            print("  ✗ Failed to enable VS Code repository")
 
         print("  ✓ Workstation dev apps installed (VS Code)")
 

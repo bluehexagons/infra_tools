@@ -11,6 +11,18 @@ from lib.remote_utils import run, is_package_installed, is_flatpak_app_installed
 
 
 FLATPAK_REMOTE = "flathub"
+_apt_update_done = False
+
+
+def _ensure_extrepo_and_update() -> None:
+    """Install extrepo if needed and run apt-get update only once."""
+    global _apt_update_done
+    if not is_package_installed("extrepo"):
+        run("apt-get install -y -qq extrepo", check=False)
+    if not _apt_update_done:
+        run("apt-get update -qq", check=False)
+        _apt_update_done = True
+
 
 def install_single_browser(browser: str, use_flatpak: bool) -> None:
     """Install a single browser."""
@@ -26,12 +38,12 @@ def install_single_browser(browser: str, use_flatpak: bool) -> None:
                 print("  ✓ Brave browser already installed")
                 return
             print("  Installing Brave browser...")
-            if not os.path.exists("/usr/share/keyrings/brave-browser-archive-keyring.gpg"):
-                run("apt-get install -y -qq curl gnupg")
-                run("curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg", check=False)
-                run('echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main" > /etc/apt/sources.list.d/brave-browser-release.list', check=False)
-                run("apt-get update -qq", check=False)
-            run("apt-get install -y -qq brave-browser", check=False)
+            run("extrepo enable brave", check=False)
+            if os.path.exists("/etc/apt/sources.list.d/extrepo_brave.sources"):
+                _ensure_extrepo_and_update()
+                run("apt-get install -y -qq brave-browser", check=False)
+            else:
+                print("  ✗ Failed to enable Brave repository")
         print("  ✓ Brave browser installed")
     
     elif browser == "firefox":
@@ -64,16 +76,26 @@ def install_single_browser(browser: str, use_flatpak: bool) -> None:
                 print("  ✓ LibreWolf browser already installed")
                 return
             print("  Installing LibreWolf browser...")
-            if not os.path.exists("/usr/share/keyrings/librewolf.gpg"):
-                run("apt-get install -y -qq curl gnupg")
-                run("curl -fsSL https://deb.librewolf.net/keyring.gpg | gpg --dearmor --output /usr/share/keyrings/librewolf.gpg", check=False)
-                # Detect Debian codename from /etc/os-release
-                import subprocess
-                result = subprocess.run(['bash', '-c', '. /etc/os-release && echo $VERSION_CODENAME'], capture_output=True, text=True)
-                codename = result.stdout.strip() or "bookworm"
-                run(f'echo "deb [signed-by=/usr/share/keyrings/librewolf.gpg] https://deb.librewolf.net {codename} main" > /etc/apt/sources.list.d/librewolf.list', check=False)
-                run("apt-get update -qq", check=False)
-            run("apt-get install -y -qq librewolf", check=False)
+
+            old_repo_files = [
+                "/usr/share/keyrings/librewolf.gpg",
+                "/etc/apt/sources.list.d/librewolf.list",
+                "/etc/apt/sources.list.d/librewolf.sources",
+                "/etc/apt/trusted.gpg.d/librewolf.gpg",
+            ]
+            has_old_repo = any(os.path.exists(f) for f in old_repo_files)
+
+            if has_old_repo:
+                print("  → Migrating from old deb.librewolf.net repository...")
+                for f in old_repo_files:
+                    run(f"rm -f {shlex.quote(f)}", check=False)
+
+            run("extrepo enable librewolf", check=False)
+            if os.path.exists("/etc/apt/sources.list.d/extrepo_librewolf.sources"):
+                _ensure_extrepo_and_update()
+                run("apt-get install -y -qq librewolf", check=False)
+            else:
+                print("  ✗ Failed to enable LibreWolf repository")
         print("  ✓ LibreWolf browser installed")
     
     elif browser == "browsh":
