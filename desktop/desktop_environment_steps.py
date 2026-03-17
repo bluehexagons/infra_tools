@@ -5,7 +5,7 @@ import os
 import shlex
 
 from lib.config import SetupConfig
-from lib.remote_utils import run, is_package_installed, file_contains
+from lib.remote_utils import run, is_package_installed, file_contains, install_package
 
 
 def install_desktop(config: SetupConfig) -> None:
@@ -31,8 +31,7 @@ def install_desktop(config: SetupConfig) -> None:
         print(f"  ✓ {config.desktop.upper()} desktop already installed")
         return
     
-    run(install_cmd)
-    print(f"  ✓ {config.desktop.upper()} desktop installed")
+    install_package(f"{config.desktop.upper()} desktop", package, install_cmd, required=False)
 
 
 def configure_xfce_for_rdp(config: SetupConfig) -> None:

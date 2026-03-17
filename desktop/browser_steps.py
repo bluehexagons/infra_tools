@@ -7,11 +7,22 @@ import shlex
 
 from lib.config import SetupConfig
 from lib.machine_state import is_container
-from lib.remote_utils import run, is_package_installed, is_flatpak_app_installed, file_contains
+from lib.remote_utils import run, is_package_installed, file_contains
 
 
 FLATPAK_REMOTE = "flathub"
 _apt_update_done = False
+
+
+def is_flatpak_app_installed(app_id: str) -> bool:
+    """Check if a Flatpak application is installed."""
+    import subprocess
+    import shlex as _shlex
+    result = subprocess.run(
+        f"flatpak list --app --columns=application 2>/dev/null | grep -qx {_shlex.quote(app_id)}",
+        shell=True, capture_output=True
+    )
+    return result.returncode == 0
 
 
 def _ensure_extrepo_and_update() -> None:
@@ -31,8 +42,11 @@ def _install_via_extrepo(name: str, extrepo_name: str, package_name: str) -> boo
     sources_path = f"/etc/apt/sources.list.d/extrepo_{extrepo_name}.sources"
     if os.path.exists(sources_path):
         run(f"apt-get install -y -qq {package_name}", check=False)
-        return True
-    print(f"  ✗ Failed to enable {name} repository")
+        if is_package_installed(package_name):
+            return True
+        print(f"  ✗ Failed to install {name} (package not found after install)")
+    else:
+        print(f"  ✗ Failed to enable {name} repository")
     return False
 
 
@@ -45,13 +59,17 @@ def install_single_browser(browser: str, use_flatpak: bool) -> None:
                 return
             print("  Installing Brave browser...")
             run(f"flatpak install -y {FLATPAK_REMOTE} com.brave.Browser", check=False)
-        else:
-            if is_package_installed("brave-browser"):
-                print("  ✓ Brave browser already installed")
-                return
-            print("  Installing Brave browser...")
-            if _install_via_extrepo("Brave", "brave", "brave-browser"):
+            if is_flatpak_app_installed("com.brave.Browser"):
                 print("  ✓ Brave browser installed")
+                return
+            print("  ⚠ Flatpak install failed, falling back to apt...")
+        
+        if is_package_installed("brave-browser"):
+            print("  ✓ Brave browser already installed")
+            return
+        print("  Installing Brave browser...")
+        if _install_via_extrepo("Brave", "brave", "brave-browser"):
+            print("  ✓ Brave browser installed")
     
     elif browser == "firefox":
         if use_flatpak:
@@ -60,16 +78,24 @@ def install_single_browser(browser: str, use_flatpak: bool) -> None:
                 return
             print("  Installing Firefox...")
             run(f"flatpak install -y {FLATPAK_REMOTE} org.mozilla.firefox", check=False)
+            if is_flatpak_app_installed("org.mozilla.firefox"):
+                print("  ✓ Firefox installed")
+                return
         else:
             if is_package_installed("firefox") or is_package_installed("firefox-esr"):
                 print("  ✓ Firefox already installed")
                 return
             print("  Installing Firefox...")
             run("apt-get install -y -qq firefox-esr", check=False)
+            if is_package_installed("firefox") or is_package_installed("firefox-esr"):
+                print("  ✓ Firefox installed")
+            else:
+                return
         
         print("  Installing uBlock Origin extension for Firefox...")
         run("wget -qO /tmp/ublock_origin.xpi https://addons.mozilla.org/firefox/downloads/latest/ublock-origin/latest.xpi", check=False)
-        print("  ✓ Firefox installed (uBlock Origin downloaded to /tmp/ublock_origin.xpi)")
+        if os.path.exists("/tmp/ublock_origin.xpi"):
+            print("  ✓ Firefox installed (uBlock Origin downloaded to /tmp/ublock_origin.xpi)")
     
     elif browser == "librewolf":
         if use_flatpak:
@@ -78,6 +104,9 @@ def install_single_browser(browser: str, use_flatpak: bool) -> None:
                 return
             print("  Installing LibreWolf browser...")
             run(f"flatpak install -y {FLATPAK_REMOTE} io.gitlab.librewolf-community", check=False)
+            if is_flatpak_app_installed("io.gitlab.librewolf-community"):
+                print("  ✓ LibreWolf browser installed")
+                return
         else:
             if is_package_installed("librewolf"):
                 print("  ✓ LibreWolf browser already installed")
@@ -110,7 +139,8 @@ def install_single_browser(browser: str, use_flatpak: bool) -> None:
             run("wget -qO /tmp/browsh.deb https://github.com/browsh-org/browsh/releases/download/v1.8.0/browsh_1.8.0_linux_amd64.deb", check=False)
             run("apt-get install -y -qq /tmp/browsh.deb", check=False)
             run("rm -f /tmp/browsh.deb", check=False)
-        print("  ✓ Browsh installed")
+        if os.path.exists("/usr/local/bin/browsh"):
+            print("  ✓ Browsh installed")
     
     elif browser == "vivaldi":
         if use_flatpak:
@@ -119,6 +149,9 @@ def install_single_browser(browser: str, use_flatpak: bool) -> None:
                 return
             print("  Installing Vivaldi browser...")
             run(f"flatpak install -y {FLATPAK_REMOTE} com.vivaldi.Vivaldi", check=False)
+            if is_flatpak_app_installed("com.vivaldi.Vivaldi"):
+                print("  ✓ Vivaldi browser installed")
+                return
         else:
             if is_package_installed("vivaldi-stable"):
                 print("  ✓ Vivaldi browser already installed")
@@ -130,7 +163,8 @@ def install_single_browser(browser: str, use_flatpak: bool) -> None:
                 run('echo "deb [signed-by=/usr/share/keyrings/vivaldi-archive-keyring.gpg] https://repo.vivaldi.com/archive/deb/ stable main" > /etc/apt/sources.list.d/vivaldi.list', check=False)
                 run("apt-get update -qq", check=False)
             run("apt-get install -y -qq vivaldi-stable", check=False)
-        print("  ✓ Vivaldi browser installed")
+        if is_package_installed("vivaldi-stable"):
+            print("  ✓ Vivaldi browser installed")
     
     elif browser == "lynx":
         if is_package_installed("lynx"):
@@ -138,7 +172,8 @@ def install_single_browser(browser: str, use_flatpak: bool) -> None:
             return
         print("  Installing Lynx...")
         run("apt-get install -y -qq lynx", check=False)
-        print("  ✓ Lynx installed")
+        if is_package_installed("lynx"):
+            print("  ✓ Lynx installed")
 
 
 def install_browser(config: SetupConfig) -> None:

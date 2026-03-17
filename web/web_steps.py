@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 
 from lib.config import SetupConfig
-from lib.remote_utils import run, is_package_installed, is_service_active, file_contains
+from lib.remote_utils import run, is_package_installed, is_service_active, file_contains, install_package
 
 
 def install_nginx(config: SetupConfig) -> None:
@@ -15,12 +15,13 @@ def install_nginx(config: SetupConfig) -> None:
             return
     
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    run("apt-get install -y -qq nginx")
+    install_package("nginx", "nginx", "apt-get install -y -qq nginx", required=False)
     
-    run("systemctl enable nginx")
-    run("systemctl start nginx")
+    run("systemctl enable nginx", check=False)
+    run("systemctl start nginx", check=False)
     
-    print("  ✓ nginx installed and started")
+    if is_service_active("nginx"):
+        print("  ✓ nginx installed and started")
 
 
 def configure_nginx_security(config: SetupConfig) -> None:

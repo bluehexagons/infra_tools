@@ -7,7 +7,7 @@ import shlex
 import string
 import subprocess
 import sys
-from typing import Optional
+from typing import Optional, Callable
 
 
 _dry_run = False
@@ -68,24 +68,65 @@ def is_package_installed(package: str) -> bool:
     return result.returncode == 0
 
 
+def install_with_verify(
+    name: str,
+    install_cmd: str,
+    verify_fn: Callable[[], bool],
+    required: bool = True
+) -> bool:
+    """Run install command and verify using provided verification function.
+    
+    Args:
+        name: Display name for messages
+        install_cmd: Command to run
+        verify_fn: Callable that returns True if installed
+        required: Unused; kept for API compatibility
+    
+    Returns:
+        True if verification passed
+    """
+    if verify_fn():
+        print(f"  ✓ {name} already installed")
+        return True
+    
+    print(f"  Installing {name}...")
+    run(install_cmd, check=False)
+    
+    if verify_fn():
+        print(f"  ✓ {name} installed")
+        return True
+    
+    print(f"  ⚠ Failed to install {name}")
+    return False
+
+
+def install_package(name: str, package: str, install_cmd: str, required: bool = True) -> bool:
+    """Install an apt package and verify success.
+    
+    Args:
+        name: Display name for messages
+        package: Package name to check (for verification)
+        install_cmd: Command to run for installation
+        required: Unused; kept for API compatibility
+    
+    Returns:
+        True if installed, False otherwise
+    """
+    return install_with_verify(
+        name,
+        install_cmd,
+        lambda pkg=package: is_package_installed(pkg),
+        required
+    )
+
+
 def is_service_active(service: str) -> bool:
     result = subprocess.run(
-        f"systemctl is-active {shlex.quote(service)} >/dev/null 2>&1",
+        f"systemctl is-active {shlex.quote(service)}",
         shell=True, capture_output=True
     )
     return result.returncode == 0
 
-
-def is_flatpak_app_installed(app_id: str) -> bool:
-    """Return True if the given Flatpak application id is installed."""
-    try:
-        result = subprocess.run(
-            f"flatpak info {shlex.quote(app_id)}",
-            shell=True, capture_output=True
-        )
-        return result.returncode == 0
-    except FileNotFoundError:
-        return False
 
 def user_exists(username: str) -> bool:
     result = subprocess.run(

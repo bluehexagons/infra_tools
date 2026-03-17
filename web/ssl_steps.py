@@ -7,14 +7,13 @@ from typing import Optional
 from lib.types import StrList, Deployments
 
 from lib.config import SetupConfig
-from lib.remote_utils import run
+from lib.remote_utils import run, install_package
 
 
 def install_certbot(config: SetupConfig) -> None:
     print("Installing certbot...")
-    run("apt-get update")
-    run("apt-get install -y certbot python3-certbot-nginx")
-    print("  ✓ certbot installed")
+    run("apt-get update -qq", check=False)
+    install_package("certbot", "certbot", "apt-get install -y -qq certbot python3-certbot-nginx", required=False)
 
 
 def obtain_letsencrypt_certificate(domains: StrList, email: Optional[str] = None, cert_name: Optional[str] = None) -> bool:

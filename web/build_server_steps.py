@@ -119,13 +119,15 @@ def install_build_dependencies(config: SetupConfig) -> None:
     """Install common build dependencies."""
     packages = ['git', 'rsync', 'openssh-client']
     
-    missing = [pkg for pkg in packages if not is_package_installed(pkg)]
+    def all_installed() -> bool:
+        return all(is_package_installed(pkg) for pkg in packages)
     
-    if not missing:
+    if all_installed():
         print("  ✓ Build dependencies already installed")
         return
     
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    run(f"apt-get install -y -qq {' '.join(missing)}")
+    run(f"apt-get install -y -qq {' '.join(packages)}", check=False)
     
-    print("  ✓ Build dependencies installed")
+    if all_installed():
+        print("  ✓ Build dependencies installed")

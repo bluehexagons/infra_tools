@@ -13,16 +13,18 @@ def install_app_server_dependencies(config: SetupConfig) -> None:
     """Install minimal dependencies for app server."""
     packages = ['nginx', 'rsync']
     
-    missing = [pkg for pkg in packages if not is_package_installed(pkg)]
+    def all_installed() -> bool:
+        return all(is_package_installed(pkg) for pkg in packages)
     
-    if not missing:
+    if all_installed():
         print("  ✓ App server dependencies already installed")
         return
     
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    run(f"apt-get install -y -qq {' '.join(missing)}")
+    run(f"apt-get install -y -qq {' '.join(packages)}", check=False)
     
-    print("  ✓ App server dependencies installed")
+    if all_installed():
+        print("  ✓ App server dependencies installed")
 
 
 def create_deploy_user(config: SetupConfig) -> None:

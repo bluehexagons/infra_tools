@@ -15,16 +15,18 @@ def install_cicd_dependencies(config: SetupConfig) -> None:
     """Install dependencies required for CI/CD system."""
     packages = ['git']
     
-    missing_packages = [pkg for pkg in packages if not is_package_installed(pkg)]
+    def all_installed() -> bool:
+        return all(is_package_installed(pkg) for pkg in packages)
     
-    if not missing_packages:
+    if all_installed():
         print("  ✓ CI/CD dependencies already installed")
         return
     
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    run(f"apt-get install -y -qq {' '.join(missing_packages)}")
+    run(f"apt-get install -y -qq {' '.join(packages)}", check=False)
     
-    print("  ✓ CI/CD dependencies installed")
+    if all_installed():
+        print("  ✓ CI/CD dependencies installed")
 
 
 def create_cicd_user(config: SetupConfig) -> None:

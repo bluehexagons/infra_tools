@@ -11,7 +11,7 @@ from typing import Optional
 
 from lib.config import SetupConfig
 from lib.machine_state import can_manage_time_sync
-from lib.remote_utils import run, is_dry_run, is_package_installed, is_service_active, file_contains, generate_password
+from lib.remote_utils import run, is_dry_run, is_package_installed, is_service_active, file_contains, generate_password, install_package
 from lib.systemd_service import cleanup_service
 
 
@@ -40,25 +40,21 @@ def update_and_upgrade_packages(config: SetupConfig) -> None:
 
 
 def ensure_sudo_installed(config: SetupConfig) -> None:
-    if is_package_installed("sudo"):
-        print("  ✓ sudo already installed")
-        return
-    
-    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    run("apt-get install -y -qq sudo")
-    
-    print("  ✓ sudo installed")
+    install_package("sudo", "sudo", "apt-get install -y -qq sudo", required=False)
 
 
 def configure_locale(config: SetupConfig) -> None:
-    if file_contains("/etc/environment", "LANG=en_US.UTF-8"):
+    def locale_configured() -> bool:
+        return file_contains("/etc/environment", "LANG=en_US.UTF-8")
+    
+    if locale_configured():
         print("  ✓ UTF-8 locale already configured")
         return
     
-    run("apt-get install -y -qq locales")
+    install_package("locales", "locales", "apt-get install -y -qq locales", required=False)
     run("sed -i 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen")
-    run("locale-gen")
-    run("update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8")
+    locale_gen_result = run("locale-gen", check=False)
+    run("update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8", check=False)
     
     os.environ["LANG"] = "en_US.UTF-8"
     os.environ["LC_ALL"] = "en_US.UTF-8"
@@ -69,7 +65,10 @@ def configure_locale(config: SetupConfig) -> None:
         if "LANG=en_US.UTF-8" not in existing:
             f.write('LANG=en_US.UTF-8\nLC_ALL=en_US.UTF-8\n')
     
-    print("  ✓ UTF-8 locale configured (en_US.UTF-8)")
+    if locale_gen_result.returncode == 0:
+        print("  ✓ UTF-8 locale configured (en_US.UTF-8)")
+    else:
+        print("  ⚠ locale-gen failed; locale may not be fully configured")
 
 
 def setup_user(config: SetupConfig) -> None:
@@ -165,9 +164,7 @@ def configure_time_sync(config: SetupConfig) -> None:
         run("apt-get remove -y -qq systemd-timesyncd", check=False)
         print("  ✓ systemd-timesyncd removed")
     
-    if not is_package_installed("chrony"):
-        run("apt-get install -y -qq chrony")
-        print("  ✓ chrony installed")
+    install_package("chrony", "chrony", "apt-get install -y -qq chrony", required=False)
     
     run("systemctl enable chrony", check=False)
     run("systemctl start chrony", check=False)
@@ -177,9 +174,18 @@ def configure_time_sync(config: SetupConfig) -> None:
 
 
 def install_cli_tools(config: SetupConfig) -> None:
-    run("apt-get install -y -qq neovim btop htop curl wget git tmux unzip xdg-utils rsync")
-
-    print("  ✓ CLI tools installed (neovim, btop, htop, curl, wget, git, tmux, unzip, rsync)")
+    tools = ["neovim", "btop", "htop", "curl", "wget", "git", "tmux", "unzip", "xdg-utils", "rsync"]
+    all_installed = all(is_package_installed(t) for t in tools)
+    if all_installed:
+        print("  ✓ CLI tools already installed (neovim, btop, htop, curl, wget, git, tmux, unzip, rsync)")
+        return
+    
+    run("apt-get install -y -qq neovim btop htop curl wget git tmux unzip xdg-utils rsync", check=False)
+    
+    if all(is_package_installed(t) for t in tools):
+        print("  ✓ CLI tools installed (neovim, btop, htop, curl, wget, git, tmux, unzip, rsync)")
+    else:
+        print("  ⚠ Some CLI tools may not have installed correctly")
 
 
 def check_restart_required(config: SetupConfig) -> None:
@@ -199,9 +205,10 @@ def install_ruby(config: SetupConfig) -> None:
     if shutil.which("ruby") and (shutil.which("bundle") or shutil.which("bundler")):
         print("  ✓ Ruby + bundler already installed")
         return
-    run("apt-get -o DPkg::Lock::Timeout=60 install -y -qq ruby ruby-dev bundler")
+    run("apt-get -o DPkg::Lock::Timeout=60 install -y -qq ruby ruby-dev bundler", check=False)
     run("gem install bundler", check=False)
-    print("  ✓ Ruby + bundler installed from apt packages")
+    if shutil.which("ruby"):
+        print("  ✓ Ruby + bundler installed from apt packages")
 
 
 def install_go(config: SetupConfig) -> None:
@@ -560,8 +567,7 @@ def install_flatpak_packages(config: SetupConfig) -> None:
         return
     
     from lib.machine_state import is_container
-    from lib.remote_utils import is_flatpak_app_installed
-    from desktop.apps_steps import is_flatpak_installed, install_flatpak_if_needed
+    from desktop.apps_steps import is_flatpak_installed, install_flatpak_if_needed, is_flatpak_app_installed
     
     # In containers, flatpak often doesn't work
     if is_container():

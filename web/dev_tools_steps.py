@@ -7,7 +7,7 @@ from typing import Optional
 
 from common.common_steps import configure_auto_update_ruby as _configure_auto_update_ruby_common
 from lib.config import SetupConfig
-from lib.remote_utils import run, is_service_active
+from lib.remote_utils import run
 from lib.systemd_service import cleanup_service
 
 

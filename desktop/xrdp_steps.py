@@ -6,7 +6,7 @@ import shlex
 
 from lib.config import SetupConfig
 from lib.machine_state import has_gpu_access, is_container
-from lib.remote_utils import is_service_active, run
+from lib.remote_utils import is_service_active, run, install_package, is_package_installed
 
 
 FLATPAK_REMOTE = "flathub"
@@ -116,8 +116,9 @@ def install_xrdp(config: SetupConfig) -> None:
     else:
         session_cmd = "xfce4-session"
     
-    run("apt-get install -y -qq xrdp xorgxrdp dbus-x11 x11-xserver-utils x11-utils")
-    print("  ✓ xRDP packages installed (Xorg+xorgxrdp backend for dynamic resolution)")
+    run("apt-get install -y -qq xrdp xorgxrdp dbus-x11 x11-xserver-utils x11-utils", check=False)
+    if is_package_installed("xrdp"):
+        print("  ✓ xRDP packages installed (Xorg+xorgxrdp backend for dynamic resolution)")
 
     # Configure Xwrapper to allow XRDP sessions to start X server
     # This is critical for preventing session freezes and startup issues

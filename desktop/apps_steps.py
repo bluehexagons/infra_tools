@@ -7,8 +7,8 @@ import shlex
 
 from lib.config import SetupConfig
 from lib.machine_state import is_container
-from lib.remote_utils import run, is_package_installed, is_flatpak_app_installed, file_contains
-from desktop.browser_steps import install_browser
+from lib.remote_utils import run, is_package_installed, file_contains
+from desktop.browser_steps import install_browser, is_flatpak_app_installed
 
 
 FLATPAK_REMOTE = "flathub"
@@ -45,8 +45,9 @@ def install_flatpak_if_needed() -> bool:
 
 def install_remmina(config: SetupConfig) -> None:
     """Install Remmina RDP client."""
-    run("apt-get install -y -qq remmina remmina-plugin-rdp remmina-plugin-vnc")
-    print("  ✓ Remmina installed/updated")
+    run("apt-get install -y -qq remmina remmina-plugin-rdp remmina-plugin-vnc", check=False)
+    if is_package_installed("remmina"):
+        print("  ✓ Remmina installed/updated")
 
 
 def install_office_apps(config: SetupConfig) -> None:
@@ -64,15 +65,17 @@ def install_office_apps(config: SetupConfig) -> None:
         else:
             print("  Installing LibreOffice via Flatpak...")
             run(f"flatpak install -y {FLATPAK_REMOTE} org.libreoffice.LibreOffice", check=False)
-            print("  ✓ LibreOffice installed via Flatpak")
+            if is_flatpak_app_installed("org.libreoffice.LibreOffice"):
+                print("  ✓ LibreOffice installed via Flatpak")
             return
     
     if is_package_installed("libreoffice"):
         print("  ✓ LibreOffice already installed")
         return
     print("  Installing LibreOffice...")
-    run("apt-get install -y -qq libreoffice")
-    print("  ✓ LibreOffice installed")
+    run("apt-get install -y -qq libreoffice", check=False)
+    if is_package_installed("libreoffice"):
+        print("  ✓ LibreOffice installed")
 
 
 def install_desktop_apps(config: SetupConfig) -> None:
@@ -105,7 +108,8 @@ def install_desktop_apps(config: SetupConfig) -> None:
             print("  Installing Discord...")
             run(f"flatpak install -y {FLATPAK_REMOTE} com.discordapp.Discord", check=False)
         
-        print(f"  ✓ Other desktop apps installed via Flatpak (VSCodium, Discord)")
+        if is_flatpak_app_installed("com.vscodium.codium") and is_flatpak_app_installed("com.discordapp.Discord"):
+            print(f"  ✓ Other desktop apps installed via Flatpak (VSCodium, Discord)")
     else:
         codium_installed = is_package_installed("codium")
         discord_installed = is_package_installed("discord")
@@ -127,10 +131,12 @@ def install_desktop_apps(config: SetupConfig) -> None:
             run("wget -qO /tmp/discord.deb 'https://discord.com/api/download?platform=linux&format=deb'", check=False)
             run("apt-get install -y -qq /tmp/discord.deb", check=False)
             run("rm -f /tmp/discord.deb", check=False)
+            discord_installed = is_package_installed("discord")
         else:
             print("  ✓ Discord already installed")
 
-        print(f"  ✓ Other desktop apps installed (VSCodium, Discord)")
+        if is_package_installed("codium") and discord_installed:
+            print(f"  ✓ Other desktop apps installed (VSCodium, Discord)")
 
 
 
