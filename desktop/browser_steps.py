@@ -24,6 +24,18 @@ def _ensure_extrepo_and_update() -> None:
         _apt_update_done = True
 
 
+def _install_via_extrepo(name: str, extrepo_name: str, package_name: str) -> bool:
+    """Install a package via extrepo. Returns True if successful."""
+    _ensure_extrepo_and_update()
+    run(f"extrepo enable {extrepo_name}", check=False)
+    sources_path = f"/etc/apt/sources.list.d/extrepo_{extrepo_name}.sources"
+    if os.path.exists(sources_path):
+        run(f"apt-get install -y -qq {package_name}", check=False)
+        return True
+    print(f"  ✗ Failed to enable {name} repository")
+    return False
+
+
 def install_single_browser(browser: str, use_flatpak: bool) -> None:
     """Install a single browser."""
     if browser == "brave":
@@ -38,13 +50,8 @@ def install_single_browser(browser: str, use_flatpak: bool) -> None:
                 print("  ✓ Brave browser already installed")
                 return
             print("  Installing Brave browser...")
-            run("extrepo enable brave", check=False)
-            if os.path.exists("/etc/apt/sources.list.d/extrepo_brave.sources"):
-                _ensure_extrepo_and_update()
-                run("apt-get install -y -qq brave-browser", check=False)
-            else:
-                print("  ✗ Failed to enable Brave repository")
-        print("  ✓ Brave browser installed")
+            if _install_via_extrepo("Brave", "brave", "brave-browser"):
+                print("  ✓ Brave browser installed")
     
     elif browser == "firefox":
         if use_flatpak:
@@ -90,13 +97,8 @@ def install_single_browser(browser: str, use_flatpak: bool) -> None:
                 for f in old_repo_files:
                     run(f"rm -f {shlex.quote(f)}", check=False)
 
-            run("extrepo enable librewolf", check=False)
-            if os.path.exists("/etc/apt/sources.list.d/extrepo_librewolf.sources"):
-                _ensure_extrepo_and_update()
-                run("apt-get install -y -qq librewolf", check=False)
-            else:
-                print("  ✗ Failed to enable LibreWolf repository")
-        print("  ✓ LibreWolf browser installed")
+            if _install_via_extrepo("LibreWolf", "librewolf", "librewolf"):
+                print("  ✓ LibreWolf browser installed")
     
     elif browser == "browsh":
         print("  Installing Browsh (requires Firefox)...")

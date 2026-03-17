@@ -116,13 +116,9 @@ def install_desktop_apps(config: SetupConfig) -> None:
 
         if not codium_installed:
             print("  Installing VSCodium...")
-            from desktop.browser_steps import _ensure_extrepo_and_update
-            run("extrepo enable vscodium", check=False)
-            if os.path.exists("/etc/apt/sources.list.d/extrepo_vscodium.sources"):
-                _ensure_extrepo_and_update()
-                run("apt-get install -y -qq codium", check=False)
-            else:
-                print("  ✗ Failed to enable VSCodium repository")
+            from desktop.browser_steps import _install_via_extrepo
+            if _install_via_extrepo("VSCodium", "vscodium", "codium"):
+                print("  ✓ VSCodium installed")
         else:
             print("  ✓ VSCodium already installed")
 
@@ -214,15 +210,9 @@ def install_workstation_dev_apps(config: SetupConfig) -> None:
             return
 
         print("  Installing Visual Studio Code...")
-        from desktop.browser_steps import _ensure_extrepo_and_update
-        run("extrepo enable vscode", check=False)
-        if os.path.exists("/etc/apt/sources.list.d/extrepo_vscode.sources"):
-            _ensure_extrepo_and_update()
-            run("apt-get install -y -qq code", check=False)
-        else:
-            print("  ✗ Failed to enable VS Code repository")
-
-        print("  ✓ Workstation dev apps installed (VS Code)")
+        from desktop.browser_steps import _install_via_extrepo
+        if _install_via_extrepo("VS Code", "vscode", "code"):
+            print("  ✓ Workstation dev apps installed (VS Code)")
 
 
 def configure_vivaldi_browser(config: SetupConfig) -> None:
