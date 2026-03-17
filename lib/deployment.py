@@ -474,7 +474,11 @@ class DeploymentOrchestrator:
                     
                     create_rails_service(app_name, dest_path, backend_port,
                                         self.web_user, self.web_group,
-                                        env_vars={"CORS_ORIGINS": ",".join(cors_origins)})
+                                        env_vars={
+                                            "CORS_ORIGINS": ",".join(cors_origins) if cors_origins else "",
+                                            "FRONTEND_URL": cors_origins[0] if cors_origins else "",
+                                            "RAILS_HOST": domain or "",
+                                        })
 
                 frontend_path = os.path.join(dest_path, "frontend")
                 if os.path.exists(frontend_path):
@@ -577,7 +581,11 @@ class DeploymentOrchestrator:
             cors_origins = self._build_cors_origins(domain)
             
             create_rails_service(app_name, dest_path, backend_port, self.web_user, self.web_group, 
-                               env_vars={"CORS_ORIGINS": ",".join(cors_origins)})
+                               env_vars={
+                                   "CORS_ORIGINS": ",".join(cors_origins) if cors_origins else "",
+                                   "FRONTEND_URL": cors_origins[0] if cors_origins else "",
+                                   "RAILS_HOST": domain or "",
+                               })
             
             frontend_path = os.path.join(dest_path, "frontend")
             if os.path.exists(frontend_path):
