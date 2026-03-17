@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
 import sys
 import os
 import json
@@ -30,6 +31,13 @@ from lib.setup_common import (
     run_remote_setup,
     REMOTE_SCRIPT_PATH
 )
+
+PATCH_SPECIAL_COMMANDS_HELP = """Special commands:
+  patch_setup.py list [pattern]   List saved configurations
+  patch_setup.py info [pattern]   Show configuration details
+  patch_setup.py rm [pattern]     Remove saved configurations
+  patch_setup.py deploy [pattern] Redeploy matching configurations
+"""
 
 
 def get_all_configs(pattern: Optional[str] = None) -> Deployments:
@@ -386,6 +394,16 @@ def deploy_configurations(args: StrList) -> int:
     return 0
 
 
+def create_patch_argument_parser() -> argparse.ArgumentParser:
+    parser = create_argument_parser(
+        description="Patch a previously configured system with new or modified settings",
+        allow_steps=True
+    )
+    parser.formatter_class = argparse.RawDescriptionHelpFormatter
+    parser.epilog = PATCH_SPECIAL_COMMANDS_HELP
+    return parser
+
+
 def main() -> int:
     if len(sys.argv) > 1:
         cmd = sys.argv[1]
@@ -402,10 +420,7 @@ def main() -> int:
         elif cmd == 'deploy':
             return deploy_configurations(sys.argv[2:])
 
-    parser = create_argument_parser(
-        description="Patch a previously configured system with new or modified settings",
-        allow_steps=True
-    )
+    parser = create_patch_argument_parser()
     
     if argcomplete:
         argcomplete.autocomplete(parser)
