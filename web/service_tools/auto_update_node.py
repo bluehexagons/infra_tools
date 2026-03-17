@@ -249,6 +249,10 @@ def main():
     update_symlinks()
     fix_permissions()
     
+    # Re-read the current version after any successful install so notifications reflect
+    # the actual installed Node.js version rather than the pre-update version.
+    post_update_version = get_current_version() or current_version
+    
     logger.info(f"✓ Node.js update tasks completed successfully for {target_version}")
     
     send_notification_safe(
@@ -256,7 +260,7 @@ def main():
         subject="Success: Node.js updated",
         job="auto_update_node",
         status="good",
-        message=f"Node.js {track_label} track checked (current: {current_version}, target: {target_version}) and global packages were updated",
+        message=f"Node.js {track_label} track checked (current: {post_update_version}, target: {target_version}) and global packages were updated",
         logger=logger
     )
     
