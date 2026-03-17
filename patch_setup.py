@@ -6,6 +6,7 @@ import sys
 import os
 import json
 import time
+import shlex
 
 try:
     import argcomplete
@@ -34,10 +35,22 @@ from lib.setup_common import (
 
 PATCH_SPECIAL_COMMANDS_HELP = """Special commands:
   patch_setup.py list [pattern]   List saved configurations
-  patch_setup.py info [pattern]   Show configuration details
-  patch_setup.py rm [pattern]     Remove saved configurations
-  patch_setup.py deploy [pattern] Redeploy matching configurations
+  patch_setup.py info [pattern]    Show configuration details
+  patch_setup.py cmd [pattern]     Show reconstructed command
+  patch_setup.py rm [pattern]      Remove saved configurations
+  patch_setup.py deploy [pattern]  Redeploy matching configurations
 """
+
+SYSTEM_TYPE_TO_SCRIPT = {
+    "server_web": "setup_server_web.py",
+    "server_dev": "setup_server_dev.py",
+    "server_lite": "setup_server_lite.py",
+    "workstation_desktop": "setup_workstation_desktop.py",
+    "workstation_dev": "setup_workstation_dev.py",
+    "pc_dev": "setup_pc_dev.py",
+    "server_proxmox": "setup_server_proxmox.py",
+    "admin_python": "setup_admin_python.py",
+}
 
 
 def get_all_configs(pattern: Optional[str] = None) -> Deployments:
@@ -83,6 +96,198 @@ def get_all_configs(pattern: Optional[str] = None) -> Deployments:
     configs.sort(key=lambda x: x.get('host', ''))
     
     return configs
+
+
+def reconstruct_command(config: SetupConfig) -> str:
+    """Reconstruct the original command from cached configuration."""
+    script_name = SYSTEM_TYPE_TO_SCRIPT.get(config.system_type, f"setup_{config.system_type}.py")
+    
+    cmd_parts = [f"./{script_name}", config.host]
+    
+    if config.username:
+        cmd_parts.append(f"--username {shlex.quote(config.username)}")
+    
+    if config.machine_type:
+        cmd_parts.append(f"--machine {shlex.quote(config.machine_type)}")
+    
+    if config.timezone and config.timezone != "UTC":
+        cmd_parts.append(f"--timezone {shlex.quote(config.timezone)}")
+    
+    if config.friendly_name:
+        cmd_parts.append(f"--name {shlex.quote(config.friendly_name)}")
+    
+    if config.enable_rdp:
+        cmd_parts.append("--rdp")
+    
+    if config.desktop:
+        cmd_parts.append(f"--desktop {shlex.quote(config.desktop)}")
+    
+    if config.browsers:
+        for browser in config.browsers:
+            cmd_parts.append(f"--browser {shlex.quote(browser)}")
+    elif config.browser:
+        cmd_parts.append(f"--browser {shlex.quote(config.browser)}")
+    
+    if config.use_flatpak:
+        cmd_parts.append("--flatpak")
+    
+    if config.install_office:
+        cmd_parts.append("--office")
+    
+    if config.apt_packages:
+        for pkg in config.apt_packages:
+            cmd_parts.append(f"--apt-install {shlex.quote(pkg)}")
+    
+    if config.flatpak_packages:
+        for pkg in config.flatpak_packages:
+            cmd_parts.append(f"--flatpak-install {shlex.quote(pkg)}")
+    
+    if config.dark_theme:
+        cmd_parts.append("--dark")
+    
+    if config.dry_run:
+        cmd_parts.append("--dry-run")
+    
+    if config.install_ruby:
+        cmd_parts.append("--ruby")
+    
+    if config.install_go:
+        cmd_parts.append("--go")
+    
+    if config.install_node:
+        cmd_parts.append("--node")
+    
+    if config.install_python:
+        cmd_parts.append("--python")
+    
+    if config.custom_steps:
+        cmd_parts.append(f"--steps {shlex.quote(config.custom_steps)}")
+    
+    if config.deploy_specs:
+        cmd_parts.append("--lite-deploy")
+        if config.full_deploy:
+            cmd_parts.append("--full-deploy")
+        for deploy_spec, git_url in config.deploy_specs:
+            cmd_parts.append(f"--deploy {shlex.quote(deploy_spec)} {shlex.quote(git_url)}")
+    
+    if config.reset_migrations:
+        cmd_parts.append("--reset-migrations")
+    
+    if config.enable_ssl:
+        cmd_parts.append("--ssl")
+        if config.ssl_email:
+            cmd_parts.append(f"--ssl-email {shlex.quote(config.ssl_email)}")
+    
+    if config.enable_cloudflare:
+        cmd_parts.append("--cloudflare")
+    
+    if config.enable_cicd:
+        cmd_parts.append("--cicd")
+    
+    if config.is_build_server:
+        cmd_parts.append("--build-server")
+    
+    if config.is_app_server:
+        cmd_parts.append("--app-server")
+    
+    if config.deploy_targets:
+        for target in config.deploy_targets:
+            cmd_parts.append(f"--deploy-target {shlex.quote(target)}")
+    
+    if config.api_subdomain:
+        cmd_parts.append("--api-subdomain")
+    
+    if config.enable_samba:
+        cmd_parts.append("--samba")
+    
+    if config.samba_shares:
+        for share_spec in config.samba_shares:
+            escaped_spec = ' '.join(shlex.quote(str(s)) for s in share_spec)
+            cmd_parts.append(f"--share {escaped_spec}")
+    
+    if config.share_credentials:
+        for cred_spec in config.share_credentials:
+            escaped_spec = ' '.join(shlex.quote(str(s)) for s in cred_spec)
+            cmd_parts.append(f"--credential {escaped_spec}")
+    
+    if config.enable_smbclient:
+        cmd_parts.append("--smbclient")
+    
+    if config.smb_mounts:
+        for mount_spec in config.smb_mounts:
+            escaped_spec = ' '.join(shlex.quote(str(s)) for s in mount_spec)
+            cmd_parts.append(f"--mount-smb {escaped_spec}")
+    
+    if config.sync_specs:
+        for sync_spec in config.sync_specs:
+            escaped_spec = ' '.join(shlex.quote(str(s)) for s in sync_spec)
+            cmd_parts.append(f"--sync {escaped_spec}")
+    
+    if config.scrub_specs:
+        for scrub_spec in config.scrub_specs:
+            escaped_spec = ' '.join(shlex.quote(str(s)) for s in scrub_spec)
+            cmd_parts.append(f"--scrub {escaped_spec}")
+    
+    if config.notify_specs:
+        for notify_spec in config.notify_specs:
+            escaped_spec = ' '.join(shlex.quote(str(s)) for s in notify_spec)
+            cmd_parts.append(f"--notify {escaped_spec}")
+    
+    if config.no_restart:
+        cmd_parts.append("--no-restart")
+    
+    if config.include_desktop:
+        cmd_parts.append("--include-desktop")
+    
+    if config.include_cli_tools:
+        cmd_parts.append("--include-cli-tools")
+    
+    if config.include_desktop_apps:
+        cmd_parts.append("--include-desktop-apps")
+    
+    if config.include_workstation_dev_apps:
+        cmd_parts.append("--include-workstation-dev-apps")
+    
+    if config.include_pc_dev_apps:
+        cmd_parts.append("--include-pc-dev-apps")
+    
+    if config.include_web_server:
+        cmd_parts.append("--include-web-server")
+    
+    if config.include_web_firewall:
+        cmd_parts.append("--include-web-firewall")
+    
+    return ' '.join(cmd_parts)
+
+
+def show_command(pattern: Optional[str] = None) -> None:
+    configs: Deployments = get_all_configs(pattern)
+
+    if not configs:
+        if pattern:
+            print(f"No configurations found matching '{pattern}'")
+        else:
+            print("No saved configurations found.")
+        return
+
+    for config_data in configs:
+        host = config_data.get('host', 'Unknown')
+        system_type = config_data.get('system_type', 'Unknown')
+        args_dict = config_data.get('args', {})
+        
+        print("=" * 60)
+        print(f"Host: {host}")
+        print(f"System Type: {system_type}")
+        print("-" * 60)
+        
+        try:
+            config = SetupConfig.from_dict(host, system_type, args_dict)
+            cmd = reconstruct_command(config)
+            print(cmd)
+        except Exception as e:
+            print(f"Error reconstructing command: {e}")
+        
+        print()
 
 
 def list_configurations(pattern: Optional[str] = None) -> None:
@@ -414,6 +619,10 @@ def main() -> int:
         elif cmd == 'info':
             pattern = sys.argv[2] if len(sys.argv) > 2 else None
             show_info(pattern)
+            return 0
+        elif cmd in ['cmd', 'command']:
+            pattern = sys.argv[2] if len(sys.argv) > 2 else None
+            show_command(pattern)
             return 0
         elif cmd in ['rm', 'remove']:
             return remove_configurations(sys.argv[2:])
