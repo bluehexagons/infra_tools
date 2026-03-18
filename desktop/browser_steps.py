@@ -39,6 +39,7 @@ def _install_via_extrepo(name: str, extrepo_name: str, package_name: str) -> boo
     """Install a package via extrepo. Returns True if successful."""
     _ensure_extrepo_and_update()
     run(f"extrepo enable {extrepo_name}", check=False)
+    run("apt-get update -qq", check=False)
     sources_path = f"/etc/apt/sources.list.d/extrepo_{extrepo_name}.sources"
     if os.path.exists(sources_path):
         run(f"apt-get install -y -qq {package_name}", check=False)
