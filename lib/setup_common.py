@@ -20,6 +20,7 @@ except ImportError:
 
 from lib.config import SetupConfig
 from lib.validators import validate_host, validate_username
+from lib.validation import validate_hosted_flags
 from lib.system_utils import get_current_username
 from lib.cache import save_setup_command
 from lib.arg_parser import create_setup_argument_parser
@@ -357,7 +358,29 @@ def setup_main(system_type: str, description: str, success_msg_fn: Callable[[Set
     except ValueError as e:
         print(f"Error: {e}")
         return 1
-    
+
+    # Container provisioning (if --hosted)
+    if config.hosted_node:
+        try:
+            validate_hosted_flags(config)
+        except ValueError as e:
+            print(f"Error: {e}")
+            return 1
+
+        from lib.proxmox_node import provision_container, ContainerAlreadyExists
+
+        print(f"\n{'='*60}")
+        print(f"Provisioning LXC container on {config.hosted_node}...")
+        print(f"{'='*60}")
+
+        try:
+            provision_container(config)
+        except ContainerAlreadyExists:
+            print("  ✓ Container already provisioned, skipping creation")
+        except Exception as e:
+            print(f"\n✗ Failed to provision container: {e}")
+            return 1
+
     print_setup_summary(config, description)
     
     if not config.dry_run:

@@ -1,9 +1,13 @@
 """Enhanced validation framework extending existing patterns."""
 
 from __future__ import annotations
+
 import os
 import re
 from pathlib import Path
+from typing import Optional
+
+from lib.config import SetupConfig
 
 
 def validate_filesystem_path(path: str, must_exist: bool = False, check_writable: bool = False) -> None:
@@ -199,5 +203,63 @@ def validate_positive_integer(value: str, name: str = "value") -> int:
     
     if value_int <= 0:
         raise ValueError(f"{name} must be positive: {value_int}")
-    
+
     return value_int
+
+
+_MEMORY_PATTERN = re.compile(r'^\d+[KMGT]$', re.IGNORECASE)
+
+
+def validate_memory_string(value: str, name: str = "memory") -> None:
+    """Validate a memory/size string like '2G', '512M', '1024K'.
+
+    Args:
+        value: Memory string to validate
+        name: Field name for error messages
+
+    Raises:
+        ValueError: If validation fails
+    """
+    if not value:
+        raise ValueError(f"{name} must be a non-empty string")
+
+    if not _MEMORY_PATTERN.match(value):
+        raise ValueError(
+            f"Invalid {name} value '{value}' (e.g. 2G, 512M, 1T)"
+        )
+
+
+def validate_hosted_flags(config: SetupConfig) -> None:
+    """Validate that required hosted flags are present when --hosted is used.
+
+    Args:
+        config: SetupConfig instance
+
+    Raises:
+        ValueError: If required flags are missing or invalid
+    """
+    if not config.hosted_node:
+        return
+
+    if not config.container_memory:
+        raise ValueError("--memory is required when --hosted is specified")
+
+    if not config.container_storage:
+        raise ValueError("--storage is required when --hosted is specified")
+
+    storage_type = config.container_storage[0]
+    valid_types = ("root", "template")
+    if storage_type not in valid_types:
+        raise ValueError(
+            f"--storage TYPE must be one of {', '.join(valid_types)} "
+            f"(got '{storage_type}')"
+        )
+
+    validate_memory_string(config.container_memory, "--memory")
+
+    if storage_type == "root":
+        amount = config.container_storage[2]
+        validate_memory_string(amount, "--storage AMOUNT")
+
+    if config.container_cores < 1:
+        raise ValueError("--cores must be at least 1")

@@ -79,6 +79,14 @@ class SetupConfig:
     scrub_specs: Optional[NestedStrList] = None
     notify_specs: Optional[NestedStrList] = None
     no_restart: bool = False
+    # Container hosting (Proxmox LXC)
+    hosted_node: MaybeStr = None
+    hosted_user: str = "root"
+    hosted_key: MaybeStr = None
+    container_memory: MaybeStr = None
+    container_storage: Optional[StrList] = None  # [type, pool, amount]
+    container_cores: int = 1
+    container_base: str = "debian"
     include_desktop: bool = False
     include_cli_tools: bool = False
     include_desktop_apps: bool = False
@@ -546,6 +554,13 @@ class SetupConfig:
             scrub_specs=getattr(args, 'scrub_specs', None),
             notify_specs=getattr(args, 'notify_specs', None),
             no_restart=no_restart,
+            hosted_node=getattr(args, 'hosted_node', None),
+            hosted_user=getattr(args, 'hosted_user', 'root'),
+            hosted_key=getattr(args, 'hosted_key', None),
+            container_memory=getattr(args, 'container_memory', None),
+            container_storage=getattr(args, 'container_storage', None),
+            container_cores=getattr(args, 'container_cores', 1),
+            container_base=getattr(args, 'container_base', 'debian'),
             include_desktop=include_desktop,
             include_cli_tools=include_cli_tools,
             include_desktop_apps=include_desktop_apps,

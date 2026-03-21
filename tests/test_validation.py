@@ -13,6 +13,8 @@ from lib.validation import (
     validate_directory_empty,
     validate_network_endpoint,
     validate_positive_integer,
+    validate_memory_string,
+    validate_hosted_flags,
 )
 
 
@@ -111,6 +113,145 @@ class TestValidatePositiveInteger(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             validate_positive_integer('0', name='count')
         self.assertIn('count', str(ctx.exception))
+
+
+class TestValidateMemoryString(unittest.TestCase):
+    def test_valid_gigabytes(self):
+        validate_memory_string('2G')  # should not raise
+
+    def test_valid_megabytes(self):
+        validate_memory_string('512M')  # should not raise
+
+    def test_valid_kilobytes(self):
+        validate_memory_string('1024K')  # should not raise
+
+    def test_valid_terabytes(self):
+        validate_memory_string('1T')  # should not raise
+
+    def test_case_insensitive(self):
+        validate_memory_string('2g')  # should not raise
+
+    def test_invalid_suffix(self):
+        with self.assertRaises(ValueError):
+            validate_memory_string('2GB')
+
+    def test_no_suffix(self):
+        with self.assertRaises(ValueError):
+            validate_memory_string('512')
+
+    def test_empty_string(self):
+        with self.assertRaises(ValueError):
+            validate_memory_string('')
+
+    def test_letters_only(self):
+        with self.assertRaises(ValueError):
+            validate_memory_string('abc')
+
+    def test_custom_name_in_error(self):
+        with self.assertRaises(ValueError) as ctx:
+            validate_memory_string('bad', name='--storage')
+        self.assertIn('--storage', str(ctx.exception))
+
+
+class _MockConfig:
+    """Minimal mock for SetupConfig used by validate_hosted_flags."""
+    def __init__(self, **kwargs):
+        self.hosted_node = kwargs.get('hosted_node')
+        self.container_memory = kwargs.get('container_memory')
+        self.container_storage = kwargs.get('container_storage')
+        self.container_cores = kwargs.get('container_cores', 1)
+
+
+class TestValidateHostedFlags(unittest.TestCase):
+    def test_no_hosted_node_passes(self):
+        config = _MockConfig(hosted_node=None)
+        validate_hosted_flags(config)  # should not raise
+
+    def test_valid_config(self):
+        config = _MockConfig(
+            hosted_node='10.0.0.1',
+            container_memory='2G',
+            container_storage=['root', 'auto', '10G'],
+            container_cores=2,
+        )
+        validate_hosted_flags(config)  # should not raise
+
+    def test_missing_memory(self):
+        config = _MockConfig(
+            hosted_node='10.0.0.1',
+            container_memory=None,
+            container_storage=['root', 'auto', '10G'],
+        )
+        with self.assertRaises(ValueError) as ctx:
+            validate_hosted_flags(config)
+        self.assertIn('--memory', str(ctx.exception))
+
+    def test_missing_storage(self):
+        config = _MockConfig(
+            hosted_node='10.0.0.1',
+            container_memory='2G',
+            container_storage=None,
+        )
+        with self.assertRaises(ValueError) as ctx:
+            validate_hosted_flags(config)
+        self.assertIn('--storage', str(ctx.exception))
+
+    def test_invalid_storage_type(self):
+        config = _MockConfig(
+            hosted_node='10.0.0.1',
+            container_memory='2G',
+            container_storage=['bad', 'auto', '10G'],
+        )
+        with self.assertRaises(ValueError) as ctx:
+            validate_hosted_flags(config)
+        self.assertIn('TYPE', str(ctx.exception))
+
+    def test_invalid_memory_format(self):
+        config = _MockConfig(
+            hosted_node='10.0.0.1',
+            container_memory='2GB',
+            container_storage=['root', 'auto', '10G'],
+        )
+        with self.assertRaises(ValueError):
+            validate_hosted_flags(config)
+
+    def test_invalid_storage_amount_for_root(self):
+        config = _MockConfig(
+            hosted_node='10.0.0.1',
+            container_memory='2G',
+            container_storage=['root', 'auto', 'bad'],
+        )
+        with self.assertRaises(ValueError):
+            validate_hosted_flags(config)
+
+    def test_storage_amount_not_validated_for_template(self):
+        config = _MockConfig(
+            hosted_node='10.0.0.1',
+            container_memory='2G',
+            container_storage=['template', 'auto', 'ignored'],
+        )
+        validate_hosted_flags(config)  # should not raise — amount ignored for template
+
+    def test_path_type_rejected(self):
+        config = _MockConfig(
+            hosted_node='10.0.0.1',
+            container_memory='2G',
+            container_storage=['path', 'auto', '10G'],
+        )
+        with self.assertRaises(ValueError) as ctx:
+            validate_hosted_flags(config)
+        self.assertIn('TYPE', str(ctx.exception))
+
+    def test_zero_cores_rejected(self):
+        config = _MockConfig(
+            hosted_node='10.0.0.1',
+            container_memory='2G',
+            container_storage=['root', 'auto', '10G'],
+            container_cores=0,
+        )
+        with self.assertRaises(ValueError) as ctx:
+            validate_hosted_flags(config)
+        self.assertIn('cores', str(ctx.exception).lower())
 
 
 if __name__ == '__main__':

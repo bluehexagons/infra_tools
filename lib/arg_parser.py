@@ -31,6 +31,23 @@ def create_setup_argument_parser(
     if not for_remote:
         parser.add_argument("--name", dest="friendly_name", help="Friendly name for this configuration")
         parser.add_argument("--tags", dest="tags", help="Comma-separated list of tags for this configuration")
+
+        # Container hosting (Proxmox LXC creation)
+        parser.add_argument("--hosted", dest="hosted_node",
+                           help="Proxmox node IP/hostname to create LXC container on")
+        parser.add_argument("--hosted-user", dest="hosted_user", default="root",
+                           help="SSH user for Proxmox node (default: root)")
+        parser.add_argument("--hosted-key", dest="hosted_key",
+                           help="SSH key for Proxmox node (default: SSH config)")
+        parser.add_argument("--memory", dest="container_memory",
+                           help="Container memory (e.g. 2G, 512M)")
+        parser.add_argument("--storage", dest="container_storage",
+                           nargs=3, metavar=("TYPE", "POOL", "AMOUNT"),
+                           help="Container storage: TYPE (root|template), POOL (name or 'auto'), AMOUNT (e.g. 10G)")
+        parser.add_argument("--cores", dest="container_cores", type=int, default=1,
+                           help="Container CPU cores (default: 1)")
+        parser.add_argument("--base", dest="container_base", default="debian",
+                           help="Base OS template (default: debian, auto-downloads latest)")
     else:
         parser.add_argument("--name", dest="friendly_name", default=None,
                            help="Friendly name for this configuration")
