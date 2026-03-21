@@ -59,7 +59,18 @@ class TestHostedFlagParsing(unittest.TestCase):
         args = self.parser.parse_args([
             "10.0.0.50", "--storage", "root", "auto", "10G"
         ])
-        self.assertEqual(args.container_storage, ["root", "auto", "10G"])
+        self.assertEqual(args.container_storage, [["root", "auto", "10G"]])
+
+    def test_multiple_storage_specs(self):
+        args = self.parser.parse_args([
+            "10.0.0.50",
+            "--storage", "root", "auto", "10G",
+            "--storage", "template", "local"
+        ])
+        self.assertEqual(
+            args.container_storage,
+            [["root", "auto", "10G"], ["template", "local"]]
+        )
 
     def test_storage_default_none(self):
         args = self.parser.parse_args(["10.0.0.50"])
@@ -94,7 +105,7 @@ class TestHostedFlagParsing(unittest.TestCase):
         ])
         self.assertEqual(args.hosted_node, "10.0.0.1")
         self.assertEqual(args.container_memory, "2G")
-        self.assertEqual(args.container_storage, ["root", "auto", "10G"])
+        self.assertEqual(args.container_storage, [["root", "auto", "10G"]])
         self.assertEqual(args.container_cores, 2)
         self.assertEqual(args.container_base, "debian")
         self.assertEqual(args.friendly_name, "web-01")

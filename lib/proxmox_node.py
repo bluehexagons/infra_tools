@@ -11,9 +11,10 @@ import re
 import subprocess
 import shlex
 import sys
-from typing import Optional
+from typing import Optional, cast
 
-from lib.types import StrList
+from lib.config import SetupConfig
+from lib.types import NestedStrList, StrList
 
 
 class ContainerAlreadyExists(Exception):
@@ -64,6 +65,63 @@ def _ssh_run(
             print(f"    Warning: {stderr[:200]}")
         sys.stdout.flush()
     return result
+
+
+def _normalize_storage_specs(storage_specs: NestedStrList | None) -> list[StrList]:
+    if not storage_specs:
+        return []
+
+    if isinstance(storage_specs[0], str):
+        return [list(storage_specs)]  # type: ignore[list-item]
+
+    return [list(spec) for spec in storage_specs]
+
+
+def _get_storage_spec(storage_specs: NestedStrList | None, storage_type: str) -> Optional[StrList]:
+    for spec in _normalize_storage_specs(storage_specs):
+        if spec and spec[0] == storage_type:
+            return spec
+    return None
+
+
+def _storage_pool_supports_content(
+    pool: str,
+    content_filter: str,
+    node_ip: str,
+    user: str,
+    ssh_opts: StrList,
+    dry_run: bool = False,
+) -> bool:
+    result = _ssh_run(
+        node_ip, user, ssh_opts,
+        f"pvesm status --content {shlex.quote(content_filter)}",
+        dry_run=dry_run,
+    )
+
+    if dry_run:
+        return True
+
+    if result.returncode != 0:
+        fallback_result = _ssh_run(
+            node_ip, user, ssh_opts,
+            "pvesm status",
+            dry_run=dry_run,
+        )
+        if fallback_result.returncode != 0:
+            return False
+
+        for line in fallback_result.stdout.strip().split('\n')[1:]:
+            parts = line.split()
+            if parts and parts[0] == pool and len(parts) >= 3 and parts[2] == "active":
+                return True
+        return False
+
+    for line in result.stdout.strip().split('\n')[1:]:
+        parts = line.split()
+        if parts and parts[0] == pool and len(parts) >= 3 and parts[2] == "active":
+            return True
+
+    return False
 
 
 def check_container_exists(
@@ -140,6 +198,31 @@ def auto_detect_bridge(
 
     print(f"  ✓ Detected bridge: {bridge}")
     return bridge
+
+
+def _get_bridge_prefix_length(
+    node_ip: str,
+    user: str,
+    ssh_opts: StrList,
+    bridge: str,
+    dry_run: bool = False,
+) -> str:
+    result = _ssh_run(
+        node_ip, user, ssh_opts,
+        f"ip -o -f inet addr show dev {shlex.quote(bridge)} | awk 'NR==1 {{print $4}}'",
+        dry_run=dry_run,
+    )
+
+    if dry_run:
+        return "24"
+
+    cidr = result.stdout.strip()
+    if not cidr or "/" not in cidr:
+        raise ProvisionError(f"Could not detect IPv4 prefix length for bridge {bridge}")
+
+    prefix = cidr.split("/", 1)[1]
+    print(f"  ✓ Detected bridge network: {cidr}")
+    return prefix
 
 
 def _get_host_gateway(
@@ -227,6 +310,7 @@ def _resolve_storage_pool(
     node_ip: str,
     user: str,
     ssh_opts: StrList,
+    content_filter: str,
     dry_run: bool = False
 ) -> str:
     """Resolve a storage pool name.
@@ -236,17 +320,28 @@ def _resolve_storage_pool(
     """
     if pool_arg != "auto":
         print(f"  ✓ Using storage pool: {pool_arg}")
+        if not _storage_pool_supports_content(
+            pool_arg, content_filter, node_ip, user, ssh_opts, dry_run=dry_run
+        ):
+            raise ProvisionError(
+                f"Storage pool '{pool_arg}' does not support content type '{content_filter}'"
+            )
         return pool_arg
 
     result = _ssh_run(
         node_ip, user, ssh_opts,
-        "pvesm status --content images,rootdir 2>/dev/null || pvesm status",
+        f"pvesm status --content {shlex.quote(content_filter)}",
         dry_run=dry_run
     )
 
     if dry_run:
         print("  [DRY-RUN] Would resolve storage pool")
         return "local-lvm"
+
+    if result.returncode != 0:
+        raise ProvisionError(
+            f"Could not query storage pools for content type '{content_filter}'"
+        )
 
     for line in result.stdout.strip().split('\n')[1:]:  # skip header
         parts = line.split()
@@ -257,7 +352,7 @@ def _resolve_storage_pool(
             return pool
 
     raise ProvisionError(
-        "No suitable storage pool found. Specify one explicitly with --storage TYPE POOL AMOUNT"
+        "No suitable storage pool found. Specify one explicitly with --storage root POOL AMOUNT or --storage template POOL"
     )
 
 
@@ -270,8 +365,15 @@ def _resolve_template_storage(
 ) -> str:
     """Find a storage pool that supports vztmpl content.
 
-    Falls back to root_pool if it supports templates.
+    Prefer the root pool if it already supports templates; otherwise auto-select
+    the first active template-capable pool.
     """
+    if _storage_pool_supports_content(
+        root_pool, "vztmpl", node_ip, user, ssh_opts, dry_run=dry_run
+    ):
+        print(f"  ✓ Using root storage pool for templates: {root_pool}")
+        return root_pool
+
     result = _ssh_run(
         node_ip, user, ssh_opts,
         "pvesm status --content vztmpl 2>/dev/null",
@@ -288,19 +390,7 @@ def _resolve_template_storage(
             print(f"  ✓ Template storage pool: {pool}")
             return pool
 
-    # Fall back: check if root pool supports templates
-    check = _ssh_run(
-        node_ip, user, ssh_opts,
-        f"pvesm status | grep '^{shlex.quote(root_pool)}'",
-        dry_run=dry_run
-    )
-    if root_pool in check.stdout:
-        print(f"  ✓ Using root storage pool for templates: {root_pool}")
-        return root_pool
-
-    raise ProvisionError(
-        "No template storage pool found on the Proxmox host"
-    )
+    raise ProvisionError("No template storage pool found on the Proxmox host")
 
 
 def _resolve_template_name(
@@ -324,7 +414,7 @@ def _resolve_template_name(
     # List available templates
     result = _ssh_run(
         node_ip, user, ssh_opts,
-        f"pveam available --section {shlex.quote(template_storage)} 2>/dev/null || pveam available",
+        "pveam available",
         dry_run=dry_run
     )
 
@@ -412,6 +502,7 @@ def _create_container(
     cores: int,
     root_pool: str,
     storage_amount: str,
+    cidr_prefix: str,
     bridge: str,
     gateway: str,
     nameservers: StrList,
@@ -432,13 +523,17 @@ def _create_container(
         f"--cores {cores} "
         f"--rootfs {shlex.quote(root_pool)}:{shlex.quote(storage_amount)} "
         f"--net0 name=eth0,bridge={shlex.quote(bridge)},"
-        f"ip={shlex.quote(target_ip)}/24,gw={shlex.quote(gateway)},type=veth "
+        f"ip={shlex.quote(target_ip)}/{shlex.quote(cidr_prefix)},gw={shlex.quote(gateway)},type=veth "
         f"--nameserver {shlex.quote(' '.join(nameservers))} "
         f"--unprivileged {unprivileged} "
         f"--start 1"
     )
 
-    _ssh_run(node_ip, user, ssh_opts, cmd, dry_run=dry_run)
+    result = _ssh_run(node_ip, user, ssh_opts, cmd, dry_run=dry_run)
+    if result.returncode != 0:
+        raise ProvisionError(
+            f"Container creation failed for VMID {vmid}: {result.stderr.strip() or result.stdout.strip() or 'unknown error'}"
+        )
 
     if not dry_run:
         # Verify it started
@@ -456,7 +551,7 @@ def _create_container(
     print(f"  ✓ Container {vmid} created and started ({hostname}, {target_ip})")
 
 
-def provision_container(config) -> None:
+def provision_container(config: SetupConfig) -> None:
     """Orchestrate LXC container provisioning on a Proxmox host.
 
     Args:
@@ -466,9 +561,11 @@ def provision_container(config) -> None:
         ContainerAlreadyExists: If a container with the target IP already exists.
         ProvisionError: If provisioning fails at any step.
     """
-    node_ip = config.hosted_node
-    user = config.hosted_user
-    target_ip = config.host
+    node_ip = cast(str, config.hosted_node)
+    memory = cast(str, config.container_memory)
+    storage_specs = cast(NestedStrList, config.container_storage)
+    user: str = config.hosted_user
+    target_ip: str = config.host
     ssh_opts = _ssh_opts(config.hosted_key)
     dry_run = config.dry_run
 
@@ -503,24 +600,40 @@ def provision_container(config) -> None:
     gateway = _get_host_gateway(node_ip, user, ssh_opts)
     nameservers = _get_host_nameservers(node_ip, user, ssh_opts)
 
-    # Resolve storage pools
-    storage_type = config.container_storage[0]
-    root_pool_arg = config.container_storage[1]
-    storage_amount = config.container_storage[2]
+    root_spec = _get_storage_spec(storage_specs, "root")
+    if not root_spec:
+        raise ProvisionError("Missing root storage specification")
 
-    root_pool = _resolve_storage_pool(root_pool_arg, node_ip, user, ssh_opts)
+    template_spec = _get_storage_spec(storage_specs, "template")
+
+    root_pool_arg = root_spec[1]
+    storage_amount = root_spec[2]
+
+    root_pool = _resolve_storage_pool(
+        root_pool_arg, node_ip, user, ssh_opts, "images,rootdir"
+    )
 
     # Template storage
-    if storage_type == "template":
-        template_storage = root_pool
+    if template_spec:
+        template_pool_arg = template_spec[1]
+        if template_pool_arg == "auto":
+            template_storage = _resolve_storage_pool(
+                "auto", node_ip, user, ssh_opts, "vztmpl"
+            )
+        else:
+            template_storage = _resolve_storage_pool(
+                template_pool_arg, node_ip, user, ssh_opts, "vztmpl"
+            )
     else:
-        template_storage = _resolve_template_storage(
-            root_pool, node_ip, user, ssh_opts
-        )
+        template_storage = _resolve_template_storage(root_pool, node_ip, user, ssh_opts)
 
     # Resolve and download template
     template_path = _resolve_template_name(
         config.container_base, template_storage, node_ip, user, ssh_opts
+    )
+
+    cidr_prefix = _get_bridge_prefix_length(
+        node_ip, user, ssh_opts, bridge, dry_run=dry_run
     )
 
     # Get next VMID
@@ -534,10 +647,11 @@ def provision_container(config) -> None:
         vmid=vmid,
         target_ip=target_ip,
         template_path=template_path,
-        memory=config.container_memory,
+        memory=memory,
         cores=config.container_cores,
         root_pool=root_pool,
         storage_amount=storage_amount,
+        cidr_prefix=cidr_prefix,
         bridge=bridge,
         gateway=gateway,
         nameservers=nameservers,
@@ -546,5 +660,5 @@ def provision_container(config) -> None:
         user=user,
         ssh_opts=ssh_opts,
         privileged=privileged,
-        dry_run=False
+        dry_run=dry_run
     )

@@ -37,6 +37,19 @@ infra_tools.py setup workstation_desktop 192.168.1.50 --desktop i3 --browser fir
 
 # Patch an existing server
 infra_tools.py patch web.com --deploy api.web.com https://github.com/user/api.git
+
+# Provision a hosted LXC on a Proxmox node, then configure it as a web server
+infra_tools.py setup server_web 10.0.0.50 admin \
+  --hosted 10.0.0.10 \
+  --hosted-user root \
+  --hosted-key ~/.ssh/proxmox_ed25519 \
+  --memory 4G \
+  --storage root auto 20G \
+  --storage template local \
+  --cores 2 \
+  --base debian \
+  --name web-01 \
+  --ruby --node --ssl
 ```
 
 ---
@@ -77,6 +90,44 @@ infra_tools.py patch web.com --deploy api.web.com https://github.com/user/api.gi
 | `--node` | Install nvm + Node.js + PNPM |
 | `--go` | Install latest Go |
 | `--python` | Install Python aliases + uv |
+
+## Hosted Proxmox LXC Flags
+
+Use these flags with `infra_tools.py setup ...` or the legacy `setup_*.py` scripts to create an LXC container on a Proxmox host before the normal setup flow continues against that new container.
+
+| Flag | Description |
+|------|-------------|
+| `--hosted HOST` | Proxmox node IP or hostname where the container will be created |
+| `--hosted-user USER` | SSH user for the Proxmox node (default: `root`) |
+| `--hosted-key PATH` | SSH key for the Proxmox node |
+| `--memory SIZE` | Container memory, such as `2G` or `512M` |
+| `--storage root POOL AMOUNT` | Required root filesystem storage spec; `POOL` may be a Proxmox storage name or `auto` |
+| `--storage template POOL` | Optional template storage spec; use to force where the base image is downloaded |
+| `--cores N` | Container vCPU count (default: `1`) |
+| `--base NAME` | Base template family to download, such as `debian` or `ubuntu` (default: `debian`) |
+
+Notes:
+
+- `--storage` is repeatable and storage types are unique.
+- `root` storage is required when `--hosted` is used.
+- `template` storage is optional; if omitted, the tool prefers the root pool when it supports templates and otherwise auto-selects a template-capable pool.
+
+Full example:
+
+```bash
+python3 infra_tools.py setup server_web 10.0.0.50 admin \
+  --hosted 10.0.0.10 \
+  --hosted-user root \
+  --hosted-key ~/.ssh/proxmox_ed25519 \
+  --memory 4G \
+  --storage root auto 20G \
+  --storage template local \
+  --cores 2 \
+  --base debian \
+  --name web-01 \
+  --ruby --node --ssl --ssl-email admin@example.com \
+  --deploy example.com https://github.com/user/repo.git
+```
 
 ## Deployment Flags
 

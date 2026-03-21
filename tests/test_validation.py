@@ -171,7 +171,7 @@ class TestValidateHostedFlags(unittest.TestCase):
         config = _MockConfig(
             hosted_node='10.0.0.1',
             container_memory='2G',
-            container_storage=['root', 'auto', '10G'],
+            container_storage=[['root', 'auto', '10G'], ['template', 'local']],
             container_cores=2,
         )
         validate_hosted_flags(config)  # should not raise
@@ -180,7 +180,7 @@ class TestValidateHostedFlags(unittest.TestCase):
         config = _MockConfig(
             hosted_node='10.0.0.1',
             container_memory=None,
-            container_storage=['root', 'auto', '10G'],
+            container_storage=[['root', 'auto', '10G']],
         )
         with self.assertRaises(ValueError) as ctx:
             validate_hosted_flags(config)
@@ -200,7 +200,7 @@ class TestValidateHostedFlags(unittest.TestCase):
         config = _MockConfig(
             hosted_node='10.0.0.1',
             container_memory='2G',
-            container_storage=['bad', 'auto', '10G'],
+            container_storage=[['bad', 'auto', '10G']],
         )
         with self.assertRaises(ValueError) as ctx:
             validate_hosted_flags(config)
@@ -210,7 +210,7 @@ class TestValidateHostedFlags(unittest.TestCase):
         config = _MockConfig(
             hosted_node='10.0.0.1',
             container_memory='2GB',
-            container_storage=['root', 'auto', '10G'],
+            container_storage=[['root', 'auto', '10G']],
         )
         with self.assertRaises(ValueError):
             validate_hosted_flags(config)
@@ -219,24 +219,33 @@ class TestValidateHostedFlags(unittest.TestCase):
         config = _MockConfig(
             hosted_node='10.0.0.1',
             container_memory='2G',
-            container_storage=['root', 'auto', 'bad'],
+            container_storage=[['root', 'auto', 'bad']],
         )
         with self.assertRaises(ValueError):
             validate_hosted_flags(config)
 
-    def test_storage_amount_not_validated_for_template(self):
+    def test_template_storage_omits_amount(self):
         config = _MockConfig(
             hosted_node='10.0.0.1',
             container_memory='2G',
-            container_storage=['template', 'auto', 'ignored'],
+            container_storage=[['root', 'auto', '10G'], ['template', 'local']],
         )
-        validate_hosted_flags(config)  # should not raise — amount ignored for template
+        validate_hosted_flags(config)  # should not raise
+
+    def test_template_storage_with_amount_rejected(self):
+        config = _MockConfig(
+            hosted_node='10.0.0.1',
+            container_memory='2G',
+            container_storage=[['root', 'auto', '10G'], ['template', 'local', 'ignored']],
+        )
+        with self.assertRaises(ValueError):
+            validate_hosted_flags(config)
 
     def test_path_type_rejected(self):
         config = _MockConfig(
             hosted_node='10.0.0.1',
             container_memory='2G',
-            container_storage=['path', 'auto', '10G'],
+            container_storage=[['path', 'auto', '10G']],
         )
         with self.assertRaises(ValueError) as ctx:
             validate_hosted_flags(config)
@@ -246,12 +255,21 @@ class TestValidateHostedFlags(unittest.TestCase):
         config = _MockConfig(
             hosted_node='10.0.0.1',
             container_memory='2G',
-            container_storage=['root', 'auto', '10G'],
+            container_storage=[['root', 'auto', '10G']],
             container_cores=0,
         )
         with self.assertRaises(ValueError) as ctx:
             validate_hosted_flags(config)
         self.assertIn('cores', str(ctx.exception).lower())
+
+    def test_duplicate_storage_types_rejected(self):
+        config = _MockConfig(
+            hosted_node='10.0.0.1',
+            container_memory='2G',
+            container_storage=[['root', 'auto', '10G'], ['root', 'local', '20G']],
+        )
+        with self.assertRaises(ValueError):
+            validate_hosted_flags(config)
 
     def test_storage_too_few_elements(self):
         config = _MockConfig(
@@ -261,7 +279,7 @@ class TestValidateHostedFlags(unittest.TestCase):
         )
         with self.assertRaises(ValueError) as ctx:
             validate_hosted_flags(config)
-        self.assertIn('3', str(ctx.exception))
+        self.assertIn('TYPE POOL AMOUNT', str(ctx.exception))
 
 
 if __name__ == '__main__':

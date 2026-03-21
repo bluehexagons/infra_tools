@@ -5,9 +5,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Optional
-
-from lib.config import SetupConfig
+from typing import Any, Optional, cast
 
 
 def validate_filesystem_path(path: str, must_exist: bool = False, check_writable: bool = False) -> None:
@@ -229,7 +227,7 @@ def validate_memory_string(value: str, name: str = "memory") -> None:
         )
 
 
-def validate_hosted_flags(config: SetupConfig) -> None:
+def validate_hosted_flags(config: Any) -> None:
     """Validate that required hosted flags are present when --hosted is used.
 
     Args:
@@ -247,24 +245,53 @@ def validate_hosted_flags(config: SetupConfig) -> None:
     if not config.container_storage:
         raise ValueError("--storage is required when --hosted is specified")
 
-    if len(config.container_storage) < 3:
-        raise ValueError(
-            f"--storage requires exactly 3 arguments (TYPE POOL AMOUNT), "
-            f"got {len(config.container_storage)}"
-        )
+    storage_specs: list[list[str]] = []
+    if config.container_storage:
+        raw_specs = cast(list[object], config.container_storage)
+        if raw_specs and isinstance(raw_specs[0], str):
+            storage_specs = [cast(list[str], raw_specs)]
+        else:
+            storage_specs = [cast(list[str], spec) for spec in raw_specs]
 
-    storage_type = config.container_storage[0]
-    valid_types = ("root", "template")
-    if storage_type not in valid_types:
-        raise ValueError(
-            f"--storage TYPE must be one of {', '.join(valid_types)} "
-            f"(got '{storage_type}')"
-        )
+    root_seen = False
+    seen_types: set[str] = set()
+
+    for spec in storage_specs:
+        if len(spec) < 2:
+            raise ValueError(
+                "--storage requires at least TYPE and POOL"
+            )
+
+        storage_type = spec[0]
+        if storage_type in seen_types:
+            raise ValueError(f"Duplicate --storage TYPE '{storage_type}'")
+        seen_types.add(storage_type)
+
+        if storage_type == "root":
+            if len(spec) != 3:
+                raise ValueError(
+                    "--storage root requires TYPE POOL AMOUNT"
+                )
+            root_seen = True
+        elif storage_type == "template":
+            if len(spec) != 2:
+                raise ValueError(
+                    "--storage template requires TYPE POOL"
+                )
+        else:
+            raise ValueError(
+                f"--storage TYPE must be one of root, template (got '{storage_type}')"
+            )
+
+    if not root_seen:
+        raise ValueError("--storage root POOL AMOUNT is required when --hosted is specified")
 
     validate_memory_string(config.container_memory, "--memory")
 
-    if storage_type == "root":
-        amount = config.container_storage[2]
+    for spec in storage_specs:
+        if spec[0] != "root":
+            continue
+        amount = spec[2]
         validate_memory_string(amount, "--storage AMOUNT")
 
     if config.container_cores < 1:

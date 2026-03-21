@@ -95,6 +95,26 @@ python3 setup_server_lite.py 192.168.1.10 \
   --scrub /mnt/backup .pardatabase 5% weekly
 ```
 
+### Hosted Proxmox LXC
+```bash
+# Create an LXC on Proxmox, then run the normal web-server setup against it
+python3 infra_tools.py setup server_web 10.0.0.50 admin \
+  --hosted 10.0.0.10 \
+  --hosted-user root \
+  --hosted-key ~/.ssh/proxmox_ed25519 \
+  --memory 4G \
+  --storage root auto 20G \
+  --storage template local \
+  --cores 2 \
+  --base debian \
+  --name web-01 \
+  --ruby --node \
+  --ssl --ssl-email admin@example.com \
+  --deploy example.com https://github.com/user/repo.git
+```
+
+`--storage` is repeatable: `root` is required as `--storage root POOL AMOUNT`, and `template` is optional as `--storage template POOL`.
+
 Use `--credential USERNAME PASSWORD` to define share passwords once, then reference those users by name in
 `--share`. The `USERS` field accepts a comma-separated list of `username` or `username:password` entries, and
 each bare username must have a matching `--credential`.

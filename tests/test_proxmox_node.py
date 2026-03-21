@@ -10,8 +10,11 @@ from unittest.mock import patch, MagicMock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.proxmox_node import (
+    ProvisionError,
     _build_container_hostname,
+    _create_container,
     auto_detect_bridge,
+    _get_bridge_prefix_length,
     _resolve_storage_pool,
     _resolve_template_name,
     check_container_exists,
@@ -101,9 +104,26 @@ class TestAutoDetectBridge(unittest.TestCase):
 class TestResolveStoragePool(unittest.TestCase):
     @patch("lib.proxmox_node._ssh_run")
     def test_explicit_pool(self, mock_run):
-        result = _resolve_storage_pool("local-lvm", "10.0.0.1", "root", [])
+        mock_run.return_value = MagicMock(stdout="Name Type Status\nlocal-lvm dir active\n", returncode=0)
+        result = _resolve_storage_pool("local-lvm", "10.0.0.1", "root", [], "images,rootdir")
         self.assertEqual(result, "local-lvm")
-        mock_run.assert_not_called()
+
+    @patch("lib.proxmox_node._ssh_run")
+    def test_explicit_pool_inactive_raises(self, mock_run):
+        mock_run.return_value = MagicMock(stdout="Name Type Status\nlocal dir active\n", returncode=0)
+        with self.assertRaises(ProvisionError):
+            _resolve_storage_pool("local-lvm", "10.0.0.1", "root", [], "images,rootdir")
+
+    @patch("lib.proxmox_node._ssh_run")
+    def test_explicit_pool_uses_unfiltered_fallback(self, mock_run):
+        filtered = MagicMock(stdout="", stderr="unsupported option", returncode=1)
+        unfiltered = MagicMock(
+            stdout="Name Type Status\nlocal-lvm lvmthin active\n",
+            returncode=0,
+        )
+        mock_run.side_effect = [filtered, unfiltered]
+        result = _resolve_storage_pool("local-lvm", "10.0.0.1", "root", [], "images,rootdir")
+        self.assertEqual(result, "local-lvm")
 
     @patch("lib.proxmox_node._ssh_run")
     def test_auto_selects_active_pool(self, mock_run):
@@ -113,7 +133,7 @@ class TestResolveStoragePool(unittest.TestCase):
                    "local-lvm    lvmph   active  200G     50G     150G       25%\n",
             returncode=0
         )
-        result = _resolve_storage_pool("auto", "10.0.0.1", "root", [])
+        result = _resolve_storage_pool("auto", "10.0.0.1", "root", [], "images,rootdir")
         self.assertEqual(result, "local")
 
     @patch("lib.proxmox_node._ssh_run")
@@ -122,7 +142,46 @@ class TestResolveStoragePool(unittest.TestCase):
             stdout="Name  Type  Status\n", returncode=0
         )
         with self.assertRaises(Exception):
-            _resolve_storage_pool("auto", "10.0.0.1", "root", [])
+            _resolve_storage_pool("auto", "10.0.0.1", "root", [], "images,rootdir")
+
+    @patch("lib.proxmox_node._ssh_run")
+    def test_auto_filtered_query_failure_raises(self, mock_run):
+        mock_run.return_value = MagicMock(stdout="", stderr="unsupported option", returncode=1)
+        with self.assertRaises(ProvisionError):
+            _resolve_storage_pool("auto", "10.0.0.1", "root", [], "vztmpl")
+
+
+class TestBridgePrefixDetection(unittest.TestCase):
+    @patch("lib.proxmox_node._ssh_run")
+    def test_detects_prefix(self, mock_run):
+        mock_run.return_value = MagicMock(stdout="10.0.0.1/23\n", returncode=0)
+        result = _get_bridge_prefix_length("10.0.0.1", "root", [], "vmbr0")
+        self.assertEqual(result, "23")
+
+
+class TestCreateContainer(unittest.TestCase):
+    @patch("lib.proxmox_node._ssh_run")
+    def test_pct_create_failure_raises(self, mock_run):
+        mock_run.return_value = MagicMock(stdout="", stderr="boom", returncode=1)
+        with self.assertRaises(ProvisionError):
+            _create_container(
+                vmid=100,
+                target_ip="10.0.0.50",
+                template_path="/var/lib/vz/template/cache/debian.tar.zst",
+                memory="2G",
+                cores=1,
+                root_pool="local-lvm",
+                storage_amount="10G",
+                cidr_prefix="24",
+                bridge="vmbr0",
+                gateway="10.0.0.1",
+                nameservers=["8.8.8.8"],
+                hostname="lxc-10-0-0-50",
+                node_ip="10.0.0.1",
+                user="root",
+                ssh_opts=[],
+                dry_run=False,
+            )
 
 
 class TestResolveTemplateName(unittest.TestCase):

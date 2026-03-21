@@ -278,7 +278,7 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
 
 class TestSetupConfigHostedFields(unittest.TestCase):
     def _make_config(self, **kwargs):
-        defaults = dict(host='testhost', username='testuser', system_type='server_lite')
+        defaults: dict[str, object] = dict(host='testhost', username='testuser', system_type='server_lite')
         defaults.update(kwargs)
         return SetupConfig(**defaults)
 
@@ -298,7 +298,7 @@ class TestSetupConfigHostedFields(unittest.TestCase):
             hosted_user='admin',
             hosted_key='/path/to/key',
             container_memory='2G',
-            container_storage=['root', 'auto', '10G'],
+            container_storage=[['root', 'auto', '10G'], ['template', 'local']],
             container_cores=4,
             container_base='ubuntu',
         )
@@ -306,7 +306,7 @@ class TestSetupConfigHostedFields(unittest.TestCase):
         self.assertEqual(config.hosted_user, 'admin')
         self.assertEqual(config.hosted_key, '/path/to/key')
         self.assertEqual(config.container_memory, '2G')
-        self.assertEqual(config.container_storage, ['root', 'auto', '10G'])
+        self.assertEqual(config.container_storage, [['root', 'auto', '10G'], ['template', 'local']])
         self.assertEqual(config.container_cores, 4)
         self.assertEqual(config.container_base, 'ubuntu')
 
@@ -314,26 +314,26 @@ class TestSetupConfigHostedFields(unittest.TestCase):
         config = self._make_config(
             hosted_node='10.0.0.1',
             container_memory='2G',
-            container_storage=['root', 'auto', '10G'],
+            container_storage=[['root', 'auto', '10G'], ['template', 'local']],
         )
         d = config.to_dict()
         self.assertEqual(d['hosted_node'], '10.0.0.1')
         self.assertEqual(d['container_memory'], '2G')
-        self.assertEqual(d['container_storage'], ['root', 'auto', '10G'])
+        self.assertEqual(d['container_storage'], [['root', 'auto', '10G'], ['template', 'local']])
 
     def test_from_dict_restores_hosted_fields(self):
         data = {
             'username': 'testuser',
             'hosted_node': '10.0.0.1',
             'container_memory': '4G',
-            'container_storage': ['template', 'local', '5G'],
+            'container_storage': [['template', 'local'], ['root', 'auto', '5G']],
             'container_cores': 8,
             'container_base': 'fedora',
         }
         config = SetupConfig.from_dict('target', 'server_web', data)
         self.assertEqual(config.hosted_node, '10.0.0.1')
         self.assertEqual(config.container_memory, '4G')
-        self.assertEqual(config.container_storage, ['template', 'local', '5G'])
+        self.assertEqual(config.container_storage, [['template', 'local'], ['root', 'auto', '5G']])
         self.assertEqual(config.container_cores, 8)
         self.assertEqual(config.container_base, 'fedora')
 
@@ -341,7 +341,7 @@ class TestSetupConfigHostedFields(unittest.TestCase):
         config = self._make_config(
             hosted_node='10.0.0.1',
             container_memory='2G',
-            container_storage=['root', 'auto', '10G'],
+            container_storage=[['root', 'auto', '10G'], ['template', 'local']],
         )
         args_str = ' '.join(config.to_remote_args())
         self.assertNotIn('--hosted', args_str)
@@ -353,7 +353,7 @@ class TestSetupConfigHostedFields(unittest.TestCase):
         config = self._make_config(
             hosted_node='10.0.0.1',
             container_memory='2G',
-            container_storage=['root', 'auto', '10G'],
+            container_storage=[['root', 'auto', '10G'], ['template', 'local']],
         )
         parts = config.to_setup_command()
         cmd = ' '.join(parts)

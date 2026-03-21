@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import shlex
 from dataclasses import dataclass, asdict
-from typing import Optional
+from typing import Optional, cast
 from lib.types import StrList, NestedStrList, JSONDict, MaybeStr
 
 
@@ -25,6 +25,24 @@ DEFAULT_MACHINE_TYPE = "unprivileged"
 
 DESKTOP_SYSTEMS = ["workstation_desktop", "pc_dev", "workstation_dev"]
 CLI_SYSTEMS = ["workstation_desktop", "pc_dev", "workstation_dev", "server_dev", "server_web"]
+
+
+def _normalize_container_storage(value: NestedStrList | list[str] | None) -> Optional[NestedStrList]:
+    if not value:
+        return None
+
+    if isinstance(value, list) and value and isinstance(value[0], str):
+        normalized: NestedStrList = []
+        normalized.append(cast(list[str], value))
+        return normalized
+
+    if isinstance(value, list):
+        normalized: NestedStrList = []
+        for spec in value:
+            normalized.append(cast(list[str], spec))
+        return normalized
+
+    return None
 
 
 @dataclass
@@ -84,7 +102,7 @@ class SetupConfig:
     hosted_user: str = "root"
     hosted_key: MaybeStr = None
     container_memory: MaybeStr = None
-    container_storage: Optional[StrList] = None  # [type, pool, amount]
+    container_storage: Optional[NestedStrList] = None  # [[type, pool, amount?], ...]
     container_cores: int = 1
     container_base: str = "debian"
     include_desktop: bool = False
@@ -442,6 +460,8 @@ class SetupConfig:
             data['tags'] = [tag.strip() for tag in tags_str.split(',') if tag.strip()]
         elif not tags_str:
             data['tags'] = None
+
+        data['container_storage'] = _normalize_container_storage(data.get('container_storage'))
             
         if 'friendly_name' not in data:
             data['friendly_name'] = None
@@ -558,7 +578,7 @@ class SetupConfig:
             hosted_user=getattr(args, 'hosted_user', 'root'),
             hosted_key=getattr(args, 'hosted_key', None),
             container_memory=getattr(args, 'container_memory', None),
-            container_storage=getattr(args, 'container_storage', None),
+            container_storage=_normalize_container_storage(getattr(args, 'container_storage', None)),
             container_cores=getattr(args, 'container_cores', 1),
             container_base=getattr(args, 'container_base', 'debian'),
             include_desktop=include_desktop,

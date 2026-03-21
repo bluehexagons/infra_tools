@@ -42,8 +42,8 @@ def create_setup_argument_parser(
         parser.add_argument("--memory", dest="container_memory",
                            help="Container memory (e.g. 2G, 512M)")
         parser.add_argument("--storage", dest="container_storage",
-                           nargs=3, metavar=("TYPE", "POOL", "AMOUNT"),
-                           help="Container storage: TYPE (root|template), POOL (name or 'auto'), AMOUNT (e.g. 10G)")
+                           action="append", nargs="+", metavar="STORAGE",
+                           help="Container storage spec: root POOL AMOUNT or template POOL; repeat as needed")
         parser.add_argument("--cores", dest="container_cores", type=int, default=1,
                            help="Container CPU cores (default: 1)")
         parser.add_argument("--base", dest="container_base", default="debian",
