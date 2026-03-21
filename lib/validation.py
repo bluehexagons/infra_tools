@@ -247,6 +247,12 @@ def validate_hosted_flags(config: SetupConfig) -> None:
     if not config.container_storage:
         raise ValueError("--storage is required when --hosted is specified")
 
+    if len(config.container_storage) < 3:
+        raise ValueError(
+            f"--storage requires exactly 3 arguments (TYPE POOL AMOUNT), "
+            f"got {len(config.container_storage)}"
+        )
+
     storage_type = config.container_storage[0]
     valid_types = ("root", "template")
     if storage_type not in valid_types:

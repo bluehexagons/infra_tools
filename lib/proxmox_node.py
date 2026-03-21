@@ -96,9 +96,12 @@ def check_container_exists(
             f"pct config {vmid}",
             dry_run=dry_run
         )
-        if target_ip in config_result.stdout:
-            print(f"  ✓ Container VMID {vmid} already exists with IP {target_ip}")
-            return True
+        for line in config_result.stdout.split('\n'):
+            if line.startswith('net0:'):
+                net_config = line.split('ip=', 1)
+                if len(net_config) > 1 and target_ip in net_config[1].split(',')[0]:
+                    print(f"  ✓ Container VMID {vmid} already exists with IP {target_ip}")
+                    return True
 
     return False
 
@@ -365,11 +368,16 @@ def _resolve_template_name(
 
     # Download if not already present
     print(f"  Downloading template: {template_name}")
-    _ssh_run(
+    result = _ssh_run(
         node_ip, user, ssh_opts,
         f"pveam download {shlex.quote(template_storage)} {shlex.quote(template_name)}",
         dry_run=dry_run
     )
+    if result.returncode != 0:
+        raise ProvisionError(
+            f"Template download failed for {template_name} on storage {template_storage}. "
+            f"Error: {result.stderr.strip() or 'unknown error'}"
+        )
 
     template_path = f"/var/lib/vz/template/cache/{template_name}"
     if not template_storage.startswith("local"):
@@ -476,7 +484,7 @@ def provision_container(config) -> None:
 
     # Check if already provisioned
     if check_container_exists(
-        node_ip, target_ip, user, config.hosted_key, dry_run=False
+        node_ip, target_ip, user, config.hosted_key, dry_run=dry_run
     ):
         raise ContainerAlreadyExists(
             f"Container with IP {target_ip} already exists on {node_ip}"
@@ -504,9 +512,7 @@ def provision_container(config) -> None:
 
     # Template storage
     if storage_type == "template":
-        template_storage = _resolve_storage_pool(
-            root_pool_arg, node_ip, user, ssh_opts
-        )
+        template_storage = root_pool
     else:
         template_storage = _resolve_template_storage(
             root_pool, node_ip, user, ssh_opts

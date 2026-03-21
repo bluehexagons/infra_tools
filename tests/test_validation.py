@@ -253,6 +253,16 @@ class TestValidateHostedFlags(unittest.TestCase):
             validate_hosted_flags(config)
         self.assertIn('cores', str(ctx.exception).lower())
 
+    def test_storage_too_few_elements(self):
+        config = _MockConfig(
+            hosted_node='10.0.0.1',
+            container_memory='2G',
+            container_storage=['root', 'auto'],
+        )
+        with self.assertRaises(ValueError) as ctx:
+            validate_hosted_flags(config)
+        self.assertIn('3', str(ctx.exception))
+
 
 if __name__ == '__main__':
     unittest.main()
