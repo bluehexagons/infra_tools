@@ -381,6 +381,7 @@ def _resolve_template_storage(
     )
 
     if dry_run:
+        print(f"  [DRY-RUN] Would auto-select template storage pool")
         return root_pool
 
     for line in result.stdout.strip().split('\n')[1:]:
@@ -570,13 +571,25 @@ def provision_container(config: SetupConfig) -> None:
     dry_run = config.dry_run
 
     if dry_run:
+        hostname = _build_container_hostname(target_ip, config.friendly_name)
+        root_spec = _get_storage_spec(storage_specs, "root")
+        template_spec = _get_storage_spec(storage_specs, "template")
+        privileged = config.machine_type == "privileged"
+
         print("[DRY RUN] Would provision LXC container:")
         print(f"  Proxmox node: {node_ip}")
         print(f"  Target IP: {target_ip}")
-        print(f"  Memory: {config.container_memory}")
+        print(f"  Hostname: {hostname}")
+        print(f"  Memory: {memory}")
         print(f"  Cores: {config.container_cores}")
-        print(f"  Storage: {config.container_storage}")
-        print(f"  Base: {config.container_base}")
+        print(f"  Container type: {'privileged' if privileged else 'unprivileged'}")
+        print(f"  Root storage: {root_spec[1] if root_spec else 'N/A'} ({root_spec[2] if root_spec else 'N/A'})")
+        if template_spec:
+            print(f"  Template storage: {template_spec[1]}")
+        else:
+            print(f"  Template storage: auto-detect")
+        print(f"  Base OS: {config.container_base}")
+        print(f"  Storage specs: {storage_specs}")
         return
 
     # Check if already provisioned
