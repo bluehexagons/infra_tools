@@ -43,9 +43,15 @@ class TestCleanupHelpers(unittest.TestCase):
         cleanup_maintenance.cleanup_apt_cache()
 
         first_call = mock_run_command.call_args_list[0]
-        self.assertEqual(first_call.args[0], ["/usr/bin/apt-get", "autoclean", "-qq"])
+        self.assertEqual(
+            first_call.args[0],
+            ["/usr/bin/apt-get", "autoclean", "-qq", "-o", "DPkg::Lock::Timeout=300"],
+        )
         self.assertEqual(first_call.kwargs["env"]["DEBIAN_FRONTEND"], "noninteractive")
-        self.assertEqual(mock_run_command.call_args_list[1].args[0], ["/usr/bin/apt-get", "clean"])
+        self.assertEqual(
+            mock_run_command.call_args_list[1].args[0],
+            ["/usr/bin/apt-get", "clean", "-o", "DPkg::Lock::Timeout=300"],
+        )
 
     @patch("common.service_tools.cleanup_maintenance.run_cleanup_command", return_value=None)
     @patch("common.service_tools.cleanup_maintenance.shutil.which", side_effect=[None, "/usr/bin/pip"])

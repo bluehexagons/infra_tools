@@ -11,6 +11,7 @@ from unittest.mock import mock_open, patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.config import SetupConfig
+from lib.maintenance_defaults import JOURNAL_MAX_USE
 from lib.system_types import get_steps_for_system_type
 from security.security_steps import configure_auto_updates, configure_cleanup_maintenance
 
@@ -120,8 +121,44 @@ class TestConfigureCleanupMaintenance(unittest.TestCase):
         written_text = "".join(call.args[0] for call in mock_file().write.call_args_list)
         self.assertIn("/opt/infra_tools/common/service_tools/cleanup_maintenance.py", written_text)
         self.assertIn("OnCalendar=Sun *-*-* 03:30:00", written_text)
-        self.assertIn("SystemMaxUse=100M", written_text)
-        self.assertIn("RuntimeMaxUse=100M", written_text)
+        self.assertIn(f"SystemMaxUse={JOURNAL_MAX_USE}", written_text)
+        self.assertIn(f"RuntimeMaxUse={JOURNAL_MAX_USE}", written_text)
+
+    @patch("security.security_steps.run")
+    @patch("security.security_steps.cleanup_service")
+    @patch("security.security_steps.open", new_callable=mock_open)
+    @patch("security.security_steps.os.makedirs")
+    def test_warns_when_timer_enable_fails(self, _makedirs, mock_file, _cleanup, mock_run):
+        mock_run.side_effect = [
+            SimpleNamespace(returncode=0),
+            SimpleNamespace(returncode=0),
+            SimpleNamespace(returncode=1),
+        ]
+        with patch("builtins.print") as mock_print:
+            configure_cleanup_maintenance(SetupConfig(username="u", host="h", system_type="server_lite"))
+
+        run_commands = [args[0] for args, _ in mock_run.call_args_list]
+        self.assertIn("systemctl enable cleanup-maintenance.timer", run_commands)
+        self.assertNotIn("systemctl start cleanup-maintenance.timer", run_commands)
+        mock_print.assert_any_call("  ⚠ Cleanup maintenance configured but timer could not be enabled")
+
+    @patch("security.security_steps.run")
+    @patch("security.security_steps.cleanup_service")
+    @patch("security.security_steps.open", new_callable=mock_open)
+    @patch("security.security_steps.os.makedirs")
+    def test_warns_when_timer_start_fails(self, _makedirs, mock_file, _cleanup, mock_run):
+        mock_run.side_effect = [
+            SimpleNamespace(returncode=0),
+            SimpleNamespace(returncode=0),
+            SimpleNamespace(returncode=0),
+            SimpleNamespace(returncode=1),
+        ]
+        with patch("builtins.print") as mock_print:
+            configure_cleanup_maintenance(SetupConfig(username="u", host="h", system_type="server_lite"))
+
+        run_commands = [args[0] for args, _ in mock_run.call_args_list]
+        self.assertIn("systemctl start cleanup-maintenance.timer", run_commands)
+        mock_print.assert_any_call("  ⚠ Cleanup maintenance configured but timer could not be started")
 
 
 class TestCleanupMaintenanceStepWiring(unittest.TestCase):

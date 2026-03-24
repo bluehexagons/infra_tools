@@ -11,12 +11,11 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
 from lib.logging_utils import get_service_logger
+from lib.maintenance_defaults import APT_LOCK_OPTIONS, JOURNAL_MAX_USE
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
 
 
 logger = get_service_logger('cleanup_maintenance', 'common', use_syslog=True)
-
-JOURNAL_MAX_USE = "100M"
 
 
 def run_command(
@@ -55,8 +54,8 @@ def cleanup_apt_cache() -> list[str]:
 
     failures: list[str] = []
     for command, action in (
-        ([apt_get, "autoclean", "-qq"], "APT autoclean"),
-        ([apt_get, "clean"], "APT clean"),
+        ([apt_get, "autoclean", "-qq"] + APT_LOCK_OPTIONS, "APT autoclean"),
+        ([apt_get, "clean"] + APT_LOCK_OPTIONS, "APT clean"),
     ):
         failure = run_cleanup_command(command, action, env=env)
         if failure:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 
 from lib.config import SetupConfig
+from lib.maintenance_defaults import JOURNAL_MAX_USE
 from lib.machine_state import can_modify_kernel, is_container
 from lib.remote_utils import run, is_service_active, file_contains
 from lib.systemd_service import cleanup_service
@@ -13,7 +14,6 @@ _LEGACY_UNATTENDED_ORIGINS_FILE = "/etc/apt/apt.conf.d/52infra-tools-unattended-
 _LEGACY_MANAGED_ORIGINS_FILE = "/etc/infra_tools/unattended_upgrades_origins.list"
 _JOURNAL_CONF_DIR = "/etc/systemd/journald.conf.d"
 _JOURNAL_CONF_FILE = f"{_JOURNAL_CONF_DIR}/infra-tools.conf"
-_JOURNAL_MAX_USE = "100M"
 
 
 def create_remoteusers_group(config: SetupConfig) -> None:
@@ -363,8 +363,8 @@ def configure_cleanup_maintenance(config: SetupConfig) -> None:
     with open(_JOURNAL_CONF_FILE, "w") as f:
         f.write(
             f"""[Journal]
-SystemMaxUse={_JOURNAL_MAX_USE}
-RuntimeMaxUse={_JOURNAL_MAX_USE}
+SystemMaxUse={JOURNAL_MAX_USE}
+RuntimeMaxUse={JOURNAL_MAX_USE}
 """
         )
 
@@ -407,7 +407,14 @@ WantedBy=timers.target
     if journal_result.returncode != 0:
         print("  ⚠ Cleanup maintenance configured but journald could not be restarted")
 
-    run("systemctl enable cleanup-maintenance.timer", check=False)
-    run("systemctl start cleanup-maintenance.timer", check=False)
+    enable_result = run("systemctl enable cleanup-maintenance.timer", check=False)
+    if enable_result.returncode != 0:
+        print("  ⚠ Cleanup maintenance configured but timer could not be enabled")
+        return
+
+    start_result = run("systemctl start cleanup-maintenance.timer", check=False)
+    if start_result.returncode != 0:
+        print("  ⚠ Cleanup maintenance configured but timer could not be started")
+        return
 
     print("  ✓ Cleanup maintenance enabled (weekly with 100M journal cap)")
