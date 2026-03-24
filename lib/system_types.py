@@ -55,6 +55,7 @@ from security.steps import (
     configure_auto_updates,
     configure_firewall_web,
     configure_auto_restart,
+    configure_cleanup_maintenance,
 )
 
 # Import from web module
@@ -129,6 +130,7 @@ SECURITY_STEPS: list[tuple[str, StepFunc]] = [
     ("Hardening SSH configuration", harden_ssh),
     ("Hardening kernel parameters", harden_kernel),
     ("Configuring automatic security updates", configure_auto_updates),
+    ("Configuring cleanup maintenance service", configure_cleanup_maintenance),
     ("Configuring automatic restart service", configure_auto_restart),
 ]
 
@@ -173,6 +175,7 @@ PROXMOX_HARDENING_STEPS: list[tuple[str, StepFunc]] = [
     ("Hardening SSH configuration", harden_ssh),
     ("Hardening kernel parameters", harden_kernel),
     ("Configuring automatic security updates", configure_auto_updates),
+    ("Configuring cleanup maintenance service", configure_cleanup_maintenance),
     ("Configuring automatic restart service", configure_auto_restart),
     ("Checking if restart required", check_restart_required),
 ]
@@ -211,6 +214,7 @@ STEP_FUNCTIONS: dict[str, StepFunc] = {
     'harden_ssh': harden_ssh,
     'harden_kernel': harden_kernel,
     'configure_auto_updates': configure_auto_updates,
+    'configure_cleanup_maintenance': configure_cleanup_maintenance,
     'configure_auto_restart': configure_auto_restart,
     'configure_auto_update_node': configure_auto_update_node,
     'configure_auto_update_ruby': configure_auto_update_ruby,
@@ -292,6 +296,7 @@ def get_steps_for_system_type(config: SetupConfig) -> list[tuple[str, StepFunc]]
             ("Hardening SSH configuration", harden_ssh),
             ("Hardening kernel parameters", harden_kernel),
             ("Configuring automatic security updates", configure_auto_updates),
+            ("Configuring cleanup maintenance service", configure_cleanup_maintenance),
             ("Configuring automatic restart service", configure_auto_restart),
         ]
         steps.extend(security_steps)

@@ -26,7 +26,11 @@ python3 patch_setup.py example.com --ssl --deploy api.example.com https://github
 - **Servers**: Security hardening, Nginx/SSL, Ruby/Node/Go, app deployment
 - **Workstations**: Desktop environments (XFCE, i3, LXQt), RDP, browsers, audio
 - **Storage**: Samba shares, rsync sync, par2 integrity verification
-- **Security**: Firewall, SSH hardening, fail2ban, auto-updates
+- **Security**: Firewall, SSH hardening, fail2ban, auto-updates, weekly cleanup maintenance, journald size limits
+
+Background maintenance includes a `cleanup-maintenance` systemd timer that reclaims temporary files,
+old package-manager caches, and oversized journals. Infra tools also installs a journald drop-in at
+`/etc/systemd/journald.conf.d/infra-tools.conf` to cap persistent and runtime journal usage at `100M`.
 
 ## Setup Scripts
 
