@@ -417,4 +417,4 @@ WantedBy=timers.target
         print("  ⚠ Cleanup maintenance configured but timer could not be started")
         return
 
-    print("  ✓ Cleanup maintenance enabled (weekly with 100M journal cap)")
+    print(f"  ✓ Cleanup maintenance enabled (weekly with {JOURNAL_MAX_USE} journal cap)")
