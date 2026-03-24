@@ -11,6 +11,9 @@ from lib.systemd_service import cleanup_service
 
 _LEGACY_UNATTENDED_ORIGINS_FILE = "/etc/apt/apt.conf.d/52infra-tools-unattended-upgrades"
 _LEGACY_MANAGED_ORIGINS_FILE = "/etc/infra_tools/unattended_upgrades_origins.list"
+_JOURNAL_CONF_DIR = "/etc/systemd/journald.conf.d"
+_JOURNAL_CONF_FILE = f"{_JOURNAL_CONF_DIR}/infra-tools.conf"
+_JOURNAL_MAX_USE = "100M"
 
 
 def create_remoteusers_group(config: SetupConfig) -> None:
@@ -345,3 +348,66 @@ WantedBy=timers.target
     run("systemctl start auto-restart-if-needed.timer")
     
     print("  ✓ Automatic restart service configured (daily at 2 AM when needed)")
+
+
+def configure_cleanup_maintenance(config: SetupConfig) -> None:
+    """Configure periodic cleanup for journals, temp files, and package caches."""
+    service_name = "cleanup-maintenance"
+    service_file = f"/etc/systemd/system/{service_name}.service"
+    timer_file = f"/etc/systemd/system/{service_name}.timer"
+    script_path = "/opt/infra_tools/common/service_tools/cleanup_maintenance.py"
+
+    cleanup_service(service_name)
+
+    os.makedirs(_JOURNAL_CONF_DIR, exist_ok=True)
+    with open(_JOURNAL_CONF_FILE, "w") as f:
+        f.write(
+            f"""[Journal]
+SystemMaxUse={_JOURNAL_MAX_USE}
+RuntimeMaxUse={_JOURNAL_MAX_USE}
+"""
+        )
+
+    service_content = f"""[Unit]
+Description=Cleanup temporary files and package caches
+Documentation=man:systemd.service(5)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 {script_path}
+StandardOutput=journal
+StandardError=journal
+"""
+
+    with open(service_file, "w") as f:
+        f.write(service_content)
+
+    timer_content = """[Unit]
+Description=Cleanup temporary files and package caches (weekly)
+Documentation=man:systemd.timer(5)
+
+[Timer]
+OnCalendar=Sun *-*-* 03:30:00
+Persistent=true
+RandomizedDelaySec=30min
+
+[Install]
+WantedBy=timers.target
+"""
+
+    with open(timer_file, "w") as f:
+        f.write(timer_content)
+
+    result = run("systemctl daemon-reload", check=False)
+    if result.returncode != 0:
+        print("  ⚠ Cleanup maintenance configured but systemd could not reload")
+        return
+
+    journal_result = run("systemctl restart systemd-journald", check=False)
+    if journal_result.returncode != 0:
+        print("  ⚠ Cleanup maintenance configured but journald could not be restarted")
+
+    run("systemctl enable cleanup-maintenance.timer", check=False)
+    run("systemctl start cleanup-maintenance.timer", check=False)
+
+    print("  ✓ Cleanup maintenance enabled (weekly with 100M journal cap)")
