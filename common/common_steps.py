@@ -11,7 +11,7 @@ from typing import Optional
 
 from lib.config import SetupConfig
 from lib.machine_state import can_manage_time_sync
-from lib.remote_utils import run, is_dry_run, is_package_installed, is_service_active, file_contains, generate_password, install_package
+from lib.remote_utils import run, is_dry_run, is_package_installed, is_service_active, file_contains, install_package
 from lib.systemd_service import cleanup_service
 
 
@@ -84,9 +84,7 @@ def setup_user(config: SetupConfig) -> None:
             if set_user_password(config.username, config.password):
                 print("  Password set")
         else:
-            generated = generate_password()
-            if set_user_password(config.username, generated):
-                print(f"  Generated password: {generated}")
+            print("  No password configured; relying on SSH key authentication")
     else:
         print(f"  User already exists: {config.username}")
         if config.password:

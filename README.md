@@ -14,6 +14,7 @@ Automated setup scripts for remote Linux systems (Debian).
 python3 infra_tools.py setup server_web example.com --ruby --node --deploy example.com https://github.com/user/repo.git
 python3 infra_tools.py setup workstation_desktop 192.168.1.100 --desktop i3 --browser firefox
 python3 infra_tools.py patch example.com --ssl --deploy api.example.com https://github.com/user/api.git
+python3 infra_tools.py credentials set guest s3cret
 
 # Or use individual scripts
 python3 setup_server_web.py example.com --ruby --node --deploy example.com https://github.com/user/repo.git
@@ -120,8 +121,12 @@ python3 infra_tools.py setup server_web 10.0.0.50 admin \
 `--storage` is repeatable: `root` is required as `--storage root POOL AMOUNT`, and `template` is optional as `--storage template POOL`.
 
 Use `--credential USERNAME PASSWORD` to define share passwords once, then reference those users by name in
-`--share`. The `USERS` field accepts a comma-separated list of `username` or `username:password` entries, and
-each bare username must have a matching `--credential`.
+`--share` or `--mount-smb`. The `USERS` field accepts a comma-separated list of `username` or `username:password`
+entries, and each bare username must have a matching saved credential. Use `infra_tools.py credentials set USERNAME
+PASSWORD` to manage the shared workspace store directly.
+
+Workspace state now lives under `~/.config/infra_tools` by default. Use `--workspace /path/to/workspace` to isolate
+saved setups, credentials, and history for a project or test environment.
 
 ## Requirements
 
@@ -143,7 +148,7 @@ See [docs/SHELL_COMPLETION.md](docs/SHELL_COMPLETION.md) for detailed setup.
 ## Testing
 
 ```bash
-python3 -m pytest tests/ -v
+python3 -m unittest discover -s tests
 ```
 
 ## License

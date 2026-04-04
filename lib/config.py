@@ -45,6 +45,47 @@ def _normalize_container_storage(value: NestedStrList | list[str] | None) -> Opt
     return None
 
 
+def _strip_passwords_from_share_users(users_field: str) -> str:
+    sanitized_users: StrList = []
+    for user_spec in users_field.split(','):
+        normalized_user = user_spec.strip()
+        if not normalized_user:
+            continue
+        if ':' in normalized_user:
+            username, _ = normalized_user.split(':', 1)
+            sanitized_users.append(username.strip())
+        else:
+            sanitized_users.append(normalized_user)
+    return ','.join(sanitized_users)
+
+
+def _strip_passwords_from_samba_shares(value: Optional[NestedStrList]) -> Optional[NestedStrList]:
+    if not value:
+        return value
+
+    sanitized_shares: NestedStrList = []
+    for share_spec in value:
+        sanitized_share = list(share_spec)
+        if len(sanitized_share) >= 4:
+            sanitized_share[3] = _strip_passwords_from_share_users(sanitized_share[3])
+        sanitized_shares.append(sanitized_share)
+    return sanitized_shares
+
+
+def _strip_passwords_from_smb_mounts(value: Optional[NestedStrList]) -> Optional[NestedStrList]:
+    if not value:
+        return value
+
+    sanitized_mounts: NestedStrList = []
+    for mount_spec in value:
+        sanitized_mount = list(mount_spec)
+        if len(sanitized_mount) >= 3 and ':' in sanitized_mount[2]:
+            username, _ = sanitized_mount[2].split(':', 1)
+            sanitized_mount[2] = username.strip()
+        sanitized_mounts.append(sanitized_mount)
+    return sanitized_mounts
+
+
 @dataclass
 class SetupConfig:
     """Configuration for system setup.
@@ -418,7 +459,11 @@ class SetupConfig:
         # SMB mounts
         if self.smb_mounts:
             for mount_spec in self.smb_mounts:
-                escaped_spec = ' '.join(shlex.quote(str(s)) for s in mount_spec)
+                redacted_mount_spec = list(mount_spec)
+                if len(redacted_mount_spec) >= 3 and ':' in redacted_mount_spec[2]:
+                    username, _ = redacted_mount_spec[2].split(':', 1)
+                    redacted_mount_spec[2] = f"{username}:[REDACTED]"
+                escaped_spec = ' '.join(shlex.quote(str(s)) for s in redacted_mount_spec)
                 cmd_parts.append(f"--mount-smb {escaped_spec}")
         
         # Sync
@@ -449,6 +494,9 @@ class SetupConfig:
         data = asdict(self)
         data.pop('host', None)
         data.pop('system_type', None)
+        data.pop('share_credentials', None)
+        data['samba_shares'] = _strip_passwords_from_samba_shares(self.samba_shares)
+        data['smb_mounts'] = _strip_passwords_from_smb_mounts(self.smb_mounts)
         if self.tags:
             data['tags'] = ','.join(self.tags)
         return data

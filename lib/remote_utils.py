@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import secrets
-import shlex
 import string
 import subprocess
 import sys
@@ -62,10 +61,11 @@ def detect_os() -> None:
 
 def is_package_installed(package: str) -> bool:
     result = subprocess.run(
-        f"dpkg -l {shlex.quote(package)} 2>/dev/null | grep -q ^ii",
-        shell=True, capture_output=True
+        ["dpkg-query", "-W", "-f=${Status}", package],
+        capture_output=True,
+        text=True,
     )
-    return result.returncode == 0
+    return result.returncode == 0 and "install ok installed" in result.stdout
 
 
 def install_with_verify(
@@ -122,16 +122,16 @@ def install_package(name: str, package: str, install_cmd: str, required: bool = 
 
 def is_service_active(service: str) -> bool:
     result = subprocess.run(
-        f"systemctl is-active {shlex.quote(service)}",
-        shell=True, capture_output=True
+        ["systemctl", "is-active", service],
+        capture_output=True,
     )
     return result.returncode == 0
 
 
 def user_exists(username: str) -> bool:
     result = subprocess.run(
-        f"id {shlex.quote(username)}",
-        shell=True, capture_output=True
+        ["id", username],
+        capture_output=True,
     )
     return result.returncode == 0
 

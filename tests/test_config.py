@@ -54,6 +54,21 @@ class TestSetupConfigToDict(unittest.TestCase):
         d = config.to_dict()
         self.assertEqual(d['tags'], 'web,prod')
 
+    def test_to_dict_excludes_share_credentials(self):
+        config = self._make_config(share_credentials=[['user1', 'secret1']])
+        d = config.to_dict()
+        self.assertNotIn('share_credentials', d)
+
+    def test_to_dict_redacts_inline_share_passwords(self):
+        config = self._make_config(samba_shares=[['read', 'share', '/mnt/data', 'user1:secret1,user2']])
+        d = config.to_dict()
+        self.assertEqual(d['samba_shares'], [['read', 'share', '/mnt/data', 'user1,user2']])
+
+    def test_to_dict_redacts_inline_smb_mount_passwords(self):
+        config = self._make_config(smb_mounts=[['/mnt/share', '1.2.3.4', 'user1:secret1', 'docs', '/']])
+        d = config.to_dict()
+        self.assertEqual(d['smb_mounts'], [['/mnt/share', '1.2.3.4', 'user1', 'docs', '/']])
+
 
 class TestSetupConfigFromDict(unittest.TestCase):
     def test_from_dict_basic(self):
@@ -274,6 +289,15 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
         config = self._make_config(install_python=True)
         parts = config.to_setup_command()
         self.assertIn('--python', parts)
+
+    def test_smb_mount_password_redacted(self):
+        config = self._make_config(
+            smb_mounts=[['/mnt/share', '1.2.3.4', 'user1:secret1', 'docs', '/']]
+        )
+        parts = config.to_setup_command()
+        cmd = ' '.join(parts)
+        self.assertIn('user1:[REDACTED]', cmd)
+        self.assertNotIn('secret1', cmd)
 
 
 class TestSetupConfigHostedFields(unittest.TestCase):

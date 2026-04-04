@@ -19,12 +19,14 @@ except ImportError:
     argcomplete = None
 
 from lib.config import SetupConfig
+from lib.credentials import prepare_runtime_config, store_cli_credentials
 from lib.validators import validate_host, validate_username
 from lib.validation import validate_hosted_flags
 from lib.system_utils import get_current_username
 from lib.cache import save_setup_command
 from lib.arg_parser import create_setup_argument_parser
 from lib.display import print_setup_summary
+from lib.workspace import set_workspace_dir
 from smb.samba_steps import validate_samba_share_credentials
 
 
@@ -212,6 +214,13 @@ def create_argument_parser(description: str, allow_steps: bool = False) -> argpa
     return create_setup_argument_parser(description, for_remote=False, allow_steps=allow_steps)
 
 
+def _expand_remote_args(remote_args: list[str]) -> list[str]:
+    expanded_args: list[str] = []
+    for arg in remote_args:
+        expanded_args.extend(shlex.split(arg))
+    return expanded_args
+
+
 def run_remote_setup(config: SetupConfig) -> int:
     is_local = config.host in ["localhost", "127.0.0.1"]
     
@@ -228,17 +237,18 @@ def run_remote_setup(config: SetupConfig) -> int:
             os.makedirs(deploy_dir, exist_ok=True)
             prepare_deployments(config, deploy_dir)
             
-        cmd_parts = [shlex.quote(sys.executable), shlex.quote(os.path.join(REMOTE_INSTALL_DIR, "remote_setup.py"))] + config.to_remote_args()
+        remote_arg_tokens = _expand_remote_args(config.to_remote_args())
+        command_tokens = [sys.executable, os.path.join(REMOTE_INSTALL_DIR, "remote_setup.py")] + remote_arg_tokens
         
         if config.dry_run:
             print("\n" + "=" * 60)
             print("[DRY RUN] Would execute:")
             if is_local:
                 print(f"  Copy files to {REMOTE_INSTALL_DIR}")
-                print(f"  Run: {' '.join(cmd_parts)}")
+                print(f"  Run: {shlex.join(command_tokens)}")
             else:
                 print(f"  Upload files to {config.host}:{REMOTE_INSTALL_DIR}")
-                print(f"  Run: {' '.join(cmd_parts)}")
+                print(f"  Run: {shlex.join(command_tokens)}")
             print("=" * 60)
             return 0
 
@@ -256,8 +266,7 @@ def run_remote_setup(config: SetupConfig) -> int:
             
             try:
                 process = subprocess.Popen(
-                    ' '.join(cmd_parts),
-                    shell=True,
+                    command_tokens,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
@@ -289,8 +298,8 @@ def run_remote_setup(config: SetupConfig) -> int:
             
             remote_python = "python3"
             remote_script = os.path.join(REMOTE_INSTALL_DIR, "remote_setup.py")
-            remote_cmd_args = [remote_python, remote_script] + config.to_remote_args()
-            remote_cmd_str = ' '.join(remote_cmd_args)
+            remote_cmd_args = [remote_python, remote_script] + remote_arg_tokens
+            remote_cmd_str = shlex.join(remote_cmd_args)
             
             remote_shell_cmd = f"""
 mkdir -p {escaped_install_dir} && \
@@ -340,6 +349,8 @@ def setup_main(system_type: str, description: str, success_msg_fn: Callable[[Set
         argcomplete.autocomplete(parser)
     
     args = parser.parse_args()
+    if getattr(args, 'workspace', None):
+        set_workspace_dir(args.workspace)
     
     if not validate_host(args.host):
         print(f"Error: Invalid IP address or hostname: {args.host}")
@@ -354,7 +365,8 @@ def setup_main(system_type: str, description: str, success_msg_fn: Callable[[Set
     config = SetupConfig.from_args(args, system_type)
 
     try:
-        validate_samba_share_credentials(config)
+        runtime_config = prepare_runtime_config(config)
+        validate_samba_share_credentials(runtime_config)
     except ValueError as e:
         print(f"Error: {e}")
         return 1
@@ -384,12 +396,13 @@ def setup_main(system_type: str, description: str, success_msg_fn: Callable[[Set
     print_setup_summary(config, description)
     
     if not config.dry_run:
+        store_cli_credentials(config)
         save_setup_command(config)
     
     start_time = time.time()
     returncode = 1
     try:
-        returncode = run_remote_setup(config)
+        returncode = run_remote_setup(runtime_config)
     finally:
         end_time = time.time()
         success = (returncode == 0)

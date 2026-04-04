@@ -11,17 +11,19 @@ from dataclasses import asdict
 from typing import Optional, Any
 
 from lib.config import SetupConfig
+from lib.workspace import DEFAULT_WORKSPACE_DIR, get_setup_cache_dir
 
 
-SETUP_CACHE_DIR = os.path.expanduser("~/.cache/infra_tools/setups")
+SETUP_CACHE_DIR = os.path.join(DEFAULT_WORKSPACE_DIR, "setups")
 
 
 def get_cache_path_for_host(host: str) -> str:
-    os.makedirs(SETUP_CACHE_DIR, exist_ok=True)
+    cache_dir = get_setup_cache_dir()
+    os.makedirs(cache_dir, exist_ok=True)
     normalized_host = host.lower().rstrip('.')
     safe_host = re.sub(r'[^a-zA-Z0-9._-]', '_', normalized_host)
     host_hash = hashlib.sha256(normalized_host.encode()).hexdigest()[:8]
-    return os.path.join(SETUP_CACHE_DIR, f"{safe_host}_{host_hash}.json")
+    return os.path.join(cache_dir, f"{safe_host}_{host_hash}.json")
 
 
 def save_setup_command(config: SetupConfig, start_time: Optional[float] = None, 
@@ -71,14 +73,15 @@ def _load_cache_file(cache_path: str, host: str) -> Optional[SetupConfig]:
 
 def _find_cache_by_name(name: str) -> Optional[SetupConfig]:
     """Search all cache files for one matching by friendly name or tag."""
-    if not os.path.exists(SETUP_CACHE_DIR):
+    cache_dir = get_setup_cache_dir()
+    if not os.path.exists(cache_dir):
         return None
     needle = name.lower()
     try:
-        for filename in os.listdir(SETUP_CACHE_DIR):
+        for filename in os.listdir(cache_dir):
             if not filename.endswith('.json'):
                 continue
-            filepath = os.path.join(SETUP_CACHE_DIR, filename)
+            filepath = os.path.join(cache_dir, filename)
             try:
                 with open(filepath, 'r') as f:
                     data = json.load(f)

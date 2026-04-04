@@ -32,10 +32,18 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from lib.cache import load_setup_command, merge_setup_configs, save_setup_command
 from lib.config import SYSTEM_TYPES, SetupConfig
+from lib.credentials import (
+    list_workspace_credentials,
+    prepare_runtime_config,
+    remove_workspace_credential,
+    set_workspace_credential,
+    store_cli_credentials,
+)
 from lib.display import print_name_and_tags, print_setup_summary, print_success_header
 from lib.setup_common import REMOTE_SCRIPT_PATH, run_remote_setup
 from lib.system_utils import get_current_username
 from lib.validators import validate_host, validate_username
+from lib.workspace import get_workspace_dir, set_workspace_dir
 from smb.samba_steps import validate_samba_share_credentials
 
 
@@ -65,6 +73,10 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
         description="Unified infrastructure setup and management tool",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=INFRA_TOOLS_EPILOG
+    )
+    parser.add_argument(
+        "--workspace",
+        help="Workspace root for saved setups, credentials, known_hosts, and history"
     )
     
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
@@ -109,12 +121,36 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
         default=None,
         help="Username (defaults to current user)"
     )
+
+    credentials_parser = subparsers.add_parser(
+        "credentials",
+        help="Manage workspace credentials",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    credentials_parser.add_argument(
+        "--workspace",
+        help="Workspace root for saved setups, credentials, known_hosts, and history"
+    )
+    credentials_subparsers = credentials_parser.add_subparsers(dest="credentials_command", help="Credential commands")
+
+    credentials_set_parser = credentials_subparsers.add_parser("set", help="Save or replace a credential")
+    credentials_set_parser.add_argument("username", help="Credential username")
+    credentials_set_parser.add_argument("password", help="Credential password")
+
+    credentials_subparsers.add_parser("list", help="List saved credential usernames")
+
+    credentials_remove_parser = credentials_subparsers.add_parser("remove", help="Remove a saved credential")
+    credentials_remove_parser.add_argument("username", help="Credential username to remove")
     
     return parser, setup_parser, patch_parser
 
 
 def add_common_arguments(parser: argparse.ArgumentParser, for_patch: bool = False) -> None:
     """Add common setup/patch arguments to a parser."""
+    parser.add_argument(
+        "--workspace",
+        help="Workspace root for saved setups, credentials, known_hosts, and history"
+    )
     parser.add_argument("-k", "--key", dest="ssh_key", help="SSH private key path")
     parser.add_argument("-p", "--password", help="User password")
     parser.add_argument("-t", "--timezone", help="Timezone (defaults to UTC)")
@@ -220,16 +256,16 @@ def add_common_arguments(parser: argparse.ArgumentParser, for_patch: bool = Fals
                        metavar=("ACCESS_TYPE", "SHARE_NAME", "PATHS", "USERS"),
                        help="Configure Samba share (can be used multiple times)")
     parser.add_argument("--credential", dest="share_credentials",
-                       action="append", nargs=2, metavar=("USERNAME", "PASSWORD"),
-                       help="Store a Samba credential for share users")
+                        action="append", nargs=2, metavar=("USERNAME", "PASSWORD"),
+                        help="Save a workspace credential and let --share/--mount-smb reference the username without inline passwords")
     parser.add_argument("--smbclient", dest="enable_smbclient",
                        action=argparse.BooleanOptionalAction,
                        default=None,
                        help="Install SMB/CIFS client packages for connecting to network shares")
     parser.add_argument("--mount-smb", dest="smb_mounts",
-                       action="append", nargs=5,
-                       metavar=("MOUNTPOINT", "IP", "CREDENTIALS", "SHARE", "SUBDIR"),
-                       help="Mount SMB share (can be used multiple times)")
+                        action="append", nargs=5,
+                        metavar=("MOUNTPOINT", "IP", "CREDENTIALS", "SHARE", "SUBDIR"),
+                        help="Mount SMB share using username or username:password credentials (can be used multiple times)")
     parser.add_argument("--sync", dest="sync_specs",
                        action="append", nargs=3,
                        metavar=("SOURCE", "DESTINATION", "INTERVAL"),
@@ -262,7 +298,8 @@ def run_setup_command(args: argparse.Namespace) -> int:
     config = SetupConfig.from_args(args, args.system_type)
     
     try:
-        validate_samba_share_credentials(config)
+        runtime_config = prepare_runtime_config(config)
+        validate_samba_share_credentials(runtime_config)
     except ValueError as e:
         print(f"Error: {e}")
         return 1
@@ -271,6 +308,7 @@ def run_setup_command(args: argparse.Namespace) -> int:
     print_setup_summary(config, description)
     
     if not config.dry_run:
+        store_cli_credentials(config)
         save_setup_command(config)
     
     if not os.path.exists(REMOTE_SCRIPT_PATH):
@@ -280,7 +318,7 @@ def run_setup_command(args: argparse.Namespace) -> int:
     start_time = time.time()
     returncode = 1
     try:
-        returncode = run_remote_setup(config)
+        returncode = run_remote_setup(runtime_config)
     finally:
         end_time = time.time()
         success = (returncode == 0)
@@ -325,6 +363,12 @@ def run_patch_command(args: argparse.Namespace) -> int:
     
     new_config = SetupConfig.from_args(args, cached_config.system_type)
     merged_config = merge_setup_configs(cached_config, new_config)
+    try:
+        runtime_config = prepare_runtime_config(merged_config)
+        validate_samba_share_credentials(runtime_config)
+    except ValueError as e:
+        print(f"Error: {e}")
+        return 1
     
     # Execute patch
     if not os.path.exists(REMOTE_SCRIPT_PATH):
@@ -343,7 +387,9 @@ def run_patch_command(args: argparse.Namespace) -> int:
     start_time = time.time()
     returncode = 1
     try:
-        returncode = run_remote_setup(merged_config)
+        if not merged_config.dry_run:
+            store_cli_credentials(merged_config)
+        returncode = run_remote_setup(runtime_config)
     finally:
         end_time = time.time()
         success = (returncode == 0)
@@ -379,6 +425,8 @@ def main() -> int:
     add_common_arguments(patch_parser, for_patch=True)
     
     args = parser.parse_args()
+    if getattr(args, 'workspace', None):
+        set_workspace_dir(args.workspace)
     
     if not args.command:
         parser.print_help()
@@ -388,6 +436,28 @@ def main() -> int:
         return run_setup_command(args)
     elif args.command == "patch":
         return run_patch_command(args)
+    elif args.command == "credentials":
+        if args.credentials_command == "set":
+            set_workspace_credential(args.username, args.password)
+            print(f"Saved credential for {args.username} in {get_workspace_dir()}")
+            return 0
+        if args.credentials_command == "list":
+            usernames = list_workspace_credentials()
+            if not usernames:
+                print("No saved credentials.")
+                return 0
+            for username in usernames:
+                print(username)
+            return 0
+        if args.credentials_command == "remove":
+            removed = remove_workspace_credential(args.username)
+            if removed:
+                print(f"Removed credential for {args.username}")
+            else:
+                print(f"No saved credential for {args.username}")
+            return 0
+        print("Error: credentials command required (set, list, remove)")
+        return 1
     else:
         parser.print_help()
         return 0

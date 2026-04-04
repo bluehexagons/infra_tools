@@ -25,13 +25,14 @@ from lib.cache import (
     merge_setup_configs,
     save_setup_command,
     get_cache_path_for_host,
-    SETUP_CACHE_DIR
 )
+from lib.credentials import prepare_runtime_config, store_cli_credentials
 from lib.setup_common import (
     create_argument_parser,
     run_remote_setup,
     REMOTE_SCRIPT_PATH
 )
+from lib.workspace import get_setup_cache_dir, set_workspace_dir
 
 PATCH_SPECIAL_COMMANDS_HELP = """Special commands:
   patch_setup.py list [pattern]   List saved configurations
@@ -54,16 +55,17 @@ SYSTEM_TYPE_TO_SCRIPT = {
 
 
 def get_all_configs(pattern: Optional[str] = None) -> Deployments:
-    if not os.path.exists(SETUP_CACHE_DIR):
+    cache_dir = get_setup_cache_dir()
+    if not os.path.exists(cache_dir):
         return []
 
     configs: Deployments = []
     try:
-        for filename in os.listdir(SETUP_CACHE_DIR):
+        for filename in os.listdir(cache_dir):
             if not filename.endswith('.json'):
                 continue
                 
-            filepath = os.path.join(SETUP_CACHE_DIR, filename)
+            filepath = os.path.join(cache_dir, filename)
             try:
                 with open(filepath, 'r') as f:
                     data = cast(JSONDict, json.load(f))
@@ -202,20 +204,48 @@ def reconstruct_command(config: SetupConfig) -> str:
     
     if config.samba_shares:
         for share_spec in config.samba_shares:
-            escaped_spec = ' '.join(shlex.quote(str(s)) for s in share_spec)
+            redacted_share_spec = list(share_spec)
+            if len(redacted_share_spec) >= 4:
+                redacted_users: list[str] = []
+                for user_spec in str(redacted_share_spec[3]).split(','):
+                    normalized_user = user_spec.strip()
+                    if not normalized_user:
+                        continue
+                    if ':' in normalized_user:
+                        username, _ = normalized_user.split(':', 1)
+                        redacted_users.append(f"{username}:[REDACTED]")
+                    else:
+                        redacted_users.append(normalized_user)
+                redacted_share_spec[3] = ','.join(redacted_users)
+            escaped_spec = ' '.join(shlex.quote(str(s)) for s in redacted_share_spec)
             cmd_parts.append(f"--share {escaped_spec}")
     
-    if config.share_credentials:
-        for cred_spec in config.share_credentials:
-            escaped_spec = ' '.join(shlex.quote(str(s)) for s in cred_spec)
-            cmd_parts.append(f"--credential {escaped_spec}")
+    required_usernames: list[str] = []
+    seen_usernames: set[str] = set()
+    if config.samba_shares:
+        for share_spec in config.samba_shares:
+            if len(share_spec) < 4:
+                continue
+            for user_spec in str(share_spec[3]).split(','):
+                normalized_user = user_spec.strip()
+                if not normalized_user or ':' in normalized_user or normalized_user in seen_usernames:
+                    continue
+                seen_usernames.add(normalized_user)
+                required_usernames.append(normalized_user)
+
+    for username in required_usernames:
+        cmd_parts.append(f"--credential {shlex.quote(username)} [REDACTED]")
     
     if config.enable_smbclient:
         cmd_parts.append("--smbclient")
     
     if config.smb_mounts:
         for mount_spec in config.smb_mounts:
-            escaped_spec = ' '.join(shlex.quote(str(s)) for s in mount_spec)
+            redacted_mount_spec = list(mount_spec)
+            if len(redacted_mount_spec) >= 3 and ':' in str(redacted_mount_spec[2]):
+                username, _ = str(redacted_mount_spec[2]).split(':', 1)
+                redacted_mount_spec[2] = f"{username}:[REDACTED]"
+            escaped_spec = ' '.join(shlex.quote(str(s)) for s in redacted_mount_spec)
             cmd_parts.append(f"--mount-smb {escaped_spec}")
     
     if config.sync_specs:
@@ -511,11 +541,18 @@ def execute_patch(config: SetupConfig) -> int:
     print(f"Timezone: {config.timezone}")
     print("=" * 60)
     print()
+    try:
+        runtime_config = prepare_runtime_config(config)
+    except ValueError as e:
+        print(f"Error: {e}")
+        return 1
     
     start_time = time.time()
     returncode = 1
     try:
-        returncode = run_remote_setup(config)
+        if not config.dry_run:
+            store_cli_credentials(config)
+        returncode = run_remote_setup(runtime_config)
     finally:
         end_time = time.time()
         success = (returncode == 0)
@@ -609,32 +646,56 @@ def create_patch_argument_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _extract_workspace_args(argv: StrList) -> StrList:
+    filtered_args: StrList = []
+    index = 0
+    while index < len(argv):
+        arg = argv[index]
+        if arg == "--workspace":
+            if index + 1 >= len(argv):
+                raise ValueError("--workspace requires a path")
+            set_workspace_dir(argv[index + 1])
+            index += 2
+            continue
+        filtered_args.append(arg)
+        index += 1
+    return filtered_args
+
+
 def main() -> int:
-    if len(sys.argv) > 1:
-        cmd = sys.argv[1]
+    try:
+        argv = _extract_workspace_args(sys.argv[1:])
+    except ValueError as e:
+        print(f"Error: {e}")
+        return 1
+
+    if argv:
+        cmd = argv[0]
         if cmd in ['list', 'ls']:
-            pattern = sys.argv[2] if len(sys.argv) > 2 else None
+            pattern = argv[1] if len(argv) > 1 else None
             list_configurations(pattern)
             return 0
         elif cmd == 'info':
-            pattern = sys.argv[2] if len(sys.argv) > 2 else None
+            pattern = argv[1] if len(argv) > 1 else None
             show_info(pattern)
             return 0
         elif cmd in ['cmd', 'command']:
-            pattern = sys.argv[2] if len(sys.argv) > 2 else None
+            pattern = argv[1] if len(argv) > 1 else None
             show_command(pattern)
             return 0
         elif cmd in ['rm', 'remove']:
-            return remove_configurations(sys.argv[2:])
+            return remove_configurations(argv[1:])
         elif cmd == 'deploy':
-            return deploy_configurations(sys.argv[2:])
+            return deploy_configurations(argv[1:])
 
     parser = create_patch_argument_parser()
     
     if argcomplete:
         argcomplete.autocomplete(parser)
     
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    if getattr(args, 'workspace', None):
+        set_workspace_dir(args.workspace)
     
     if not validate_host(args.host):
         print(f"Error: Invalid IP address or hostname: {args.host}")

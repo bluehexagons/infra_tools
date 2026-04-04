@@ -20,6 +20,10 @@ def create_setup_argument_parser(
         parser.add_argument("username", nargs="?", default=None, 
                            help="Username (defaults to current user)")
         parser.add_argument("-k", "--key", dest="ssh_key", help="SSH private key path")
+        parser.add_argument(
+            "--workspace",
+            help="Workspace root for saved setups, credentials, known_hosts, and history"
+        )
     
     parser.add_argument("-p", "--password", help="User password")
     parser.add_argument("-t", "--timezone", help="Timezone (defaults to UTC)")
@@ -172,8 +176,8 @@ def create_setup_argument_parser(
                        action="append", nargs=4, metavar=("ACCESS_TYPE", "SHARE_NAME", "PATHS", "USERS"),
                        help="Configure Samba share: access_type (read|write), share_name, comma-separated paths, comma-separated username:password pairs or usernames that resolve via --credential (can be used multiple times)")
     parser.add_argument("--credential", dest="share_credentials",
-                       action="append", nargs=2, metavar=("USERNAME", "PASSWORD"),
-                       help="Store a Samba credential for share users so --share can reference usernames without inline passwords (can be used multiple times)")
+                        action="append", nargs=2, metavar=("USERNAME", "PASSWORD"),
+                        help="Save a workspace credential and let --share/--mount-smb reference the username without inline passwords (can be used multiple times)")
     
     parser.add_argument("--smbclient", dest="enable_smbclient", 
                        action=argparse.BooleanOptionalAction if not for_remote else "store_true", 
@@ -181,8 +185,8 @@ def create_setup_argument_parser(
                        help="Install SMB/CIFS client packages for connecting to network shares (default: enabled for pc_dev)")
     
     parser.add_argument("--mount-smb", dest="smb_mounts",
-                       action="append", nargs=5, metavar=("MOUNTPOINT", "IP", "CREDENTIALS", "SHARE", "SUBDIR"),
-                       help="Mount SMB share: /mnt/path, ip_address, username:password, share_name, /share/subdirectory (can be used multiple times). Auto-enables --smbclient")
+                        action="append", nargs=5, metavar=("MOUNTPOINT", "IP", "CREDENTIALS", "SHARE", "SUBDIR"),
+                        help="Mount SMB share: /mnt/path, ip_address, username or username:password, share_name, /share/subdirectory (can be used multiple times). Auto-enables --smbclient")
     
     parser.add_argument("--sync", dest="sync_specs", 
                        action="append", nargs=3, metavar=("SOURCE", "DESTINATION", "INTERVAL"),
