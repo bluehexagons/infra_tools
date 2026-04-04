@@ -22,6 +22,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
 from lib.logging_utils import get_service_logger
+from lib.maintenance_defaults import APT_LOCK_OPTIONS
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
 
 
@@ -33,13 +34,6 @@ DPKG_OPTIONS = [
     '-o', 'Dpkg::Options::=--force-confdef',
     '-o', 'Dpkg::Options::=--force-confold',
 ]
-
-# Wait up to 5 minutes for apt/dpkg locks to be released before failing.
-# This handles races with other apt processes (e.g. residual unattended-upgrades).
-APT_LOCK_OPTIONS = [
-    '-o', 'DPkg::Lock::Timeout=300',
-]
-
 
 def run_apt_command(args: list[str]) -> subprocess.CompletedProcess[str]:
     """Run an apt-get command with non-interactive settings."""

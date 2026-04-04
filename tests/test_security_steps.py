@@ -11,7 +11,9 @@ from unittest.mock import mock_open, patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.config import SetupConfig
-from security.security_steps import configure_auto_updates
+from lib.maintenance_defaults import JOURNAL_MAX_USE
+from lib.system_types import get_steps_for_system_type
+from security.security_steps import configure_auto_updates, configure_cleanup_maintenance
 
 
 class TestConfigureAutoUpdates(unittest.TestCase):
@@ -77,6 +79,98 @@ class TestConfigureAutoUpdates(unittest.TestCase):
         run_commands = [args[0] for args, _ in mock_run.call_args_list]
         self.assertIn("systemctl stop unattended-upgrades", run_commands)
         self.assertIn("systemctl disable unattended-upgrades", run_commands)
+
+
+class TestConfigureCleanupMaintenance(unittest.TestCase):
+    @patch("security.security_steps.run")
+    @patch("security.security_steps.cleanup_service")
+    @patch("security.security_steps.open", new_callable=mock_open)
+    @patch("security.security_steps.os.makedirs")
+    def test_creates_service_timer_and_journal_limit(self, mock_makedirs, mock_file, _cleanup, mock_run):
+        mock_run.return_value = SimpleNamespace(returncode=0)
+        configure_cleanup_maintenance(SetupConfig(username="u", host="h", system_type="server_lite"))
+
+        mock_makedirs.assert_called_once_with("/etc/systemd/journald.conf.d", exist_ok=True)
+        opened_paths = [args[0] for args, _ in mock_file.call_args_list]
+        self.assertIn("/etc/systemd/journald.conf.d/infra-tools.conf", opened_paths)
+        self.assertIn("/etc/systemd/system/cleanup-maintenance.service", opened_paths)
+        self.assertIn("/etc/systemd/system/cleanup-maintenance.timer", opened_paths)
+
+    @patch("security.security_steps.run")
+    @patch("security.security_steps.cleanup_service")
+    @patch("security.security_steps.open", new_callable=mock_open)
+    @patch("security.security_steps.os.makedirs")
+    def test_enables_timer_and_restarts_journald(self, _makedirs, mock_file, _cleanup, mock_run):
+        mock_run.return_value = SimpleNamespace(returncode=0)
+        configure_cleanup_maintenance(SetupConfig(username="u", host="h", system_type="server_lite"))
+
+        run_commands = [args[0] for args, _ in mock_run.call_args_list]
+        self.assertIn("systemctl daemon-reload", run_commands)
+        self.assertIn("systemctl restart systemd-journald", run_commands)
+        self.assertIn("systemctl enable cleanup-maintenance.timer", run_commands)
+        self.assertIn("systemctl start cleanup-maintenance.timer", run_commands)
+
+    @patch("security.security_steps.run")
+    @patch("security.security_steps.cleanup_service")
+    @patch("security.security_steps.open", new_callable=mock_open)
+    @patch("security.security_steps.os.makedirs")
+    def test_service_references_cleanup_script_and_100m_journal_limit(self, _makedirs, mock_file, _cleanup, mock_run):
+        mock_run.return_value = SimpleNamespace(returncode=0)
+        configure_cleanup_maintenance(SetupConfig(username="u", host="h", system_type="server_lite"))
+
+        written_text = "".join(call.args[0] for call in mock_file().write.call_args_list)
+        self.assertIn("/opt/infra_tools/common/service_tools/cleanup_maintenance.py", written_text)
+        self.assertIn("OnCalendar=Sun *-*-* 03:30:00", written_text)
+        self.assertIn(f"SystemMaxUse={JOURNAL_MAX_USE}", written_text)
+        self.assertIn(f"RuntimeMaxUse={JOURNAL_MAX_USE}", written_text)
+
+    @patch("security.security_steps.run")
+    @patch("security.security_steps.cleanup_service")
+    @patch("security.security_steps.open", new_callable=mock_open)
+    @patch("security.security_steps.os.makedirs")
+    def test_warns_when_timer_enable_fails(self, _makedirs, mock_file, _cleanup, mock_run):
+        mock_run.side_effect = [
+            SimpleNamespace(returncode=0),
+            SimpleNamespace(returncode=0),
+            SimpleNamespace(returncode=1),
+        ]
+        with patch("builtins.print") as mock_print:
+            configure_cleanup_maintenance(SetupConfig(username="u", host="h", system_type="server_lite"))
+
+        run_commands = [args[0] for args, _ in mock_run.call_args_list]
+        self.assertIn("systemctl enable cleanup-maintenance.timer", run_commands)
+        self.assertNotIn("systemctl start cleanup-maintenance.timer", run_commands)
+        mock_print.assert_any_call("  ⚠ Cleanup maintenance configured but timer could not be enabled")
+
+    @patch("security.security_steps.run")
+    @patch("security.security_steps.cleanup_service")
+    @patch("security.security_steps.open", new_callable=mock_open)
+    @patch("security.security_steps.os.makedirs")
+    def test_warns_when_timer_start_fails(self, _makedirs, mock_file, _cleanup, mock_run):
+        mock_run.side_effect = [
+            SimpleNamespace(returncode=0),
+            SimpleNamespace(returncode=0),
+            SimpleNamespace(returncode=0),
+            SimpleNamespace(returncode=1),
+        ]
+        with patch("builtins.print") as mock_print:
+            configure_cleanup_maintenance(SetupConfig(username="u", host="h", system_type="server_lite"))
+
+        run_commands = [args[0] for args, _ in mock_run.call_args_list]
+        self.assertIn("systemctl start cleanup-maintenance.timer", run_commands)
+        mock_print.assert_any_call("  ⚠ Cleanup maintenance configured but timer could not be started")
+
+
+class TestCleanupMaintenanceStepWiring(unittest.TestCase):
+    def test_server_lite_includes_cleanup_maintenance_step(self):
+        config = SetupConfig(username="u", host="h", system_type="server_lite")
+        step_names = [name for name, _ in get_steps_for_system_type(config)]
+        self.assertIn("Configuring cleanup maintenance service", step_names)
+
+    def test_server_proxmox_includes_cleanup_maintenance_step(self):
+        config = SetupConfig(username="u", host="h", system_type="server_proxmox")
+        step_names = [name for name, _ in get_steps_for_system_type(config)]
+        self.assertIn("Configuring cleanup maintenance service", step_names)
 
 
 if __name__ == "__main__":

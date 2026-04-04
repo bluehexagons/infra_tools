@@ -572,6 +572,42 @@ Backups contain the full production database, including:
 - Exclude from public backups/syncs
 - Consider backup retention policies for compliance
 
+## System Maintenance and Log Retention
+
+Infra tools now installs a background cleanup service for server-style setups:
+
+- `cleanup-maintenance.service` runs periodic cleanup tasks
+- `cleanup-maintenance.timer` schedules it weekly on Sunday at 3:30 AM
+- `/etc/systemd/journald.conf.d/infra-tools.conf` caps journal storage to `100M`
+
+The cleanup job is intended to reduce disk pressure from transient data by reclaiming:
+
+- APT caches with `apt-get autoclean` and `apt-get clean`
+- old temporary files via `systemd-tmpfiles --clean`
+- oversized systemd journals via `journalctl --vacuum-size=100M`
+- optional package-manager caches for npm, pip, gem, and uv when those tools are installed
+
+To verify that the cleanup timer is installed and running:
+
+```bash
+sudo systemctl status cleanup-maintenance.timer --no-pager
+sudo systemctl list-timers cleanup-maintenance.timer --all --no-pager
+```
+
+To review the last cleanup run:
+
+```bash
+sudo systemctl status cleanup-maintenance.service --no-pager
+sudo journalctl -u cleanup-maintenance.service -n 50 --no-pager
+```
+
+To confirm the active journal retention cap:
+
+```bash
+sudo cat /etc/systemd/journald.conf.d/infra-tools.conf
+sudo journalctl --disk-usage
+```
+
 ## Related Documentation
 
 - [CI/CD System](CICD.md) - Continuous deployment integration

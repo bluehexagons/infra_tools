@@ -11,6 +11,7 @@ from .security_steps import (
     configure_auto_updates,
     configure_firewall_web,
     configure_auto_restart,
+    configure_cleanup_maintenance,
 )
 
 __all__ = [
@@ -22,4 +23,5 @@ __all__ = [
     'configure_auto_updates',
     'configure_firewall_web',
     'configure_auto_restart',
+    'configure_cleanup_maintenance',
 ]
