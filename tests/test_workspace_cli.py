@@ -23,8 +23,7 @@ class TestWorkspaceCli(unittest.TestCase):
         self.assertEqual(args.workspace, "/tmp/workspace")
 
     def test_infra_tools_parser_accepts_credentials_command(self):
-        parser, setup_parser, patch_parser = infra_tools.create_infra_tools_parser()
-        del setup_parser, patch_parser
+        parser, _setup_parser, _patch_parser = infra_tools.create_infra_tools_parser()
         args = parser.parse_args(["credentials", "--workspace", "/tmp/workspace", "list"])
         self.assertEqual(args.command, "credentials")
         self.assertEqual(args.workspace, "/tmp/workspace")

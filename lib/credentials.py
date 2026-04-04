@@ -148,7 +148,7 @@ def store_cli_credentials(config: SetupConfig, workspace: str | None = None) -> 
         for share_spec in config.samba_shares:
             if len(share_spec) < 4:
                 continue
-            for user_spec in share_spec[3].split(","):
+            for user_spec in str(share_spec[3]).split(","):
                 normalized_user = user_spec.strip()
                 if ":" not in normalized_user:
                     continue
@@ -157,9 +157,10 @@ def store_cli_credentials(config: SetupConfig, workspace: str | None = None) -> 
 
     if config.smb_mounts:
         for mount_spec in config.smb_mounts:
-            if len(mount_spec) < 3 or ":" not in mount_spec[2]:
+            credentials_field = str(mount_spec[2]) if len(mount_spec) >= 3 else ""
+            if len(mount_spec) < 3 or ":" not in credentials_field:
                 continue
-            username, password = mount_spec[2].split(":", 1)
+            username, password = credentials_field.split(":", 1)
             credentials[_normalize_credential_username(username)] = _normalize_credential_password(password)
 
     if not credentials:
@@ -178,7 +179,7 @@ def _collect_required_share_usernames(config: SetupConfig) -> list[str]:
     for share_spec in config.samba_shares:
         if len(share_spec) < 4:
             continue
-        for user_spec in share_spec[3].split(","):
+        for user_spec in str(share_spec[3]).split(","):
             normalized_user = user_spec.strip()
             if not normalized_user or ":" in normalized_user or normalized_user in seen_usernames:
                 continue

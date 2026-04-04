@@ -215,6 +215,7 @@ def create_argument_parser(description: str, allow_steps: bool = False) -> argpa
 
 
 def _expand_remote_args(remote_args: list[str]) -> list[str]:
+    """Split quoted remote arg fragments back into argv tokens for subprocess usage."""
     expanded_args: list[str] = []
     for arg in remote_args:
         expanded_args.extend(shlex.split(arg))

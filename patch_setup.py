@@ -646,7 +646,7 @@ def create_patch_argument_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _extract_workspace_args(argv: StrList) -> StrList:
+def _extract_and_apply_workspace_args(argv: StrList) -> StrList:
     filtered_args: StrList = []
     index = 0
     while index < len(argv):
@@ -664,7 +664,7 @@ def _extract_workspace_args(argv: StrList) -> StrList:
 
 def main() -> int:
     try:
-        argv = _extract_workspace_args(sys.argv[1:])
+        argv = _extract_and_apply_workspace_args(sys.argv[1:])
     except ValueError as e:
         print(f"Error: {e}")
         return 1
