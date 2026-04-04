@@ -206,6 +206,7 @@ def validate_positive_integer(value: str, name: str = "value") -> int:
 
 
 _MEMORY_PATTERN = re.compile(r'^\d+[KMGT]$', re.IGNORECASE)
+_PACKAGE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+.-]*$")
 
 
 def validate_memory_string(value: str, name: str = "memory") -> None:
@@ -225,6 +226,18 @@ def validate_memory_string(value: str, name: str = "memory") -> None:
         raise ValueError(
             f"Invalid {name} value '{value}' (e.g. 2G, 512M, 1T)"
         )
+
+
+def validate_package_name(value: str, name: str = "package") -> str:
+    """Validate a package name used in apt/system package lookups."""
+    normalized_value = value.strip()
+    if not normalized_value:
+        raise ValueError(f"{name} must be a non-empty string")
+
+    if not _PACKAGE_NAME_PATTERN.match(normalized_value):
+        raise ValueError(f"Invalid {name} name: {value}")
+
+    return normalized_value
 
 
 def validate_hosted_flags(config: Any) -> None:

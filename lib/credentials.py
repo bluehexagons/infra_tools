@@ -97,12 +97,17 @@ def save_workspace_credentials(credentials: dict[str, str], workspace: str | Non
         },
     }
 
-    fd, temp_path = tempfile.mkstemp(
-        dir=workspace_dir,
-        prefix=".credentials-",
-        suffix=".json",
-        text=True,
-    )
+    old_umask = os.umask(0o177)
+    try:
+        fd, temp_path = tempfile.mkstemp(
+            dir=workspace_dir,
+            prefix=".credentials-",
+            suffix=".json",
+            text=True,
+        )
+    finally:
+        os.umask(old_umask)
+
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as file_obj:
             json.dump(payload, file_obj, indent=2, sort_keys=True)

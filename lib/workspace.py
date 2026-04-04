@@ -6,7 +6,7 @@ import os
 
 
 WORKSPACE_ENV_VAR = "INFRA_TOOLS_WORKSPACE"
-DEFAULT_WORKSPACE_DIR = os.path.expanduser("~/.config/infra_tools")
+DEFAULT_WORKSPACE_DIR = "~/.config/infra_tools"
 
 
 def normalize_workspace_dir(path: str | None = None) -> str:

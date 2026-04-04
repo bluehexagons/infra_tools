@@ -165,5 +165,29 @@ class TestSetupMainTimingPersistence(unittest.TestCase):
             self.assertEqual(saved_calls, [])
 
 
+class TestExpandRemoteArgs(unittest.TestCase):
+    def test_expand_remote_args_preserves_quoted_values(self):
+        from lib.setup_common import _expand_remote_args
+
+        expanded = _expand_remote_args([
+            "--timezone 'America/New_York'",
+            "--mount-smb /mnt/share 1.2.3.4 'user:secret phrase' docs /",
+        ])
+
+        self.assertEqual(
+            expanded,
+            [
+                "--timezone",
+                "America/New_York",
+                "--mount-smb",
+                "/mnt/share",
+                "1.2.3.4",
+                "user:secret phrase",
+                "docs",
+                "/",
+            ],
+        )
+
+
 if __name__ == '__main__':
     unittest.main()

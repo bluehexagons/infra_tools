@@ -14,6 +14,7 @@ from lib.validation import (
     validate_network_endpoint,
     validate_positive_integer,
     validate_memory_string,
+    validate_package_name,
     validate_hosted_flags,
 )
 
@@ -151,6 +152,22 @@ class TestValidateMemoryString(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             validate_memory_string('bad', name='--storage')
         self.assertIn('--storage', str(ctx.exception))
+
+
+class TestValidatePackageName(unittest.TestCase):
+    def test_valid_package_name(self):
+        self.assertEqual(validate_package_name('python3-venv'), 'python3-venv')
+
+    def test_valid_package_name_with_plus(self):
+        self.assertEqual(validate_package_name('libgtk-3-0t64+extra'), 'libgtk-3-0t64+extra')
+
+    def test_empty_package_name(self):
+        with self.assertRaises(ValueError):
+            validate_package_name('')
+
+    def test_invalid_package_name(self):
+        with self.assertRaises(ValueError):
+            validate_package_name('python3; rm -rf /')
 
 
 class _MockConfig:

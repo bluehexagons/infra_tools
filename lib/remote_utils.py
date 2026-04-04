@@ -8,6 +8,8 @@ import subprocess
 import sys
 from typing import Optional, Callable
 
+from lib.validation import validate_package_name
+
 
 _dry_run = False
 
@@ -60,8 +62,9 @@ def detect_os() -> None:
 
 
 def is_package_installed(package: str) -> bool:
+    safe_package = validate_package_name(package)
     result = subprocess.run(
-        ["dpkg-query", "-W", "-f=${Status}", package],
+        ["dpkg-query", "-W", "-f=${Status}", safe_package],
         capture_output=True,
         text=True,
     )

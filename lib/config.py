@@ -59,6 +59,20 @@ def _strip_passwords_from_share_users(users_field: str) -> str:
     return ','.join(sanitized_users)
 
 
+def redact_share_user_passwords(users_field: str) -> str:
+    redacted_users: StrList = []
+    for user_spec in users_field.split(','):
+        normalized_user = user_spec.strip()
+        if not normalized_user:
+            continue
+        if ':' in normalized_user:
+            username, _ = normalized_user.split(':', 1)
+            redacted_users.append(f"{username.strip()}:[REDACTED]")
+        else:
+            redacted_users.append(normalized_user)
+    return ','.join(redacted_users)
+
+
 def _strip_passwords_from_samba_shares(value: Optional[NestedStrList]) -> Optional[NestedStrList]:
     if not value:
         return value
@@ -84,6 +98,13 @@ def _strip_passwords_from_smb_mounts(value: Optional[NestedStrList]) -> Optional
             sanitized_mount[2] = username.strip()
         sanitized_mounts.append(sanitized_mount)
     return sanitized_mounts
+
+
+def redact_mount_credentials(credentials_field: str) -> str:
+    if ':' not in credentials_field:
+        return credentials_field
+    username, _ = credentials_field.split(':', 1)
+    return f"{username}:[REDACTED]"
 
 
 @dataclass
@@ -434,9 +455,7 @@ class SetupConfig:
                         if not user_spec:
                             continue
                         if ':' in user_spec:
-                            username, _ = user_spec.split(':', 1)
-                            username = username.strip()
-                            redacted_users.append(f"{username}:[REDACTED]")
+                            redacted_users.append(redact_share_user_passwords(user_spec))
                         else:
                             redacted_users.append(user_spec)
                             if user_spec not in seen_share_credentials:
@@ -461,8 +480,7 @@ class SetupConfig:
             for mount_spec in self.smb_mounts:
                 redacted_mount_spec = list(mount_spec)
                 if len(redacted_mount_spec) >= 3 and ':' in redacted_mount_spec[2]:
-                    username, _ = redacted_mount_spec[2].split(':', 1)
-                    redacted_mount_spec[2] = f"{username}:[REDACTED]"
+                    redacted_mount_spec[2] = redact_mount_credentials(redacted_mount_spec[2])
                 escaped_spec = ' '.join(shlex.quote(str(s)) for s in redacted_mount_spec)
                 cmd_parts.append(f"--mount-smb {escaped_spec}")
         
