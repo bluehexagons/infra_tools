@@ -59,7 +59,9 @@ def load_workspace_credentials(workspace: str | None = None) -> dict[str, str]:
         payload = json.load(file_obj)
 
     if not isinstance(payload, dict):
-        raise ValueError("Credential store must contain a JSON object")
+        raise ValueError(
+            f"Credential store must contain a JSON object, got {type(payload).__name__}"
+        )
 
     if payload.get("version") != CREDENTIALS_VERSION:
         raise ValueError("Unsupported credential store version")

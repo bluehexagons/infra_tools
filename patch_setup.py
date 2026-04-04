@@ -206,16 +206,7 @@ def reconstruct_command(config: SetupConfig) -> str:
         for share_spec in config.samba_shares:
             redacted_share_spec = list(share_spec)
             if len(redacted_share_spec) >= 4:
-                redacted_users: list[str] = []
-                for user_spec in str(redacted_share_spec[3]).split(','):
-                    normalized_user = user_spec.strip()
-                    if not normalized_user:
-                        continue
-                    if ':' in normalized_user:
-                        redacted_users.append(redact_share_user_passwords(normalized_user))
-                    else:
-                        redacted_users.append(normalized_user)
-                redacted_share_spec[3] = ','.join(redacted_users)
+                redacted_share_spec[3] = redact_share_user_passwords(str(redacted_share_spec[3]))
             escaped_spec = ' '.join(shlex.quote(str(s)) for s in redacted_share_spec)
             cmd_parts.append(f"--share {escaped_spec}")
     
