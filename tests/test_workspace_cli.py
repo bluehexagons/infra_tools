@@ -41,6 +41,8 @@ class TestSetupUserPasswordless(unittest.TestCase):
         common_steps.setup_user(config)
 
         mock_set_password.assert_not_called()
+        commands = [call_args.args[0] for call_args in mock_run.call_args_list]
+        self.assertTrue(any(command.startswith("useradd -m -s /bin/bash") for command in commands))
         mock_print.assert_any_call("  No password configured; relying on SSH key authentication")
 
 

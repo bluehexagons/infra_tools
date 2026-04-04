@@ -455,13 +455,14 @@ class SetupConfig:
                         if not user_spec:
                             continue
                         if ':' in user_spec:
-                            redacted_users.append(redact_share_user_passwords(user_spec))
+                            username, _ = user_spec.split(':', 1)
+                            redacted_users.append(f"{username.strip()}:[REDACTED]")
                         else:
                             redacted_users.append(user_spec)
                             if user_spec not in seen_share_credentials:
                                 seen_share_credentials.add(user_spec)
                                 required_share_credentials.append(user_spec)
-                    redacted_share_spec[SHARE_USERS_INDEX] = redact_share_user_passwords(','.join(redacted_users))
+                    redacted_share_spec[SHARE_USERS_INDEX] = ','.join(redacted_users)
                 redacted_share_specs.append(redacted_share_spec)
 
         for username in required_share_credentials:
