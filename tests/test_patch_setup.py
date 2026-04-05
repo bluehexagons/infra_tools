@@ -199,6 +199,30 @@ class TestPatchSetupDeployTargetValidation(unittest.TestCase):
         self.assertEqual(result, 1)
         mock_print.assert_called_with("Error: Invalid SSL email address: bad-email")
 
+    @patch("builtins.print")
+    @patch("patch_setup.prepare_runtime_config")
+    @patch("patch_setup.os.path.exists", return_value=True)
+    @patch("patch_setup.validate_username", return_value=True)
+    def test_execute_patch_rejects_invalid_apt_package(
+        self,
+        _mock_validate_username,
+        _mock_exists,
+        mock_prepare_runtime_config,
+        mock_print,
+    ):
+        config = patch_setup.SetupConfig(
+            host="example.com",
+            username="testuser",
+            system_type="server_lite",
+            apt_packages=["python3; rm -rf /"],
+        )
+        mock_prepare_runtime_config.return_value = config
+
+        result = patch_setup.execute_patch(config)
+
+        self.assertEqual(result, 1)
+        mock_print.assert_called_with("Error: Invalid --apt-install name: python3; rm -rf /")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -46,6 +46,7 @@ from lib.setup_common import REMOTE_SCRIPT_PATH, run_remote_setup
 from lib.system_utils import get_current_username
 from lib.validators import validate_host, validate_username
 from lib.validation import (
+    validate_apt_packages,
     validate_deploy_specs,
     validate_deploy_targets,
     validate_hosted_flags,
@@ -307,6 +308,7 @@ def run_setup_command(args: argparse.Namespace) -> int:
     
     try:
         runtime_config = prepare_runtime_config(config)
+        validate_apt_packages(runtime_config.apt_packages)
         validate_notification_args(runtime_config.notify_specs)
         validate_ssl_email(runtime_config.ssl_email)
         validate_deploy_specs(runtime_config.deploy_specs)
@@ -382,6 +384,7 @@ def run_patch_command(args: argparse.Namespace) -> int:
     merged_config = merge_setup_configs(cached_config, new_config)
     try:
         runtime_config = prepare_runtime_config(merged_config)
+        validate_apt_packages(runtime_config.apt_packages)
         validate_notification_args(runtime_config.notify_specs)
         validate_ssl_email(runtime_config.ssl_email)
         validate_deploy_specs(runtime_config.deploy_specs)

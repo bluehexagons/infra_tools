@@ -349,6 +349,16 @@ def validate_ssl_email(email: Optional[str]) -> None:
         raise ValueError(f"Invalid SSL email address: {email}") from exc
 
 
+def validate_apt_packages(packages: Optional[list[str]]) -> None:
+    """Validate custom apt package names before setup or patch execution."""
+
+    if not packages:
+        return
+
+    for package in packages:
+        validate_package_name(package, name="--apt-install")
+
+
 def validate_positive_integer(value: str, name: str = "value") -> int:
     """Validate and convert string to positive integer.
     

@@ -10,6 +10,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.validation import (
+    validate_apt_packages,
     validate_deploy_specs,
     validate_deploy_targets,
     validate_samba_share_specs,
@@ -317,6 +318,18 @@ class TestValidatePackageName(unittest.TestCase):
     def test_invalid_package_name(self):
         with self.assertRaises(ValueError):
             validate_package_name('python3; rm -rf /')
+
+
+class TestValidateAptPackages(unittest.TestCase):
+    def test_none_passes(self):
+        validate_apt_packages(None)
+
+    def test_valid_packages_pass(self):
+        validate_apt_packages(["python3-venv", "curl"])
+
+    def test_invalid_package_fails(self):
+        with self.assertRaisesRegex(ValueError, "Invalid --apt-install name: python3; rm -rf /"):
+            validate_apt_packages(["python3; rm -rf /"])
 
 
 class _MockConfig:
