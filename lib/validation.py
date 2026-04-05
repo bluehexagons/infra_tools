@@ -255,6 +255,35 @@ def validate_deploy_specs(deploy_specs: Optional[list[list[str]]]) -> None:
                 raise ValueError(f"Invalid deploy domain: {domain or deploy_spec}")
 
 
+def validate_sync_specs(sync_specs: Optional[list[list[str]]]) -> None:
+    """Validate sync specs before setup or patch execution."""
+
+    if not sync_specs:
+        return
+
+    from sync.sync_steps import parse_sync_spec
+
+    for sync_spec in sync_specs:
+        sync_config = parse_sync_spec(sync_spec)
+        validate_filesystem_path(sync_config["source"], must_exist=False)
+        validate_filesystem_path(sync_config["destination"], must_exist=False)
+
+
+def validate_scrub_specs(scrub_specs: Optional[list[list[str]]]) -> None:
+    """Validate scrub specs before setup or patch execution."""
+
+    if not scrub_specs:
+        return
+
+    from sync.scrub_steps import parse_scrub_spec
+
+    for scrub_spec in scrub_specs:
+        scrub_config = parse_scrub_spec(scrub_spec)
+        validate_filesystem_path(scrub_config["directory"], must_exist=False)
+        validate_database_path(scrub_config["database_path"])
+        validate_redundancy_percentage(scrub_config["redundancy"])
+
+
 def validate_positive_integer(value: str, name: str = "value") -> int:
     """Validate and convert string to positive integer.
     

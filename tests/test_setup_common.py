@@ -256,6 +256,52 @@ class TestSetupMainTimingPersistence(unittest.TestCase):
         mock_run_remote.assert_not_called()
         mock_print.assert_called_with("Error: Invalid deploy domain: bad domain")
 
+    @patch("builtins.print")
+    def test_invalid_sync_specs_return_error_before_remote_setup(self, mock_print):
+        from lib import setup_common
+
+        parser = MagicMock()
+        args = MagicMock()
+        args.workspace = None
+        args.host = "testhost"
+        args.username = "testuser"
+        parser.parse_args.return_value = args
+        config = _make_config(sync_specs=[["relative", "/dst", "daily"]])
+
+        with patch.object(setup_common, "create_argument_parser", return_value=parser), \
+             patch.object(setup_common, "validate_host", return_value=True), \
+             patch.object(setup_common, "validate_username", return_value=True), \
+             patch.object(setup_common, "prepare_runtime_config", return_value=config), \
+             patch.object(setup_common, "run_remote_setup") as mock_run_remote:
+            result = setup_common.setup_main("server_lite", "Test", lambda c: None)
+
+        self.assertEqual(result, 1)
+        mock_run_remote.assert_not_called()
+        mock_print.assert_called_with("Error: Source path must be absolute: relative")
+
+    @patch("builtins.print")
+    def test_invalid_scrub_specs_return_error_before_remote_setup(self, mock_print):
+        from lib import setup_common
+
+        parser = MagicMock()
+        args = MagicMock()
+        args.workspace = None
+        args.host = "testhost"
+        args.username = "testuser"
+        parser.parse_args.return_value = args
+        config = _make_config(scrub_specs=[["/data", ".pardatabase", "0%", "weekly"]])
+
+        with patch.object(setup_common, "create_argument_parser", return_value=parser), \
+             patch.object(setup_common, "validate_host", return_value=True), \
+             patch.object(setup_common, "validate_username", return_value=True), \
+             patch.object(setup_common, "prepare_runtime_config", return_value=config), \
+             patch.object(setup_common, "run_remote_setup") as mock_run_remote:
+            result = setup_common.setup_main("server_lite", "Test", lambda c: None)
+
+        self.assertEqual(result, 1)
+        mock_run_remote.assert_not_called()
+        mock_print.assert_called_with("Error: Redundancy percentage must be between 1 and 100: 0%")
+
 
 class TestExpandRemoteArgs(unittest.TestCase):
     def test_expand_remote_args_preserves_quoted_values(self):

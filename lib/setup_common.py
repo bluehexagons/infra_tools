@@ -21,7 +21,14 @@ except ImportError:
 from lib.config import SetupConfig
 from lib.credentials import prepare_runtime_config, store_cli_credentials
 from lib.validators import validate_host, validate_username
-from lib.validation import validate_deploy_specs, validate_deploy_targets, validate_hosted_flags, validate_workspace_dir
+from lib.validation import (
+    validate_deploy_specs,
+    validate_deploy_targets,
+    validate_hosted_flags,
+    validate_scrub_specs,
+    validate_sync_specs,
+    validate_workspace_dir,
+)
 from lib.system_utils import get_current_username
 from lib.cache import save_setup_command
 from lib.arg_parser import create_setup_argument_parser
@@ -374,6 +381,8 @@ def setup_main(system_type: str, description: str, success_msg_fn: Callable[[Set
         validate_notification_args(runtime_config.notify_specs)
         validate_deploy_specs(runtime_config.deploy_specs)
         validate_deploy_targets(runtime_config.deploy_targets)
+        validate_sync_specs(runtime_config.sync_specs)
+        validate_scrub_specs(runtime_config.scrub_specs)
         validate_samba_share_credentials(runtime_config)
     except ValueError as e:
         print(f"Error: {e}")

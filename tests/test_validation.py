@@ -13,6 +13,8 @@ from lib.validation import (
     validate_deploy_specs,
     validate_deploy_targets,
     validate_directory_empty,
+    validate_scrub_specs,
+    validate_sync_specs,
     validate_network_endpoint,
     validate_positive_integer,
     validate_memory_string,
@@ -126,6 +128,38 @@ class TestValidateDeploySpecs(unittest.TestCase):
     def test_empty_deploy_spec_entry_fails(self):
         with self.assertRaisesRegex(ValueError, "Deploy target spec list must not contain empty entries"):
             validate_deploy_specs([['example.com,,other.example.com', 'https://github.com/user/repo.git']])
+
+
+class TestValidateSyncSpecs(unittest.TestCase):
+    def test_none_passes(self):
+        validate_sync_specs(None)
+
+    def test_valid_sync_specs_pass(self):
+        validate_sync_specs([['/src', '/dst', 'daily']])
+
+    def test_relative_source_fails(self):
+        with self.assertRaisesRegex(ValueError, "Source path must be absolute: relative"):
+            validate_sync_specs([['relative', '/dst', 'daily']])
+
+    def test_invalid_frequency_fails(self):
+        with self.assertRaisesRegex(ValueError, "Invalid interval 'yearly'"):
+            validate_sync_specs([['/src', '/dst', 'yearly']])
+
+
+class TestValidateScrubSpecs(unittest.TestCase):
+    def test_none_passes(self):
+        validate_scrub_specs(None)
+
+    def test_valid_scrub_specs_pass(self):
+        validate_scrub_specs([['/data', '.pardatabase', '5%', 'weekly']])
+
+    def test_relative_directory_fails(self):
+        with self.assertRaisesRegex(ValueError, "Directory path must be absolute: relative"):
+            validate_scrub_specs([['relative', '.pardatabase', '5%', 'weekly']])
+
+    def test_invalid_redundancy_fails(self):
+        with self.assertRaisesRegex(ValueError, "Redundancy percentage must be between 1 and 100: 0%"):
+            validate_scrub_specs([['/data', '.pardatabase', '0%', 'weekly']])
 
 
 class TestValidateWorkspaceDir(unittest.TestCase):

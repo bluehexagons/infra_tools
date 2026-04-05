@@ -79,6 +79,54 @@ class TestPatchSetupDeployTargetValidation(unittest.TestCase):
         self.assertEqual(result, 1)
         mock_print.assert_called_with("Error: Invalid deploy domain: bad domain")
 
+    @patch("builtins.print")
+    @patch("patch_setup.prepare_runtime_config")
+    @patch("patch_setup.os.path.exists", return_value=True)
+    @patch("patch_setup.validate_username", return_value=True)
+    def test_execute_patch_rejects_invalid_sync_spec(
+        self,
+        _mock_validate_username,
+        _mock_exists,
+        mock_prepare_runtime_config,
+        mock_print,
+    ):
+        config = patch_setup.SetupConfig(
+            host="example.com",
+            username="testuser",
+            system_type="server_lite",
+            sync_specs=[["relative", "/dst", "daily"]],
+        )
+        mock_prepare_runtime_config.return_value = config
+
+        result = patch_setup.execute_patch(config)
+
+        self.assertEqual(result, 1)
+        mock_print.assert_called_with("Error: Source path must be absolute: relative")
+
+    @patch("builtins.print")
+    @patch("patch_setup.prepare_runtime_config")
+    @patch("patch_setup.os.path.exists", return_value=True)
+    @patch("patch_setup.validate_username", return_value=True)
+    def test_execute_patch_rejects_invalid_scrub_spec(
+        self,
+        _mock_validate_username,
+        _mock_exists,
+        mock_prepare_runtime_config,
+        mock_print,
+    ):
+        config = patch_setup.SetupConfig(
+            host="example.com",
+            username="testuser",
+            system_type="server_lite",
+            scrub_specs=[["/data", ".pardatabase", "0%", "weekly"]],
+        )
+        mock_prepare_runtime_config.return_value = config
+
+        result = patch_setup.execute_patch(config)
+
+        self.assertEqual(result, 1)
+        mock_print.assert_called_with("Error: Redundancy percentage must be between 1 and 100: 0%")
+
 
 if __name__ == "__main__":
     unittest.main()

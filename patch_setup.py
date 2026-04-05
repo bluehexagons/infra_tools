@@ -28,7 +28,13 @@ from lib.cache import (
 )
 from lib.credentials import prepare_runtime_config, store_cli_credentials
 from lib.notifications import validate_notification_args
-from lib.validation import validate_deploy_specs, validate_deploy_targets, validate_workspace_dir
+from lib.validation import (
+    validate_deploy_specs,
+    validate_deploy_targets,
+    validate_scrub_specs,
+    validate_sync_specs,
+    validate_workspace_dir,
+)
 from lib.setup_common import (
     create_argument_parser,
     run_remote_setup,
@@ -538,6 +544,8 @@ def execute_patch(config: SetupConfig) -> int:
         validate_notification_args(runtime_config.notify_specs)
         validate_deploy_specs(runtime_config.deploy_specs)
         validate_deploy_targets(runtime_config.deploy_targets)
+        validate_sync_specs(runtime_config.sync_specs)
+        validate_scrub_specs(runtime_config.scrub_specs)
     except ValueError as e:
         print(f"Error: {e}")
         return 1
