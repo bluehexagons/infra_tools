@@ -173,22 +173,21 @@ This document outlines a plan for major architectural and security improvements 
 | 1 | Password-bearing SSH/login CLI flags removed | ✅ Done |
 | 2 | Workspace credentials in `credentials.json` with `0600` permissions | ✅ Done |
 | 3 | Password-based features resolve from workspace store | ✅ Done |
-| 4 | `shell=True` and unsafe command construction addressed | ⚠️ Partial |
+| 4 | `shell=True` and unsafe command construction addressed | ⚠️ Near done |
 | 5 | Comprehensive input validation for external interfaces | ✅ Done for this pass |
-| 6 | Structured logging without credential exposure | ⚠️ Partial |
+| 6 | Structured logging without credential exposure | ⚠️ Near done |
 | 7 | Plugin discovery with conflict detection | ⚠️ Partial |
 | 8 | Improved performance and reliability | ⚠️ Partial |
 | 9 | Enhanced extensibility | ⚠️ Partial |
 | 10 | Regression tests for credential/plugin/passwordless behavior | ✅ Done |
 
 ## Next Steps
-1. ~~Review and approve this plan~~ ✅ Done
-2. ~~Define the `credentials` subcommand UX and `credentials.json` schema/file-permission expectations~~ ✅ Done
-3. ~~Define the SSH/SCP transfer mechanism for deployment credentials~~ ✅ Decided: SCP over existing SSH connection, temp path `/tmp/infra_tools-creds-*`, `0600` permissions, cleanup on success/failure
-4. Treat validation as sufficient for this pass unless a clear external-input gap appears during other work
-5. Continue structured logging adoption in remaining long-running services/helpers that still emit free-form diagnostics
-6. Establish CI/CD pipeline for automated testing
-7. Implement pre-commit hooks and type checking in CI
+1. Finish the last meaningful structured-logging cleanup pass, then decide whether criterion 6 can be marked done for this revision.
+2. Do a final confirmation sweep for concrete unsafe command/execution edges, and mark criterion 4 done if nothing substantive remains.
+3. Decide whether criteria 7-9 need another implementation slice in this pass or should be explicitly deferred with notes.
+4. Keep validation frozen unless adjacent work exposes a specific external-input gap.
+5. Keep dedicated security-testing additions out of scope for this pass.
+6. If this revision continues beyond the remaining REVIEW_1 hardening work, establish CI/CD automation and add pre-commit/type-checking follow-through as a later quality phase.
 
 ---
 *This plan will be executed in iterations with regular reviews to ensure alignment with project goals and adjustment based on findings during implementation.*
