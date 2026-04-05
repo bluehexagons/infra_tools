@@ -3,7 +3,7 @@
 from __future__ import annotations
 from typing import Optional
 import os
-import shlex
+import subprocess
 
 from lib.config import SetupConfig
 from lib.machine_state import is_container
@@ -16,13 +16,14 @@ _apt_update_done = False
 
 def is_flatpak_app_installed(app_id: str) -> bool:
     """Check if a Flatpak application is installed."""
-    import subprocess
-    import shlex as _shlex
     result = subprocess.run(
-        f"flatpak list --app --columns=application 2>/dev/null | grep -qx {_shlex.quote(app_id)}",
-        shell=True, capture_output=True
+        ["flatpak", "list", "--app", "--columns=application"],
+        capture_output=True,
+        text=True,
     )
-    return result.returncode == 0
+    if result.returncode != 0:
+        return False
+    return app_id in result.stdout.splitlines()
 
 
 def _ensure_extrepo_and_update() -> None:

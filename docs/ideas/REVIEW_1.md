@@ -50,6 +50,7 @@ This document outlines a plan for major architectural and security improvements 
   - Consider NLA (Network Level Authentication) for direct RDP
 
 #### 1.3 Shell Injection Prevention
+- Status: `auto_update_node`, browser Flatpak detection, and plain `lib.remote_utils.run()` commands now avoid direct `shell=True`; remaining remote/SSH assembly is still under audit
 - Audit all subprocess calls and SSH command constructions
 - Replace shell=True usage with list-based arguments where possible
 - Implement proper escaping for unavoidable shell constructions
@@ -150,7 +151,7 @@ This document outlines a plan for major architectural and security improvements 
 ### Phase 5: Testing and Quality Assurance
 
 #### 5.1 Test Strategy — ✅ IN PROGRESS
-- 818 tests passing across the codebase
+- 823 tests passing across the codebase
 - New tests: `test_credentials.py`, `test_workspace_cli.py`, `test_config.py`, `test_setup_common.py`, `test_plugin_registry.py`
 - **TODO**: Property-based testing, integration tests for common setup scenarios
 
@@ -180,7 +181,7 @@ This document outlines a plan for major architectural and security improvements 
 2. ~~Define the `credentials` subcommand UX and `credentials.json` schema/file-permission expectations~~ ✅ Done
 3. ~~Define the SSH/SCP transfer mechanism for deployment credentials~~ ✅ Decided: SCP over existing SSH connection, temp path `/tmp/infra_tools-creds-*`, `0600` permissions, cleanup on success/failure
 4. Define composition rules for system-type plugins vs. capability plugins now that step assembly is plugin-owned
-5. Continue implementation of Phase 1 (complete shell injection audit, secure defaults review)
+5. Continue implementation of Phase 1 by auditing remaining remote SSH/SCP command assembly and secure defaults
 6. Establish CI/CD pipeline for automated testing
 7. Add security testing (bandit, semgrep, fuzz testing)
 8. Implement pre-commit hooks and type checking in CI

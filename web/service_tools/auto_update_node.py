@@ -11,6 +11,7 @@ Logs to: /var/log/infra_tools/web/auto_update_node.log
 from __future__ import annotations
 
 import os
+import shlex
 import sys
 import subprocess
 import pwd
@@ -36,24 +37,26 @@ def get_nvm_dir() -> str:
     return os.path.join(home_dir, '.nvm')
 
 
-def run_nvm_command(cmd: str) -> subprocess.CompletedProcess[str]:
+def run_nvm_command(args: list[str]) -> subprocess.CompletedProcess[str]:
     """Run a command with nvm environment loaded."""
     nvm_dir = get_nvm_dir()
-    full_cmd = f'export NVM_DIR="{nvm_dir}" && [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && {cmd}'
-    
+    full_cmd = (
+        f'export NVM_DIR={shlex.quote(nvm_dir)} && '
+        '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && '
+        f'{shlex.join(args)}'
+    )
+
     result = subprocess.run(
-        full_cmd,
-        shell=True,
-        executable="/bin/bash",
+        ["/bin/bash", "-lc", full_cmd],
         capture_output=True,
-        text=True
+        text=True,
     )
     return result
 
 
 def get_current_lts_version() -> str:
     """Get the latest LTS version available."""
-    result = run_nvm_command("nvm version-remote --lts")
+    result = run_nvm_command(["nvm", "version-remote", "--lts"])
     if result.returncode == 0:
         return result.stdout.strip()
     return ""
@@ -61,7 +64,7 @@ def get_current_lts_version() -> str:
 
 def get_latest_version() -> str:
     """Get the latest non-LTS stable version available."""
-    result = run_nvm_command("nvm version-remote node")
+    result = run_nvm_command(["nvm", "version-remote", "node"])
     if result.returncode == 0:
         return result.stdout.strip()
     return ""
@@ -69,7 +72,7 @@ def get_latest_version() -> str:
 
 def get_current_version() -> str:
     """Get the currently installed default version."""
-    result = run_nvm_command("nvm version default")
+    result = run_nvm_command(["nvm", "version", "default"])
     if result.returncode == 0:
         return result.stdout.strip()
     return ""
@@ -77,7 +80,7 @@ def get_current_version() -> str:
 
 def get_default_alias() -> str:
     """Get the nvm default alias definition."""
-    result = run_nvm_command("nvm alias default")
+    result = run_nvm_command(["nvm", "alias", "default"])
     if result.returncode == 0:
         return result.stdout.strip()
     return ""
@@ -103,7 +106,7 @@ def determine_update_track(alias_output: str) -> str:
 def install_target_version(update_track: str) -> bool:
     """Install the latest Node.js version for the selected track."""
     install_arg = "node" if update_track == "latest" else "--lts"
-    result = run_nvm_command(f"nvm install {install_arg}")
+    result = run_nvm_command(["nvm", "install", install_arg])
     action = "Installed latest Node.js version" if update_track == "latest" else "Installed latest Node.js LTS"
     return log_subprocess_result(logger, action, result, failure_level=ERROR)
 
@@ -118,7 +121,7 @@ def update_global_packages() -> tuple[bool, MaybeStr]:
     failures: list[str] = []
 
     for action, command in commands:
-        result = run_nvm_command(command)
+        result = run_nvm_command(shlex.split(command))
         if not log_subprocess_result(logger, action, result):
             details = result.stderr.strip() or result.stdout.strip() or command
             failures.append(f"{action}: {details}")

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import unittest
 from unittest.mock import patch
@@ -24,6 +25,17 @@ class TestAutoUpdateNode(unittest.TestCase):
             auto_update_node.determine_update_track("default -> node (-> v22.1.0)"),
             "latest",
         )
+
+    @patch("web.service_tools.auto_update_node.subprocess.run")
+    @patch("web.service_tools.auto_update_node.get_nvm_dir", return_value="/home/user/.nvm")
+    def test_run_nvm_command_uses_bash_argv(self, _nvm_dir, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess(args=["/bin/bash"], returncode=0)
+        auto_update_node.run_nvm_command(["nvm", "version", "default"])
+        mock_run.assert_called_once()
+        args, kwargs = mock_run.call_args
+        self.assertEqual(args[0][:2], ["/bin/bash", "-lc"])
+        self.assertIn("nvm version default", args[0][2])
+        self.assertNotIn("shell", kwargs)
 
     @patch("web.service_tools.auto_update_node.send_notification_safe")
     @patch("web.service_tools.auto_update_node.update_global_packages", return_value=(True, ""))

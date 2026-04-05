@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import secrets
+import shlex
 import string
 import subprocess
 import sys
@@ -39,13 +40,34 @@ def run(cmd: str, check: bool = True, cwd: Optional[str] = None, capture_output:
         print("  [DRY-RUN] Command not executed")
         # CompletedProcess.args expects a sequence; provide a one-element list for consistency
         return subprocess.CompletedProcess(args=[cmd], returncode=0, stdout="", stderr="")
-    
-    result = subprocess.run(cmd, shell=True, capture_output=capture_output, text=text, cwd=cwd)
+
+    if _requires_shell(cmd):
+        result = subprocess.run(cmd, shell=True, capture_output=capture_output, text=text, cwd=cwd)
+    else:
+        result = subprocess.run(shlex.split(cmd), capture_output=capture_output, text=text, cwd=cwd)
     if check and result.returncode != 0:
         if getattr(result, 'stderr', None):
             print(f"    Warning: {result.stderr[:200]}")
             sys.stdout.flush()
     return result
+
+
+def _requires_shell(cmd: str) -> bool:
+    """Return True when a command string depends on shell parsing."""
+
+    stripped = cmd.strip()
+    if not stripped:
+        return False
+
+    if stripped.startswith(("export ", ".", "source ")):
+        return True
+
+    first_token = stripped.split(None, 1)[0]
+    if "=" in first_token and not first_token.startswith(("/", "./")):
+        return True
+
+    shell_metacharacters = ("|", "&&", "||", ";", ">", "<", "$", "`", "$(", "\n")
+    return any(token in stripped for token in shell_metacharacters)
 
 
 def detect_os() -> None:
