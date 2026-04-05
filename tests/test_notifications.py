@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import io
+import logging
 import os
 import socket
 import subprocess
@@ -15,6 +17,7 @@ from lib.notifications import (
     NotificationConfig,
     Notification,
     NotificationSender,
+    load_notification_configs_from_state,
     parse_notification_args,
     send_notification_safe,
     send_setup_notification,
@@ -99,6 +102,60 @@ class TestNotificationSender(unittest.TestCase):
         _, kwargs = mock_run.call_args
         body = kwargs['input'].decode('utf-8')
         self.assertIn('myserver', body)
+
+    def test_failure_logs_redacted_target(self):
+        log_stream = io.StringIO()
+        logger = logging.getLogger('test.notifications.sender.failure')
+        logger.handlers = []
+        logger.propagate = False
+        handler = logging.StreamHandler(log_stream)
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+
+        sender = NotificationSender(
+            [NotificationConfig(type='mailbox', target='admin@example.com')],
+            logger=logger,
+        )
+        notification = Notification(subject='Test', job='sync', status='error', message='Something failed')
+
+        with patch.object(sender, '_send_mailbox', side_effect=Exception('boom')):
+            self.assertFalse(sender.send(notification))
+
+        output = log_stream.getvalue()
+        self.assertIn('Notification delivery failed', output)
+        self.assertIn("job='sync'", output)
+        self.assertIn("notification_type='mailbox'", output)
+        self.assertIn("target='*@example.com'", output)
+        self.assertNotIn('admin@example.com', output)
+
+    @patch('urllib.request.urlopen')
+    def test_webhook_success_logs_redacted_target(self, mock_urlopen):
+        log_stream = io.StringIO()
+        logger = logging.getLogger('test.notifications.sender.webhook')
+        logger.handlers = []
+        logger.propagate = False
+        handler = logging.StreamHandler(log_stream)
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+
+        response = unittest.mock.MagicMock()
+        response.__enter__.return_value.status = 204
+        response.__exit__.return_value = False
+        mock_urlopen.return_value = response
+
+        sender = NotificationSender(
+            [NotificationConfig(type='webhook', target='https://hooks.example.com/path?token=secret')],
+            logger=logger,
+        )
+        notification = Notification(subject='Test', job='sync', status='good', message='ok')
+
+        self.assertTrue(sender.send(notification))
+
+        output = log_stream.getvalue()
+        self.assertIn('Webhook notification sent', output)
+        self.assertIn("target='hooks.example.com'", output)
+        self.assertNotIn('token=secret', output)
+        self.assertNotIn('/path', output)
 
 
 class TestParseNotificationArgs(unittest.TestCase):
@@ -322,6 +379,48 @@ class TestSendNotificationSafe(unittest.TestCase):
             "error",
             "msg"
         )
+
+    @patch('lib.notifications.send_notification', side_effect=RuntimeError('boom'))
+    def test_logs_structured_warning_when_logger_present(self, _mock_send):
+        log_stream = io.StringIO()
+        logger = logging.getLogger('test.notifications.safe')
+        logger.handlers = []
+        logger.propagate = False
+        handler = logging.StreamHandler(log_stream)
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+
+        send_notification_safe(
+            [NotificationConfig(type='webhook', target='https://example.com/hook')],
+            "Subject",
+            "job",
+            "error",
+            "msg",
+            logger=logger,
+        )
+
+        output = log_stream.getvalue()
+        self.assertIn('Notification send suppressed after delivery failure', output)
+        self.assertIn("job='job'", output)
+        self.assertIn("error='boom'", output)
+
+
+class TestLoadNotificationConfigsFromState(unittest.TestCase):
+    @patch('lib.machine_state.load_setup_config', side_effect=ValueError('bad state'))
+    def test_logs_structured_warning_on_load_failure(self, _mock_load):
+        log_stream = io.StringIO()
+        logger = logging.getLogger('test.notifications.state')
+        logger.handlers = []
+        logger.propagate = False
+        handler = logging.StreamHandler(log_stream)
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+
+        self.assertEqual(load_notification_configs_from_state(logger=logger), [])
+
+        output = log_stream.getvalue()
+        self.assertIn('Failed to load notification configs from machine state', output)
+        self.assertIn("error='bad state'", output)
 
 
 if __name__ == '__main__':

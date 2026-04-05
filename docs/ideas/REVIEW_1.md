@@ -135,7 +135,7 @@ This document outlines a plan for major architectural and security improvements 
 ### Phase 4: Error Handling and Observability
 
 #### 4.1 Structured Logging
-- Status: service logging now has a shared `log_event()` helper for stable key=value context, and the webhook receiver plus the CI/CD executor, Node/APT/Ruby/uv/cleanup-maintenance/auto-restart/storage-ops/sync-rsync/xRDP-cleanup services use it for their main event/failure logs; webhook config/server lifecycle plus CI/CD executor config/cleanup/notification, repo sync, script execution, job lifecycle, remote deployment, rsync lifecycle, and storage-ops operation/notification/skip events now emit structured context too
+- Status: service logging now has a shared `log_event()` helper for stable key=value context, and the webhook receiver plus the CI/CD executor, Node/APT/Ruby/uv/cleanup-maintenance/auto-restart/storage-ops/sync-rsync/xRDP-cleanup services use it for their main event/failure logs; webhook config/server lifecycle plus CI/CD executor config/cleanup/notification, repo sync, script execution, job lifecycle, remote deployment, rsync lifecycle, storage-ops operation/notification/skip events, and shared notification delivery/load failures now emit structured context with redacted targets where appropriate
 - Keep human-readable CLI output for interactive setup flows
 - Use structured logging for services, helpers, and internal diagnostics where persistent logs are useful
 - Implement log levels (DEBUG, INFO, WARNING, ERROR, CRITICAL)
@@ -156,7 +156,7 @@ This document outlines a plan for major architectural and security improvements 
 ### Phase 5: Testing and Quality Assurance
 
 #### 5.1 Test Strategy — ✅ IN PROGRESS
-- 955 tests passing across the codebase
+- 959 tests passing across the codebase
 - New tests: `test_credentials.py`, `test_workspace_cli.py`, `test_config.py`, `test_setup_common.py`, `test_plugin_registry.py`, `test_ssh_utils.py`, `test_browser_steps.py`
 - **TODO**: Property-based testing, integration tests for common setup scenarios
 

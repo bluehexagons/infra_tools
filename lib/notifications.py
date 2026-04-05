@@ -11,10 +11,12 @@ import socket
 import subprocess
 from typing import Optional, Literal, cast
 from dataclasses import dataclass, asdict, field
-from logging import Logger
+from logging import ERROR, INFO, Logger, WARNING
 import urllib.request
 import urllib.error
 import urllib.parse
+
+from lib.logging_utils import log_event
 
 NotificationStatus = Literal["good", "info", "warning", "error"]
 
@@ -97,7 +99,15 @@ class NotificationSender:
             except Exception as e:
                 all_succeeded = False
                 if self.logger:
-                    self.logger.error(f"Failed to send {config.type} notification to {config.target}: {e}")
+                    log_event(
+                        self.logger,
+                        "Notification delivery failed",
+                        level=ERROR,
+                        job=notification.job,
+                        notification_type=config.type,
+                        target=_redact_notification_target(config),
+                        error=str(e),
+                    )
         
         return all_succeeded
     
@@ -117,7 +127,16 @@ class NotificationSender:
                     raise Exception(f"Webhook returned status {response.status}")
                 
                 if self.logger:
-                    self.logger.info(f"✓ Webhook notification sent to {url}")
+                    log_event(
+                        self.logger,
+                        "Webhook notification sent",
+                        level=INFO,
+                        job=notification.job,
+                        status=notification.status,
+                        target=_redact_notification_target(
+                            NotificationConfig(type="webhook", target=url)
+                        ),
+                    )
         except urllib.error.URLError as e:
             raise Exception(f"Webhook request failed: {e}")
     
@@ -143,7 +162,16 @@ Check system logs for detailed information.
                 timeout=NETWORK_TIMEOUT_SECONDS
             )
             if self.logger:
-                self.logger.info(f"✓ Email notification sent to {email}")
+                log_event(
+                    self.logger,
+                    "Mailbox notification sent",
+                    level=INFO,
+                    job=notification.job,
+                    status=notification.status,
+                    target=_redact_notification_target(
+                        NotificationConfig(type="mailbox", target=email)
+                    ),
+                )
                     
         except (FileNotFoundError, subprocess.CalledProcessError) as e:
             raise Exception(f"Failed to send email: {e}")
@@ -195,7 +223,13 @@ def send_notification_safe(
         )
     except Exception as e:
         if logger:
-            logger.warning(f"Failed to send notification for job '{job}': {e}")
+            log_event(
+                logger,
+                "Notification send suppressed after delivery failure",
+                level=WARNING,
+                job=job,
+                error=str(e),
+            )
 
 
 def parse_notification_args(notify_args: Optional[list[list[str]]]) -> list[NotificationConfig]:
@@ -282,7 +316,12 @@ def load_notification_configs_from_state(logger: Optional[Logger] = None) -> lis
             return parse_notification_args(setup_config['notify_specs'])
     except (ImportError, OSError, ValueError, KeyError, TypeError) as e:
         if logger:
-            logger.warning(f"Failed to load notification configs from machine state: {e}")
+            log_event(
+                logger,
+                "Failed to load notification configs from machine state",
+                level=WARNING,
+                error=str(e),
+            )
     
     return []
 
@@ -344,3 +383,17 @@ def send_setup_notification(
         details=details,
         logger=logger
     )
+
+
+def _redact_notification_target(config: NotificationConfig) -> str:
+    """Return a log-safe summary of a notification target."""
+
+    if config.type == "webhook":
+        parsed = urllib.parse.urlparse(config.target)
+        return parsed.hostname or "unknown-host"
+
+    if config.type == "mailbox" and "@" in config.target:
+        _local_part, domain = config.target.rsplit("@", 1)
+        return f"*@{domain}"
+
+    return config.type
