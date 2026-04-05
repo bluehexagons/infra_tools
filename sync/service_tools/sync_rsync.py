@@ -9,13 +9,14 @@ import subprocess
 import re
 import select
 import time
+from logging import ERROR, WARNING
 from datetime import datetime
 from typing import IO
 
 # Add lib directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
-from lib.logging_utils import get_service_logger
+from lib.logging_utils import get_service_logger, log_event
 from lib.progress_utils import ProgressTracker, ProgressMessage, format_bytes
 
 # Conversion constants
@@ -76,9 +77,9 @@ def run_rsync_with_notifications(source: str, destination: str, suppress_notific
                     notification_configs = parse_notification_args(setup_config['notify_specs'])
                 friendly_name = setup_config.get('friendly_name')
         except (ImportError, OSError, ValueError, KeyError, TypeError) as e:
-            logger.warning(f"Failed to load notification configs: {e}")
+            log_event(logger, "Failed to load notification configs", level=WARNING, error=str(e))
     
-    logger.info(f"Starting sync: {source} -> {destination}")
+    log_event(logger, "Starting sync", source=source, destination=destination)
     start_time = datetime.now()
     
     # Initialize progress tracker
@@ -228,7 +229,15 @@ def run_rsync_with_notifications(source: str, destination: str, suppress_notific
                     pass
         
         # Log final summary
-        logger.info(f"✓ Sync completed: {files_transferred} files transferred, {total_size // BYTES_TO_MB} MB total, {duration:.1f}s")
+        log_event(
+            logger,
+            "Sync completed",
+            source=source,
+            destination=destination,
+            files_transferred=files_transferred,
+            total_mb=total_size // BYTES_TO_MB,
+            duration_seconds=f"{duration:.1f}",
+        )
         
         # Send success notification
         if notification_configs:
@@ -258,15 +267,23 @@ Duration: {duration:.1f}s
                     logger=logger
                 )
             except Exception as e:
-                logger.error(f"Failed to send notification: {e}")
+                log_event(logger, "Failed to send success notification", level=ERROR, error=str(e))
         
         return 0
         
     except subprocess.CalledProcessError as e:
         duration = (datetime.now() - start_time).total_seconds()
-        logger.error(f"✗ Sync failed after {duration:.1f}s")
+        log_event(
+            logger,
+            "Sync failed",
+            level=ERROR,
+            source=source,
+            destination=destination,
+            duration_seconds=f"{duration:.1f}",
+            exit_code=e.returncode,
+        )
         error_output = e.stderr or e.output or str(e)
-        logger.error(f"Error: {error_output}")
+        log_event(logger, "Rsync error output", level=ERROR, stderr=error_output)
         
         # Send error notification
         if notification_configs:
@@ -284,13 +301,21 @@ Duration: {duration:.1f}s
                     logger=logger
                 )
             except Exception as notify_error:
-                logger.error(f"Failed to send error notification: {notify_error}")
+                log_event(logger, "Failed to send failure notification", level=ERROR, error=str(notify_error))
         
         return e.returncode
     
     except Exception as e:
         duration = (datetime.now() - start_time).total_seconds()
-        logger.error(f"✗ Sync failed with unexpected error after {duration:.1f}s: {e}")
+        log_event(
+            logger,
+            "Sync failed with unexpected error",
+            level=ERROR,
+            source=source,
+            destination=destination,
+            duration_seconds=f"{duration:.1f}",
+            error=str(e),
+        )
         
         # Send error notification
         if notification_configs:
@@ -307,7 +332,7 @@ Duration: {duration:.1f}s
                     logger=logger
                 )
             except Exception as notify_error:
-                logger.error(f"Failed to send error notification: {notify_error}")
+                log_event(logger, "Failed to send failure notification", level=ERROR, error=str(notify_error))
         
         return 1
 
