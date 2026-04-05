@@ -41,14 +41,14 @@ LOCK_FILE = os.path.join(STATE_DIR, "executor.lock")
 def load_config() -> dict:
     """Load webhook configuration from JSON file."""
     if not os.path.exists(CONFIG_FILE):
-        logger.error(f"Configuration file not found: {CONFIG_FILE}")
+        log_event(logger, "Configuration file not found", level=40, config_file=CONFIG_FILE)
         return {}
     
     try:
         with open(CONFIG_FILE, 'r') as f:
             return json.load(f)
     except Exception as e:
-        logger.error(f"Failed to load configuration: {e}")
+        log_event(logger, "Failed to load configuration", level=40, config_file=CONFIG_FILE, error=str(e))
         return {}
 
 
@@ -438,7 +438,14 @@ def notify_success(repo_url: str, commit_sha: str, log_file: str, notification_c
             logger=logger
         )
     except Exception as e:
-        logger.warning(f"Failed to send success notification: {e}")
+        log_event(
+            logger,
+            "Failed to send success notification",
+            level=30,
+            repo_url=repo_url,
+            commit_sha=commit_sha[:8],
+            error=str(e),
+        )
 
 
 def notify_failure(repo_url: str, commit_sha: str, reason: str, notification_configs: Optional[list] = None) -> None:
@@ -457,7 +464,14 @@ def notify_failure(repo_url: str, commit_sha: str, reason: str, notification_con
                 logger=logger
             )
         except Exception as e:
-            logger.warning(f"Failed to send failure notification: {e}")
+            log_event(
+                logger,
+                "Failed to send failure notification",
+                level=30,
+                repo_url=repo_url,
+                commit_sha=commit_sha[:8],
+                error=str(e),
+            )
 
 
 def cleanup_old_build_logs(days_to_keep: int = 30) -> int:
@@ -484,7 +498,7 @@ def cleanup_old_build_logs(days_to_keep: int = 30) -> int:
                 os.remove(log_path)
                 removed_count += 1
         except OSError as e:
-            logger.warning(f"Failed to remove old build log {filename}: {e}")
+            log_event(logger, "Failed to remove old build log", level=30, log_file=filename, error=str(e))
 
     if removed_count > 0:
         log_event(
@@ -534,7 +548,7 @@ def cleanup_stale_workspaces(config: dict) -> int:
                     removed_count += 1
                     log_event(logger, "Removed stale workspace", workspace=name)
                 except OSError as e:
-                    logger.warning(f"Failed to remove stale workspace {name}: {e}")
+                    log_event(logger, "Failed to remove stale workspace", level=30, workspace=name, error=str(e))
 
     return removed_count
 

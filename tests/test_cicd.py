@@ -617,6 +617,14 @@ class TestRemoteDeployScriptExecution(unittest.TestCase):
 
 class TestExecutorStructuredLogging(unittest.TestCase):
     @patch("web.service_tools.cicd_executor.os.path.exists", return_value=False)
+    def test_load_config_logs_missing_config(self, _mock_exists):
+        with self.assertLogs(cicd_executor.logger, level="ERROR") as logs:
+            result = cicd_executor.load_config()
+
+        self.assertEqual(result, {})
+        self.assertIn("Configuration file not found | config_file=", "\n".join(logs.output))
+
+    @patch("web.service_tools.cicd_executor.os.path.exists", return_value=False)
     @patch("web.service_tools.cicd_executor.subprocess.run")
     def test_clone_or_update_repo_logs_clone_and_success(self, mock_run, _mock_exists):
         mock_run.side_effect = [
@@ -656,6 +664,26 @@ class TestExecutorStructuredLogging(unittest.TestCase):
         output = "\n".join(logs.output)
         self.assertIn(f"Running script | script_path='{script_path}'", output)
         self.assertIn(f"Script completed successfully | script_path='{script_path}'", output)
+
+    @patch("web.service_tools.cicd_executor.send_notification", side_effect=RuntimeError("notify boom"))
+    def test_notify_success_logs_structured_failure(self, _mock_notify):
+        with self.assertLogs(cicd_executor.logger, level="WARNING") as logs:
+            cicd_executor.notify_success("https://github.com/org/repo.git", "abcdef123456", "/tmp/build.log", ["cfg"])
+
+        self.assertIn(
+            "Failed to send success notification | commit_sha='abcdef12' error='notify boom' repo_url='https://github.com/org/repo.git'",
+            "\n".join(logs.output),
+        )
+
+    @patch("web.service_tools.cicd_executor.send_notification", side_effect=RuntimeError("notify boom"))
+    def test_notify_failure_logs_structured_failure(self, _mock_notify):
+        with self.assertLogs(cicd_executor.logger, level="WARNING") as logs:
+            cicd_executor.notify_failure("https://github.com/org/repo.git", "abcdef123456", "Build failed", ["cfg"])
+
+        self.assertIn(
+            "Failed to send failure notification | commit_sha='abcdef12' error='notify boom' repo_url='https://github.com/org/repo.git'",
+            "\n".join(logs.output),
+        )
 
     @patch("web.service_tools.cicd_executor.os.remove")
     @patch("web.service_tools.cicd_executor.load_notification_configs_from_state", return_value=[])
@@ -785,6 +813,27 @@ class TestCleanupOldBuildLogs(unittest.TestCase):
         self.assertEqual(removed, 1)
         self.assertIn("Cleaned up old build logs | days_to_keep=30 removed_count=1", "\n".join(logs.output))
 
+    def test_cleanup_logs_structured_warning_on_remove_failure(self):
+        from web.service_tools.cicd_executor import cleanup_old_build_logs, logger
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            old_log = os.path.join(tmpdir, "abc12345.log")
+            with open(old_log, "w") as f:
+                f.write("old build log")
+            old_time = time.time() - (40 * 24 * 60 * 60)
+            os.utime(old_log, (old_time, old_time))
+
+            with patch("web.service_tools.cicd_executor.LOGS_DIR", tmpdir), \
+                 patch("web.service_tools.cicd_executor.os.remove", side_effect=OSError("permission denied")):
+                with self.assertLogs(logger, level="WARNING") as logs:
+                    removed = cleanup_old_build_logs(days_to_keep=30)
+
+        self.assertEqual(removed, 0)
+        self.assertIn(
+            "Failed to remove old build log | error='permission denied' log_file='abc12345.log'",
+            "\n".join(logs.output),
+        )
+
 
 class TestCleanupStaleWorkspaces(unittest.TestCase):
     """Test stale workspace cleanup."""
@@ -899,6 +948,25 @@ class TestCleanupStaleWorkspaces(unittest.TestCase):
 
         self.assertEqual(removed, 1)
         self.assertIn("Removed stale workspace | workspace='old-repo'", "\n".join(logs.output))
+
+    def test_logs_structured_stale_workspace_removal_failure(self):
+        from web.service_tools.cicd_executor import cleanup_stale_workspaces, logger
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            stale_ws = os.path.join(tmpdir, "old-repo")
+            os.makedirs(stale_ws)
+            config = {"repositories": [{"url": "https://github.com/org/other-repo.git"}]}
+
+            with patch("web.service_tools.cicd_executor.WORKSPACES_DIR", tmpdir), \
+                 patch("web.service_tools.cicd_executor.shutil.rmtree", side_effect=OSError("permission denied")):
+                with self.assertLogs(logger, level="WARNING") as logs:
+                    removed = cleanup_stale_workspaces(config)
+
+        self.assertEqual(removed, 0)
+        self.assertIn(
+            "Failed to remove stale workspace | error='permission denied' workspace='old-repo'",
+            "\n".join(logs.output),
+        )
 
 
 if __name__ == '__main__':
