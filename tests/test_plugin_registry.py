@@ -16,6 +16,8 @@ from lib.plugin_registry import (
     get_system_type_definition,
     get_system_type_names,
 )
+from lib.system_types import get_steps_for_system_type
+from lib.config import SetupConfig
 
 
 class TestPluginRegistry(unittest.TestCase):
@@ -49,6 +51,23 @@ class TestPluginRegistry(unittest.TestCase):
         self.assertTrue(system_type.default_install_office)
         self.assertTrue(system_type.default_enable_smbclient)
         self.assertEqual(system_type.default_browser, "librewolf")
+        self.assertIsNotNone(system_type.step_builder)
+
+    def test_custom_step_builder_is_plugin_registered(self):
+        config = SetupConfig(
+            host="host",
+            username="user",
+            system_type="custom_steps",
+            custom_steps="install_ruby",
+        )
+        steps = get_steps_for_system_type(config)
+        self.assertEqual([name for name, _ in steps], ["Running install_ruby"])
+
+    def test_proxmox_step_builder_is_plugin_registered(self):
+        config = SetupConfig(host="host", username="user", system_type="server_proxmox")
+        step_names = [name for name, _ in get_steps_for_system_type(config)]
+        self.assertEqual(step_names[0], "Creating remoteusers group")
+        self.assertEqual(step_names[-1], "Checking if restart required")
 
     def test_duplicate_plugin_names_fail(self):
         plugin = PluginDefinition(name="dup", module="plugins.one")

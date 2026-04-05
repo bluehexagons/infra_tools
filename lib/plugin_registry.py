@@ -6,7 +6,15 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 import importlib
 import pkgutil
-from typing import Mapping, Sequence
+from typing import TYPE_CHECKING, Mapping, Sequence
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from lib.config import SetupConfig
+    from lib.types import StepFunc
+
+    StepBuilder = Callable[["SetupConfig"], list[tuple[str, StepFunc]]]
 
 
 @dataclass(frozen=True)
@@ -28,6 +36,7 @@ class SystemTypeDefinition:
     default_enable_smbclient: bool = False
     default_no_restart: bool = False
     default_browser: str | None = None
+    step_builder: str | None = None
 
 
 @dataclass(frozen=True)
@@ -147,6 +156,28 @@ def get_system_type_definition(system_type: str) -> SystemTypeDefinition:
         return get_plugin_registry().system_types_by_name[system_type]
     except KeyError as exc:
         raise ValueError(f"Unknown system type: {system_type!r}") from exc
+
+
+def resolve_step_builder(system_type: str) -> "StepBuilder":
+    """Resolve a system type's lazy step-builder reference."""
+
+    definition = get_system_type_definition(system_type)
+    if not definition.step_builder:
+        raise ValueError(f"No step builder registered for system type: {system_type}")
+
+    module_name, separator, function_name = definition.step_builder.partition(":")
+    if not separator or not module_name or not function_name:
+        raise ValueError(
+            f"Invalid step builder reference for system type {system_type!r}: {definition.step_builder!r}"
+        )
+
+    module = importlib.import_module(module_name)
+    builder = getattr(module, function_name, None)
+    if builder is None or not callable(builder):
+        raise ValueError(
+            f"Step builder {definition.step_builder!r} for system type {system_type!r} is not callable"
+        )
+    return builder
 
 
 def format_system_type_help(indent: str = "  ") -> str:

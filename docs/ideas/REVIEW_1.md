@@ -80,7 +80,7 @@ This document outlines a plan for major architectural and security improvements 
 - Separate CLI/public configuration from internal/runtime state and persisted workspace state
 
 #### 2.2 Plugin-Based System Types
-- Status: built-in plugin registry foundation landed; system-type discovery, metadata defaults, and conflict detection now flow through `lib/plugin_registry.py`
+- Status: built-in plugin registry foundation landed; system-type discovery, metadata defaults, conflict detection, and lazy step-builder resolution now flow through plugin-owned registrations
 - Move current domain directories (e.g., common, security, desktop, web, sync, smb) under a main `plugins/` package
 - Plugins define reusable steps, defaults, and optional system types; shared validators and utility code can live outside plugins when broadly reusable
 - System types are registered by plugins rather than maintained in a central static list
@@ -150,7 +150,7 @@ This document outlines a plan for major architectural and security improvements 
 ### Phase 5: Testing and Quality Assurance
 
 #### 5.1 Test Strategy — ✅ IN PROGRESS
-- 816 tests passing across the codebase
+- 818 tests passing across the codebase
 - New tests: `test_credentials.py`, `test_workspace_cli.py`, `test_config.py`, `test_setup_common.py`, `test_plugin_registry.py`
 - **TODO**: Property-based testing, integration tests for common setup scenarios
 
@@ -172,18 +172,18 @@ This document outlines a plan for major architectural and security improvements 
 | 6 | Structured logging without credential exposure | ⚠️ Partial |
 | 7 | Plugin discovery with conflict detection | ⚠️ Partial |
 | 8 | Improved performance and reliability | ⚠️ Partial |
-| 9 | Enhanced extensibility | ❌ Not started |
+| 9 | Enhanced extensibility | ⚠️ Partial |
 | 10 | Regression tests for credential/plugin/passwordless behavior | ✅ Done |
 
 ## Next Steps
 1. ~~Review and approve this plan~~ ✅ Done
 2. ~~Define the `credentials` subcommand UX and `credentials.json` schema/file-permission expectations~~ ✅ Done
 3. ~~Define the SSH/SCP transfer mechanism for deployment credentials~~ ✅ Decided: SCP over existing SSH connection, temp path `/tmp/infra_tools-creds-*`, `0600` permissions, cleanup on success/failure
-4. Continue Phase 2 by moving step composition out of the central system-type list and into plugin-owned registrations
-5. Define composition rules for system-type plugins vs. capability plugins
-6. Continue implementation of Phase 1 (complete shell injection audit, secure defaults review)
-7. Establish CI/CD pipeline for automated testing
-8. Add security testing (bandit, semgrep, fuzz testing)
+4. Define composition rules for system-type plugins vs. capability plugins now that step assembly is plugin-owned
+5. Continue implementation of Phase 1 (complete shell injection audit, secure defaults review)
+6. Establish CI/CD pipeline for automated testing
+7. Add security testing (bandit, semgrep, fuzz testing)
+8. Implement pre-commit hooks and type checking in CI
 9. Implement pre-commit hooks and type checking in CI
 
 ---

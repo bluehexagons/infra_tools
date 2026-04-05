@@ -13,6 +13,7 @@ PLUGIN = PluginDefinition(
             name="custom_steps",
             description="Run an explicit custom step list",
             order=80,
+            step_builder="lib.plugin_steps:build_custom_steps",
         ),
     ),
 )

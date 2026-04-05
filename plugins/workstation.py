@@ -19,6 +19,7 @@ PLUGIN = PluginDefinition(
             include_desktop_apps=True,
             default_enable_rdp=True,
             default_browser="librewolf",
+            step_builder="lib.plugin_steps:build_standard_steps",
         ),
         SystemTypeDefinition(
             name="pc_dev",
@@ -31,6 +32,7 @@ PLUGIN = PluginDefinition(
             default_install_office=True,
             default_enable_smbclient=True,
             default_browser="librewolf",
+            step_builder="lib.plugin_steps:build_standard_steps",
         ),
         SystemTypeDefinition(
             name="workstation_dev",
@@ -41,6 +43,7 @@ PLUGIN = PluginDefinition(
             include_workstation_dev_apps=True,
             default_enable_rdp=True,
             default_browser="librewolf",
+            step_builder="lib.plugin_steps:build_standard_steps",
         ),
     ),
 )
