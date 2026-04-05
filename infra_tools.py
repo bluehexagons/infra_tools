@@ -44,6 +44,7 @@ from lib.plugin_registry import format_system_type_help, get_system_type_names
 from lib.setup_common import REMOTE_SCRIPT_PATH, run_remote_setup
 from lib.system_utils import get_current_username
 from lib.validators import validate_host, validate_username
+from lib.validation import validate_workspace_dir
 from lib.workspace import get_workspace_dir, set_workspace_dir
 from smb.samba_steps import validate_samba_share_credentials
 
@@ -422,6 +423,11 @@ def main() -> int:
     
     args = parser.parse_args()
     if getattr(args, 'workspace', None):
+        try:
+            validate_workspace_dir(args.workspace)
+        except ValueError as e:
+            print(f"Error: {e}")
+            return 1
         set_workspace_dir(args.workspace)
     
     if not args.command:

@@ -22,5 +22,12 @@ class TestPatchSetupHelp(unittest.TestCase):
         self.assertIn("patch_setup.py deploy [pattern]", help_text)
 
 
+class TestPatchSetupWorkspaceValidation(unittest.TestCase):
+    def test_process_workspace_args_rejects_invalid_workspace(self):
+        with unittest.mock.patch("patch_setup.validate_workspace_dir", side_effect=ValueError("bad workspace")):
+            with self.assertRaisesRegex(ValueError, "bad workspace"):
+                patch_setup._process_workspace_args(["--workspace", "/bad/workspace", "list"])
+
+
 if __name__ == "__main__":
     unittest.main()

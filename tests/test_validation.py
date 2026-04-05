@@ -16,6 +16,7 @@ from lib.validation import (
     validate_memory_string,
     validate_package_name,
     validate_hosted_flags,
+    validate_workspace_dir,
 )
 
 
@@ -85,6 +86,25 @@ class TestValidateNetworkEndpoint(unittest.TestCase):
     def test_multiple_colons(self):
         with self.assertRaises(ValueError):
             validate_network_endpoint('host:80:90')
+
+
+class TestValidateWorkspaceDir(unittest.TestCase):
+    def test_existing_workspace_directory(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            validate_workspace_dir(tmpdir)
+
+    def test_new_nested_workspace_directory_uses_existing_parent(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            validate_workspace_dir(os.path.join(tmpdir, 'nested', 'workspace'))
+
+    def test_workspace_path_rejects_existing_file(self):
+        with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
+            path = tmpfile.name
+        try:
+            with self.assertRaises(ValueError):
+                validate_workspace_dir(path)
+        finally:
+            os.unlink(path)
 
 
 class TestValidatePositiveInteger(unittest.TestCase):

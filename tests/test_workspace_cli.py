@@ -29,6 +29,32 @@ class TestWorkspaceCli(unittest.TestCase):
         self.assertEqual(args.workspace, "/tmp/workspace")
         self.assertEqual(args.credentials_command, "list")
 
+    @patch("builtins.print")
+    @patch("infra_tools.validate_workspace_dir", side_effect=ValueError("bad workspace"))
+    @patch("infra_tools.set_workspace_dir")
+    def test_infra_tools_main_rejects_invalid_workspace(
+        self,
+        mock_set_workspace,
+        _mock_validate_workspace,
+        mock_print,
+    ):
+        parser = unittest.mock.MagicMock()
+        setup_parser = unittest.mock.MagicMock()
+        patch_parser = unittest.mock.MagicMock()
+        args = unittest.mock.MagicMock()
+        args.workspace = "/bad/workspace"
+        parser.parse_args.return_value = args
+
+        with patch(
+            "infra_tools.create_infra_tools_parser",
+            return_value=(parser, setup_parser, patch_parser),
+        ):
+            result = infra_tools.main()
+
+        self.assertEqual(result, 1)
+        mock_set_workspace.assert_not_called()
+        mock_print.assert_called_with("Error: bad workspace")
+
 
 class TestSetupUserPasswordless(unittest.TestCase):
     @patch("builtins.print")

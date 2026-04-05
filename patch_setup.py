@@ -32,6 +32,7 @@ from lib.setup_common import (
     run_remote_setup,
     REMOTE_SCRIPT_PATH
 )
+from lib.validation import validate_workspace_dir
 from lib.workspace import get_setup_cache_dir, set_workspace_dir
 
 PATCH_SPECIAL_COMMANDS_HELP = """Special commands:
@@ -643,6 +644,7 @@ def _process_workspace_args(argv: StrList) -> StrList:
         if arg == "--workspace":
             if index + 1 >= len(argv):
                 raise ValueError("--workspace requires a path")
+            validate_workspace_dir(argv[index + 1])
             set_workspace_dir(argv[index + 1])
             index += 2
             continue
@@ -684,6 +686,11 @@ def main() -> int:
     
     args = parser.parse_args(argv)
     if getattr(args, 'workspace', None):
+        try:
+            validate_workspace_dir(args.workspace)
+        except ValueError as e:
+            print(f"Error: {e}")
+            return 1
         set_workspace_dir(args.workspace)
     
     if not validate_host(args.host):

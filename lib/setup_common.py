@@ -21,7 +21,7 @@ except ImportError:
 from lib.config import SetupConfig
 from lib.credentials import prepare_runtime_config, store_cli_credentials
 from lib.validators import validate_host, validate_username
-from lib.validation import validate_hosted_flags
+from lib.validation import validate_hosted_flags, validate_workspace_dir
 from lib.system_utils import get_current_username
 from lib.cache import save_setup_command
 from lib.arg_parser import create_setup_argument_parser
@@ -349,6 +349,11 @@ def setup_main(system_type: str, description: str, success_msg_fn: Callable[[Set
     
     args = parser.parse_args()
     if getattr(args, 'workspace', None):
+        try:
+            validate_workspace_dir(args.workspace)
+        except ValueError as e:
+            print(f"Error: {e}")
+            return 1
         set_workspace_dir(args.workspace)
     
     if not validate_host(args.host):

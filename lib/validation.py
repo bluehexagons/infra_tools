@@ -147,6 +147,35 @@ def validate_directory_empty(directory: str) -> None:
         raise ValueError(f"Cannot read directory contents: {directory}") from e
 
 
+def validate_workspace_dir(path: str) -> None:
+    """Validate a workspace directory path for CLI entry points."""
+
+    if not path:
+        raise ValueError("Workspace path must be a non-empty string")
+
+    expanded_path = os.path.abspath(os.path.expanduser(path))
+    validate_filesystem_path(expanded_path, must_exist=False)
+
+    if os.path.exists(expanded_path):
+        if not os.path.isdir(expanded_path):
+            raise ValueError(f"Workspace path is not a directory: {expanded_path}")
+        if not os.access(expanded_path, os.W_OK):
+            raise ValueError(f"Workspace path is not writable: {expanded_path}")
+        return
+
+    existing_parent = expanded_path
+    while not os.path.exists(existing_parent):
+        parent = os.path.dirname(existing_parent)
+        if parent == existing_parent:
+            break
+        existing_parent = parent
+
+    if not os.path.isdir(existing_parent):
+        raise ValueError(f"Workspace parent is not a directory: {existing_parent}")
+    if not os.access(existing_parent, os.W_OK):
+        raise ValueError(f"Workspace parent is not writable: {existing_parent}")
+
+
 def validate_network_endpoint(endpoint: str) -> None:
     """Validate network endpoint (host:port or IP:port).
     

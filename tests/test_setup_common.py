@@ -164,6 +164,26 @@ class TestSetupMainTimingPersistence(unittest.TestCase):
 
             self.assertEqual(saved_calls, [])
 
+    @patch("builtins.print")
+    def test_invalid_workspace_returns_error_before_validation(self, mock_print):
+        from lib import setup_common
+
+        parser = MagicMock()
+        args = MagicMock()
+        args.workspace = "/bad/workspace"
+        parser.parse_args.return_value = args
+
+        with patch.object(setup_common, "create_argument_parser", return_value=parser), \
+             patch.object(setup_common, "validate_workspace_dir", side_effect=ValueError("bad workspace")), \
+             patch.object(setup_common, "set_workspace_dir") as mock_set_workspace, \
+             patch.object(setup_common, "validate_host") as mock_validate_host:
+            result = setup_common.setup_main("server_lite", "Test", lambda c: None)
+
+        self.assertEqual(result, 1)
+        mock_set_workspace.assert_not_called()
+        mock_validate_host.assert_not_called()
+        mock_print.assert_called_with("Error: bad workspace")
+
 
 class TestExpandRemoteArgs(unittest.TestCase):
     def test_expand_remote_args_preserves_quoted_values(self):
