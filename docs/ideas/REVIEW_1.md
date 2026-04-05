@@ -156,7 +156,7 @@ This document outlines a plan for major architectural and security improvements 
 ### Phase 5: Testing and Quality Assurance
 
 #### 5.1 Test Strategy — ✅ IN PROGRESS
-- 963 tests passing across the codebase
+- 963 tests passing across the codebase, including repository-level regression scanners and unit-style coverage
 - New tests: `test_credentials.py`, `test_workspace_cli.py`, `test_config.py`, `test_setup_common.py`, `test_plugin_registry.py`, `test_ssh_utils.py`, `test_browser_steps.py`, `test_shell_safety.py`
 - **TODO**: Property-based testing, integration tests for common setup scenarios
 
