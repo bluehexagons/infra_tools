@@ -134,7 +134,7 @@ This document outlines a plan for major architectural and security improvements 
 ### Phase 4: Error Handling and Observability
 
 #### 4.1 Structured Logging
-- Status: service logging now has a shared `log_event()` helper for stable key=value context, and both the webhook receiver and Node auto-update service use it for their main event/failure logs
+- Status: service logging now has a shared `log_event()` helper for stable key=value context, and the webhook receiver, Node auto-update service, and APT auto-update service use it for their main event/failure logs
 - Keep human-readable CLI output for interactive setup flows
 - Use structured logging for services, helpers, and internal diagnostics where persistent logs are useful
 - Implement log levels (DEBUG, INFO, WARNING, ERROR, CRITICAL)
@@ -155,7 +155,7 @@ This document outlines a plan for major architectural and security improvements 
 ### Phase 5: Testing and Quality Assurance
 
 #### 5.1 Test Strategy — ✅ IN PROGRESS
-- 872 tests passing across the codebase
+- 873 tests passing across the codebase
 - New tests: `test_credentials.py`, `test_workspace_cli.py`, `test_config.py`, `test_setup_common.py`, `test_plugin_registry.py`, `test_ssh_utils.py`, `test_browser_steps.py`
 - **TODO**: Property-based testing, integration tests for common setup scenarios
 

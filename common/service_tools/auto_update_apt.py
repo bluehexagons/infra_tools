@@ -17,11 +17,13 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from logging import ERROR, WARNING
 
 # Add lib directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
 from lib.logging_utils import get_service_logger
+from lib.logging_utils import log_event
 from lib.maintenance_defaults import APT_LOCK_OPTIONS
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
 
@@ -47,9 +49,9 @@ def update_package_lists() -> bool:
     """Run apt-get update to refresh package lists."""
     result = run_apt_command(['update', '-qq'] + APT_LOCK_OPTIONS)
     if result.returncode != 0:
-        logger.error("apt-get update failed: %s", result.stderr.strip())
+        log_event(logger, "apt-get update failed", level=ERROR, stderr=result.stderr.strip())
         return False
-    logger.info("Package lists updated")
+    log_event(logger, "Package lists updated")
     return True
 
 
@@ -62,9 +64,9 @@ def upgrade_packages() -> tuple[bool, str]:
     result = run_apt_command(['dist-upgrade', '-y', '-qq'] + DPKG_OPTIONS + APT_LOCK_OPTIONS)
     output = result.stdout.strip()
     if result.returncode != 0:
-        logger.error("apt-get dist-upgrade failed: %s", result.stderr.strip())
+        log_event(logger, "apt-get dist-upgrade failed", level=ERROR, stderr=result.stderr.strip())
         return False, result.stderr.strip()
-    logger.info("Packages upgraded successfully")
+    log_event(logger, "Packages upgraded successfully")
     return True, output
 
 
@@ -72,14 +74,14 @@ def autoremove_packages() -> None:
     """Run apt-get autoremove to clean up unused packages."""
     result = run_apt_command(['autoremove', '-y', '-qq'] + APT_LOCK_OPTIONS)
     if result.returncode != 0:
-        logger.warning("apt-get autoremove failed: %s", result.stderr.strip())
+        log_event(logger, "apt-get autoremove failed", level=WARNING, stderr=result.stderr.strip())
     else:
-        logger.info("Unused packages removed")
+        log_event(logger, "Unused packages removed")
 
 
 def main() -> int:
     """Main function to update APT packages."""
-    logger.info("Starting APT package update")
+    log_event(logger, "Starting APT package update")
     notification_configs = load_notification_configs_from_state(logger)
 
     if not update_package_lists():
@@ -108,7 +110,7 @@ def main() -> int:
 
     autoremove_packages()
 
-    logger.info("APT package update completed successfully")
+    log_event(logger, "APT package update completed successfully")
     return 0
 
 
