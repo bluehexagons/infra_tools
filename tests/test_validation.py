@@ -24,6 +24,7 @@ from lib.validation import (
     validate_hosted_flags,
     validate_smb_mount_specs,
     validate_ssl_email,
+    validate_timezone_name,
     validate_workspace_dir,
 )
 
@@ -235,6 +236,18 @@ class TestValidateSslEmail(unittest.TestCase):
     def test_invalid_email_fails(self):
         with self.assertRaisesRegex(ValueError, "Invalid SSL email address: bad-email"):
             validate_ssl_email("bad-email")
+
+
+class TestValidateTimezoneName(unittest.TestCase):
+    def test_none_passes(self):
+        validate_timezone_name(None)
+
+    def test_valid_timezone_passes(self):
+        validate_timezone_name("UTC")
+
+    def test_invalid_timezone_fails(self):
+        with self.assertRaisesRegex(ValueError, "Invalid timezone: Mars/Olympus"):
+            validate_timezone_name("Mars/Olympus")
 
 
 class TestValidatePositiveInteger(unittest.TestCase):

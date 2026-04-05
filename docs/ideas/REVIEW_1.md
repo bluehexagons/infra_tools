@@ -120,7 +120,8 @@ This document outlines a plan for major architectural and security improvements 
 
 ### Phase 3: Validation and Type Safety
 #### 3.1 Comprehensive Input Validation
-- Status: workspace paths, custom apt package names, notification targets, SSL registration emails, credential usernames with ambiguous separators, deploy target hostnames, deploy site/path specs, Samba share specs, SMB mount specs, sync/scrub storage specs, and hosted-node targets are now validated before setup/patch or credential-management flows continue
+- Status: workspace paths, timezones, custom apt package names, notification targets, SSL registration emails, credential usernames with ambiguous separators, deploy target hostnames, deploy site/path specs, Samba share specs, SMB mount specs, sync/scrub storage specs, and hosted-node targets are now validated before setup/patch or credential-management flows continue
+- Assessment: validation coverage is in a good place for this revision pass; add more only when a concrete external-input gap is found during adjacent work
 - Implement validation decorators/middleware for all entry points
 - Create reusable validation components for common patterns (hostnames, ports, paths, etc.)
 - Add range validation for numeric values
@@ -155,12 +156,12 @@ This document outlines a plan for major architectural and security improvements 
 ### Phase 5: Testing and Quality Assurance
 
 #### 5.1 Test Strategy — ✅ IN PROGRESS
-- 949 tests passing across the codebase
+- 955 tests passing across the codebase
 - New tests: `test_credentials.py`, `test_workspace_cli.py`, `test_config.py`, `test_setup_common.py`, `test_plugin_registry.py`, `test_ssh_utils.py`, `test_browser_steps.py`
 - **TODO**: Property-based testing, integration tests for common setup scenarios
 
-#### 5.2 Security Testing — ❌ NOT STARTED
-- **TODO**: Static analysis (bandit, semgrep), dependency vulnerability checking, fuzz testing
+#### 5.2 Security Testing — ⏸️ OUT OF SCOPE FOR THIS PASS
+- Deferred to a later follow-up; this revision will not add dedicated static-analysis, dependency-scanning, or fuzz-testing work
 
 #### 5.3 Code Quality — ❌ NOT STARTED
 - **TODO**: Pre-commit hooks, type checking in CI, documentation coverage
@@ -173,7 +174,7 @@ This document outlines a plan for major architectural and security improvements 
 | 2 | Workspace credentials in `credentials.json` with `0600` permissions | ✅ Done |
 | 3 | Password-based features resolve from workspace store | ✅ Done |
 | 4 | `shell=True` and unsafe command construction addressed | ⚠️ Partial |
-| 5 | Comprehensive input validation for external interfaces | ⚠️ Partial |
+| 5 | Comprehensive input validation for external interfaces | ✅ Done for this pass |
 | 6 | Structured logging without credential exposure | ⚠️ Partial |
 | 7 | Plugin discovery with conflict detection | ⚠️ Partial |
 | 8 | Improved performance and reliability | ⚠️ Partial |
@@ -184,12 +185,11 @@ This document outlines a plan for major architectural and security improvements 
 1. ~~Review and approve this plan~~ ✅ Done
 2. ~~Define the `credentials` subcommand UX and `credentials.json` schema/file-permission expectations~~ ✅ Done
 3. ~~Define the SSH/SCP transfer mechanism for deployment credentials~~ ✅ Decided: SCP over existing SSH connection, temp path `/tmp/infra_tools-creds-*`, `0600` permissions, cleanup on success/failure
-4. Expand validation further across more external inputs now that workspace, custom apt packages, notification, SSL email, credential-name, deploy-target, deploy-spec, Samba share, SMB mount, sync/scrub, and hosted-node checks are in place
+4. Treat validation as sufficient for this pass unless a clear external-input gap appears during other work
 5. Continue structured logging adoption in remaining long-running services/helpers that still emit free-form diagnostics
-6. Establish CI/CD pipeline for automated testing
-7. Add security testing (bandit, semgrep, fuzz testing)
+6. Revisit the remaining unsafe-command and remote-execution edges under criterion 4
+7. Establish CI/CD pipeline for automated testing
 8. Implement pre-commit hooks and type checking in CI
-9. Implement pre-commit hooks and type checking in CI
 
 ---
 *This plan will be executed in iterations with regular reviews to ensure alignment with project goals and adjustment based on findings during implementation.*

@@ -31,6 +31,7 @@ from lib.validation import (
     validate_scrub_specs,
     validate_ssl_email,
     validate_sync_specs,
+    validate_timezone_name,
     validate_workspace_dir,
 )
 from lib.system_utils import get_current_username
@@ -382,6 +383,7 @@ def setup_main(system_type: str, description: str, success_msg_fn: Callable[[Set
 
     try:
         runtime_config = prepare_runtime_config(config)
+        validate_timezone_name(runtime_config.timezone)
         validate_apt_packages(runtime_config.apt_packages)
         validate_notification_args(runtime_config.notify_specs)
         validate_ssl_email(runtime_config.ssl_email)

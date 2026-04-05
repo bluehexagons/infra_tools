@@ -6,6 +6,7 @@ import os
 import re
 from pathlib import Path
 from typing import Any, Optional, cast
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 def validate_filesystem_path(path: str, must_exist: bool = False, check_writable: bool = False) -> None:
@@ -357,6 +358,18 @@ def validate_apt_packages(packages: Optional[list[str]]) -> None:
 
     for package in packages:
         validate_package_name(package, name="--apt-install")
+
+
+def validate_timezone_name(timezone: Optional[str]) -> None:
+    """Validate a timezone identifier before setup or patch execution."""
+
+    if not timezone:
+        return
+
+    try:
+        ZoneInfo(timezone)
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError(f"Invalid timezone: {timezone}") from exc
 
 
 def validate_positive_integer(value: str, name: str = "value") -> int:

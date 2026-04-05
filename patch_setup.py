@@ -37,6 +37,7 @@ from lib.validation import (
     validate_scrub_specs,
     validate_ssl_email,
     validate_sync_specs,
+    validate_timezone_name,
     validate_workspace_dir,
 )
 from lib.setup_common import (
@@ -545,6 +546,7 @@ def execute_patch(config: SetupConfig) -> int:
     print()
     try:
         runtime_config = prepare_runtime_config(config)
+        validate_timezone_name(runtime_config.timezone)
         validate_apt_packages(runtime_config.apt_packages)
         validate_notification_args(runtime_config.notify_specs)
         validate_ssl_email(runtime_config.ssl_email)

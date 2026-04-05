@@ -55,6 +55,7 @@ from lib.validation import (
     validate_scrub_specs,
     validate_ssl_email,
     validate_sync_specs,
+    validate_timezone_name,
     validate_workspace_dir,
 )
 from lib.workspace import get_workspace_dir, set_workspace_dir
@@ -308,6 +309,7 @@ def run_setup_command(args: argparse.Namespace) -> int:
     
     try:
         runtime_config = prepare_runtime_config(config)
+        validate_timezone_name(runtime_config.timezone)
         validate_apt_packages(runtime_config.apt_packages)
         validate_notification_args(runtime_config.notify_specs)
         validate_ssl_email(runtime_config.ssl_email)
@@ -384,6 +386,7 @@ def run_patch_command(args: argparse.Namespace) -> int:
     merged_config = merge_setup_configs(cached_config, new_config)
     try:
         runtime_config = prepare_runtime_config(merged_config)
+        validate_timezone_name(runtime_config.timezone)
         validate_apt_packages(runtime_config.apt_packages)
         validate_notification_args(runtime_config.notify_specs)
         validate_ssl_email(runtime_config.ssl_email)
