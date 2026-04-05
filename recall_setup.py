@@ -24,6 +24,7 @@ except ImportError:
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from lib.config import SetupConfig
+from lib.ssh_utils import build_ssh_command as _build_ssh_command, chain_remote_commands, shell_join
 from lib.setup_common import copy_project_files, create_tar_from_dir, REMOTE_INSTALL_DIR
 
 
@@ -32,25 +33,20 @@ def build_ssh_command(host: str, username: str, ssh_key: Optional[str] = None) -
     
     Uses same options as setup_common.py for consistency.
     """
-    ssh_opts = [
-        "-o", "StrictHostKeyChecking=accept-new",
-        "-o", "ConnectTimeout=30",
-        "-o", "ServerAliveInterval=30",
-    ]
-    if ssh_key:
-        ssh_opts.extend(["-i", ssh_key])
-    
-    return ["ssh"] + ssh_opts + [f"{username}@{host}"]
+    return _build_ssh_command(host, username, ssh_key, connect_timeout=30, server_alive_interval=30)
 
 
 def retrieve_stored_config(host: str, username: str, ssh_key: Optional[str] = None) -> Optional[SetupConfig]:
     """Retrieve the stored configuration from the remote host."""
-    ssh_cmd = build_ssh_command(host, username, ssh_key)
     remote_config_path = "/opt/infra_tools/state/setup.json"
     
     try:
         result = subprocess.run(
-            ssh_cmd + ["cat", remote_config_path],
+            build_ssh_command(
+                host,
+                username,
+                ssh_key,
+            ) + [shell_join(["cat", remote_config_path])],
             capture_output=True,
             text=True,
             timeout=30
@@ -77,13 +73,12 @@ def reconstruct_remote_config(host: str, username: str, ssh_key: Optional[str] =
     
     Returns a tuple of (config, extras) or None on failure.
     """
-    ssh_cmd = build_ssh_command(host, username, ssh_key)
     remote_script = "/opt/infra_tools/reconstruct_setup.py"
     
     try:
         # Check if infra_tools is installed on remote
         check_result = subprocess.run(
-            ssh_cmd + ["test", "-f", remote_script],
+            build_ssh_command(host, username, ssh_key) + [shell_join(["test", "-f", remote_script])],
             capture_output=True,
             timeout=10
         )
@@ -96,12 +91,16 @@ def reconstruct_remote_config(host: str, username: str, ssh_key: Optional[str] =
                 copy_project_files(build_dir)
                 tar_data = create_tar_from_dir(build_dir)
                 
-                # Use shlex.quote to safely escape the directory path
-                import shlex
-                escaped_dir = shlex.quote(REMOTE_INSTALL_DIR)
-                install_cmd = f"mkdir -p {escaped_dir} && cd {escaped_dir} && tar xzf -"
                 install_process = subprocess.Popen(
-                    ssh_cmd + [install_cmd],
+                    build_ssh_command(host, username, ssh_key) + [
+                        chain_remote_commands(
+                            [
+                                ["mkdir", "-p", REMOTE_INSTALL_DIR],
+                                ["cd", REMOTE_INSTALL_DIR],
+                                ["tar", "xzf", "-"],
+                            ]
+                        )
+                    ],
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE
@@ -117,7 +116,7 @@ def reconstruct_remote_config(host: str, username: str, ssh_key: Optional[str] =
         
         # Run the reconstruct script from the installed location
         result = subprocess.run(
-            ssh_cmd + ["python3", remote_script],
+            build_ssh_command(host, username, ssh_key) + [shell_join(["python3", remote_script])],
             capture_output=True,
             text=True,
             timeout=60

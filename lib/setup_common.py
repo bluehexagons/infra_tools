@@ -26,6 +26,7 @@ from lib.system_utils import get_current_username
 from lib.cache import save_setup_command
 from lib.arg_parser import create_setup_argument_parser
 from lib.display import print_setup_summary
+from lib.ssh_utils import build_ssh_command, chain_remote_commands
 from lib.workspace import set_workspace_dir
 from smb.samba_steps import validate_samba_share_credentials
 
@@ -287,28 +288,25 @@ def run_remote_setup(config: SetupConfig) -> int:
         else:
             tar_data = create_tar_from_dir(build_dir)
             
-            ssh_opts = [
-                "-o", "StrictHostKeyChecking=accept-new",
-                "-o", "ConnectTimeout=30",
-                "-o", "ServerAliveInterval=30",
-            ]
-            if config.ssh_key:
-                ssh_opts.extend(["-i", config.ssh_key])
-            
-            escaped_install_dir = shlex.quote(REMOTE_INSTALL_DIR)
-            
             remote_python = "python3"
             remote_script = os.path.join(REMOTE_INSTALL_DIR, "remote_setup.py")
             remote_cmd_args = [remote_python, remote_script] + remote_arg_tokens
-            remote_cmd_str = shlex.join(remote_cmd_args)
-            
-            remote_shell_cmd = f"""
-mkdir -p {escaped_install_dir} && \
-cd {escaped_install_dir} && \
-tar xzf - && \
-{remote_cmd_str}
-"""
-            ssh_cmd = ["ssh"] + ssh_opts + [f"root@{config.host}", remote_shell_cmd]
+            remote_shell_cmd = chain_remote_commands(
+                [
+                    ["mkdir", "-p", REMOTE_INSTALL_DIR],
+                    ["cd", REMOTE_INSTALL_DIR],
+                    ["tar", "xzf", "-"],
+                    remote_cmd_args,
+                ]
+            )
+            ssh_cmd = build_ssh_command(
+                config.host,
+                "root",
+                config.ssh_key,
+                remote_command=remote_shell_cmd,
+                connect_timeout=30,
+                server_alive_interval=30,
+            )
             
             ssh_env = os.environ.copy()
             ssh_env["LC_ALL"] = "C"
