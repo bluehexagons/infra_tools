@@ -360,11 +360,16 @@ class TestSetupConfigFromArgs(unittest.TestCase):
 
     def test_workstation_defaults_come_from_registry(self):
         config = SetupConfig.from_args(self._make_args(), 'workstation_desktop')
-        self.assertTrue(config.enable_rdp)
+        self.assertFalse(config.enable_rdp)
         self.assertTrue(config.include_desktop)
         self.assertTrue(config.include_cli_tools)
         self.assertTrue(config.include_desktop_apps)
         self.assertEqual(config.browser, 'librewolf')
+
+    def test_workstation_rdp_can_be_enabled_explicitly(self):
+        config = SetupConfig.from_args(self._make_args(enable_rdp=True), 'workstation_desktop')
+        self.assertTrue(config.enable_rdp)
+        self.assertTrue(config.include_desktop)
 
     def test_pc_dev_defaults_include_office_and_smbclient(self):
         config = SetupConfig.from_args(self._make_args(), 'pc_dev')

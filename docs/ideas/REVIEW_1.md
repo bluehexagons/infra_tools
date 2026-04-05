@@ -57,6 +57,7 @@ This document outlines a plan for major architectural and security improvements 
 - Create utility functions for safe command building
 
 #### 1.4 Secure Defaults
+- Status: workstation system types no longer auto-enable RDP; remote desktop exposure is now explicit via `--rdp`
 - Review and tighten default configurations
 - Ensure secure values for security-related options (firewall, SSH, etc.)
 - Add security validation for critical configuration values
@@ -152,7 +153,7 @@ This document outlines a plan for major architectural and security improvements 
 ### Phase 5: Testing and Quality Assurance
 
 #### 5.1 Test Strategy — ✅ IN PROGRESS
-- 830 tests passing across the codebase
+- 831 tests passing across the codebase
 - New tests: `test_credentials.py`, `test_workspace_cli.py`, `test_config.py`, `test_setup_common.py`, `test_plugin_registry.py`, `test_ssh_utils.py`, `test_browser_steps.py`
 - **TODO**: Property-based testing, integration tests for common setup scenarios
 
@@ -182,7 +183,7 @@ This document outlines a plan for major architectural and security improvements 
 2. ~~Define the `credentials` subcommand UX and `credentials.json` schema/file-permission expectations~~ ✅ Done
 3. ~~Define the SSH/SCP transfer mechanism for deployment credentials~~ ✅ Decided: SCP over existing SSH connection, temp path `/tmp/infra_tools-creds-*`, `0600` permissions, cleanup on success/failure
 4. Define composition rules for system-type plugins vs. capability plugins now that step assembly is plugin-owned
-5. Continue implementation of Phase 1 by reviewing secure defaults
+5. Continue implementation of Phase 1 by reviewing remaining secure defaults and host-key trust behavior
 6. Establish CI/CD pipeline for automated testing
 7. Add security testing (bandit, semgrep, fuzz testing)
 8. Implement pre-commit hooks and type checking in CI

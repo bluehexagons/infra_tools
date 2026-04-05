@@ -70,7 +70,7 @@ def create_setup_argument_parser(
     parser.add_argument("--rdp", dest="enable_rdp", 
                        action=argparse.BooleanOptionalAction, 
                        default=None if not for_remote else False,
-                       help="Enable RDP/XRDP setup" + ("" if for_remote else " (default: enabled for workstation setups)"))
+                       help="Enable RDP/XRDP setup" + ("" if for_remote else " (default: disabled)"))
     parser.add_argument("--desktop", choices=["xfce", "i3", "cinnamon", "lxqt"], 
                        default="xfce" if for_remote else None,
                        help="Desktop environment to install (default: xfce)")

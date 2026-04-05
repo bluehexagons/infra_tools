@@ -13,7 +13,10 @@ def success_message(config: SetupConfig) -> None:
     print_success_header(config)
     print()
     print("PC Dev setup includes:")
-    print("  - Desktop environment with RDP access")
+    if config.enable_rdp:
+        print("  - Desktop environment with RDP access")
+    else:
+        print("  - Desktop environment (RDP available with --rdp)")
     print("  - Remmina RDP client for remote connections")
     print("  - LibreOffice (installed by default)")
     print("  - Standard desktop applications")

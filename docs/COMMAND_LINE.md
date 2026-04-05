@@ -72,7 +72,7 @@ infra_tools.py setup server_web 10.0.0.50 admin \
 
 | Flag | Description |
 |------|-------------|
-| `--rdp` / `--no-rdp` | Enable/disable RDP/XRDP (default: enabled for workstations) |
+| `--rdp` / `--no-rdp` | Enable/disable RDP/XRDP (default: disabled) |
 | `--audio` / `--no-audio` | Enable/disable audio setup |
 | `--desktop [xfce\|i3\|cinnamon\|lxqt]` | Desktop environment (default: xfce) |
 | `--browser NAME` | Browser to install (can be used multiple times) |
