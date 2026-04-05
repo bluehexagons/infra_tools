@@ -21,6 +21,7 @@ from logging import ERROR
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
 from lib.logging_utils import get_service_logger
+from lib.logging_utils import log_event
 from lib.logging_utils import log_subprocess_result
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
 from lib.types import MaybeStr
@@ -156,7 +157,7 @@ def fix_permissions():
 
 def main():
     """Main function to update Node.js."""
-    logger.info("Starting Node.js update check")
+    log_event(logger, "Starting Node.js update check")
     
     nvm_dir = get_nvm_dir()
     
@@ -164,7 +165,7 @@ def main():
     notification_configs = load_notification_configs_from_state(logger)
     
     if not os.path.exists(nvm_dir):
-        logger.error(f"✗ nvm not found at {nvm_dir}")
+        log_event(logger, "nvm directory not found", level=ERROR, nvm_dir=nvm_dir)
         send_notification_safe(
             notification_configs,
             subject="Error: Node.js update failed",
@@ -183,7 +184,7 @@ def main():
     track_label = "latest" if update_track == "latest" else "LTS"
     
     if not current_lts:
-        logger.error("✗ Failed to get latest LTS version")
+        log_event(logger, "Failed to get latest LTS version", level=ERROR)
         send_notification_safe(
             notification_configs,
             subject="Error: Node.js update failed",
@@ -195,7 +196,7 @@ def main():
         return 1
     
     if update_track == "latest" and not latest_version:
-        logger.error("✗ Failed to get latest Node.js version")
+        log_event(logger, "Failed to get latest Node.js version", level=ERROR, update_track=update_track)
         send_notification_safe(
             notification_configs,
             subject="Error: Node.js update failed",
@@ -207,7 +208,7 @@ def main():
         return 1
 
     if not current_version:
-        logger.error("✗ Failed to get current version")
+        log_event(logger, "Failed to get current Node.js version", level=ERROR, update_track=update_track)
         send_notification_safe(
             notification_configs,
             subject="Error: Node.js update failed",
@@ -219,12 +220,31 @@ def main():
         return 1
     
     if current_version == target_version:
-        logger.info(f"Node.js already at latest {track_label} version: {target_version}")
+        log_event(
+            logger,
+            "Node.js already up to date",
+            current_version=current_version,
+            target_version=target_version,
+            update_track=track_label,
+        )
     else:
-        logger.info(f"Updating Node.js ({track_label}) from {current_version} to {target_version}")
+        log_event(
+            logger,
+            "Updating Node.js",
+            current_version=current_version,
+            target_version=target_version,
+            update_track=track_label,
+        )
         
         if not install_target_version(update_track):
-            logger.error("✗ Node.js update failed")
+            log_event(
+                logger,
+                "Node.js update failed",
+                level=ERROR,
+                current_version=current_version,
+                target_version=target_version,
+                update_track=track_label,
+            )
             send_notification_safe(
                 notification_configs,
                 subject="Error: Node.js update failed",
@@ -237,7 +257,14 @@ def main():
 
     packages_updated, package_error = update_global_packages()
     if not packages_updated:
-        logger.error("✗ Node.js global package update failed")
+        log_event(
+            logger,
+            "Node.js global package update failed",
+            level=ERROR,
+            current_version=current_version,
+            target_version=target_version,
+            update_track=track_label,
+        )
         send_notification_safe(
             notification_configs,
             subject="Error: Node.js update failed",
@@ -256,7 +283,13 @@ def main():
     # the actual installed Node.js version rather than the pre-update version.
     post_update_version = get_current_version() or current_version
     
-    logger.info(f"✓ Node.js update tasks completed successfully for {target_version}")
+    log_event(
+        logger,
+        "Node.js update tasks completed successfully",
+        current_version=post_update_version,
+        target_version=target_version,
+        update_track=track_label,
+    )
     
     send_notification_safe(
         notification_configs,
