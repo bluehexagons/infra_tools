@@ -16,6 +16,8 @@ import os
 # Add the parent directory to the path so we can import the modules
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from web.service_tools import cicd_executor
+
 from web.cicd_steps import (
     install_cicd_dependencies,
     create_cicd_user,
@@ -513,6 +515,97 @@ class TestRemoteDeployScriptExecution(unittest.TestCase):
         mock_run.assert_called_once()
         self.assertEqual(mock_run.call_args.kwargs['input'], 'echo hello\n')
         self.assertEqual(mock_run.call_args.args[0], ['ssh', 'deploy@app1', 'bash -s --'])
+
+
+class TestExecutorStructuredLogging(unittest.TestCase):
+    @patch("web.service_tools.cicd_executor.os.path.exists", return_value=False)
+    @patch("web.service_tools.cicd_executor.subprocess.run")
+    def test_clone_or_update_repo_logs_clone_and_success(self, mock_run, _mock_exists):
+        mock_run.side_effect = [
+            subprocess.CompletedProcess(args=["git", "clone"], returncode=0, stdout="", stderr=""),
+            subprocess.CompletedProcess(args=["git", "fetch"], returncode=0, stdout="", stderr=""),
+            subprocess.CompletedProcess(args=["git", "reset"], returncode=0, stdout="", stderr=""),
+            subprocess.CompletedProcess(args=["git", "clean"], returncode=0, stdout="", stderr=""),
+            subprocess.CompletedProcess(args=["git", "checkout"], returncode=0, stdout="", stderr=""),
+            subprocess.CompletedProcess(args=["git", "pull"], returncode=0, stdout="", stderr=""),
+        ]
+
+        with self.assertLogs(cicd_executor.logger, level="INFO") as logs:
+            result = cicd_executor.clone_or_update_repo(
+                "https://github.com/org/repo.git",
+                "/tmp/repo",
+                "refs/heads/main",
+            )
+
+        self.assertTrue(result)
+        output = "\n".join(logs.output)
+        self.assertIn("Cloning repository | repo_url='https://github.com/org/repo.git'", output)
+        self.assertIn("Checking out branch | branch='main' repo_url='https://github.com/org/repo.git'", output)
+        self.assertIn("Repository updated successfully | branch='main' repo_url='https://github.com/org/repo.git'", output)
+
+    @patch("web.service_tools.cicd_executor.subprocess.run", return_value=subprocess.CompletedProcess(args=["/bin/bash"], returncode=0, stdout="", stderr=""))
+    def test_run_script_logs_start_and_success(self, _mock_run):
+        with tempfile.TemporaryDirectory() as workspace:
+            script_path = os.path.join(workspace, "build.sh")
+            log_path = os.path.join(workspace, "build.log")
+            with open(script_path, "w") as f:
+                f.write("echo ok\n")
+
+            with self.assertLogs(cicd_executor.logger, level="INFO") as logs:
+                result = cicd_executor.run_script("build.sh", workspace, log_path)
+
+        self.assertTrue(result)
+        output = "\n".join(logs.output)
+        self.assertIn(f"Running script | script_path='{script_path}'", output)
+        self.assertIn(f"Script completed successfully | script_path='{script_path}'", output)
+
+    @patch("web.service_tools.cicd_executor.os.remove")
+    @patch("web.service_tools.cicd_executor.load_notification_configs_from_state", return_value=[])
+    @patch("web.service_tools.cicd_executor.run_script", return_value=True)
+    @patch("web.service_tools.cicd_executor.clone_or_update_repo", return_value=True)
+    @patch("web.service_tools.cicd_executor.load_config")
+    @patch("web.service_tools.cicd_executor.os.makedirs")
+    def test_process_job_logs_start_and_completion(
+        self,
+        _mock_makedirs,
+        mock_load_config,
+        _mock_clone,
+        _mock_run_script,
+        _mock_notifications,
+        _mock_remove,
+    ):
+        mock_load_config.return_value = {
+            "repositories": [
+                {
+                    "url": "https://github.com/org/repo.git",
+                    "scripts": {"build": "build.sh"},
+                }
+            ]
+        }
+        job_data = {
+            "repo_url": "https://github.com/org/repo.git",
+            "ref": "refs/heads/main",
+            "commit_sha": "abcdef123456",
+            "pusher": "alice",
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            job_file = os.path.join(tmpdir, "job.json")
+            with open(job_file, "w") as f:
+                json.dump(job_data, f)
+
+            with patch("web.service_tools.cicd_executor.WORKSPACES_DIR", tmpdir), \
+                 patch("web.service_tools.cicd_executor.LOGS_DIR", tmpdir):
+                with self.assertLogs(cicd_executor.logger, level="INFO") as logs:
+                    result = cicd_executor.process_job(job_file)
+
+        self.assertTrue(result)
+        output = "\n".join(logs.output)
+        self.assertIn(f"Processing job | job_file='{job_file}'", output)
+        self.assertIn(
+            f"Job completed | commit_sha='abcdef12' job_file='{job_file}' repo_url='https://github.com/org/repo.git' result='success'",
+            output,
+        )
 
 
 class TestCleanupOldBuildLogs(unittest.TestCase):

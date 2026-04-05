@@ -64,7 +64,7 @@ def clone_or_update_repo(repo_url: str, workspace: str, ref: str) -> bool:
     """Clone repository if it doesn't exist, or pull latest changes."""
     try:
         if not os.path.exists(workspace):
-            logger.info(f"Cloning repository: {repo_url}")
+            log_event(logger, "Cloning repository", repo_url=repo_url)
             result = subprocess.run(
                 ['git', 'clone', repo_url, workspace],
                 capture_output=True,
@@ -72,10 +72,10 @@ def clone_or_update_repo(repo_url: str, workspace: str, ref: str) -> bool:
                 timeout=300
             )
             if result.returncode != 0:
-                logger.error(f"Failed to clone repository: {result.stderr}")
+                log_event(logger, "Failed to clone repository", level=40, repo_url=repo_url, stderr=result.stderr.strip())
                 return False
         
-        logger.info(f"Fetching latest changes from {repo_url}")
+        log_event(logger, "Fetching latest changes", repo_url=repo_url)
         result = subprocess.run(
             ['git', 'fetch', '--all'],
             cwd=workspace,
@@ -84,7 +84,7 @@ def clone_or_update_repo(repo_url: str, workspace: str, ref: str) -> bool:
             timeout=120
         )
         if result.returncode != 0:
-            logger.error(f"Failed to fetch: {result.stderr}")
+            log_event(logger, "Failed to fetch repository changes", level=40, repo_url=repo_url, stderr=result.stderr.strip())
             return False
         
         result = subprocess.run(
@@ -95,7 +95,7 @@ def clone_or_update_repo(repo_url: str, workspace: str, ref: str) -> bool:
             timeout=30
         )
         if result.returncode != 0:
-            logger.error(f"Failed to reset: {result.stderr}")
+            log_event(logger, "Failed to reset repository", level=40, repo_url=repo_url, stderr=result.stderr.strip())
             return False
         
         result = subprocess.run(
@@ -106,10 +106,10 @@ def clone_or_update_repo(repo_url: str, workspace: str, ref: str) -> bool:
             timeout=60
         )
         if result.returncode != 0:
-            logger.warning(f"git clean had issues: {result.stderr}")
+            log_event(logger, "git clean had issues", level=30, repo_url=repo_url, stderr=result.stderr.strip())
         
         branch = ref.replace('refs/heads/', '')
-        logger.info(f"Checking out: {branch}")
+        log_event(logger, "Checking out branch", repo_url=repo_url, branch=branch)
         result = subprocess.run(
             ['git', 'checkout', branch],
             cwd=workspace,
@@ -118,7 +118,7 @@ def clone_or_update_repo(repo_url: str, workspace: str, ref: str) -> bool:
             timeout=30
         )
         if result.returncode != 0:
-            logger.error(f"Failed to checkout {branch}: {result.stderr}")
+            log_event(logger, "Failed to checkout branch", level=40, repo_url=repo_url, branch=branch, stderr=result.stderr.strip())
             return False
         
         result = subprocess.run(
@@ -129,17 +129,17 @@ def clone_or_update_repo(repo_url: str, workspace: str, ref: str) -> bool:
             timeout=120
         )
         if result.returncode != 0:
-            logger.error(f"Failed to pull: {result.stderr}")
+            log_event(logger, "Failed to pull repository changes", level=40, repo_url=repo_url, branch=branch, stderr=result.stderr.strip())
             return False
         
-        logger.info(f"Repository updated successfully")
+        log_event(logger, "Repository updated successfully", repo_url=repo_url, branch=branch)
         return True
         
     except subprocess.TimeoutExpired:
-        logger.error("Git operation timed out")
+        log_event(logger, "Git operation timed out", level=40, repo_url=repo_url)
         return False
     except Exception as e:
-        logger.error(f"Failed to clone/update repository: {e}")
+        log_event(logger, "Failed to clone/update repository", level=40, repo_url=repo_url, error=str(e))
         return False
 
 
@@ -150,11 +150,11 @@ def run_script(script_path: str, workspace: str, log_file: str) -> bool:
         script_path = os.path.join(workspace, script_path)
     
     if not os.path.exists(script_path):
-        logger.error(f"Script not found: {script_path}")
+        log_event(logger, "Script not found", level=40, script_path=script_path)
         return False
     
     try:
-        logger.info(f"Running script: {script_path}")
+        log_event(logger, "Running script", script_path=script_path)
         
         with open(log_file, 'a') as log:
             log.write(f"\n{'='*80}\n")
@@ -174,23 +174,23 @@ def run_script(script_path: str, workspace: str, log_file: str) -> bool:
             log.write(f"{'='*80}\n")
         
         if result.returncode == 0:
-            logger.info(f"Script completed successfully: {script_path}")
+            log_event(logger, "Script completed successfully", script_path=script_path)
             return True
         else:
-            logger.error(f"Script failed with exit code {result.returncode}: {script_path}")
+            log_event(logger, "Script failed", level=40, script_path=script_path, exit_code=result.returncode)
             return False
             
     except subprocess.TimeoutExpired:
-        logger.error(f"Script timed out: {script_path}")
+        log_event(logger, "Script timed out", level=40, script_path=script_path)
         return False
     except Exception as e:
-        logger.error(f"Failed to run script: {e}")
+        log_event(logger, "Failed to run script", level=40, script_path=script_path, error=str(e))
         return False
 
 
 def process_job(job_file: str) -> bool:
     """Process a single CI/CD job."""
-    logger.info(f"Processing job: {job_file}")
+    log_event(logger, "Processing job", job_file=job_file)
     
     try:
         with open(job_file, 'r') as f:
@@ -202,7 +202,7 @@ def process_job(job_file: str) -> bool:
         pusher = job_data.get('pusher', 'unknown')
         
         if not repo_url or not ref or not commit_sha:
-            logger.error("Invalid job data")
+            log_event(logger, "Invalid job data", level=40, job_file=job_file)
             return False
         
         config = load_config()
@@ -215,7 +215,7 @@ def process_job(job_file: str) -> bool:
                 break
         
         if not repo_config:
-            logger.error(f"Repository not configured: {repo_url}")
+            log_event(logger, "Repository not configured", level=40, repo_url=repo_url)
             return False
         
         workspace = get_repo_workspace(repo_url)
@@ -238,7 +238,7 @@ def process_job(job_file: str) -> bool:
             log.write(f"{'='*80}\n\n")
         
         if not clone_or_update_repo(repo_url, workspace, ref):
-            logger.error("Failed to clone/update repository")
+            log_event(logger, "Failed to clone/update repository", level=40, repo_url=repo_url, job_file=job_file)
             notify_failure(repo_url, commit_sha, "Failed to clone/update repository")
             return False
         
@@ -249,7 +249,7 @@ def process_job(job_file: str) -> bool:
             script_path = scripts.get(script_name)
             if script_path:
                 if not run_script(script_path, workspace, log_file):
-                    logger.error(f"Failed at stage: {script_name}")
+                    log_event(logger, "Failed at stage", level=40, stage=script_name, repo_url=repo_url, commit_sha=commit_sha[:8])
                     success = False
                     break
         
@@ -266,7 +266,7 @@ def process_job(job_file: str) -> bool:
                 deploy_script = scripts.get('deploy')
                 if deploy_script:
                     if not run_script(deploy_script, workspace, log_file):
-                        logger.error("Failed at stage: deploy")
+                        log_event(logger, "Failed at stage", level=40, stage="deploy", repo_url=repo_url, commit_sha=commit_sha[:8])
                         success = False
         
         notification_configs = load_notification_configs_from_state(logger)
@@ -278,11 +278,18 @@ def process_job(job_file: str) -> bool:
         
         os.remove(job_file)
         
-        logger.info(f"Job completed: {job_file} - {'SUCCESS' if success else 'FAILED'}")
+        log_event(
+            logger,
+            "Job completed",
+            job_file=job_file,
+            result="success" if success else "failed",
+            repo_url=repo_url,
+            commit_sha=commit_sha[:8],
+        )
         return success
         
     except Exception as e:
-        logger.error(f"Error processing job: {e}")
+        log_event(logger, "Error processing job", level=40, job_file=job_file, error=str(e))
         return False
 
 
