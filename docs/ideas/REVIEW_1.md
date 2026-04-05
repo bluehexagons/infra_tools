@@ -61,25 +61,26 @@ This document outlines a plan for major architectural and security improvements 
 - Add security validation for critical configuration values
 
 #### 1.5 Workspace Location Flag
-- Add `--workspace` flag to specify custom directory for setup state/configuration
-- Default: `~/.config/infra_tools/setups` (replacing current `~/.cache/infra_tools/setups`)
-- Store: Setup configurations, host metadata, deployment history, credentials state, SSH known hosts
-- Recommended workspace layout:
+- Add `--workspace` flag to specify custom base directory for setup state/configuration
+- Default base: `~/.config/infra_tools` (replacing current `~/.cache/infra_tools`)
+- Subdirectories under the workspace base:
   - `setups/` for persisted setup definitions/state
-  - `credentials.json` for saved username/password mappings
+  - `credentials.json` for saved username/password mappings (at workspace root, not inside `setups/`)
   - `known_hosts` for SSH host keys managed by infra_tools
   - `history/` for optional deployment/setup execution history
+- Changing `--workspace` changes the base; all subdirectories and files resolve relative to it
 - Use cases: Testing, multi-project setups, separate concerns from system configs
 - Existing cache/state compatibility will be intentionally broken; users recreate configs in the new workspace instead of migrating old cache entries
 - Credentials must never be duplicated into setup cache/history files; those files can reference usernames but not stored passwords
 
 ### Phase 2: Architectural Refactor
 #### 2.1 Configuration System Overhaul
-- Replace dataclass-based config with pydantic models for automatic validation
+- Add explicit validation layer on top of dataclass-based config
 - Add configuration versioning for the new workspace-managed state format
 - Separate CLI/public configuration from internal/runtime state and persisted workspace state
 
 #### 2.2 Plugin-Based System Types
+- Status: built-in plugin registry foundation landed; system-type discovery, metadata defaults, and conflict detection now flow through `lib/plugin_registry.py`
 - Move current domain directories (e.g., common, security, desktop, web, sync, smb) under a main `plugins/` package
 - Plugins define reusable steps, defaults, and optional system types; shared validators and utility code can live outside plugins when broadly reusable
 - System types are registered by plugins rather than maintained in a central static list
@@ -110,8 +111,9 @@ This document outlines a plan for major architectural and security improvements 
 
 #### 2.4 Remote Execution Refactor
 - Create utility functions for safe SSH/SCP command building with list-based args, implement consistent timeout/retry patterns, add proper error handling and logging
-- Use SSH/SCP for secure transfer of remote setup artifacts and deployment credentials where credentials must reach the target system
-- Stage remote credential files under a restrictive temporary path such as `/tmp/infra_tools-*` or a user-owned runtime temp directory, write them with `0600`, use them only for the required setup step, and remove them immediately after use with best-effort cleanup on failure paths
+- Use SCP over existing SSH connection for secure transfer of remote setup artifacts and deployment credentials where credentials must reach the target system
+- Stage remote credential files under a restrictive temporary path such as `/tmp/infra_tools-creds-*`, write them with `0600`, use them only for the required setup step, and remove them immediately after use with best-effort cleanup on failure paths
+- SCP chosen over alternatives (SFTP library, inline credential passing) as the best balance of stability (built on existing SSH infrastructure), security (encrypted transfer, no credentials in process args), and simplicity (no new dependencies, uses subprocess SSH/SCP commands already in use)
 
 ### Phase 3: Validation and Type Safety
 #### 3.1 Comprehensive Input Validation
@@ -122,10 +124,11 @@ This document outlines a plan for major architectural and security improvements 
 
 #### 3.2 Type Hint Enhancement
 - Expand type hint coverage across public interfaces and new plugin APIs
-- Use TypedDict or pydantic models for configuration dictionaries where appropriate
+- Use TypedDict for configuration dictionaries where appropriate
 - Implement protocol interfaces for plugin architectures
 
 ### Phase 4: Error Handling and Observability
+
 #### 4.1 Structured Logging
 - Keep human-readable CLI output for interactive setup flows
 - Use structured logging for services, helpers, and internal diagnostics where persistent logs are useful
@@ -145,128 +148,43 @@ This document outlines a plan for major architectural and security improvements 
 - Create diagnostic information collection for troubleshooting failed setup/patch runs
 
 ### Phase 5: Testing and Quality Assurance
-#### 5.1 Test Strategy
-- Implement property-based testing for validation logic
-- Add integration tests for common setup scenarios
 
-#### 5.2 Security Testing
-- Add static analysis security scanning (bandit, semgrep)
-- Implement dependency vulnerability checking
-- Add fuzz testing for input validation
-- Create security regression tests
+#### 5.1 Test Strategy — ✅ IN PROGRESS
+- 816 tests passing across the codebase
+- New tests: `test_credentials.py`, `test_workspace_cli.py`, `test_config.py`, `test_setup_common.py`, `test_plugin_registry.py`
+- **TODO**: Property-based testing, integration tests for common setup scenarios
 
-#### 5.3 Code Quality
-- Implement pre-commit hooks for formatting and linting
-- Add type checking to CI pipeline (mypy or pyright)
-- Add documentation coverage requirements
+#### 5.2 Security Testing — ❌ NOT STARTED
+- **TODO**: Static analysis (bandit, semgrep), dependency vulnerability checking, fuzz testing
 
-## Specific Component Plans
+#### 5.3 Code Quality — ❌ NOT STARTED
+- **TODO**: Pre-commit hooks, type checking in CI, documentation coverage
 
-### Core Library (lib/)
-#### Config Module
-- Migrate to pydantic models appropriate for CLI/workspace state rather than relying on a single dataclass
-- Implement environment variable loading
-- Add configuration validation rules
-- Split configuration responsibilities into distinct models:
-  - CLI/request model
-  - persisted workspace state model
-  - runtime execution model
+## Success Criteria Status
 
-#### Validation Module
-- Expand validation functions with comprehensive test coverage
-- Add validation for security-sensitive inputs (SQL-like patterns, shell metacharacters)
-- Implement validation composition utilities
-- Add custom validator registry
-
-#### Machine State
-- Improve container/VM detection logic (auto-detect should be the new default)
-- Implement machine capability discovery
-- Add caching for expensive detection operations
-
-#### Remote Utils
-- Evaluate: Use established SSH library (paramiko) vs. lightweight wrapper around subprocess
-- Implement workspace-aware paths (use relative paths from workspace base)
-- Replace password-bearing command-line flows with workspace credential resolution and safer transfer mechanisms where credentials must reach the remote host
-- Add SFTP support for file transfers (if using library or wrapper)
-- Improve error handling and retry logic
-
-### Feature Modules
-#### Web Module
-- Decouple nginx configuration from deployment logic
-- Implement template-based configuration generation
-- Improve SSL certificate management
-
-#### Security Module
-- Implement firewall rule validation
-- Add automated security updating
-
-#### Samba Module
-- Improve share permission validation
-- Add SMB encryption support
-- Implement better audit logging
-
-#### Desktop Module
-- Decouple desktop environment installation from configuration
-- Improve Flatpak integration
-- Implement desktop settings synchronization
-
-### Entry Points
-#### infra_tools.py
-- Simplify to thin wrapper around functionality
-- Implement plugin discovery mechanism
-- Add better help and examples generation
-- Implement configuration validation before execution
-- Load system types and plugin-provided arguments dynamically from discovered plugins
-- Add credential management subcommands under `infra_tools.py credentials` with help output for list/remove/set operations
-
-#### patch_setup.py
-- Ensure all functionality is moved to `infra_tools.py patch (...)`, `infra_tools.py list (...)`, etc
-- Remove in favor of unified entry point
-
-#### Individual Setup Scripts
-- Remove in favor of unified entry point (`infra_tools.py setup system_type`)
-
-## Non-Goals
-1. Migrate old workspace/cache data into the new layout
-2. Add host-scoped or operation-scoped credential storage in this pass
-3. Add secret encryption, keyring integration, or external secret managers in this pass
-4. Support partial system-type merging across plugins
-
-## Migration Strategy
-Since backwards compatibility is not required:
-1. Create new implementation in parallel
-2. Provide reset/recreation documentation for the new workspace layout and state model
-3. Allow side-by-side testing during transition where practical, but do not migrate old cached setup state
-4. Remove old implementation after validation period
-
-## Success Criteria
-1. Known password-bearing SSH/login CLI flags are removed and setup no longer generates or prints default random login passwords
-2. Workspace credentials are stored and resolved through a single source-of-truth `credentials.json` file using per-credential objects and secure `0600` permissions
-3. Password-based features that still require credentials can resolve them from the workspace store without inline `username:password` inputs
-4. Known `shell=True` and unsafe command-construction hotspots are removed, isolated, or explicitly justified with tests and escaping
-5. Comprehensive input validation exists for all external interfaces touched by the refactor
-6. Structured logging for services/helpers and human-readable CLI output coexist without exposing credentials in logs or saved state
-7. Plugin discovery fails fast on conflicts, loads in deterministic order, and the plugin contract is documented
-8. Improved performance and reliability through better error handling
-9. Enhanced extensibility for future feature additions
-10. Regression tests cover credential redaction, credential resolution, plugin conflict failures, and passwordless account setup behavior
-
-## Risks and Mitigations
-1. **Risk**: Introducing new bugs during refactor
-   **Mitigation**: Comprehensive test suite and incremental implementation
-   
-2. **Risk**: Performance degradation from new abstractions
-   **Mitigation**: Benchmarking and optimization during implementation
+| # | Criterion | Status |
+|---|-----------|--------|
+| 1 | Password-bearing SSH/login CLI flags removed | ✅ Done |
+| 2 | Workspace credentials in `credentials.json` with `0600` permissions | ✅ Done |
+| 3 | Password-based features resolve from workspace store | ✅ Done |
+| 4 | `shell=True` and unsafe command construction addressed | ⚠️ Partial |
+| 5 | Comprehensive input validation for external interfaces | ⚠️ Partial |
+| 6 | Structured logging without credential exposure | ⚠️ Partial |
+| 7 | Plugin discovery with conflict detection | ⚠️ Partial |
+| 8 | Improved performance and reliability | ⚠️ Partial |
+| 9 | Enhanced extensibility | ❌ Not started |
+| 10 | Regression tests for credential/plugin/passwordless behavior | ✅ Done |
 
 ## Next Steps
-1. Review and approve this plan
-2. Define the `credentials` subcommand UX and `credentials.json` schema/file-permission expectations
-3. Define the SSH/SCP transfer mechanism for deployment credentials, including temp-file path and cleanup behavior
-4. Define the plugin contract and discovery/registration rules, including explicit conflict detection and load ordering
+1. ~~Review and approve this plan~~ ✅ Done
+2. ~~Define the `credentials` subcommand UX and `credentials.json` schema/file-permission expectations~~ ✅ Done
+3. ~~Define the SSH/SCP transfer mechanism for deployment credentials~~ ✅ Decided: SCP over existing SSH connection, temp path `/tmp/infra_tools-creds-*`, `0600` permissions, cleanup on success/failure
+4. Continue Phase 2 by moving step composition out of the central system-type list and into plugin-owned registrations
 5. Define composition rules for system-type plugins vs. capability plugins
-6. Begin implementation of Phase 1 (Security Foundation)
+6. Continue implementation of Phase 1 (complete shell injection audit, secure defaults review)
 7. Establish CI/CD pipeline for automated testing
-8. Begin writing tests for existing functionality to ensure regression protection
+8. Add security testing (bandit, semgrep, fuzz testing)
+9. Implement pre-commit hooks and type checking in CI
 
 ---
 *This plan will be executed in iterations with regular reviews to ensure alignment with project goals and adjustment based on findings during implementation.*

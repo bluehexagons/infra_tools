@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+from argparse import Namespace
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -298,6 +299,84 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
         cmd = ' '.join(parts)
         self.assertIn('user1:[REDACTED]', cmd)
         self.assertNotIn('secret1', cmd)
+
+
+class TestSetupConfigFromArgs(unittest.TestCase):
+    def _make_args(self, **overrides):
+        defaults = dict(
+            host='testhost',
+            username='testuser',
+            timezone='UTC',
+            tags=None,
+            desktop=None,
+            browsers=None,
+            browser=None,
+            install_office=None,
+            enable_rdp=None,
+            smb_mounts=None,
+            enable_smbclient=None,
+            no_restart=None,
+            machine_type=None,
+            password=None,
+            ssh_key=None,
+            friendly_name=None,
+            use_flatpak=False,
+            apt_packages=None,
+            flatpak_packages=None,
+            dark_theme=False,
+            dry_run=False,
+            install_ruby=False,
+            install_go=False,
+            install_node=False,
+            install_python=False,
+            custom_steps=None,
+            deploy_specs=None,
+            full_deploy=False,
+            reset_migrations=False,
+            enable_ssl=False,
+            ssl_email=None,
+            enable_cloudflare=False,
+            enable_cicd=False,
+            is_build_server=False,
+            is_app_server=False,
+            deploy_targets=None,
+            api_subdomain=False,
+            enable_samba=False,
+            samba_shares=None,
+            share_credentials=None,
+            sync_specs=None,
+            scrub_specs=None,
+            notify_specs=None,
+            hosted_node=None,
+            hosted_user='root',
+            hosted_key=None,
+            container_memory=None,
+            container_storage=None,
+            container_cores=1,
+            container_base='debian',
+        )
+        defaults.update(overrides)
+        return Namespace(**defaults)
+
+    def test_workstation_defaults_come_from_registry(self):
+        config = SetupConfig.from_args(self._make_args(), 'workstation_desktop')
+        self.assertTrue(config.enable_rdp)
+        self.assertTrue(config.include_desktop)
+        self.assertTrue(config.include_cli_tools)
+        self.assertTrue(config.include_desktop_apps)
+        self.assertEqual(config.browser, 'librewolf')
+
+    def test_pc_dev_defaults_include_office_and_smbclient(self):
+        config = SetupConfig.from_args(self._make_args(), 'pc_dev')
+        self.assertTrue(config.install_office)
+        self.assertTrue(config.enable_smbclient)
+        self.assertTrue(config.include_pc_dev_apps)
+
+    def test_server_proxmox_defaults_no_restart(self):
+        config = SetupConfig.from_args(self._make_args(), 'server_proxmox')
+        self.assertTrue(config.no_restart)
+        self.assertFalse(config.include_cli_tools)
+        self.assertFalse(config.include_desktop)
 
 
 class TestSetupConfigHostedFields(unittest.TestCase):

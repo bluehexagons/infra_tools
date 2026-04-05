@@ -6,25 +6,25 @@ import argparse
 import shlex
 from dataclasses import dataclass, asdict
 from typing import Optional, cast
+from lib.plugin_registry import get_system_type_definition, get_system_type_names
 from lib.types import StrList, NestedStrList, JSONDict, MaybeStr
 
 
-SYSTEM_TYPES = [
-    "workstation_desktop",
-    "pc_dev",
-    "workstation_dev",
-    "server_dev",
-    "server_web",
-    "server_lite",
-    "server_proxmox",
-    "custom_steps"
-]
+SYSTEM_TYPES = get_system_type_names()
 
 MACHINE_TYPES = ["unprivileged", "vm", "privileged", "hardware", "oci"]
 DEFAULT_MACHINE_TYPE = "unprivileged"
 
-DESKTOP_SYSTEMS = ["workstation_desktop", "pc_dev", "workstation_dev"]
-CLI_SYSTEMS = ["workstation_desktop", "pc_dev", "workstation_dev", "server_dev", "server_web"]
+DESKTOP_SYSTEMS = [
+    system_type.name
+    for system_type in (get_system_type_definition(name) for name in SYSTEM_TYPES)
+    if system_type.include_desktop
+]
+CLI_SYSTEMS = [
+    system_type.name
+    for system_type in (get_system_type_definition(name) for name in SYSTEM_TYPES)
+    if system_type.include_cli_tools
+]
 
 
 def _normalize_container_storage(value: NestedStrList | list[str] | None) -> Optional[NestedStrList]:
@@ -538,7 +538,8 @@ class SetupConfig:
     @classmethod
     def from_args(cls, args: argparse.Namespace, system_type: str) -> 'SetupConfig':
         from lib.system_utils import get_current_username, get_local_timezone
-        
+
+        system_type_definition = get_system_type_definition(system_type)
         tags = None
         if hasattr(args, 'tags') and args.tags:
             tags = [tag.strip() for tag in args.tags.split(',') if tag.strip()]
@@ -558,43 +559,42 @@ class SetupConfig:
         elif hasattr(args, 'browser') and args.browser:
             # Single browser provided
             browser = args.browser
-        elif system_type in DESKTOP_SYSTEMS:
-            # Default browser for desktop systems
-            browser = "librewolf"
+        elif system_type_definition.default_browser:
+            browser = system_type_definition.default_browser
         
         install_office = args.install_office
-        if system_type == "pc_dev" and install_office is None:
+        if install_office is None and system_type_definition.default_install_office:
             install_office = True
         elif install_office is None:
             install_office = False
         
         enable_rdp = args.enable_rdp
-        if enable_rdp is None and system_type in DESKTOP_SYSTEMS:
+        if enable_rdp is None and system_type_definition.default_enable_rdp:
             enable_rdp = True
         elif enable_rdp is None:
             enable_rdp = False
         
         smb_mounts = getattr(args, 'smb_mounts', None)
         enable_smbclient = getattr(args, 'enable_smbclient', None)
-        if enable_smbclient is None and (system_type == "pc_dev" or smb_mounts):
+        if enable_smbclient is None and (system_type_definition.default_enable_smbclient or smb_mounts):
             enable_smbclient = True
         elif enable_smbclient is None:
             enable_smbclient = False
         
         include_desktop = (
-            system_type in DESKTOP_SYSTEMS
+            system_type_definition.include_desktop
             or enable_rdp
         )
-        include_cli_tools = system_type in CLI_SYSTEMS
-        include_desktop_apps = system_type == "workstation_desktop"
-        include_workstation_dev_apps = system_type == "workstation_dev"
-        include_pc_dev_apps = system_type == "pc_dev"
-        include_web_server = system_type == "server_web"
-        include_web_firewall = system_type == "server_web"
+        include_cli_tools = system_type_definition.include_cli_tools
+        include_desktop_apps = system_type_definition.include_desktop_apps
+        include_workstation_dev_apps = system_type_definition.include_workstation_dev_apps
+        include_pc_dev_apps = system_type_definition.include_pc_dev_apps
+        include_web_server = system_type_definition.include_web_server
+        include_web_firewall = system_type_definition.include_web_firewall
         
         no_restart = getattr(args, 'no_restart', None)
         if no_restart is None:
-            no_restart = system_type == "server_proxmox"
+            no_restart = system_type_definition.default_no_restart
         
         return cls(
             host=args.host,

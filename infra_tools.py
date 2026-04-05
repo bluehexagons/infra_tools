@@ -31,7 +31,7 @@ from typing import Optional, Tuple
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from lib.cache import load_setup_command, merge_setup_configs, save_setup_command
-from lib.config import SYSTEM_TYPES, SetupConfig
+from lib.config import SetupConfig
 from lib.credentials import (
     list_workspace_credentials,
     prepare_runtime_config,
@@ -40,6 +40,7 @@ from lib.credentials import (
     store_cli_credentials,
 )
 from lib.display import print_name_and_tags, print_setup_summary, print_success_header
+from lib.plugin_registry import format_system_type_help, get_system_type_names
 from lib.setup_common import REMOTE_SCRIPT_PATH, run_remote_setup
 from lib.system_utils import get_current_username
 from lib.validators import validate_host, validate_username
@@ -47,18 +48,13 @@ from lib.workspace import get_workspace_dir, set_workspace_dir
 from smb.samba_steps import validate_samba_share_credentials
 
 
-INFRA_TOOLS_EPILOG = """Available Commands:
+def _build_infra_tools_epilog() -> str:
+    return f"""Available Commands:
   setup <type> <host> [args]   Run initial setup for a system type
   patch <host> [args]          Patch/update an existing system
 
 System Types for setup:
-  workstation_desktop  Desktop workstation with GUI
-  pc_dev              PC development environment
-  workstation_dev     Developer workstation
-  server_dev          Development server
-  server_web          Web server
-  server_lite         Lightweight server
-  server_proxmox      Proxmox host server
+{format_system_type_help()}
 
 Examples:
   infra_tools.py setup server_web 192.168.1.100 admin --ssl
@@ -72,7 +68,7 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
         prog="infra_tools.py",
         description="Unified infrastructure setup and management tool",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=INFRA_TOOLS_EPILOG
+        epilog=_build_infra_tools_epilog()
     )
     parser.add_argument(
         "--workspace",
@@ -90,7 +86,7 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
     )
     setup_parser.add_argument(
         "system_type",
-        choices=SYSTEM_TYPES,
+        choices=get_system_type_names(),
         help="Type of system to set up"
     )
     setup_parser.add_argument(

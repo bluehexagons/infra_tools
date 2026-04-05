@@ -5,7 +5,8 @@ from __future__ import annotations
 import argparse
 
 
-from lib.config import SYSTEM_TYPES, MACHINE_TYPES, DEFAULT_MACHINE_TYPE
+from lib.config import MACHINE_TYPES, DEFAULT_MACHINE_TYPE
+from lib.plugin_registry import get_system_type_names
 
 
 def create_setup_argument_parser(
@@ -58,7 +59,7 @@ def create_setup_argument_parser(
     
     if for_remote:
         parser.add_argument("--system-type", dest="system_type", 
-                           choices=SYSTEM_TYPES,
+                           choices=get_system_type_names(),
                            help="System type to setup")
         parser.add_argument("--username", default=None,
                            help="Username (defaults to current user, not used for server_proxmox)")
