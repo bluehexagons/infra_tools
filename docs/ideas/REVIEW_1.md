@@ -82,7 +82,7 @@ This document outlines a plan for major architectural and security improvements 
 - Separate CLI/public configuration from internal/runtime state and persisted workspace state
 
 #### 2.2 Plugin-Based System Types
-- Status: built-in plugin registry foundation landed; system-type discovery, metadata defaults, conflict detection, lazy step-builder resolution, and explicit base/composition plugin roles now flow through plugin-owned registrations
+- Status: built-in plugin registry foundation landed; system-type discovery, metadata defaults, conflict detection, lazy step-builder resolution, explicit base/composition plugin roles, and plugin-local step-builder entry points now flow through plugin-owned registrations
 - Move current domain directories (e.g., common, security, desktop, web, sync, smb) under a main `plugins/` package
 - Plugins define reusable steps, defaults, and optional system types; shared validators and utility code can live outside plugins when broadly reusable
 - System types are registered by plugins rather than maintained in a central static list
@@ -173,21 +173,21 @@ This document outlines a plan for major architectural and security improvements 
 | 1 | Password-bearing SSH/login CLI flags removed | ✅ Done |
 | 2 | Workspace credentials in `credentials.json` with `0600` permissions | ✅ Done |
 | 3 | Password-based features resolve from workspace store | ✅ Done |
-| 4 | `shell=True` and unsafe command construction addressed | ⚠️ Near done |
+| 4 | `shell=True` and unsafe command construction addressed | ✅ Done for this pass |
 | 5 | Comprehensive input validation for external interfaces | ✅ Done for this pass |
-| 6 | Structured logging without credential exposure | ⚠️ Near done |
+| 6 | Structured logging without credential exposure | ✅ Done for this pass |
 | 7 | Plugin discovery with conflict detection | ⚠️ Partial |
 | 8 | Improved performance and reliability | ⚠️ Partial |
 | 9 | Enhanced extensibility | ⚠️ Partial |
 | 10 | Regression tests for credential/plugin/passwordless behavior | ✅ Done |
 
 ## Next Steps
-1. Finish the last meaningful structured-logging cleanup pass, then decide whether criterion 6 can be marked done for this revision.
-2. Do a final confirmation sweep for concrete unsafe command/execution edges, and mark criterion 4 done if nothing substantive remains.
-3. Decide whether criteria 7-9 need another implementation slice in this pass or should be explicitly deferred with notes.
-4. Keep validation frozen unless adjacent work exposes a specific external-input gap.
-5. Keep dedicated security-testing additions out of scope for this pass.
-6. If this revision continues beyond the remaining REVIEW_1 hardening work, establish CI/CD automation and add pre-commit/type-checking follow-through as a later quality phase.
+1. Criterion 4 is effectively complete for this pass: there are no remaining `shell=True` call sites in the tracked Python codebase, and shared SSH/SCP/rsync builders cover the main remote-execution paths.
+2. Criterion 6 is effectively complete for this pass: the remaining gaps are helper scripts that intentionally keep human-readable interactive output rather than service-style structured logs.
+3. Criterion 7 advanced again in this pass with plugin-local step-builder entry points, but the legacy domain directories are still present and keep this criterion in partial status.
+4. Criteria 8-9 remain partial and depend mostly on broader architectural follow-through rather than another small hardening pass.
+5. Keep validation frozen unless adjacent work exposes a specific external-input gap.
+6. Keep dedicated security-testing additions out of scope for this pass, and treat pre-commit/type-checking follow-through as a later quality phase.
 
 ---
 *This plan will be executed in iterations with regular reviews to ensure alignment with project goals and adjustment based on findings during implementation.*

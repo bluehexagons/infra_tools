@@ -73,6 +73,8 @@ def _discover_plugin_definitions(package_name: str = "plugins") -> list[PluginDe
             continue
         module = importlib.import_module(f"{package_name}.{module_name}")
         plugin_definition = getattr(module, "PLUGIN", None)
+        if plugin_definition is None:
+            continue
         if not isinstance(plugin_definition, PluginDefinition):
             raise ValueError(
                 f"Plugin module {module.__name__!r} must define PLUGIN as PluginDefinition"
