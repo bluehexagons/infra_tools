@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import os
 from pathlib import Path
 import sys
@@ -16,12 +17,22 @@ class TestShellSafety(unittest.TestCase):
         offenders: list[str] = []
 
         for path in repo_root.rglob("*.py"):
-            if any(part.startswith(".") for part in path.relative_to(repo_root).parts):
+            relative_parts = path.relative_to(repo_root).parts
+            if any(part.startswith(".") for part in relative_parts):
                 continue
-            if path.name in {"__pycache__", "test_shell_safety.py"}:
+            if "__pycache__" in relative_parts or path.name == "test_shell_safety.py":
                 continue
-            content = path.read_text(encoding="utf-8")
-            if "shell=True" in content:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            if any(
+                isinstance(node, ast.Call)
+                and any(
+                    keyword.arg == "shell"
+                    and isinstance(keyword.value, ast.Constant)
+                    and keyword.value.value is True
+                    for keyword in node.keywords
+                )
+                for node in ast.walk(tree)
+            ):
                 offenders.append(str(path.relative_to(repo_root)))
 
         self.assertEqual(offenders, [])
