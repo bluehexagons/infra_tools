@@ -442,25 +442,29 @@ def main() -> int:
     elif args.command == "patch":
         return run_patch_command(args)
     elif args.command == "credentials":
-        if args.credentials_command == "set":
-            set_workspace_credential(args.username, args.password)
-            print(f"Saved credential for {args.username} in {get_workspace_dir()}")
-            return 0
-        if args.credentials_command == "list":
-            usernames = list_workspace_credentials()
-            if not usernames:
-                print("No saved credentials.")
+        try:
+            if args.credentials_command == "set":
+                set_workspace_credential(args.username, args.password)
+                print(f"Saved credential for {args.username} in {get_workspace_dir()}")
                 return 0
-            for username in usernames:
-                print(username)
-            return 0
-        if args.credentials_command == "remove":
-            removed = remove_workspace_credential(args.username)
-            if removed:
-                print(f"Removed credential for {args.username}")
-            else:
-                print(f"No saved credential for {args.username}")
-            return 0
+            if args.credentials_command == "list":
+                usernames = list_workspace_credentials()
+                if not usernames:
+                    print("No saved credentials.")
+                    return 0
+                for username in usernames:
+                    print(username)
+                return 0
+            if args.credentials_command == "remove":
+                removed = remove_workspace_credential(args.username)
+                if removed:
+                    print(f"Removed credential for {args.username}")
+                else:
+                    print(f"No saved credential for {args.username}")
+                return 0
+        except ValueError as e:
+            print(f"Error: {e}")
+            return 1
         print("Error: credentials command required (set, list, remove)")
         return 1
     else:

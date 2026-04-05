@@ -18,6 +18,12 @@ def _normalize_credential_username(username: str) -> str:
     normalized = username.strip()
     if not normalized:
         raise ValueError("Credential username must not be empty")
+    if ":" in normalized:
+        raise ValueError("Credential username must not contain ':'")
+    if "," in normalized:
+        raise ValueError("Credential username must not contain ','")
+    if any(ord(char) < 32 or ord(char) == 127 for char in normalized):
+        raise ValueError("Credential username must not contain control characters")
     return normalized
 
 

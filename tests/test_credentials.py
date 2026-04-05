@@ -98,6 +98,14 @@ class TestWorkspaceCredentials(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Missing credential for SMB mount user: mountuser"):
                 prepare_runtime_config(config, tmpdir)
 
+    def test_set_workspace_credential_rejects_separator_username(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with self.assertRaisesRegex(ValueError, "Credential username must not contain ':'"):
+                set_workspace_credential("bad:user", "secret1", tmpdir)
+
+            with self.assertRaisesRegex(ValueError, "Credential username must not contain ','"):
+                set_workspace_credential("bad,user", "secret1", tmpdir)
+
 
 if __name__ == "__main__":
     unittest.main()

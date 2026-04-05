@@ -31,6 +31,33 @@ class TestWorkspaceCli(unittest.TestCase):
         self.assertEqual(args.credentials_command, "list")
 
     @patch("builtins.print")
+    @patch("infra_tools.set_workspace_credential", side_effect=ValueError("Credential username must not contain ':'"))
+    def test_infra_tools_credentials_set_rejects_invalid_username(
+        self,
+        _mock_set_credential,
+        mock_print,
+    ):
+        parser = unittest.mock.MagicMock()
+        setup_parser = unittest.mock.MagicMock()
+        patch_parser = unittest.mock.MagicMock()
+        args = unittest.mock.MagicMock()
+        args.command = "credentials"
+        args.credentials_command = "set"
+        args.username = "bad:user"
+        args.password = "secret"
+        args.workspace = None
+        parser.parse_args.return_value = args
+
+        with patch(
+            "infra_tools.create_infra_tools_parser",
+            return_value=(parser, setup_parser, patch_parser),
+        ):
+            result = infra_tools.main()
+
+        self.assertEqual(result, 1)
+        mock_print.assert_called_with("Error: Credential username must not contain ':'")
+
+    @patch("builtins.print")
     @patch("infra_tools.validate_workspace_dir", side_effect=ValueError("bad workspace"))
     @patch("infra_tools.set_workspace_dir")
     def test_infra_tools_main_rejects_invalid_workspace(

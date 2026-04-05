@@ -120,7 +120,7 @@ This document outlines a plan for major architectural and security improvements 
 
 ### Phase 3: Validation and Type Safety
 #### 3.1 Comprehensive Input Validation
-- Status: workspace paths and notification targets are now validated before setup/patch entry points switch process state or start remote execution
+- Status: workspace paths, notification targets, and credential usernames with ambiguous separators are now validated before setup/patch or credential-management flows continue
 - Implement validation decorators/middleware for all entry points
 - Create reusable validation components for common patterns (hostnames, ports, paths, etc.)
 - Add range validation for numeric values
@@ -155,7 +155,7 @@ This document outlines a plan for major architectural and security improvements 
 ### Phase 5: Testing and Quality Assurance
 
 #### 5.1 Test Strategy — ✅ IN PROGRESS
-- 853 tests passing across the codebase
+- 855 tests passing across the codebase
 - New tests: `test_credentials.py`, `test_workspace_cli.py`, `test_config.py`, `test_setup_common.py`, `test_plugin_registry.py`, `test_ssh_utils.py`, `test_browser_steps.py`
 - **TODO**: Property-based testing, integration tests for common setup scenarios
 
@@ -184,7 +184,7 @@ This document outlines a plan for major architectural and security improvements 
 1. ~~Review and approve this plan~~ ✅ Done
 2. ~~Define the `credentials` subcommand UX and `credentials.json` schema/file-permission expectations~~ ✅ Done
 3. ~~Define the SSH/SCP transfer mechanism for deployment credentials~~ ✅ Decided: SCP over existing SSH connection, temp path `/tmp/infra_tools-creds-*`, `0600` permissions, cleanup on success/failure
-4. Expand validation further across more external inputs now that the first structured-logging service slices are in place
+4. Expand validation further across more external inputs now that workspace, notification, and credential-name checks are in place
 5. Continue structured logging adoption in other long-running services/helpers that still emit free-form diagnostics
 6. Establish CI/CD pipeline for automated testing
 7. Add security testing (bandit, semgrep, fuzz testing)
