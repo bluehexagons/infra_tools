@@ -222,6 +222,39 @@ def validate_deploy_targets(targets: Optional[list[str]]) -> None:
             raise ValueError(f"Invalid deploy target host: {target}")
 
 
+def validate_deploy_specs(deploy_specs: Optional[list[list[str]]]) -> None:
+    """Validate deploy specs before setup or patch execution."""
+
+    if not deploy_specs:
+        return
+
+    from lib.deploy_utils import parse_deploy_spec
+    from lib.validators import validate_host
+
+    for deploy_spec_entry in deploy_specs:
+        if len(deploy_spec_entry) != 2:
+            raise ValueError("--deploy requires DOMAIN_OR_PATH and GIT_URL")
+
+        deploy_specs_str, git_url = deploy_spec_entry
+        if not deploy_specs_str or not str(deploy_specs_str).strip():
+            raise ValueError("Deploy target spec must be a non-empty string")
+        if not git_url or not str(git_url).strip():
+            raise ValueError("Deploy git URL must be a non-empty string")
+
+        for raw_deploy_spec in str(deploy_specs_str).split(","):
+            deploy_spec = raw_deploy_spec.strip()
+            if not deploy_spec:
+                raise ValueError("Deploy target spec list must not contain empty entries")
+
+            if deploy_spec.startswith("/"):
+                validate_filesystem_path(deploy_spec, must_exist=False)
+                continue
+
+            domain, _path = parse_deploy_spec(deploy_spec)
+            if not domain or not validate_host(domain):
+                raise ValueError(f"Invalid deploy domain: {domain or deploy_spec}")
+
+
 def validate_positive_integer(value: str, name: str = "value") -> int:
     """Validate and convert string to positive integer.
     

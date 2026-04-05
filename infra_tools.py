@@ -45,7 +45,7 @@ from lib.plugin_registry import format_system_type_help, get_system_type_names
 from lib.setup_common import REMOTE_SCRIPT_PATH, run_remote_setup
 from lib.system_utils import get_current_username
 from lib.validators import validate_host, validate_username
-from lib.validation import validate_deploy_targets, validate_workspace_dir
+from lib.validation import validate_deploy_specs, validate_deploy_targets, validate_workspace_dir
 from lib.workspace import get_workspace_dir, set_workspace_dir
 from smb.samba_steps import validate_samba_share_credentials
 
@@ -298,6 +298,7 @@ def run_setup_command(args: argparse.Namespace) -> int:
     try:
         runtime_config = prepare_runtime_config(config)
         validate_notification_args(runtime_config.notify_specs)
+        validate_deploy_specs(runtime_config.deploy_specs)
         validate_deploy_targets(runtime_config.deploy_targets)
         validate_samba_share_credentials(runtime_config)
     except ValueError as e:
@@ -366,6 +367,7 @@ def run_patch_command(args: argparse.Namespace) -> int:
     try:
         runtime_config = prepare_runtime_config(merged_config)
         validate_notification_args(runtime_config.notify_specs)
+        validate_deploy_specs(runtime_config.deploy_specs)
         validate_deploy_targets(runtime_config.deploy_targets)
         validate_samba_share_credentials(runtime_config)
     except ValueError as e:

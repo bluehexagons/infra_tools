@@ -10,6 +10,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.validation import (
+    validate_deploy_specs,
     validate_deploy_targets,
     validate_directory_empty,
     validate_network_endpoint,
@@ -103,6 +104,28 @@ class TestValidateDeployTargets(unittest.TestCase):
     def test_invalid_target_fails(self):
         with self.assertRaisesRegex(ValueError, "Invalid deploy target host: bad target"):
             validate_deploy_targets(['bad target'])
+
+
+class TestValidateDeploySpecs(unittest.TestCase):
+    def test_none_passes(self):
+        validate_deploy_specs(None)
+
+    def test_valid_domain_and_path_specs_pass(self):
+        validate_deploy_specs([
+            ['example.com/blog,/srv/www/app', 'https://github.com/user/repo.git'],
+        ])
+
+    def test_invalid_domain_fails(self):
+        with self.assertRaisesRegex(ValueError, "Invalid deploy domain: bad domain"):
+            validate_deploy_specs([['bad domain', 'https://github.com/user/repo.git']])
+
+    def test_empty_git_url_fails(self):
+        with self.assertRaisesRegex(ValueError, "Deploy git URL must be a non-empty string"):
+            validate_deploy_specs([['example.com', '']])
+
+    def test_empty_deploy_spec_entry_fails(self):
+        with self.assertRaisesRegex(ValueError, "Deploy target spec list must not contain empty entries"):
+            validate_deploy_specs([['example.com,,other.example.com', 'https://github.com/user/repo.git']])
 
 
 class TestValidateWorkspaceDir(unittest.TestCase):
