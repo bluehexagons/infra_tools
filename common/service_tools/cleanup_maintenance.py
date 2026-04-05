@@ -7,10 +7,11 @@ import os
 import shutil
 import subprocess
 import sys
+from logging import INFO, WARNING
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
-from lib.logging_utils import get_service_logger
+from lib.logging_utils import get_service_logger, log_event
 from lib.maintenance_defaults import APT_LOCK_OPTIONS, JOURNAL_MAX_USE
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
 
@@ -35,10 +36,10 @@ def run_cleanup_command(
     result = run_command(command, env=env)
     if result.returncode != 0:
         details = result.stderr.strip() or result.stdout.strip() or f"{action} failed"
-        logger.warning("%s failed: %s", action, details)
+        log_event(logger, f"{action} failed", level=WARNING, stderr=details)
         return f"{action}: {details}"
 
-    logger.info("%s completed", action)
+    log_event(logger, f"{action} completed", level=INFO)
     return None
 
 
@@ -46,7 +47,7 @@ def cleanup_apt_cache() -> list[str]:
     """Clean APT package caches when apt-get is available."""
     apt_get = shutil.which("apt-get")
     if not apt_get:
-        logger.info("apt-get not found, skipping APT cache cleanup")
+        log_event(logger, "apt-get not found, skipping APT cache cleanup")
         return []
 
     env = os.environ.copy()
@@ -74,13 +75,13 @@ def cleanup_optional_cache(
         if executable_path:
             return run_cleanup_command([executable_path] + args, action)
 
-    logger.info("%s not available, skipping", action)
+    log_event(logger, f"{action} not available, skipping")
     return None
 
 
 def main() -> int:
     """Run system cleanup tasks and notify on failures."""
-    logger.info("Starting cleanup maintenance")
+    log_event(logger, "Starting cleanup maintenance")
     notification_configs = load_notification_configs_from_state(logger)
 
     failures = cleanup_apt_cache()
@@ -108,7 +109,7 @@ def main() -> int:
         )
         return 1
 
-    logger.info("Cleanup maintenance completed successfully")
+    log_event(logger, "Cleanup maintenance completed successfully")
     return 0
 
 

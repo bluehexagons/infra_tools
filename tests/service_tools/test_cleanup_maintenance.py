@@ -18,10 +18,14 @@ class TestCleanupMaintenance(unittest.TestCase):
     @patch("common.service_tools.cleanup_maintenance.cleanup_apt_cache", return_value=[])
     @patch("common.service_tools.cleanup_maintenance.load_notification_configs_from_state", return_value=[])
     def test_successful_cleanup_returns_zero(self, _configs, mock_apt, mock_optional):
-        result = cleanup_maintenance.main()
+        with self.assertLogs(cleanup_maintenance.logger, level="INFO") as logs:
+            result = cleanup_maintenance.main()
         self.assertEqual(result, 0)
         mock_apt.assert_called_once()
         self.assertEqual(mock_optional.call_count, 6)
+        joined = "\n".join(logs.output)
+        self.assertIn("Starting cleanup maintenance", joined)
+        self.assertIn("Cleanup maintenance completed successfully", joined)
 
     @patch("common.service_tools.cleanup_maintenance.send_notification_safe")
     @patch("common.service_tools.cleanup_maintenance.cleanup_optional_cache", side_effect=[None, "journal vacuum: failed", None, None, None, None])
@@ -36,6 +40,21 @@ class TestCleanupMaintenance(unittest.TestCase):
 
 
 class TestCleanupHelpers(unittest.TestCase):
+    @patch("common.service_tools.cleanup_maintenance.run_command")
+    def test_run_cleanup_command_logs_structured_failure(self, mock_run_command):
+        mock_run_command.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=1,
+            stdout="",
+            stderr="permission denied",
+        )
+
+        with self.assertLogs(cleanup_maintenance.logger, level="WARNING") as logs:
+            failure = cleanup_maintenance.run_cleanup_command(["apt-get", "clean"], "APT clean")
+
+        self.assertEqual(failure, "APT clean: permission denied")
+        self.assertIn("APT clean failed | stderr='permission denied'", "\n".join(logs.output))
+
     @patch("common.service_tools.cleanup_maintenance.run_command")
     @patch("common.service_tools.cleanup_maintenance.shutil.which", return_value="/usr/bin/apt-get")
     def test_cleanup_apt_cache_uses_noninteractive_env(self, _which, mock_run_command):
