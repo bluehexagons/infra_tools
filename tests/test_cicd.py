@@ -516,6 +516,75 @@ class TestRemoteDeployScriptExecution(unittest.TestCase):
         self.assertEqual(mock_run.call_args.kwargs['input'], 'echo hello\n')
         self.assertEqual(mock_run.call_args.args[0], ['ssh', 'deploy@app1', 'bash -s --'])
 
+    @patch('lib.remote_deploy.get_deploy_target', return_value=None)
+    def test_remote_deployment_logs_unknown_target(self, _mock_get_target):
+        from web.service_tools.cicd_executor import perform_remote_deployment
+
+        with tempfile.NamedTemporaryFile(mode='w', delete=False) as log_file:
+            log_path = log_file.name
+
+        try:
+            with self.assertLogs(cicd_executor.logger, level='ERROR') as logs:
+                result = perform_remote_deployment(
+                    workspace='/tmp/workspace',
+                    deploy_target='missing.example.com',
+                    deploy_spec=None,
+                    repo_url='https://example.com/repo.git',
+                    commit_sha='abc123',
+                    log_file=log_path,
+                    repo_config={},
+                )
+        finally:
+            os.unlink(log_path)
+
+        self.assertFalse(result)
+        self.assertIn("Unknown deploy target | deploy_target='missing.example.com'", "\n".join(logs.output))
+
+    @patch('web.service_tools.cicd_executor.subprocess.run', return_value=subprocess.CompletedProcess(args=['ssh'], returncode=0, stdout='ok', stderr=''))
+    @patch('lib.remote_deploy._build_ssh_stdin_script_cmd', return_value=['ssh', 'deploy@app1', 'bash -s --'])
+    @patch('lib.remote_deploy.reload_nginx', return_value=True)
+    @patch('lib.remote_deploy.push_nginx_config', return_value=True)
+    @patch('lib.remote_deploy.push_artifact', return_value=True)
+    @patch('lib.remote_deploy.get_deploy_target')
+    def test_remote_deployment_logs_success(
+        self,
+        mock_get_target,
+        _mock_push_artifact,
+        _mock_push_nginx,
+        _mock_reload_nginx,
+        _mock_build_ssh_stdin,
+        _mock_run,
+    ):
+        from web.service_tools.cicd_executor import perform_remote_deployment
+
+        mock_get_target.return_value = {'host': 'app1.example.com', 'base_dir': '/var/www'}
+
+        with tempfile.TemporaryDirectory() as workspace:
+            script_path = os.path.join(workspace, 'deploy.sh')
+            with open(script_path, 'w') as script_file:
+                script_file.write('echo hello\n')
+            with tempfile.NamedTemporaryFile(mode='w', delete=False) as log_file:
+                log_path = log_file.name
+
+            try:
+                with self.assertLogs(cicd_executor.logger, level='INFO') as logs:
+                    result = perform_remote_deployment(
+                        workspace=workspace,
+                        deploy_target='app1.example.com',
+                        deploy_spec=None,
+                        repo_url='https://example.com/repo.git',
+                        commit_sha='abc123',
+                        log_file=log_path,
+                        repo_config={'scripts': {'deploy': 'deploy.sh'}},
+                    )
+            finally:
+                os.unlink(log_path)
+
+        self.assertTrue(result)
+        output = "\n".join(logs.output)
+        self.assertIn("Detected project type | deploy_target='app1.example.com' project_type='unknown'", output)
+        self.assertIn("Remote deployment completed | deploy_target='app1.example.com' remote_path='/var/www/root'", output)
+
 
 class TestExecutorStructuredLogging(unittest.TestCase):
     @patch("web.service_tools.cicd_executor.os.path.exists", return_value=False)

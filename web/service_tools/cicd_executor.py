@@ -315,7 +315,7 @@ def perform_remote_deployment(
     
     target = get_deploy_target(deploy_target)
     if not target:
-        logger.error(f"Unknown deploy target: {deploy_target}")
+        log_event(logger, "Unknown deploy target", level=40, deploy_target=deploy_target)
         with open(log_file, 'a') as log:
             log.write(f"\n✗ Unknown deploy target: {deploy_target}\n")
         return False
@@ -326,7 +326,7 @@ def perform_remote_deployment(
         domain, path = parse_deploy_spec(deploy_spec)
     
     project_type = detect_project_type(workspace)
-    logger.info(f"Detected project type: {project_type}")
+    log_event(logger, "Detected project type", deploy_target=deploy_target, project_type=project_type)
     
     serve_path = get_project_root(workspace, project_type)
     base_dir = target.get('base_dir', '/var/www')
@@ -344,7 +344,7 @@ def perform_remote_deployment(
     exclude_patterns = ['.git', 'node_modules', '__pycache__', '*.log']
     
     if not push_artifact(serve_path, deploy_target, remote_path, exclude_patterns):
-        logger.error("Failed to push artifact to remote server")
+        log_event(logger, "Failed to push artifact to remote server", level=40, deploy_target=deploy_target, remote_path=remote_path)
         with open(log_file, 'a') as log:
             log.write("✗ Failed to push artifact\n")
         return False
@@ -364,7 +364,7 @@ def perform_remote_deployment(
         nginx_config = generate_merged_nginx_config(domain, [deployment])
         
         if not push_nginx_config(nginx_config, deploy_target, domain):
-            logger.error("Failed to push nginx config")
+            log_event(logger, "Failed to push nginx config", level=40, deploy_target=deploy_target, domain=domain)
             with open(log_file, 'a') as log:
                 log.write("✗ Failed to push nginx config\n")
             return False
@@ -373,7 +373,7 @@ def perform_remote_deployment(
             log.write(f"✓ Nginx config pushed for {domain}\n")
         
         if not reload_nginx(deploy_target):
-            logger.error("Failed to reload nginx on remote server")
+            log_event(logger, "Failed to reload nginx on remote server", level=40, deploy_target=deploy_target, domain=domain)
             with open(log_file, 'a') as log:
                 log.write("✗ Failed to reload nginx\n")
             return False
@@ -387,13 +387,13 @@ def perform_remote_deployment(
         target_config = get_deploy_target(deploy_target)
         
         if not target_config:
-            logger.error(f"Deploy target not found: {deploy_target}")
+            log_event(logger, "Deploy target not found", level=40, deploy_target=deploy_target)
             return False
         
         script_path = deploy_script if os.path.isabs(deploy_script) else os.path.join(workspace, deploy_script)
         
         if not os.path.exists(script_path):
-            logger.warning(f"Deploy script configured but not found: {script_path}")
+            log_event(logger, "Deploy script configured but not found", level=30, script_path=script_path, deploy_target=deploy_target)
             with open(log_file, 'a') as log:
                 log.write(f"\n⚠ Deploy script not found: {script_path}\n")
         else:
@@ -416,13 +416,13 @@ def perform_remote_deployment(
                         log.write(f"Errors:\n{result.stderr}\n")
                 
                 if result.returncode != 0:
-                    logger.error(f"Deploy script failed: {result.stderr}")
+                    log_event(logger, "Deploy script failed", level=40, deploy_target=deploy_target, stderr=result.stderr.strip())
                     return False
             except Exception as e:
-                logger.error(f"Failed to run deploy script: {e}")
+                log_event(logger, "Failed to run deploy script", level=40, deploy_target=deploy_target, error=str(e))
                 return False
     
-    logger.info(f"Remote deployment to {deploy_target} completed")
+    log_event(logger, "Remote deployment completed", deploy_target=deploy_target, remote_path=remote_path)
     return True
 
 
