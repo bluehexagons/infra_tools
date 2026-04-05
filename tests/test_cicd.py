@@ -576,6 +576,24 @@ class TestCleanupOldBuildLogs(unittest.TestCase):
 
         self.assertEqual(removed, 0)
 
+    def test_cleanup_logs_structured_summary(self):
+        """Cleanup summary uses structured logging context."""
+        from web.service_tools.cicd_executor import cleanup_old_build_logs, logger
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            old_log = os.path.join(tmpdir, 'abc12345.log')
+            with open(old_log, 'w') as f:
+                f.write('old build log')
+            old_time = time.time() - (40 * 24 * 60 * 60)
+            os.utime(old_log, (old_time, old_time))
+
+            with patch('web.service_tools.cicd_executor.LOGS_DIR', tmpdir):
+                with self.assertLogs(logger, level='INFO') as logs:
+                    removed = cleanup_old_build_logs(days_to_keep=30)
+
+        self.assertEqual(removed, 1)
+        self.assertIn("Cleaned up old build logs | days_to_keep=30 removed_count=1", "\n".join(logs.output))
+
 
 class TestCleanupStaleWorkspaces(unittest.TestCase):
     """Test stale workspace cleanup."""
@@ -674,6 +692,22 @@ class TestCleanupStaleWorkspaces(unittest.TestCase):
 
             self.assertEqual(removed, 0)
             self.assertTrue(os.path.exists(stray_file))
+
+    def test_logs_structured_stale_workspace_removal(self):
+        """Stale workspace removals include structured workspace context."""
+        from web.service_tools.cicd_executor import cleanup_stale_workspaces, logger
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            stale_ws = os.path.join(tmpdir, 'old-repo')
+            os.makedirs(stale_ws)
+            config = {'repositories': [{'url': 'https://github.com/org/other-repo.git'}]}
+
+            with patch('web.service_tools.cicd_executor.WORKSPACES_DIR', tmpdir):
+                with self.assertLogs(logger, level='INFO') as logs:
+                    removed = cleanup_stale_workspaces(config)
+
+        self.assertEqual(removed, 1)
+        self.assertIn("Removed stale workspace | workspace='old-repo'", "\n".join(logs.output))
 
 
 if __name__ == '__main__':

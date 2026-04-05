@@ -24,7 +24,7 @@ from typing import Optional
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
-from lib.logging_utils import get_service_logger
+from lib.logging_utils import get_service_logger, log_event
 from lib.notifications import load_notification_configs_from_state, send_notification
 
 logger = get_service_logger('cicd_executor', 'web', use_syslog=True)
@@ -480,7 +480,12 @@ def cleanup_old_build_logs(days_to_keep: int = 30) -> int:
             logger.warning(f"Failed to remove old build log {filename}: {e}")
 
     if removed_count > 0:
-        logger.info(f"Cleaned up {removed_count} old build log(s) (older than {days_to_keep} days)")
+        log_event(
+            logger,
+            "Cleaned up old build logs",
+            removed_count=removed_count,
+            days_to_keep=days_to_keep,
+        )
 
     return removed_count
 
@@ -520,7 +525,7 @@ def cleanup_stale_workspaces(config: dict) -> int:
                 try:
                     shutil.rmtree(workspace_path)
                     removed_count += 1
-                    logger.info(f"Removed stale workspace: {name}")
+                    log_event(logger, "Removed stale workspace", workspace=name)
                 except OSError as e:
                     logger.warning(f"Failed to remove stale workspace {name}: {e}")
 
@@ -529,7 +534,7 @@ def cleanup_stale_workspaces(config: dict) -> int:
 
 def main():
     """Main function to process CI/CD jobs."""
-    logger.info("Starting CI/CD executor")
+    log_event(logger, "Starting CI/CD executor")
     
     os.makedirs(STATE_DIR, exist_ok=True)
     os.makedirs(JOBS_DIR, exist_ok=True)
@@ -542,19 +547,19 @@ def main():
         try:
             fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except (IOError, OSError):
-            logger.info("Another executor instance is running, exiting")
+            log_event(logger, "Another executor instance is running, exiting")
             return 0
         
         job_files = sorted(Path(JOBS_DIR).glob('*.json'))
         config = load_config()
         
         if not job_files:
-            logger.info("No pending jobs")
+            log_event(logger, "No pending jobs")
             cleanup_old_build_logs()
             cleanup_stale_workspaces(config)
             return 0
         
-        logger.info(f"Found {len(job_files)} pending job(s)")
+        log_event(logger, "Found pending jobs", pending_jobs=len(job_files))
         
         success_count = 0
         failure_count = 0
@@ -565,7 +570,12 @@ def main():
             else:
                 failure_count += 1
         
-        logger.info(f"CI/CD executor finished: {success_count} successful, {failure_count} failed")
+        log_event(
+            logger,
+            "CI/CD executor finished",
+            successful_jobs=success_count,
+            failed_jobs=failure_count,
+        )
         
         cleanup_old_build_logs()
         cleanup_stale_workspaces(config)
