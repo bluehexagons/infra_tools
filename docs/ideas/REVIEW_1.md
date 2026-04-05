@@ -134,6 +134,7 @@ This document outlines a plan for major architectural and security improvements 
 ### Phase 4: Error Handling and Observability
 
 #### 4.1 Structured Logging
+- Status: service logging now has a shared `log_event()` helper for stable key=value context, and the webhook receiver uses it for its main CI/CD event logs
 - Keep human-readable CLI output for interactive setup flows
 - Use structured logging for services, helpers, and internal diagnostics where persistent logs are useful
 - Implement log levels (DEBUG, INFO, WARNING, ERROR, CRITICAL)
@@ -154,7 +155,7 @@ This document outlines a plan for major architectural and security improvements 
 ### Phase 5: Testing and Quality Assurance
 
 #### 5.1 Test Strategy — ✅ IN PROGRESS
-- 849 tests passing across the codebase
+- 851 tests passing across the codebase
 - New tests: `test_credentials.py`, `test_workspace_cli.py`, `test_config.py`, `test_setup_common.py`, `test_plugin_registry.py`, `test_ssh_utils.py`, `test_browser_steps.py`
 - **TODO**: Property-based testing, integration tests for common setup scenarios
 
@@ -183,7 +184,7 @@ This document outlines a plan for major architectural and security improvements 
 1. ~~Review and approve this plan~~ ✅ Done
 2. ~~Define the `credentials` subcommand UX and `credentials.json` schema/file-permission expectations~~ ✅ Done
 3. ~~Define the SSH/SCP transfer mechanism for deployment credentials~~ ✅ Decided: SCP over existing SSH connection, temp path `/tmp/infra_tools-creds-*`, `0600` permissions, cleanup on success/failure
-4. Continue implementation by starting structured logging improvements where service/helper diagnostics still rely on plain prints
+4. Continue structured logging adoption in other long-running services/helpers that still emit free-form diagnostics
 5. Expand validation further across more external inputs after the current logging slice
 6. Establish CI/CD pipeline for automated testing
 7. Add security testing (bandit, semgrep, fuzz testing)

@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from lib.logging_utils import (
     get_standard_formatter,
     get_rotating_logger,
+    log_event,
     log_message,
     log_subprocess_result,
     ensure_log_directory,
@@ -79,6 +80,19 @@ class TestLogMessage(unittest.TestCase):
             with open(log_file, 'r') as f:
                 content = f.read()
             self.assertIn('hello world', content)
+
+    def test_log_event_appends_sorted_context(self):
+        logger = logging.getLogger('test_log_event_context')
+        with self.assertLogs(logger, level='INFO') as logs:
+            log_event(logger, 'webhook received', repo='repo1', branch='main')
+        self.assertIn("webhook received | branch='main' repo='repo1'", logs.output[0])
+
+    def test_log_event_omits_none_values(self):
+        logger = logging.getLogger('test_log_event_none')
+        with self.assertLogs(logger, level='INFO') as logs:
+            log_event(logger, 'executor started', job=None, worker='webhook')
+        self.assertIn("executor started | worker='webhook'", logs.output[0])
+        self.assertNotIn("job=", logs.output[0])
 
 
 class TestEnsureLogDirectory(unittest.TestCase):

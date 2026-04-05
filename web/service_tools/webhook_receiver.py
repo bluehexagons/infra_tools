@@ -29,7 +29,7 @@ from typing import Optional
 # Add lib directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
-from lib.logging_utils import get_service_logger
+from lib.logging_utils import get_service_logger, log_event
 from lib.notifications import load_notification_configs_from_state, send_notification
 
 # Initialize centralized logger
@@ -109,7 +109,7 @@ def trigger_cicd_job(repo_url: str, ref: str, commit_sha: str, pusher: str) -> b
         with open(job_file, 'w') as f:
             json.dump(job_data, f, indent=2)
         
-        logger.info(f"Created CI/CD job: {job_file}")
+        log_event(logger, "Created CI/CD job", job_file=job_file, repo_url=repo_url, commit_sha=commit_sha[:8])
         
         result = subprocess.run(
             ['systemctl', 'start', 'cicd-executor.service'],
@@ -118,12 +118,17 @@ def trigger_cicd_job(repo_url: str, ref: str, commit_sha: str, pusher: str) -> b
         )
         
         if result.returncode != 0:
-            logger.warning(f"Failed to trigger executor service: {result.stderr}")
+            log_event(
+                logger,
+                "Failed to trigger executor service",
+                level=30,
+                stderr=result.stderr.strip() if result.stderr else "",
+            )
         
         return True
         
     except Exception as e:
-        logger.error(f"Failed to create CI/CD job: {e}")
+        log_event(logger, "Failed to create CI/CD job", level=40, error=str(e), repo_url=repo_url)
         return False
 
 
@@ -154,7 +159,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
         # Verify signature
         signature = self.headers.get('X-Hub-Signature-256')
         if not verify_github_signature(secret, body, signature):
-            logger.warning(f"Invalid signature from {self.client_address[0]}")
+            log_event(logger, "Invalid signature", level=30, client_ip=self.client_address[0])
             self.send_error(403, "Invalid Signature")
             return
         
@@ -176,7 +181,14 @@ class WebhookHandler(BaseHTTPRequestHandler):
             commit_sha = payload.get('after', '')
             pusher = payload.get('pusher', {}).get('name', 'unknown')
             
-            logger.info(f"Received push event: repo={repo_url}, ref={ref}, sha={commit_sha[:8]}")
+            log_event(
+                logger,
+                "Received push event",
+                repo_url=repo_url,
+                ref=ref,
+                commit_sha=commit_sha[:8],
+                pusher=pusher,
+            )
             
             # Load configuration to check if this repo is configured
             config = load_config()
@@ -190,7 +202,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
                     break
             
             if not repo_config:
-                logger.info(f"Repository not configured: {repo_url}")
+                log_event(logger, "Repository not configured", repo_url=repo_url)
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
@@ -202,7 +214,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
             configured_branches = repo_config.get('branches', ['main', 'master'])
             
             if branch not in configured_branches:
-                logger.info(f"Branch not configured: {branch}")
+                log_event(logger, "Branch not configured", branch=branch, repo_url=repo_url)
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
@@ -213,13 +225,13 @@ class WebhookHandler(BaseHTTPRequestHandler):
             success = trigger_cicd_job(repo_url, ref, commit_sha, pusher)
             
             if success:
-                logger.info(f"CI/CD job triggered for {repo_url} @ {commit_sha[:8]}")
+                log_event(logger, "CI/CD job triggered", repo_url=repo_url, commit_sha=commit_sha[:8])
                 self.send_response(202)  # Accepted
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
                 self.wfile.write(json.dumps({"status": "accepted", "commit": commit_sha[:8]}).encode())
             else:
-                logger.error(f"Failed to trigger CI/CD job")
+                logger.error("Failed to trigger CI/CD job")
                 self.send_error(500, "Failed to trigger job")
         
         elif event_type == 'ping':
@@ -232,7 +244,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
         
         else:
             # Ignore other event types
-            logger.info(f"Ignored event type: {event_type}")
+            log_event(logger, "Ignored event type", event_type=event_type)
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
@@ -268,7 +280,7 @@ def main():
     server_address = ('127.0.0.1', port)
     httpd = HTTPServer(server_address, WebhookHandler)
     
-    logger.info(f"Webhook receiver listening on http://127.0.0.1:{port}")
+    log_event(logger, "Webhook receiver listening", bind="127.0.0.1", port=port)
     logger.info("Server is ready to accept webhooks")
     
     try:

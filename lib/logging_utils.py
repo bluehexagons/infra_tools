@@ -214,6 +214,20 @@ def log_message(logger: Logger, message: str, level: int = INFO) -> None:
         print(f"Error writing to log {log_target}: {e}", file=sys.stderr)
 
 
+def log_event(logger: Logger, message: str, level: int = INFO, **context: object) -> None:
+    """Log a message with stable key=value context for service diagnostics."""
+
+    context_parts = [
+        f"{key}={value!r}"
+        for key, value in sorted(context.items())
+        if value is not None
+    ]
+    rendered_message = message
+    if context_parts:
+        rendered_message = f"{message} | {' '.join(context_parts)}"
+    log_message(logger, rendered_message, level=level)
+
+
 def ensure_log_directory(subdir: Optional[str] = None) -> Path:
     """Ensure the log directory exists and return its path.
     
