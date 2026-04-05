@@ -57,12 +57,6 @@ class TestPluginRegistry(unittest.TestCase):
         self.assertEqual(system_type.default_browser, "librewolf")
         self.assertIsNotNone(system_type.step_builder)
 
-    def test_builtin_system_types_use_plugin_local_step_builders(self):
-        for system_type_name in get_system_type_names():
-            system_type = get_system_type_definition(system_type_name)
-            self.assertIsNotNone(system_type.step_builder)
-            self.assertTrue(system_type.step_builder.startswith("plugins."))
-
     def test_custom_step_builder_is_plugin_registered(self):
         config = SetupConfig(
             host="host",

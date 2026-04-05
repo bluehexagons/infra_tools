@@ -82,7 +82,7 @@ This document outlines a plan for major architectural and security improvements 
 - Separate CLI/public configuration from internal/runtime state and persisted workspace state
 
 #### 2.2 Plugin-Based System Types
-- Status: built-in plugin registry foundation landed; system-type discovery, metadata defaults, conflict detection, lazy step-builder resolution, explicit base/composition plugin roles, and plugin-local step-builder entry points now flow through plugin-owned registrations
+- Status: built-in plugin registry foundation landed; system-type discovery, metadata defaults, conflict detection, lazy step-builder resolution, and explicit base/composition plugin roles now flow through plugin-owned registrations
 - Move current domain directories (e.g., common, security, desktop, web, sync, smb) under a main `plugins/` package
 - Plugins define reusable steps, defaults, and optional system types; shared validators and utility code can live outside plugins when broadly reusable
 - System types are registered by plugins rather than maintained in a central static list
@@ -156,8 +156,8 @@ This document outlines a plan for major architectural and security improvements 
 ### Phase 5: Testing and Quality Assurance
 
 #### 5.1 Test Strategy — ✅ IN PROGRESS
-- 962 tests passing across the codebase
-- New tests: `test_credentials.py`, `test_workspace_cli.py`, `test_config.py`, `test_setup_common.py`, `test_plugin_registry.py`, `test_ssh_utils.py`, `test_browser_steps.py`
+- 963 tests passing across the codebase
+- New tests: `test_credentials.py`, `test_workspace_cli.py`, `test_config.py`, `test_setup_common.py`, `test_plugin_registry.py`, `test_ssh_utils.py`, `test_browser_steps.py`, `test_shell_safety.py`
 - **TODO**: Property-based testing, integration tests for common setup scenarios
 
 #### 5.2 Security Testing — ⏸️ OUT OF SCOPE FOR THIS PASS
@@ -184,7 +184,7 @@ This document outlines a plan for major architectural and security improvements 
 ## Next Steps
 1. Criterion 4 is effectively complete for this pass: there are no remaining `shell=True` call sites in the tracked Python codebase, and shared SSH/SCP/rsync builders cover the main remote-execution paths.
 2. Criterion 6 is effectively complete for this pass: the remaining gaps are helper scripts that intentionally keep human-readable interactive output rather than service-style structured logs.
-3. Criterion 7 advanced again in this pass with plugin-local step-builder entry points, but the legacy domain directories are still present and keep this criterion in partial status.
+3. Criterion 7 remains partial: plugin discovery and conflict detection are in place, but the legacy domain directories are still present and broader plugin-owned step/catalog migration is still deferred.
 4. Criteria 8-9 remain partial and depend mostly on broader architectural follow-through rather than another small hardening pass.
 5. Keep validation frozen unless adjacent work exposes a specific external-input gap.
 6. Keep dedicated security-testing additions out of scope for this pass, and treat pre-commit/type-checking follow-through as a later quality phase.
