@@ -329,6 +329,11 @@ def validate_hosted_flags(config: Any) -> None:
     if not config.hosted_node:
         return
 
+    from lib.validators import validate_host
+
+    if not validate_host(config.hosted_node):
+        raise ValueError(f"Invalid hosted node host: {config.hosted_node}")
+
     if not config.container_memory:
         raise ValueError("--memory is required when --hosted is specified")
 

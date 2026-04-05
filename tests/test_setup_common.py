@@ -200,6 +200,7 @@ class TestSetupMainTimingPersistence(unittest.TestCase):
              patch.object(setup_common, "validate_host", return_value=True), \
              patch.object(setup_common, "validate_username", return_value=True), \
              patch.object(setup_common, "prepare_runtime_config", return_value=config), \
+             patch.object(setup_common, "validate_hosted_flags", side_effect=ValueError("Invalid hosted node host: bad host")), \
              patch.object(setup_common, "run_remote_setup") as mock_run_remote:
             result = setup_common.setup_main("server_lite", "Test", lambda c: None)
 
@@ -223,6 +224,7 @@ class TestSetupMainTimingPersistence(unittest.TestCase):
              patch.object(setup_common, "validate_host", return_value=True), \
              patch.object(setup_common, "validate_username", return_value=True), \
              patch.object(setup_common, "prepare_runtime_config", return_value=config), \
+             patch.object(setup_common, "validate_hosted_flags", side_effect=ValueError("Invalid hosted node host: bad host")), \
              patch.object(setup_common, "run_remote_setup") as mock_run_remote:
             result = setup_common.setup_main("server_lite", "Test", lambda c: None)
 
@@ -246,6 +248,7 @@ class TestSetupMainTimingPersistence(unittest.TestCase):
              patch.object(setup_common, "validate_host", return_value=True), \
              patch.object(setup_common, "validate_username", return_value=True), \
              patch.object(setup_common, "prepare_runtime_config", return_value=config), \
+             patch.object(setup_common, "validate_hosted_flags", side_effect=ValueError("Invalid hosted node host: bad host")), \
              patch.object(setup_common, "run_remote_setup") as mock_run_remote:
             result = setup_common.setup_main("server_lite", "Test", lambda c: None)
 

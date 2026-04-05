@@ -292,6 +292,15 @@ class TestValidateHostedFlags(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_hosted_flags(config)
 
+    def test_invalid_hosted_node_host(self):
+        config = _MockConfig(
+            hosted_node='bad host',
+            container_memory='2G',
+            container_storage=[['root', 'auto', '10G']],
+        )
+        with self.assertRaisesRegex(ValueError, "Invalid hosted node host: bad host"):
+            validate_hosted_flags(config)
+
     def test_invalid_storage_amount_for_root(self):
         config = _MockConfig(
             hosted_node='10.0.0.1',
