@@ -188,6 +188,8 @@ class TestCICDSteps(unittest.TestCase):
         start_calls = [call for call in mock_run.call_args_list if 'start' in str(call)]
         self.assertGreater(len(enable_calls), 0)
         self.assertGreater(len(start_calls), 0)
+        written_service = ''.join(call.args[0] for call in mock_service_file().write.call_args_list)
+        self.assertIn('Environment=INFRA_TOOLS_WORKSPACE=/var/lib/infra_tools/cicd', written_service)
     
     @patch('web.cicd_steps.cleanup_service')
     @patch('web.cicd_steps.run')
@@ -204,6 +206,8 @@ class TestCICDSteps(unittest.TestCase):
         # Should reload systemd
         reload_calls = [call for call in mock_run.call_args_list if 'daemon-reload' in str(call)]
         self.assertGreater(len(reload_calls), 0)
+        written_service = ''.join(call.args[0] for call in mock_file().write.call_args_list)
+        self.assertIn('Environment=INFRA_TOOLS_WORKSPACE=/var/lib/infra_tools/cicd', written_service)
     
     @patch('web.cicd_steps.os.path.exists')
     @patch('web.cicd_steps.os.makedirs')
@@ -374,6 +378,39 @@ class TestBuildServerSteps(unittest.TestCase):
         config_data = mock_json_dump.call_args[0][0]
         self.assertIn('app1.example.com', config_data)
         self.assertIn('app2.example.com', config_data)
+
+    @patch('web.build_server_steps.get_known_hosts_path', return_value='/var/lib/infra_tools/cicd/known_hosts')
+    @patch('web.build_server_steps.os.path.exists')
+    @patch('web.build_server_steps.os.makedirs')
+    @patch('builtins.open', new_callable=mock_open)
+    @patch('web.build_server_steps.run')
+    def test_configure_deploy_known_hosts_uses_workspace_file(
+        self,
+        mock_run,
+        mock_file,
+        mock_makedirs,
+        mock_exists,
+        _mock_known_hosts_path,
+    ):
+        mock_exists.side_effect = lambda path: path == '/var/lib/infra_tools/cicd/known_hosts'
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout='app1 ssh-ed25519 AAAA\n'),
+            MagicMock(returncode=0, stdout='app2 ssh-ed25519 BBBB\n'),
+            MagicMock(returncode=0),
+            MagicMock(returncode=0),
+        ]
+        mock_config = MagicMock()
+        mock_config.deploy_targets = ['app1.example.com', 'app2.example.com']
+
+        from web.build_server_steps import configure_deploy_known_hosts
+        configure_deploy_known_hosts(mock_config)
+
+        mock_makedirs.assert_called_once_with('/var/lib/infra_tools/cicd', mode=0o700, exist_ok=True)
+        write_paths = [call.args[0] for call in mock_file.call_args_list]
+        self.assertEqual(
+            write_paths,
+            ['/var/lib/infra_tools/cicd/known_hosts', '/var/lib/infra_tools/cicd/known_hosts'],
+        )
 
 
 class TestRemoteDeploy(unittest.TestCase):

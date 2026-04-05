@@ -175,6 +175,7 @@ Type=simple
 User=webhook
 Group=webhook
 WorkingDirectory=/opt/infra_tools/web/service_tools
+Environment=INFRA_TOOLS_WORKSPACE=/var/lib/infra_tools/cicd
 EnvironmentFile=/etc/infra_tools/cicd/webhook.env
 ExecStart=/usr/bin/python3 /opt/infra_tools/web/service_tools/webhook_receiver.py
 Restart=always
@@ -224,6 +225,7 @@ Type=oneshot
 User=webhook
 Group=webhook
 WorkingDirectory=/opt/infra_tools/web/service_tools
+Environment=INFRA_TOOLS_WORKSPACE=/var/lib/infra_tools/cicd
 ExecStart=/usr/bin/python3 /opt/infra_tools/web/service_tools/cicd_executor.py
 
 # Security hardening

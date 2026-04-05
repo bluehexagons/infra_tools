@@ -8,6 +8,7 @@ import shlex
 
 from lib.config import SetupConfig
 from lib.remote_utils import run, is_package_installed
+from lib.workspace import get_known_hosts_path
 
 
 def generate_deploy_ssh_key(config: SetupConfig) -> None:
@@ -75,10 +76,10 @@ def configure_deploy_known_hosts(config: SetupConfig) -> None:
         print("  ℹ No deploy targets to add to known_hosts")
         return
     
-    ssh_dir = "/var/lib/infra_tools/cicd/.ssh"
-    known_hosts = f"{ssh_dir}/known_hosts"
+    workspace_dir = "/var/lib/infra_tools/cicd"
+    known_hosts = get_known_hosts_path(workspace_dir)
     
-    os.makedirs(ssh_dir, mode=0o700, exist_ok=True)
+    os.makedirs(os.path.dirname(known_hosts), mode=0o700, exist_ok=True)
     
     for target_host in config.deploy_targets:
         result = run(

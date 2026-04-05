@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -33,7 +34,9 @@ class TestSshUtils(unittest.TestCase):
             "mkdir -p '/tmp/infra tools' && python3 /opt/infra_tools/remote_setup.py --name 'web node'",
         )
 
-    def test_build_ssh_command_with_remote_command(self):
+    @patch("lib.ssh_utils.ensure_workspace_dir")
+    @patch("lib.ssh_utils.get_known_hosts_path", return_value="/tmp/workspace/known_hosts")
+    def test_build_ssh_command_with_remote_command(self, _mock_known_hosts, _mock_ensure_workspace):
         command = build_ssh_command(
             "example.com",
             "deploy",
@@ -52,6 +55,8 @@ class TestSshUtils(unittest.TestCase):
                 "-p",
                 "2222",
                 "-o",
+                "UserKnownHostsFile=/tmp/workspace/known_hosts",
+                "-o",
                 "StrictHostKeyChecking=accept-new",
                 "-o",
                 "BatchMode=yes",
@@ -62,7 +67,9 @@ class TestSshUtils(unittest.TestCase):
             ],
         )
 
-    def test_build_scp_command(self):
+    @patch("lib.ssh_utils.ensure_workspace_dir")
+    @patch("lib.ssh_utils.get_known_hosts_path", return_value="/tmp/workspace/known_hosts")
+    def test_build_scp_command(self, _mock_known_hosts, _mock_ensure_workspace):
         command = build_scp_command(
             "example.com",
             "deploy",
@@ -80,6 +87,8 @@ class TestSshUtils(unittest.TestCase):
                 "-P",
                 "2222",
                 "-o",
+                "UserKnownHostsFile=/tmp/workspace/known_hosts",
+                "-o",
                 "StrictHostKeyChecking=accept-new",
                 "-o",
                 "BatchMode=yes",
@@ -90,11 +99,14 @@ class TestSshUtils(unittest.TestCase):
             ],
         )
 
-    def test_build_rsync_ssh_transport_quotes_key_path(self):
+    @patch("lib.ssh_utils.ensure_workspace_dir")
+    @patch("lib.ssh_utils.get_known_hosts_path", return_value="/tmp/workspace/known_hosts")
+    def test_build_rsync_ssh_transport_quotes_key_path(self, _mock_known_hosts, _mock_ensure_workspace):
         transport = build_rsync_ssh_transport(ssh_key="/tmp/key file", port=2222)
         self.assertIn("ssh", transport)
         self.assertIn("'/tmp/key file'", transport)
         self.assertIn("-p 2222", transport)
+        self.assertIn("UserKnownHostsFile=/tmp/workspace/known_hosts", transport)
 
 
 if __name__ == "__main__":

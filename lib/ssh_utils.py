@@ -5,6 +5,8 @@ from __future__ import annotations
 import shlex
 from typing import Sequence
 
+from lib.workspace import ensure_workspace_dir, get_known_hosts_path
+
 
 def shell_join(argv: Sequence[str]) -> str:
     """Quote an argv sequence for remote shell execution."""
@@ -16,6 +18,13 @@ def chain_remote_commands(commands: Sequence[Sequence[str]]) -> str:
     """Quote and chain multiple remote commands with &&."""
 
     return " && ".join(shell_join(command) for command in commands)
+
+
+def get_workspace_known_hosts_path() -> str:
+    """Return the active workspace known_hosts path, ensuring the workspace exists."""
+
+    ensure_workspace_dir()
+    return get_known_hosts_path()
 
 
 def build_ssh_command(
@@ -37,6 +46,7 @@ def build_ssh_command(
     if port is not None:
         command.extend(["-p", str(port)])
 
+    command.extend(["-o", f"UserKnownHostsFile={get_workspace_known_hosts_path()}"])
     command.extend(["-o", "StrictHostKeyChecking=accept-new"])
     if batch_mode is True:
         command.extend(["-o", "BatchMode=yes"])
@@ -72,6 +82,7 @@ def build_scp_command(
     if port is not None:
         command.extend(["-P", str(port)])
 
+    command.extend(["-o", f"UserKnownHostsFile={get_workspace_known_hosts_path()}"])
     command.extend(["-o", "StrictHostKeyChecking=accept-new"])
     if batch_mode is True:
         command.extend(["-o", "BatchMode=yes"])
@@ -98,6 +109,7 @@ def build_rsync_ssh_transport(
         ssh_command.extend(["-i", ssh_key])
     if port is not None:
         ssh_command.extend(["-p", str(port)])
+    ssh_command.extend(["-o", f"UserKnownHostsFile={get_workspace_known_hosts_path()}"])
     ssh_command.extend(["-o", "StrictHostKeyChecking=accept-new"])
     if batch_mode:
         ssh_command.extend(["-o", "BatchMode=yes"])
