@@ -304,6 +304,37 @@ def validate_smb_mount_specs(smb_mounts: Optional[list[list[str]]]) -> None:
             raise ValueError(f"Subdirectory must start with /: {mount_config['subdir']}")
 
 
+def validate_samba_share_specs(
+    samba_shares: Optional[list[list[str]]],
+    share_credentials: Optional[list[list[str]]] = None,
+) -> None:
+    """Validate Samba share specs before setup or patch execution."""
+
+    if not samba_shares:
+        return
+
+    from smb.samba_steps import parse_share_credentials, parse_share_spec
+
+    credentials = parse_share_credentials(share_credentials)
+
+    for share_spec in samba_shares:
+        share_config = parse_share_spec(share_spec, credentials)
+        share_name = share_config["share_name"]
+        if not share_name or "/" in share_name or "\\" in share_name or " " in share_name:
+            raise ValueError(f"Invalid Samba share name (cannot contain /, \\, or spaces): {share_name}")
+
+        if not share_config["paths"]:
+            raise ValueError(f"No paths specified for share: {share_name}")
+
+        for path in cast(list[str], share_config["paths"]):
+            if not os.path.isabs(path):
+                raise ValueError(f"Share path must be absolute: {path}")
+            validate_filesystem_path(path, must_exist=False)
+
+        if not share_config["users"]:
+            raise ValueError(f"No users specified for share: {share_name}")
+
+
 def validate_positive_integer(value: str, name: str = "value") -> int:
     """Validate and convert string to positive integer.
     

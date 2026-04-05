@@ -208,6 +208,36 @@ class TestWorkspaceCli(unittest.TestCase):
     @patch("builtins.print")
     @patch("infra_tools.validate_samba_share_credentials")
     @patch("infra_tools.prepare_runtime_config")
+    @patch("infra_tools.validate_username", return_value=True)
+    @patch("infra_tools.validate_host", return_value=True)
+    def test_run_setup_command_rejects_invalid_samba_share_spec(
+        self,
+        _mock_validate_host,
+        _mock_validate_username,
+        mock_prepare_runtime_config,
+        _mock_validate_samba,
+        mock_print,
+    ):
+        config = SetupConfig(
+            host="example.com",
+            username="testuser",
+            system_type="server_lite",
+            samba_shares=[["read", "bad/share", "/mnt/docs", "shareuser:secret"]],
+        )
+        mock_prepare_runtime_config.return_value = config
+        args = Namespace(host="example.com", username="testuser", system_type="server_lite")
+
+        with patch("infra_tools.SetupConfig.from_args", return_value=config), \
+             patch("infra_tools.run_remote_setup") as mock_run_remote:
+            result = infra_tools.run_setup_command(args)
+
+        self.assertEqual(result, 1)
+        mock_run_remote.assert_not_called()
+        mock_print.assert_called_with("Error: Invalid Samba share name (cannot contain /, \\, or spaces): bad/share")
+
+    @patch("builtins.print")
+    @patch("infra_tools.validate_samba_share_credentials")
+    @patch("infra_tools.prepare_runtime_config")
     @patch("infra_tools.load_setup_command")
     @patch("infra_tools.validate_username", return_value=True)
     @patch("infra_tools.validate_host", return_value=True)

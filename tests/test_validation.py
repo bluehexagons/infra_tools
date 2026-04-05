@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from lib.validation import (
     validate_deploy_specs,
     validate_deploy_targets,
+    validate_samba_share_specs,
     validate_directory_empty,
     validate_scrub_specs,
     validate_sync_specs,
@@ -181,6 +182,26 @@ class TestValidateSmbMountSpecs(unittest.TestCase):
     def test_invalid_subdir_fails(self):
         with self.assertRaisesRegex(ValueError, "Subdirectory must start with /: subdir"):
             validate_smb_mount_specs([['/mnt/share', '192.168.1.10', 'user:pass', 'docs', 'subdir']])
+
+
+class TestValidateSambaShareSpecs(unittest.TestCase):
+    def test_none_passes(self):
+        validate_samba_share_specs(None)
+
+    def test_valid_share_specs_pass(self):
+        validate_samba_share_specs([['read', 'docs', '/mnt/docs', 'shareuser']], [['shareuser', 'secret']])
+
+    def test_relative_path_fails(self):
+        with self.assertRaisesRegex(ValueError, "Share path must be absolute: relative"):
+            validate_samba_share_specs([['read', 'docs', 'relative', 'shareuser:secret']])
+
+    def test_invalid_share_name_fails(self):
+        with self.assertRaisesRegex(ValueError, r"Invalid Samba share name .*bad/share"):
+            validate_samba_share_specs([['read', 'bad/share', '/mnt/docs', 'shareuser:secret']])
+
+    def test_missing_credential_fails(self):
+        with self.assertRaisesRegex(ValueError, "Missing credential for share user: shareuser"):
+            validate_samba_share_specs([['read', 'docs', '/mnt/docs', 'shareuser']])
 
 
 class TestValidateWorkspaceDir(unittest.TestCase):

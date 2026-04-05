@@ -31,6 +31,7 @@ from lib.notifications import validate_notification_args
 from lib.validation import (
     validate_deploy_specs,
     validate_deploy_targets,
+    validate_samba_share_specs,
     validate_smb_mount_specs,
     validate_scrub_specs,
     validate_sync_specs,
@@ -548,6 +549,7 @@ def execute_patch(config: SetupConfig) -> int:
         validate_sync_specs(runtime_config.sync_specs)
         validate_scrub_specs(runtime_config.scrub_specs)
         validate_smb_mount_specs(runtime_config.smb_mounts)
+        validate_samba_share_specs(runtime_config.samba_shares, runtime_config.share_credentials)
     except ValueError as e:
         print(f"Error: {e}")
         return 1
