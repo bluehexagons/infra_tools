@@ -20,11 +20,12 @@ import fcntl
 import time
 from datetime import datetime
 from typing import Optional
+from logging import ERROR
 
 # Add lib directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
-from lib.logging_utils import get_service_logger
+from lib.logging_utils import get_service_logger, log_event
 from lib.notifications import send_notification, parse_notification_args
 from lib.machine_state import load_setup_config
 from lib.mount_utils import get_mount_ancestor
@@ -283,17 +284,22 @@ def execute_storage_operations() -> dict:
     # Load configuration
     config_dict = load_setup_config()
     if not config_dict:
-        logger.error("No configuration found in machine state")
+        log_event(logger, "No configuration found in machine state", level=ERROR)
         results["success"] = False
         return results
     
     config = RuntimeConfig.from_dict(config_dict)
     notification_configs = parse_notification_args(config.notify_specs)
     
-    logger.info(f"Loaded {len(config.sync_specs)} sync specs, {len(config.scrub_specs)} scrub specs")
+    log_event(
+        logger,
+        "Loaded storage operation specs",
+        sync_specs=len(config.sync_specs),
+        scrub_specs=len(config.scrub_specs),
+    )
     
     if not config.has_storage_ops():
-        logger.info("No storage operations configured")
+        log_event(logger, "No storage operations configured")
         results["end_time"] = datetime.now().isoformat()
         return results
     
@@ -312,9 +318,15 @@ def execute_storage_operations() -> dict:
     
     # Log operation summary
     if total_syncs > 0 or total_scrubs > 0 or total_parity > 0:
-        logger.info(f"Operations due: {total_syncs} sync(s), {total_scrubs} scrub(s), {total_parity} parity update(s)")
+        log_event(
+            logger,
+            "Operations due",
+            syncs_due=total_syncs,
+            scrubs_due=total_scrubs,
+            parity_updates_due=total_parity,
+        )
     else:
-        logger.info("No operations due at this time")
+        log_event(logger, "No operations due at this time")
     
     # Execute syncs first (always run if due)
     if total_syncs > 0 and notification_configs:
@@ -492,7 +504,7 @@ def execute_storage_operations() -> dict:
         send_operation_notification(results, notification_configs, logger, 
                                    friendly_name=config.friendly_name)
     elif total_operations == 0:
-        logger.info("No operations executed - all tasks skipped (not due yet or validation failed)")
+        log_event(logger, "No operations executed - all tasks skipped", reason="not_due_or_validation_failed")
     
     return results
 
@@ -593,8 +605,8 @@ def main():
     # Acquire lock (non-blocking) - if another instance is running, exit cleanly
     with OperationLock(LOCK_FILE) as lock:
         if not lock.acquire(blocking=False):
-            logger.info("Another storage-ops instance is already running, skipping this run")
-            
+            log_event(logger, "Another storage-ops instance is already running, skipping this run")
+        
             # Send notification about lock failure
             if notification_configs:
                 name_prefix = f"[{friendly_name}] " if friendly_name else ""
@@ -610,9 +622,9 @@ def main():
                     )
                 except Exception as e:
                     logger.error(f"Failed to send lock failure notification: {e}")
-            
-            return 0
         
+            return 0
+    
         # Execute operations (individual start notifications sent for long-running operations)
         results = execute_storage_operations()
         

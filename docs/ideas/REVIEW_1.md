@@ -134,7 +134,7 @@ This document outlines a plan for major architectural and security improvements 
 ### Phase 4: Error Handling and Observability
 
 #### 4.1 Structured Logging
-- Status: service logging now has a shared `log_event()` helper for stable key=value context, and the webhook receiver plus the Node/APT/Ruby/uv/cleanup-maintenance/auto-restart services use it for their main event/failure logs
+- Status: service logging now has a shared `log_event()` helper for stable key=value context, and the webhook receiver plus the Node/APT/Ruby/uv/cleanup-maintenance/auto-restart/storage-ops services use it for their main event/failure logs
 - Keep human-readable CLI output for interactive setup flows
 - Use structured logging for services, helpers, and internal diagnostics where persistent logs are useful
 - Implement log levels (DEBUG, INFO, WARNING, ERROR, CRITICAL)

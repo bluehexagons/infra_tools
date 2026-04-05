@@ -401,17 +401,20 @@ class TestOperationLogging(unittest.TestCase):
         
         results = execute_storage_operations()
         
-        # Verify the "No operations due at this time" message was logged
-        info_calls = [call[0][0] for call in logger_mock.info.call_args_list]
+        # Verify the structured "No operations due at this time" message was logged
+        log_calls = [call.args[1] for call in logger_mock.log.call_args_list]
         self.assertTrue(
-            any("No operations due at this time" in msg for msg in info_calls),
-            f"Expected 'No operations due at this time' log message. Got: {info_calls}"
+            any("No operations due at this time" in msg for msg in log_calls),
+            f"Expected 'No operations due at this time' log message. Got: {log_calls}"
         )
         
-        # Verify the final summary message about skipped tasks
+        # Verify the final structured summary message about skipped tasks
         self.assertTrue(
-            any("No operations executed" in msg and "all tasks skipped" in msg for msg in info_calls),
-            f"Expected 'No operations executed - all tasks skipped' message. Got: {info_calls}"
+            any(
+                "No operations executed - all tasks skipped | reason='not_due_or_validation_failed'" in msg
+                for msg in log_calls
+            ),
+            f"Expected structured skipped-task message. Got: {log_calls}"
         )
         
         # Verify no operations were executed
@@ -447,11 +450,14 @@ class TestOperationLogging(unittest.TestCase):
         
         results = execute_storage_operations()
         
-        # Verify the "Operations due" message was logged
-        info_calls = [call[0][0] for call in logger_mock.info.call_args_list]
+        # Verify the structured "Operations due" message was logged
+        log_calls = [call.args[1] for call in logger_mock.log.call_args_list]
         self.assertTrue(
-            any("Operations due: 1 sync(s)" in msg for msg in info_calls),
-            f"Expected 'Operations due: 1 sync(s)' log message. Got: {info_calls}"
+            any(
+                "Operations due | parity_updates_due=0 scrubs_due=0 syncs_due=1" in msg
+                for msg in log_calls
+            ),
+            f"Expected structured operations-due log message. Got: {log_calls}"
         )
         
         # Verify sync was executed
