@@ -6,6 +6,7 @@ import unittest
 import json
 import hmac
 import hashlib
+import subprocess
 import tempfile
 import time
 from unittest.mock import patch, mock_open, MagicMock
@@ -410,6 +411,71 @@ class TestRemoteDeploy(unittest.TestCase):
         target = get_deploy_target('unknown.example.com')
         
         self.assertIsNone(target)
+
+    def test_build_ssh_stdin_script_cmd_uses_bash_stdin(self):
+        """Deploy scripts should stream over stdin instead of being embedded in the command."""
+        from lib.remote_deploy import _build_ssh_stdin_script_cmd
+
+        target = {
+            'host': 'app1.example.com',
+            'user': 'deploy',
+            'ssh_key': '/tmp/key',
+            'ssh_port': 2222,
+        }
+        command = _build_ssh_stdin_script_cmd(target, '/var/www/app one')
+
+        self.assertEqual(command[:6], ['ssh', '-i', '/tmp/key', '-p', '2222', '-o'])
+        self.assertEqual(command[-2], 'deploy@app1.example.com')
+        self.assertEqual(command[-1], "cd '/var/www/app one' && bash -s --")
+
+
+class TestRemoteDeployScriptExecution(unittest.TestCase):
+    @patch('web.service_tools.cicd_executor.logger')
+    @patch('web.service_tools.cicd_executor.subprocess.run')
+    @patch('lib.remote_deploy._build_ssh_stdin_script_cmd', return_value=['ssh', 'deploy@app1', 'bash -s --'])
+    @patch('lib.remote_deploy.reload_nginx', return_value=True)
+    @patch('lib.remote_deploy.push_nginx_config', return_value=True)
+    @patch('lib.remote_deploy.push_artifact', return_value=True)
+    @patch('lib.remote_deploy.get_deploy_target')
+    def test_execute_remote_deployment_streams_script_over_stdin(
+        self,
+        mock_get_target,
+        _mock_push_artifact,
+        _mock_push_nginx,
+        _mock_reload_nginx,
+        _mock_build_ssh_stdin,
+        mock_run,
+        _mock_logger,
+    ):
+        from web.service_tools.cicd_executor import perform_remote_deployment
+
+        mock_get_target.return_value = {'host': 'app1.example.com', 'base_dir': '/var/www'}
+        mock_run.return_value = subprocess.CompletedProcess(args=['ssh'], returncode=0, stdout='ok', stderr='')
+
+        with tempfile.TemporaryDirectory() as workspace:
+            script_path = os.path.join(workspace, 'deploy.sh')
+            with open(script_path, 'w') as script_file:
+                script_file.write('echo hello\n')
+            with tempfile.NamedTemporaryFile(mode='w', delete=False) as log_file:
+                log_path = log_file.name
+
+            try:
+                result = perform_remote_deployment(
+                    workspace=workspace,
+                    deploy_target='app1.example.com',
+                    deploy_spec=None,
+                    repo_url='https://example.com/repo.git',
+                    commit_sha='abc123',
+                    log_file=log_path,
+                    repo_config={'scripts': {'deploy': 'deploy.sh'}},
+                )
+            finally:
+                os.unlink(log_path)
+
+        self.assertTrue(result)
+        mock_run.assert_called_once()
+        self.assertEqual(mock_run.call_args.kwargs['input'], 'echo hello\n')
+        self.assertEqual(mock_run.call_args.args[0], ['ssh', 'deploy@app1', 'bash -s --'])
 
 
 class TestCleanupOldBuildLogs(unittest.TestCase):

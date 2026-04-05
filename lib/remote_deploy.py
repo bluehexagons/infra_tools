@@ -52,6 +52,18 @@ def _build_ssh_cmd(target: JSONDict, remote_cmd: str) -> list[str]:
     )
 
 
+def _build_ssh_stdin_script_cmd(target: JSONDict, working_dir: str) -> list[str]:
+    """Build an SSH command that executes a bash script streamed over stdin."""
+
+    remote_cmd = chain_remote_commands(
+        [
+            ["cd", working_dir],
+            ["bash", "-s", "--"],
+        ]
+    )
+    return _build_ssh_cmd(target, remote_cmd)
+
+
 def push_artifact(
     local_path: str,
     target_host: str,

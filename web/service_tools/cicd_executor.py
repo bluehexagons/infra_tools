@@ -376,7 +376,7 @@ def perform_remote_deployment(
     
     deploy_script = repo_config.get('scripts', {}).get('deploy')
     if deploy_script:
-        from lib.remote_deploy import _build_ssh_cmd
+        from lib.remote_deploy import _build_ssh_stdin_script_cmd
         target_config = get_deploy_target(deploy_target)
         
         if not target_config:
@@ -392,12 +392,17 @@ def perform_remote_deployment(
         else:
             with open(script_path, 'r') as f:
                 script_content = f.read()
-            
-            remote_cmd = f"cd {remote_path} && bash -c {shlex.quote(script_content)}"
-            ssh_cmd = _build_ssh_cmd(target_config, remote_cmd)
+
+            ssh_cmd = _build_ssh_stdin_script_cmd(target_config, remote_path)
             
             try:
-                result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=300)
+                result = subprocess.run(
+                    ssh_cmd,
+                    input=script_content,
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                )
                 with open(log_file, 'a') as log:
                     log.write(f"\nDeploy script output:\n{result.stdout}\n")
                     if result.stderr:

@@ -50,7 +50,7 @@ This document outlines a plan for major architectural and security improvements 
   - Consider NLA (Network Level Authentication) for direct RDP
 
 #### 1.3 Shell Injection Prevention
-- Status: local shell-heavy helpers and the main remote SSH/SCP assembly paths now use shared command builders and quoted remote argv; a smaller tail of remote deployment script execution still remains
+- Status: local shell-heavy helpers, the main remote SSH/SCP assembly paths, and remote deploy script execution now use shared command builders or SSH stdin streaming
 - Audit all subprocess calls and SSH command constructions
 - Replace shell=True usage with list-based arguments where possible
 - Implement proper escaping for unavoidable shell constructions
@@ -152,8 +152,8 @@ This document outlines a plan for major architectural and security improvements 
 ### Phase 5: Testing and Quality Assurance
 
 #### 5.1 Test Strategy — ✅ IN PROGRESS
-- 828 tests passing across the codebase
-- New tests: `test_credentials.py`, `test_workspace_cli.py`, `test_config.py`, `test_setup_common.py`, `test_plugin_registry.py`
+- 830 tests passing across the codebase
+- New tests: `test_credentials.py`, `test_workspace_cli.py`, `test_config.py`, `test_setup_common.py`, `test_plugin_registry.py`, `test_ssh_utils.py`, `test_browser_steps.py`
 - **TODO**: Property-based testing, integration tests for common setup scenarios
 
 #### 5.2 Security Testing — ❌ NOT STARTED
@@ -182,7 +182,7 @@ This document outlines a plan for major architectural and security improvements 
 2. ~~Define the `credentials` subcommand UX and `credentials.json` schema/file-permission expectations~~ ✅ Done
 3. ~~Define the SSH/SCP transfer mechanism for deployment credentials~~ ✅ Decided: SCP over existing SSH connection, temp path `/tmp/infra_tools-creds-*`, `0600` permissions, cleanup on success/failure
 4. Define composition rules for system-type plugins vs. capability plugins now that step assembly is plugin-owned
-5. Continue implementation of Phase 1 by reviewing secure defaults and the remaining remote deploy script execution path
+5. Continue implementation of Phase 1 by reviewing secure defaults
 6. Establish CI/CD pipeline for automated testing
 7. Add security testing (bandit, semgrep, fuzz testing)
 8. Implement pre-commit hooks and type checking in CI
