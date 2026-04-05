@@ -25,6 +25,7 @@ from lib.validation import (
     validate_deploy_specs,
     validate_deploy_targets,
     validate_hosted_flags,
+    validate_smb_mount_specs,
     validate_scrub_specs,
     validate_sync_specs,
     validate_workspace_dir,
@@ -383,6 +384,7 @@ def setup_main(system_type: str, description: str, success_msg_fn: Callable[[Set
         validate_deploy_targets(runtime_config.deploy_targets)
         validate_sync_specs(runtime_config.sync_specs)
         validate_scrub_specs(runtime_config.scrub_specs)
+        validate_smb_mount_specs(runtime_config.smb_mounts)
         validate_samba_share_credentials(runtime_config)
     except ValueError as e:
         print(f"Error: {e}")

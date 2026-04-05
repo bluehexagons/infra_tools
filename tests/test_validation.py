@@ -20,6 +20,7 @@ from lib.validation import (
     validate_memory_string,
     validate_package_name,
     validate_hosted_flags,
+    validate_smb_mount_specs,
     validate_workspace_dir,
 )
 
@@ -160,6 +161,26 @@ class TestValidateScrubSpecs(unittest.TestCase):
     def test_invalid_redundancy_fails(self):
         with self.assertRaisesRegex(ValueError, "Redundancy percentage must be between 1 and 100: 0%"):
             validate_scrub_specs([['/data', '.pardatabase', '0%', 'weekly']])
+
+
+class TestValidateSmbMountSpecs(unittest.TestCase):
+    def test_none_passes(self):
+        validate_smb_mount_specs(None)
+
+    def test_valid_smb_mount_specs_pass(self):
+        validate_smb_mount_specs([['/mnt/share', '192.168.1.10', 'user:pass', 'docs', '/sub']])
+
+    def test_invalid_host_fails(self):
+        with self.assertRaisesRegex(ValueError, "Invalid SMB mount host: bad host"):
+            validate_smb_mount_specs([['/mnt/share', 'bad host', 'user:pass', 'docs', '/sub']])
+
+    def test_invalid_share_name_fails(self):
+        with self.assertRaisesRegex(ValueError, r"Invalid share name .*bad/share"):
+            validate_smb_mount_specs([['/mnt/share', '192.168.1.10', 'user:pass', 'bad/share', '/sub']])
+
+    def test_invalid_subdir_fails(self):
+        with self.assertRaisesRegex(ValueError, "Subdirectory must start with /: subdir"):
+            validate_smb_mount_specs([['/mnt/share', '192.168.1.10', 'user:pass', 'docs', 'subdir']])
 
 
 class TestValidateWorkspaceDir(unittest.TestCase):

@@ -284,6 +284,26 @@ def validate_scrub_specs(scrub_specs: Optional[list[list[str]]]) -> None:
         validate_redundancy_percentage(scrub_config["redundancy"])
 
 
+def validate_smb_mount_specs(smb_mounts: Optional[list[list[str]]]) -> None:
+    """Validate SMB mount specs before setup or patch execution."""
+
+    if not smb_mounts:
+        return
+
+    from lib.validators import validate_host
+    from smb.smb_mount_steps import parse_smb_mount_spec
+
+    for mount_spec in smb_mounts:
+        mount_config = parse_smb_mount_spec(mount_spec)
+        validate_filesystem_path(mount_config["mountpoint"], must_exist=False)
+        if not validate_host(mount_config["ip"]):
+            raise ValueError(f"Invalid SMB mount host: {mount_config['ip']}")
+        if not mount_config["share"] or "/" in mount_config["share"] or "\\" in mount_config["share"] or " " in mount_config["share"]:
+            raise ValueError(f"Invalid share name (cannot contain /, \\, or spaces): {mount_config['share']}")
+        if mount_config["subdir"] and not mount_config["subdir"].startswith("/"):
+            raise ValueError(f"Subdirectory must start with /: {mount_config['subdir']}")
+
+
 def validate_positive_integer(value: str, name: str = "value") -> int:
     """Validate and convert string to positive integer.
     
