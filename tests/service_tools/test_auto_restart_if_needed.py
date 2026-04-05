@@ -22,10 +22,12 @@ class TestAutoRestartIfNeeded(unittest.TestCase):
     def test_manual_restart_notification_when_users_logged_in(
         self, _check, _no_restart, _users, _load, mock_notify
     ):
-        result = auto_restart_if_needed.main()
+        with self.assertLogs(auto_restart_if_needed.logger, level="INFO") as logs:
+            result = auto_restart_if_needed.main()
         self.assertEqual(result, 0)
         mock_notify.assert_called_once()
         self.assertIn("manual restart needed", mock_notify.call_args.kwargs["subject"])
+        self.assertIn("Users are logged in, skipping restart | session_type='ssh-console'", "\n".join(logs.output))
 
     @patch("common.service_tools.auto_restart_if_needed.perform_restart", return_value=0)
     @patch("common.service_tools.auto_restart_if_needed.check_rdp_sessions", return_value=False)
@@ -44,10 +46,12 @@ class TestAutoRestartIfNeeded(unittest.TestCase):
     @patch("common.service_tools.auto_restart_if_needed.send_notification_safe")
     @patch("common.service_tools.auto_restart_if_needed.subprocess.run", side_effect=subprocess.CalledProcessError(1, "shutdown"))
     def test_perform_restart_failure_notifies(self, _run, mock_notify):
-        result = auto_restart_if_needed.perform_restart(["cfg"])
+        with self.assertLogs(auto_restart_if_needed.logger, level="ERROR") as logs:
+            result = auto_restart_if_needed.perform_restart(["cfg"])
         self.assertEqual(result, 1)
         self.assertEqual(mock_notify.call_count, 2)
         self.assertIn("automatic restart failed", mock_notify.call_args.kwargs["subject"])
+        self.assertIn("Failed to initiate restart | error=", "\n".join(logs.output))
 
     @patch("common.service_tools.auto_restart_if_needed.send_notification_safe")
     @patch("common.service_tools.auto_restart_if_needed.load_notification_configs_from_state", return_value=["cfg"])

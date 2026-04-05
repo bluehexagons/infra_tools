@@ -134,7 +134,7 @@ This document outlines a plan for major architectural and security improvements 
 ### Phase 4: Error Handling and Observability
 
 #### 4.1 Structured Logging
-- Status: service logging now has a shared `log_event()` helper for stable key=value context, and the webhook receiver plus the Node/APT/Ruby/uv/cleanup-maintenance services use it for their main event/failure logs
+- Status: service logging now has a shared `log_event()` helper for stable key=value context, and the webhook receiver plus the Node/APT/Ruby/uv/cleanup-maintenance/auto-restart services use it for their main event/failure logs
 - Keep human-readable CLI output for interactive setup flows
 - Use structured logging for services, helpers, and internal diagnostics where persistent logs are useful
 - Implement log levels (DEBUG, INFO, WARNING, ERROR, CRITICAL)
@@ -185,7 +185,7 @@ This document outlines a plan for major architectural and security improvements 
 2. ~~Define the `credentials` subcommand UX and `credentials.json` schema/file-permission expectations~~ ✅ Done
 3. ~~Define the SSH/SCP transfer mechanism for deployment credentials~~ ✅ Decided: SCP over existing SSH connection, temp path `/tmp/infra_tools-creds-*`, `0600` permissions, cleanup on success/failure
 4. Expand validation further across more external inputs now that workspace, notification, credential-name, deploy-target, deploy-spec, and hosted-node checks are in place
-5. Continue structured logging adoption in other long-running services/helpers that still emit free-form diagnostics
+5. Continue structured logging adoption in remaining long-running services/helpers that still emit free-form diagnostics
 6. Establish CI/CD pipeline for automated testing
 7. Add security testing (bandit, semgrep, fuzz testing)
 8. Implement pre-commit hooks and type checking in CI
