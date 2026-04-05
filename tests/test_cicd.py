@@ -17,6 +17,7 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from web.service_tools import cicd_executor
+from web.service_tools import webhook_receiver
 
 from web.cicd_steps import (
     install_cicd_dependencies,
@@ -272,6 +273,34 @@ class TestWebhookSignatureVerification(unittest.TestCase):
         wrong_signature = hmac.new("wrong-secret".encode('utf-8'), payload, hashlib.sha256).hexdigest()
         
         self.assertNotEqual(correct_signature, wrong_signature)
+
+
+class TestWebhookReceiverStructuredLogging(unittest.TestCase):
+    @patch("web.service_tools.webhook_receiver.os.path.exists", return_value=False)
+    def test_load_config_logs_missing_config(self, _mock_exists):
+        with self.assertLogs(webhook_receiver.logger, level="WARNING") as logs:
+            result = webhook_receiver.load_config()
+
+        self.assertEqual(result, {})
+        self.assertIn("Configuration file not found | config_file=", "\n".join(logs.output))
+
+    @patch.dict(os.environ, {"WEBHOOK_SECRET": "secret", "WEBHOOK_PORT": "9123"}, clear=True)
+    @patch("web.service_tools.webhook_receiver.os.makedirs")
+    @patch("web.service_tools.webhook_receiver.HTTPServer")
+    def test_main_logs_start_listen_and_shutdown(self, mock_http_server, _mock_makedirs):
+        httpd = MagicMock()
+        httpd.serve_forever.side_effect = KeyboardInterrupt()
+        mock_http_server.return_value = httpd
+
+        with self.assertLogs(webhook_receiver.logger, level="INFO") as logs:
+            result = webhook_receiver.main()
+
+        self.assertEqual(result, 0)
+        output = "\n".join(logs.output)
+        self.assertIn("Starting webhook receiver", output)
+        self.assertIn("Webhook receiver listening | bind='127.0.0.1' port=9123", output)
+        self.assertIn("Server is ready to accept webhooks", output)
+        self.assertIn("Shutting down webhook receiver", output)
 
 
 class TestAppServerSteps(unittest.TestCase):

@@ -75,14 +75,14 @@ def verify_github_signature(secret: str, payload: bytes, signature_header: Optio
 def load_config() -> dict:
     """Load webhook configuration from JSON file."""
     if not os.path.exists(CONFIG_FILE):
-        logger.warning(f"Configuration file not found: {CONFIG_FILE}")
+        log_event(logger, "Configuration file not found", level=30, config_file=CONFIG_FILE)
         return {}
     
     try:
         with open(CONFIG_FILE, 'r') as f:
             return json.load(f)
     except Exception as e:
-        logger.error(f"Failed to load configuration: {e}")
+        log_event(logger, "Failed to load configuration", level=40, config_file=CONFIG_FILE, error=str(e))
         return {}
 
 
@@ -152,7 +152,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
         # Get webhook secret from environment
         secret = os.environ.get(WEBHOOK_SECRET_ENV)
         if not secret:
-            logger.error("WEBHOOK_SECRET environment variable not set")
+            log_event(logger, "Webhook secret environment variable not set", level=40, env_var=WEBHOOK_SECRET_ENV)
             self.send_error(500, "Server Configuration Error")
             return
         
@@ -167,7 +167,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
         try:
             payload = json.loads(body.decode('utf-8'))
         except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON payload: {e}")
+            log_event(logger, "Invalid JSON payload", level=40, error=str(e))
             self.send_error(400, "Invalid JSON")
             return
         
@@ -231,12 +231,12 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(json.dumps({"status": "accepted", "commit": commit_sha[:8]}).encode())
             else:
-                logger.error("Failed to trigger CI/CD job")
+                log_event(logger, "Failed to trigger CI/CD job", level=40, repo_url=repo_url, commit_sha=commit_sha[:8])
                 self.send_error(500, "Failed to trigger job")
         
         elif event_type == 'ping':
             # Handle ping events (sent when webhook is first created)
-            logger.info("Received ping event")
+            log_event(logger, "Received ping event")
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
@@ -263,14 +263,14 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
 def main():
     """Main function to run the webhook receiver server."""
-    logger.info("Starting webhook receiver")
+    log_event(logger, "Starting webhook receiver")
     
     # Get port from environment or use default
     port = int(os.environ.get('WEBHOOK_PORT', DEFAULT_PORT))
     
     # Verify webhook secret is configured
     if not os.environ.get(WEBHOOK_SECRET_ENV):
-        logger.error(f"{WEBHOOK_SECRET_ENV} environment variable not set")
+        log_event(logger, "Webhook secret environment variable not set", level=40, env_var=WEBHOOK_SECRET_ENV)
         return 1
     
     # Create jobs directory if it doesn't exist
@@ -281,12 +281,12 @@ def main():
     httpd = HTTPServer(server_address, WebhookHandler)
     
     log_event(logger, "Webhook receiver listening", bind="127.0.0.1", port=port)
-    logger.info("Server is ready to accept webhooks")
+    log_event(logger, "Server is ready to accept webhooks")
     
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        logger.info("Shutting down webhook receiver")
+        log_event(logger, "Shutting down webhook receiver")
         httpd.shutdown()
     
     return 0
