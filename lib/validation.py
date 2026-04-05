@@ -335,6 +335,20 @@ def validate_samba_share_specs(
             raise ValueError(f"No users specified for share: {share_name}")
 
 
+def validate_ssl_email(email: Optional[str]) -> None:
+    """Validate the optional SSL registration email before setup or patch execution."""
+
+    if not email:
+        return
+
+    from lib.notifications import NotificationConfig, validate_notification_config
+
+    try:
+        validate_notification_config(NotificationConfig(type="mailbox", target=email))
+    except ValueError as exc:
+        raise ValueError(f"Invalid SSL email address: {email}") from exc
+
+
 def validate_positive_integer(value: str, name: str = "value") -> int:
     """Validate and convert string to positive integer.
     

@@ -22,6 +22,7 @@ from lib.validation import (
     validate_package_name,
     validate_hosted_flags,
     validate_smb_mount_specs,
+    validate_ssl_email,
     validate_workspace_dir,
 )
 
@@ -221,6 +222,18 @@ class TestValidateWorkspaceDir(unittest.TestCase):
                 validate_workspace_dir(path)
         finally:
             os.unlink(path)
+
+
+class TestValidateSslEmail(unittest.TestCase):
+    def test_none_passes(self):
+        validate_ssl_email(None)
+
+    def test_valid_email_passes(self):
+        validate_ssl_email("admin@example.com")
+
+    def test_invalid_email_fails(self):
+        with self.assertRaisesRegex(ValueError, "Invalid SSL email address: bad-email"):
+            validate_ssl_email("bad-email")
 
 
 class TestValidatePositiveInteger(unittest.TestCase):

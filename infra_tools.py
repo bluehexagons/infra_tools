@@ -52,6 +52,7 @@ from lib.validation import (
     validate_samba_share_specs,
     validate_smb_mount_specs,
     validate_scrub_specs,
+    validate_ssl_email,
     validate_sync_specs,
     validate_workspace_dir,
 )
@@ -307,6 +308,7 @@ def run_setup_command(args: argparse.Namespace) -> int:
     try:
         runtime_config = prepare_runtime_config(config)
         validate_notification_args(runtime_config.notify_specs)
+        validate_ssl_email(runtime_config.ssl_email)
         validate_deploy_specs(runtime_config.deploy_specs)
         validate_deploy_targets(runtime_config.deploy_targets)
         validate_sync_specs(runtime_config.sync_specs)
@@ -381,6 +383,7 @@ def run_patch_command(args: argparse.Namespace) -> int:
     try:
         runtime_config = prepare_runtime_config(merged_config)
         validate_notification_args(runtime_config.notify_specs)
+        validate_ssl_email(runtime_config.ssl_email)
         validate_deploy_specs(runtime_config.deploy_specs)
         validate_deploy_targets(runtime_config.deploy_targets)
         validate_sync_specs(runtime_config.sync_specs)
