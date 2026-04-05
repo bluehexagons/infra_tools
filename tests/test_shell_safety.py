@@ -22,20 +22,23 @@ class TestShellSafety(unittest.TestCase):
                 continue
             if "__pycache__" in relative_parts or path.name == "test_shell_safety.py":
                 continue
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-            if any(
-                isinstance(node, ast.Call)
-                and any(
+            try:
+                tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            except SyntaxError as exc:
+                self.fail(f"Failed to parse {path.relative_to(repo_root)}: {exc}")
+
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                if any(
                     keyword.arg == "shell"
                     and isinstance(keyword.value, ast.Constant)
                     and keyword.value.value is True
                     for keyword in node.keywords
-                )
-                for node in ast.walk(tree)
-            ):
-                offenders.append(str(path.relative_to(repo_root)))
+                ):
+                    offenders.append(f"{path.relative_to(repo_root)}:{node.lineno}")
 
-        self.assertEqual(offenders, [])
+        self.assertEqual(offenders, [], msg=f"Found shell=True call sites: {offenders}")
 
 
 if __name__ == "__main__":
