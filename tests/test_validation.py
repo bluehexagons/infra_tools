@@ -10,6 +10,7 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.validation import (
+    validate_deploy_targets,
     validate_directory_empty,
     validate_network_endpoint,
     validate_positive_integer,
@@ -86,6 +87,22 @@ class TestValidateNetworkEndpoint(unittest.TestCase):
     def test_multiple_colons(self):
         with self.assertRaises(ValueError):
             validate_network_endpoint('host:80:90')
+
+
+class TestValidateDeployTargets(unittest.TestCase):
+    def test_none_passes(self):
+        validate_deploy_targets(None)
+
+    def test_valid_targets_pass(self):
+        validate_deploy_targets(['app1.example.com', '192.168.1.20'])
+
+    def test_empty_target_fails(self):
+        with self.assertRaisesRegex(ValueError, "Deploy target must be a non-empty hostname or IP"):
+            validate_deploy_targets([''])
+
+    def test_invalid_target_fails(self):
+        with self.assertRaisesRegex(ValueError, "Invalid deploy target host: bad target"):
+            validate_deploy_targets(['bad target'])
 
 
 class TestValidateWorkspaceDir(unittest.TestCase):

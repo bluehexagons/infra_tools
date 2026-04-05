@@ -207,6 +207,21 @@ def validate_network_endpoint(endpoint: str) -> None:
         raise ValueError(f"Invalid port in endpoint: {port}") from e
 
 
+def validate_deploy_targets(targets: Optional[list[str]]) -> None:
+    """Validate deploy target hostnames before setup or patch execution."""
+
+    if not targets:
+        return
+
+    from lib.validators import validate_host
+
+    for target in targets:
+        if not target or not target.strip():
+            raise ValueError("Deploy target must be a non-empty hostname or IP")
+        if not validate_host(target):
+            raise ValueError(f"Invalid deploy target host: {target}")
+
+
 def validate_positive_integer(value: str, name: str = "value") -> int:
     """Validate and convert string to positive integer.
     

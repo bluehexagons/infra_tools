@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -27,6 +28,32 @@ class TestPatchSetupWorkspaceValidation(unittest.TestCase):
         with unittest.mock.patch("patch_setup.validate_workspace_dir", side_effect=ValueError("bad workspace")):
             with self.assertRaisesRegex(ValueError, "bad workspace"):
                 patch_setup._process_workspace_args(["--workspace", "/bad/workspace", "list"])
+
+
+class TestPatchSetupDeployTargetValidation(unittest.TestCase):
+    @patch("builtins.print")
+    @patch("patch_setup.prepare_runtime_config")
+    @patch("patch_setup.os.path.exists", return_value=True)
+    @patch("patch_setup.validate_username", return_value=True)
+    def test_execute_patch_rejects_invalid_deploy_target(
+        self,
+        _mock_validate_username,
+        _mock_exists,
+        mock_prepare_runtime_config,
+        mock_print,
+    ):
+        config = patch_setup.SetupConfig(
+            host="example.com",
+            username="testuser",
+            system_type="server_lite",
+            deploy_targets=["bad target"],
+        )
+        mock_prepare_runtime_config.return_value = config
+
+        result = patch_setup.execute_patch(config)
+
+        self.assertEqual(result, 1)
+        mock_print.assert_called_with("Error: Invalid deploy target host: bad target")
 
 
 if __name__ == "__main__":
