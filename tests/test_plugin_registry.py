@@ -42,6 +42,10 @@ class TestPluginRegistry(unittest.TestCase):
             [plugin.name for plugin in registry.plugins],
             ["core", "server", "workstation"],
         )
+        self.assertEqual(
+            [plugin.plugin_kind for plugin in registry.plugins],
+            ["base", "composition", "composition"],
+        )
 
     def test_system_type_metadata_drives_defaults(self):
         system_type = get_system_type_definition("pc_dev")
@@ -78,7 +82,11 @@ class TestPluginRegistry(unittest.TestCase):
         plugin = PluginDefinition(
             name="workstation",
             module="plugins.workstation",
+            plugin_kind="composition",
             dependencies=("core",),
+            system_types=(
+                SystemTypeDefinition(name="workstation_dev", description="Workstation", order=10),
+            ),
         )
         with self.assertRaisesRegex(ValueError, "depends on unknown plugin"):
             build_plugin_registry([plugin])
@@ -105,12 +113,56 @@ class TestPluginRegistry(unittest.TestCase):
         plugin_one = PluginDefinition(
             name="one",
             module="plugins.one",
+            plugin_kind="composition",
             dependencies=("two",),
+            system_types=(
+                SystemTypeDefinition(name="one_system", description="One", order=10),
+            ),
         )
         plugin_two = PluginDefinition(
             name="two",
             module="plugins.two",
+            plugin_kind="composition",
             dependencies=("one",),
+            system_types=(
+                SystemTypeDefinition(name="two_system", description="Two", order=20),
+            ),
         )
         with self.assertRaisesRegex(ValueError, "Cyclic plugin dependencies"):
             build_plugin_registry([plugin_one, plugin_two])
+
+    def test_base_plugins_cannot_declare_dependencies(self):
+        plugin = PluginDefinition(
+            name="base-with-deps",
+            module="plugins.base_with_deps",
+            plugin_kind="base",
+            dependencies=("core",),
+        )
+        with self.assertRaisesRegex(ValueError, "Base plugin .* cannot declare dependencies"):
+            build_plugin_registry([plugin])
+
+    def test_capability_plugins_cannot_register_system_types(self):
+        plugin = PluginDefinition(
+            name="capability-with-system",
+            module="plugins.capability_with_system",
+            plugin_kind="capability",
+            system_types=(
+                SystemTypeDefinition(name="bad_system", description="Bad", order=10),
+            ),
+        )
+        with self.assertRaisesRegex(ValueError, "Capability plugin .* cannot register system types"):
+            build_plugin_registry([plugin])
+
+    def test_composition_plugins_must_register_system_types(self):
+        plugin = PluginDefinition(
+            name="composition-without-system",
+            module="plugins.composition_without_system",
+            plugin_kind="composition",
+            dependencies=("core",),
+        )
+        core = PluginDefinition(name="core", module="plugins.core")
+        with self.assertRaisesRegex(
+            ValueError,
+            "Composition plugin .* must register at least one system type",
+        ):
+            build_plugin_registry([core, plugin])

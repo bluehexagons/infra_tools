@@ -8,6 +8,7 @@ from lib.plugin_registry import PluginDefinition, SystemTypeDefinition
 PLUGIN = PluginDefinition(
     name="core",
     module=__name__,
+    plugin_kind="base",
     system_types=(
         SystemTypeDefinition(
             name="custom_steps",

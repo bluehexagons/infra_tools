@@ -82,7 +82,7 @@ This document outlines a plan for major architectural and security improvements 
 - Separate CLI/public configuration from internal/runtime state and persisted workspace state
 
 #### 2.2 Plugin-Based System Types
-- Status: built-in plugin registry foundation landed; system-type discovery, metadata defaults, conflict detection, and lazy step-builder resolution now flow through plugin-owned registrations
+- Status: built-in plugin registry foundation landed; system-type discovery, metadata defaults, conflict detection, lazy step-builder resolution, and explicit base/composition plugin roles now flow through plugin-owned registrations
 - Move current domain directories (e.g., common, security, desktop, web, sync, smb) under a main `plugins/` package
 - Plugins define reusable steps, defaults, and optional system types; shared validators and utility code can live outside plugins when broadly reusable
 - System types are registered by plugins rather than maintained in a central static list
@@ -153,7 +153,7 @@ This document outlines a plan for major architectural and security improvements 
 ### Phase 5: Testing and Quality Assurance
 
 #### 5.1 Test Strategy — ✅ IN PROGRESS
-- 832 tests passing across the codebase
+- 835 tests passing across the codebase
 - New tests: `test_credentials.py`, `test_workspace_cli.py`, `test_config.py`, `test_setup_common.py`, `test_plugin_registry.py`, `test_ssh_utils.py`, `test_browser_steps.py`
 - **TODO**: Property-based testing, integration tests for common setup scenarios
 
@@ -182,8 +182,8 @@ This document outlines a plan for major architectural and security improvements 
 1. ~~Review and approve this plan~~ ✅ Done
 2. ~~Define the `credentials` subcommand UX and `credentials.json` schema/file-permission expectations~~ ✅ Done
 3. ~~Define the SSH/SCP transfer mechanism for deployment credentials~~ ✅ Decided: SCP over existing SSH connection, temp path `/tmp/infra_tools-creds-*`, `0600` permissions, cleanup on success/failure
-4. Define composition rules for system-type plugins vs. capability plugins now that step assembly is plugin-owned
-5. Continue implementation by defining plugin composition rules now that security defaults and host-key trust are tightened
+4. Continue implementation by auditing external input validation against REVIEW_1 goals
+5. Expand the plugin contract further if step/flag registration moves into plugin metadata
 6. Establish CI/CD pipeline for automated testing
 7. Add security testing (bandit, semgrep, fuzz testing)
 8. Implement pre-commit hooks and type checking in CI

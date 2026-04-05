@@ -45,6 +45,7 @@ class PluginDefinition:
 
     name: str
     module: str
+    plugin_kind: str = "base"
     dependencies: tuple[str, ...] = ()
     system_types: tuple[SystemTypeDefinition, ...] = ()
 
@@ -56,6 +57,9 @@ class PluginRegistry:
     plugins: tuple[PluginDefinition, ...]
     system_types: tuple[SystemTypeDefinition, ...]
     system_types_by_name: Mapping[str, SystemTypeDefinition] = field(default_factory=dict)
+
+
+VALID_PLUGIN_KINDS = ("base", "capability", "composition")
 
 
 def _discover_plugin_definitions(package_name: str = "plugins") -> list[PluginDefinition]:
@@ -87,6 +91,29 @@ def build_plugin_registry(plugin_definitions: Sequence[PluginDefinition]) -> Plu
         plugins_by_name[plugin_definition.name] = plugin_definition
 
     for plugin_definition in plugin_definitions:
+        if plugin_definition.plugin_kind not in VALID_PLUGIN_KINDS:
+            raise ValueError(
+                f"Plugin {plugin_definition.name!r} has invalid plugin_kind "
+                f"{plugin_definition.plugin_kind!r}; expected one of {VALID_PLUGIN_KINDS}"
+            )
+        if plugin_definition.plugin_kind == "base" and plugin_definition.dependencies:
+            raise ValueError(
+                f"Base plugin {plugin_definition.name!r} cannot declare dependencies"
+            )
+        if plugin_definition.plugin_kind == "capability" and plugin_definition.system_types:
+            raise ValueError(
+                f"Capability plugin {plugin_definition.name!r} cannot register system types"
+            )
+        if plugin_definition.plugin_kind == "composition":
+            if not plugin_definition.dependencies:
+                raise ValueError(
+                    f"Composition plugin {plugin_definition.name!r} must declare dependencies"
+                )
+            if not plugin_definition.system_types:
+                raise ValueError(
+                    f"Composition plugin {plugin_definition.name!r} must register at least one system type"
+                )
+
         for dependency in plugin_definition.dependencies:
             if dependency not in plugins_by_name:
                 raise ValueError(

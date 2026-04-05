@@ -8,6 +8,7 @@ from lib.plugin_registry import PluginDefinition, SystemTypeDefinition
 PLUGIN = PluginDefinition(
     name="server",
     module=__name__,
+    plugin_kind="composition",
     dependencies=("core",),
     system_types=(
         SystemTypeDefinition(
