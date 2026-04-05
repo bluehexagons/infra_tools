@@ -42,7 +42,12 @@ def run(cmd: str, check: bool = True, cwd: Optional[str] = None, capture_output:
         return subprocess.CompletedProcess(args=[cmd], returncode=0, stdout="", stderr="")
 
     if _requires_shell(cmd):
-        result = subprocess.run(cmd, shell=True, capture_output=capture_output, text=text, cwd=cwd)
+        result = subprocess.run(
+            ["/bin/bash", "-lc", cmd],
+            capture_output=capture_output,
+            text=text,
+            cwd=cwd,
+        )
     else:
         result = subprocess.run(shlex.split(cmd), capture_output=capture_output, text=text, cwd=cwd)
     if check and result.returncode != 0:

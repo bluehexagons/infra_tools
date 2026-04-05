@@ -50,7 +50,7 @@ This document outlines a plan for major architectural and security improvements 
   - Consider NLA (Network Level Authentication) for direct RDP
 
 #### 1.3 Shell Injection Prevention
-- Status: local shell-heavy helpers, the main remote SSH/SCP assembly paths, and remote deploy script execution now use shared command builders or SSH stdin streaming
+- Status: local command helpers now avoid `shell=True`, shell-dependent local commands use an explicit `/bin/bash -lc` path, and the main remote SSH/SCP assembly paths plus remote deploy script execution now use shared command builders or SSH stdin streaming
 - Audit all subprocess calls and SSH command constructions
 - Replace shell=True usage with list-based arguments where possible
 - Implement proper escaping for unavoidable shell constructions
@@ -187,9 +187,8 @@ This document outlines a plan for major architectural and security improvements 
 3. ~~Define the SSH/SCP transfer mechanism for deployment credentials~~ ✅ Decided: SCP over existing SSH connection, temp path `/tmp/infra_tools-creds-*`, `0600` permissions, cleanup on success/failure
 4. Treat validation as sufficient for this pass unless a clear external-input gap appears during other work
 5. Continue structured logging adoption in remaining long-running services/helpers that still emit free-form diagnostics
-6. Revisit the remaining unsafe-command and remote-execution edges under criterion 4
-7. Establish CI/CD pipeline for automated testing
-8. Implement pre-commit hooks and type checking in CI
+6. Establish CI/CD pipeline for automated testing
+7. Implement pre-commit hooks and type checking in CI
 
 ---
 *This plan will be executed in iterations with regular reviews to ensure alignment with project goals and adjustment based on findings during implementation.*

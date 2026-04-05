@@ -72,12 +72,11 @@ class TestRunCommandDispatch(unittest.TestCase):
         )
 
     @patch("lib.remote_utils.subprocess.run")
-    def test_piped_commands_still_use_shell(self, mock_run):
-        mock_run.return_value = subprocess.CompletedProcess(args=["echo test | cat"], returncode=0)
+    def test_piped_commands_use_explicit_shell_process(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess(args=["/bin/bash", "-lc", "echo test | cat"], returncode=0)
         run("echo test | cat")
         mock_run.assert_called_once_with(
-            "echo test | cat",
-            shell=True,
+            ["/bin/bash", "-lc", "echo test | cat"],
             capture_output=False,
             text=True,
             cwd=None,
