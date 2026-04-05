@@ -26,6 +26,7 @@ from lib.system_utils import get_current_username
 from lib.cache import save_setup_command
 from lib.arg_parser import create_setup_argument_parser
 from lib.display import print_setup_summary
+from lib.notifications import validate_notification_args
 from lib.ssh_utils import build_ssh_command, chain_remote_commands
 from lib.workspace import set_workspace_dir
 from smb.samba_steps import validate_samba_share_credentials
@@ -370,6 +371,7 @@ def setup_main(system_type: str, description: str, success_msg_fn: Callable[[Set
 
     try:
         runtime_config = prepare_runtime_config(config)
+        validate_notification_args(runtime_config.notify_specs)
         validate_samba_share_credentials(runtime_config)
     except ValueError as e:
         print(f"Error: {e}")

@@ -120,7 +120,7 @@ This document outlines a plan for major architectural and security improvements 
 
 ### Phase 3: Validation and Type Safety
 #### 3.1 Comprehensive Input Validation
-- Status: workspace paths are now validated before setup/patch/credentials entry points switch process state
+- Status: workspace paths and notification targets are now validated before setup/patch entry points switch process state or start remote execution
 - Implement validation decorators/middleware for all entry points
 - Create reusable validation components for common patterns (hostnames, ports, paths, etc.)
 - Add range validation for numeric values
@@ -154,7 +154,7 @@ This document outlines a plan for major architectural and security improvements 
 ### Phase 5: Testing and Quality Assurance
 
 #### 5.1 Test Strategy — ✅ IN PROGRESS
-- 841 tests passing across the codebase
+- 849 tests passing across the codebase
 - New tests: `test_credentials.py`, `test_workspace_cli.py`, `test_config.py`, `test_setup_common.py`, `test_plugin_registry.py`, `test_ssh_utils.py`, `test_browser_steps.py`
 - **TODO**: Property-based testing, integration tests for common setup scenarios
 
@@ -183,8 +183,8 @@ This document outlines a plan for major architectural and security improvements 
 1. ~~Review and approve this plan~~ ✅ Done
 2. ~~Define the `credentials` subcommand UX and `credentials.json` schema/file-permission expectations~~ ✅ Done
 3. ~~Define the SSH/SCP transfer mechanism for deployment credentials~~ ✅ Decided: SCP over existing SSH connection, temp path `/tmp/infra_tools-creds-*`, `0600` permissions, cleanup on success/failure
-4. Continue implementation by expanding validation beyond workspace handling to more external inputs
-5. Start structured logging improvements where service/helper diagnostics still rely on plain prints
+4. Continue implementation by starting structured logging improvements where service/helper diagnostics still rely on plain prints
+5. Expand validation further across more external inputs after the current logging slice
 6. Establish CI/CD pipeline for automated testing
 7. Add security testing (bandit, semgrep, fuzz testing)
 8. Implement pre-commit hooks and type checking in CI

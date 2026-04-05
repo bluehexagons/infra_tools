@@ -6,6 +6,7 @@ Supports webhook and email notifications for important events.
 from __future__ import annotations
 
 import json
+import re
 import socket
 import subprocess
 from typing import Optional, Literal, cast
@@ -13,10 +14,12 @@ from dataclasses import dataclass, asdict, field
 from logging import Logger
 import urllib.request
 import urllib.error
+import urllib.parse
 
 NotificationStatus = Literal["good", "info", "warning", "error"]
 
 NETWORK_TIMEOUT_SECONDS = 30
+_MAILBOX_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 @dataclass
@@ -39,8 +42,10 @@ class NotificationConfig:
         notif_type, target = parts
         if notif_type not in ["webhook", "mailbox"]:
             raise ValueError(f"Invalid notification type: {notif_type}")
-        
-        return cls(type=cast(Literal["webhook", "mailbox"], notif_type), target=target)
+
+        config = cls(type=cast(Literal["webhook", "mailbox"], notif_type), target=target)
+        validate_notification_config(config)
+        return config
 
 
 @dataclass
@@ -210,6 +215,46 @@ def parse_notification_args(notify_args: Optional[list[list[str]]]) -> list[Noti
         configs.append(NotificationConfig(type=cast(Literal["webhook", "mailbox"], notif_type), target=target))
     
     return configs
+
+
+def validate_notification_config(config: NotificationConfig) -> None:
+    """Validate a parsed notification target."""
+
+    target = config.target.strip()
+    if not target:
+        raise ValueError(f"Notification target for {config.type} must not be empty")
+
+    if config.type == "webhook":
+        parsed = urllib.parse.urlparse(target)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise ValueError(f"Invalid webhook URL: {target}")
+        return
+
+    if config.type == "mailbox":
+        if not _MAILBOX_PATTERN.match(target):
+            raise ValueError(f"Invalid mailbox address: {target}")
+        return
+
+    raise ValueError(f"Invalid notification type: {config.type}")
+
+
+def validate_notification_args(notify_args: Optional[list[list[str]]]) -> None:
+    """Validate raw --notify argument pairs from CLI/config surfaces."""
+
+    if not notify_args:
+        return
+
+    for notify_arg in notify_args:
+        if len(notify_arg) != 2:
+            raise ValueError(
+                "--notify requires TYPE and TARGET"
+            )
+        notif_type, target = notify_arg
+        if notif_type not in ["webhook", "mailbox"]:
+            raise ValueError(f"Invalid notification type: {notif_type}")
+        validate_notification_config(
+            NotificationConfig(type=cast(Literal["webhook", "mailbox"], notif_type), target=target)
+        )
 
 
 def load_notification_configs_from_state(logger: Optional[Logger] = None) -> list[NotificationConfig]:

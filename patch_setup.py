@@ -27,6 +27,7 @@ from lib.cache import (
     get_cache_path_for_host,
 )
 from lib.credentials import prepare_runtime_config, store_cli_credentials
+from lib.notifications import validate_notification_args
 from lib.setup_common import (
     create_argument_parser,
     run_remote_setup,
@@ -533,6 +534,7 @@ def execute_patch(config: SetupConfig) -> int:
     print()
     try:
         runtime_config = prepare_runtime_config(config)
+        validate_notification_args(runtime_config.notify_specs)
     except ValueError as e:
         print(f"Error: {e}")
         return 1

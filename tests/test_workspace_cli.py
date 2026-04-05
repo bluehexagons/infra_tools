@@ -14,6 +14,7 @@ import common.common_steps as common_steps
 import infra_tools
 from lib.arg_parser import create_setup_argument_parser
 from lib.config import SetupConfig
+from argparse import Namespace
 
 
 class TestWorkspaceCli(unittest.TestCase):
@@ -54,6 +55,71 @@ class TestWorkspaceCli(unittest.TestCase):
         self.assertEqual(result, 1)
         mock_set_workspace.assert_not_called()
         mock_print.assert_called_with("Error: bad workspace")
+
+    @patch("builtins.print")
+    @patch("infra_tools.validate_samba_share_credentials")
+    @patch("infra_tools.prepare_runtime_config")
+    @patch("infra_tools.validate_username", return_value=True)
+    @patch("infra_tools.validate_host", return_value=True)
+    def test_run_setup_command_rejects_invalid_notify_specs(
+        self,
+        _mock_validate_host,
+        _mock_validate_username,
+        mock_prepare_runtime_config,
+        _mock_validate_samba,
+        mock_print,
+    ):
+        config = SetupConfig(
+            host="example.com",
+            username="testuser",
+            system_type="server_lite",
+            notify_specs=[["webhook", "not-a-url"]],
+        )
+        mock_prepare_runtime_config.return_value = config
+        args = Namespace(host="example.com", username="testuser", system_type="server_lite")
+
+        with patch("infra_tools.SetupConfig.from_args", return_value=config), \
+             patch("infra_tools.run_remote_setup") as mock_run_remote:
+            result = infra_tools.run_setup_command(args)
+
+        self.assertEqual(result, 1)
+        mock_run_remote.assert_not_called()
+        mock_print.assert_called_with("Error: Invalid webhook URL: not-a-url")
+
+    @patch("builtins.print")
+    @patch("infra_tools.validate_samba_share_credentials")
+    @patch("infra_tools.prepare_runtime_config")
+    @patch("infra_tools.load_setup_command")
+    @patch("infra_tools.validate_username", return_value=True)
+    @patch("infra_tools.validate_host", return_value=True)
+    def test_run_patch_command_rejects_invalid_notify_specs(
+        self,
+        _mock_validate_host,
+        _mock_validate_username,
+        mock_load_setup_command,
+        mock_prepare_runtime_config,
+        _mock_validate_samba,
+        mock_print,
+    ):
+        cached = SetupConfig(host="example.com", username="testuser", system_type="server_lite")
+        merged = SetupConfig(
+            host="example.com",
+            username="testuser",
+            system_type="server_lite",
+            notify_specs=[["mailbox", "bad-email"]],
+        )
+        mock_load_setup_command.return_value = cached
+        mock_prepare_runtime_config.return_value = merged
+        args = Namespace(host="example.com", username="testuser")
+
+        with patch("infra_tools.SetupConfig.from_args", return_value=merged), \
+             patch("infra_tools.merge_setup_configs", return_value=merged), \
+             patch("infra_tools.run_remote_setup") as mock_run_remote:
+            result = infra_tools.run_patch_command(args)
+
+        self.assertEqual(result, 1)
+        mock_run_remote.assert_not_called()
+        mock_print.assert_called_with("Error: Invalid mailbox address: bad-email")
 
 
 class TestSetupUserPasswordless(unittest.TestCase):

@@ -18,6 +18,7 @@ from lib.notifications import (
     parse_notification_args,
     send_notification_safe,
     send_setup_notification,
+    validate_notification_args,
 )
 
 
@@ -131,6 +132,26 @@ class TestParseNotificationArgs(unittest.TestCase):
     def test_wrong_arg_count_skipped(self):
         configs = parse_notification_args([['webhook']])
         self.assertEqual(len(configs), 0)
+
+
+class TestValidateNotificationArgs(unittest.TestCase):
+    def test_valid_webhook_notification(self):
+        validate_notification_args([['webhook', 'https://example.com/hook']])
+
+    def test_valid_mailbox_notification(self):
+        validate_notification_args([['mailbox', 'admin@example.com']])
+
+    def test_invalid_webhook_url_raises(self):
+        with self.assertRaisesRegex(ValueError, "Invalid webhook URL"):
+            validate_notification_args([['webhook', 'ftp://example.com/hook']])
+
+    def test_invalid_mailbox_raises(self):
+        with self.assertRaisesRegex(ValueError, "Invalid mailbox address"):
+            validate_notification_args([['mailbox', 'not-an-email']])
+
+    def test_wrong_arg_count_raises(self):
+        with self.assertRaisesRegex(ValueError, "--notify requires TYPE and TARGET"):
+            validate_notification_args([['webhook']])
 
 
 class TestSendSetupNotification(unittest.TestCase):

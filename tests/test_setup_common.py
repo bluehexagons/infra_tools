@@ -184,6 +184,29 @@ class TestSetupMainTimingPersistence(unittest.TestCase):
         mock_validate_host.assert_not_called()
         mock_print.assert_called_with("Error: bad workspace")
 
+    @patch("builtins.print")
+    def test_invalid_notify_specs_return_error_before_remote_setup(self, mock_print):
+        from lib import setup_common
+
+        parser = MagicMock()
+        args = MagicMock()
+        args.workspace = None
+        args.host = "testhost"
+        args.username = "testuser"
+        parser.parse_args.return_value = args
+        config = _make_config(notify_specs=[["webhook", "not-a-url"]])
+
+        with patch.object(setup_common, "create_argument_parser", return_value=parser), \
+             patch.object(setup_common, "validate_host", return_value=True), \
+             patch.object(setup_common, "validate_username", return_value=True), \
+             patch.object(setup_common, "prepare_runtime_config", return_value=config), \
+             patch.object(setup_common, "run_remote_setup") as mock_run_remote:
+            result = setup_common.setup_main("server_lite", "Test", lambda c: None)
+
+        self.assertEqual(result, 1)
+        mock_run_remote.assert_not_called()
+        mock_print.assert_called_with("Error: Invalid webhook URL: not-a-url")
+
 
 class TestExpandRemoteArgs(unittest.TestCase):
     def test_expand_remote_args_preserves_quoted_values(self):

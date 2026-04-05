@@ -40,6 +40,7 @@ from lib.credentials import (
     store_cli_credentials,
 )
 from lib.display import print_name_and_tags, print_setup_summary, print_success_header
+from lib.notifications import validate_notification_args
 from lib.plugin_registry import format_system_type_help, get_system_type_names
 from lib.setup_common import REMOTE_SCRIPT_PATH, run_remote_setup
 from lib.system_utils import get_current_username
@@ -296,6 +297,7 @@ def run_setup_command(args: argparse.Namespace) -> int:
     
     try:
         runtime_config = prepare_runtime_config(config)
+        validate_notification_args(runtime_config.notify_specs)
         validate_samba_share_credentials(runtime_config)
     except ValueError as e:
         print(f"Error: {e}")
@@ -362,6 +364,7 @@ def run_patch_command(args: argparse.Namespace) -> int:
     merged_config = merge_setup_configs(cached_config, new_config)
     try:
         runtime_config = prepare_runtime_config(merged_config)
+        validate_notification_args(runtime_config.notify_specs)
         validate_samba_share_credentials(runtime_config)
     except ValueError as e:
         print(f"Error: {e}")
