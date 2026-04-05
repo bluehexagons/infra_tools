@@ -22,8 +22,10 @@ from sync.service_tools.storage_ops import (
     is_operation_due,
     load_last_run,
     resolve_scrub_database_path,
+    run_sync,
     run_scrub,
     save_last_run,
+    send_operation_notification,
     validate_mounts_for_operation,
 )
 
@@ -100,7 +102,28 @@ class TestRunScrub(unittest.TestCase):
         success, message = run_scrub("/mnt/data", "/mnt/data/.pardb", "abc%", True, logger)
         self.assertFalse(success)
         self.assertIn("Invalid redundancy value", message)
-        logger.error.assert_called()
+        log_calls = [call.args[1] for call in logger.log.call_args_list]
+        self.assertTrue(
+            any("Starting scrub | directory='/mnt/data' mode='full verify+repair'" in msg for msg in log_calls),
+            log_calls,
+        )
+        self.assertTrue(
+            any("Invalid scrub redundancy | directory='/mnt/data' error=" in msg for msg in log_calls),
+            log_calls,
+        )
+
+
+class TestRunSync(unittest.TestCase):
+    @patch("sync.service_tools.sync_rsync.run_rsync_with_notifications", side_effect=RuntimeError("boom"))
+    def test_sync_exception_logs_structured_failure(self, _mock_sync):
+        logger = MagicMock()
+
+        success, message = run_sync("/src", "/dst", logger)
+
+        self.assertFalse(success)
+        self.assertEqual(message, "boom")
+        log_calls = [call.args[1] for call in logger.log.call_args_list]
+        self.assertIn("Sync failed | destination='/dst' error='boom' source='/src'", log_calls)
 
 
 class TestGetSyncOpId(unittest.TestCase):
@@ -462,6 +485,146 @@ class TestOperationLogging(unittest.TestCase):
         
         # Verify sync was executed
         self.assertEqual(len(results["syncs"]), 1)
+
+    @patch("sync.service_tools.storage_ops.send_operation_notification")
+    @patch("sync.service_tools.storage_ops.run_sync")
+    @patch("sync.service_tools.storage_ops.validate_mounts_for_operation", return_value=(True, ""))
+    @patch("sync.service_tools.storage_ops.save_last_run")
+    @patch("sync.service_tools.storage_ops.load_last_run", return_value={})
+    @patch("sync.service_tools.storage_ops.parse_notification_args", return_value=[])
+    @patch("sync.service_tools.storage_ops.load_setup_config")
+    @patch("sync.service_tools.storage_ops.get_service_logger")
+    def test_logs_invalid_sync_spec(
+        self, mock_logger, mock_load_config, _parse_notify, _load_last, _save, _validate, mock_run_sync, _send_notif
+    ):
+        from sync.service_tools.storage_ops import execute_storage_operations
+
+        logger_mock = MagicMock()
+        mock_logger.return_value = logger_mock
+        mock_load_config.return_value = {
+            "username": "test",
+            "sync_specs": [["/src1", "/dst1"]],
+            "scrub_specs": [],
+            "notify_specs": [],
+        }
+
+        results = execute_storage_operations()
+
+        mock_run_sync.assert_not_called()
+        log_calls = [call.args[1] for call in logger_mock.log.call_args_list]
+        self.assertIn("Invalid sync spec | spec=['/src1', '/dst1']", log_calls)
+        self.assertEqual(results["syncs"][0]["error"], "Invalid spec")
+
+    @patch("sync.service_tools.storage_ops.send_operation_notification")
+    @patch("sync.service_tools.storage_ops.run_sync")
+    @patch("sync.service_tools.storage_ops.validate_mounts_for_operation", return_value=(False, "Mount /mnt/data not available"))
+    @patch("sync.service_tools.storage_ops.save_last_run")
+    @patch("sync.service_tools.storage_ops.load_last_run", return_value={})
+    @patch("sync.service_tools.storage_ops.parse_notification_args", return_value=[])
+    @patch("sync.service_tools.storage_ops.load_setup_config")
+    @patch("sync.service_tools.storage_ops.get_service_logger")
+    def test_logs_skipped_sync_with_context(
+        self, mock_logger, mock_load_config, _parse_notify, _load_last, _save, _validate, mock_run_sync, _send_notif
+    ):
+        from sync.service_tools.storage_ops import execute_storage_operations
+
+        logger_mock = MagicMock()
+        mock_logger.return_value = logger_mock
+        mock_load_config.return_value = {
+            "username": "test",
+            "sync_specs": [["/src1", "/dst1", "daily"]],
+            "scrub_specs": [],
+            "notify_specs": [],
+        }
+
+        results = execute_storage_operations()
+
+        mock_run_sync.assert_not_called()
+        log_calls = [call.args[1] for call in logger_mock.log.call_args_list]
+        self.assertIn(
+            "Skipping sync | destination='/dst1' error='Mount /mnt/data not available' source='/src1'",
+            log_calls,
+        )
+        self.assertTrue(results["syncs"][0]["skipped"])
+
+    @patch("sync.service_tools.storage_ops.send_operation_notification")
+    @patch("sync.service_tools.storage_ops.run_scrub")
+    @patch("sync.service_tools.storage_ops.validate_mounts_for_operation", return_value=(False, "Mount /mnt/data not available"))
+    @patch("sync.service_tools.storage_ops.save_last_run")
+    @patch("sync.service_tools.storage_ops.load_last_run")
+    @patch("sync.service_tools.storage_ops.parse_notification_args", return_value=[])
+    @patch("sync.service_tools.storage_ops.load_setup_config")
+    @patch("sync.service_tools.storage_ops.get_service_logger")
+    def test_logs_skipped_scrub_and_parity_with_context(
+        self, mock_logger, mock_load_config, _parse_notify, mock_load_last, _save, _validate, mock_run_scrub, _send_notif
+    ):
+        from sync.service_tools.storage_ops import execute_storage_operations
+
+        logger_mock = MagicMock()
+        mock_logger.return_value = logger_mock
+        mock_load_last.return_value = {
+            "scrub:/data:.pardatabase": time.time() - (8 * 24 * 3600),
+        }
+        mock_load_config.return_value = {
+            "username": "test",
+            "sync_specs": [],
+            "scrub_specs": [["/data", ".pardatabase", "5%", "weekly"]],
+            "notify_specs": [],
+        }
+
+        results = execute_storage_operations()
+
+        mock_run_scrub.assert_not_called()
+        log_calls = [call.args[1] for call in logger_mock.log.call_args_list]
+        self.assertIn("Skipping scrub | directory='/data' error='Mount /mnt/data not available'", log_calls)
+        self.assertIn("Skipping parity update | directory='/data' error='Mount /mnt/data not available'", log_calls)
+        self.assertTrue(results["scrubs"][0]["skipped"])
+        self.assertTrue(results["parity_updates"][0]["skipped"])
+
+
+class TestOperationNotifications(unittest.TestCase):
+    @patch("sync.service_tools.storage_ops.send_notification", side_effect=RuntimeError("notify boom"))
+    def test_logs_structured_operation_notification_failure(self, _mock_send):
+        logger = MagicMock()
+        results = {
+            "syncs": [],
+            "scrubs": [],
+            "parity_updates": [],
+            "start_time": "2026-01-01T00:00:00",
+            "end_time": "2026-01-01T00:01:00",
+            "success": True,
+        }
+
+        send_operation_notification(results, ["cfg"], logger, friendly_name="testbox")
+
+        log_calls = [call.args[1] for call in logger.log.call_args_list]
+        self.assertIn("Failed to send operation notification | error='notify boom'", log_calls)
+
+
+class TestStorageOpsMain(unittest.TestCase):
+    @patch("sync.service_tools.storage_ops.send_notification", side_effect=RuntimeError("notify boom"))
+    @patch("sync.service_tools.storage_ops.parse_notification_args", return_value=["cfg"])
+    @patch("sync.service_tools.storage_ops.load_setup_config", return_value={"notify_specs": [["mailbox", "ops@example.com"]]})
+    @patch("sync.service_tools.storage_ops.get_service_logger")
+    def test_logs_structured_lock_notification_failure(
+        self, mock_get_logger, _load_config, _parse_notify, _send_notification
+    ):
+        from sync.service_tools.storage_ops import main
+
+        logger_mock = MagicMock()
+        mock_get_logger.return_value = logger_mock
+        lock = MagicMock()
+        lock.acquire.return_value = False
+        lock.__enter__.return_value = lock
+        lock.__exit__.return_value = None
+
+        with patch("sync.service_tools.storage_ops.OperationLock", return_value=lock):
+            result = main()
+
+        self.assertEqual(result, 0)
+        log_calls = [call.args[1] for call in logger_mock.log.call_args_list]
+        self.assertIn("Another storage-ops instance is already running, skipping this run", log_calls)
+        self.assertIn("Failed to send lock failure notification | error='notify boom'", log_calls)
 
 
 if __name__ == "__main__":

@@ -20,7 +20,7 @@ import fcntl
 import time
 from datetime import datetime
 from typing import Optional
-from logging import ERROR
+from logging import ERROR, WARNING
 
 # Add lib directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
@@ -234,7 +234,7 @@ def run_sync(source: str, destination: str, logger) -> tuple[bool, str]:
         result = run_rsync_with_notifications(source, destination, suppress_notifications=True)
         return result == 0, f"Sync completed with exit code {result}"
     except Exception as e:
-        logger.error(f"Sync failed: {e}")
+        log_event(logger, "Sync failed", level=ERROR, source=source, destination=destination, error=str(e))
         return False, str(e)
 
 
@@ -243,7 +243,7 @@ def run_scrub(directory: str, database: str, redundancy: str, verify: bool, logg
     from sync.service_tools.scrub_par2 import scrub_directory
     
     mode = "full verify+repair" if verify else "parity update only"
-    logger.info(f"Starting scrub ({mode}): {directory}")
+    log_event(logger, "Starting scrub", directory=directory, mode=mode)
     
     log_dir = LOG_DIR
     os.makedirs(log_dir, exist_ok=True)
@@ -259,10 +259,10 @@ def run_scrub(directory: str, database: str, redundancy: str, verify: bool, logg
         return True, f"Scrub completed for {directory}"
     except ValueError as e:
         error_msg = f"Invalid redundancy value '{redundancy}': {e}"
-        logger.error(error_msg)
+        log_event(logger, "Invalid scrub redundancy", level=ERROR, directory=directory, redundancy=redundancy, error=str(e))
         return False, error_msg
     except Exception as e:
-        logger.error(f"Scrub failed: {e}")
+        log_event(logger, "Scrub failed", level=ERROR, directory=directory, error=str(e))
         return False, str(e)
 
 
@@ -341,11 +341,11 @@ def execute_storage_operations() -> dict:
                 logger=logger
             )
         except Exception as e:
-            logger.error(f"Failed to send sync start notification: {e}")
+            log_event(logger, "Failed to send sync start notification", level=ERROR, error=str(e))
     
     for spec in config.sync_specs:
         if len(spec) != 3:
-            logger.error(f"Invalid sync spec: {spec}")
+            log_event(logger, "Invalid sync spec", level=ERROR, spec=spec)
             results["syncs"].append({"spec": spec, "success": False, "error": "Invalid spec"})
             continue
         
@@ -365,7 +365,7 @@ def execute_storage_operations() -> dict:
         # Validate mounts
         valid, error_msg = validate_mounts_for_operation([source, destination], config, "sync")
         if not valid:
-            logger.warning(f"Skipping sync {source} -> {destination}: {error_msg}")
+            log_event(logger, "Skipping sync", level=WARNING, source=source, destination=destination, error=error_msg)
             results["syncs"].append({
                 "source": source,
                 "destination": destination,
@@ -401,11 +401,11 @@ def execute_storage_operations() -> dict:
                 logger=logger
             )
         except Exception as e:
-            logger.error(f"Failed to send scrub start notification: {e}")
+            log_event(logger, "Failed to send scrub start notification", level=ERROR, error=str(e))
     
     for spec in config.scrub_specs:
         if len(spec) != 4:
-            logger.error(f"Invalid scrub spec: {spec}")
+            log_event(logger, "Invalid scrub spec", level=ERROR, spec=spec)
             results["scrubs"].append({"spec": spec, "success": False, "error": "Invalid spec"})
             continue
         
@@ -426,7 +426,7 @@ def execute_storage_operations() -> dict:
         # Validate mounts
         valid, error_msg = validate_mounts_for_operation([directory, resolved_database], config, "scrub")
         if not valid:
-            logger.warning(f"Skipping scrub {directory}: {error_msg}")
+            log_event(logger, "Skipping scrub", level=WARNING, directory=directory, error=error_msg)
             results["scrubs"].append({
                 "directory": directory,
                 "success": False,
@@ -471,7 +471,7 @@ def execute_storage_operations() -> dict:
         # Validate mounts
         valid, error_msg = validate_mounts_for_operation([directory, resolved_database], config, "parity update")
         if not valid:
-            logger.warning(f"Skipping parity update for {directory}: {error_msg}")
+            log_event(logger, "Skipping parity update", level=WARNING, directory=directory, error=error_msg)
             results["parity_updates"].append({
                 "directory": directory,
                 "success": False,
@@ -558,7 +558,7 @@ Parity Update Operations:
             logger=logger
         )
     except Exception as e:
-        logger.error(f"Failed to send notification: {e}")
+        log_event(logger, "Failed to send operation notification", level=ERROR, error=str(e))
 
 
 def format_operation_results(operations: list) -> str:
@@ -621,7 +621,7 @@ def main():
                         logger=logger
                     )
                 except Exception as e:
-                    logger.error(f"Failed to send lock failure notification: {e}")
+                    log_event(logger, "Failed to send lock failure notification", level=ERROR, error=str(e))
         
             return 0
     
