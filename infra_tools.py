@@ -330,7 +330,7 @@ def run_setup_command(args: argparse.Namespace) -> int:
     
     if not config.dry_run:
         store_cli_credentials(config)
-        save_setup_command(config)
+        save_setup_command(config, operation="setup")
     
     if not os.path.exists(REMOTE_SCRIPT_PATH):
         print(f"Error: Remote setup script not found: {REMOTE_SCRIPT_PATH}")
@@ -344,7 +344,7 @@ def run_setup_command(args: argparse.Namespace) -> int:
         end_time = time.time()
         success = (returncode == 0)
         if not config.dry_run:
-            save_setup_command(config, start_time, end_time, success)
+            save_setup_command(config, start_time, end_time, success, operation="setup")
     
     if returncode != 0:
         print(f"\n✗ Setup failed (exit code: {returncode})")
@@ -426,7 +426,7 @@ def run_patch_command(args: argparse.Namespace) -> int:
         end_time = time.time()
         success = (returncode == 0)
         if not merged_config.dry_run:
-            save_setup_command(merged_config, start_time, end_time, success)
+            save_setup_command(merged_config, start_time, end_time, success, operation="patch")
     
     if returncode != 0:
         print(f"\n✗ Patch failed (exit code: {returncode})")

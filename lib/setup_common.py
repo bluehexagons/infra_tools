@@ -422,7 +422,7 @@ def setup_main(system_type: str, description: str, success_msg_fn: Callable[[Set
     
     if not config.dry_run:
         store_cli_credentials(config)
-        save_setup_command(config)
+        save_setup_command(config, operation="setup")
     
     start_time = time.time()
     returncode = 1
@@ -432,7 +432,7 @@ def setup_main(system_type: str, description: str, success_msg_fn: Callable[[Set
         end_time = time.time()
         success = (returncode == 0)
         if not config.dry_run:
-            save_setup_command(config, start_time, end_time, success)
+            save_setup_command(config, start_time, end_time, success, operation="setup")
     
     if returncode != 0:
         print(f"\n✗ Setup failed (exit code: {returncode})")

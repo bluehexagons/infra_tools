@@ -570,7 +570,7 @@ def execute_patch(config: SetupConfig) -> int:
         end_time = time.time()
         success = (returncode == 0)
         if not config.dry_run:
-            save_setup_command(config, start_time, end_time, success)
+            save_setup_command(config, start_time, end_time, success, operation="patch")
     
     if returncode != 0:
         print(f"\n✗ Patch failed (exit code: {returncode})")

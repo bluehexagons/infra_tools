@@ -63,6 +63,7 @@ This document outlines a plan for major architectural and security improvements 
 - Add security validation for critical configuration values
 
 #### 1.5 Workspace Location Flag
+- Status: workspace-managed setups, credentials, known_hosts, and completed setup/patch execution history now resolve under the active workspace, with completed runs recorded in `history/` using sanitized metadata
 - Add `--workspace` flag to specify custom base directory for setup state/configuration
 - Default base: `~/.config/infra_tools` (replacing current `~/.cache/infra_tools`)
 - Subdirectories under the workspace base:
@@ -156,7 +157,7 @@ This document outlines a plan for major architectural and security improvements 
 ### Phase 5: Testing and Quality Assurance
 
 #### 5.1 Test Strategy — ✅ IN PROGRESS
-- 970 tests passing across the codebase, including repository-level regression scanners and unit-style coverage
+- 972 tests passing across the codebase, including repository-level regression scanners and unit-style coverage
 - New tests: `test_credentials.py`, `test_workspace_cli.py`, `test_config.py`, `test_setup_common.py`, `test_plugin_registry.py`, `test_ssh_utils.py`, `test_browser_steps.py`, `test_shell_safety.py`
 - **TODO**: Property-based testing, integration tests for common setup scenarios
 
@@ -186,8 +187,9 @@ This document outlines a plan for major architectural and security improvements 
 2. Criterion 6 is effectively complete for this pass: the remaining gaps are helper scripts that intentionally keep human-readable interactive output rather than service-style structured logs.
 3. Criterion 7 is effectively complete for this pass: plugin discovery, capability/composition dependency wiring, plugin-owned workstation/server/proxmox step builders, plugin-owned custom-step providers, and plugin-owned validator providers are in place; the remaining legacy directory layout is now an internal organization choice rather than a blocker for the plugin contract.
 4. Criteria 8-9 remain partial and depend mostly on broader architectural follow-through rather than another small hardening pass.
-5. Keep validation frozen unless adjacent work exposes a specific external-input gap.
-6. Keep dedicated security-testing additions out of scope for this pass, and treat pre-commit/type-checking follow-through as a later quality phase.
+5. The branch is ready for controlled live-system testing: workspace state is isolated, completed runs leave sanitized history entries under `history/`, and the highest-risk command-construction and validation changes are covered by the current regression suite.
+6. Keep validation frozen unless adjacent work exposes a specific external-input gap.
+7. Keep dedicated security-testing additions out of scope for this pass, and treat pre-commit/type-checking follow-through as a later quality phase.
 
 ---
 *This plan will be executed in iterations with regular reviews to ensure alignment with project goals and adjustment based on findings during implementation.*

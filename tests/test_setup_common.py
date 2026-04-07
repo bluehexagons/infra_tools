@@ -28,8 +28,15 @@ class TestSetupMainTimingPersistence(unittest.TestCase):
             config = _make_config()
             saved_calls = []
 
-            def fake_save(cfg, start_time=None, end_time=None, success=None):
-                saved_calls.append({'start_time': start_time, 'end_time': end_time, 'success': success})
+            def fake_save(cfg, start_time=None, end_time=None, success=None, **kwargs):
+                saved_calls.append(
+                    {
+                        'start_time': start_time,
+                        'end_time': end_time,
+                        'success': success,
+                        'operation': kwargs.get('operation'),
+                    }
+                )
 
             with patch('lib.cache.SETUP_CACHE_DIR', tmpdir), \
                  patch.object(setup_common, 'run_remote_setup', return_value=0), \
@@ -54,10 +61,12 @@ class TestSetupMainTimingPersistence(unittest.TestCase):
             # Two saves expected: first is the pre-run config-only save (no timing),
             # second is the post-run save with start_time/end_time/success.
             self.assertEqual(len(saved_calls), 2)
+            self.assertEqual(saved_calls[0]['operation'], 'setup')
             post_run = saved_calls[1]
             self.assertIsNotNone(post_run['start_time'])
             self.assertIsNotNone(post_run['end_time'])
             self.assertIs(post_run['success'], True)
+            self.assertEqual(post_run['operation'], 'setup')
 
     def test_failure_saves_timing_and_success_false(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -65,8 +74,15 @@ class TestSetupMainTimingPersistence(unittest.TestCase):
             config = _make_config()
             saved_calls = []
 
-            def fake_save(cfg, start_time=None, end_time=None, success=None):
-                saved_calls.append({'start_time': start_time, 'end_time': end_time, 'success': success})
+            def fake_save(cfg, start_time=None, end_time=None, success=None, **kwargs):
+                saved_calls.append(
+                    {
+                        'start_time': start_time,
+                        'end_time': end_time,
+                        'success': success,
+                        'operation': kwargs.get('operation'),
+                    }
+                )
 
             with patch('lib.cache.SETUP_CACHE_DIR', tmpdir), \
                  patch.object(setup_common, 'run_remote_setup', return_value=1), \
@@ -93,6 +109,7 @@ class TestSetupMainTimingPersistence(unittest.TestCase):
             self.assertIsNotNone(post_run['start_time'])
             self.assertIsNotNone(post_run['end_time'])
             self.assertIs(post_run['success'], False)
+            self.assertEqual(post_run['operation'], 'setup')
 
     def test_exception_saves_timing_and_success_false(self):
         """Verifies that even if run_remote_setup raises, success=False is saved."""
@@ -101,8 +118,15 @@ class TestSetupMainTimingPersistence(unittest.TestCase):
             config = _make_config()
             saved_calls = []
 
-            def fake_save(cfg, start_time=None, end_time=None, success=None):
-                saved_calls.append({'start_time': start_time, 'end_time': end_time, 'success': success})
+            def fake_save(cfg, start_time=None, end_time=None, success=None, **kwargs):
+                saved_calls.append(
+                    {
+                        'start_time': start_time,
+                        'end_time': end_time,
+                        'success': success,
+                        'operation': kwargs.get('operation'),
+                    }
+                )
 
             with patch('lib.cache.SETUP_CACHE_DIR', tmpdir), \
                  patch.object(setup_common, 'run_remote_setup', side_effect=RuntimeError('boom')), \
@@ -131,6 +155,7 @@ class TestSetupMainTimingPersistence(unittest.TestCase):
             self.assertIsNotNone(post_run['start_time'])
             self.assertIsNotNone(post_run['end_time'])
             self.assertIs(post_run['success'], False)
+            self.assertEqual(post_run['operation'], 'setup')
 
     def test_dry_run_skips_post_run_save(self):
         """In dry-run mode, save_setup_command should never be called."""
@@ -139,8 +164,15 @@ class TestSetupMainTimingPersistence(unittest.TestCase):
             config = _make_config(dry_run=True)
             saved_calls = []
 
-            def fake_save(cfg, start_time=None, end_time=None, success=None):
-                saved_calls.append({'start_time': start_time, 'end_time': end_time, 'success': success})
+            def fake_save(cfg, start_time=None, end_time=None, success=None, **kwargs):
+                saved_calls.append(
+                    {
+                        'start_time': start_time,
+                        'end_time': end_time,
+                        'success': success,
+                        'operation': kwargs.get('operation'),
+                    }
+                )
 
             with patch('lib.cache.SETUP_CACHE_DIR', tmpdir), \
                  patch.object(setup_common, 'run_remote_setup', return_value=0), \
