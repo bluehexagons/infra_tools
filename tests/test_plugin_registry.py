@@ -40,11 +40,29 @@ class TestPluginRegistry(unittest.TestCase):
         registry = get_plugin_registry()
         self.assertEqual(
             [plugin.name for plugin in registry.plugins],
-            ["core", "server", "workstation"],
+            ["core", "common", "desktop", "security", "web", "server", "workstation"],
         )
         self.assertEqual(
             [plugin.plugin_kind for plugin in registry.plugins],
-            ["base", "composition", "composition"],
+            ["base", "capability", "capability", "capability", "capability", "composition", "composition"],
+        )
+
+    def test_builtin_step_builders_are_plugin_owned(self):
+        self.assertEqual(
+            get_system_type_definition("custom_steps").step_builder,
+            "plugins.core:build_custom_steps",
+        )
+        self.assertEqual(
+            get_system_type_definition("server_dev").step_builder,
+            "plugins.server:build_server_steps",
+        )
+        self.assertEqual(
+            get_system_type_definition("server_proxmox").step_builder,
+            "plugins.server:build_server_proxmox_steps",
+        )
+        self.assertEqual(
+            get_system_type_definition("workstation_dev").step_builder,
+            "plugins.workstation:build_workstation_steps",
         )
 
     def test_system_type_metadata_drives_defaults(self):
