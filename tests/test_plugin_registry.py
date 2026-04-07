@@ -14,6 +14,7 @@ from lib.plugin_registry import (
     build_plugin_registry,
     get_plugin_registry,
     resolve_custom_step,
+    resolve_validator,
     get_system_type_definition,
     get_system_type_names,
 )
@@ -101,6 +102,10 @@ class TestPluginRegistry(unittest.TestCase):
         self.assertIs(resolve_custom_step("install_ruby"), resolve_custom_step("install_ruby"))
         self.assertTrue(callable(resolve_custom_step("configure_smb_mount")))
 
+    def test_plugin_validator_resolution_is_plugin_owned(self):
+        self.assertTrue(callable(resolve_validator("parse_sync_spec")))
+        self.assertTrue(callable(resolve_validator("validate_samba_share_credentials")))
+
     def test_proxmox_step_builder_is_plugin_registered(self):
         config = SetupConfig(host="host", username="user", system_type="server_proxmox")
         step_names = [name for name, _ in get_steps_for_system_type(config)]
@@ -157,6 +162,22 @@ class TestPluginRegistry(unittest.TestCase):
             custom_step_provider="plugins.two:get_custom_step_functions",
         )
         with self.assertRaisesRegex(ValueError, "Duplicate custom step"):
+            build_plugin_registry([plugin_one, plugin_two])
+
+    def test_duplicate_validator_names_fail(self):
+        plugin_one = PluginDefinition(
+            name="one",
+            module="plugins.one",
+            validators=("parse_sync_spec",),
+            validator_provider="plugins.one:get_validator_functions",
+        )
+        plugin_two = PluginDefinition(
+            name="two",
+            module="plugins.two",
+            validators=("parse_sync_spec",),
+            validator_provider="plugins.two:get_validator_functions",
+        )
+        with self.assertRaisesRegex(ValueError, "Duplicate validator"):
             build_plugin_registry([plugin_one, plugin_two])
 
     def test_cyclic_dependencies_fail(self):
@@ -224,4 +245,13 @@ class TestPluginRegistry(unittest.TestCase):
             custom_step_provider="plugins.provider_only:get_custom_step_functions",
         )
         with self.assertRaisesRegex(ValueError, "must declare both custom_steps and custom_step_provider"):
+            build_plugin_registry([plugin])
+
+    def test_validator_provider_requires_validators(self):
+        plugin = PluginDefinition(
+            name="validator-only",
+            module="plugins.validator_only",
+            validator_provider="plugins.validator_only:get_validator_functions",
+        )
+        with self.assertRaisesRegex(ValueError, "must declare both validators and validator_provider"):
             build_plugin_registry([plugin])

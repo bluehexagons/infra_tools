@@ -26,6 +26,7 @@ from lib.validation import (
     validate_deploy_specs,
     validate_deploy_targets,
     validate_hosted_flags,
+    validate_samba_share_credentials,
     validate_samba_share_specs,
     validate_smb_mount_specs,
     validate_scrub_specs,
@@ -41,9 +42,6 @@ from lib.display import print_setup_summary
 from lib.notifications import validate_notification_args
 from lib.ssh_utils import build_ssh_command, chain_remote_commands
 from lib.workspace import set_workspace_dir
-from smb.samba_steps import validate_samba_share_credentials
-
-
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REMOTE_SCRIPT_PATH = os.path.join(SCRIPT_DIR, "..", "remote_setup.py")
 LIB_DIR = SCRIPT_DIR

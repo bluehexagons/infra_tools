@@ -24,6 +24,13 @@ PLUGIN = PluginDefinition(
         "configure_smb_mount",
     ),
     custom_step_provider="plugins.smb:get_custom_step_functions",
+    validators=(
+        "parse_share_credentials",
+        "parse_share_spec",
+        "validate_samba_share_credentials",
+        "parse_smb_mount_spec",
+    ),
+    validator_provider="plugins.smb:get_validator_functions",
 )
 
 
@@ -46,4 +53,22 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "configure_samba_fail2ban": configure_samba_fail2ban,
         "setup_samba_share": setup_samba_share,
         "configure_smb_mount": configure_smb_mount,
+    }
+
+
+def get_validator_functions() -> Mapping[str, object]:
+    """Return plugin-owned validator and parser functions for SMB flows."""
+
+    from smb.samba_steps import (
+        parse_share_credentials,
+        parse_share_spec,
+        validate_samba_share_credentials,
+    )
+    from smb.smb_mount_steps import parse_smb_mount_spec
+
+    return {
+        "parse_share_credentials": parse_share_credentials,
+        "parse_share_spec": parse_share_spec,
+        "validate_samba_share_credentials": validate_samba_share_credentials,
+        "parse_smb_mount_spec": parse_smb_mount_spec,
     }

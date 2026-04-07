@@ -5,8 +5,19 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import TYPE_CHECKING, Any, Callable, Optional, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from lib.plugin_registry import resolve_validator
+
+if TYPE_CHECKING:
+    from lib.config import SetupConfig
+
+
+def _resolve_plugin_validator(name: str) -> Callable[..., object]:
+    """Resolve a plugin-owned validator or parser callable."""
+
+    return resolve_validator(name)
 
 
 def validate_filesystem_path(path: str, must_exist: bool = False, check_writable: bool = False) -> None:
@@ -262,7 +273,10 @@ def validate_sync_specs(sync_specs: Optional[list[list[str]]]) -> None:
     if not sync_specs:
         return
 
-    from sync.sync_steps import parse_sync_spec
+    parse_sync_spec = cast(
+        Callable[[list[str]], dict[str, Any]],
+        _resolve_plugin_validator("parse_sync_spec"),
+    )
 
     for sync_spec in sync_specs:
         sync_config = parse_sync_spec(sync_spec)
@@ -276,7 +290,10 @@ def validate_scrub_specs(scrub_specs: Optional[list[list[str]]]) -> None:
     if not scrub_specs:
         return
 
-    from sync.scrub_steps import parse_scrub_spec
+    parse_scrub_spec = cast(
+        Callable[[list[str]], dict[str, Any]],
+        _resolve_plugin_validator("parse_scrub_spec"),
+    )
 
     for scrub_spec in scrub_specs:
         scrub_config = parse_scrub_spec(scrub_spec)
@@ -292,7 +309,10 @@ def validate_smb_mount_specs(smb_mounts: Optional[list[list[str]]]) -> None:
         return
 
     from lib.validators import validate_host
-    from smb.smb_mount_steps import parse_smb_mount_spec
+    parse_smb_mount_spec = cast(
+        Callable[[Optional[list[str]]], dict[str, Any]],
+        _resolve_plugin_validator("parse_smb_mount_spec"),
+    )
 
     for mount_spec in smb_mounts:
         mount_config = parse_smb_mount_spec(mount_spec)
@@ -314,7 +334,14 @@ def validate_samba_share_specs(
     if not samba_shares:
         return
 
-    from smb.samba_steps import parse_share_credentials, parse_share_spec
+    parse_share_credentials = cast(
+        Callable[[Optional[list[list[str]]]], dict[str, str]],
+        _resolve_plugin_validator("parse_share_credentials"),
+    )
+    parse_share_spec = cast(
+        Callable[[Optional[list[str]], Optional[dict[str, str]]], dict[str, Any]],
+        _resolve_plugin_validator("parse_share_spec"),
+    )
 
     credentials = parse_share_credentials(share_credentials)
 
@@ -334,6 +361,16 @@ def validate_samba_share_specs(
 
         if not share_config["users"]:
             raise ValueError(f"No users specified for share: {share_name}")
+
+
+def validate_samba_share_credentials(config: "SetupConfig") -> None:
+    """Validate Samba share credentials through the plugin registry."""
+
+    validator = cast(
+        Callable[["SetupConfig"], None],
+        _resolve_plugin_validator("validate_samba_share_credentials"),
+    )
+    validator(config)
 
 
 def validate_ssl_email(email: Optional[str]) -> None:

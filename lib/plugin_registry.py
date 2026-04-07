@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
     StepBuilder = Callable[["SetupConfig"], list[tuple[str, StepFunc]]]
     CustomStepProvider = Callable[[], Mapping[str, StepFunc]]
+    ValidatorProvider = Callable[[], Mapping[str, Callable[..., object]]]
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,8 @@ class PluginDefinition:
     system_types: tuple[SystemTypeDefinition, ...] = ()
     custom_steps: tuple[str, ...] = ()
     custom_step_provider: str | None = None
+    validators: tuple[str, ...] = ()
+    validator_provider: str | None = None
 
 
 @dataclass(frozen=True)
@@ -61,6 +64,7 @@ class PluginRegistry:
     system_types: tuple[SystemTypeDefinition, ...]
     system_types_by_name: Mapping[str, SystemTypeDefinition] = field(default_factory=dict)
     custom_step_providers_by_name: Mapping[str, str] = field(default_factory=dict)
+    validator_providers_by_name: Mapping[str, str] = field(default_factory=dict)
 
 
 VALID_PLUGIN_KINDS = ("base", "capability", "composition")
@@ -122,6 +126,11 @@ def build_plugin_registry(plugin_definitions: Sequence[PluginDefinition]) -> Plu
                 f"Plugin {plugin_definition.name!r} must declare both custom_steps "
                 "and custom_step_provider together"
             )
+        if bool(plugin_definition.validators) != bool(plugin_definition.validator_provider):
+            raise ValueError(
+                f"Plugin {plugin_definition.name!r} must declare both validators "
+                "and validator_provider together"
+            )
 
         for dependency in plugin_definition.dependencies:
             if dependency not in plugins_by_name:
@@ -154,6 +163,8 @@ def build_plugin_registry(plugin_definitions: Sequence[PluginDefinition]) -> Plu
     ordered_system_types: list[SystemTypeDefinition] = []
     custom_step_providers_by_name: dict[str, str] = {}
     custom_step_plugins_by_name: dict[str, str] = {}
+    validator_providers_by_name: dict[str, str] = {}
+    validator_plugins_by_name: dict[str, str] = {}
     for plugin_definition in resolved_plugins:
         for system_type in plugin_definition.system_types:
             if system_type.name in system_types_by_name:
@@ -176,6 +187,17 @@ def build_plugin_registry(plugin_definitions: Sequence[PluginDefinition]) -> Plu
                     )
                 custom_step_providers_by_name[custom_step] = plugin_definition.custom_step_provider
                 custom_step_plugins_by_name[custom_step] = plugin_definition.name
+        if plugin_definition.validator_provider:
+            for validator_name in plugin_definition.validators:
+                if validator_name in validator_providers_by_name:
+                    existing_plugin = validator_plugins_by_name[validator_name]
+                    raise ValueError(
+                        "Duplicate validator "
+                        f"{validator_name!r} from {plugin_definition.name!r}; "
+                        f"already registered by {existing_plugin!r}"
+                    )
+                validator_providers_by_name[validator_name] = plugin_definition.validator_provider
+                validator_plugins_by_name[validator_name] = plugin_definition.name
 
     ordered_system_types.sort(key=lambda system_type: (system_type.order, system_type.name))
     return PluginRegistry(
@@ -183,6 +205,7 @@ def build_plugin_registry(plugin_definitions: Sequence[PluginDefinition]) -> Plu
         system_types=tuple(ordered_system_types),
         system_types_by_name=system_types_by_name,
         custom_step_providers_by_name=custom_step_providers_by_name,
+        validator_providers_by_name=validator_providers_by_name,
     )
 
 
@@ -246,6 +269,19 @@ def _get_custom_step_provider(provider_reference: str) -> Mapping[str, "StepFunc
     return mapping
 
 
+@lru_cache(maxsize=None)
+def _get_validator_provider(provider_reference: str) -> Mapping[str, Callable[..., object]]:
+    """Load and cache a plugin validator provider mapping."""
+
+    provider = _resolve_reference(provider_reference, "validator provider")
+    mapping = provider()
+    if not isinstance(mapping, Mapping):
+        raise ValueError(
+            f"Validator provider {provider_reference!r} must return a mapping of validator names"
+        )
+    return mapping
+
+
 def resolve_custom_step(step_name: str) -> "StepFunc":
     """Resolve a custom step name to its plugin-owned step function."""
 
@@ -262,6 +298,24 @@ def resolve_custom_step(step_name: str) -> "StepFunc":
             f"Plugin custom step provider {provider_reference!r} did not expose {step_name!r}"
         ) from exc
     return step_function
+
+
+def resolve_validator(validator_name: str) -> Callable[..., object]:
+    """Resolve a validator or parser name to its plugin-owned callable."""
+
+    try:
+        provider_reference = get_plugin_registry().validator_providers_by_name[validator_name]
+    except KeyError as exc:
+        raise ValueError(f"Unknown validator: {validator_name}") from exc
+
+    mapping = _get_validator_provider(provider_reference)
+    try:
+        validator = mapping[validator_name]
+    except KeyError as exc:
+        raise ValueError(
+            f"Plugin validator provider {provider_reference!r} did not expose {validator_name!r}"
+        ) from exc
+    return validator
 
 
 def format_system_type_help(indent: str = "  ") -> str:

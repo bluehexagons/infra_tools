@@ -22,6 +22,8 @@ PLUGIN = PluginDefinition(
         "create_scrub_service",
     ),
     custom_step_provider="plugins.sync:get_custom_step_functions",
+    validators=("parse_sync_spec", "parse_scrub_spec"),
+    validator_provider="plugins.sync:get_validator_functions",
 )
 
 
@@ -35,4 +37,16 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "create_sync_service": create_sync_service,
         "install_par2": install_par2,
         "create_scrub_service": create_scrub_service,
+    }
+
+
+def get_validator_functions() -> Mapping[str, object]:
+    """Return plugin-owned validator and parser functions for sync flows."""
+
+    from sync.scrub_steps import parse_scrub_spec
+    from sync.sync_steps import parse_sync_spec
+
+    return {
+        "parse_sync_spec": parse_sync_spec,
+        "parse_scrub_spec": parse_scrub_spec,
     }

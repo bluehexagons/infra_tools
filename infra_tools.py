@@ -50,6 +50,7 @@ from lib.validation import (
     validate_deploy_specs,
     validate_deploy_targets,
     validate_hosted_flags,
+    validate_samba_share_credentials,
     validate_samba_share_specs,
     validate_smb_mount_specs,
     validate_scrub_specs,
@@ -59,7 +60,6 @@ from lib.validation import (
     validate_workspace_dir,
 )
 from lib.workspace import get_workspace_dir, set_workspace_dir
-from smb.samba_steps import validate_samba_share_credentials
 
 
 def _build_infra_tools_epilog() -> str:

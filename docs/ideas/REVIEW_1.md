@@ -82,7 +82,7 @@ This document outlines a plan for major architectural and security improvements 
 - Separate CLI/public configuration from internal/runtime state and persisted workspace state
 
 #### 2.2 Plugin-Based System Types
-- Status: built-in plugin registry foundation landed; system-type discovery, metadata defaults, conflict detection, lazy step-builder resolution, explicit base/capability/composition plugin roles, plugin-owned workstation/server/proxmox step builders, and plugin-owned custom-step providers now flow through plugin metadata, including fail-fast duplicate custom-step detection
+- Status: built-in plugin registry foundation landed; system-type discovery, metadata defaults, conflict detection, lazy step-builder resolution, explicit base/capability/composition plugin roles, plugin-owned workstation/server/proxmox step builders, plugin-owned custom-step providers, and plugin-owned validator providers now flow through plugin metadata, including fail-fast duplicate custom-step and validator detection
 - Move current domain directories (e.g., common, security, desktop, web, sync, smb) under a main `plugins/` package
 - Plugins define reusable steps, defaults, and optional system types; shared validators and utility code can live outside plugins when broadly reusable
 - System types are registered by plugins rather than maintained in a central static list
@@ -156,7 +156,7 @@ This document outlines a plan for major architectural and security improvements 
 ### Phase 5: Testing and Quality Assurance
 
 #### 5.1 Test Strategy — ✅ IN PROGRESS
-- 967 tests passing across the codebase, including repository-level regression scanners and unit-style coverage
+- 970 tests passing across the codebase, including repository-level regression scanners and unit-style coverage
 - New tests: `test_credentials.py`, `test_workspace_cli.py`, `test_config.py`, `test_setup_common.py`, `test_plugin_registry.py`, `test_ssh_utils.py`, `test_browser_steps.py`, `test_shell_safety.py`
 - **TODO**: Property-based testing, integration tests for common setup scenarios
 
@@ -176,7 +176,7 @@ This document outlines a plan for major architectural and security improvements 
 | 4 | `shell=True` and unsafe command construction addressed | ✅ Done for this pass |
 | 5 | Comprehensive input validation for external interfaces | ✅ Done for this pass |
 | 6 | Structured logging without credential exposure | ✅ Done for this pass |
-| 7 | Plugin discovery with conflict detection | ⚠️ Partial |
+| 7 | Plugin discovery with conflict detection | ✅ Done for this pass |
 | 8 | Improved performance and reliability | ⚠️ Partial |
 | 9 | Enhanced extensibility | ⚠️ Partial |
 | 10 | Regression tests for credential/plugin/passwordless behavior | ✅ Done |
@@ -184,7 +184,7 @@ This document outlines a plan for major architectural and security improvements 
 ## Next Steps
 1. Criterion 4 is effectively complete for this pass: there are no remaining `shell=True` call sites in the tracked Python codebase, and shared SSH/SCP/rsync builders cover the main remote-execution paths.
 2. Criterion 6 is effectively complete for this pass: the remaining gaps are helper scripts that intentionally keep human-readable interactive output rather than service-style structured logs.
-3. Criterion 7 remains partial: plugin discovery, capability/composition dependency wiring, plugin-owned workstation/server/proxmox step builders, and plugin-owned custom-step providers are in place, but the legacy domain directories are still present and broader plugin-owned module/catalog migration is still deferred.
+3. Criterion 7 is effectively complete for this pass: plugin discovery, capability/composition dependency wiring, plugin-owned workstation/server/proxmox step builders, plugin-owned custom-step providers, and plugin-owned validator providers are in place; the remaining legacy directory layout is now an internal organization choice rather than a blocker for the plugin contract.
 4. Criteria 8-9 remain partial and depend mostly on broader architectural follow-through rather than another small hardening pass.
 5. Keep validation frozen unless adjacent work exposes a specific external-input gap.
 6. Keep dedicated security-testing additions out of scope for this pass, and treat pre-commit/type-checking follow-through as a later quality phase.
