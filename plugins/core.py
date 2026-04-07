@@ -27,8 +27,14 @@ PLUGIN = PluginDefinition(
 
 
 def build_custom_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
-    """Delegate custom-step resolution to the shared custom-step catalog."""
+    """Build an explicit custom step list from plugin-owned step providers."""
 
-    from lib.plugin_steps import build_custom_steps as _build_custom_steps
+    from lib.plugin_registry import resolve_custom_step
 
-    return _build_custom_steps(config)
+    if not config.custom_steps:
+        return []
+
+    steps: list[tuple[str, StepFunc]] = []
+    for step_name in config.custom_steps.split():
+        steps.append((f"Running {step_name}", resolve_custom_step(step_name)))
+    return steps

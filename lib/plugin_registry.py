@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from lib.types import StepFunc
 
     StepBuilder = Callable[["SetupConfig"], list[tuple[str, StepFunc]]]
+    CustomStepProvider = Callable[[], Mapping[str, StepFunc]]
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,8 @@ class PluginDefinition:
     plugin_kind: str = "base"
     dependencies: tuple[str, ...] = ()
     system_types: tuple[SystemTypeDefinition, ...] = ()
+    custom_steps: tuple[str, ...] = ()
+    custom_step_provider: str | None = None
 
 
 @dataclass(frozen=True)
@@ -57,6 +60,7 @@ class PluginRegistry:
     plugins: tuple[PluginDefinition, ...]
     system_types: tuple[SystemTypeDefinition, ...]
     system_types_by_name: Mapping[str, SystemTypeDefinition] = field(default_factory=dict)
+    custom_step_providers_by_name: Mapping[str, str] = field(default_factory=dict)
 
 
 VALID_PLUGIN_KINDS = ("base", "capability", "composition")
@@ -113,6 +117,11 @@ def build_plugin_registry(plugin_definitions: Sequence[PluginDefinition]) -> Plu
                 raise ValueError(
                     f"Composition plugin {plugin_definition.name!r} must register at least one system type"
                 )
+        if bool(plugin_definition.custom_steps) != bool(plugin_definition.custom_step_provider):
+            raise ValueError(
+                f"Plugin {plugin_definition.name!r} must declare both custom_steps "
+                "and custom_step_provider together"
+            )
 
         for dependency in plugin_definition.dependencies:
             if dependency not in plugins_by_name:
@@ -143,6 +152,8 @@ def build_plugin_registry(plugin_definitions: Sequence[PluginDefinition]) -> Plu
 
     system_types_by_name: dict[str, SystemTypeDefinition] = {}
     ordered_system_types: list[SystemTypeDefinition] = []
+    custom_step_providers_by_name: dict[str, str] = {}
+    custom_step_plugins_by_name: dict[str, str] = {}
     for plugin_definition in resolved_plugins:
         for system_type in plugin_definition.system_types:
             if system_type.name in system_types_by_name:
@@ -154,12 +165,24 @@ def build_plugin_registry(plugin_definitions: Sequence[PluginDefinition]) -> Plu
                 )
             system_types_by_name[system_type.name] = system_type
             ordered_system_types.append(system_type)
+        if plugin_definition.custom_step_provider:
+            for custom_step in plugin_definition.custom_steps:
+                if custom_step in custom_step_providers_by_name:
+                    existing_plugin = custom_step_plugins_by_name[custom_step]
+                    raise ValueError(
+                        "Duplicate custom step "
+                        f"{custom_step!r} from {plugin_definition.name!r}; "
+                        f"already registered by {existing_plugin!r}"
+                    )
+                custom_step_providers_by_name[custom_step] = plugin_definition.custom_step_provider
+                custom_step_plugins_by_name[custom_step] = plugin_definition.name
 
     ordered_system_types.sort(key=lambda system_type: (system_type.order, system_type.name))
     return PluginRegistry(
         plugins=tuple(resolved_plugins),
         system_types=tuple(ordered_system_types),
         system_types_by_name=system_types_by_name,
+        custom_step_providers_by_name=custom_step_providers_by_name,
     )
 
 
@@ -185,6 +208,20 @@ def get_system_type_definition(system_type: str) -> SystemTypeDefinition:
         raise ValueError(f"Unknown system type: {system_type!r}") from exc
 
 
+def _resolve_reference(reference: str, reference_kind: str) -> Callable[..., object]:
+    """Resolve a lazy module:function reference."""
+
+    module_name, separator, function_name = reference.partition(":")
+    if not separator or not module_name or not function_name:
+        raise ValueError(f"Invalid {reference_kind} reference: {reference!r}")
+
+    module = importlib.import_module(module_name)
+    resolved = getattr(module, function_name, None)
+    if resolved is None or not callable(resolved):
+        raise ValueError(f"{reference_kind.capitalize()} {reference!r} is not callable")
+    return resolved
+
+
 def resolve_step_builder(system_type: str) -> "StepBuilder":
     """Resolve a system type's lazy step-builder reference."""
 
@@ -192,19 +229,39 @@ def resolve_step_builder(system_type: str) -> "StepBuilder":
     if not definition.step_builder:
         raise ValueError(f"No step builder registered for system type: {system_type}")
 
-    module_name, separator, function_name = definition.step_builder.partition(":")
-    if not separator or not module_name or not function_name:
-        raise ValueError(
-            f"Invalid step builder reference for system type {system_type!r}: {definition.step_builder!r}"
-        )
+    builder = _resolve_reference(definition.step_builder, "step builder")
+    return builder  # type: ignore[return-value]
 
-    module = importlib.import_module(module_name)
-    builder = getattr(module, function_name, None)
-    if builder is None or not callable(builder):
+
+@lru_cache(maxsize=None)
+def _get_custom_step_provider(provider_reference: str) -> Mapping[str, "StepFunc"]:
+    """Load and cache a plugin custom-step provider mapping."""
+
+    provider = _resolve_reference(provider_reference, "custom step provider")
+    mapping = provider()
+    if not isinstance(mapping, Mapping):
         raise ValueError(
-            f"Step builder {definition.step_builder!r} for system type {system_type!r} is not callable"
+            f"Custom step provider {provider_reference!r} must return a mapping of step names"
         )
-    return builder
+    return mapping
+
+
+def resolve_custom_step(step_name: str) -> "StepFunc":
+    """Resolve a custom step name to its plugin-owned step function."""
+
+    try:
+        provider_reference = get_plugin_registry().custom_step_providers_by_name[step_name]
+    except KeyError as exc:
+        raise ValueError(f"Unknown step: {step_name}") from exc
+
+    mapping = _get_custom_step_provider(provider_reference)
+    try:
+        step_function = mapping[step_name]
+    except KeyError as exc:
+        raise ValueError(
+            f"Plugin custom step provider {provider_reference!r} did not expose {step_name!r}"
+        ) from exc
+    return step_function
 
 
 def format_system_type_help(indent: str = "  ") -> str:

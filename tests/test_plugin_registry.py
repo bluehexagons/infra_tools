@@ -13,6 +13,7 @@ from lib.plugin_registry import (
     SystemTypeDefinition,
     build_plugin_registry,
     get_plugin_registry,
+    resolve_custom_step,
     get_system_type_definition,
     get_system_type_names,
 )
@@ -40,11 +41,21 @@ class TestPluginRegistry(unittest.TestCase):
         registry = get_plugin_registry()
         self.assertEqual(
             [plugin.name for plugin in registry.plugins],
-            ["core", "common", "desktop", "security", "web", "server", "workstation"],
+            ["core", "common", "desktop", "security", "smb", "sync", "web", "server", "workstation"],
         )
         self.assertEqual(
             [plugin.plugin_kind for plugin in registry.plugins],
-            ["base", "capability", "capability", "capability", "capability", "composition", "composition"],
+            [
+                "base",
+                "capability",
+                "capability",
+                "capability",
+                "capability",
+                "capability",
+                "capability",
+                "composition",
+                "composition",
+            ],
         )
 
     def test_builtin_step_builders_are_plugin_owned(self):
@@ -84,6 +95,10 @@ class TestPluginRegistry(unittest.TestCase):
         )
         steps = get_steps_for_system_type(config)
         self.assertEqual([name for name, _ in steps], ["Running install_ruby"])
+
+    def test_custom_step_resolution_is_plugin_owned(self):
+        self.assertIs(resolve_custom_step("install_ruby"), resolve_custom_step("install_ruby"))
+        self.assertTrue(callable(resolve_custom_step("configure_smb_mount")))
 
     def test_proxmox_step_builder_is_plugin_registered(self):
         config = SetupConfig(host="host", username="user", system_type="server_proxmox")
@@ -125,6 +140,22 @@ class TestPluginRegistry(unittest.TestCase):
             ),
         )
         with self.assertRaisesRegex(ValueError, "Duplicate system type"):
+            build_plugin_registry([plugin_one, plugin_two])
+
+    def test_duplicate_custom_step_names_fail(self):
+        plugin_one = PluginDefinition(
+            name="one",
+            module="plugins.one",
+            custom_steps=("install_ruby",),
+            custom_step_provider="plugins.one:get_custom_step_functions",
+        )
+        plugin_two = PluginDefinition(
+            name="two",
+            module="plugins.two",
+            custom_steps=("install_ruby",),
+            custom_step_provider="plugins.two:get_custom_step_functions",
+        )
+        with self.assertRaisesRegex(ValueError, "Duplicate custom step"):
             build_plugin_registry([plugin_one, plugin_two])
 
     def test_cyclic_dependencies_fail(self):
@@ -184,3 +215,12 @@ class TestPluginRegistry(unittest.TestCase):
             "Composition plugin .* must register at least one system type",
         ):
             build_plugin_registry([core, plugin])
+
+    def test_custom_step_provider_requires_custom_steps(self):
+        plugin = PluginDefinition(
+            name="provider-only",
+            module="plugins.provider_only",
+            custom_step_provider="plugins.provider_only:get_custom_step_functions",
+        )
+        with self.assertRaisesRegex(ValueError, "must declare both custom_steps and custom_step_provider"):
+            build_plugin_registry([plugin])

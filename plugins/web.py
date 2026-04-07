@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Mapping
 
 from lib.plugin_registry import PluginDefinition
 
@@ -16,6 +16,41 @@ PLUGIN = PluginDefinition(
     module=__name__,
     plugin_kind="capability",
     dependencies=("core",),
+    custom_steps=(
+        "configure_auto_update_node",
+        "install_certbot",
+        "configure_cloudflare_firewall",
+        "create_cloudflared_config_directory",
+        "configure_nginx_for_cloudflare",
+        "install_cloudflared_service_helper",
+        "run_cloudflare_tunnel_setup",
+        "install_nginx",
+        "configure_nginx_security",
+        "create_hello_world_site",
+        "configure_default_site",
+        "install_cicd_dependencies",
+        "create_cicd_user",
+        "create_cicd_directories",
+        "generate_webhook_secret",
+        "create_default_webhook_config",
+        "create_webhook_receiver_service",
+        "create_cicd_executor_service",
+        "configure_nginx_for_webhook",
+        "update_cloudflare_tunnel_for_webhook",
+        "install_webhook_manager_helper",
+        "install_app_server_dependencies",
+        "create_deploy_user",
+        "configure_deploy_sudoers",
+        "create_app_directories",
+        "configure_deploy_ssh_access",
+        "configure_app_nginx",
+        "generate_deploy_ssh_key",
+        "configure_deploy_targets",
+        "configure_deploy_known_hosts",
+        "create_build_workspace_dirs",
+        "install_build_dependencies",
+    ),
+    custom_step_provider="plugins.web:get_custom_step_functions",
 )
 
 
@@ -140,3 +175,77 @@ def extend_build_server_steps(config: SetupConfig, steps: list[tuple[str, StepFu
             ("Installing webhook manager helper", install_webhook_manager_helper),
         ]
     )
+
+
+def get_custom_step_functions() -> Mapping[str, StepFunc]:
+    """Return plugin-owned custom step functions exported by the web capability."""
+
+    from web.steps import (
+        configure_app_nginx,
+        configure_auto_update_node,
+        configure_cloudflare_firewall,
+        configure_deploy_known_hosts,
+        configure_deploy_ssh_access,
+        configure_deploy_sudoers,
+        configure_deploy_targets,
+        configure_default_site,
+        configure_nginx_for_cloudflare,
+        configure_nginx_for_webhook,
+        configure_nginx_security,
+        create_app_directories,
+        create_build_workspace_dirs,
+        create_cicd_directories,
+        create_cicd_executor_service,
+        create_cicd_user,
+        create_cloudflared_config_directory,
+        create_default_webhook_config,
+        create_deploy_user,
+        create_hello_world_site,
+        create_webhook_receiver_service,
+        generate_deploy_ssh_key,
+        generate_webhook_secret,
+        install_app_server_dependencies,
+        install_build_dependencies,
+        install_certbot,
+        install_cicd_dependencies,
+        install_cloudflared_service_helper,
+        install_nginx,
+        install_webhook_manager_helper,
+        run_cloudflare_tunnel_setup,
+        update_cloudflare_tunnel_for_webhook,
+    )
+
+    return {
+        "configure_auto_update_node": configure_auto_update_node,
+        "install_certbot": install_certbot,
+        "configure_cloudflare_firewall": configure_cloudflare_firewall,
+        "create_cloudflared_config_directory": create_cloudflared_config_directory,
+        "configure_nginx_for_cloudflare": configure_nginx_for_cloudflare,
+        "install_cloudflared_service_helper": install_cloudflared_service_helper,
+        "run_cloudflare_tunnel_setup": run_cloudflare_tunnel_setup,
+        "install_nginx": install_nginx,
+        "configure_nginx_security": configure_nginx_security,
+        "create_hello_world_site": create_hello_world_site,
+        "configure_default_site": configure_default_site,
+        "install_cicd_dependencies": install_cicd_dependencies,
+        "create_cicd_user": create_cicd_user,
+        "create_cicd_directories": create_cicd_directories,
+        "generate_webhook_secret": generate_webhook_secret,
+        "create_default_webhook_config": create_default_webhook_config,
+        "create_webhook_receiver_service": create_webhook_receiver_service,
+        "create_cicd_executor_service": create_cicd_executor_service,
+        "configure_nginx_for_webhook": configure_nginx_for_webhook,
+        "update_cloudflare_tunnel_for_webhook": update_cloudflare_tunnel_for_webhook,
+        "install_webhook_manager_helper": install_webhook_manager_helper,
+        "install_app_server_dependencies": install_app_server_dependencies,
+        "create_deploy_user": create_deploy_user,
+        "configure_deploy_sudoers": configure_deploy_sudoers,
+        "create_app_directories": create_app_directories,
+        "configure_deploy_ssh_access": configure_deploy_ssh_access,
+        "configure_app_nginx": configure_app_nginx,
+        "generate_deploy_ssh_key": generate_deploy_ssh_key,
+        "configure_deploy_targets": configure_deploy_targets,
+        "configure_deploy_known_hosts": configure_deploy_known_hosts,
+        "create_build_workspace_dirs": create_build_workspace_dirs,
+        "install_build_dependencies": install_build_dependencies,
+    }

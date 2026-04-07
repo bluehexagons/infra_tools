@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Mapping
 
 from lib.plugin_registry import PluginDefinition
 
@@ -16,6 +16,22 @@ PLUGIN = PluginDefinition(
     module=__name__,
     plugin_kind="capability",
     dependencies=("core",),
+    custom_steps=(
+        "install_desktop",
+        "install_xrdp",
+        "harden_xrdp",
+        "install_desktop_apps",
+        "configure_default_browser",
+        "install_workstation_dev_apps",
+        "configure_vivaldi_browser",
+        "install_smbclient",
+        "configure_dark_theme",
+        "install_browser",
+        "install_office_apps",
+        "install_remmina",
+        "configure_xfce_for_rdp",
+    ),
+    custom_step_provider="plugins.desktop:get_custom_step_functions",
 )
 
 
@@ -99,3 +115,39 @@ def extend_desktop_browser_and_office_steps(
 
     if config.install_office and not (config.include_desktop_apps or config.include_pc_dev_apps):
         steps.append(("Installing Office", install_office_apps))
+
+
+def get_custom_step_functions() -> Mapping[str, StepFunc]:
+    """Return plugin-owned custom step functions exported by the desktop capability."""
+
+    from desktop.steps import (
+        configure_dark_theme,
+        configure_default_browser,
+        configure_vivaldi_browser,
+        configure_xfce_for_rdp,
+        harden_xrdp,
+        install_browser,
+        install_desktop,
+        install_desktop_apps,
+        install_office_apps,
+        install_remmina,
+        install_smbclient,
+        install_workstation_dev_apps,
+        install_xrdp,
+    )
+
+    return {
+        "install_desktop": install_desktop,
+        "install_xrdp": install_xrdp,
+        "harden_xrdp": harden_xrdp,
+        "install_desktop_apps": install_desktop_apps,
+        "configure_default_browser": configure_default_browser,
+        "install_workstation_dev_apps": install_workstation_dev_apps,
+        "configure_vivaldi_browser": configure_vivaldi_browser,
+        "install_smbclient": install_smbclient,
+        "configure_dark_theme": configure_dark_theme,
+        "install_browser": install_browser,
+        "install_office_apps": install_office_apps,
+        "install_remmina": install_remmina,
+        "configure_xfce_for_rdp": configure_xfce_for_rdp,
+    }

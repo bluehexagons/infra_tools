@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Mapping
 
 from lib.plugin_registry import PluginDefinition
 
@@ -16,6 +16,28 @@ PLUGIN = PluginDefinition(
     module=__name__,
     plugin_kind="capability",
     dependencies=("core",),
+    custom_steps=(
+        "install_ruby",
+        "install_go",
+        "install_node",
+        "install_python",
+        "configure_auto_update_uv",
+        "update_and_upgrade_packages",
+        "ensure_sudo_installed",
+        "configure_locale",
+        "setup_user",
+        "copy_ssh_keys_to_user",
+        "generate_ssh_key",
+        "configure_time_sync",
+        "install_cli_tools",
+        "check_restart_required",
+        "configure_auto_update_ruby",
+        "install_mail_utils",
+        "configure_swap",
+        "install_apt_packages",
+        "install_flatpak_packages",
+    ),
+    custom_step_provider="plugins.common:get_custom_step_functions",
 )
 
 
@@ -102,3 +124,51 @@ def extend_package_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]])
 
     if config.notify_specs:
         steps.append(("Installing mail utilities for notifications", install_mail_utils))
+
+
+def get_custom_step_functions() -> Mapping[str, StepFunc]:
+    """Return plugin-owned custom step functions exported by the common capability."""
+
+    from common.steps import (
+        check_restart_required,
+        configure_auto_update_ruby,
+        configure_auto_update_uv,
+        configure_locale,
+        configure_swap,
+        configure_time_sync,
+        copy_ssh_keys_to_user,
+        ensure_sudo_installed,
+        generate_ssh_key,
+        install_apt_packages,
+        install_cli_tools,
+        install_flatpak_packages,
+        install_go,
+        install_mail_utils,
+        install_node,
+        install_python,
+        install_ruby,
+        setup_user,
+        update_and_upgrade_packages,
+    )
+
+    return {
+        "install_ruby": install_ruby,
+        "install_go": install_go,
+        "install_node": install_node,
+        "install_python": install_python,
+        "configure_auto_update_uv": configure_auto_update_uv,
+        "update_and_upgrade_packages": update_and_upgrade_packages,
+        "ensure_sudo_installed": ensure_sudo_installed,
+        "configure_locale": configure_locale,
+        "setup_user": setup_user,
+        "copy_ssh_keys_to_user": copy_ssh_keys_to_user,
+        "generate_ssh_key": generate_ssh_key,
+        "configure_time_sync": configure_time_sync,
+        "install_cli_tools": install_cli_tools,
+        "check_restart_required": check_restart_required,
+        "configure_auto_update_ruby": configure_auto_update_ruby,
+        "install_mail_utils": install_mail_utils,
+        "configure_swap": configure_swap,
+        "install_apt_packages": install_apt_packages,
+        "install_flatpak_packages": install_flatpak_packages,
+    }
