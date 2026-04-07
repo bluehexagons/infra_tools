@@ -39,13 +39,6 @@ PLUGIN = PluginDefinition(
             order=60,
             step_builder="plugins.server:build_server_steps",
         ),
-        SystemTypeDefinition(
-            name="server_proxmox",
-            description="Proxmox host server",
-            order=70,
-            default_no_restart=True,
-            step_builder="plugins.server:build_server_proxmox_steps",
-        ),
     ),
 )
 
@@ -88,28 +81,3 @@ def build_server_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
     extend_build_server_steps(config, steps)
     steps.extend(get_final_steps())
     return steps
-
-
-def build_server_proxmox_steps(_: SetupConfig) -> list[tuple[str, StepFunc]]:
-    """Build the dedicated Proxmox hardening flow."""
-
-    from common.steps import check_restart_required, configure_swap
-    from security.steps import (
-        configure_auto_restart,
-        configure_auto_updates,
-        configure_cleanup_maintenance,
-        create_remoteusers_group,
-        harden_kernel,
-        harden_ssh,
-    )
-
-    return [
-        ("Creating remoteusers group", create_remoteusers_group),
-        ("Configuring swap", configure_swap),
-        ("Hardening SSH configuration", harden_ssh),
-        ("Hardening kernel parameters", harden_kernel),
-        ("Configuring automatic security updates", configure_auto_updates),
-        ("Configuring cleanup maintenance service", configure_cleanup_maintenance),
-        ("Configuring automatic restart service", configure_auto_restart),
-        ("Checking if restart required", check_restart_required),
-    ]

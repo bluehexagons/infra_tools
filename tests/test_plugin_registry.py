@@ -41,7 +41,7 @@ class TestPluginRegistry(unittest.TestCase):
         registry = get_plugin_registry()
         self.assertEqual(
             [plugin.name for plugin in registry.plugins],
-            ["core", "common", "desktop", "security", "smb", "sync", "web", "server", "workstation"],
+            ["core", "common", "desktop", "security", "smb", "sync", "web", "proxmox", "server", "workstation"],
         )
         self.assertEqual(
             [plugin.plugin_kind for plugin in registry.plugins],
@@ -53,6 +53,7 @@ class TestPluginRegistry(unittest.TestCase):
                 "capability",
                 "capability",
                 "capability",
+                "composition",
                 "composition",
                 "composition",
             ],
@@ -69,7 +70,7 @@ class TestPluginRegistry(unittest.TestCase):
         )
         self.assertEqual(
             get_system_type_definition("server_proxmox").step_builder,
-            "plugins.server:build_server_proxmox_steps",
+            "plugins.proxmox:build_server_proxmox_steps",
         )
         self.assertEqual(
             get_system_type_definition("workstation_dev").step_builder,

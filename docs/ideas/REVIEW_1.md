@@ -82,7 +82,7 @@ This document outlines a plan for major architectural and security improvements 
 - Separate CLI/public configuration from internal/runtime state and persisted workspace state
 
 #### 2.2 Plugin-Based System Types
-- Status: built-in plugin registry foundation landed; system-type discovery, metadata defaults, conflict detection, lazy step-builder resolution, explicit base/capability/composition plugin roles, plugin-owned workstation/server step builders, and plugin-owned custom-step providers now flow through plugin metadata, including fail-fast duplicate custom-step detection
+- Status: built-in plugin registry foundation landed; system-type discovery, metadata defaults, conflict detection, lazy step-builder resolution, explicit base/capability/composition plugin roles, plugin-owned workstation/server/proxmox step builders, and plugin-owned custom-step providers now flow through plugin metadata, including fail-fast duplicate custom-step detection
 - Move current domain directories (e.g., common, security, desktop, web, sync, smb) under a main `plugins/` package
 - Plugins define reusable steps, defaults, and optional system types; shared validators and utility code can live outside plugins when broadly reusable
 - System types are registered by plugins rather than maintained in a central static list
@@ -98,7 +98,7 @@ This document outlines a plan for major architectural and security improvements 
 - Example plugin split:
   - core/base plugins load first in a fixed order for shared foundations
   - `plugins/workstation` provides desktop and workstation-related steps and system types
-  - `plugins/web_server` provides web deployment/server steps and registers `server_web`
+  - `plugins/server` composes shared capability plugins and registers `server_web`
   - `plugins/proxmox` provides hosted/container steps and registers `server_proxmox`
 - After core/base plugins load, resolve dependent plugins in deterministic order
 - Allow a late-load discovery step for simple/lightweight plugins that do not declare dependencies
@@ -184,7 +184,7 @@ This document outlines a plan for major architectural and security improvements 
 ## Next Steps
 1. Criterion 4 is effectively complete for this pass: there are no remaining `shell=True` call sites in the tracked Python codebase, and shared SSH/SCP/rsync builders cover the main remote-execution paths.
 2. Criterion 6 is effectively complete for this pass: the remaining gaps are helper scripts that intentionally keep human-readable interactive output rather than service-style structured logs.
-3. Criterion 7 remains partial: plugin discovery, capability/composition dependency wiring, plugin-owned workstation/server step builders, and plugin-owned custom-step providers are in place, but the legacy domain directories are still present and broader plugin-owned module/catalog migration is still deferred.
+3. Criterion 7 remains partial: plugin discovery, capability/composition dependency wiring, plugin-owned workstation/server/proxmox step builders, and plugin-owned custom-step providers are in place, but the legacy domain directories are still present and broader plugin-owned module/catalog migration is still deferred.
 4. Criteria 8-9 remain partial and depend mostly on broader architectural follow-through rather than another small hardening pass.
 5. Keep validation frozen unless adjacent work exposes a specific external-input gap.
 6. Keep dedicated security-testing additions out of scope for this pass, and treat pre-commit/type-checking follow-through as a later quality phase.
