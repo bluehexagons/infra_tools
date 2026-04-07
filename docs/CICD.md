@@ -46,16 +46,16 @@ GitHub Webhook → Cloudflare Tunnel → Nginx (rate limiting) → Webhook Recei
 
 ### Automatic Setup (Recommended)
 
-Add `--cicd` flag to your setup script:
+Add `--cicd` to your setup command:
 
 ```bash
-python3 setup_server_web.py example.com --cicd
+python3 infra_tools.py setup server_web example.com --cicd
 ```
 
-Or use patch_setup to add CI/CD to existing server:
+Or patch an existing server with the unified CLI:
 
 ```bash
-python3 patch_setup.py example.com --cicd
+python3 infra_tools.py patch example.com --cicd
 ```
 
 ### Manual Setup

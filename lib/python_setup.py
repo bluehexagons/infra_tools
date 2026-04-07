@@ -1,33 +1,17 @@
-#!/usr/bin/env python3
-
 from __future__ import annotations
 
-import argparse
 import os
 import shutil
 import subprocess
-import sys
 
 from common.common_steps import install_or_update_uv
+from lib.completions import run_completion_setup
 from lib.system_utils import get_current_username
 from lib.validators import validate_username
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Install local Python tooling for infra_tools (current user, no root required)."
-    )
-    parser.add_argument(
-        "--shell",
-        choices=["bash", "zsh", "fish", "tcsh"],
-        default="bash",
-        help="Shell to configure for completion (default: bash)",
-    )
-    return parser.parse_args()
-
-
-def main() -> int:
-    args = parse_args()
+def run_local_python_setup(shell: str, command_name: str = "infra_tools.py") -> int:
+    """Install local Python tooling and CLI completions for the current user."""
     username = get_current_username()
     if not validate_username(username):
         print(f"Error: Invalid username: {username}")
@@ -64,7 +48,7 @@ def main() -> int:
     argcomplete_result = subprocess.run(
         [uv_path, "tool", "install", "--upgrade", "argcomplete"],
         capture_output=True,
-        text=True
+        text=True,
     )
     if argcomplete_result.returncode != 0:
         output = "\n".join(
@@ -74,31 +58,15 @@ def main() -> int:
         return 1
     print("✓ argcomplete installed via uv")
 
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    completions_script = os.path.join(script_dir, "setup_completions.py")
-    if not os.path.exists(completions_script):
-        print(f"Error: setup_completions.py not found: {completions_script}")
-        return 1
+    old_path = os.environ.get("PATH", "")
+    os.environ["PATH"] = os.pathsep.join([local_bin, old_path]) if old_path else local_bin
+    try:
+        result = run_completion_setup(shell=shell, global_install=False, command_name=command_name)
+    finally:
+        os.environ["PATH"] = old_path
 
-    completion_env = os.environ.copy()
-    completion_env["PATH"] = os.pathsep.join([local_bin, completion_env.get("PATH", "")])
+    if result != 0:
+        return result
 
-    completion_result = subprocess.run(
-        [sys.executable, completions_script, "--user", "--shell", args.shell],
-        capture_output=True,
-        text=True,
-        env=completion_env
-    )
-    if completion_result.returncode != 0:
-        print(completion_result.stdout, end="")
-        if completion_result.stderr:
-            print(completion_result.stderr, end="")
-        return 1
-
-    print(completion_result.stdout, end="")
     print("✓ Local infra_tools Python install complete.")
     return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 
@@ -28,6 +29,34 @@ def extract_repo_name(git_url: str) -> str:
     if repo_name.endswith('.git'):
         repo_name = repo_name[:-4]
     return repo_name
+
+
+def _load_args_file(args_file: str) -> list[str]:
+    try:
+        with open(args_file, "r", encoding="utf-8") as file_obj:
+            payload = json.load(file_obj)
+    finally:
+        try:
+            os.unlink(args_file)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            print(f"Warning: Failed to remove args file {args_file}: {exc}", file=sys.stderr)
+
+    if not isinstance(payload, list):
+        raise ValueError("Args file must contain a JSON list")
+    if not all(isinstance(arg, str) for arg in payload):
+        raise ValueError("Args file entries must all be strings")
+    return list(payload)
+
+
+def _resolve_cli_args(argv: list[str]) -> list[str]:
+    args_file_parser = argparse.ArgumentParser(add_help=False)
+    args_file_parser.add_argument("--args-file")
+    parsed, remaining = args_file_parser.parse_known_args(argv)
+    if not parsed.args_file:
+        return argv
+    return _load_args_file(parsed.args_file) + remaining
 
 
 def config_from_remote_args(args: argparse.Namespace) -> SetupConfig:
@@ -56,7 +85,7 @@ def main() -> int:
         allow_steps=True
     )
     
-    args = parser.parse_args()
+    args = parser.parse_args(_resolve_cli_args(sys.argv[1:]))
     
     if args.dry_run:
         set_dry_run(True)

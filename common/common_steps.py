@@ -305,17 +305,6 @@ export NVM_DIR="$HOME/.nvm"
     print("  ✓ nvm + Node.js LTS + NPM (latest) + PNPM installed for user")
 
 
-def _find_setup_completions_script() -> Optional[str]:
-    candidates = [
-        "/opt/infra_tools/setup_completions.py",
-        os.path.join(os.path.dirname(os.path.dirname(__file__)), "setup_completions.py"),
-    ]
-    for candidate in candidates:
-        if os.path.exists(candidate):
-            return candidate
-    return None
-
-
 def _validate_uv_install_script(script_path: str) -> bool:
     """Basic validation for uv installer script content before execution."""
     try:
@@ -431,8 +420,6 @@ def install_python(config: SetupConfig) -> None:
     else:
         raise RuntimeError("uv installation failed")
 
-    if _find_setup_completions_script() is None:
-        print("  ℹ setup_completions.py not found in installed location")
     print("  ℹ Remote systems skip shell autocompletion setup")
 
 

@@ -12,9 +12,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.arg_parser import create_setup_argument_parser
 from lib.config import SetupConfig
+from lib import python_setup
 from lib.system_types import get_steps_for_system_type
 import common.common_steps as common_steps
-import setup_admin_python
 
 
 class TestPythonFlag(unittest.TestCase):
@@ -36,13 +36,12 @@ class TestPythonFlag(unittest.TestCase):
 
     @patch("common.common_steps.install_or_update_uv", return_value=True)
     @patch("common.common_steps.shutil.which", side_effect=["/usr/bin/python3", "/usr/bin/python"])
-    @patch("common.common_steps._find_setup_completions_script", return_value="/opt/infra_tools/setup_completions.py")
     @patch("common.common_steps.run")
-    def test_remote_install_python_skips_completion(self, mock_run, _find, _which, _install_uv):
+    def test_remote_install_python_skips_completion(self, mock_run, _which, _install_uv):
         config = SetupConfig(host="host", username="user", system_type="server_dev", install_python=True)
         common_steps.install_python(config)
         commands = [args[0] for args, _ in mock_run.call_args_list]
-        self.assertFalse(any("setup_completions.py" in cmd for cmd in commands))
+        self.assertFalse(any("argcomplete" in cmd for cmd in commands))
 
     @patch("common.common_steps.is_dry_run", return_value=True)
     def test_install_or_update_uv_returns_true_in_dry_run(self, _is_dry_run):
@@ -50,47 +49,45 @@ class TestPythonFlag(unittest.TestCase):
 
 
 class TestSetupAdminPython(unittest.TestCase):
-    @patch("setup_admin_python.os.path.expanduser", return_value="/tmp/testuser")
-    @patch("setup_admin_python.os.symlink")
-    @patch("setup_admin_python.os.makedirs")
-    @patch("setup_admin_python.subprocess.run")
-    @patch("setup_admin_python.install_or_update_uv", return_value=True)
-    @patch("setup_admin_python.validate_username", return_value=True)
-    @patch("setup_admin_python.parse_args", return_value=argparse.Namespace(shell="bash"))
-    @patch("setup_admin_python.get_current_username", return_value="admin")
-    @patch("setup_admin_python.shutil.which", side_effect=["/usr/bin/python3", None])
+    @patch("lib.python_setup.run_completion_setup", return_value=0)
+    @patch("lib.python_setup.os.path.expanduser", return_value="/tmp/testuser")
+    @patch("lib.python_setup.os.symlink")
+    @patch("lib.python_setup.os.makedirs")
+    @patch("lib.python_setup.subprocess.run")
+    @patch("lib.python_setup.install_or_update_uv", return_value=True)
+    @patch("lib.python_setup.validate_username", return_value=True)
+    @patch("lib.python_setup.get_current_username", return_value="admin")
+    @patch("lib.python_setup.shutil.which", side_effect=["/usr/bin/python3", None])
     def test_main_runs_shared_setup_steps(
         self,
         _which,
         _current_username,
-        _parse_args,
         _validate_username,
         mock_install_or_update_uv,
         mock_subprocess_run,
         mock_makedirs,
         mock_symlink,
         _expanduser,
+        mock_run_completion_setup,
     ):
         mock_subprocess_run.return_value = argparse.Namespace(returncode=0, stdout="", stderr="")
-        with patch(
-            "setup_admin_python.os.path.exists",
-            side_effect=lambda p: str(p).endswith("setup_completions.py"),
-        ):
-            result = setup_admin_python.main()
+        result = python_setup.run_local_python_setup("bash")
         self.assertEqual(result, 0)
         mock_makedirs.assert_called_once()
         mock_symlink.assert_called_once_with("/usr/bin/python3", "/tmp/testuser/.local/bin/python")
         mock_install_or_update_uv.assert_called_once()
         _which.assert_has_calls([call("python3"), call("python")])
-        self.assertEqual(mock_subprocess_run.call_count, 2)
-        completion_env = mock_subprocess_run.call_args_list[1].kwargs["env"]
-        self.assertTrue(completion_env["PATH"].startswith("/tmp/testuser/.local/bin"))
+        mock_subprocess_run.assert_called_once()
+        mock_run_completion_setup.assert_called_once_with(
+            shell="bash",
+            global_install=False,
+            command_name="infra_tools.py",
+        )
 
-    @patch("setup_admin_python.validate_username", return_value=False)
-    @patch("setup_admin_python.parse_args", return_value=argparse.Namespace(shell="bash"))
-    @patch("setup_admin_python.get_current_username", return_value="invalid user")
-    def test_main_rejects_invalid_username(self, _current_username, _parse_args, _validate_username):
-        result = setup_admin_python.main()
+    @patch("lib.python_setup.validate_username", return_value=False)
+    @patch("lib.python_setup.get_current_username", return_value="invalid user")
+    def test_main_rejects_invalid_username(self, _current_username, _validate_username):
+        result = python_setup.run_local_python_setup("bash")
         self.assertEqual(result, 1)
 
 

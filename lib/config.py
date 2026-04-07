@@ -316,11 +316,14 @@ class SetupConfig:
         return args
     
     def to_setup_command(self, include_username: bool = True) -> StrList:
-        """Generate command line for user-facing setup script.
+        """Generate command line for the unified setup entry point.
         
         Returns a list of command parts that can be joined with spaces or newlines.
         """
-        cmd_parts: StrList = [f"python3 setup_{self.system_type}.py", self.host]
+        cmd_parts: StrList = [
+            f"python3 infra_tools.py setup {shlex.quote(self.system_type)}",
+            self.host,
+        ]
         
         # Add username if different from current user or if requested
         if include_username:

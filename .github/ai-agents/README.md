@@ -58,7 +58,7 @@ See `docs/MACHINE_TYPES.md` for capability matrix.
 
 | Task | Steps |
 |------|-------|
-| Add Setup Step | Function in `module/*_steps.py` → Add to setup script → Add tests |
+| Add Setup Step | Function in `module/*_steps.py` → Wire into unified setup flow → Add tests |
 | Modify Config | Update `SetupConfig` in `lib/config.py` → Update `lib/arg_parser.py` |
 | Fix Bug | Preserve signatures → Follow error patterns → Add regression test |
 

@@ -203,7 +203,7 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
     def test_basic_command(self):
         config = self._make_config()
         parts = config.to_setup_command()
-        self.assertIn('python3 setup_server_lite.py', parts[0])
+        self.assertIn('python3 infra_tools.py setup server_lite', parts[0])
         self.assertIn('testhost', parts)
 
     def test_includes_username(self):

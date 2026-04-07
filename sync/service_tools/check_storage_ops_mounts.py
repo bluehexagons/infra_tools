@@ -15,6 +15,9 @@ from logging import ERROR, INFO, WARNING, Logger
 import os
 import sys
 
+# Add lib directory to path
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
+
 from lib.logging_utils import get_service_logger, log_event
 
 

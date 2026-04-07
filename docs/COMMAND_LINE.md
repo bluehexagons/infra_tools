@@ -1,8 +1,8 @@
 # Command-Line Reference
 
-Complete reference for all setup script flags.
+Complete reference for the unified infra_tools CLI.
 
-## Unified Entry Point (Recommended)
+## Unified Entry Point
 
 The `infra_tools.py` script provides a unified interface for all operations:
 
@@ -12,6 +12,19 @@ infra_tools.py setup <system_type> <host> [username] [options]
 
 # Patch/update an existing system  
 infra_tools.py patch <host> [username] [options]
+
+# Recall a saved or reconstructed setup command from a remote host
+infra_tools.py recall <host> [username] [options]
+
+# Reconstruct this host's setup summary
+infra_tools.py reconstruct [--compact]
+
+# Install shell completion or local Python tooling
+infra_tools.py completions [options]
+infra_tools.py python-tools [options]
+
+# Bootstrap the local orchestration host
+infra_tools.py bootstrap [options]
 ```
 
 ### System Types for `setup` command
@@ -93,7 +106,7 @@ infra_tools.py setup server_web 10.0.0.50 admin \
 
 ## Hosted Proxmox LXC Flags
 
-Use these flags with `infra_tools.py setup ...` or the legacy `setup_*.py` scripts to create an LXC container on a Proxmox host before the normal setup flow continues against that new container.
+Use these flags with `infra_tools.py setup ...` to create an LXC container on a Proxmox host before the normal setup flow continues against that new container.
 
 | Flag | Description |
 |------|-------------|
@@ -153,7 +166,7 @@ python3 infra_tools.py setup server_web 10.0.0.50 admin \
 Example:
 
 ```bash
-python3 setup_server_lite.py 192.168.1.10 \
+python3 infra_tools.py setup server_lite 192.168.1.10 \
   --samba \
   --credential mediauser supersecret \
   --share read media /mnt/data/media mediauser,guest:guest
@@ -181,15 +194,25 @@ Each bare username in `USERS` must have a matching `--credential USERNAME PASSWO
 
 ## Patch Commands
 
-When using `infra_tools.py patch` or the legacy `patch_setup.py`:
+Saved setup management and patching are handled through `infra_tools.py`:
 
 ```bash
-infra_tools.py patch <host> [options]     # Using unified tool
+infra_tools.py patch <host> [options]     # Patch/update an existing system
+infra_tools.py list [pattern]             # List saved configurations
+infra_tools.py info [pattern]             # Show configuration details
+infra_tools.py cmd [pattern]              # Show reconstructed command
+infra_tools.py rm <pattern>               # Remove configurations
+infra_tools.py deploy <pattern>           # Redeploy systems
+```
 
-# Legacy commands still work:
-patch_setup.py list [pattern]             # List saved configurations
-patch_setup.py info [pattern]             # Show configuration details
-patch_setup.py cmd [pattern]              # Show reconstructed command
-patch_setup.py rm [pattern]               # Remove configurations
-patch_setup.py deploy [pattern]           # Redeploy systems
+## Utility Commands
+
+These remaining utility workflows are also handled through `infra_tools.py`:
+
+```bash
+infra_tools.py recall <host> [username]   # Read stored config or reconstruct remotely
+infra_tools.py reconstruct                # Analyze the current host and emit JSON
+infra_tools.py completions --shell zsh    # Install shell completion
+infra_tools.py python-tools --shell bash  # Install local python alias, uv, argcomplete
+sudo python3 infra_tools.py bootstrap --user admin  # Install local packages and configure tools for an admin user
 ```

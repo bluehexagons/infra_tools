@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import json
 import os
 import shlex
 import shutil
@@ -49,6 +50,7 @@ CONFIG_DIR = os.path.join(SCRIPT_DIR, "..", "config")
 SERVICE_TOOLS_DIR = os.path.join(SCRIPT_DIR, "..", "service_tools")
 REMOTE_INSTALL_DIR = "/opt/infra_tools"
 GIT_CACHE_DIR = os.path.expanduser("~/.cache/infra_tools/git_repos")
+REMOTE_ARGS_FILENAME = ".remote_setup_args.json"
 
 
 def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = None, dry_run: bool = False) -> Optional[tuple[str, Optional[str]]]:
@@ -182,7 +184,7 @@ def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = Non
 
 def copy_project_files(dest_dir: str) -> None:
     project_root = os.path.normpath(os.path.join(SCRIPT_DIR, ".."))
-    items_to_copy = ["remote_setup.py", "reconstruct_setup.py", "lib", "desktop", "web", "smb", "security", "sync", "common", "deploy"]
+    items_to_copy = ["infra_tools.py", "remote_setup.py", "lib", "desktop", "web", "smb", "security", "sync", "common", "deploy"]
     
     for item in items_to_copy:
         src = os.path.join(project_root, item)
@@ -234,6 +236,16 @@ def _expand_remote_args(remote_args: list[str]) -> list[str]:
     return expanded_args
 
 
+def _write_remote_args_file(build_dir: str, remote_arg_tokens: list[str]) -> str:
+    """Persist runtime argv tokens outside the process table."""
+    args_path = os.path.join(build_dir, REMOTE_ARGS_FILENAME)
+    with open(args_path, "w", encoding="utf-8") as file_obj:
+        json.dump(remote_arg_tokens, file_obj)
+        file_obj.write("\n")
+    os.chmod(args_path, 0o600)
+    return args_path
+
+
 def run_remote_setup(config: SetupConfig) -> int:
     is_local = config.host in ["localhost", "127.0.0.1"]
     
@@ -251,7 +263,14 @@ def run_remote_setup(config: SetupConfig) -> int:
             prepare_deployments(config, deploy_dir)
             
         remote_arg_tokens = _expand_remote_args(config.to_remote_args())
-        command_tokens = [sys.executable, os.path.join(REMOTE_INSTALL_DIR, "remote_setup.py")] + remote_arg_tokens
+        _write_remote_args_file(build_dir, remote_arg_tokens)
+        remote_args_path = os.path.join(REMOTE_INSTALL_DIR, REMOTE_ARGS_FILENAME)
+        command_tokens = [
+            sys.executable,
+            os.path.join(REMOTE_INSTALL_DIR, "remote_setup.py"),
+            "--args-file",
+            remote_args_path,
+        ]
         
         if config.dry_run:
             print("\n" + "=" * 60)
@@ -301,7 +320,7 @@ def run_remote_setup(config: SetupConfig) -> int:
             
             remote_python = "python3"
             remote_script = os.path.join(REMOTE_INSTALL_DIR, "remote_setup.py")
-            remote_cmd_args = [remote_python, remote_script] + remote_arg_tokens
+            remote_cmd_args = [remote_python, remote_script, "--args-file", remote_args_path]
             remote_shell_cmd = chain_remote_commands(
                 [
                     ["mkdir", "-p", REMOTE_INSTALL_DIR],

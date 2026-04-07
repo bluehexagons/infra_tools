@@ -33,7 +33,7 @@ def setup_feature(config: SetupConfig) -> None:
 python3 -m py_compile file.py
 
 # Dry run test
-python3 setup_server_web.py test.com --dry-run
+python3 infra_tools.py setup server_web test.com --dry-run
 
 # Run tests
 python3 -m pytest tests/ -v

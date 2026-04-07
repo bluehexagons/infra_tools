@@ -30,6 +30,60 @@ class TestWorkspaceCli(unittest.TestCase):
         self.assertEqual(args.workspace, "/tmp/workspace")
         self.assertEqual(args.credentials_command, "list")
 
+    def test_infra_tools_parser_accepts_list_command(self):
+        parser, _setup_parser, _patch_parser = infra_tools.create_infra_tools_parser()
+        args = parser.parse_args(["list", "--workspace", "/tmp/workspace", "prod"])
+        self.assertEqual(args.command, "list")
+        self.assertEqual(args.workspace, "/tmp/workspace")
+        self.assertEqual(args.pattern, "prod")
+
+    def test_infra_tools_parser_accepts_recall_command(self):
+        parser, _setup_parser, _patch_parser = infra_tools.create_infra_tools_parser()
+        args = parser.parse_args(["recall", "example.com", "admin", "--key", "~/.ssh/id_ed25519"])
+        self.assertEqual(args.command, "recall")
+        self.assertEqual(args.host, "example.com")
+        self.assertEqual(args.username, "admin")
+        self.assertEqual(args.ssh_key, "~/.ssh/id_ed25519")
+
+    def test_infra_tools_parser_accepts_reconstruct_command(self):
+        parser, _setup_parser, _patch_parser = infra_tools.create_infra_tools_parser()
+        args = parser.parse_args(["reconstruct", "--compact"])
+        self.assertEqual(args.command, "reconstruct")
+        self.assertTrue(args.compact)
+
+    def test_infra_tools_parser_accepts_completions_command(self):
+        parser, _setup_parser, _patch_parser = infra_tools.create_infra_tools_parser()
+        args = parser.parse_args(["completions", "--shell", "zsh", "--global"])
+        self.assertEqual(args.command, "completions")
+        self.assertEqual(args.shell, "zsh")
+        self.assertTrue(args.global_install)
+
+    def test_infra_tools_parser_accepts_python_tools_command(self):
+        parser, _setup_parser, _patch_parser = infra_tools.create_infra_tools_parser()
+        args = parser.parse_args(["python-tools", "--shell", "fish"])
+        self.assertEqual(args.command, "python-tools")
+        self.assertEqual(args.shell, "fish")
+
+    def test_infra_tools_parser_accepts_bootstrap_command(self):
+        parser, _setup_parser, _patch_parser = infra_tools.create_infra_tools_parser()
+        args = parser.parse_args(["bootstrap", "--user", "admin", "--shell", "zsh", "--skip-system-packages"])
+        self.assertEqual(args.command, "bootstrap")
+        self.assertEqual(args.bootstrap_user, "admin")
+        self.assertEqual(args.shell, "zsh")
+        self.assertTrue(args.skip_system_packages)
+
+    def test_reconstruct_command_uses_unified_setup_entrypoint(self):
+        config = SetupConfig(
+            host="example.com",
+            username="testuser",
+            system_type="server_lite",
+        )
+
+        command = infra_tools.reconstruct_command(config)
+
+        self.assertIn("python3 infra_tools.py setup server_lite", command)
+        self.assertNotIn("setup_server_lite.py", command)
+
     @patch("builtins.print")
     @patch("infra_tools.set_workspace_credential", side_effect=ValueError("Credential username must not contain ':'"))
     def test_infra_tools_credentials_set_rejects_invalid_username(

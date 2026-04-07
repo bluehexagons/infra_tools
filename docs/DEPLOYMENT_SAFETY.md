@@ -292,7 +292,7 @@ This happens because:
 Use the `--reset-migrations` flag to reload the schema and mark all migrations as run:
 
 ```bash
-./setup_server_web.py <host> \
+python3 infra_tools.py setup server_web <host> \
   --deploy clicker.bluehexagons.com https://github.com/user/repo.git \
   --reset-migrations
 ```
@@ -330,7 +330,7 @@ This typically happens when:
   • The database schema is out of sync with migration history
 
 To fix this, redeploy with the --reset-migrations flag:
-  ./setup_server_web.py <host> --deploy <deploy-spec> <git-url> --reset-migrations
+  python3 infra_tools.py setup server_web <host> --deploy <deploy-spec> <git-url> --reset-migrations
 
 ⚠ WARNING: --reset-migrations will:
   • Load the current schema from db/schema.rb
@@ -344,7 +344,7 @@ To fix this, redeploy with the --reset-migrations flag:
 
 **Before (error):**
 ```bash
-$ ./setup_server_web.py myserver.com --deploy app.example.com https://github.com/user/app.git
+$ python3 infra_tools.py setup server_web myserver.com --deploy app.example.com https://github.com/user/app.git
 
 Deploying to /var/www/app_example_com...
   Running database migrations...
@@ -353,7 +353,7 @@ Deploying to /var/www/app_example_com...
 
 **After (fixed):**
 ```bash
-$ ./setup_server_web.py myserver.com --deploy app.example.com https://github.com/user/app.git --reset-migrations
+$ python3 infra_tools.py setup server_web myserver.com --deploy app.example.com https://github.com/user/app.git --reset-migrations
 
 Deploying to /var/www/app_example_com...
   Resetting database schema (--reset-migrations flag used)...

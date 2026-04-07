@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import os
 import sys
 import tempfile
@@ -23,7 +24,7 @@ class TestSetupMainTimingPersistence(unittest.TestCase):
     """Verify setup_main always saves last_start_time/end_time/success."""
 
     def test_success_saves_timing_and_success_true(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with tempfile.TemporaryDirectory():
             from lib import setup_common
             config = _make_config()
             saved_calls = []
@@ -38,13 +39,13 @@ class TestSetupMainTimingPersistence(unittest.TestCase):
                     }
                 )
 
-            with patch('lib.cache.SETUP_CACHE_DIR', tmpdir), \
-                 patch.object(setup_common, 'run_remote_setup', return_value=0), \
+            with patch.object(setup_common, 'run_remote_setup', return_value=0), \
                  patch.object(setup_common, 'validate_host', return_value=True), \
                  patch.object(setup_common, 'validate_username', return_value=True), \
                  patch.object(setup_common, 'get_current_username', return_value='testuser'), \
                  patch.object(setup_common, 'validate_samba_share_credentials'), \
                  patch.object(setup_common, 'print_setup_summary'), \
+                 patch.object(setup_common, 'store_cli_credentials'), \
                  patch.object(setup_common, 'save_setup_command', side_effect=fake_save):
 
                 parser = MagicMock()
@@ -69,7 +70,7 @@ class TestSetupMainTimingPersistence(unittest.TestCase):
             self.assertEqual(post_run['operation'], 'setup')
 
     def test_failure_saves_timing_and_success_false(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with tempfile.TemporaryDirectory():
             from lib import setup_common
             config = _make_config()
             saved_calls = []
@@ -84,13 +85,13 @@ class TestSetupMainTimingPersistence(unittest.TestCase):
                     }
                 )
 
-            with patch('lib.cache.SETUP_CACHE_DIR', tmpdir), \
-                 patch.object(setup_common, 'run_remote_setup', return_value=1), \
+            with patch.object(setup_common, 'run_remote_setup', return_value=1), \
                  patch.object(setup_common, 'validate_host', return_value=True), \
                  patch.object(setup_common, 'validate_username', return_value=True), \
                  patch.object(setup_common, 'get_current_username', return_value='testuser'), \
                  patch.object(setup_common, 'validate_samba_share_credentials'), \
                  patch.object(setup_common, 'print_setup_summary'), \
+                 patch.object(setup_common, 'store_cli_credentials'), \
                  patch.object(setup_common, 'save_setup_command', side_effect=fake_save):
 
                 parser = MagicMock()
@@ -113,7 +114,7 @@ class TestSetupMainTimingPersistence(unittest.TestCase):
 
     def test_exception_saves_timing_and_success_false(self):
         """Verifies that even if run_remote_setup raises, success=False is saved."""
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with tempfile.TemporaryDirectory():
             from lib import setup_common
             config = _make_config()
             saved_calls = []
@@ -128,13 +129,13 @@ class TestSetupMainTimingPersistence(unittest.TestCase):
                     }
                 )
 
-            with patch('lib.cache.SETUP_CACHE_DIR', tmpdir), \
-                 patch.object(setup_common, 'run_remote_setup', side_effect=RuntimeError('boom')), \
+            with patch.object(setup_common, 'run_remote_setup', side_effect=RuntimeError('boom')), \
                  patch.object(setup_common, 'validate_host', return_value=True), \
                  patch.object(setup_common, 'validate_username', return_value=True), \
                  patch.object(setup_common, 'get_current_username', return_value='testuser'), \
                  patch.object(setup_common, 'validate_samba_share_credentials'), \
                  patch.object(setup_common, 'print_setup_summary'), \
+                 patch.object(setup_common, 'store_cli_credentials'), \
                  patch.object(setup_common, 'save_setup_command', side_effect=fake_save):
 
                 parser = MagicMock()
@@ -159,7 +160,7 @@ class TestSetupMainTimingPersistence(unittest.TestCase):
 
     def test_dry_run_skips_post_run_save(self):
         """In dry-run mode, save_setup_command should never be called."""
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with tempfile.TemporaryDirectory():
             from lib import setup_common
             config = _make_config(dry_run=True)
             saved_calls = []
@@ -174,8 +175,7 @@ class TestSetupMainTimingPersistence(unittest.TestCase):
                     }
                 )
 
-            with patch('lib.cache.SETUP_CACHE_DIR', tmpdir), \
-                 patch.object(setup_common, 'run_remote_setup', return_value=0), \
+            with patch.object(setup_common, 'run_remote_setup', return_value=0), \
                  patch.object(setup_common, 'validate_host', return_value=True), \
                  patch.object(setup_common, 'validate_username', return_value=True), \
                  patch.object(setup_common, 'get_current_username', return_value='testuser'), \
@@ -195,6 +195,44 @@ class TestSetupMainTimingPersistence(unittest.TestCase):
                     setup_common.setup_main('server_lite', 'Test', lambda c: None)
 
             self.assertEqual(saved_calls, [])
+
+
+class TestRunRemoteSetupArgumentSecurity(unittest.TestCase):
+    def test_write_remote_args_file_uses_secure_json_file(self):
+        from lib import setup_common
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = setup_common._write_remote_args_file(tmpdir, ["--credential", "mediauser", "supersecret"])
+
+            with open(path, encoding="utf-8") as file_obj:
+                self.assertEqual(file_obj.read().strip(), '["--credential", "mediauser", "supersecret"]')
+            self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+
+    def test_remote_ssh_command_uses_args_file_without_inline_passwords(self):
+        from lib import setup_common
+
+        config = _make_config(
+            host="example.com",
+            share_credentials=[["mediauser", "supersecret"]],
+        )
+        process = MagicMock()
+        process.stdin = io.BytesIO()
+        process.stdout = io.BytesIO(b"")
+        process.wait.return_value = 0
+
+        with patch.object(setup_common, "copy_project_files"), \
+             patch.object(setup_common, "prepare_deployments"), \
+             patch.object(setup_common, "build_ssh_command", return_value=["ssh"]) as mock_build_ssh, \
+             patch("subprocess.Popen", return_value=process):
+            result = setup_common.run_remote_setup(config)
+
+        self.assertEqual(result, 0)
+        remote_command = mock_build_ssh.call_args.kwargs["remote_command"]
+        self.assertIn("--args-file", remote_command)
+        self.assertNotIn("supersecret", remote_command)
+
+
+class TestSetupMainValidation(unittest.TestCase):
 
     @patch("builtins.print")
     def test_invalid_workspace_returns_error_before_validation(self, mock_print):

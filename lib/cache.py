@@ -11,10 +11,7 @@ from dataclasses import asdict
 from typing import Optional, Any
 
 from lib.config import SetupConfig
-from lib.workspace import DEFAULT_WORKSPACE_DIR, get_history_dir, get_setup_cache_dir
-
-
-SETUP_CACHE_DIR = os.path.join(DEFAULT_WORKSPACE_DIR, "setups")
+from lib.workspace import get_history_dir, get_setup_cache_dir
 
 
 def get_cache_path_for_host(host: str) -> str:

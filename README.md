@@ -10,16 +10,10 @@ Automated setup scripts for remote Linux systems (Debian).
 ## Quick Start
 
 ```bash
-# Using unified infra_tools.py (recommended)
 python3 infra_tools.py setup server_web example.com --ruby --node --deploy example.com https://github.com/user/repo.git
 python3 infra_tools.py setup workstation_desktop 192.168.1.100 --desktop i3 --browser firefox
 python3 infra_tools.py patch example.com --ssl --deploy api.example.com https://github.com/user/api.git
 python3 infra_tools.py credentials set guest s3cret
-
-# Or use individual scripts
-python3 setup_server_web.py example.com --ruby --node --deploy example.com https://github.com/user/repo.git
-python3 setup_workstation_desktop.py 192.168.1.100 --desktop i3 --browser firefox
-python3 patch_setup.py example.com --ssl --deploy api.example.com https://github.com/user/api.git
 ```
 
 ## What It Does
@@ -33,19 +27,13 @@ Background maintenance includes a `cleanup-maintenance` systemd timer that recla
 old package-manager caches, and oversized journals. Infra tools also installs a journald drop-in at
 `/etc/systemd/journald.conf.d/infra-tools.conf` to cap persistent and runtime journal usage at `100M`.
 
-## Setup Scripts
+## CLI Entry Points
 
 | Script | Description |
 |--------|-------------|
-| `infra_tools.py` | **Unified entry point** - Use `setup` or `patch` subcommands for all operations |
-| `setup_server_web.py` | Web server with Nginx, reverse proxy, SSL, deployments |
-| `setup_server_dev.py` | Development server with CLI tools |
-| `setup_workstation_desktop.py` | Desktop workstation with RDP, browsers |
-| `setup_admin_python.py` | Local user installer for Python aliases, uv, and shell completion |
-| `patch_setup.py` | Update existing systems, manage saved configurations |
-| `recall_setup.py` | Retrieve configuration from remote host |
+| `infra_tools.py` | **Unified entry point** - Use `setup`, `patch`, `list`, `info`, `cmd`, `rm`, `deploy`, `recall`, `reconstruct`, `completions`, `python-tools`, `bootstrap`, or `credentials` |
 
-**Recommendation**: Use `infra_tools.py` as your primary entry point. It provides a consistent interface for both initial setup and patching operations.
+Use `infra_tools.py` for all system setup, saved-configuration management, patching, recall, reconstruction, local Python tooling, and shell-completion setup. The legacy per-system `setup_*.py` wrappers, `patch_setup.py`, `recall_setup.py`, `reconstruct_setup.py`, `setup_admin_python.py`, and `setup_completions.py` have been removed.
 
 See [Command-Line Reference](./docs/COMMAND_LINE.md) for all flags.
 
@@ -53,14 +41,7 @@ See [Command-Line Reference](./docs/COMMAND_LINE.md) for all flags.
 
 ### Web Server with Deployment
 ```bash
-# Using unified tool
 python3 infra_tools.py setup server_web web.com \
-  --ruby --node \
-  --ssl --ssl-email admin@web.com \
-  --deploy web.com https://github.com/user/repo.git
-
-# Or use individual script
-python3 setup_server_web.py web.com \
   --ruby --node \
   --ssl --ssl-email admin@web.com \
   --deploy web.com https://github.com/user/repo.git
@@ -68,14 +49,7 @@ python3 setup_server_web.py web.com \
 
 ### Remote Desktop Workstation
 ```bash
-# Using unified tool
 python3 infra_tools.py setup workstation_desktop 192.168.1.50 \
-  --desktop xfce --rdp --audio \
-  --browser librewolf \
-  --ruby --node
-
-# Or use individual script
-python3 setup_workstation_desktop.py 192.168.1.50 \
   --desktop xfce --rdp --audio \
   --browser librewolf \
   --ruby --node
@@ -83,16 +57,7 @@ python3 setup_workstation_desktop.py 192.168.1.50 \
 
 ### NAS with Backup
 ```bash
-# Using unified tool
 python3 infra_tools.py setup server_lite 192.168.1.10 \
-  --samba \
-  --credential guest guest \
-  --share read media /mnt/data/media guest \
-  --sync /mnt/data/docs /mnt/backup daily \
-  --scrub /mnt/backup .pardatabase 5% weekly
-
-# Or use individual script
-python3 setup_server_lite.py 192.168.1.10 \
   --samba \
   --credential guest guest \
   --share read media /mnt/data/media guest \
@@ -130,17 +95,26 @@ saved setups, credentials, and history for a project or test environment.
 
 ## Requirements
 
-- Python 3.9+
+- Python 3.10+
 - SSH root access to target system
 - Target OS: Debian
 
+### Local Orchestration Host Bootstrap
+
+To prepare the machine where you run `infra_tools.py`, an admin can install the local package prerequisites and
+configure the chosen user's Python tooling and shell completion in one step:
+
+```bash
+sudo python3 infra_tools.py bootstrap --user "$USER"
+```
+
 ## Shell Completion
 
-Setup scripts support tab completion for bash, zsh, and fish.
+The unified CLI supports tab completion for bash, zsh, and fish.
 
 ```bash
 uv tool install --upgrade argcomplete
-python3 setup_completions.py
+python3 infra_tools.py completions
 ```
 
 See [docs/SHELL_COMPLETION.md](docs/SHELL_COMPLETION.md) for detailed setup.
