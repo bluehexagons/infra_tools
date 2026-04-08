@@ -1,195 +1,129 @@
-# infra_tools Architecture and Security Review Plan
+# REVIEW_1 Workspace, Credential, and Execution Hardening
 
-## Overview
-This document outlines a plan for major architectural and security improvements to the infra_tools codebase. As this is a major revision, backwards compatibility is not required and existing cached setup state will be intentionally replaced instead of migrated.
+This document describes the architecture and security changes implemented by the REVIEW_1 pull request.
 
-## Primary Focus Areas
-1. **Security Hardening** - Eliminate injection vulnerabilities and improve secure handling of sensitive data
-2. **Architectural Improvements** - Refactor for better maintainability, testability, and extensibility
-3. **Validation Enhancement** - Strengthen input validation throughout the codebase
-4. **Error Handling & Logging** - Implement consistent, secure error handling and logging
+## Scope
 
-## Detailed Implementation Plan
+REVIEW_1 establishes a new foundation for how `infra_tools` stores local state, manages reusable credentials, validates user input, resolves system types, and executes remote setup work. The changes are intended to replace the older cache- and wrapper-script-based model with a unified CLI and a workspace-scoped runtime model.
 
-### Phase 1: Security Foundation
-#### 1.1 Remove SSH/Login Password Command-Line Exposure
-- Eliminate SSH/login password acceptance via command-line arguments
-- Implement SSH key-only authentication for remote operations wherever possible
-- Add interactive password prompts only for SSH/login flows that cannot use keys
-- Update all related configuration and argument parsing
-- Keep non-login credentials supported, but stop routing them through ad hoc flags and inline command-line values where avoidable
-- Stop generating default random login passwords during setup; allow passwordless user creation/setup when a password is not explicitly required
-- If no password is provided for setup, create the user account without setting a local password and rely on SSH key authentication
-- Do not change or remove passwords for existing accounts unless a password is explicitly provided
+## Unified CLI Surface
 
-#### 1.2 Credential Management Strategy
-- Add a unified credentials store within the workspace configuration directory (JSON state file for this pass)
-- Add `infra_tools.py credentials [command] [args]` for credential management with built-in help output
-- Support `credentials set USERNAME PASSWORD`, `credentials list`, and `credentials remove USERNAME`
-- Allow setup/patch flows to accept `--credential USERNAME PASSWORD` as a convenience path that writes to the shared credential store
-- Treat the workspace credential file as the single source of truth for saved credentials
-- Use a simple global credential mapping for this pass: one username maps to one password regardless of host or operation type
-- Use per-credential objects for extensibility, e.g. `{ "version": 1, "credentials": { "alice": { "password": "secret" } } }`
-- Require `credentials.json` to use `0600` permissions; fix permissions automatically when possible and warn/fail when secure handling is not possible
-- Replacing an existing stored credential should happen silently to keep CLI automation simple
-- Allow Samba shares, SMB mounts, deployments, and other password-based features to resolve credentials from the shared store instead of requiring repeated `username:password` inputs
-- Credentials specific to a deployment should be transferred to the remote system through a more secure setup channel instead of command-line flags
-- Keep the stored credential model intentionally simple even if consumers use it for SSH/login, Samba/share, SMB mount, deployment, or other service-specific operations
-- Prefer the explicit `credentials` subcommand for management operations; keep `--credential` as a convenience write path only
-- Support password-free RDP via SSH tunnel (xRDP over SSH):
-  - Configure xRDP to not require password (password=ask or empty with PAM)
-  - Client connects via SSH tunnel: `ssh -L 3389:localhost:3389 user@host` then connect RDP client to localhost:3389
-  - Document this as preferred method vs. password-based RDP
-- Add credential helper functions for:
-  - Storing and retrieving workspace-scoped credentials
-  - Resolving credential requirements per operation type
-  - Redacting credentials in logs, displays, and saved state
-- RDP connection scenarios:
-  - SSH tunnel (recommended): No password exposed, encrypted tunnel
-  - Direct RDP with password: Only when SSH access not available
-  - Consider NLA (Network Level Authentication) for direct RDP
+`infra_tools.py` is now the primary user-facing entry point for setup, patching, saved-configuration management, recall, reconstruction, completions, local Python tooling, orchestration-host bootstrap, and credential management.
 
-#### 1.3 Shell Injection Prevention
-- Status: local command helpers now avoid `shell=True`, shell-dependent local commands use an explicit `/bin/bash -lc` path, and the main remote SSH/SCP assembly paths plus remote deploy script execution now use shared command builders or SSH stdin streaming
-- Audit all subprocess calls and SSH command constructions
-- Replace shell=True usage with list-based arguments where possible
-- Implement proper escaping for unavoidable shell constructions
-- Create utility functions for safe command building
+The older per-system setup wrappers and standalone helper entry points have been removed from the normal user workflow. Persisted workspace metadata now records the unified entry point instead of obsolete `setup_<system_type>.py` wrapper names.
 
-#### 1.4 Secure Defaults
-- Status: workstation system types no longer auto-enable RDP, and shared SSH helpers now pin host trust to workspace-managed `known_hosts` files
-- Review and tighten default configurations
-- Ensure secure values for security-related options (firewall, SSH, etc.)
-- Add security validation for critical configuration values
+## Workspace-Based State
 
-#### 1.5 Workspace Location Flag
-- Status: workspace-managed setups, credentials, known_hosts, and completed setup/patch execution history now resolve under the active workspace, with completed runs recorded in `history/` using sanitized metadata
-- Add `--workspace` flag to specify custom base directory for setup state/configuration
-- Default base: `~/.config/infra_tools` (replacing current `~/.cache/infra_tools`)
-- Subdirectories under the workspace base:
-  - `setups/` for persisted setup definitions/state
-  - `credentials.json` for saved username/password mappings (at workspace root, not inside `setups/`)
-  - `known_hosts` for SSH host keys managed by infra_tools
-  - `history/` for optional deployment/setup execution history
-- Changing `--workspace` changes the base; all subdirectories and files resolve relative to it
-- Use cases: Testing, multi-project setups, separate concerns from system configs
-- Existing cache/state compatibility will be intentionally broken; users recreate configs in the new workspace instead of migrating old cache entries
-- Credentials must never be duplicated into setup cache/history files; those files can reference usernames but not stored passwords
+Workspace state now lives under `~/.config/infra_tools` by default, or under the path selected with `--workspace`.
 
-### Phase 2: Architectural Refactor
-#### 2.1 Configuration System Overhaul
-- Add explicit validation layer on top of dataclass-based config
-- Add configuration versioning for the new workspace-managed state format
-- Separate CLI/public configuration from internal/runtime state and persisted workspace state
+The workspace contains:
 
-#### 2.2 Plugin-Based System Types
-- Status: built-in plugin registry foundation landed; system-type discovery, metadata defaults, conflict detection, lazy step-builder resolution, explicit base/capability/composition plugin roles, plugin-owned workstation/server/proxmox step builders, plugin-owned custom-step providers, and plugin-owned validator providers now flow through plugin metadata, including fail-fast duplicate custom-step and validator detection
-- Move current domain directories (e.g., common, security, desktop, web, sync, smb) under a main `plugins/` package
-- Plugins define reusable steps, defaults, and optional system types; shared validators and utility code can live outside plugins when broadly reusable
-- System types are registered by plugins rather than maintained in a central static list
-- Implement automatic plugin discovery from the `plugins/` directory
-- Define an explicit plugin contract, for example:
-  - plugin metadata and name
-  - optional dependencies on other plugins
-  - globally registered CLI flags
-  - exported steps/tasks
-  - default configuration hooks
-  - system type registrations
-  - plugin-specific validators
-- Example plugin split:
-  - core/base plugins load first in a fixed order for shared foundations
-  - `plugins/workstation` provides desktop and workstation-related steps and system types
-  - `plugins/server` composes shared capability plugins and registers `server_web`
-  - `plugins/proxmox` provides hosted/container steps and registers `server_proxmox`
-- After core/base plugins load, resolve dependent plugins in deterministic order
-- Allow a late-load discovery step for simple/lightweight plugins that do not declare dependencies
-- Fail fast on plugin conflicts; duplicate plugin names, step names, argument registrations, or system type registrations should raise explicit startup errors
-- If a system type needs contributions from multiple capability plugins, define that system type in a separate composition plugin that depends on those capability plugins rather than merging partial system type definitions across plugins
-- Benefits: Easier to add new system types, better encapsulation, clearer ownership, less central coupling
+- `setups/` for saved setup definitions
+- `credentials.json` for shared username/password mappings
+- `known_hosts` for SSH host trust managed by `infra_tools`
+- `history/` for sanitized records of completed setup and patch runs
 
-#### 2.3 Module Dependencies and Coupling
-- Analyze and reduce circular dependencies
-- Create clear interfaces between modules
-- Extract common functionality into well-defined services
+Completed runs write sanitized JSON history entries into `history/`. Saved setup state and history contain the requested configuration and execution metadata, but they do not persist resolved passwords.
 
-#### 2.4 Remote Execution Refactor
-- Status: shared SSH/SCP/rsync command builders now back setup, recall, and remote deploy flows
-- Create utility functions for safe SSH/SCP command building with list-based args, implement consistent timeout/retry patterns, add proper error handling and logging
-- Use SCP over existing SSH connection for secure transfer of remote setup artifacts and deployment credentials where credentials must reach the target system
-- Stage remote credential files under a restrictive temporary path such as `/tmp/infra_tools-creds-*`, write them with `0600`, use them only for the required setup step, and remove them immediately after use with best-effort cleanup on failure paths
-- SCP chosen over alternatives (SFTP library, inline credential passing) as the best balance of stability (built on existing SSH infrastructure), security (encrypted transfer, no credentials in process args), and simplicity (no new dependencies, uses subprocess SSH/SCP commands already in use)
+## Credential Handling
 
-### Phase 3: Validation and Type Safety
-#### 3.1 Comprehensive Input Validation
-- Status: workspace paths, timezones, custom apt package names, notification targets, SSL registration emails, credential usernames with ambiguous separators, deploy target hostnames, deploy site/path specs, Samba share specs, SMB mount specs, sync/scrub storage specs, and hosted-node targets are now validated before setup/patch or credential-management flows continue
-- Assessment: validation coverage is in a good place for this revision pass; add more only when a concrete external-input gap is found during adjacent work
-- Implement validation decorators/middleware for all entry points
-- Create reusable validation components for common patterns (hostnames, ports, paths, etc.)
-- Add range validation for numeric values
-- Implement regex validation for patterned inputs (service names, etc.)
+Workspace credentials are managed through `infra_tools.py credentials` and through the convenience `--credential USERNAME PASSWORD` path on setup and patch commands.
 
-#### 3.2 Type Hint Enhancement
-- Expand type hint coverage across public interfaces and new plugin APIs
-- Use TypedDict for configuration dictionaries where appropriate
-- Implement protocol interfaces for plugin architectures
+The credential store:
 
-### Phase 4: Error Handling and Observability
+- uses a versioned JSON structure at the workspace root
+- enforces `0600` permissions
+- stores one reusable password per username for this revision
+- supports listing, setting, and removing credentials
 
-#### 4.1 Structured Logging
-- Status: service logging now has a shared `log_event()` helper for stable key=value context, and the webhook receiver plus the CI/CD executor, Node/APT/Ruby/uv/cleanup-maintenance/auto-restart/storage-ops/sync-rsync/xRDP-cleanup services use it for their main event/failure logs; webhook config/server lifecycle plus CI/CD executor config/cleanup/notification, repo sync, script execution, job lifecycle, remote deployment, rsync lifecycle, storage-ops operation/notification/skip events, shared notification delivery/load failures, and the storage-ops mount checker now emit structured context with redacted targets where appropriate
-- Keep human-readable CLI output for interactive setup flows
-- Use structured logging for services, helpers, and internal diagnostics where persistent logs are useful
-- Implement log levels (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-- Add contextual information to logs (user, host, operation)
-- Implement log rotation and filtering
+Runtime credential resolution now pulls saved credentials into Samba shares, SMB mounts, and other password-based operations without requiring repeated inline `username:password` values in user-facing commands.
 
-#### 4.2 Exception Hierarchy
-- Create custom exception types for different error categories
-- Implement proper exception chaining and context preservation
-- Add error codes for machine-readable error handling
-- Implement graceful degradation where appropriate
+## Remote Execution and Secret Handling
 
-#### 4.3 Monitoring and Metrics
-- Add basic metrics collection (operation timing, success rates)
-- Add debugging/profiling hooks where useful for long-running helpers/services
-- Create diagnostic information collection for troubleshooting failed setup/patch runs
+Remote setup execution now stages project artifacts locally, streams them to the target host over SSH stdin as a tar archive, and executes `remote_setup.py` on the remote side.
 
-### Phase 5: Testing and Quality Assurance
+Runtime arguments are written to a temporary JSON args file with `0600` permissions before transfer, and `remote_setup.py` consumes and deletes that file on the remote host. This keeps resolved passwords out of the local SSH process command line while still allowing the remote run to reconstruct the requested setup configuration.
 
-#### 5.1 Test Strategy — ✅ IN PROGRESS
-- 972 tests passing across the codebase, including repository-level regression scanners and unit-style coverage
-- New tests: `test_credentials.py`, `test_workspace_cli.py`, `test_config.py`, `test_setup_common.py`, `test_plugin_registry.py`, `test_ssh_utils.py`, `test_browser_steps.py`, `test_shell_safety.py`
-- **TODO**: Property-based testing, integration tests for common setup scenarios
+Remote artifact bundling includes the top-level `plugins/` package along with the main code directories so plugin-based system-type discovery works on live remote runs.
 
-#### 5.2 Security Testing — ⏸️ OUT OF SCOPE FOR THIS PASS
-- Deferred to a later follow-up; this revision will not add dedicated static-analysis, dependency-scanning, or fuzz-testing work
+## Plugin-Based System Types
 
-#### 5.3 Code Quality — ❌ NOT STARTED
-- **TODO**: Pre-commit hooks, type checking in CI, documentation coverage
+System-type discovery is now driven by a built-in plugin registry.
 
-## Success Criteria Status
+The registry provides:
 
-| # | Criterion | Status |
-|---|-----------|--------|
-| 1 | Password-bearing SSH/login CLI flags removed | ✅ Done |
-| 2 | Workspace credentials in `credentials.json` with `0600` permissions | ✅ Done |
-| 3 | Password-based features resolve from workspace store | ✅ Done |
-| 4 | `shell=True` and unsafe command construction addressed | ✅ Done for this pass |
-| 5 | Comprehensive input validation for external interfaces | ✅ Done for this pass |
-| 6 | Structured logging without credential exposure | ✅ Done for this pass |
-| 7 | Plugin discovery with conflict detection | ✅ Done for this pass |
-| 8 | Improved performance and reliability | ⚠️ Partial |
-| 9 | Enhanced extensibility | ⚠️ Partial |
-| 10 | Regression tests for credential/plugin/passwordless behavior | ✅ Done |
+- automatic discovery of built-in plugins from `plugins/`
+- explicit plugin roles (`base`, `capability`, `composition`)
+- deterministic dependency resolution
+- plugin-owned system-type registration
+- plugin-owned custom-step registration
+- plugin-owned validator registration
+- fail-fast duplicate and conflict detection
 
-## Next Steps
-1. Criterion 4 is effectively complete for this pass: there are no remaining `shell=True` call sites in the tracked Python codebase, and shared SSH/SCP/rsync builders cover the main remote-execution paths.
-2. Criterion 6 is effectively complete for this pass: the remaining gaps are helper scripts that intentionally keep human-readable interactive output rather than service-style structured logs.
-3. Criterion 7 is effectively complete for this pass: plugin discovery, capability/composition dependency wiring, plugin-owned workstation/server/proxmox step builders, plugin-owned custom-step providers, and plugin-owned validator providers are in place; the remaining legacy directory layout is now an internal organization choice rather than a blocker for the plugin contract.
-4. Criteria 8-9 remain partial and depend mostly on broader architectural follow-through rather than another small hardening pass.
-5. The branch is ready for controlled live-system testing: workspace state is isolated, completed runs leave sanitized history entries under `history/`, and the highest-risk command-construction and validation changes are covered by the current regression suite.
-6. Keep validation frozen unless adjacent work exposes a specific external-input gap.
-7. Keep dedicated security-testing additions out of scope for this pass, and treat pre-commit/type-checking follow-through as a later quality phase.
+Current built-in plugins cover shared/common functionality, desktop features, security hardening, SMB support, sync/storage behavior, web/deployment behavior, workstation compositions, server compositions, and Proxmox-specific compositions.
 
----
-*This plan will be executed in iterations with regular reviews to ensure alignment with project goals and adjustment based on findings during implementation.*
+This plugin contract is sufficient for the current system types and is the supported model for REVIEW_1.
+
+## Validation and Safer Defaults
+
+CLI entry points now validate external inputs before setup or patch execution continues. This includes:
+
+- workspace paths
+- usernames and hosts
+- notification targets
+- timezones
+- SSL registration email addresses
+- custom APT package names
+- deploy specs and deploy targets
+- Samba shares and SMB mounts
+- sync and scrub storage specs
+- hosted/Proxmox container options
+
+Secure defaults introduced in this revision include:
+
+- no generated default login passwords during setup
+- workspace-managed SSH `known_hosts`
+- workstation flows that do not enable RDP by default
+- sanitized persisted state and execution history
+
+## Logging and Observability
+
+Service-oriented helpers now use shared structured logging utilities for stable `key=value` event context. The REVIEW_1 work applies this to the major service tools involved in CI/CD execution, storage operations, automatic maintenance, xRDP session cleanup, and webhook handling.
+
+Interactive CLI setup and patch commands remain human-readable, while long-running helpers and services emit structured operational logs that avoid credential disclosure.
+
+## Testing and Regression Coverage
+
+The REVIEW_1 changes are covered by focused tests for:
+
+- workspace path handling and workspace-aware CLI behavior
+- credential storage and runtime credential resolution
+- plugin registry behavior and plugin-owned step/validator registration
+- remote setup arg-file handling
+- cache/history persistence behavior
+- SSH command building and command-safety behavior
+
+The repository also includes a regression test that fails if Python source reintroduces `shell=True` subprocess usage.
+
+At the time this document was last updated, `python3 -m unittest discover -s tests` passed with 977 tests.
+
+## Live-System Readiness
+
+This branch is intended to be suitable for controlled live-system testing.
+
+In particular:
+
+- persisted local state is isolated under the selected workspace
+- reusable credentials are centralized and permission-restricted
+- remote setup avoids exposing resolved passwords in local process arguments
+- plugin discovery works in both local and remote execution contexts
+- saved setup/history metadata reflects the unified CLI surface
+- the current regression suite covers the highest-risk command-construction, validation, credential, and workspace behaviors introduced by REVIEW_1
+
+## Deferred Follow-Up Work
+
+The following items remain reasonable future improvements, but they are not blockers for this REVIEW_1 branch:
+
+- broader type-checking and pre-commit automation
+- expanded integration testing beyond the current targeted regression suite
+- additional metrics and diagnostics for long-running service workflows

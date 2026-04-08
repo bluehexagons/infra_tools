@@ -198,6 +198,14 @@ class TestSetupMainTimingPersistence(unittest.TestCase):
 
 
 class TestRunRemoteSetupArgumentSecurity(unittest.TestCase):
+    def test_copy_project_files_includes_plugins_package(self):
+        from lib import setup_common
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            setup_common.copy_project_files(tmpdir)
+            self.assertTrue(os.path.isdir(os.path.join(tmpdir, "plugins")))
+            self.assertTrue(os.path.exists(os.path.join(tmpdir, "plugins", "__init__.py")))
+
     def test_write_remote_args_file_uses_secure_json_file(self):
         from lib import setup_common
 

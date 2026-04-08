@@ -62,6 +62,12 @@ class TestSaveAndLoadSetupCommand(unittest.TestCase):
                 self.assertEqual(loaded.system_type, 'server_lite')
                 self.assertEqual(loaded.timezone, 'America/New_York')
 
+                cache_path = get_cache_path_for_host('testhost')
+                with open(cache_path, encoding='utf-8') as f:
+                    cache_data = json.load(f)
+                self.assertEqual(cache_data['script'], 'infra_tools.py')
+                self.assertEqual(cache_data['command'], 'infra_tools.py setup')
+
     def test_load_nonexistent(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch('lib.cache.get_setup_cache_dir', return_value=tmpdir), patch('lib.cache.get_history_dir', return_value=tmpdir):
@@ -201,6 +207,8 @@ class TestSaveAndLoadSetupCommand(unittest.TestCase):
                 self.assertEqual(history_data['tags'], ['prod'])
                 self.assertIs(history_data['success'], True)
                 self.assertEqual(history_data['duration_seconds'], 45.0)
+                self.assertEqual(history_data['script'], 'infra_tools.py')
+                self.assertEqual(history_data['command'], 'infra_tools.py patch')
                 self.assertNotIn('share_credentials', history_data['args'])
 
     def test_initial_cache_write_does_not_create_history_entry(self):

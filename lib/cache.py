@@ -14,6 +14,15 @@ from lib.config import SetupConfig
 from lib.workspace import get_history_dir, get_setup_cache_dir
 
 
+def _get_entrypoint_metadata(operation: str) -> dict[str, str]:
+    """Return user-facing CLI metadata stored with workspace state."""
+
+    return {
+        "script": "infra_tools.py",
+        "command": f"infra_tools.py {operation}",
+    }
+
+
 def get_cache_path_for_host(host: str) -> str:
     cache_dir = get_setup_cache_dir()
     os.makedirs(cache_dir, exist_ok=True)
@@ -52,12 +61,12 @@ def _write_history_entry(
         "system_type": config.system_type,
         "operation": operation,
         "args": config.to_dict(),
-        "script": f"setup_{config.system_type}.py",
         "start_time": start_time,
         "end_time": end_time,
         "duration_seconds": max(0.0, end_time - start_time),
         "success": success,
     }
+    history_data.update(_get_entrypoint_metadata(operation))
 
     if config.friendly_name:
         history_data["name"] = config.friendly_name
@@ -84,8 +93,8 @@ def save_setup_command(
         "host": config.host,
         "system_type": config.system_type,
         "args": config.to_dict(),
-        "script": f"setup_{config.system_type}.py",
     }
+    cache_data.update(_get_entrypoint_metadata(operation))
     
     if config.friendly_name:
         cache_data["name"] = config.friendly_name
