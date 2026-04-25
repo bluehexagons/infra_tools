@@ -87,6 +87,72 @@ class TestBrowserSteps(unittest.TestCase):
 
         mock_extrepo.assert_called_once_with("LibreWolf", "librewolf", "librewolf")
 
+    @patch("desktop.browser_steps._install_helium_browser")
+    def test_installs_helium_browser(self, mock_install_helium):
+        """Helium should be accepted by the browser installer."""
+        from desktop.browser_steps import install_single_browser
+
+        install_single_browser("helium", use_flatpak=False)
+
+        mock_install_helium.assert_called_once_with()
+
+    @patch("desktop.browser_steps.run")
+    @patch("desktop.browser_steps.os.makedirs")
+    @patch("desktop.browser_steps.os.path.exists")
+    @patch("desktop.browser_steps.file_contains")
+    @patch("builtins.open", new_callable=unittest.mock.mock_open)
+    def test_configures_helium_as_default_browser(
+        self,
+        mock_open,
+        mock_file_contains,
+        mock_exists,
+        mock_makedirs,
+        mock_run,
+    ):
+        """Helium should be configurable as the default browser."""
+        from desktop.browser_steps import configure_default_browser
+
+        mock_exists.return_value = False
+        mock_file_contains.return_value = False
+        mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
+        config = SetupConfig(
+            host="test.example.com",
+            username="testuser",
+            system_type="workstation_desktop",
+            browser="helium",
+        )
+
+        configure_default_browser(config)
+
+        write_calls = [call.args[0] for call in mock_open().write.call_args_list]
+        self.assertIn("helium.desktop", "".join(write_calls))
+        run_commands = [call.args[0] for call in mock_run.call_args_list]
+        self.assertIn("xdg-mime default helium.desktop x-scheme-handler/http", run_commands)
+        self.assertIn("xdg-mime default helium.desktop x-scheme-handler/https", run_commands)
+
+    @patch("desktop.browser_steps.os.path.exists")
+    @patch("desktop.browser_steps.is_package_installed")
+    @patch("desktop.browser_steps.run")
+    def test_helium_installer_uses_latest_release_deb(self, mock_run, mock_package, mock_exists):
+        """Helium installer should resolve and install the latest Debian package."""
+        from desktop.browser_steps import _install_helium_browser
+
+        mock_package.side_effect = [False, True]
+        mock_exists.return_value = False
+        mock_run.side_effect = [
+            Mock(returncode=0, stdout="https://example.test/helium-bin_1.0-1_amd64.deb\n", stderr=""),
+            Mock(returncode=0, stdout="", stderr=""),
+            Mock(returncode=0, stdout="", stderr=""),
+            Mock(returncode=0, stdout="", stderr=""),
+        ]
+
+        _install_helium_browser()
+
+        commands = [call.args[0] for call in mock_run.call_args_list]
+        self.assertIn("wget -qO /tmp/helium.deb https://example.test/helium-bin_1.0-1_amd64.deb", commands)
+        self.assertIn("apt-get install -y -qq /tmp/helium.deb", commands)
+        self.assertIn("rm -f /tmp/helium.deb", commands)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -13,6 +13,7 @@ from lib.remote_utils import run, is_package_installed, file_contains
 
 FLATPAK_REMOTE = "flathub"
 _apt_update_done = False
+HELIUM_RELEASE_API = "https://api.github.com/repos/imputnet/helium-linux/releases/latest"
 
 
 def is_flatpak_app_installed(app_id: str) -> bool:
@@ -51,6 +52,54 @@ def _install_via_extrepo(name: str, extrepo_name: str, package_name: str) -> boo
     else:
         print(f"  ✗ Failed to enable {name} repository")
     return False
+
+
+def _install_helium_browser() -> None:
+    """Install Helium from the latest upstream Debian package release."""
+    if is_package_installed("helium-bin") or os.path.exists("/usr/bin/helium"):
+        print("  ✓ Helium browser already installed")
+        return
+
+    print("  Installing Helium browser...")
+    url_script = f"""import json
+import subprocess
+import sys
+import urllib.request
+
+arch = subprocess.check_output(["dpkg", "--print-architecture"], text=True).strip()
+if arch not in {{"amd64", "arm64"}}:
+    sys.exit(f"unsupported architecture: {{arch}}")
+
+with urllib.request.urlopen("{HELIUM_RELEASE_API}", timeout=30) as response:
+    release = json.load(response)
+
+suffix = f"_{{arch}}.deb"
+for asset in release.get("assets", []):
+    name = asset.get("name", "")
+    if name.startswith("helium-bin_") and name.endswith(suffix):
+        print(asset["browser_download_url"])
+        break
+else:
+    sys.exit(f"no Helium Debian package found for {{arch}}")
+"""
+    result = run(
+        f"python3 -c {shlex.quote(url_script)}",
+        check=False,
+        capture_output=True,
+        display_cmd="python3 -c '[resolve latest Helium Debian package URL]'",
+    )
+    helium_url = result.stdout.strip() if result.returncode == 0 else ""
+    if not helium_url:
+        print("  ✗ Failed to resolve latest Helium package URL")
+        if result.stderr:
+            print(f"    {result.stderr.strip()[:200]}")
+        return
+
+    run(f"wget -qO /tmp/helium.deb {shlex.quote(helium_url)}", check=False)
+    run("apt-get install -y -qq /tmp/helium.deb", check=False)
+    run("rm -f /tmp/helium.deb", check=False)
+    if is_package_installed("helium-bin") or os.path.exists("/usr/bin/helium"):
+        print("  ✓ Helium browser installed")
 
 
 def install_single_browser(browser: str, use_flatpak: bool) -> None:
@@ -118,6 +167,9 @@ def install_single_browser(browser: str, use_flatpak: bool) -> None:
 
             if _install_via_extrepo("LibreWolf", "librewolf", "librewolf"):
                 print("  ✓ LibreWolf browser installed")
+
+    elif browser == "helium":
+        _install_helium_browser()
     
     elif browser == "browsh":
         print("  Installing Browsh (requires Firefox)...")
@@ -168,6 +220,7 @@ def configure_default_browser(config: SetupConfig) -> None:
     browser_desktops: dict[str, Optional[str]] = {
         "brave": "brave-browser.desktop",
         "firefox": "firefox.desktop",
+        "helium": "helium.desktop",
         "librewolf": "librewolf.desktop",
         "lynx": None,
         "browsh": None
