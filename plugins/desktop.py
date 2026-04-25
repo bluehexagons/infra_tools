@@ -23,7 +23,6 @@ PLUGIN = PluginDefinition(
         "install_desktop_apps",
         "configure_default_browser",
         "install_workstation_dev_apps",
-        "configure_vivaldi_browser",
         "install_smbclient",
         "configure_dark_theme",
         "install_browser",
@@ -69,7 +68,6 @@ def extend_desktop_app_steps(config: SetupConfig, steps: list[tuple[str, StepFun
 
     from desktop.steps import (
         configure_default_browser,
-        configure_vivaldi_browser,
         install_desktop_apps,
         install_remmina,
         install_workstation_dev_apps,
@@ -94,7 +92,7 @@ def extend_desktop_app_steps(config: SetupConfig, steps: list[tuple[str, StepFun
         steps.extend(
             [
                 ("Installing workstation dev applications", install_workstation_dev_apps),
-                ("Configuring default browser", configure_vivaldi_browser),
+                ("Configuring default browser", configure_default_browser),
             ]
         )
 
@@ -123,7 +121,6 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
     from desktop.steps import (
         configure_dark_theme,
         configure_default_browser,
-        configure_vivaldi_browser,
         configure_xfce_for_rdp,
         harden_xrdp,
         install_browser,
@@ -143,7 +140,6 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "install_desktop_apps": install_desktop_apps,
         "configure_default_browser": configure_default_browser,
         "install_workstation_dev_apps": install_workstation_dev_apps,
-        "configure_vivaldi_browser": configure_vivaldi_browser,
         "install_smbclient": install_smbclient,
         "configure_dark_theme": configure_dark_theme,
         "install_browser": install_browser,

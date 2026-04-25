@@ -17,7 +17,6 @@ from .xrdp_steps import (
 from .browser_steps import (
     install_browser,
     configure_default_browser,
-    configure_vivaldi_browser,
 )
 
 from .apps_steps import (
@@ -39,7 +38,6 @@ __all__ = [
     'harden_xrdp',
     'install_browser',
     'configure_default_browser',
-    'configure_vivaldi_browser',
     'is_flatpak_installed',
     'install_flatpak_if_needed',
     'is_flatpak_app_installed',

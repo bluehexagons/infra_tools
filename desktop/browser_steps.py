@@ -3,6 +3,7 @@
 from __future__ import annotations
 from typing import Optional
 import os
+import shlex
 import subprocess
 
 from lib.config import SetupConfig
@@ -115,19 +116,6 @@ def install_single_browser(browser: str, use_flatpak: bool) -> None:
                 return
             print("  Installing LibreWolf browser...")
 
-            old_repo_files = [
-                "/usr/share/keyrings/librewolf.gpg",
-                "/etc/apt/sources.list.d/librewolf.list",
-                "/etc/apt/sources.list.d/librewolf.sources",
-                "/etc/apt/trusted.gpg.d/librewolf.gpg",
-            ]
-            has_old_repo = any(os.path.exists(f) for f in old_repo_files)
-
-            if has_old_repo:
-                print("  → Migrating from old deb.librewolf.net repository...")
-                for f in old_repo_files:
-                    run(f"rm -f {shlex.quote(f)}", check=False)
-
             if _install_via_extrepo("LibreWolf", "librewolf", "librewolf"):
                 print("  ✓ LibreWolf browser installed")
     
@@ -143,30 +131,6 @@ def install_single_browser(browser: str, use_flatpak: bool) -> None:
             run("rm -f /tmp/browsh.deb", check=False)
         if os.path.exists("/usr/local/bin/browsh"):
             print("  ✓ Browsh installed")
-    
-    elif browser == "vivaldi":
-        if use_flatpak:
-            if is_flatpak_app_installed("com.vivaldi.Vivaldi"):
-                print("  ✓ Vivaldi browser already installed")
-                return
-            print("  Installing Vivaldi browser...")
-            run(f"flatpak install -y {FLATPAK_REMOTE} com.vivaldi.Vivaldi", check=False)
-            if is_flatpak_app_installed("com.vivaldi.Vivaldi"):
-                print("  ✓ Vivaldi browser installed")
-                return
-        else:
-            if is_package_installed("vivaldi-stable"):
-                print("  ✓ Vivaldi browser already installed")
-                return
-            print("  Installing Vivaldi browser...")
-            if not os.path.exists("/usr/share/keyrings/vivaldi-archive-keyring.gpg"):
-                run("apt-get install -y -qq curl gnupg")
-                run("curl -fsSL https://repo.vivaldi.com/archive/linux_signing_key.pub | gpg --dearmor --output /usr/share/keyrings/vivaldi-archive-keyring.gpg", check=False)
-                run('echo "deb [signed-by=/usr/share/keyrings/vivaldi-archive-keyring.gpg] https://repo.vivaldi.com/archive/deb/ stable main" > /etc/apt/sources.list.d/vivaldi.list', check=False)
-                run("apt-get update -qq", check=False)
-            run("apt-get install -y -qq vivaldi-stable", check=False)
-        if is_package_installed("vivaldi-stable"):
-            print("  ✓ Vivaldi browser installed")
     
     elif browser == "lynx":
         if is_package_installed("lynx"):
@@ -205,7 +169,6 @@ def configure_default_browser(config: SetupConfig) -> None:
         "brave": "brave-browser.desktop",
         "firefox": "firefox.desktop",
         "librewolf": "librewolf.desktop",
-        "vivaldi": "vivaldi-stable.desktop",
         "lynx": None,
         "browsh": None
     }
@@ -242,8 +205,3 @@ application/xhtml+xml={desktop_file}
     run(f"xdg-mime default {desktop_file} x-scheme-handler/https", check=False)
     
     print(f"  ✓ Default browser set to {config.browser.capitalize()}")
-
-
-def configure_vivaldi_browser(config: SetupConfig) -> None:
-    """Configure Vivaldi browser as default (wrapper for configure_default_browser)."""
-    configure_default_browser(config)
