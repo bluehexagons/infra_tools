@@ -13,9 +13,6 @@ exec 2> >(tee -a ~/.xsession-errors)
 export XRDP_SESSION=1
 export XRDP_SOCKET=/tmp/xrdp
 
-# Tell XFCE not to manage displays (let xorgxrdp handle it)
-export XFCE_DISABLE_DISPLAY_MANAGEMENT=1
-
 # Disable X screen saver and DPMS
 xset s off 2>/dev/null
 xset -dpms 2>/dev/null

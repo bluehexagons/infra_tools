@@ -113,6 +113,8 @@ def install_xrdp(config: SetupConfig) -> None:
         session_cmd = "i3"
     elif config.desktop == "cinnamon":
         session_cmd = "cinnamon-session"
+    elif config.desktop == "lxqt":
+        session_cmd = "startlxqt"
     else:
         session_cmd = "xfce4-session"
     

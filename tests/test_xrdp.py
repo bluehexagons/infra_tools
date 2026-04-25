@@ -256,6 +256,33 @@ class TestInstallXrdp(unittest.TestCase):
         
         # Check for virtual screen size (updated for 4K support)
         self.assertIn('Virtual 3840 2160', combined_content)
+
+    @patch('desktop.xrdp_steps.run')
+    @patch('desktop.xrdp_steps.os.path.exists')
+    @patch('desktop.xrdp_steps.os.makedirs')
+    @patch('builtins.open', new_callable=unittest.mock.mock_open, read_data='exec {SESSION_CMD}\n')
+    @patch('desktop.xrdp_steps.has_gpu_access')
+    @patch('desktop.xrdp_steps.is_service_active')
+    def test_uses_lxqt_session_command(self, mock_is_active, mock_gpu, mock_open_func, mock_makedirs, mock_exists, mock_run):
+        """LXQt RDP sessions should start LXQt, not fall back to XFCE."""
+        mock_exists.return_value = True
+        mock_is_active.return_value = True
+        mock_gpu.return_value = False
+        mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
+
+        config = SetupConfig(
+            host="test.example.com",
+            username="testuser",
+            system_type="workstation_dev",
+            desktop="lxqt"
+        )
+
+        install_xrdp(config)
+
+        write_calls = [c for c in mock_open_func().write.call_args_list]
+        combined_content = ''.join([str(c[0][0]) for c in write_calls if c[0]])
+        self.assertIn("exec startlxqt", combined_content)
+        self.assertNotIn("exec xfce4-session", combined_content)
         
     @patch('desktop.xrdp_steps.run')
     @patch('desktop.xrdp_steps.os.path.exists')
@@ -488,6 +515,29 @@ class TestConfigureXfceForRdp(unittest.TestCase):
         
         self.assertIn("dpms-enabled", combined_content)
         self.assertIn("false", combined_content)
+
+    @patch('desktop.desktop_environment_steps.run')
+    @patch('desktop.desktop_environment_steps.os.makedirs')
+    @patch('desktop.desktop_environment_steps.os.path.exists')
+    @patch('desktop.desktop_environment_steps.os.remove')
+    @patch('builtins.open', new_callable=unittest.mock.mock_open)
+    def test_removes_stale_display_workarounds(self, mock_open, mock_remove, mock_exists, mock_makedirs, mock_run):
+        """Should remove stale fixed display profile and xfsettingsd override."""
+        mock_exists.return_value = True
+        mock_run.return_value = Mock(returncode=0)
+
+        config = SetupConfig(
+            host="test.example.com",
+            username="testuser",
+            system_type="workstation_dev",
+            desktop="xfce"
+        )
+
+        configure_xfce_for_rdp(config)
+
+        removed_paths = [call.args[0] for call in mock_remove.call_args_list]
+        self.assertIn("/home/testuser/.config/autostart/xfsettingsd.desktop", removed_paths)
+        self.assertIn("/home/testuser/.config/xfce4/xfconf/xfce-perchannel-xml/displays.xml", removed_paths)
         
     @patch('desktop.desktop_environment_steps.run')
     @patch('desktop.desktop_environment_steps.os.makedirs')
