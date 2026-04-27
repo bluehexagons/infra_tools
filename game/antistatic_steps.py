@@ -21,6 +21,7 @@ from lib.systemd_service import cleanup_service
 ANTISTATIC_USER = "antistatic"
 ANTISTATIC_BINARY = "/usr/local/bin/antistatic-server"
 ANTISTATIC_SERVICE = "antistatic"
+ANTISTATIC_RELEASE_STATE_FILE = "/opt/infra_tools/state/antistatic_release.json"
 GITHUB_REPO = "bluehexagons/antistatic-server"
 DEFAULT_INTERNAL_PORT = 8080
 
@@ -60,11 +61,8 @@ def _ensure_antistatic_user() -> None:
     print(f"  ✓ Created system user: {ANTISTATIC_USER}")
 
 
-def _download_antistatic_binary(arch: str) -> None:
-    """Download the latest antistatic-server release binary from GitHub.
-
-    Raises RuntimeError if the download or the API call fails.
-    """
+def _fetch_latest_antistatic_release(arch: str) -> tuple[str, str]:
+    """Return the latest release tag and binary download URL for this architecture."""
     binary_name = f"antistatic-server-linux-{arch}"
     api_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
@@ -78,6 +76,9 @@ def _download_antistatic_binary(arch: str) -> None:
 
     try:
         release_data = json.loads(result.stdout)
+        tag_name = release_data.get("tag_name")
+        if not isinstance(tag_name, str) or not tag_name:
+            raise RuntimeError("Latest GitHub release response did not include tag_name")
         assets = release_data.get("assets", [])
         download_url: str | None = next(
             (a["browser_download_url"] for a in assets if a["name"] == binary_name),
@@ -92,8 +93,54 @@ def _download_antistatic_binary(arch: str) -> None:
             f"https://github.com/{GITHUB_REPO}"
         )
 
-    print(f"  Downloading {binary_name}...")
-    tmp_path = f"/tmp/{binary_name}"
+    return tag_name, download_url
+
+
+def _read_installed_antistatic_release() -> str | None:
+    """Return the recorded antistatic release tag, if available."""
+    try:
+        with open(ANTISTATIC_RELEASE_STATE_FILE, "r", encoding="utf-8") as fh:
+            release_state = json.load(fh)
+    except FileNotFoundError:
+        return None
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"  ⚠ Warning: Failed to read antistatic release metadata: {exc}")
+        return None
+
+    if not isinstance(release_state, dict):
+        print("  ⚠ Warning: Invalid antistatic release metadata, reinstalling latest release")
+        return None
+
+    tag_name = release_state.get("tag_name")
+    if not isinstance(tag_name, str) or not tag_name:
+        print("  ⚠ Warning: Missing antistatic release tag in metadata, reinstalling latest release")
+        return None
+    return tag_name
+
+
+def _write_installed_antistatic_release(tag_name: str) -> None:
+    """Persist the installed antistatic release tag for future update checks."""
+    state_dir = os.path.dirname(ANTISTATIC_RELEASE_STATE_FILE)
+    run(f"mkdir -p {shlex.quote(state_dir)}", check=True)
+    with open(ANTISTATIC_RELEASE_STATE_FILE, "w", encoding="utf-8") as fh:
+        json.dump({"tag_name": tag_name}, fh)
+        fh.write("\n")
+
+
+def _download_antistatic_binary(arch: str) -> str:
+    """Install the newest antistatic-server release when needed.
+
+    Returns the release tag that should be running after setup completes.
+    """
+    binary_name = f"antistatic-server-linux-{arch}"
+    latest_tag, download_url = _fetch_latest_antistatic_release(arch)
+    installed_tag = _read_installed_antistatic_release()
+    if installed_tag == latest_tag and os.path.exists(ANTISTATIC_BINARY):
+        print(f"  ✓ antistatic-server already up to date ({latest_tag})")
+        return latest_tag
+
+    print(f"  Downloading {binary_name} ({latest_tag})...")
+    tmp_path = f"/tmp/{binary_name}.{latest_tag}"
     run(
         f"curl -fL -o {shlex.quote(tmp_path)} {shlex.quote(download_url)}",
         check=True,
@@ -101,7 +148,9 @@ def _download_antistatic_binary(arch: str) -> None:
     )
     run(f"chmod +x {shlex.quote(tmp_path)}", check=True)
     run(f"mv {shlex.quote(tmp_path)} {ANTISTATIC_BINARY}", check=True)
-    print(f"  ✓ Installed {ANTISTATIC_BINARY}")
+    _write_installed_antistatic_release(latest_tag)
+    print(f"  ✓ Installed {ANTISTATIC_BINARY} ({latest_tag})")
+    return latest_tag
 
 
 def generate_antistatic_service(port: int) -> str:

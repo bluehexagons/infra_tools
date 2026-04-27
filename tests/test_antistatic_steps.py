@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, call, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -17,6 +18,8 @@ from game.antistatic_steps import (
     ANTISTATIC_BINARY,
     ANTISTATIC_SERVICE,
     DEFAULT_INTERNAL_PORT,
+    _download_antistatic_binary,
+    _fetch_latest_antistatic_release,
 )
 
 
@@ -120,6 +123,105 @@ class TestGenerateAntistaticNginxConfig(unittest.TestCase):
         config = self._make_config()
         self.assertIn("listen 80;", config)
         self.assertIn("listen 443 ssl;", config)
+
+
+class TestAntistaticReleaseDownloads(unittest.TestCase):
+    def test_fetch_latest_release_returns_tag_and_asset_url(self):
+        release_payload = {
+            "tag_name": "v1.2.3",
+            "assets": [
+                {
+                    "name": "antistatic-server-linux-amd64",
+                    "browser_download_url": "https://example.invalid/antistatic-server-linux-amd64",
+                }
+            ],
+        }
+
+        with patch(
+            "game.antistatic_steps.run",
+            return_value=MagicMock(returncode=0, stdout=json.dumps(release_payload)),
+        ):
+            tag_name, download_url = _fetch_latest_antistatic_release("amd64")
+
+        self.assertEqual(tag_name, "v1.2.3")
+        self.assertEqual(
+            download_url,
+            "https://example.invalid/antistatic-server-linux-amd64",
+        )
+
+    def test_fetch_latest_release_requires_tag_name(self):
+        release_payload = {
+            "assets": [
+                {
+                    "name": "antistatic-server-linux-amd64",
+                    "browser_download_url": "https://example.invalid/antistatic-server-linux-amd64",
+                }
+            ],
+        }
+
+        with patch(
+            "game.antistatic_steps.run",
+            return_value=MagicMock(returncode=0, stdout=json.dumps(release_payload)),
+        ):
+            with self.assertRaises(RuntimeError):
+                _fetch_latest_antistatic_release("amd64")
+
+    @patch("game.antistatic_steps._write_installed_antistatic_release")
+    @patch("game.antistatic_steps.run")
+    @patch("game.antistatic_steps.os.path.exists", return_value=False)
+    @patch("game.antistatic_steps._read_installed_antistatic_release", return_value="v1.2.2")
+    @patch(
+        "game.antistatic_steps._fetch_latest_antistatic_release",
+        return_value=("v1.2.3", "https://example.invalid/antistatic-server-linux-amd64"),
+    )
+    def test_download_binary_reinstalls_when_new_release_available(
+        self,
+        _fetch_latest,
+        _read_installed,
+        _exists,
+        mock_run,
+        mock_write_release,
+    ):
+        tag_name = _download_antistatic_binary("amd64")
+
+        self.assertEqual(tag_name, "v1.2.3")
+        mock_run.assert_has_calls(
+            [
+                call(
+                    "curl -fL -o /tmp/antistatic-server-linux-amd64.v1.2.3 https://example.invalid/antistatic-server-linux-amd64",
+                    check=True,
+                    display_cmd="curl -fL -o /tmp/antistatic-server-linux-amd64.v1.2.3 <release URL>",
+                ),
+                call("chmod +x /tmp/antistatic-server-linux-amd64.v1.2.3", check=True),
+                call(
+                    "mv /tmp/antistatic-server-linux-amd64.v1.2.3 /usr/local/bin/antistatic-server",
+                    check=True,
+                ),
+            ]
+        )
+        mock_write_release.assert_called_once_with("v1.2.3")
+
+    @patch("game.antistatic_steps._write_installed_antistatic_release")
+    @patch("game.antistatic_steps.run")
+    @patch("game.antistatic_steps.os.path.exists", return_value=True)
+    @patch("game.antistatic_steps._read_installed_antistatic_release", return_value="v1.2.3")
+    @patch(
+        "game.antistatic_steps._fetch_latest_antistatic_release",
+        return_value=("v1.2.3", "https://example.invalid/antistatic-server-linux-amd64"),
+    )
+    def test_download_binary_skips_reinstall_when_latest_release_already_present(
+        self,
+        _fetch_latest,
+        _read_installed,
+        _exists,
+        mock_run,
+        mock_write_release,
+    ):
+        tag_name = _download_antistatic_binary("amd64")
+
+        self.assertEqual(tag_name, "v1.2.3")
+        mock_run.assert_not_called()
+        mock_write_release.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -89,7 +89,7 @@ PASSWORD` to manage the shared workspace store directly.
 
 ### Game Lobby Server (Antistatic)
 ```bash
-# Deploy the antistatic lobby server behind nginx (auto-downloads binary from GitHub)
+# Deploy the antistatic lobby server behind nginx (reruns upgrade to the latest GitHub release)
 python3 infra_tools.py setup server_lite 192.168.1.10 --antistatic-server lobby.example.com
 
 # With custom internal port (default: 8080)

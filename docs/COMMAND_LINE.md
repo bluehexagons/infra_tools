@@ -162,7 +162,7 @@ python3 infra_tools.py setup server_web 10.0.0.50 admin \
 
 ## Game Lobby Server (Antistatic)
 
-Deploys the [antistatic-server](https://github.com/bluehexagons/antistatic-server) Go binary behind nginx. The latest release is auto-downloaded from GitHub releases (`github.com/bluehexagons/antistatic-server/releases`).
+Deploys the [antistatic-server](https://github.com/bluehexagons/antistatic-server) Go binary behind nginx. The latest release is auto-downloaded from GitHub releases (`github.com/bluehexagons/antistatic-server/releases`), and rerunning setup upgrades the service when a newer release exists.
 
 | Flag | Description |
 |------|-------------|

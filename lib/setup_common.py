@@ -189,6 +189,7 @@ def copy_project_files(dest_dir: str) -> None:
         "remote_setup.py",
         "lib",
         "plugins",
+        "game",
         "desktop",
         "web",
         "smb",
