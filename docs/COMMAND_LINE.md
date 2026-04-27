@@ -76,10 +76,12 @@ infra_tools.py setup server_web 10.0.0.50 admin \
 | `-k, --key PATH` | SSH private key path |
 | `-p, --password PASS` | User password |
 | `-t, --timezone TZ` | Timezone (defaults to UTC) |
+| `--workspace PATH` | Workspace root for config, credentials, known_hosts, and history |
 | `--machine TYPE` | Machine type: `unprivileged` (LXC, default), `vm`, `privileged`, `hardware`, `oci` |
 | `--name NAME` | Friendly name for this configuration |
 | `--tags TAG1,TAG2` | Comma-separated tags for this configuration |
 | `--dry-run` | Simulate execution without making changes |
+| `--no-restart` | Disable automatic restarts after updates |
 
 ## Desktop/Workstation Flags
 
@@ -94,6 +96,7 @@ infra_tools.py setup server_web 10.0.0.50 admin \
 | `--apt-install PACKAGE` | Install package via apt |
 | `--flatpak-install PACKAGE` | Install package via flatpak |
 | `--dark` | Configure dark theme |
+| `--workspace PATH` | Workspace isolation for this setup |
 
 ## Development Flags
 
@@ -103,6 +106,7 @@ infra_tools.py setup server_web 10.0.0.50 admin \
 | `--node` | Install nvm + Node.js + PNPM |
 | `--go` | Install latest Go |
 | `--python` | Install Python aliases + uv |
+| `--workspace PATH` | Workspace isolation for this setup |
 
 ## Hosted Proxmox LXC Flags
 
@@ -118,6 +122,7 @@ Use these flags with `infra_tools.py setup ...` to create an LXC container on a 
 | `--storage template POOL` | Optional template storage spec; use to force where the base image is downloaded |
 | `--cores N` | Container vCPU count (default: `1`) |
 | `--base NAME` | Base template family to download, such as `debian` or `ubuntu` (default: `debian`) |
+| `--workspace PATH` | Workspace isolation for this setup |
 
 Notes:
 
@@ -139,6 +144,7 @@ python3 infra_tools.py setup server_web 10.0.0.50 admin \
   --base debian \
   --name web-01 \
   --ruby --node --ssl --ssl-email admin@example.com \
+  --workspace /workspace/myapp \
   --deploy example.com https://github.com/user/repo.git
 ```
 
@@ -146,12 +152,39 @@ python3 infra_tools.py setup server_web 10.0.0.50 admin \
 
 | Flag | Description |
 |------|-------------|
-| `--deploy DOMAIN GIT_URL` | Deploy repository to domain |
-| `--full-deploy` | Always rebuild deployments |
+| `--deploy DOMAIN GIT_URL` | Deploy repository to domain. `GIT_URL` can be a local directory path or a git URL |
+| `--full-deploy` | Always rebuild deployments (don't skip unchanged) |
 | `--ssl` | Enable Let's Encrypt SSL |
 | `--ssl-email EMAIL` | Email for SSL registration |
 | `--cloudflare` | Configure Cloudflare Tunnel |
-| `--api-subdomain` | Deploy Rails API to subdomain |
+| `--api-subdomain` | Deploy Rails API to subdomain (`api.domain.com`) instead of subdirectory (`domain.com/api`) |
+| `--workspace PATH` | Workspace isolation for this setup |
+
+## Game Lobby Server (Antistatic)
+
+Deploys the [antistatic-server](https://github.com/bluehexagons/antistatic-server) Go binary behind nginx. The latest release is auto-downloaded from GitHub releases (`github.com/bluehexagons/antistatic-server/releases`).
+
+| Flag | Description |
+|------|-------------|
+| `--antistatic-server DOMAIN[:PORT]` | Deploy lobby server. DOMAIN is the public hostname. PORT is the internal listen port (default: 8080). The binary is fetched from GitHub releases and installed to `/usr/local/bin/antistatic-server`. Requires `--ssl` for secure (HTTPS) deployment. |
+
+```bash
+# Basic usage (default port 8080)
+python3 infra_tools.py setup server_lite 192.168.1.10 --antistatic-server lobby.example.com
+
+# With custom port
+python3 infra_tools.py setup server_web 192.168.1.10 --antistatic-server lobby.example.com:9090 --ssl
+```
+
+The service runs as a locked-down systemd unit (`antistatic.service`) with `Restart=on-failure`, security hardening (`NoNewPrivileges`, `PrivateTmp`, `ProtectSystem=strict`, `ProtectHome`), and automatic nginx configuration including SSL certificates.
+
+## Build/App Server Flags
+
+| Flag | Description |
+|------|-------------|
+| `--build-server` | Configure as a build server that deploys to app servers |
+| `--app-server` | Configure as an app server to receive deployments |
+| `--deploy-target HOST` | Target app server for deployments (can be used multiple times) |
 
 ## Samba Flags
 
@@ -200,7 +233,7 @@ Saved setup management and patching are handled through `infra_tools.py`:
 infra_tools.py patch <host> [options]     # Patch/update an existing system
 infra_tools.py list [pattern]             # List saved configurations
 infra_tools.py info [pattern]             # Show configuration details
-infra_tools.py cmd [pattern]              # Show reconstructed command
+infra_tools.py command [pattern]          # Show reconstructed command
 infra_tools.py rm <pattern>               # Remove configurations
 infra_tools.py deploy <pattern>           # Redeploy systems
 ```
@@ -211,8 +244,9 @@ These remaining utility workflows are also handled through `infra_tools.py`:
 
 ```bash
 infra_tools.py recall <host> [username]   # Read stored config or reconstruct remotely
-infra_tools.py reconstruct                # Analyze the current host and emit JSON
+infra_tools.py reconstruct [--compact/-c]  # Analyze the current host and emit JSON
 infra_tools.py completions --shell zsh    # Install shell completion
-infra_tools.py python-tools --shell bash  # Install local python alias, uv, argcomplete
+infra_tools.py python-tools --shell bash  # Install local python alias, uv, and argcomplete
+                 (alias: admin-python)
 sudo python3 infra_tools.py bootstrap --user admin  # Install local packages and configure tools for an admin user
 ```

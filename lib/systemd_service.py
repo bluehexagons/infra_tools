@@ -139,6 +139,8 @@ def cleanup_all_infra_services(dry_run: bool = False) -> None:
         r"^auto-restart-if-needed\.timer$",
         # SMB mount units
         r"^mnt-.*\.mount$",
+        # Antistatic lobby server
+        r"^antistatic\.service$",
     ]
     
     units_to_remove = []

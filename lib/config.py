@@ -158,6 +158,7 @@ class SetupConfig:
     sync_specs: Optional[NestedStrList] = None
     scrub_specs: Optional[NestedStrList] = None
     notify_specs: Optional[NestedStrList] = None
+    antistatic_server: MaybeStr = None  # "DOMAIN[:port]" spec
     no_restart: bool = False
     # Container hosting (Proxmox LXC)
     hosted_node: MaybeStr = None
@@ -309,6 +310,9 @@ class SetupConfig:
             for notify_spec in self.notify_specs:
                 escaped_spec = ' '.join(shlex.quote(str(s)) for s in notify_spec)
                 args.append(f"--notify {escaped_spec}")
+        
+        if self.antistatic_server:
+            args.append(f"--antistatic-server {shlex.quote(self.antistatic_server)}")
         
         if self.no_restart:
             args.append("--no-restart")
@@ -506,6 +510,10 @@ class SetupConfig:
                 escaped_spec = ' '.join(shlex.quote(str(s)) for s in notify_spec)
                 cmd_parts.append(f"--notify {escaped_spec}")
         
+        # Antistatic lobby server
+        if self.antistatic_server:
+            cmd_parts.append(f"--antistatic-server {shlex.quote(self.antistatic_server)}")
+        
         # Restart control
         if self.no_restart:
             cmd_parts.append("--no-restart")
@@ -643,6 +651,7 @@ class SetupConfig:
             sync_specs=getattr(args, 'sync_specs', None),
             scrub_specs=getattr(args, 'scrub_specs', None),
             notify_specs=getattr(args, 'notify_specs', None),
+            antistatic_server=getattr(args, 'antistatic_server', None),
             no_restart=no_restart,
             hosted_node=getattr(args, 'hosted_node', None),
             hosted_user=getattr(args, 'hosted_user', 'root'),

@@ -201,6 +201,12 @@ def create_setup_argument_parser(
                        action="append", nargs=2, metavar=("TYPE", "TARGET"),
                        help="Configure notification target: TYPE (webhook|mailbox), TARGET (URL for webhook or email for mailbox). Sends alerts for important events (errors, warnings, successes). Can be used multiple times for multiple targets.")
     
+    parser.add_argument("--antistatic-server", dest="antistatic_server",
+                       metavar="DOMAIN[:PORT]",
+                       help="Deploy the antistatic lobby server behind nginx. "
+                            "DOMAIN is the public hostname; PORT is the internal listen port "
+                            f"(default: 8080). Example: lobby.example.com or lobby.example.com:9090")
+    
     parser.add_argument("--no-restart", dest="no_restart",
                         action="store_true",
                         default=None if not for_remote else False,

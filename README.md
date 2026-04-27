@@ -10,15 +10,15 @@ Automated setup scripts for remote Linux systems (Debian).
 ## Quick Start
 
 ```bash
-python3 infra_tools.py setup server_web example.com --ruby --node --deploy example.com https://github.com/user/repo.git
-python3 infra_tools.py setup workstation_desktop 192.168.1.100 --desktop i3 --browser firefox
-python3 infra_tools.py patch example.com --ssl --deploy api.example.com https://github.com/user/api.git
+python3 infra_tools.py setup server_web example.com admin --ruby --node --deploy example.com https://github.com/user/repo.git
+python3 infra_tools.py setup workstation_desktop 192.168.1.100 admin --desktop i3 --browser firefox
+python3 infra_tools.py patch example.com admin --ssl --deploy api.example.com https://github.com/user/api.git
 python3 infra_tools.py credentials set guest s3cret
 ```
 
 ## What It Does
 
-- **Servers**: Security hardening, Nginx/SSL, Ruby/Node/Go, app deployment
+- **Servers**: Security hardening, Nginx/SSL, Ruby/Node/Go, app deployment, game lobby server
 - **Workstations**: Desktop environments (XFCE, i3, LXQt), RDP, browsers, audio
 - **Storage**: Samba shares, rsync sync, par2 integrity verification
 - **Security**: Firewall, SSH hardening, fail2ban, auto-updates, weekly cleanup maintenance, journald size limits
@@ -49,10 +49,7 @@ python3 infra_tools.py setup server_web web.com \
 
 ### Remote Desktop Workstation
 ```bash
-python3 infra_tools.py setup workstation_desktop 192.168.1.50 \
-  --desktop xfce --rdp --audio \
-  --browser librewolf \
-  --ruby --node
+python3 infra_tools.py setup workstation_desktop user192.168.1.100 --desktop i3 --browser firefox
 ```
 
 ### NAS with Backup
@@ -85,10 +82,22 @@ python3 infra_tools.py setup server_web 10.0.0.50 admin \
 
 `--storage` is repeatable: `root` is required as `--storage root POOL AMOUNT`, and `template` is optional as `--storage template POOL`.
 
-Use `--credential USERNAME PASSWORD` to define share passwords once, then reference those users by name in
-`--share` or `--mount-smb`. The `USERS` field accepts a comma-separated list of `username` or `username:password`
+Use `--credential USERNAME PASSWORD` to define share passwords once, then reference those users by username
+in `--share` or `--mount-smb`. The `USERS` field accepts a comma-separated list of `username` or `username:password`
 entries, and each bare username must have a matching saved credential. Use `infra_tools.py credentials set USERNAME
 PASSWORD` to manage the shared workspace store directly.
+
+### Game Lobby Server (Antistatic)
+```bash
+# Deploy the antistatic lobby server behind nginx (auto-downloads binary from GitHub)
+python3 infra_tools.py setup server_lite 192.168.1.10 --antistatic-server lobby.example.com
+
+# With custom internal port (default: 8080)
+python3 infra_tools.py setup server_web 192.168.1.10 --antistatic-server lobby.example.com:9090 --ssl
+
+# The lobby server binary is fetched from github.com/bluehexagons/antistatic-server/releases
+# Runs as a locked-down systemd service with automatic restart on failure
+```
 
 Workspace state now lives under `~/.config/infra_tools` by default. Use `--workspace /path/to/workspace` to isolate
 saved setups, credentials, and history for a project or test environment.

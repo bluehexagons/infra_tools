@@ -43,6 +43,16 @@ PLUGIN = PluginDefinition(
 )
 
 
+def extend_antistatic_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -> None:
+    """Append the antistatic lobby server setup step when configured."""
+    if not config.antistatic_server:
+        return
+
+    from game.antistatic_steps import setup_antistatic_server
+
+    steps.append(("Setting up antistatic lobby server", setup_antistatic_server))
+
+
 def build_server_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
     """Build server-oriented setup steps from plugin-owned capability helpers."""
 
@@ -79,5 +89,6 @@ def build_server_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
     extend_cicd_steps(config, steps)
     extend_app_server_steps(config, steps)
     extend_build_server_steps(config, steps)
+    extend_antistatic_steps(config, steps)
     steps.extend(get_final_steps())
     return steps
