@@ -41,19 +41,20 @@ def cleanup_systemd_unit(unit_name: str, unit_type: str = "service") -> None:
 
 
 def cleanup_service(service_name: str) -> None:
-    """Stop, disable, and remove a service and its timer if they exist.
+    """Stop, disable, and remove a service plus any associated timer or path unit.
     
     This is the primary cleanup function for systemd services. It automatically
-    checks for and cleans up any associated timer before cleaning up the service.
-    Use this for all service cleanup operations.
+    checks for and cleans up any associated timer or path unit before cleaning
+    up the service. Use this for all service cleanup operations.
     
     Args:
-        service_name: Base name of the service (without .service/.timer extension)
-                      If the service has a timer (service_name.timer), it will be
-                      automatically detected and cleaned up as well.
+        service_name: Base name of the service (without .service/.timer/.path
+                      extension). If the service has a timer (service_name.timer)
+                      or a path activator (service_name.path), they are detected
+                      and cleaned up as well.
     
     Examples:
-        # Cleans up both myapp.service and myapp.timer (if timer exists)
+        # Cleans up myapp.service plus myapp.timer/myapp.path if present
         cleanup_service("myapp")
         
         # Cleans up just the timer
@@ -61,15 +62,20 @@ def cleanup_service(service_name: str) -> None:
     """
     service_file = f"/etc/systemd/system/{service_name}.service"
     timer_file = f"/etc/systemd/system/{service_name}.timer"
+    path_file = f"/etc/systemd/system/{service_name}.path"
     
     needs_reload = False
     
-    # Stop and disable timer first (timers trigger services, so stop timer before service)
-    if os.path.exists(timer_file):
-        run(f"systemctl stop {shlex.quote(service_name)}.timer", check=False)
-        run(f"systemctl disable {shlex.quote(service_name)}.timer", check=False)
-        os.remove(timer_file)
-        needs_reload = True
+    # Stop and disable timers/paths first (they activate the service)
+    for activator_file, activator_kind in (
+        (timer_file, "timer"),
+        (path_file, "path"),
+    ):
+        if os.path.exists(activator_file):
+            run(f"systemctl stop {shlex.quote(service_name)}.{activator_kind}", check=False)
+            run(f"systemctl disable {shlex.quote(service_name)}.{activator_kind}", check=False)
+            os.remove(activator_file)
+            needs_reload = True
     
     # Stop service; disable only when it declares an [Install] section
     if os.path.exists(service_file):

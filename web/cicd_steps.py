@@ -184,9 +184,29 @@ RestartSec=10
 # Security hardening
 NoNewPrivileges=true
 PrivateTmp=true
+PrivateDevices=true
 ProtectSystem=strict
 ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @mount
 ReadWritePaths=/var/lib/infra_tools/cicd
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
 
 # Logging
 StandardOutput=journal
@@ -209,13 +229,19 @@ WantedBy=multi-user.target
 
 
 def create_cicd_executor_service(config: SetupConfig) -> None:
-    """Create systemd service for CI/CD executor."""
+    """Create systemd service + path unit for CI/CD executor.
+    
+    The executor is triggered by a systemd path unit that watches the jobs
+    directory for new files written by the unprivileged webhook receiver.
+    This avoids requiring the webhook user to have systemctl/polkit privileges
+    to start the executor service (which previously made jobs silently fail
+    to run when the webhook user could not invoke ``systemctl start``).
+    """
     service_name = "cicd-executor"
     
-    # Cleanup existing service
+    # Cleanup existing service (also removes any prior .path unit)
     cleanup_service(service_name)
     
-    # Create service unit file (one-shot service triggered by webhook receiver)
     service_content = """[Unit]
 Description=CI/CD Job Executor
 After=network.target
@@ -227,13 +253,33 @@ Group=webhook
 WorkingDirectory=/opt/infra_tools/web/service_tools
 Environment=INFRA_TOOLS_WORKSPACE=/var/lib/infra_tools/cicd
 ExecStart=/usr/bin/python3 /opt/infra_tools/web/service_tools/cicd_executor.py
+TimeoutStartSec=2h
 
-# Security hardening
+# Security hardening (executor must run user-supplied scripts so we cannot
+# apply MemoryDenyWriteExecute or SystemCallFilter without breaking common
+# CI tooling like Node/Ruby/JIT'd languages)
 NoNewPrivileges=true
 PrivateTmp=true
+PrivateDevices=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/infra_tools/cicd
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+SystemCallArchitectures=native
+ReadWritePaths=/var/lib/infra_tools/cicd /var/log/infra_tools
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0027
 
 # Logging
 StandardOutput=journal
@@ -245,9 +291,31 @@ SyslogIdentifier=cicd-executor
     with open(service_file, 'w') as f:
         f.write(service_content)
     
-    run("systemctl daemon-reload")
+    # Path activator: triggers the executor whenever a job file is written by
+    # the webhook receiver. The receiver runs as an unprivileged user that
+    # cannot call ``systemctl start`` directly, so this is required.
+    path_content = """[Unit]
+Description=Watch CI/CD jobs directory for new jobs
+After=network.target
+
+[Path]
+DirectoryNotEmpty=/var/lib/infra_tools/cicd/jobs
+PathChanged=/var/lib/infra_tools/cicd/jobs
+Unit=cicd-executor.service
+
+[Install]
+WantedBy=multi-user.target
+"""
     
-    print(f"  ✓ Created {service_name}.service")
+    path_file = f"/etc/systemd/system/{service_name}.path"
+    with open(path_file, 'w') as f:
+        f.write(path_content)
+    
+    run("systemctl daemon-reload")
+    run(f"systemctl enable {service_name}.path")
+    run(f"systemctl start {service_name}.path")
+    
+    print(f"  ✓ Created {service_name}.service and {service_name}.path")
 
 
 def configure_nginx_for_webhook(config: SetupConfig) -> None:

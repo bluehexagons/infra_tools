@@ -21,7 +21,6 @@ import sys
 import json
 import hmac
 import hashlib
-import subprocess
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Optional
@@ -88,9 +87,12 @@ def load_config() -> dict:
 
 def trigger_cicd_job(repo_url: str, ref: str, commit_sha: str, pusher: str) -> bool:
     """
-    Trigger CI/CD job by creating a job file for the executor service.
+    Trigger CI/CD job by creating a job file in the jobs directory.
     
-    The executor service watches the jobs directory and processes new jobs.
+    The cicd-executor.service is activated automatically by a systemd .path
+    unit that watches the jobs directory, so this function does not need
+    elevated privileges to start the executor (and indeed cannot, since the
+    webhook user has no polkit rule to call systemctl on system services).
     """
     try:
         os.makedirs(JOBS_DIR, exist_ok=True)
@@ -106,24 +108,13 @@ def trigger_cicd_job(repo_url: str, ref: str, commit_sha: str, pusher: str) -> b
         timestamp = datetime.now().strftime(TIMESTAMP_FORMAT_FILE)
         safe_repo_name = repo_url.rstrip('/').split('/')[-1].replace('.git', '')
         job_file = os.path.join(JOBS_DIR, f"{timestamp}_{safe_repo_name}_{commit_sha}.json")
-        with open(job_file, 'w') as f:
+        # Atomic write so the path activator never sees a half-written file.
+        tmp_file = job_file + ".tmp"
+        with open(tmp_file, 'w') as f:
             json.dump(job_data, f, indent=2)
+        os.replace(tmp_file, job_file)
         
         log_event(logger, "Created CI/CD job", job_file=job_file, repo_url=repo_url, commit_sha=commit_sha[:8])
-        
-        result = subprocess.run(
-            ['systemctl', 'start', 'cicd-executor.service'],
-            capture_output=True,
-            text=True
-        )
-        
-        if result.returncode != 0:
-            log_event(
-                logger,
-                "Failed to trigger executor service",
-                level=30,
-                stderr=result.stderr.strip() if result.stderr else "",
-            )
         
         return True
         

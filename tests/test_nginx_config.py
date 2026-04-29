@@ -169,5 +169,31 @@ class TestGenerateMergedNginxConfig(unittest.TestCase):
         self.assertIn('http2 on', config)
 
 
+    def test_http_redirects_to_https(self):
+        deployments = [{
+            'path': '/',
+            'needs_proxy': False,
+            'serve_path': '/var/www/html',
+            'project_type': 'static',
+        }]
+        config = generate_merged_nginx_config('example.com', deployments)
+        self.assertIn('return 301 https://$host$request_uri', config)
+        # ACME challenge must remain reachable on plaintext HTTP for renewals.
+        http_block_end = config.find('}', config.find('listen 80'))
+        http_block = config[: http_block_end]
+        self.assertIn('acme-challenge', http_block)
+
+    def test_hsts_header_present(self):
+        deployments = [{
+            'path': '/',
+            'needs_proxy': False,
+            'serve_path': '/var/www/html',
+            'project_type': 'static',
+        }]
+        config = generate_merged_nginx_config('example.com', deployments)
+        self.assertIn('Strict-Transport-Security', config)
+        self.assertIn('max-age=63072000', config)
+
+
 if __name__ == '__main__':
     unittest.main()

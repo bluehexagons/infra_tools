@@ -211,6 +211,28 @@ class TestCICDSteps(unittest.TestCase):
         self.assertGreater(len(reload_calls), 0)
         written_service = ''.join(call.args[0] for call in mock_file().write.call_args_list)
         self.assertIn('Environment=INFRA_TOOLS_WORKSPACE=/var/lib/infra_tools/cicd', written_service)
+        # Path unit must be created and enabled so the unprivileged webhook user
+        # can trigger the executor by writing job files instead of calling systemctl.
+        self.assertIn('PathChanged=/var/lib/infra_tools/cicd/jobs', written_service)
+        self.assertIn('Unit=cicd-executor.service', written_service)
+        path_enable_calls = [
+            c for c in mock_run.call_args_list
+            if 'enable cicd-executor.path' in str(c)
+        ]
+        self.assertGreater(len(path_enable_calls), 0,
+                           "cicd-executor.path must be enabled so the webhook receiver "
+                           "can trigger jobs without systemctl/polkit privileges")
+    
+    def test_trigger_cicd_job_does_not_call_systemctl(self):
+        """Verify the unprivileged webhook receiver only writes job files."""
+        import inspect
+        src = inspect.getsource(webhook_receiver.trigger_cicd_job)
+        # No code path may invoke systemctl from the unprivileged webhook user.
+        self.assertNotIn("'systemctl'", src,
+                         "trigger_cicd_job must not invoke systemctl: the webhook user "
+                         "has no privilege to start system services. Use the path unit.")
+        self.assertNotIn('"systemctl"', src)
+        self.assertNotIn('subprocess.run', src)
     
     @patch('web.cicd_steps.os.path.exists')
     @patch('web.cicd_steps.os.makedirs')

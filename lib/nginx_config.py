@@ -156,11 +156,23 @@ def _make_static_location(path: str, serve_path: str, index_file: str, try_files
 
 
 def _make_api_server_block(domain: str, port: int) -> str:
-    """Generate a separate server block for API subdomain."""
+    """Generate a separate server block for API subdomain (HTTP redirect + HTTPS)."""
     cert, key = get_ssl_cert_path(domain)
     return f"""server {{
     listen 80;
     listen [::]:80;
+    server_name {domain};
+    
+    location /.well-known/acme-challenge/ {{
+        root /var/www/letsencrypt;
+    }}
+    
+    location / {{
+        return 301 https://$host$request_uri;
+    }}
+}}
+
+server {{
     listen 443 ssl;
     listen [::]:443 ssl;
     http2 on;
@@ -173,9 +185,7 @@ def _make_api_server_block(domain: str, port: int) -> str:
     ssl_prefer_server_ciphers on;
     ssl_ciphers {SSL_CIPHERS};
     
-    location /.well-known/acme-challenge/ {{
-        root /var/www/letsencrypt;
-    }}
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
     
     location / {{
         proxy_pass http://127.0.0.1:{port};
@@ -304,6 +314,19 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: Deployments
     main_config = f"""server {{
     listen 80{default_server};
     listen [::]:80{default_server};
+    
+    {server_name_directive}
+    
+    location /.well-known/acme-challenge/ {{
+        root /var/www/letsencrypt;
+    }}
+    
+    location / {{
+        return 301 https://$host$request_uri;
+    }}
+}}
+
+server {{
     listen 443 ssl{default_server};
     listen [::]:443 ssl{default_server};
     http2 on;
@@ -315,6 +338,8 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: Deployments
     ssl_protocols {SSL_PROTOCOLS};
     ssl_prefer_server_ciphers on;
     ssl_ciphers {SSL_CIPHERS};
+    
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
     
 {chr(10).join(locations)}
 }}
