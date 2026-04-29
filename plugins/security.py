@@ -37,6 +37,7 @@ def get_security_steps(*, lite: bool) -> list[tuple[str, StepFunc]]:
         configure_auto_restart,
         configure_auto_updates,
         configure_cleanup_maintenance,
+        configure_fail2ban,
         configure_firewall,
         harden_kernel,
         harden_ssh,
@@ -50,6 +51,7 @@ def get_security_steps(*, lite: bool) -> list[tuple[str, StepFunc]]:
         [
             ("Hardening SSH configuration", harden_ssh),
             ("Hardening kernel parameters", harden_kernel),
+            ("Configuring fail2ban (sshd jail)", configure_fail2ban),
             ("Configuring automatic security updates", configure_auto_updates),
             ("Configuring cleanup maintenance service", configure_cleanup_maintenance),
             ("Configuring automatic restart service", configure_auto_restart),

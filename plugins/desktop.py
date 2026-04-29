@@ -45,7 +45,6 @@ def extend_desktop_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]])
         install_smbclient,
         install_xrdp,
     )
-    from security.steps import configure_fail2ban
 
     if not config.include_desktop:
         return
@@ -60,7 +59,6 @@ def extend_desktop_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]])
         steps.append(("Configuring dark theme", configure_dark_theme))
     if config.enable_rdp:
         steps.append(("Hardening xRDP with TLS and group restrictions", harden_xrdp))
-        steps.append(("Installing fail2ban for RDP brute-force protection", configure_fail2ban))
 
 
 def extend_desktop_app_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -> None:

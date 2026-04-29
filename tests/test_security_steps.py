@@ -13,7 +13,152 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from lib.config import SetupConfig
 from lib.maintenance_defaults import JOURNAL_MAX_USE
 from lib.system_types import get_steps_for_system_type
-from security.security_steps import configure_auto_updates, configure_cleanup_maintenance
+from security.security_steps import (
+    configure_auto_updates,
+    configure_cleanup_maintenance,
+    configure_fail2ban,
+    configure_firewall,
+    harden_kernel,
+    harden_ssh,
+)
+
+
+class TestHardenSSH(unittest.TestCase):
+    @patch("security.security_steps.run")
+    @patch("security.security_steps.os.makedirs")
+    @patch("security.security_steps.open", new_callable=mock_open)
+    @patch("security.security_steps.os.path.exists", return_value=False)
+    def test_writes_dropin_with_hardening_directives(self, _exists, mock_file, _md, mock_run):
+        mock_run.return_value = SimpleNamespace(returncode=0)
+        harden_ssh(SetupConfig(username="u", host="h", system_type="server_lite"))
+
+        opened_paths = [args[0] for args, _ in mock_file.call_args_list]
+        self.assertIn("/etc/ssh/sshd_config.d/99-infra-tools-hardening.conf", opened_paths)
+        written = "".join(call.args[0] for call in mock_file().write.call_args_list)
+        for directive in (
+            "PermitRootLogin prohibit-password",
+            "PasswordAuthentication no",
+            "MaxAuthTries 3",
+            "AllowGroups remoteusers",
+            "ClientAliveInterval 300",
+        ):
+            self.assertIn(directive, written)
+
+    @patch("security.security_steps.run")
+    @patch("security.security_steps.os.makedirs")
+    @patch("security.security_steps.open", new_callable=mock_open)
+    @patch("security.security_steps.os.path.exists", return_value=False)
+    def test_validates_sshd_before_reload(self, _exists, _file, _md, mock_run):
+        mock_run.return_value = SimpleNamespace(returncode=0)
+        harden_ssh(SetupConfig(username="u", host="h", system_type="server_lite"))
+        run_commands = [args[0] for args, _ in mock_run.call_args_list]
+        self.assertIn("sshd -t", run_commands)
+        self.assertTrue(any(cmd.startswith("systemctl reload sshd") for cmd in run_commands))
+
+    @patch("security.security_steps.run")
+    @patch("security.security_steps.os.makedirs")
+    @patch("security.security_steps.open", new_callable=mock_open)
+    @patch("security.security_steps.os.path.exists", return_value=False)
+    def test_skips_reload_when_validation_fails(self, _exists, _file, _md, mock_run):
+        mock_run.return_value = SimpleNamespace(returncode=1)
+        harden_ssh(SetupConfig(username="u", host="h", system_type="server_lite"))
+        run_commands = [args[0] for args, _ in mock_run.call_args_list]
+        self.assertIn("sshd -t", run_commands)
+        self.assertFalse(any(cmd.startswith("systemctl reload sshd") for cmd in run_commands))
+
+
+class TestHardenKernel(unittest.TestCase):
+    @patch("security.security_steps.can_modify_kernel", return_value=True)
+    @patch("security.security_steps.run")
+    @patch("security.security_steps.open", new_callable=mock_open)
+    @patch("security.security_steps.os.path.exists", return_value=False)
+    def test_writes_sysctl_file_with_modern_protections(self, _exists, mock_file, mock_run, _ckm):
+        mock_run.return_value = SimpleNamespace(returncode=0)
+        harden_kernel(SetupConfig(username="u", host="h", system_type="server_lite"))
+        written = "".join(call.args[0] for call in mock_file().write.call_args_list)
+        for directive in (
+            "kernel.kptr_restrict=2",
+            "kernel.unprivileged_bpf_disabled=1",
+            "fs.protected_symlinks=1",
+            "net.ipv4.tcp_syncookies=1",
+        ):
+            self.assertIn(directive, written)
+
+    @patch("security.security_steps.can_modify_kernel", return_value=True)
+    @patch("security.security_steps.run")
+    @patch("security.security_steps.os.path.exists", return_value=True)
+    def test_skips_when_existing_content_matches(self, _exists, mock_run, _ckm):
+        # Read the bytes the function would write, then mock open() to return them.
+        from security.security_steps import _SYSCTL_HARDENING_FILE  # noqa: F401
+        # Import inside function to avoid leaking; we re-run the function once
+        # to produce expected content.
+        mock_run.return_value = SimpleNamespace(returncode=0)
+        captured = {}
+        m = mock_open()
+        # First call: prime with the expected content by running once with non-existent file
+        with patch("security.security_steps.os.path.exists", return_value=False), \
+             patch("security.security_steps.open", m):
+            harden_kernel(SetupConfig(username="u", host="h", system_type="server_lite"))
+        expected = "".join(call.args[0] for call in m().write.call_args_list)
+
+        m2 = mock_open(read_data=expected)
+        with patch("security.security_steps.open", m2):
+            harden_kernel(SetupConfig(username="u", host="h", system_type="server_lite"))
+        # No write should have happened because content matched.
+        self.assertEqual(m2().write.call_count, 0)
+        captured["ok"] = True
+        self.assertTrue(captured["ok"])
+
+
+class TestConfigureFail2Ban(unittest.TestCase):
+    @patch("security.security_steps.is_container", return_value=False)
+    @patch("security.security_steps.run")
+    @patch("security.security_steps.os.makedirs")
+    @patch("security.security_steps.open", new_callable=mock_open)
+    def test_writes_sshd_jail_when_rdp_disabled(self, mock_file, _md, mock_run, _ic):
+        mock_run.return_value = SimpleNamespace(returncode=0)
+        configure_fail2ban(SetupConfig(username="u", host="h", system_type="server_lite"))
+        opened_paths = [args[0] for args, _ in mock_file.call_args_list]
+        self.assertIn("/etc/fail2ban/jail.d/sshd.local", opened_paths)
+        self.assertNotIn("/etc/fail2ban/jail.d/xrdp.local", opened_paths)
+
+    @patch("security.security_steps.is_container", return_value=False)
+    @patch("security.security_steps.run")
+    @patch("security.security_steps.os.makedirs")
+    @patch("security.security_steps.open", new_callable=mock_open)
+    def test_writes_xrdp_jail_and_filter_when_rdp_enabled(self, mock_file, _md, mock_run, _ic):
+        mock_run.return_value = SimpleNamespace(returncode=0)
+        cfg = SetupConfig(username="u", host="h", system_type="workstation_dev")
+        cfg.enable_rdp = True
+        configure_fail2ban(cfg)
+        opened_paths = [args[0] for args, _ in mock_file.call_args_list]
+        self.assertIn("/etc/fail2ban/jail.d/sshd.local", opened_paths)
+        self.assertIn("/etc/fail2ban/jail.d/xrdp.local", opened_paths)
+        self.assertIn("/etc/fail2ban/filter.d/xrdp.conf", opened_paths)
+        # The filter should target AUTHFAIL to avoid false positives on
+        # informational connection lines.
+        written = "".join(call.args[0] for call in mock_file().write.call_args_list)
+        self.assertIn("AUTHFAIL", written)
+
+    @patch("security.security_steps.is_container", return_value=True)
+    def test_skipped_in_container(self, _ic):
+        with patch("builtins.print") as mock_print:
+            configure_fail2ban(SetupConfig(username="u", host="h", system_type="server_lite"))
+        mock_print.assert_any_call("  ✓ Skipping fail2ban configuration (limited functionality in containers)")
+
+
+class TestConfigureFirewall(unittest.TestCase):
+    @patch("security.security_steps.is_container", return_value=False)
+    @patch("security.security_steps.run")
+    def test_rate_limits_ssh_and_rdp_when_rdp_enabled(self, mock_run, _ic):
+        mock_run.return_value = SimpleNamespace(returncode=1)  # ufw not yet active
+        cfg = SetupConfig(username="u", host="h", system_type="workstation_dev")
+        cfg.enable_rdp = True
+        configure_firewall(cfg)
+        run_commands = [args[0] for args, _ in mock_run.call_args_list]
+        self.assertIn("ufw limit ssh", run_commands)
+        self.assertIn("ufw limit 3389/tcp", run_commands)
+        self.assertNotIn("ufw allow 3389/tcp", run_commands)
 
 
 class TestConfigureAutoUpdates(unittest.TestCase):

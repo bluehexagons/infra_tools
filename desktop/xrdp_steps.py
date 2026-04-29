@@ -9,9 +9,6 @@ from lib.machine_state import has_gpu_access, is_container
 from lib.remote_utils import is_service_active, run, install_package, is_package_installed
 
 
-FLATPAK_REMOTE = "flathub"
-
-
 def _generate_sesman_ini(config: SetupConfig, cleanup_script_path: str) -> str:
     """Generate complete sesman.ini content.
     
