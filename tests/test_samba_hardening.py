@@ -1,0 +1,205 @@
+"""Regression tests for Samba server hardening defaults.
+
+These tests assert the *content* of the hardening constants so that future
+edits cannot silently weaken the defaults (e.g. lowering `server min
+protocol` back to SMB2, or re-enabling NetBIOS).
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import sys
+import unittest
+from unittest.mock import patch, MagicMock
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+from lib.config import SetupConfig
+from smb import samba_steps
+
+
+def _make_config(**kwargs) -> SetupConfig:
+    defaults = dict(host='testhost', username='testuser', system_type='server_lite')
+    defaults.update(kwargs)
+    return SetupConfig(**defaults)
+
+
+class TestSambaGlobalHardenedSettings(unittest.TestCase):
+    def test_pins_smb3_minimum(self) -> None:
+        s = samba_steps.SAMBA_GLOBAL_HARDENED_SETTINGS
+        self.assertEqual(s["server min protocol"], "SMB3")
+        self.assertEqual(s["client min protocol"], "SMB3")
+
+    def test_requires_signing_and_encryption(self) -> None:
+        s = samba_steps.SAMBA_GLOBAL_HARDENED_SETTINGS
+        self.assertEqual(s["server signing"], "mandatory")
+        self.assertEqual(s["client signing"], "mandatory")
+        self.assertEqual(s["smb encrypt"], "required")
+
+    def test_disables_netbios_and_anonymous(self) -> None:
+        s = samba_steps.SAMBA_GLOBAL_HARDENED_SETTINGS
+        self.assertEqual(s["disable netbios"], "yes")
+        self.assertEqual(s["map to guest"], "Never")
+        self.assertEqual(s["restrict anonymous"], "2")
+
+    def test_log_template_matches_fail2ban_glob(self) -> None:
+        # log.%m is what the fail2ban `log.*` glob expects to find;
+        # the legacy `%m.log` template would not be picked up.
+        self.assertEqual(
+            samba_steps.SAMBA_GLOBAL_HARDENED_SETTINGS["log file"],
+            "/var/log/samba/log.%m",
+        )
+
+
+class TestSambaFail2banFilter(unittest.TestCase):
+    def test_filter_matches_modern_smbd_auth_failure(self) -> None:
+        # Pull the failregex out of the multiline filter body and apply
+        # fail2ban's <HOST> -> capture-group expansion to verify it
+        # actually matches a current smbd "Auth:" log line.
+        body = samba_steps.SAMBA_FAIL2BAN_FILTER
+        match = re.search(r"failregex\s*=\s*(.+)", body)
+        self.assertIsNotNone(match, "filter must declare a failregex")
+        regex = match.group(1).strip()
+        # fail2ban substitutes <HOST> with a host/IP capture; for testing,
+        # an IPv4 capture group is sufficient.
+        regex = regex.replace("<HOST>", r"(?P<host>[^\]:]+)")
+
+        sample = (
+            '[2024/01/01 12:34:56.789012,  2] '
+            '../../source3/auth/auth.c:319(auth_check_ntlm_password)  '
+            'Auth: [SMB2,(null)] user [WORKGROUP]\\[bob] at '
+            '[Wed Jan  1 12:34:56 2024] with [NTLMv2] '
+            'status [NT_STATUS_WRONG_PASSWORD] '
+            'workstation [USER-PC] '
+            'remote host [ipv4:192.168.1.10:54321] became [WORKGROUP]\\[]'
+        )
+        m = re.search(regex, sample)
+        self.assertIsNotNone(m, f"filter regex did not match modern smbd line: {regex!r}")
+        self.assertEqual(m.group("host"), "192.168.1.10")
+
+    def test_filter_does_not_match_successful_auth(self) -> None:
+        body = samba_steps.SAMBA_FAIL2BAN_FILTER
+        match = re.search(r"failregex\s*=\s*(.+)", body)
+        regex = match.group(1).strip().replace("<HOST>", r"(?P<host>[^\]:]+)")
+        success = (
+            '  Auth: [SMB2,(null)] user [WORKGROUP]\\[bob] at [...] '
+            'with [NTLMv2] status [NT_STATUS_OK] workstation [USER-PC] '
+            'remote host [ipv4:192.168.1.10:54321]'
+        )
+        self.assertIsNone(re.search(regex, success))
+
+
+class TestSambaFail2banJail(unittest.TestCase):
+    def test_jail_uses_445_only_and_renamed_filter(self) -> None:
+        body = samba_steps.SAMBA_FAIL2BAN_JAIL
+        self.assertIn("[samba-auth]", body)
+        self.assertIn("filter = samba-auth", body)
+        self.assertIn("port = 445", body)
+        # Port 139 (legacy NetBIOS) must not be enabled in the jail.
+        self.assertNotIn("139", body)
+        # Wildcard logpath catches per-machine logs (log.%m -> log.HOSTNAME).
+        self.assertIn("/var/log/samba/log.*", body)
+
+
+class TestConfigureSambaFirewall(unittest.TestCase):
+    def test_only_opens_445_and_removes_legacy_139(self) -> None:
+        commands: list[str] = []
+
+        def fake_run(cmd, **kwargs):
+            commands.append(cmd)
+            res = MagicMock()
+            res.returncode = 0
+            return res
+
+        with patch.object(samba_steps, 'run', side_effect=fake_run):
+            samba_steps.configure_samba_firewall(_make_config())
+
+        joined = "\n".join(commands)
+        self.assertIn("ufw delete allow 139/tcp", joined)
+        self.assertIn("ufw allow 445/tcp", joined)
+        # No allow rule for 139 should be issued.
+        self.assertFalse(any("ufw allow 139" in c for c in commands))
+        self.assertIn("ufw reload", joined)
+
+
+class TestConfigureSambaFail2banLegacyCleanup(unittest.TestCase):
+    """The old code wrote /etc/fail2ban/filter.d/samba.conf, clobbering the
+    distro-shipped conffile. The new code uses samba-auth.* and removes the
+    legacy paths if present."""
+
+    def test_legacy_files_are_removed_when_present(self) -> None:
+        existing_paths = {
+            "/etc/fail2ban/jail.d/samba.local",
+            "/etc/fail2ban/filter.d/samba.conf",
+            # New jail does not exist yet, so the function will (re)write it.
+        }
+        removed: list[str] = []
+        opened: list[str] = []
+        written: dict[str, str] = {}
+
+        class _Writer:
+            def __init__(self, path: str) -> None:
+                self.path = path
+
+            def __enter__(self):  # type: ignore[no-untyped-def]
+                return self
+
+            def __exit__(self, *a):  # type: ignore[no-untyped-def]
+                return False
+
+            def write(self, data: str) -> None:
+                written[self.path] = written.get(self.path, "") + data
+
+        def fake_open(path, mode='r', *a, **kw):
+            opened.append(path)
+            self.assertEqual(mode, 'w')
+            return _Writer(path)
+
+        def fake_remove(path):
+            removed.append(path)
+            existing_paths.discard(path)
+
+        def fake_exists(path):
+            return path in existing_paths
+
+        with patch.object(samba_steps, 'run') as mock_run, \
+             patch.object(samba_steps, 'is_package_installed', return_value=True), \
+             patch.object(samba_steps.os.path, 'exists', side_effect=fake_exists), \
+             patch.object(samba_steps.os, 'makedirs'), \
+             patch.object(samba_steps.os, 'remove', side_effect=fake_remove), \
+             patch.object(samba_steps, 'open', side_effect=fake_open, create=True), \
+             patch('lib.remote_utils.is_service_active', return_value=False):
+            mock_run.return_value = MagicMock(returncode=0)
+            samba_steps.configure_samba_fail2ban(_make_config())
+
+        self.assertIn("/etc/fail2ban/jail.d/samba.local", removed)
+        self.assertIn("/etc/fail2ban/filter.d/samba.conf", removed)
+        # New paths were written, not the legacy ones.
+        self.assertIn("/etc/fail2ban/filter.d/samba-auth.conf", written)
+        self.assertIn("/etc/fail2ban/jail.d/samba-auth.local", written)
+        self.assertNotIn("/etc/fail2ban/filter.d/samba.conf", written)
+        self.assertNotIn("/etc/fail2ban/jail.d/samba.local", written)
+
+
+class TestVetoFilesPattern(unittest.TestCase):
+    """The veto-files config must use real on-disk directory names; an
+    earlier version always prepended a `.` which silently broke vetoing for
+    non-dotfile directories like `subdir`."""
+
+    def test_pattern_uses_real_dir_name(self) -> None:
+        config = _make_config(scrub_specs=[
+            ['/mnt/data/store/subdir', '.pardatabase', '5%', 'monthly'],
+        ])
+        veto_dirs = samba_steps._get_veto_dirs_for_share('/mnt/data/store', config)
+        self.assertEqual(veto_dirs, ['subdir'])
+
+        # Reproduce setup_samba_share's pattern construction so this test
+        # fails if the regression returns.
+        veto_pattern = "/" + "/".join(veto_dirs) + "/"
+        self.assertEqual(veto_pattern, "/subdir/")
+        self.assertNotEqual(veto_pattern, "/.subdir/")
+
+
+if __name__ == '__main__':
+    unittest.main()

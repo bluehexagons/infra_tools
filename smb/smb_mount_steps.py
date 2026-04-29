@@ -81,6 +81,7 @@ password={password}
     
     with open(creds_file, 'w') as f:
         f.write(creds_content)
+    run(f"chown root:root {shlex.quote(creds_file)}")
     run(f"chmod 600 {shlex.quote(creds_file)}")
     
     if not ip.replace('.', '').replace(':', '').isalnum():
@@ -110,7 +111,7 @@ Wants=network-online.target
 What={unc_path}
 Where={mountpoint}
 Type=cifs
-Options=credentials={creds_file},uid={config.username},gid={config.username},file_mode=0755,dir_mode=0755,nofail,x-systemd.automount,x-systemd.idle-timeout=60
+Options=credentials={creds_file},uid={config.username},gid={config.username},file_mode=0644,dir_mode=0755,vers=3.0,seal,nofail,x-systemd.automount,x-systemd.idle-timeout=60
 
 [Install]
 WantedBy=multi-user.target
