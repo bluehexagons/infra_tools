@@ -142,16 +142,23 @@ class NotificationSender:
     
     def _send_mailbox(self, email: str, notification: Notification) -> None:
         """Send email notification."""
-        body = f"""Job: {notification.job}
-Status: {notification.status.upper()}
-System: {notification.hostname}
-
-{notification.message}
-
----
-This is an automated notification from infra_tools.
-Check system logs for detailed information.
-"""
+        body_parts = [
+            f"Job: {notification.job}",
+            f"Status: {notification.status.upper()}",
+            f"System: {notification.hostname}",
+            "",
+            notification.message,
+        ]
+        if notification.details:
+            body_parts.extend(["", "Details:", notification.details])
+        body_parts.extend([
+            "",
+            "---",
+            "This is an automated notification from infra_tools.",
+            "Check system logs for detailed information.",
+            "",
+        ])
+        body = "\n".join(body_parts)
         
         try:
             subprocess.run(

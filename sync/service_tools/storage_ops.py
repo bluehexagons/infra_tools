@@ -255,7 +255,15 @@ def run_scrub(directory: str, database: str, redundancy: str, verify: bool, logg
     
     try:
         redundancy_int = int(redundancy.rstrip('%'))
-        scrub_directory(directory, database, redundancy_int, log_file, verify, suppress_notifications=True)
+        scrub_result = scrub_directory(directory, database, redundancy_int, log_file, verify, suppress_notifications=True)
+        unrepairable = scrub_result.get("files_unrepairable", []) if isinstance(scrub_result, dict) else []
+        ok = bool(scrub_result.get("ok", True)) if isinstance(scrub_result, dict) else True
+        if unrepairable:
+            sample = ", ".join(unrepairable[:5])
+            extra = f" (and {len(unrepairable) - 5} more)" if len(unrepairable) > 5 else ""
+            return False, f"Scrub completed with {len(unrepairable)} unrepairable file(s) in {directory}: {sample}{extra}"
+        if not ok:
+            return False, f"Scrub did not complete cleanly for {directory}"
         return True, f"Scrub completed for {directory}"
     except ValueError as e:
         error_msg = f"Invalid redundancy value '{redundancy}': {e}"

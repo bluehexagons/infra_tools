@@ -103,6 +103,31 @@ class TestNotificationSender(unittest.TestCase):
         body = kwargs['input'].decode('utf-8')
         self.assertIn('myserver', body)
 
+    @patch('subprocess.run')
+    def test_mailbox_body_includes_details(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout=b'', stderr=b'')
+        sender = NotificationSender([NotificationConfig(type='mailbox', target='admin@example.com')])
+        notification = Notification(
+            subject='Test', job='scrub', status='error',
+            message='Unrepairable corruption',
+            details='Unrepairable files:\n  - movies/film.mkv',
+        )
+        sender.send(notification)
+        _, kwargs = mock_run.call_args
+        body = kwargs['input'].decode('utf-8')
+        self.assertIn('Details:', body)
+        self.assertIn('movies/film.mkv', body)
+
+    @patch('subprocess.run')
+    def test_mailbox_body_omits_details_section_when_absent(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout=b'', stderr=b'')
+        sender = NotificationSender([NotificationConfig(type='mailbox', target='admin@example.com')])
+        notification = Notification(subject='Test', job='sync', status='good', message='ok')
+        sender.send(notification)
+        _, kwargs = mock_run.call_args
+        body = kwargs['input'].decode('utf-8')
+        self.assertNotIn('Details:', body)
+
     def test_failure_logs_redacted_target(self):
         log_stream = io.StringIO()
         logger = logging.getLogger('test.notifications.sender.failure')

@@ -25,6 +25,28 @@ from lib.task_utils import (
 )
 
 
+def remove_par2_files_under(database_path: str) -> list[str]:
+    """Remove all .par2 files under ``database_path``.
+
+    Used by initial-par2 rollback at setup time. Returns the list of removed
+    paths (best-effort; OSErrors during removal are swallowed but the path is
+    still reported as not-removed by being absent from the result).
+    """
+    removed: list[str] = []
+    if not os.path.isdir(database_path):
+        return removed
+    for root, _, files in os.walk(database_path):
+        for file in files:
+            if file.endswith('.par2'):
+                full = os.path.join(root, file)
+                try:
+                    os.remove(full)
+                    removed.append(full)
+                except OSError:
+                    pass
+    return removed
+
+
 def install_par2(config: SetupConfig) -> None:
     if is_package_installed("par2"):
         print("  ✓ par2 already installed")
@@ -161,10 +183,11 @@ def create_scrub_service(config: SetupConfig, scrub_spec: Optional[list[str]] = 
         return True
     
     def rollback_initial_par2():
+        # Initial creation writes par2 files under database_path (mirroring the
+        # protected directory tree), not directly under ``directory``. Walk the
+        # database tree and remove anything we created.
         try:
-            for file in os.listdir(directory):
-                if file.endswith('.par2'):
-                    os.remove(os.path.join(directory, file))
+            remove_par2_files_under(database_path)
         except Exception as e:
             logger.log_error("rollback_initial_par2_failed", str(e))
     
