@@ -31,7 +31,7 @@ old package-manager caches, and oversized journals. Infra tools also installs a 
 
 | Script | Description |
 |--------|-------------|
-| `infra_tools.py` | **Unified entry point** - Use `setup`, `patch`, `list`, `info`, `cmd`, `rm`, `deploy`, `recall`, `reconstruct`, `completions`, `python-tools`, `bootstrap`, or `credentials` |
+| `infra_tools.py` | **Unified entry point** - Use `setup`, `patch`, `list`, `info`, `cmd`, `rm`, `deploy`, `recall`, `reconstruct`, `completions`, `python-tools`, `bootstrap`, `credentials`, or `proxmox` |
 
 Use `infra_tools.py` for all system setup, saved-configuration management, patching, recall, reconstruction, local Python tooling, and shell-completion setup. The legacy per-system `setup_*.py` wrappers, `patch_setup.py`, `recall_setup.py`, `reconstruct_setup.py`, `setup_admin_python.py`, and `setup_completions.py` have been removed.
 
@@ -81,6 +81,28 @@ python3 infra_tools.py setup server_web 10.0.0.50 admin \
 ```
 
 `--storage` is repeatable: `root` is required as `--storage root POOL AMOUNT`, and `template` is optional as `--storage template POOL`.
+
+### Managing Proxmox Containers
+
+Register Proxmox hosts and manage their LXC containers from a workspace registry. Run with no
+subcommand to enter an interactive shell, or use the subcommands directly:
+
+```bash
+python3 infra_tools.py proxmox add pve1 10.0.0.10 --user root --ssh-key ~/.ssh/proxmox_ed25519
+python3 infra_tools.py proxmox ls pve1
+python3 infra_tools.py proxmox health pve1 101
+python3 infra_tools.py proxmox stop pve1 101
+python3 infra_tools.py proxmox destroy pve1 101 -y
+python3 infra_tools.py proxmox shell
+```
+
+The registry is stored at `<workspace>/proxmox_hosts.json` (mode `0600`).
+
+### Tests
+
+Run the full suite with `python3 -m unittest discover -s tests`. Slow / network-dependent tests are
+gated behind `INFRA_TOOLS_RUN_EXPENSIVE=1` (see `tests/expensive_support.py`) and are skipped by
+default.
 
 Use `--credential USERNAME PASSWORD` to define share passwords once, then reference those users by username
 in `--share` or `--mount-smb`. The `USERS` field accepts a comma-separated list of `username` or `username:password`

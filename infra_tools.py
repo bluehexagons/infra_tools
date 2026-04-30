@@ -51,6 +51,7 @@ from lib.display import print_name_and_tags, print_setup_summary, print_success_
 from lib.notifications import validate_notification_args
 from lib.orchestrator_bootstrap import run_orchestrator_bootstrap
 from lib.plugin_registry import format_system_type_help, get_system_type_names
+from lib.proxmox_cli import add_proxmox_subparser, run_proxmox_command
 from lib.python_setup import run_local_python_setup
 from lib.recall import run_recall_command
 from lib.reconstruct import run_reconstruct_command
@@ -89,6 +90,7 @@ def _build_infra_tools_epilog() -> str:
     completions                 Install shell completion for infra_tools.py
     python-tools                Install local Python aliases, uv, and completion
     bootstrap                   Install local packages and bootstrap infra_tools tools
+    proxmox [subcommand]        Manage Proxmox hosts and containers (interactive shell with no args)
     credentials                 Manage workspace credentials
 
 System Types for setup:
@@ -318,7 +320,9 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
 
     credentials_remove_parser = credentials_subparsers.add_parser("remove", help="Remove a saved credential")
     credentials_remove_parser.add_argument("username", help="Credential username to remove")
-    
+
+    add_proxmox_subparser(subparsers)
+
     return parser, setup_parser, patch_parser
 
 
@@ -1000,6 +1004,8 @@ def main() -> int:
             requested_user=args.bootstrap_user,
             skip_system_packages=args.skip_system_packages,
         )
+    elif args.command == "proxmox":
+        return run_proxmox_command(args)
     elif args.command == "credentials":
         try:
             if args.credentials_command == "set":
