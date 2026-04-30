@@ -8,3 +8,6 @@ JOURNAL_MAX_USE = "100M"
 APT_LOCK_OPTIONS = [
     "-o", "DPkg::Lock::Timeout=300",
 ]
+
+# Individual cleanup commands should never block the whole maintenance run forever.
+CLEANUP_COMMAND_TIMEOUT_SECONDS = 600

@@ -15,7 +15,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../
 
 from lib.disk_utils import get_disk_usage_details
 from lib.logging_utils import get_service_logger, log_event
-from lib.maintenance_defaults import APT_LOCK_OPTIONS, JOURNAL_MAX_USE
+from lib.maintenance_defaults import (
+    APT_LOCK_OPTIONS,
+    CLEANUP_COMMAND_TIMEOUT_SECONDS,
+    JOURNAL_MAX_USE,
+)
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
 
 
@@ -25,9 +29,10 @@ logger = get_service_logger('cleanup_maintenance', 'common', use_syslog=True)
 def run_command(
     command: list[str],
     env: dict[str, str] | None = None,
+    timeout: int = CLEANUP_COMMAND_TIMEOUT_SECONDS,
 ) -> subprocess.CompletedProcess[str]:
     """Run a command and capture its output."""
-    return subprocess.run(command, capture_output=True, text=True, env=env)
+    return subprocess.run(command, capture_output=True, text=True, env=env, timeout=timeout)
 
 
 def run_cleanup_command(
@@ -36,7 +41,13 @@ def run_cleanup_command(
     env: dict[str, str] | None = None,
 ) -> str | None:
     """Run a cleanup command and return a failure summary when it fails."""
-    result = run_command(command, env=env)
+    try:
+        result = run_command(command, env=env)
+    except subprocess.TimeoutExpired:
+        details = f"timed out after {CLEANUP_COMMAND_TIMEOUT_SECONDS}s"
+        log_event(logger, f"{action} timed out", level=WARNING, stderr=details)
+        return f"{action}: {details}"
+
     if result.returncode != 0:
         details = result.stderr.strip() or result.stdout.strip() or f"{action} failed"
         log_event(logger, f"{action} failed", level=WARNING, stderr=details)
@@ -59,6 +70,7 @@ def cleanup_apt_cache() -> list[str]:
     failures: list[str] = []
     for command, action in (
         ([apt_get, "autoclean", "-qq"] + APT_LOCK_OPTIONS, "APT autoclean"),
+        ([apt_get, "autoremove", "-y", "-qq"] + APT_LOCK_OPTIONS, "APT autoremove"),
         ([apt_get, "clean"] + APT_LOCK_OPTIONS, "APT clean"),
     ):
         failure = run_cleanup_command(command, action, env=env)
@@ -89,7 +101,12 @@ def run_nvm_command(nvm_dir: str, args: list[str]) -> subprocess.CompletedProces
         '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && '
         f'{shlex.join(args)}'
     )
-    return subprocess.run(["/bin/bash", "-lc", full_cmd], capture_output=True, text=True)
+    return subprocess.run(
+        ["/bin/bash", "-lc", full_cmd],
+        capture_output=True,
+        text=True,
+        timeout=CLEANUP_COMMAND_TIMEOUT_SECONDS,
+    )
 
 
 def iter_nvm_dirs() -> list[tuple[str, str]]:
@@ -114,7 +131,20 @@ def cleanup_old_node_versions() -> list[str]:
     failures: list[str] = []
 
     for username, nvm_dir in iter_nvm_dirs():
-        default_result = run_nvm_command(nvm_dir, ["nvm", "version", "default"])
+        try:
+            default_result = run_nvm_command(nvm_dir, ["nvm", "version", "default"])
+        except subprocess.TimeoutExpired:
+            details = f"nvm version default timed out after {CLEANUP_COMMAND_TIMEOUT_SECONDS}s"
+            log_event(
+                logger,
+                "Skipping nvm version cleanup",
+                level=WARNING,
+                username=username,
+                nvm_dir=nvm_dir,
+                reason=details,
+            )
+            failures.append(f"{username} default: {details}")
+            continue
         current_version = default_result.stdout.strip()
         if default_result.returncode != 0 or not current_version or current_version == "N/A":
             log_event(
@@ -155,7 +185,20 @@ def cleanup_old_node_versions() -> list[str]:
                 )
                 failures.append(f"{username} {version_name}: {details}")
 
-        cache_result = run_nvm_command(nvm_dir, ["nvm", "cache", "clear"])
+        try:
+            cache_result = run_nvm_command(nvm_dir, ["nvm", "cache", "clear"])
+        except subprocess.TimeoutExpired:
+            details = f"nvm cache clear timed out after {CLEANUP_COMMAND_TIMEOUT_SECONDS}s"
+            log_event(
+                logger,
+                "nvm cache cleanup timed out",
+                level=WARNING,
+                username=username,
+                nvm_dir=nvm_dir,
+                error=details,
+            )
+            failures.append(f"{username} cache: {details}")
+            continue
         if cache_result.returncode != 0:
             details = cache_result.stderr.strip() or cache_result.stdout.strip() or "nvm cache clear failed"
             log_event(

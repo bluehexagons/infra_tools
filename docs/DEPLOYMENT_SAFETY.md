@@ -583,9 +583,13 @@ Infra tools now installs a background cleanup service for server-style setups:
 The cleanup job is intended to reduce disk pressure from transient data by reclaiming:
 
 - APT caches with `apt-get autoclean` and `apt-get clean`
+- unused APT packages with `apt-get autoremove`
 - old temporary files via `systemd-tmpfiles --clean`
 - oversized systemd journals via `journalctl --vacuum-size=100M`
 - optional package-manager caches for npm, pip, gem, and uv when those tools are installed
+
+Each cleanup command has a bounded runtime so one stuck package manager or cache
+tool does not block the entire maintenance run indefinitely.
 
 To verify that the cleanup timer is installed and running:
 

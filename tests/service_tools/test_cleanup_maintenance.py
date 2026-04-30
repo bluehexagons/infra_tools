@@ -64,6 +64,16 @@ class TestCleanupHelpers(unittest.TestCase):
         self.assertIn("APT clean failed | stderr='permission denied'", "\n".join(logs.output))
 
     @patch("common.service_tools.cleanup_maintenance.run_command")
+    def test_run_cleanup_command_reports_timeout(self, mock_run_command):
+        mock_run_command.side_effect = subprocess.TimeoutExpired(["journalctl"], timeout=600)
+
+        with self.assertLogs(cleanup_maintenance.logger, level="WARNING") as logs:
+            failure = cleanup_maintenance.run_cleanup_command(["journalctl"], "journal vacuum")
+
+        self.assertEqual(failure, "journal vacuum: timed out after 600s")
+        self.assertIn("journal vacuum timed out", "\n".join(logs.output))
+
+    @patch("common.service_tools.cleanup_maintenance.run_command")
     @patch("common.service_tools.cleanup_maintenance.shutil.which", return_value="/usr/bin/apt-get")
     def test_cleanup_apt_cache_uses_noninteractive_env(self, _which, mock_run_command):
         mock_run_command.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
@@ -77,6 +87,10 @@ class TestCleanupHelpers(unittest.TestCase):
         self.assertEqual(first_call.kwargs["env"]["DEBIAN_FRONTEND"], "noninteractive")
         self.assertEqual(
             mock_run_command.call_args_list[1].args[0],
+            ["/usr/bin/apt-get", "autoremove", "-y", "-qq", "-o", "DPkg::Lock::Timeout=300"],
+        )
+        self.assertEqual(
+            mock_run_command.call_args_list[2].args[0],
             ["/usr/bin/apt-get", "clean", "-o", "DPkg::Lock::Timeout=300"],
         )
 
@@ -118,6 +132,41 @@ class TestCleanupHelpers(unittest.TestCase):
         self.assertEqual(failures, [])
         mock_rmtree.assert_called_once_with("/home/alice/.nvm/versions/node/v18.20.0")
         self.assertEqual(mock_nvm.call_count, 2)
+
+    @patch("common.service_tools.cleanup_maintenance.run_nvm_command")
+    @patch("common.service_tools.cleanup_maintenance.iter_nvm_dirs", return_value=[("alice", "/home/alice/.nvm")])
+    def test_cleanup_old_node_versions_reports_default_version_timeout(
+        self,
+        _dirs,
+        mock_nvm,
+    ):
+        mock_nvm.side_effect = subprocess.TimeoutExpired(["nvm"], timeout=600)
+
+        failures = cleanup_maintenance.cleanup_old_node_versions()
+
+        self.assertEqual(failures, ["alice default: nvm version default timed out after 600s"])
+
+    @patch("common.service_tools.cleanup_maintenance.os.listdir", return_value=["v18.20.0", "v20.12.2"])
+    @patch("common.service_tools.cleanup_maintenance.os.path.isdir", return_value=True)
+    @patch("common.service_tools.cleanup_maintenance.shutil.rmtree")
+    @patch("common.service_tools.cleanup_maintenance.run_nvm_command")
+    @patch("common.service_tools.cleanup_maintenance.iter_nvm_dirs", return_value=[("alice", "/home/alice/.nvm")])
+    def test_cleanup_old_node_versions_reports_cache_timeout(
+        self,
+        _dirs,
+        mock_nvm,
+        _rmtree,
+        _isdir,
+        _listdir,
+    ):
+        mock_nvm.side_effect = [
+            subprocess.CompletedProcess(args=[], returncode=0, stdout="v20.12.2\n", stderr=""),
+            subprocess.TimeoutExpired(["nvm"], timeout=600),
+        ]
+
+        failures = cleanup_maintenance.cleanup_old_node_versions()
+
+        self.assertEqual(failures, ["alice cache: nvm cache clear timed out after 600s"])
 
     @patch("common.service_tools.cleanup_maintenance.send_notification_safe")
     @patch("common.service_tools.cleanup_maintenance.get_disk_usage_details", return_value={
