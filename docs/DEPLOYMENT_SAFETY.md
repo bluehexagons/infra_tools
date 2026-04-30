@@ -585,7 +585,7 @@ The cleanup job is intended to reduce disk pressure from transient data by recla
 - APT caches with `apt-get autoclean` and `apt-get clean`
 - unused APT packages with `apt-get autoremove`
 - old temporary files via `systemd-tmpfiles --clean`
-- stale infra_tools temp artifacts from interrupted setup/deploy/Proxmox/Antistatic runs
+- stale infra_tools temp artifacts from interrupted setup/deploy/Proxmox/Antistatic runs (scans both `/tmp` and `/var/tmp`, including stray `bundler*` build directories left behind by interrupted Rails deploys)
 - oversized systemd journals via `journalctl --vacuum-size=100M`
 - optional package-manager caches for npm, pip, gem, and uv when those tools are installed
 

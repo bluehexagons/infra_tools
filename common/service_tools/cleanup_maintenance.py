@@ -19,6 +19,7 @@ from lib.logging_utils import get_service_logger, log_event
 from lib.maintenance_defaults import (
     APT_LOCK_OPTIONS,
     CLEANUP_COMMAND_TIMEOUT_SECONDS,
+    INFRA_TMP_DIRS,
     INFRA_TMP_PREFIXES,
     JOURNAL_MAX_USE,
     STALE_INFRA_TMP_MAX_AGE_DAYS,
@@ -342,7 +343,8 @@ def main() -> int:
         if failure:
             failures.append(failure)
 
-    failures.extend(cleanup_stale_infra_tmp_artifacts())
+    for tmp_dir in INFRA_TMP_DIRS:
+        failures.extend(cleanup_stale_infra_tmp_artifacts(tmp_dir=tmp_dir))
     failures.extend(cleanup_old_node_versions())
     notify_if_storage_still_low(notification_configs)
 

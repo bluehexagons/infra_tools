@@ -204,7 +204,7 @@ def install_ruby(config: SetupConfig) -> None:
         print("  ✓ Ruby + bundler already installed")
         return
     run("apt-get -o DPkg::Lock::Timeout=60 install -y -qq ruby ruby-dev bundler", check=False)
-    run("gem install bundler", check=False)
+    run("gem install bundler --no-document", check=False)
     if shutil.which("ruby"):
         print("  ✓ Ruby + bundler installed from apt packages")
 
