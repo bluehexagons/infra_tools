@@ -26,6 +26,7 @@ except ImportError:
 
 _HISTORY_FILE = Path.home() / ".local" / "share" / "infra_tools" / "shell_history"
 _HISTORY_MAX_LINES = 1000
+_INIT_FILE = Path.home() / ".infra_toolsrc"
 
 InputFn = Callable[[str], str]
 OutputFn = Callable[[str], None]
@@ -33,8 +34,8 @@ OutputFn = Callable[[str], None]
 
 HELP_TEXT = """\
 Available commands:
-  list/ls [pattern]           List saved configurations
-  info [pattern]              Show saved configuration details
+  list/ls [pattern] [--json]  List saved configurations (--json for scripting)
+  info [pattern] [--compact]  Show saved configuration details (--compact: one line each)
   cmd [pattern]               Show reconstructed setup commands
   deploy <pattern> [--yes]    Redeploy saved configurations
   rm/remove <pattern> [--yes] Remove saved configurations
@@ -73,6 +74,7 @@ class InteractiveShell:
     def run(self) -> int:
         """Drive the REPL until the user quits or input ends."""
         self._load_readline_history()
+        self._run_init_file()
         self._output("infra_tools shell — type 'help' for commands.")
         try:
             return self._run_loop()
@@ -118,6 +120,24 @@ class InteractiveShell:
 
     def _make_prompt(self) -> str:
         return "infra_tools> "
+
+    def _run_init_file(self, init_file: Optional[Path] = None) -> None:
+        path = init_file if init_file is not None else _INIT_FILE
+        try:
+            text = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            self._output(f"Warning: could not read {path}: {exc}")
+            return
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            try:
+                self.dispatch(stripped)
+            except ValueError as exc:
+                self._output(f"Init file error ({stripped!r}): {exc}")
 
     def _load_readline_history(self) -> None:
         if not _READLINE_AVAILABLE or self._input is not input:
@@ -194,13 +214,17 @@ class InteractiveShell:
 
     def _cmd_list(self, args: list[str]) -> None:
         from infra_tools import list_configurations
-        pattern = args[0] if args else None
-        list_configurations(pattern)
+        json_output = "--json" in args
+        rest = [a for a in args if a != "--json"]
+        pattern = rest[0] if rest else None
+        list_configurations(pattern, json_output=json_output)
 
     def _cmd_info(self, args: list[str]) -> None:
         from infra_tools import show_info
-        pattern = args[0] if args else None
-        show_info(pattern)
+        compact = "--compact" in args
+        rest = [a for a in args if a != "--compact"]
+        pattern = rest[0] if rest else None
+        show_info(pattern, compact=compact)
 
     def _cmd_command(self, args: list[str]) -> None:
         from infra_tools import show_command

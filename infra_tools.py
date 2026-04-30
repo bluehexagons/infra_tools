@@ -180,6 +180,11 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
         "--workspace",
         help="Workspace root for saved setups, credentials, known_hosts, and history"
     )
+    list_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output results as a JSON array for scripting",
+    )
 
     info_parser = subparsers.add_parser(
         "info",
@@ -189,6 +194,11 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
     info_parser.add_argument(
         "--workspace",
         help="Workspace root for saved setups, credentials, known_hosts, and history"
+    )
+    info_parser.add_argument(
+        "--compact",
+        action="store_true",
+        help="Show one-line summary per configuration instead of full details",
     )
 
     cmd_parser = subparsers.add_parser(
@@ -531,16 +541,25 @@ def reconstruct_command(config: SetupConfig) -> str:
     return " ".join(config.to_setup_command())
 
 
-def list_configurations(pattern: Optional[str] = None) -> int:
+def list_configurations(
+    pattern: Optional[str] = None, *, json_output: bool = False
+) -> int:
     from datetime import datetime
 
     configs = get_all_configs(pattern)
     if not configs:
+        if json_output:
+            print("[]")
+            return 0
         if pattern:
             print(f"No configurations found matching '{pattern}'")
         else:
             print("No saved configurations found.")
         return 1
+
+    if json_output:
+        print(json.dumps(list(configs), indent=2, default=str))
+        return 0
 
     host_width = 30
     name_width = 20
@@ -593,7 +612,7 @@ def list_configurations(pattern: Optional[str] = None) -> int:
     return 0
 
 
-def show_info(pattern: Optional[str] = None) -> int:
+def show_info(pattern: Optional[str] = None, *, compact: bool = False) -> int:
     from datetime import datetime
 
     configs = get_all_configs(pattern)
@@ -611,6 +630,16 @@ def show_info(pattern: Optional[str] = None) -> int:
         system_type = config.get("system_type", "Unknown")
         args = cast(JSONDict, config.get("args", {}))
         username = args.get("username", "Unknown")
+
+        if compact:
+            label = f"{host}"
+            if name:
+                label += f"/{name}"
+            status = "PASS" if config.get("last_success") is True else (
+                "FAIL" if config.get("last_success") is False else "UNKNOWN"
+            )
+            print(f"{label}  {system_type}  {username}  {status}")
+            continue
 
         print("=" * 60)
         print(f"Host: {host}")
@@ -988,9 +1017,9 @@ def main() -> int:
     elif args.command == "patch":
         return run_patch_command(args)
     elif args.command in {"list", "ls"}:
-        return list_configurations(args.pattern)
+        return list_configurations(args.pattern, json_output=getattr(args, "json", False))
     elif args.command == "info":
-        return show_info(args.pattern)
+        return show_info(args.pattern, compact=getattr(args, "compact", False))
     elif args.command in {"cmd", "command"}:
         return show_command(args.pattern)
     elif args.command in {"rm", "remove"}:

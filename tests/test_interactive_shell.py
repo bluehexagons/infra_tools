@@ -57,19 +57,31 @@ class TestInteractiveShellDispatch(unittest.TestCase):
     def test_list_invokes_list_configurations(self, mock_list):
         shell, _ = _make_shell(["list prod", "exit"])
         shell.run()
-        mock_list.assert_called_once_with("prod")
+        mock_list.assert_called_once_with("prod", json_output=False)
 
     @patch("infra_tools.list_configurations")
     def test_list_without_pattern_passes_none(self, mock_list):
         shell, _ = _make_shell(["ls", "exit"])
         shell.run()
-        mock_list.assert_called_once_with(None)
+        mock_list.assert_called_once_with(None, json_output=False)
+
+    @patch("infra_tools.list_configurations")
+    def test_list_json_flag_passes_true(self, mock_list):
+        shell, _ = _make_shell(["list --json", "exit"])
+        shell.run()
+        mock_list.assert_called_once_with(None, json_output=True)
 
     @patch("infra_tools.show_info")
     def test_info_invokes_show_info(self, mock_show):
         shell, _ = _make_shell(["info web", "exit"])
         shell.run()
-        mock_show.assert_called_once_with("web")
+        mock_show.assert_called_once_with("web", compact=False)
+
+    @patch("infra_tools.show_info")
+    def test_info_compact_flag(self, mock_show):
+        shell, _ = _make_shell(["info --compact", "exit"])
+        shell.run()
+        mock_show.assert_called_once_with(None, compact=True)
 
     @patch("infra_tools.show_command")
     def test_cmd_invokes_show_command(self, mock_show):
@@ -125,6 +137,69 @@ class TestRunInteractiveShellEntry(unittest.TestCase):
     def test_run_interactive_shell_invokes_shell(self, mock_run):
         self.assertEqual(run_interactive_shell(workspace="/tmp/ws"), 0)
         mock_run.assert_called_once()
+
+
+class TestInteractiveShellInitFile(unittest.TestCase):
+    def test_init_file_commands_run_at_startup(self):
+        import tempfile
+        from pathlib import Path
+        outputs: list[str] = []
+        shell = InteractiveShell(
+            input_func=lambda _p: (_ for _ in ()).throw(EOFError()),
+            output_func=outputs.append,
+        )
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".rc", delete=False) as f:
+            f.write("help\n")
+            rc_path = Path(f.name)
+        try:
+            shell._run_init_file(rc_path)
+        finally:
+            rc_path.unlink(missing_ok=True)
+        self.assertTrue(any("Available commands" in line for line in outputs))
+
+    def test_init_file_skips_comments_and_blank_lines(self):
+        import tempfile
+        from pathlib import Path
+        outputs: list[str] = []
+        shell = InteractiveShell(
+            input_func=lambda _p: (_ for _ in ()).throw(EOFError()),
+            output_func=outputs.append,
+        )
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".rc", delete=False) as f:
+            f.write("# this is a comment\n\n   \n")
+            rc_path = Path(f.name)
+        try:
+            shell._run_init_file(rc_path)
+        finally:
+            rc_path.unlink(missing_ok=True)
+        self.assertEqual(outputs, [])
+
+    def test_init_file_missing_is_silent(self):
+        from pathlib import Path
+        outputs: list[str] = []
+        shell = InteractiveShell(
+            input_func=lambda _p: (_ for _ in ()).throw(EOFError()),
+            output_func=outputs.append,
+        )
+        shell._run_init_file(Path("/nonexistent/no/such/file.rc"))
+        self.assertEqual(outputs, [])
+
+    def test_init_file_errors_reported_gracefully(self):
+        import tempfile
+        from pathlib import Path
+        outputs: list[str] = []
+        shell = InteractiveShell(
+            input_func=lambda _p: (_ for _ in ()).throw(EOFError()),
+            output_func=outputs.append,
+        )
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".rc", delete=False) as f:
+            f.write("unknown_command_xyz\n")
+            rc_path = Path(f.name)
+        try:
+            shell._run_init_file(rc_path)
+        finally:
+            rc_path.unlink(missing_ok=True)
+        self.assertTrue(any("Init file error" in line for line in outputs))
 
 
 if __name__ == "__main__":
