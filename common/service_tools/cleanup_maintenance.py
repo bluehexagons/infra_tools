@@ -9,6 +9,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 from logging import ERROR, INFO, WARNING
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
@@ -18,7 +19,9 @@ from lib.logging_utils import get_service_logger, log_event
 from lib.maintenance_defaults import (
     APT_LOCK_OPTIONS,
     CLEANUP_COMMAND_TIMEOUT_SECONDS,
+    INFRA_TMP_PREFIXES,
     JOURNAL_MAX_USE,
+    STALE_INFRA_TMP_MAX_AGE_DAYS,
 )
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
 
@@ -92,6 +95,65 @@ def cleanup_optional_cache(
 
     log_event(logger, f"{action} not available, skipping")
     return None
+
+
+def cleanup_stale_infra_tmp_artifacts(
+    tmp_dir: str = "/tmp",
+    max_age_days: int = STALE_INFRA_TMP_MAX_AGE_DAYS,
+) -> list[str]:
+    """Remove stale infra_tools temp files/directories left by interrupted runs."""
+    failures: list[str] = []
+    try:
+        names = os.listdir(tmp_dir)
+    except FileNotFoundError:
+        return []
+    except OSError as exc:
+        details = str(exc)
+        log_event(
+            logger,
+            "Failed to list infra_tools temp artifacts",
+            level=WARNING,
+            tmp_dir=tmp_dir,
+            error=details,
+        )
+        return [f"infra temp cleanup: {details}"]
+
+    cutoff = time.time() - (max_age_days * 24 * 60 * 60)
+    removed: list[str] = []
+    for name in names:
+        if not name.startswith(INFRA_TMP_PREFIXES):
+            continue
+        path = os.path.join(tmp_dir, name)
+        try:
+            stat_result = os.lstat(path)
+            if stat_result.st_mtime > cutoff:
+                continue
+            if os.path.isdir(path) and not os.path.islink(path):
+                shutil.rmtree(path)
+            else:
+                os.unlink(path)
+            removed.append(name)
+        except OSError as exc:
+            details = str(exc)
+            log_event(
+                logger,
+                "Failed to remove infra_tools temp artifact",
+                level=WARNING,
+                path=path,
+                error=details,
+            )
+            failures.append(f"{path}: {details}")
+
+    if removed:
+        log_event(
+            logger,
+            "Removed stale infra_tools temp artifacts",
+            tmp_dir=tmp_dir,
+            max_age_days=max_age_days,
+            removed_count=len(removed),
+            removed_names=",".join(sorted(removed)),
+        )
+    return failures
 
 
 def run_nvm_command(nvm_dir: str, args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -280,6 +342,7 @@ def main() -> int:
         if failure:
             failures.append(failure)
 
+    failures.extend(cleanup_stale_infra_tmp_artifacts())
     failures.extend(cleanup_old_node_versions())
     notify_if_storage_still_low(notification_configs)
 

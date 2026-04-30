@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -16,15 +18,25 @@ from common.service_tools import cleanup_maintenance
 class TestCleanupMaintenance(unittest.TestCase):
     @patch("common.service_tools.cleanup_maintenance.notify_if_storage_still_low")
     @patch("common.service_tools.cleanup_maintenance.cleanup_old_node_versions", return_value=[])
+    @patch("common.service_tools.cleanup_maintenance.cleanup_stale_infra_tmp_artifacts", return_value=[])
     @patch("common.service_tools.cleanup_maintenance.cleanup_optional_cache", return_value=None)
     @patch("common.service_tools.cleanup_maintenance.cleanup_apt_cache", return_value=[])
     @patch("common.service_tools.cleanup_maintenance.load_notification_configs_from_state", return_value=[])
-    def test_successful_cleanup_returns_zero(self, _configs, mock_apt, mock_optional, mock_node_cleanup, mock_low_space):
+    def test_successful_cleanup_returns_zero(
+        self,
+        _configs,
+        mock_apt,
+        mock_optional,
+        mock_tmp_cleanup,
+        mock_node_cleanup,
+        mock_low_space,
+    ):
         with self.assertLogs(cleanup_maintenance.logger, level="INFO") as logs:
             result = cleanup_maintenance.main()
         self.assertEqual(result, 0)
         mock_apt.assert_called_once()
         self.assertEqual(mock_optional.call_count, 6)
+        mock_tmp_cleanup.assert_called_once()
         mock_node_cleanup.assert_called_once()
         mock_low_space.assert_called_once()
         joined = "\n".join(logs.output)
@@ -33,11 +45,21 @@ class TestCleanupMaintenance(unittest.TestCase):
 
     @patch("common.service_tools.cleanup_maintenance.notify_if_storage_still_low")
     @patch("common.service_tools.cleanup_maintenance.cleanup_old_node_versions", return_value=[])
+    @patch("common.service_tools.cleanup_maintenance.cleanup_stale_infra_tmp_artifacts", return_value=[])
     @patch("common.service_tools.cleanup_maintenance.send_notification_safe")
     @patch("common.service_tools.cleanup_maintenance.cleanup_optional_cache", side_effect=[None, "journal vacuum: failed", None, None, None, None])
     @patch("common.service_tools.cleanup_maintenance.cleanup_apt_cache", return_value=[])
     @patch("common.service_tools.cleanup_maintenance.load_notification_configs_from_state", return_value=["cfg"])
-    def test_failure_notifies(self, _configs, _apt, _optional, mock_notify, mock_node_cleanup, mock_low_space):
+    def test_failure_notifies(
+        self,
+        _configs,
+        _apt,
+        _optional,
+        mock_notify,
+        _tmp_cleanup,
+        mock_node_cleanup,
+        mock_low_space,
+    ):
         result = cleanup_maintenance.main()
         self.assertEqual(result, 1)
         mock_notify.assert_called_once()
@@ -108,6 +130,47 @@ class TestCleanupHelpers(unittest.TestCase):
             ["/usr/bin/pip", "cache", "purge"],
             "pip cache cleanup",
         )
+
+    def test_cleanup_stale_infra_tmp_artifacts_removes_only_old_owned_paths(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            old_dir = os.path.join(tmp_dir, "infra_setup_build_abcd")
+            old_file = os.path.join(tmp_dir, "antistatic-server-linux-amd64.v1")
+            fresh_file = os.path.join(tmp_dir, "infra_deploy_fresh")
+            unrelated_file = os.path.join(tmp_dir, "unrelated")
+            os.mkdir(old_dir)
+            for path in (old_file, fresh_file, unrelated_file):
+                with open(path, "w", encoding="utf-8") as fh:
+                    fh.write("x")
+
+            old_time = time.time() - (8 * 24 * 60 * 60)
+            os.utime(old_dir, (old_time, old_time))
+            os.utime(old_file, (old_time, old_time))
+
+            failures = cleanup_maintenance.cleanup_stale_infra_tmp_artifacts(
+                tmp_dir=tmp_dir,
+                max_age_days=7,
+            )
+
+            self.assertEqual(failures, [])
+            self.assertFalse(os.path.exists(old_dir))
+            self.assertFalse(os.path.exists(old_file))
+            self.assertTrue(os.path.exists(fresh_file))
+            self.assertTrue(os.path.exists(unrelated_file))
+
+    @patch("common.service_tools.cleanup_maintenance.shutil.rmtree", side_effect=OSError("busy"))
+    def test_cleanup_stale_infra_tmp_artifacts_reports_remove_failure(self, _rmtree):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            old_dir = os.path.join(tmp_dir, "infra_recall_abcd")
+            os.mkdir(old_dir)
+            old_time = time.time() - (8 * 24 * 60 * 60)
+            os.utime(old_dir, (old_time, old_time))
+
+            failures = cleanup_maintenance.cleanup_stale_infra_tmp_artifacts(
+                tmp_dir=tmp_dir,
+                max_age_days=7,
+            )
+
+            self.assertEqual(failures, [f"{old_dir}: busy"])
 
     @patch("common.service_tools.cleanup_maintenance.shutil.rmtree")
     @patch("common.service_tools.cleanup_maintenance.os.listdir", return_value=["v18.20.0", "v20.12.2"])
