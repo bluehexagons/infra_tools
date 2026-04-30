@@ -164,12 +164,18 @@ saved setups, credentials, and history for a project or test environment.
 
 ### Local Orchestration Host Bootstrap
 
-To prepare the machine where you run `infra_tools.py`, an admin can install the local package prerequisites and
-configure the chosen user's Python tooling and shell completion in one step:
+To prepare the machine where you run `infra_tools.py`, an admin can install the local package prerequisites,
+drop an `infra_tools` launcher onto `PATH`, and configure the chosen user's Python tooling and shell
+completion in one step:
 
 ```bash
-sudo python3 infra_tools.py bootstrap --user "$USER"
+sudo python3 infra_tools.py self-setup --user "$USER"
 ```
+
+`self-setup` is an alias for `bootstrap`. After it runs, you can invoke the tool from any directory as
+`infra_tools <command> ...` instead of `python3 /path/to/infra_tools.py <command> ...`. The launcher is
+installed to `/usr/local/bin/infra_tools` for system-wide use, and `~/.local/bin/infra_tools` for the
+target user. Shell completion is registered for both `infra_tools` and `infra_tools.py`.
 
 ## Shell Completion
 

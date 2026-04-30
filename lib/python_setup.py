@@ -6,11 +6,16 @@ import subprocess
 
 from common.common_steps import install_or_update_uv
 from lib.completions import run_completion_setup
+from lib.orchestrator_bootstrap import LAUNCHER_NAME, install_launcher
 from lib.system_utils import get_current_username
 from lib.validators import validate_username
 
 
-def run_local_python_setup(shell: str, command_name: str = "infra_tools.py") -> int:
+def run_local_python_setup(
+    shell: str,
+    command_name: str = "infra_tools.py",
+    script_path: str | None = None,
+) -> int:
     """Install local Python tooling and CLI completions for the current user."""
     username = get_current_username()
     if not validate_username(username):
@@ -58,10 +63,20 @@ def run_local_python_setup(shell: str, command_name: str = "infra_tools.py") -> 
         return 1
     print("✓ argcomplete installed via uv")
 
+    if script_path:
+        try:
+            launcher_path = install_launcher(script_path, target_dir=local_bin)
+            print(f"✓ Installed user launcher: {launcher_path}")
+        except (OSError, ValueError) as exc:
+            print(f"Warning: could not install user launcher in {local_bin}: {exc}")
+
     old_path = os.environ.get("PATH", "")
     os.environ["PATH"] = os.pathsep.join([local_bin, old_path]) if old_path else local_bin
     try:
         result = run_completion_setup(shell=shell, global_install=False, command_name=command_name)
+        if result == 0 and command_name != LAUNCHER_NAME:
+            # Also register completions for the short `infra_tools` launcher name.
+            result = run_completion_setup(shell=shell, global_install=False, command_name=LAUNCHER_NAME)
     finally:
         os.environ["PATH"] = old_path
 

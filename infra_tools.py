@@ -89,7 +89,7 @@ def _build_infra_tools_epilog() -> str:
     reconstruct                 Analyze this host and emit a setup summary
     completions                 Install shell completion for infra_tools.py
     python-tools                Install local Python aliases, uv, and completion
-    bootstrap                   Install local packages and bootstrap infra_tools tools
+    bootstrap                   Install packages, launcher, and completions (alias: self-setup)
     proxmox [subcommand]        Manage Proxmox hosts and containers (interactive shell with no args)
     credentials                 Manage workspace credentials
 
@@ -103,7 +103,8 @@ Examples:
   infra_tools.py deploy prod --yes
   infra_tools.py recall example.com admin
   infra_tools.py completions --shell zsh
-  sudo python3 infra_tools.py bootstrap --user admin
+  sudo python3 infra_tools.py self-setup --user admin
+  infra_tools list prod    # after self-setup, the launcher is on PATH
  """
 
 
@@ -279,10 +280,17 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
         default="bash",
         help="Shell to configure for completion (default: bash)",
     )
+    python_tools_parser.add_argument(
+        "--script-path",
+        dest="script_path",
+        default=None,
+        help="Absolute path to infra_tools.py (used to install the user launcher)",
+    )
 
     bootstrap_parser = subparsers.add_parser(
         "bootstrap",
-        help="Install local packages and bootstrap infra_tools tools",
+        aliases=["self-setup"],
+        help="Install local packages, launcher, and completions for infra_tools",
     )
     bootstrap_parser.add_argument(
         "--shell",
@@ -996,8 +1004,12 @@ def main() -> int:
             command_name=_current_command_name(),
         )
     elif args.command in {"python-tools", "admin-python"}:
-        return run_local_python_setup(args.shell, command_name=_current_command_name())
-    elif args.command == "bootstrap":
+        return run_local_python_setup(
+            args.shell,
+            command_name=_current_command_name(),
+            script_path=getattr(args, "script_path", None) or sys.argv[0],
+        )
+    elif args.command in {"bootstrap", "self-setup"}:
         return run_orchestrator_bootstrap(
             script_path=sys.argv[0],
             shell=args.shell,

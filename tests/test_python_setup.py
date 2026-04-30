@@ -78,11 +78,11 @@ class TestSetupAdminPython(unittest.TestCase):
         mock_install_or_update_uv.assert_called_once()
         _which.assert_has_calls([call("python3"), call("python")])
         mock_subprocess_run.assert_called_once()
-        mock_run_completion_setup.assert_called_once_with(
-            shell="bash",
-            global_install=False,
-            command_name="infra_tools.py",
-        )
+        mock_run_completion_setup.assert_has_calls([
+            call(shell="bash", global_install=False, command_name="infra_tools.py"),
+            call(shell="bash", global_install=False, command_name="infra_tools"),
+        ])
+        self.assertEqual(mock_run_completion_setup.call_count, 2)
 
     @patch("lib.python_setup.validate_username", return_value=False)
     @patch("lib.python_setup.get_current_username", return_value="invalid user")

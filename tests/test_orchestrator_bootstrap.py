@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import pwd
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -45,6 +46,7 @@ class TestInstallSystemPackages(unittest.TestCase):
 
 
 class TestRunOrchestratorBootstrap(unittest.TestCase):
+    @patch("lib.orchestrator_bootstrap.install_launcher", return_value="/usr/local/bin/infra_tools")
     @patch("lib.orchestrator_bootstrap.resolve_bootstrap_user", return_value=("admin", "/home/admin"))
     @patch("lib.orchestrator_bootstrap.install_system_packages", return_value=0)
     @patch("lib.orchestrator_bootstrap.get_current_username", return_value="root")
@@ -57,6 +59,7 @@ class TestRunOrchestratorBootstrap(unittest.TestCase):
         _mock_current_username,
         _mock_install_packages,
         _mock_resolve_user,
+        mock_install_launcher,
     ):
         mock_run.return_value = unittest.mock.MagicMock(returncode=0)
         result = orchestrator_bootstrap.run_orchestrator_bootstrap(
@@ -65,9 +68,11 @@ class TestRunOrchestratorBootstrap(unittest.TestCase):
             requested_user="admin",
         )
         self.assertEqual(result, 0)
+        mock_install_launcher.assert_called_once()
         command = mock_run.call_args.args[0]
         self.assertEqual(command[:4], ["runuser", "-u", "admin", "--"])
         self.assertIn("python-tools", command)
+        self.assertIn("--script-path", command)
 
     @patch("lib.orchestrator_bootstrap.resolve_bootstrap_user", return_value=("admin", "/home/admin"))
     @patch("lib.orchestrator_bootstrap.get_current_username", return_value="admin")
@@ -87,4 +92,35 @@ class TestRunOrchestratorBootstrap(unittest.TestCase):
         )
         self.assertEqual(result, 0)
         command = mock_run.call_args.args[0]
-        self.assertEqual(command[-3:], ["python-tools", "--shell", "zsh"])
+        self.assertIn("python-tools", command)
+        self.assertEqual(command[-4:-2], ["--shell", "zsh"])
+        self.assertEqual(command[-2], "--script-path")
+
+
+class TestInstallLauncher(unittest.TestCase):
+    def test_install_launcher_writes_executable_wrapper(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_script = os.path.join(tmp, "infra_tools.py")
+            with open(project_script, "w", encoding="utf-8") as handle:
+                handle.write("# fake script\n")
+            target_dir = os.path.join(tmp, "bin")
+            launcher = orchestrator_bootstrap.install_launcher(
+                project_script, target_dir=target_dir
+            )
+            self.assertEqual(launcher, os.path.join(target_dir, "infra_tools"))
+            self.assertTrue(os.access(launcher, os.X_OK))
+            content = open(launcher, encoding="utf-8").read()
+            self.assertIn("#!/usr/bin/env bash", content)
+            self.assertIn(project_script, content)
+            self.assertIn("exec python3", content)
+
+    def test_install_launcher_rejects_missing_script(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(ValueError):
+                orchestrator_bootstrap.install_launcher(
+                    os.path.join(tmp, "nope.py"), target_dir=tmp
+                )
+
+
+if __name__ == "__main__":
+    unittest.main()
