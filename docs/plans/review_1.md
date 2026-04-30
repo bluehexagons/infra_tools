@@ -27,15 +27,8 @@ This file captures potential improvements and follow-up work for infra_tools.
 
 ### #88: Remaining /tmp Cleanup Work
 
-- Transient build artifacts in `/tmp` from concurrent operations
 - tmpfs mount configuration to prevent filling /tmp (`--set-tmpfs-limit SIZE` for bootstrap)
 - Alert on /tmp usage threshold (complement to existing root fs low-space alert)
-
-**Approach**:
-- Add `/etc/tmpfiles.d/infra_tools.conf` to auto-age and remove aged artifacts
-- Implement `--set-tmpfs-limit SIZE` option for bootstrap to configure `/tmp` tmpfs mount size
-- Add periodic monitoring via cleanup maintenance to log /tmp usage trends
-- Document best practices for tmpfs sizing on orchestration hosts
 
 ## Performance & Scalability
 

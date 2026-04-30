@@ -24,16 +24,18 @@ python3 infra_tools.py credentials set guest s3cret
 - **Security**: Firewall, SSH hardening, fail2ban, auto-updates, weekly cleanup maintenance, journald size limits
 
 Background maintenance includes a `cleanup-maintenance` systemd timer that reclaims temporary files,
-stale infra_tools setup/deploy artifacts, unused APT packages, old package-manager caches, and oversized journals. Infra tools also installs a journald drop-in at
-`/etc/systemd/journald.conf.d/infra-tools.conf` to cap persistent and runtime journal usage at `100M`.
+stale infra_tools setup/deploy artifacts, unused APT packages, old package-manager caches, and oversized journals.
+Infra tools also installs a journald drop-in at `/etc/systemd/journald.conf.d/infra-tools.conf` to cap
+persistent and runtime journal usage at `100M`.
 
 ## CLI Entry Points
 
 | Script | Description |
 |--------|-------------|
-| `infra_tools.py` | **Unified entry point** - Use `setup`, `patch`, `list`, `info`, `cmd`, `rm`, `deploy`, `recall`, `reconstruct`, `completions`, `python-tools`, `bootstrap`, `credentials`, or `proxmox` |
+| `infra_tools.py` | **Unified entry point** - Use `setup`, `patch`, `list`, `info`, `cmd`, `rm`, `deploy`, `recall`, `reconstruct`, `completions`, `python-tools`, `bootstrap`, `credentials`, `proxmox`, or `shell` |
 
-Use `infra_tools.py` for all system setup, saved-configuration management, patching, recall, reconstruction, local Python tooling, and shell-completion setup. The legacy per-system `setup_*.py` wrappers, `patch_setup.py`, `recall_setup.py`, `reconstruct_setup.py`, `setup_admin_python.py`, and `setup_completions.py` have been removed.
+Use `infra_tools.py` for all system setup, saved-configuration management, patching, recall, reconstruction,
+local Python tooling, and shell-completion setup.
 
 See [Command-Line Reference](./docs/COMMAND_LINE.md) for all flags.
 
@@ -49,7 +51,7 @@ python3 infra_tools.py setup server_web web.com \
 
 ### Remote Desktop Workstation
 ```bash
-python3 infra_tools.py setup workstation_desktop user192.168.1.100 --desktop i3 --browser firefox
+python3 infra_tools.py setup workstation_desktop 192.168.1.100 admin --desktop i3 --browser firefox
 ```
 
 ### NAS with Backup
@@ -84,23 +86,69 @@ python3 infra_tools.py setup server_web 10.0.0.50 admin \
 
 ### Managing Proxmox Containers
 
-Register Proxmox hosts and manage their LXC containers from a workspace registry. Run with no
-subcommand to enter an interactive shell, or use the subcommands directly:
+Register Proxmox hosts and manage their LXC containers from a workspace registry. Run `proxmox` with no
+subcommand to enter an interactive shell, or use subcommands directly:
 
 ```bash
+# Register and inspect hosts
 python3 infra_tools.py proxmox add pve1 10.0.0.10 --user root --ssh-key ~/.ssh/proxmox_ed25519
+python3 infra_tools.py proxmox hosts
 python3 infra_tools.py proxmox ls pve1
-python3 infra_tools.py proxmox health pve1 101
+
+# Container lifecycle
+python3 infra_tools.py proxmox start pve1 101
 python3 infra_tools.py proxmox stop pve1 101
+python3 infra_tools.py proxmox health pve1 101
 python3 infra_tools.py proxmox destroy pve1 101 -y
+
+# Container configuration and resource changes
+python3 infra_tools.py proxmox config pve1 101
+python3 infra_tools.py proxmox modify pve1 101 --cores 4 --memory 8G
+python3 infra_tools.py proxmox reconfigure pve1 101 --set hostname=newbox
+python3 infra_tools.py proxmox resize-disk pve1 101 rootfs 40G
+
+# Native Proxmox webhook notifications
 python3 infra_tools.py proxmox notifications install-webhook pve1 https://notify.example/hook --send-test
+
+# Interactive Proxmox shell
 python3 infra_tools.py proxmox shell
 ```
 
 The registry is stored at `<workspace>/proxmox_hosts.json` (mode `0600`).
-Proxmox notifications use the native Proxmox webhook endpoint and matcher
-configuration via `pvesh` (no local hook script); the generated payload follows
-the infra_tools notification JSON shape.
+Proxmox notifications use the native Proxmox webhook endpoint and matcher via `pvesh` — no local hook script
+is installed. `modify` and `reconfigure` changes that affect a running container may require a restart.
+
+### Interactive Shell
+
+The `shell` subcommand opens an interactive REPL for configuration management:
+
+```bash
+python3 infra_tools.py shell
+```
+
+Inside the shell:
+- `list [pattern] [--json]` / `info [pattern] [--compact]` — browse saved configurations
+- `deploy <pattern> [--yes]` — redeploy saved configurations
+- `rm <pattern> [--yes]` — remove configurations
+- `recall <host> [user]` — fetch a setup command from a remote host
+- `workspace [path]` — show or switch the active workspace
+- `proxmox` — drop into the Proxmox sub-shell
+
+The shell loads `~/.infra_toolsrc` on startup — put any commands you want to run at the start of each session
+(e.g., `workspace /path/to/project`) in that file, one per line.
+Command history is persisted at `~/.local/share/infra_tools/shell_history`.
+
+### Saved Configuration Output
+
+The `list` and `info` commands support machine-readable output for scripting:
+
+```bash
+# JSON array of all saved configurations
+python3 infra_tools.py list --json
+
+# One-line summary per configuration
+python3 infra_tools.py info --compact
+```
 
 ### Tests
 
@@ -174,8 +222,11 @@ sudo python3 infra_tools.py self-setup --user "$USER"
 
 `self-setup` is an alias for `bootstrap`. After it runs, you can invoke the tool from any directory as
 `infra_tools <command> ...` instead of `python3 /path/to/infra_tools.py <command> ...`. The launcher is
-installed to `/usr/local/bin/infra_tools` for system-wide use, and `~/.local/bin/infra_tools` for the
+installed to `/usr/local/bin/infra_tools` for system-wide use and `~/.local/bin/infra_tools` for the
 target user. Shell completion is registered for both `infra_tools` and `infra_tools.py`.
+
+Bootstrap also installs `/etc/tmpfiles.d/infra_tools.conf`, which registers known infra_tools temp
+prefixes with `systemd-tmpfiles-clean` as an additional safety net alongside the cleanup-maintenance timer.
 
 ## Shell Completion
 
@@ -187,12 +238,6 @@ python3 infra_tools.py completions
 ```
 
 See [docs/SHELL_COMPLETION.md](docs/SHELL_COMPLETION.md) for detailed setup.
-
-## Testing
-
-```bash
-python3 -m unittest discover -s tests
-```
 
 ## License
 
