@@ -14,7 +14,18 @@ from __future__ import annotations
 
 import shlex
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable, Optional
+
+try:
+    import readline as _readline
+    _READLINE_AVAILABLE = True
+except ImportError:
+    _readline = None  # type: ignore[assignment]
+    _READLINE_AVAILABLE = False
+
+_HISTORY_FILE = Path.home() / ".local" / "share" / "infra_tools" / "shell_history"
+_HISTORY_MAX_LINES = 1000
 
 InputFn = Callable[[str], str]
 OutputFn = Callable[[str], None]
@@ -61,7 +72,14 @@ class InteractiveShell:
 
     def run(self) -> int:
         """Drive the REPL until the user quits or input ends."""
+        self._load_readline_history()
         self._output("infra_tools shell — type 'help' for commands.")
+        try:
+            return self._run_loop()
+        finally:
+            self._save_readline_history()
+
+    def _run_loop(self) -> int:
         while True:
             try:
                 raw = self._input(self._make_prompt())
@@ -100,6 +118,24 @@ class InteractiveShell:
 
     def _make_prompt(self) -> str:
         return "infra_tools> "
+
+    def _load_readline_history(self) -> None:
+        if not _READLINE_AVAILABLE or self._input is not input:
+            return
+        try:
+            _readline.read_history_file(_HISTORY_FILE)
+        except (FileNotFoundError, OSError):
+            pass
+        _readline.set_history_length(_HISTORY_MAX_LINES)
+
+    def _save_readline_history(self) -> None:
+        if not _READLINE_AVAILABLE or self._input is not input:
+            return
+        try:
+            _HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+            _readline.write_history_file(_HISTORY_FILE)
+        except OSError:
+            pass
 
     def _handlers(self) -> dict[str, Callable[[list[str]], None]]:
         return {

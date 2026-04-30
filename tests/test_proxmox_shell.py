@@ -249,5 +249,75 @@ class TestShellMisc(_ShellFixture):
             self.shell.dispatch("status -1")
 
 
+class TestShellLifecycleCommands(_ShellFixture):
+    def setUp(self) -> None:
+        super().setUp()
+        add_proxmox_host(
+            ProxmoxHost(name="pve1", address="10.0.0.10"), self.workspace
+        )
+        self.shell.dispatch("use pve1")
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_config_dispatch(self, mock_run) -> None:
+        mock_run.return_value = _completed("cores: 2\nmemory: 2048\n")
+        self.shell.dispatch("config 100")
+        self.assert_output_contains("cores")
+        self.assert_output_contains("2048")
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_config_pending_flag(self, mock_run) -> None:
+        mock_run.return_value = _completed("cores: 4\n")
+        self.shell.dispatch("config 100 --pending")
+        self.assert_output_contains("Pending")
+        self.assertIn("pct pending", mock_run.call_args.args[3])
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_set_dispatch(self, mock_run) -> None:
+        mock_run.return_value = _completed()
+        self.shell.dispatch("set 100 hostname=newbox")
+        self.assert_output_contains("Set 1 option")
+        self.assertIn("--hostname", mock_run.call_args.args[3])
+
+    def test_set_without_options_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            self.shell.dispatch("set 100")
+
+    def test_set_bad_format_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            self.shell.dispatch("set 100 notakeyvalue")
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_modify_cores(self, mock_run) -> None:
+        mock_run.return_value = _completed()
+        self.shell.dispatch("modify 100 --cores 4")
+        self.assert_output_contains("cores=4")
+        self.assertIn("--cores", mock_run.call_args.args[3])
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_modify_memory_g_suffix(self, mock_run) -> None:
+        mock_run.return_value = _completed()
+        self.shell.dispatch("modify 100 --memory 2G")
+        self.assert_output_contains("memory=2048M")
+        self.assertIn("2048", mock_run.call_args.args[3])
+
+    def test_modify_no_flags_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            self.shell.dispatch("modify 100")
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_resize_dispatch(self, mock_run) -> None:
+        mock_run.return_value = _completed()
+        self.shell.dispatch("resize 100 rootfs 20G")
+        self.assert_output_contains("Resized rootfs")
+        cmd = mock_run.call_args.args[3]
+        self.assertIn("pct resize", cmd)
+        self.assertIn("rootfs", cmd)
+        self.assertIn("20G", cmd)
+
+    def test_resize_wrong_arg_count_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            self.shell.dispatch("resize 100 rootfs")
+
+
 if __name__ == "__main__":
     unittest.main()

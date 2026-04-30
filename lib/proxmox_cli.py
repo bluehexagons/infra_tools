@@ -23,10 +23,15 @@ from lib.proxmox_manage import (
     DEFAULT_NOTIFICATION_SEVERITIES,
     ProxmoxManageError,
     destroy_container,
+    get_container_config,
+    get_container_pending,
     get_container_status,
     health_check,
     install_webhook_notifications,
     list_containers,
+    modify_container,
+    reconfigure_container,
+    resize_container_disk,
     send_webhook_test_notification,
     start_container,
     stop_container,
@@ -123,6 +128,84 @@ def add_proxmox_subparser(subparsers: argparse._SubParsersAction) -> argparse.Ar
         "--no-ssh", action="store_true", help="Skip the SSH:22 reachability probe"
     )
     health.set_defaults(_handler=_cmd_health)
+
+    config_cmd = sub.add_parser("config", help="Show container configuration")
+    config_cmd.add_argument("host", help="Registered host name or address")
+    config_cmd.add_argument("vmid", type=int, help="Container VMID")
+    config_cmd.add_argument(
+        "--pending",
+        action="store_true",
+        help="Show pending (unapplied) configuration changes instead",
+    )
+    config_cmd.set_defaults(_handler=_cmd_config)
+
+    reconfig = sub.add_parser(
+        "reconfigure",
+        help="Set arbitrary pct configuration options on a container",
+        description=(
+            "Apply one or more pct set options to a container. "
+            "Changes that affect a running container may require a restart."
+        ),
+    )
+    reconfig.add_argument("host", help="Registered host name or address")
+    reconfig.add_argument("vmid", type=int, help="Container VMID")
+    reconfig.add_argument(
+        "--set",
+        action="append",
+        dest="options",
+        metavar="KEY=VALUE",
+        help=(
+            "Option to set, as key=value (e.g. --set hostname=mybox). "
+            "Repeatable."
+        ),
+    )
+    reconfig.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the remote pct set command without executing it",
+    )
+    reconfig.set_defaults(_handler=_cmd_reconfigure)
+
+    modify = sub.add_parser(
+        "modify",
+        help="Change CPU cores or memory allocation for a container",
+    )
+    modify.add_argument("host", help="Registered host name or address")
+    modify.add_argument("vmid", type=int, help="Container VMID")
+    modify.add_argument(
+        "--cores",
+        type=int,
+        help="Number of vCPU cores",
+    )
+    modify.add_argument(
+        "--memory",
+        dest="memory",
+        help=(
+            "RAM allocation in MiB, or with a unit suffix: "
+            "512M / 4G (e.g. --memory 4G)"
+        ),
+    )
+    modify.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the remote pct set command without executing it",
+    )
+    modify.set_defaults(_handler=_cmd_modify)
+
+    resize = sub.add_parser(
+        "resize-disk",
+        help="Increase a container disk volume size",
+    )
+    resize.add_argument("host", help="Registered host name or address")
+    resize.add_argument("vmid", type=int, help="Container VMID")
+    resize.add_argument("volume", help="Volume name (e.g. rootfs)")
+    resize.add_argument("size", help="New absolute size with unit (e.g. 20G)")
+    resize.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the remote pct resize command without executing it",
+    )
+    resize.set_defaults(_handler=_cmd_resize_disk)
 
     notifications = sub.add_parser(
         "notifications",
@@ -334,6 +417,110 @@ def _cmd_health(args: argparse.Namespace, workspace: Optional[str]) -> int:
     for note in report.notes:
         print(f"  note:    {note}")
     return 0 if report.healthy else 1
+
+
+def _cmd_config(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    host = _resolve_host(args.host, workspace)
+    if args.pending:
+        data = get_container_pending(host, args.vmid)
+        label = "Pending configuration"
+    else:
+        data = get_container_config(host, args.vmid)
+        label = "Configuration"
+    if not data:
+        print(f"{label} for VMID {args.vmid} on {host.name}: (empty)")
+        return 0
+    print(f"{label} for VMID {args.vmid} on {host.name}:")
+    for key, value in sorted(data.items()):
+        print(f"  {key}: {value}")
+    return 0
+
+
+def _cmd_reconfigure(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    if not args.options:
+        print("Error: At least one --set KEY=VALUE option is required.")
+        return 1
+    options: dict[str, str] = {}
+    for item in args.options:
+        if "=" not in item:
+            print(f"Error: --set value must be KEY=VALUE, got: {item!r}")
+            return 1
+        key, _, value = item.partition("=")
+        options[key] = value
+    host = _resolve_host(args.host, workspace)
+    reconfigure_container(host, args.vmid, options, dry_run=args.dry_run)
+    prefix = "Would set" if args.dry_run else "Set"
+    print(
+        f"{prefix} {len(options)} option(s) on VMID {args.vmid} "
+        f"on {host.name}."
+    )
+    return 0
+
+
+def _parse_memory_mb(value: str) -> int:
+    """Parse a memory string to MiB. Accepts plain integers or N[M|G] suffixes."""
+    value = value.strip()
+    if value.endswith(("G", "g")):
+        try:
+            return int(value[:-1]) * 1024
+        except ValueError:
+            pass
+    if value.endswith(("M", "m")):
+        try:
+            return int(value[:-1])
+        except ValueError:
+            pass
+    try:
+        return int(value)
+    except ValueError:
+        raise ValueError(
+            f"Invalid memory value: {value!r}. "
+            "Use a plain integer (MiB), or add a suffix: 512M or 4G."
+        )
+
+
+def _cmd_modify(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    if args.cores is None and args.memory is None:
+        print("Error: At least one of --cores or --memory is required.")
+        return 1
+    memory_mb: Optional[int] = None
+    if args.memory is not None:
+        try:
+            memory_mb = _parse_memory_mb(args.memory)
+        except ValueError as exc:
+            print(f"Error: {exc}")
+            return 1
+    host = _resolve_host(args.host, workspace)
+    modify_container(
+        host,
+        args.vmid,
+        cores=args.cores,
+        memory_mb=memory_mb,
+        dry_run=args.dry_run,
+    )
+    parts = []
+    if args.cores is not None:
+        parts.append(f"cores={args.cores}")
+    if memory_mb is not None:
+        parts.append(f"memory={memory_mb}M")
+    prefix = "Would modify" if args.dry_run else "Modified"
+    print(
+        f"{prefix} VMID {args.vmid} on {host.name}: {', '.join(parts)}."
+    )
+    return 0
+
+
+def _cmd_resize_disk(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    host = _resolve_host(args.host, workspace)
+    resize_container_disk(
+        host, args.vmid, args.volume, args.size, dry_run=args.dry_run
+    )
+    prefix = "Would resize" if args.dry_run else "Resized"
+    print(
+        f"{prefix} {args.volume} on VMID {args.vmid} on {host.name} "
+        f"to {args.size}."
+    )
+    return 0
 
 
 def _cmd_notifications_install_webhook(

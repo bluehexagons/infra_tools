@@ -28,8 +28,13 @@ from lib.proxmox_manage import (
     HealthReport,
     ProxmoxManageError,
     destroy_container,
+    get_container_config,
+    get_container_pending,
     health_check,
     list_containers,
+    modify_container,
+    reconfigure_container,
+    resize_container_disk,
     start_container,
     stop_container,
 )
@@ -52,6 +57,12 @@ Available commands:
   stop <vmid> [--force]       Shutdown (or force-stop) a container
   destroy <vmid> [--force]    Destroy a container (asks for confirmation)
   health <vmid>               Run a health check
+  config <vmid> [--pending]   Show container configuration (or pending changes)
+  set <vmid> key=value [...]  Set pct configuration options
+  modify <vmid> [--cores N] [--memory N[M|G]]
+                              Change CPU cores or memory allocation
+  resize <vmid> <volume> <size>
+                              Increase a disk volume (e.g. resize 100 rootfs 20G)
   help                        Show this help text
   quit / exit                 Leave the shell
 """
@@ -93,6 +104,28 @@ def _tristate(value: Optional[bool]) -> str:
     if value is None:
         return "skipped"
     return "ok" if value else "fail"
+
+
+def _parse_memory_mb_shell(value: str) -> int:
+    """Parse a memory string to MiB for shell commands."""
+    value = value.strip()
+    if value.endswith(("G", "g")):
+        try:
+            return int(value[:-1]) * 1024
+        except ValueError:
+            pass
+    if value.endswith(("M", "m")):
+        try:
+            return int(value[:-1])
+        except ValueError:
+            pass
+    try:
+        return int(value)
+    except ValueError:
+        raise ValueError(
+            f"Invalid memory value: {value!r}. "
+            "Use a plain integer (MiB) or a suffix: 512M or 4G."
+        )
 
 
 @dataclass
@@ -180,6 +213,10 @@ class ProxmoxShell:
             "rmct": self._cmd_destroy,
             "health": self._cmd_health,
             "check": self._cmd_health,
+            "config": self._cmd_config,
+            "set": self._cmd_set,
+            "modify": self._cmd_modify,
+            "resize": self._cmd_resize,
         }
 
     def _make_prompt(self) -> str:
@@ -328,6 +365,98 @@ class ProxmoxShell:
         vmid = self._parse_vmid(args, "health")
         report = health_check(host, vmid)
         self._output(_format_health(report))
+
+    def _cmd_config(self, args: list[str]) -> None:
+        host = self._require_host()
+        pending = "--pending" in args
+        rest = [a for a in args if a != "--pending"]
+        vmid = self._parse_vmid(rest, "config")
+        if pending:
+            data = get_container_pending(host, vmid)
+            label = "Pending"
+        else:
+            data = get_container_config(host, vmid)
+            label = "Config"
+        if not data:
+            self._output(f"  {label} for VMID {vmid}: (empty)")
+            return
+        self._output(f"  {label} for VMID {vmid}:")
+        for key, value in sorted(data.items()):
+            self._output(f"    {key}: {value}")
+
+    def _cmd_set(self, args: list[str]) -> None:
+        host = self._require_host()
+        if not args:
+            raise ValueError("Usage: set <vmid> key=value [key=value ...]")
+        vmid = self._parse_vmid([args[0]], "set")
+        options: dict[str, str] = {}
+        for item in args[1:]:
+            if "=" not in item:
+                raise ValueError(
+                    f"Options must be key=value, got: {item!r}"
+                )
+            key, _, value = item.partition("=")
+            options[key] = value
+        if not options:
+            raise ValueError("Usage: set <vmid> key=value [key=value ...]")
+        reconfigure_container(host, vmid, options)
+        self._output(
+            f"  Set {len(options)} option(s) on VMID {vmid} on {host.name}."
+        )
+
+    def _cmd_modify(self, args: list[str]) -> None:
+        host = self._require_host()
+        if not args:
+            raise ValueError(
+                "Usage: modify <vmid> [--cores N] [--memory N[M|G]]"
+            )
+        vmid = self._parse_vmid([args[0]], "modify")
+        rest = args[1:]
+        cores: Optional[int] = None
+        memory_mb: Optional[int] = None
+        i = 0
+        while i < len(rest):
+            token = rest[i]
+            if token in ("--cores", "-c"):
+                i += 1
+                if i >= len(rest):
+                    raise ValueError("--cores requires a value")
+                try:
+                    cores = int(rest[i])
+                except ValueError:
+                    raise ValueError(f"--cores must be an integer, got {rest[i]!r}")
+            elif token in ("--memory", "-m"):
+                i += 1
+                if i >= len(rest):
+                    raise ValueError("--memory requires a value")
+                memory_mb = _parse_memory_mb_shell(rest[i])
+            else:
+                raise ValueError(f"Unknown option: {token!r}")
+            i += 1
+        if cores is None and memory_mb is None:
+            raise ValueError(
+                "Usage: modify <vmid> [--cores N] [--memory N[M|G]]"
+            )
+        modify_container(host, vmid, cores=cores, memory_mb=memory_mb)
+        parts = []
+        if cores is not None:
+            parts.append(f"cores={cores}")
+        if memory_mb is not None:
+            parts.append(f"memory={memory_mb}M")
+        self._output(
+            f"  Modified VMID {vmid} on {host.name}: {', '.join(parts)}."
+        )
+
+    def _cmd_resize(self, args: list[str]) -> None:
+        host = self._require_host()
+        if len(args) != 3:
+            raise ValueError("Usage: resize <vmid> <volume> <size>")
+        vmid = self._parse_vmid([args[0]], "resize")
+        volume, size = args[1], args[2]
+        resize_container_disk(host, vmid, volume, size)
+        self._output(
+            f"  Resized {volume} on VMID {vmid} on {host.name} to {size}."
+        )
 
     @staticmethod
     def _parse_vmid(args: list[str], cmd: str) -> int:

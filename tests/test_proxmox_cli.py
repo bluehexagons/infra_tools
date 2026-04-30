@@ -269,5 +269,93 @@ class TestProxmoxCliNotifications(_CliFixture):
         self.assertIn("Choose a notifications subcommand", out)
 
 
+class TestProxmoxCliLifecycle(_CliFixture):
+    def setUp(self) -> None:
+        super().setUp()
+        add_proxmox_host(
+            ProxmoxHost(name="pve1", address="10.0.0.10"), self.workspace
+        )
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_config_shows_key_value(self, mock_run) -> None:
+        mock_run.return_value = _completed("cores: 2\nmemory: 2048\nhostname: box\n")
+        rc, out = self._run("config", "pve1", "100")
+        self.assertEqual(rc, 0)
+        self.assertIn("cores", out)
+        self.assertIn("2048", out)
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_config_pending_flag(self, mock_run) -> None:
+        mock_run.return_value = _completed("cores: 4\n")
+        rc, out = self._run("config", "pve1", "100", "--pending")
+        self.assertEqual(rc, 0)
+        self.assertIn("Pending", out)
+        self.assertIn("pct pending", mock_run.call_args.args[3])
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_reconfigure_sets_option(self, mock_run) -> None:
+        mock_run.return_value = _completed()
+        rc, out = self._run("reconfigure", "pve1", "100", "--set", "hostname=newbox")
+        self.assertEqual(rc, 0)
+        self.assertIn("Set 1 option", out)
+        self.assertIn("--hostname", mock_run.call_args.args[3])
+
+    def test_reconfigure_without_options_errors(self) -> None:
+        rc, out = self._run("reconfigure", "pve1", "100")
+        self.assertEqual(rc, 1)
+        self.assertIn("--set", out)
+
+    def test_reconfigure_bad_format_errors(self) -> None:
+        rc, out = self._run("reconfigure", "pve1", "100", "--set", "no-equals-sign")
+        self.assertEqual(rc, 1)
+        self.assertIn("KEY=VALUE", out)
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_modify_cores(self, mock_run) -> None:
+        mock_run.return_value = _completed()
+        rc, out = self._run("modify", "pve1", "100", "--cores", "4")
+        self.assertEqual(rc, 0)
+        self.assertIn("cores=4", out)
+        self.assertIn("--cores", mock_run.call_args.args[3])
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_modify_memory_with_g_suffix(self, mock_run) -> None:
+        mock_run.return_value = _completed()
+        rc, out = self._run("modify", "pve1", "100", "--memory", "4G")
+        self.assertEqual(rc, 0)
+        self.assertIn("memory=4096M", out)
+        self.assertIn("4096", mock_run.call_args.args[3])
+
+    def test_modify_without_flags_errors(self) -> None:
+        rc, out = self._run("modify", "pve1", "100")
+        self.assertEqual(rc, 1)
+        self.assertIn("--cores", out)
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_modify_dry_run(self, mock_run) -> None:
+        mock_run.return_value = _completed()
+        rc, out = self._run("modify", "pve1", "100", "--cores", "2", "--dry-run")
+        self.assertEqual(rc, 0)
+        self.assertIn("Would modify", out)
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_resize_disk(self, mock_run) -> None:
+        mock_run.return_value = _completed()
+        rc, out = self._run("resize-disk", "pve1", "100", "rootfs", "20G")
+        self.assertEqual(rc, 0)
+        self.assertIn("Resized", out)
+        cmd = mock_run.call_args.args[3]
+        self.assertIn("pct resize", cmd)
+        self.assertIn("rootfs", cmd)
+        self.assertIn("20G", cmd)
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_resize_disk_dry_run(self, mock_run) -> None:
+        mock_run.return_value = _completed()
+        rc, out = self._run("resize-disk", "pve1", "100", "rootfs", "20G", "--dry-run")
+        self.assertEqual(rc, 0)
+        self.assertIn("Would resize", out)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -7,6 +7,8 @@ Provides helpers for:
 - Starting and stopping containers.
 - Destroying containers (caller is expected to handle confirmation).
 - Health-checking a container (status + ping + optional SSH probe).
+- Reconfiguring containers (CPU, memory, arbitrary pct options).
+- Resizing container disks.
 - Configuring native Proxmox notification webhooks.
 
 All commands run via ``ssh root@<node>`` using the existing
@@ -77,6 +79,18 @@ class ProxmoxWebhookNotificationConfig:
     matcher_name: str
     url: str
     severities: list[str] = field(default_factory=list)
+
+
+_PCT_OPTION_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+_DISK_SIZE_RE = re.compile(r"^\d+[KkMmGgTt]$")
+
+
+def _validate_pct_option(name: str) -> None:
+    if not _PCT_OPTION_RE.match(name):
+        raise ValueError(
+            f"Invalid pct option name: {name!r}. "
+            "Use lowercase letters, digits, and hyphens."
+        )
 
 
 DEFAULT_NOTIFICATION_ENDPOINT = "infra-tools-webhook"
@@ -263,6 +277,141 @@ def destroy_container(
         raise ProxmoxManageError(
             f"pct destroy {vmid} failed on {host.address}: "
             f"{(result.stderr or '').strip() or 'unknown error'}"
+        )
+
+
+def get_container_config(
+    host: ProxmoxHost, vmid: int, *, dry_run: bool = False
+) -> dict[str, str]:
+    """Return the current configuration for ``vmid`` as a key/value dict."""
+    if dry_run:
+        return {}
+    result = _run_on_host(host, f"pct config {int(vmid)}")
+    if result.returncode != 0:
+        raise ProxmoxManageError(
+            f"pct config {vmid} failed on {host.address}: "
+            f"{(result.stderr or result.stdout or '').strip() or 'no output'}"
+        )
+    config: dict[str, str] = {}
+    for line in (result.stdout or "").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if ":" in line:
+            key, _, value = line.partition(":")
+            config[key.strip()] = value.strip()
+    return config
+
+
+def get_container_pending(
+    host: ProxmoxHost, vmid: int, *, dry_run: bool = False
+) -> dict[str, str]:
+    """Return pending (unapplied) configuration changes for ``vmid``.
+
+    Returns a dict of option -> new-value for options that require a container
+    restart to take effect.
+    """
+    if dry_run:
+        return {}
+    result = _run_on_host(host, f"pct pending {int(vmid)}")
+    if result.returncode != 0:
+        raise ProxmoxManageError(
+            f"pct pending {vmid} failed on {host.address}: "
+            f"{(result.stderr or result.stdout or '').strip() or 'no output'}"
+        )
+    pending: dict[str, str] = {}
+    for line in (result.stdout or "").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if ":" in line:
+            key, _, value = line.partition(":")
+            pending[key.strip()] = value.strip()
+    return pending
+
+
+def reconfigure_container(
+    host: ProxmoxHost,
+    vmid: int,
+    options: dict[str, str],
+    *,
+    dry_run: bool = False,
+) -> None:
+    """Apply ``pct set`` options to ``vmid`` on ``host``.
+
+    ``options`` maps option names (e.g. ``"cores"``) to string values.
+    Changes that require a container restart are queued as pending by Proxmox.
+    """
+    if not options:
+        return
+    for name in options:
+        _validate_pct_option(name)
+    parts: list[str] = ["pct", "set", str(int(vmid))]
+    for name, value in options.items():
+        parts.extend([f"--{name}", value])
+    cmd = shlex.join(parts)
+    result = _run_on_host(host, cmd, dry_run=dry_run)
+    if result.returncode != 0:
+        raise ProxmoxManageError(
+            f"pct set {vmid} failed on {host.address}: "
+            f"{(result.stderr or result.stdout or '').strip() or 'unknown error'}"
+        )
+
+
+def modify_container(
+    host: ProxmoxHost,
+    vmid: int,
+    *,
+    cores: Optional[int] = None,
+    memory_mb: Optional[int] = None,
+    dry_run: bool = False,
+) -> None:
+    """Change CPU cores and/or memory allocation for ``vmid`` on ``host``.
+
+    ``cores`` sets the number of vCPU cores. ``memory_mb`` sets RAM in
+    mebibytes (1 GiB = 1024 MiB). Both changes may require a container
+    restart to take effect on a running container.
+    """
+    options: dict[str, str] = {}
+    if cores is not None:
+        if cores < 1:
+            raise ValueError(f"cores must be >= 1, got {cores}")
+        options["cores"] = str(cores)
+    if memory_mb is not None:
+        if memory_mb < 16:
+            raise ValueError(f"memory_mb must be >= 16, got {memory_mb}")
+        options["memory"] = str(memory_mb)
+    if not options:
+        raise ValueError("At least one of cores or memory_mb must be provided")
+    reconfigure_container(host, vmid, options, dry_run=dry_run)
+
+
+def resize_container_disk(
+    host: ProxmoxHost,
+    vmid: int,
+    volume: str,
+    size: str,
+    *,
+    dry_run: bool = False,
+) -> None:
+    """Increase a container disk volume to ``size`` using ``pct resize``.
+
+    ``volume`` is the volume name (e.g. ``"rootfs"``). ``size`` is the new
+    absolute size with a unit suffix, e.g. ``"20G"``. Proxmox only supports
+    increasing disk size.
+    """
+    _validate_pct_option(volume)
+    if not _DISK_SIZE_RE.match(size):
+        raise ValueError(
+            f"Invalid disk size: {size!r}. Use a positive integer followed by "
+            "K, M, G, or T (e.g. '20G')."
+        )
+    cmd = shlex.join(["pct", "resize", str(int(vmid)), volume, size])
+    result = _run_on_host(host, cmd, dry_run=dry_run)
+    if result.returncode != 0:
+        raise ProxmoxManageError(
+            f"pct resize {vmid} {volume} {size} failed on {host.address}: "
+            f"{(result.stderr or result.stdout or '').strip() or 'unknown error'}"
         )
 
 
