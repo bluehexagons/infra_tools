@@ -157,18 +157,21 @@ class TestCleanupHelpers(unittest.TestCase):
             self.assertTrue(os.path.exists(fresh_file))
             self.assertTrue(os.path.exists(unrelated_file))
 
-    @patch("common.service_tools.cleanup_maintenance.shutil.rmtree", side_effect=OSError("busy"))
-    def test_cleanup_stale_infra_tmp_artifacts_reports_remove_failure(self, _rmtree):
+    def test_cleanup_stale_infra_tmp_artifacts_reports_remove_failure(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             old_dir = os.path.join(tmp_dir, "infra_recall_abcd")
             os.mkdir(old_dir)
             old_time = time.time() - (8 * 24 * 60 * 60)
             os.utime(old_dir, (old_time, old_time))
 
-            failures = cleanup_maintenance.cleanup_stale_infra_tmp_artifacts(
-                tmp_dir=tmp_dir,
-                max_age_days=7,
-            )
+            with patch(
+                "common.service_tools.cleanup_maintenance.shutil.rmtree",
+                side_effect=OSError("busy"),
+            ):
+                failures = cleanup_maintenance.cleanup_stale_infra_tmp_artifacts(
+                    tmp_dir=tmp_dir,
+                    max_age_days=7,
+                )
 
             self.assertEqual(failures, [f"{old_dir}: busy"])
 
