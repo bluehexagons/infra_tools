@@ -1,174 +1,254 @@
 #!/usr/bin/env python3
-"""Simple test runner for infra_tools.
+"""Test runner for infra_tools.
 
-Usage:
-    ./run_tests.py                    # Run all tests (concise output)
-    ./run_tests.py test_config        # Run specific test file
-    ./run_tests.py TestSetupConfig    # Run specific test class
-    ./run_tests.py -v                 # Verbose output (detailed)
-    ./run_tests.py -h                 # Show help
-    
+By default, expensive tests (live Proxmox round-trips, network downloads, etc.)
+are skipped. Opt in with ``--expensive CATEGORY`` (repeatable) or
+``--expensive all``.
+
 Examples:
-    ./run_tests.py
-    ./run_tests.py -v
-    ./run_tests.py test_scrub_par2
-    ./run_tests.py test_scrub_par2 -v
+    ./run_tests.py                                  # full default suite, concise output
+    ./run_tests.py -v                               # verbose
+    ./run_tests.py test_proxmox_manage              # one test module
+    ./run_tests.py tests.test_proxmox_manage.TestHealthCheck   # one class
+    ./run_tests.py --list-categories                # show known expensive categories
+    ./run_tests.py --expensive live_proxmox \
+        tests.test_proxmox_live                     # run a real Proxmox round-trip
+    ./run_tests.py --expensive all                  # run everything including expensive
+
+Selectors are matched case-insensitively against test module file names; you
+can also pass a fully-qualified ``tests.module.Class.method`` selector and it
+will be loaded directly.
 """
 
 from __future__ import annotations
 
-import sys
-import os
+import argparse
 import io
-
-# Parse arguments at the very beginning (before any imports)
-verbose = '-v' in sys.argv or '--verbose' in sys.argv
-help_requested = '-h' in sys.argv or '--help' in sys.argv
-
-# Set test mode to suppress console logging from infra_tools
-if not verbose and not help_requested:
-    os.environ['INFRA_TOOLS_TEST'] = '1'
-
+import os
+import sys
+import unittest
 from pathlib import Path
 from typing import TextIO
-import unittest
+
+# Make `tests/` importable when running from the repo root.
+_REPO_ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(_REPO_ROOT))
+
+from tests.expensive_support import (  # noqa: E402  (after sys.path tweak)
+    EXPENSIVE_ENV_VAR,
+    KNOWN_CATEGORIES,
+    category_env_var,
+)
 
 
-class TeeIO:
-    """Captures output to a buffer while optionally passing through to original stream."""
-    
-    def __init__(self, original: TextIO, capture: io.StringIO, passthrough: bool = False):
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Run the infra_tools test suite.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    parser.add_argument(
+        "selectors",
+        nargs="*",
+        help=(
+            "Optional test selectors: file stems (test_proxmox_manage), "
+            "module dotted paths (tests.test_proxmox_manage), or fully "
+            "qualified test ids."
+        ),
+    )
+    parser.add_argument(
+        "-v", "--verbose", action="store_true",
+        help="Verbose test output (does not suppress infra_tools console logs).",
+    )
+    parser.add_argument(
+        "--expensive",
+        action="append",
+        metavar="CATEGORY",
+        default=[],
+        help=(
+            "Enable an expensive test category. Repeatable. "
+            "Use 'all' to enable every expensive test."
+        ),
+    )
+    parser.add_argument(
+        "--list-categories", action="store_true",
+        help="List the known expensive-test categories and exit.",
+    )
+    parser.add_argument(
+        "--list-tests", action="store_true",
+        help="List the discovered test files and exit.",
+    )
+    return parser
+
+
+def _list_categories() -> int:
+    print("Known expensive-test categories:")
+    print()
+    width = max(len(c) for c in KNOWN_CATEGORIES) if KNOWN_CATEGORIES else 0
+    for name, desc in sorted(KNOWN_CATEGORIES.items()):
+        env = category_env_var(name)
+        print(f"  {name:<{width}}  {desc}")
+        print(f"  {'':<{width}}    enable: {env}=1  (or --expensive {name})")
+    print()
+    print(f"Or set {EXPENSIVE_ENV_VAR}=1 (--expensive all) to enable everything.")
+    return 0
+
+
+def _list_tests() -> int:
+    test_dir = _REPO_ROOT / "tests"
+    print("Discovered test files:")
+    for test_file in sorted(test_dir.rglob("test_*.py")):
+        rel_path = test_file.relative_to(test_dir)
+        print(f"  {rel_path}")
+    return 0
+
+
+def _apply_expensive_flags(categories: list[str]) -> list[str]:
+    """Set the env vars that gate expensive tests. Returns the categories enabled."""
+    enabled: list[str] = []
+    for raw in categories:
+        cat = raw.strip().lower()
+        if not cat:
+            continue
+        if cat == "all":
+            os.environ[EXPENSIVE_ENV_VAR] = "1"
+            enabled.append("all")
+            continue
+        os.environ[category_env_var(cat)] = "1"
+        enabled.append(cat)
+    return enabled
+
+
+def _resolve_selector(loader: unittest.TestLoader, selector: str):
+    """Resolve a single selector to a test suite.
+
+    Accepted forms:
+      * file stem:           "test_proxmox_manage" or "test_proxmox_manage.py"
+      * dotted module:       "tests.test_proxmox_manage"
+      * dotted test id:      "tests.test_proxmox_manage.TestHealthCheck.test_x"
+      * bare class/method:   tries "tests.<selector>" as a fallback
+    """
+    candidates: list[str] = []
+    s = selector
+    if s.endswith(".py"):
+        s = s[:-3]
+    if "/" in s or os.sep in s:
+        s = s.replace("/", ".").replace(os.sep, ".")
+
+    if s.startswith("tests."):
+        candidates.append(s)
+    else:
+        # Try direct module under tests/ (file stem like "test_foo").
+        test_dir = _REPO_ROOT / "tests"
+        matches = list(test_dir.rglob(f"{s}.py"))
+        for match in matches:
+            rel = match.relative_to(test_dir).with_suffix("")
+            candidates.append("tests." + str(rel).replace(os.sep, "."))
+        # Also try the selector as-is, in case it's a class.method.
+        candidates.append(f"tests.{s}")
+        candidates.append(s)
+
+    last_error: Exception | None = None
+    for name in candidates:
+        try:
+            return loader.loadTestsFromName(name)
+        except (ImportError, AttributeError) as exc:
+            last_error = exc
+            continue
+    raise RuntimeError(
+        f"Could not resolve test selector {selector!r}. Tried: {candidates}. "
+        f"Last error: {last_error}"
+    )
+
+
+def _build_suite(loader: unittest.TestLoader, selectors: list[str]) -> unittest.TestSuite:
+    if not selectors:
+        return loader.discover("tests", pattern="test_*.py")
+    suite = unittest.TestSuite()
+    for sel in selectors:
+        suite.addTests(_resolve_selector(loader, sel))
+    return suite
+
+
+class _Tee:
+    """Tee writes to capture (always) and the original stream (optional)."""
+
+    def __init__(self, original: TextIO, capture: io.StringIO, passthrough: bool) -> None:
         self.original = original
         self.capture = capture
         self.passthrough = passthrough
-    
+
     def write(self, data: str) -> int:
         self.capture.write(data)
         if self.passthrough:
             return self.original.write(data)
         return len(data)
-    
+
     def flush(self) -> None:
         if self.passthrough:
             self.original.flush()
-    
-    def isatty(self) -> bool:
+
+    def isatty(self) -> bool:  # pragma: no cover - cosmetic
         return self.original.isatty()
 
 
-def show_help():
-    """Display help message."""
-    print(__doc__)
-    print("\nAvailable test files:")
-    test_dir = Path(__file__).parent / "tests"
-    for test_file in sorted(test_dir.rglob("test_*.py")):
-        rel_path = test_file.relative_to(test_dir)
-        print(f"  {rel_path}")
+def main(argv: list[str] | None = None) -> int:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
 
+    if args.list_categories:
+        return _list_categories()
+    if args.list_tests:
+        return _list_tests()
 
-def main():
-    """Run tests with simple command-line interface."""
-    
-    if help_requested:
-        show_help()
-        return 0
-    
-    # Remove flags from argv
-    args = [arg for arg in sys.argv[1:] if not arg.startswith('-')]
-    
-    # Change to project directory
-    project_dir = Path(__file__).parent
-    os.chdir(project_dir)
-    
-    # Set up output capture for non-verbose mode
-    old_stdout = sys.stdout
-    old_stderr = sys.stderr
-    capture = io.StringIO()
-    
-    if not verbose:
-        # Suppress all output during test discovery and execution
-        sys.stdout = capture
-        sys.stderr = capture
-    
-    # Set up test loader
+    enabled = _apply_expensive_flags(args.expensive)
+    if enabled:
+        print(f"Expensive categories enabled: {', '.join(enabled)}")
+
+    if not args.verbose:
+        os.environ.setdefault("INFRA_TOOLS_TEST", "1")
+
+    os.chdir(_REPO_ROOT)
+
     loader = unittest.TestLoader()
-    
-    if not args:
-        # Run all tests
-        suite = loader.discover('tests', pattern='test_*.py')
-    else:
-        # Run specific tests
-        test_pattern = args[0]
-        
-        # Add .py extension if not present
-        if not test_pattern.endswith('.py'):
-            test_pattern_with_ext = test_pattern + '.py'
-        else:
-            test_pattern_with_ext = test_pattern
-            test_pattern = test_pattern[:-3]
-        
-        # Try to find the test file
-        test_dir = Path('tests')
-        found_files = list(test_dir.rglob(f"*{test_pattern_with_ext}"))
-        
-        if found_files:
-            # Load specific test file
-            test_file = found_files[0]
-            rel_path = test_file.relative_to(test_dir)
-            module_path = str(rel_path.with_suffix('')).replace(os.sep, '.')
-            module_name = f'tests.{module_path}'
-            try:
-                suite = loader.loadTestsFromName(module_name)
-            except (ImportError, AttributeError) as e:
-                print(f"Error loading test module: {e}")
-                return 1
-        else:
-            # Try loading as a module path (e.g., tests.test_config)
-            if not test_pattern.startswith('tests.'):
-                if '/' in test_pattern or os.sep in test_pattern:
-                    # Convert path to module notation
-                    test_pattern = test_pattern.replace('/', '.').replace(os.sep, '.')
-                module_name = f'tests.{test_pattern}'
-            else:
-                module_name = test_pattern
-            
-            try:
-                suite = loader.loadTestsFromName(module_name)
-            except (ImportError, AttributeError) as e:
-                print(f"Error: Could not find test '{test_pattern}'")
-                print(f"Details: {e}")
-                print("\nRun './run_tests.py -h' to see available tests")
-                return 1
-    
-    # Run tests
-    if verbose:
-        # Restore stdout for verbose mode
-        sys.stdout = old_stdout
-        sys.stderr = old_stderr
+    try:
+        suite = _build_suite(loader, args.selectors)
+    except RuntimeError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+
+    if args.verbose:
         runner = unittest.TextTestRunner(verbosity=2)
         result = runner.run(suite)
     else:
-        # Already captured in 'capture', just run tests
-        runner = unittest.TextTestRunner(stream=capture, verbosity=0)
-        result = runner.run(suite)
-        
-        # Restore stdout to print results
-        sys.stdout = old_stdout
-        sys.stderr = old_stderr
-        
-        # Show output only if there were failures
+        capture = io.StringIO()
+        old_stdout, old_stderr = sys.stdout, sys.stderr
+        sys.stdout = capture
+        sys.stderr = capture
+        try:
+            runner = unittest.TextTestRunner(stream=capture, verbosity=0)
+            result = runner.run(suite)
+        finally:
+            sys.stdout = old_stdout
+            sys.stderr = old_stderr
         if not result.wasSuccessful():
-            print(capture.getvalue())
-    
-    # Print summary
+            sys.stdout.write(capture.getvalue())
+
     print()
+    skipped = len(result.skipped)
     if result.wasSuccessful():
-        print(f"✓ All tests passed ({result.testsRun} tests)")
+        msg = f"✓ All tests passed ({result.testsRun} run"
+        if skipped:
+            msg += f", {skipped} skipped"
+        msg += ")"
+        print(msg)
         return 0
-    else:
-        print(f"✗ Tests failed: {len(result.failures)} failures, {len(result.errors)} errors")
-        return 1
+    print(
+        f"✗ Tests failed: {len(result.failures)} failures, "
+        f"{len(result.errors)} errors, {skipped} skipped"
+    )
+    return 1
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

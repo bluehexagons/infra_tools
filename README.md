@@ -100,9 +100,29 @@ The registry is stored at `<workspace>/proxmox_hosts.json` (mode `0600`).
 
 ### Tests
 
-Run the full suite with `python3 -m unittest discover -s tests`. Slow / network-dependent tests are
-gated behind `INFRA_TOOLS_RUN_EXPENSIVE=1` (see `tests/expensive_support.py`) and are skipped by
-default.
+Run the full default suite (fast — no network, no live hosts):
+
+```bash
+python3 -m unittest discover -s tests   # raw unittest
+./run_tests.py                          # nicer wrapper with selectors
+./run_tests.py test_proxmox_manage      # one module
+./run_tests.py -v                       # verbose
+```
+
+Expensive tests (live Proxmox round-trips, network downloads, slow tests) are
+gated behind opt-in *categories*. List them and run them on demand:
+
+```bash
+./run_tests.py --list-categories
+./run_tests.py --expensive live_proxmox tests.test_proxmox_live
+./run_tests.py --expensive all          # everything, including expensive
+```
+
+Each category also has a matching env var (e.g. `INFRA_TOOLS_RUN_LIVE_PROXMOX=1`),
+or set `INFRA_TOOLS_RUN_EXPENSIVE=1` to enable everything. See
+[`tests/expensive_support.py`](tests/expensive_support.py) for details and
+[`tests/test_proxmox_live.py`](tests/test_proxmox_live.py) for the env vars
+needed to point the live Proxmox test at a real host.
 
 Use `--credential USERNAME PASSWORD` to define share passwords once, then reference those users by username
 in `--share` or `--mount-smb`. The `USERS` field accepts a comma-separated list of `username` or `username:password`
