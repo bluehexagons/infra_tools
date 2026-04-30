@@ -10,43 +10,26 @@ This file captures potential improvements and follow-up work for infra_tools.
 - **#84 Live LXC Integration Test**: `test_proxmox_live.py` with `INFRA_TOOLS_RUN_LIVE_PROXMOX=1` gating
 - **#89 Node version cleanup**: Stale nvm version removal in cleanup maintenance
 - **#88 Bundler cleanup** (partial): Cleanup scanning `/var/tmp` for `bundler*` directories
+- **#81 Container Lifecycle**: `config`, `reconfigure`, `modify`, `resize-disk` commands in CLI and ProxmoxShell; `get_container_config`, `get_container_pending`, `reconfigure_container`, `modify_container`, `resize_container_disk` in `lib/proxmox_manage`
+- **#27 Shell history**: Readline-based persistent history at `~/.local/share/infra_tools/shell_history`
+- **#27 Output formatting**: `list --json` (JSON array output) and `info --compact` (one-line summary) in CLI and shell
+- **#27 Init file**: `~/.infra_toolsrc` shell startup commands dispatched at shell start
+- **#88 /tmp monitoring**: Structured `log_tmp_usage` per temp directory on each cleanup run
+- **#88 tmpfiles.d config**: `install_tmpfiles_conf()` deploys `/etc/tmpfiles.d/infra_tools.conf` during bootstrap to auto-age known prefixes via `systemd-tmpfiles-clean`
 
 ## Open Issues
 
-### #81: Container Lifecycle Modifications
+### #27: Remaining Interactive CLI Features
 
-The Proxmox container management system supports create/start/stop/destroy/health, but not yet:
-- Modify container flags (CPU, RAM, disk)
-- Reconfigure container networking
-- Re-deploy on modified containers
-- In-place updates without recreate
-
-**Impact**: Users cannot adjust container resources after creation or redeploy changes without full destroy/recreate.
-
-**Approach**:
-- Add `lib/proxmox_manage.reconfigure_container(host, vmid, **flags)` wrapping `pct config` and `pct pending`
-- Add `lib/proxmox_manage.modify_container(host, vmid, cpu, memory, disk)` for resource changes
-- Extend CLI with `proxmox reconfigure <host> <vmid> ...` and `proxmox modify <host> <vmid> --cpu N --memory XG`
-- Add interactive shell commands for these operations
-
-### #27: Broader Interactive CLI Features (Partial)
-
-The shell covers basic configuration management. Enhancements could include:
-- **Shell history**: Persistent command history file (`~/.local/share/infra_tools/shell_history`)
 - **Autocompletion within shell**: Tab-complete patterns, hosts, vmids, subcommands (requires upstream `readline` integration or custom solution)
 - **Configuration templates**: `template list`, `template show`, save/load partial setups as templates
-- **Batch operations**: `deploy prod web* --yes` to deploy multiple matched configurations at once
-- **Init file support**: `~/.infra_toolsrc` for shell startup commands/aliases
 - **Workspace shortcuts**: Quick aliases within shell to switch between workspaces (e.g., `ws prod`, `ws staging`)
-- **Output formatting**: `list --json`, `info --compact`, etc. for scripting
 
-### #88: Comprehensive /tmp Cleanup (Partial)
+### #88: Remaining /tmp Cleanup Work
 
-The current approach handles stale bundler directories in `/var/tmp`, but doesn't fully address:
 - Transient build artifacts in `/tmp` from concurrent operations
-- Systemd-tmpfiles policies for automatic aging
-- tmpfs mount configuration to prevent filling /tmp
-- Monitor and alert on /tmp usage
+- tmpfs mount configuration to prevent filling /tmp (`--set-tmpfs-limit SIZE` for bootstrap)
+- Alert on /tmp usage threshold (complement to existing root fs low-space alert)
 
 **Approach**:
 - Add `/etc/tmpfiles.d/infra_tools.conf` to auto-age and remove aged artifacts

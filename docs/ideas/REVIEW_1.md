@@ -105,7 +105,7 @@ The REVIEW_1 changes are covered by focused tests for:
 
 The repository also includes a regression test that fails if Python source reintroduces `shell=True` subprocess usage.
 
-At the time this document was last updated, `python3 -m unittest discover -s tests` passed with 977 tests.
+At the time this document was last updated, `python3 -m unittest discover -s tests` passed with 1266 tests.
 
 ## Live-System Readiness
 
