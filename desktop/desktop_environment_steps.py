@@ -31,7 +31,7 @@ def install_desktop(config: SetupConfig) -> None:
         print(f"  ✓ {config.desktop.upper()} desktop already installed")
         return
     
-    install_package(f"{config.desktop.upper()} desktop", package, install_cmd, required=False)
+    install_package(f"{config.desktop.upper()} desktop", package, install_cmd)
 
 
 def configure_xfce_for_rdp(config: SetupConfig) -> None:

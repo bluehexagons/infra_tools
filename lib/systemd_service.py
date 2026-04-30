@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 import os
-import secrets
 import re
 import shlex
-from typing import Optional
 
 from lib.remote_utils import run
 
@@ -90,11 +88,6 @@ def cleanup_service(service_name: str) -> None:
         run("systemctl daemon-reload", check=False)
 
 
-# Keep backward compatibility with old function name
-cleanup_existing_systemd_unit = cleanup_systemd_unit
-cleanup_service_and_timer = cleanup_service
-
-
 def cleanup_all_infra_services(dry_run: bool = False) -> None:
     """Remove all systemd units created by infra_tools to ensure clean deployment state.
     
@@ -120,10 +113,8 @@ def cleanup_all_infra_services(dry_run: bool = False) -> None:
         # Unified storage operations service (new style)
         r"^storage-ops\.service$",
         r"^storage-ops\.timer$",
-        # Sync services and timers (legacy, kept for migration)
         r"^sync-.*\.service$",
         r"^sync-.*\.timer$",
-        # Scrub services and timers (legacy, kept for migration)
         r"^scrub-.*\.service$",
         r"^scrub-.*\.timer$",
         r"^scrub-.*-update\.service$",

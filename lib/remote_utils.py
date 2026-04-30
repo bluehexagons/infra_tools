@@ -7,7 +7,7 @@ import shlex
 import string
 import subprocess
 import sys
-from typing import Optional, Callable
+from typing import Callable, Optional
 
 from lib.validation import validate_package_name
 
@@ -102,7 +102,6 @@ def install_with_verify(
     name: str,
     install_cmd: str,
     verify_fn: Callable[[], bool],
-    required: bool = True
 ) -> bool:
     """Run install command and verify using provided verification function.
     
@@ -110,8 +109,7 @@ def install_with_verify(
         name: Display name for messages
         install_cmd: Command to run
         verify_fn: Callable that returns True if installed
-        required: Unused; kept for API compatibility
-    
+
     Returns:
         True if verification passed
     """
@@ -130,15 +128,14 @@ def install_with_verify(
     return False
 
 
-def install_package(name: str, package: str, install_cmd: str, required: bool = True) -> bool:
+def install_package(name: str, package: str, install_cmd: str) -> bool:
     """Install an apt package and verify success.
     
     Args:
         name: Display name for messages
         package: Package name to check (for verification)
         install_cmd: Command to run for installation
-        required: Unused; kept for API compatibility
-    
+
     Returns:
         True if installed, False otherwise
     """
@@ -146,7 +143,6 @@ def install_package(name: str, package: str, install_cmd: str, required: bool = 
         name,
         install_cmd,
         lambda pkg=package: is_package_installed(pkg),
-        required
     )
 
 

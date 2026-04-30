@@ -13,7 +13,7 @@ from lib.remote_utils import run, install_package
 def install_certbot(config: SetupConfig) -> None:
     print("Installing certbot...")
     run("apt-get update -qq", check=False)
-    install_package("certbot", "certbot", "apt-get install -y -qq certbot python3-certbot-nginx", required=False)
+    install_package("certbot", "certbot", "apt-get install -y -qq certbot python3-certbot-nginx")
 
 
 def obtain_letsencrypt_certificate(domains: StrList, email: Optional[str] = None, cert_name: Optional[str] = None) -> bool:

@@ -40,7 +40,7 @@ def update_and_upgrade_packages(config: SetupConfig) -> None:
 
 
 def ensure_sudo_installed(config: SetupConfig) -> None:
-    install_package("sudo", "sudo", "apt-get install -y -qq sudo", required=False)
+    install_package("sudo", "sudo", "apt-get install -y -qq sudo")
 
 
 def configure_locale(config: SetupConfig) -> None:
@@ -51,7 +51,7 @@ def configure_locale(config: SetupConfig) -> None:
         print("  ✓ UTF-8 locale already configured")
         return
     
-    install_package("locales", "locales", "apt-get install -y -qq locales", required=False)
+    install_package("locales", "locales", "apt-get install -y -qq locales")
     run("sed -i 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen")
     locale_gen_result = run("locale-gen", check=False)
     run("update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8", check=False)
@@ -162,7 +162,7 @@ def configure_time_sync(config: SetupConfig) -> None:
         run("apt-get remove -y -qq systemd-timesyncd", check=False)
         print("  ✓ systemd-timesyncd removed")
     
-    install_package("chrony", "chrony", "apt-get install -y -qq chrony", required=False)
+    install_package("chrony", "chrony", "apt-get install -y -qq chrony")
     
     run("systemctl enable chrony", check=False)
     run("systemctl start chrony", check=False)

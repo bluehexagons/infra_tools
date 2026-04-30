@@ -19,6 +19,18 @@ infra_tools.py recall <host> [username] [options]
 # Reconstruct this host's setup summary
 infra_tools.py reconstruct [--compact]
 
+# Inspect, manage, or redeploy saved configurations
+infra_tools.py list [pattern]
+infra_tools.py info [pattern]
+infra_tools.py cmd [pattern]
+infra_tools.py rm <pattern>
+infra_tools.py deploy <pattern> [--yes]
+
+# Manage workspace credentials
+infra_tools.py credentials set <username> <password>
+infra_tools.py credentials list
+infra_tools.py credentials remove <username>
+
 # Install shell completion or local Python tooling
 infra_tools.py completions [options]
 infra_tools.py python-tools [options]
