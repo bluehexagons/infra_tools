@@ -265,6 +265,27 @@ class TestCleanupHelpers(unittest.TestCase):
 
         mock_notify.assert_not_called()
 
+    @patch("common.service_tools.cleanup_maintenance.shutil.disk_usage")
+    def test_log_tmp_usage_logs_stats(self, mock_usage):
+        from collections import namedtuple
+        DiskUsage = namedtuple("DiskUsage", ["total", "used", "free"])
+        mock_usage.return_value = DiskUsage(
+            total=10 * 1024 * 1024 * 1024,
+            used=2 * 1024 * 1024 * 1024,
+            free=8 * 1024 * 1024 * 1024,
+        )
+        with self.assertLogs(cleanup_maintenance.logger, level="DEBUG") as logs:
+            cleanup_maintenance.log_tmp_usage("/tmp")
+        joined = "\n".join(logs.output)
+        self.assertIn("Temp directory usage", joined)
+        self.assertIn("tmp_dir='/tmp'", joined)
+
+    @patch("common.service_tools.cleanup_maintenance.shutil.disk_usage", side_effect=OSError("no such directory"))
+    def test_log_tmp_usage_handles_oserror(self, _mock_usage):
+        with self.assertLogs(cleanup_maintenance.logger, level="WARNING") as logs:
+            cleanup_maintenance.log_tmp_usage("/nonexistent")
+        self.assertIn("Could not read temp directory usage", "\n".join(logs.output))
+
 
 if __name__ == "__main__":
     unittest.main()

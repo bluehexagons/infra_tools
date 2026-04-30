@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import sys
 import time
-from logging import ERROR, INFO, WARNING
+from logging import ERROR, INFO, WARNING, DEBUG
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
@@ -286,6 +286,34 @@ def cleanup_old_node_versions() -> list[str]:
     return failures
 
 
+def log_tmp_usage(tmp_dir: str = "/tmp") -> None:
+    """Log current disk usage for a temporary directory."""
+    try:
+        usage = shutil.disk_usage(tmp_dir)
+        total_mb = usage.total // (1024 * 1024)
+        used_mb = (usage.total - usage.free) // (1024 * 1024)
+        free_mb = usage.free // (1024 * 1024)
+        usage_percent = round((used_mb / total_mb * 100) if total_mb else 0, 1)
+        log_event(
+            logger,
+            "Temp directory usage",
+            level=DEBUG,
+            tmp_dir=tmp_dir,
+            total_mb=total_mb,
+            used_mb=used_mb,
+            free_mb=free_mb,
+            usage_percent=usage_percent,
+        )
+    except OSError as exc:
+        log_event(
+            logger,
+            "Could not read temp directory usage",
+            level=WARNING,
+            tmp_dir=tmp_dir,
+            error=str(exc),
+        )
+
+
 def notify_if_storage_still_low(notification_configs) -> None:
     """Notify when the root filesystem remains crowded after cleanup."""
     usage = get_disk_usage_details("/")
@@ -344,6 +372,7 @@ def main() -> int:
             failures.append(failure)
 
     for tmp_dir in INFRA_TMP_DIRS:
+        log_tmp_usage(tmp_dir)
         failures.extend(cleanup_stale_infra_tmp_artifacts(tmp_dir=tmp_dir))
     failures.extend(cleanup_old_node_versions())
     notify_if_storage_still_low(notification_configs)
