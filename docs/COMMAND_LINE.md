@@ -35,8 +35,12 @@ infra_tools.py credentials remove <username>
 infra_tools.py completions [options]
 infra_tools.py python-tools [options]
 
-# Bootstrap the local orchestration host
+# Bootstrap the local orchestration host (alias: self-setup)
 infra_tools.py bootstrap [options]
+infra_tools.py self-setup [options]
+
+# Drop into the interactive infra_tools REPL
+infra_tools.py shell
 ```
 
 ### System Types for `setup` command

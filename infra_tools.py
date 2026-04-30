@@ -48,6 +48,7 @@ from lib.credentials import (
     store_cli_credentials,
 )
 from lib.display import print_name_and_tags, print_setup_summary, print_success_header
+from lib.interactive_shell import run_interactive_shell
 from lib.notifications import validate_notification_args
 from lib.orchestrator_bootstrap import run_orchestrator_bootstrap
 from lib.plugin_registry import format_system_type_help, get_system_type_names
@@ -91,6 +92,7 @@ def _build_infra_tools_epilog() -> str:
     python-tools                Install local Python aliases, uv, and completion
     bootstrap                   Install packages, launcher, and completions (alias: self-setup)
     proxmox [subcommand]        Manage Proxmox hosts and containers (interactive shell with no args)
+    shell                       Interactive REPL for managing saved configurations
     credentials                 Manage workspace credentials
 
 System Types for setup:
@@ -330,6 +332,15 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
     credentials_remove_parser.add_argument("username", help="Credential username to remove")
 
     add_proxmox_subparser(subparsers)
+
+    shell_parser = subparsers.add_parser(
+        "shell",
+        help="Start the interactive infra_tools REPL",
+    )
+    shell_parser.add_argument(
+        "--workspace",
+        help="Workspace root for saved setups, credentials, known_hosts, and history",
+    )
 
     return parser, setup_parser, patch_parser
 
@@ -1018,6 +1029,8 @@ def main() -> int:
         )
     elif args.command == "proxmox":
         return run_proxmox_command(args)
+    elif args.command == "shell":
+        return run_interactive_shell(getattr(args, "workspace", None))
     elif args.command == "credentials":
         try:
             if args.credentials_command == "set":
