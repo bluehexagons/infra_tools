@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import os
 import subprocess
 import sys
@@ -14,16 +15,21 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from lib.proxmox_hosts import ProxmoxHost
 from lib.proxmox_manage import (
     ContainerInfo,
+    DEFAULT_NOTIFICATION_ENDPOINT,
     HealthReport,
     ProxmoxManageError,
+    _build_webhook_notification_commands,
     _parse_pct_list,
     destroy_container,
     get_container_ip,
     get_container_status,
     health_check,
+    install_webhook_notifications,
     list_containers,
+    send_webhook_test_notification,
     start_container,
     stop_container,
+    ProxmoxWebhookNotificationConfig,
 )
 
 
@@ -224,6 +230,91 @@ class TestDestroy(unittest.TestCase):
         ]
         with self.assertRaises(ProxmoxManageError):
             destroy_container(_host(), 100)
+
+
+class TestWebhookNotifications(unittest.TestCase):
+    def test_builds_native_pvesh_endpoint_and_matcher_commands(self) -> None:
+        commands = _build_webhook_notification_commands(
+            ProxmoxWebhookNotificationConfig(
+                endpoint_name="infra-tools-webhook",
+                matcher_name="infra-tools-system",
+                url="https://notify.example/hook",
+                severities=["warning", "error"],
+            )
+        )
+        self.assertEqual(len(commands), 2)
+        self.assertIn("/cluster/notifications/endpoints/webhook", commands[0])
+        self.assertIn("--url https://notify.example/hook", commands[0])
+        self.assertIn("--method post", commands[0])
+        self.assertIn("name=Content-Type,value=", commands[0])
+        encoded_body = commands[0].split("--body ", 1)[1].split(" ", 1)[0]
+        body = base64.b64decode(encoded_body).decode("utf-8")
+        self.assertIn('"job": "proxmox"', body)
+        self.assertIn("/cluster/notifications/matchers", commands[1])
+        self.assertIn("--target infra-tools-webhook", commands[1])
+        self.assertIn("--match-severity warning", commands[1])
+        self.assertIn("--match-severity error", commands[1])
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_install_webhook_notifications_runs_endpoint_and_matcher(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = _completed("")
+        config = install_webhook_notifications(
+            _host(),
+            "https://notify.example/hook?token=secret",
+            endpoint_name="it-webhook",
+            matcher_name="it-system",
+            severities=["error"],
+        )
+        self.assertEqual(config.endpoint_name, "it-webhook")
+        self.assertEqual(config.matcher_name, "it-system")
+        self.assertEqual(mock_run.call_count, 2)
+        endpoint_call = mock_run.call_args_list[0]
+        self.assertIn("https://notify.example/hook?token=secret", endpoint_call.args[3])
+        self.assertNotIn("token=secret", endpoint_call.kwargs["log_cmd"])
+        self.assertIn("<redacted-query>", endpoint_call.kwargs["log_cmd"])
+        matcher_call = mock_run.call_args_list[1]
+        self.assertIn("--match-severity error", matcher_call.args[3])
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_install_webhook_notifications_can_send_test(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = _completed("")
+        install_webhook_notifications(
+            _host(),
+            "https://notify.example/hook",
+            send_test=True,
+        )
+        self.assertEqual(mock_run.call_count, 3)
+        self.assertIn(
+            f"/cluster/notifications/targets/{DEFAULT_NOTIFICATION_ENDPOINT}/test",
+            mock_run.call_args_list[-1].args[3],
+        )
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_send_webhook_test_notification(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = _completed("")
+        send_webhook_test_notification(_host(), "it-webhook")
+        self.assertIn(
+            "/cluster/notifications/targets/it-webhook/test",
+            mock_run.call_args.args[3],
+        )
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_install_webhook_notifications_raises_on_pvesh_failure(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = _completed(stderr="bad endpoint", returncode=1)
+        with self.assertRaises(ProxmoxManageError):
+            install_webhook_notifications(_host(), "https://notify.example/hook")
+
+    def test_install_webhook_notifications_validates_url_and_names(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Invalid webhook URL"):
+            install_webhook_notifications(_host(), "not-a-url", dry_run=True)
+        with self.assertRaisesRegex(ValueError, "endpoint name"):
+            install_webhook_notifications(
+                _host(), "https://notify.example/hook", endpoint_name="1bad", dry_run=True
+            )
+        with self.assertRaisesRegex(ValueError, "severities"):
+            install_webhook_notifications(
+                _host(), "https://notify.example/hook", severities=["critical"], dry_run=True
+            )
 
 
 class TestHealthCheck(unittest.TestCase):

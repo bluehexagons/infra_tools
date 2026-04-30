@@ -184,5 +184,90 @@ class TestProxmoxCliContainerOps(_CliFixture):
         self.assertIn("No registered Proxmox host", out)
 
 
+class TestProxmoxCliNotifications(_CliFixture):
+    def setUp(self) -> None:
+        super().setUp()
+        add_proxmox_host(
+            ProxmoxHost(name="pve1", address="10.0.0.10"), self.workspace
+        )
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_install_webhook_configures_native_endpoint(self, mock_run) -> None:
+        mock_run.return_value = _completed("")
+        rc, out = self._run(
+            "notifications",
+            "install-webhook",
+            "pve1",
+            "https://notify.example/hook",
+            "--endpoint-name",
+            "it-webhook",
+            "--matcher-name",
+            "it-system",
+            "--severity",
+            "warning",
+            "--severity",
+            "error",
+        )
+        self.assertEqual(rc, 0)
+        self.assertIn("Configured Proxmox webhook notifications", out)
+        self.assertEqual(mock_run.call_count, 2)
+        self.assertIn("/cluster/notifications/endpoints/webhook", mock_run.call_args_list[0].args[3])
+        self.assertIn("--match-severity warning", mock_run.call_args_list[1].args[3])
+        self.assertIn("--match-severity error", mock_run.call_args_list[1].args[3])
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_install_webhook_dry_run_prints_would_configure(self, mock_run) -> None:
+        mock_run.return_value = _completed("")
+        rc, out = self._run(
+            "notifications",
+            "install-webhook",
+            "pve1",
+            "https://notify.example/hook",
+            "--dry-run",
+        )
+        self.assertEqual(rc, 0)
+        self.assertIn("Would configure", out)
+        self.assertTrue(all(call.kwargs["dry_run"] for call in mock_run.call_args_list))
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_install_webhook_send_test(self, mock_run) -> None:
+        mock_run.return_value = _completed("")
+        rc, _ = self._run(
+            "notifications",
+            "install-webhook",
+            "pve1",
+            "https://notify.example/hook",
+            "--send-test",
+        )
+        self.assertEqual(rc, 0)
+        self.assertEqual(mock_run.call_count, 3)
+        self.assertIn(
+            "/cluster/notifications/targets/infra-tools-webhook/test",
+            mock_run.call_args_list[-1].args[3],
+        )
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_test_webhook_sends_native_test(self, mock_run) -> None:
+        mock_run.return_value = _completed("")
+        rc, out = self._run(
+            "notifications",
+            "test-webhook",
+            "pve1",
+            "--endpoint-name",
+            "it-webhook",
+        )
+        self.assertEqual(rc, 0)
+        self.assertIn("Sent Proxmox test notification", out)
+        self.assertIn(
+            "/cluster/notifications/targets/it-webhook/test",
+            mock_run.call_args.args[3],
+        )
+
+    def test_notifications_without_subcommand_errors(self) -> None:
+        rc, out = self._run("notifications")
+        self.assertEqual(rc, 1)
+        self.assertIn("Choose a notifications subcommand", out)
+
+
 if __name__ == "__main__":
     unittest.main()

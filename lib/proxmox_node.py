@@ -45,11 +45,13 @@ def _ssh_run(
     user: str,
     ssh_opts: StrList,
     cmd: str,
-    dry_run: bool = False
+    dry_run: bool = False,
+    log_cmd: Optional[str] = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a command on the Proxmox host via SSH."""
-    log_cmd = cmd[:80] + "..." if len(cmd) > 80 else cmd
-    print(f"  Running on {node_ip}: {log_cmd}")
+    display_cmd = log_cmd if log_cmd is not None else cmd
+    display_cmd = display_cmd[:80] + "..." if len(display_cmd) > 80 else display_cmd
+    print(f"  Running on {node_ip}: {display_cmd}")
     sys.stdout.flush()
 
     if dry_run:

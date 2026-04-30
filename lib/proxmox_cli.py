@@ -18,11 +18,16 @@ from lib.proxmox_hosts import (
     remove_proxmox_host,
 )
 from lib.proxmox_manage import (
+    DEFAULT_NOTIFICATION_ENDPOINT,
+    DEFAULT_NOTIFICATION_MATCHER,
+    DEFAULT_NOTIFICATION_SEVERITIES,
     ProxmoxManageError,
     destroy_container,
     get_container_status,
     health_check,
+    install_webhook_notifications,
     list_containers,
+    send_webhook_test_notification,
     start_container,
     stop_container,
 )
@@ -118,6 +123,74 @@ def add_proxmox_subparser(subparsers: argparse._SubParsersAction) -> argparse.Ar
         "--no-ssh", action="store_true", help="Skip the SSH:22 reachability probe"
     )
     health.set_defaults(_handler=_cmd_health)
+
+    notifications = sub.add_parser(
+        "notifications",
+        help="Configure native Proxmox notification targets",
+        description=(
+            "Configure Proxmox's native notification system to send system "
+            "notifications to an infra_tools-compatible webhook endpoint."
+        ),
+    )
+    notification_sub = notifications.add_subparsers(
+        dest="notification_command",
+        help="Notification subcommand",
+    )
+    notifications.set_defaults(_handler=_cmd_notifications_missing)
+
+    install = notification_sub.add_parser(
+        "install-webhook",
+        help="Create/update a native Proxmox webhook endpoint and matcher",
+    )
+    install.add_argument("host", help="Registered host name or address")
+    install.add_argument("url", help="Webhook URL to receive Proxmox notifications")
+    install.add_argument(
+        "--endpoint-name",
+        default=DEFAULT_NOTIFICATION_ENDPOINT,
+        help=f"Proxmox webhook endpoint name (default: {DEFAULT_NOTIFICATION_ENDPOINT})",
+    )
+    install.add_argument(
+        "--matcher-name",
+        default=DEFAULT_NOTIFICATION_MATCHER,
+        help=f"Proxmox matcher name (default: {DEFAULT_NOTIFICATION_MATCHER})",
+    )
+    install.add_argument(
+        "--severity",
+        action="append",
+        choices=DEFAULT_NOTIFICATION_SEVERITIES,
+        help=(
+            "Severity to route to the webhook. Repeatable. "
+            f"Default: {', '.join(DEFAULT_NOTIFICATION_SEVERITIES)}"
+        ),
+    )
+    install.add_argument(
+        "--send-test",
+        action="store_true",
+        help="Ask Proxmox to send a test notification after configuring the endpoint",
+    )
+    install.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the remote pvesh commands without executing them",
+    )
+    install.set_defaults(_handler=_cmd_notifications_install_webhook)
+
+    test = notification_sub.add_parser(
+        "test-webhook",
+        help="Ask Proxmox to send a native test notification to an endpoint",
+    )
+    test.add_argument("host", help="Registered host name or address")
+    test.add_argument(
+        "--endpoint-name",
+        default=DEFAULT_NOTIFICATION_ENDPOINT,
+        help=f"Proxmox webhook endpoint name (default: {DEFAULT_NOTIFICATION_ENDPOINT})",
+    )
+    test.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the remote pvesh command without executing it",
+    )
+    test.set_defaults(_handler=_cmd_notifications_test_webhook)
 
     return parser
 
@@ -261,6 +334,47 @@ def _cmd_health(args: argparse.Namespace, workspace: Optional[str]) -> int:
     for note in report.notes:
         print(f"  note:    {note}")
     return 0 if report.healthy else 1
+
+
+def _cmd_notifications_install_webhook(
+    args: argparse.Namespace,
+    workspace: Optional[str],
+) -> int:
+    host = _resolve_host(args.host, workspace)
+    config = install_webhook_notifications(
+        host,
+        args.url,
+        endpoint_name=args.endpoint_name,
+        matcher_name=args.matcher_name,
+        severities=args.severity,
+        send_test=args.send_test,
+        dry_run=args.dry_run,
+    )
+    prefix = "Would configure" if args.dry_run else "Configured"
+    print(
+        f"{prefix} Proxmox webhook notifications on {host.name} "
+        f"using endpoint '{config.endpoint_name}' and matcher '{config.matcher_name}'."
+    )
+    return 0
+
+
+def _cmd_notifications_missing(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    raise ValueError("Choose a notifications subcommand: install-webhook or test-webhook")
+
+
+def _cmd_notifications_test_webhook(
+    args: argparse.Namespace,
+    workspace: Optional[str],
+) -> int:
+    host = _resolve_host(args.host, workspace)
+    send_webhook_test_notification(
+        host,
+        args.endpoint_name,
+        dry_run=args.dry_run,
+    )
+    prefix = "Would send" if args.dry_run else "Sent"
+    print(f"{prefix} Proxmox test notification via endpoint '{args.endpoint_name}'.")
+    return 0
 
 
 def _tristate(value: Optional[bool]) -> str:

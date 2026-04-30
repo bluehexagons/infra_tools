@@ -93,10 +93,14 @@ python3 infra_tools.py proxmox ls pve1
 python3 infra_tools.py proxmox health pve1 101
 python3 infra_tools.py proxmox stop pve1 101
 python3 infra_tools.py proxmox destroy pve1 101 -y
+python3 infra_tools.py proxmox notifications install-webhook pve1 https://notify.example/hook --send-test
 python3 infra_tools.py proxmox shell
 ```
 
 The registry is stored at `<workspace>/proxmox_hosts.json` (mode `0600`).
+Proxmox notifications use the native Proxmox webhook endpoint and matcher
+configuration via `pvesh` (no local hook script); the generated payload follows
+the infra_tools notification JSON shape.
 
 ### Tests
 
