@@ -138,6 +138,8 @@ def cleanup_all_infra_services(dry_run: bool = False) -> None:
         r"^mnt-.*\.mount$",
         # Antistatic lobby server
         r"^antistatic\.service$",
+        # Antistatic DB service
+        r"^antistatic-db\.service$",
     ]
     
     units_to_remove = []

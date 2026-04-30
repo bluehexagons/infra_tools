@@ -206,6 +206,12 @@ def create_setup_argument_parser(
                        help="Deploy the antistatic lobby server behind nginx. "
                             "DOMAIN is the public hostname; PORT is the internal listen port "
                             f"(default: 8080). Example: lobby.example.com or lobby.example.com:9090")
+
+    parser.add_argument("--antistatic-db", dest="antistatic_db",
+                       metavar="DOMAIN[:PORT]",
+                       help="Deploy the antistatic-db service behind nginx. "
+                            "DOMAIN is the public hostname; PORT is the internal listen port "
+                            " (default: 8081). The binary is fetched from GitHub releases.")
     
     parser.add_argument("--no-restart", dest="no_restart",
                         action="store_true",

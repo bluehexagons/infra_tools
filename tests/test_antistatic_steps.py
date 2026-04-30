@@ -11,15 +11,25 @@ from unittest.mock import MagicMock, call, patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from game.antistatic_steps import (
-    parse_antistatic_spec,
-    generate_antistatic_service,
-    generate_antistatic_nginx_config,
-    ANTISTATIC_USER,
     ANTISTATIC_BINARY,
+    ANTISTATIC_DB_BINARY,
+    ANTISTATIC_DB_DATA_DIR,
+    ANTISTATIC_DB_PATH,
+    ANTISTATIC_DB_SERVICE,
+    ANTISTATIC_DB_USER,
     ANTISTATIC_SERVICE,
+    ANTISTATIC_USER,
+    DEFAULT_DB_INTERNAL_PORT,
     DEFAULT_INTERNAL_PORT,
     _download_antistatic_binary,
+    _download_antistatic_db_binary,
+    _fetch_latest_antistatic_db_release,
     _fetch_latest_antistatic_release,
+    generate_antistatic_db_service,
+    generate_antistatic_nginx_config,
+    generate_antistatic_service,
+    parse_antistatic_db_spec,
+    parse_antistatic_spec,
 )
 
 
@@ -43,6 +53,23 @@ class TestParseAntistaticSpec(unittest.TestCase):
         domain, port = parse_antistatic_spec("game.lobby.mysite.io:8181")
         self.assertEqual(domain, "game.lobby.mysite.io")
         self.assertEqual(port, 8181)
+
+
+class TestParseAntistaticDbSpec(unittest.TestCase):
+    def test_domain_only(self):
+        domain, port = parse_antistatic_db_spec("api.example.com")
+        self.assertEqual(domain, "api.example.com")
+        self.assertEqual(port, DEFAULT_DB_INTERNAL_PORT)
+
+    def test_domain_with_port(self):
+        domain, port = parse_antistatic_db_spec("api.example.com:9091")
+        self.assertEqual(domain, "api.example.com")
+        self.assertEqual(port, 9091)
+
+    def test_domain_with_invalid_port_falls_back(self):
+        domain, port = parse_antistatic_db_spec("api.example.com:nope")
+        self.assertEqual(domain, "api.example.com")
+        self.assertEqual(port, DEFAULT_DB_INTERNAL_PORT)
 
 
 class TestGenerateAntistaticService(unittest.TestCase):
@@ -84,6 +111,43 @@ class TestGenerateAntistaticService(unittest.TestCase):
     def test_start_limit_burst(self):
         content = generate_antistatic_service(8080)
         self.assertIn("StartLimitBurst=3", content)
+
+
+class TestGenerateAntistaticDbService(unittest.TestCase):
+    def test_contains_required_sections(self):
+        content = generate_antistatic_db_service(8081)
+        self.assertIn("[Unit]", content)
+        self.assertIn("[Service]", content)
+        self.assertIn("[Install]", content)
+        self.assertIn("WantedBy=multi-user.target", content)
+
+    def test_port_and_db_path_substituted(self):
+        content = generate_antistatic_db_service(9091)
+        self.assertIn("-port 9091", content)
+        self.assertIn(f"-db {ANTISTATIC_DB_PATH}", content)
+
+    def test_binds_to_loopback_and_trusts_proxy(self):
+        content = generate_antistatic_db_service(8081)
+        self.assertIn("-host 127.0.0.1", content)
+        self.assertIn("-trust-proxy", content)
+
+    def test_correct_user_and_binary(self):
+        content = generate_antistatic_db_service(8081)
+        self.assertIn(f"User={ANTISTATIC_DB_USER}", content)
+        self.assertIn(f"Group={ANTISTATIC_DB_USER}", content)
+        self.assertIn(f"ExecStart={ANTISTATIC_DB_BINARY}", content)
+
+    def test_state_directory_and_working_directory(self):
+        content = generate_antistatic_db_service(8081)
+        self.assertIn("StateDirectory=antistatic-db", content)
+        self.assertIn(f"WorkingDirectory={ANTISTATIC_DB_DATA_DIR}", content)
+
+    def test_security_hardening_directives(self):
+        content = generate_antistatic_db_service(8081)
+        self.assertIn("NoNewPrivileges=yes", content)
+        self.assertIn("PrivateTmp=yes", content)
+        self.assertIn("ProtectSystem=strict", content)
+        self.assertIn("ProtectHome=yes", content)
 
 
 class TestGenerateAntistaticNginxConfig(unittest.TestCase):
@@ -220,6 +284,106 @@ class TestAntistaticReleaseDownloads(unittest.TestCase):
         tag_name = _download_antistatic_binary("amd64")
 
         self.assertEqual(tag_name, "v1.2.3")
+        mock_run.assert_not_called()
+        mock_write_release.assert_not_called()
+
+
+class TestAntistaticDbReleaseDownloads(unittest.TestCase):
+    def test_fetch_latest_release_returns_tag_and_asset_url(self):
+        release_payload = {
+            "tag_name": "v0.1.0",
+            "assets": [
+                {
+                    "name": "antistatic-db-linux-amd64",
+                    "browser_download_url": "https://example.invalid/antistatic-db-linux-amd64",
+                }
+            ],
+        }
+
+        with patch(
+            "game.antistatic_steps.run",
+            return_value=MagicMock(returncode=0, stdout=json.dumps(release_payload)),
+        ):
+            tag_name, download_url = _fetch_latest_antistatic_db_release("amd64")
+
+        self.assertEqual(tag_name, "v0.1.0")
+        self.assertEqual(
+            download_url,
+            "https://example.invalid/antistatic-db-linux-amd64",
+        )
+
+    def test_fetch_latest_release_requires_matching_asset(self):
+        release_payload = {
+            "tag_name": "v0.1.0",
+            "assets": [
+                {
+                    "name": "antistatic-db-linux-arm64",
+                    "browser_download_url": "https://example.invalid/antistatic-db-linux-arm64",
+                }
+            ],
+        }
+
+        with patch(
+            "game.antistatic_steps.run",
+            return_value=MagicMock(returncode=0, stdout=json.dumps(release_payload)),
+        ):
+            with self.assertRaises(RuntimeError):
+                _fetch_latest_antistatic_db_release("amd64")
+
+    @patch("game.antistatic_steps._write_installed_antistatic_db_release")
+    @patch("game.antistatic_steps.run")
+    @patch("game.antistatic_steps.os.path.exists", return_value=False)
+    @patch("game.antistatic_steps._read_installed_antistatic_db_release", return_value="v0.0.9")
+    @patch(
+        "game.antistatic_steps._fetch_latest_antistatic_db_release",
+        return_value=("v0.1.0", "https://example.invalid/antistatic-db-linux-amd64"),
+    )
+    def test_download_binary_reinstalls_when_new_release_available(
+        self,
+        _fetch_latest,
+        _read_installed,
+        _exists,
+        mock_run,
+        mock_write_release,
+    ):
+        tag_name = _download_antistatic_db_binary("amd64")
+
+        self.assertEqual(tag_name, "v0.1.0")
+        mock_run.assert_has_calls(
+            [
+                call(
+                    "curl -fL -o /tmp/antistatic-db-linux-amd64.v0.1.0 https://example.invalid/antistatic-db-linux-amd64",
+                    check=True,
+                    display_cmd="curl -fL -o /tmp/antistatic-db-linux-amd64.v0.1.0 <release URL>",
+                ),
+                call("chmod +x /tmp/antistatic-db-linux-amd64.v0.1.0", check=True),
+                call(
+                    "mv /tmp/antistatic-db-linux-amd64.v0.1.0 /usr/local/bin/antistatic-db",
+                    check=True,
+                ),
+            ]
+        )
+        mock_write_release.assert_called_once_with("v0.1.0")
+
+    @patch("game.antistatic_steps._write_installed_antistatic_db_release")
+    @patch("game.antistatic_steps.run")
+    @patch("game.antistatic_steps.os.path.exists", return_value=True)
+    @patch("game.antistatic_steps._read_installed_antistatic_db_release", return_value="v0.1.0")
+    @patch(
+        "game.antistatic_steps._fetch_latest_antistatic_db_release",
+        return_value=("v0.1.0", "https://example.invalid/antistatic-db-linux-amd64"),
+    )
+    def test_download_binary_skips_reinstall_when_latest_release_already_present(
+        self,
+        _fetch_latest,
+        _read_installed,
+        _exists,
+        mock_run,
+        mock_write_release,
+    ):
+        tag_name = _download_antistatic_db_binary("amd64")
+
+        self.assertEqual(tag_name, "v0.1.0")
         mock_run.assert_not_called()
         mock_write_release.assert_not_called()
 

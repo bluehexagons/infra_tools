@@ -25,6 +25,15 @@ ANTISTATIC_RELEASE_STATE_FILE = "/opt/infra_tools/state/antistatic_release.json"
 GITHUB_REPO = "bluehexagons/antistatic-server"
 DEFAULT_INTERNAL_PORT = 8080
 
+ANTISTATIC_DB_USER = "antistatic-db"
+ANTISTATIC_DB_BINARY = "/usr/local/bin/antistatic-db"
+ANTISTATIC_DB_SERVICE = "antistatic-db"
+ANTISTATIC_DB_RELEASE_STATE_FILE = "/opt/infra_tools/state/antistatic_db_release.json"
+ANTISTATIC_DB_GITHUB_REPO = "bluehexagons/antistatic-db"
+ANTISTATIC_DB_DATA_DIR = "/var/lib/antistatic-db"
+ANTISTATIC_DB_PATH = f"{ANTISTATIC_DB_DATA_DIR}/antistatic.db"
+DEFAULT_DB_INTERNAL_PORT = 8081
+
 
 def parse_antistatic_spec(spec: str) -> tuple[str, int]:
     """Parse a 'DOMAIN[:port]' spec into (domain, port).
@@ -38,6 +47,17 @@ def parse_antistatic_spec(spec: str) -> tuple[str, int]:
         except ValueError:
             return domain, DEFAULT_INTERNAL_PORT
     return spec, DEFAULT_INTERNAL_PORT
+
+
+def parse_antistatic_db_spec(spec: str) -> tuple[str, int]:
+    """Parse an antistatic-db 'DOMAIN[:port]' spec into (domain, port)."""
+    if ":" in spec:
+        domain, _, raw_port = spec.rpartition(":")
+        try:
+            return domain, int(raw_port)
+        except ValueError:
+            return domain, DEFAULT_DB_INTERNAL_PORT
+    return spec, DEFAULT_DB_INTERNAL_PORT
 
 
 def _detect_arch() -> str:
@@ -59,6 +79,18 @@ def _ensure_antistatic_user() -> None:
         f"{ANTISTATIC_USER}"
     )
     print(f"  ✓ Created system user: {ANTISTATIC_USER}")
+
+
+def _ensure_antistatic_db_user() -> None:
+    """Create a dedicated antistatic-db system user if needed."""
+    if user_exists(ANTISTATIC_DB_USER):
+        print(f"  ✓ System user already exists: {ANTISTATIC_DB_USER}")
+        return
+    run(
+        f"useradd --system --no-create-home --shell /usr/sbin/nologin "
+        f"{ANTISTATIC_DB_USER}"
+    )
+    print(f"  ✓ Created system user: {ANTISTATIC_DB_USER}")
 
 
 def _fetch_latest_antistatic_release(arch: str) -> tuple[str, str]:
@@ -96,6 +128,44 @@ def _fetch_latest_antistatic_release(arch: str) -> tuple[str, str]:
     return tag_name, download_url
 
 
+def _fetch_latest_antistatic_db_release(arch: str) -> tuple[str, str]:
+    """Return the latest antistatic-db release tag and binary URL."""
+    binary_name = f"antistatic-db-linux-{arch}"
+    api_url = f"https://api.github.com/repos/{ANTISTATIC_DB_GITHUB_REPO}/releases/latest"
+
+    result = run(
+        f"curl -sf {shlex.quote(api_url)}",
+        capture_output=True,
+        display_cmd=(
+            f"curl -sf https://api.github.com/repos/"
+            f"{ANTISTATIC_DB_GITHUB_REPO}/releases/latest"
+        ),
+    )
+    if result.returncode != 0 or not result.stdout:
+        raise RuntimeError("Failed to fetch latest antistatic-db release info from GitHub")
+
+    try:
+        release_data = json.loads(result.stdout)
+        tag_name = release_data.get("tag_name")
+        if not isinstance(tag_name, str) or not tag_name:
+            raise RuntimeError("Latest antistatic-db release response did not include tag_name")
+        assets = release_data.get("assets", [])
+        download_url: str | None = next(
+            (a["browser_download_url"] for a in assets if a["name"] == binary_name),
+            None,
+        )
+    except (json.JSONDecodeError, KeyError) as exc:
+        raise RuntimeError(f"Failed to parse antistatic-db GitHub release data: {exc}") from exc
+
+    if not download_url:
+        raise RuntimeError(
+            f"No binary found for '{binary_name}' in the latest release of "
+            f"https://github.com/{ANTISTATIC_DB_GITHUB_REPO}"
+        )
+
+    return tag_name, download_url
+
+
 def _read_installed_antistatic_release() -> str | None:
     """Return the recorded antistatic release tag, if available."""
     try:
@@ -127,6 +197,37 @@ def _write_installed_antistatic_release(tag_name: str) -> None:
         fh.write("\n")
 
 
+def _read_installed_antistatic_db_release() -> str | None:
+    """Return the recorded antistatic-db release tag, if available."""
+    try:
+        with open(ANTISTATIC_DB_RELEASE_STATE_FILE, "r", encoding="utf-8") as fh:
+            release_state = json.load(fh)
+    except FileNotFoundError:
+        return None
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"  ⚠ Warning: Failed to read antistatic-db release metadata: {exc}")
+        return None
+
+    if not isinstance(release_state, dict):
+        print("  ⚠ Warning: Invalid antistatic-db release metadata, reinstalling latest release")
+        return None
+
+    tag_name = release_state.get("tag_name")
+    if not isinstance(tag_name, str) or not tag_name:
+        print("  ⚠ Warning: Missing antistatic-db release tag in metadata, reinstalling latest release")
+        return None
+    return tag_name
+
+
+def _write_installed_antistatic_db_release(tag_name: str) -> None:
+    """Persist the installed antistatic-db release tag for future update checks."""
+    state_dir = os.path.dirname(ANTISTATIC_DB_RELEASE_STATE_FILE)
+    run(f"mkdir -p {shlex.quote(state_dir)}", check=True)
+    with open(ANTISTATIC_DB_RELEASE_STATE_FILE, "w", encoding="utf-8") as fh:
+        json.dump({"tag_name": tag_name}, fh)
+        fh.write("\n")
+
+
 def _download_antistatic_binary(arch: str) -> str:
     """Install the newest antistatic-server release when needed.
 
@@ -153,6 +254,29 @@ def _download_antistatic_binary(arch: str) -> str:
     return latest_tag
 
 
+def _download_antistatic_db_binary(arch: str) -> str:
+    """Install the newest antistatic-db release when needed."""
+    binary_name = f"antistatic-db-linux-{arch}"
+    latest_tag, download_url = _fetch_latest_antistatic_db_release(arch)
+    installed_tag = _read_installed_antistatic_db_release()
+    if installed_tag == latest_tag and os.path.exists(ANTISTATIC_DB_BINARY):
+        print(f"  ✓ antistatic-db already up to date ({latest_tag})")
+        return latest_tag
+
+    print(f"  Downloading {binary_name} ({latest_tag})...")
+    tmp_path = f"/tmp/{binary_name}.{latest_tag}"
+    run(
+        f"curl -fL -o {shlex.quote(tmp_path)} {shlex.quote(download_url)}",
+        check=True,
+        display_cmd=f"curl -fL -o {tmp_path} <release URL>",
+    )
+    run(f"chmod +x {shlex.quote(tmp_path)}", check=True)
+    run(f"mv {shlex.quote(tmp_path)} {ANTISTATIC_DB_BINARY}", check=True)
+    _write_installed_antistatic_db_release(latest_tag)
+    print(f"  ✓ Installed {ANTISTATIC_DB_BINARY} ({latest_tag})")
+    return latest_tag
+
+
 def generate_antistatic_service(port: int) -> str:
     """Return systemd unit file content for the antistatic server."""
     return f"""\
@@ -167,6 +291,37 @@ Type=simple
 User={ANTISTATIC_USER}
 Group={ANTISTATIC_USER}
 ExecStart={ANTISTATIC_BINARY} -port {port} -trust-proxy
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
+def generate_antistatic_db_service(port: int) -> str:
+    """Return systemd unit file content for antistatic-db."""
+    return f"""\
+[Unit]
+Description=Antistatic DB service
+Documentation=https://github.com/bluehexagons/antistatic-db
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User={ANTISTATIC_DB_USER}
+Group={ANTISTATIC_DB_USER}
+StateDirectory=antistatic-db
+WorkingDirectory={ANTISTATIC_DB_DATA_DIR}
+ExecStart={ANTISTATIC_DB_BINARY} -host 127.0.0.1 -port {port} -db {ANTISTATIC_DB_PATH} -trust-proxy
 Restart=on-failure
 RestartSec=5
 StartLimitIntervalSec=60
@@ -285,6 +440,42 @@ def setup_antistatic_server(config: SetupConfig) -> None:
         print(
             f"  ⚠ Warning: {ANTISTATIC_SERVICE} may not be running. "
             f"Check with: systemctl status {ANTISTATIC_SERVICE}"
+        )
+
+    _configure_nginx_proxy(domain, port)
+
+
+def setup_antistatic_db(config: SetupConfig) -> None:
+    """Install and run antistatic-db behind nginx from GitHub releases."""
+    if not config.antistatic_db:
+        return
+
+    domain, port = parse_antistatic_db_spec(config.antistatic_db)
+    print(f"  Setting up antistatic-db: {domain} → 127.0.0.1:{port}")
+
+    from web.web_steps import install_nginx
+    install_nginx(config)
+
+    _ensure_antistatic_db_user()
+    _download_antistatic_db_binary(_detect_arch())
+
+    cleanup_service(ANTISTATIC_DB_SERVICE)
+
+    service_file = f"/etc/systemd/system/{ANTISTATIC_DB_SERVICE}.service"
+    with open(service_file, "w", encoding="utf-8") as fh:
+        fh.write(generate_antistatic_db_service(port))
+
+    run("systemctl daemon-reload")
+    run(f"systemctl enable {ANTISTATIC_DB_SERVICE}")
+    run(f"systemctl restart {ANTISTATIC_DB_SERVICE}")
+    print(f"  ✓ Created and started systemd service: {ANTISTATIC_DB_SERVICE}")
+
+    if is_service_active(ANTISTATIC_DB_SERVICE):
+        print(f"  ✓ {ANTISTATIC_DB_SERVICE} is running")
+    else:
+        print(
+            f"  ⚠ Warning: {ANTISTATIC_DB_SERVICE} may not be running. "
+            f"Check with: systemctl status {ANTISTATIC_DB_SERVICE}"
         )
 
     _configure_nginx_proxy(domain, port)

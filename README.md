@@ -148,6 +148,9 @@ python3 infra_tools.py setup server_web 192.168.1.10 --antistatic-server lobby.e
 
 # The lobby server binary is fetched from github.com/bluehexagons/antistatic-server/releases
 # Runs as a locked-down systemd service with automatic restart on failure
+
+# Deploy antistatic-db behind nginx from future GitHub release binaries
+python3 infra_tools.py setup server_web 192.168.1.10 --antistatic-db db.example.com --ssl
 ```
 
 Workspace state now lives under `~/.config/infra_tools` by default. Use `--workspace /path/to/workspace` to isolate

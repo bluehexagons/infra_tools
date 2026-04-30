@@ -176,9 +176,12 @@ python3 infra_tools.py setup server_web 10.0.0.50 admin \
 
 Deploys the [antistatic-server](https://github.com/bluehexagons/antistatic-server) Go binary behind nginx. The latest release is auto-downloaded from GitHub releases (`github.com/bluehexagons/antistatic-server/releases`), and rerunning setup upgrades the service when a newer release exists.
 
+`antistatic-db` is also supported through the same release-binary flow. The repo does not publish releases yet, but infra_tools expects future assets named `antistatic-db-linux-amd64` / `antistatic-db-linux-arm64` from `github.com/bluehexagons/antistatic-db/releases`.
+
 | Flag | Description |
 |------|-------------|
 | `--antistatic-server DOMAIN[:PORT]` | Deploy lobby server. DOMAIN is the public hostname. PORT is the internal listen port (default: 8080). The binary is fetched from GitHub releases and installed to `/usr/local/bin/antistatic-server`. Requires `--ssl` for secure (HTTPS) deployment. |
+| `--antistatic-db DOMAIN[:PORT]` | Deploy antistatic-db. DOMAIN is the public hostname. PORT is the internal listen port (default: 8081). The binary is fetched from future GitHub releases and installed to `/usr/local/bin/antistatic-db`; SQLite data lives in `/var/lib/antistatic-db/antistatic.db`. Requires `--ssl` for secure (HTTPS) deployment. |
 
 ```bash
 # Basic usage (default port 8080)
@@ -186,9 +189,12 @@ python3 infra_tools.py setup server_lite 192.168.1.10 --antistatic-server lobby.
 
 # With custom port
 python3 infra_tools.py setup server_web 192.168.1.10 --antistatic-server lobby.example.com:9090 --ssl
+
+# Deploy antistatic-db
+python3 infra_tools.py setup server_web 192.168.1.10 --antistatic-db db.example.com --ssl
 ```
 
-The service runs as a locked-down systemd unit (`antistatic.service`) with `Restart=on-failure`, security hardening (`NoNewPrivileges`, `PrivateTmp`, `ProtectSystem=strict`, `ProtectHome`), and automatic nginx configuration including SSL certificates.
+The services run as locked-down systemd units (`antistatic.service` and `antistatic-db.service`) with `Restart=on-failure`, security hardening (`NoNewPrivileges`, `PrivateTmp`, `ProtectSystem=strict`, `ProtectHome`), and automatic nginx configuration including SSL certificates.
 
 ## Build/App Server Flags
 

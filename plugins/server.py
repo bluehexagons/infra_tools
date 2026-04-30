@@ -44,13 +44,16 @@ PLUGIN = PluginDefinition(
 
 
 def extend_antistatic_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -> None:
-    """Append the antistatic lobby server setup step when configured."""
-    if not config.antistatic_server:
-        return
+    """Append Antistatic service setup steps when configured."""
+    if config.antistatic_server:
+        from game.antistatic_steps import setup_antistatic_server
 
-    from game.antistatic_steps import setup_antistatic_server
+        steps.append(("Setting up antistatic lobby server", setup_antistatic_server))
 
-    steps.append(("Setting up antistatic lobby server", setup_antistatic_server))
+    if config.antistatic_db:
+        from game.antistatic_steps import setup_antistatic_db
+
+        steps.append(("Setting up antistatic-db service", setup_antistatic_db))
 
 
 def build_server_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:

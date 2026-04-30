@@ -49,6 +49,7 @@ python3 -m unittest discover -s tests
 | Validation | `lib/validation.py` | `validate_path` | `validate_path`, `validate_service_name` |
 | SSH Operations | `lib/remote_utils.py` | `run` | `run`, `is_service_active` |
 | antistatic_server | `lib/config.py` | `SetupConfig` | `SetupConfig.antistatic_server` |
+| antistatic_db | `lib/config.py` | `SetupConfig` | `SetupConfig.antistatic_db` |
 | SSH Keys | `lib/config.py` | `SetupConfig` | `SetupConfig.ssh_key` |
 
 ---
