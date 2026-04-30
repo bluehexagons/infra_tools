@@ -105,7 +105,11 @@ Run the full default suite (fast — no network, no live hosts):
 ```bash
 python3 -m unittest discover -s tests   # raw unittest
 ./run_tests.py                          # nicer wrapper with selectors
+./run_tests.py --list-suites            # named slices: smoke, proxmox, security, integration
+./run_tests.py --suite smoke            # quick high-value checks
+./run_tests.py --suite proxmox          # all Proxmox tests (live test still gated)
 ./run_tests.py test_proxmox_manage      # one module
+./run_tests.py --durations 20           # show slowest tests
 ./run_tests.py -v                       # verbose
 ```
 
@@ -114,6 +118,7 @@ gated behind opt-in *categories*. List them and run them on demand:
 
 ```bash
 ./run_tests.py --list-categories
+./run_tests.py --check-prereqs --expensive live_proxmox
 ./run_tests.py --expensive live_proxmox tests.test_proxmox_live
 ./run_tests.py --expensive all          # everything, including expensive
 ```

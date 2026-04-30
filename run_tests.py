@@ -8,9 +8,14 @@ are skipped. Opt in with ``--expensive CATEGORY`` (repeatable) or
 Examples:
     ./run_tests.py                                  # full default suite, concise output
     ./run_tests.py -v                               # verbose
+    ./run_tests.py --suite smoke                    # quick high-value checks
+    ./run_tests.py --suite proxmox                  # mocked Proxmox + skipped live test
     ./run_tests.py test_proxmox_manage              # one test module
     ./run_tests.py tests.test_proxmox_manage.TestHealthCheck   # one class
+    ./run_tests.py --durations 20                   # show slowest tests
+    ./run_tests.py --list-suites                    # show named suites
     ./run_tests.py --list-categories                # show known expensive categories
+    ./run_tests.py --check-prereqs --expensive live_proxmox
     ./run_tests.py --expensive live_proxmox \
         tests.test_proxmox_live                     # run a real Proxmox round-trip
     ./run_tests.py --expensive all                  # run everything including expensive
@@ -26,6 +31,7 @@ import argparse
 import io
 import os
 import sys
+import time
 import unittest
 from pathlib import Path
 from typing import TextIO
@@ -39,6 +45,46 @@ from tests.expensive_support import (  # noqa: E402  (after sys.path tweak)
     KNOWN_CATEGORIES,
     category_env_var,
 )
+
+TEST_SUITES: dict[str, list[str]] = {
+    "smoke": [
+        "tests.test_config",
+        "tests.test_validation",
+        "tests.test_proxmox_hosts",
+        "tests.test_proxmox_manage",
+        "tests.test_proxmox_cli",
+        "tests.test_expensive_support",
+    ],
+    "proxmox": [
+        "tests.test_arg_parser_hosted",
+        "tests.test_proxmox_node",
+        "tests.test_proxmox_hosts",
+        "tests.test_proxmox_manage",
+        "tests.test_proxmox_shell",
+        "tests.test_proxmox_cli",
+        "tests.test_proxmox_live",
+    ],
+    "security": [
+        "tests.test_security_steps",
+        "tests.test_shell_safety",
+        "tests.test_samba_hardening",
+        "tests.test_smb_mount_hardening",
+        "tests.test_ssh_utils",
+        "tests.test_validation",
+        "tests.test_validators",
+    ],
+    "integration": [
+        "tests.test_cicd",
+        "tests.test_deployment_backup",
+        "tests.test_deploy_utils",
+        "tests.test_orchestrator_bootstrap",
+        "tests.test_remote_setup",
+        "tests.test_remote_utils",
+        "tests.test_setup_common",
+        "tests.test_proxmox_node",
+    ],
+    "all": [],
+}
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -71,6 +117,36 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--suite",
+        action="append",
+        choices=sorted(TEST_SUITES),
+        metavar="SUITE",
+        default=[],
+        help=(
+            "Run a named suite. Repeatable. "
+            f"Choices: {', '.join(sorted(TEST_SUITES))}."
+        ),
+    )
+    parser.add_argument(
+        "--durations",
+        type=int,
+        metavar="N",
+        default=0,
+        help="Show the N slowest test durations after the run.",
+    )
+    parser.add_argument(
+        "--check-prereqs",
+        action="store_true",
+        help=(
+            "Check prerequisites for requested expensive categories and exit. "
+            "Useful before destructive live tests."
+        ),
+    )
+    parser.add_argument(
+        "--list-suites", action="store_true",
+        help="List named suites and exit.",
+    )
+    parser.add_argument(
         "--list-categories", action="store_true",
         help="List the known expensive-test categories and exit.",
     )
@@ -79,6 +155,20 @@ def _build_parser() -> argparse.ArgumentParser:
         help="List the discovered test files and exit.",
     )
     return parser
+
+
+def _list_suites() -> int:
+    print("Named test suites:")
+    print()
+    width = max(len(name) for name in TEST_SUITES) if TEST_SUITES else 0
+    for name, selectors in sorted(TEST_SUITES.items()):
+        if name == "all":
+            print(f"  {name:<{width}}  all discovered tests (expensive tests still gated)")
+            continue
+        print(f"  {name:<{width}}  {len(selectors)} module(s)")
+        for selector in selectors:
+            print(f"  {'':<{width}}    {selector}")
+    return 0
 
 
 def _list_categories() -> int:
@@ -117,6 +207,53 @@ def _apply_expensive_flags(categories: list[str]) -> list[str]:
         os.environ[category_env_var(cat)] = "1"
         enabled.append(cat)
     return enabled
+
+
+def _requested_prereq_categories(expensive: list[str]) -> list[str]:
+    categories: list[str] = []
+    for raw in expensive:
+        cat = raw.strip().lower()
+        if not cat:
+            continue
+        if cat == "all":
+            categories.extend(KNOWN_CATEGORIES)
+            continue
+        categories.append(cat)
+    if not categories:
+        categories.extend(KNOWN_CATEGORIES)
+    return sorted(set(categories))
+
+
+def _check_prereqs(categories: list[str]) -> int:
+    checks = {
+        "live_proxmox": _check_live_proxmox_prereqs,
+    }
+    unknown = [cat for cat in categories if cat not in checks]
+    failures: list[str] = []
+    print("Prerequisite checks:")
+    for category in categories:
+        check = checks.get(category)
+        if check is None:
+            continue
+        errors = check()
+        if errors:
+            print(f"  ✗ {category}")
+            for error in errors:
+                print(f"    - {error}")
+            failures.extend(f"{category}: {error}" for error in errors)
+        else:
+            print(f"  ✓ {category}")
+    for category in unknown:
+        print(f"  - {category}: no prerequisite checker registered")
+    if failures:
+        return 2
+    return 0
+
+
+def _check_live_proxmox_prereqs() -> list[str]:
+    from tests.test_proxmox_live import check_live_proxmox_prereqs
+
+    return check_live_proxmox_prereqs()
 
 
 def _resolve_selector(loader: unittest.TestLoader, selector: str):
@@ -161,10 +298,19 @@ def _resolve_selector(loader: unittest.TestLoader, selector: str):
     )
 
 
-def _build_suite(loader: unittest.TestLoader, selectors: list[str]) -> unittest.TestSuite:
-    if not selectors:
+def _build_suite(
+    loader: unittest.TestLoader,
+    selectors: list[str],
+    suites: list[str],
+) -> unittest.TestSuite:
+    if "all" in suites:
+        return loader.discover("tests", pattern="test_*.py")
+    if not selectors and not suites:
         return loader.discover("tests", pattern="test_*.py")
     suite = unittest.TestSuite()
+    for suite_name in suites:
+        for selector in TEST_SUITES[suite_name]:
+            suite.addTests(_resolve_selector(loader, selector))
     for sel in selectors:
         suite.addTests(_resolve_selector(loader, sel))
     return suite
@@ -192,10 +338,42 @@ class _Tee:
         return self.original.isatty()
 
 
+class TimedTextTestResult(unittest.TextTestResult):
+    """Text test result that records per-test durations."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.test_durations: list[tuple[float, str]] = []
+        self._test_started_at = 0.0
+
+    def startTest(self, test) -> None:
+        self._test_started_at = time.perf_counter()
+        super().startTest(test)
+
+    def stopTest(self, test) -> None:
+        elapsed = time.perf_counter() - self._test_started_at
+        self.test_durations.append((elapsed, test.id()))
+        super().stopTest(test)
+
+
+def _print_durations(result: unittest.TestResult, count: int) -> None:
+    if count <= 0:
+        return
+    durations = getattr(result, "test_durations", [])
+    if not durations:
+        return
+    print()
+    print(f"Slowest {min(count, len(durations))} tests:")
+    for elapsed, test_id in sorted(durations, reverse=True)[:count]:
+        print(f"  {elapsed:8.3f}s  {test_id}")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
+    if args.list_suites:
+        return _list_suites()
     if args.list_categories:
         return _list_categories()
     if args.list_tests:
@@ -205,6 +383,9 @@ def main(argv: list[str] | None = None) -> int:
     if enabled:
         print(f"Expensive categories enabled: {', '.join(enabled)}")
 
+    if args.check_prereqs:
+        return _check_prereqs(_requested_prereq_categories(args.expensive))
+
     if not args.verbose:
         os.environ.setdefault("INFRA_TOOLS_TEST", "1")
 
@@ -212,13 +393,13 @@ def main(argv: list[str] | None = None) -> int:
 
     loader = unittest.TestLoader()
     try:
-        suite = _build_suite(loader, args.selectors)
+        suite = _build_suite(loader, args.selectors, args.suite)
     except RuntimeError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
 
     if args.verbose:
-        runner = unittest.TextTestRunner(verbosity=2)
+        runner = unittest.TextTestRunner(verbosity=2, resultclass=TimedTextTestResult)
         result = runner.run(suite)
     else:
         capture = io.StringIO()
@@ -226,13 +407,19 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout = capture
         sys.stderr = capture
         try:
-            runner = unittest.TextTestRunner(stream=capture, verbosity=0)
+            runner = unittest.TextTestRunner(
+                stream=capture,
+                verbosity=0,
+                resultclass=TimedTextTestResult,
+            )
             result = runner.run(suite)
         finally:
             sys.stdout = old_stdout
             sys.stderr = old_stderr
         if not result.wasSuccessful():
             sys.stdout.write(capture.getvalue())
+
+    _print_durations(result, args.durations)
 
     print()
     skipped = len(result.skipped)

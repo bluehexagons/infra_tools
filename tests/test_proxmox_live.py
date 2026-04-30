@@ -31,8 +31,10 @@ body fails, so a failing run shouldn't leave debris behind.
 from __future__ import annotations
 
 import os
+import shlex
 import sys
 import unittest
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -65,6 +67,46 @@ def _required_env_missing() -> list[str]:
     return missing
 
 
+def _live_host_from_env() -> ProxmoxHost:
+    return ProxmoxHost(
+        name=_env("PROXMOX_TEST_HOST_NAME", "live-test") or "live-test",
+        address=_env("PROXMOX_TEST_HOST") or "",
+        user=_env("PROXMOX_TEST_USER", "root") or "root",
+        ssh_key=_env("PROXMOX_TEST_SSH_KEY"),
+    )
+
+
+def check_live_proxmox_prereqs() -> list[str]:
+    """Return prerequisite errors for the destructive live Proxmox test."""
+    errors: list[str] = []
+    missing = _required_env_missing()
+    if missing:
+        errors.append("missing required env vars: " + ", ".join(missing))
+
+    ssh_key = _env("PROXMOX_TEST_SSH_KEY")
+    if ssh_key and not Path(ssh_key).expanduser().exists():
+        errors.append(f"PROXMOX_TEST_SSH_KEY does not exist: {ssh_key}")
+
+    vmid_raw = _env("PROXMOX_TEST_VMID", "9999") or "9999"
+    try:
+        vmid = int(vmid_raw)
+    except ValueError:
+        errors.append(f"PROXMOX_TEST_VMID must be an integer: {vmid_raw!r}")
+    else:
+        if vmid < 100:
+            errors.append("PROXMOX_TEST_VMID must be >= 100")
+
+    if _env("PROXMOX_TEST_HOST"):
+        host = _live_host_from_env()
+        result = _run_on_host(host, "command -v pct >/dev/null")
+        if result.returncode != 0:
+            errors.append(
+                "cannot reach Proxmox host or 'pct' is unavailable "
+                f"(rc={result.returncode}, stderr={result.stderr.strip()!r})"
+            )
+    return errors
+
+
 @expensive(
     "live_proxmox",
     "Creates and destroys a real LXC container on a Proxmox host",
@@ -80,13 +122,8 @@ class TestProxmoxLiveLifecycle(unittest.TestCase):
                 "Missing required env vars for live Proxmox test: "
                 + ", ".join(missing)
             )
-        cls.host = ProxmoxHost(
-            name=_env("PROXMOX_TEST_HOST_NAME", "live-test"),
-            address=_env("PROXMOX_TEST_HOST"),  # required, checked above
-            user=_env("PROXMOX_TEST_USER", "root") or "root",
-            ssh_key=_env("PROXMOX_TEST_SSH_KEY"),
-        )
-        cls.template = _env("PROXMOX_TEST_TEMPLATE")
+        cls.host = _live_host_from_env()
+        cls.template = _env("PROXMOX_TEST_TEMPLATE") or ""
         cls.storage = _env("PROXMOX_TEST_STORAGE", "local-lvm") or "local-lvm"
         cls.bridge = _env("PROXMOX_TEST_BRIDGE", "vmbr0") or "vmbr0"
         cls.vmid = int(_env("PROXMOX_TEST_VMID", "9999") or "9999")
@@ -111,11 +148,11 @@ class TestProxmoxLiveLifecycle(unittest.TestCase):
 
     def _create(self) -> None:
         cmd = (
-            f"pct create {self.vmid} {self.template} "
-            f"--hostname {self.hostname} "
-            f"--memory 256 --cores 1 --rootfs {self.storage}:1 "
-            f"--net0 name=eth0,bridge={self.bridge},ip=dhcp,type=veth "
-            f"--password {self.password} --unprivileged 1 --start 0"
+            f"pct create {self.vmid} {shlex.quote(self.template)} "
+            f"--hostname {shlex.quote(self.hostname)} "
+            f"--memory 256 --cores 1 --rootfs {shlex.quote(f'{self.storage}:1')} "
+            f"--net0 {shlex.quote(f'name=eth0,bridge={self.bridge},ip=dhcp,type=veth')} "
+            f"--password {shlex.quote(self.password)} --unprivileged 1 --start 0"
         )
         result = _run_on_host(self.host, cmd)
         if result.returncode != 0:
