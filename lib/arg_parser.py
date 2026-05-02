@@ -211,16 +211,16 @@ def add_setup_arguments(
                        help="Configure notification target: TYPE (webhook|mailbox), TARGET (URL for webhook or email for mailbox). Sends alerts for important events (errors, warnings, successes). Can be used multiple times for multiple targets.")
     
     parser.add_argument("--antistatic-server", dest="antistatic_server",
-                       metavar="DOMAIN[:PORT]",
+                       metavar="[DOMAIN][:PORT]",
                        help="Deploy the antistatic lobby server behind nginx. "
-                            "DOMAIN is the public hostname; PORT is the internal listen port "
-                            f"(default: 8080). Example: lobby.example.com or lobby.example.com:9090")
+                            "DOMAIN is the optional public hostname; PORT is the internal listen port "
+                            f"(default: 8080). Hostless specs like :8080 listen directly without nginx.")
 
     parser.add_argument("--antistatic-db", dest="antistatic_db",
-                       metavar="DOMAIN[:PORT]",
+                       metavar="[DOMAIN][:PORT]",
                        help="Deploy the antistatic-db service behind nginx. "
-                            "DOMAIN is the public hostname; PORT is the internal listen port "
-                            " (default: 8081). The binary is fetched from GitHub releases.")
+                            "DOMAIN is the optional public hostname; PORT is the internal listen port "
+                            "(default: 8081). Hostless specs like :8081 listen directly without nginx.")
     
     parser.add_argument("--no-restart", dest="no_restart",
                         action="store_true",

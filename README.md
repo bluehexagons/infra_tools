@@ -194,10 +194,13 @@ python3 infra_tools.py setup server_lite 192.168.1.10 --antistatic-server lobby.
 # With custom internal port (default: 8080)
 python3 infra_tools.py setup server_web 192.168.1.10 --antistatic-server lobby.example.com:9090 --ssl
 
+# Hostless direct port, no nginx virtual host
+python3 infra_tools.py setup server_lite 192.168.1.10 --antistatic-server :8080
+
 # The lobby server binary is fetched from github.com/bluehexagons/antistatic-server/releases
 # Runs as a locked-down systemd service with automatic restart on failure
 
-# Deploy antistatic-db behind nginx from future GitHub release binaries
+# Deploy antistatic-db behind nginx, or use :8081 for direct hostless mode
 python3 infra_tools.py setup server_web 192.168.1.10 --antistatic-db db.example.com --ssl
 ```
 

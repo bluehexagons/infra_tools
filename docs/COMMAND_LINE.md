@@ -178,14 +178,14 @@ python3 infra_tools.py setup server_web 10.0.0.50 admin \
 
 ## Game Lobby Server (Antistatic)
 
-Deploys the [antistatic-server](https://github.com/bluehexagons/antistatic-server) Go binary behind nginx. The latest release is auto-downloaded from GitHub releases (`github.com/bluehexagons/antistatic-server/releases`), and rerunning setup upgrades the service when a newer release exists.
+Deploys the [antistatic-server](https://github.com/bluehexagons/antistatic-server) Go binary. With a hostname, infra_tools configures nginx as a reverse proxy. With a hostless spec such as `:8080`, the service listens directly on that port and no nginx site is generated.
 
 `antistatic-db` is also supported through the same release-binary flow. The repo does not publish releases yet, but infra_tools expects future assets named `antistatic-db-linux-amd64` / `antistatic-db-linux-arm64` from `github.com/bluehexagons/antistatic-db/releases`.
 
 | Flag | Description |
 |------|-------------|
-| `--antistatic-server DOMAIN[:PORT]` | Deploy lobby server. DOMAIN is the public hostname. PORT is the internal listen port (default: 8080). The binary is fetched from GitHub releases and installed to `/usr/local/bin/antistatic-server`. Requires `--ssl` for secure (HTTPS) deployment. |
-| `--antistatic-db DOMAIN[:PORT]` | Deploy antistatic-db. DOMAIN is the public hostname. PORT is the internal listen port (default: 8081). The binary is fetched from future GitHub releases and installed to `/usr/local/bin/antistatic-db`; SQLite data lives in `/var/lib/antistatic-db/antistatic.db`. Requires `--ssl` for secure (HTTPS) deployment. |
+| `--antistatic-server [DOMAIN][:PORT]` | Deploy lobby server. DOMAIN is optional. PORT defaults to 8080. Hostless specs like `:8080` or `8080` listen directly without nginx. |
+| `--antistatic-db [DOMAIN][:PORT]` | Deploy antistatic-db. DOMAIN is optional. PORT defaults to 8081. Hostless specs like `:8081` or `8081` listen directly without nginx. SQLite data lives in `/var/lib/antistatic-db/antistatic.db`. |
 
 ```bash
 # Basic usage (default port 8080)
@@ -194,11 +194,14 @@ python3 infra_tools.py setup server_lite 192.168.1.10 --antistatic-server lobby.
 # With custom port
 python3 infra_tools.py setup server_web 192.168.1.10 --antistatic-server lobby.example.com:9090 --ssl
 
+# Hostless direct port, no nginx virtual host
+python3 infra_tools.py setup server_lite 192.168.1.10 --antistatic-server :8080
+
 # Deploy antistatic-db
 python3 infra_tools.py setup server_web 192.168.1.10 --antistatic-db db.example.com --ssl
 ```
 
-The services run as locked-down systemd units (`antistatic.service` and `antistatic-db.service`) with `Restart=on-failure`, security hardening (`NoNewPrivileges`, `PrivateTmp`, `ProtectSystem=strict`, `ProtectHome`), and automatic nginx configuration including SSL certificates.
+The services run as locked-down systemd units (`antistatic.service` and `antistatic-db.service`) with `Restart=on-failure`, security hardening (`NoNewPrivileges`, `PrivateTmp`, `ProtectSystem=strict`, `ProtectHome`), and optional nginx configuration when a hostname is provided.
 
 ## Build/App Server Flags
 
