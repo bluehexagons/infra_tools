@@ -619,7 +619,7 @@ class SetupConfig:
             host=args.host,
             username=username,
             system_type=system_type,
-            machine_type=getattr(args, 'machine_type', None) or DEFAULT_MACHINE_TYPE,
+            machine_type=getattr(args, 'machine_type', None) or system_type_definition.default_machine_type or DEFAULT_MACHINE_TYPE,
             password=getattr(args, 'password', None),
             ssh_key=getattr(args, 'ssh_key', None),
             timezone=timezone,

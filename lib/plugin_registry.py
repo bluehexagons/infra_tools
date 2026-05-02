@@ -37,6 +37,7 @@ class SystemTypeDefinition:
     default_install_office: bool = False
     default_enable_smbclient: bool = False
     default_no_restart: bool = False
+    default_machine_type: str | None = None
     default_browser: str | None = None
     step_builder: str | None = None
 

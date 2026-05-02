@@ -22,6 +22,7 @@ PLUGIN = PluginDefinition(
             description="Proxmox host server",
             order=70,
             default_no_restart=True,
+            default_machine_type="hardware",
             step_builder="plugins.proxmox:build_server_proxmox_steps",
         ),
     ),
