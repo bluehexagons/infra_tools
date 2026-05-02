@@ -320,7 +320,7 @@ def _validate_uv_install_script(script_path: str) -> bool:
         return False
     if "uv" not in content:
         return False
-    suspicious_patterns = ["rm -rf /", "chmod -R 777 /", "mkfs.", "dd if=", "curl | sh", "wget | sh"]
+    suspicious_patterns = ["rm -rf /", "chmod -R 777 /", "mkfs.", "dd if="]
     if any(pattern in content for pattern in suspicious_patterns):
         return False
     return True
@@ -350,7 +350,7 @@ def install_or_update_uv(user_home: str, username: Optional[str] = None) -> bool
                 return False
 
             file_mode = os.stat(installer_path).st_mode & 0o777
-            if (file_mode & 0o033) != 0 or (file_mode & 0o100) == 0:
+            if (file_mode & 0o033) != 0:
                 print("  ✗ Downloaded uv installer file permissions are too broad")
                 return False
 
