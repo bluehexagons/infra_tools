@@ -25,6 +25,7 @@ PLUGIN = PluginDefinition(
         "update_and_upgrade_packages",
         "ensure_sudo_installed",
         "configure_locale",
+        "configure_ipv4_preference",
         "setup_user",
         "copy_ssh_keys_to_user",
         "generate_ssh_key",
@@ -45,6 +46,7 @@ def get_common_steps() -> list[tuple[str, StepFunc]]:
     """Return the shared foundation steps for built-in setup flows."""
 
     from common.steps import (
+        configure_ipv4_preference,
         configure_locale,
         configure_swap,
         configure_time_sync,
@@ -60,6 +62,7 @@ def get_common_steps() -> list[tuple[str, StepFunc]]:
         ("Updating and upgrading packages", update_and_upgrade_packages),
         ("Ensuring sudo is installed", ensure_sudo_installed),
         ("Configuring UTF-8 locale", configure_locale),
+        ("Configuring IPv4 preference", configure_ipv4_preference),
         ("Creating remoteusers group", create_remoteusers_group),
         ("Setting up user", setup_user),
         ("Copying SSH keys to user", copy_ssh_keys_to_user),
@@ -133,6 +136,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         check_restart_required,
         configure_auto_update_ruby,
         configure_auto_update_uv,
+        configure_ipv4_preference,
         configure_locale,
         configure_swap,
         configure_time_sync,
@@ -160,6 +164,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "update_and_upgrade_packages": update_and_upgrade_packages,
         "ensure_sudo_installed": ensure_sudo_installed,
         "configure_locale": configure_locale,
+        "configure_ipv4_preference": configure_ipv4_preference,
         "setup_user": setup_user,
         "copy_ssh_keys_to_user": copy_ssh_keys_to_user,
         "generate_ssh_key": generate_ssh_key,

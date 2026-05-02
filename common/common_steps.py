@@ -43,6 +43,27 @@ def ensure_sudo_installed(config: SetupConfig) -> None:
     install_package("sudo", "sudo", "apt-get install -y -qq sudo")
 
 
+def configure_ipv4_preference(config: SetupConfig) -> None:
+    """Prefer IPv4 over IPv6 to avoid hangs when IPv6 is present but non-functional."""
+    import re
+    gai_conf = "/etc/gai.conf"
+    marker = "precedence ::ffff:0:0/96  100"
+
+    if os.path.exists(gai_conf):
+        with open(gai_conf, "r") as f:
+            content = f.read()
+        if re.search(r"^\s*precedence\s+::ffff:0:0/96\s+100", content, re.MULTILINE):
+            print("  ✓ IPv4 preference already configured")
+            return
+        with open(gai_conf, "a") as f:
+            f.write(f"\n# Prefer IPv4 to avoid timeouts when IPv6 is non-functional\n{marker}\n")
+    else:
+        with open(gai_conf, "w") as f:
+            f.write(f"# Prefer IPv4 to avoid timeouts when IPv6 is non-functional\n{marker}\n")
+
+    print("  ✓ Configured IPv4 preference in /etc/gai.conf")
+
+
 def configure_locale(config: SetupConfig) -> None:
     def locale_configured() -> bool:
         return file_contains("/etc/environment", "LANG=en_US.UTF-8")
