@@ -9,17 +9,26 @@ from lib.config import MACHINE_TYPES, DEFAULT_MACHINE_TYPE
 from lib.plugin_registry import get_system_type_names
 
 
-def create_setup_argument_parser(
-    description: str,
+def add_setup_arguments(
+    parser: argparse.ArgumentParser,
     for_remote: bool = False,
-    allow_steps: bool = False
-) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=description)
-    
+    allow_steps: bool = False,
+    include_system_type: bool = False,
+    include_host: bool = True,
+) -> None:
+    """Add the shared setup/patch argument surface to an argparse parser."""
+
     if not for_remote:
-        parser.add_argument("host", help="IP address or hostname of the remote host")
-        parser.add_argument("username", nargs="?", default=None, 
-                           help="Username (defaults to current user)")
+        if include_system_type:
+            parser.add_argument(
+                "system_type",
+                choices=get_system_type_names(),
+                help="Type of system to set up",
+            )
+        if include_host:
+            parser.add_argument("host", help="IP address or hostname of the remote host")
+            parser.add_argument("username", nargs="?", default=None,
+                               help="Username (defaults to current user)")
         parser.add_argument("-k", "--key", dest="ssh_key", help="SSH private key path")
         parser.add_argument(
             "--workspace",
@@ -220,5 +229,13 @@ def create_setup_argument_parser(
     
     parser.add_argument("--dry-run", action="store_true",
                        help="Show what would be done without executing commands")
-    
+
+
+def create_setup_argument_parser(
+    description: str,
+    for_remote: bool = False,
+    allow_steps: bool = False
+) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=description)
+    add_setup_arguments(parser, for_remote=for_remote, allow_steps=allow_steps)
     return parser

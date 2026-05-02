@@ -116,6 +116,17 @@ class TestHostedFlagParsing(unittest.TestCase):
         self.assertTrue(args.install_node)
         self.assertIsNone(args.hosted_node)
 
+    def test_antistatic_flags(self):
+        args = self.parser.parse_args([
+            "10.0.0.50",
+            "--antistatic-server",
+            "lobby.example.com:9090",
+            "--antistatic-db",
+            "db.example.com:9091",
+        ])
+        self.assertEqual(args.antistatic_server, "lobby.example.com:9090")
+        self.assertEqual(args.antistatic_db, "db.example.com:9091")
+
 
 class TestHostedFlagsNotInRemoteParser(unittest.TestCase):
     def setUp(self):

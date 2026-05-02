@@ -37,6 +37,7 @@ except ImportError:
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from lib.arg_parser import add_setup_arguments
 from lib.cache import get_cache_path_for_host, load_setup_command, merge_setup_configs, save_setup_command
 from lib.completions import run_completion_setup
 from lib.config import SetupConfig
@@ -136,21 +137,7 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="Run 'infra_tools.py setup --help' for full options"
     )
-    setup_parser.add_argument(
-        "system_type",
-        choices=get_system_type_names(),
-        help="Type of system to set up"
-    )
-    setup_parser.add_argument(
-        "host",
-        help="IP address or hostname of the remote host"
-    )
-    setup_parser.add_argument(
-        "username",
-        nargs="?",
-        default=None,
-        help="Username (defaults to current user)"
-    )
+    add_setup_arguments(setup_parser, allow_steps=True, include_system_type=True)
     
     # Patch subcommand
     patch_parser = subparsers.add_parser(
@@ -169,6 +156,7 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
         default=None,
         help="Username (defaults to current user)"
     )
+    add_setup_arguments(patch_parser, allow_steps=True, include_host=False)
 
     list_parser = subparsers.add_parser(
         "list",
@@ -353,145 +341,6 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
     )
 
     return parser, setup_parser, patch_parser
-
-
-def add_common_arguments(parser: argparse.ArgumentParser, for_patch: bool = False) -> None:
-    """Add common setup/patch arguments to a parser."""
-    parser.add_argument(
-        "--workspace",
-        help="Workspace root for saved setups, credentials, known_hosts, and history"
-    )
-    parser.add_argument("-k", "--key", dest="ssh_key", help="SSH private key path")
-    parser.add_argument("-p", "--password", help="User password")
-    parser.add_argument("-t", "--timezone", help="Timezone (defaults to UTC)")
-    parser.add_argument("--machine", dest="machine_type",
-                       choices=["unprivileged", "vm", "privileged", "hardware", "oci"],
-                       default=None,
-                       help="Machine type: unprivileged (LXC, default), vm, privileged, hardware, oci")
-    
-    parser.add_argument("--name", dest="friendly_name", help="Friendly name for this configuration")
-    parser.add_argument("--tags", dest="tags", help="Comma-separated list of tags for this configuration")
-    
-    parser.add_argument("--steps", dest="custom_steps",
-                       help="Space-separated list of steps to run (e.g., 'install_ruby install_node')")
-    parser.add_argument("--rdp", dest="enable_rdp",
-                       action=argparse.BooleanOptionalAction,
-                       default=None,
-                       help="Enable RDP/XRDP setup")
-    parser.add_argument("--desktop", choices=["xfce", "i3", "cinnamon", "lxqt"],
-                       default=None,
-                       help="Desktop environment to install (default: xfce)")
-    parser.add_argument("--browser", dest="browsers",
-                       action="append",
-                       choices=["brave", "firefox", "browsh", "helium", "lynx", "librewolf"],
-                       help="Web browser to install (can be used multiple times)")
-    parser.add_argument("--flatpak", dest="use_flatpak",
-                       action=argparse.BooleanOptionalAction,
-                       default=None,
-                       help="Install desktop apps via Flatpak when available")
-    parser.add_argument("--office", dest="install_office",
-                       action=argparse.BooleanOptionalAction,
-                       default=None,
-                       help="Install LibreOffice (desktop only)")
-    parser.add_argument("--apt-install", dest="apt_packages",
-                       action="append",
-                       metavar="PACKAGE",
-                       help="Install package via apt (can be used multiple times)")
-    parser.add_argument("--flatpak-install", dest="flatpak_packages",
-                       action="append",
-                       metavar="PACKAGE",
-                       help="Install package via flatpak (can be used multiple times)")
-    parser.add_argument("--dark", dest="dark_theme",
-                       action=argparse.BooleanOptionalAction,
-                       default=None,
-                       help="Configure desktop to use dark theme")
-    parser.add_argument("--ruby", dest="install_ruby",
-                       action=argparse.BooleanOptionalAction,
-                       default=None,
-                       help="Install Ruby + Bundler from apt packages")
-    parser.add_argument("--go", dest="install_go",
-                       action=argparse.BooleanOptionalAction,
-                       default=None,
-                       help="Install latest Go version")
-    parser.add_argument("--node", dest="install_node",
-                       action=argparse.BooleanOptionalAction,
-                       default=None,
-                       help="Install nvm + latest Node.JS + PNPM + update NPM")
-    parser.add_argument("--python", dest="install_python",
-                       action=argparse.BooleanOptionalAction,
-                       default=None,
-                       help="Install Python tooling (python aliases and uv)")
-    parser.add_argument("--deploy", dest="deploy_specs",
-                       action="append", nargs=2, metavar=("DOMAIN_OR_PATH", "GIT_URL"),
-                       help="Deploy a git repository to auto-configure nginx (can be used multiple times)")
-    parser.add_argument("--full-deploy", dest="full_deploy", action="store_true",
-                       help="Always rebuild deployments even if they haven't changed")
-    parser.add_argument("--reset-migrations", dest="reset_migrations", action="store_true",
-                       help="Reset Rails database schema using db:schema:load")
-    parser.add_argument("--ssl", dest="enable_ssl",
-                       action=argparse.BooleanOptionalAction,
-                       default=None,
-                       help="Enable Let's Encrypt SSL/TLS certificates for deployed domains")
-    parser.add_argument("--ssl-email", dest="ssl_email",
-                       help="Email address for Let's Encrypt registration (optional)")
-    parser.add_argument("--cloudflare", dest="enable_cloudflare",
-                       action=argparse.BooleanOptionalAction,
-                       default=None,
-                       help="Preconfigure server for Cloudflare tunnel")
-    parser.add_argument("--api-subdomain", dest="api_subdomain",
-                       action=argparse.BooleanOptionalAction,
-                       default=None,
-                       help="Deploy Rails API as a subdomain instead of subdirectory")
-    parser.add_argument("--cicd", dest="enable_cicd",
-                       action=argparse.BooleanOptionalAction,
-                       default=None,
-                       help="Install webhook-based CI/CD system for GitHub Actions")
-    parser.add_argument("--build-server", dest="is_build_server",
-                       action=argparse.BooleanOptionalAction,
-                       default=None,
-                       help="Configure as a build server that deploys to app servers")
-    parser.add_argument("--app-server", dest="is_app_server",
-                       action=argparse.BooleanOptionalAction,
-                       default=None,
-                       help="Configure as a lightweight app server to receive deployments")
-    parser.add_argument("--deploy-target", dest="deploy_targets",
-                       action="append", metavar="HOST",
-                       help="Target app server for deployments (can be used multiple times)")
-    parser.add_argument("--samba", dest="enable_samba",
-                       action=argparse.BooleanOptionalAction,
-                       default=None,
-                       help="Install and configure Samba for SMB file sharing")
-    parser.add_argument("--share", dest="samba_shares",
-                       action="append", nargs=4,
-                       metavar=("ACCESS_TYPE", "SHARE_NAME", "PATHS", "USERS"),
-                       help="Configure Samba share (can be used multiple times)")
-    parser.add_argument("--credential", dest="share_credentials",
-                        action="append", nargs=2, metavar=("USERNAME", "PASSWORD"),
-                        help="Save a workspace credential and let --share/--mount-smb reference the username without inline passwords")
-    parser.add_argument("--smbclient", dest="enable_smbclient",
-                       action=argparse.BooleanOptionalAction,
-                       default=None,
-                       help="Install SMB/CIFS client packages for connecting to network shares")
-    parser.add_argument("--mount-smb", dest="smb_mounts",
-                        action="append", nargs=5,
-                        metavar=("MOUNTPOINT", "IP", "CREDENTIALS", "SHARE", "SUBDIR"),
-                        help="Mount SMB share using username or username:password credentials (can be used multiple times)")
-    parser.add_argument("--sync", dest="sync_specs",
-                       action="append", nargs=3,
-                       metavar=("SOURCE", "DESTINATION", "INTERVAL"),
-                       help="Configure directory synchronization (hourly|daily|weekly|monthly)")
-    parser.add_argument("--scrub", dest="scrub_specs",
-                       action="append", nargs=4,
-                       metavar=("DIRECTORY", "DATABASE_PATH", "REDUNDANCY", "FREQUENCY"),
-                       help="Configure data integrity checking")
-    parser.add_argument("--notify", dest="notify_specs",
-                       action="append", nargs=2, metavar=("TYPE", "TARGET"),
-                       help="Configure notification target: webhook URL or email address")
-    parser.add_argument("--no-restart", dest="no_restart", action="store_true",
-                       help="Disable automatic restarts after updates")
-    parser.add_argument("--dry-run", action="store_true",
-                       help="Show what would be done without executing commands")
-
 
 def get_all_configs(pattern: Optional[str] = None) -> Deployments:
     cache_dir = get_setup_cache_dir()
@@ -990,11 +839,7 @@ def run_patch_command(args: argparse.Namespace) -> int:
 
 def main() -> int:
     """Main entry point for infra_tools."""
-    parser, setup_parser, patch_parser = create_infra_tools_parser()
-    
-    # Add common arguments to both subparsers
-    add_common_arguments(setup_parser, for_patch=False)
-    add_common_arguments(patch_parser, for_patch=True)
+    parser, _setup_parser, _patch_parser = create_infra_tools_parser()
 
     if argcomplete:
         argcomplete.autocomplete(parser)
