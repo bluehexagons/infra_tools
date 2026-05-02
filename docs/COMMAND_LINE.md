@@ -172,7 +172,7 @@ python3 infra_tools.py setup server_web 10.0.0.50 admin \
 | `--full-deploy` | Always rebuild deployments (don't skip unchanged) |
 | `--ssl` | Enable Let's Encrypt SSL |
 | `--ssl-email EMAIL` | Email for SSL registration |
-| `--cloudflare` | Configure Cloudflare Tunnel |
+| `--cloudflare` | Configure Cloudflare Tunnel. Generated nginx sites do not redirect HTTP to HTTPS because cloudflared connects to the origin over HTTP |
 | `--api-subdomain` | Deploy Rails API to subdomain (`api.domain.com`) instead of subdirectory (`domain.com/api`) |
 | `--workspace PATH` | Workspace isolation for this setup |
 

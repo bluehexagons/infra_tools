@@ -304,7 +304,10 @@ def main() -> int:
                 key = dep.get('domain')
                 grouped_deployments.setdefault(key, []).append(dep)
             
-            create_nginx_sites_for_groups(grouped_deployments)
+            create_nginx_sites_for_groups(
+                grouped_deployments,
+                enable_https_redirect=not config.enable_cloudflare,
+            )
             
             if config.enable_ssl:
                 from web.ssl_steps import install_certbot, setup_ssl_for_deployments
@@ -314,7 +317,11 @@ def main() -> int:
                 print("=" * 60)
                 install_certbot(config)
                 
-                setup_ssl_for_deployments(deployments, config.ssl_email)
+                setup_ssl_for_deployments(
+                    deployments,
+                    config.ssl_email,
+                    enable_https_redirect=not config.enable_cloudflare,
+                )
             
             if config.enable_cloudflare:
                 from web.cloudflare_steps import run_cloudflare_tunnel_setup

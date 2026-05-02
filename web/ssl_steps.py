@@ -108,7 +108,11 @@ def setup_certificate_renewal() -> None:
     print("  ✓ Automatic renewal configured")
 
 
-def setup_ssl_for_deployments(deployments: Deployments, email: Optional[str] = None) -> None:
+def setup_ssl_for_deployments(
+    deployments: Deployments,
+    email: Optional[str] = None,
+    enable_https_redirect: bool = True,
+) -> None:
     """
     Set up Let's Encrypt SSL using SANs for all deployed domains.
     Requests single certificate covering all domains for efficiency.
@@ -167,7 +171,7 @@ def setup_ssl_for_deployments(deployments: Deployments, email: Optional[str] = N
         grouped_deployments.setdefault(key, []).append(dep)
     
     # Create nginx sites from grouped deployments
-    create_nginx_sites_for_groups(grouped_deployments)
+    create_nginx_sites_for_groups(grouped_deployments, enable_https_redirect=enable_https_redirect)
     
     setup_certificate_renewal()
     
