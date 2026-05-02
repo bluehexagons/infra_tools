@@ -1,70 +1,78 @@
-# Future Ideas and Enhancements
+# REVIEW_1 Workspace, Credential, and Execution Hardening
 
-This file captures potential improvements and follow-up work for infra_tools.
+This document describes the architecture of the REVIEW_1 revision branch and tracks remaining work and testing.
 
-## Completed in Major Revision Branch
+## Architecture Overview
 
-- **#79 Self-setup**: Launcher install for `infra_tools` command on PATH, system-wide and per-user
-- **#27 Interactive CLI**: Top-level `shell` subcommand with REPL for configuration management
-- **#82 Proxmox Notifications**: Native Proxmox webhook notifications via `pvesh`
-- **#84 Live LXC Integration Test**: `test_proxmox_live.py` with `INFRA_TOOLS_RUN_LIVE_PROXMOX=1` gating
+REVIEW_1 establishes a new foundation for how `infra_tools` stores local state, manages reusable credentials, validates user input, resolves system types, and executes remote setup work. The changes replace the older cache- and wrapper-script-based model with a unified CLI and workspace-scoped runtime model.
+
+### Key Components
+
+- **Unified CLI Surface**: `infra_tools.py` is now the primary entry point; older per-system wrappers removed
+- **Workspace-Based State**: State under `~/.config/infra_tools` (or `--workspace` path) with `setups/`, `credentials.json`, `known_hosts`, and `history/`
+- **Credential Handling**: Workspace-managed credentials via `infra_tools.py credentials` with `0600` permissions
+- **Remote Execution**: Artifacts staged locally, streamed over SSH stdin as tar archive; runtime args in temporary JSON file
+- **Plugin-Based System Types**: Automatic discovery from `plugins/` with deterministic dependency resolution
+- **Validation and Safer Defaults**: CLI input validation and secure defaults (no generated passwords, workspace-managed SSH `known_hosts`, etc.)
+- **Structured Logging**: Service helpers use `key=value` event context for stable operational logs
+
+### Test Coverage
+
+At the time of last review, the test suite passed with 1190 tests. Tests cover:
+
+- Workspace path handling and workspace-aware CLI behavior
+- Credential storage and runtime resolution
+- Plugin registry behavior and registration
+- Remote setup arg-file handling
+- Cache/history persistence
+- SSH command building and command-safety
+- Regression test preventing `shell=True` subprocess usage
+
+## Remaining Work and Testing
+
+### Completed in This Revision
+
+- **#79 Self-setup**: Launcher install for `infra_tools` command on PATH
+- **#27 Interactive CLI**: Shell subcommand with REPL and persistent history
+- **#82 Proxmox Notifications**: Native webhook notifications
+- **#84 Live LXC Integration Test**: `test_proxmox_live.py` with environment gating
 - **#89 Node version cleanup**: Stale nvm version removal in cleanup maintenance
-- **#88 Bundler cleanup** (partial): Cleanup scanning `/var/tmp` for `bundler*` directories
-- **#81 Container Lifecycle**: `config`, `reconfigure`, `modify`, `resize-disk` commands in CLI and ProxmoxShell; `get_container_config`, `get_container_pending`, `reconfigure_container`, `modify_container`, `resize_container_disk` in `lib/proxmox_manage`
-- **#27 Shell history**: Readline-based persistent history at `~/.local/share/infra_tools/shell_history`
-- **#27 Output formatting**: `list --json` (JSON array output) and `info --compact` (one-line summary) in CLI and shell
-- **#27 Init file**: `~/.infra_toolsrc` shell startup commands dispatched at shell start
-- **#88 /tmp monitoring**: Structured `log_tmp_usage` per temp directory on each cleanup run
-- **#88 tmpfiles.d config**: `install_tmpfiles_conf()` deploys `/etc/tmpfiles.d/infra_tools.conf` during bootstrap to auto-age known prefixes via `systemd-tmpfiles-clean`
+- **#88 Bundler cleanup**: Scanning `/var/tmp` for `bundler*` directories
+- **#81 Container Lifecycle**: `config`, `reconfigure`, `modify`, `resize-disk` commands
+- **#27 Output formatting**: `list --json` and `info --compact`
+- **#27 Init file**: `~/.infra_toolsrc` shell startup
+- **#88 /tmp monitoring**: Structured `log_tmp_usage` logging
+- **#88 tmpfiles.d config**: Auto-aging of known prefixes
 
-## Open Issues
+### Testing Tasks
 
-### #27: Remaining Interactive CLI Features
+- [ ] Full regression test suite passes with 1190+ tests
+- [ ] Live Proxmox tests pass with `INFRA_TOOLS_RUN_LIVE_PROXMOX=1` (requires manual `PROXMOX_TEST_HOST` setup)
+- [ ] Verify workspace isolation and credential permission (0600)
+- [ ] Verify SSH command safety (no `shell=True`)
+- [ ] Test credential resolution in Samba shares and SMB mounts
+- [ ] Verify plugin discovery works in both local and remote execution contexts
+- [ ] Verify sanitized state and history persistence (no credential leaks)
 
-- **Autocompletion within shell**: Tab-complete patterns, hosts, vmids, subcommands (requires upstream `readline` integration or custom solution)
-- **Configuration templates**: `template list`, `template show`, save/load partial setups as templates
-- **Workspace shortcuts**: Quick aliases within shell to switch between workspaces (e.g., `ws prod`, `ws staging`)
+### Known Limitations (Not Blockers)
 
-### #88: Remaining /tmp Cleanup Work
-
-- tmpfs mount configuration to prevent filling /tmp (`--set-tmpfs-limit SIZE` for bootstrap)
-- Alert on /tmp usage threshold (complement to existing root fs low-space alert)
-
-## Performance & Scalability
-
-- **Configuration search**: `list` and `info` commands scan all saved configs; large workspaces (1000+) may be slow
-  - Add indexing or caching layer for frequent patterns
-  - Add filtering options (e.g., `list --tags prod --before 2025-01-01`)
-
-- **Proxmox API overhead**: Commands that list/query containers make sequential SSH calls per host
-  - Batch operations where possible
-  - Async/parallel queries across multiple hosts
-
-## Testing Infrastructure
-
-- **Live Proxmox test**: Currently requires manual `PROXMOX_TEST_HOST` environment setup; could expand to:
-  - Container creation/deletion lifecycle
-  - Notification delivery verification
-  - Multi-host coordination tests
-
-- **CI/CD integration**: Add pre-merge checks for documentation, shell completions, help text consistency
-
-## Documentation & UX
-
-- **Interactive shell guide**: Dedicated tutorial (e.g., `docs/INTERACTIVE_SHELL.md`)
-- **Quick-start with launcher**: Beginner-friendly setup guide for new users
-- **Error recovery guide**: Common failures (network, SSH, disk space) and recovery steps
-- **Workspace management guide**: Best practices for multi-environment setups
-
-## Maintenance
-
-- **Dependency updates**: `uv`, `argcomplete` pinning and update strategy
-- **Python version support**: Currently requires 3.10+; could consider backport or security fixes for 3.9
-- **Debian version support**: Test on current and LTS releases
-
-## Known Limitations
-
+- **Autocompletion within shell**: Tab-completion requires upstream `readline` integration or custom solution
+- **Configuration templates**: Save/load partial setups
+- **Workspace shortcuts**: Quick aliases to switch workspaces
+- **tmpfs mount configuration**: Prevent filling /tmp with `--set-tmpfs-limit SIZE`
+- **Configuration search performance**: Large workspaces (1000+) may be slow; needs indexing/caching
+- **Proxmox API overhead**: Sequential SSH calls per host; needs batch operations
 - **SSH key management**: Currently supports per-host keys; no agent forwarding or multi-key support
-- **Credential storage**: Workspace credentials stored in plaintext; consider encryption at rest
-- **Network resilience**: SSH connection drops during long operations may leave partial state
-- **Concurrency**: Multiple infra_tools processes operating on same workspace could race on saves
+- **Credential encryption**: Workspace credentials stored in plaintext
+- **Network resilience**: SSH connection drops may leave partial state
+- **Concurrency**: Multiple infra_tools processes may race on workspace saves
+
+## Deferred Follow-Up Work
+
+The following remain reasonable future improvements but are not blockers for this branch:
+
+- Broader type-checking and pre-commit automation
+- Expanded integration testing beyond targeted regression suite
+- Additional metrics and diagnostics for long-running service workflows
+- Documentation enhancements (interactive shell guide, quick-start, error recovery, workspace management)
+- Dependency update strategy for `uv` and `argcomplete`
