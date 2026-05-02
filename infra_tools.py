@@ -366,7 +366,7 @@ def add_common_arguments(parser: argparse.ArgumentParser, for_patch: bool = Fals
     parser.add_argument("-t", "--timezone", help="Timezone (defaults to UTC)")
     parser.add_argument("--machine", dest="machine_type",
                        choices=["unprivileged", "vm", "privileged", "hardware", "oci"],
-                       default="unprivileged",
+                       default=None,
                        help="Machine type: unprivileged (LXC, default), vm, privileged, hardware, oci")
     
     parser.add_argument("--name", dest="friendly_name", help="Friendly name for this configuration")
