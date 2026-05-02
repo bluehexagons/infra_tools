@@ -48,7 +48,8 @@ def configure_firewall(config: SetupConfig) -> None:
             run("ufw delete allow 3389/tcp", check=False)
             run("ufw limit 3389/tcp", check=False)
         return
-    
+
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get install -y -qq ufw")
     run("ufw default deny incoming", check=False)
     run("ufw default allow outgoing", check=False)
@@ -77,6 +78,7 @@ def configure_fail2ban(config: SetupConfig) -> None:
         print("  ✓ Skipping fail2ban configuration (limited functionality in containers)")
         return
 
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get install -y -qq fail2ban")
 
     os.makedirs("/etc/fail2ban/filter.d", exist_ok=True)
@@ -330,7 +332,8 @@ def configure_firewall_web(config: SetupConfig) -> None:
         if result.returncode == 0:
             print("  ✓ Firewall already configured for web")
             return
-    
+
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get install -y -qq ufw")
     run("ufw default deny incoming", check=False)
     run("ufw default allow outgoing", check=False)
@@ -355,7 +358,8 @@ def configure_firewall_ssh_only(config: SetupConfig) -> None:
     if result.returncode == 0:
         print("  ✓ Firewall already configured")
         return
-    
+
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get install -y -qq ufw")
     run("ufw default deny incoming", check=False)
     run("ufw default allow outgoing", check=False)

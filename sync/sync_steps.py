@@ -25,6 +25,7 @@ def install_rsync(config: SetupConfig) -> None:
         print("  ✓ rsync already installed")
         return
     
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get install -y -qq rsync")
     print("  ✓ rsync installed")
 

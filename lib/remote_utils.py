@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import secrets
 import shlex
 import string
@@ -116,7 +117,8 @@ def install_with_verify(
     if verify_fn():
         print(f"  ✓ {name} already installed")
         return True
-    
+
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     print(f"  Installing {name}...")
     run(install_cmd, check=False)
     

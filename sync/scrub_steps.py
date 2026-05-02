@@ -52,6 +52,7 @@ def install_par2(config: SetupConfig) -> None:
         print("  ✓ par2 already installed")
         return
     
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get install -y -qq par2")
     print("  ✓ par2 installed")
 

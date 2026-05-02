@@ -32,6 +32,7 @@ def _ensure_extrepo_and_update() -> None:
     """Install extrepo if needed and run apt-get update only once."""
     global _apt_update_done
     if not is_package_installed("extrepo"):
+        os.environ["DEBIAN_FRONTEND"] = "noninteractive"
         run("apt-get install -y -qq extrepo", check=False)
     if not _apt_update_done:
         run("apt-get update -qq", check=False)
@@ -45,6 +46,7 @@ def _install_via_extrepo(name: str, extrepo_name: str, package_name: str) -> boo
     run("apt-get update -qq", check=False)
     sources_path = f"/etc/apt/sources.list.d/extrepo_{extrepo_name}.sources"
     if os.path.exists(sources_path):
+        os.environ["DEBIAN_FRONTEND"] = "noninteractive"
         run(f"apt-get install -y -qq {package_name}", check=False)
         if is_package_installed(package_name):
             return True
@@ -96,6 +98,7 @@ else:
         return
 
     run(f"wget -qO /tmp/helium.deb {shlex.quote(helium_url)}", check=False)
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get install -y -qq /tmp/helium.deb", check=False)
     run("rm -f /tmp/helium.deb", check=False)
     if is_package_installed("helium-bin") or os.path.exists("/usr/bin/helium"):
@@ -104,6 +107,7 @@ else:
 
 def install_single_browser(browser: str, use_flatpak: bool) -> None:
     """Install a single browser."""
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     if browser == "brave":
         if use_flatpak:
             if is_flatpak_app_installed("com.brave.Browser"):

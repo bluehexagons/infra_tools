@@ -115,6 +115,7 @@ def install_xrdp(config: SetupConfig) -> None:
     else:
         session_cmd = "xfce4-session"
     
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get install -y -qq xrdp xorgxrdp dbus-x11 x11-xserver-utils x11-utils", check=False)
     if is_package_installed("xrdp"):
         print("  ✓ xRDP packages installed (Xorg+xorgxrdp backend for dynamic resolution)")

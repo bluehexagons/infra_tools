@@ -30,7 +30,8 @@ def install_flatpak_if_needed() -> bool:
     
     if is_flatpak_installed():
         return True
-    
+
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     result = run("apt-get install -y -qq flatpak", check=False)
     if result.returncode != 0:
         print("  ⚠ Failed to install Flatpak")
@@ -43,6 +44,7 @@ def install_flatpak_if_needed() -> bool:
 
 def install_remmina(config: SetupConfig) -> None:
     """Install Remmina RDP client."""
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get install -y -qq remmina remmina-plugin-rdp remmina-plugin-vnc", check=False)
     if is_package_installed("remmina"):
         print("  ✓ Remmina installed/updated")
@@ -71,6 +73,7 @@ def install_office_apps(config: SetupConfig) -> None:
         print("  ✓ LibreOffice already installed")
         return
     print("  Installing LibreOffice...")
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get install -y -qq libreoffice", check=False)
     if is_package_installed("libreoffice"):
         print("  ✓ LibreOffice installed")
@@ -108,6 +111,7 @@ def install_desktop_apps(config: SetupConfig) -> None:
 
         print("  Installing Discord...")
         run("wget -qO /tmp/discord.deb 'https://discord.com/api/download?platform=linux&format=deb'", check=False)
+        os.environ["DEBIAN_FRONTEND"] = "noninteractive"
         run("apt-get install -y -qq /tmp/discord.deb", check=False)
         run("rm -f /tmp/discord.deb", check=False)
         discord_installed = is_package_installed("discord")

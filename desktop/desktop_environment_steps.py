@@ -158,6 +158,7 @@ def install_smbclient(config: SetupConfig) -> None:
         return
     
     packages_str = " ".join(packages)
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run(f"apt-get install -y -qq {packages_str}")
     
     print("  ✓ SMB client packages installed (cifs-utils, smbclient, gvfs-backends)")

@@ -461,6 +461,7 @@ def configure_samba_fail2ban(config: SetupConfig) -> None:
             return
 
     if not is_package_installed("fail2ban"):
+        os.environ["DEBIAN_FRONTEND"] = "noninteractive"
         run("apt-get install -y -qq fail2ban")
 
     # Modern smbd (4.x) emits a single structured "Auth:" line for every

@@ -198,7 +198,8 @@ def install_cli_tools(config: SetupConfig) -> None:
     if all_installed:
         print("  ✓ CLI tools already installed (neovim, btop, htop, curl, wget, git, tmux, unzip, rsync)")
         return
-    
+
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get install -y -qq neovim btop htop curl wget git tmux unzip xdg-utils rsync", check=False)
     
     if all(is_package_installed(t) for t in tools):
@@ -236,6 +237,7 @@ def install_go(config: SetupConfig) -> None:
         print("  ✓ Go already installed")
         return
     
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get install -y -qq curl wget")
     result = run("curl -s https://go.dev/VERSION?m=text | head -1", check=False, capture_output=True)
     if result.returncode != 0 or not result.stdout.strip():
@@ -271,8 +273,9 @@ def install_node(config: SetupConfig) -> None:
         print("  ✓ nvm already installed")
         return
     
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get install -y -qq curl")
-    
+
     nvm_version = "v0.39.7"
     
     # Install nvm as the user, explicitly setting NVM_DIR to avoid picking up
@@ -416,6 +419,7 @@ def install_python(config: SetupConfig) -> None:
     """Install Python tooling (aliases and uv)."""
     user_home = f"/home/{config.username}"
 
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get install -y -qq python3 python3-venv curl")
 
     python3_path = shutil.which("python3")
@@ -564,6 +568,7 @@ def install_apt_packages(config: SetupConfig) -> None:
     if not config.apt_packages:
         return
     
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     print("  Installing custom apt packages...")
     for package in config.apt_packages:
         if is_package_installed(package):
