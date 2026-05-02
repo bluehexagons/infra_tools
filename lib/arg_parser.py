@@ -30,7 +30,7 @@ def create_setup_argument_parser(
     parser.add_argument("-t", "--timezone", help="Timezone (defaults to UTC)")
     parser.add_argument("--machine", dest="machine_type",
                        choices=MACHINE_TYPES,
-                       default=DEFAULT_MACHINE_TYPE,
+                       default=None,
                        help=f"Machine type: unprivileged (LXC, default), vm, privileged, hardware, oci (Docker/Podman)")
     
     if not for_remote:
