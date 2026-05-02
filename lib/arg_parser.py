@@ -5,7 +5,8 @@ from __future__ import annotations
 import argparse
 
 
-from lib.config import SYSTEM_TYPES, MACHINE_TYPES, DEFAULT_MACHINE_TYPE
+from lib.config import MACHINE_TYPES, DEFAULT_MACHINE_TYPE
+from lib.plugin_registry import get_system_type_names
 
 
 def create_setup_argument_parser(
@@ -20,12 +21,16 @@ def create_setup_argument_parser(
         parser.add_argument("username", nargs="?", default=None, 
                            help="Username (defaults to current user)")
         parser.add_argument("-k", "--key", dest="ssh_key", help="SSH private key path")
+        parser.add_argument(
+            "--workspace",
+            help="Workspace root for saved setups, credentials, known_hosts, and history"
+        )
     
     parser.add_argument("-p", "--password", help="User password")
     parser.add_argument("-t", "--timezone", help="Timezone (defaults to UTC)")
     parser.add_argument("--machine", dest="machine_type",
                        choices=MACHINE_TYPES,
-                       default=DEFAULT_MACHINE_TYPE,
+                       default=None,
                        help=f"Machine type: unprivileged (LXC, default), vm, privileged, hardware, oci (Docker/Podman)")
     
     if not for_remote:
@@ -54,7 +59,7 @@ def create_setup_argument_parser(
     
     if for_remote:
         parser.add_argument("--system-type", dest="system_type", 
-                           choices=SYSTEM_TYPES,
+                           choices=get_system_type_names(),
                            help="System type to setup")
         parser.add_argument("--username", default=None,
                            help="Username (defaults to current user, not used for server_proxmox)")
@@ -65,13 +70,13 @@ def create_setup_argument_parser(
     parser.add_argument("--rdp", dest="enable_rdp", 
                        action=argparse.BooleanOptionalAction, 
                        default=None if not for_remote else False,
-                       help="Enable RDP/XRDP setup" + ("" if for_remote else " (default: enabled for workstation setups)"))
+                       help="Enable RDP/XRDP setup" + ("" if for_remote else " (default: disabled)"))
     parser.add_argument("--desktop", choices=["xfce", "i3", "cinnamon", "lxqt"], 
                        default="xfce" if for_remote else None,
                        help="Desktop environment to install (default: xfce)")
     parser.add_argument("--browser", dest="browsers", 
                        action="append",
-                       choices=["brave", "firefox", "browsh", "vivaldi", "lynx", "librewolf"], 
+                       choices=["brave", "firefox", "browsh", "helium", "lynx", "librewolf"], 
                        help="Web browser to install (can be used multiple times, default: librewolf for desktop setups)")
     parser.add_argument("--flatpak", dest="use_flatpak", 
                        action=argparse.BooleanOptionalAction if not for_remote else "store_true", 
@@ -172,8 +177,8 @@ def create_setup_argument_parser(
                        action="append", nargs=4, metavar=("ACCESS_TYPE", "SHARE_NAME", "PATHS", "USERS"),
                        help="Configure Samba share: access_type (read|write), share_name, comma-separated paths, comma-separated username:password pairs or usernames that resolve via --credential (can be used multiple times)")
     parser.add_argument("--credential", dest="share_credentials",
-                       action="append", nargs=2, metavar=("USERNAME", "PASSWORD"),
-                       help="Store a Samba credential for share users so --share can reference usernames without inline passwords (can be used multiple times)")
+                        action="append", nargs=2, metavar=("USERNAME", "PASSWORD"),
+                        help="Save a workspace credential and let --share/--mount-smb reference the username without inline passwords (can be used multiple times)")
     
     parser.add_argument("--smbclient", dest="enable_smbclient", 
                        action=argparse.BooleanOptionalAction if not for_remote else "store_true", 
@@ -181,8 +186,8 @@ def create_setup_argument_parser(
                        help="Install SMB/CIFS client packages for connecting to network shares (default: enabled for pc_dev)")
     
     parser.add_argument("--mount-smb", dest="smb_mounts",
-                       action="append", nargs=5, metavar=("MOUNTPOINT", "IP", "CREDENTIALS", "SHARE", "SUBDIR"),
-                       help="Mount SMB share: /mnt/path, ip_address, username:password, share_name, /share/subdirectory (can be used multiple times). Auto-enables --smbclient")
+                        action="append", nargs=5, metavar=("MOUNTPOINT", "IP", "CREDENTIALS", "SHARE", "SUBDIR"),
+                        help="Mount SMB share: /mnt/path, ip_address, username or username:password, share_name, /share/subdirectory (can be used multiple times). Auto-enables --smbclient")
     
     parser.add_argument("--sync", dest="sync_specs", 
                        action="append", nargs=3, metavar=("SOURCE", "DESTINATION", "INTERVAL"),
@@ -195,6 +200,18 @@ def create_setup_argument_parser(
     parser.add_argument("--notify", dest="notify_specs",
                        action="append", nargs=2, metavar=("TYPE", "TARGET"),
                        help="Configure notification target: TYPE (webhook|mailbox), TARGET (URL for webhook or email for mailbox). Sends alerts for important events (errors, warnings, successes). Can be used multiple times for multiple targets.")
+    
+    parser.add_argument("--antistatic-server", dest="antistatic_server",
+                       metavar="DOMAIN[:PORT]",
+                       help="Deploy the antistatic lobby server behind nginx. "
+                            "DOMAIN is the public hostname; PORT is the internal listen port "
+                            f"(default: 8080). Example: lobby.example.com or lobby.example.com:9090")
+
+    parser.add_argument("--antistatic-db", dest="antistatic_db",
+                       metavar="DOMAIN[:PORT]",
+                       help="Deploy the antistatic-db service behind nginx. "
+                            "DOMAIN is the public hostname; PORT is the internal listen port "
+                            " (default: 8081). The binary is fetched from GitHub releases.")
     
     parser.add_argument("--no-restart", dest="no_restart",
                         action="store_true",

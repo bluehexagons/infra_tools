@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import os
 import secrets
 import shlex
 import string
 import subprocess
 import sys
-from typing import Optional, Callable
+from typing import Callable, Optional
+
+from lib.validation import validate_package_name
 
 
 _dry_run = False
@@ -38,13 +41,39 @@ def run(cmd: str, check: bool = True, cwd: Optional[str] = None, capture_output:
         print("  [DRY-RUN] Command not executed")
         # CompletedProcess.args expects a sequence; provide a one-element list for consistency
         return subprocess.CompletedProcess(args=[cmd], returncode=0, stdout="", stderr="")
-    
-    result = subprocess.run(cmd, shell=True, capture_output=capture_output, text=text, cwd=cwd)
+
+    if _requires_shell(cmd):
+        result = subprocess.run(
+            ["/bin/bash", "-lc", cmd],
+            capture_output=capture_output,
+            text=text,
+            cwd=cwd,
+        )
+    else:
+        result = subprocess.run(shlex.split(cmd), capture_output=capture_output, text=text, cwd=cwd)
     if check and result.returncode != 0:
         if getattr(result, 'stderr', None):
             print(f"    Warning: {result.stderr[:200]}")
             sys.stdout.flush()
     return result
+
+
+def _requires_shell(cmd: str) -> bool:
+    """Return True when a command string depends on shell parsing."""
+
+    stripped = cmd.strip()
+    if not stripped:
+        return False
+
+    if stripped.startswith(("export ", ".", "source ")):
+        return True
+
+    first_token = stripped.split(None, 1)[0]
+    if "=" in first_token and not first_token.startswith(("/", "./")):
+        return True
+
+    shell_metacharacters = ("|", "&&", "||", ";", ">", "<", "$", "`", "$(", "\n")
+    return any(token in stripped for token in shell_metacharacters)
 
 
 def detect_os() -> None:
@@ -61,18 +90,19 @@ def detect_os() -> None:
 
 
 def is_package_installed(package: str) -> bool:
+    safe_package = validate_package_name(package)
     result = subprocess.run(
-        f"dpkg -l {shlex.quote(package)} 2>/dev/null | grep -q ^ii",
-        shell=True, capture_output=True
+        ["dpkg-query", "-W", "-f=${Status}", safe_package],
+        capture_output=True,
+        text=True,
     )
-    return result.returncode == 0
+    return result.returncode == 0 and "install ok installed" in result.stdout
 
 
 def install_with_verify(
     name: str,
     install_cmd: str,
     verify_fn: Callable[[], bool],
-    required: bool = True
 ) -> bool:
     """Run install command and verify using provided verification function.
     
@@ -80,15 +110,15 @@ def install_with_verify(
         name: Display name for messages
         install_cmd: Command to run
         verify_fn: Callable that returns True if installed
-        required: Unused; kept for API compatibility
-    
+
     Returns:
         True if verification passed
     """
     if verify_fn():
         print(f"  ✓ {name} already installed")
         return True
-    
+
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     print(f"  Installing {name}...")
     run(install_cmd, check=False)
     
@@ -100,15 +130,14 @@ def install_with_verify(
     return False
 
 
-def install_package(name: str, package: str, install_cmd: str, required: bool = True) -> bool:
+def install_package(name: str, package: str, install_cmd: str) -> bool:
     """Install an apt package and verify success.
     
     Args:
         name: Display name for messages
         package: Package name to check (for verification)
         install_cmd: Command to run for installation
-        required: Unused; kept for API compatibility
-    
+
     Returns:
         True if installed, False otherwise
     """
@@ -116,22 +145,21 @@ def install_package(name: str, package: str, install_cmd: str, required: bool = 
         name,
         install_cmd,
         lambda pkg=package: is_package_installed(pkg),
-        required
     )
 
 
 def is_service_active(service: str) -> bool:
     result = subprocess.run(
-        f"systemctl is-active {shlex.quote(service)}",
-        shell=True, capture_output=True
+        ["systemctl", "is-active", service],
+        capture_output=True,
     )
     return result.returncode == 0
 
 
 def user_exists(username: str) -> bool:
     result = subprocess.run(
-        f"id {shlex.quote(username)}",
-        shell=True, capture_output=True
+        ["id", username],
+        capture_output=True,
     )
     return result.returncode == 0
 

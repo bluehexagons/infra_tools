@@ -743,7 +743,10 @@ class DeploymentOrchestrator:
                     print(f"    • Migrations were squashed or reset in the repository")
                     print(f"    • The database schema is out of sync with migration history")
                     print(f"\n  To fix this, redeploy with the --reset-migrations flag:")
-                    print(f"    ./setup_server_web.py <host> --deploy <deploy-spec> <git-url> --reset-migrations")
+                    print(
+                        "    python3 infra_tools.py setup server_web <host> "
+                        "--deploy <deploy-spec> <git-url> --reset-migrations"
+                    )
                     print(f"\n  ⚠ WARNING: --reset-migrations will:")
                     print(f"    • Load the current schema from db/schema.rb")
                     print(f"    • Mark all migrations as already run")

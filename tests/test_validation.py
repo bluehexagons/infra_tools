@@ -10,11 +10,22 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.validation import (
+    validate_apt_packages,
+    validate_deploy_specs,
+    validate_deploy_targets,
+    validate_samba_share_specs,
     validate_directory_empty,
+    validate_scrub_specs,
+    validate_sync_specs,
     validate_network_endpoint,
     validate_positive_integer,
     validate_memory_string,
+    validate_package_name,
     validate_hosted_flags,
+    validate_smb_mount_specs,
+    validate_ssl_email,
+    validate_timezone_name,
+    validate_workspace_dir,
 )
 
 
@@ -86,6 +97,159 @@ class TestValidateNetworkEndpoint(unittest.TestCase):
             validate_network_endpoint('host:80:90')
 
 
+class TestValidateDeployTargets(unittest.TestCase):
+    def test_none_passes(self):
+        validate_deploy_targets(None)
+
+    def test_valid_targets_pass(self):
+        validate_deploy_targets(['app1.example.com', '192.168.1.20'])
+
+    def test_empty_target_fails(self):
+        with self.assertRaisesRegex(ValueError, "Deploy target must be a non-empty hostname or IP"):
+            validate_deploy_targets([''])
+
+    def test_invalid_target_fails(self):
+        with self.assertRaisesRegex(ValueError, "Invalid deploy target host: bad target"):
+            validate_deploy_targets(['bad target'])
+
+
+class TestValidateDeploySpecs(unittest.TestCase):
+    def test_none_passes(self):
+        validate_deploy_specs(None)
+
+    def test_valid_domain_and_path_specs_pass(self):
+        validate_deploy_specs([
+            ['example.com/blog,/srv/www/app', 'https://github.com/user/repo.git'],
+        ])
+
+    def test_invalid_domain_fails(self):
+        with self.assertRaisesRegex(ValueError, "Invalid deploy domain: bad domain"):
+            validate_deploy_specs([['bad domain', 'https://github.com/user/repo.git']])
+
+    def test_empty_git_url_fails(self):
+        with self.assertRaisesRegex(ValueError, "Deploy git URL must be a non-empty string"):
+            validate_deploy_specs([['example.com', '']])
+
+    def test_empty_deploy_spec_entry_fails(self):
+        with self.assertRaisesRegex(ValueError, "Deploy target spec list must not contain empty entries"):
+            validate_deploy_specs([['example.com,,other.example.com', 'https://github.com/user/repo.git']])
+
+
+class TestValidateSyncSpecs(unittest.TestCase):
+    def test_none_passes(self):
+        validate_sync_specs(None)
+
+    def test_valid_sync_specs_pass(self):
+        validate_sync_specs([['/src', '/dst', 'daily']])
+
+    def test_relative_source_fails(self):
+        with self.assertRaisesRegex(ValueError, "Source path must be absolute: relative"):
+            validate_sync_specs([['relative', '/dst', 'daily']])
+
+    def test_invalid_frequency_fails(self):
+        with self.assertRaisesRegex(ValueError, "Invalid interval 'yearly'"):
+            validate_sync_specs([['/src', '/dst', 'yearly']])
+
+
+class TestValidateScrubSpecs(unittest.TestCase):
+    def test_none_passes(self):
+        validate_scrub_specs(None)
+
+    def test_valid_scrub_specs_pass(self):
+        validate_scrub_specs([['/data', '.pardatabase', '5%', 'weekly']])
+
+    def test_relative_directory_fails(self):
+        with self.assertRaisesRegex(ValueError, "Directory path must be absolute: relative"):
+            validate_scrub_specs([['relative', '.pardatabase', '5%', 'weekly']])
+
+    def test_invalid_redundancy_fails(self):
+        with self.assertRaisesRegex(ValueError, "Redundancy percentage must be between 1 and 100: 0%"):
+            validate_scrub_specs([['/data', '.pardatabase', '0%', 'weekly']])
+
+
+class TestValidateSmbMountSpecs(unittest.TestCase):
+    def test_none_passes(self):
+        validate_smb_mount_specs(None)
+
+    def test_valid_smb_mount_specs_pass(self):
+        validate_smb_mount_specs([['/mnt/share', '192.168.1.10', 'user:pass', 'docs', '/sub']])
+
+    def test_invalid_host_fails(self):
+        with self.assertRaisesRegex(ValueError, "Invalid SMB mount host: bad host"):
+            validate_smb_mount_specs([['/mnt/share', 'bad host', 'user:pass', 'docs', '/sub']])
+
+    def test_invalid_share_name_fails(self):
+        with self.assertRaisesRegex(ValueError, r"Invalid share name .*bad/share"):
+            validate_smb_mount_specs([['/mnt/share', '192.168.1.10', 'user:pass', 'bad/share', '/sub']])
+
+    def test_invalid_subdir_fails(self):
+        with self.assertRaisesRegex(ValueError, "Subdirectory must start with /: subdir"):
+            validate_smb_mount_specs([['/mnt/share', '192.168.1.10', 'user:pass', 'docs', 'subdir']])
+
+
+class TestValidateSambaShareSpecs(unittest.TestCase):
+    def test_none_passes(self):
+        validate_samba_share_specs(None)
+
+    def test_valid_share_specs_pass(self):
+        validate_samba_share_specs([['read', 'docs', '/mnt/docs', 'shareuser']], [['shareuser', 'secret']])
+
+    def test_relative_path_fails(self):
+        with self.assertRaisesRegex(ValueError, "Share path must be absolute: relative"):
+            validate_samba_share_specs([['read', 'docs', 'relative', 'shareuser:secret']])
+
+    def test_invalid_share_name_fails(self):
+        with self.assertRaisesRegex(ValueError, r"Invalid Samba share name .*bad/share"):
+            validate_samba_share_specs([['read', 'bad/share', '/mnt/docs', 'shareuser:secret']])
+
+    def test_missing_credential_fails(self):
+        with self.assertRaisesRegex(ValueError, "Missing credential for share user: shareuser"):
+            validate_samba_share_specs([['read', 'docs', '/mnt/docs', 'shareuser']])
+
+
+class TestValidateWorkspaceDir(unittest.TestCase):
+    def test_existing_workspace_directory(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            validate_workspace_dir(tmpdir)
+
+    def test_new_nested_workspace_directory_uses_existing_parent(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            validate_workspace_dir(os.path.join(tmpdir, 'nested', 'workspace'))
+
+    def test_workspace_path_rejects_existing_file(self):
+        with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
+            path = tmpfile.name
+        try:
+            with self.assertRaises(ValueError):
+                validate_workspace_dir(path)
+        finally:
+            os.unlink(path)
+
+
+class TestValidateSslEmail(unittest.TestCase):
+    def test_none_passes(self):
+        validate_ssl_email(None)
+
+    def test_valid_email_passes(self):
+        validate_ssl_email("admin@example.com")
+
+    def test_invalid_email_fails(self):
+        with self.assertRaisesRegex(ValueError, "Invalid SSL email address: bad-email"):
+            validate_ssl_email("bad-email")
+
+
+class TestValidateTimezoneName(unittest.TestCase):
+    def test_none_passes(self):
+        validate_timezone_name(None)
+
+    def test_valid_timezone_passes(self):
+        validate_timezone_name("UTC")
+
+    def test_invalid_timezone_fails(self):
+        with self.assertRaisesRegex(ValueError, "Invalid timezone: Mars/Olympus"):
+            validate_timezone_name("Mars/Olympus")
+
+
 class TestValidatePositiveInteger(unittest.TestCase):
     def test_valid(self):
         self.assertEqual(validate_positive_integer('42'), 42)
@@ -153,6 +317,34 @@ class TestValidateMemoryString(unittest.TestCase):
         self.assertIn('--storage', str(ctx.exception))
 
 
+class TestValidatePackageName(unittest.TestCase):
+    def test_valid_package_name(self):
+        self.assertEqual(validate_package_name('python3-venv'), 'python3-venv')
+
+    def test_valid_package_name_with_plus(self):
+        self.assertEqual(validate_package_name('libgtk-3-0t64+extra'), 'libgtk-3-0t64+extra')
+
+    def test_empty_package_name(self):
+        with self.assertRaises(ValueError):
+            validate_package_name('')
+
+    def test_invalid_package_name(self):
+        with self.assertRaises(ValueError):
+            validate_package_name('python3; rm -rf /')
+
+
+class TestValidateAptPackages(unittest.TestCase):
+    def test_none_passes(self):
+        validate_apt_packages(None)
+
+    def test_valid_packages_pass(self):
+        validate_apt_packages(["python3-venv", "curl"])
+
+    def test_invalid_package_fails(self):
+        with self.assertRaisesRegex(ValueError, "Invalid --apt-install name: python3; rm -rf /"):
+            validate_apt_packages(["python3; rm -rf /"])
+
+
 class _MockConfig:
     """Minimal mock for SetupConfig used by validate_hosted_flags."""
     def __init__(self, **kwargs):
@@ -213,6 +405,15 @@ class TestValidateHostedFlags(unittest.TestCase):
             container_storage=[['root', 'auto', '10G']],
         )
         with self.assertRaises(ValueError):
+            validate_hosted_flags(config)
+
+    def test_invalid_hosted_node_host(self):
+        config = _MockConfig(
+            hosted_node='bad host',
+            container_memory='2G',
+            container_storage=[['root', 'auto', '10G']],
+        )
+        with self.assertRaisesRegex(ValueError, "Invalid hosted node host: bad host"):
             validate_hosted_flags(config)
 
     def test_invalid_storage_amount_for_root(self):

@@ -19,11 +19,15 @@ class TestAutoUpdateApt(unittest.TestCase):
     @patch("common.service_tools.auto_update_apt.update_package_lists", return_value=True)
     @patch("common.service_tools.auto_update_apt.load_notification_configs_from_state", return_value=[])
     def test_successful_update(self, _configs, _update, _upgrade, _autoremove):
-        result = auto_update_apt.main()
+        with self.assertLogs(auto_update_apt.logger, level="INFO") as logs:
+            result = auto_update_apt.main()
         self.assertEqual(result, 0)
         _update.assert_called_once()
         _upgrade.assert_called_once()
         _autoremove.assert_called_once()
+        joined = "\n".join(logs.output)
+        self.assertIn("Starting APT package update", joined)
+        self.assertIn("APT package update completed successfully", joined)
 
     @patch("common.service_tools.auto_update_apt.send_notification_safe")
     @patch("common.service_tools.auto_update_apt.update_package_lists", return_value=False)
@@ -44,6 +48,18 @@ class TestAutoUpdateApt(unittest.TestCase):
         mock_notify.assert_called_once()
         self.assertIn("APT upgrade failed", mock_notify.call_args.kwargs["subject"])
         self.assertEqual("dependency error", mock_notify.call_args.kwargs["details"])
+
+    @patch("common.service_tools.auto_update_apt.run_apt_command")
+    def test_update_package_lists_logs_structured_error(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="mirror offline"
+        )
+
+        with self.assertLogs(auto_update_apt.logger, level="ERROR") as logs:
+            ok = auto_update_apt.update_package_lists()
+
+        self.assertFalse(ok)
+        self.assertIn("apt-get update failed | stderr='mirror offline'", "\n".join(logs.output))
 
 
 class TestRunAptCommand(unittest.TestCase):

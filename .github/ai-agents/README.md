@@ -1,6 +1,6 @@
 # AI Agent Instructions
 
-⚡ Quick guidance for AI agents. See **QUICK_START.md** for the essentials.
+Quick guidance for AI agents. See **QUICK_START.md** for the essentials.
 
 ## 4-Step Workflow
 
@@ -9,7 +9,7 @@
 3. **Follow existing patterns** in the file you're editing
 4. **Test with `python3 -m py_compile <file>`** and run unit tests
 
-## ⚠️ Critical Rules
+## Critical Rules
 
 1. **Always** use `from __future__ import annotations`
 2. **Never** commit secrets or credentials
@@ -19,10 +19,10 @@
 6. **Always** keep docs up to date when changing patterns
 7. **Always** remove unused/deprecated code — API compatibility is not a concern
 
-## 🧪 Testing
+## Testing
 
 ```bash
-python3 -m pytest tests/ -v
+python3 -m unittest discover -s tests
 python3 -m py_compile file.py
 ```
 
@@ -30,7 +30,7 @@ python3 -m py_compile file.py
 - Mock system calls with `unittest.mock`
 - Use `tempfile.TemporaryDirectory()` for filesystem tests
 
-## 🖥️ Machine Type Awareness
+## Machine Type Awareness
 
 ```python
 from lib.machine_state import can_modify_kernel, can_manage_swap
@@ -44,7 +44,7 @@ if not can_modify_kernel():
 
 See `docs/MACHINE_TYPES.md` for capability matrix.
 
-## 📁 Key Files
+## Key Files
 
 | Purpose | File |
 |---------|------|
@@ -58,10 +58,10 @@ See `docs/MACHINE_TYPES.md` for capability matrix.
 
 | Task | Steps |
 |------|-------|
-| Add Setup Step | Function in `module/*_steps.py` → Add to setup script → Add tests |
+| Add Setup Step | Function in `module/*_steps.py` → Wire into unified setup flow → Add tests |
 | Modify Config | Update `SetupConfig` in `lib/config.py` → Update `lib/arg_parser.py` |
 | Fix Bug | Preserve signatures → Follow error patterns → Add regression test |
 
 ---
 
-📖 **QUICK_START.md** has the essential pattern and quick commands
+**QUICK_START.md** has the essential pattern and quick commands

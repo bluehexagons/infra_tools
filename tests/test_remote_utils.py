@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -56,6 +57,30 @@ class TestRunDryRun(unittest.TestCase):
     def test_dry_run_type(self):
         result = run("echo hello")
         self.assertIsInstance(result, subprocess.CompletedProcess)
+
+
+class TestRunCommandDispatch(unittest.TestCase):
+    @patch("lib.remote_utils.subprocess.run")
+    def test_simple_commands_use_argument_list(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess(args=["echo", "hello"], returncode=0)
+        run("echo hello")
+        mock_run.assert_called_once_with(
+            ["echo", "hello"],
+            capture_output=False,
+            text=True,
+            cwd=None,
+        )
+
+    @patch("lib.remote_utils.subprocess.run")
+    def test_piped_commands_use_explicit_shell_process(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess(args=["/bin/bash", "-lc", "echo test | cat"], returncode=0)
+        run("echo test | cat")
+        mock_run.assert_called_once_with(
+            ["/bin/bash", "-lc", "echo test | cat"],
+            capture_output=False,
+            text=True,
+            cwd=None,
+        )
 
 
 class TestRemoteValidateUsername(unittest.TestCase):

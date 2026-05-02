@@ -334,26 +334,34 @@ def _cleanup_orphan_par2(
             operation_logger.log_metric("total_orphan_size_mb", total_orphan_size // 1024 // 1024, "MB")
 
 
-def verify_repair(file_path: str, directory: str, database: str, log_file: str) -> bool:
+# Verification outcomes returned by verify_repair.
+VERIFY_OK = "ok"
+VERIFY_REPAIRED = "repaired"
+VERIFY_UNREPAIRABLE = "unrepairable"
+
+
+def verify_repair(file_path: str, directory: str, database: str, log_file: str) -> str:
     """Verify file integrity and repair if needed.
-    
+
     Args:
         file_path: Path to file to verify
         directory: Base directory being protected
         database: Database directory for par2 files
         log_file: Log file path
-        
+
     Returns:
-        True if a repair was performed, False otherwise
+        One of VERIFY_OK (verification passed or no parity exists),
+        VERIFY_REPAIRED (corruption detected and repaired), or
+        VERIFY_UNREPAIRABLE (corruption detected and repair failed).
     """
     relative_path = os.path.relpath(file_path, directory)
     par2_base = os.path.join(database, f"{relative_path}{PAR2_EXTENSION}")
-    
+
     if not os.path.exists(par2_base):
-        return False
-    
+        return VERIFY_OK
+
     # Don't log every file verification - only failures and repairs
-    
+
     try:
         subprocess.run(
             ['par2', 'verify', '-B', directory, par2_base],
@@ -363,11 +371,11 @@ def verify_repair(file_path: str, directory: str, database: str, log_file: str) 
             text=True,
             cwd=directory
         )
-        return False
+        return VERIFY_OK
     except subprocess.CalledProcessError:
         log(f"Verification failed for: {relative_path}", log_file)
         log("Attempting repair...", log_file)
-        
+
         try:
             subprocess.run(
                 ['par2', 'repair', '-B', directory, par2_base],
@@ -378,14 +386,14 @@ def verify_repair(file_path: str, directory: str, database: str, log_file: str) 
                 cwd=directory
             )
             log(f"✓ Repaired: {relative_path}", log_file)
-            return True
+            return VERIFY_REPAIRED
         except subprocess.CalledProcessError as e:
             log(f"✗ Repair failed: {relative_path}", log_file)
             log(f"  Error: {e.stdout}", log_file)
-            return False
+            return VERIFY_UNREPAIRABLE
 
 
-def scrub_directory(directory: str, database: str, redundancy: int, log_file: str, verify: bool = True, suppress_notifications: bool = False) -> None:
+def scrub_directory(directory: str, database: str, redundancy: int, log_file: str, verify: bool = True, suppress_notifications: bool = False) -> dict:
     """Scrub directory: create par2 files and optionally verify/repair.
     
     Args:
@@ -395,7 +403,22 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
         log_file: Log file path
         verify: Whether to verify and repair (False for fast initial creation)
         suppress_notifications: If True, skip sending notifications (caller will handle)
+
+    Returns:
+        Result dict with keys: ok (bool), files_processed, files_created,
+        files_updated, files_verified, files_repaired, files_unrepairable
+        (list of relative paths). ``ok`` is False when validation failed or
+        any files could not be repaired.
     """
+    result: dict = {
+        "ok": True,
+        "files_processed": 0,
+        "files_created": 0,
+        "files_updated": 0,
+        "files_verified": 0,
+        "files_repaired": 0,
+        "files_unrepairable": [],
+    }
     # Load notification configs from machine state
     notification_configs = []
     friendly_name = None
@@ -468,7 +491,8 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
                 except Exception as notify_err:
                     log(f"Warning: Failed to send notification: {notify_err}", log_file)
             
-            return
+            result["ok"] = False
+            return result
         
         os.makedirs(database, exist_ok=True)
         
@@ -478,6 +502,7 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
         files_updated = 0
         files_verified = 0
         files_repaired = 0
+        files_unrepairable: list[str] = []
         files_created = 0  # Track newly created par2 files
         files_skipped_empty = 0  # Track 0-byte files skipped
         files_skipped_uptodate = 0  # Track files with up-to-date par2
@@ -570,10 +595,12 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
                     progress_tracker.force_log(msg.build())
                 
                 if verify:
-                    was_repaired = verify_repair(file_path, directory, database, log_file)
+                    outcome = verify_repair(file_path, directory, database, log_file)
                     files_verified += 1
-                    if was_repaired:
+                    if outcome == VERIFY_REPAIRED:
                         files_repaired += 1
+                    elif outcome == VERIFY_UNREPAIRABLE:
+                        files_unrepairable.append(relative_path)
         
         log(f"Directory scan complete: {files_found} files in {dirs_found} directories", log_file)
         
@@ -593,6 +620,7 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
         operation_logger.log_metric("files_skipped_uptodate", files_skipped_uptodate, "count")
         operation_logger.log_metric("files_verified", files_verified, "count")
         operation_logger.log_metric("files_repaired", files_repaired, "count")
+        operation_logger.log_metric("files_unrepairable", len(files_unrepairable), "count")
         operation_logger.log_metric("total_file_size_mb", total_file_size // (1024 * 1024), "MB")
         
         # Execute any remaining transaction steps
@@ -603,7 +631,11 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
                                    f"Successfully processed {files_processed} files")
         
         log(f"Scrub completed: {datetime.now()}", log_file)
-        log(f"Files: {files_processed} processed, {files_created} created, {files_updated} updated, {files_verified} verified, {files_repaired} repaired", log_file)
+        log(f"Files: {files_processed} processed, {files_created} created, {files_updated} updated, {files_verified} verified, {files_repaired} repaired, {len(files_unrepairable)} UNREPAIRABLE", log_file)
+        if files_unrepairable:
+            log("Unrepairable files:", log_file)
+            for unrepairable in files_unrepairable:
+                log(f"  - {unrepairable}", log_file)
         if files_skipped_empty > 0 or files_skipped_uptodate > 0:
             log(f"Skipped: {files_skipped_empty} empty files, {files_skipped_uptodate} up-to-date files", log_file)
         log("", log_file)
@@ -617,12 +649,20 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
         operation_logger.complete("completed", 
                               f"Scrub completed: {files_processed} files processed, {files_repaired} repaired")
         
-        # Send success notification
+        # Send completion notification (escalate to error if any files could not be repaired)
         if notification_configs:
             try:
                 from lib.notifications import send_notification
                 name_prefix = f"[{friendly_name}] " if friendly_name else ""
-                status = "warning" if files_repaired > 0 else "good"
+                if files_unrepairable:
+                    status = "error"
+                    subject_state = "ERROR"
+                elif files_repaired > 0:
+                    status = "warning"
+                    subject_state = "Warning"
+                else:
+                    status = "good"
+                    subject_state = "Success"
                 message = f"Processed {files_processed} files"
                 if files_created > 0:
                     message += f", created {files_created} new"
@@ -630,9 +670,11 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
                     message += f", updated {files_updated}"
                 if files_repaired > 0:
                     message += f", repaired {files_repaired}"
+                if files_unrepairable:
+                    message += f", UNREPAIRABLE: {len(files_unrepairable)}"
                 if files_verified > 0:
                     message += f", verified {files_verified}"
-                
+
                 details = f"""Scrub Summary:
 Directory: {directory}
 Files processed: {files_processed}
@@ -640,15 +682,22 @@ Files created: {files_created}
 Files updated: {files_updated}
 Files verified: {files_verified}
 Files repaired: {files_repaired}
+Files unrepairable: {len(files_unrepairable)}
 Total size: {total_file_size // (1024 * 1024)} MB
 Redundancy: {redundancy}%
 """
-                
+                if files_unrepairable:
+                    # Cap listing to avoid blowing past webhook payload limits.
+                    sample = files_unrepairable[:50]
+                    details += "\nUnrepairable files:\n" + "\n".join(f"  - {p}" for p in sample)
+                    if len(files_unrepairable) > len(sample):
+                        details += f"\n  ... and {len(files_unrepairable) - len(sample)} more"
+
                 # Reuse existing logger from _LOGGERS cache
                 notif_logger = _LOGGERS.get(log_file)
                 send_notification(
                     notification_configs,
-                    subject=f"{name_prefix}{'Warning' if files_repaired > 0 else 'Success'}: Scrub completed",
+                    subject=f"{name_prefix}{subject_state}: Scrub completed",
                     job="scrub",
                     status=status,
                     message=message,
@@ -657,7 +706,16 @@ Redundancy: {redundancy}%
                 )
             except Exception as notify_err:
                 log(f"Warning: Failed to send notification: {notify_err}", log_file)
-        
+
+        result["files_processed"] = files_processed
+        result["files_created"] = files_created
+        result["files_updated"] = files_updated
+        result["files_verified"] = files_verified
+        result["files_repaired"] = files_repaired
+        result["files_unrepairable"] = list(files_unrepairable)
+        result["ok"] = not files_unrepairable
+        return result
+
     except Exception as e:
         operation_logger.log_error("scrub_failed", str(e))
         log(f"Scrub failed: {e}", log_file)

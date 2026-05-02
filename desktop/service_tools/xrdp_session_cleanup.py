@@ -14,11 +14,12 @@ from __future__ import annotations
 import os
 import sys
 import subprocess
+from logging import ERROR
 
 # Add lib directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
-from lib.logging_utils import get_service_logger
+from lib.logging_utils import get_service_logger, log_event
 
 # Initialize centralized logger
 logger = get_service_logger('xrdp_session_cleanup', 'desktop', use_syslog=True)
@@ -61,10 +62,10 @@ def main() -> int:
     
     if not username:
         error_msg = "No user specified for cleanup"
-        logger.error(error_msg)
+        log_event(logger, error_msg, level=ERROR)
         return 1
     
-    logger.info(f"Starting session cleanup for user: {username}")
+    log_event(logger, "Starting session cleanup", username=username)
     
     # Terminate xRDP-specific processes only (not all user processes)
     # This prevents disrupting other active sessions (SSH, other RDP, etc.)
@@ -77,7 +78,7 @@ def main() -> int:
     kill_processes(username, "cinnamon-session", exact=False)
     kill_processes(username, "i3", exact=True)
     
-    logger.info(f"Session cleanup completed for user: {username}")
+    log_event(logger, "Session cleanup completed", username=username)
     
     return 0
 

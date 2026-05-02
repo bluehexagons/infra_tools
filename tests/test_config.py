@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+from argparse import Namespace
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -53,6 +54,21 @@ class TestSetupConfigToDict(unittest.TestCase):
         config = self._make_config(tags=['web', 'prod'])
         d = config.to_dict()
         self.assertEqual(d['tags'], 'web,prod')
+
+    def test_to_dict_excludes_share_credentials(self):
+        config = self._make_config(share_credentials=[['user1', 'secret1']])
+        d = config.to_dict()
+        self.assertNotIn('share_credentials', d)
+
+    def test_to_dict_redacts_inline_share_passwords(self):
+        config = self._make_config(samba_shares=[['read', 'share', '/mnt/data', 'user1:secret1,user2']])
+        d = config.to_dict()
+        self.assertEqual(d['samba_shares'], [['read', 'share', '/mnt/data', 'user1,user2']])
+
+    def test_to_dict_redacts_inline_smb_mount_passwords(self):
+        config = self._make_config(smb_mounts=[['/mnt/share', '1.2.3.4', 'user1:secret1', 'docs', '/']])
+        d = config.to_dict()
+        self.assertEqual(d['smb_mounts'], [['/mnt/share', '1.2.3.4', 'user1', 'docs', '/']])
 
 
 class TestSetupConfigFromDict(unittest.TestCase):
@@ -165,6 +181,12 @@ class TestSetupConfigToRemoteArgs(unittest.TestCase):
         args_str = ' '.join(args)
         self.assertIn('--notify', args_str)
 
+    def test_antistatic_db(self):
+        config = self._make_config(antistatic_db='db.example.com:8081')
+        args = config.to_remote_args()
+        args_str = ' '.join(args)
+        self.assertIn('--antistatic-db db.example.com:8081', args_str)
+
     def test_friendly_name_included(self):
         config = self._make_config(friendly_name='scrapbox')
         args = config.to_remote_args()
@@ -187,7 +209,7 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
     def test_basic_command(self):
         config = self._make_config()
         parts = config.to_setup_command()
-        self.assertIn('python3 setup_server_lite.py', parts[0])
+        self.assertIn('python3 infra_tools.py setup server_lite', parts[0])
         self.assertIn('testhost', parts)
 
     def test_includes_username(self):
@@ -274,6 +296,107 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
         config = self._make_config(install_python=True)
         parts = config.to_setup_command()
         self.assertIn('--python', parts)
+
+    def test_smb_mount_password_redacted(self):
+        config = self._make_config(
+            smb_mounts=[['/mnt/share', '1.2.3.4', 'user1:secret1', 'docs', '/']]
+        )
+        parts = config.to_setup_command()
+        cmd = ' '.join(parts)
+        self.assertIn('user1:[REDACTED]', cmd)
+        self.assertNotIn('secret1', cmd)
+
+
+class TestSetupConfigFromArgs(unittest.TestCase):
+    def _make_args(self, **overrides):
+        defaults = dict(
+            host='testhost',
+            username='testuser',
+            timezone='UTC',
+            tags=None,
+            desktop=None,
+            browsers=None,
+            browser=None,
+            install_office=None,
+            enable_rdp=None,
+            smb_mounts=None,
+            enable_smbclient=None,
+            no_restart=None,
+            machine_type=None,
+            password=None,
+            ssh_key=None,
+            friendly_name=None,
+            use_flatpak=False,
+            apt_packages=None,
+            flatpak_packages=None,
+            dark_theme=False,
+            dry_run=False,
+            install_ruby=False,
+            install_go=False,
+            install_node=False,
+            install_python=False,
+            custom_steps=None,
+            deploy_specs=None,
+            full_deploy=False,
+            reset_migrations=False,
+            enable_ssl=False,
+            ssl_email=None,
+            enable_cloudflare=False,
+            enable_cicd=False,
+            is_build_server=False,
+            is_app_server=False,
+            deploy_targets=None,
+            api_subdomain=False,
+            enable_samba=False,
+            samba_shares=None,
+            share_credentials=None,
+            sync_specs=None,
+            scrub_specs=None,
+            notify_specs=None,
+            antistatic_server=None,
+            antistatic_db=None,
+            hosted_node=None,
+            hosted_user='root',
+            hosted_key=None,
+            container_memory=None,
+            container_storage=None,
+            container_cores=1,
+            container_base='debian',
+        )
+        defaults.update(overrides)
+        return Namespace(**defaults)
+
+    def test_workstation_defaults_come_from_registry(self):
+        config = SetupConfig.from_args(self._make_args(), 'workstation_desktop')
+        self.assertFalse(config.enable_rdp)
+        self.assertTrue(config.include_desktop)
+        self.assertTrue(config.include_cli_tools)
+        self.assertTrue(config.include_desktop_apps)
+        self.assertEqual(config.browser, 'librewolf')
+
+    def test_workstation_rdp_can_be_enabled_explicitly(self):
+        config = SetupConfig.from_args(self._make_args(enable_rdp=True), 'workstation_desktop')
+        self.assertTrue(config.enable_rdp)
+        self.assertTrue(config.include_desktop)
+
+    def test_pc_dev_defaults_include_office_and_smbclient(self):
+        config = SetupConfig.from_args(self._make_args(), 'pc_dev')
+        self.assertTrue(config.install_office)
+        self.assertTrue(config.enable_smbclient)
+        self.assertTrue(config.include_pc_dev_apps)
+
+    def test_antistatic_db_from_args(self):
+        config = SetupConfig.from_args(
+            self._make_args(antistatic_db='db.example.com'),
+            'server_web',
+        )
+        self.assertEqual(config.antistatic_db, 'db.example.com')
+
+    def test_server_proxmox_defaults_no_restart(self):
+        config = SetupConfig.from_args(self._make_args(), 'server_proxmox')
+        self.assertTrue(config.no_restart)
+        self.assertFalse(config.include_cli_tools)
+        self.assertFalse(config.include_desktop)
 
 
 class TestSetupConfigHostedFields(unittest.TestCase):

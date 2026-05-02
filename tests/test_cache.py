@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -22,21 +23,21 @@ from lib.config import SetupConfig
 class TestGetCachePathForHost(unittest.TestCase):
     def test_returns_json_path(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('lib.cache.SETUP_CACHE_DIR', tmpdir):
+            with patch('lib.cache.get_setup_cache_dir', return_value=tmpdir):
                 path = get_cache_path_for_host('myhost')
                 self.assertTrue(path.endswith('.json'))
                 self.assertIn('myhost', path)
 
     def test_normalizes_host(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('lib.cache.SETUP_CACHE_DIR', tmpdir):
+            with patch('lib.cache.get_setup_cache_dir', return_value=tmpdir):
                 path1 = get_cache_path_for_host('MyHost.')
                 path2 = get_cache_path_for_host('myhost')
                 self.assertEqual(path1, path2)
 
     def test_safe_chars_in_filename(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('lib.cache.SETUP_CACHE_DIR', tmpdir):
+            with patch('lib.cache.get_setup_cache_dir', return_value=tmpdir):
                 path = get_cache_path_for_host('host with spaces!')
                 basename = os.path.basename(path)
                 # Should not contain spaces or special chars
@@ -52,7 +53,7 @@ class TestSaveAndLoadSetupCommand(unittest.TestCase):
 
     def test_save_and_load(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('lib.cache.SETUP_CACHE_DIR', tmpdir):
+            with patch('lib.cache.get_setup_cache_dir', return_value=tmpdir), patch('lib.cache.get_history_dir', return_value=tmpdir):
                 config = self._make_config(timezone='America/New_York')
                 save_setup_command(config)
                 loaded = load_setup_command('testhost')
@@ -61,15 +62,21 @@ class TestSaveAndLoadSetupCommand(unittest.TestCase):
                 self.assertEqual(loaded.system_type, 'server_lite')
                 self.assertEqual(loaded.timezone, 'America/New_York')
 
+                cache_path = get_cache_path_for_host('testhost')
+                with open(cache_path, encoding='utf-8') as f:
+                    cache_data = json.load(f)
+                self.assertEqual(cache_data['script'], 'infra_tools.py')
+                self.assertEqual(cache_data['command'], 'infra_tools.py setup')
+
     def test_load_nonexistent(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('lib.cache.SETUP_CACHE_DIR', tmpdir):
+            with patch('lib.cache.get_setup_cache_dir', return_value=tmpdir), patch('lib.cache.get_history_dir', return_value=tmpdir):
                 loaded = load_setup_command('nonexistent')
                 self.assertIsNone(loaded)
 
     def test_save_with_name_and_tags(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('lib.cache.SETUP_CACHE_DIR', tmpdir):
+            with patch('lib.cache.get_setup_cache_dir', return_value=tmpdir), patch('lib.cache.get_history_dir', return_value=tmpdir):
                 config = self._make_config(friendly_name='My Server', tags=['web', 'prod'])
                 save_setup_command(config)
                 loaded = load_setup_command('testhost')
@@ -78,7 +85,7 @@ class TestSaveAndLoadSetupCommand(unittest.TestCase):
 
     def test_load_by_friendly_name_fallback(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('lib.cache.SETUP_CACHE_DIR', tmpdir):
+            with patch('lib.cache.get_setup_cache_dir', return_value=tmpdir), patch('lib.cache.get_history_dir', return_value=tmpdir):
                 config = self._make_config(host='10.0.0.5', friendly_name='My Server')
                 save_setup_command(config)
 
@@ -90,7 +97,7 @@ class TestSaveAndLoadSetupCommand(unittest.TestCase):
 
     def test_load_by_tag_fallback(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('lib.cache.SETUP_CACHE_DIR', tmpdir):
+            with patch('lib.cache.get_setup_cache_dir', return_value=tmpdir), patch('lib.cache.get_history_dir', return_value=tmpdir):
                 config = self._make_config(host='10.0.0.5', tags=['web', 'prod'])
                 save_setup_command(config)
 
@@ -102,7 +109,7 @@ class TestSaveAndLoadSetupCommand(unittest.TestCase):
 
     def test_load_by_name_returns_none_when_no_match_found(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('lib.cache.SETUP_CACHE_DIR', tmpdir):
+            with patch('lib.cache.get_setup_cache_dir', return_value=tmpdir), patch('lib.cache.get_history_dir', return_value=tmpdir):
                 config = self._make_config(host='10.0.0.5', friendly_name='My Server', tags=['prod'])
                 save_setup_command(config)
 
@@ -112,7 +119,7 @@ class TestSaveAndLoadSetupCommand(unittest.TestCase):
 
     def test_load_by_name_skips_corrupted_cache_files(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('lib.cache.SETUP_CACHE_DIR', tmpdir):
+            with patch('lib.cache.get_setup_cache_dir', return_value=tmpdir), patch('lib.cache.get_history_dir', return_value=tmpdir):
                 with open(os.path.join(tmpdir, 'broken.json'), 'w') as f:
                     f.write('{not valid json')
 
@@ -126,8 +133,7 @@ class TestSaveAndLoadSetupCommand(unittest.TestCase):
 
     def test_save_with_timing_and_success(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('lib.cache.SETUP_CACHE_DIR', tmpdir):
-                import json
+            with patch('lib.cache.get_setup_cache_dir', return_value=tmpdir), patch('lib.cache.get_history_dir', return_value=tmpdir):
                 config = self._make_config()
                 start = 1700000000.0
                 end = 1700000060.0
@@ -141,8 +147,7 @@ class TestSaveAndLoadSetupCommand(unittest.TestCase):
 
     def test_save_with_failure_status(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('lib.cache.SETUP_CACHE_DIR', tmpdir):
-                import json
+            with patch('lib.cache.get_setup_cache_dir', return_value=tmpdir), patch('lib.cache.get_history_dir', return_value=tmpdir):
                 config = self._make_config()
                 start = 1700000000.0
                 end = 1700000030.0
@@ -155,8 +160,7 @@ class TestSaveAndLoadSetupCommand(unittest.TestCase):
     def test_second_save_updates_timing(self):
         """Verify that a second save (with timing) overwrites the first (without timing)."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch('lib.cache.SETUP_CACHE_DIR', tmpdir):
-                import json
+            with patch('lib.cache.get_setup_cache_dir', return_value=tmpdir), patch('lib.cache.get_history_dir', return_value=tmpdir):
                 config = self._make_config(timezone='UTC')
                 # First save: no timing (pre-run)
                 save_setup_command(config)
@@ -177,6 +181,43 @@ class TestSaveAndLoadSetupCommand(unittest.TestCase):
                 # Config data still present
                 self.assertEqual(data['host'], 'testhost')
                 self.assertEqual(data['system_type'], 'server_lite')
+
+    def test_completed_run_writes_history_entry(self):
+        with tempfile.TemporaryDirectory() as cache_dir, tempfile.TemporaryDirectory() as history_dir:
+            with patch('lib.cache.get_setup_cache_dir', return_value=cache_dir), patch('lib.cache.get_history_dir', return_value=history_dir):
+                config = self._make_config(friendly_name='My Server', tags=['prod'])
+                save_setup_command(
+                    config,
+                    start_time=1700000000.0,
+                    end_time=1700000045.0,
+                    success=True,
+                    operation='patch',
+                )
+
+                history_files = os.listdir(history_dir)
+                self.assertEqual(len(history_files), 1)
+                history_path = os.path.join(history_dir, history_files[0])
+                with open(history_path, encoding='utf-8') as f:
+                    history_data = json.load(f)
+
+                self.assertEqual(history_data['host'], 'testhost')
+                self.assertEqual(history_data['operation'], 'patch')
+                self.assertEqual(history_data['system_type'], 'server_lite')
+                self.assertEqual(history_data['name'], 'My Server')
+                self.assertEqual(history_data['tags'], ['prod'])
+                self.assertIs(history_data['success'], True)
+                self.assertEqual(history_data['duration_seconds'], 45.0)
+                self.assertEqual(history_data['script'], 'infra_tools.py')
+                self.assertEqual(history_data['command'], 'infra_tools.py patch')
+                self.assertNotIn('share_credentials', history_data['args'])
+
+    def test_initial_cache_write_does_not_create_history_entry(self):
+        with tempfile.TemporaryDirectory() as cache_dir, tempfile.TemporaryDirectory() as history_dir:
+            with patch('lib.cache.get_setup_cache_dir', return_value=cache_dir), patch('lib.cache.get_history_dir', return_value=history_dir):
+                config = self._make_config()
+                save_setup_command(config, operation='setup')
+
+                self.assertEqual(os.listdir(history_dir), [])
 
 
 class TestMergeSetupConfigs(unittest.TestCase):

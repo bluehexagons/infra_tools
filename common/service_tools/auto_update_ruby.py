@@ -9,10 +9,11 @@ import os
 import shutil
 import subprocess
 import sys
+from logging import ERROR
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
-from lib.logging_utils import get_service_logger
+from lib.logging_utils import get_service_logger, log_event
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
 from lib.types import MaybeStr
 
@@ -36,10 +37,10 @@ def update_gem(gem_name: str) -> tuple[bool, MaybeStr]:
     result = run_gem_command(["update", gem_name])
     if result.returncode != 0:
         details = result.stderr.strip() or result.stdout.strip() or f"Failed to update {gem_name}"
-        logger.error("gem update %s failed: %s", gem_name, details)
+        log_event(logger, "gem update failed", level=ERROR, gem_name=gem_name, stderr=details)
         return False, details
 
-    logger.info("%s updated successfully", gem_name)
+    log_event(logger, "gem updated successfully", gem_name=gem_name)
     return True, result.stdout.strip() or None
 
 
@@ -47,10 +48,10 @@ def main() -> int:
     """Update commonly used global Ruby gems when present."""
     gem_path = shutil.which("gem")
     if not gem_path:
-        logger.info("gem not found, skipping update")
+        log_event(logger, "gem not found, skipping update")
         return 0
 
-    logger.info("Starting Ruby gem update check")
+    log_event(logger, "Starting Ruby gem update check")
     notification_configs = load_notification_configs_from_state(logger)
 
     failed_updates: list[str] = []
@@ -58,7 +59,7 @@ def main() -> int:
 
     for gem_name in ("bundler", "rails"):
         if not gem_installed(gem_name):
-            logger.info("%s not installed, skipping", gem_name)
+            log_event(logger, "gem not installed, skipping", gem_name=gem_name)
             continue
 
         success, details = update_gem(gem_name)
@@ -80,9 +81,9 @@ def main() -> int:
         return 1
 
     if updated_gems:
-        logger.info("Updated Ruby gems: %s", ", ".join(updated_gems))
+        log_event(logger, "Updated Ruby gems", gems=", ".join(updated_gems))
     else:
-        logger.info("No managed global Ruby gems installed, nothing to update")
+        log_event(logger, "No managed global Ruby gems installed, nothing to update")
     return 0
 
 

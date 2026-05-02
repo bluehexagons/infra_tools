@@ -14,17 +14,18 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
+          python-version: '3.10'
 
       - name: Install dependencies
         run: |
           python3 -m pip install --upgrade pip
+          pip install argcomplete
 
       - name: Run tests
-        run: make test
+        run: python3 -m unittest discover -s tests
 
       - name: Compile check
-        run: make compile
+        run: python3 -m py_compile $(find . -name '*.py' -not -path './.git/*' -not -path './__pycache__/*' -not -path '*.egg-info/*')
 
   release:
     needs: test

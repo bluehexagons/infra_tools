@@ -1,53 +1,39 @@
 # Shell Completion
 
-All setup scripts support tab completion for bash, zsh, and fish.
+The unified `infra_tools.py` CLI supports tab completion for bash, zsh, and fish.
 
 ## Quick Setup
 
 ```bash
 uv tool install --upgrade argcomplete
-python3 setup_completions.py
+python3 infra_tools.py completions
 ```
 
-## Supported Scripts
-
-- `setup_workstation_desktop`
-- `setup_workstation_dev`
-- `setup_server_web`
-- `setup_server_dev`
-- `setup_server_proxmox`
-- `setup_server_lite`
-- `setup_pc_dev`
-- `patch_setup`
-- `recall_setup`
-- `reconstruct_setup`
-- `webhook_manager`
+This installs completion for the single consolidated `infra_tools.py` entry point, including subcommands such as
+`setup`, `patch`, `recall`, `reconstruct`, `completions`, `python-tools`, and `credentials`.
 
 ## Manual Setup
 
 ### Bash
 
 ```bash
-eval "$(register-python-argcomplete setup_workstation_desktop)"
-eval "$(register-python-argcomplete setup_server_web)"
+eval "$(register-python-argcomplete infra_tools.py)"
 ```
 
 ### Zsh
 
 ```bash
-eval "$(register-python-argcomplete setup_workstation_desktop)"
-eval "$(register-python-argcomplete setup_server_web)"
+eval "$(register-python-argcomplete infra_tools.py)"
 ```
 
 ### Fish
 
 ```bash
-register-python-argcomplete --shell fish setup_workstation_desktop > ~/.config/fish/completions/setup_workstation_desktop.fish
-register-python-argcomplete --shell fish setup_server_web > ~/.config/fish/completions/setup_server_web.fish
+register-python-argcomplete --shell fish infra_tools.py > ~/.config/fish/completions/infra_tools.py.fish
 ```
 
 ## System-wide Installation
 
 ```bash
-sudo python3 setup_completions.py --global --shell bash
+sudo python3 infra_tools.py completions --global --shell bash
 ```

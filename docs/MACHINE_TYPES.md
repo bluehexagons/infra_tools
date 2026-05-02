@@ -1,6 +1,6 @@
 # Machine Types
 
-The `--machine` flag specifies the environment type, enabling setup scripts to adapt configuration based on platform capabilities.
+The `--machine` flag specifies the environment type, enabling setup commands to adapt configuration based on platform capabilities.
 
 ## Types
 
@@ -40,15 +40,15 @@ The `--machine` flag specifies the environment type, enabling setup scripts to a
 
 ```bash
 # Unprivileged LXC (default)
-python3 setup_workstation_dev.py 192.168.1.10
+python3 infra_tools.py setup workstation_dev 192.168.1.10
 
 # Explicit machine type
-python3 setup_workstation_dev.py 192.168.1.10 --machine vm
-python3 setup_workstation_dev.py 192.168.1.10 --machine privileged
-python3 setup_server_web.py 192.168.1.20 --machine hardware
+python3 infra_tools.py setup workstation_dev 192.168.1.10 --machine vm
+python3 infra_tools.py setup workstation_dev 192.168.1.10 --machine privileged
+python3 infra_tools.py setup server_web 192.168.1.20 --machine hardware
 
 # OCI container (limited features)
-python3 setup_server_lite.py 192.168.1.30 --machine oci
+python3 infra_tools.py setup server_lite 192.168.1.30 --machine oci
 ```
 
 ## State Persistence

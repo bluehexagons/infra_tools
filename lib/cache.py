@@ -11,29 +11,90 @@ from dataclasses import asdict
 from typing import Optional, Any
 
 from lib.config import SetupConfig
+from lib.workspace import get_history_dir, get_setup_cache_dir
 
 
-SETUP_CACHE_DIR = os.path.expanduser("~/.cache/infra_tools/setups")
+def _get_entrypoint_metadata(operation: str) -> dict[str, str]:
+    """Return user-facing CLI metadata stored with workspace state."""
+
+    return {
+        "script": "infra_tools.py",
+        "command": f"infra_tools.py {operation}",
+    }
 
 
 def get_cache_path_for_host(host: str) -> str:
-    os.makedirs(SETUP_CACHE_DIR, exist_ok=True)
+    cache_dir = get_setup_cache_dir()
+    os.makedirs(cache_dir, exist_ok=True)
     normalized_host = host.lower().rstrip('.')
     safe_host = re.sub(r'[^a-zA-Z0-9._-]', '_', normalized_host)
     host_hash = hashlib.sha256(normalized_host.encode()).hexdigest()[:8]
-    return os.path.join(SETUP_CACHE_DIR, f"{safe_host}_{host_hash}.json")
+    return os.path.join(cache_dir, f"{safe_host}_{host_hash}.json")
 
 
-def save_setup_command(config: SetupConfig, start_time: Optional[float] = None, 
-                      end_time: Optional[float] = None, success: Optional[bool] = None) -> None:
+def _get_history_path_for_run(host: str, operation: str, end_time: float) -> str:
+    """Return a unique history filename for a completed setup or patch run."""
+
+    history_dir = get_history_dir()
+    os.makedirs(history_dir, mode=0o700, exist_ok=True)
+
+    normalized_host = host.lower().rstrip(".")
+    safe_host = re.sub(r"[^a-zA-Z0-9._-]", "_", normalized_host)
+    host_hash = hashlib.sha256(normalized_host.encode()).hexdigest()[:8]
+    timestamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(end_time))
+    return os.path.join(history_dir, f"{timestamp}_{operation}_{safe_host}_{host_hash}.json")
+
+
+def _write_history_entry(
+    config: SetupConfig,
+    *,
+    operation: str,
+    start_time: float,
+    end_time: float,
+    success: bool,
+) -> None:
+    """Persist a completed run entry in the workspace history directory."""
+
+    history_path = _get_history_path_for_run(config.host, operation, end_time)
+    history_data: dict[str, Any] = {
+        "host": config.host,
+        "system_type": config.system_type,
+        "operation": operation,
+        "args": config.to_dict(),
+        "start_time": start_time,
+        "end_time": end_time,
+        "duration_seconds": max(0.0, end_time - start_time),
+        "success": success,
+    }
+    history_data.update(_get_entrypoint_metadata(operation))
+
+    if config.friendly_name:
+        history_data["name"] = config.friendly_name
+    if config.tags:
+        history_data["tags"] = config.tags
+
+    with open(history_path, "w", encoding="utf-8") as f:
+        json.dump(history_data, f, indent=2)
+        f.write("\n")
+    os.chmod(history_path, 0o600)
+
+
+def save_setup_command(
+    config: SetupConfig,
+    start_time: Optional[float] = None,
+    end_time: Optional[float] = None,
+    success: Optional[bool] = None,
+    *,
+    operation: str = "setup",
+) -> None:
     cache_path = get_cache_path_for_host(config.host)
     
     cache_data: dict[str, Any] = {
         "host": config.host,
         "system_type": config.system_type,
         "args": config.to_dict(),
-        "script": f"setup_{config.system_type}.py"
     }
+    cache_data.update(_get_entrypoint_metadata(operation))
     
     if config.friendly_name:
         cache_data["name"] = config.friendly_name
@@ -48,8 +109,18 @@ def save_setup_command(config: SetupConfig, start_time: Optional[float] = None,
     if success is not None:
         cache_data["last_success"] = success
     
-    with open(cache_path, 'w') as f:
+    with open(cache_path, "w", encoding="utf-8") as f:
         json.dump(cache_data, f, indent=2)
+        f.write("\n")
+
+    if start_time is not None and end_time is not None and success is not None:
+        _write_history_entry(
+            config,
+            operation=operation,
+            start_time=start_time,
+            end_time=end_time,
+            success=success,
+        )
 
 
 def _load_cache_file(cache_path: str, host: str) -> Optional[SetupConfig]:
@@ -71,14 +142,15 @@ def _load_cache_file(cache_path: str, host: str) -> Optional[SetupConfig]:
 
 def _find_cache_by_name(name: str) -> Optional[SetupConfig]:
     """Search all cache files for one matching by friendly name or tag."""
-    if not os.path.exists(SETUP_CACHE_DIR):
+    cache_dir = get_setup_cache_dir()
+    if not os.path.exists(cache_dir):
         return None
     needle = name.lower()
     try:
-        for filename in os.listdir(SETUP_CACHE_DIR):
+        for filename in os.listdir(cache_dir):
             if not filename.endswith('.json'):
                 continue
-            filepath = os.path.join(SETUP_CACHE_DIR, filename)
+            filepath = os.path.join(cache_dir, filename)
             try:
                 with open(filepath, 'r') as f:
                     data = json.load(f)

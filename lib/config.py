@@ -6,25 +6,25 @@ import argparse
 import shlex
 from dataclasses import dataclass, asdict
 from typing import Optional, cast
+from lib.plugin_registry import get_system_type_definition, get_system_type_names
 from lib.types import StrList, NestedStrList, JSONDict, MaybeStr
 
 
-SYSTEM_TYPES = [
-    "workstation_desktop",
-    "pc_dev",
-    "workstation_dev",
-    "server_dev",
-    "server_web",
-    "server_lite",
-    "server_proxmox",
-    "custom_steps"
-]
+SYSTEM_TYPES = get_system_type_names()
 
 MACHINE_TYPES = ["unprivileged", "vm", "privileged", "hardware", "oci"]
 DEFAULT_MACHINE_TYPE = "unprivileged"
 
-DESKTOP_SYSTEMS = ["workstation_desktop", "pc_dev", "workstation_dev"]
-CLI_SYSTEMS = ["workstation_desktop", "pc_dev", "workstation_dev", "server_dev", "server_web"]
+DESKTOP_SYSTEMS = [
+    system_type.name
+    for system_type in (get_system_type_definition(name) for name in SYSTEM_TYPES)
+    if system_type.include_desktop
+]
+CLI_SYSTEMS = [
+    system_type.name
+    for system_type in (get_system_type_definition(name) for name in SYSTEM_TYPES)
+    if system_type.include_cli_tools
+]
 
 
 def _normalize_container_storage(value: NestedStrList | list[str] | None) -> Optional[NestedStrList]:
@@ -43,6 +43,68 @@ def _normalize_container_storage(value: NestedStrList | list[str] | None) -> Opt
         return normalized
 
     return None
+
+
+def _strip_passwords_from_share_users(users_field: str) -> str:
+    sanitized_users: StrList = []
+    for user_spec in users_field.split(','):
+        normalized_user = user_spec.strip()
+        if not normalized_user:
+            continue
+        if ':' in normalized_user:
+            username, _ = normalized_user.split(':', 1)
+            sanitized_users.append(username.strip())
+        else:
+            sanitized_users.append(normalized_user)
+    return ','.join(sanitized_users)
+
+
+def redact_share_user_passwords(users_field: str) -> str:
+    redacted_users: StrList = []
+    for user_spec in users_field.split(','):
+        normalized_user = user_spec.strip()
+        if not normalized_user:
+            continue
+        if ':' in normalized_user:
+            username, _ = normalized_user.split(':', 1)
+            redacted_users.append(f"{username.strip()}:[REDACTED]")
+        else:
+            redacted_users.append(normalized_user)
+    return ','.join(redacted_users)
+
+
+def _strip_passwords_from_samba_shares(value: Optional[NestedStrList]) -> Optional[NestedStrList]:
+    if not value:
+        return value
+
+    sanitized_shares: NestedStrList = []
+    for share_spec in value:
+        sanitized_share = list(share_spec)
+        if len(sanitized_share) >= 4:
+            sanitized_share[3] = _strip_passwords_from_share_users(sanitized_share[3])
+        sanitized_shares.append(sanitized_share)
+    return sanitized_shares
+
+
+def _strip_passwords_from_smb_mounts(value: Optional[NestedStrList]) -> Optional[NestedStrList]:
+    if not value:
+        return value
+
+    sanitized_mounts: NestedStrList = []
+    for mount_spec in value:
+        sanitized_mount = list(mount_spec)
+        if len(sanitized_mount) >= 3 and ':' in sanitized_mount[2]:
+            username, _ = sanitized_mount[2].split(':', 1)
+            sanitized_mount[2] = username.strip()
+        sanitized_mounts.append(sanitized_mount)
+    return sanitized_mounts
+
+
+def redact_mount_credentials(credentials_field: str) -> str:
+    if ':' not in credentials_field:
+        return credentials_field
+    username, _ = credentials_field.split(':', 1)
+    return f"{username}:[REDACTED]"
 
 
 @dataclass
@@ -96,6 +158,8 @@ class SetupConfig:
     sync_specs: Optional[NestedStrList] = None
     scrub_specs: Optional[NestedStrList] = None
     notify_specs: Optional[NestedStrList] = None
+    antistatic_server: MaybeStr = None  # "DOMAIN[:port]" spec
+    antistatic_db: MaybeStr = None  # "DOMAIN[:port]" spec
     no_restart: bool = False
     # Container hosting (Proxmox LXC)
     hosted_node: MaybeStr = None
@@ -248,17 +312,26 @@ class SetupConfig:
                 escaped_spec = ' '.join(shlex.quote(str(s)) for s in notify_spec)
                 args.append(f"--notify {escaped_spec}")
         
+        if self.antistatic_server:
+            args.append(f"--antistatic-server {shlex.quote(self.antistatic_server)}")
+
+        if self.antistatic_db:
+            args.append(f"--antistatic-db {shlex.quote(self.antistatic_db)}")
+        
         if self.no_restart:
             args.append("--no-restart")
                 
         return args
     
     def to_setup_command(self, include_username: bool = True) -> StrList:
-        """Generate command line for user-facing setup script.
+        """Generate command line for the unified setup entry point.
         
         Returns a list of command parts that can be joined with spaces or newlines.
         """
-        cmd_parts: StrList = [f"python3 setup_{self.system_type}.py", self.host]
+        cmd_parts: StrList = [
+            f"python3 infra_tools.py setup {shlex.quote(self.system_type)}",
+            self.host,
+        ]
         
         # Add username if different from current user or if requested
         if include_username:
@@ -394,8 +467,7 @@ class SetupConfig:
                             continue
                         if ':' in user_spec:
                             username, _ = user_spec.split(':', 1)
-                            username = username.strip()
-                            redacted_users.append(f"{username}:[REDACTED]")
+                            redacted_users.append(f"{username.strip()}:[REDACTED]")
                         else:
                             redacted_users.append(user_spec)
                             if user_spec not in seen_share_credentials:
@@ -418,7 +490,10 @@ class SetupConfig:
         # SMB mounts
         if self.smb_mounts:
             for mount_spec in self.smb_mounts:
-                escaped_spec = ' '.join(shlex.quote(str(s)) for s in mount_spec)
+                redacted_mount_spec = list(mount_spec)
+                if len(redacted_mount_spec) >= 3 and ':' in redacted_mount_spec[2]:
+                    redacted_mount_spec[2] = redact_mount_credentials(redacted_mount_spec[2])
+                escaped_spec = ' '.join(shlex.quote(str(s)) for s in redacted_mount_spec)
                 cmd_parts.append(f"--mount-smb {escaped_spec}")
         
         # Sync
@@ -439,6 +514,14 @@ class SetupConfig:
                 escaped_spec = ' '.join(shlex.quote(str(s)) for s in notify_spec)
                 cmd_parts.append(f"--notify {escaped_spec}")
         
+        # Antistatic lobby server
+        if self.antistatic_server:
+            cmd_parts.append(f"--antistatic-server {shlex.quote(self.antistatic_server)}")
+
+        # Antistatic DB service
+        if self.antistatic_db:
+            cmd_parts.append(f"--antistatic-db {shlex.quote(self.antistatic_db)}")
+        
         # Restart control
         if self.no_restart:
             cmd_parts.append("--no-restart")
@@ -449,6 +532,9 @@ class SetupConfig:
         data = asdict(self)
         data.pop('host', None)
         data.pop('system_type', None)
+        data.pop('share_credentials', None)
+        data['samba_shares'] = _strip_passwords_from_samba_shares(self.samba_shares)
+        data['smb_mounts'] = _strip_passwords_from_smb_mounts(self.smb_mounts)
         if self.tags:
             data['tags'] = ','.join(self.tags)
         return data
@@ -471,7 +557,8 @@ class SetupConfig:
     @classmethod
     def from_args(cls, args: argparse.Namespace, system_type: str) -> 'SetupConfig':
         from lib.system_utils import get_current_username, get_local_timezone
-        
+
+        system_type_definition = get_system_type_definition(system_type)
         tags = None
         if hasattr(args, 'tags') and args.tags:
             tags = [tag.strip() for tag in args.tags.split(',') if tag.strip()]
@@ -491,49 +578,48 @@ class SetupConfig:
         elif hasattr(args, 'browser') and args.browser:
             # Single browser provided
             browser = args.browser
-        elif system_type in DESKTOP_SYSTEMS:
-            # Default browser for desktop systems
-            browser = "librewolf"
+        elif system_type_definition.default_browser:
+            browser = system_type_definition.default_browser
         
         install_office = args.install_office
-        if system_type == "pc_dev" and install_office is None:
+        if install_office is None and system_type_definition.default_install_office:
             install_office = True
         elif install_office is None:
             install_office = False
         
         enable_rdp = args.enable_rdp
-        if enable_rdp is None and system_type in DESKTOP_SYSTEMS:
+        if enable_rdp is None and system_type_definition.default_enable_rdp:
             enable_rdp = True
         elif enable_rdp is None:
             enable_rdp = False
         
         smb_mounts = getattr(args, 'smb_mounts', None)
         enable_smbclient = getattr(args, 'enable_smbclient', None)
-        if enable_smbclient is None and (system_type == "pc_dev" or smb_mounts):
+        if enable_smbclient is None and (system_type_definition.default_enable_smbclient or smb_mounts):
             enable_smbclient = True
         elif enable_smbclient is None:
             enable_smbclient = False
         
         include_desktop = (
-            system_type in DESKTOP_SYSTEMS
+            system_type_definition.include_desktop
             or enable_rdp
         )
-        include_cli_tools = system_type in CLI_SYSTEMS
-        include_desktop_apps = system_type == "workstation_desktop"
-        include_workstation_dev_apps = system_type == "workstation_dev"
-        include_pc_dev_apps = system_type == "pc_dev"
-        include_web_server = system_type == "server_web"
-        include_web_firewall = system_type == "server_web"
+        include_cli_tools = system_type_definition.include_cli_tools
+        include_desktop_apps = system_type_definition.include_desktop_apps
+        include_workstation_dev_apps = system_type_definition.include_workstation_dev_apps
+        include_pc_dev_apps = system_type_definition.include_pc_dev_apps
+        include_web_server = system_type_definition.include_web_server
+        include_web_firewall = system_type_definition.include_web_firewall
         
         no_restart = getattr(args, 'no_restart', None)
         if no_restart is None:
-            no_restart = system_type == "server_proxmox"
+            no_restart = system_type_definition.default_no_restart
         
         return cls(
             host=args.host,
             username=username,
             system_type=system_type,
-            machine_type=getattr(args, 'machine_type', None) or DEFAULT_MACHINE_TYPE,
+            machine_type=getattr(args, 'machine_type', None) or system_type_definition.default_machine_type or DEFAULT_MACHINE_TYPE,
             password=getattr(args, 'password', None),
             ssh_key=getattr(args, 'ssh_key', None),
             timezone=timezone,
@@ -573,6 +659,8 @@ class SetupConfig:
             sync_specs=getattr(args, 'sync_specs', None),
             scrub_specs=getattr(args, 'scrub_specs', None),
             notify_specs=getattr(args, 'notify_specs', None),
+            antistatic_server=getattr(args, 'antistatic_server', None),
+            antistatic_db=getattr(args, 'antistatic_db', None),
             no_restart=no_restart,
             hosted_node=getattr(args, 'hosted_node', None),
             hosted_user=getattr(args, 'hosted_user', 'root'),

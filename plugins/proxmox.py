@@ -1,0 +1,56 @@
+"""Proxmox-oriented built-in plugin definitions and step builders."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from lib.plugin_registry import PluginDefinition, SystemTypeDefinition
+
+if TYPE_CHECKING:
+    from lib.config import SetupConfig
+    from lib.types import StepFunc
+
+
+PLUGIN = PluginDefinition(
+    name="proxmox",
+    module=__name__,
+    plugin_kind="composition",
+    dependencies=("common", "core", "security"),
+    system_types=(
+        SystemTypeDefinition(
+            name="server_proxmox",
+            description="Proxmox host server",
+            order=70,
+            default_no_restart=True,
+            default_machine_type="hardware",
+            step_builder="plugins.proxmox:build_server_proxmox_steps",
+        ),
+    ),
+)
+
+
+def build_server_proxmox_steps(_: SetupConfig) -> list[tuple[str, StepFunc]]:
+    """Build the dedicated Proxmox hardening flow."""
+
+    from common.steps import check_restart_required, configure_swap
+    from security.steps import (
+        configure_auto_restart,
+        configure_auto_updates,
+        configure_cleanup_maintenance,
+        configure_fail2ban,
+        create_remoteusers_group,
+        harden_kernel,
+        harden_ssh,
+    )
+
+    return [
+        ("Creating remoteusers group", create_remoteusers_group),
+        ("Configuring swap", configure_swap),
+        ("Hardening SSH configuration", harden_ssh),
+        ("Hardening kernel parameters", harden_kernel),
+        ("Configuring fail2ban (sshd jail)", configure_fail2ban),
+        ("Configuring automatic security updates", configure_auto_updates),
+        ("Configuring cleanup maintenance service", configure_cleanup_maintenance),
+        ("Configuring automatic restart service", configure_auto_restart),
+        ("Checking if restart required", check_restart_required),
+    ]

@@ -15,8 +15,13 @@ from lib.proxmox_node import (
     _create_container,
     auto_detect_bridge,
     _get_bridge_prefix_length,
+    _get_host_nameservers,
+    _is_usable_nameserver,
+    _parse_pveam_available,
+    _resolve_public_key_path,
     _resolve_storage_pool,
     _resolve_template_name,
+    _template_sort_key,
     check_container_exists,
     _ssh_opts,
     _ssh_run,
@@ -260,6 +265,232 @@ class TestCheckContainerExists(unittest.TestCase):
         mock_run.side_effect = [list_result, config_100]
         result = check_container_exists("10.0.0.1", "10.0.0.50")
         self.assertFalse(result)
+
+    @patch("lib.proxmox_node._ssh_run")
+    def test_substring_ip_does_not_false_positive(self, mock_run):
+        # Regression: previously "10.0.0.5" would falsely match a container
+        # whose IP was "10.0.0.50/24" because of substring matching.
+        list_result = MagicMock(stdout="100\n", returncode=0)
+        config_100 = MagicMock(
+            stdout="net0: name=eth0,bridge=vmbr0,ip=10.0.0.50/24,gw=10.0.0.1,type=veth\n",
+            returncode=0,
+        )
+        mock_run.side_effect = [list_result, config_100]
+        self.assertFalse(check_container_exists("10.0.0.1", "10.0.0.5"))
+
+    @patch("lib.proxmox_node._ssh_run")
+    def test_matches_when_no_cidr_suffix(self, mock_run):
+        list_result = MagicMock(stdout="100\n", returncode=0)
+        config_100 = MagicMock(
+            stdout="net0: name=eth0,bridge=vmbr0,ip=10.0.0.50,gw=10.0.0.1,type=veth\n",
+            returncode=0,
+        )
+        mock_run.side_effect = [list_result, config_100]
+        self.assertTrue(check_container_exists("10.0.0.1", "10.0.0.50"))
+
+
+class TestAutoDetectBridge(unittest.TestCase):
+    @patch("lib.proxmox_node._ssh_run")
+    def test_ssh_failure_raises(self, mock_run):
+        mock_run.return_value = MagicMock(stdout="", stderr="ssh: timeout", returncode=255)
+        with self.assertRaises(ProvisionError) as ctx:
+            auto_detect_bridge("10.0.0.1")
+        self.assertIn("Failed to query bridges", str(ctx.exception))
+
+    @patch("lib.proxmox_node._ssh_run")
+    def test_prefers_vmbr0(self, mock_run):
+        mock_run.return_value = MagicMock(stdout="vmbr1\nvmbr0\nvmbr2\n", returncode=0)
+        self.assertEqual(auto_detect_bridge("10.0.0.1"), "vmbr0")
+
+
+class TestNameserverFiltering(unittest.TestCase):
+    def test_loopback_rejected(self):
+        self.assertFalse(_is_usable_nameserver("127.0.0.53"))
+        self.assertFalse(_is_usable_nameserver("127.0.0.1"))
+        self.assertFalse(_is_usable_nameserver("::1"))
+
+    def test_link_local_rejected(self):
+        self.assertFalse(_is_usable_nameserver("169.254.1.1"))
+        self.assertFalse(_is_usable_nameserver("0.0.0.0"))
+
+    def test_global_accepted(self):
+        self.assertTrue(_is_usable_nameserver("1.1.1.1"))
+        self.assertTrue(_is_usable_nameserver("8.8.8.8"))
+
+    def test_invalid_rejected(self):
+        self.assertFalse(_is_usable_nameserver("not-an-ip"))
+
+    @patch("lib.proxmox_node._ssh_run")
+    def test_filters_loopback_from_resolv_conf(self, mock_run):
+        # systemd-resolved scenario: resolvectl prints upstream, resolv.conf has stub.
+        mock_run.return_value = MagicMock(
+            stdout="1.1.1.1\n8.8.8.8\n127.0.0.53\n",
+            returncode=0,
+        )
+        result = _get_host_nameservers("10.0.0.1", "root", [])
+        self.assertEqual(result, ["1.1.1.1", "8.8.8.8"])
+
+    @patch("lib.proxmox_node._ssh_run")
+    def test_falls_back_when_only_loopback(self, mock_run):
+        mock_run.return_value = MagicMock(stdout="127.0.0.53\n", returncode=0)
+        result = _get_host_nameservers("10.0.0.1", "root", [])
+        self.assertEqual(result, ["1.1.1.1"])
+
+
+class TestParsePveamAvailable(unittest.TestCase):
+    def test_real_whitespace_format(self):
+        # Actual pveam available output uses whitespace-separated columns.
+        stdout = (
+            "section          template\n"
+            "system           debian-11-standard_11.7-1_amd64.tar.zst\n"
+            "system           debian-12-standard_12.7-1_amd64.tar.zst\n"
+            "system           ubuntu-24.04-standard_24.04-1_amd64.tar.zst\n"
+            "turnkeylinux     debian-12-turnkey-wordpress_18.0-1_amd64.tar.gz\n"
+        )
+        debian = _parse_pveam_available(stdout, "debian")
+        # Must include both standard debian images, but NOT turnkey-wordpress.
+        self.assertIn("debian-11-standard_11.7-1_amd64.tar.zst", debian)
+        self.assertIn("debian-12-standard_12.7-1_amd64.tar.zst", debian)
+        for entry in debian:
+            self.assertNotIn("turnkey", entry)
+
+    def test_legacy_slash_format(self):
+        # Older format with section/template prefix should still work.
+        stdout = (
+            "system/debian-12-standard_12.0-1_amd64.tar.zst\n"
+            "system/ubuntu-24.04-standard_24.04-1_amd64.tar.zst\n"
+        )
+        self.assertEqual(
+            _parse_pveam_available(stdout, "debian"),
+            ["debian-12-standard_12.0-1_amd64.tar.zst"],
+        )
+
+    def test_skips_section_and_blank_lines(self):
+        stdout = "section\n\nsystem  debian-12-standard_12.0-1_amd64.tar.zst\n"
+        self.assertEqual(
+            _parse_pveam_available(stdout, "debian"),
+            ["debian-12-standard_12.0-1_amd64.tar.zst"],
+        )
+
+
+class TestTemplateSortKey(unittest.TestCase):
+    def test_picks_higher_major_over_lexical(self):
+        # Lexically "debian-9" > "debian-10"; ensure version-aware sort wins.
+        names = [
+            "debian-10-standard_10.7-1_amd64.tar.gz",
+            "debian-9-standard_9.7-1_amd64.tar.gz",
+            "debian-12-standard_12.0-1_amd64.tar.zst",
+        ]
+        names.sort(key=_template_sort_key)
+        self.assertTrue(names[-1].startswith("debian-12-"))
+
+    def test_picks_higher_minor(self):
+        names = [
+            "debian-12-standard_12.10-1_amd64.tar.zst",
+            "debian-12-standard_12.2-1_amd64.tar.zst",
+        ]
+        names.sort(key=_template_sort_key)
+        self.assertTrue(names[-1].startswith("debian-12-standard_12.10"))
+
+
+class TestPublicKeyResolution(unittest.TestCase):
+    def test_returns_none_when_no_key_set(self):
+        self.assertIsNone(_resolve_public_key_path(None))
+
+    def test_returns_none_when_pub_missing(self):
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix="_id", delete=False) as fh:
+            fh.write(b"private")
+            path = fh.name
+        try:
+            self.assertIsNone(_resolve_public_key_path(path))
+        finally:
+            os.unlink(path)
+
+    def test_returns_pub_path_when_present(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            priv = os.path.join(tmp, "id_test")
+            pub = priv + ".pub"
+            with open(priv, "w") as fh:
+                fh.write("priv")
+            with open(pub, "w") as fh:
+                fh.write("ssh-ed25519 AAAA...")
+            self.assertEqual(_resolve_public_key_path(priv), pub)
+
+
+class TestHostnameLengthCap(unittest.TestCase):
+    def test_long_friendly_name_truncated_to_63(self):
+        long_name = "a" * 100
+        result = _build_container_hostname("10.0.0.50", long_name)
+        self.assertLessEqual(len(result), 63)
+
+    def test_truncation_does_not_leave_trailing_hyphen(self):
+        # "abcdef-" * 10 truncated at 63 might end on a hyphen; ensure stripped.
+        weird = ("abcdefghij-" * 10)
+        result = _build_container_hostname("10.0.0.50", weird)
+        self.assertLessEqual(len(result), 63)
+        self.assertFalse(result.endswith("-"))
+
+    def test_short_name_unchanged(self):
+        self.assertEqual(_build_container_hostname("10.0.0.50", "web"), "web")
+
+
+class TestCreateContainerInjectsPubkey(unittest.TestCase):
+    @patch("lib.proxmox_node._ssh_run")
+    def test_pubkey_arg_added_when_provided(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(stdout="", stderr="", returncode=0),  # pct create
+            MagicMock(stdout="status: running\n", returncode=0),  # pct status
+        ]
+        _create_container(
+            vmid=200,
+            target_ip="10.0.0.51",
+            template_path="local:vztmpl/debian.tar.zst",
+            memory="2G",
+            cores=2,
+            root_pool="local-lvm",
+            storage_amount="20G",
+            cidr_prefix="24",
+            bridge="vmbr0",
+            gateway="10.0.0.1",
+            nameservers=["1.1.1.1"],
+            hostname="web-01",
+            node_ip="10.0.0.10",
+            user="root",
+            ssh_opts=[],
+            ssh_pubkey_remote_path="/tmp/infra_tools_pubkey.abc",
+        )
+        pct_cmd = mock_run.call_args_list[0].args[3]
+        self.assertIn("--ssh-public-keys", pct_cmd)
+        self.assertIn("/tmp/infra_tools_pubkey.abc", pct_cmd)
+        self.assertIn("--start 1", pct_cmd)
+
+    @patch("lib.proxmox_node._ssh_run")
+    def test_no_pubkey_arg_when_omitted(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(stdout="", stderr="", returncode=0),
+            MagicMock(stdout="status: running\n", returncode=0),
+        ]
+        _create_container(
+            vmid=200,
+            target_ip="10.0.0.51",
+            template_path="local:vztmpl/debian.tar.zst",
+            memory="2G",
+            cores=2,
+            root_pool="local-lvm",
+            storage_amount="20G",
+            cidr_prefix="24",
+            bridge="vmbr0",
+            gateway="10.0.0.1",
+            nameservers=["1.1.1.1"],
+            hostname="web-01",
+            node_ip="10.0.0.10",
+            user="root",
+            ssh_opts=[],
+        )
+        pct_cmd = mock_run.call_args_list[0].args[3]
+        self.assertNotIn("--ssh-public-keys", pct_cmd)
 
 
 if __name__ == '__main__':

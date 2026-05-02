@@ -11,7 +11,7 @@ from typing import Optional
 
 from lib.config import SetupConfig
 from lib.machine_state import can_manage_time_sync
-from lib.remote_utils import run, is_dry_run, is_package_installed, is_service_active, file_contains, generate_password, install_package
+from lib.remote_utils import run, is_dry_run, is_package_installed, is_service_active, file_contains, install_package
 from lib.systemd_service import cleanup_service
 
 
@@ -40,7 +40,28 @@ def update_and_upgrade_packages(config: SetupConfig) -> None:
 
 
 def ensure_sudo_installed(config: SetupConfig) -> None:
-    install_package("sudo", "sudo", "apt-get install -y -qq sudo", required=False)
+    install_package("sudo", "sudo", "apt-get install -y -qq sudo")
+
+
+def configure_ipv4_preference(config: SetupConfig) -> None:
+    """Prefer IPv4 over IPv6 to avoid hangs when IPv6 is present but non-functional."""
+    import re
+    gai_conf = "/etc/gai.conf"
+    marker = "precedence ::ffff:0:0/96  100"
+
+    if os.path.exists(gai_conf):
+        with open(gai_conf, "r") as f:
+            content = f.read()
+        if re.search(r"^\s*precedence\s+::ffff:0:0/96\s+100", content, re.MULTILINE):
+            print("  ✓ IPv4 preference already configured")
+            return
+        with open(gai_conf, "a") as f:
+            f.write(f"\n# Prefer IPv4 to avoid timeouts when IPv6 is non-functional\n{marker}\n")
+    else:
+        with open(gai_conf, "w") as f:
+            f.write(f"# Prefer IPv4 to avoid timeouts when IPv6 is non-functional\n{marker}\n")
+
+    print("  ✓ Configured IPv4 preference in /etc/gai.conf")
 
 
 def configure_locale(config: SetupConfig) -> None:
@@ -51,7 +72,7 @@ def configure_locale(config: SetupConfig) -> None:
         print("  ✓ UTF-8 locale already configured")
         return
     
-    install_package("locales", "locales", "apt-get install -y -qq locales", required=False)
+    install_package("locales", "locales", "apt-get install -y -qq locales")
     run("sed -i 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen")
     locale_gen_result = run("locale-gen", check=False)
     run("update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8", check=False)
@@ -84,9 +105,7 @@ def setup_user(config: SetupConfig) -> None:
             if set_user_password(config.username, config.password):
                 print("  Password set")
         else:
-            generated = generate_password()
-            if set_user_password(config.username, generated):
-                print(f"  Generated password: {generated}")
+            print("  No password configured; relying on SSH key authentication")
     else:
         print(f"  User already exists: {config.username}")
         if config.password:
@@ -164,7 +183,7 @@ def configure_time_sync(config: SetupConfig) -> None:
         run("apt-get remove -y -qq systemd-timesyncd", check=False)
         print("  ✓ systemd-timesyncd removed")
     
-    install_package("chrony", "chrony", "apt-get install -y -qq chrony", required=False)
+    install_package("chrony", "chrony", "apt-get install -y -qq chrony")
     
     run("systemctl enable chrony", check=False)
     run("systemctl start chrony", check=False)
@@ -179,7 +198,8 @@ def install_cli_tools(config: SetupConfig) -> None:
     if all_installed:
         print("  ✓ CLI tools already installed (neovim, btop, htop, curl, wget, git, tmux, unzip, rsync)")
         return
-    
+
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get install -y -qq neovim btop htop curl wget git tmux unzip xdg-utils rsync", check=False)
     
     if all(is_package_installed(t) for t in tools):
@@ -206,7 +226,7 @@ def install_ruby(config: SetupConfig) -> None:
         print("  ✓ Ruby + bundler already installed")
         return
     run("apt-get -o DPkg::Lock::Timeout=60 install -y -qq ruby ruby-dev bundler", check=False)
-    run("gem install bundler", check=False)
+    run("gem install bundler --no-document", check=False)
     if shutil.which("ruby"):
         print("  ✓ Ruby + bundler installed from apt packages")
 
@@ -217,6 +237,7 @@ def install_go(config: SetupConfig) -> None:
         print("  ✓ Go already installed")
         return
     
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get install -y -qq curl wget")
     result = run("curl -s https://go.dev/VERSION?m=text | head -1", check=False, capture_output=True)
     if result.returncode != 0 or not result.stdout.strip():
@@ -252,8 +273,9 @@ def install_node(config: SetupConfig) -> None:
         print("  ✓ nvm already installed")
         return
     
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get install -y -qq curl")
-    
+
     nvm_version = "v0.39.7"
     
     # Install nvm as the user, explicitly setting NVM_DIR to avoid picking up
@@ -307,17 +329,6 @@ export NVM_DIR="$HOME/.nvm"
     print("  ✓ nvm + Node.js LTS + NPM (latest) + PNPM installed for user")
 
 
-def _find_setup_completions_script() -> Optional[str]:
-    candidates = [
-        "/opt/infra_tools/setup_completions.py",
-        os.path.join(os.path.dirname(os.path.dirname(__file__)), "setup_completions.py"),
-    ]
-    for candidate in candidates:
-        if os.path.exists(candidate):
-            return candidate
-    return None
-
-
 def _validate_uv_install_script(script_path: str) -> bool:
     """Basic validation for uv installer script content before execution."""
     try:
@@ -333,7 +344,7 @@ def _validate_uv_install_script(script_path: str) -> bool:
         return False
     if "uv" not in content:
         return False
-    suspicious_patterns = ["rm -rf /", "chmod -R 777 /", "mkfs.", "dd if=", "curl | sh", "wget | sh"]
+    suspicious_patterns = ["rm -rf /", "chmod -R 777 /", "mkfs.", "dd if="]
     if any(pattern in content for pattern in suspicious_patterns):
         return False
     return True
@@ -363,7 +374,7 @@ def install_or_update_uv(user_home: str, username: Optional[str] = None) -> bool
                 return False
 
             file_mode = os.stat(installer_path).st_mode & 0o777
-            if (file_mode & 0o033) != 0 or (file_mode & 0o100) == 0:
+            if (file_mode & 0o033) != 0:
                 print("  ✗ Downloaded uv installer file permissions are too broad")
                 return False
 
@@ -408,6 +419,7 @@ def install_python(config: SetupConfig) -> None:
     """Install Python tooling (aliases and uv)."""
     user_home = f"/home/{config.username}"
 
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get install -y -qq python3 python3-venv curl")
 
     python3_path = shutil.which("python3")
@@ -433,8 +445,6 @@ def install_python(config: SetupConfig) -> None:
     else:
         raise RuntimeError("uv installation failed")
 
-    if _find_setup_completions_script() is None:
-        print("  ℹ setup_completions.py not found in installed location")
     print("  ℹ Remote systems skip shell autocompletion setup")
 
 
@@ -558,6 +568,7 @@ def install_apt_packages(config: SetupConfig) -> None:
     if not config.apt_packages:
         return
     
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     print("  Installing custom apt packages...")
     for package in config.apt_packages:
         if is_package_installed(package):

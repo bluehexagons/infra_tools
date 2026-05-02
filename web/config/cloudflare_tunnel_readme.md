@@ -18,6 +18,13 @@ This script will:
 5. Generate config.yml automatically
 6. Install and start the tunnel service
 
+When the server is configured with `--cloudflare`, generated nginx site configs
+serve origin HTTP directly instead of redirecting HTTP to HTTPS. This keeps
+cloudflared's `http://localhost:80` origin service from entering a redirect
+loop while Cloudflare still serves public HTTPS at the edge. Proxied app
+backends also receive `X-Forwarded-Proto: https` so frameworks such as Rails do
+not issue their own HTTPS redirects.
+
 ## Manual Configuration
 
 If you prefer manual setup or need to customize:

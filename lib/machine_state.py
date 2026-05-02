@@ -7,7 +7,8 @@ import json
 import os
 from typing import Optional, Any
 
-from lib.config import DEFAULT_MACHINE_TYPE, MACHINE_TYPES, SYSTEM_TYPES
+from lib.config import DEFAULT_MACHINE_TYPE, MACHINE_TYPES
+from lib.plugin_registry import get_system_type_names
 
 
 STATE_DIR = "/opt/infra_tools/state"
@@ -180,7 +181,7 @@ def _validate_setup_config(config: Any) -> Optional[str]:
         return f"Missing required keys: {', '.join(missing)}"
 
     system_type = config.get("system_type")
-    if system_type is not None and system_type not in SYSTEM_TYPES:
+    if system_type is not None and system_type not in get_system_type_names():
         return f"Unknown system_type: {system_type!r}"
 
     machine_type = config.get("machine_type")

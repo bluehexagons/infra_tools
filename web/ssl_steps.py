@@ -13,7 +13,7 @@ from lib.remote_utils import run, install_package
 def install_certbot(config: SetupConfig) -> None:
     print("Installing certbot...")
     run("apt-get update -qq", check=False)
-    install_package("certbot", "certbot", "apt-get install -y -qq certbot python3-certbot-nginx", required=False)
+    install_package("certbot", "certbot", "apt-get install -y -qq certbot python3-certbot-nginx")
 
 
 def obtain_letsencrypt_certificate(domains: StrList, email: Optional[str] = None, cert_name: Optional[str] = None) -> bool:
@@ -108,7 +108,11 @@ def setup_certificate_renewal() -> None:
     print("  ✓ Automatic renewal configured")
 
 
-def setup_ssl_for_deployments(deployments: Deployments, email: Optional[str] = None) -> None:
+def setup_ssl_for_deployments(
+    deployments: Deployments,
+    email: Optional[str] = None,
+    enable_https_redirect: bool = True,
+) -> None:
     """
     Set up Let's Encrypt SSL using SANs for all deployed domains.
     Requests single certificate covering all domains for efficiency.
@@ -167,7 +171,7 @@ def setup_ssl_for_deployments(deployments: Deployments, email: Optional[str] = N
         grouped_deployments.setdefault(key, []).append(dep)
     
     # Create nginx sites from grouped deployments
-    create_nginx_sites_for_groups(grouped_deployments)
+    create_nginx_sites_for_groups(grouped_deployments, enable_https_redirect=enable_https_redirect)
     
     setup_certificate_renewal()
     

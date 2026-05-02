@@ -17,10 +17,10 @@ This document describes the implementation of separate build servers and lightwe
 
 ```bash
 # Set up a build server with CI/CD and build tools
-python3 setup_server_web.py build.example.com --build-server --node
+python3 infra_tools.py setup server_web build.example.com --build-server --node
 
 # Add deploy targets (app servers)
-python3 setup_server_web.py build.example.com --build-server \
+python3 infra_tools.py setup server_web build.example.com --build-server \
   --deploy-target app1.example.com \
   --deploy example.com https://github.com/user/site.git
 ```
@@ -29,10 +29,10 @@ python3 setup_server_web.py build.example.com --build-server \
 
 ```bash
 # Lightweight app server - nginx only, receives deployments from build server
-python3 setup_server_web.py app1.example.com --app-server
+python3 infra_tools.py setup server_web app1.example.com --app-server
 
 # App server with SSL support
-python3 setup_server_web.py app1.example.com --app-server --ssl --ssl-email admin@example.com
+python3 infra_tools.py setup server_web app1.example.com --app-server --ssl --ssl-email admin@example.com
 ```
 
 ## Implementation
@@ -61,7 +61,7 @@ deploy_targets: Optional[StrList]  # List of app server hosts
 
 ### System Types
 
-Build servers and app servers integrate with the existing system type infrastructure in `lib/system_types.py`. When `is_build_server` or `is_app_server` is set, the appropriate setup steps are automatically included.
+Build servers and app servers integrate with the existing system type infrastructure. When `is_build_server` or `is_app_server` is set, the appropriate setup steps are automatically included.
 
 ## Architecture
 
@@ -159,10 +159,10 @@ deploy ALL=(ALL) NOPASSWD: /bin/systemctl restart node-*
 
 ```bash
 # 1. Set up app server
-python3 setup_server_web.py app1.example.com --app-server --cloudflare
+python3 infra_tools.py setup server_web app1.example.com --app-server --cloudflare
 
 # 2. Set up build server with deploy target
-python3 setup_server_web.py build.example.com --build-server \
+python3 infra_tools.py setup server_web build.example.com --build-server \
   --node --cloudflare \
   --deploy-target app1.example.com
 

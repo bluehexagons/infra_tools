@@ -292,7 +292,7 @@ This happens because:
 Use the `--reset-migrations` flag to reload the schema and mark all migrations as run:
 
 ```bash
-./setup_server_web.py <host> \
+python3 infra_tools.py setup server_web <host> \
   --deploy clicker.bluehexagons.com https://github.com/user/repo.git \
   --reset-migrations
 ```
@@ -330,7 +330,7 @@ This typically happens when:
   • The database schema is out of sync with migration history
 
 To fix this, redeploy with the --reset-migrations flag:
-  ./setup_server_web.py <host> --deploy <deploy-spec> <git-url> --reset-migrations
+  python3 infra_tools.py setup server_web <host> --deploy <deploy-spec> <git-url> --reset-migrations
 
 ⚠ WARNING: --reset-migrations will:
   • Load the current schema from db/schema.rb
@@ -344,7 +344,7 @@ To fix this, redeploy with the --reset-migrations flag:
 
 **Before (error):**
 ```bash
-$ ./setup_server_web.py myserver.com --deploy app.example.com https://github.com/user/app.git
+$ python3 infra_tools.py setup server_web myserver.com --deploy app.example.com https://github.com/user/app.git
 
 Deploying to /var/www/app_example_com...
   Running database migrations...
@@ -353,7 +353,7 @@ Deploying to /var/www/app_example_com...
 
 **After (fixed):**
 ```bash
-$ ./setup_server_web.py myserver.com --deploy app.example.com https://github.com/user/app.git --reset-migrations
+$ python3 infra_tools.py setup server_web myserver.com --deploy app.example.com https://github.com/user/app.git --reset-migrations
 
 Deploying to /var/www/app_example_com...
   Resetting database schema (--reset-migrations flag used)...
@@ -583,9 +583,14 @@ Infra tools now installs a background cleanup service for server-style setups:
 The cleanup job is intended to reduce disk pressure from transient data by reclaiming:
 
 - APT caches with `apt-get autoclean` and `apt-get clean`
+- unused APT packages with `apt-get autoremove`
 - old temporary files via `systemd-tmpfiles --clean`
+- stale infra_tools temp artifacts from interrupted setup/deploy/Proxmox/Antistatic runs (scans both `/tmp` and `/var/tmp`, including stray `bundler*` build directories left behind by interrupted Rails deploys)
 - oversized systemd journals via `journalctl --vacuum-size=100M`
 - optional package-manager caches for npm, pip, gem, and uv when those tools are installed
+
+Each cleanup command has a bounded runtime so one stuck package manager or cache
+tool does not block the entire maintenance run indefinitely.
 
 To verify that the cleanup timer is installed and running:
 

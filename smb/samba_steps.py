@@ -44,18 +44,23 @@ def install_samba(config: SetupConfig) -> None:
 
 
 def configure_samba_firewall(config: SetupConfig) -> None:
-    rules = [
-        "ufw allow 139/tcp comment 'Samba NetBIOS'",
-        "ufw allow 445/tcp comment 'Samba SMB'",
+    # Modern SMB only needs 445/tcp. NetBIOS (137/138/139) is disabled in the
+    # global Samba config (`disable netbios = yes`), so opening 139/tcp would
+    # only widen the attack surface for no benefit. Remove any pre-existing
+    # 139/tcp rule that an earlier version of this tool may have added.
+    cleanup_rules = [
+        "ufw delete allow 139/tcp",
+        "ufw delete allow 139",
     ]
-    
-    for rule in rules:
-        result = run(rule, check=False)
-        if result.returncode != 0:
-            print(f"  Warning: Failed to add firewall rule: {rule}")
-    
+    for rule in cleanup_rules:
+        run(rule, check=False)
+
+    result = run("ufw allow 445/tcp comment 'Samba SMB'", check=False)
+    if result.returncode != 0:
+        print("  Warning: Failed to add firewall rule for SMB (445/tcp)")
+
     run("ufw reload", check=False)
-    print("  ✓ Firewall configured for Samba")
+    print("  ✓ Firewall configured for Samba (445/tcp)")
 
 
 def parse_share_spec(
@@ -270,8 +275,13 @@ def setup_samba_share(config: SetupConfig, share_spec: Optional[list[str]] = Non
     # Detect scrub database directories that fall within this share's path.
     veto_dirs = _get_veto_dirs_for_share(primary_path, config)
     if veto_dirs:
-        veto_pattern = "/".join(f".{d}" if not d.startswith('.') else d for d in veto_dirs)
-        veto_pattern = f"/{veto_pattern}/"
+        # Samba's `veto files` syntax uses the first character as the
+        # separator and matches against the on-disk filename verbatim
+        # (with `*`/`?` globbing). Use the actual directory names from
+        # disk; do not synthesise a leading dot, which would otherwise
+        # make patterns like `.subdir` fail to match a directory named
+        # `subdir`.
+        veto_pattern = "/" + "/".join(veto_dirs) + "/"
         share_lines.append(f"   veto files = {veto_pattern}")
         share_lines.append("   delete veto files = no")
         print(f"  Hiding internal directories from share: {', '.join(veto_dirs)}")
@@ -311,25 +321,77 @@ def setup_samba_share(config: SetupConfig, share_spec: Optional[list[str]] = Non
     print(f"  ✓ Share configured: {share_name}_{access_type} -> {primary_path}")
 
 
+SAMBA_GLOBAL_HARDENED_SETTINGS: dict[str, str] = {
+    # Pin to SMB3+ everywhere. SMB2 is allowed only by Vista/Server 2008.
+    # Modern Linux kernels, macOS, and Windows 7+ all speak SMB3.
+    "server min protocol": "SMB3",
+    "client min protocol": "SMB3",
+    # Mandate signing and encryption to prevent tampering / sniffing on
+    # the wire. Both are SMB3 features and should "just work" against
+    # current Linux/macOS/Windows clients.
+    "server signing": "mandatory",
+    "client signing": "mandatory",
+    "smb encrypt": "required",
+    # Disable the legacy NetBIOS-over-TCP transport entirely; modern SMB
+    # only uses 445/tcp. This also prevents nmbd from binding 137/138/139.
+    "disable netbios": "yes",
+    "workgroup": "WORKGROUP",
+    "server string": "Samba Server",
+    # Per-machine log files following the upstream `log.%m` template so
+    # that the fail2ban `log.*` glob actually catches them; the previous
+    # `%m.log` template produced names like `BUILDPC.log` that the glob
+    # would not match.
+    "log file": "/var/log/samba/log.%m",
+    "max log size": "50",
+    "log level": "1 auth:3",
+    "security": "user",
+    "map to guest": "Never",
+    "guest account": "nobody",
+    "restrict anonymous": "2",
+    "obey pam restrictions": "yes",
+    "unix password sync": "yes",
+    "pam password change": "yes",
+}
+
+
+# Modern smbd (4.x) emits a single structured "Auth:" line for every
+# authentication attempt that includes both the NT_STATUS_* result and
+# `remote host [ipv4:<addr>:<port>]` / `[ipv6:[<addr>]:<port>]`. The
+# filter targets only failure statuses so successful logins are not
+# counted toward the ban threshold.
+SAMBA_FAIL2BAN_FILTER = """[INCLUDES]
+before = common.conf
+
+[Definition]
+_daemon = smbd
+failregex = ^.*Auth: .*status \\[NT_STATUS_(?:WRONG_PASSWORD|NO_SUCH_USER|ACCOUNT_(?:DISABLED|LOCKED_OUT|RESTRICTION)|LOGON_FAILURE|ACCESS_DENIED)\\].*remote host \\[ipv[46]:?<HOST>(?::\\d+)?\\]
+ignoreregex =
+
+[Init]
+journalmatch = _SYSTEMD_UNIT=smbd.service
+"""
+
+
+# 445/tcp only — port 139 is no longer opened by configure_samba_firewall
+# and `disable netbios = yes` keeps nmbd from binding the legacy ports.
+SAMBA_FAIL2BAN_JAIL = """[samba-auth]
+enabled = true
+port = 445
+protocol = tcp
+filter = samba-auth
+logpath = /var/log/samba/log.smbd
+          /var/log/samba/log.*
+backend = auto
+maxretry = 5
+bantime = 3600
+findtime = 600
+"""
+
+
 def configure_samba_global_settings(config: SetupConfig) -> None:
     smb_conf = "/etc/samba/smb.conf"
-    
-    settings = {
-        "server min protocol": "SMB2",
-        "client min protocol": "SMB2",
-        "workgroup": "WORKGROUP",
-        "server string": "Samba Server",
-        "log file": "/var/log/samba/%m.log",
-        "max log size": "50",
-        "log level": "1 auth:3",
-        "security": "user",
-        "map to guest": "Never",
-        "guest account": "nobody",
-        "restrict anonymous": "2",
-        "obey pam restrictions": "yes",
-        "unix password sync": "yes",
-        "pam password change": "yes",
-    }
+
+    settings = SAMBA_GLOBAL_HARDENED_SETTINGS
     
     if not os.path.exists(smb_conf):
         run("touch /etc/samba/smb.conf")
@@ -373,43 +435,56 @@ def configure_samba_global_settings(config: SetupConfig) -> None:
 
 def configure_samba_fail2ban(config: SetupConfig) -> None:
     from lib.remote_utils import is_service_active
-    
-    if os.path.exists("/etc/fail2ban/jail.d/samba.local"):
+
+    jail_path = "/etc/fail2ban/jail.d/samba-auth.local"
+    filter_path = "/etc/fail2ban/filter.d/samba-auth.conf"
+
+    # Older versions of this tool wrote /etc/fail2ban/jail.d/samba.local and
+    # /etc/fail2ban/filter.d/samba.conf. The latter clobbered the distro
+    # filter shipped by the fail2ban package (a dpkg conffile), which is
+    # both rude and confusing on upgrades. Remove the legacy files so the
+    # distro-shipped samba filter is restored on next package install.
+    legacy_files = [
+        "/etc/fail2ban/jail.d/samba.local",
+        "/etc/fail2ban/filter.d/samba.conf",
+    ]
+    for path in legacy_files:
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+    if os.path.exists(jail_path):
         if is_service_active("fail2ban"):
             print("  ✓ fail2ban for Samba already configured")
             return
-    
+
     if not is_package_installed("fail2ban"):
+        os.environ["DEBIAN_FRONTEND"] = "noninteractive"
         run("apt-get install -y -qq fail2ban")
-    
-    fail2ban_samba_filter = """[Definition]
-failregex = ^.*smbd.*: .*Authentication for user .* from <HOST>.*FAILED.*$
-            ^.*smbd.*: .*Failed password for .* from <HOST>.*$
-            ^.*smbd.*: .*check_ntlm_password:  Authentication for user .* failed with NT_STATUS_WRONG_PASSWORD.*$
-ignoreregex =
-"""
-    
-    fail2ban_samba_jail = """[samba]
-enabled = true
-port = 139,445
-protocol = tcp
-filter = samba
-logpath = /var/log/samba/log.smbd
-maxretry = 5
-bantime = 3600
-findtime = 600
-"""
-    
+
+    # Modern smbd (4.x) emits a single structured "Auth:" line for every
+    # authentication attempt that includes both the NT_STATUS_* result and
+    # `remote host [ipv4:<addr>:<port>]` / `[ipv6:[<addr>]:<port>]`. The
+    # filter targets only failure statuses so successful logins are not
+    # counted toward the ban threshold.
+    fail2ban_samba_filter = SAMBA_FAIL2BAN_FILTER
+
+    # 445/tcp only — port 139 is no longer opened by configure_samba_firewall
+    # and `disable netbios = yes` keeps nmbd from binding the legacy ports.
+    fail2ban_samba_jail = SAMBA_FAIL2BAN_JAIL
+
     os.makedirs("/etc/fail2ban/filter.d", exist_ok=True)
     os.makedirs("/etc/fail2ban/jail.d", exist_ok=True)
-    
-    with open("/etc/fail2ban/filter.d/samba.conf", "w") as f:
+
+    with open(filter_path, "w") as f:
         f.write(fail2ban_samba_filter)
-    
-    with open("/etc/fail2ban/jail.d/samba.local", "w") as f:
+
+    with open(jail_path, "w") as f:
         f.write(fail2ban_samba_jail)
-    
+
     run("systemctl enable fail2ban", check=False)
     run("systemctl restart fail2ban")
-    
+
     print("  ✓ fail2ban configured for Samba (5 failed attempts = 1 hour ban)")

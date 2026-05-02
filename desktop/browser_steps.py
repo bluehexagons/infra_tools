@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Optional
 import os
 import shlex
+import subprocess
 
 from lib.config import SetupConfig
 from lib.machine_state import is_container
@@ -12,23 +13,26 @@ from lib.remote_utils import run, is_package_installed, file_contains
 
 FLATPAK_REMOTE = "flathub"
 _apt_update_done = False
+HELIUM_RELEASE_API = "https://api.github.com/repos/imputnet/helium-linux/releases/latest"
 
 
 def is_flatpak_app_installed(app_id: str) -> bool:
     """Check if a Flatpak application is installed."""
-    import subprocess
-    import shlex as _shlex
     result = subprocess.run(
-        f"flatpak list --app --columns=application 2>/dev/null | grep -qx {_shlex.quote(app_id)}",
-        shell=True, capture_output=True
+        ["flatpak", "list", "--app", "--columns=application"],
+        capture_output=True,
+        text=True,
     )
-    return result.returncode == 0
+    if result.returncode != 0:
+        return False
+    return app_id in result.stdout.splitlines()
 
 
 def _ensure_extrepo_and_update() -> None:
     """Install extrepo if needed and run apt-get update only once."""
     global _apt_update_done
     if not is_package_installed("extrepo"):
+        os.environ["DEBIAN_FRONTEND"] = "noninteractive"
         run("apt-get install -y -qq extrepo", check=False)
     if not _apt_update_done:
         run("apt-get update -qq", check=False)
@@ -42,6 +46,7 @@ def _install_via_extrepo(name: str, extrepo_name: str, package_name: str) -> boo
     run("apt-get update -qq", check=False)
     sources_path = f"/etc/apt/sources.list.d/extrepo_{extrepo_name}.sources"
     if os.path.exists(sources_path):
+        os.environ["DEBIAN_FRONTEND"] = "noninteractive"
         run(f"apt-get install -y -qq {package_name}", check=False)
         if is_package_installed(package_name):
             return True
@@ -51,8 +56,58 @@ def _install_via_extrepo(name: str, extrepo_name: str, package_name: str) -> boo
     return False
 
 
+def _install_helium_browser() -> None:
+    """Install Helium from the latest upstream Debian package release."""
+    if is_package_installed("helium-bin") or os.path.exists("/usr/bin/helium"):
+        print("  ✓ Helium browser already installed")
+        return
+
+    print("  Installing Helium browser...")
+    url_script = f"""import json
+import subprocess
+import sys
+import urllib.request
+
+arch = subprocess.check_output(["dpkg", "--print-architecture"], text=True).strip()
+if arch not in {{"amd64", "arm64"}}:
+    sys.exit(f"unsupported architecture: {{arch}}")
+
+with urllib.request.urlopen("{HELIUM_RELEASE_API}", timeout=30) as response:
+    release = json.load(response)
+
+suffix = f"_{{arch}}.deb"
+for asset in release.get("assets", []):
+    name = asset.get("name", "")
+    if name.startswith("helium-bin_") and name.endswith(suffix):
+        print(asset["browser_download_url"])
+        break
+else:
+    sys.exit(f"no Helium Debian package found for {{arch}}")
+"""
+    result = run(
+        f"python3 -c {shlex.quote(url_script)}",
+        check=False,
+        capture_output=True,
+        display_cmd="python3 -c '[resolve latest Helium Debian package URL]'",
+    )
+    helium_url = result.stdout.strip() if result.returncode == 0 else ""
+    if not helium_url:
+        print("  ✗ Failed to resolve latest Helium package URL")
+        if result.stderr:
+            print(f"    {result.stderr.strip()[:200]}")
+        return
+
+    run(f"wget -qO /tmp/helium.deb {shlex.quote(helium_url)}", check=False)
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
+    run("apt-get install -y -qq /tmp/helium.deb", check=False)
+    run("rm -f /tmp/helium.deb", check=False)
+    if is_package_installed("helium-bin") or os.path.exists("/usr/bin/helium"):
+        print("  ✓ Helium browser installed")
+
+
 def install_single_browser(browser: str, use_flatpak: bool) -> None:
     """Install a single browser."""
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     if browser == "brave":
         if use_flatpak:
             if is_flatpak_app_installed("com.brave.Browser"):
@@ -114,21 +169,11 @@ def install_single_browser(browser: str, use_flatpak: bool) -> None:
                 return
             print("  Installing LibreWolf browser...")
 
-            old_repo_files = [
-                "/usr/share/keyrings/librewolf.gpg",
-                "/etc/apt/sources.list.d/librewolf.list",
-                "/etc/apt/sources.list.d/librewolf.sources",
-                "/etc/apt/trusted.gpg.d/librewolf.gpg",
-            ]
-            has_old_repo = any(os.path.exists(f) for f in old_repo_files)
-
-            if has_old_repo:
-                print("  → Migrating from old deb.librewolf.net repository...")
-                for f in old_repo_files:
-                    run(f"rm -f {shlex.quote(f)}", check=False)
-
             if _install_via_extrepo("LibreWolf", "librewolf", "librewolf"):
                 print("  ✓ LibreWolf browser installed")
+
+    elif browser == "helium":
+        _install_helium_browser()
     
     elif browser == "browsh":
         print("  Installing Browsh (requires Firefox)...")
@@ -142,30 +187,6 @@ def install_single_browser(browser: str, use_flatpak: bool) -> None:
             run("rm -f /tmp/browsh.deb", check=False)
         if os.path.exists("/usr/local/bin/browsh"):
             print("  ✓ Browsh installed")
-    
-    elif browser == "vivaldi":
-        if use_flatpak:
-            if is_flatpak_app_installed("com.vivaldi.Vivaldi"):
-                print("  ✓ Vivaldi browser already installed")
-                return
-            print("  Installing Vivaldi browser...")
-            run(f"flatpak install -y {FLATPAK_REMOTE} com.vivaldi.Vivaldi", check=False)
-            if is_flatpak_app_installed("com.vivaldi.Vivaldi"):
-                print("  ✓ Vivaldi browser installed")
-                return
-        else:
-            if is_package_installed("vivaldi-stable"):
-                print("  ✓ Vivaldi browser already installed")
-                return
-            print("  Installing Vivaldi browser...")
-            if not os.path.exists("/usr/share/keyrings/vivaldi-archive-keyring.gpg"):
-                run("apt-get install -y -qq curl gnupg")
-                run("curl -fsSL https://repo.vivaldi.com/archive/linux_signing_key.pub | gpg --dearmor --output /usr/share/keyrings/vivaldi-archive-keyring.gpg", check=False)
-                run('echo "deb [signed-by=/usr/share/keyrings/vivaldi-archive-keyring.gpg] https://repo.vivaldi.com/archive/deb/ stable main" > /etc/apt/sources.list.d/vivaldi.list', check=False)
-                run("apt-get update -qq", check=False)
-            run("apt-get install -y -qq vivaldi-stable", check=False)
-        if is_package_installed("vivaldi-stable"):
-            print("  ✓ Vivaldi browser installed")
     
     elif browser == "lynx":
         if is_package_installed("lynx"):
@@ -203,8 +224,8 @@ def configure_default_browser(config: SetupConfig) -> None:
     browser_desktops: dict[str, Optional[str]] = {
         "brave": "brave-browser.desktop",
         "firefox": "firefox.desktop",
+        "helium": "helium.desktop",
         "librewolf": "librewolf.desktop",
-        "vivaldi": "vivaldi-stable.desktop",
         "lynx": None,
         "browsh": None
     }
@@ -241,8 +262,3 @@ application/xhtml+xml={desktop_file}
     run(f"xdg-mime default {desktop_file} x-scheme-handler/https", check=False)
     
     print(f"  ✓ Default browser set to {config.browser.capitalize()}")
-
-
-def configure_vivaldi_browser(config: SetupConfig) -> None:
-    """Configure Vivaldi browser as default (wrapper for configure_default_browser)."""
-    configure_default_browser(config)

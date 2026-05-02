@@ -10,41 +10,32 @@ Automated setup scripts for remote Linux systems (Debian).
 ## Quick Start
 
 ```bash
-# Using unified infra_tools.py (recommended)
-python3 infra_tools.py setup server_web example.com --ruby --node --deploy example.com https://github.com/user/repo.git
-python3 infra_tools.py setup workstation_desktop 192.168.1.100 --desktop i3 --browser firefox
-python3 infra_tools.py patch example.com --ssl --deploy api.example.com https://github.com/user/api.git
-
-# Or use individual scripts
-python3 setup_server_web.py example.com --ruby --node --deploy example.com https://github.com/user/repo.git
-python3 setup_workstation_desktop.py 192.168.1.100 --desktop i3 --browser firefox
-python3 patch_setup.py example.com --ssl --deploy api.example.com https://github.com/user/api.git
+python3 infra_tools.py setup server_web example.com admin --ruby --node --deploy example.com https://github.com/user/repo.git
+python3 infra_tools.py setup workstation_desktop 192.168.1.100 admin --desktop i3 --browser firefox
+python3 infra_tools.py patch example.com admin --ssl --deploy api.example.com https://github.com/user/api.git
+python3 infra_tools.py credentials set guest s3cret
 ```
 
 ## What It Does
 
-- **Servers**: Security hardening, Nginx/SSL, Ruby/Node/Go, app deployment
+- **Servers**: Security hardening, Nginx/SSL, Ruby/Node/Go, app deployment, game lobby server
 - **Workstations**: Desktop environments (XFCE, i3, LXQt), RDP, browsers, audio
 - **Storage**: Samba shares, rsync sync, par2 integrity verification
 - **Security**: Firewall, SSH hardening, fail2ban, auto-updates, weekly cleanup maintenance, journald size limits
 
 Background maintenance includes a `cleanup-maintenance` systemd timer that reclaims temporary files,
-old package-manager caches, and oversized journals. Infra tools also installs a journald drop-in at
-`/etc/systemd/journald.conf.d/infra-tools.conf` to cap persistent and runtime journal usage at `100M`.
+stale infra_tools setup/deploy artifacts, unused APT packages, old package-manager caches, and oversized journals.
+Infra tools also installs a journald drop-in at `/etc/systemd/journald.conf.d/infra-tools.conf` to cap
+persistent and runtime journal usage at `100M`.
 
-## Setup Scripts
+## CLI Entry Points
 
 | Script | Description |
 |--------|-------------|
-| `infra_tools.py` | **Unified entry point** - Use `setup` or `patch` subcommands for all operations |
-| `setup_server_web.py` | Web server with Nginx, reverse proxy, SSL, deployments |
-| `setup_server_dev.py` | Development server with CLI tools |
-| `setup_workstation_desktop.py` | Desktop workstation with RDP, browsers |
-| `setup_admin_python.py` | Local user installer for Python aliases, uv, and shell completion |
-| `patch_setup.py` | Update existing systems, manage saved configurations |
-| `recall_setup.py` | Retrieve configuration from remote host |
+| `infra_tools.py` | **Unified entry point** - Use `setup`, `patch`, `list`, `info`, `cmd`, `rm`, `deploy`, `recall`, `reconstruct`, `completions`, `python-tools`, `bootstrap`, `credentials`, `proxmox`, or `shell` |
 
-**Recommendation**: Use `infra_tools.py` as your primary entry point. It provides a consistent interface for both initial setup and patching operations.
+Use `infra_tools.py` for all system setup, saved-configuration management, patching, recall, reconstruction,
+local Python tooling, and shell-completion setup.
 
 See [Command-Line Reference](./docs/COMMAND_LINE.md) for all flags.
 
@@ -52,14 +43,7 @@ See [Command-Line Reference](./docs/COMMAND_LINE.md) for all flags.
 
 ### Web Server with Deployment
 ```bash
-# Using unified tool
 python3 infra_tools.py setup server_web web.com \
-  --ruby --node \
-  --ssl --ssl-email admin@web.com \
-  --deploy web.com https://github.com/user/repo.git
-
-# Or use individual script
-python3 setup_server_web.py web.com \
   --ruby --node \
   --ssl --ssl-email admin@web.com \
   --deploy web.com https://github.com/user/repo.git
@@ -67,31 +51,12 @@ python3 setup_server_web.py web.com \
 
 ### Remote Desktop Workstation
 ```bash
-# Using unified tool
-python3 infra_tools.py setup workstation_desktop 192.168.1.50 \
-  --desktop xfce --rdp --audio \
-  --browser librewolf \
-  --ruby --node
-
-# Or use individual script
-python3 setup_workstation_desktop.py 192.168.1.50 \
-  --desktop xfce --rdp --audio \
-  --browser librewolf \
-  --ruby --node
+python3 infra_tools.py setup workstation_desktop 192.168.1.100 admin --desktop i3 --browser firefox
 ```
 
 ### NAS with Backup
 ```bash
-# Using unified tool
 python3 infra_tools.py setup server_lite 192.168.1.10 \
-  --samba \
-  --credential guest guest \
-  --share read media /mnt/data/media guest \
-  --sync /mnt/data/docs /mnt/backup daily \
-  --scrub /mnt/backup .pardatabase 5% weekly
-
-# Or use individual script
-python3 setup_server_lite.py 192.168.1.10 \
   --samba \
   --credential guest guest \
   --share read media /mnt/data/media guest \
@@ -119,32 +84,160 @@ python3 infra_tools.py setup server_web 10.0.0.50 admin \
 
 `--storage` is repeatable: `root` is required as `--storage root POOL AMOUNT`, and `template` is optional as `--storage template POOL`.
 
-Use `--credential USERNAME PASSWORD` to define share passwords once, then reference those users by name in
-`--share`. The `USERS` field accepts a comma-separated list of `username` or `username:password` entries, and
-each bare username must have a matching `--credential`.
+### Managing Proxmox Containers
+
+Register Proxmox hosts and manage their LXC containers from a workspace registry. Run `proxmox` with no
+subcommand to enter an interactive shell, or use subcommands directly:
+
+```bash
+# Register and inspect hosts
+python3 infra_tools.py proxmox add pve1 10.0.0.10 --user root --ssh-key ~/.ssh/proxmox_ed25519
+python3 infra_tools.py proxmox hosts
+python3 infra_tools.py proxmox ls pve1
+
+# Container lifecycle
+python3 infra_tools.py proxmox start pve1 101
+python3 infra_tools.py proxmox stop pve1 101
+python3 infra_tools.py proxmox health pve1 101
+python3 infra_tools.py proxmox destroy pve1 101 -y
+
+# Container configuration and resource changes
+python3 infra_tools.py proxmox config pve1 101
+python3 infra_tools.py proxmox modify pve1 101 --cores 4 --memory 8G
+python3 infra_tools.py proxmox reconfigure pve1 101 --set hostname=newbox
+python3 infra_tools.py proxmox resize-disk pve1 101 rootfs 40G
+
+# Native Proxmox webhook notifications
+python3 infra_tools.py proxmox notifications install-webhook pve1 https://notify.example/hook --send-test
+
+# Interactive Proxmox shell
+python3 infra_tools.py proxmox shell
+```
+
+The registry is stored at `<workspace>/proxmox_hosts.json` (mode `0600`).
+Proxmox notifications use the native Proxmox webhook endpoint and matcher via `pvesh` — no local hook script
+is installed. `modify` and `reconfigure` changes that affect a running container may require a restart.
+
+### Interactive Shell
+
+The `shell` subcommand opens an interactive REPL for configuration management:
+
+```bash
+python3 infra_tools.py shell
+```
+
+Inside the shell:
+- `list [pattern] [--json]` / `info [pattern] [--compact]` — browse saved configurations
+- `deploy <pattern> [--yes]` — redeploy saved configurations
+- `rm <pattern> [--yes]` — remove configurations
+- `recall <host> [user]` — fetch a setup command from a remote host
+- `workspace [path]` — show or switch the active workspace
+- `proxmox` — drop into the Proxmox sub-shell
+
+The shell loads `~/.infra_toolsrc` on startup — put any commands you want to run at the start of each session
+(e.g., `workspace /path/to/project`) in that file, one per line.
+Command history is persisted at `~/.local/share/infra_tools/shell_history`.
+
+### Saved Configuration Output
+
+The `list` and `info` commands support machine-readable output for scripting:
+
+```bash
+# JSON array of all saved configurations
+python3 infra_tools.py list --json
+
+# One-line summary per configuration
+python3 infra_tools.py info --compact
+```
+
+### Tests
+
+Run the full default suite (fast — no network, no live hosts):
+
+```bash
+python3 -m unittest discover -s tests   # raw unittest
+./run_tests.py                          # nicer wrapper with selectors
+./run_tests.py --list-suites            # named slices: smoke, proxmox, security, integration
+./run_tests.py --suite smoke            # quick high-value checks
+./run_tests.py --suite proxmox          # all Proxmox tests (live test still gated)
+./run_tests.py test_proxmox_manage      # one module
+./run_tests.py --durations 20           # show slowest tests
+./run_tests.py -v                       # verbose
+```
+
+Expensive tests (live Proxmox round-trips, network downloads, slow tests) are
+gated behind opt-in *categories*. List them and run them on demand:
+
+```bash
+./run_tests.py --list-categories
+./run_tests.py --check-prereqs --expensive live_proxmox
+./run_tests.py --expensive live_proxmox tests.test_proxmox_live
+./run_tests.py --expensive all          # everything, including expensive
+```
+
+Each category also has a matching env var (e.g. `INFRA_TOOLS_RUN_LIVE_PROXMOX=1`),
+or set `INFRA_TOOLS_RUN_EXPENSIVE=1` to enable everything. See
+[`tests/expensive_support.py`](tests/expensive_support.py) for details and
+[`tests/test_proxmox_live.py`](tests/test_proxmox_live.py) for the env vars
+needed to point the live Proxmox test at a real host.
+
+Use `--credential USERNAME PASSWORD` to define share passwords once, then reference those users by username
+in `--share` or `--mount-smb`. The `USERS` field accepts a comma-separated list of `username` or `username:password`
+entries, and each bare username must have a matching saved credential. Use `infra_tools.py credentials set USERNAME
+PASSWORD` to manage the shared workspace store directly.
+
+### Game Lobby Server (Antistatic)
+```bash
+# Deploy the antistatic lobby server behind nginx (reruns upgrade to the latest GitHub release)
+python3 infra_tools.py setup server_lite 192.168.1.10 --antistatic-server lobby.example.com
+
+# With custom internal port (default: 8080)
+python3 infra_tools.py setup server_web 192.168.1.10 --antistatic-server lobby.example.com:9090 --ssl
+
+# The lobby server binary is fetched from github.com/bluehexagons/antistatic-server/releases
+# Runs as a locked-down systemd service with automatic restart on failure
+
+# Deploy antistatic-db behind nginx from future GitHub release binaries
+python3 infra_tools.py setup server_web 192.168.1.10 --antistatic-db db.example.com --ssl
+```
+
+Workspace state now lives under `~/.config/infra_tools` by default. Use `--workspace /path/to/workspace` to isolate
+saved setups, credentials, and history for a project or test environment.
 
 ## Requirements
 
-- Python 3.9+
+- Python 3.10+
 - SSH root access to target system
 - Target OS: Debian
 
+### Local Orchestration Host Bootstrap
+
+To prepare the machine where you run `infra_tools.py`, an admin can install the local package prerequisites,
+drop an `infra_tools` launcher onto `PATH`, and configure the chosen user's Python tooling and shell
+completion in one step:
+
+```bash
+sudo python3 infra_tools.py self-setup --user "$USER"
+```
+
+`self-setup` is an alias for `bootstrap`. After it runs, you can invoke the tool from any directory as
+`infra_tools <command> ...` instead of `python3 /path/to/infra_tools.py <command> ...`. The launcher is
+installed to `/usr/local/bin/infra_tools` for system-wide use and `~/.local/bin/infra_tools` for the
+target user. Shell completion is registered for both `infra_tools` and `infra_tools.py`.
+
+Bootstrap also installs `/etc/tmpfiles.d/infra_tools.conf`, which registers known infra_tools temp
+prefixes with `systemd-tmpfiles-clean` as an additional safety net alongside the cleanup-maintenance timer.
+
 ## Shell Completion
 
-Setup scripts support tab completion for bash, zsh, and fish.
+The unified CLI supports tab completion for bash, zsh, and fish.
 
 ```bash
 uv tool install --upgrade argcomplete
-python3 setup_completions.py
+python3 infra_tools.py completions
 ```
 
 See [docs/SHELL_COMPLETION.md](docs/SHELL_COMPLETION.md) for detailed setup.
-
-## Testing
-
-```bash
-python3 -m pytest tests/ -v
-```
 
 ## License
 

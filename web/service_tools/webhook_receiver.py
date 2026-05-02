@@ -21,7 +21,6 @@ import sys
 import json
 import hmac
 import hashlib
-import subprocess
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Optional
@@ -29,7 +28,7 @@ from typing import Optional
 # Add lib directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
-from lib.logging_utils import get_service_logger
+from lib.logging_utils import get_service_logger, log_event
 from lib.notifications import load_notification_configs_from_state, send_notification
 
 # Initialize centralized logger
@@ -75,22 +74,25 @@ def verify_github_signature(secret: str, payload: bytes, signature_header: Optio
 def load_config() -> dict:
     """Load webhook configuration from JSON file."""
     if not os.path.exists(CONFIG_FILE):
-        logger.warning(f"Configuration file not found: {CONFIG_FILE}")
+        log_event(logger, "Configuration file not found", level=30, config_file=CONFIG_FILE)
         return {}
     
     try:
         with open(CONFIG_FILE, 'r') as f:
             return json.load(f)
     except Exception as e:
-        logger.error(f"Failed to load configuration: {e}")
+        log_event(logger, "Failed to load configuration", level=40, config_file=CONFIG_FILE, error=str(e))
         return {}
 
 
 def trigger_cicd_job(repo_url: str, ref: str, commit_sha: str, pusher: str) -> bool:
     """
-    Trigger CI/CD job by creating a job file for the executor service.
+    Trigger CI/CD job by creating a job file in the jobs directory.
     
-    The executor service watches the jobs directory and processes new jobs.
+    The cicd-executor.service is activated automatically by a systemd .path
+    unit that watches the jobs directory, so this function does not need
+    elevated privileges to start the executor (and indeed cannot, since the
+    webhook user has no polkit rule to call systemctl on system services).
     """
     try:
         os.makedirs(JOBS_DIR, exist_ok=True)
@@ -106,24 +108,18 @@ def trigger_cicd_job(repo_url: str, ref: str, commit_sha: str, pusher: str) -> b
         timestamp = datetime.now().strftime(TIMESTAMP_FORMAT_FILE)
         safe_repo_name = repo_url.rstrip('/').split('/')[-1].replace('.git', '')
         job_file = os.path.join(JOBS_DIR, f"{timestamp}_{safe_repo_name}_{commit_sha}.json")
-        with open(job_file, 'w') as f:
+        # Atomic write so the path activator never sees a half-written file.
+        tmp_file = job_file + ".tmp"
+        with open(tmp_file, 'w') as f:
             json.dump(job_data, f, indent=2)
+        os.replace(tmp_file, job_file)
         
-        logger.info(f"Created CI/CD job: {job_file}")
-        
-        result = subprocess.run(
-            ['systemctl', 'start', 'cicd-executor.service'],
-            capture_output=True,
-            text=True
-        )
-        
-        if result.returncode != 0:
-            logger.warning(f"Failed to trigger executor service: {result.stderr}")
+        log_event(logger, "Created CI/CD job", job_file=job_file, repo_url=repo_url, commit_sha=commit_sha[:8])
         
         return True
         
     except Exception as e:
-        logger.error(f"Failed to create CI/CD job: {e}")
+        log_event(logger, "Failed to create CI/CD job", level=40, error=str(e), repo_url=repo_url)
         return False
 
 
@@ -147,14 +143,14 @@ class WebhookHandler(BaseHTTPRequestHandler):
         # Get webhook secret from environment
         secret = os.environ.get(WEBHOOK_SECRET_ENV)
         if not secret:
-            logger.error("WEBHOOK_SECRET environment variable not set")
+            log_event(logger, "Webhook secret environment variable not set", level=40, env_var=WEBHOOK_SECRET_ENV)
             self.send_error(500, "Server Configuration Error")
             return
         
         # Verify signature
         signature = self.headers.get('X-Hub-Signature-256')
         if not verify_github_signature(secret, body, signature):
-            logger.warning(f"Invalid signature from {self.client_address[0]}")
+            log_event(logger, "Invalid signature", level=30, client_ip=self.client_address[0])
             self.send_error(403, "Invalid Signature")
             return
         
@@ -162,7 +158,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
         try:
             payload = json.loads(body.decode('utf-8'))
         except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON payload: {e}")
+            log_event(logger, "Invalid JSON payload", level=40, error=str(e))
             self.send_error(400, "Invalid JSON")
             return
         
@@ -176,7 +172,14 @@ class WebhookHandler(BaseHTTPRequestHandler):
             commit_sha = payload.get('after', '')
             pusher = payload.get('pusher', {}).get('name', 'unknown')
             
-            logger.info(f"Received push event: repo={repo_url}, ref={ref}, sha={commit_sha[:8]}")
+            log_event(
+                logger,
+                "Received push event",
+                repo_url=repo_url,
+                ref=ref,
+                commit_sha=commit_sha[:8],
+                pusher=pusher,
+            )
             
             # Load configuration to check if this repo is configured
             config = load_config()
@@ -190,7 +193,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
                     break
             
             if not repo_config:
-                logger.info(f"Repository not configured: {repo_url}")
+                log_event(logger, "Repository not configured", repo_url=repo_url)
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
@@ -202,7 +205,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
             configured_branches = repo_config.get('branches', ['main', 'master'])
             
             if branch not in configured_branches:
-                logger.info(f"Branch not configured: {branch}")
+                log_event(logger, "Branch not configured", branch=branch, repo_url=repo_url)
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
@@ -213,18 +216,18 @@ class WebhookHandler(BaseHTTPRequestHandler):
             success = trigger_cicd_job(repo_url, ref, commit_sha, pusher)
             
             if success:
-                logger.info(f"CI/CD job triggered for {repo_url} @ {commit_sha[:8]}")
+                log_event(logger, "CI/CD job triggered", repo_url=repo_url, commit_sha=commit_sha[:8])
                 self.send_response(202)  # Accepted
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
                 self.wfile.write(json.dumps({"status": "accepted", "commit": commit_sha[:8]}).encode())
             else:
-                logger.error(f"Failed to trigger CI/CD job")
+                log_event(logger, "Failed to trigger CI/CD job", level=40, repo_url=repo_url, commit_sha=commit_sha[:8])
                 self.send_error(500, "Failed to trigger job")
         
         elif event_type == 'ping':
             # Handle ping events (sent when webhook is first created)
-            logger.info("Received ping event")
+            log_event(logger, "Received ping event")
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
@@ -232,7 +235,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
         
         else:
             # Ignore other event types
-            logger.info(f"Ignored event type: {event_type}")
+            log_event(logger, "Ignored event type", event_type=event_type)
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
@@ -251,14 +254,14 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
 def main():
     """Main function to run the webhook receiver server."""
-    logger.info("Starting webhook receiver")
+    log_event(logger, "Starting webhook receiver")
     
     # Get port from environment or use default
     port = int(os.environ.get('WEBHOOK_PORT', DEFAULT_PORT))
     
     # Verify webhook secret is configured
     if not os.environ.get(WEBHOOK_SECRET_ENV):
-        logger.error(f"{WEBHOOK_SECRET_ENV} environment variable not set")
+        log_event(logger, "Webhook secret environment variable not set", level=40, env_var=WEBHOOK_SECRET_ENV)
         return 1
     
     # Create jobs directory if it doesn't exist
@@ -268,13 +271,13 @@ def main():
     server_address = ('127.0.0.1', port)
     httpd = HTTPServer(server_address, WebhookHandler)
     
-    logger.info(f"Webhook receiver listening on http://127.0.0.1:{port}")
-    logger.info("Server is ready to accept webhooks")
+    log_event(logger, "Webhook receiver listening", bind="127.0.0.1", port=port)
+    log_event(logger, "Server is ready to accept webhooks")
     
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        logger.info("Shutting down webhook receiver")
+        log_event(logger, "Shutting down webhook receiver")
         httpd.shutdown()
     
     return 0

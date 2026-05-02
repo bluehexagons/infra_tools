@@ -24,7 +24,7 @@ from typing import Optional
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
-from lib.logging_utils import get_service_logger
+from lib.logging_utils import get_service_logger, log_event
 from lib.notifications import load_notification_configs_from_state, send_notification
 
 logger = get_service_logger('cicd_executor', 'web', use_syslog=True)
@@ -41,14 +41,14 @@ LOCK_FILE = os.path.join(STATE_DIR, "executor.lock")
 def load_config() -> dict:
     """Load webhook configuration from JSON file."""
     if not os.path.exists(CONFIG_FILE):
-        logger.error(f"Configuration file not found: {CONFIG_FILE}")
+        log_event(logger, "Configuration file not found", level=40, config_file=CONFIG_FILE)
         return {}
     
     try:
         with open(CONFIG_FILE, 'r') as f:
             return json.load(f)
     except Exception as e:
-        logger.error(f"Failed to load configuration: {e}")
+        log_event(logger, "Failed to load configuration", level=40, config_file=CONFIG_FILE, error=str(e))
         return {}
 
 
@@ -64,7 +64,7 @@ def clone_or_update_repo(repo_url: str, workspace: str, ref: str) -> bool:
     """Clone repository if it doesn't exist, or pull latest changes."""
     try:
         if not os.path.exists(workspace):
-            logger.info(f"Cloning repository: {repo_url}")
+            log_event(logger, "Cloning repository", repo_url=repo_url)
             result = subprocess.run(
                 ['git', 'clone', repo_url, workspace],
                 capture_output=True,
@@ -72,10 +72,10 @@ def clone_or_update_repo(repo_url: str, workspace: str, ref: str) -> bool:
                 timeout=300
             )
             if result.returncode != 0:
-                logger.error(f"Failed to clone repository: {result.stderr}")
+                log_event(logger, "Failed to clone repository", level=40, repo_url=repo_url, stderr=result.stderr.strip())
                 return False
         
-        logger.info(f"Fetching latest changes from {repo_url}")
+        log_event(logger, "Fetching latest changes", repo_url=repo_url)
         result = subprocess.run(
             ['git', 'fetch', '--all'],
             cwd=workspace,
@@ -84,7 +84,7 @@ def clone_or_update_repo(repo_url: str, workspace: str, ref: str) -> bool:
             timeout=120
         )
         if result.returncode != 0:
-            logger.error(f"Failed to fetch: {result.stderr}")
+            log_event(logger, "Failed to fetch repository changes", level=40, repo_url=repo_url, stderr=result.stderr.strip())
             return False
         
         result = subprocess.run(
@@ -95,7 +95,7 @@ def clone_or_update_repo(repo_url: str, workspace: str, ref: str) -> bool:
             timeout=30
         )
         if result.returncode != 0:
-            logger.error(f"Failed to reset: {result.stderr}")
+            log_event(logger, "Failed to reset repository", level=40, repo_url=repo_url, stderr=result.stderr.strip())
             return False
         
         result = subprocess.run(
@@ -106,10 +106,10 @@ def clone_or_update_repo(repo_url: str, workspace: str, ref: str) -> bool:
             timeout=60
         )
         if result.returncode != 0:
-            logger.warning(f"git clean had issues: {result.stderr}")
+            log_event(logger, "git clean had issues", level=30, repo_url=repo_url, stderr=result.stderr.strip())
         
         branch = ref.replace('refs/heads/', '')
-        logger.info(f"Checking out: {branch}")
+        log_event(logger, "Checking out branch", repo_url=repo_url, branch=branch)
         result = subprocess.run(
             ['git', 'checkout', branch],
             cwd=workspace,
@@ -118,7 +118,7 @@ def clone_or_update_repo(repo_url: str, workspace: str, ref: str) -> bool:
             timeout=30
         )
         if result.returncode != 0:
-            logger.error(f"Failed to checkout {branch}: {result.stderr}")
+            log_event(logger, "Failed to checkout branch", level=40, repo_url=repo_url, branch=branch, stderr=result.stderr.strip())
             return False
         
         result = subprocess.run(
@@ -129,17 +129,17 @@ def clone_or_update_repo(repo_url: str, workspace: str, ref: str) -> bool:
             timeout=120
         )
         if result.returncode != 0:
-            logger.error(f"Failed to pull: {result.stderr}")
+            log_event(logger, "Failed to pull repository changes", level=40, repo_url=repo_url, branch=branch, stderr=result.stderr.strip())
             return False
         
-        logger.info(f"Repository updated successfully")
+        log_event(logger, "Repository updated successfully", repo_url=repo_url, branch=branch)
         return True
         
     except subprocess.TimeoutExpired:
-        logger.error("Git operation timed out")
+        log_event(logger, "Git operation timed out", level=40, repo_url=repo_url)
         return False
     except Exception as e:
-        logger.error(f"Failed to clone/update repository: {e}")
+        log_event(logger, "Failed to clone/update repository", level=40, repo_url=repo_url, error=str(e))
         return False
 
 
@@ -150,11 +150,11 @@ def run_script(script_path: str, workspace: str, log_file: str) -> bool:
         script_path = os.path.join(workspace, script_path)
     
     if not os.path.exists(script_path):
-        logger.error(f"Script not found: {script_path}")
+        log_event(logger, "Script not found", level=40, script_path=script_path)
         return False
     
     try:
-        logger.info(f"Running script: {script_path}")
+        log_event(logger, "Running script", script_path=script_path)
         
         with open(log_file, 'a') as log:
             log.write(f"\n{'='*80}\n")
@@ -174,23 +174,23 @@ def run_script(script_path: str, workspace: str, log_file: str) -> bool:
             log.write(f"{'='*80}\n")
         
         if result.returncode == 0:
-            logger.info(f"Script completed successfully: {script_path}")
+            log_event(logger, "Script completed successfully", script_path=script_path)
             return True
         else:
-            logger.error(f"Script failed with exit code {result.returncode}: {script_path}")
+            log_event(logger, "Script failed", level=40, script_path=script_path, exit_code=result.returncode)
             return False
             
     except subprocess.TimeoutExpired:
-        logger.error(f"Script timed out: {script_path}")
+        log_event(logger, "Script timed out", level=40, script_path=script_path)
         return False
     except Exception as e:
-        logger.error(f"Failed to run script: {e}")
+        log_event(logger, "Failed to run script", level=40, script_path=script_path, error=str(e))
         return False
 
 
 def process_job(job_file: str) -> bool:
     """Process a single CI/CD job."""
-    logger.info(f"Processing job: {job_file}")
+    log_event(logger, "Processing job", job_file=job_file)
     
     try:
         with open(job_file, 'r') as f:
@@ -202,7 +202,7 @@ def process_job(job_file: str) -> bool:
         pusher = job_data.get('pusher', 'unknown')
         
         if not repo_url or not ref or not commit_sha:
-            logger.error("Invalid job data")
+            log_event(logger, "Invalid job data", level=40, job_file=job_file)
             return False
         
         config = load_config()
@@ -215,7 +215,7 @@ def process_job(job_file: str) -> bool:
                 break
         
         if not repo_config:
-            logger.error(f"Repository not configured: {repo_url}")
+            log_event(logger, "Repository not configured", level=40, repo_url=repo_url)
             return False
         
         workspace = get_repo_workspace(repo_url)
@@ -238,7 +238,7 @@ def process_job(job_file: str) -> bool:
             log.write(f"{'='*80}\n\n")
         
         if not clone_or_update_repo(repo_url, workspace, ref):
-            logger.error("Failed to clone/update repository")
+            log_event(logger, "Failed to clone/update repository", level=40, repo_url=repo_url, job_file=job_file)
             notify_failure(repo_url, commit_sha, "Failed to clone/update repository")
             return False
         
@@ -249,7 +249,7 @@ def process_job(job_file: str) -> bool:
             script_path = scripts.get(script_name)
             if script_path:
                 if not run_script(script_path, workspace, log_file):
-                    logger.error(f"Failed at stage: {script_name}")
+                    log_event(logger, "Failed at stage", level=40, stage=script_name, repo_url=repo_url, commit_sha=commit_sha[:8])
                     success = False
                     break
         
@@ -266,7 +266,7 @@ def process_job(job_file: str) -> bool:
                 deploy_script = scripts.get('deploy')
                 if deploy_script:
                     if not run_script(deploy_script, workspace, log_file):
-                        logger.error("Failed at stage: deploy")
+                        log_event(logger, "Failed at stage", level=40, stage="deploy", repo_url=repo_url, commit_sha=commit_sha[:8])
                         success = False
         
         notification_configs = load_notification_configs_from_state(logger)
@@ -278,11 +278,18 @@ def process_job(job_file: str) -> bool:
         
         os.remove(job_file)
         
-        logger.info(f"Job completed: {job_file} - {'SUCCESS' if success else 'FAILED'}")
+        log_event(
+            logger,
+            "Job completed",
+            job_file=job_file,
+            result="success" if success else "failed",
+            repo_url=repo_url,
+            commit_sha=commit_sha[:8],
+        )
         return success
         
     except Exception as e:
-        logger.error(f"Error processing job: {e}")
+        log_event(logger, "Error processing job", level=40, job_file=job_file, error=str(e))
         return False
 
 
@@ -308,7 +315,7 @@ def perform_remote_deployment(
     
     target = get_deploy_target(deploy_target)
     if not target:
-        logger.error(f"Unknown deploy target: {deploy_target}")
+        log_event(logger, "Unknown deploy target", level=40, deploy_target=deploy_target)
         with open(log_file, 'a') as log:
             log.write(f"\n✗ Unknown deploy target: {deploy_target}\n")
         return False
@@ -319,7 +326,7 @@ def perform_remote_deployment(
         domain, path = parse_deploy_spec(deploy_spec)
     
     project_type = detect_project_type(workspace)
-    logger.info(f"Detected project type: {project_type}")
+    log_event(logger, "Detected project type", deploy_target=deploy_target, project_type=project_type)
     
     serve_path = get_project_root(workspace, project_type)
     base_dir = target.get('base_dir', '/var/www')
@@ -337,7 +344,7 @@ def perform_remote_deployment(
     exclude_patterns = ['.git', 'node_modules', '__pycache__', '*.log']
     
     if not push_artifact(serve_path, deploy_target, remote_path, exclude_patterns):
-        logger.error("Failed to push artifact to remote server")
+        log_event(logger, "Failed to push artifact to remote server", level=40, deploy_target=deploy_target, remote_path=remote_path)
         with open(log_file, 'a') as log:
             log.write("✗ Failed to push artifact\n")
         return False
@@ -357,7 +364,7 @@ def perform_remote_deployment(
         nginx_config = generate_merged_nginx_config(domain, [deployment])
         
         if not push_nginx_config(nginx_config, deploy_target, domain):
-            logger.error("Failed to push nginx config")
+            log_event(logger, "Failed to push nginx config", level=40, deploy_target=deploy_target, domain=domain)
             with open(log_file, 'a') as log:
                 log.write("✗ Failed to push nginx config\n")
             return False
@@ -366,7 +373,7 @@ def perform_remote_deployment(
             log.write(f"✓ Nginx config pushed for {domain}\n")
         
         if not reload_nginx(deploy_target):
-            logger.error("Failed to reload nginx on remote server")
+            log_event(logger, "Failed to reload nginx on remote server", level=40, deploy_target=deploy_target, domain=domain)
             with open(log_file, 'a') as log:
                 log.write("✗ Failed to reload nginx\n")
             return False
@@ -376,41 +383,46 @@ def perform_remote_deployment(
     
     deploy_script = repo_config.get('scripts', {}).get('deploy')
     if deploy_script:
-        from lib.remote_deploy import _build_ssh_cmd
+        from lib.remote_deploy import _build_ssh_stdin_script_cmd
         target_config = get_deploy_target(deploy_target)
         
         if not target_config:
-            logger.error(f"Deploy target not found: {deploy_target}")
+            log_event(logger, "Deploy target not found", level=40, deploy_target=deploy_target)
             return False
         
         script_path = deploy_script if os.path.isabs(deploy_script) else os.path.join(workspace, deploy_script)
         
         if not os.path.exists(script_path):
-            logger.warning(f"Deploy script configured but not found: {script_path}")
+            log_event(logger, "Deploy script configured but not found", level=30, script_path=script_path, deploy_target=deploy_target)
             with open(log_file, 'a') as log:
                 log.write(f"\n⚠ Deploy script not found: {script_path}\n")
         else:
             with open(script_path, 'r') as f:
                 script_content = f.read()
-            
-            remote_cmd = f"cd {remote_path} && bash -c {shlex.quote(script_content)}"
-            ssh_cmd = _build_ssh_cmd(target_config, remote_cmd)
+
+            ssh_cmd = _build_ssh_stdin_script_cmd(target_config, remote_path)
             
             try:
-                result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=300)
+                result = subprocess.run(
+                    ssh_cmd,
+                    input=script_content,
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                )
                 with open(log_file, 'a') as log:
                     log.write(f"\nDeploy script output:\n{result.stdout}\n")
                     if result.stderr:
                         log.write(f"Errors:\n{result.stderr}\n")
                 
                 if result.returncode != 0:
-                    logger.error(f"Deploy script failed: {result.stderr}")
+                    log_event(logger, "Deploy script failed", level=40, deploy_target=deploy_target, stderr=result.stderr.strip())
                     return False
             except Exception as e:
-                logger.error(f"Failed to run deploy script: {e}")
+                log_event(logger, "Failed to run deploy script", level=40, deploy_target=deploy_target, error=str(e))
                 return False
     
-    logger.info(f"Remote deployment to {deploy_target} completed")
+    log_event(logger, "Remote deployment completed", deploy_target=deploy_target, remote_path=remote_path)
     return True
 
 
@@ -426,7 +438,14 @@ def notify_success(repo_url: str, commit_sha: str, log_file: str, notification_c
             logger=logger
         )
     except Exception as e:
-        logger.warning(f"Failed to send success notification: {e}")
+        log_event(
+            logger,
+            "Failed to send success notification",
+            level=30,
+            repo_url=repo_url,
+            commit_sha=commit_sha[:8],
+            error=str(e),
+        )
 
 
 def notify_failure(repo_url: str, commit_sha: str, reason: str, notification_configs: Optional[list] = None) -> None:
@@ -445,7 +464,14 @@ def notify_failure(repo_url: str, commit_sha: str, reason: str, notification_con
                 logger=logger
             )
         except Exception as e:
-            logger.warning(f"Failed to send failure notification: {e}")
+            log_event(
+                logger,
+                "Failed to send failure notification",
+                level=30,
+                repo_url=repo_url,
+                commit_sha=commit_sha[:8],
+                error=str(e),
+            )
 
 
 def cleanup_old_build_logs(days_to_keep: int = 30) -> int:
@@ -472,10 +498,15 @@ def cleanup_old_build_logs(days_to_keep: int = 30) -> int:
                 os.remove(log_path)
                 removed_count += 1
         except OSError as e:
-            logger.warning(f"Failed to remove old build log {filename}: {e}")
+            log_event(logger, "Failed to remove old build log", level=30, log_file=filename, error=str(e))
 
     if removed_count > 0:
-        logger.info(f"Cleaned up {removed_count} old build log(s) (older than {days_to_keep} days)")
+        log_event(
+            logger,
+            "Cleaned up old build logs",
+            removed_count=removed_count,
+            days_to_keep=days_to_keep,
+        )
 
     return removed_count
 
@@ -515,16 +546,16 @@ def cleanup_stale_workspaces(config: dict) -> int:
                 try:
                     shutil.rmtree(workspace_path)
                     removed_count += 1
-                    logger.info(f"Removed stale workspace: {name}")
+                    log_event(logger, "Removed stale workspace", workspace=name)
                 except OSError as e:
-                    logger.warning(f"Failed to remove stale workspace {name}: {e}")
+                    log_event(logger, "Failed to remove stale workspace", level=30, workspace=name, error=str(e))
 
     return removed_count
 
 
 def main():
     """Main function to process CI/CD jobs."""
-    logger.info("Starting CI/CD executor")
+    log_event(logger, "Starting CI/CD executor")
     
     os.makedirs(STATE_DIR, exist_ok=True)
     os.makedirs(JOBS_DIR, exist_ok=True)
@@ -537,19 +568,19 @@ def main():
         try:
             fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except (IOError, OSError):
-            logger.info("Another executor instance is running, exiting")
+            log_event(logger, "Another executor instance is running, exiting")
             return 0
         
         job_files = sorted(Path(JOBS_DIR).glob('*.json'))
         config = load_config()
         
         if not job_files:
-            logger.info("No pending jobs")
+            log_event(logger, "No pending jobs")
             cleanup_old_build_logs()
             cleanup_stale_workspaces(config)
             return 0
         
-        logger.info(f"Found {len(job_files)} pending job(s)")
+        log_event(logger, "Found pending jobs", pending_jobs=len(job_files))
         
         success_count = 0
         failure_count = 0
@@ -560,7 +591,12 @@ def main():
             else:
                 failure_count += 1
         
-        logger.info(f"CI/CD executor finished: {success_count} successful, {failure_count} failed")
+        log_event(
+            logger,
+            "CI/CD executor finished",
+            successful_jobs=success_count,
+            failed_jobs=failure_count,
+        )
         
         cleanup_old_build_logs()
         cleanup_stale_workspaces(config)

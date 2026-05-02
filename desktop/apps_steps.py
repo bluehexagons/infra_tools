@@ -1,13 +1,11 @@
 """Desktop and workstation setup steps."""
 
 from __future__ import annotations
-from typing import Optional
 import os
-import shlex
 
 from lib.config import SetupConfig
 from lib.machine_state import is_container
-from lib.remote_utils import run, is_package_installed, file_contains
+from lib.remote_utils import run, is_package_installed
 from desktop.browser_steps import install_browser, is_flatpak_app_installed
 
 
@@ -32,7 +30,8 @@ def install_flatpak_if_needed() -> bool:
     
     if is_flatpak_installed():
         return True
-    
+
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     result = run("apt-get install -y -qq flatpak", check=False)
     if result.returncode != 0:
         print("  ⚠ Failed to install Flatpak")
@@ -45,6 +44,7 @@ def install_flatpak_if_needed() -> bool:
 
 def install_remmina(config: SetupConfig) -> None:
     """Install Remmina RDP client."""
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get install -y -qq remmina remmina-plugin-rdp remmina-plugin-vnc", check=False)
     if is_package_installed("remmina"):
         print("  ✓ Remmina installed/updated")
@@ -73,6 +73,7 @@ def install_office_apps(config: SetupConfig) -> None:
         print("  ✓ LibreOffice already installed")
         return
     print("  Installing LibreOffice...")
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get install -y -qq libreoffice", check=False)
     if is_package_installed("libreoffice"):
         print("  ✓ LibreOffice installed")
@@ -89,104 +90,34 @@ def install_desktop_apps(config: SetupConfig) -> None:
             use_flatpak = False
     
     if use_flatpak:
-        all_installed = (
-            is_flatpak_app_installed("com.vscodium.codium") and
-            is_flatpak_app_installed("com.discordapp.Discord")
-        )
-        
-        if all_installed:
+        if is_flatpak_app_installed("com.discordapp.Discord"):
             print("  ✓ Other desktop apps already installed via Flatpak")
             return
         
         print("  Installing other desktop apps via Flatpak...")
-        
-        if not is_flatpak_app_installed("com.vscodium.codium"):
-            print("  Installing VSCodium...")
-            run(f"flatpak install -y {FLATPAK_REMOTE} com.vscodium.codium", check=False)
-        
+
         if not is_flatpak_app_installed("com.discordapp.Discord"):
             print("  Installing Discord...")
             run(f"flatpak install -y {FLATPAK_REMOTE} com.discordapp.Discord", check=False)
         
-        if is_flatpak_app_installed("com.vscodium.codium") and is_flatpak_app_installed("com.discordapp.Discord"):
-            print(f"  ✓ Other desktop apps installed via Flatpak (VSCodium, Discord)")
+        if is_flatpak_app_installed("com.discordapp.Discord"):
+            print("  ✓ Other desktop apps installed via Flatpak (Discord)")
     else:
-        codium_installed = is_package_installed("codium")
         discord_installed = is_package_installed("discord")
 
-        if codium_installed and discord_installed:
+        if discord_installed:
             print("  ✓ Other desktop apps already installed")
             return
 
-        if not codium_installed:
-            print("  Installing VSCodium...")
-            from desktop.browser_steps import _install_via_extrepo
-            if _install_via_extrepo("VSCodium", "vscodium", "codium"):
-                print("  ✓ VSCodium installed")
-        else:
-            print("  ✓ VSCodium already installed")
+        print("  Installing Discord...")
+        run("wget -qO /tmp/discord.deb 'https://discord.com/api/download?platform=linux&format=deb'", check=False)
+        os.environ["DEBIAN_FRONTEND"] = "noninteractive"
+        run("apt-get install -y -qq /tmp/discord.deb", check=False)
+        run("rm -f /tmp/discord.deb", check=False)
+        discord_installed = is_package_installed("discord")
 
-        if not discord_installed:
-            print("  Installing Discord...")
-            run("wget -qO /tmp/discord.deb 'https://discord.com/api/download?platform=linux&format=deb'", check=False)
-            run("apt-get install -y -qq /tmp/discord.deb", check=False)
-            run("rm -f /tmp/discord.deb", check=False)
-            discord_installed = is_package_installed("discord")
-        else:
-            print("  ✓ Discord already installed")
-
-        if is_package_installed("codium") and discord_installed:
-            print(f"  ✓ Other desktop apps installed (VSCodium, Discord)")
-
-
-
-def configure_default_browser(config: SetupConfig) -> None:
-    if not config.browser:
-        return
-
-    safe_username = shlex.quote(config.username)
-    mimeapps_path = f"/home/{config.username}/.config/mimeapps.list"
-    
-    browser_desktops: dict[str, Optional[str]] = {
-        "brave": "brave-browser.desktop",
-        "firefox": "firefox.desktop",
-        "vivaldi": "vivaldi-stable.desktop",
-        "lynx": None,
-        "browsh": None
-    }
-    
-    desktop_file = browser_desktops.get(config.browser)
-    if not desktop_file:
-        print(f"  ✓ No default browser configuration needed for {config.browser}")
-        return
-    
-    if os.path.exists(mimeapps_path):
-        if file_contains(mimeapps_path, desktop_file):
-            print("  ✓ Default browser already set")
-            return
-    
-    user_apps_dir = f"/home/{config.username}/.local/share/applications"
-    os.makedirs(user_apps_dir, exist_ok=True)
-    run(f"chown -R {safe_username}:{safe_username} /home/{config.username}/.local")
-    
-    os.makedirs(f"/home/{config.username}/.config", exist_ok=True)
-    
-    mimeapps_content = f"""[Default Applications]
-x-scheme-handler/http={desktop_file}
-x-scheme-handler/https={desktop_file}
-text/html={desktop_file}
-application/xhtml+xml={desktop_file}
-"""
-    
-    with open(mimeapps_path, "w") as f:
-        f.write(mimeapps_content)
-    
-    run(f"chown -R {safe_username}:{safe_username} /home/{config.username}/.config")
-    
-    run(f"xdg-mime default {desktop_file} x-scheme-handler/http", check=False)
-    run(f"xdg-mime default {desktop_file} x-scheme-handler/https", check=False)
-    
-    print(f"  ✓ Default browser set to {config.browser.capitalize()}")
+        if discord_installed:
+            print("  ✓ Other desktop apps installed (Discord)")
 
 
 def install_workstation_dev_apps(config: SetupConfig) -> None:
@@ -219,7 +150,3 @@ def install_workstation_dev_apps(config: SetupConfig) -> None:
         from desktop.browser_steps import _install_via_extrepo
         if _install_via_extrepo("VS Code", "vscode", "code"):
             print("  ✓ Workstation dev apps installed (VS Code)")
-
-
-def configure_vivaldi_browser(config: SetupConfig) -> None:
-    configure_default_browser(config)

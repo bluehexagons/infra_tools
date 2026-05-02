@@ -29,7 +29,7 @@ class TestRubySetup(unittest.TestCase):
         common_steps.install_ruby(config)
         mock_run.assert_has_calls([
             call("apt-get -o DPkg::Lock::Timeout=60 install -y -qq ruby ruby-dev bundler", check=False),
-            call("gem install bundler", check=False),
+            call("gem install bundler --no-document", check=False),
         ])
 
     @patch("common.common_steps.shutil.which", side_effect=["/usr/bin/ruby", None, None, None])
@@ -39,7 +39,7 @@ class TestRubySetup(unittest.TestCase):
         common_steps.install_ruby(config)
         mock_run.assert_has_calls([
             call("apt-get -o DPkg::Lock::Timeout=60 install -y -qq ruby ruby-dev bundler", check=False),
-            call("gem install bundler", check=False),
+            call("gem install bundler --no-document", check=False),
         ])
 
     @patch("common.common_steps._configure_auto_update_systemd")

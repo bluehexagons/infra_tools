@@ -73,7 +73,8 @@ map $uri {cc_var} {{
 
 
 def _make_proxy_location(path: str, port: int, comment: str, enable_websocket: bool = False,
-                        expires_var: Optional[str] = None, cc_var: Optional[str] = None) -> str:
+                        expires_var: Optional[str] = None, cc_var: Optional[str] = None,
+                        forwarded_proto: str = "$scheme", enable_path_redirect: bool = True) -> str:
     """Generate a proxy_pass location block."""
     slash = "/" if path != "/" else ""
     
@@ -82,7 +83,7 @@ def _make_proxy_location(path: str, port: int, comment: str, enable_websocket: b
         "        proxy_set_header Host $host;",
         "        proxy_set_header X-Real-IP $remote_addr;",
         "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
-        "        proxy_set_header X-Forwarded-Proto $scheme;",
+        f"        proxy_set_header X-Forwarded-Proto {forwarded_proto};",
         "",
         "        # Performance optimizations for dynamic backends",
         "        proxy_buffering on;",
@@ -118,15 +119,19 @@ def _make_proxy_location(path: str, port: int, comment: str, enable_websocket: b
 {body}
     }}"""
     else:
+        exact_location = f"""    # Redirect {path} to {path}/
+    location = {path} {{
+        return 301 {path}/;
+    }}""" if enable_path_redirect else f"""    # Proxy exact {path} without redirect
+    location = {path} {{
+{body}
+    }}"""
         return f"""    {comment}
     location {path}/ {{
 {body}
     }}
-    
-    # Redirect {path} to {path}/
-    location = {path} {{
-        return 301 {path}/;
-    }}"""
+
+{exact_location}"""
 
 
 def _make_static_location(path: str, serve_path: str, index_file: str, try_files: str, comment: str,
@@ -155,16 +160,47 @@ def _make_static_location(path: str, serve_path: str, index_file: str, try_files
     }}"""
 
 
-def _make_api_server_block(domain: str, port: int) -> str:
-    """Generate a separate server block for API subdomain."""
+def _make_api_server_block(
+    domain: str,
+    port: int,
+    enable_https_redirect: bool = True,
+    forwarded_proto: str = "$scheme",
+) -> str:
+    """Generate a separate server block for API subdomain (HTTP redirect + HTTPS)."""
     cert, key = get_ssl_cert_path(domain)
+    redirect_block = """
+    location / {
+        return 301 https://$host$request_uri;
+    }
+""" if enable_https_redirect else f"""
+    location / {{
+        proxy_pass http://127.0.0.1:{port};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto {forwarded_proto};
+        proxy_buffering on;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_intercept_errors off;
+    }}
+"""
     return f"""server {{
     listen 80;
     listen [::]:80;
+    server_name {domain};
+
+    location /.well-known/acme-challenge/ {{
+        root /var/www/letsencrypt;
+    }}
+{redirect_block}
+}}
+
+server {{
     listen 443 ssl;
     listen [::]:443 ssl;
     http2 on;
-    
+
     server_name {domain};
     
     ssl_certificate {cert};
@@ -173,17 +209,15 @@ def _make_api_server_block(domain: str, port: int) -> str:
     ssl_prefer_server_ciphers on;
     ssl_ciphers {SSL_CIPHERS};
     
-    location /.well-known/acme-challenge/ {{
-        root /var/www/letsencrypt;
-    }}
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
     
     location / {{
         proxy_pass http://127.0.0.1:{port};
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        
+        proxy_set_header X-Forwarded-Proto {forwarded_proto};
+
         # Performance optimizations for API backends
         proxy_buffering on;
         proxy_http_version 1.1;
@@ -194,7 +228,12 @@ def _make_api_server_block(domain: str, port: int) -> str:
 """
 
 
-def generate_merged_nginx_config(domain: Optional[str], deployments: Deployments, is_default: bool = False) -> str:
+def generate_merged_nginx_config(
+    domain: Optional[str],
+    deployments: Deployments,
+    is_default: bool = False,
+    enable_https_redirect: bool = True,
+) -> str:
     """Generate a merged nginx configuration for multiple deployments on the same domain."""
     cert_file, key_file = get_ssl_cert_path(domain)
     server_name_directive = f"server_name {domain};" if domain else "server_name _;"
@@ -202,6 +241,8 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: Deployments
     
     domain_slug = domain.replace('.', '_') if domain else 'default'
     cache_maps, expires_var, cc_var = _make_cache_maps(domain_slug)
+    forwarded_proto = "https" if not enable_https_redirect else "$scheme"
+    enable_path_redirect = enable_https_redirect
     
     sorted_deployments = sorted(deployments, key=lambda d: len(d['path']), reverse=True)
     
@@ -213,7 +254,12 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: Deployments
                 
                 if (dep['path'] == '/' or not dep['path']) and use_subdomain:
                     api_domain = f"api.{domain}"
-                    api_configs.append(_make_api_server_block(api_domain, dep['backend_port']))
+                    api_configs.append(_make_api_server_block(
+                        api_domain,
+                        dep['backend_port'],
+                        enable_https_redirect=enable_https_redirect,
+                        forwarded_proto=forwarded_proto,
+                    ))
 
     locations: StrList = []
     
@@ -245,7 +291,8 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: Deployments
                         if frontend_port is not None:
                             locations.append(_make_proxy_location(
                                 location_path, frontend_port, f"# Frontend for {path}", enable_websocket=True,
-                                expires_var=expires_var, cc_var=cc_var
+                                expires_var=expires_var, cc_var=cc_var,
+                                forwarded_proto=forwarded_proto, enable_path_redirect=enable_path_redirect
                             ))
                         else:
                             raise ValueError("frontend_port must be set to create proxy location")
@@ -255,7 +302,8 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: Deployments
                     api_path = "/api" if location_path == '/' else f"{location_path}/api"
                     locations.append(_make_proxy_location(
                         api_path, backend_port, f"# Backend for {path}",
-                        expires_var=expires_var, cc_var=cc_var
+                        expires_var=expires_var, cc_var=cc_var,
+                        forwarded_proto=forwarded_proto, enable_path_redirect=enable_path_redirect
                     ))
 
                     if frontend_serve_path:
@@ -268,14 +316,16 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: Deployments
                         if frontend_port is not None:
                             locations.append(_make_proxy_location(
                                 location_path, frontend_port, f"# Frontend for {path}", enable_websocket=True,
-                                expires_var=expires_var, cc_var=cc_var
+                                expires_var=expires_var, cc_var=cc_var,
+                                forwarded_proto=forwarded_proto, enable_path_redirect=enable_path_redirect
                             ))
                         else:
                             raise ValueError("frontend_port must be set to create proxy location")
             else:
                 locations.append(_make_proxy_location(
                     location_path, proxy_port, f"# Proxy for {path}",
-                    expires_var=expires_var, cc_var=cc_var
+                    expires_var=expires_var, cc_var=cc_var,
+                    forwarded_proto=forwarded_proto, enable_path_redirect=enable_path_redirect
                 ))
         else:
             serve_path = dep['serve_path']
@@ -301,21 +351,40 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: Deployments
         log_not_found off;
     }""")
 
+    acme_location = locations[0]
+    http_content = f"""
+{acme_location}
+
+    location / {{
+        return 301 https://$host$request_uri;
+    }}
+""" if enable_https_redirect else f"""
+{chr(10).join(locations)}
+"""
+
     main_config = f"""server {{
     listen 80{default_server};
     listen [::]:80{default_server};
+
+    {server_name_directive}
+{http_content}
+}}
+
+server {{
     listen 443 ssl{default_server};
     listen [::]:443 ssl{default_server};
     http2 on;
-    
+
     {server_name_directive}
-    
+
     ssl_certificate {cert_file};
     ssl_certificate_key {key_file};
     ssl_protocols {SSL_PROTOCOLS};
     ssl_prefer_server_ciphers on;
     ssl_ciphers {SSL_CIPHERS};
-    
+
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+
 {chr(10).join(locations)}
 }}
 """
@@ -323,7 +392,10 @@ def generate_merged_nginx_config(domain: Optional[str], deployments: Deployments
     return "\n".join([cache_maps] + api_configs + [main_config])
 
 
-def create_nginx_sites_for_groups(grouped_deployments: dict[Optional[str], Deployments]) -> None:
+def create_nginx_sites_for_groups(
+    grouped_deployments: dict[Optional[str], Deployments],
+    enable_https_redirect: bool = True,
+) -> None:
     """Create nginx site configurations for grouped deployments."""
     
     run("mkdir -p /var/www/letsencrypt/.well-known/acme-challenge")
@@ -347,7 +419,9 @@ def create_nginx_sites_for_groups(grouped_deployments: dict[Optional[str], Deplo
         
         is_default = (domain is None)
         
-        config_content = generate_merged_nginx_config(domain, deployments, is_default)
+        config_content = generate_merged_nginx_config(
+            domain, deployments, is_default, enable_https_redirect=enable_https_redirect
+        )
         
         try:
             with open(config_file, 'w') as f:

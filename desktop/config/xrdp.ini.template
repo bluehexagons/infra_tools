@@ -14,9 +14,11 @@ tcp_nodelay=true
 tcp_keepalive=true
 
 ; Security settings
-; Use negotiate to allow client/server to agree on best security protocol
-; This provides good security while maintaining compatibility with Remmina
-security_layer=negotiate
+; security_layer=tls forces TLS-encrypted RDP and disables the legacy
+; standard-RDP/RC4 fallback that 'negotiate' permits. Modern clients
+; (Remmina/FreeRDP, Windows mstsc) all support TLS; only very old or
+; misconfigured clients require the negotiate downgrade path.
+security_layer=tls
 crypt_level=high
 ssl_protocols=TLSv1.2, TLSv1.3
 tls_ciphers=HIGH:!aNULL:!eNULL:!EXPORT:!DES:!MD5:!PSK:!RC4

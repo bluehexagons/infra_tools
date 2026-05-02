@@ -13,11 +13,12 @@ import os
 import sys
 import subprocess
 import shutil
+from logging import ERROR, INFO
 
 # Add lib directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
-from lib.logging_utils import get_service_logger
+from lib.logging_utils import get_service_logger, log_event
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
 from lib.machine_state import load_setup_config
 
@@ -84,7 +85,7 @@ def check_rdp_sessions() -> bool:
 
 def perform_restart(notification_configs) -> int:
     """Perform system restart."""
-    logger.info("Restart required and no users logged in, restarting system...")
+    log_event(logger, "Restart required and no users logged in, restarting system")
     send_notification_safe(
         notification_configs,
         subject="Restart required: restarting now",
@@ -104,7 +105,7 @@ def perform_restart(notification_configs) -> int:
         )
         return 0
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        logger.error(f"✗ Failed to initiate restart: {e}")
+        log_event(logger, "Failed to initiate restart", level=ERROR, error=str(e))
         send_notification_safe(
             notification_configs,
             subject="Error: automatic restart failed",
@@ -129,17 +130,17 @@ def is_no_restart_mode() -> bool:
 
 def main():
     """Main function to check and perform restart if needed."""
-    logger.info("Starting restart check")
+    log_event(logger, "Starting restart check")
     notification_configs = load_notification_configs_from_state(logger)
     
     # Check if restart is required
     if not check_restart_required():
-        logger.info("No restart required")
+        log_event(logger, "No restart required")
         return 0
     
     # When no_restart is configured, always notify instead of restarting
     if is_no_restart_mode():
-        logger.info("Restart required but automatic restarts are disabled (no_restart mode)")
+        log_event(logger, "Restart required but automatic restarts are disabled", mode="no_restart")
         send_notification_safe(
             notification_configs,
             subject="Restart required: automatic restart disabled",
@@ -153,7 +154,7 @@ def main():
     # Check for SSH/console sessions
     logged_in_users = get_logged_in_users()
     if logged_in_users:
-        logger.info("Users are logged in (SSH/console), skipping restart")
+        log_event(logger, "Users are logged in, skipping restart", session_type="ssh-console")
         send_notification_safe(
             notification_configs,
             subject="Restart required: manual restart needed",
@@ -167,7 +168,7 @@ def main():
     
     # Check for desktop sessions
     if check_desktop_sessions():
-        logger.info("Desktop session active, skipping restart")
+        log_event(logger, "Desktop session active, skipping restart")
         send_notification_safe(
             notification_configs,
             subject="Restart required: manual restart needed",
@@ -180,7 +181,7 @@ def main():
     
     # Check for RDP sessions
     if check_rdp_sessions():
-        logger.info("RDP session active, skipping restart")
+        log_event(logger, "RDP session active, skipping restart")
         send_notification_safe(
             notification_configs,
             subject="Restart required: manual restart needed",

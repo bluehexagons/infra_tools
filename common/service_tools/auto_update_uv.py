@@ -9,10 +9,11 @@ import os
 import pwd
 import subprocess
 import sys
+from logging import ERROR
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
-from lib.logging_utils import get_service_logger
+from lib.logging_utils import get_service_logger, log_event
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
 
 
@@ -27,13 +28,13 @@ def main() -> int:
     notification_configs = load_notification_configs_from_state(logger)
 
     if not os.path.exists(uv_path):
-        logger.info("uv not found, skipping update")
+        log_event(logger, "uv not found, skipping update")
         return 0
 
     result = subprocess.run([uv_path, "self", "update"], capture_output=True, text=True)
     if result.returncode != 0:
         details = result.stderr.strip() or result.stdout.strip() or "uv self update failed"
-        logger.error("uv update failed: %s", details)
+        log_event(logger, "uv update failed", level=ERROR, stderr=details)
         send_notification_safe(
             notification_configs,
             subject="Error: uv update failed",
@@ -48,7 +49,7 @@ def main() -> int:
     result = subprocess.run([uv_path, "tool", "upgrade", "--all"], capture_output=True, text=True)
     if result.returncode != 0:
         details = result.stderr.strip() or result.stdout.strip() or "uv tool upgrade failed"
-        logger.error("uv tool upgrade failed: %s", details)
+        log_event(logger, "uv tool upgrade failed", level=ERROR, stderr=details)
         send_notification_safe(
             notification_configs,
             subject="Error: uv tool upgrade failed",
@@ -60,7 +61,7 @@ def main() -> int:
         )
         return 1
 
-    logger.info("uv and uv-managed tools updated successfully")
+    log_event(logger, "uv and uv-managed tools updated successfully")
     return 0
 
 

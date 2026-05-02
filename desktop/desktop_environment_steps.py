@@ -31,7 +31,7 @@ def install_desktop(config: SetupConfig) -> None:
         print(f"  ✓ {config.desktop.upper()} desktop already installed")
         return
     
-    install_package(f"{config.desktop.upper()} desktop", package, install_cmd, required=False)
+    install_package(f"{config.desktop.upper()} desktop", package, install_cmd)
 
 
 def configure_xfce_for_rdp(config: SetupConfig) -> None:
@@ -42,7 +42,7 @@ def configure_xfce_for_rdp(config: SetupConfig) -> None:
     - Disables xfce4-power-manager display features (no DPMS in RDP)
     - Creates stub pm-is-supported to suppress warnings
     - Removes problematic autostart entries
-    - Disables xfsettingsd display management
+    - Removes stale XFCE display profiles that conflict with xorgxrdp RANDR
     - Sets XRDP-specific environment indicators
     """
     if config.desktop != "xfce":
@@ -66,16 +66,12 @@ Comment=Screen Locker (disabled for RDP)
 Hidden=true
 """)
     
-    # 2. Disable xfsettingsd from managing displays - CRITICAL for dynamic resolution
-    # This prevents xfsettingsd from interfering with xorgxrdp's RANDR events
+    # 2. Remove older infra_tools workaround that disabled xfsettingsd entirely.
+    # xfsettingsd is needed for normal XFCE settings; stale display profiles are
+    # the part that conflicts with xorgxrdp's RANDR-driven resize events.
     xfsettingsd_desktop = f"{autostart_dir}/xfsettingsd.desktop"
-    with open(xfsettingsd_desktop, "w") as f:
-        f.write("""[Desktop Entry]
-Type=Application
-Name=XFCE Settings Daemon
-Comment=Settings daemon (display management disabled for RDP)
-Hidden=true
-""")
+    if os.path.exists(xfsettingsd_desktop):
+        os.remove(xfsettingsd_desktop)
     
     # 3. Create stub pm-is-supported to suppress xfce4-session warnings
     pm_stub = "/usr/local/bin/pm-is-supported"
@@ -114,31 +110,11 @@ exit 1
     with open(power_manager_config, "w") as f:
         f.write(power_manager_xml)
     
-    # 6. Create an empty displays config to prevent xfsettingsd from managing displays
-    # This is critical - xfsettingsd's display management conflicts with xorgxrdp
+    # 6. Remove stale fixed display profile from previous infra_tools runs.
+    # A saved resolution/output profile can override xorgxrdp RANDR resize events.
     displays_config = f"{xfce_config_dir}/displays.xml"
-    displays_xml = """<?xml version="1.0" encoding="UTF-8"?>
-<channel name="displays" version="1.0">
-  <property name="ActiveProfile" type="string" value=""/>
-  <property name="Default" type="empty">
-    <property name="DP-1" type="string" value="Virtual Display">
-      <property name="Active" type="bool" value="true"/>
-      <property name="EDID" type="string" value=""/>
-      <property name="Resolution" type="string" value="1920x1080"/>
-      <property name="RefreshRate" type="double" value="60"/>
-      <property name="Rotation" type="int" value="0"/>
-      <property name="Reflection" type="string" value="0"/>
-      <property name="Primary" type="bool" value="true"/>
-      <property name="Position" type="empty">
-        <property name="X" type="int" value="0"/>
-        <property name="Y" type="int" value="0"/>
-      </property>
-    </property>
-  </property>
-</channel>
-"""
-    with open(displays_config, "w") as f:
-        f.write(displays_xml)
+    if os.path.exists(displays_config):
+        os.remove(displays_config)
     
     # 7. Create xfwm4 configuration that doesn't interfere with RANDR
     xfwm4_config = f"{xfce_config_dir}/xfwm4.xml"
@@ -160,7 +136,7 @@ exit 1
     
     print("  ✓ XFCE configured for RDP compatibility")
     print("    - light-locker disabled (prevents crashes)")
-    print("    - xfsettingsd display management disabled")
+    print("    - Stale fixed display profile removed")
     print("    - Display power management disabled (no DPMS in RDP)")
     print("    - Power management warnings suppressed")
 
@@ -182,6 +158,7 @@ def install_smbclient(config: SetupConfig) -> None:
         return
     
     packages_str = " ".join(packages)
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run(f"apt-get install -y -qq {packages_str}")
     
     print("  ✓ SMB client packages installed (cifs-utils, smbclient, gvfs-backends)")

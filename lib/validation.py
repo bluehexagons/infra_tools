@@ -5,7 +5,19 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import TYPE_CHECKING, Any, Callable, Optional, cast
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from lib.plugin_registry import resolve_validator
+
+if TYPE_CHECKING:
+    from lib.config import SetupConfig
+
+
+def _resolve_plugin_validator(name: str) -> Callable[..., object]:
+    """Resolve a plugin-owned validator or parser callable."""
+
+    return resolve_validator(name)
 
 
 def validate_filesystem_path(path: str, must_exist: bool = False, check_writable: bool = False) -> None:
@@ -147,6 +159,35 @@ def validate_directory_empty(directory: str) -> None:
         raise ValueError(f"Cannot read directory contents: {directory}") from e
 
 
+def validate_workspace_dir(path: str) -> None:
+    """Validate a workspace directory path for CLI entry points."""
+
+    if not path:
+        raise ValueError("Workspace path must be a non-empty string")
+
+    expanded_path = os.path.abspath(os.path.expanduser(path))
+    validate_filesystem_path(expanded_path, must_exist=False)
+
+    if os.path.exists(expanded_path):
+        if not os.path.isdir(expanded_path):
+            raise ValueError(f"Workspace path is not a directory: {expanded_path}")
+        if not os.access(expanded_path, os.W_OK):
+            raise ValueError(f"Workspace path is not writable: {expanded_path}")
+        return
+
+    existing_parent = expanded_path
+    while not os.path.exists(existing_parent):
+        parent = os.path.dirname(existing_parent)
+        if parent == existing_parent:
+            break
+        existing_parent = parent
+
+    if not os.path.isdir(existing_parent):
+        raise ValueError(f"Workspace parent is not a directory: {existing_parent}")
+    if not os.access(existing_parent, os.W_OK):
+        raise ValueError(f"Workspace parent is not writable: {existing_parent}")
+
+
 def validate_network_endpoint(endpoint: str) -> None:
     """Validate network endpoint (host:port or IP:port).
     
@@ -178,6 +219,196 @@ def validate_network_endpoint(endpoint: str) -> None:
         raise ValueError(f"Invalid port in endpoint: {port}") from e
 
 
+def validate_deploy_targets(targets: Optional[list[str]]) -> None:
+    """Validate deploy target hostnames before setup or patch execution."""
+
+    if not targets:
+        return
+
+    from lib.validators import validate_host
+
+    for target in targets:
+        if not target or not target.strip():
+            raise ValueError("Deploy target must be a non-empty hostname or IP")
+        if not validate_host(target):
+            raise ValueError(f"Invalid deploy target host: {target}")
+
+
+def validate_deploy_specs(deploy_specs: Optional[list[list[str]]]) -> None:
+    """Validate deploy specs before setup or patch execution."""
+
+    if not deploy_specs:
+        return
+
+    from lib.deploy_utils import parse_deploy_spec
+    from lib.validators import validate_host
+
+    for deploy_spec_entry in deploy_specs:
+        if len(deploy_spec_entry) != 2:
+            raise ValueError("--deploy requires DOMAIN_OR_PATH and GIT_URL")
+
+        deploy_specs_str, git_url = deploy_spec_entry
+        if not deploy_specs_str or not str(deploy_specs_str).strip():
+            raise ValueError("Deploy target spec must be a non-empty string")
+        if not git_url or not str(git_url).strip():
+            raise ValueError("Deploy git URL must be a non-empty string")
+
+        for raw_deploy_spec in str(deploy_specs_str).split(","):
+            deploy_spec = raw_deploy_spec.strip()
+            if not deploy_spec:
+                raise ValueError("Deploy target spec list must not contain empty entries")
+
+            if deploy_spec.startswith("/"):
+                validate_filesystem_path(deploy_spec, must_exist=False)
+                continue
+
+            domain, _path = parse_deploy_spec(deploy_spec)
+            if not domain or not validate_host(domain):
+                raise ValueError(f"Invalid deploy domain: {domain or deploy_spec}")
+
+
+def validate_sync_specs(sync_specs: Optional[list[list[str]]]) -> None:
+    """Validate sync specs before setup or patch execution."""
+
+    if not sync_specs:
+        return
+
+    parse_sync_spec = cast(
+        Callable[[list[str]], dict[str, Any]],
+        _resolve_plugin_validator("parse_sync_spec"),
+    )
+
+    for sync_spec in sync_specs:
+        sync_config = parse_sync_spec(sync_spec)
+        validate_filesystem_path(sync_config["source"], must_exist=False)
+        validate_filesystem_path(sync_config["destination"], must_exist=False)
+
+
+def validate_scrub_specs(scrub_specs: Optional[list[list[str]]]) -> None:
+    """Validate scrub specs before setup or patch execution."""
+
+    if not scrub_specs:
+        return
+
+    parse_scrub_spec = cast(
+        Callable[[list[str]], dict[str, Any]],
+        _resolve_plugin_validator("parse_scrub_spec"),
+    )
+
+    for scrub_spec in scrub_specs:
+        scrub_config = parse_scrub_spec(scrub_spec)
+        validate_filesystem_path(scrub_config["directory"], must_exist=False)
+        validate_database_path(scrub_config["database_path"])
+        validate_redundancy_percentage(scrub_config["redundancy"])
+
+
+def validate_smb_mount_specs(smb_mounts: Optional[list[list[str]]]) -> None:
+    """Validate SMB mount specs before setup or patch execution."""
+
+    if not smb_mounts:
+        return
+
+    from lib.validators import validate_host
+    parse_smb_mount_spec = cast(
+        Callable[[Optional[list[str]]], dict[str, Any]],
+        _resolve_plugin_validator("parse_smb_mount_spec"),
+    )
+
+    for mount_spec in smb_mounts:
+        mount_config = parse_smb_mount_spec(mount_spec)
+        validate_filesystem_path(mount_config["mountpoint"], must_exist=False)
+        if not validate_host(mount_config["ip"]):
+            raise ValueError(f"Invalid SMB mount host: {mount_config['ip']}")
+        if not mount_config["share"] or "/" in mount_config["share"] or "\\" in mount_config["share"] or " " in mount_config["share"]:
+            raise ValueError(f"Invalid share name (cannot contain /, \\, or spaces): {mount_config['share']}")
+        if mount_config["subdir"] and not mount_config["subdir"].startswith("/"):
+            raise ValueError(f"Subdirectory must start with /: {mount_config['subdir']}")
+
+
+def validate_samba_share_specs(
+    samba_shares: Optional[list[list[str]]],
+    share_credentials: Optional[list[list[str]]] = None,
+) -> None:
+    """Validate Samba share specs before setup or patch execution."""
+
+    if not samba_shares:
+        return
+
+    parse_share_credentials = cast(
+        Callable[[Optional[list[list[str]]]], dict[str, str]],
+        _resolve_plugin_validator("parse_share_credentials"),
+    )
+    parse_share_spec = cast(
+        Callable[[Optional[list[str]], Optional[dict[str, str]]], dict[str, Any]],
+        _resolve_plugin_validator("parse_share_spec"),
+    )
+
+    credentials = parse_share_credentials(share_credentials)
+
+    for share_spec in samba_shares:
+        share_config = parse_share_spec(share_spec, credentials)
+        share_name = share_config["share_name"]
+        if not share_name or "/" in share_name or "\\" in share_name or " " in share_name:
+            raise ValueError(f"Invalid Samba share name (cannot contain /, \\, or spaces): {share_name}")
+
+        if not share_config["paths"]:
+            raise ValueError(f"No paths specified for share: {share_name}")
+
+        for path in cast(list[str], share_config["paths"]):
+            if not os.path.isabs(path):
+                raise ValueError(f"Share path must be absolute: {path}")
+            validate_filesystem_path(path, must_exist=False)
+
+        if not share_config["users"]:
+            raise ValueError(f"No users specified for share: {share_name}")
+
+
+def validate_samba_share_credentials(config: "SetupConfig") -> None:
+    """Validate Samba share credentials through the plugin registry."""
+
+    validator = cast(
+        Callable[["SetupConfig"], None],
+        _resolve_plugin_validator("validate_samba_share_credentials"),
+    )
+    validator(config)
+
+
+def validate_ssl_email(email: Optional[str]) -> None:
+    """Validate the optional SSL registration email before setup or patch execution."""
+
+    if not email:
+        return
+
+    from lib.notifications import NotificationConfig, validate_notification_config
+
+    try:
+        validate_notification_config(NotificationConfig(type="mailbox", target=email))
+    except ValueError as exc:
+        raise ValueError(f"Invalid SSL email address: {email}") from exc
+
+
+def validate_apt_packages(packages: Optional[list[str]]) -> None:
+    """Validate custom apt package names before setup or patch execution."""
+
+    if not packages:
+        return
+
+    for package in packages:
+        validate_package_name(package, name="--apt-install")
+
+
+def validate_timezone_name(timezone: Optional[str]) -> None:
+    """Validate a timezone identifier before setup or patch execution."""
+
+    if not timezone:
+        return
+
+    try:
+        ZoneInfo(timezone)
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError(f"Invalid timezone: {timezone}") from exc
+
+
 def validate_positive_integer(value: str, name: str = "value") -> int:
     """Validate and convert string to positive integer.
     
@@ -206,6 +437,7 @@ def validate_positive_integer(value: str, name: str = "value") -> int:
 
 
 _MEMORY_PATTERN = re.compile(r'^\d+[KMGT]$', re.IGNORECASE)
+_PACKAGE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+.-]*$")
 
 
 def validate_memory_string(value: str, name: str = "memory") -> None:
@@ -227,6 +459,18 @@ def validate_memory_string(value: str, name: str = "memory") -> None:
         )
 
 
+def validate_package_name(value: str, name: str = "package") -> str:
+    """Validate a package name used in apt/system package lookups."""
+    normalized_value = value.strip()
+    if not normalized_value:
+        raise ValueError(f"{name} must be a non-empty string")
+
+    if not _PACKAGE_NAME_PATTERN.match(normalized_value):
+        raise ValueError(f"Invalid {name} name: {value}")
+
+    return normalized_value
+
+
 def validate_hosted_flags(config: Any) -> None:
     """Validate that required hosted flags are present when --hosted is used.
 
@@ -238,6 +482,11 @@ def validate_hosted_flags(config: Any) -> None:
     """
     if not config.hosted_node:
         return
+
+    from lib.validators import validate_host
+
+    if not validate_host(config.hosted_node):
+        raise ValueError(f"Invalid hosted node host: {config.hosted_node}")
 
     if not config.container_memory:
         raise ValueError("--memory is required when --hosted is specified")

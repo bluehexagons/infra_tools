@@ -106,6 +106,8 @@ class TestCleanupFunctions(unittest.TestCase):
             [
                 call("systemctl stop demo.timer", check=False),
                 call("systemctl disable demo.timer", check=False),
+                call("systemctl stop demo.path", check=False),
+                call("systemctl disable demo.path", check=False),
                 call("systemctl stop demo.service", check=False),
                 call("systemctl disable demo.service", check=False),
                 call("systemctl daemon-reload", check=False),
@@ -114,6 +116,7 @@ class TestCleanupFunctions(unittest.TestCase):
         mock_remove.assert_has_calls(
             [
                 call("/etc/systemd/system/demo.timer"),
+                call("/etc/systemd/system/demo.path"),
                 call("/etc/systemd/system/demo.service"),
             ]
         )

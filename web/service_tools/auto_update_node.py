@@ -11,6 +11,7 @@ Logs to: /var/log/infra_tools/web/auto_update_node.log
 from __future__ import annotations
 
 import os
+import shlex
 import sys
 import subprocess
 import pwd
@@ -20,6 +21,7 @@ from logging import ERROR
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
 from lib.logging_utils import get_service_logger
+from lib.logging_utils import log_event
 from lib.logging_utils import log_subprocess_result
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
 from lib.types import MaybeStr
@@ -36,24 +38,26 @@ def get_nvm_dir() -> str:
     return os.path.join(home_dir, '.nvm')
 
 
-def run_nvm_command(cmd: str) -> subprocess.CompletedProcess[str]:
+def run_nvm_command(args: list[str]) -> subprocess.CompletedProcess[str]:
     """Run a command with nvm environment loaded."""
     nvm_dir = get_nvm_dir()
-    full_cmd = f'export NVM_DIR="{nvm_dir}" && [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && {cmd}'
-    
+    full_cmd = (
+        f'export NVM_DIR={shlex.quote(nvm_dir)} && '
+        '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && '
+        f'{shlex.join(args)}'
+    )
+
     result = subprocess.run(
-        full_cmd,
-        shell=True,
-        executable="/bin/bash",
+        ["/bin/bash", "-lc", full_cmd],
         capture_output=True,
-        text=True
+        text=True,
     )
     return result
 
 
 def get_current_lts_version() -> str:
     """Get the latest LTS version available."""
-    result = run_nvm_command("nvm version-remote --lts")
+    result = run_nvm_command(["nvm", "version-remote", "--lts"])
     if result.returncode == 0:
         return result.stdout.strip()
     return ""
@@ -61,7 +65,7 @@ def get_current_lts_version() -> str:
 
 def get_latest_version() -> str:
     """Get the latest non-LTS stable version available."""
-    result = run_nvm_command("nvm version-remote node")
+    result = run_nvm_command(["nvm", "version-remote", "node"])
     if result.returncode == 0:
         return result.stdout.strip()
     return ""
@@ -69,7 +73,7 @@ def get_latest_version() -> str:
 
 def get_current_version() -> str:
     """Get the currently installed default version."""
-    result = run_nvm_command("nvm version default")
+    result = run_nvm_command(["nvm", "version", "default"])
     if result.returncode == 0:
         return result.stdout.strip()
     return ""
@@ -77,7 +81,7 @@ def get_current_version() -> str:
 
 def get_default_alias() -> str:
     """Get the nvm default alias definition."""
-    result = run_nvm_command("nvm alias default")
+    result = run_nvm_command(["nvm", "alias", "default"])
     if result.returncode == 0:
         return result.stdout.strip()
     return ""
@@ -103,7 +107,7 @@ def determine_update_track(alias_output: str) -> str:
 def install_target_version(update_track: str) -> bool:
     """Install the latest Node.js version for the selected track."""
     install_arg = "node" if update_track == "latest" else "--lts"
-    result = run_nvm_command(f"nvm install {install_arg}")
+    result = run_nvm_command(["nvm", "install", install_arg])
     action = "Installed latest Node.js version" if update_track == "latest" else "Installed latest Node.js LTS"
     return log_subprocess_result(logger, action, result, failure_level=ERROR)
 
@@ -118,7 +122,7 @@ def update_global_packages() -> tuple[bool, MaybeStr]:
     failures: list[str] = []
 
     for action, command in commands:
-        result = run_nvm_command(command)
+        result = run_nvm_command(shlex.split(command))
         if not log_subprocess_result(logger, action, result):
             details = result.stderr.strip() or result.stdout.strip() or command
             failures.append(f"{action}: {details}")
@@ -153,7 +157,7 @@ def fix_permissions():
 
 def main():
     """Main function to update Node.js."""
-    logger.info("Starting Node.js update check")
+    log_event(logger, "Starting Node.js update check")
     
     nvm_dir = get_nvm_dir()
     
@@ -161,7 +165,7 @@ def main():
     notification_configs = load_notification_configs_from_state(logger)
     
     if not os.path.exists(nvm_dir):
-        logger.error(f"✗ nvm not found at {nvm_dir}")
+        log_event(logger, "nvm directory not found", level=ERROR, nvm_dir=nvm_dir)
         send_notification_safe(
             notification_configs,
             subject="Error: Node.js update failed",
@@ -180,7 +184,7 @@ def main():
     track_label = "latest" if update_track == "latest" else "LTS"
     
     if not current_lts:
-        logger.error("✗ Failed to get latest LTS version")
+        log_event(logger, "Failed to get latest LTS version", level=ERROR)
         send_notification_safe(
             notification_configs,
             subject="Error: Node.js update failed",
@@ -192,7 +196,7 @@ def main():
         return 1
     
     if update_track == "latest" and not latest_version:
-        logger.error("✗ Failed to get latest Node.js version")
+        log_event(logger, "Failed to get latest Node.js version", level=ERROR, update_track=update_track)
         send_notification_safe(
             notification_configs,
             subject="Error: Node.js update failed",
@@ -204,7 +208,7 @@ def main():
         return 1
 
     if not current_version:
-        logger.error("✗ Failed to get current version")
+        log_event(logger, "Failed to get current Node.js version", level=ERROR, update_track=update_track)
         send_notification_safe(
             notification_configs,
             subject="Error: Node.js update failed",
@@ -216,12 +220,31 @@ def main():
         return 1
     
     if current_version == target_version:
-        logger.info(f"Node.js already at latest {track_label} version: {target_version}")
+        log_event(
+            logger,
+            "Node.js already up to date",
+            current_version=current_version,
+            target_version=target_version,
+            update_track=track_label,
+        )
     else:
-        logger.info(f"Updating Node.js ({track_label}) from {current_version} to {target_version}")
+        log_event(
+            logger,
+            "Updating Node.js",
+            current_version=current_version,
+            target_version=target_version,
+            update_track=track_label,
+        )
         
         if not install_target_version(update_track):
-            logger.error("✗ Node.js update failed")
+            log_event(
+                logger,
+                "Node.js update failed",
+                level=ERROR,
+                current_version=current_version,
+                target_version=target_version,
+                update_track=track_label,
+            )
             send_notification_safe(
                 notification_configs,
                 subject="Error: Node.js update failed",
@@ -234,7 +257,14 @@ def main():
 
     packages_updated, package_error = update_global_packages()
     if not packages_updated:
-        logger.error("✗ Node.js global package update failed")
+        log_event(
+            logger,
+            "Node.js global package update failed",
+            level=ERROR,
+            current_version=current_version,
+            target_version=target_version,
+            update_track=track_label,
+        )
         send_notification_safe(
             notification_configs,
             subject="Error: Node.js update failed",
@@ -253,7 +283,13 @@ def main():
     # the actual installed Node.js version rather than the pre-update version.
     post_update_version = get_current_version() or current_version
     
-    logger.info(f"✓ Node.js update tasks completed successfully for {target_version}")
+    log_event(
+        logger,
+        "Node.js update tasks completed successfully",
+        current_version=post_update_version,
+        target_version=target_version,
+        update_track=track_label,
+    )
     
     send_notification_safe(
         notification_configs,

@@ -7,10 +7,13 @@ Designed to be called locally before remote_setup runs against the container.
 
 from __future__ import annotations
 
+import ipaddress
+import os
 import re
 import subprocess
 import shlex
 import sys
+import time
 from typing import Optional, cast
 
 from lib.config import SetupConfig
@@ -42,11 +45,13 @@ def _ssh_run(
     user: str,
     ssh_opts: StrList,
     cmd: str,
-    dry_run: bool = False
+    dry_run: bool = False,
+    log_cmd: Optional[str] = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a command on the Proxmox host via SSH."""
-    log_cmd = cmd[:80] + "..." if len(cmd) > 80 else cmd
-    print(f"  Running on {node_ip}: {log_cmd}")
+    display_cmd = log_cmd if log_cmd is not None else cmd
+    display_cmd = display_cmd[:80] + "..." if len(display_cmd) > 80 else display_cmd
+    print(f"  Running on {node_ip}: {display_cmd}")
     sys.stdout.flush()
 
     if dry_run:
@@ -155,11 +160,17 @@ def check_container_exists(
             dry_run=dry_run
         )
         for line in config_result.stdout.split('\n'):
-            if line.startswith('net0:'):
-                net_config = line.split('ip=', 1)
-                if len(net_config) > 1 and target_ip in net_config[1].split(',')[0]:
-                    print(f"  ✓ Container VMID {vmid} already exists with IP {target_ip}")
-                    return True
+            if not line.startswith('net0:'):
+                continue
+            # net0 line example:
+            #   net0: name=eth0,bridge=vmbr0,ip=10.0.0.50/24,gw=10.0.0.1,type=veth
+            match = re.search(r'(?:^|,)ip=([^,\s]+)', line)
+            if not match:
+                continue
+            container_ip = match.group(1).split('/', 1)[0].strip()
+            if container_ip == target_ip:
+                print(f"  ✓ Container VMID {vmid} already exists with IP {target_ip}")
+                return True
 
     return False
 
@@ -185,14 +196,21 @@ def auto_detect_bridge(
         print("  [DRY-RUN] Would detect bridge")
         return "vmbr0"
 
-    bridges = result.stdout.strip().split('\n') if result.stdout.strip() else []
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
+        raise ProvisionError(
+            f"Failed to query bridges on Proxmox host {node_ip}: "
+            f"{stderr or 'ssh command failed'}"
+        )
+
+    bridges = [b.strip() for b in result.stdout.strip().split('\n') if b.strip()]
 
     if not bridges:
         raise ProvisionError(
             "No vmbr* network bridge found on the Proxmox host"
         )
 
-    bridge = bridges[0].strip()
+    bridge = bridges[0]
     if bridge != "vmbr0" and "vmbr0" in bridges:
         bridge = "vmbr0"
 
@@ -249,30 +267,54 @@ def _get_host_gateway(
     return gateway
 
 
+def _is_usable_nameserver(addr: str) -> bool:
+    """Return True if addr is a globally routable nameserver the container can reach."""
+    try:
+        ip = ipaddress.ip_address(addr)
+    except ValueError:
+        return False
+    # Containers have their own loopback; the host's resolved stub at 127.0.0.53
+    # (or any loopback / link-local / unspecified address) is not reachable from the container.
+    if ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_multicast:
+        return False
+    return True
+
+
 def _get_host_nameservers(
     node_ip: str,
     user: str,
     ssh_opts: StrList,
     dry_run: bool = False
 ) -> StrList:
-    """Get nameservers from the Proxmox host."""
+    """Get nameservers from the Proxmox host, filtering out unreachable addresses."""
+    # Prefer resolvectl (gives upstream DNS even when /etc/resolv.conf points at the
+    # systemd-resolved stub). Fall back to /etc/resolv.conf when resolvectl isn't installed.
     result = _ssh_run(
         node_ip, user, ssh_opts,
-        "grep -oP '^nameserver\\s+\\K.*' /etc/resolv.conf | head -3",
+        "resolvectl dns 2>/dev/null | awk '{for (i=2;i<=NF;i++) print $i}' | sort -u; "
+        "grep -oP '^nameserver\\s+\\K\\S+' /etc/resolv.conf",
         dry_run=dry_run
     )
 
     if dry_run:
         return ["8.8.8.8"]
 
-    nameservers = [
-        ns.strip() for ns in result.stdout.strip().split('\n')
-        if ns.strip()
-    ]
+    seen: set[str] = set()
+    nameservers: StrList = []
+    for ns in (result.stdout or "").split('\n'):
+        ns = ns.strip()
+        if not ns or ns in seen:
+            continue
+        if not _is_usable_nameserver(ns):
+            continue
+        seen.add(ns)
+        nameservers.append(ns)
+        if len(nameservers) >= 3:
+            break
 
     if not nameservers:
-        print("  ⚠ No nameservers found, using 8.8.8.8")
-        return ["8.8.8.8"]
+        print("  ⚠ No usable nameservers detected on host (only loopback?), using 1.1.1.1")
+        return ["1.1.1.1"]
 
     print(f"  ✓ Detected nameservers: {', '.join(nameservers)}")
     return nameservers
@@ -394,6 +436,54 @@ def _resolve_template_storage(
     raise ProvisionError("No template storage pool found on the Proxmox host")
 
 
+def _parse_pveam_available(stdout: str, system: str) -> StrList:
+    """Parse `pveam available` output and return matching template filenames.
+
+    pveam available emits whitespace-separated columns like:
+        section          template_name
+        system           debian-12-standard_12.7-1_amd64.tar.zst
+        system           ubuntu-24.04-standard_24.04-1_amd64.tar.zst
+
+    Older or differently-formatted output may use `section/template`. We accept either.
+    The match requires `<system>-<digits>` so `--base debian` doesn't pull in
+    `debian-12-turnkey-*` images by accident.
+    """
+    system_lc = system.lower()
+    pattern = re.compile(rf'^{re.escape(system_lc)}-\d')
+    matches: StrList = []
+    for raw in (stdout or "").split('\n'):
+        line = raw.strip()
+        if not line or line.startswith('---') or line.upper().startswith('NAME') or line.upper().startswith('SECTION'):
+            continue
+        # Pick the last whitespace-separated field, then strip any leading "section/" prefix.
+        candidate = line.split()[-1]
+        candidate = candidate.rsplit('/', 1)[-1]
+        cand_lc = candidate.lower()
+        if not pattern.match(cand_lc):
+            continue
+        # Exclude derivative distributions that share the base name but ship a
+        # different OS (e.g. debian-12-turnkey-wordpress is a TurnKey appliance,
+        # not a stock Debian image).
+        if '-turnkey-' in cand_lc:
+            continue
+        matches.append(candidate)
+    return matches
+
+
+def _template_sort_key(name: str) -> tuple:
+    """Extract a comparable version key from a template filename.
+
+    e.g. debian-12-standard_12.7-1_amd64.tar.zst -> (12, (12, 7, 1))
+    Templates that don't match fall back to lexical order at the end.
+    """
+    m = re.search(r'-(\d+)[-.][^_]*_([\d.]+)', name)
+    if not m:
+        return (0, (), name)
+    major = int(m.group(1))
+    sub = tuple(int(p) for p in m.group(2).split('.') if p.isdigit())
+    return (major, sub, name)
+
+
 def _resolve_template_name(
     base_arg: str,
     template_storage: str,
@@ -420,17 +510,7 @@ def _resolve_template_name(
     )
 
     system = base_arg.lower()
-    candidates = []
-
-    for line in result.stdout.strip().split('\n'):
-        line = line.strip()
-        if not line or line.startswith("---") or line.startswith("NAME"):
-            continue
-        # pveam available output: system/ or system-version-standard_version_arch.tar.*
-        parts = line.split('/')
-        template_name = parts[-1] if len(parts) > 1 else parts[0]
-        if template_name.lower().startswith(system):
-            candidates.append(template_name)
+    candidates = _parse_pveam_available(result.stdout, system)
 
     if not candidates:
         # Also check what's already downloaded
@@ -439,22 +519,32 @@ def _resolve_template_name(
             f"pveam list {shlex.quote(template_storage)} 2>/dev/null",
             dry_run=dry_run
         )
-        for line in local_result.stdout.strip().split('\n')[1:]:
+        local_pattern = re.compile(rf'^{re.escape(system)}-\d')
+        local_candidates: StrList = []
+        for line in (local_result.stdout or "").strip().split('\n')[1:]:
             parts = line.split()
-            if parts and parts[0].lower().startswith(system):
-                template_path = f"/var/lib/vz/template/cache/{parts[0]}"
-                if not template_storage.startswith("local"):
-                    template_path = f"{template_storage}:vztmpl/{parts[0]}"
-                print(f"  ✓ Found downloaded template: {parts[0]}")
-                return template_path
+            if not parts:
+                continue
+            # pveam list rows typically show full storage path: local:vztmpl/<file>
+            name = parts[0].rsplit('/', 1)[-1]
+            if local_pattern.match(name.lower()):
+                local_candidates.append(name)
+        if local_candidates:
+            local_candidates.sort(key=_template_sort_key)
+            chosen = local_candidates[-1]
+            template_path = f"/var/lib/vz/template/cache/{chosen}"
+            if not template_storage.startswith("local"):
+                template_path = f"{template_storage}:vztmpl/{chosen}"
+            print(f"  ✓ Found downloaded template: {chosen}")
+            return template_path
 
         raise ProvisionError(
             f"No template found matching '{base_arg}'. "
             f"Available templates can be listed with 'pveam available' on the Proxmox host"
         )
 
-    # Pick the latest (last in sorted order, which for versioned names gives latest)
-    candidates.sort()
+    # Pick the latest by version, not lexical order
+    candidates.sort(key=_template_sort_key)
     template_name = candidates[-1]
 
     # Download if not already present
@@ -481,7 +571,8 @@ def _resolve_template_name(
 def _build_container_hostname(target_ip: str, friendly_name: Optional[str]) -> str:
     """Derive a hostname for the container.
 
-    Uses friendly_name if set, otherwise derives from IP.
+    Uses friendly_name if set, otherwise derives from IP. Result is clamped to
+    63 characters per RFC 1123 so `pct create --hostname` accepts it.
     """
     if friendly_name:
         # Sanitize: lowercase, replace non-alphanumeric with hyphens
@@ -489,10 +580,111 @@ def _build_container_hostname(target_ip: str, friendly_name: Optional[str]) -> s
         # Remove consecutive hyphens
         hostname = re.sub(r'-+', '-', hostname)
         if hostname:
-            return hostname
+            return hostname[:63].rstrip('-') or hostname[:63]
 
     # Derive from IP: 10.0.0.50 → lxc-10-0-0-50
-    return "lxc-" + target_ip.replace(".", "-")
+    return ("lxc-" + target_ip.replace(".", "-"))[:63]
+
+
+def _resolve_public_key_path(ssh_key: Optional[str]) -> Optional[str]:
+    """Return the local path to the public key matching the given private key, if any.
+
+    Convention: <ssh_key>.pub. Returns None if ssh_key is unset, the .pub file is
+    missing, or the file is empty.
+    """
+    if not ssh_key:
+        return None
+    pub_path = ssh_key + ".pub"
+    try:
+        if os.path.isfile(pub_path) and os.path.getsize(pub_path) > 0:
+            return pub_path
+    except OSError:
+        return None
+    return None
+
+
+def _upload_pubkey_to_host(
+    pub_path: str,
+    node_ip: str,
+    user: str,
+    ssh_opts: StrList,
+    dry_run: bool,
+) -> Optional[str]:
+    """Upload the local public key to a temp file on the Proxmox host.
+
+    Returns the remote temp path so the caller can pass it to `pct create
+    --ssh-public-keys`. Returns None on dry runs.
+    """
+    if dry_run:
+        return "/tmp/infra_tools_pubkey.dryrun"
+
+    try:
+        with open(pub_path, "r", encoding="utf-8") as fh:
+            pub_contents = fh.read()
+    except OSError as exc:
+        raise ProvisionError(f"Failed to read public key {pub_path}: {exc}")
+
+    # mktemp on the host, then write the contents through ssh stdin.
+    mk = _ssh_run(
+        node_ip, user, ssh_opts,
+        "mktemp /tmp/infra_tools_pubkey.XXXXXX",
+        dry_run=False,
+    )
+    if mk.returncode != 0 or not mk.stdout.strip():
+        raise ProvisionError(
+            f"Failed to allocate temp file for SSH key on {node_ip}: "
+            f"{(mk.stderr or '').strip() or 'mktemp failed'}"
+        )
+    remote_path = mk.stdout.strip()
+
+    write_cmd = ["ssh"] + ssh_opts + [
+        f"{user}@{node_ip}",
+        f"cat > {shlex.quote(remote_path)} && chmod 600 {shlex.quote(remote_path)}",
+    ]
+    proc = subprocess.run(
+        write_cmd, input=pub_contents, text=True, capture_output=True, timeout=60
+    )
+    if proc.returncode != 0:
+        raise ProvisionError(
+            f"Failed to upload public key to {node_ip}: "
+            f"{proc.stderr.strip() or 'unknown error'}"
+        )
+    return remote_path
+
+
+def _wait_for_container_ssh(
+    target_ip: str,
+    node_ip: str,
+    user: str,
+    ssh_opts: StrList,
+    timeout: int = 90,
+    dry_run: bool = False,
+) -> None:
+    """Wait for sshd inside the new container to accept TCP connections.
+
+    Uses /dev/tcp from the Proxmox host so we don't need any local network
+    visibility into the container.
+    """
+    if dry_run:
+        return
+
+    deadline = time.monotonic() + timeout
+    probe = (
+        f"timeout 3 bash -c '</dev/tcp/{shlex.quote(target_ip)}/22' "
+        f"&& echo READY"
+    )
+    last_err = ""
+    while time.monotonic() < deadline:
+        result = _ssh_run(node_ip, user, ssh_opts, probe, dry_run=False)
+        if result.returncode == 0 and "READY" in result.stdout:
+            print(f"  ✓ Container SSH is reachable at {target_ip}:22")
+            return
+        last_err = (result.stderr or result.stdout or "").strip()
+        time.sleep(3)
+    raise ProvisionError(
+        f"Timed out after {timeout}s waiting for SSH on {target_ip}:22 "
+        f"(last probe: {last_err or 'no response'})"
+    )
 
 
 def _create_container(
@@ -512,23 +704,32 @@ def _create_container(
     user: str,
     ssh_opts: StrList,
     privileged: bool = False,
-    dry_run: bool = False
+    dry_run: bool = False,
+    ssh_pubkey_remote_path: Optional[str] = None,
 ) -> None:
     """Create and start the LXC container on the Proxmox host."""
     unprivileged = "0" if privileged else "1"
 
-    cmd = (
-        f"pct create {vmid} {shlex.quote(template_path)} "
-        f"--hostname {shlex.quote(hostname)} "
-        f"--memory {shlex.quote(memory)} "
-        f"--cores {cores} "
-        f"--rootfs {shlex.quote(root_pool)}:{shlex.quote(storage_amount)} "
-        f"--net0 name=eth0,bridge={shlex.quote(bridge)},"
-        f"ip={shlex.quote(target_ip)}/{shlex.quote(cidr_prefix)},gw={shlex.quote(gateway)},type=veth "
-        f"--nameserver {shlex.quote(' '.join(nameservers))} "
-        f"--unprivileged {unprivileged} "
-        f"--start 1"
-    )
+    cmd_parts = [
+        f"pct create {vmid} {shlex.quote(template_path)}",
+        f"--hostname {shlex.quote(hostname)}",
+        f"--memory {shlex.quote(memory)}",
+        f"--cores {cores}",
+        f"--rootfs {shlex.quote(root_pool)}:{shlex.quote(storage_amount)}",
+        (
+            f"--net0 name=eth0,bridge={shlex.quote(bridge)},"
+            f"ip={shlex.quote(target_ip)}/{shlex.quote(cidr_prefix)},"
+            f"gw={shlex.quote(gateway)},type=veth"
+        ),
+        f"--nameserver {shlex.quote(' '.join(nameservers))}",
+        f"--unprivileged {unprivileged}",
+        "--onboot 1",
+        "--start 1",
+    ]
+    if ssh_pubkey_remote_path:
+        cmd_parts.insert(-1, f"--ssh-public-keys {shlex.quote(ssh_pubkey_remote_path)}")
+
+    cmd = " ".join(cmd_parts)
 
     result = _ssh_run(node_ip, user, ssh_opts, cmd, dry_run=dry_run)
     if result.returncode != 0:
@@ -655,23 +856,54 @@ def provision_container(config: SetupConfig) -> None:
     # Determine privileged/unprivileged
     privileged = config.machine_type == "privileged"
 
-    # Create container
-    _create_container(
-        vmid=vmid,
-        target_ip=target_ip,
-        template_path=template_path,
-        memory=memory,
-        cores=config.container_cores,
-        root_pool=root_pool,
-        storage_amount=storage_amount,
-        cidr_prefix=cidr_prefix,
-        bridge=bridge,
-        gateway=gateway,
-        nameservers=nameservers,
-        hostname=hostname,
-        node_ip=node_ip,
-        user=user,
-        ssh_opts=ssh_opts,
-        privileged=privileged,
-        dry_run=dry_run
-    )
+    # Bootstrap SSH access into the new container so the subsequent remote_setup phase
+    # can connect as root via the user's SSH key. Without this, pct create leaves root
+    # with no usable credentials and the orchestration would hang on password auth.
+    pub_path = _resolve_public_key_path(config.ssh_key)
+    remote_pubkey_path: Optional[str] = None
+    if pub_path:
+        print(f"  Uploading public key for container access: {pub_path}")
+        remote_pubkey_path = _upload_pubkey_to_host(
+            pub_path, node_ip, user, ssh_opts, dry_run=dry_run
+        )
+    else:
+        print(
+            "  ⚠ No SSH public key found alongside --key; the new container will have "
+            "no root credentials and remote setup will be unable to connect."
+        )
+
+    try:
+        # Create container
+        _create_container(
+            vmid=vmid,
+            target_ip=target_ip,
+            template_path=template_path,
+            memory=memory,
+            cores=config.container_cores,
+            root_pool=root_pool,
+            storage_amount=storage_amount,
+            cidr_prefix=cidr_prefix,
+            bridge=bridge,
+            gateway=gateway,
+            nameservers=nameservers,
+            hostname=hostname,
+            node_ip=node_ip,
+            user=user,
+            ssh_opts=ssh_opts,
+            privileged=privileged,
+            dry_run=dry_run,
+            ssh_pubkey_remote_path=remote_pubkey_path,
+        )
+
+        # Wait for sshd in the container to come up before handing off to remote_setup.
+        if remote_pubkey_path:
+            _wait_for_container_ssh(
+                target_ip, node_ip, user, ssh_opts, dry_run=dry_run
+            )
+    finally:
+        if remote_pubkey_path and not dry_run:
+            _ssh_run(
+                node_ip, user, ssh_opts,
+                f"rm -f {shlex.quote(remote_pubkey_path)}",
+                dry_run=False,
+            )

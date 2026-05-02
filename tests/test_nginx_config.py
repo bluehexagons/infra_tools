@@ -71,11 +71,19 @@ class TestMakeProxyLocation(unittest.TestCase):
         result = _make_proxy_location('/api', 4000, '# API')
         self.assertIn('proxy_pass http://127.0.0.1:4000/', result)
         self.assertIn('location /api/', result)
+        self.assertIn('return 301 /api/', result)
 
     def test_websocket_support(self):
         result = _make_proxy_location('/', 3000, '# WS', enable_websocket=True)
         self.assertIn('Upgrade', result)
         self.assertIn('upgrade', result)
+
+    def test_subpath_location_can_proxy_exact_path_without_redirect(self):
+        result = _make_proxy_location('/api', 4000, '# API', forwarded_proto='https', enable_path_redirect=False)
+        self.assertIn('location = /api', result)
+        self.assertIn('proxy_pass http://127.0.0.1:4000/', result)
+        self.assertIn('proxy_set_header X-Forwarded-Proto https', result)
+        self.assertNotIn('return 301 /api/', result)
 
 
 class TestMakeStaticLocation(unittest.TestCase):
@@ -167,6 +175,84 @@ class TestGenerateMergedNginxConfig(unittest.TestCase):
         self.assertNotIn('listen 443 ssl http2', config)
         self.assertNotIn('listen [::]:443 ssl http2', config)
         self.assertIn('http2 on', config)
+
+
+    def test_http_redirects_to_https(self):
+        deployments = [{
+            'path': '/',
+            'needs_proxy': False,
+            'serve_path': '/var/www/html',
+            'project_type': 'static',
+        }]
+        config = generate_merged_nginx_config('example.com', deployments)
+        self.assertIn('return 301 https://$host$request_uri', config)
+        # ACME challenge must remain reachable on plaintext HTTP for renewals.
+        http_block_end = config.find('}', config.find('listen 80'))
+        http_block = config[: http_block_end]
+        self.assertIn('acme-challenge', http_block)
+
+    def test_cloudflare_tunnel_disables_http_https_redirect(self):
+        deployments = [{
+            'path': '/',
+            'needs_proxy': False,
+            'serve_path': '/var/www/html',
+            'project_type': 'static',
+        }]
+        config = generate_merged_nginx_config('example.com', deployments, enable_https_redirect=False)
+        self.assertNotIn('return 301 https://$host$request_uri', config)
+        http_block_end = config.find('server {\n    listen 443 ssl')
+        http_block = config[: http_block_end]
+        self.assertIn('root /var/www/html', http_block)
+        self.assertIn('acme-challenge', http_block)
+
+    def test_cloudflare_tunnel_disables_api_subdomain_http_redirect(self):
+        deployments = [{
+            'path': '/',
+            'needs_proxy': True,
+            'backend_port': 3007,
+            'frontend_port': 5173,
+            'api_subdomain': True,
+        }]
+        config = generate_merged_nginx_config('example.com', deployments, enable_https_redirect=False)
+        self.assertNotIn('return 301 https://$host$request_uri', config)
+        self.assertIn('server_name api.example.com', config)
+        self.assertIn('proxy_pass http://127.0.0.1:3007', config)
+
+    def test_cloudflare_tunnel_proxies_api_path_without_redirect(self):
+        deployments = [{
+            'path': '/',
+            'needs_proxy': True,
+            'backend_port': 3007,
+            'frontend_port': 5173,
+            'api_subdomain': False,
+        }]
+        config = generate_merged_nginx_config('example.com', deployments, enable_https_redirect=False)
+        self.assertNotIn('return 301 /api/', config)
+        self.assertIn('location = /api', config)
+        self.assertIn('proxy_set_header X-Forwarded-Proto https', config)
+
+    def test_standard_api_path_still_redirects_to_trailing_slash(self):
+        deployments = [{
+            'path': '/',
+            'needs_proxy': True,
+            'backend_port': 3007,
+            'frontend_port': 5173,
+            'api_subdomain': False,
+        }]
+        config = generate_merged_nginx_config('example.com', deployments)
+        self.assertIn('return 301 /api/', config)
+        self.assertIn('proxy_set_header X-Forwarded-Proto $scheme', config)
+
+    def test_hsts_header_present(self):
+        deployments = [{
+            'path': '/',
+            'needs_proxy': False,
+            'serve_path': '/var/www/html',
+            'project_type': 'static',
+        }]
+        config = generate_merged_nginx_config('example.com', deployments)
+        self.assertIn('Strict-Transport-Security', config)
+        self.assertIn('max-age=63072000', config)
 
 
 if __name__ == '__main__':

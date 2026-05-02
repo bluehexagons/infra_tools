@@ -18,6 +18,7 @@ def configure_cloudflare_firewall(config: SetupConfig) -> None:
             print("  ✓ Firewall already configured for Cloudflare tunnel")
             return
     
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get install -y -qq ufw")
     run("ufw default deny incoming")
     run("ufw default allow outgoing")

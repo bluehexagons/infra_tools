@@ -34,12 +34,14 @@ class TestAutoUpdateUv(unittest.TestCase):
             subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
         ]
 
-        result = auto_update_uv.main()
+        with self.assertLogs(auto_update_uv.logger, level="INFO") as logs:
+            result = auto_update_uv.main()
 
         self.assertEqual(result, 0)
         self.assertEqual(mock_run.call_args_list[0].args[0], ["/home/user/.local/bin/uv", "self", "update"])
         self.assertEqual(mock_run.call_args_list[1].args[0], ["/home/user/.local/bin/uv", "tool", "upgrade", "--all"])
         mock_notify.assert_not_called()
+        self.assertIn("uv and uv-managed tools updated successfully", "\n".join(logs.output))
 
     @patch("common.service_tools.auto_update_uv.send_notification_safe")
     @patch("common.service_tools.auto_update_uv.load_notification_configs_from_state", return_value=["cfg"])
@@ -62,6 +64,23 @@ class TestAutoUpdateUv(unittest.TestCase):
         self.assertEqual(result, 1)
         mock_notify.assert_called_once()
         self.assertIn("uv update failed", mock_notify.call_args.kwargs["subject"])
+
+    @patch("common.service_tools.auto_update_uv.load_notification_configs_from_state", return_value=[])
+    @patch("common.service_tools.auto_update_uv.os.path.exists", return_value=False)
+    @patch("common.service_tools.auto_update_uv.pwd.getpwuid")
+    def test_logs_when_uv_missing(
+        self,
+        mock_getpwuid,
+        _exists,
+        _configs,
+    ):
+        mock_getpwuid.return_value = pwd.struct_passwd(("user", "x", 1000, 1000, "", "/home/user", "/bin/bash"))
+
+        with self.assertLogs(auto_update_uv.logger, level="INFO") as logs:
+            result = auto_update_uv.main()
+
+        self.assertEqual(result, 0)
+        self.assertIn("uv not found, skipping update", "\n".join(logs.output))
 
 
 if __name__ == "__main__":

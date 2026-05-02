@@ -15,7 +15,7 @@ def install_nginx(config: SetupConfig) -> None:
             return
     
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    install_package("nginx", "nginx", "apt-get install -y -qq nginx", required=False)
+    install_package("nginx", "nginx", "apt-get install -y -qq nginx")
     
     run("systemctl enable nginx", check=False)
     run("systemctl start nginx", check=False)

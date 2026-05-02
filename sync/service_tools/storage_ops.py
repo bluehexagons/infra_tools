@@ -20,11 +20,12 @@ import fcntl
 import time
 from datetime import datetime
 from typing import Optional
+from logging import ERROR, WARNING
 
 # Add lib directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
-from lib.logging_utils import get_service_logger
+from lib.logging_utils import get_service_logger, log_event
 from lib.notifications import send_notification, parse_notification_args
 from lib.machine_state import load_setup_config
 from lib.mount_utils import get_mount_ancestor
@@ -233,7 +234,7 @@ def run_sync(source: str, destination: str, logger) -> tuple[bool, str]:
         result = run_rsync_with_notifications(source, destination, suppress_notifications=True)
         return result == 0, f"Sync completed with exit code {result}"
     except Exception as e:
-        logger.error(f"Sync failed: {e}")
+        log_event(logger, "Sync failed", level=ERROR, source=source, destination=destination, error=str(e))
         return False, str(e)
 
 
@@ -242,7 +243,7 @@ def run_scrub(directory: str, database: str, redundancy: str, verify: bool, logg
     from sync.service_tools.scrub_par2 import scrub_directory
     
     mode = "full verify+repair" if verify else "parity update only"
-    logger.info(f"Starting scrub ({mode}): {directory}")
+    log_event(logger, "Starting scrub", directory=directory, mode=mode)
     
     log_dir = LOG_DIR
     os.makedirs(log_dir, exist_ok=True)
@@ -254,14 +255,22 @@ def run_scrub(directory: str, database: str, redundancy: str, verify: bool, logg
     
     try:
         redundancy_int = int(redundancy.rstrip('%'))
-        scrub_directory(directory, database, redundancy_int, log_file, verify, suppress_notifications=True)
+        scrub_result = scrub_directory(directory, database, redundancy_int, log_file, verify, suppress_notifications=True)
+        unrepairable = scrub_result.get("files_unrepairable", []) if isinstance(scrub_result, dict) else []
+        ok = bool(scrub_result.get("ok", True)) if isinstance(scrub_result, dict) else True
+        if unrepairable:
+            sample = ", ".join(unrepairable[:5])
+            extra = f" (and {len(unrepairable) - 5} more)" if len(unrepairable) > 5 else ""
+            return False, f"Scrub completed with {len(unrepairable)} unrepairable file(s) in {directory}: {sample}{extra}"
+        if not ok:
+            return False, f"Scrub did not complete cleanly for {directory}"
         return True, f"Scrub completed for {directory}"
     except ValueError as e:
         error_msg = f"Invalid redundancy value '{redundancy}': {e}"
-        logger.error(error_msg)
+        log_event(logger, "Invalid scrub redundancy", level=ERROR, directory=directory, redundancy=redundancy, error=str(e))
         return False, error_msg
     except Exception as e:
-        logger.error(f"Scrub failed: {e}")
+        log_event(logger, "Scrub failed", level=ERROR, directory=directory, error=str(e))
         return False, str(e)
 
 
@@ -283,17 +292,22 @@ def execute_storage_operations() -> dict:
     # Load configuration
     config_dict = load_setup_config()
     if not config_dict:
-        logger.error("No configuration found in machine state")
+        log_event(logger, "No configuration found in machine state", level=ERROR)
         results["success"] = False
         return results
     
     config = RuntimeConfig.from_dict(config_dict)
     notification_configs = parse_notification_args(config.notify_specs)
     
-    logger.info(f"Loaded {len(config.sync_specs)} sync specs, {len(config.scrub_specs)} scrub specs")
+    log_event(
+        logger,
+        "Loaded storage operation specs",
+        sync_specs=len(config.sync_specs),
+        scrub_specs=len(config.scrub_specs),
+    )
     
     if not config.has_storage_ops():
-        logger.info("No storage operations configured")
+        log_event(logger, "No storage operations configured")
         results["end_time"] = datetime.now().isoformat()
         return results
     
@@ -312,9 +326,15 @@ def execute_storage_operations() -> dict:
     
     # Log operation summary
     if total_syncs > 0 or total_scrubs > 0 or total_parity > 0:
-        logger.info(f"Operations due: {total_syncs} sync(s), {total_scrubs} scrub(s), {total_parity} parity update(s)")
+        log_event(
+            logger,
+            "Operations due",
+            syncs_due=total_syncs,
+            scrubs_due=total_scrubs,
+            parity_updates_due=total_parity,
+        )
     else:
-        logger.info("No operations due at this time")
+        log_event(logger, "No operations due at this time")
     
     # Execute syncs first (always run if due)
     if total_syncs > 0 and notification_configs:
@@ -329,11 +349,11 @@ def execute_storage_operations() -> dict:
                 logger=logger
             )
         except Exception as e:
-            logger.error(f"Failed to send sync start notification: {e}")
+            log_event(logger, "Failed to send sync start notification", level=ERROR, error=str(e))
     
     for spec in config.sync_specs:
         if len(spec) != 3:
-            logger.error(f"Invalid sync spec: {spec}")
+            log_event(logger, "Invalid sync spec", level=ERROR, spec=spec)
             results["syncs"].append({"spec": spec, "success": False, "error": "Invalid spec"})
             continue
         
@@ -353,7 +373,7 @@ def execute_storage_operations() -> dict:
         # Validate mounts
         valid, error_msg = validate_mounts_for_operation([source, destination], config, "sync")
         if not valid:
-            logger.warning(f"Skipping sync {source} -> {destination}: {error_msg}")
+            log_event(logger, "Skipping sync", level=WARNING, source=source, destination=destination, error=error_msg)
             results["syncs"].append({
                 "source": source,
                 "destination": destination,
@@ -389,11 +409,11 @@ def execute_storage_operations() -> dict:
                 logger=logger
             )
         except Exception as e:
-            logger.error(f"Failed to send scrub start notification: {e}")
+            log_event(logger, "Failed to send scrub start notification", level=ERROR, error=str(e))
     
     for spec in config.scrub_specs:
         if len(spec) != 4:
-            logger.error(f"Invalid scrub spec: {spec}")
+            log_event(logger, "Invalid scrub spec", level=ERROR, spec=spec)
             results["scrubs"].append({"spec": spec, "success": False, "error": "Invalid spec"})
             continue
         
@@ -414,7 +434,7 @@ def execute_storage_operations() -> dict:
         # Validate mounts
         valid, error_msg = validate_mounts_for_operation([directory, resolved_database], config, "scrub")
         if not valid:
-            logger.warning(f"Skipping scrub {directory}: {error_msg}")
+            log_event(logger, "Skipping scrub", level=WARNING, directory=directory, error=error_msg)
             results["scrubs"].append({
                 "directory": directory,
                 "success": False,
@@ -459,7 +479,7 @@ def execute_storage_operations() -> dict:
         # Validate mounts
         valid, error_msg = validate_mounts_for_operation([directory, resolved_database], config, "parity update")
         if not valid:
-            logger.warning(f"Skipping parity update for {directory}: {error_msg}")
+            log_event(logger, "Skipping parity update", level=WARNING, directory=directory, error=error_msg)
             results["parity_updates"].append({
                 "directory": directory,
                 "success": False,
@@ -492,7 +512,7 @@ def execute_storage_operations() -> dict:
         send_operation_notification(results, notification_configs, logger, 
                                    friendly_name=config.friendly_name)
     elif total_operations == 0:
-        logger.info("No operations executed - all tasks skipped (not due yet or validation failed)")
+        log_event(logger, "No operations executed - all tasks skipped", reason="not_due_or_validation_failed")
     
     return results
 
@@ -546,7 +566,7 @@ Parity Update Operations:
             logger=logger
         )
     except Exception as e:
-        logger.error(f"Failed to send notification: {e}")
+        log_event(logger, "Failed to send operation notification", level=ERROR, error=str(e))
 
 
 def format_operation_results(operations: list) -> str:
@@ -593,8 +613,8 @@ def main():
     # Acquire lock (non-blocking) - if another instance is running, exit cleanly
     with OperationLock(LOCK_FILE) as lock:
         if not lock.acquire(blocking=False):
-            logger.info("Another storage-ops instance is already running, skipping this run")
-            
+            log_event(logger, "Another storage-ops instance is already running, skipping this run")
+        
             # Send notification about lock failure
             if notification_configs:
                 name_prefix = f"[{friendly_name}] " if friendly_name else ""
@@ -609,10 +629,10 @@ def main():
                         logger=logger
                     )
                 except Exception as e:
-                    logger.error(f"Failed to send lock failure notification: {e}")
-            
-            return 0
+                    log_event(logger, "Failed to send lock failure notification", level=ERROR, error=str(e))
         
+            return 0
+    
         # Execute operations (individual start notifications sent for long-running operations)
         results = execute_storage_operations()
         
