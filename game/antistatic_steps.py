@@ -24,6 +24,8 @@ ANTISTATIC_SERVICE = "antistatic"
 ANTISTATIC_RELEASE_STATE_FILE = "/opt/infra_tools/state/antistatic_release.json"
 GITHUB_REPO = "bluehexagons/antistatic-server"
 DEFAULT_INTERNAL_PORT = 8080
+PROXY_LISTEN_HOST = "127.0.0.1"
+TRUSTED_NGINX_PROXY_CIDRS = "127.0.0.1/32,::1/128"
 
 ANTISTATIC_DB_USER = "antistatic-db"
 ANTISTATIC_DB_BINARY = "/usr/local/bin/antistatic-db"
@@ -283,8 +285,25 @@ def _download_antistatic_db_binary(arch: str) -> str:
     return latest_tag
 
 
-def generate_antistatic_service(port: int) -> str:
+def _antistatic_service_listen_options(domain: str) -> tuple[str, bool]:
+    """Return (host, trust_proxy) for antistatic-server systemd execution."""
+    if domain:
+        return PROXY_LISTEN_HOST, True
+    return "", False
+
+
+def generate_antistatic_service(
+    port: int,
+    host: str = "",
+    trust_proxy: bool = True,
+) -> str:
     """Return systemd unit file content for the antistatic server."""
+    host_args = f" -host {host}" if host else ""
+    proxy_args = (
+        f" -trust-proxy -trusted-proxy-cidrs {TRUSTED_NGINX_PROXY_CIDRS}"
+        if trust_proxy
+        else ""
+    )
     return f"""\
 [Unit]
 Description=Antistatic lobby server
@@ -296,7 +315,7 @@ Wants=network.target
 Type=simple
 User={ANTISTATIC_USER}
 Group={ANTISTATIC_USER}
-ExecStart={ANTISTATIC_BINARY} -port {port} -trust-proxy
+ExecStart={ANTISTATIC_BINARY}{host_args} -port {port}{proxy_args}
 Restart=on-failure
 RestartSec=5
 StartLimitIntervalSec=60
@@ -442,12 +461,33 @@ def _maybe_configure_nginx_proxy(domain: str, port: int, service_name: str) -> N
     )
 
 
+def _maybe_configure_direct_port_firewall(domain: str, port: int, service_name: str) -> None:
+    """Allow the direct hostless service port when UFW is already enforcing rules."""
+    if domain:
+        return
+
+    result = run("ufw status 2>/dev/null | grep -q 'Status: active'", check=False)
+    if result.returncode != 0:
+        print(f"  ✓ Firewall inactive; no direct port rule needed for {service_name}")
+        return
+
+    result = run(
+        f"ufw allow {port}/tcp comment '{service_name} direct port'",
+        check=False,
+    )
+    if result.returncode == 0:
+        print(f"  ✓ Firewall allows {service_name} direct port: {port}/tcp")
+    else:
+        print(f"  ⚠ Warning: Failed to allow {service_name} direct port: {port}/tcp")
+
+
 def setup_antistatic_server(config: SetupConfig) -> None:
     """Install and run the antistatic lobby server behind nginx."""
     if not config.antistatic_server:
         return
 
     domain, port = parse_antistatic_spec(config.antistatic_server)
+    service_host, trust_proxy = _antistatic_service_listen_options(domain)
     listen_label = f"{domain} → 127.0.0.1:{port}" if domain else f":{port}"
     print(f"  Setting up antistatic server: {listen_label}")
 
@@ -461,7 +501,13 @@ def setup_antistatic_server(config: SetupConfig) -> None:
 
     service_file = f"/etc/systemd/system/{ANTISTATIC_SERVICE}.service"
     with open(service_file, "w", encoding="utf-8") as fh:
-        fh.write(generate_antistatic_service(port))
+        fh.write(
+            generate_antistatic_service(
+                port,
+                host=service_host,
+                trust_proxy=trust_proxy,
+            )
+        )
 
     run("systemctl daemon-reload")
     run(f"systemctl enable {ANTISTATIC_SERVICE}")
@@ -477,6 +523,7 @@ def setup_antistatic_server(config: SetupConfig) -> None:
         )
 
     _maybe_configure_nginx_proxy(domain, port, ANTISTATIC_SERVICE)
+    _maybe_configure_direct_port_firewall(domain, port, ANTISTATIC_SERVICE)
 
 
 def setup_antistatic_db(config: SetupConfig) -> None:
@@ -515,3 +562,4 @@ def setup_antistatic_db(config: SetupConfig) -> None:
         )
 
     _maybe_configure_nginx_proxy(domain, port, ANTISTATIC_DB_SERVICE)
+    _maybe_configure_direct_port_firewall(domain, port, ANTISTATIC_DB_SERVICE)

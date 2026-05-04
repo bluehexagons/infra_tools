@@ -196,6 +196,7 @@ python3 infra_tools.py setup server_web 192.168.1.10 --antistatic-server lobby.e
 
 # Hostless direct port, no nginx virtual host
 python3 infra_tools.py setup server_lite 192.168.1.10 --antistatic-server :8080
+# If UFW is active, hostless mode also opens the selected direct TCP port.
 
 # The lobby server binary is fetched from github.com/bluehexagons/antistatic-server/releases
 # Runs as a locked-down systemd service with automatic restart on failure

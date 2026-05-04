@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import unittest
+from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -21,10 +22,14 @@ from game.antistatic_steps import (
     ANTISTATIC_USER,
     DEFAULT_DB_INTERNAL_PORT,
     DEFAULT_INTERNAL_PORT,
+    PROXY_LISTEN_HOST,
+    TRUSTED_NGINX_PROXY_CIDRS,
+    _antistatic_service_listen_options,
     _download_antistatic_binary,
     _download_antistatic_db_binary,
     _fetch_latest_antistatic_db_release,
     _fetch_latest_antistatic_release,
+    _maybe_configure_direct_port_firewall,
     _maybe_configure_nginx_proxy,
     _remove_empty_domain_nginx_proxy,
     generate_antistatic_db_service,
@@ -109,6 +114,32 @@ class TestGenerateAntistaticService(unittest.TestCase):
     def test_trust_proxy_flag_present(self):
         content = generate_antistatic_service(8080)
         self.assertIn("-trust-proxy", content)
+
+    def test_proxy_mode_binds_loopback_and_limits_trusted_proxies(self):
+        content = generate_antistatic_service(
+            8080,
+            host=PROXY_LISTEN_HOST,
+            trust_proxy=True,
+        )
+        self.assertIn(f"-host {PROXY_LISTEN_HOST}", content)
+        self.assertIn(f"-trusted-proxy-cidrs {TRUSTED_NGINX_PROXY_CIDRS}", content)
+
+    def test_hostless_direct_mode_listens_on_requested_port_without_proxy_trust(self):
+        content = generate_antistatic_service(8080, host="", trust_proxy=False)
+        self.assertIn(f"ExecStart={ANTISTATIC_BINARY} -port 8080", content)
+        self.assertNotIn("-host", content)
+        self.assertNotIn("-trust-proxy", content)
+        self.assertNotIn("-trusted-proxy-cidrs", content)
+
+    def test_listen_options_use_loopback_for_domain_proxy_mode(self):
+        host, trust_proxy = _antistatic_service_listen_options("lobby.example.com")
+        self.assertEqual(host, PROXY_LISTEN_HOST)
+        self.assertTrue(trust_proxy)
+
+    def test_listen_options_use_all_interfaces_for_hostless_direct_mode(self):
+        host, trust_proxy = _antistatic_service_listen_options("")
+        self.assertEqual(host, "")
+        self.assertFalse(trust_proxy)
 
     def test_correct_user(self):
         content = generate_antistatic_service(8080)
@@ -243,6 +274,48 @@ class TestAntistaticHostlessNginxHandling(unittest.TestCase):
         _maybe_configure_nginx_proxy("lobby.example.com", 8080, ANTISTATIC_SERVICE)
         mock_configure.assert_called_once_with("lobby.example.com", 8080)
         mock_remove.assert_not_called()
+
+
+class TestAntistaticDirectFirewallHandling(unittest.TestCase):
+    @patch("game.antistatic_steps.run")
+    def test_hostless_direct_mode_allows_port_when_ufw_active(self, mock_run):
+        mock_run.side_effect = [
+            SimpleNamespace(returncode=0),
+            SimpleNamespace(returncode=0),
+        ]
+
+        _maybe_configure_direct_port_firewall("", 8080, ANTISTATIC_SERVICE)
+
+        mock_run.assert_has_calls(
+            [
+                call("ufw status 2>/dev/null | grep -q 'Status: active'", check=False),
+                call(
+                    "ufw allow 8080/tcp comment 'antistatic direct port'",
+                    check=False,
+                ),
+            ]
+        )
+
+    @patch("game.antistatic_steps.run")
+    def test_hostless_direct_mode_skips_port_rule_when_ufw_inactive(self, mock_run):
+        mock_run.return_value = SimpleNamespace(returncode=1)
+
+        _maybe_configure_direct_port_firewall("", 8080, ANTISTATIC_SERVICE)
+
+        mock_run.assert_called_once_with(
+            "ufw status 2>/dev/null | grep -q 'Status: active'",
+            check=False,
+        )
+
+    @patch("game.antistatic_steps.run")
+    def test_domain_proxy_mode_does_not_open_direct_port(self, mock_run):
+        _maybe_configure_direct_port_firewall(
+            "lobby.example.com",
+            8080,
+            ANTISTATIC_SERVICE,
+        )
+
+        mock_run.assert_not_called()
 
 
 class TestAntistaticReleaseDownloads(unittest.TestCase):
