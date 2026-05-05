@@ -310,6 +310,8 @@ Description=Antistatic lobby server
 Documentation=https://github.com/bluehexagons/antistatic-server
 After=network.target
 Wants=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 Type=simple
@@ -318,8 +320,6 @@ Group={ANTISTATIC_USER}
 ExecStart={ANTISTATIC_BINARY}{host_args} -port {port}{proxy_args}
 Restart=on-failure
 RestartSec=5
-StartLimitIntervalSec=60
-StartLimitBurst=3
 
 NoNewPrivileges=yes
 PrivateTmp=yes
@@ -340,6 +340,8 @@ Description=Antistatic DB service
 Documentation=https://github.com/bluehexagons/antistatic-db
 After=network.target
 Wants=network.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 Type=simple
@@ -350,8 +352,6 @@ WorkingDirectory={ANTISTATIC_DB_DATA_DIR}
 ExecStart={ANTISTATIC_DB_BINARY}{host_args} -port {port} -db {ANTISTATIC_DB_PATH} -trust-proxy
 Restart=on-failure
 RestartSec=5
-StartLimitIntervalSec=60
-StartLimitBurst=3
 
 NoNewPrivileges=yes
 PrivateTmp=yes
