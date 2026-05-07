@@ -41,16 +41,18 @@ _STATE_FILE = '/opt/infra_tools/state/security_monitor_state.json'
 _FAIL2BAN_LOG = '/var/log/fail2ban.log'
 _SSH_FAILURE_THRESHOLD = 5
 
-# fail2ban log line pattern — local-time timestamp + jail + action + IP
+# fail2ban log line pattern — local-time timestamp + jail + action + IP.
+# Jail names may contain hyphens (e.g. nginx-http-auth), so [^\]]+ is used.
 _BAN_RE = re.compile(
     r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+'
-    r' fail2ban\.actions\s+\[.*?\]:\s+(?:WARNING|NOTICE)\s+\[(\w+)\] (Ban|Unban) (\S+)'
+    r' fail2ban\.actions\s+\[.*?\]:\s+(?:WARNING|NOTICE)\s+\[([^\]]+)\] (Ban|Unban) (\S+)'
 )
 
 # auditd keys that trigger error-level notifications (system integrity events)
 _CRITICAL_KEYS = ('identity', 'sudoers', 'sshd_config', 'modules')
-# auditd keys that trigger warning-level notifications
-_WARNING_KEYS = ('privileged',)
+# auditd keys included in notifications but not used to raise severity —
+# 'privileged' fires on every sudo call, which is routine admin activity.
+_INFO_KEYS = ('privileged',)
 
 
 # ---------------------------------------------------------------------------
@@ -128,7 +130,7 @@ def _check_auditd(since: datetime) -> tuple[list[str], bool]:
         return [], False
     triggered: list[str] = []
     has_critical = False
-    for key in _CRITICAL_KEYS + _WARNING_KEYS:
+    for key in _CRITICAL_KEYS + _INFO_KEYS:
         if _ausearch_has_events(key, since):
             triggered.append(key)
             if key in _CRITICAL_KEYS:
@@ -194,10 +196,13 @@ def main() -> int:
         _save_state({'last_run': now.isoformat()})
         return 0
 
-    # Determine notification severity
+    # Determine notification severity.
+    # Info-only audit keys (e.g. 'privileged') do not raise to warning —
+    # they cover routine admin actions like sudo.
+    critical_audit_keys = [k for k in audit_keys if k in _CRITICAL_KEYS]
     if audit_critical:
         status = 'error'
-    elif bans or audit_keys:
+    elif bans or critical_audit_keys:
         status = 'warning'
     else:
         status = 'info'
