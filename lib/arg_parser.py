@@ -62,6 +62,11 @@ def add_setup_arguments(
                            help="Container CPU cores (default: 1)")
         parser.add_argument("--base", dest="container_base", default="debian",
                            help="Base OS template (default: debian, auto-downloads latest)")
+        parser.add_argument("--image", dest="vm_image", default=None,
+                           help="VM cloud image override: http(s) URL to a qcow2, or a "
+                                "Proxmox storage reference like 'local:iso/foo.qcow2'. "
+                                "Only used when --machine vm. Defaults to the curated "
+                                "Debian catalog (lib/cloud_images.py).")
     else:
         parser.add_argument("--name", dest="friendly_name", default=None,
                            help="Friendly name for this configuration")

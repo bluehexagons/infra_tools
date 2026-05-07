@@ -169,6 +169,7 @@ class SetupConfig:
     container_storage: Optional[NestedStrList] = None  # [[type, pool, amount?], ...]
     container_cores: int = 1
     container_base: str = "debian"
+    vm_image: MaybeStr = None  # http(s) URL or 'storage:iso/file.qcow2'
     include_desktop: bool = False
     include_cli_tools: bool = False
     include_desktop_apps: bool = False
@@ -669,6 +670,7 @@ class SetupConfig:
             container_storage=_normalize_container_storage(getattr(args, 'container_storage', None)),
             container_cores=getattr(args, 'container_cores', 1),
             container_base=getattr(args, 'container_base', 'debian'),
+            vm_image=getattr(args, 'vm_image', None),
             include_desktop=include_desktop,
             include_cli_tools=include_cli_tools,
             include_desktop_apps=include_desktop_apps,

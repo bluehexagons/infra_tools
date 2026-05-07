@@ -777,11 +777,39 @@ def run_setup_command(args: argparse.Namespace) -> int:
     
     description = f"{args.system_type.replace('_', ' ').title()} Setup"
     print_setup_summary(config, description)
-    
+
+    if config.hosted_node:
+        if config.machine_type == "vm":
+            from lib.proxmox_vm import provision_vm, VMAlreadyExists
+
+            print(f"\n{'='*60}")
+            print(f"Provisioning VM on {config.hosted_node}...")
+            print(f"{'='*60}")
+            try:
+                provision_vm(config, image=config.vm_image)
+            except VMAlreadyExists:
+                print("  ✓ VM already provisioned, skipping creation")
+            except Exception as e:
+                print(f"\n✗ Failed to provision VM: {e}")
+                return 1
+        else:
+            from lib.proxmox_node import provision_container, ContainerAlreadyExists
+
+            print(f"\n{'='*60}")
+            print(f"Provisioning LXC container on {config.hosted_node}...")
+            print(f"{'='*60}")
+            try:
+                provision_container(config)
+            except ContainerAlreadyExists:
+                print("  ✓ Container already provisioned, skipping creation")
+            except Exception as e:
+                print(f"\n✗ Failed to provision container: {e}")
+                return 1
+
     if not config.dry_run:
         store_cli_credentials(config)
         save_setup_command(config, operation="setup")
-    
+
     if not os.path.exists(REMOTE_SCRIPT_PATH):
         print(f"Error: Remote setup script not found: {REMOTE_SCRIPT_PATH}")
         return 1

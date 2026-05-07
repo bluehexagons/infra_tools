@@ -436,19 +436,34 @@ def setup_main(system_type: str, description: str, success_msg_fn: Callable[[Set
             print(f"Error: {e}")
             return 1
 
-        from lib.proxmox_node import provision_container, ContainerAlreadyExists
+        if config.machine_type == "vm":
+            from lib.proxmox_vm import provision_vm, VMAlreadyExists
 
-        print(f"\n{'='*60}")
-        print(f"Provisioning LXC container on {config.hosted_node}...")
-        print(f"{'='*60}")
+            print(f"\n{'='*60}")
+            print(f"Provisioning VM on {config.hosted_node}...")
+            print(f"{'='*60}")
 
-        try:
-            provision_container(config)
-        except ContainerAlreadyExists:
-            print("  ✓ Container already provisioned, skipping creation")
-        except Exception as e:
-            print(f"\n✗ Failed to provision container: {e}")
-            return 1
+            try:
+                provision_vm(config, image=config.vm_image)
+            except VMAlreadyExists:
+                print("  ✓ VM already provisioned, skipping creation")
+            except Exception as e:
+                print(f"\n✗ Failed to provision VM: {e}")
+                return 1
+        else:
+            from lib.proxmox_node import provision_container, ContainerAlreadyExists
+
+            print(f"\n{'='*60}")
+            print(f"Provisioning LXC container on {config.hosted_node}...")
+            print(f"{'='*60}")
+
+            try:
+                provision_container(config)
+            except ContainerAlreadyExists:
+                print("  ✓ Container already provisioned, skipping creation")
+            except Exception as e:
+                print(f"\n✗ Failed to provision container: {e}")
+                return 1
 
     print_setup_summary(config, description)
     
