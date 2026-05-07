@@ -546,16 +546,19 @@ def validate_hosted_flags(config: Any) -> None:
     if config.container_cores < 1:
         raise ValueError("--cores must be at least 1")
 
-    if config.machine_type == "vm":
+    machine_type = getattr(config, "machine_type", None)
+    vm_image = getattr(config, "vm_image", None)
+    if machine_type == "vm":
         from lib.cloud_images import parse_image_argument, resolve_cloud_image
         for spec in storage_specs:
             if spec[0] == "template":
                 raise ValueError(
                     "--storage template is not used for VMs; use --image instead"
                 )
-        if config.vm_image:
-            parse_image_argument(config.vm_image)
+        if vm_image:
+            parse_image_argument(vm_image)
         else:
-            resolve_cloud_image(config.container_base or "debian")
-    elif getattr(config, "vm_image", None):
+            base = getattr(config, "container_base", None) or "debian"
+            resolve_cloud_image(base)
+    elif vm_image:
         raise ValueError("--image requires --machine vm")

@@ -51,6 +51,34 @@ python3 infra_tools.py setup server_web 192.168.1.20 --machine hardware
 python3 infra_tools.py setup server_lite 192.168.1.30 --machine oci
 ```
 
+## Provisioning a Proxmox VM
+
+Pass `--machine vm` together with the existing `--hosted` flags to provision a
+VM via `qm` + cloud-init instead of an LXC container:
+
+```bash
+python3 infra_tools.py setup server_lite 10.0.0.50 \
+    --machine vm \
+    --hosted proxmox.lan \
+    --memory 4G --cores 2 \
+    --storage root local-lvm 32G
+```
+
+By default, the curated Debian cloud-image catalog
+(`lib/cloud_images.py`) supplies the qcow2. Override with `--image`:
+
+```bash
+# Direct URL
+... --image https://cloud.debian.org/.../debian-12-genericcloud-amd64.qcow2
+
+# Pre-uploaded image on the Proxmox node
+... --image local:iso/my-debian.qcow2
+```
+
+Refresh the catalog with `python3 scripts/update_cloud_images.py`. Add
+`--pin-snapshot` to lock entries to a specific upstream snapshot directory and
+record its SHA-512.
+
 ## State Persistence
 
 Machine type is saved to `/opt/infra_tools/state/machine.json` on target systems, allowing service scripts to adapt behavior automatically.
