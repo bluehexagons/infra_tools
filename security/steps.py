@@ -12,6 +12,10 @@ from .security_steps import (
     configure_firewall_web,
     configure_auto_restart,
     configure_cleanup_maintenance,
+    configure_login_banners,
+    configure_apparmor,
+    configure_auditd,
+    configure_pam_lockout,
 )
 
 __all__ = [
@@ -24,4 +28,8 @@ __all__ = [
     'configure_firewall_web',
     'configure_auto_restart',
     'configure_cleanup_maintenance',
+    'configure_login_banners',
+    'configure_apparmor',
+    'configure_auditd',
+    'configure_pam_lockout',
 ]

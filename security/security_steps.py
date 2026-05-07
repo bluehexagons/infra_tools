@@ -6,7 +6,7 @@ import os
 
 from lib.config import SetupConfig
 from lib.maintenance_defaults import JOURNAL_MAX_USE
-from lib.machine_state import can_modify_kernel, is_container
+from lib.machine_state import can_modify_kernel, is_container, is_hardware, is_vm
 from lib.remote_utils import run
 from lib.systemd_service import cleanup_service
 
@@ -20,6 +20,10 @@ _SYSCTL_HARDENING_FILE = "/etc/sysctl.d/99-security-hardening.conf"
 _FAIL2BAN_SSHD_JAIL = "/etc/fail2ban/jail.d/sshd.local"
 _FAIL2BAN_XRDP_JAIL = "/etc/fail2ban/jail.d/xrdp.local"
 _FAIL2BAN_XRDP_FILTER = "/etc/fail2ban/filter.d/xrdp.conf"
+_AUDIT_RULES_FILE = "/etc/audit/rules.d/99-infra-tools.rules"
+_FAILLOCK_CONF = "/etc/security/faillock.conf"
+_PAM_FAILLOCK_PROFILE = "/usr/share/pam-configs/faillock-infra-tools"
+_ISSUE_BANNER = "Authorized access only. All activity is monitored and logged.\n"
 
 
 def create_remoteusers_group(config: SetupConfig) -> None:
@@ -218,6 +222,10 @@ net.ipv4.icmp_echo_ignore_broadcasts=1
 net.ipv4.icmp_ignore_bogus_error_responses=1
 net.ipv4.conf.all.log_martians=1
 net.ipv4.conf.default.log_martians=1
+net.ipv4.conf.all.accept_source_route=0
+net.ipv4.conf.default.accept_source_route=0
+net.ipv6.conf.all.accept_source_route=0
+net.ipv6.conf.default.accept_source_route=0
 
 # Kernel security
 kernel.dmesg_restrict=1
@@ -230,6 +238,7 @@ fs.protected_hardlinks=1
 fs.protected_symlinks=1
 fs.protected_fifos=2
 fs.protected_regular=2
+kernel.core_uses_pid=1
 """
 
     if os.path.exists(_SYSCTL_HARDENING_FILE):
@@ -250,6 +259,157 @@ fs.protected_regular=2
         print("  ⚠ Some kernel parameters may not have applied (check logs)")
 
     print("  ✓ Kernel hardened (network protection, security restrictions)")
+
+
+def configure_login_banners(config: SetupConfig) -> None:
+    changed = False
+    for path in ("/etc/issue", "/etc/issue.net"):
+        try:
+            with open(path) as f:
+                existing = f.read()
+        except OSError:
+            existing = None
+        if existing != _ISSUE_BANNER:
+            with open(path, "w") as f:
+                f.write(_ISSUE_BANNER)
+            changed = True
+
+    if changed:
+        print("  ✓ Login banners configured (authorized-use notice)")
+    else:
+        print("  ✓ Login banners already configured")
+
+
+def configure_apparmor(config: SetupConfig) -> None:
+    if not (is_vm() or is_hardware()):
+        print("  ✓ Skipping AppArmor setup (privileged containers inherit host AppArmor)")
+        return
+
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
+    run("apt-get install -y -qq apparmor apparmor-utils")
+
+    result = run("aa-status --json 2>/dev/null | python3 -c \"import sys,json; d=json.load(sys.stdin); exit(0 if d.get('profiles') else 1)\"", check=False)
+    if result.returncode == 0:
+        # AppArmor is running; enforce all loaded profiles
+        run("aa-enforce /etc/apparmor.d/* 2>/dev/null || true", check=False)
+        run("systemctl enable apparmor", check=False)
+        print("  ✓ AppArmor enabled (enforce mode for all installed profiles)")
+    else:
+        run("systemctl enable apparmor", check=False)
+        run("systemctl restart apparmor", check=False)
+        run("aa-enforce /etc/apparmor.d/* 2>/dev/null || true", check=False)
+        print("  ✓ AppArmor configured (enforce mode; reboot may be needed to fully activate)")
+
+
+def configure_auditd(config: SetupConfig) -> None:
+    if not (is_vm() or is_hardware()):
+        print("  ✓ Skipping auditd (not applicable to containers)")
+        return
+
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
+    run("apt-get install -y -qq auditd audispd-plugins")
+
+    audit_rules = """# Managed by infra_tools - audit rules.
+# Identity and authentication files
+-w /etc/passwd -p wa -k identity
+-w /etc/shadow -p wa -k identity
+-w /etc/group -p wa -k identity
+-w /etc/gshadow -p wa -k identity
+-w /etc/sudoers -p wa -k sudoers
+-w /etc/sudoers.d/ -p wa -k sudoers
+
+# SSH configuration changes
+-w /etc/ssh/sshd_config -p wa -k sshd_config
+-w /etc/ssh/sshd_config.d/ -p wa -k sshd_config
+
+# Privileged command execution (setuid/setgid by non-root sessions)
+-a always,exit -F arch=b64 -S execve -F euid=0 -F auid>=1000 -F auid!=-1 -k privileged
+-a always,exit -F arch=b32 -S execve -F euid=0 -F auid>=1000 -F auid!=-1 -k privileged
+
+# Kernel module loading/unloading
+-w /sbin/insmod -p x -k modules
+-w /sbin/rmmod -p x -k modules
+-w /sbin/modprobe -p x -k modules
+-a always,exit -F arch=b64 -S init_module,finit_module,delete_module -k modules
+
+# Login and session tracking
+-w /var/run/utmp -p wa -k session
+-w /var/log/wtmp -p wa -k session
+-w /var/log/btmp -p wa -k session
+
+# Enable audit (not immutable - allows future rule updates)
+-e 1
+"""
+
+    os.makedirs("/etc/audit/rules.d", exist_ok=True)
+
+    if os.path.exists(_AUDIT_RULES_FILE):
+        try:
+            with open(_AUDIT_RULES_FILE) as f:
+                existing = f.read()
+        except OSError:
+            existing = None
+        if existing == audit_rules:
+            print("  ✓ auditd already configured")
+            return
+
+    with open(_AUDIT_RULES_FILE, "w") as f:
+        f.write(audit_rules)
+
+    run("systemctl enable auditd")
+    run("systemctl restart auditd", check=False)
+    run("augenrules --load", check=False)
+
+    print("  ✓ auditd configured (monitoring identity, sudoers, SSH config, modules)")
+
+
+def configure_pam_lockout(config: SetupConfig) -> None:
+    if not (is_vm() or is_hardware()):
+        print("  ✓ Skipping PAM lockout (not applicable to containers)")
+        return
+
+    faillock_conf = """# Managed by infra_tools - account lockout settings.
+deny = 5
+fail_interval = 900
+unlock_time = 600
+"""
+
+    pam_profile = """Name: infra-tools account lockout (pam_faillock)
+Default: yes
+Priority: 0
+Auth-Type: Primary
+Auth:
+\t[default=die] pam_faillock.so authfail
+Auth-Initial:
+\trequired pam_faillock.so preauth
+Account-Type: Primary
+Account:
+\trequired pam_faillock.so
+"""
+
+    if os.path.exists(_FAILLOCK_CONF) and os.path.exists(_PAM_FAILLOCK_PROFILE):
+        try:
+            with open(_FAILLOCK_CONF) as f:
+                if f.read() == faillock_conf:
+                    print("  ✓ PAM lockout already configured")
+                    return
+        except OSError:
+            pass
+
+    os.makedirs("/usr/share/pam-configs", exist_ok=True)
+    with open(_PAM_FAILLOCK_PROFILE, "w") as f:
+        f.write(pam_profile)
+
+    with open(_FAILLOCK_CONF, "w") as f:
+        f.write(faillock_conf)
+
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
+    result = run("pam-auth-update --enable faillock-infra-tools", check=False)
+    if result.returncode != 0:
+        print("  ⚠ PAM auth update failed; lockout config written but may not be active")
+        return
+
+    print("  ✓ PAM account lockout configured (5 failures in 15 min → 10 min lockout)")
 
 
 def _cleanup_legacy_unattended_upgrades() -> None:

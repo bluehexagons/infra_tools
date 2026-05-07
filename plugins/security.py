@@ -25,6 +25,10 @@ PLUGIN = PluginDefinition(
         "configure_firewall_web",
         "configure_auto_restart",
         "configure_cleanup_maintenance",
+        "configure_login_banners",
+        "configure_apparmor",
+        "configure_auditd",
+        "configure_pam_lockout",
     ),
     custom_step_provider="plugins.security:get_custom_step_functions",
 )
@@ -34,11 +38,15 @@ def get_security_steps(*, lite: bool) -> list[tuple[str, StepFunc]]:
     """Return the standard security-hardening steps for a built-in flow."""
 
     from security.steps import (
+        configure_apparmor,
+        configure_auditd,
         configure_auto_restart,
         configure_auto_updates,
         configure_cleanup_maintenance,
         configure_fail2ban,
         configure_firewall,
+        configure_login_banners,
+        configure_pam_lockout,
         harden_kernel,
         harden_ssh,
     )
@@ -52,6 +60,10 @@ def get_security_steps(*, lite: bool) -> list[tuple[str, StepFunc]]:
             ("Hardening SSH configuration", harden_ssh),
             ("Hardening kernel parameters", harden_kernel),
             ("Configuring fail2ban (sshd jail)", configure_fail2ban),
+            ("Configuring login banners", configure_login_banners),
+            ("Configuring AppArmor enforcement", configure_apparmor),
+            ("Configuring auditd (kernel audit framework)", configure_auditd),
+            ("Configuring PAM account lockout", configure_pam_lockout),
             ("Configuring automatic security updates", configure_auto_updates),
             ("Configuring cleanup maintenance service", configure_cleanup_maintenance),
             ("Configuring automatic restart service", configure_auto_restart),
@@ -72,12 +84,16 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
     """Return plugin-owned custom step functions exported by the security capability."""
 
     from security.steps import (
+        configure_apparmor,
+        configure_auditd,
         configure_auto_restart,
         configure_auto_updates,
         configure_cleanup_maintenance,
         configure_fail2ban,
         configure_firewall,
         configure_firewall_web,
+        configure_login_banners,
+        configure_pam_lockout,
         create_remoteusers_group,
         harden_kernel,
         harden_ssh,
@@ -93,4 +109,8 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "configure_firewall_web": configure_firewall_web,
         "configure_auto_restart": configure_auto_restart,
         "configure_cleanup_maintenance": configure_cleanup_maintenance,
+        "configure_login_banners": configure_login_banners,
+        "configure_apparmor": configure_apparmor,
+        "configure_auditd": configure_auditd,
+        "configure_pam_lockout": configure_pam_lockout,
     }
