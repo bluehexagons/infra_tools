@@ -24,6 +24,7 @@ _AUDIT_RULES_FILE = "/etc/audit/rules.d/99-infra-tools.rules"
 _FAILLOCK_CONF = "/etc/security/faillock.conf"
 _PAM_FAILLOCK_PROFILE = "/usr/share/pam-configs/faillock-infra-tools"
 _ISSUE_BANNER = "Authorized access only. All activity is monitored and logged.\n"
+_SECURITY_MONITOR_SCRIPT = "/opt/infra_tools/security/service_tools/security_monitor.py"
 
 
 def create_remoteusers_group(config: SetupConfig) -> None:
@@ -410,6 +411,63 @@ Account:
         return
 
     print("  ✓ PAM account lockout configured (5 failures in 15 min → 10 min lockout)")
+
+
+def configure_security_monitor(config: SetupConfig) -> None:
+    """Set up a systemd timer that checks security logs every 15 minutes.
+
+    Monitors fail2ban ban events, auditd key events (identity, sudoers, SSH
+    config, kernel modules, privileged execs), and SSH auth failures, then
+    sends notifications via the configured infra_tools targets.
+    """
+    if not (is_vm() or is_hardware()):
+        print("  ✓ Skipping security monitor (not applicable to containers)")
+        return
+
+    service_name = "security-monitor"
+    service_file = f"/etc/systemd/system/{service_name}.service"
+    timer_file = f"/etc/systemd/system/{service_name}.timer"
+
+    cleanup_service(service_name)
+
+    service_content = f"""[Unit]
+Description=Security event monitor
+Documentation=man:systemd.service(5)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 {_SECURITY_MONITOR_SCRIPT}
+StandardOutput=journal
+StandardError=journal
+"""
+
+    timer_content = """[Unit]
+Description=Security event monitor (every 15 minutes)
+Documentation=man:systemd.timer(5)
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+"""
+
+    with open(service_file, "w") as f:
+        f.write(service_content)
+
+    with open(timer_file, "w") as f:
+        f.write(timer_content)
+
+    result = run("systemctl daemon-reload", check=False)
+    if result.returncode != 0:
+        print("  ⚠ Security monitor configured but systemd could not reload")
+        return
+
+    run("systemctl enable security-monitor.timer", check=False)
+    run("systemctl start security-monitor.timer", check=False)
+
+    print("  ✓ Security monitor enabled (every 15 min: fail2ban, auditd, SSH failures)")
 
 
 def _cleanup_legacy_unattended_upgrades() -> None:

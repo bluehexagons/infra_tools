@@ -16,6 +16,7 @@ from .security_steps import (
     configure_apparmor,
     configure_auditd,
     configure_pam_lockout,
+    configure_security_monitor,
 )
 
 __all__ = [
@@ -32,4 +33,5 @@ __all__ = [
     'configure_apparmor',
     'configure_auditd',
     'configure_pam_lockout',
+    'configure_security_monitor',
 ]

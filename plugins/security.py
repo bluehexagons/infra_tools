@@ -29,6 +29,7 @@ PLUGIN = PluginDefinition(
         "configure_apparmor",
         "configure_auditd",
         "configure_pam_lockout",
+        "configure_security_monitor",
     ),
     custom_step_provider="plugins.security:get_custom_step_functions",
 )
@@ -47,6 +48,7 @@ def get_security_steps(*, lite: bool) -> list[tuple[str, StepFunc]]:
         configure_firewall,
         configure_login_banners,
         configure_pam_lockout,
+        configure_security_monitor,
         harden_kernel,
         harden_ssh,
     )
@@ -64,6 +66,7 @@ def get_security_steps(*, lite: bool) -> list[tuple[str, StepFunc]]:
             ("Configuring AppArmor enforcement", configure_apparmor),
             ("Configuring auditd (kernel audit framework)", configure_auditd),
             ("Configuring PAM account lockout", configure_pam_lockout),
+            ("Configuring security event monitor", configure_security_monitor),
             ("Configuring automatic security updates", configure_auto_updates),
             ("Configuring cleanup maintenance service", configure_cleanup_maintenance),
             ("Configuring automatic restart service", configure_auto_restart),
@@ -94,6 +97,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         configure_firewall_web,
         configure_login_banners,
         configure_pam_lockout,
+        configure_security_monitor,
         create_remoteusers_group,
         harden_kernel,
         harden_ssh,
@@ -113,4 +117,5 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "configure_apparmor": configure_apparmor,
         "configure_auditd": configure_auditd,
         "configure_pam_lockout": configure_pam_lockout,
+        "configure_security_monitor": configure_security_monitor,
     }
