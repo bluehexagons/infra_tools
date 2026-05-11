@@ -24,6 +24,7 @@ ANTISTATIC_SERVICE = "antistatic"
 ANTISTATIC_RELEASE_STATE_FILE = "/opt/infra_tools/state/antistatic_release.json"
 GITHUB_REPO = "bluehexagons/antistatic-server"
 DEFAULT_INTERNAL_PORT = 8080
+DEFAULT_STUN_PORT = 3478
 PROXY_LISTEN_HOST = "127.0.0.1"
 TRUSTED_NGINX_PROXY_CIDRS = "127.0.0.1/32,::1/128"
 
@@ -35,6 +36,7 @@ ANTISTATIC_DB_GITHUB_REPO = "bluehexagons/antistatic-db"
 ANTISTATIC_DB_DATA_DIR = "/var/lib/antistatic-db"
 ANTISTATIC_DB_PATH = f"{ANTISTATIC_DB_DATA_DIR}/antistatic.db"
 DEFAULT_DB_INTERNAL_PORT = 8081
+FirewallRule = tuple[int, str, str]
 
 
 def parse_antistatic_spec(spec: str) -> tuple[str, int]:
@@ -296,9 +298,11 @@ def generate_antistatic_service(
     port: int,
     host: str = "",
     trust_proxy: bool = True,
+    stun_port: int = DEFAULT_STUN_PORT,
 ) -> str:
     """Return systemd unit file content for the antistatic server."""
     host_args = f" -host {host}" if host else ""
+    stun_args = f" -stun-port {stun_port}" if stun_port > 0 else ""
     proxy_args = (
         f" -trust-proxy -trusted-proxy-cidrs {TRUSTED_NGINX_PROXY_CIDRS}"
         if trust_proxy
@@ -317,7 +321,7 @@ StartLimitBurst=3
 Type=simple
 User={ANTISTATIC_USER}
 Group={ANTISTATIC_USER}
-ExecStart={ANTISTATIC_BINARY}{host_args} -port {port}{proxy_args}
+ExecStart={ANTISTATIC_BINARY}{host_args} -port {port}{stun_args}{proxy_args}
 Restart=on-failure
 RestartSec=5
 
@@ -461,24 +465,57 @@ def _maybe_configure_nginx_proxy(domain: str, port: int, service_name: str) -> N
     )
 
 
+def get_antistatic_public_firewall_rules(domain: str, port: int) -> tuple[FirewallRule, ...]:
+    """Return required public firewall rules for antistatic-server."""
+    rules: list[FirewallRule] = []
+    if not domain:
+        rules.append((port, "tcp", f"{ANTISTATIC_SERVICE} direct port"))
+    rules.append((DEFAULT_STUN_PORT, "udp", f"{ANTISTATIC_SERVICE} STUN"))
+    return tuple(rules)
+
+
+def _maybe_configure_firewall_rules(rules: tuple[FirewallRule, ...], service_name: str) -> None:
+    """Allow service firewall rules when UFW is already enforcing rules."""
+    if not rules:
+        return
+
+    result = run("ufw status 2>/dev/null | grep -q 'Status: active'", check=False)
+    if result.returncode != 0:
+        allowed_ports = ", ".join(f"{port}/{protocol}" for port, protocol, _ in rules)
+        print(
+            f"  ✓ Firewall inactive; no port rules needed for {service_name} "
+            f"({allowed_ports})"
+        )
+        return
+
+    for rule_port, protocol, comment in rules:
+        result = run(
+            f"ufw allow {rule_port}/{protocol} comment {shlex.quote(comment)}",
+            check=False,
+        )
+        if result.returncode == 0:
+            print(f"  ✓ Firewall allows {comment}: {rule_port}/{protocol}")
+        else:
+            print(f"  ⚠ Warning: Failed to allow {comment}: {rule_port}/{protocol}")
+
+
 def _maybe_configure_direct_port_firewall(domain: str, port: int, service_name: str) -> None:
     """Allow the direct hostless service port when UFW is already enforcing rules."""
     if domain:
         return
 
-    result = run("ufw status 2>/dev/null | grep -q 'Status: active'", check=False)
-    if result.returncode != 0:
-        print(f"  ✓ Firewall inactive; no direct port rule needed for {service_name}")
-        return
-
-    result = run(
-        f"ufw allow {port}/tcp comment '{service_name} direct port'",
-        check=False,
+    _maybe_configure_firewall_rules(
+        ((port, "tcp", f"{service_name} direct port"),),
+        service_name,
     )
-    if result.returncode == 0:
-        print(f"  ✓ Firewall allows {service_name} direct port: {port}/tcp")
-    else:
-        print(f"  ⚠ Warning: Failed to allow {service_name} direct port: {port}/tcp")
+
+
+def _maybe_configure_antistatic_firewall(domain: str, port: int) -> None:
+    """Allow antistatic-server public ports when UFW is already enforcing rules."""
+    _maybe_configure_firewall_rules(
+        get_antistatic_public_firewall_rules(domain, port),
+        ANTISTATIC_SERVICE,
+    )
 
 
 def setup_antistatic_server(config: SetupConfig) -> None:
@@ -523,7 +560,12 @@ def setup_antistatic_server(config: SetupConfig) -> None:
         )
 
     _maybe_configure_nginx_proxy(domain, port, ANTISTATIC_SERVICE)
-    _maybe_configure_direct_port_firewall(domain, port, ANTISTATIC_SERVICE)
+    _maybe_configure_antistatic_firewall(domain, port)
+    if config.enable_cloudflare:
+        print(
+            "  ℹ Cloudflare tunnels do not proxy UDP; antistatic still needs "
+            f"direct IP reachability on {DEFAULT_STUN_PORT}/udp"
+        )
 
 
 def setup_antistatic_db(config: SetupConfig) -> None:

@@ -219,7 +219,9 @@ def add_setup_arguments(
                        metavar="[DOMAIN][:PORT]",
                        help="Deploy the antistatic lobby server behind nginx. "
                             "DOMAIN is the optional public hostname; PORT is the internal listen port "
-                            f"(default: 8080). Hostless specs like :8080 listen directly without nginx.")
+                            f"(default: 8080). Hostless specs like :8080 listen directly without nginx. "
+                            "The built-in STUN responder uses direct public UDP 3478 even when Cloudflare tunnel "
+                            "support is enabled.")
 
     parser.add_argument("--antistatic-db", dest="antistatic_db",
                        metavar="[DOMAIN][:PORT]",

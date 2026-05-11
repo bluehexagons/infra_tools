@@ -3,36 +3,63 @@
 from __future__ import annotations
 
 import os
+import shlex
 
 from lib.config import SetupConfig
 from lib.remote_utils import run
 
 
+def _allow_antistatic_direct_access_for_cloudflare(config: SetupConfig) -> bool:
+    """Preserve antistatic direct-access ports that Cloudflare tunnels cannot proxy."""
+    if not config.antistatic_server:
+        return False
+
+    from game.antistatic_steps import (
+        DEFAULT_STUN_PORT,
+        get_antistatic_public_firewall_rules,
+        parse_antistatic_spec,
+    )
+
+    domain, port = parse_antistatic_spec(config.antistatic_server)
+    rules = get_antistatic_public_firewall_rules(domain, port)
+    allowed_ports = ", ".join(f"{rule_port}/{protocol}" for rule_port, protocol, _ in rules)
+    for rule_port, protocol, comment in rules:
+        run(
+            f"ufw allow {rule_port}/{protocol} comment {shlex.quote(comment)}",
+            check=False,
+        )
+    print(f"  ✓ Preserved direct antistatic access: {allowed_ports}")
+    print(
+        "  ℹ Cloudflare tunnels do not proxy UDP; antistatic still needs "
+        f"direct IP reachability on {DEFAULT_STUN_PORT}/udp"
+    )
+    return True
+
+
 def configure_cloudflare_firewall(config: SetupConfig) -> None:
-    """Configure firewall for Cloudflare tunnel (SSH only, no HTTP/HTTPS)."""
+    """Configure firewall for Cloudflare tunnel and preserve required direct-access rules."""
     result = run("ufw status 2>/dev/null | grep -q 'Status: active'", check=False)
-    if result.returncode == 0:
-        result_80 = run("ufw status | grep -q '80/tcp'", check=False)
-        result_443 = run("ufw status | grep -q '443/tcp'", check=False)
-        if result_80.returncode != 0 and result_443.returncode != 0:
-            print("  ✓ Firewall already configured for Cloudflare tunnel")
-            return
-    
-    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    run("apt-get install -y -qq ufw")
+    if result.returncode != 0:
+        os.environ["DEBIAN_FRONTEND"] = "noninteractive"
+        run("apt-get install -y -qq ufw")
+
     run("ufw default deny incoming")
     run("ufw default allow outgoing")
     run("ufw allow ssh")
-    
+
     # Explicitly remove web ports if they were added by previous steps
     run("ufw delete allow 80/tcp", check=False)
     run("ufw delete allow 443/tcp", check=False)
     run("ufw delete allow 80", check=False)
     run("ufw delete allow 443", check=False)
-    
+
+    antistatic_direct_access = _allow_antistatic_direct_access_for_cloudflare(config)
     run("ufw --force enable")
-    
-    print("  ✓ Firewall configured for Cloudflare tunnel (SSH only)")
+
+    if antistatic_direct_access:
+        print("  ✓ Firewall configured for Cloudflare tunnel with antistatic direct access")
+    else:
+        print("  ✓ Firewall configured for Cloudflare tunnel (SSH only)")
 
 
 def create_cloudflared_config_directory(config: SetupConfig) -> None:

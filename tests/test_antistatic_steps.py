@@ -22,9 +22,11 @@ from game.antistatic_steps import (
     ANTISTATIC_USER,
     DEFAULT_DB_INTERNAL_PORT,
     DEFAULT_INTERNAL_PORT,
+    DEFAULT_STUN_PORT,
     PROXY_LISTEN_HOST,
     TRUSTED_NGINX_PROXY_CIDRS,
     _antistatic_service_listen_options,
+    _maybe_configure_antistatic_firewall,
     _download_antistatic_binary,
     _download_antistatic_db_binary,
     _fetch_latest_antistatic_db_release,
@@ -110,6 +112,10 @@ class TestGenerateAntistaticService(unittest.TestCase):
     def test_port_substituted(self):
         content = generate_antistatic_service(9999)
         self.assertIn("-port 9999", content)
+
+    def test_stun_port_enabled_by_default(self):
+        content = generate_antistatic_service(8080)
+        self.assertIn(f"-stun-port {DEFAULT_STUN_PORT}", content)
 
     def test_trust_proxy_flag_present(self):
         content = generate_antistatic_service(8080)
@@ -316,6 +322,51 @@ class TestAntistaticDirectFirewallHandling(unittest.TestCase):
         )
 
         mock_run.assert_not_called()
+
+
+class TestAntistaticFirewallHandling(unittest.TestCase):
+    @patch("game.antistatic_steps.run")
+    def test_hostless_mode_allows_direct_and_stun_ports_when_ufw_active(self, mock_run):
+        mock_run.side_effect = [
+            SimpleNamespace(returncode=0),
+            SimpleNamespace(returncode=0),
+            SimpleNamespace(returncode=0),
+        ]
+
+        _maybe_configure_antistatic_firewall("", 8080)
+
+        mock_run.assert_has_calls(
+            [
+                call("ufw status 2>/dev/null | grep -q 'Status: active'", check=False),
+                call(
+                    "ufw allow 8080/tcp comment 'antistatic direct port'",
+                    check=False,
+                ),
+                call(
+                    f"ufw allow {DEFAULT_STUN_PORT}/udp comment 'antistatic STUN'",
+                    check=False,
+                ),
+            ]
+        )
+
+    @patch("game.antistatic_steps.run")
+    def test_domain_mode_only_allows_stun_port_when_ufw_active(self, mock_run):
+        mock_run.side_effect = [
+            SimpleNamespace(returncode=0),
+            SimpleNamespace(returncode=0),
+        ]
+
+        _maybe_configure_antistatic_firewall("lobby.example.com", 8080)
+
+        mock_run.assert_has_calls(
+            [
+                call("ufw status 2>/dev/null | grep -q 'Status: active'", check=False),
+                call(
+                    f"ufw allow {DEFAULT_STUN_PORT}/udp comment 'antistatic STUN'",
+                    check=False,
+                ),
+            ]
+        )
 
 
 class TestAntistaticReleaseDownloads(unittest.TestCase):
