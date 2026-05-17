@@ -29,7 +29,7 @@ class NetworkSubnet:
     name: str
     cidr: str
     zone: Optional[str] = None
-    vlan_id: Optional[int] = None
+    vlan_id: Optional[int | str] = None
     gateway: Optional[str] = None
 
     def to_dict(self) -> JSONDict:
@@ -37,11 +37,19 @@ class NetworkSubnet:
 
     @classmethod
     def from_dict(cls, data: JSONDict) -> "NetworkSubnet":
+        vlan_id_raw = data.get("vlan_id")
+        vlan_id: Optional[int | str]
+        if vlan_id_raw is None:
+            vlan_id = None
+        elif isinstance(vlan_id_raw, (int, str)):
+            vlan_id = vlan_id_raw
+        else:
+            vlan_id = str(vlan_id_raw)
         return cls(
             name=str(data.get("name") or ""),
             cidr=str(data.get("cidr") or ""),
             zone=cast(Optional[str], data.get("zone")),
-            vlan_id=cast(Optional[int], data.get("vlan_id")),
+            vlan_id=vlan_id,
             gateway=cast(Optional[str], data.get("gateway")),
         )
 
@@ -314,7 +322,7 @@ def validate_network_subnet(subnet: NetworkSubnet) -> None:
     if subnet.zone:
         validate_network_name(subnet.zone, "Subnet zone")
     if subnet.vlan_id is not None:
-        validate_network_vlan_id(subnet.vlan_id)
+        subnet.vlan_id = validate_network_vlan_id(subnet.vlan_id)
     if subnet.gateway:
         validate_network_ip(subnet.gateway, "subnet gateway")
 

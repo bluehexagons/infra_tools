@@ -209,7 +209,7 @@ def _upsert_proxmox_network_host(
     incoming: NetworkHost,
 ) -> bool:
     for index, existing in enumerate(profile.hosts):
-        matches_identity = (
+        matches_identity: bool = (
             existing.profile_ref == incoming.profile_ref
             or existing.name.lower() == incoming.name.lower()
         )

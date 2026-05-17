@@ -21,7 +21,7 @@ from lib.network_proxmox import (
     import_registered_proxmox_hosts,
 )
 from lib.proxmox_hosts import ProxmoxHost, add_proxmox_host
-from lib.proxmox_manage import ContainerInfo
+from lib.proxmox_manage import ContainerInfo, ProxmoxManageError
 
 
 class TestNetworkProxmoxImport(unittest.TestCase):
@@ -209,8 +209,6 @@ class TestNetworkProxmoxImport(unittest.TestCase):
         mock_list.return_value = [
             ContainerInfo(vmid=100, status="running", name="web", guest_type="lxc"),
         ]
-        from lib.proxmox_manage import ProxmoxManageError
-
         mock_config.side_effect = ProxmoxManageError("boom")
 
         result = import_proxmox_guest_networks("homelab", self.workspace)
