@@ -139,8 +139,9 @@ def build_proxmox_control_plane_lockdown_plan(
         FirewallAddressSet("infra-control-plane", list(profile.control_plane)),
         FirewallAddressSet("infra-guests", list(profile.guest_networks)),
     ]
-    rules: list[FirewallRulePlan] = []
-    if not errors:
+    if errors:
+        rules: list[FirewallRulePlan] = []
+    else:
         rules = [
             FirewallRulePlan(
                 action="ACCEPT",

@@ -20,6 +20,7 @@ from lib.workspace import ensure_workspace_dir, normalize_workspace_dir
 
 
 NETWORK_INVENTORY_FILENAME = "network_inventory.json"
+RawNetworkVlanId = Optional[int | str]
 
 
 @dataclass
@@ -29,7 +30,7 @@ class NetworkSubnet:
     name: str
     cidr: str
     zone: Optional[str] = None
-    vlan_id: Optional[int | str] = None
+    vlan_id: RawNetworkVlanId = None
     gateway: Optional[str] = None
 
     def to_dict(self) -> JSONDict:
@@ -38,7 +39,7 @@ class NetworkSubnet:
     @classmethod
     def from_dict(cls, data: JSONDict) -> "NetworkSubnet":
         vlan_id_raw = data.get("vlan_id")
-        vlan_id: Optional[int | str]
+        vlan_id: RawNetworkVlanId
         if vlan_id_raw is None:
             vlan_id = None
         elif isinstance(vlan_id_raw, (int, str)):
@@ -137,6 +138,9 @@ class NetworkProfile:
             ],
         )
         validate_network_profile(profile)
+        for subnet in profile.subnets:
+            if subnet.vlan_id is not None:
+                subnet.vlan_id = validate_network_vlan_id(subnet.vlan_id)
         return profile
 
 
@@ -322,7 +326,7 @@ def validate_network_subnet(subnet: NetworkSubnet) -> None:
     if subnet.zone:
         validate_network_name(subnet.zone, "Subnet zone")
     if subnet.vlan_id is not None:
-        subnet.vlan_id = validate_network_vlan_id(subnet.vlan_id)
+        validate_network_vlan_id(subnet.vlan_id)
     if subnet.gateway:
         validate_network_ip(subnet.gateway, "subnet gateway")
 
