@@ -48,7 +48,7 @@ CATEGORY_ENV_PREFIX = "INFRA_TOOLS_RUN_"
 # common ones here keeps `run_tests.py --list-categories` and documentation in
 # sync with what's actually decorated in the test tree.
 KNOWN_CATEGORIES: dict[str, str] = {
-    "live_proxmox": "Talks to a real Proxmox host (creates/destroys real LXC containers)",
+    "live_proxmox": "Talks to a real Proxmox host (creates/destroys real VMs or LXCs)",
     "network": "Requires outbound network access (downloads, DNS, etc.)",
     "slow": "Long-running tests that aren't useful for the inner dev loop",
 }

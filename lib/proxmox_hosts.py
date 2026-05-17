@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Workspace registry of known Proxmox hosts.
 
-Each host record persists the connection details needed to manage LXC
-containers on it (IP/hostname, SSH user, optional SSH key, optional default
+Each host record persists the connection details needed to manage Proxmox
+guests on it (IP/hostname, SSH user, optional SSH key, optional default
 storage pool, optional friendly description). Records are stored in
 ``proxmox_hosts.json`` inside the active workspace.
 """
