@@ -140,6 +140,8 @@ def build_proxmox_control_plane_lockdown_plan(
         FirewallAddressSet("infra-guests", list(profile.guest_networks)),
     ]
     if errors:
+        # Keep rules empty whenever prerequisite safety checks fail so callers
+        # cannot accidentally apply a partial lockdown plan.
         rules: list[FirewallRulePlan] = []
     else:
         rules = [

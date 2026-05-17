@@ -20,7 +20,7 @@ from lib.workspace import ensure_workspace_dir, normalize_workspace_dir
 
 
 NETWORK_INVENTORY_FILENAME = "network_inventory.json"
-RawNetworkVlanId = Optional[Union[int, str]]
+NetworkVlanId = Optional[Union[int, str]]
 
 
 @dataclass
@@ -30,7 +30,7 @@ class NetworkSubnet:
     name: str
     cidr: str
     zone: Optional[str] = None
-    vlan_id: RawNetworkVlanId = None
+    vlan_id: NetworkVlanId = None
     gateway: Optional[str] = None
 
     def to_dict(self) -> JSONDict:
@@ -39,7 +39,7 @@ class NetworkSubnet:
     @classmethod
     def from_dict(cls, data: JSONDict) -> "NetworkSubnet":
         vlan_id_raw = data.get("vlan_id")
-        vlan_id: RawNetworkVlanId
+        vlan_id: NetworkVlanId
         if vlan_id_raw is None:
             vlan_id = None
         elif isinstance(vlan_id_raw, (int, str)):
