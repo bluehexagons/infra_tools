@@ -227,6 +227,25 @@ def upsert_network_profile(
     return profile
 
 
+def save_network_profile(
+    profile: NetworkProfile,
+    workspace: Optional[str] = None,
+) -> NetworkProfile:
+    """Persist one profile, replacing any profile with the same name."""
+
+    validate_network_profile(profile)
+    profiles = load_network_profiles(workspace)
+    name_lc = profile.name.lower()
+    for index, existing in enumerate(profiles):
+        if existing.name.lower() == name_lc:
+            profiles[index] = profile
+            save_network_profiles(profiles, workspace)
+            return profile
+    profiles.append(profile)
+    save_network_profiles(profiles, workspace)
+    return profile
+
+
 def add_network_host(
     profile_name: str,
     host: NetworkHost,
@@ -327,6 +346,7 @@ __all__ = [
     "find_network_profile",
     "get_network_inventory_path",
     "load_network_profiles",
+    "save_network_profile",
     "save_network_profiles",
     "upsert_network_profile",
     "validate_network_host",

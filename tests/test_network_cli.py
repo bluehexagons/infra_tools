@@ -42,6 +42,31 @@ class TestNetworkCli(unittest.TestCase):
         self.assertEqual(args.network_command, "init")
         self.assertEqual(args.profile, "homelab")
 
+    def test_parser_accepts_import_proxmox(self) -> None:
+        parser, _setup_parser, _patch_parser = infra_tools.create_infra_tools_parser()
+
+        args = parser.parse_args(
+            [
+                "network",
+                "--workspace",
+                "/tmp/workspace",
+                "import-proxmox",
+                "homelab",
+                "--tag",
+                "prod",
+                "--host",
+                "pve1",
+                "--no-control-plane",
+            ]
+        )
+
+        self.assertEqual(args.command, "network")
+        self.assertEqual(args.network_command, "import-proxmox")
+        self.assertEqual(args.profile, "homelab")
+        self.assertEqual(args.tags, ["prod"])
+        self.assertEqual(args.hosts, ["pve1"])
+        self.assertTrue(args.no_control_plane)
+
     def test_init_and_add_host_through_main(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:
             with patch.object(

@@ -67,6 +67,7 @@ Generic commands:
 infra_tools.py network list
 infra_tools.py network init homelab --management 192.168.1.0/24
 infra_tools.py network add-host homelab pve1 10.0.0.10 --provider proxmox --role control-plane
+infra_tools.py network import-proxmox homelab --tag prod
 infra_tools.py network show homelab
 ```
 

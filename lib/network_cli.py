@@ -15,6 +15,7 @@ from lib.network_inventory import (
     load_network_profiles,
     upsert_network_profile,
 )
+from lib.network_proxmox import import_registered_proxmox_hosts
 
 
 def add_network_subparser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
@@ -115,6 +116,32 @@ def add_network_subparser(subparsers: argparse._SubParsersAction) -> argparse.Ar
     )
     add_host.set_defaults(_handler=_cmd_add_host)
 
+    import_proxmox = sub.add_parser(
+        "import-proxmox",
+        help="Import registered Proxmox hosts into a network profile",
+    )
+    import_proxmox.add_argument("profile", help="Network profile name")
+    import_proxmox.add_argument(
+        "--host",
+        action="append",
+        dest="hosts",
+        default=[],
+        help="Registered Proxmox host name or address to import; repeatable",
+    )
+    import_proxmox.add_argument(
+        "--tag",
+        action="append",
+        dest="tags",
+        default=[],
+        help="Only import Proxmox hosts with this registry tag; repeatable",
+    )
+    import_proxmox.add_argument(
+        "--no-control-plane",
+        action="store_true",
+        help="Do not add imported node IPs to the profile control-plane set",
+    )
+    import_proxmox.set_defaults(_handler=_cmd_import_proxmox)
+
     return parser
 
 
@@ -123,7 +150,10 @@ def run_network_command(args: argparse.Namespace) -> int:
 
     handler = getattr(args, "_handler", None)
     if handler is None:
-        print("Error: network command required (list, show, init, add-host)")
+        print(
+            "Error: network command required "
+            "(list, show, init, add-host, import-proxmox)"
+        )
         return 1
     try:
         return handler(args, getattr(args, "workspace", None))
@@ -217,6 +247,32 @@ def _cmd_add_host(args: argparse.Namespace, workspace: Optional[str]) -> int:
         replace=args.replace,
     )
     print(f"Added host '{host.name}' to network profile '{profile.name}'.")
+    return 0
+
+
+def _cmd_import_proxmox(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    result = import_registered_proxmox_hosts(
+        args.profile,
+        workspace,
+        targets=list(args.hosts),
+        tags=list(args.tags),
+        include_control_plane=not args.no_control_plane,
+    )
+    print(
+        f"Imported {len(result.imported_hosts)} Proxmox host(s) into "
+        f"network profile '{result.profile.name}'."
+    )
+    for host in result.imported_hosts:
+        marker = (
+            " control-plane"
+            if host.address in result.control_plane_added
+            else ""
+        )
+        print(f"  {host.name}: {host.address}{marker}")
+    if result.skipped_hosts:
+        print("Skipped conflicting non-Proxmox host(s):")
+        for host_name in result.skipped_hosts:
+            print(f"  {host_name}")
     return 0
 
 

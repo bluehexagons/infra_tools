@@ -15,6 +15,7 @@ from lib.network_inventory import (
     NetworkSubnet,
     add_network_host,
     load_network_profiles,
+    save_network_profile,
     upsert_network_profile,
 )
 
@@ -96,6 +97,21 @@ class TestNetworkInventory(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             add_network_host("homelab", host, self.workspace)
+
+    def test_save_network_profile_replaces_existing_profile(self) -> None:
+        upsert_network_profile(NetworkProfile(name="homelab"), self.workspace)
+
+        save_network_profile(
+            NetworkProfile(
+                name="homelab",
+                management_sources=["192.168.1.0/24"],
+            ),
+            self.workspace,
+        )
+
+        loaded = load_network_profiles(self.workspace)
+        self.assertEqual(len(loaded), 1)
+        self.assertEqual(loaded[0].management_sources, ["192.168.1.0/24"])
 
 
 if __name__ == "__main__":
