@@ -8,7 +8,9 @@ from typing import Optional
 
 from lib.network_firewall import (
     format_proxmox_firewall_plan,
+    format_rendered_proxmox_plan,
     plan_proxmox_control_plane_lockdown,
+    render_proxmox_firewall_plan,
 )
 from lib.network_inventory import (
     NetworkHost,
@@ -176,6 +178,11 @@ def add_network_subparser(subparsers: argparse._SubParsersAction) -> argparse.Ar
     )
     plan_proxmox.add_argument("profile", help="Network profile name")
     plan_proxmox.add_argument("--json", action="store_true", help="Output JSON")
+    plan_proxmox.add_argument(
+        "--proxmox",
+        action="store_true",
+        help="Render concrete Proxmox firewall artifacts instead of the abstract plan",
+    )
     plan_proxmox.set_defaults(_handler=_cmd_plan_proxmox)
 
     return parser
@@ -342,6 +349,14 @@ def _cmd_import_proxmox_guests(
 
 def _cmd_plan_proxmox(args: argparse.Namespace, workspace: Optional[str]) -> int:
     plan = plan_proxmox_control_plane_lockdown(args.profile, workspace)
+    if args.proxmox and args.json:
+        rendered = render_proxmox_firewall_plan(plan)
+        print(json.dumps(rendered.to_dict(), indent=2, sort_keys=True))
+        return 0 if rendered.safe_to_apply else 1
+    if args.proxmox:
+        rendered = render_proxmox_firewall_plan(plan)
+        print(format_rendered_proxmox_plan(rendered))
+        return 0 if rendered.safe_to_apply else 1
     if args.json:
         print(json.dumps(plan.to_dict(), indent=2, sort_keys=True))
     else:

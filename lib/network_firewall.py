@@ -66,6 +66,42 @@ class ProxmoxFirewallPlan:
         return cast(JSONDict, payload)
 
 
+@dataclass
+class ProxmoxRenderedArtifact:
+    """A concrete Proxmox firewall file or snippet."""
+
+    path: str
+    content: str
+    description: str = ""
+
+    def to_dict(self) -> JSONDict:
+        return cast(JSONDict, asdict(self))
+
+
+@dataclass
+class ProxmoxRenderedPlan:
+    """Concrete Proxmox-native rendering for review."""
+
+    profile: str
+    artifacts: list[ProxmoxRenderedArtifact]
+    warnings: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+    @property
+    def safe_to_apply(self) -> bool:
+        return not self.errors
+
+    def to_dict(self) -> JSONDict:
+        payload = {
+            "profile": self.profile,
+            "artifacts": [artifact.to_dict() for artifact in self.artifacts],
+            "warnings": list(self.warnings),
+            "errors": list(self.errors),
+            "safe_to_apply": self.safe_to_apply,
+        }
+        return cast(JSONDict, payload)
+
+
 def plan_proxmox_control_plane_lockdown(
     profile_name: str,
     workspace: Optional[str] = None,
@@ -172,6 +208,142 @@ def format_proxmox_firewall_plan(plan: ProxmoxFirewallPlan) -> str:
     return "\n".join(lines)
 
 
+def render_proxmox_firewall_plan(plan: ProxmoxFirewallPlan) -> ProxmoxRenderedPlan:
+    """Render a read-only plan into Proxmox-native firewall artifacts."""
+
+    management_entries = _entries_for(plan, "infra-management")
+    control_entries = _entries_for(plan, "infra-control-plane")
+    guest_entries = _entries_for(plan, "infra-guests")
+    artifacts = [
+        ProxmoxRenderedArtifact(
+            path="/etc/pve/firewall/cluster.fw",
+            description=(
+                "Cluster-wide IP sets and security groups. "
+                "Uses Proxmox's standard host `management` IP set."
+            ),
+            content=_render_cluster_fw(
+                management_entries,
+                control_entries,
+                guest_entries,
+            ),
+        ),
+        ProxmoxRenderedArtifact(
+            path="/etc/pve/nodes/<node>/host.fw",
+            description=(
+                "Host firewall snippet for every Proxmox control-plane node."
+            ),
+            content=_render_host_fw(),
+        ),
+        ProxmoxRenderedArtifact(
+            path="/etc/pve/firewall/<VMID>.fw",
+            description=(
+                "Guest firewall snippet to attach to VMs and containers that "
+                "should be blocked from the control plane."
+            ),
+            content=_render_guest_fw(),
+        ),
+    ]
+    return ProxmoxRenderedPlan(
+        profile=plan.profile,
+        artifacts=artifacts,
+        warnings=list(plan.warnings),
+        errors=list(plan.errors),
+    )
+
+
+def format_rendered_proxmox_plan(rendered: ProxmoxRenderedPlan) -> str:
+    """Render concrete Proxmox artifacts for CLI review."""
+
+    lines = [f"Proxmox rendered plan: {rendered.profile}"]
+    status = "yes" if rendered.safe_to_apply else "no"
+    lines.append(f"Safe to apply: {status}")
+    if rendered.errors:
+        lines.append("Errors:")
+        lines.extend(f"  {error}" for error in rendered.errors)
+    if rendered.warnings:
+        lines.append("Warnings:")
+        lines.extend(f"  {warning}" for warning in rendered.warnings)
+    for artifact in rendered.artifacts:
+        lines.append("")
+        lines.append(f"# {artifact.path}")
+        if artifact.description:
+            lines.append(f"# {artifact.description}")
+        lines.append(artifact.content.rstrip())
+    return "\n".join(lines)
+
+
+def _entries_for(plan: ProxmoxFirewallPlan, name: str) -> list[str]:
+    for address_set in plan.address_sets:
+        if address_set.name == name:
+            return list(address_set.entries)
+    return []
+
+
+def _render_cluster_fw(
+    management_entries: list[str],
+    control_entries: list[str],
+    guest_entries: list[str],
+) -> str:
+    lines: list[str] = []
+    lines.extend(_render_ipset("management", management_entries))
+    lines.append("")
+    lines.extend(_render_ipset("infra-control-plane", control_entries))
+    lines.append("")
+    lines.extend(_render_ipset("infra-guests", guest_entries))
+    lines.append("")
+    lines.extend(
+        [
+            "[group infra-cluster-management]",
+            "IN SSH(ACCEPT) -source +management",
+            "IN ACCEPT -p tcp -dport 8006 -source +management",
+            "IN ACCEPT -p tcp -dport 5900:5999 -source +infra-control-plane",
+            "IN ACCEPT -p tcp -dport 60000:60050 -source +infra-control-plane",
+            "IN ACCEPT -p udp -dport 5405:5412 -source +infra-control-plane",
+            "",
+            "[group infra-deny-control-plane]",
+            "OUT DROP -dest +infra-control-plane",
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
+def _render_ipset(name: str, entries: list[str]) -> list[str]:
+    lines = [f"[IPSET {name}]"]
+    if not entries:
+        lines.append("# empty")
+        return lines
+    lines.extend(entries)
+    return lines
+
+
+def _render_host_fw() -> str:
+    return "\n".join(
+        [
+            "[OPTIONS]",
+            "enable: 1",
+            "",
+            "[RULES]",
+            "GROUP infra-cluster-management",
+            "",
+        ]
+    )
+
+
+def _render_guest_fw() -> str:
+    return "\n".join(
+        [
+            "[OPTIONS]",
+            "enable: 1",
+            "",
+            "[RULES]",
+            "GROUP infra-deny-control-plane",
+            "",
+            "# Add guest-specific ipfilter-net* IP sets when enabling IP filter.",
+            "",
+        ]
+    )
+
+
 __all__ = [
     "FirewallAddressSet",
     "FirewallRulePlan",
@@ -179,7 +351,11 @@ __all__ = [
     "PROXMOX_CLUSTER_UDP_PORTS",
     "PROXMOX_MANAGEMENT_TCP_PORTS",
     "ProxmoxFirewallPlan",
+    "ProxmoxRenderedArtifact",
+    "ProxmoxRenderedPlan",
     "build_proxmox_control_plane_lockdown_plan",
     "format_proxmox_firewall_plan",
+    "format_rendered_proxmox_plan",
     "plan_proxmox_control_plane_lockdown",
+    "render_proxmox_firewall_plan",
 ]

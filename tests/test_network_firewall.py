@@ -11,6 +11,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from lib.network_firewall import (
     build_proxmox_control_plane_lockdown_plan,
     format_proxmox_firewall_plan,
+    format_rendered_proxmox_plan,
+    render_proxmox_firewall_plan,
 )
 from lib.network_inventory import NetworkProfile
 
@@ -72,6 +74,41 @@ class TestProxmoxFirewallPlan(unittest.TestCase):
         self.assertIn("Proxmox firewall plan: homelab", rendered)
         self.assertIn("infra-management", rendered)
         self.assertIn("DROP", rendered)
+
+    def test_renders_proxmox_artifacts(self) -> None:
+        profile = NetworkProfile(
+            name="homelab",
+            management_sources=["192.168.1.0/24"],
+            control_plane=["10.0.0.10"],
+            guest_networks=["10.20.0.0/24"],
+        )
+        plan = build_proxmox_control_plane_lockdown_plan(profile)
+
+        rendered = render_proxmox_firewall_plan(plan)
+
+        self.assertTrue(rendered.safe_to_apply)
+        self.assertEqual(rendered.artifacts[0].path, "/etc/pve/firewall/cluster.fw")
+        self.assertIn("[IPSET management]", rendered.artifacts[0].content)
+        self.assertIn("[group infra-deny-control-plane]", rendered.artifacts[0].content)
+        self.assertIn("GROUP infra-cluster-management", rendered.artifacts[1].content)
+        self.assertIn("GROUP infra-deny-control-plane", rendered.artifacts[2].content)
+
+    def test_rendered_format_includes_artifacts(self) -> None:
+        profile = NetworkProfile(
+            name="homelab",
+            management_sources=["192.168.1.0/24"],
+            control_plane=["10.0.0.10"],
+            guest_networks=["10.20.0.0/24"],
+        )
+        rendered = render_proxmox_firewall_plan(
+            build_proxmox_control_plane_lockdown_plan(profile)
+        )
+
+        text = format_rendered_proxmox_plan(rendered)
+
+        self.assertIn("Proxmox rendered plan: homelab", text)
+        self.assertIn("/etc/pve/firewall/cluster.fw", text)
+        self.assertIn("[OPTIONS]", text)
 
 
 if __name__ == "__main__":
