@@ -20,6 +20,7 @@ from lib.proxmox_manage import (
     ProxmoxManageError,
     _build_webhook_notification_commands,
     _parse_pct_list,
+    _parse_qm_list,
     destroy_container,
     get_container_config,
     get_container_ip,
@@ -86,6 +87,23 @@ class TestParsePctList(unittest.TestCase):
         ])
 
 
+class TestParseQmList(unittest.TestCase):
+    def test_parses_standard_header(self) -> None:
+        out = (
+            "VMID NAME                 STATUS     MEM(MB)    BOOTDISK(GB) PID\n"
+            "101  web-01-vm            running    4096       32.00        123\n"
+            "102  db-01-vm             stopped    2048       16.00        0\n"
+        )
+        rows = _parse_qm_list(out)
+        self.assertEqual(rows, [
+            ContainerInfo(vmid=101, status="running", name="web-01-vm", guest_type="vm"),
+            ContainerInfo(vmid=102, status="stopped", name="db-01-vm", guest_type="vm"),
+        ])
+
+    def test_ignores_non_qm_headers(self) -> None:
+        self.assertEqual(_parse_qm_list("VMID Status Name\n100 running web\n"), [])
+
+
 class TestListContainers(unittest.TestCase):
     @patch("lib.proxmox_manage._ssh_run")
     def test_list_containers_sorts_by_vmid(self, mock_run: MagicMock) -> None:
@@ -94,6 +112,18 @@ class TestListContainers(unittest.TestCase):
         )
         rows = list_containers(_host())
         self.assertEqual([r.vmid for r in rows], [100, 200])
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_list_containers_includes_qm_guests(self, mock_run: MagicMock) -> None:
+        mock_run.side_effect = [
+            _completed("VMID Status Name\n200 running lxc-web\n"),
+            _completed(
+                "VMID NAME STATUS MEM(MB) BOOTDISK(GB) PID\n"
+                "101 vm-web running 4096 32.00 123\n"
+            ),
+        ]
+        rows = list_containers(_host())
+        self.assertEqual([(row.vmid, row.guest_type) for row in rows], [(101, "vm"), (200, "lxc")])
 
     @patch("lib.proxmox_manage._ssh_run")
     def test_list_containers_raises_on_failure(self, mock_run: MagicMock) -> None:
@@ -126,6 +156,14 @@ class TestContainerIp(unittest.TestCase):
         mock_run.return_value = _completed(returncode=2)
         self.assertIsNone(get_container_ip(_host(), 100))
 
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_falls_back_to_qm_config(self, mock_run: MagicMock) -> None:
+        mock_run.side_effect = [
+            _completed(stderr="CT 100 does not exist", returncode=2),
+            _completed("ipconfig0: ip=10.0.0.60/24,gw=10.0.0.1\n"),
+        ]
+        self.assertEqual(get_container_ip(_host(), 100), "10.0.0.60")
+
 
 class TestStatus(unittest.TestCase):
     @patch("lib.proxmox_manage._ssh_run")
@@ -138,6 +176,14 @@ class TestStatus(unittest.TestCase):
         mock_run.return_value = _completed(stderr="not found", returncode=2)
         with self.assertRaises(ProxmoxManageError):
             get_container_status(_host(), 100)
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_falls_back_to_qm_status(self, mock_run: MagicMock) -> None:
+        mock_run.side_effect = [
+            _completed(stderr="CT 100 does not exist", returncode=2),
+            _completed("status: running\n"),
+        ]
+        self.assertEqual(get_container_status(_host(), 100), "running")
 
 
 class TestStartStop(unittest.TestCase):
@@ -169,6 +215,16 @@ class TestStartStop(unittest.TestCase):
             start_container(_host(), 100)
 
     @patch("lib.proxmox_manage._ssh_run")
+    def test_start_runs_qm_start_for_vm(self, mock_run: MagicMock) -> None:
+        mock_run.side_effect = [
+            _completed(stderr="CT 100 does not exist", returncode=2),
+            _completed("status: stopped\n"),
+            _completed(""),
+        ]
+        start_container(_host(), 100)
+        self.assertIn("qm start 100", mock_run.call_args_list[-1][0][3])
+
+    @patch("lib.proxmox_manage._ssh_run")
     def test_stop_uses_shutdown_by_default(self, mock_run: MagicMock) -> None:
         mock_run.side_effect = [
             _completed("status: running\n"),
@@ -191,6 +247,16 @@ class TestStartStop(unittest.TestCase):
         mock_run.return_value = _completed("status: stopped\n")
         stop_container(_host(), 100)
         self.assertEqual(mock_run.call_count, 1)
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_stop_force_uses_qm_stop_for_vm(self, mock_run: MagicMock) -> None:
+        mock_run.side_effect = [
+            _completed(stderr="CT 100 does not exist", returncode=2),
+            _completed("status: running\n"),
+            _completed(""),
+        ]
+        stop_container(_host(), 100, force=True)
+        self.assertIn("qm stop 100", mock_run.call_args_list[-1][0][3])
 
 
 class TestDestroy(unittest.TestCase):
@@ -235,6 +301,17 @@ class TestDestroy(unittest.TestCase):
         ]
         with self.assertRaises(ProxmoxManageError):
             destroy_container(_host(), 100)
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_destroy_vm_uses_qm_destroy(self, mock_run: MagicMock) -> None:
+        mock_run.side_effect = [
+            _completed(stderr="CT 100 does not exist", returncode=2),
+            _completed("status: stopped\n"),
+            _completed(""),
+        ]
+        destroy_container(_host(), 100)
+        self.assertIn("qm destroy 100", mock_run.call_args_list[-1].args[3])
+        self.assertIn("--purge 1", mock_run.call_args_list[-1].args[3])
 
 
 class TestWebhookNotifications(unittest.TestCase):
@@ -391,6 +468,20 @@ class TestHealthCheck(unittest.TestCase):
         self.assertIsNone(report.ssh_open)
         self.assertTrue(report.healthy)
 
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_vm_health_sets_guest_type(self, mock_run: MagicMock) -> None:
+        mock_run.side_effect = [
+            _completed(stderr="CT 100 does not exist", returncode=2),
+            _completed("status: running\n"),
+            _completed(stderr="CT 100 does not exist", returncode=2),
+            _completed("ipconfig0: ip=10.0.0.60/24,gw=10.0.0.1\n"),
+            _completed("OK\n"),
+            _completed("OK\n"),
+        ]
+        report = health_check(_host(), 100)
+        self.assertEqual(report.guest_type, "vm")
+        self.assertTrue(report.healthy)
+
 
 class TestGetContainerConfig(unittest.TestCase):
     @patch("lib.proxmox_manage._ssh_run")
@@ -425,6 +516,15 @@ class TestGetContainerConfig(unittest.TestCase):
         self.assertEqual(result, {})
         mock_run.assert_not_called()
 
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_falls_back_to_qm_config(self, mock_run: MagicMock) -> None:
+        mock_run.side_effect = [
+            _completed(stderr="CT 999 does not exist", returncode=2),
+            _completed("cores: 4\nmemory: 4096\n"),
+        ]
+        config = get_container_config(_host(), 999)
+        self.assertEqual(config["cores"], "4")
+
 
 class TestGetContainerPending(unittest.TestCase):
     @patch("lib.proxmox_manage._ssh_run")
@@ -445,6 +545,15 @@ class TestGetContainerPending(unittest.TestCase):
         result = get_container_pending(_host(), 100, dry_run=True)
         self.assertEqual(result, {})
         mock_run.assert_not_called()
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_falls_back_to_qm_pending(self, mock_run: MagicMock) -> None:
+        mock_run.side_effect = [
+            _completed(stderr="CT 100 does not exist", returncode=2),
+            _completed("cores: 8\n"),
+        ]
+        pending = get_container_pending(_host(), 100)
+        self.assertEqual(pending["cores"], "8")
 
 
 class TestReconfigureContainer(unittest.TestCase):
@@ -477,10 +586,24 @@ class TestReconfigureContainer(unittest.TestCase):
 
     @patch("lib.proxmox_manage._ssh_run")
     def test_dry_run_passes_through(self, mock_run: MagicMock) -> None:
-        mock_run.return_value = _completed()
+        mock_run.side_effect = [
+            _completed("status: running\n"),
+            _completed(),
+        ]
         reconfigure_container(_host(), 100, {"cores": "2"}, dry_run=True)
         _, kwargs = mock_run.call_args
         self.assertTrue(kwargs.get("dry_run"))
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_vm_uses_qm_set(self, mock_run: MagicMock) -> None:
+        mock_run.side_effect = [
+            _completed(stderr="CT 100 does not exist", returncode=2),
+            _completed("status: running\n"),
+            _completed(),
+        ]
+        reconfigure_container(_host(), 100, {"cores": "2"})
+        self.assertIn("qm", mock_run.call_args.args[3])
+        self.assertIn("set", mock_run.call_args.args[3])
 
 
 class TestModifyContainer(unittest.TestCase):
@@ -550,10 +673,24 @@ class TestResizeContainerDisk(unittest.TestCase):
 
     @patch("lib.proxmox_manage._ssh_run")
     def test_dry_run_passes_through(self, mock_run: MagicMock) -> None:
-        mock_run.return_value = _completed()
+        mock_run.side_effect = [
+            _completed("status: running\n"),
+            _completed(),
+        ]
         resize_container_disk(_host(), 100, "rootfs", "20G", dry_run=True)
         _, kwargs = mock_run.call_args
         self.assertTrue(kwargs.get("dry_run"))
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_vm_uses_qm_resize(self, mock_run: MagicMock) -> None:
+        mock_run.side_effect = [
+            _completed(stderr="CT 100 does not exist", returncode=2),
+            _completed("status: running\n"),
+            _completed(),
+        ]
+        resize_container_disk(_host(), 100, "scsi0", "20G")
+        self.assertIn("qm", mock_run.call_args.args[3])
+        self.assertIn("resize", mock_run.call_args.args[3])
 
 
 if __name__ == "__main__":

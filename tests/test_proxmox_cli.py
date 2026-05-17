@@ -93,13 +93,15 @@ class TestProxmoxCliContainerOps(_CliFixture):
 
     @patch("lib.proxmox_manage._ssh_run")
     def test_ls_lists_containers(self, mock_run) -> None:
-        mock_run.return_value = _completed(
-            "VMID Status Name\n100 running web\n"
-        )
+        mock_run.side_effect = [
+            _completed("VMID Status Name\n100 running web\n"),
+            _completed("VMID NAME STATUS MEM(MB) BOOTDISK(GB) PID\n"),
+        ]
         rc, out = self._run("ls", "pve1")
         self.assertEqual(rc, 0)
         self.assertIn("100", out)
         self.assertIn("web", out)
+        self.assertIn("lxc", out)
 
     @patch("lib.proxmox_manage._ssh_run")
     def test_status_prints_value(self, mock_run) -> None:
@@ -136,7 +138,7 @@ class TestProxmoxCliContainerOps(_CliFixture):
         ]
         rc, out = self._run("destroy", "pve1", "100", "-y")
         self.assertEqual(rc, 0)
-        self.assertIn("Destroyed container 100", out)
+        self.assertIn("Destroyed guest 100", out)
 
     @patch("lib.proxmox_manage._ssh_run")
     @patch("builtins.input", return_value="no")

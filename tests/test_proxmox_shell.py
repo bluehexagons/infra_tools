@@ -95,19 +95,24 @@ class TestShellContainerOps(_ShellFixture):
 
     @patch("lib.proxmox_manage._ssh_run")
     def test_ls_lists_containers(self, mock_run) -> None:
-        mock_run.return_value = _completed(
-            "VMID Status Name\n100 running web\n101 stopped db\n"
-        )
+        mock_run.side_effect = [
+            _completed("VMID Status Name\n100 running web\n101 stopped db\n"),
+            _completed("VMID NAME STATUS MEM(MB) BOOTDISK(GB) PID\n"),
+        ]
         self.shell.dispatch("ls")
         self.assert_output_contains("100")
         self.assert_output_contains("web")
         self.assert_output_contains("101")
+        self.assert_output_contains("lxc")
 
     @patch("lib.proxmox_manage._ssh_run")
     def test_ls_when_empty_says_so(self, mock_run) -> None:
-        mock_run.return_value = _completed("VMID Status Name\n")
+        mock_run.side_effect = [
+            _completed("VMID Status Name\n"),
+            _completed("VMID NAME STATUS MEM(MB) BOOTDISK(GB) PID\n"),
+        ]
         self.shell.dispatch("ls")
-        self.assert_output_contains("(no containers)")
+        self.assert_output_contains("(no guests)")
 
     @patch("lib.proxmox_manage._ssh_run")
     def test_status_dispatch(self, mock_run) -> None:
@@ -123,7 +128,7 @@ class TestShellContainerOps(_ShellFixture):
             _completed(""),
         ]
         self.shell.dispatch("start 100")
-        self.assert_output_contains("Started container 100")
+        self.assert_output_contains("Started guest 100")
 
     @patch("lib.proxmox_manage._ssh_run")
     def test_stop_default_uses_shutdown(self, mock_run) -> None:
@@ -182,28 +187,33 @@ class TestShellDestroyConfirmation(_ShellFixture):
     def test_destroy_calls_confirm_and_proceeds_on_yes(self, mock_run) -> None:
         self._confirm_response = True
         mock_run.side_effect = [
-            _completed("VMID Status Name\n100 stopped web\n"),  # list_containers
+            _completed("VMID Status Name\n100 stopped web\n"),  # pct list
+            _completed("VMID NAME STATUS MEM(MB) BOOTDISK(GB) PID\n"),  # qm list
             _completed("status: stopped\n"),                     # status pre-destroy
             _completed(""),                                       # destroy
         ]
         self.shell.dispatch("destroy 100")
         self.assertEqual(self.confirm_calls, [True])
-        self.assert_output_contains("Destroyed container 100")
+        self.assert_output_contains("Destroyed guest 100")
 
     @patch("lib.proxmox_manage._ssh_run")
     def test_destroy_aborts_when_confirm_false(self, mock_run) -> None:
         self._confirm_response = False
-        mock_run.return_value = _completed(
-            "VMID Status Name\n100 stopped web\n"
-        )
+        mock_run.side_effect = [
+            _completed("VMID Status Name\n100 stopped web\n"),
+            _completed("VMID NAME STATUS MEM(MB) BOOTDISK(GB) PID\n"),
+        ]
         self.shell.dispatch("destroy 100")
         self.assert_output_contains("cancelled")
         # Only the list_containers call should have happened.
-        self.assertEqual(mock_run.call_count, 1)
+        self.assertEqual(mock_run.call_count, 2)
 
     @patch("lib.proxmox_manage._ssh_run")
     def test_destroy_unknown_vmid_raises(self, mock_run) -> None:
-        mock_run.return_value = _completed("VMID Status Name\n")
+        mock_run.side_effect = [
+            _completed("VMID Status Name\n"),
+            _completed("VMID NAME STATUS MEM(MB) BOOTDISK(GB) PID\n"),
+        ]
         with self.assertRaises(ValueError):
             self.shell.dispatch("destroy 999")
 

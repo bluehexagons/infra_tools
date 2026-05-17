@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Interactive command-line shell for managing Proxmox-hosted containers.
+"""Interactive command-line shell for managing Proxmox-hosted guests.
 
 Designed to feel like a small REPL on top of :mod:`lib.proxmox_manage` and
 :mod:`lib.proxmox_hosts`. The shell starts with no host selected; ``use``
@@ -51,14 +51,14 @@ Available commands:
   add <name> <addr> [user] [key]
                               Register a new Proxmox host
   remove <name|address>       Remove a host from the registry
-  ls                          List containers on the active host
-  status <vmid>               Show container status
-  start <vmid>                Start a container
-  stop <vmid> [--force]       Shutdown (or force-stop) a container
-  destroy <vmid> [--force]    Destroy a container (asks for confirmation)
+  ls                          List guests on the active host
+  status <vmid>               Show guest status
+  start <vmid>                Start a guest
+  stop <vmid> [--force]       Shutdown (or force-stop) a guest
+  destroy <vmid> [--force]    Destroy a guest (asks for confirmation)
   health <vmid>               Run a health check
-  config <vmid> [--pending]   Show container configuration (or pending changes)
-  set <vmid> key=value [...]  Set pct configuration options
+  config <vmid> [--pending]   Show guest configuration (or pending changes)
+  set <vmid> key=value [...]  Set pct/qm configuration options
   modify <vmid> [--cores N] [--memory N[M|G]]
                               Change CPU cores or memory allocation
   resize <vmid> <volume> <size>
@@ -78,6 +78,7 @@ def _format_host_row(host: ProxmoxHost) -> str:
 def _format_container_row(info: ContainerInfo) -> str:
     parts = [
         f"{info.vmid:>6}",
+        f"{info.guest_type:<6}",
         f"{info.status:<10}",
         f"{(info.lock or '-'):<10}",
         info.name or "-",
@@ -89,6 +90,7 @@ def _format_health(report: HealthReport) -> str:
     state = "HEALTHY" if report.healthy else "UNHEALTHY"
     lines = [
         f"  VMID:    {report.vmid}",
+        f"  Type:    {report.guest_type or 'unknown'}",
         f"  Status:  {report.status}",
         f"  IP:      {report.ip or 'n/a'}",
         f"  Ping:    {_tristate(report.pingable)}",
@@ -236,7 +238,7 @@ class ProxmoxShell:
         info: ContainerInfo, host: ProxmoxHost
     ) -> bool:
         prompt = (
-            f"Destroy container {info.vmid} '{info.name}' on {host.name} "
+            f"Destroy guest {info.vmid} '{info.name}' on {host.name} "
             f"({host.address})? Type 'yes' to confirm: "
         )
         try:
@@ -308,10 +310,10 @@ class ProxmoxShell:
         host = self._require_host()
         rows = list_containers(host)
         if not rows:
-            self._output("(no containers)")
+            self._output("(no guests)")
             return
         self._output(
-            f"  {'VMID':>6} {'Status':<10} {'Lock':<10} Name"
+            f"  {'VMID':>6} {'Type':<6} {'Status':<10} {'Lock':<10} Name"
         )
         for row in rows:
             self._output(_format_container_row(row))
@@ -327,7 +329,7 @@ class ProxmoxShell:
         host = self._require_host()
         vmid = self._parse_vmid(args, "start")
         start_container(host, vmid)
-        self._output(f"  Started container {vmid} on {host.name}.")
+        self._output(f"  Started guest {vmid} on {host.name}.")
 
     def _cmd_stop(self, args: list[str]) -> None:
         host = self._require_host()
@@ -336,7 +338,7 @@ class ProxmoxShell:
         vmid = self._parse_vmid(rest, "stop")
         stop_container(host, vmid, force=force)
         self._output(
-            f"  {'Stopped' if force else 'Shut down'} container {vmid} on {host.name}."
+            f"  {'Stopped' if force else 'Shut down'} guest {vmid} on {host.name}."
         )
 
     def _cmd_destroy(self, args: list[str]) -> None:
@@ -344,7 +346,7 @@ class ProxmoxShell:
         force = "--force" in args
         rest = [a for a in args if a != "--force"]
         vmid = self._parse_vmid(rest, "destroy")
-        # Look up the container so the confirmation prompt has its name.
+        # Look up the guest so the confirmation prompt has its name.
         info: Optional[ContainerInfo] = None
         for row in list_containers(host):
             if row.vmid == vmid:
@@ -352,13 +354,13 @@ class ProxmoxShell:
                 break
         if info is None:
             raise ValueError(
-                f"No container with VMID {vmid} on {host.name}"
+                f"No guest with VMID {vmid} on {host.name}"
             )
         if not self._confirm_destroy(info, host):
             self._output("  Destroy cancelled.")
             return
         destroy_container(host, vmid, force=force)
-        self._output(f"  Destroyed container {vmid} on {host.name}.")
+        self._output(f"  Destroyed guest {vmid} on {host.name}.")
 
     def _cmd_health(self, args: list[str]) -> None:
         host = self._require_host()

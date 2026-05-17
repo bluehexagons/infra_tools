@@ -43,9 +43,9 @@ def add_proxmox_subparser(subparsers: argparse._SubParsersAction) -> argparse.Ar
     """Register the ``proxmox`` command tree on the main argparse subparsers."""
     parser = subparsers.add_parser(
         "proxmox",
-        help="Manage Proxmox hosts and the containers running on them",
+        help="Manage Proxmox hosts and the guests running on them",
         description=(
-            "Manage Proxmox host registrations and the LXC containers "
+            "Manage Proxmox host registrations and the Proxmox guests "
             "running on them. Run with no subcommand to enter the "
             "interactive shell."
         ),
@@ -71,11 +71,11 @@ def add_proxmox_subparser(subparsers: argparse._SubParsersAction) -> argparse.Ar
     add.add_argument("--description", help="Optional human-readable description")
     add.add_argument(
         "--default-storage",
-        help="Optional default storage pool to suggest when creating containers",
+        help="Optional default storage pool to suggest when creating guests",
     )
     add.add_argument(
         "--default-bridge",
-        help="Optional default network bridge to suggest when creating containers",
+        help="Optional default network bridge to suggest when creating guests",
     )
     add.add_argument(
         "--replace",
@@ -88,50 +88,50 @@ def add_proxmox_subparser(subparsers: argparse._SubParsersAction) -> argparse.Ar
     rm.add_argument("target", help="Host name or address to remove")
     rm.set_defaults(_handler=_cmd_hosts_remove)
 
-    ls = sub.add_parser("ls", aliases=["list"], help="List containers on a host")
+    ls = sub.add_parser("ls", aliases=["list"], help="List guests on a host")
     ls.add_argument("host", help="Registered host name or address")
     ls.set_defaults(_handler=_cmd_containers_ls)
 
-    status = sub.add_parser("status", help="Show container status")
+    status = sub.add_parser("status", help="Show guest status")
     status.add_argument("host", help="Registered host name or address")
-    status.add_argument("vmid", type=int, help="Container VMID")
+    status.add_argument("vmid", type=int, help="Guest VMID")
     status.set_defaults(_handler=_cmd_status)
 
-    start = sub.add_parser("start", help="Start a container")
+    start = sub.add_parser("start", help="Start a guest")
     start.add_argument("host", help="Registered host name or address")
-    start.add_argument("vmid", type=int, help="Container VMID")
+    start.add_argument("vmid", type=int, help="Guest VMID")
     start.set_defaults(_handler=_cmd_start)
 
-    stop = sub.add_parser("stop", help="Shutdown (or force-stop) a container")
+    stop = sub.add_parser("stop", help="Shutdown (or force-stop) a guest")
     stop.add_argument("host", help="Registered host name or address")
-    stop.add_argument("vmid", type=int, help="Container VMID")
+    stop.add_argument("vmid", type=int, help="Guest VMID")
     stop.add_argument(
-        "--force", action="store_true", help="Use 'pct stop' instead of graceful shutdown"
+        "--force", action="store_true", help="Use an immediate stop instead of graceful shutdown"
     )
     stop.set_defaults(_handler=_cmd_stop)
 
-    destroy = sub.add_parser("destroy", help="Destroy a container (asks for confirmation)")
+    destroy = sub.add_parser("destroy", help="Destroy a guest (asks for confirmation)")
     destroy.add_argument("host", help="Registered host name or address")
-    destroy.add_argument("vmid", type=int, help="Container VMID")
+    destroy.add_argument("vmid", type=int, help="Guest VMID")
     destroy.add_argument(
         "-y", "--yes", action="store_true", help="Skip the confirmation prompt"
     )
     destroy.add_argument(
-        "--force", action="store_true", help="Use 'pct stop' before destroy if running"
+        "--force", action="store_true", help="Force-stop the guest before destroy if it is running"
     )
     destroy.set_defaults(_handler=_cmd_destroy)
 
-    health = sub.add_parser("health", help="Run a health check against a container")
+    health = sub.add_parser("health", help="Run a health check against a guest")
     health.add_argument("host", help="Registered host name or address")
-    health.add_argument("vmid", type=int, help="Container VMID")
+    health.add_argument("vmid", type=int, help="Guest VMID")
     health.add_argument(
         "--no-ssh", action="store_true", help="Skip the SSH:22 reachability probe"
     )
     health.set_defaults(_handler=_cmd_health)
 
-    config_cmd = sub.add_parser("config", help="Show container configuration")
+    config_cmd = sub.add_parser("config", help="Show guest configuration")
     config_cmd.add_argument("host", help="Registered host name or address")
-    config_cmd.add_argument("vmid", type=int, help="Container VMID")
+    config_cmd.add_argument("vmid", type=int, help="Guest VMID")
     config_cmd.add_argument(
         "--pending",
         action="store_true",
@@ -141,14 +141,14 @@ def add_proxmox_subparser(subparsers: argparse._SubParsersAction) -> argparse.Ar
 
     reconfig = sub.add_parser(
         "reconfigure",
-        help="Set arbitrary pct configuration options on a container",
+        help="Set arbitrary guest configuration options",
         description=(
-            "Apply one or more pct set options to a container. "
-            "Changes that affect a running container may require a restart."
+            "Apply one or more pct/qm set options to a guest. "
+            "Changes that affect a running guest may require a restart."
         ),
     )
     reconfig.add_argument("host", help="Registered host name or address")
-    reconfig.add_argument("vmid", type=int, help="Container VMID")
+    reconfig.add_argument("vmid", type=int, help="Guest VMID")
     reconfig.add_argument(
         "--set",
         action="append",
@@ -162,16 +162,16 @@ def add_proxmox_subparser(subparsers: argparse._SubParsersAction) -> argparse.Ar
     reconfig.add_argument(
         "--dry-run",
         action="store_true",
-        help="Print the remote pct set command without executing it",
+        help="Print the remote pct/qm set command without executing it",
     )
     reconfig.set_defaults(_handler=_cmd_reconfigure)
 
     modify = sub.add_parser(
         "modify",
-        help="Change CPU cores or memory allocation for a container",
+        help="Change CPU cores or memory allocation for a guest",
     )
     modify.add_argument("host", help="Registered host name or address")
-    modify.add_argument("vmid", type=int, help="Container VMID")
+    modify.add_argument("vmid", type=int, help="Guest VMID")
     modify.add_argument(
         "--cores",
         type=int,
@@ -188,22 +188,22 @@ def add_proxmox_subparser(subparsers: argparse._SubParsersAction) -> argparse.Ar
     modify.add_argument(
         "--dry-run",
         action="store_true",
-        help="Print the remote pct set command without executing it",
+        help="Print the remote pct/qm set command without executing it",
     )
     modify.set_defaults(_handler=_cmd_modify)
 
     resize = sub.add_parser(
         "resize-disk",
-        help="Increase a container disk volume size",
+        help="Increase a guest disk volume size",
     )
     resize.add_argument("host", help="Registered host name or address")
-    resize.add_argument("vmid", type=int, help="Container VMID")
+    resize.add_argument("vmid", type=int, help="Guest VMID")
     resize.add_argument("volume", help="Volume name (e.g. rootfs)")
     resize.add_argument("size", help="New absolute size with unit (e.g. 20G)")
     resize.add_argument(
         "--dry-run",
         action="store_true",
-        help="Print the remote pct resize command without executing it",
+        help="Print the remote pct/qm resize command without executing it",
     )
     resize.set_defaults(_handler=_cmd_resize_disk)
 
@@ -351,13 +351,13 @@ def _cmd_containers_ls(args: argparse.Namespace, workspace: Optional[str]) -> in
     host = _resolve_host(args.host, workspace)
     rows = list_containers(host)
     if not rows:
-        print(f"No containers on {host.name} ({host.address}).")
+        print(f"No guests on {host.name} ({host.address}).")
         return 0
-    print(f"Containers on {host.name} ({host.address}):")
-    print(f"  {'VMID':>6} {'STATUS':<10} {'LOCK':<10} NAME")
+    print(f"Guests on {host.name} ({host.address}):")
+    print(f"  {'VMID':>6} {'TYPE':<6} {'STATUS':<10} {'LOCK':<10} NAME")
     for row in rows:
         print(
-            f"  {row.vmid:>6} {row.status:<10} {(row.lock or '-'):<10} "
+            f"  {row.vmid:>6} {row.guest_type:<6} {row.status:<10} {(row.lock or '-'):<10} "
             f"{row.name or '-'}"
         )
     return 0
@@ -372,7 +372,7 @@ def _cmd_status(args: argparse.Namespace, workspace: Optional[str]) -> int:
 def _cmd_start(args: argparse.Namespace, workspace: Optional[str]) -> int:
     host = _resolve_host(args.host, workspace)
     start_container(host, args.vmid)
-    print(f"Started container {args.vmid} on {host.name}.")
+    print(f"Started guest {args.vmid} on {host.name}.")
     return 0
 
 
@@ -380,7 +380,7 @@ def _cmd_stop(args: argparse.Namespace, workspace: Optional[str]) -> int:
     host = _resolve_host(args.host, workspace)
     stop_container(host, args.vmid, force=args.force)
     verb = "Stopped" if args.force else "Shut down"
-    print(f"{verb} container {args.vmid} on {host.name}.")
+    print(f"{verb} guest {args.vmid} on {host.name}.")
     return 0
 
 
@@ -388,7 +388,7 @@ def _cmd_destroy(args: argparse.Namespace, workspace: Optional[str]) -> int:
     host = _resolve_host(args.host, workspace)
     if not args.yes:
         prompt = (
-            f"Destroy container {args.vmid} on {host.name} ({host.address})? "
+            f"Destroy guest {args.vmid} on {host.name} ({host.address})? "
             f"Type 'yes' to confirm: "
         )
         try:
@@ -401,7 +401,7 @@ def _cmd_destroy(args: argparse.Namespace, workspace: Optional[str]) -> int:
             print("Aborted.")
             return 1
     destroy_container(host, args.vmid, force=args.force)
-    print(f"Destroyed container {args.vmid} on {host.name}.")
+    print(f"Destroyed guest {args.vmid} on {host.name}.")
     return 0
 
 

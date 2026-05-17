@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""LXC container management against a Proxmox host over SSH.
+"""Proxmox guest management against a host over SSH.
 
 Provides helpers for:
-- Listing containers (``pct list``).
-- Querying status, config, and uptime for a single container.
-- Starting and stopping containers.
-- Destroying containers (caller is expected to handle confirmation).
-- Health-checking a container (status + ping + optional SSH probe).
-- Reconfiguring containers (CPU, memory, arbitrary pct options).
-- Resizing container disks.
+- Listing guests (``pct list`` + ``qm list``).
+- Querying status, config, and uptime for a single guest.
+- Starting and stopping guests.
+- Destroying guests (caller is expected to handle confirmation).
+- Health-checking a guest (status + ping + optional SSH probe).
+- Reconfiguring guests (CPU, memory, arbitrary ``pct``/``qm`` options).
+- Resizing guest disks.
 - Configuring native Proxmox notification webhooks.
 
 All commands run via ``ssh root@<node>`` using the existing
@@ -37,21 +37,23 @@ class ProxmoxManageError(Exception):
 
 @dataclass
 class ContainerInfo:
-    """One row returned from ``pct list`` plus optional enrichment."""
+    """One row returned from ``pct list``/``qm list`` plus optional enrichment."""
 
     vmid: int
     status: str
     name: str
+    guest_type: str = "lxc"
     lock: Optional[str] = None
     ip: Optional[str] = None
 
 
 @dataclass
 class HealthReport:
-    """Result of :func:`health_check` for a single container."""
+    """Result of :func:`health_check` for a single guest."""
 
     vmid: int
     status: str
+    guest_type: Optional[str] = None
     pingable: Optional[bool] = None
     ssh_open: Optional[bool] = None
     ip: Optional[str] = None
@@ -81,14 +83,21 @@ class ProxmoxWebhookNotificationConfig:
     severities: list[str] = field(default_factory=list)
 
 
-_PCT_OPTION_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+_GUEST_OPTION_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 _DISK_SIZE_RE = re.compile(r"^\d+[KkMmGgTt]$")
+_MISSING_GUEST_PATTERNS = (
+    "does not exist",
+    "not exist",
+    "not found",
+    "no such",
+    "configuration file",
+)
 
 
-def _validate_pct_option(name: str) -> None:
-    if not _PCT_OPTION_RE.match(name):
+def _validate_guest_option(name: str) -> None:
+    if not _GUEST_OPTION_RE.match(name):
         raise ValueError(
-            f"Invalid pct option name: {name!r}. "
+            f"Invalid guest option name: {name!r}. "
             "Use lowercase letters, digits, and hyphens."
         )
 
@@ -109,6 +118,60 @@ def _run_on_host(
     """Execute ``cmd`` on ``host`` over SSH, returning the completed process."""
     opts = _ssh_opts(host.ssh_key)
     return _ssh_run(host.address, host.user, opts, cmd, dry_run=dry_run, log_cmd=log_cmd)
+
+
+def _looks_like_missing_guest(result: subprocess.CompletedProcess[str]) -> bool:
+    text = "\n".join(filter(None, [result.stdout, result.stderr])).lower()
+    return any(pattern in text for pattern in _MISSING_GUEST_PATTERNS)
+
+
+def _parse_status_output(stdout: str) -> str:
+    out = (stdout or "").strip()
+    if ":" in out:
+        return out.split(":", 1)[1].strip() or "unknown"
+    return out or "unknown"
+
+
+def _run_guest_command(
+    host: ProxmoxHost,
+    vmid: int,
+    pct_cmd: str,
+    qm_cmd: str,
+    *,
+    dry_run: bool = False,
+    log_cmd: Optional[str] = None,
+) -> tuple[subprocess.CompletedProcess[str], str]:
+    """Run a pct/qm command pair, retrying with qm when pct reports no guest."""
+    if dry_run:
+        _, guest_type = _get_guest_status(host, vmid)
+        cmd = qm_cmd if guest_type == "vm" else pct_cmd
+        result = _run_on_host(host, cmd, dry_run=True, log_cmd=log_cmd)
+        return result, guest_type
+
+    pct_result = _run_on_host(host, pct_cmd, log_cmd=log_cmd)
+    if pct_result.returncode == 0:
+        return pct_result, "lxc"
+    if not _looks_like_missing_guest(pct_result):
+        return pct_result, "lxc"
+    qm_result = _run_on_host(host, qm_cmd, log_cmd=log_cmd)
+    return qm_result, "vm"
+
+
+def _get_guest_status(host: ProxmoxHost, vmid: int) -> tuple[str, str]:
+    """Return ``(guest_type, status)`` for ``vmid``."""
+    result, guest_type = _run_guest_command(
+        host,
+        vmid,
+        f"pct status {int(vmid)}",
+        f"qm status {int(vmid)}",
+    )
+    if result.returncode != 0:
+        tool = "qm" if guest_type == "vm" else "pct"
+        raise ProxmoxManageError(
+            f"{tool} status {vmid} failed on {host.address}: "
+            f"{(result.stderr or result.stdout or '').strip() or 'unknown error'}"
+        )
+    return guest_type, _parse_status_output(result.stdout)
 
 
 def _parse_pct_list(stdout: str) -> list[ContainerInfo]:
@@ -154,41 +217,84 @@ def _parse_pct_list(stdout: str) -> list[ContainerInfo]:
             else:
                 lock = None
                 name = " ".join(parts[2:])
-        rows.append(ContainerInfo(vmid=vmid, status=status, name=name, lock=lock))
+        rows.append(ContainerInfo(vmid=vmid, status=status, name=name, guest_type="lxc", lock=lock))
+    return rows
+
+
+def _parse_qm_list(stdout: str) -> list[ContainerInfo]:
+    """Parse ``qm list`` output into :class:`ContainerInfo` rows."""
+    rows: list[ContainerInfo] = []
+    lines = [ln for ln in (stdout or "").splitlines() if ln.strip()]
+    if not lines:
+        return rows
+    header = lines[0].split()
+    if len(header) >= 3 and header[0].upper() == "VMID" and header[1].upper() == "NAME":
+        data_lines = lines[1:]
+    elif header and header[0].isdigit():
+        data_lines = lines
+    else:
+        return rows
+    for line in data_lines:
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        try:
+            vmid = int(parts[0])
+        except ValueError:
+            continue
+        name = parts[1]
+        status = parts[2]
+        rows.append(ContainerInfo(vmid=vmid, status=status, name=name, guest_type="vm"))
     return rows
 
 
 def list_containers(
     host: ProxmoxHost, *, dry_run: bool = False
 ) -> list[ContainerInfo]:
-    """Return the LXC containers on ``host`` (sorted by VMID)."""
+    """Return Proxmox guests on ``host`` (sorted by VMID)."""
     if dry_run:
         return []
-    result = _run_on_host(host, "pct list")
-    if result.returncode != 0:
+    pct_result = _run_on_host(host, "pct list")
+    if pct_result.returncode != 0:
         raise ProxmoxManageError(
             f"pct list failed on {host.address}: "
-            f"{(result.stderr or result.stdout or '').strip() or 'no output'}"
+            f"{(pct_result.stderr or pct_result.stdout or '').strip() or 'no output'}"
         )
-    rows = _parse_pct_list(result.stdout)
+    qm_result = _run_on_host(host, "qm list")
+    if qm_result.returncode != 0:
+        raise ProxmoxManageError(
+            f"qm list failed on {host.address}: "
+            f"{(qm_result.stderr or qm_result.stdout or '').strip() or 'no output'}"
+        )
+    rows_by_vmid: dict[int, ContainerInfo] = {
+        row.vmid: row for row in _parse_pct_list(pct_result.stdout)
+    }
+    for row in _parse_qm_list(qm_result.stdout):
+        rows_by_vmid[row.vmid] = row
+    rows = list(rows_by_vmid.values())
     rows.sort(key=lambda r: r.vmid)
     return rows
 
 
-_NET0_IP_RE = re.compile(r"(?:^|,)ip=([^,\s]+)")
+_NET0_IP_RE = re.compile(r"\bip=([^,\s]+)")
 
 
 def get_container_ip(
     host: ProxmoxHost, vmid: int, *, dry_run: bool = False
 ) -> Optional[str]:
-    """Return the configured IPv4 address from ``pct config`` (no CIDR)."""
+    """Return the configured IPv4 address from guest config (no CIDR)."""
     if dry_run:
         return None
-    result = _run_on_host(host, f"pct config {int(vmid)}")
+    result, _guest_type = _run_guest_command(
+        host,
+        vmid,
+        f"pct config {int(vmid)}",
+        f"qm config {int(vmid)}",
+    )
     if result.returncode != 0:
         return None
     for line in (result.stdout or "").splitlines():
-        if not line.startswith("net0:"):
+        if not (line.startswith("net0:") or line.startswith("ipconfig0:")):
             continue
         match = _NET0_IP_RE.search(line)
         if not match:
@@ -198,29 +304,22 @@ def get_container_ip(
 
 
 def get_container_status(host: ProxmoxHost, vmid: int) -> str:
-    """Return the textual status from ``pct status`` (e.g. ``running``)."""
-    result = _run_on_host(host, f"pct status {int(vmid)}")
-    if result.returncode != 0:
-        raise ProxmoxManageError(
-            f"pct status {vmid} failed on {host.address}: "
-            f"{(result.stderr or '').strip() or 'unknown error'}"
-        )
-    # Output format: "status: running"
-    out = (result.stdout or "").strip()
-    if ":" in out:
-        return out.split(":", 1)[1].strip() or "unknown"
-    return out or "unknown"
+    """Return the textual status from ``pct status``/``qm status``."""
+    _guest_type, status = _get_guest_status(host, vmid)
+    return status
 
 
 def start_container(host: ProxmoxHost, vmid: int) -> None:
-    """Start an LXC container on ``host``; idempotent if already running."""
-    current = get_container_status(host, vmid)
+    """Start a guest on ``host``; idempotent if already running."""
+    guest_type, current = _get_guest_status(host, vmid)
     if current == "running":
         return
-    result = _run_on_host(host, f"pct start {int(vmid)}")
+    cmd = f"qm start {int(vmid)}" if guest_type == "vm" else f"pct start {int(vmid)}"
+    result = _run_on_host(host, cmd)
     if result.returncode != 0:
+        tool = "qm" if guest_type == "vm" else "pct"
         raise ProxmoxManageError(
-            f"pct start {vmid} failed on {host.address}: "
+            f"{tool} start {vmid} failed on {host.address}: "
             f"{(result.stderr or '').strip() or 'unknown error'}"
         )
 
@@ -228,15 +327,18 @@ def start_container(host: ProxmoxHost, vmid: int) -> None:
 def stop_container(
     host: ProxmoxHost, vmid: int, *, force: bool = False
 ) -> None:
-    """Stop an LXC container.
+    """Stop a guest.
 
-    By default uses ``pct shutdown`` (graceful). When ``force`` is True falls
-    back to ``pct stop`` (immediate). Idempotent if already stopped.
+    By default uses guest shutdown (graceful). When ``force`` is True it falls
+    back to the immediate stop command. Idempotent if already stopped.
     """
-    current = get_container_status(host, vmid)
+    guest_type, current = _get_guest_status(host, vmid)
     if current == "stopped":
         return
-    cmd = f"pct stop {int(vmid)}" if force else f"pct shutdown {int(vmid)}"
+    if guest_type == "vm":
+        cmd = f"qm stop {int(vmid)}" if force else f"qm shutdown {int(vmid)}"
+    else:
+        cmd = f"pct stop {int(vmid)}" if force else f"pct shutdown {int(vmid)}"
     result = _run_on_host(host, cmd)
     if result.returncode != 0:
         raise ProxmoxManageError(
@@ -252,30 +354,37 @@ def destroy_container(
     purge: bool = True,
     force: bool = False,
 ) -> None:
-    """Destroy an LXC container.
+    """Destroy a guest.
 
-    The container is stopped first if needed. ``purge`` removes the container
+    The guest is stopped first if needed. ``purge`` removes the guest
     from backup/HA configs as well. Pass ``force`` to skip stop verification
     and use ``pct stop`` instead of shutdown.
     """
     try:
-        current = get_container_status(host, vmid)
+        guest_type, current = _get_guest_status(host, vmid)
     except ProxmoxManageError:
+        guest_type = "lxc"
         current = "unknown"
     if current == "running":
         stop_container(host, vmid, force=force)
     flags: StrList = []
-    if purge:
-        flags.append("--purge")
-    if force:
-        flags.append("--force")
-    cmd = f"pct destroy {int(vmid)}"
-    if flags:
-        cmd += " " + " ".join(flags)
+    if guest_type == "vm":
+        if purge:
+            flags.extend(["--purge", "1", "--destroy-unreferenced-disks", "1"])
+        cmd = shlex.join(["qm", "destroy", str(int(vmid)), *flags])
+    else:
+        if purge:
+            flags.append("--purge")
+        if force:
+            flags.append("--force")
+        cmd = f"pct destroy {int(vmid)}"
+        if flags:
+            cmd += " " + " ".join(flags)
     result = _run_on_host(host, cmd)
     if result.returncode != 0:
+        tool = "qm" if guest_type == "vm" else "pct"
         raise ProxmoxManageError(
-            f"pct destroy {vmid} failed on {host.address}: "
+            f"{tool} destroy {vmid} failed on {host.address}: "
             f"{(result.stderr or '').strip() or 'unknown error'}"
         )
 
@@ -283,13 +392,19 @@ def destroy_container(
 def get_container_config(
     host: ProxmoxHost, vmid: int, *, dry_run: bool = False
 ) -> dict[str, str]:
-    """Return the current configuration for ``vmid`` as a key/value dict."""
+    """Return the current guest configuration for ``vmid`` as a key/value dict."""
     if dry_run:
         return {}
-    result = _run_on_host(host, f"pct config {int(vmid)}")
+    result, guest_type = _run_guest_command(
+        host,
+        vmid,
+        f"pct config {int(vmid)}",
+        f"qm config {int(vmid)}",
+    )
     if result.returncode != 0:
+        tool = "qm" if guest_type == "vm" else "pct"
         raise ProxmoxManageError(
-            f"pct config {vmid} failed on {host.address}: "
+            f"{tool} config {vmid} failed on {host.address}: "
             f"{(result.stderr or result.stdout or '').strip() or 'no output'}"
         )
     config: dict[str, str] = {}
@@ -308,15 +423,21 @@ def get_container_pending(
 ) -> dict[str, str]:
     """Return pending (unapplied) configuration changes for ``vmid``.
 
-    Returns a dict of option -> new-value for options that require a container
+    Returns a dict of option -> new-value for options that require a guest
     restart to take effect.
     """
     if dry_run:
         return {}
-    result = _run_on_host(host, f"pct pending {int(vmid)}")
+    result, guest_type = _run_guest_command(
+        host,
+        vmid,
+        f"pct pending {int(vmid)}",
+        f"qm pending {int(vmid)}",
+    )
     if result.returncode != 0:
+        tool = "qm" if guest_type == "vm" else "pct"
         raise ProxmoxManageError(
-            f"pct pending {vmid} failed on {host.address}: "
+            f"{tool} pending {vmid} failed on {host.address}: "
             f"{(result.stderr or result.stdout or '').strip() or 'no output'}"
         )
     pending: dict[str, str] = {}
@@ -337,23 +458,33 @@ def reconfigure_container(
     *,
     dry_run: bool = False,
 ) -> None:
-    """Apply ``pct set`` options to ``vmid`` on ``host``.
+    """Apply ``pct set``/``qm set`` options to ``vmid`` on ``host``.
 
     ``options`` maps option names (e.g. ``"cores"``) to string values.
-    Changes that require a container restart are queued as pending by Proxmox.
+    Changes that require a guest restart are queued as pending by Proxmox.
     """
     if not options:
         return
     for name in options:
-        _validate_pct_option(name)
-    parts: list[str] = ["pct", "set", str(int(vmid))]
+        _validate_guest_option(name)
+    pct_parts: list[str] = ["pct", "set", str(int(vmid))]
+    qm_parts: list[str] = ["qm", "set", str(int(vmid))]
     for name, value in options.items():
-        parts.extend([f"--{name}", value])
-    cmd = shlex.join(parts)
-    result = _run_on_host(host, cmd, dry_run=dry_run)
+        pct_parts.extend([f"--{name}", value])
+        qm_parts.extend([f"--{name}", value])
+    pct_cmd = shlex.join(pct_parts)
+    qm_cmd = shlex.join(qm_parts)
+    result, guest_type = _run_guest_command(
+        host,
+        vmid,
+        pct_cmd,
+        qm_cmd,
+        dry_run=dry_run,
+    )
     if result.returncode != 0:
+        tool = "qm" if guest_type == "vm" else "pct"
         raise ProxmoxManageError(
-            f"pct set {vmid} failed on {host.address}: "
+            f"{tool} set {vmid} failed on {host.address}: "
             f"{(result.stderr or result.stdout or '').strip() or 'unknown error'}"
         )
 
@@ -369,8 +500,8 @@ def modify_container(
     """Change CPU cores and/or memory allocation for ``vmid`` on ``host``.
 
     ``cores`` sets the number of vCPU cores. ``memory_mb`` sets RAM in
-    mebibytes (1 GiB = 1024 MiB). Both changes may require a container
-    restart to take effect on a running container.
+    mebibytes (1 GiB = 1024 MiB). Both changes may require a guest
+    restart to take effect on a running guest.
     """
     options: dict[str, str] = {}
     if cores is not None:
@@ -394,23 +525,31 @@ def resize_container_disk(
     *,
     dry_run: bool = False,
 ) -> None:
-    """Increase a container disk volume to ``size`` using ``pct resize``.
+    """Increase a guest disk volume to ``size`` using ``pct resize``/``qm resize``.
 
     ``volume`` is the volume name (e.g. ``"rootfs"``). ``size`` is the new
     absolute size with a unit suffix, e.g. ``"20G"``. Proxmox only supports
     increasing disk size.
     """
-    _validate_pct_option(volume)
+    _validate_guest_option(volume)
     if not _DISK_SIZE_RE.match(size):
         raise ValueError(
             f"Invalid disk size: {size!r}. Use a positive integer followed by "
             "K, M, G, or T (e.g. '20G')."
         )
-    cmd = shlex.join(["pct", "resize", str(int(vmid)), volume, size])
-    result = _run_on_host(host, cmd, dry_run=dry_run)
+    pct_cmd = shlex.join(["pct", "resize", str(int(vmid)), volume, size])
+    qm_cmd = shlex.join(["qm", "resize", str(int(vmid)), volume, size])
+    result, guest_type = _run_guest_command(
+        host,
+        vmid,
+        pct_cmd,
+        qm_cmd,
+        dry_run=dry_run,
+    )
     if result.returncode != 0:
+        tool = "qm" if guest_type == "vm" else "pct"
         raise ProxmoxManageError(
-            f"pct resize {vmid} {volume} {size} failed on {host.address}: "
+            f"{tool} resize {vmid} {volume} {size} failed on {host.address}: "
             f"{(result.stderr or result.stdout or '').strip() or 'unknown error'}"
         )
 
@@ -613,14 +752,14 @@ def health_check(
 ) -> HealthReport:
     """Run a best-effort health check against ``vmid`` on ``host``.
 
-    Combines ``pct status`` with a ping from the host and (optionally) a
+    Combines guest status with a ping from the host and (optionally) a
     TCP probe on port 22. Network probes are recorded but never raise — the
-    Proxmox host occasionally lacks ``ping`` or the container may be on an
+    Proxmox host occasionally lacks ``ping`` or the guest may be on an
     isolated bridge.
     """
     report = HealthReport(vmid=vmid, status="unknown")
     try:
-        report.status = get_container_status(host, vmid)
+        report.guest_type, report.status = _get_guest_status(host, vmid)
     except ProxmoxManageError as exc:
         report.notes.append(str(exc))
         return report
@@ -632,7 +771,7 @@ def health_check(
         return report
 
     if report.status != "running":
-        report.notes.append(f"Container is not running (status={report.status})")
+        report.notes.append(f"Guest is not running (status={report.status})")
         return report
 
     ping_cmd = (

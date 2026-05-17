@@ -270,7 +270,7 @@ infra_tools.py proxmox add <name> <address> [--user USER] [--key PATH]
 infra_tools.py proxmox hosts
 infra_tools.py proxmox remove <name>
 
-# Container lifecycle
+# Guest lifecycle
 infra_tools.py proxmox ls <host>
 infra_tools.py proxmox status <host> <vmid>
 infra_tools.py proxmox start <host> <vmid>
@@ -278,7 +278,7 @@ infra_tools.py proxmox stop <host> <vmid> [--force]
 infra_tools.py proxmox destroy <host> <vmid> [-y] [--force]
 infra_tools.py proxmox health <host> <vmid> [--no-ssh]
 
-# Container configuration
+# Guest configuration
 infra_tools.py proxmox config <host> <vmid> [--pending]
 infra_tools.py proxmox reconfigure <host> <vmid> --set KEY=VALUE [--set ...]
 infra_tools.py proxmox modify <host> <vmid> [--cores N] [--memory N[M|G]]
@@ -292,7 +292,7 @@ infra_tools.py proxmox notifications test-webhook <host>
 infra_tools.py proxmox [shell]
 ```
 
-`config` shows the running pct configuration; `--pending` shows changes that take effect on next restart.
+`config` shows the running guest configuration from `pct` or `qm`, and `--pending` shows changes that take effect on next restart.
 `modify` and `reconfigure` changes to a running guest are queued as pending by Proxmox.
 All subcommands accept `--dry-run` to print the remote command without executing it.
 

@@ -202,13 +202,13 @@ python3 infra_tools.py proxmox add pve1 10.0.0.10 --user root --ssh-key ~/.ssh/p
 python3 infra_tools.py proxmox hosts
 python3 infra_tools.py proxmox ls pve1
 
-# Container lifecycle
+# Guest lifecycle
 python3 infra_tools.py proxmox start pve1 101
 python3 infra_tools.py proxmox stop pve1 101
 python3 infra_tools.py proxmox health pve1 101
 python3 infra_tools.py proxmox destroy pve1 101 -y
 
-# Container configuration and resource changes
+# Guest configuration and resource changes
 python3 infra_tools.py proxmox config pve1 101
 python3 infra_tools.py proxmox modify pve1 101 --cores 4 --memory 8G
 python3 infra_tools.py proxmox reconfigure pve1 101 --set hostname=newbox
