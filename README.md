@@ -64,10 +64,12 @@ python3 infra_tools.py setup server_lite 192.168.1.10 \
   --scrub /mnt/backup .pardatabase 5% weekly
 ```
 
-### End-to-End: One Proxmox Server + Dev Workstation Container
+### End-to-End: One Proxmox Server + Dev Workstation
 
 A full start-to-finish setup with a single Proxmox node at `10.0.0.10` and a Debian
-dev-workstation LXC at `10.0.0.50`. Run all commands from your local orchestration host.
+dev workstation at `10.0.0.50`. Run all commands from your local orchestration host.
+The default flow uses an unprivileged LXC; a VM variant follows for cases where you
+need GPU passthrough, kernel-level tuning, or a stronger isolation boundary.
 
 ```bash
 # 0. (One-time) install infra_tools onto the orchestration host
@@ -115,7 +117,43 @@ Connect to the workstation over RDP at `10.0.0.50:3389` as `devuser`, or SSH in 
 a CLI session. To rebuild from the saved configuration later, run
 `infra_tools deploy dev-01`.
 
-### Hosted Proxmox LXC
+#### Alternate: provision the workstation as a VM
+
+Use a VM instead of an LXC when you need GPU passthrough, kernel hardening (sysctl),
+swap, UFW, fail2ban, or hardware-accelerated RDP — see
+[`docs/MACHINE_TYPES.md`](docs/MACHINE_TYPES.md) for the full capability matrix.
+
+Replace step 3 with the VM variant below. The Proxmox host setup (step 1) and
+registration (step 2) are unchanged.
+
+```bash
+# 3b. Provision the workstation as a Debian VM via qm + cloud-init.
+#     --machine vm switches to the VM flow and unlocks GPU/UFW/sysctl features.
+#     Root storage uses an LVM-backed pool (e.g. local-lvm) rather than `auto`.
+#     The cloud image is fetched from the curated catalog in lib/cloud_images.py;
+#     pass --image URL_OR_VOLUME to override.
+infra_tools setup workstation_dev 10.0.0.50 devuser \
+  --machine vm \
+  --hosted 10.0.0.10 \
+  --hosted-user root \
+  --hosted-key ~/.ssh/proxmox_ed25519 \
+  --base debian \
+  --name dev-01-vm \
+  --cores 4 \
+  --memory 8G \
+  --storage root local-lvm 40G \
+  --desktop i3 \
+  --rdp \
+  --browser firefox \
+  --ruby --node --go --python \
+  --office
+```
+
+`infra_tools proxmox` subcommands work the same way for VMs as for LXCs — the
+vmid returned by step 3b can be used directly with `proxmox health`, `modify`,
+`stop`, `destroy`, etc.
+
+### Hosted Proxmox LXC or VM
 ```bash
 # Create an LXC on Proxmox, then run the normal web-server setup against it
 python3 infra_tools.py setup server_web 10.0.0.50 admin \
@@ -133,11 +171,31 @@ python3 infra_tools.py setup server_web 10.0.0.50 admin \
   --deploy example.com https://github.com/user/repo.git
 ```
 
-`--storage` is repeatable: `root` is required as `--storage root POOL AMOUNT`, and `template` is optional as `--storage template POOL`.
+For a VM instead of an LXC, add `--machine vm`, point `--storage root` at an
+LVM-backed pool, and drop `--storage template` (VMs use a cloud-image catalog,
+not an LXC template pool):
 
-### Managing Proxmox Containers
+```bash
+python3 infra_tools.py setup server_web 10.0.0.50 admin \
+  --machine vm \
+  --hosted 10.0.0.10 \
+  --hosted-user root \
+  --hosted-key ~/.ssh/proxmox_ed25519 \
+  --memory 4G --cores 2 \
+  --storage root local-lvm 32G \
+  --base debian \
+  --name web-01-vm \
+  --ruby --node \
+  --ssl --ssl-email admin@example.com \
+  --deploy example.com https://github.com/user/repo.git
+```
 
-Register Proxmox hosts and manage their LXC containers from a workspace registry. Run `proxmox` with no
+`--storage` is repeatable: `root` is required as `--storage root POOL AMOUNT`, and `template` is optional as `--storage template POOL` (LXC only).
+
+### Managing Proxmox Containers and VMs
+
+Register Proxmox hosts and manage their LXC containers or VMs from a workspace registry. The same
+subcommands work for both — VMIDs are unique per node regardless of guest type. Run `proxmox` with no
 subcommand to enter an interactive shell, or use subcommands directly:
 
 ```bash
