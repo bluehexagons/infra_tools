@@ -9,6 +9,7 @@ Provides helpers for:
 - Health-checking a guest (status + ping + optional SSH probe).
 - Reconfiguring guests (CPU, memory, arbitrary ``pct``/``qm`` options).
 - Resizing guest disks.
+- Snapshot management (create, list, rollback, delete).
 - Configuring native Proxmox notification webhooks.
 
 All commands run via ``ssh root@<node>`` using the existing
@@ -74,6 +75,15 @@ class HealthReport:
 
 
 @dataclass
+class SnapshotInfo:
+    """One snapshot entry returned by ``pct listsnapshot``/``qm listsnapshot``."""
+
+    name: str
+    description: str = ""
+    is_current: bool = False
+
+
+@dataclass
 class ProxmoxWebhookNotificationConfig:
     """Configuration for native Proxmox webhook notifications."""
 
@@ -84,6 +94,7 @@ class ProxmoxWebhookNotificationConfig:
 
 
 _GUEST_OPTION_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+_SNAPSHOT_NAME_RE = re.compile(r"^[a-zA-Z0-9_]{1,40}$")
 _DISK_SIZE_RE = re.compile(r"^\d+[KkMmGgTt]$")
 _MISSING_GUEST_PATTERNS = (
     "does not exist",
@@ -549,6 +560,138 @@ def resize_container_disk(
         tool = "qm" if guest_type == "vm" else "pct"
         raise ProxmoxManageError(
             f"{tool} resize {vmid} {volume} {size} failed on {host.address}: "
+            f"{(result.stderr or result.stdout or '').strip() or 'unknown error'}"
+        )
+
+
+def _validate_snapshot_name(name: str) -> None:
+    if not _SNAPSHOT_NAME_RE.match(name):
+        raise ValueError(
+            f"Invalid snapshot name: {name!r}. "
+            "Use letters, digits, and underscores only (1–40 characters)."
+        )
+
+
+def _parse_listsnapshot(stdout: str) -> list[SnapshotInfo]:
+    """Parse ``pct listsnapshot``/``qm listsnapshot`` output into snapshot rows."""
+    snapshots: list[SnapshotInfo] = []
+    for line in (stdout or "").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        # Both pct and qm prefix the current state with "->" or "->".
+        is_current = stripped.startswith("->")
+        text = stripped.lstrip("-> ").strip()
+        parts = text.split(None, 1)
+        if not parts:
+            continue
+        snap_name = parts[0]
+        if snap_name.lower() in {"name", "snapname"}:
+            continue
+        description = parts[1].strip() if len(parts) > 1 else ""
+        snapshots.append(
+            SnapshotInfo(name=snap_name, description=description, is_current=is_current)
+        )
+    return snapshots
+
+
+def list_snapshots(
+    host: ProxmoxHost,
+    vmid: int,
+    *,
+    dry_run: bool = False,
+) -> list[SnapshotInfo]:
+    """Return snapshots for ``vmid`` on ``host`` (sorted by name)."""
+    if dry_run:
+        return []
+    result, _guest_type = _run_guest_command(
+        host,
+        vmid,
+        f"pct listsnapshot {int(vmid)}",
+        f"qm listsnapshot {int(vmid)}",
+    )
+    if result.returncode != 0:
+        raise ProxmoxManageError(
+            f"listsnapshot {vmid} failed on {host.address}: "
+            f"{(result.stderr or result.stdout or '').strip() or 'unknown error'}"
+        )
+    return sorted(_parse_listsnapshot(result.stdout), key=lambda s: s.name)
+
+
+def snapshot_guest(
+    host: ProxmoxHost,
+    vmid: int,
+    name: str,
+    *,
+    description: str = "",
+    dry_run: bool = False,
+) -> None:
+    """Create a snapshot named ``name`` for ``vmid`` on ``host``."""
+    _validate_snapshot_name(name)
+    pct_parts = ["pct", "snapshot", str(int(vmid)), name]
+    qm_parts = ["qm", "snapshot", str(int(vmid)), name]
+    if description:
+        pct_parts += ["--description", description]
+        qm_parts += ["--description", description]
+    result, guest_type = _run_guest_command(
+        host,
+        vmid,
+        shlex.join(pct_parts),
+        shlex.join(qm_parts),
+        dry_run=dry_run,
+    )
+    if result.returncode != 0:
+        tool = "qm" if guest_type == "vm" else "pct"
+        raise ProxmoxManageError(
+            f"{tool} snapshot {vmid} {name!r} failed on {host.address}: "
+            f"{(result.stderr or result.stdout or '').strip() or 'unknown error'}"
+        )
+
+
+def rollback_guest(
+    host: ProxmoxHost,
+    vmid: int,
+    name: str,
+    *,
+    dry_run: bool = False,
+) -> None:
+    """Roll back ``vmid`` to snapshot ``name`` on ``host``."""
+    _validate_snapshot_name(name)
+    result, guest_type = _run_guest_command(
+        host,
+        vmid,
+        shlex.join(["pct", "rollback", str(int(vmid)), name]),
+        shlex.join(["qm", "rollback", str(int(vmid)), name]),
+        dry_run=dry_run,
+    )
+    if result.returncode != 0:
+        tool = "qm" if guest_type == "vm" else "pct"
+        raise ProxmoxManageError(
+            f"{tool} rollback {vmid} {name!r} failed on {host.address}: "
+            f"{(result.stderr or result.stdout or '').strip() or 'unknown error'}"
+        )
+
+
+def delete_snapshot(
+    host: ProxmoxHost,
+    vmid: int,
+    name: str,
+    *,
+    dry_run: bool = False,
+) -> None:
+    """Delete snapshot ``name`` for ``vmid`` on ``host``."""
+    _validate_snapshot_name(name)
+    result, guest_type = _run_guest_command(
+        host,
+        vmid,
+        shlex.join(["pct", "delsnapshot", str(int(vmid)), name]),
+        shlex.join(["qm", "delsnapshot", str(int(vmid)), name]),
+        dry_run=dry_run,
+    )
+    if result.returncode != 0:
+        tool = "qm" if guest_type == "vm" else "pct"
+        raise ProxmoxManageError(
+            f"{tool} delsnapshot {vmid} {name!r} failed on {host.address}: "
             f"{(result.stderr or result.stdout or '').strip() or 'unknown error'}"
         )
 

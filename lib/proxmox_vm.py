@@ -23,6 +23,7 @@ The flow is:
 from __future__ import annotations
 
 import shlex
+import subprocess
 import time
 from dataclasses import dataclass
 from typing import Optional, cast
@@ -282,7 +283,6 @@ def _upload_user_data(
         f"{user}@{node_ip}",
         f"cat > {shlex.quote(remote_path)}",
     ]
-    import subprocess
     proc = subprocess.run(
         write_cmd, input=rendered, text=True, capture_output=True, timeout=60
     )

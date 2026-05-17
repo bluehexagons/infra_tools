@@ -18,9 +18,12 @@ from lib.proxmox_manage import (
     DEFAULT_NOTIFICATION_ENDPOINT,
     HealthReport,
     ProxmoxManageError,
+    SnapshotInfo,
     _build_webhook_notification_commands,
+    _parse_listsnapshot,
     _parse_pct_list,
     _parse_qm_list,
+    delete_snapshot,
     destroy_container,
     get_container_config,
     get_container_ip,
@@ -29,10 +32,13 @@ from lib.proxmox_manage import (
     health_check,
     install_webhook_notifications,
     list_containers,
+    list_snapshots,
     modify_container,
     reconfigure_container,
     resize_container_disk,
+    rollback_guest,
     send_webhook_test_notification,
+    snapshot_guest,
     start_container,
     stop_container,
     ProxmoxWebhookNotificationConfig,
@@ -691,6 +697,129 @@ class TestResizeContainerDisk(unittest.TestCase):
         resize_container_disk(_host(), 100, "scsi0", "20G")
         self.assertIn("qm", mock_run.call_args.args[3])
         self.assertIn("resize", mock_run.call_args.args[3])
+
+
+class TestParseListsnapshot(unittest.TestCase):
+    def test_parses_pct_format(self) -> None:
+        out = (
+            "-> current (no snapshot)\n"
+            "   snap1 (2024-01-01 12:00:00)\n"
+            "   snap2 before-upgrade\n"
+        )
+        snaps = _parse_listsnapshot(out)
+        names = [s.name for s in snaps]
+        self.assertIn("snap1", names)
+        self.assertIn("snap2", names)
+
+    def test_marks_current_entry(self) -> None:
+        out = "-> current\n   snap1\n"
+        snaps = _parse_listsnapshot(out)
+        current = [s for s in snaps if s.is_current]
+        self.assertEqual(len(current), 1)
+        self.assertEqual(current[0].name, "current")
+
+    def test_empty_output(self) -> None:
+        self.assertEqual(_parse_listsnapshot(""), [])
+
+    def test_skips_header_line(self) -> None:
+        out = "snapname parent state description\nsnap1\n"
+        snaps = _parse_listsnapshot(out)
+        names = [s.name for s in snaps]
+        self.assertNotIn("snapname", names)
+        self.assertIn("snap1", names)
+
+
+class TestSnapshotGuest(unittest.TestCase):
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_creates_pct_snapshot(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = _completed()
+        snapshot_guest(_host(), 100, "snap1")
+        cmd = mock_run.call_args[0][3]
+        self.assertIn("pct", cmd)
+        self.assertIn("snapshot", cmd)
+        self.assertIn("100", cmd)
+        self.assertIn("snap1", cmd)
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_includes_description(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = _completed()
+        snapshot_guest(_host(), 100, "snap1", description="before upgrade")
+        cmd = mock_run.call_args[0][3]
+        self.assertIn("--description", cmd)
+        self.assertIn("before upgrade", cmd)
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_vm_uses_qm_snapshot(self, mock_run: MagicMock) -> None:
+        mock_run.side_effect = [
+            _completed(stderr="CT 100 does not exist", returncode=2),
+            _completed(),
+        ]
+        snapshot_guest(_host(), 100, "snap1")
+        self.assertIn("qm", mock_run.call_args[0][3])
+
+    def test_invalid_name_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            snapshot_guest(_host(), 100, "bad name!")
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_raises_on_remote_failure(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = _completed(returncode=1, stderr="error")
+        with self.assertRaises(ProxmoxManageError):
+            snapshot_guest(_host(), 100, "snap1")
+
+
+class TestRollbackGuest(unittest.TestCase):
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_builds_pct_rollback_command(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = _completed()
+        rollback_guest(_host(), 100, "snap1")
+        cmd = mock_run.call_args[0][3]
+        self.assertIn("pct", cmd)
+        self.assertIn("rollback", cmd)
+        self.assertIn("snap1", cmd)
+
+    def test_invalid_name_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            rollback_guest(_host(), 100, "bad-name!")
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_raises_on_remote_failure(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = _completed(returncode=1, stderr="snap not found")
+        with self.assertRaises(ProxmoxManageError):
+            rollback_guest(_host(), 100, "snap1")
+
+
+class TestDeleteSnapshot(unittest.TestCase):
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_builds_pct_delsnapshot_command(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = _completed()
+        delete_snapshot(_host(), 100, "snap1")
+        cmd = mock_run.call_args[0][3]
+        self.assertIn("pct", cmd)
+        self.assertIn("delsnapshot", cmd)
+        self.assertIn("snap1", cmd)
+
+    def test_invalid_name_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            delete_snapshot(_host(), 100, "bad name!")
+
+
+class TestListSnapshots(unittest.TestCase):
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_returns_parsed_list(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = _completed(stdout="snap1\nsnap2\n")
+        snaps = list_snapshots(_host(), 100)
+        self.assertEqual([s.name for s in snaps], ["snap1", "snap2"])
+
+    def test_dry_run_returns_empty(self) -> None:
+        snaps = list_snapshots(_host(), 100, dry_run=True)
+        self.assertEqual(snaps, [])
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_raises_on_failure(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = _completed(returncode=1, stderr="error")
+        with self.assertRaises(ProxmoxManageError):
+            list_snapshots(_host(), 100)
 
 
 class TestDryRunGuestRouting(unittest.TestCase):

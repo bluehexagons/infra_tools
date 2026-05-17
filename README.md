@@ -222,6 +222,12 @@ python3 infra_tools.py proxmox modify pve1 101 --cores 4 --memory 8G
 python3 infra_tools.py proxmox reconfigure pve1 101 --set hostname=newbox
 python3 infra_tools.py proxmox resize-disk pve1 101 rootfs 40G
 
+# Snapshots
+python3 infra_tools.py proxmox snapshots pve1 101
+python3 infra_tools.py proxmox snapshot pve1 101 pre-upgrade --description "before kernel update"
+python3 infra_tools.py proxmox rollback pve1 101 pre-upgrade
+python3 infra_tools.py proxmox delsnapshot pve1 101 pre-upgrade
+
 # Native Proxmox webhook notifications
 python3 infra_tools.py proxmox notifications install-webhook pve1 https://notify.example/hook --send-test
 
@@ -320,13 +326,15 @@ Before broad rollout, the highest-value manual validation is a short Proxmox
 smoke pass on one VM-first flow plus one LXC compatibility flow:
 
 ```bash
+# 0. Register the Proxmox host and cache its defaults (skip if already done)
+infra_tools.py proxmox add pve1 10.0.0.10 --user root --key ~/.ssh/proxmox_ed25519
+infra_tools.py proxmox probe pve1
+
 # 1. VM-first hosted setup (primary path)
 infra_tools.py setup workstation_dev 10.0.0.50 devuser \
-  --hosted 10.0.0.10 \
-  --hosted-user root \
-  --hosted-key ~/.ssh/proxmox_ed25519 \
+  --hosted pve1 \
   --memory 8G \
-  --storage root local-lvm 40G \
+  --storage root 40G \
   --cores 4 \
   --name dev-01-vm \
   --rdp
@@ -335,6 +343,7 @@ infra_tools.py setup workstation_dev 10.0.0.50 devuser \
 infra_tools.py proxmox ls pve1
 infra_tools.py proxmox health pve1 <vmid>
 infra_tools.py proxmox config pve1 <vmid>
+infra_tools.py proxmox snapshot pve1 <vmid> pre-modify
 infra_tools.py proxmox modify pve1 <vmid> --cores 6 --memory 12G
 infra_tools.py proxmox stop pve1 <vmid>
 infra_tools.py proxmox start pve1 <vmid>
@@ -342,12 +351,10 @@ infra_tools.py proxmox start pve1 <vmid>
 # 3. LXC compatibility check (basic support path)
 infra_tools.py setup server_lite 10.0.0.60 appuser \
   --machine unprivileged \
-  --hosted 10.0.0.10 \
-  --hosted-user root \
-  --hosted-key ~/.ssh/proxmox_ed25519 \
+  --hosted pve1 \
   --memory 2G \
-  --storage root local-lvm 10G \
-  --storage template local
+  --storage root 10G \
+  --storage template
 ```
 
 For the VM path, verify SSH access and, if enabled, RDP login after first boot.

@@ -29,14 +29,18 @@ from lib.proxmox_manage import (
     ContainerInfo,
     HealthReport,
     ProxmoxManageError,
+    delete_snapshot,
     destroy_container,
     get_container_config,
     get_container_pending,
     health_check,
     list_containers,
+    list_snapshots,
     modify_container,
     reconfigure_container,
     resize_container_disk,
+    rollback_guest,
+    snapshot_guest,
     start_container,
     stop_container,
 )
@@ -69,6 +73,10 @@ Available commands:
                               Change CPU cores or memory allocation
   resize <vmid> <volume> <size>
                               Increase a disk volume (e.g. resize 100 rootfs 20G)
+  snapshots <vmid>            List snapshots for a guest
+  snapshot <vmid> <name>      Create a snapshot
+  rollback <vmid> <name>      Roll back a guest to a snapshot
+  delsnapshot <vmid> <name>   Delete a snapshot
   help                        Show this help text
   quit / exit                 Leave the shell
 """
@@ -277,6 +285,10 @@ class ProxmoxShell:
             "set": self._cmd_set,
             "modify": self._cmd_modify,
             "resize": self._cmd_resize,
+            "snapshots": self._cmd_snapshots,
+            "snapshot": self._cmd_snapshot,
+            "rollback": self._cmd_rollback,
+            "delsnapshot": self._cmd_delsnapshot,
         }
 
     def _make_prompt(self) -> str:
@@ -595,6 +607,46 @@ class ProxmoxShell:
         self._output(
             f"  Resized {volume} on VMID {vmid} on {host.name} to {size}."
         )
+
+    def _cmd_snapshots(self, args: list[str]) -> None:
+        host = self._require_host()
+        vmid = self._parse_vmid(args, "snapshots")
+        snaps = list_snapshots(host, vmid)
+        if not snaps:
+            self._output(f"  No snapshots for VMID {vmid}.")
+            return
+        self._output(f"  Snapshots for VMID {vmid}:")
+        for snap in snaps:
+            marker = "*" if snap.is_current else " "
+            desc = f"  {snap.description}" if snap.description else ""
+            self._output(f"    {marker} {snap.name}{desc}")
+
+    def _cmd_snapshot(self, args: list[str]) -> None:
+        host = self._require_host()
+        if len(args) < 2:
+            raise ValueError("Usage: snapshot <vmid> <name>")
+        vmid = self._parse_vmid([args[0]], "snapshot")
+        name = args[1]
+        snapshot_guest(host, vmid, name)
+        self._output(f"  Created snapshot '{name}' for VMID {vmid} on {host.name}.")
+
+    def _cmd_rollback(self, args: list[str]) -> None:
+        host = self._require_host()
+        if len(args) < 2:
+            raise ValueError("Usage: rollback <vmid> <name>")
+        vmid = self._parse_vmid([args[0]], "rollback")
+        name = args[1]
+        rollback_guest(host, vmid, name)
+        self._output(f"  Rolled back VMID {vmid} on {host.name} to snapshot '{name}'.")
+
+    def _cmd_delsnapshot(self, args: list[str]) -> None:
+        host = self._require_host()
+        if len(args) < 2:
+            raise ValueError("Usage: delsnapshot <vmid> <name>")
+        vmid = self._parse_vmid([args[0]], "delsnapshot")
+        name = args[1]
+        delete_snapshot(host, vmid, name)
+        self._output(f"  Deleted snapshot '{name}' for VMID {vmid} on {host.name}.")
 
     @staticmethod
     def _parse_vmid(args: list[str], cmd: str) -> int:

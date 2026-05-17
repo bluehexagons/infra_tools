@@ -26,6 +26,7 @@ from lib.proxmox_manage import (
     DEFAULT_NOTIFICATION_MATCHER,
     DEFAULT_NOTIFICATION_SEVERITIES,
     ProxmoxManageError,
+    delete_snapshot,
     destroy_container,
     get_container_config,
     get_container_pending,
@@ -33,10 +34,13 @@ from lib.proxmox_manage import (
     health_check,
     install_webhook_notifications,
     list_containers,
+    list_snapshots,
     modify_container,
     reconfigure_container,
     resize_container_disk,
+    rollback_guest,
     send_webhook_test_notification,
+    snapshot_guest,
     start_container,
     stop_container,
 )
@@ -260,6 +264,58 @@ def add_proxmox_subparser(subparsers: argparse._SubParsersAction) -> argparse.Ar
         help="Print the remote pct/qm resize command without executing it",
     )
     resize.set_defaults(_handler=_cmd_resize_disk)
+
+    snapshots_list = sub.add_parser(
+        "snapshots",
+        help="List snapshots for a guest",
+    )
+    snapshots_list.add_argument("host", help="Registered host name or address")
+    snapshots_list.add_argument("vmid", type=int, help="Guest VMID")
+    snapshots_list.set_defaults(_handler=_cmd_snapshots_list)
+
+    snapshot = sub.add_parser(
+        "snapshot",
+        help="Create a snapshot of a guest",
+    )
+    snapshot.add_argument("host", help="Registered host name or address")
+    snapshot.add_argument("vmid", type=int, help="Guest VMID")
+    snapshot.add_argument("name", help="Snapshot name (letters, digits, underscores; max 40)")
+    snapshot.add_argument("--description", default="", help="Optional snapshot description")
+    snapshot.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the remote snapshot command without executing it",
+    )
+    snapshot.set_defaults(_handler=_cmd_snapshot)
+
+    rollback = sub.add_parser(
+        "rollback",
+        help="Roll back a guest to a snapshot",
+    )
+    rollback.add_argument("host", help="Registered host name or address")
+    rollback.add_argument("vmid", type=int, help="Guest VMID")
+    rollback.add_argument("name", help="Snapshot name to roll back to")
+    rollback.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the remote rollback command without executing it",
+    )
+    rollback.set_defaults(_handler=_cmd_rollback)
+
+    delsnapshot = sub.add_parser(
+        "delsnapshot",
+        aliases=["delete-snapshot"],
+        help="Delete a guest snapshot",
+    )
+    delsnapshot.add_argument("host", help="Registered host name or address")
+    delsnapshot.add_argument("vmid", type=int, help="Guest VMID")
+    delsnapshot.add_argument("name", help="Snapshot name to delete")
+    delsnapshot.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the remote delsnapshot command without executing it",
+    )
+    delsnapshot.set_defaults(_handler=_cmd_delsnapshot)
 
     notifications = sub.add_parser(
         "notifications",
@@ -657,6 +713,48 @@ def _cmd_resize_disk(args: argparse.Namespace, workspace: Optional[str]) -> int:
         f"{prefix} {args.volume} on VMID {args.vmid} on {host.name} "
         f"to {args.size}."
     )
+    return 0
+
+
+def _cmd_snapshots_list(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    host = _resolve_host(args.host, workspace)
+    snaps = list_snapshots(host, args.vmid)
+    if not snaps:
+        print(f"No snapshots for VMID {args.vmid} on {host.name}.")
+        return 0
+    print(f"Snapshots for VMID {args.vmid} on {host.name}:")
+    for snap in snaps:
+        marker = "*" if snap.is_current else " "
+        desc = f"  {snap.description}" if snap.description else ""
+        print(f"  {marker} {snap.name}{desc}")
+    return 0
+
+
+def _cmd_snapshot(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    host = _resolve_host(args.host, workspace)
+    snapshot_guest(
+        host, args.vmid, args.name,
+        description=args.description,
+        dry_run=args.dry_run,
+    )
+    prefix = "Would create" if args.dry_run else "Created"
+    print(f"{prefix} snapshot '{args.name}' for VMID {args.vmid} on {host.name}.")
+    return 0
+
+
+def _cmd_rollback(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    host = _resolve_host(args.host, workspace)
+    rollback_guest(host, args.vmid, args.name, dry_run=args.dry_run)
+    prefix = "Would roll back" if args.dry_run else "Rolled back"
+    print(f"{prefix} VMID {args.vmid} on {host.name} to snapshot '{args.name}'.")
+    return 0
+
+
+def _cmd_delsnapshot(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    host = _resolve_host(args.host, workspace)
+    delete_snapshot(host, args.vmid, args.name, dry_run=args.dry_run)
+    prefix = "Would delete" if args.dry_run else "Deleted"
+    print(f"{prefix} snapshot '{args.name}' for VMID {args.vmid} on {host.name}.")
     return 0
 
 

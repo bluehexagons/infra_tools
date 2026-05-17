@@ -151,9 +151,6 @@ def auto_detect_bridge(
         )
 
     bridge = bridges[0]
-    if bridge != "vmbr0" and "vmbr0" in bridges:
-        bridge = "vmbr0"
-
     print(f"  ✓ Detected bridge: {bridge}")
     return bridge
 
