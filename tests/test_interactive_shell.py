@@ -9,6 +9,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from lib.config import SetupConfig
+from lib.proxmox_hosts import ProxmoxHost
 from lib.interactive_shell import InteractiveShell, run_interactive_shell
 
 
@@ -32,6 +34,7 @@ class TestInteractiveShellDispatch(unittest.TestCase):
         self.assertEqual(shell.run(), 0)
         joined = "\n".join(output)
         self.assertIn("Available commands", joined)
+        self.assertIn("new/setup", joined)
         self.assertIn("proxmox", joined)
         self.assertIn("recall", joined)
 
@@ -114,6 +117,119 @@ class TestInteractiveShellDispatch(unittest.TestCase):
         shell, _ = _make_shell(["proxmox", "exit"])
         shell.run()
         mock_run_shell.assert_called_once_with(None)
+
+    @patch("lib.cache.save_setup_command")
+    @patch("lib.proxmox_hosts.load_proxmox_hosts")
+    @patch("lib.cache.load_all_setup_commands")
+    def test_new_guides_hosted_workstation_setup(
+        self,
+        mock_load_templates,
+        mock_load_proxmox_hosts,
+        mock_save_setup,
+    ):
+        mock_load_templates.return_value = [
+            SetupConfig(
+                host="10.0.0.20",
+                username="devuser",
+                system_type="workstation_dev",
+                machine_type="vm",
+                friendly_name="old-dev",
+                tags=["dev"],
+                enable_rdp=True,
+                desktop="i3",
+                install_ruby=True,
+                install_node=True,
+                install_go=True,
+                install_python=True,
+                hosted_node="pve1",
+                container_memory="8G",
+                container_cores=4,
+                container_storage=[["root", "40G"]],
+                container_base="debian",
+            )
+        ]
+        mock_load_proxmox_hosts.return_value = [
+            ProxmoxHost(name="pve1", address="10.0.0.10", user="root")
+        ]
+        shell, _ = _make_shell(
+            [
+                "new",
+                "1",          # template
+                "1",          # proxmox host
+                "dev-02",     # name
+                "10.0.0.51",  # target host
+                "",           # machine type default (vm)
+                "",           # system type default (workstation_dev)
+                "",           # username default
+                "",           # tags default
+                "",           # desktop default
+                "",           # rdp default
+                "",           # dev tools default
+                "",           # memory default
+                "",           # cores default
+                "",           # disk default
+                "",           # base os default
+                "exit",
+            ]
+        )
+
+        shell.run()
+
+        saved_config = mock_save_setup.call_args.args[0]
+        self.assertEqual(saved_config.friendly_name, "dev-02")
+        self.assertEqual(saved_config.host, "10.0.0.51")
+        self.assertEqual(saved_config.machine_type, "vm")
+        self.assertEqual(saved_config.system_type, "workstation_dev")
+        self.assertEqual(saved_config.hosted_node, "pve1")
+        self.assertEqual(saved_config.container_storage, [["root", "40G"]])
+        self.assertTrue(saved_config.install_ruby)
+        self.assertTrue(saved_config.install_node)
+        self.assertTrue(saved_config.install_go)
+        self.assertTrue(saved_config.install_python)
+
+    @patch("lib.cache.save_setup_command")
+    @patch("lib.proxmox_hosts.load_proxmox_hosts")
+    @patch("lib.cache.load_all_setup_commands")
+    def test_new_can_skip_proxmox_host_for_server_setup(
+        self,
+        mock_load_templates,
+        mock_load_proxmox_hosts,
+        mock_save_setup,
+    ):
+        mock_load_templates.return_value = []
+        mock_load_proxmox_hosts.return_value = [
+            ProxmoxHost(name="pve1", address="10.0.0.10", user="root")
+        ]
+        shell, _ = _make_shell(
+            [
+                "new",
+                "",                  # no proxmox host
+                "web-01",            # name
+                "10.0.0.80",         # target host
+                "1",                 # hardware
+                "3",                 # server_web
+                "admin",             # username
+                "web,prod",          # tags
+                "",                  # ruby default yes
+                "",                  # node default yes
+                "y",                 # enable ssl
+                "admin@example.com", # ssl email
+                "exit",
+            ]
+        )
+
+        shell.run()
+
+        saved_config = mock_save_setup.call_args.args[0]
+        self.assertEqual(saved_config.friendly_name, "web-01")
+        self.assertEqual(saved_config.machine_type, "hardware")
+        self.assertEqual(saved_config.system_type, "server_web")
+        self.assertIsNone(saved_config.hosted_node)
+        self.assertTrue(saved_config.install_ruby)
+        self.assertTrue(saved_config.install_node)
+        self.assertTrue(saved_config.enable_ssl)
+        self.assertEqual(saved_config.ssl_email, "admin@example.com")
+        self.assertEqual(saved_config.tags, ["web", "prod"])
 
     def test_recall_rejects_invalid_host(self):
         shell, output = _make_shell(["recall '%bad host'", "exit"])

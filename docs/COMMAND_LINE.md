@@ -314,6 +314,7 @@ as other commands. Available commands inside the shell:
 list [pattern] [--json]    list saved configurations
 info [pattern] [--compact] show configuration details
 cmd [pattern]              show reconstructed setup command
+new / setup                guided flow to create a new saved setup
 deploy <pattern> [--yes]   redeploy saved configurations
 rm <pattern> [--yes]       remove saved configurations
 recall <host> [user]       fetch a setup command from a remote host
@@ -327,6 +328,11 @@ quit / exit                leave the shell
 The shell loads `~/.infra_toolsrc` on startup. Put any commands to run at the start of each session
 there — for example `workspace /path/to/project`. Command history is persisted at
 `~/.local/share/infra_tools/shell_history`.
+
+`new` / `setup` is a lightweight guided wizard: it can reuse an existing saved
+setup as a starting point, optionally choose a registered Proxmox host, then
+prompt for common fields such as name, IP/hostname, machine type, system type,
+and a few common workstation or web-server options before saving the result.
 
 ## Utility Commands
 

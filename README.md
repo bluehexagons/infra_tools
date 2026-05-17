@@ -240,11 +240,17 @@ python3 infra_tools.py shell
 
 Inside the shell:
 - `list [pattern] [--json]` / `info [pattern] [--compact]` — browse saved configurations
+- `new` / `setup` — guided flow for creating a new saved setup from common prompts
 - `deploy <pattern> [--yes]` — redeploy saved configurations
 - `rm <pattern> [--yes]` — remove configurations
 - `recall <host> [user]` — fetch a setup command from a remote host
 - `workspace [path]` — show or switch the active workspace
 - `proxmox` — drop into the Proxmox sub-shell
+
+The guided `new` flow can optionally start from an existing saved setup, then
+optionally attach the new system to a registered Proxmox host before prompting
+for common fields such as name, IP address, machine type, system type, and a
+small set of common workstation/web-server options.
 
 The shell loads `~/.infra_toolsrc` on startup — put any commands you want to run at the start of each session
 (e.g., `workspace /path/to/project`) in that file, one per line.
