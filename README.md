@@ -190,9 +190,9 @@ python3 infra_tools.py setup server_web 10.0.0.50 admin \
 
 `--storage` is repeatable: `root` is required as `--storage root POOL AMOUNT`, and `template` is optional as `--storage template POOL` (LXC only).
 
-### Managing Proxmox Containers and VMs
+### Managing Proxmox Guests
 
-Register Proxmox hosts and manage their LXC containers or VMs from a workspace registry. The same
+Register Proxmox hosts and manage their VMs or LXC compatibility guests from a workspace registry. The same
 subcommands work for both — VMIDs are unique per node regardless of guest type. Run `proxmox` with no
 subcommand to enter an interactive shell, or use subcommands directly:
 
@@ -281,6 +281,10 @@ gated behind opt-in *categories*. List them and run them on demand:
 ./run_tests.py --expensive live_proxmox tests.test_proxmox_live
 ./run_tests.py --expensive all          # everything, including expensive
 ```
+
+For the live Proxmox category, the primary path is a VM run (`PROXMOX_TEST_GUEST_TYPE=vm`,
+`PROXMOX_TEST_IP=...`). Use `PROXMOX_TEST_GUEST_TYPE=lxc` with `PROXMOX_TEST_TEMPLATE=...`
+for the LXC compatibility path.
 
 Each category also has a matching env var (e.g. `INFRA_TOOLS_RUN_LIVE_PROXMOX=1`),
 or set `INFRA_TOOLS_RUN_EXPENSIVE=1` to enable everything. See

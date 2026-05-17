@@ -428,7 +428,7 @@ def setup_main(system_type: str, description: str, success_msg_fn: Callable[[Set
         print(f"Error: {e}")
         return 1
 
-    # Container provisioning (if --hosted)
+    # Hosted guest provisioning (if --hosted)
     if config.hosted_node:
         try:
             validate_hosted_flags(config)

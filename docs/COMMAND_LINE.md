@@ -262,7 +262,7 @@ infra_tools.py deploy <pattern> [--yes]        # Redeploy systems
 
 ## Proxmox Management
 
-Register Proxmox hosts and manage their LXC containers or VMs:
+Register Proxmox hosts and manage their VMs or LXC compatibility guests:
 
 ```bash
 # Host registry

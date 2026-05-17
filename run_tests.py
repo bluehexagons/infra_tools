@@ -16,8 +16,10 @@ Examples:
     ./run_tests.py --list-suites                    # show named suites
     ./run_tests.py --list-categories                # show known expensive categories
     ./run_tests.py --check-prereqs --expensive live_proxmox
+    PROXMOX_TEST_GUEST_TYPE=vm PROXMOX_TEST_IP=10.0.0.50 \
+        ./run_tests.py --expensive live_proxmox tests.test_proxmox_live
     ./run_tests.py --expensive live_proxmox \
-        tests.test_proxmox_live                     # run a real Proxmox round-trip
+        tests.test_proxmox_live                     # run a real Proxmox guest round-trip
     ./run_tests.py --expensive all                  # run everything including expensive
 
 Selectors are matched case-insensitively against test module file names; you
