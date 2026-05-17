@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import asdict, dataclass, field
-from typing import Optional, cast
+from typing import Optional, Union, cast
 
 from lib.types import JSONDict
 from lib.validation import (
@@ -20,7 +20,7 @@ from lib.workspace import ensure_workspace_dir, normalize_workspace_dir
 
 
 NETWORK_INVENTORY_FILENAME = "network_inventory.json"
-RawNetworkVlanId = Optional[int | str]
+RawNetworkVlanId = Optional[Union[int, str]]
 
 
 @dataclass
@@ -45,7 +45,7 @@ class NetworkSubnet:
         elif isinstance(vlan_id_raw, (int, str)):
             vlan_id = vlan_id_raw
         else:
-            vlan_id = str(vlan_id_raw)
+            raise ValueError("Network subnet vlan_id must be a string or integer")
         return cls(
             name=str(data.get("name") or ""),
             cidr=str(data.get("cidr") or ""),
