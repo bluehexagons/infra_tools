@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.config import SetupConfig
 from lib.system_types import get_steps_for_system_type
+from lib.update_policy import ECOSYSTEM_AUTO_UPGRADE_ENV
 import common.common_steps as common_steps
 
 
@@ -55,6 +56,7 @@ class TestRubySetup(unittest.TestCase):
             schedule="Sun *-*-* 04:00:00",
             check_path="/usr/bin/gem",
             check_name="Ruby gems",
+            environment={ECOSYSTEM_AUTO_UPGRADE_ENV: "0"},
         )
 
     def test_ruby_auto_update_step_uses_common_cleanup_implementation(self):

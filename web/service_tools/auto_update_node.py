@@ -2,8 +2,8 @@
 """
 Auto-update Node.js
 
-This script updates Node.js via nvm, following the current default alias
-track (LTS or latest). It also updates global npm packages.
+This script updates Node.js via nvm on the LTS track by default. Global npm
+package upgrades and latest-track Node.js upgrades are opt-in by policy.
 
 Logs to: /var/log/infra_tools/web/auto_update_node.log
 """
@@ -15,7 +15,7 @@ import shlex
 import sys
 import subprocess
 import pwd
-from logging import ERROR
+from logging import ERROR, WARNING
 
 # Add lib directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
@@ -25,6 +25,12 @@ from lib.logging_utils import log_event
 from lib.logging_utils import log_subprocess_result
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
 from lib.types import MaybeStr
+from lib.update_policy import (
+    ECOSYSTEM_AUTO_UPGRADE_ENV,
+    NODE_LATEST_AUTO_UPDATE_ENV,
+    ecosystem_auto_upgrade_enabled,
+    node_latest_auto_update_enabled,
+)
 
 # Initialize centralized logger
 logger = get_service_logger('auto_update_node', 'web', use_syslog=True)
@@ -114,6 +120,14 @@ def install_target_version(update_track: str) -> bool:
 
 def update_global_packages() -> tuple[bool, MaybeStr]:
     """Update npm itself and global npm packages."""
+    if not ecosystem_auto_upgrade_enabled():
+        log_event(
+            logger,
+            "Node.js global package auto-upgrades disabled by policy",
+            env_var=ECOSYSTEM_AUTO_UPGRADE_ENV,
+        )
+        return True, None
+
     commands = (
         ("Updated npm", "npm install -g npm@latest"),
         ("Updated global npm packages", "npm update -g"),
@@ -180,10 +194,13 @@ def main():
     latest_version = get_latest_version()
     current_version = get_current_version()
     update_track = determine_update_track(get_default_alias())
-    target_version = latest_version if update_track == "latest" else current_lts
     track_label = "latest" if update_track == "latest" else "LTS"
+    latest_policy_skipped = update_track == "latest" and not node_latest_auto_update_enabled()
+    target_version = current_version if latest_policy_skipped else (
+        latest_version if update_track == "latest" else current_lts
+    )
     
-    if not current_lts:
+    if update_track != "latest" and not current_lts:
         log_event(logger, "Failed to get latest LTS version", level=ERROR)
         send_notification_safe(
             notification_configs,
@@ -195,7 +212,7 @@ def main():
         )
         return 1
     
-    if update_track == "latest" and not latest_version:
+    if update_track == "latest" and not latest_policy_skipped and not latest_version:
         log_event(logger, "Failed to get latest Node.js version", level=ERROR, update_track=update_track)
         send_notification_safe(
             notification_configs,
@@ -206,6 +223,15 @@ def main():
             logger=logger
         )
         return 1
+
+    if latest_policy_skipped:
+        log_event(
+            logger,
+            "Node.js latest-track auto-update disabled by policy",
+            level=WARNING,
+            current_version=current_version,
+            env_var=NODE_LATEST_AUTO_UPDATE_ENV,
+        )
 
     if not current_version:
         log_event(logger, "Failed to get current Node.js version", level=ERROR, update_track=update_track)
@@ -296,7 +322,11 @@ def main():
         subject="Success: Node.js updated",
         job="auto_update_node",
         status="good",
-        message=f"Node.js {track_label} track checked (current: {post_update_version}, target: {target_version}) and global packages were updated",
+        message=(
+            f"Node.js {track_label} track checked (current: {post_update_version}, target: {target_version}); "
+            f"global package auto-upgrades "
+            f"{'enabled' if ecosystem_auto_upgrade_enabled() else 'skipped by policy'}"
+        ),
         logger=logger
     )
     

@@ -572,6 +572,25 @@ Backups contain the full production database, including:
 - Exclude from public backups/syncs
 - Consider backup retention policies for compliance
 
+## Automatic Updates, Supply Chain Risk, and Maintenance
+
+Infra tools keeps operating-system patching enabled by default because delayed
+security updates are usually a larger risk than signed distribution package
+updates. The APT timer runs `apt-get dist-upgrade --no-remove`, so it can apply
+normal dependency additions but fails instead of automatically removing packages.
+
+Language ecosystem auto-upgrades are more conservative. Node.js, Ruby, and uv
+timers are installed with `INFRA_TOOLS_ECOSYSTEM_AUTO_UPGRADE=0`, so they do not
+silently pull the latest global npm packages, gems, or uv-managed tools. Set
+`INFRA_TOOLS_ECOSYSTEM_AUTO_UPGRADE=1` in a systemd drop-in only for systems
+where that supply-chain risk is acceptable. Node.js latest-track runtime updates
+also require `INFRA_TOOLS_NODE_LATEST_AUTO_UPDATE=1`; the default LTS track still
+receives runtime patch updates.
+
+Deployment builds prefer lockfile-backed installs when possible. Frontend builds
+use `npm ci` when `package-lock.json` exists, while Rails builds keep Bundler in
+deployment mode so lockfiles drive dependency resolution.
+
 ## System Maintenance and Log Retention
 
 Infra tools now installs a background cleanup service for server-style setups:

@@ -481,10 +481,10 @@ def configure_auto_updates(config: SetupConfig) -> None:
     """Configure automatic package updates using a custom systemd service.
 
     This replaces the legacy unattended-upgrades approach. The new service
-    runs ``apt-get update && apt-get dist-upgrade`` which:
+    runs ``apt-get update && apt-get dist-upgrade --no-remove`` which:
     - Does not require any hardcoded origins or codenames
     - Automatically handles all configured repositories
-    - Supports release version switches (dist-upgrade resolves dependency changes)
+    - Supports dependency additions while refusing automated package removals
     """
     service_name = "auto-update-apt"
     service_file = f"/etc/systemd/system/{service_name}.service"

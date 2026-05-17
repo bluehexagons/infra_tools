@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from lib.arg_parser import create_setup_argument_parser
 from lib.config import SetupConfig
 from lib import python_setup
+from lib.update_policy import ECOSYSTEM_AUTO_UPGRADE_ENV
 from lib.system_types import get_steps_for_system_type
 import common.common_steps as common_steps
 
@@ -46,6 +47,22 @@ class TestPythonFlag(unittest.TestCase):
     @patch("common.common_steps.is_dry_run", return_value=True)
     def test_install_or_update_uv_returns_true_in_dry_run(self, _is_dry_run):
         self.assertTrue(common_steps.install_or_update_uv(user_home="/home/user", username="user"))
+
+    @patch("common.common_steps._configure_auto_update_systemd")
+    def test_configure_auto_update_uv_disables_ecosystem_auto_upgrades(self, mock_configure):
+        config = SetupConfig(host="host", username="user", system_type="server_dev", install_python=True)
+        common_steps.configure_auto_update_uv(config)
+        mock_configure.assert_called_once_with(
+            service_name="auto-update-uv",
+            service_desc="Auto-update uv package manager",
+            timer_desc="Auto-update uv weekly",
+            script_name="auto_update_uv.py",
+            schedule="Sun *-*-* 05:00:00",
+            check_path="/home/user/.local/bin/uv",
+            check_name="uv",
+            user="user",
+            environment={ECOSYSTEM_AUTO_UPGRADE_ENV: "0"},
+        )
 
 
 class TestSetupAdminPython(unittest.TestCase):

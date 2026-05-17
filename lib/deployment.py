@@ -825,16 +825,18 @@ class DeploymentOrchestrator:
                             site_root: Optional[str] = None, require_build_output: bool = False) -> bool:
         print(f"  Building Node.js project at {project_path}")
         
+        package_lock = os.path.join(project_path, "package-lock.json")
+        npm_install_command = "npm ci" if os.path.exists(package_lock) else "npm install"
         install_result = run(
-            f"cd {shlex.quote(project_path)} && TMPDIR=/var/tmp npm install",
+            f"cd {shlex.quote(project_path)} && TMPDIR=/var/tmp {npm_install_command}",
             check=False,
             capture_output=True,
         )
         if install_result.returncode != 0:
-            error = self._get_command_error(install_result, "npm install failed")
+            error = self._get_command_error(install_result, f"{npm_install_command} failed")
             if require_build_output:
                 raise RuntimeError(f"Frontend dependency install failed: {error}")
-            print(f"  ⚠ npm install failed, skipping build step: {error}")
+            print(f"  ⚠ {npm_install_command} failed, skipping build step: {error}")
             return False
         
         # Check if a build script is defined in package.json before running it

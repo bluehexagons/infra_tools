@@ -91,6 +91,15 @@ class TestUpgradePackages(unittest.TestCase):
         self.assertIn("Dpkg::Options::=--force-confold", args)
 
     @patch("common.service_tools.auto_update_apt.run_apt_command")
+    def test_upgrade_refuses_package_removals(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
+        auto_update_apt.upgrade_packages()
+        args = mock_run.call_args[0][0]
+        self.assertIn("--no-remove", args)
+
+    @patch("common.service_tools.auto_update_apt.run_apt_command")
     def test_upgrade_uses_lock_timeout(self, mock_run):
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="", stderr=""

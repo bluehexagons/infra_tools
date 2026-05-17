@@ -657,6 +657,22 @@ class TestRailsFrontendServePathDetection(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "Frontend build failed"):
             self.orchestrator._build_node_project(frontend_path, require_build_output=True)
 
+    @patch('lib.deployment.run')
+    def test_build_node_project_uses_npm_ci_when_lockfile_exists(self, mock_run):
+        frontend_path = os.path.join(self.tmpdir, "frontend")
+        os.makedirs(frontend_path)
+        with open(os.path.join(frontend_path, 'package.json'), 'w') as f:
+            f.write('{}')
+        with open(os.path.join(frontend_path, 'package-lock.json'), 'w') as f:
+            f.write('{}')
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        self.orchestrator._build_node_project(frontend_path)
+
+        self.assertIn("npm ci", mock_run.call_args_list[0].args[0])
+        self.assertNotIn("npm install", mock_run.call_args_list[0].args[0])
+
     @patch('lib.deployment.create_rails_service')
     @patch('lib.deployment.run')
     @patch('os.path.exists')

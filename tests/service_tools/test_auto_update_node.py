@@ -11,6 +11,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 from web.service_tools import auto_update_node
+from lib.update_policy import ECOSYSTEM_AUTO_UPGRADE_ENV
 
 
 class TestAutoUpdateNode(unittest.TestCase):
@@ -25,6 +26,28 @@ class TestAutoUpdateNode(unittest.TestCase):
             auto_update_node.determine_update_track("default -> node (-> v22.1.0)"),
             "latest",
         )
+
+    @patch("web.service_tools.auto_update_node.run_nvm_command")
+    def test_global_package_updates_skip_by_default(self, mock_run_nvm):
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertLogs(auto_update_node.logger, level="INFO") as logs:
+                success, details = auto_update_node.update_global_packages()
+
+        self.assertTrue(success)
+        self.assertIsNone(details)
+        mock_run_nvm.assert_not_called()
+        self.assertIn("Node.js global package auto-upgrades disabled by policy", "\n".join(logs.output))
+
+    @patch("web.service_tools.auto_update_node.run_nvm_command")
+    def test_global_package_updates_can_be_enabled(self, mock_run_nvm):
+        mock_run_nvm.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+        with patch.dict(os.environ, {ECOSYSTEM_AUTO_UPGRADE_ENV: "1"}):
+            success, details = auto_update_node.update_global_packages()
+
+        self.assertTrue(success)
+        self.assertIsNone(details)
+        self.assertEqual(mock_run_nvm.call_count, 3)
 
     @patch("web.service_tools.auto_update_node.subprocess.run")
     @patch("web.service_tools.auto_update_node.get_nvm_dir", return_value="/home/user/.nvm")

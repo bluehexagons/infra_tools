@@ -21,12 +21,17 @@ python3 infra_tools.py credentials set guest s3cret
 - **Servers**: Security hardening, Nginx/SSL, Ruby/Node/Go, app deployment, game lobby server
 - **Workstations**: Desktop environments (XFCE, i3, LXQt), RDP, browsers, audio
 - **Storage**: Samba shares, rsync sync, par2 integrity verification
-- **Security**: Firewall, SSH hardening, fail2ban, auto-updates, weekly cleanup maintenance, journald size limits
+- **Security**: Firewall, SSH hardening, fail2ban, hardened OS auto-updates, weekly cleanup maintenance, journald size limits
 
 Background maintenance includes a `cleanup-maintenance` systemd timer that reclaims temporary files,
 stale infra_tools setup/deploy artifacts, unused APT packages, old package-manager caches, and oversized journals.
 Infra tools also installs a journald drop-in at `/etc/systemd/journald.conf.d/infra-tools.conf` to cap
 persistent and runtime journal usage at `100M`.
+
+Automatic update policy is intentionally conservative for language ecosystems. APT updates still run
+automatically, but the updater refuses automated package removals. Node.js, Ruby, and uv timers no longer
+auto-upgrade global npm packages, gems, or uv-managed tools unless `INFRA_TOOLS_ECOSYSTEM_AUTO_UPGRADE=1`
+is set for the service; Node.js latest-track updates also require `INFRA_TOOLS_NODE_LATEST_AUTO_UPDATE=1`.
 
 ## CLI Entry Points
 

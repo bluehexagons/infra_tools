@@ -13,6 +13,7 @@ from lib.config import SetupConfig
 from lib.machine_state import can_manage_time_sync
 from lib.remote_utils import run, is_dry_run, is_package_installed, is_service_active, file_contains, install_package
 from lib.systemd_service import cleanup_service
+from lib.update_policy import ECOSYSTEM_AUTO_UPGRADE_ENV
 
 
 def set_user_password(username: str, password: str) -> bool:
@@ -456,7 +457,8 @@ def _configure_auto_update_systemd(
     schedule: str,
     check_path: str,
     check_name: str,
-    user: Optional[str] = None
+    user: Optional[str] = None,
+    environment: Optional[dict[str, str]] = None,
 ) -> None:
     """Helper to configure systemd service and timer for auto-updates."""
     if not os.path.exists(check_path):
@@ -472,6 +474,12 @@ def _configure_auto_update_systemd(
     script_path = f"/opt/infra_tools/common/service_tools/{script_name}"
     
     user_line = f"User={user}\n" if user else ""
+    environment_lines = ""
+    if environment:
+        environment_lines = "".join(
+            f'Environment="{name}={value}"\n'
+            for name, value in sorted(environment.items())
+        )
     
     service_content = f"""[Unit]
 Description={service_desc}
@@ -479,7 +487,7 @@ Documentation=man:systemd.service(5)
 
 [Service]
 Type=oneshot
-{user_line}ExecStart=/usr/bin/python3 {script_path}
+{user_line}{environment_lines}ExecStart=/usr/bin/python3 {script_path}
 StandardOutput=journal
 StandardError=journal
 """
@@ -522,6 +530,7 @@ def configure_auto_update_ruby(config: SetupConfig) -> None:
         schedule="Sun *-*-* 04:00:00",
         check_path=gem_path,
         check_name="Ruby gems",
+        environment={ECOSYSTEM_AUTO_UPGRADE_ENV: "0"},
     )
 
 
@@ -538,7 +547,8 @@ def configure_auto_update_uv(config: SetupConfig) -> None:
         schedule="Sun *-*-* 05:00:00",
         check_path=uv_path,
         check_name="uv",
-        user=config.username
+        user=config.username,
+        environment={ECOSYSTEM_AUTO_UPGRADE_ENV: "0"},
     )
 
 

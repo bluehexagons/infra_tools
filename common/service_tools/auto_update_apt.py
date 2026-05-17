@@ -3,11 +3,12 @@
 Auto-update APT Packages
 
 This script updates all packages from all configured APT repositories using
-dist-upgrade. It replaces the traditional unattended-upgrades approach by:
+dist-upgrade, while refusing automated package removals. It replaces the
+traditional unattended-upgrades approach by:
 
 - Not requiring any hardcoded origins or codenames
 - Automatically handling all configured repositories
-- Supporting release version switches (dist-upgrade resolves dependency changes)
+- Supporting dependency additions while refusing automated package removals
 
 Logs to: /var/log/infra_tools/security/auto_update_apt.log
 """
@@ -36,6 +37,9 @@ DPKG_OPTIONS = [
     '-o', 'Dpkg::Options::=--force-confdef',
     '-o', 'Dpkg::Options::=--force-confold',
 ]
+APT_UPGRADE_SAFETY_OPTIONS = [
+    '--no-remove',
+]
 
 def run_apt_command(args: list[str]) -> subprocess.CompletedProcess[str]:
     """Run an apt-get command with non-interactive settings."""
@@ -56,12 +60,14 @@ def update_package_lists() -> bool:
 
 
 def upgrade_packages() -> tuple[bool, str]:
-    """Run apt-get dist-upgrade to upgrade all packages.
+    """Run apt-get dist-upgrade to upgrade all packages without removals.
 
     Returns:
         Tuple of (success, output_summary).
     """
-    result = run_apt_command(['dist-upgrade', '-y', '-qq'] + DPKG_OPTIONS + APT_LOCK_OPTIONS)
+    result = run_apt_command(
+        ['dist-upgrade', '-y', '-qq'] + APT_UPGRADE_SAFETY_OPTIONS + DPKG_OPTIONS + APT_LOCK_OPTIONS
+    )
     output = result.stdout.strip()
     if result.returncode != 0:
         log_event(logger, "apt-get dist-upgrade failed", level=ERROR, stderr=result.stderr.strip())

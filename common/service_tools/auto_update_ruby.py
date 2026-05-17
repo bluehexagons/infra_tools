@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../
 from lib.logging_utils import get_service_logger, log_event
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
 from lib.types import MaybeStr
+from lib.update_policy import ECOSYSTEM_AUTO_UPGRADE_ENV, ecosystem_auto_upgrade_enabled
 
 
 logger = get_service_logger('auto_update_ruby', 'common', use_syslog=True)
@@ -53,6 +54,14 @@ def main() -> int:
 
     log_event(logger, "Starting Ruby gem update check")
     notification_configs = load_notification_configs_from_state(logger)
+
+    if not ecosystem_auto_upgrade_enabled():
+        log_event(
+            logger,
+            "Ruby gem auto-upgrades disabled by policy",
+            env_var=ECOSYSTEM_AUTO_UPGRADE_ENV,
+        )
+        return 0
 
     failed_updates: list[str] = []
     updated_gems: list[str] = []

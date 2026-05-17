@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../
 
 from lib.logging_utils import get_service_logger, log_event
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
+from lib.update_policy import ECOSYSTEM_AUTO_UPGRADE_ENV, ecosystem_auto_upgrade_enabled
 
 
 logger = get_service_logger('auto_update_uv', 'common', use_syslog=True)
@@ -45,6 +46,15 @@ def main() -> int:
             logger=logger,
         )
         return 1
+
+    if not ecosystem_auto_upgrade_enabled():
+        log_event(
+            logger,
+            "uv-managed tool auto-upgrades disabled by policy",
+            env_var=ECOSYSTEM_AUTO_UPGRADE_ENV,
+        )
+        log_event(logger, "uv updated successfully")
+        return 0
 
     result = subprocess.run([uv_path, "tool", "upgrade", "--all"], capture_output=True, text=True)
     if result.returncode != 0:
