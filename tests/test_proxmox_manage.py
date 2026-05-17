@@ -693,5 +693,18 @@ class TestResizeContainerDisk(unittest.TestCase):
         self.assertIn("resize", mock_run.call_args.args[3])
 
 
+class TestDryRunGuestRouting(unittest.TestCase):
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_reconfigure_dry_run_does_not_probe_guest_status(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = _completed()
+
+        reconfigure_container(_host(), 100, {"cores": "2"}, dry_run=True)
+
+        self.assertEqual(mock_run.call_count, 1)
+        self.assertTrue(mock_run.call_args.kwargs.get("dry_run"))
+        self.assertIn("pct set 100 --cores 2", mock_run.call_args.args[3])
+        self.assertIn("qm set 100 --cores 2", mock_run.call_args.kwargs.get("log_cmd", ""))
+
+
 if __name__ == "__main__":
     unittest.main()

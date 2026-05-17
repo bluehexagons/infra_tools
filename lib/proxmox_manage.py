@@ -143,10 +143,9 @@ def _run_guest_command(
 ) -> tuple[subprocess.CompletedProcess[str], str]:
     """Run a pct/qm command pair, retrying with qm when pct reports no guest."""
     if dry_run:
-        _, guest_type = _get_guest_status(host, vmid)
-        cmd = qm_cmd if guest_type == "vm" else pct_cmd
-        result = _run_on_host(host, cmd, dry_run=True, log_cmd=log_cmd)
-        return result, guest_type
+        display = log_cmd if log_cmd is not None else f"{pct_cmd} || {qm_cmd}"
+        result = _run_on_host(host, pct_cmd, dry_run=True, log_cmd=display)
+        return result, "unknown"
 
     pct_result = _run_on_host(host, pct_cmd, log_cmd=log_cmd)
     if pct_result.returncode == 0:
