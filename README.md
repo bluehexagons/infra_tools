@@ -292,6 +292,46 @@ or set `INFRA_TOOLS_RUN_EXPENSIVE=1` to enable everything. See
 [`tests/test_proxmox_live.py`](tests/test_proxmox_live.py) for the env vars
 needed to point the live Proxmox test at a real host.
 
+### Real-System Smoke Test
+
+Before broad rollout, the highest-value manual validation is a short Proxmox
+smoke pass on one VM-first flow plus one LXC compatibility flow:
+
+```bash
+# 1. VM-first hosted setup (primary path)
+infra_tools.py setup workstation_dev 10.0.0.50 devuser \
+  --hosted 10.0.0.10 \
+  --hosted-user root \
+  --hosted-key ~/.ssh/proxmox_ed25519 \
+  --memory 8G \
+  --storage root local-lvm 40G \
+  --cores 4 \
+  --name dev-01-vm \
+  --rdp
+
+# 2. Guest management sanity checks against the created VM
+infra_tools.py proxmox ls pve1
+infra_tools.py proxmox health pve1 <vmid>
+infra_tools.py proxmox config pve1 <vmid>
+infra_tools.py proxmox modify pve1 <vmid> --cores 6 --memory 12G
+infra_tools.py proxmox stop pve1 <vmid>
+infra_tools.py proxmox start pve1 <vmid>
+
+# 3. LXC compatibility check (basic support path)
+infra_tools.py setup server_lite 10.0.0.60 appuser \
+  --machine unprivileged \
+  --hosted 10.0.0.10 \
+  --hosted-user root \
+  --hosted-key ~/.ssh/proxmox_ed25519 \
+  --memory 2G \
+  --storage root local-lvm 10G \
+  --storage template local
+```
+
+For the VM path, verify SSH access and, if enabled, RDP login after first boot.
+For the LXC path, basic provisioning and guest-management behavior are the main
+compatibility target; advanced desktop polish is intentionally VM-first.
+
 Use `--credential USERNAME PASSWORD` to define share passwords once, then reference those users by username
 in `--share` or `--mount-smb`. The `USERS` field accepts a comma-separated list of `username` or `username:password`
 entries, and each bare username must have a matching saved credential. Use `infra_tools.py credentials set USERNAME
