@@ -396,6 +396,18 @@ class InteractiveShell:
         proxmox_host = self._choose_proxmox_host()
 
         friendly_name = self._prompt_text("Name for this setup")
+
+        if proxmox_host is not None:
+            try:
+                from lib.proxmox_network import suggest_free_ips
+                suggestions = suggest_free_ips(proxmox_host, count=5)
+                if suggestions:
+                    self._output(
+                        "  Suggested free IPs: " + "  ".join(suggestions)
+                    )
+            except Exception:
+                pass  # suggestions are best-effort; never block on failure
+
         host = self._prompt_text("IP address or hostname")
         if not validate_host(host):
             raise ValueError(f"Invalid IP address or hostname: {host}")
