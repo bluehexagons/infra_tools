@@ -22,8 +22,91 @@ PROXMOX_HOSTS_FILENAME = "proxmox_hosts.json"
 
 
 @dataclass
+class ProxmoxStoragePool:
+    """Cached metadata for a storage pool discovered on a Proxmox node."""
+
+    name: str
+    type: Optional[str] = None
+    status: Optional[str] = None
+    content: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> JSONDict:
+        return cast(JSONDict, asdict(self))
+
+    @classmethod
+    def from_dict(cls, data: JSONDict) -> "ProxmoxStoragePool":
+        if "name" not in data:
+            raise ValueError("Proxmox storage pool record missing 'name'")
+        content_raw = data.get("content") or []
+        if not isinstance(content_raw, list):
+            raise ValueError("Proxmox storage pool 'content' must be a list")
+        return cls(
+            name=str(data["name"]),
+            type=cast(Optional[str], data.get("type")),
+            status=cast(Optional[str], data.get("status")),
+            content=[str(value) for value in content_raw],
+        )
+
+
+@dataclass
+class ProxmoxHostFacts:
+    """Cached discovery data for a Proxmox node."""
+
+    node_name: Optional[str] = None
+    bridges: list[str] = field(default_factory=list)
+    gateway: Optional[str] = None
+    nameservers: list[str] = field(default_factory=list)
+    storage_pools: list[ProxmoxStoragePool] = field(default_factory=list)
+    default_root_storage: Optional[str] = None
+    default_template_storage: Optional[str] = None
+    default_bridge: Optional[str] = None
+
+    def to_dict(self) -> JSONDict:
+        payload = {
+            "node_name": self.node_name,
+            "bridges": list(self.bridges),
+            "gateway": self.gateway,
+            "nameservers": list(self.nameservers),
+            "storage_pools": [pool.to_dict() for pool in self.storage_pools],
+            "default_root_storage": self.default_root_storage,
+            "default_template_storage": self.default_template_storage,
+            "default_bridge": self.default_bridge,
+        }
+        return cast(JSONDict, payload)
+
+    @classmethod
+    def from_dict(cls, data: JSONDict) -> "ProxmoxHostFacts":
+        bridges_raw = data.get("bridges") or []
+        if not isinstance(bridges_raw, list):
+            raise ValueError("Proxmox host facts 'bridges' must be a list")
+        nameservers_raw = data.get("nameservers") or []
+        if not isinstance(nameservers_raw, list):
+            raise ValueError("Proxmox host facts 'nameservers' must be a list")
+        storage_raw = data.get("storage_pools") or []
+        if not isinstance(storage_raw, list):
+            raise ValueError("Proxmox host facts 'storage_pools' must be a list")
+        storage_pools: list[ProxmoxStoragePool] = []
+        for entry in storage_raw:
+            if not isinstance(entry, dict):
+                raise ValueError("Proxmox host facts storage pool entries must be objects")
+            storage_pools.append(ProxmoxStoragePool.from_dict(cast(JSONDict, entry)))
+        return cls(
+            node_name=cast(Optional[str], data.get("node_name")),
+            bridges=[str(value) for value in bridges_raw],
+            gateway=cast(Optional[str], data.get("gateway")),
+            nameservers=[str(value) for value in nameservers_raw],
+            storage_pools=storage_pools,
+            default_root_storage=cast(Optional[str], data.get("default_root_storage")),
+            default_template_storage=cast(
+                Optional[str], data.get("default_template_storage")
+            ),
+            default_bridge=cast(Optional[str], data.get("default_bridge")),
+        )
+
+
+@dataclass
 class ProxmoxHost:
-    """Connection details for a single Proxmox node."""
+    """Connection details and cached discovery data for a Proxmox node."""
 
     name: str
     address: str
@@ -31,7 +114,9 @@ class ProxmoxHost:
     ssh_key: Optional[str] = None
     description: Optional[str] = None
     default_storage: Optional[str] = None
+    default_template_storage: Optional[str] = None
     default_bridge: Optional[str] = None
+    facts: Optional[ProxmoxHostFacts] = None
     tags: list[str] = field(default_factory=list)
 
     def to_dict(self) -> JSONDict:
@@ -51,7 +136,15 @@ class ProxmoxHost:
             ssh_key=cast(Optional[str], data.get("ssh_key")),
             description=cast(Optional[str], data.get("description")),
             default_storage=cast(Optional[str], data.get("default_storage")),
+            default_template_storage=cast(
+                Optional[str], data.get("default_template_storage")
+            ),
             default_bridge=cast(Optional[str], data.get("default_bridge")),
+            facts=(
+                ProxmoxHostFacts.from_dict(cast(JSONDict, data["facts"]))
+                if isinstance(data.get("facts"), dict)
+                else None
+            ),
             tags=[str(t) for t in tags_raw],
         )
 

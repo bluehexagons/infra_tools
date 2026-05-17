@@ -12,7 +12,13 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from lib.proxmox_hosts import ProxmoxHost, add_proxmox_host, load_proxmox_hosts
+from lib.proxmox_hosts import (
+    ProxmoxHost,
+    ProxmoxHostFacts,
+    ProxmoxStoragePool,
+    add_proxmox_host,
+    load_proxmox_hosts,
+)
 from lib.proxmox_shell import ProxmoxShell
 
 
@@ -61,6 +67,39 @@ class TestShellHostManagement(_ShellFixture):
     def test_use_unknown_host_raises(self) -> None:
         with self.assertRaises(ValueError):
             self.shell.dispatch("use missing")
+
+    @patch("lib.proxmox_shell.probe_proxmox_host")
+    def test_probe_caches_host_defaults(self, mock_probe) -> None:
+        self.shell.dispatch("add pve1 10.0.0.10")
+        self.shell.dispatch("use pve1")
+        self.outputs.clear()
+        mock_probe.return_value = ProxmoxHostFacts(
+            node_name="pve1",
+            bridges=["vmbr0"],
+            gateway="10.0.0.1",
+            nameservers=["1.1.1.1"],
+            storage_pools=[
+                ProxmoxStoragePool(
+                    name="local-lvm",
+                    type="lvmthin",
+                    status="active",
+                    content=["images", "rootdir"],
+                )
+            ],
+            default_root_storage="local-lvm",
+            default_template_storage="local",
+            default_bridge="vmbr0",
+        )
+
+        self.shell.dispatch("probe")
+
+        loaded = load_proxmox_hosts(self.workspace)
+        self.assertEqual(loaded[0].default_storage, "local-lvm")
+        self.assertEqual(loaded[0].default_template_storage, "local")
+        self.assertEqual(loaded[0].default_bridge, "vmbr0")
+        self.assertIsNotNone(loaded[0].facts)
+        self.assert_output_contains("Cached host facts")
+        self.assert_output_contains("local-lvm")
 
     def test_remove_clears_active_host(self) -> None:
         self.shell.dispatch("add pve1 10.0.0.10")
@@ -223,6 +262,7 @@ class TestShellMisc(_ShellFixture):
         self.shell.dispatch("help")
         self.assert_output_contains("destroy")
         self.assert_output_contains("health")
+        self.assert_output_contains("probe")
 
     def test_unknown_command_raises(self) -> None:
         with self.assertRaises(ValueError):
@@ -257,6 +297,26 @@ class TestShellMisc(_ShellFixture):
             self.shell.dispatch("status notanumber")
         with self.assertRaises(ValueError):
             self.shell.dispatch("status -1")
+
+    def test_host_command_shows_saved_defaults(self) -> None:
+        add_proxmox_host(
+            ProxmoxHost(
+                name="pve1",
+                address="10.0.0.10",
+                default_storage="local-lvm",
+                default_template_storage="local",
+                default_bridge="vmbr0",
+            ),
+            self.workspace,
+        )
+        self.shell.dispatch("use pve1")
+        self.outputs.clear()
+
+        self.shell.dispatch("host")
+
+        self.assert_output_contains("Root pool: local-lvm")
+        self.assert_output_contains("Template:  local")
+        self.assert_output_contains("Bridge:    vmbr0")
 
 
 class TestShellLifecycleCommands(_ShellFixture):

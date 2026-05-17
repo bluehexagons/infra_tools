@@ -19,8 +19,9 @@ try:
 except ImportError:
     argcomplete = None
 
-from lib.config import SetupConfig
+from lib.config import SetupConfig, _normalize_container_storage
 from lib.credentials import prepare_runtime_config, store_cli_credentials
+from lib.proxmox_hosts import find_proxmox_host
 from lib.validators import validate_host, validate_username
 from lib.validation import (
     validate_apt_packages,
@@ -33,6 +34,7 @@ from lib.validation import (
     validate_scrub_specs,
     validate_ssl_email,
     validate_sync_specs,
+    validate_memory_string,
     validate_timezone_name,
     validate_workspace_dir,
 )
@@ -259,6 +261,78 @@ def _write_remote_args_file(build_dir: str, remote_arg_tokens: list[str]) -> str
     return args_path
 
 
+def _default_root_storage_for_host(host) -> Optional[str]:
+    if host.default_storage:
+        return host.default_storage
+    if host.facts and host.facts.default_root_storage:
+        return host.facts.default_root_storage
+    return None
+
+
+def _default_template_storage_for_host(host) -> Optional[str]:
+    if host.default_template_storage:
+        return host.default_template_storage
+    if host.facts and host.facts.default_template_storage:
+        return host.facts.default_template_storage
+    return None
+
+
+def _is_storage_amount(value: str) -> bool:
+    try:
+        validate_memory_string(value, "--storage AMOUNT")
+    except ValueError:
+        return False
+    return True
+
+
+def _apply_hosted_proxmox_defaults(
+    config: SetupConfig,
+    workspace: Optional[str],
+) -> None:
+    """Resolve saved Proxmox host details and expand shorthand storage specs."""
+    if not config.hosted_node:
+        return
+
+    host = find_proxmox_host(str(config.hosted_node), workspace)
+    if not host:
+        return
+
+    if config.hosted_node == host.name:
+        config.hosted_node = host.address
+    if not config.hosted_key and host.ssh_key:
+        config.hosted_key = host.ssh_key
+
+    storage_specs = _normalize_container_storage(config.container_storage)
+    if not storage_specs:
+        return
+
+    root_pool = _default_root_storage_for_host(host) or "auto"
+    template_pool = _default_template_storage_for_host(host) or "auto"
+    updated_specs: list[list[str]] = []
+    changed = False
+
+    for spec in storage_specs:
+        normalized = list(spec)
+        if normalized and normalized[0] == "root":
+            if len(normalized) == 2 and _is_storage_amount(normalized[1]):
+                normalized = ["root", root_pool, normalized[1]]
+                changed = True
+            elif len(normalized) == 3 and normalized[1] in {"default", "host"}:
+                normalized = ["root", root_pool, normalized[2]]
+                changed = True
+        elif normalized and normalized[0] == "template":
+            if len(normalized) == 1:
+                normalized = ["template", template_pool]
+                changed = True
+            elif len(normalized) == 2 and normalized[1] in {"default", "host"}:
+                normalized = ["template", template_pool]
+                changed = True
+        updated_specs.append(normalized)
+
+    if changed:
+        config.container_storage = updated_specs
+
+
 def run_remote_setup(config: SetupConfig) -> int:
     is_local = config.host in ["localhost", "127.0.0.1"]
     
@@ -412,6 +486,7 @@ def setup_main(system_type: str, description: str, success_msg_fn: Callable[[Set
     config = SetupConfig.from_args(args, system_type)
 
     try:
+        _apply_hosted_proxmox_defaults(config, getattr(args, "workspace", None))
         runtime_config = prepare_runtime_config(config)
         validate_timezone_name(runtime_config.timezone)
         validate_apt_packages(runtime_config.apt_packages)

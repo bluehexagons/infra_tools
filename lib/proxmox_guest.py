@@ -12,6 +12,7 @@ import sys
 import time
 from typing import Optional
 
+from lib.proxmox_hosts import ProxmoxHostFacts, ProxmoxStoragePool
 from lib.types import StrList
 
 
@@ -103,23 +104,23 @@ def _storage_pool_supports_content(
     return False
 
 
-def auto_detect_bridge(
+def _list_proxmox_bridges(
     node_ip: str,
-    user: str = "root",
-    hosted_key: Optional[str] = None,
+    user: str,
+    ssh_opts: StrList,
     dry_run: bool = False,
-) -> str:
-    """Auto-detect the network bridge on the Proxmox host."""
-    opts = _ssh_opts(hosted_key)
+) -> StrList:
+    """Return available vmbr* bridges on the Proxmox host."""
     result = _ssh_run(
-        node_ip, user, opts,
-        "ip -o link show | grep -o 'vmbr[0-9]*' | head -5",
+        node_ip,
+        user,
+        ssh_opts,
+        "ip -o link show | awk -F': ' '{print $2}' | grep '^vmbr' | sort -u",
         dry_run=dry_run,
     )
 
     if dry_run:
-        print("  [DRY-RUN] Would detect bridge")
-        return "vmbr0"
+        return ["vmbr0"]
 
     if result.returncode != 0:
         stderr = (result.stderr or "").strip()
@@ -128,7 +129,21 @@ def auto_detect_bridge(
             f"{stderr or 'ssh command failed'}"
         )
 
-    bridges = [b.strip() for b in result.stdout.strip().split('\n') if b.strip()]
+    bridges = [bridge.strip() for bridge in result.stdout.splitlines() if bridge.strip()]
+    if "vmbr0" in bridges:
+        bridges = ["vmbr0"] + [bridge for bridge in bridges if bridge != "vmbr0"]
+    return bridges
+
+
+def auto_detect_bridge(
+    node_ip: str,
+    user: str = "root",
+    hosted_key: Optional[str] = None,
+    dry_run: bool = False,
+) -> str:
+    """Auto-detect the network bridge on the Proxmox host."""
+    opts = _ssh_opts(hosted_key)
+    bridges = _list_proxmox_bridges(node_ip, user, opts, dry_run=dry_run)
 
     if not bridges:
         raise ProvisionError(
@@ -141,6 +156,28 @@ def auto_detect_bridge(
 
     print(f"  ✓ Detected bridge: {bridge}")
     return bridge
+
+
+def _get_node_name(
+    node_ip: str,
+    user: str,
+    ssh_opts: StrList,
+    dry_run: bool = False,
+) -> Optional[str]:
+    """Return the short hostname for the Proxmox node."""
+    result = _ssh_run(
+        node_ip,
+        user,
+        ssh_opts,
+        "hostname -s",
+        dry_run=dry_run,
+    )
+    if dry_run:
+        return "pve"
+    if result.returncode != 0:
+        return None
+    node_name = (result.stdout or "").strip()
+    return node_name or None
 
 
 def _get_bridge_prefix_length(
@@ -314,6 +351,172 @@ def _resolve_storage_pool(
     )
 
 
+def _list_storage_pools(
+    node_ip: str,
+    user: str,
+    ssh_opts: StrList,
+    dry_run: bool = False,
+) -> list[ProxmoxStoragePool]:
+    """Return storage pools reported by ``pvesm status``."""
+    result = _ssh_run(
+        node_ip,
+        user,
+        ssh_opts,
+        "pvesm status",
+        dry_run=dry_run,
+    )
+    if dry_run:
+        return [
+            ProxmoxStoragePool(
+                name="local",
+                type="dir",
+                status="active",
+                content=["iso", "backup", "vztmpl"],
+            ),
+            ProxmoxStoragePool(
+                name="local-lvm",
+                type="lvmthin",
+                status="active",
+                content=["images", "rootdir"],
+            ),
+        ]
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
+        raise ProvisionError(
+            f"Could not query storage pools on {node_ip}: "
+            f"{stderr or 'ssh command failed'}"
+        )
+
+    storage_pools: list[ProxmoxStoragePool] = []
+    for line in result.stdout.splitlines()[1:]:
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        storage_pools.append(
+            ProxmoxStoragePool(
+                name=parts[0],
+                type=parts[1],
+                status=parts[2],
+            )
+        )
+    return storage_pools
+
+
+def _list_storage_names_for_content(
+    node_ip: str,
+    user: str,
+    ssh_opts: StrList,
+    content_type: str,
+    dry_run: bool = False,
+) -> set[str]:
+    """Return pools supporting a specific content type."""
+    result = _ssh_run(
+        node_ip,
+        user,
+        ssh_opts,
+        f"pvesm status --content {shlex.quote(content_type)}",
+        dry_run=dry_run,
+    )
+    if dry_run:
+        defaults = {
+            "images": {"local-lvm"},
+            "rootdir": {"local-lvm"},
+            "vztmpl": {"local"},
+        }
+        return set(defaults.get(content_type, set()))
+    if result.returncode != 0:
+        return set()
+
+    pools: set[str] = set()
+    for line in result.stdout.splitlines()[1:]:
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        if parts[2] == "active":
+            pools.add(parts[0])
+    return pools
+
+
+def _choose_storage_pool(
+    storage_pools: list[ProxmoxStoragePool],
+    *,
+    required_content: tuple[str, ...],
+    preferred_names: tuple[str, ...],
+) -> Optional[str]:
+    """Pick a preferred active pool supporting at least one required content type."""
+    active_pools = [
+        pool for pool in storage_pools
+        if (pool.status or "").lower() == "active"
+    ]
+    candidates = [
+        pool for pool in active_pools
+        if any(content in pool.content for content in required_content)
+    ]
+    if not candidates:
+        return None
+
+    for preferred in preferred_names:
+        if not preferred:
+            continue
+        for pool in candidates:
+            if pool.name == preferred:
+                return pool.name
+    return candidates[0].name
+
+
+def probe_proxmox_host(
+    node_ip: str,
+    user: str = "root",
+    hosted_key: Optional[str] = None,
+    dry_run: bool = False,
+) -> ProxmoxHostFacts:
+    """Probe a Proxmox node for bridges, gateway, nameservers, and storage defaults."""
+    ssh_opts = _ssh_opts(hosted_key)
+    bridges = _list_proxmox_bridges(node_ip, user, ssh_opts, dry_run=dry_run)
+    storage_pools = _list_storage_pools(node_ip, user, ssh_opts, dry_run=dry_run)
+
+    images_pools = _list_storage_names_for_content(
+        node_ip, user, ssh_opts, "images", dry_run=dry_run
+    )
+    rootdir_pools = _list_storage_names_for_content(
+        node_ip, user, ssh_opts, "rootdir", dry_run=dry_run
+    )
+    vztmpl_pools = _list_storage_names_for_content(
+        node_ip, user, ssh_opts, "vztmpl", dry_run=dry_run
+    )
+    for pool in storage_pools:
+        content: list[str] = []
+        if pool.name in images_pools:
+            content.append("images")
+        if pool.name in rootdir_pools:
+            content.append("rootdir")
+        if pool.name in vztmpl_pools:
+            content.append("vztmpl")
+        pool.content = content
+
+    default_root_storage = _choose_storage_pool(
+        storage_pools,
+        required_content=("images", "rootdir"),
+        preferred_names=("local-lvm", "local"),
+    )
+    default_template_storage = _choose_storage_pool(
+        storage_pools,
+        required_content=("vztmpl",),
+        preferred_names=("local", default_root_storage or ""),
+    )
+
+    return ProxmoxHostFacts(
+        node_name=_get_node_name(node_ip, user, ssh_opts, dry_run=dry_run),
+        bridges=bridges,
+        gateway=_get_host_gateway(node_ip, user, ssh_opts, dry_run=dry_run),
+        nameservers=_get_host_nameservers(node_ip, user, ssh_opts, dry_run=dry_run),
+        storage_pools=storage_pools,
+        default_root_storage=default_root_storage,
+        default_template_storage=default_template_storage,
+        default_bridge=bridges[0] if bridges else None,
+    )
+
+
 def _build_guest_hostname(
     target_ip: str,
     friendly_name: Optional[str],
@@ -384,7 +587,11 @@ __all__ = [
     "_get_host_gateway",
     "_get_host_nameservers",
     "_get_next_vmid",
+    "_get_node_name",
     "_is_usable_nameserver",
+    "_list_proxmox_bridges",
+    "_list_storage_names_for_content",
+    "_list_storage_pools",
     "_resolve_public_key_path",
     "_resolve_storage_pool",
     "_ssh_opts",
@@ -392,4 +599,5 @@ __all__ = [
     "_storage_pool_supports_content",
     "_wait_for_guest_ssh",
     "auto_detect_bridge",
+    "probe_proxmox_host",
 ]

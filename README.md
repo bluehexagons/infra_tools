@@ -85,7 +85,8 @@ infra_tools setup server_proxmox 10.0.0.10 root \
 # 2. Register the node so the proxmox subcommands can talk to it.
 infra_tools proxmox add pve1 10.0.0.10 \
   --user root \
-  --ssh-key ~/.ssh/proxmox_ed25519
+  --key ~/.ssh/proxmox_ed25519
+infra_tools proxmox probe pve1  # cache bridges/storage defaults for future hosted setups
 infra_tools proxmox hosts        # sanity check: pve1 is listed
 infra_tools proxmox ls pve1      # sanity check: no guests yet
 
@@ -93,14 +94,12 @@ infra_tools proxmox ls pve1      # sanity check: no guests yet
 #    workstation_dev now defaults to --machine vm, so --hosted creates a VM
 #    on the Proxmox node and the normal workstation_dev flow continues there.
 infra_tools setup workstation_dev 10.0.0.50 devuser \
-  --hosted 10.0.0.10 \
-  --hosted-user root \
-  --hosted-key ~/.ssh/proxmox_ed25519 \
+  --hosted pve1 \
   --base debian \
   --name dev-01-vm \
   --cores 4 \
   --memory 8G \
-  --storage root local-lvm 40G \
+  --storage root 40G \
   --desktop i3 \
   --rdp \
   --browser firefox \
@@ -132,15 +131,13 @@ registration (step 2) are unchanged.
 #     LXC still works for the basic path, but VM is now the primary hosted default.
 infra_tools setup workstation_dev 10.0.0.50 devuser \
   --machine unprivileged \
-  --hosted 10.0.0.10 \
-  --hosted-user root \
-  --hosted-key ~/.ssh/proxmox_ed25519 \
+  --hosted pve1 \
   --base debian \
   --name dev-01-lxc \
   --cores 4 \
   --memory 8G \
-  --storage root auto 40G \
-  --storage template local \
+  --storage root 40G \
+  --storage template \
   --desktop i3 \
   --rdp \
   --browser firefox \
@@ -156,11 +153,9 @@ vmid returned by step 3b can be used directly with `proxmox health`, `modify`,
 ```bash
 # Create a VM on Proxmox, then run the normal web-server setup against it
 python3 infra_tools.py setup server_web 10.0.0.50 admin \
-  --hosted 10.0.0.10 \
-  --hosted-user root \
-  --hosted-key ~/.ssh/proxmox_ed25519 \
+  --hosted pve1 \
   --memory 4G \
-  --storage root local-lvm 32G \
+  --storage root 32G \
   --cores 2 \
   --base debian \
   --name web-01-vm \
@@ -175,12 +170,10 @@ and include a template pool:
 ```bash
 python3 infra_tools.py setup server_web 10.0.0.50 admin \
   --machine unprivileged \
-  --hosted 10.0.0.10 \
-  --hosted-user root \
-  --hosted-key ~/.ssh/proxmox_ed25519 \
+  --hosted pve1 \
   --memory 4G --cores 2 \
-  --storage root auto 20G \
-  --storage template local \
+  --storage root 20G \
+  --storage template \
   --base debian \
   --name web-01-lxc \
   --ruby --node \
@@ -188,7 +181,10 @@ python3 infra_tools.py setup server_web 10.0.0.50 admin \
   --deploy example.com https://github.com/user/repo.git
 ```
 
-`--storage` is repeatable: `root` is required as `--storage root POOL AMOUNT`, and `template` is optional as `--storage template POOL` (LXC only).
+`--storage` is repeatable. `root` may be given as `--storage root POOL AMOUNT` or the shorthand
+`--storage root AMOUNT`, which reuses a saved Proxmox host default and otherwise falls back to
+Proxmox auto-detection. LXC `template` storage is optional and may be given as `--storage template`
+to reuse the saved/default template pool.
 
 ### Managing Proxmox Guests
 
@@ -198,7 +194,8 @@ subcommand to enter an interactive shell, or use subcommands directly:
 
 ```bash
 # Register and inspect hosts
-python3 infra_tools.py proxmox add pve1 10.0.0.10 --user root --ssh-key ~/.ssh/proxmox_ed25519
+python3 infra_tools.py proxmox add pve1 10.0.0.10 --user root --key ~/.ssh/proxmox_ed25519
+python3 infra_tools.py proxmox probe pve1
 python3 infra_tools.py proxmox hosts
 python3 infra_tools.py proxmox ls pve1
 
@@ -222,6 +219,8 @@ python3 infra_tools.py proxmox shell
 ```
 
 The registry is stored at `<workspace>/proxmox_hosts.json` (mode `0600`).
+`proxmox probe` caches bridge, gateway, DNS, and storage-pool recommendations so later `setup --hosted`
+runs can target a registered host by name and omit manual pool names.
 Proxmox notifications use the native Proxmox webhook endpoint and matcher via `pvesh` — no local hook script
 is installed. `modify` and `reconfigure` changes that affect a running guest may require a restart.
 

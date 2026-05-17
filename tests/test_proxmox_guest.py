@@ -9,7 +9,11 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from lib.proxmox_guest import _build_guest_hostname, _wait_for_guest_ssh
+from lib.proxmox_guest import (
+    _build_guest_hostname,
+    _wait_for_guest_ssh,
+    probe_proxmox_host,
+)
 
 
 class TestBuildGuestHostname(unittest.TestCase):
@@ -43,6 +47,55 @@ class TestWaitForGuestSsh(unittest.TestCase):
     def test_dry_run_skips_probe(self, mock_run) -> None:
         _wait_for_guest_ssh("10.0.0.50", "10.0.0.1", "root", [], dry_run=True)
         mock_run.assert_not_called()
+
+
+class TestProbeProxmoxHost(unittest.TestCase):
+    @patch("lib.proxmox_guest._ssh_run")
+    def test_discovers_defaults_and_storage_content(self, mock_run) -> None:
+        mock_run.side_effect = [
+            MagicMock(stdout="vmbr1\nvmbr0\n", returncode=0, stderr=""),
+            MagicMock(
+                stdout=(
+                    "Name         Type     Status\n"
+                    "local        dir      active\n"
+                    "local-lvm    lvmthin  active\n"
+                    "backup       dir      disabled\n"
+                ),
+                returncode=0,
+                stderr="",
+            ),
+            MagicMock(stdout="Name Type Status\nlocal-lvm lvmthin active\n", returncode=0, stderr=""),
+            MagicMock(stdout="Name Type Status\nlocal-lvm lvmthin active\n", returncode=0, stderr=""),
+            MagicMock(stdout="Name Type Status\nlocal dir active\n", returncode=0, stderr=""),
+            MagicMock(stdout="pve1\n", returncode=0, stderr=""),
+            MagicMock(stdout="10.0.0.1\n", returncode=0, stderr=""),
+            MagicMock(stdout="1.1.1.1\n8.8.8.8\n", returncode=0, stderr=""),
+        ]
+
+        facts = probe_proxmox_host("10.0.0.10", "root")
+
+        self.assertEqual(facts.node_name, "pve1")
+        self.assertEqual(facts.default_bridge, "vmbr0")
+        self.assertEqual(facts.default_root_storage, "local-lvm")
+        self.assertEqual(facts.default_template_storage, "local")
+        self.assertEqual(facts.gateway, "10.0.0.1")
+        self.assertEqual(facts.nameservers, ["1.1.1.1", "8.8.8.8"])
+        self.assertEqual(facts.bridges, ["vmbr0", "vmbr1"])
+        self.assertEqual(
+            {pool.name: pool.content for pool in facts.storage_pools},
+            {
+                "local": ["vztmpl"],
+                "local-lvm": ["images", "rootdir"],
+                "backup": [],
+            },
+        )
+
+    def test_dry_run_returns_sample_defaults(self) -> None:
+        facts = probe_proxmox_host("10.0.0.10", "root", dry_run=True)
+
+        self.assertEqual(facts.default_bridge, "vmbr0")
+        self.assertEqual(facts.default_root_storage, "local-lvm")
+        self.assertEqual(facts.default_template_storage, "local")
 
 
 if __name__ == "__main__":

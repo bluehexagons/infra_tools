@@ -69,11 +69,9 @@ infra_tools.py patch web.com --deploy api.web.com https://github.com/user/api.gi
 
 # Provision a hosted Proxmox VM, then configure it as a web server
 infra_tools.py setup server_web 10.0.0.50 admin \
-  --hosted 10.0.0.10 \
-  --hosted-user root \
-  --hosted-key ~/.ssh/proxmox_ed25519 \
+  --hosted pve1 \
   --memory 4G \
-  --storage root local-lvm 32G \
+  --storage root 32G \
   --cores 2 \
   --base debian \
   --name web-01-vm \
@@ -129,12 +127,14 @@ Use these flags with `infra_tools.py setup ...` to create a Proxmox guest before
 
 | Flag | Description |
 |------|-------------|
-| `--hosted HOST` | Proxmox node IP or hostname where the hosted guest will be created |
+| `--hosted HOST` | Proxmox node IP/hostname, or a registered Proxmox host name from the workspace registry |
 | `--hosted-user USER` | SSH user for the Proxmox node (default: `root`) |
 | `--hosted-key PATH` | SSH key for the Proxmox node |
 | `--memory SIZE` | Hosted guest memory, such as `2G` or `512M` |
 | `--storage root POOL AMOUNT` | Required root filesystem storage spec; `POOL` may be a Proxmox storage name or `auto` |
+| `--storage root AMOUNT` | Shorthand root storage spec that reuses a saved host default pool and otherwise falls back to `auto` |
 | `--storage template POOL` | Optional LXC-only template storage spec; use to force where the base image is downloaded |
+| `--storage template` | LXC shorthand that reuses the saved/default template storage pool |
 | `--cores N` | Hosted guest vCPU count (default: `1`) |
 | `--base NAME` | Base template/image family to download, such as `debian` or `ubuntu` (default: `debian`) |
 | `--workspace PATH` | Workspace isolation for this setup |
@@ -143,6 +143,7 @@ Notes:
 
 - `--storage` is repeatable and storage types are unique.
 - `root` storage is required when `--hosted` is used.
+- If `--hosted` matches a registered Proxmox host, infra_tools reuses that host's saved SSH key and probed storage defaults.
 - `template` storage is LXC-only; if omitted, the tool prefers the root pool when it supports templates and otherwise auto-selects a template-capable pool.
 - VM-first hosted flows expect an image-capable root pool such as `local-lvm`.
 
@@ -150,11 +151,9 @@ Full example:
 
 ```bash
 python3 infra_tools.py setup server_web 10.0.0.50 admin \
-  --hosted 10.0.0.10 \
-  --hosted-user root \
-  --hosted-key ~/.ssh/proxmox_ed25519 \
+  --hosted pve1 \
   --memory 4G \
-  --storage root local-lvm 32G \
+  --storage root 32G \
   --cores 2 \
   --base debian \
   --name web-01-vm \
@@ -267,6 +266,7 @@ Register Proxmox hosts and manage their VMs or LXC compatibility guests:
 ```bash
 # Host registry
 infra_tools.py proxmox add <name> <address> [--user USER] [--key PATH]
+infra_tools.py proxmox probe <host>
 infra_tools.py proxmox hosts
 infra_tools.py proxmox remove <name>
 
@@ -293,6 +293,8 @@ infra_tools.py proxmox [shell]
 ```
 
 `config` shows the running guest configuration from `pct` or `qm`, and `--pending` shows changes that take effect on next restart.
+`probe` caches bridge, gateway, DNS, and storage-pool recommendations back into the host registry so later `setup --hosted`
+commands can reuse them.
 `modify` and `reconfigure` changes to a running guest are queued as pending by Proxmox.
 All subcommands accept `--dry-run` to print the remote command without executing it.
 

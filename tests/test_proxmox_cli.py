@@ -15,7 +15,13 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.proxmox_cli import add_proxmox_subparser, run_proxmox_command
-from lib.proxmox_hosts import ProxmoxHost, add_proxmox_host
+from lib.proxmox_hosts import (
+    ProxmoxHost,
+    ProxmoxHostFacts,
+    ProxmoxStoragePool,
+    add_proxmox_host,
+    load_proxmox_hosts,
+)
 
 
 def _make_parser() -> argparse.ArgumentParser:
@@ -82,6 +88,39 @@ class TestProxmoxCliHosts(_CliFixture):
         rc, out = self._run("remove", "missing")
         self.assertEqual(rc, 1)
         self.assertIn("No Proxmox host", out)
+
+    @patch("lib.proxmox_cli.probe_proxmox_host")
+    def test_probe_updates_cached_defaults(self, mock_probe) -> None:
+        add_proxmox_host(
+            ProxmoxHost(name="pve1", address="10.0.0.10"),
+            self.workspace,
+        )
+        mock_probe.return_value = ProxmoxHostFacts(
+            node_name="pve1",
+            bridges=["vmbr0"],
+            gateway="10.0.0.1",
+            nameservers=["1.1.1.1"],
+            storage_pools=[
+                ProxmoxStoragePool(
+                    name="local-lvm",
+                    type="lvmthin",
+                    status="active",
+                    content=["images", "rootdir"],
+                )
+            ],
+            default_root_storage="local-lvm",
+            default_template_storage="local",
+            default_bridge="vmbr0",
+        )
+
+        rc, out = self._run("probe", "pve1")
+
+        self.assertEqual(rc, 0)
+        self.assertIn("local-lvm", out)
+        self.assertIn("vmbr0", out)
+        loaded = load_proxmox_hosts(self.workspace)
+        self.assertEqual(loaded[0].default_storage, "local-lvm")
+        self.assertEqual(loaded[0].default_template_storage, "local")
 
 
 class TestProxmoxCliContainerOps(_CliFixture):

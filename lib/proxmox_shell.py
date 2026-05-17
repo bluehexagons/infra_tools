@@ -13,9 +13,10 @@ The shell is fully driver-agnostic: tests construct one with a custom
 from __future__ import annotations
 
 import shlex
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable, Optional
 
+from lib.proxmox_guest import probe_proxmox_host
 from lib.proxmox_hosts import (
     ProxmoxHost,
     add_proxmox_host,
@@ -49,8 +50,10 @@ Available commands:
   hosts                       List registered Proxmox hosts
   use <name|address>          Select a host for subsequent commands
   add <name> <addr> [user] [key]
-                              Register a new Proxmox host
+                               Register a new Proxmox host
   remove <name|address>       Remove a host from the registry
+  host                        Show details for the active host
+  probe                       Probe the active host and cache setup defaults
   ls                          List guests on the active host
   status <vmid>               Show guest status
   start <vmid>                Start a guest
@@ -72,6 +75,15 @@ def _format_host_row(host: ProxmoxHost) -> str:
     bits = [host.name, host.address, host.user]
     if host.description:
         bits.append(f"({host.description})")
+    defaults = []
+    if host.default_storage:
+        defaults.append(f"root={host.default_storage}")
+    if host.default_template_storage:
+        defaults.append(f"template={host.default_template_storage}")
+    if host.default_bridge:
+        defaults.append(f"bridge={host.default_bridge}")
+    if defaults:
+        bits.append("[" + ", ".join(defaults) + "]")
     return "  " + " | ".join(bits)
 
 
@@ -106,6 +118,40 @@ def _tristate(value: Optional[bool]) -> str:
     if value is None:
         return "skipped"
     return "ok" if value else "fail"
+
+
+def _format_host_details(host: ProxmoxHost) -> str:
+    lines = [
+        f"  Name:      {host.name}",
+        f"  Address:   {host.address}",
+        f"  User:      {host.user}",
+        f"  SSH key:   {host.ssh_key or 'default SSH config'}",
+        f"  Root pool: {host.default_storage or 'auto'}",
+        f"  Template:  {host.default_template_storage or 'auto'}",
+        f"  Bridge:    {host.default_bridge or 'auto'}",
+    ]
+    if host.description:
+        lines.append(f"  Notes:     {host.description}")
+    if host.facts:
+        lines.append(f"  Node:      {host.facts.node_name or '-'}")
+        lines.append(f"  Gateway:   {host.facts.gateway or '-'}")
+        lines.append(
+            "  DNS:       "
+            + (", ".join(host.facts.nameservers) if host.facts.nameservers else "-")
+        )
+        lines.append(
+            "  Bridges:   "
+            + (", ".join(host.facts.bridges) if host.facts.bridges else "-")
+        )
+        if host.facts.storage_pools:
+            lines.append("  Storage:")
+            for pool in host.facts.storage_pools:
+                content = ",".join(pool.content) if pool.content else "-"
+                lines.append(
+                    f"    {pool.name}: {pool.type or '-'} / "
+                    f"{pool.status or '-'} / {content}"
+                )
+    return "\n".join(lines)
 
 
 def _parse_memory_mb_shell(value: str) -> int:
@@ -206,6 +252,9 @@ class ProxmoxShell:
             "add": self._cmd_add,
             "remove": self._cmd_remove,
             "rm": self._cmd_remove,
+            "host": self._cmd_host,
+            "probe": self._cmd_probe,
+            "discover": self._cmd_probe,
             "ls": self._cmd_ls,
             "list": self._cmd_ls,
             "status": self._cmd_status,
@@ -305,6 +354,31 @@ class ProxmoxShell:
         ):
             self.state.active_host = None
         self._output(f"Removed host '{target}'.")
+
+    def _cmd_host(self, args: list[str]) -> None:
+        host = self._require_host()
+        self._output(_format_host_details(host))
+
+    def _cmd_probe(self, args: list[str]) -> None:
+        host = self._require_host()
+        facts = probe_proxmox_host(
+            host.address,
+            user=host.user,
+            hosted_key=host.ssh_key,
+        )
+        updated_host = replace(
+            host,
+            default_storage=host.default_storage or facts.default_root_storage,
+            default_template_storage=(
+                host.default_template_storage or facts.default_template_storage
+            ),
+            default_bridge=host.default_bridge or facts.default_bridge,
+            facts=facts,
+        )
+        add_proxmox_host(updated_host, self.state.workspace, replace=True)
+        self.state.active_host = updated_host
+        self._output("Cached host facts and setup defaults:")
+        self._output(_format_host_details(updated_host))
 
     def _cmd_ls(self, args: list[str]) -> None:
         host = self._require_host()

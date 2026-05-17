@@ -8,8 +8,10 @@ the management surface can grow independently of the setup/patch flow.
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 from typing import Optional
 
+from lib.proxmox_guest import probe_proxmox_host
 from lib.proxmox_hosts import (
     ProxmoxHost,
     add_proxmox_host,
@@ -74,6 +76,10 @@ def add_proxmox_subparser(subparsers: argparse._SubParsersAction) -> argparse.Ar
         help="Optional default storage pool to suggest when creating guests",
     )
     add.add_argument(
+        "--default-template-storage",
+        help="Optional default LXC template storage pool to suggest when creating guests",
+    )
+    add.add_argument(
         "--default-bridge",
         help="Optional default network bridge to suggest when creating guests",
     )
@@ -87,6 +93,13 @@ def add_proxmox_subparser(subparsers: argparse._SubParsersAction) -> argparse.Ar
     rm = sub.add_parser("remove", aliases=["rm"], help="Remove a registered Proxmox host")
     rm.add_argument("target", help="Host name or address to remove")
     rm.set_defaults(_handler=_cmd_hosts_remove)
+
+    probe = sub.add_parser(
+        "probe",
+        help="Probe a registered host for storage pools, bridges, and setup defaults",
+    )
+    probe.add_argument("host", help="Registered host name or address")
+    probe.set_defaults(_handler=_cmd_probe)
 
     ls = sub.add_parser("ls", aliases=["list"], help="List guests on a host")
     ls.add_argument("host", help="Registered host name or address")
@@ -314,11 +327,17 @@ def _cmd_hosts_list(args: argparse.Namespace, workspace: Optional[str]) -> int:
     if not hosts:
         print("No Proxmox hosts registered.")
         return 0
-    print(f"{'NAME':<20} {'ADDRESS':<25} {'USER':<12} DESCRIPTION")
-    print("-" * 70)
+    print(
+        f"{'NAME':<20} {'ADDRESS':<25} {'USER':<12} "
+        f"{'ROOT':<12} {'TEMPLATE':<12} {'BRIDGE':<10} DESCRIPTION"
+    )
+    print("-" * 110)
     for host in hosts:
         print(
             f"{host.name:<20} {host.address:<25} {host.user:<12} "
+            f"{(host.default_storage or '-').ljust(12)}"
+            f"{(host.default_template_storage or '-').ljust(12)}"
+            f"{(host.default_bridge or '-').ljust(10)}"
             f"{host.description or ''}"
         )
     return 0
@@ -332,6 +351,7 @@ def _cmd_hosts_add(args: argparse.Namespace, workspace: Optional[str]) -> int:
         ssh_key=args.ssh_key,
         description=args.description,
         default_storage=args.default_storage,
+        default_template_storage=args.default_template_storage,
         default_bridge=args.default_bridge,
     )
     add_proxmox_host(host, workspace, replace=args.replace)
@@ -345,6 +365,45 @@ def _cmd_hosts_remove(args: argparse.Namespace, workspace: Optional[str]) -> int
         return 0
     print(f"No Proxmox host matching '{args.target}'.")
     return 1
+
+
+def _cmd_probe(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    host = _resolve_host(args.host, workspace)
+    facts = probe_proxmox_host(host.address, user=host.user, hosted_key=host.ssh_key)
+    updated_host = replace(
+        host,
+        default_storage=host.default_storage or facts.default_root_storage,
+        default_template_storage=(
+            host.default_template_storage or facts.default_template_storage
+        ),
+        default_bridge=host.default_bridge or facts.default_bridge,
+        facts=facts,
+    )
+    add_proxmox_host(updated_host, workspace, replace=True)
+
+    print(f"Probed Proxmox host '{updated_host.name}' ({updated_host.address}).")
+    print(f"  node:      {facts.node_name or '-'}")
+    print(f"  root:      {updated_host.default_storage or '-'}")
+    print(f"  template:  {updated_host.default_template_storage or '-'}")
+    print(f"  bridge:    {updated_host.default_bridge or '-'}")
+    print(f"  gateway:   {facts.gateway or '-'}")
+    print(
+        "  dns:       "
+        + (", ".join(facts.nameservers) if facts.nameservers else "-")
+    )
+    print(
+        "  bridges:   "
+        + (", ".join(facts.bridges) if facts.bridges else "-")
+    )
+    if facts.storage_pools:
+        print("  storage:")
+        for pool in facts.storage_pools:
+            content = ",".join(pool.content) if pool.content else "-"
+            print(
+                f"    {pool.name}: {pool.type or '-'} / "
+                f"{pool.status or '-'} / {content}"
+            )
+    return 0
 
 
 def _cmd_containers_ls(args: argparse.Namespace, workspace: Optional[str]) -> int:
