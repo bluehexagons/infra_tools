@@ -27,7 +27,7 @@ from typing import Optional
 import urllib.parse
 
 from lib.proxmox_hosts import ProxmoxHost
-from lib.proxmox_node import _ssh_opts, _ssh_run
+from lib.proxmox_guest import _ssh_opts, _ssh_run
 from lib.types import StrList
 
 

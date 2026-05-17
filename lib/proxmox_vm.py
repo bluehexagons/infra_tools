@@ -34,9 +34,9 @@ from lib.cloud_images import (
     resolve_cloud_image,
 )
 from lib.config import SetupConfig
-from lib.proxmox_node import (
+from lib.proxmox_guest import (
     ProvisionError,
-    _build_container_hostname,
+    _build_guest_hostname,
     _get_bridge_prefix_length,
     _get_host_gateway,
     _get_host_nameservers,
@@ -45,7 +45,7 @@ from lib.proxmox_node import (
     _resolve_storage_pool,
     _ssh_opts,
     _ssh_run,
-    _wait_for_container_ssh,
+    _wait_for_guest_ssh,
     auto_detect_bridge,
 )
 from lib.types import NestedStrList, StrList
@@ -470,9 +470,11 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
     memory_mb = _parse_memory_mb(memory_str)
     disk_size_gib = _parse_disk_size_gib(disk_amount)
 
-    hostname = _build_container_hostname(target_ip, config.friendly_name)
-    if hostname.startswith("lxc-"):
-        hostname = "vm-" + hostname[len("lxc-"):]
+    hostname = _build_guest_hostname(
+        target_ip,
+        config.friendly_name,
+        default_prefix="vm",
+    )
 
     resolved, catalog_entry = _resolve_image(config, image)
 
@@ -572,7 +574,7 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
             dry_run=dry_run,
         )
         # Cloud-init takes longer than LXC startup; bump the timeout.
-        _wait_for_container_ssh(
+        _wait_for_guest_ssh(
             target_ip, node_ip, user, ssh_opts, timeout=300, dry_run=dry_run
         )
     finally:
