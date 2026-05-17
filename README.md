@@ -64,6 +64,57 @@ python3 infra_tools.py setup server_lite 192.168.1.10 \
   --scrub /mnt/backup .pardatabase 5% weekly
 ```
 
+### End-to-End: One Proxmox Server + Dev Workstation Container
+
+A full start-to-finish setup with a single Proxmox node at `10.0.0.10` and a Debian
+dev-workstation LXC at `10.0.0.50`. Run all commands from your local orchestration host.
+
+```bash
+# 0. (One-time) install infra_tools onto the orchestration host
+sudo python3 infra_tools.py self-setup --user "$USER"
+
+# 1. Harden and configure the Proxmox node itself.
+#    Assumes Proxmox VE is already installed and SSH-reachable as root.
+infra_tools setup server_proxmox 10.0.0.10 root \
+  --key ~/.ssh/proxmox_ed25519 \
+  --machine hardware \
+  --name pve1
+
+# 2. Register the node so the proxmox subcommands can talk to it.
+infra_tools proxmox add pve1 10.0.0.10 \
+  --user root \
+  --ssh-key ~/.ssh/proxmox_ed25519
+infra_tools proxmox hosts        # sanity check: pve1 is listed
+infra_tools proxmox ls pve1      # sanity check: no containers yet
+
+# 3. Provision a Debian dev-workstation LXC on pve1 and configure it in one shot.
+#    --hosted creates the LXC on the Proxmox node, then the normal workstation_dev
+#    flow runs against the new container at 10.0.0.50.
+infra_tools setup workstation_dev 10.0.0.50 devuser \
+  --hosted 10.0.0.10 \
+  --hosted-user root \
+  --hosted-key ~/.ssh/proxmox_ed25519 \
+  --base debian \
+  --name dev-01 \
+  --cores 4 \
+  --memory 8G \
+  --storage root auto 40G \
+  --storage template local \
+  --desktop i3 \
+  --rdp \
+  --browser firefox \
+  --ruby --node --go --python \
+  --office
+
+# 4. From now on you can manage the container through pve1 without re-typing keys.
+infra_tools proxmox health pve1 100       # vmid Proxmox assigned to dev-01
+infra_tools proxmox modify pve1 100 --cores 8 --memory 16G
+```
+
+Connect to the workstation over RDP at `10.0.0.50:3389` as `devuser`, or SSH in for
+a CLI session. To rebuild from the saved configuration later, run
+`infra_tools deploy dev-01`.
+
 ### Hosted Proxmox LXC
 ```bash
 # Create an LXC on Proxmox, then run the normal web-server setup against it
