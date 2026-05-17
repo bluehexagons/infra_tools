@@ -231,6 +231,9 @@ def _render_user_data(
         "#cloud-config",
         f"hostname: __HOSTNAME__",
         "manage_etc_hosts: true",
+        "package_update: true",
+        "packages:",
+        "  - qemu-guest-agent",
         "users:",
         "  - name: root",
         "    lock_passwd: false",
@@ -250,6 +253,10 @@ def _render_user_data(
             lines.append("    ssh_authorized_keys:")
             lines.append(f"      - {pubkey_contents.strip()}")
     lines.append("ssh_pwauth: false")
+    lines.extend([
+        "runcmd:",
+        "  - systemctl enable --now qemu-guest-agent",
+    ])
     lines.append("")
     return "\n".join(lines)
 
@@ -398,6 +405,39 @@ def _create_vm(
     print(f"  ✓ VM {vmid} created and started ({hostname}, {target_ip})")
 
 
+def _wait_for_guest_agent(
+    vmid: int,
+    node_ip: str,
+    user: str,
+    ssh_opts: StrList,
+    *,
+    timeout: int = 180,
+    poll_interval: int = 5,
+    dry_run: bool = False,
+) -> None:
+    """Wait briefly for qemu-guest-agent to become reachable."""
+    if dry_run:
+        print(f"  [DRY-RUN] Would wait for qemu-guest-agent in VM {vmid}")
+        return
+
+    print("  Waiting for qemu-guest-agent...")
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        result = _ssh_run(
+            node_ip,
+            user,
+            ssh_opts,
+            f"qm agent {vmid} ping",
+            dry_run=False,
+        )
+        if result.returncode == 0:
+            print("  ✓ qemu-guest-agent is responding")
+            return
+        time.sleep(poll_interval)
+
+    print("  ⚠ qemu-guest-agent did not come up before SSH handoff; continuing")
+
+
 def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
     """Orchestrate Proxmox VM provisioning.
 
@@ -522,6 +562,13 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
             node_ip=node_ip,
             user=user,
             ssh_opts=ssh_opts,
+            dry_run=dry_run,
+        )
+        _wait_for_guest_agent(
+            vmid,
+            node_ip,
+            user,
+            ssh_opts,
             dry_run=dry_run,
         )
         # Cloud-init takes longer than LXC startup; bump the timeout.

@@ -27,6 +27,22 @@ CLI_SYSTEMS = [
 ]
 
 
+def _resolve_machine_type(
+    args: argparse.Namespace,
+    *,
+    system_default: Optional[str],
+    is_build_server: bool,
+) -> str:
+    explicit_machine_type = getattr(args, "machine_type", None)
+    if explicit_machine_type:
+        return explicit_machine_type
+    if is_build_server:
+        return "vm"
+    if system_default:
+        return system_default
+    return DEFAULT_MACHINE_TYPE
+
+
 def _normalize_container_storage(value: NestedStrList | list[str] | None) -> Optional[NestedStrList]:
     if not value:
         return None
@@ -161,7 +177,7 @@ class SetupConfig:
     antistatic_server: MaybeStr = None  # "DOMAIN[:port]" spec
     antistatic_db: MaybeStr = None  # "DOMAIN[:port]" spec
     no_restart: bool = False
-    # Container hosting (Proxmox LXC)
+    # Hosted guest provisioning (Proxmox VM/LXC)
     hosted_node: MaybeStr = None
     hosted_user: str = "root"
     hosted_key: MaybeStr = None
@@ -600,6 +616,14 @@ class SetupConfig:
             enable_smbclient = True
         elif enable_smbclient is None:
             enable_smbclient = False
+
+        is_build_server = bool(getattr(args, 'is_build_server', False))
+        is_app_server = bool(getattr(args, 'is_app_server', False))
+        machine_type = _resolve_machine_type(
+            args,
+            system_default=system_type_definition.default_machine_type,
+            is_build_server=is_build_server,
+        )
         
         include_desktop = (
             system_type_definition.include_desktop
@@ -620,7 +644,7 @@ class SetupConfig:
             host=args.host,
             username=username,
             system_type=system_type,
-            machine_type=getattr(args, 'machine_type', None) or system_type_definition.default_machine_type or DEFAULT_MACHINE_TYPE,
+            machine_type=machine_type,
             password=getattr(args, 'password', None),
             ssh_key=getattr(args, 'ssh_key', None),
             timezone=timezone,
@@ -648,8 +672,8 @@ class SetupConfig:
             ssl_email=getattr(args, 'ssl_email', None),
             enable_cloudflare=getattr(args, 'enable_cloudflare', False),
             enable_cicd=getattr(args, 'enable_cicd', False),
-            is_build_server=getattr(args, 'is_build_server', False),
-            is_app_server=getattr(args, 'is_app_server', False),
+            is_build_server=is_build_server,
+            is_app_server=is_app_server,
             deploy_targets=getattr(args, 'deploy_targets', None),
             api_subdomain=getattr(args, 'api_subdomain', False),
             enable_samba=getattr(args, 'enable_samba', False),

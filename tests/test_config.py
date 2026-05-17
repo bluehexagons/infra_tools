@@ -368,6 +368,7 @@ class TestSetupConfigFromArgs(unittest.TestCase):
 
     def test_workstation_defaults_come_from_registry(self):
         config = SetupConfig.from_args(self._make_args(), 'workstation_desktop')
+        self.assertEqual(config.machine_type, 'vm')
         self.assertFalse(config.enable_rdp)
         self.assertTrue(config.include_desktop)
         self.assertTrue(config.include_cli_tools)
@@ -381,9 +382,29 @@ class TestSetupConfigFromArgs(unittest.TestCase):
 
     def test_pc_dev_defaults_include_office_and_smbclient(self):
         config = SetupConfig.from_args(self._make_args(), 'pc_dev')
+        self.assertEqual(config.machine_type, 'vm')
         self.assertTrue(config.install_office)
         self.assertTrue(config.enable_smbclient)
         self.assertTrue(config.include_pc_dev_apps)
+
+    def test_server_web_defaults_to_vm(self):
+        config = SetupConfig.from_args(self._make_args(), 'server_web')
+        self.assertEqual(config.machine_type, 'vm')
+
+    def test_build_server_defaults_to_vm(self):
+        config = SetupConfig.from_args(
+            self._make_args(is_build_server=True),
+            'server_lite',
+        )
+        self.assertTrue(config.is_build_server)
+        self.assertEqual(config.machine_type, 'vm')
+
+    def test_explicit_machine_type_overrides_vm_default(self):
+        config = SetupConfig.from_args(
+            self._make_args(machine_type='unprivileged'),
+            'workstation_dev',
+        )
+        self.assertEqual(config.machine_type, 'unprivileged')
 
     def test_antistatic_db_from_args(self):
         config = SetupConfig.from_args(

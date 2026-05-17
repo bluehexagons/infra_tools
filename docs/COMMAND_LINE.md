@@ -67,17 +67,16 @@ infra_tools.py setup workstation_desktop 192.168.1.50 --desktop i3 --browser fir
 # Patch an existing server
 infra_tools.py patch web.com --deploy api.web.com https://github.com/user/api.git
 
-# Provision a hosted LXC on a Proxmox node, then configure it as a web server
+# Provision a hosted Proxmox VM, then configure it as a web server
 infra_tools.py setup server_web 10.0.0.50 admin \
   --hosted 10.0.0.10 \
   --hosted-user root \
   --hosted-key ~/.ssh/proxmox_ed25519 \
   --memory 4G \
-  --storage root auto 20G \
-  --storage template local \
+  --storage root local-lvm 32G \
   --cores 2 \
   --base debian \
-  --name web-01 \
+  --name web-01-vm \
   --ruby --node --ssl
 ```
 
@@ -93,7 +92,7 @@ infra_tools.py setup server_web 10.0.0.50 admin \
 | `-p, --password PASS` | User password |
 | `-t, --timezone TZ` | Timezone (defaults to UTC) |
 | `--workspace PATH` | Workspace root for config, credentials, known_hosts, and history |
-| `--machine TYPE` | Machine type: `unprivileged` (LXC, default), `vm`, `privileged`, `hardware`, `oci` |
+| `--machine TYPE` | Machine type override. Defaults are system-specific: VM for workstation_desktop/workstation_dev/pc_dev/server_web and build-server flows; otherwise `unprivileged` (LXC) |
 | `--name NAME` | Friendly name for this configuration |
 | `--tags TAG1,TAG2` | Comma-separated tags for this configuration |
 | `--dry-run` | Simulate execution without making changes |
@@ -124,27 +123,28 @@ infra_tools.py setup server_web 10.0.0.50 admin \
 | `--python` | Install Python aliases + uv |
 | `--workspace PATH` | Workspace isolation for this setup |
 
-## Hosted Proxmox LXC Flags
+## Hosted Proxmox Guest Flags
 
-Use these flags with `infra_tools.py setup ...` to create an LXC container on a Proxmox host before the normal setup flow continues against that new container.
+Use these flags with `infra_tools.py setup ...` to create a Proxmox guest before the normal setup flow continues against that new machine. VM is now the default for `workstation_desktop`, `workstation_dev`, `pc_dev`, `server_web`, and `--build-server`; pass `--machine unprivileged` to stay on the LXC path.
 
 | Flag | Description |
 |------|-------------|
-| `--hosted HOST` | Proxmox node IP or hostname where the container will be created |
+| `--hosted HOST` | Proxmox node IP or hostname where the hosted guest will be created |
 | `--hosted-user USER` | SSH user for the Proxmox node (default: `root`) |
 | `--hosted-key PATH` | SSH key for the Proxmox node |
-| `--memory SIZE` | Container memory, such as `2G` or `512M` |
+| `--memory SIZE` | Hosted guest memory, such as `2G` or `512M` |
 | `--storage root POOL AMOUNT` | Required root filesystem storage spec; `POOL` may be a Proxmox storage name or `auto` |
-| `--storage template POOL` | Optional template storage spec; use to force where the base image is downloaded |
-| `--cores N` | Container vCPU count (default: `1`) |
-| `--base NAME` | Base template family to download, such as `debian` or `ubuntu` (default: `debian`) |
+| `--storage template POOL` | Optional LXC-only template storage spec; use to force where the base image is downloaded |
+| `--cores N` | Hosted guest vCPU count (default: `1`) |
+| `--base NAME` | Base template/image family to download, such as `debian` or `ubuntu` (default: `debian`) |
 | `--workspace PATH` | Workspace isolation for this setup |
 
 Notes:
 
 - `--storage` is repeatable and storage types are unique.
 - `root` storage is required when `--hosted` is used.
-- `template` storage is optional; if omitted, the tool prefers the root pool when it supports templates and otherwise auto-selects a template-capable pool.
+- `template` storage is LXC-only; if omitted, the tool prefers the root pool when it supports templates and otherwise auto-selects a template-capable pool.
+- VM-first hosted flows expect an image-capable root pool such as `local-lvm`.
 
 Full example:
 
@@ -154,11 +154,10 @@ python3 infra_tools.py setup server_web 10.0.0.50 admin \
   --hosted-user root \
   --hosted-key ~/.ssh/proxmox_ed25519 \
   --memory 4G \
-  --storage root auto 20G \
-  --storage template local \
+  --storage root local-lvm 32G \
   --cores 2 \
   --base debian \
-  --name web-01 \
+  --name web-01-vm \
   --ruby --node --ssl --ssl-email admin@example.com \
   --workspace /workspace/myapp \
   --deploy example.com https://github.com/user/repo.git
@@ -263,7 +262,7 @@ infra_tools.py deploy <pattern> [--yes]        # Redeploy systems
 
 ## Proxmox Management
 
-Register Proxmox hosts and manage their LXC containers:
+Register Proxmox hosts and manage their LXC containers or VMs:
 
 ```bash
 # Host registry
@@ -294,7 +293,7 @@ infra_tools.py proxmox [shell]
 ```
 
 `config` shows the running pct configuration; `--pending` shows changes that take effect on next restart.
-`modify` and `reconfigure` changes to a running container are queued as pending by Proxmox.
+`modify` and `reconfigure` changes to a running guest are queued as pending by Proxmox.
 All subcommands accept `--dry-run` to print the remote command without executing it.
 
 ## Interactive Shell

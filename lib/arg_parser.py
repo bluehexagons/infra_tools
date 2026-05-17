@@ -40,33 +40,35 @@ def add_setup_arguments(
     parser.add_argument("--machine", dest="machine_type",
                        choices=MACHINE_TYPES,
                        default=None,
-                       help=f"Machine type: unprivileged (LXC, default), vm, privileged, hardware, oci (Docker/Podman)")
+                       help="Machine type override. Defaults are system-specific: "
+                            "VM for workstation_desktop/workstation_dev/pc_dev/server_web "
+                            "and build-server flows; otherwise unprivileged (LXC).")
     
     if not for_remote:
         parser.add_argument("--name", dest="friendly_name", help="Friendly name for this configuration")
         parser.add_argument("--tags", dest="tags", help="Comma-separated list of tags for this configuration")
 
-        # Container hosting (Proxmox LXC creation)
+        # Hosted guest provisioning (Proxmox VM/LXC creation)
         parser.add_argument("--hosted", dest="hosted_node",
-                           help="Proxmox node IP/hostname to create LXC container on")
+                           help="Proxmox node IP/hostname where the hosted guest will be created")
         parser.add_argument("--hosted-user", dest="hosted_user", default="root",
                            help="SSH user for Proxmox node (default: root)")
         parser.add_argument("--hosted-key", dest="hosted_key",
                            help="SSH key for Proxmox node (default: SSH config)")
         parser.add_argument("--memory", dest="container_memory",
-                           help="Container memory (e.g. 2G, 512M)")
+                           help="Hosted guest memory (e.g. 2G, 512M)")
         parser.add_argument("--storage", dest="container_storage",
                            action="append", nargs="+", metavar="STORAGE",
-                           help="Container storage spec: root POOL AMOUNT or template POOL; repeat as needed")
+                           help="Hosted guest storage spec: root POOL AMOUNT, or template POOL for LXC only; repeat as needed")
         parser.add_argument("--cores", dest="container_cores", type=int, default=1,
-                           help="Container CPU cores (default: 1)")
+                           help="Hosted guest CPU cores (default: 1)")
         parser.add_argument("--base", dest="container_base", default="debian",
-                           help="Base OS template (default: debian, auto-downloads latest)")
+                           help="Base OS family for the LXC template or VM image catalog (default: debian)")
         parser.add_argument("--image", dest="vm_image", default=None,
-                           help="VM cloud image override: http(s) URL to a qcow2, or a "
-                                "Proxmox storage reference like 'local:iso/foo.qcow2'. "
-                                "Only used when --machine vm. Defaults to the curated "
-                                "Debian catalog (lib/cloud_images.py).")
+                            help="VM cloud image override: http(s) URL to a qcow2, or a "
+                                 "Proxmox storage reference like 'local:iso/foo.qcow2'. "
+                                 "Only used when --machine vm. Defaults to the curated "
+                                 "Debian catalog (lib/cloud_images.py).")
     else:
         parser.add_argument("--name", dest="friendly_name", default=None,
                            help="Friendly name for this configuration")

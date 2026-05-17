@@ -28,6 +28,7 @@ PLUGIN = PluginDefinition(
             name="server_web",
             description="Web server",
             order=50,
+            default_machine_type="vm",
             include_cli_tools=True,
             include_web_server=True,
             include_web_firewall=True,

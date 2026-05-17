@@ -68,8 +68,8 @@ python3 infra_tools.py setup server_lite 192.168.1.10 \
 
 A full start-to-finish setup with a single Proxmox node at `10.0.0.10` and a Debian
 dev workstation at `10.0.0.50`. Run all commands from your local orchestration host.
-The default flow uses an unprivileged LXC; a VM variant follows for cases where you
-need GPU passthrough, kernel-level tuning, or a stronger isolation boundary.
+The default hosted workstation flow now provisions a VM. Use `--machine unprivileged`
+only when you intentionally want the lighter-weight LXC compatibility path.
 
 ```bash
 # 0. (One-time) install infra_tools onto the orchestration host
@@ -87,53 +87,12 @@ infra_tools proxmox add pve1 10.0.0.10 \
   --user root \
   --ssh-key ~/.ssh/proxmox_ed25519
 infra_tools proxmox hosts        # sanity check: pve1 is listed
-infra_tools proxmox ls pve1      # sanity check: no containers yet
+infra_tools proxmox ls pve1      # sanity check: no guests yet
 
-# 3. Provision a Debian dev-workstation LXC on pve1 and configure it in one shot.
-#    --hosted creates the LXC on the Proxmox node, then the normal workstation_dev
-#    flow runs against the new container at 10.0.0.50.
+# 3. Provision a Debian dev-workstation VM on pve1 and configure it in one shot.
+#    workstation_dev now defaults to --machine vm, so --hosted creates a VM
+#    on the Proxmox node and the normal workstation_dev flow continues there.
 infra_tools setup workstation_dev 10.0.0.50 devuser \
-  --hosted 10.0.0.10 \
-  --hosted-user root \
-  --hosted-key ~/.ssh/proxmox_ed25519 \
-  --base debian \
-  --name dev-01 \
-  --cores 4 \
-  --memory 8G \
-  --storage root auto 40G \
-  --storage template local \
-  --desktop i3 \
-  --rdp \
-  --browser firefox \
-  --ruby --node --go --python \
-  --office
-
-# 4. From now on you can manage the container through pve1 without re-typing keys.
-infra_tools proxmox health pve1 100       # vmid Proxmox assigned to dev-01
-infra_tools proxmox modify pve1 100 --cores 8 --memory 16G
-```
-
-Connect to the workstation over RDP at `10.0.0.50:3389` as `devuser`, or SSH in for
-a CLI session. To rebuild from the saved configuration later, run
-`infra_tools deploy dev-01`.
-
-#### Alternate: provision the workstation as a VM
-
-Use a VM instead of an LXC when you need GPU passthrough, kernel hardening (sysctl),
-swap, UFW, fail2ban, or hardware-accelerated RDP — see
-[`docs/MACHINE_TYPES.md`](docs/MACHINE_TYPES.md) for the full capability matrix.
-
-Replace step 3 with the VM variant below. The Proxmox host setup (step 1) and
-registration (step 2) are unchanged.
-
-```bash
-# 3b. Provision the workstation as a Debian VM via qm + cloud-init.
-#     --machine vm switches to the VM flow and unlocks GPU/UFW/sysctl features.
-#     Root storage uses an LVM-backed pool (e.g. local-lvm) rather than `auto`.
-#     The cloud image is fetched from the curated catalog in lib/cloud_images.py;
-#     pass --image URL_OR_VOLUME to override.
-infra_tools setup workstation_dev 10.0.0.50 devuser \
-  --machine vm \
   --hosted 10.0.0.10 \
   --hosted-user root \
   --hosted-key ~/.ssh/proxmox_ed25519 \
@@ -147,44 +106,83 @@ infra_tools setup workstation_dev 10.0.0.50 devuser \
   --browser firefox \
   --ruby --node --go --python \
   --office
+
+# 4. From now on you can manage the VM through pve1 without re-typing keys.
+infra_tools proxmox health pve1 100       # vmid Proxmox assigned to dev-01-vm
+infra_tools proxmox modify pve1 100 --cores 8 --memory 16G
+```
+
+Connect to the workstation over RDP at `10.0.0.50:3389` as `devuser`, or SSH in for
+a CLI session. To rebuild from the saved configuration later, run
+`infra_tools deploy dev-01-vm`.
+
+#### Alternate: force the workstation onto an LXC
+
+Use `--machine unprivileged` only when you explicitly want a lighter-weight LXC.
+This keeps basic workstation support, but advanced VM-oriented polish such as
+full kernel/firewall behavior and the best desktop experience should be expected
+on the default VM path — see [`docs/MACHINE_TYPES.md`](docs/MACHINE_TYPES.md) for
+the full capability matrix.
+
+Replace step 3 with the LXC variant below. The Proxmox host setup (step 1) and
+registration (step 2) are unchanged.
+
+```bash
+# 3b. Provision the workstation as an unprivileged Debian LXC instead.
+#     LXC still works for the basic path, but VM is now the primary hosted default.
+infra_tools setup workstation_dev 10.0.0.50 devuser \
+  --machine unprivileged \
+  --hosted 10.0.0.10 \
+  --hosted-user root \
+  --hosted-key ~/.ssh/proxmox_ed25519 \
+  --base debian \
+  --name dev-01-lxc \
+  --cores 4 \
+  --memory 8G \
+  --storage root auto 40G \
+  --storage template local \
+  --desktop i3 \
+  --rdp \
+  --browser firefox \
+  --ruby --node --go --python \
+  --office
 ```
 
 `infra_tools proxmox` subcommands work the same way for VMs as for LXCs — the
 vmid returned by step 3b can be used directly with `proxmox health`, `modify`,
 `stop`, `destroy`, etc.
 
-### Hosted Proxmox LXC or VM
+### Hosted Proxmox VM or LXC
 ```bash
-# Create an LXC on Proxmox, then run the normal web-server setup against it
+# Create a VM on Proxmox, then run the normal web-server setup against it
 python3 infra_tools.py setup server_web 10.0.0.50 admin \
   --hosted 10.0.0.10 \
   --hosted-user root \
   --hosted-key ~/.ssh/proxmox_ed25519 \
   --memory 4G \
-  --storage root auto 20G \
-  --storage template local \
+  --storage root local-lvm 32G \
   --cores 2 \
   --base debian \
-  --name web-01 \
+  --name web-01-vm \
   --ruby --node \
   --ssl --ssl-email admin@example.com \
   --deploy example.com https://github.com/user/repo.git
 ```
 
-For a VM instead of an LXC, add `--machine vm`, point `--storage root` at an
-LVM-backed pool, and drop `--storage template` (VMs use a cloud-image catalog,
-not an LXC template pool):
+To stay on the LXC path instead, add `--machine unprivileged`, use `--storage root auto ...`,
+and include a template pool:
 
 ```bash
 python3 infra_tools.py setup server_web 10.0.0.50 admin \
-  --machine vm \
+  --machine unprivileged \
   --hosted 10.0.0.10 \
   --hosted-user root \
   --hosted-key ~/.ssh/proxmox_ed25519 \
   --memory 4G --cores 2 \
-  --storage root local-lvm 32G \
+  --storage root auto 20G \
+  --storage template local \
   --base debian \
-  --name web-01-vm \
+  --name web-01-lxc \
   --ruby --node \
   --ssl --ssl-email admin@example.com \
   --deploy example.com https://github.com/user/repo.git
@@ -225,7 +223,7 @@ python3 infra_tools.py proxmox shell
 
 The registry is stored at `<workspace>/proxmox_hosts.json` (mode `0600`).
 Proxmox notifications use the native Proxmox webhook endpoint and matcher via `pvesh` — no local hook script
-is installed. `modify` and `reconfigure` changes that affect a running container may require a restart.
+is installed. `modify` and `reconfigure` changes that affect a running guest may require a restart.
 
 ### Interactive Shell
 
