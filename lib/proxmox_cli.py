@@ -12,7 +12,11 @@ from dataclasses import replace
 from typing import Optional
 
 from lib.cluster_update import run_cluster_update
+from lib.proxmox_backup import BackupInfo, ProxmoxBackupError, create_backup, list_backups
 from lib.proxmox_guest import probe_proxmox_cluster, probe_proxmox_host
+from lib.proxmox_migrate import ProxmoxMigrateError, migrate_guest
+from lib.proxmox_storage import OrphanedVolume, ProxmoxStorageError, delete_volume, list_orphaned_volumes
+from lib.proxmox_summary import NodeSummary, ProxmoxSummaryError, format_node_summary, get_node_summary
 from lib.proxmox_hosts import (
     ProxmoxHost,
     add_proxmox_host,
@@ -266,6 +270,101 @@ def add_proxmox_subparser(subparsers: argparse._SubParsersAction) -> argparse.Ar
     )
     resize.set_defaults(_handler=_cmd_resize_disk)
 
+    top = sub.add_parser(
+        "top",
+        help="Show CPU, memory, storage, and guest counts for one or more nodes",
+    )
+    top.add_argument(
+        "hosts",
+        nargs="+",
+        help="Registered host name(s) or address(es)",
+    )
+    top.set_defaults(_handler=_cmd_top)
+
+    backups_list = sub.add_parser(
+        "backups",
+        help="List backups for a guest",
+    )
+    backups_list.add_argument("host", help="Registered host name or address")
+    backups_list.add_argument("vmid", type=int, help="Guest VMID")
+    backups_list.set_defaults(_handler=_cmd_backups_list)
+
+    backup = sub.add_parser(
+        "backup",
+        help="Create an immediate vzdump backup for a guest",
+    )
+    backup.add_argument("host", help="Registered host name or address")
+    backup.add_argument("vmid", type=int, help="Guest VMID")
+    backup.add_argument(
+        "--storage",
+        help="Target storage pool (auto-selects first backup-capable pool if omitted)",
+    )
+    backup.add_argument(
+        "--mode",
+        default="snapshot",
+        choices=["snapshot", "suspend", "stop"],
+        help="Backup mode (default: snapshot — no downtime for VMs)",
+    )
+    backup.add_argument(
+        "--compress",
+        default="zstd",
+        choices=["zstd", "gzip", "lzo", "0"],
+        help="Compression format (default: zstd)",
+    )
+    backup.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the remote vzdump command without executing it",
+    )
+    backup.set_defaults(_handler=_cmd_backup)
+
+    migrate = sub.add_parser(
+        "migrate",
+        help="Migrate a guest to another cluster node",
+    )
+    migrate.add_argument("host", help="Source registered host name or address")
+    migrate.add_argument("vmid", type=int, help="Guest VMID")
+    migrate.add_argument("target", help="Target registered host name or address")
+    migrate.add_argument(
+        "--online",
+        action="store_true",
+        help="Keep the VM running during migration (requires shared or migrated storage)",
+    )
+    migrate.add_argument(
+        "--with-local-disks",
+        action="store_true",
+        help="Migrate local disks to the target node storage",
+    )
+    migrate.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the remote migrate command without executing it",
+    )
+    migrate.set_defaults(_handler=_cmd_migrate)
+
+    clean_disks = sub.add_parser(
+        "clean-disks",
+        help="List orphaned guest volumes (and optionally delete them)",
+    )
+    clean_disks.add_argument("host", help="Registered host name or address")
+    clean_disks.add_argument(
+        "--delete",
+        action="store_true",
+        help="Delete the orphaned volumes after listing them (asks for confirmation)",
+    )
+    clean_disks.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        help="Skip the confirmation prompt when used with --delete",
+    )
+    clean_disks.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be deleted without removing anything",
+    )
+    clean_disks.set_defaults(_handler=_cmd_clean_disks)
+
     unlock = sub.add_parser(
         "unlock",
         help="Remove a stuck management lock from a guest",
@@ -414,7 +513,14 @@ def run_proxmox_command(args: argparse.Namespace) -> int:
         return run_proxmox_shell(workspace)
     try:
         return handler(args, workspace)
-    except (ProxmoxManageError, ValueError) as exc:
+    except (
+        ProxmoxBackupError,
+        ProxmoxManageError,
+        ProxmoxMigrateError,
+        ProxmoxStorageError,
+        ProxmoxSummaryError,
+        ValueError,
+    ) as exc:
         print(f"Error: {exc}")
         return 1
 
@@ -732,6 +838,124 @@ def _cmd_resize_disk(args: argparse.Namespace, workspace: Optional[str]) -> int:
         f"to {args.size}."
     )
     return 0
+
+
+def _cmd_top(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    any_error = False
+    for name in args.hosts:
+        host = _resolve_host(name, workspace)
+        try:
+            summary = get_node_summary(host)
+        except ProxmoxSummaryError as exc:
+            print(f"Error ({host.name}): {exc}")
+            any_error = True
+            continue
+        print(format_node_summary(summary))
+        if len(args.hosts) > 1:
+            print()
+    return 1 if any_error else 0
+
+
+def _cmd_backups_list(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    host = _resolve_host(args.host, workspace)
+    backups = list_backups(host, args.vmid)
+    if not backups:
+        print(f"No backups found for VMID {args.vmid} on {host.name}.")
+        return 0
+    print(f"Backups for VMID {args.vmid} on {host.name}:")
+    for b in backups:
+        size_str = _fmt_bytes(b.size) if b.size else "-"
+        date_str = _fmt_timestamp(b.ctime) if b.ctime else "-"
+        desc = f"  {b.notes}" if b.notes else ""
+        print(f"  {date_str}  {size_str:<10}  {b.filename}{desc}")
+    return 0
+
+
+def _cmd_backup(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    host = _resolve_host(args.host, workspace)
+    create_backup(
+        host,
+        args.vmid,
+        storage=args.storage,
+        mode=args.mode,
+        compress=args.compress,
+        dry_run=args.dry_run,
+    )
+    prefix = "Would back up" if args.dry_run else "Backed up"
+    print(f"{prefix} VMID {args.vmid} on {host.name}.")
+    return 0
+
+
+def _cmd_migrate(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    src = _resolve_host(args.host, workspace)
+    target = _resolve_host(args.target, workspace)
+    migrate_guest(
+        src,
+        args.vmid,
+        target,
+        online=args.online,
+        with_local_disks=args.with_local_disks,
+        dry_run=args.dry_run,
+    )
+    prefix = "Would migrate" if args.dry_run else "Migrated"
+    print(f"{prefix} VMID {args.vmid} from {src.name} to {target.name}.")
+    return 0
+
+
+def _cmd_clean_disks(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    host = _resolve_host(args.host, workspace)
+    orphans = list_orphaned_volumes(host)
+    if not orphans:
+        print(f"No orphaned volumes found on {host.name}.")
+        return 0
+
+    print(f"Orphaned volumes on {host.name} ({len(orphans)}):")
+    for vol in orphans:
+        print(f"  {vol.volid}  vmid={vol.vmid}  size={vol.size}  format={vol.format or '-'}")
+
+    if not args.delete:
+        print("Run with --delete to remove them.")
+        return 0
+
+    if args.dry_run:
+        print("Dry run — nothing deleted.")
+        return 0
+
+    if not args.yes:
+        try:
+            response = input(
+                f"\nDelete {len(orphans)} orphaned volume(s) on {host.name}? "
+                "Type 'yes' to confirm: "
+            )
+        except (EOFError, KeyboardInterrupt):
+            print("\nAborted.")
+            return 1
+        if response.strip().lower() != "yes":
+            print("Aborted.")
+            return 1
+
+    errors = 0
+    for vol in orphans:
+        try:
+            delete_volume(host, vol.volid)
+            print(f"  Deleted {vol.volid}")
+        except ProxmoxStorageError as exc:
+            print(f"  Error deleting {vol.volid}: {exc}")
+            errors += 1
+    return 1 if errors else 0
+
+
+def _fmt_bytes(b: int) -> str:
+    if b >= 1024 ** 3:
+        return f"{b / 1024 ** 3:.1f} GiB"
+    if b >= 1024 ** 2:
+        return f"{b / 1024 ** 2:.0f} MiB"
+    return f"{b / 1024:.0f} KiB"
+
+
+def _fmt_timestamp(ts: int) -> str:
+    from datetime import datetime, timezone
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
 
 
 def _cmd_unlock(args: argparse.Namespace, workspace: Optional[str]) -> int:

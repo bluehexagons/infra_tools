@@ -16,7 +16,11 @@ import shlex
 from dataclasses import dataclass, field, replace
 from typing import Callable, Optional
 
+from lib.proxmox_backup import ProxmoxBackupError, create_backup, list_backups
 from lib.proxmox_guest import probe_proxmox_cluster, probe_proxmox_host
+from lib.proxmox_migrate import ProxmoxMigrateError, migrate_guest
+from lib.proxmox_storage import ProxmoxStorageError, delete_volume, list_orphaned_volumes
+from lib.proxmox_summary import ProxmoxSummaryError, format_node_summary, get_node_summary
 from lib.proxmox_hosts import (
     ProxmoxHost,
     add_proxmox_host,
@@ -25,6 +29,19 @@ from lib.proxmox_hosts import (
     remove_proxmox_host,
     sync_proxmox_host,
 )
+
+
+def _shell_fmt_bytes(b: int) -> str:
+    if b >= 1024 ** 3:
+        return f"{b / 1024 ** 3:.1f}G"
+    if b >= 1024 ** 2:
+        return f"{b / 1024 ** 2:.0f}M"
+    return f"{b / 1024:.0f}K"
+
+
+def _shell_fmt_ts(ts: int) -> str:
+    from datetime import datetime, timezone
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
 from lib.proxmox_manage import (
     ContainerInfo,
     HealthReport,
@@ -80,6 +97,13 @@ Available commands:
   delsnapshot <vmid> <name>   Delete a snapshot
   unlock <vmid>               Remove a stuck management lock from a guest
   rolling-update <name> [...] Patch saved node configs in order, rebooting if needed
+  top                         Show CPU, memory, storage, and guest counts
+  backups <vmid>              List backups for a guest
+  backup <vmid> [--storage POOL] [--mode snapshot|suspend|stop]
+                              Create an immediate vzdump backup
+  migrate <vmid> <target>     Migrate a guest to another registered host
+  clean-disks [--delete] [--yes]
+                              List (and optionally delete) orphaned volumes
   help                        Show this help text
   quit / exit                 Leave the shell
 """
@@ -294,6 +318,11 @@ class ProxmoxShell:
             "delsnapshot": self._cmd_delsnapshot,
             "unlock": self._cmd_unlock,
             "rolling-update": self._cmd_rolling_update,
+            "top": self._cmd_top,
+            "backups": self._cmd_backups,
+            "backup": self._cmd_backup,
+            "migrate": self._cmd_migrate,
+            "clean-disks": self._cmd_clean_disks,
         }
 
     def _make_prompt(self) -> str:
@@ -668,6 +697,98 @@ class ProxmoxShell:
         name = args[1]
         delete_snapshot(host, vmid, name)
         self._output(f"  Deleted snapshot '{name}' for VMID {vmid} on {host.name}.")
+
+    def _cmd_top(self, args: list[str]) -> None:
+        host = self._require_host()
+        try:
+            summary = get_node_summary(host)
+        except ProxmoxSummaryError as exc:
+            raise ValueError(str(exc))
+        self._output(format_node_summary(summary))
+
+    def _cmd_backups(self, args: list[str]) -> None:
+        host = self._require_host()
+        vmid = self._parse_vmid(args, "backups")
+        backups = list_backups(host, vmid)
+        if not backups:
+            self._output(f"  No backups found for VMID {vmid}.")
+            return
+        self._output(f"  Backups for VMID {vmid}:")
+        for b in backups:
+            size_str = _shell_fmt_bytes(b.size) if b.size else "-"
+            date_str = _shell_fmt_ts(b.ctime) if b.ctime else "-"
+            desc = f"  {b.notes}" if b.notes else ""
+            self._output(f"    {date_str}  {size_str:<10}  {b.filename}{desc}")
+
+    def _cmd_backup(self, args: list[str]) -> None:
+        host = self._require_host()
+        if not args:
+            raise ValueError("Usage: backup <vmid> [--storage POOL] [--mode snapshot|suspend|stop]")
+        vmid = self._parse_vmid([args[0]], "backup")
+        rest = args[1:]
+        storage: Optional[str] = None
+        mode = "snapshot"
+        i = 0
+        while i < len(rest):
+            if rest[i] == "--storage" and i + 1 < len(rest):
+                storage = rest[i + 1]
+                i += 2
+            elif rest[i] == "--mode" and i + 1 < len(rest):
+                mode = rest[i + 1]
+                i += 2
+            else:
+                raise ValueError(f"Unknown option: {rest[i]!r}")
+        create_backup(host, vmid, storage=storage, mode=mode)
+        self._output(f"  Backup of VMID {vmid} on {host.name} complete.")
+
+    def _cmd_migrate(self, args: list[str]) -> None:
+        host = self._require_host()
+        if len(args) < 2:
+            raise ValueError("Usage: migrate <vmid> <target-host> [--online]")
+        vmid = self._parse_vmid([args[0]], "migrate")
+        target_name = args[1]
+        online = "--online" in args
+        target = find_proxmox_host(target_name, self.state.workspace)
+        if not target:
+            raise ValueError(f"No registered host matching '{target_name}'")
+        migrate_guest(host, vmid, target, online=online)
+        self._output(
+            f"  Migrated VMID {vmid} from {host.name} to {target.name}."
+        )
+
+    def _cmd_clean_disks(self, args: list[str]) -> None:
+        host = self._require_host()
+        do_delete = "--delete" in args
+        skip_confirm = "--yes" in args or "-y" in args
+        orphans = list_orphaned_volumes(host)
+        if not orphans:
+            self._output("  No orphaned volumes found.")
+            return
+        self._output(f"  Orphaned volumes ({len(orphans)}):")
+        for vol in orphans:
+            self._output(
+                f"    {vol.volid}  vmid={vol.vmid}  size={vol.size}"
+            )
+        if not do_delete:
+            self._output("  Run 'clean-disks --delete' to remove them.")
+            return
+        if not skip_confirm:
+            try:
+                response = self._input(
+                    f"  Delete {len(orphans)} volume(s)? Type 'yes' to confirm: "
+                )
+            except (EOFError, KeyboardInterrupt):
+                self._output("  Aborted.")
+                return
+            if response.strip().lower() != "yes":
+                self._output("  Aborted.")
+                return
+        for vol in orphans:
+            try:
+                delete_volume(host, vol.volid)
+                self._output(f"  Deleted {vol.volid}")
+            except ProxmoxStorageError as exc:
+                self._output(f"  Error: {exc}")
 
     @staticmethod
     def _parse_vmid(args: list[str], cmd: str) -> int:
