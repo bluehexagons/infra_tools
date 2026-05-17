@@ -16,13 +16,14 @@ import shlex
 from dataclasses import dataclass, field, replace
 from typing import Callable, Optional
 
-from lib.proxmox_guest import probe_proxmox_host
+from lib.proxmox_guest import probe_proxmox_cluster, probe_proxmox_host
 from lib.proxmox_hosts import (
     ProxmoxHost,
     add_proxmox_host,
     find_proxmox_host,
     load_proxmox_hosts,
     remove_proxmox_host,
+    sync_proxmox_host,
 )
 from lib.proxmox_manage import (
     ContainerInfo,
@@ -54,6 +55,8 @@ Available commands:
   remove <name|address>       Remove a host from the registry
   host                        Show details for the active host
   probe                       Probe the active host and cache setup defaults
+  probe-cluster <addr> [--user USER] [--key PATH] [--tag TAG ...]
+                               Discover and register every node in a Proxmox cluster
   ls                          List guests on the active host
   status <vmid>               Show guest status
   start <vmid>                Start a guest
@@ -84,6 +87,8 @@ def _format_host_row(host: ProxmoxHost) -> str:
         defaults.append(f"bridge={host.default_bridge}")
     if defaults:
         bits.append("[" + ", ".join(defaults) + "]")
+    if host.tags:
+        bits.append("tags=" + ",".join(host.tags))
     return "  " + " | ".join(bits)
 
 
@@ -130,6 +135,8 @@ def _format_host_details(host: ProxmoxHost) -> str:
         f"  Template:  {host.default_template_storage or 'auto'}",
         f"  Bridge:    {host.default_bridge or 'auto'}",
     ]
+    if host.tags:
+        lines.append(f"  Tags:      {', '.join(host.tags)}")
     if host.description:
         lines.append(f"  Notes:     {host.description}")
     if host.facts:
@@ -254,6 +261,8 @@ class ProxmoxShell:
             "rm": self._cmd_remove,
             "host": self._cmd_host,
             "probe": self._cmd_probe,
+            "probe-cluster": self._cmd_probe_cluster,
+            "cluster-probe": self._cmd_probe_cluster,
             "discover": self._cmd_probe,
             "ls": self._cmd_ls,
             "list": self._cmd_ls,
@@ -375,10 +384,63 @@ class ProxmoxShell:
             default_bridge=host.default_bridge or facts.default_bridge,
             facts=facts,
         )
-        add_proxmox_host(updated_host, self.state.workspace, replace=True)
-        self.state.active_host = updated_host
+        self.state.active_host = sync_proxmox_host(updated_host, self.state.workspace)
         self._output("Cached host facts and setup defaults:")
-        self._output(_format_host_details(updated_host))
+        self._output(_format_host_details(self.state.active_host))
+
+    def _cmd_probe_cluster(self, args: list[str]) -> None:
+        if not args:
+            raise ValueError(
+                "Usage: probe-cluster <address> [--user USER] [--key PATH] [--tag TAG ...]"
+            )
+        address = args[0]
+        user = "root"
+        ssh_key: Optional[str] = None
+        tags: list[str] = []
+        i = 1
+        while i < len(args):
+            token = args[i]
+            if token == "--user":
+                i += 1
+                if i >= len(args):
+                    raise ValueError("--user requires a value")
+                user = args[i]
+            elif token == "--key":
+                i += 1
+                if i >= len(args):
+                    raise ValueError("--key requires a value")
+                ssh_key = args[i]
+            elif token == "--tag":
+                i += 1
+                if i >= len(args):
+                    raise ValueError("--tag requires a value")
+                tags.append(args[i])
+            else:
+                raise ValueError(f"Unknown option: {token!r}")
+            i += 1
+
+        discovered_hosts = probe_proxmox_cluster(
+            address,
+            user=user,
+            hosted_key=ssh_key,
+            tags=tags,
+        )
+        if not discovered_hosts:
+            self._output("No cluster nodes discovered.")
+            return
+
+        saved_hosts = [
+            sync_proxmox_host(host, self.state.workspace)
+            for host in discovered_hosts
+        ]
+        self.state.active_host = next(
+            (host for host in saved_hosts if host.address == address),
+            saved_hosts[0],
+        )
+        self._output(f"Discovered {len(saved_hosts)} Proxmox node(s):")
+        for host in saved_hosts:
+            tag_text = ",".join(host.tags) if host.tags else "-"
+            self._output(f"  {host.name} | {host.address} | tags={tag_text}")
 
     def _cmd_ls(self, args: list[str]) -> None:
         host = self._require_host()

@@ -101,6 +101,22 @@ class TestShellHostManagement(_ShellFixture):
         self.assert_output_contains("Cached host facts")
         self.assert_output_contains("local-lvm")
 
+    @patch("lib.proxmox_shell.probe_proxmox_cluster")
+    def test_probe_cluster_registers_all_nodes(self, mock_probe_cluster) -> None:
+        mock_probe_cluster.return_value = [
+            ProxmoxHost(name="pve1", address="10.0.0.10", tags=["prod"]),
+            ProxmoxHost(name="pve2", address="10.0.0.11", tags=["prod"]),
+        ]
+
+        self.shell.dispatch("probe-cluster 10.0.0.10 --tag prod")
+
+        loaded = load_proxmox_hosts(self.workspace)
+        self.assertEqual([host.name for host in loaded], ["pve1", "pve2"])
+        self.assertIsNotNone(self.shell.state.active_host)
+        assert self.shell.state.active_host is not None
+        self.assertEqual(self.shell.state.active_host.name, "pve1")
+        self.assert_output_contains("Discovered 2 Proxmox node(s)")
+
     def test_remove_clears_active_host(self) -> None:
         self.shell.dispatch("add pve1 10.0.0.10")
         self.shell.dispatch("use pve1")

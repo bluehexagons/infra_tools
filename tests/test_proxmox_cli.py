@@ -122,6 +122,32 @@ class TestProxmoxCliHosts(_CliFixture):
         self.assertEqual(loaded[0].default_storage, "local-lvm")
         self.assertEqual(loaded[0].default_template_storage, "local")
 
+    @patch("lib.proxmox_cli.probe_proxmox_cluster")
+    def test_probe_cluster_seeds_discovered_nodes(self, mock_probe_cluster) -> None:
+        mock_probe_cluster.return_value = [
+            ProxmoxHost(
+                name="pve1",
+                address="10.0.0.10",
+                default_storage="local-lvm",
+                tags=["prod"],
+            ),
+            ProxmoxHost(
+                name="pve2",
+                address="10.0.0.11",
+                default_storage="shared-lvm",
+                tags=["prod"],
+            ),
+        ]
+
+        rc, out = self._run("probe-cluster", "10.0.0.10", "--tag", "prod")
+
+        self.assertEqual(rc, 0)
+        self.assertIn("pve1", out)
+        self.assertIn("pve2", out)
+        self.assertIn("tags=prod", out)
+        loaded = load_proxmox_hosts(self.workspace)
+        self.assertEqual([host.name for host in loaded], ["pve1", "pve2"])
+
 
 class TestProxmoxCliContainerOps(_CliFixture):
     def setUp(self) -> None:

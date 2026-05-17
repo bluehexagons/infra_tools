@@ -12,7 +12,7 @@ import sys
 import time
 from typing import Optional
 
-from lib.proxmox_hosts import ProxmoxHostFacts, ProxmoxStoragePool
+from lib.proxmox_hosts import ProxmoxHost, ProxmoxHostFacts, ProxmoxStoragePool
 from lib.types import StrList
 
 
@@ -178,6 +178,56 @@ def _get_node_name(
         return None
     node_name = (result.stdout or "").strip()
     return node_name or None
+
+
+def _get_corosync_config(
+    node_ip: str,
+    user: str,
+    ssh_opts: StrList,
+    dry_run: bool = False,
+) -> str:
+    """Return the cluster corosync config when available."""
+    result = _ssh_run(
+        node_ip,
+        user,
+        ssh_opts,
+        "cat /etc/pve/corosync.conf",
+        dry_run=dry_run,
+    )
+    if dry_run:
+        return (
+            "totem {\n"
+            "  cluster_name: homelab\n"
+            "}\n"
+            "nodelist {\n"
+            "  node {\n"
+            "    name: pve1\n"
+            "    ring0_addr: 10.0.0.10\n"
+            "  }\n"
+            "  node {\n"
+            "    name: pve2\n"
+            "    ring0_addr: 10.0.0.11\n"
+            "  }\n"
+            "}\n"
+        )
+    if result.returncode != 0:
+        return ""
+    return result.stdout or ""
+
+
+def _parse_corosync_config(config_text: str) -> tuple[Optional[str], list[tuple[str, str]]]:
+    """Extract cluster name and member node addresses from corosync config text."""
+    cluster_match = re.search(r"cluster_name:\s*(\S+)", config_text)
+    cluster_name = cluster_match.group(1) if cluster_match else None
+
+    nodes: list[tuple[str, str]] = []
+    for block in re.findall(r"node\s*\{(.*?)\}", config_text, flags=re.DOTALL):
+        name_match = re.search(r"name:\s*(\S+)", block)
+        address_match = re.search(r"ring0_addr:\s*(\S+)", block)
+        if not name_match or not address_match:
+            continue
+        nodes.append((name_match.group(1), address_match.group(1)))
+    return cluster_name, nodes
 
 
 def _get_bridge_prefix_length(
@@ -517,6 +567,54 @@ def probe_proxmox_host(
     )
 
 
+def probe_proxmox_cluster(
+    seed_address: str,
+    user: str = "root",
+    hosted_key: Optional[str] = None,
+    *,
+    tags: Optional[StrList] = None,
+    dry_run: bool = False,
+) -> list[ProxmoxHost]:
+    """Probe every node in a Proxmox cluster from a single reachable seed node."""
+    ssh_opts = _ssh_opts(hosted_key)
+    _cluster_name, members = _parse_corosync_config(
+        _get_corosync_config(seed_address, user, ssh_opts, dry_run=dry_run)
+    )
+    if not members:
+        seed_name = _get_node_name(seed_address, user, ssh_opts, dry_run=dry_run)
+        members = [(seed_name or seed_address, seed_address)]
+
+    discovered_hosts: list[ProxmoxHost] = []
+    seen_names: set[str] = set()
+    seen_addresses: set[str] = set()
+    for configured_name, address in members:
+        facts = probe_proxmox_host(
+            address,
+            user=user,
+            hosted_key=hosted_key,
+            dry_run=dry_run,
+        )
+        host_name = facts.node_name or configured_name or address
+        if host_name.lower() in seen_names or address in seen_addresses:
+            continue
+        seen_names.add(host_name.lower())
+        seen_addresses.add(address)
+        discovered_hosts.append(
+            ProxmoxHost(
+                name=host_name,
+                address=address,
+                user=user,
+                ssh_key=hosted_key,
+                default_storage=facts.default_root_storage,
+                default_template_storage=facts.default_template_storage,
+                default_bridge=facts.default_bridge,
+                facts=facts,
+                tags=list(tags or []),
+            )
+        )
+    return discovered_hosts
+
+
 def _build_guest_hostname(
     target_ip: str,
     friendly_name: Optional[str],
@@ -584,11 +682,13 @@ __all__ = [
     "ProvisionError",
     "_build_guest_hostname",
     "_get_bridge_prefix_length",
+    "_get_corosync_config",
     "_get_host_gateway",
     "_get_host_nameservers",
     "_get_next_vmid",
     "_get_node_name",
     "_is_usable_nameserver",
+    "_parse_corosync_config",
     "_list_proxmox_bridges",
     "_list_storage_names_for_content",
     "_list_storage_pools",
@@ -599,5 +699,6 @@ __all__ = [
     "_storage_pool_supports_content",
     "_wait_for_guest_ssh",
     "auto_detect_bridge",
+    "probe_proxmox_cluster",
     "probe_proxmox_host",
 ]

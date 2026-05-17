@@ -11,7 +11,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.proxmox_guest import (
     _build_guest_hostname,
+    _parse_corosync_config,
     _wait_for_guest_ssh,
+    probe_proxmox_cluster,
     probe_proxmox_host,
 )
 
@@ -96,6 +98,75 @@ class TestProbeProxmoxHost(unittest.TestCase):
         self.assertEqual(facts.default_bridge, "vmbr0")
         self.assertEqual(facts.default_root_storage, "local-lvm")
         self.assertEqual(facts.default_template_storage, "local")
+
+
+class TestProbeProxmoxCluster(unittest.TestCase):
+    def test_parse_corosync_config_extracts_nodes(self) -> None:
+        cluster_name, members = _parse_corosync_config(
+            """
+            totem {
+              cluster_name: homelab
+            }
+            nodelist {
+              node {
+                name: pve1
+                ring0_addr: 10.0.0.10
+              }
+              node {
+                name: pve2
+                ring0_addr: 10.0.0.11
+              }
+            }
+            """
+        )
+
+        self.assertEqual(cluster_name, "homelab")
+        self.assertEqual(
+            members,
+            [("pve1", "10.0.0.10"), ("pve2", "10.0.0.11")],
+        )
+
+    @patch("lib.proxmox_guest.probe_proxmox_host")
+    @patch("lib.proxmox_guest._get_corosync_config")
+    def test_cluster_probe_discovers_each_node(self, mock_corosync, mock_probe_host) -> None:
+        mock_corosync.return_value = """
+        nodelist {
+          node {
+            name: pve1
+            ring0_addr: 10.0.0.10
+          }
+          node {
+            name: pve2
+            ring0_addr: 10.0.0.11
+          }
+        }
+        """
+        mock_probe_host.side_effect = [
+            MagicMock(
+                node_name="pve1",
+                default_root_storage="local-lvm",
+                default_template_storage="local",
+                default_bridge="vmbr0",
+            ),
+            MagicMock(
+                node_name="pve2",
+                default_root_storage="shared-lvm",
+                default_template_storage="local",
+                default_bridge="vmbr1",
+            ),
+        ]
+
+        hosts = probe_proxmox_cluster(
+            "10.0.0.10",
+            user="root",
+            hosted_key="/keys/proxmox",
+            tags=["prod"],
+        )
+
+        self.assertEqual([host.name for host in hosts], ["pve1", "pve2"])
+        self.assertEqual([host.address for host in hosts], ["10.0.0.10", "10.0.0.11"])
+        self.assertEqual(hosts[0].tags, ["prod"])
+        self.assertEqual(hosts[1].default_storage, "shared-lvm")
 
 
 if __name__ == "__main__":

@@ -19,6 +19,7 @@ from lib.proxmox_hosts import (
     load_proxmox_hosts,
     remove_proxmox_host,
     save_proxmox_hosts,
+    sync_proxmox_host,
 )
 
 
@@ -150,6 +151,34 @@ class TestAddProxmoxHost(_WorkspaceFixture):
             add_proxmox_host(ProxmoxHost(name="", address="10.0.0.1"), self.workspace)
         with self.assertRaises(ValueError):
             add_proxmox_host(ProxmoxHost(name="pve", address=""), self.workspace)
+
+    def test_sync_merges_by_address_and_preserves_existing_metadata(self) -> None:
+        add_proxmox_host(
+            ProxmoxHost(
+                name="seed",
+                address="10.0.0.10",
+                description="manual note",
+                tags=["prod"],
+                default_storage="manual-root",
+            ),
+            self.workspace,
+        )
+
+        synced = sync_proxmox_host(
+            ProxmoxHost(
+                name="pve1",
+                address="10.0.0.10",
+                default_template_storage="local",
+                tags=["cluster"],
+            ),
+            self.workspace,
+        )
+
+        self.assertEqual(synced.name, "pve1")
+        self.assertEqual(synced.description, "manual note")
+        self.assertEqual(synced.default_storage, "manual-root")
+        self.assertEqual(synced.default_template_storage, "local")
+        self.assertEqual(synced.tags, ["prod", "cluster"])
 
 
 class TestFindAndRemove(_WorkspaceFixture):

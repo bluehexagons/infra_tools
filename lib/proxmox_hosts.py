@@ -213,6 +213,32 @@ def find_proxmox_host(
     return None
 
 
+def _merge_host_tags(existing: list[str], incoming: list[str]) -> list[str]:
+    tags = list(existing)
+    for tag in incoming:
+        if tag not in tags:
+            tags.append(tag)
+    return tags
+
+
+def merge_proxmox_host(existing: ProxmoxHost, incoming: ProxmoxHost) -> ProxmoxHost:
+    """Merge discovered host data into an existing registry entry."""
+    return ProxmoxHost(
+        name=incoming.name,
+        address=incoming.address,
+        user=existing.user or incoming.user,
+        ssh_key=existing.ssh_key or incoming.ssh_key,
+        description=existing.description or incoming.description,
+        default_storage=existing.default_storage or incoming.default_storage,
+        default_template_storage=(
+            existing.default_template_storage or incoming.default_template_storage
+        ),
+        default_bridge=existing.default_bridge or incoming.default_bridge,
+        facts=incoming.facts or existing.facts,
+        tags=_merge_host_tags(existing.tags, incoming.tags),
+    )
+
+
 def add_proxmox_host(
     host: ProxmoxHost,
     workspace: Optional[str] = None,
@@ -240,6 +266,28 @@ def add_proxmox_host(
             hosts[i] = host
             save_proxmox_hosts(hosts, workspace)
             return host
+    hosts.append(host)
+    save_proxmox_hosts(hosts, workspace)
+    return host
+
+
+def sync_proxmox_host(
+    host: ProxmoxHost,
+    workspace: Optional[str] = None,
+) -> ProxmoxHost:
+    """Insert or merge a host by matching either name or address."""
+    if not host.name or not host.name.strip():
+        raise ValueError("Proxmox host name is required")
+    if not host.address or not host.address.strip():
+        raise ValueError("Proxmox host address is required")
+
+    hosts = load_proxmox_hosts(workspace)
+    name_lc = host.name.lower()
+    for index, existing in enumerate(hosts):
+        if existing.name.lower() == name_lc or existing.address == host.address:
+            hosts[index] = merge_proxmox_host(existing, host)
+            save_proxmox_hosts(hosts, workspace)
+            return hosts[index]
     hosts.append(host)
     save_proxmox_hosts(hosts, workspace)
     return host

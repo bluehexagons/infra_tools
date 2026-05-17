@@ -87,6 +87,8 @@ infra_tools proxmox add pve1 10.0.0.10 \
   --user root \
   --key ~/.ssh/proxmox_ed25519
 infra_tools proxmox probe pve1  # cache bridges/storage defaults for future hosted setups
+#    For a multi-node cluster, bootstrap every node at once from one seed address:
+#    infra_tools proxmox probe-cluster 10.0.0.10 --key ~/.ssh/proxmox_ed25519 --tag prod
 infra_tools proxmox hosts        # sanity check: pve1 is listed
 infra_tools proxmox ls pve1      # sanity check: no guests yet
 
@@ -196,6 +198,7 @@ subcommand to enter an interactive shell, or use subcommands directly:
 # Register and inspect hosts
 python3 infra_tools.py proxmox add pve1 10.0.0.10 --user root --key ~/.ssh/proxmox_ed25519
 python3 infra_tools.py proxmox probe pve1
+python3 infra_tools.py proxmox probe-cluster 10.0.0.10 --key ~/.ssh/proxmox_ed25519 --tag prod
 python3 infra_tools.py proxmox hosts
 python3 infra_tools.py proxmox ls pve1
 
@@ -221,6 +224,9 @@ python3 infra_tools.py proxmox shell
 The registry is stored at `<workspace>/proxmox_hosts.json` (mode `0600`).
 `proxmox probe` caches bridge, gateway, DNS, and storage-pool recommendations so later `setup --hosted`
 runs can target a registered host by name and omit manual pool names.
+`proxmox probe-cluster` starts from one reachable node IP/hostname, discovers every cluster member from
+Proxmox's configured node names, and seeds the host registry for the whole cluster in one step; `--tag`
+values are applied to newly discovered nodes.
 Proxmox notifications use the native Proxmox webhook endpoint and matcher via `pvesh` — no local hook script
 is installed. `modify` and `reconfigure` changes that affect a running guest may require a restart.
 

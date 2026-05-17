@@ -267,6 +267,7 @@ Register Proxmox hosts and manage their VMs or LXC compatibility guests:
 # Host registry
 infra_tools.py proxmox add <name> <address> [--user USER] [--key PATH]
 infra_tools.py proxmox probe <host>
+infra_tools.py proxmox probe-cluster <address> [--user USER] [--key PATH] [--tag TAG]
 infra_tools.py proxmox hosts
 infra_tools.py proxmox remove <name>
 
@@ -295,6 +296,8 @@ infra_tools.py proxmox [shell]
 `config` shows the running guest configuration from `pct` or `qm`, and `--pending` shows changes that take effect on next restart.
 `probe` caches bridge, gateway, DNS, and storage-pool recommendations back into the host registry so later `setup --hosted`
 commands can reuse them.
+`probe-cluster` starts from one reachable node IP/hostname, discovers every cluster member using Proxmox's configured node names,
+and seeds host records for the whole cluster in one step. `--tag` is repeatable and applies those tags to newly discovered nodes.
 `modify` and `reconfigure` changes to a running guest are queued as pending by Proxmox.
 All subcommands accept `--dry-run` to print the remote command without executing it.
 

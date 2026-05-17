@@ -11,13 +11,14 @@ import argparse
 from dataclasses import replace
 from typing import Optional
 
-from lib.proxmox_guest import probe_proxmox_host
+from lib.proxmox_guest import probe_proxmox_cluster, probe_proxmox_host
 from lib.proxmox_hosts import (
     ProxmoxHost,
     add_proxmox_host,
     find_proxmox_host,
     load_proxmox_hosts,
     remove_proxmox_host,
+    sync_proxmox_host,
 )
 from lib.proxmox_manage import (
     DEFAULT_NOTIFICATION_ENDPOINT,
@@ -100,6 +101,23 @@ def add_proxmox_subparser(subparsers: argparse._SubParsersAction) -> argparse.Ar
     )
     probe.add_argument("host", help="Registered host name or address")
     probe.set_defaults(_handler=_cmd_probe)
+
+    probe_cluster = sub.add_parser(
+        "probe-cluster",
+        help="Probe a Proxmox cluster from one reachable node and seed host entries",
+    )
+    probe_cluster.add_argument("address", help="Reachable IP or hostname for one cluster node")
+    probe_cluster.add_argument(
+        "-u", "--user", default="root", help="SSH user for the cluster nodes (default: root)"
+    )
+    probe_cluster.add_argument("-k", "--key", dest="ssh_key", help="SSH private key path")
+    probe_cluster.add_argument(
+        "--tag",
+        action="append",
+        default=[],
+        help="Tag to apply to newly discovered nodes; repeatable",
+    )
+    probe_cluster.set_defaults(_handler=_cmd_probe_cluster)
 
     ls = sub.add_parser("ls", aliases=["list"], help="List guests on a host")
     ls.add_argument("host", help="Registered host name or address")
@@ -339,6 +357,7 @@ def _cmd_hosts_list(args: argparse.Namespace, workspace: Optional[str]) -> int:
             f"{(host.default_template_storage or '-').ljust(12)}"
             f"{(host.default_bridge or '-').ljust(10)}"
             f"{host.description or ''}"
+            + (f" tags={','.join(host.tags)}" if host.tags else "")
         )
     return 0
 
@@ -379,7 +398,7 @@ def _cmd_probe(args: argparse.Namespace, workspace: Optional[str]) -> int:
         default_bridge=host.default_bridge or facts.default_bridge,
         facts=facts,
     )
-    add_proxmox_host(updated_host, workspace, replace=True)
+    updated_host = sync_proxmox_host(updated_host, workspace)
 
     print(f"Probed Proxmox host '{updated_host.name}' ({updated_host.address}).")
     print(f"  node:      {facts.node_name or '-'}")
@@ -403,6 +422,33 @@ def _cmd_probe(args: argparse.Namespace, workspace: Optional[str]) -> int:
                 f"    {pool.name}: {pool.type or '-'} / "
                 f"{pool.status or '-'} / {content}"
             )
+    return 0
+
+
+def _cmd_probe_cluster(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    discovered_hosts = probe_proxmox_cluster(
+        args.address,
+        user=args.user,
+        hosted_key=args.ssh_key,
+        tags=args.tag,
+    )
+    if not discovered_hosts:
+        print("No Proxmox nodes discovered.")
+        return 0
+
+    saved_hosts = [sync_proxmox_host(host, workspace) for host in discovered_hosts]
+    print(
+        f"Discovered {len(saved_hosts)} Proxmox node(s) from {args.address}:"
+    )
+    for host in saved_hosts:
+        tags_text = ",".join(host.tags) if host.tags else "-"
+        print(
+            f"  {host.name:<20} {host.address:<25} "
+            f"root={host.default_storage or '-'} "
+            f"template={host.default_template_storage or '-'} "
+            f"bridge={host.default_bridge or '-'} "
+            f"tags={tags_text}"
+        )
     return 0
 
 
