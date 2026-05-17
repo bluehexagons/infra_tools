@@ -43,6 +43,7 @@ from lib.proxmox_manage import (
     snapshot_guest,
     start_container,
     stop_container,
+    unlock_guest,
 )
 
 
@@ -77,6 +78,8 @@ Available commands:
   snapshot <vmid> <name>      Create a snapshot
   rollback <vmid> <name>      Roll back a guest to a snapshot
   delsnapshot <vmid> <name>   Delete a snapshot
+  unlock <vmid>               Remove a stuck management lock from a guest
+  rolling-update <name> [...] Patch saved node configs in order, rebooting if needed
   help                        Show this help text
   quit / exit                 Leave the shell
 """
@@ -289,6 +292,8 @@ class ProxmoxShell:
             "snapshot": self._cmd_snapshot,
             "rollback": self._cmd_rollback,
             "delsnapshot": self._cmd_delsnapshot,
+            "unlock": self._cmd_unlock,
+            "rolling-update": self._cmd_rolling_update,
         }
 
     def _make_prompt(self) -> str:
@@ -607,6 +612,22 @@ class ProxmoxShell:
         self._output(
             f"  Resized {volume} on VMID {vmid} on {host.name} to {size}."
         )
+
+    def _cmd_unlock(self, args: list[str]) -> None:
+        host = self._require_host()
+        vmid = self._parse_vmid(args, "unlock")
+        unlock_guest(host, vmid)
+        self._output(f"  Unlocked VMID {vmid} on {host.name}.")
+
+    def _cmd_rolling_update(self, args: list[str]) -> None:
+        if not args:
+            raise ValueError("Usage: rolling-update <name> [<name> ...]")
+        from lib.cluster_update import run_cluster_update
+        dry_run = "--dry-run" in args
+        targets = [a for a in args if a != "--dry-run"]
+        if not targets:
+            raise ValueError("Usage: rolling-update <name> [<name> ...]")
+        run_cluster_update(targets, workspace=self.state.workspace, dry_run=dry_run)
 
     def _cmd_snapshots(self, args: list[str]) -> None:
         host = self._require_host()

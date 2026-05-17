@@ -41,6 +41,7 @@ from lib.proxmox_manage import (
     snapshot_guest,
     start_container,
     stop_container,
+    unlock_guest,
     ProxmoxWebhookNotificationConfig,
 )
 
@@ -820,6 +821,33 @@ class TestListSnapshots(unittest.TestCase):
         mock_run.return_value = _completed(returncode=1, stderr="error")
         with self.assertRaises(ProxmoxManageError):
             list_snapshots(_host(), 100)
+
+
+class TestUnlockGuest(unittest.TestCase):
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_builds_pct_unlock_command(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = _completed()
+        unlock_guest(_host(), 100)
+        cmd = mock_run.call_args[0][3]
+        self.assertIn("pct", cmd)
+        self.assertIn("unlock", cmd)
+        self.assertIn("100", cmd)
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_vm_uses_qm_unlock(self, mock_run: MagicMock) -> None:
+        mock_run.side_effect = [
+            _completed(stderr="CT 100 does not exist", returncode=2),
+            _completed(),
+        ]
+        unlock_guest(_host(), 100)
+        self.assertIn("qm", mock_run.call_args[0][3])
+        self.assertIn("unlock", mock_run.call_args[0][3])
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_raises_on_failure(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = _completed(returncode=1, stderr="no lock")
+        with self.assertRaises(ProxmoxManageError):
+            unlock_guest(_host(), 100)
 
 
 class TestDryRunGuestRouting(unittest.TestCase):

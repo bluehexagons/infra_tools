@@ -564,6 +564,33 @@ def resize_container_disk(
         )
 
 
+def unlock_guest(
+    host: ProxmoxHost,
+    vmid: int,
+    *,
+    dry_run: bool = False,
+) -> None:
+    """Remove a management lock from ``vmid`` on ``host``.
+
+    Proxmox sets a lock during backup, migration, and other operations; if
+    a job aborts mid-run the lock can get stuck. ``pct unlock``/``qm unlock``
+    clears it.
+    """
+    result, guest_type = _run_guest_command(
+        host,
+        vmid,
+        shlex.join(["pct", "unlock", str(int(vmid))]),
+        shlex.join(["qm", "unlock", str(int(vmid))]),
+        dry_run=dry_run,
+    )
+    if result.returncode != 0:
+        tool = "qm" if guest_type == "vm" else "pct"
+        raise ProxmoxManageError(
+            f"{tool} unlock {vmid} failed on {host.address}: "
+            f"{(result.stderr or result.stdout or '').strip() or 'unknown error'}"
+        )
+
+
 def _validate_snapshot_name(name: str) -> None:
     if not _SNAPSHOT_NAME_RE.match(name):
         raise ValueError(

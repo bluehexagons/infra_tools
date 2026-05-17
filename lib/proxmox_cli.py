@@ -43,6 +43,7 @@ from lib.proxmox_manage import (
     snapshot_guest,
     start_container,
     stop_container,
+    unlock_guest,
 )
 from lib.proxmox_shell import ProxmoxShell, run_proxmox_shell
 
@@ -264,6 +265,23 @@ def add_proxmox_subparser(subparsers: argparse._SubParsersAction) -> argparse.Ar
         help="Print the remote pct/qm resize command without executing it",
     )
     resize.set_defaults(_handler=_cmd_resize_disk)
+
+    unlock = sub.add_parser(
+        "unlock",
+        help="Remove a stuck management lock from a guest",
+        description=(
+            "Clear a Proxmox management lock left behind by an aborted backup, "
+            "migration, or snapshot job."
+        ),
+    )
+    unlock.add_argument("host", help="Registered host name or address")
+    unlock.add_argument("vmid", type=int, help="Guest VMID")
+    unlock.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the remote unlock command without executing it",
+    )
+    unlock.set_defaults(_handler=_cmd_unlock)
 
     snapshots_list = sub.add_parser(
         "snapshots",
@@ -713,6 +731,14 @@ def _cmd_resize_disk(args: argparse.Namespace, workspace: Optional[str]) -> int:
         f"{prefix} {args.volume} on VMID {args.vmid} on {host.name} "
         f"to {args.size}."
     )
+    return 0
+
+
+def _cmd_unlock(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    host = _resolve_host(args.host, workspace)
+    unlock_guest(host, args.vmid, dry_run=args.dry_run)
+    prefix = "Would unlock" if args.dry_run else "Unlocked"
+    print(f"{prefix} VMID {args.vmid} on {host.name}.")
     return 0
 
 
