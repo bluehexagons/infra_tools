@@ -53,6 +53,7 @@ from lib.interactive_shell import run_interactive_shell
 from lib.notifications import validate_notification_args
 from lib.orchestrator_bootstrap import run_orchestrator_bootstrap
 from lib.plugin_registry import format_system_type_help, get_system_type_names
+from lib.network_cli import add_network_subparser, run_network_command
 from lib.proxmox_cli import add_proxmox_subparser, run_proxmox_command
 from lib.python_setup import run_local_python_setup
 from lib.recall import run_recall_command
@@ -96,6 +97,7 @@ def _build_infra_tools_epilog() -> str:
     completions                 Install shell completion for infra_tools.py
     python-tools                Install local Python aliases, uv, and completion
     bootstrap                   Install packages, launcher, and completions (alias: self-setup)
+    network [subcommand]        Manage generic network inventory profiles
     proxmox [subcommand]        Manage Proxmox hosts and containers (interactive shell with no args)
     shell                       Interactive REPL for managing saved configurations
     credentials                 Manage workspace credentials
@@ -333,6 +335,7 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
     credentials_remove_parser = credentials_subparsers.add_parser("remove", help="Remove a saved credential")
     credentials_remove_parser.add_argument("username", help="Credential username to remove")
 
+    add_network_subparser(subparsers)
     add_proxmox_subparser(subparsers)
 
     shell_parser = subparsers.add_parser(
@@ -930,6 +933,8 @@ def main() -> int:
             requested_user=args.bootstrap_user,
             skip_system_packages=args.skip_system_packages,
         )
+    elif args.command == "network":
+        return run_network_command(args)
     elif args.command == "proxmox":
         return run_proxmox_command(args)
     elif args.command == "shell":
