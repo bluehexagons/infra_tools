@@ -8,6 +8,7 @@ from common.common_steps import install_or_update_uv
 from lib.completions import run_completion_setup
 from lib.orchestrator_bootstrap import LAUNCHER_NAME, install_launcher
 from lib.system_utils import get_current_username
+from lib.update_policy import uv_exclude_newer_args
 from lib.validators import validate_username
 
 
@@ -51,7 +52,7 @@ def run_local_python_setup(
 
     uv_path = os.path.join(local_bin, "uv")
     argcomplete_result = subprocess.run(
-        [uv_path, "tool", "install", "--upgrade", "argcomplete"],
+        [uv_path, "tool", "install", "--upgrade", "argcomplete"] + uv_exclude_newer_args(),
         capture_output=True,
         text=True,
     )

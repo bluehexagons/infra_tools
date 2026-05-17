@@ -11,7 +11,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 from web.service_tools import auto_update_node
-from lib.update_policy import ECOSYSTEM_AUTO_UPGRADE_ENV
+from lib.update_policy import DEPENDENCY_MIN_AGE_DAYS_ENV, ECOSYSTEM_AUTO_UPGRADE_ENV
 
 
 class TestAutoUpdateNode(unittest.TestCase):
@@ -42,12 +42,14 @@ class TestAutoUpdateNode(unittest.TestCase):
     def test_global_package_updates_can_be_enabled(self, mock_run_nvm):
         mock_run_nvm.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
 
-        with patch.dict(os.environ, {ECOSYSTEM_AUTO_UPGRADE_ENV: "1"}):
+        with patch.dict(os.environ, {ECOSYSTEM_AUTO_UPGRADE_ENV: "1", DEPENDENCY_MIN_AGE_DAYS_ENV: "2"}):
             success, details = auto_update_node.update_global_packages()
 
         self.assertTrue(success)
         self.assertIsNone(details)
         self.assertEqual(mock_run_nvm.call_count, 3)
+        for call_args in mock_run_nvm.call_args_list:
+            self.assertTrue(any(arg.startswith("--before=") for arg in call_args.args[0]))
 
     @patch("web.service_tools.auto_update_node.subprocess.run")
     @patch("web.service_tools.auto_update_node.get_nvm_dir", return_value="/home/user/.nvm")

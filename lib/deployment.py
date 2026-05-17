@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Optional, Any
 
 from lib.remote_utils import run
+from lib.update_policy import npm_freshness_args
 from lib.deploy_utils import (
     create_safe_directory_name,
     detect_project_type,
@@ -827,8 +828,10 @@ class DeploymentOrchestrator:
         
         package_lock = os.path.join(project_path, "package-lock.json")
         npm_install_command = "npm ci" if os.path.exists(package_lock) else "npm install"
+        freshness_args = shlex.join(npm_freshness_args())
+        freshness_suffix = f" {freshness_args}" if freshness_args else ""
         install_result = run(
-            f"cd {shlex.quote(project_path)} && TMPDIR=/var/tmp {npm_install_command}",
+            f"cd {shlex.quote(project_path)} && TMPDIR=/var/tmp {npm_install_command}{freshness_suffix}",
             check=False,
             capture_output=True,
         )

@@ -672,6 +672,21 @@ class TestRailsFrontendServePathDetection(unittest.TestCase):
 
         self.assertIn("npm ci", mock_run.call_args_list[0].args[0])
         self.assertNotIn("npm install", mock_run.call_args_list[0].args[0])
+        self.assertIn("--before=", mock_run.call_args_list[0].args[0])
+
+    @patch('lib.deployment.run')
+    def test_build_node_project_uses_before_policy_for_npm_install_without_lockfile(self, mock_run):
+        frontend_path = os.path.join(self.tmpdir, "frontend")
+        os.makedirs(frontend_path)
+        with open(os.path.join(frontend_path, 'package.json'), 'w') as f:
+            f.write('{}')
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        self.orchestrator._build_node_project(frontend_path)
+
+        self.assertIn("npm install", mock_run.call_args_list[0].args[0])
+        self.assertIn("--before=", mock_run.call_args_list[0].args[0])
 
     @patch('lib.deployment.create_rails_service')
     @patch('lib.deployment.run')

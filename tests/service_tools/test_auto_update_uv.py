@@ -12,7 +12,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 from common.service_tools import auto_update_uv
-from lib.update_policy import ECOSYSTEM_AUTO_UPGRADE_ENV
+from lib.update_policy import DEPENDENCY_MIN_AGE_DAYS_ENV, ECOSYSTEM_AUTO_UPGRADE_ENV
 
 
 class TestAutoUpdateUv(unittest.TestCase):
@@ -35,13 +35,17 @@ class TestAutoUpdateUv(unittest.TestCase):
             subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
         ]
 
-        with patch.dict(os.environ, {ECOSYSTEM_AUTO_UPGRADE_ENV: "1"}):
+        with patch.dict(os.environ, {ECOSYSTEM_AUTO_UPGRADE_ENV: "1", DEPENDENCY_MIN_AGE_DAYS_ENV: "2"}):
             with self.assertLogs(auto_update_uv.logger, level="INFO") as logs:
                 result = auto_update_uv.main()
 
         self.assertEqual(result, 0)
         self.assertEqual(mock_run.call_args_list[0].args[0], ["/home/user/.local/bin/uv", "self", "update"])
-        self.assertEqual(mock_run.call_args_list[1].args[0], ["/home/user/.local/bin/uv", "tool", "upgrade", "--all"])
+        self.assertEqual(
+            mock_run.call_args_list[1].args[0][:4],
+            ["/home/user/.local/bin/uv", "tool", "upgrade", "--all"],
+        )
+        self.assertIn("--exclude-newer", mock_run.call_args_list[1].args[0])
         mock_notify.assert_not_called()
         self.assertIn("uv and uv-managed tools updated successfully", "\n".join(logs.output))
 

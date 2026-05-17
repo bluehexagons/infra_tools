@@ -587,9 +587,15 @@ where that supply-chain risk is acceptable. Node.js latest-track runtime updates
 also require `INFRA_TOOLS_NODE_LATEST_AUTO_UPDATE=1`; the default LTS track still
 receives runtime patch updates.
 
+Dependency-resolving npm and uv installs also avoid very new releases by default.
+`INFRA_TOOLS_DEPENDENCY_MIN_AGE_DAYS=7` produces npm `--before` and uv
+`--exclude-newer` cutoffs where those package managers support them. Set the
+value to `0` only when a system intentionally needs same-day package releases.
+
 Deployment builds prefer lockfile-backed installs when possible. Frontend builds
-use `npm ci` when `package-lock.json` exists, while Rails builds keep Bundler in
-deployment mode so lockfiles drive dependency resolution.
+use `npm ci` when `package-lock.json` exists and pass the freshness cutoff to
+npm, while Rails builds keep Bundler in deployment mode so lockfiles drive
+dependency resolution.
 
 ## System Maintenance and Log Retention
 

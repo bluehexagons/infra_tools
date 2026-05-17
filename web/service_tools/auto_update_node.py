@@ -30,6 +30,7 @@ from lib.update_policy import (
     NODE_LATEST_AUTO_UPDATE_ENV,
     ecosystem_auto_upgrade_enabled,
     node_latest_auto_update_enabled,
+    npm_freshness_args,
 )
 
 # Initialize centralized logger
@@ -129,14 +130,14 @@ def update_global_packages() -> tuple[bool, MaybeStr]:
         return True, None
 
     commands = (
-        ("Updated npm", "npm install -g npm@latest"),
-        ("Updated global npm packages", "npm update -g"),
-        ("Updated pnpm", "npm install -g pnpm"),
+        ("Updated npm", ["npm", "install", "-g", "npm@latest"] + npm_freshness_args()),
+        ("Updated global npm packages", ["npm", "update", "-g"] + npm_freshness_args()),
+        ("Updated pnpm", ["npm", "install", "-g", "pnpm"] + npm_freshness_args()),
     )
     failures: list[str] = []
 
     for action, command in commands:
-        result = run_nvm_command(shlex.split(command))
+        result = run_nvm_command(command)
         if not log_subprocess_result(logger, action, result):
             details = result.stderr.strip() or result.stdout.strip() or command
             failures.append(f"{action}: {details}")

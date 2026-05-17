@@ -13,7 +13,7 @@ from lib.config import SetupConfig
 from lib.machine_state import can_manage_time_sync
 from lib.remote_utils import run, is_dry_run, is_package_installed, is_service_active, file_contains, install_package
 from lib.systemd_service import cleanup_service
-from lib.update_policy import ECOSYSTEM_AUTO_UPGRADE_ENV
+from lib.update_policy import ECOSYSTEM_AUTO_UPGRADE_ENV, npm_freshness_args
 
 
 def set_user_password(username: str, password: str) -> bool:
@@ -227,9 +227,10 @@ def install_ruby(config: SetupConfig) -> None:
         print("  ✓ Ruby + bundler already installed")
         return
     run("apt-get -o DPkg::Lock::Timeout=60 install -y -qq ruby ruby-dev bundler", check=False)
-    run("gem install bundler --no-document", check=False)
-    if shutil.which("ruby"):
+    if shutil.which("ruby") and (shutil.which("bundle") or shutil.which("bundler")):
         print("  ✓ Ruby + bundler installed from apt packages")
+    elif shutil.which("ruby"):
+        print("  ⚠ Ruby installed, but bundled apt package was unavailable")
 
 
 def install_go(config: SetupConfig) -> None:
@@ -295,8 +296,10 @@ def install_node(config: SetupConfig) -> None:
     run(f"runuser -u {safe_username} -- bash -c 'export NVM_DIR={safe_nvm_dir} && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && nvm install --lts'")
     
     # Update npm and install pnpm
-    run(f"runuser -u {safe_username} -- bash -c 'export NVM_DIR={safe_nvm_dir} && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npm install -g npm@latest'")
-    run(f"runuser -u {safe_username} -- bash -c 'export NVM_DIR={safe_nvm_dir} && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npm install -g pnpm'")
+    npm_freshness = shlex.join(npm_freshness_args())
+    npm_freshness_suffix = f" {npm_freshness}" if npm_freshness else ""
+    run(f"runuser -u {safe_username} -- bash -c 'export NVM_DIR={safe_nvm_dir} && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npm install -g npm@latest{npm_freshness_suffix}'")
+    run(f"runuser -u {safe_username} -- bash -c 'export NVM_DIR={safe_nvm_dir} && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npm install -g pnpm{npm_freshness_suffix}'")
     
     # Add nvm initialization to .bashrc if not already present
     bashrc_path = f"{user_home}/.bashrc"
