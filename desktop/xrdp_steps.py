@@ -5,18 +5,19 @@ import os
 import shlex
 
 from lib.config import SetupConfig
-from lib.machine_state import has_gpu_access, is_container
-from lib.remote_utils import is_service_active, run, install_package, is_package_installed
+from lib.machine_state import has_gpu_access
+from lib.remote_utils import is_service_active, run, is_package_installed
 
 
 def _generate_sesman_ini(config: SetupConfig, cleanup_script_path: str) -> str:
     """Generate complete sesman.ini content.
     
-    Uses Xorg+xorgxrdp backend exclusively for proper dynamic resolution support.
+    Uses Xorg+xorgxrdp backend exclusively for the most stable resize behaviour.
     Xvnc is NOT included because it doesn't emit RANDR events, causing desktop
     freezes when the RDP window is resized.
-    
-    Xorg+xorgxrdp works in unprivileged LXC containers (no GPU access needed).
+
+    This path is tuned for VM-first desktops while still providing best-effort
+    compatibility for headless/container guests.
     """
     
     # Only Xorg backend - Xvnc disabled due to resize issues
@@ -198,10 +199,11 @@ needs_root_rights=no
     except Exception as e:
         print(f"  ⚠ Error deploying xrdp.ini template: {e}")
     
-    # Configure xorgxrdp - required for all environments
+    # Configure xorgxrdp - required for all XRDP environments
     # Fix for Debian Trixie/X.Org 21.1.16: glamoregl must be loaded before xorgxrdp
     # to resolve undefined glamor_xv_init symbol errors.
-    # UseGlamor=false disables acceleration (prevents resize crashes in containers).
+    # UseGlamor=false keeps the software-rendered path that has been the most
+    # stable across VM-first desktops and compatibility guests.
     # Large virtual screen supports up to 4K+ resolutions for dynamic resizing.
     xorg_conf_path = "/etc/X11/xrdp/xorg.conf"
     if not os.path.exists(xorg_conf_path):
@@ -251,7 +253,7 @@ EndSection
 Section "Device"
     Identifier "Video Card (xrdpdev)"
     Driver "xrdpdev"
-    # Disable glamor acceleration to prevent resize crashes in containers
+    # Disable glamor acceleration for the most stable XRDP resize behaviour
     Option "UseGlamor" "false"
     # Software cursor prevents cursor-related resize issues
     Option "SWCursor" "true"

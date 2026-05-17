@@ -9,6 +9,7 @@ The infra_tools XRDP setup is optimized for:
 - **Security** - TLS encryption, group-based access control
 - **Stability** - XFCE desktop environment with RDP-compatible configuration
 - **Simplicity** - No audio support (removed to reduce complexity)
+- **VM-first behavior** - tuned for Proxmox/hosted VMs, with LXC kept as basic compatibility support
 
 ## Architecture
 
@@ -40,7 +41,7 @@ Located at `~/startwm.sh`, this script:
 
 3. Launches the desktop environment through dbus-launch
 
-**Note:** The script explicitly disables display management because xorgxrdp handles RANDR events natively. Any additional display management scripts or manual refresh mechanisms will cause session freezing.
+**Note:** The session is tuned to let xorgxrdp own display changes. infra_tools no longer disables `xfsettingsd` outright; instead it removes stale display overrides and power-management settings that interfere with RANDR-driven resizes.
 
 ## Configuration Details
 
@@ -61,22 +62,22 @@ Without this, XRDP sessions cannot start X server, causing:
 
 ### XFCE RDP Compatibility
 
-The `configure_xfce_for_rdp()` function disables components that interfere with RDP sessions:
+The `configure_xfce_for_rdp()` function removes or neutralizes components that interfere with RDP sessions:
 
 1. **light-locker** - Screen locker (crashes without display manager)
-2. **xfsettingsd** - Settings daemon (interferes with RANDR events - CRITICAL for dynamic resolution)
-3. **DPMS** - Display power management (no hardware in RDP)
-4. **xfce4-power-manager** - Power management features
+2. **Stale `xfsettingsd` override files** - Removed so current XFCE settings work normally
+3. **Saved display profiles** - Removed so old fixed resolutions do not override xorgxrdp RANDR events
+4. **DPMS / xfce4-power-manager display features** - Disabled for headless RDP sessions
 5. **Invalid autostart entries** - Removed to prevent startup errors
 
-**Critical:** xfsettingsd's display management is disabled because it conflicts with xorgxrdp's RANDR event handling. This is the most common cause of session freezes on resize.
+**Critical:** The current fix is to clear stale XFCE display state, not to disable `xfsettingsd` entirely. Keeping `xfsettingsd` available preserves normal desktop settings while still letting xorgxrdp drive resize events.
 
 ### X.Org Configuration
 
 ```ini
 Section "Device"
     Driver "xrdpdev"
-    Option "UseGlamor" "false"  # Disabled to prevent resize crashes
+    Option "UseGlamor" "false"  # Software-rendered path chosen for stability
     Option "SWCursor" "true"      # Software cursor for stability
 EndSection
 
@@ -94,10 +95,16 @@ EndSection
 ```
 
 **Key Changes:**
-- **Glamor disabled** - Prevents GPU-related crashes during resolution changes
+- **Glamor disabled** - Prefers the most stable XRDP path across VMs and compatibility guests
 - **Software cursor (SWCursor)** - Avoids cursor rendering issues during resize
 - **4K virtual screen** - Supports up to 3840x2160 resolution
 - **DPMS/Screensaver disabled** - Prevents X server from managing display state
+
+### VM-first expectations
+
+- **Best experience:** hosted or local VMs, where the XRDP path is the main target
+- **Compatibility mode:** unprivileged/container guests, where basic XRDP access is supported but advanced polish is not guaranteed
+- **Tradeoff:** infra_tools now favors the most stable shared XRDP configuration instead of carrying extra LXC-specific resize workarounds
 
 ### Network Optimization
 

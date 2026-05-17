@@ -522,7 +522,7 @@ class TestConfigureXfceForRdp(unittest.TestCase):
     @patch('desktop.desktop_environment_steps.os.remove')
     @patch('builtins.open', new_callable=unittest.mock.mock_open)
     def test_removes_stale_display_workarounds(self, mock_open, mock_remove, mock_exists, mock_makedirs, mock_run):
-        """Should remove stale fixed display profile and xfsettingsd override."""
+        """Should remove stale display profile and legacy xfsettingsd override."""
         mock_exists.return_value = True
         mock_run.return_value = Mock(returncode=0)
 
