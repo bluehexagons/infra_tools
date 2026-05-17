@@ -318,5 +318,144 @@ class TestInteractiveShellInitFile(unittest.TestCase):
         self.assertTrue(any("Init file error" in line for line in outputs))
 
 
+class TestWorkspacePrompt(unittest.TestCase):
+    def test_default_prompt(self) -> None:
+        shell = InteractiveShell(
+            input_func=lambda _p: (_ for _ in ()).throw(EOFError()),
+            output_func=lambda _: None,
+        )
+        self.assertEqual(shell._make_prompt(), "infra_tools> ")
+
+    def test_workspace_prompt_shows_basename(self) -> None:
+        shell = InteractiveShell(
+            input_func=lambda _p: (_ for _ in ()).throw(EOFError()),
+            output_func=lambda _: None,
+        )
+        shell.state.workspace = "/home/user/projects/myproject"
+        self.assertIn("myproject", shell._make_prompt())
+        self.assertIn("[", shell._make_prompt())
+
+    def test_workspace_prompt_after_set(self) -> None:
+        shell, _ = _make_shell([])
+        shell.state.workspace = "/workspaces/prod"
+        self.assertEqual(shell._make_prompt(), "infra_tools[prod]> ")
+
+
+class TestRenameCommand(unittest.TestCase):
+    def test_rename_updates_friendly_name(self) -> None:
+        config = SetupConfig(
+            host="10.0.0.5",
+            username="admin",
+            system_type="server_lite",
+            friendly_name="old-name",
+        )
+        shell, output = _make_shell([])
+        with (
+            patch("lib.cache.load_setup_command", return_value=config),
+            patch("lib.cache.save_setup_command") as mock_save,
+        ):
+            shell._cmd_rename(["old-name", "new-name"])
+        mock_save.assert_called_once()
+        self.assertEqual(config.friendly_name, "new-name")
+        self.assertTrue(any("new-name" in line for line in output))
+
+    def test_rename_requires_two_args(self) -> None:
+        shell, _ = _make_shell([])
+        with self.assertRaises(ValueError):
+            shell._cmd_rename(["only-one"])
+
+    def test_rename_missing_config_raises(self) -> None:
+        shell, _ = _make_shell([])
+        with patch("lib.cache.load_setup_command", return_value=None):
+            with self.assertRaises(ValueError):
+                shell._cmd_rename(["no-such", "newname"])
+
+
+class TestCloneCommand(unittest.TestCase):
+    def test_clone_creates_new_host_entry(self) -> None:
+        config = SetupConfig(
+            host="10.0.0.5",
+            username="admin",
+            system_type="server_lite",
+            friendly_name="original",
+        )
+        shell, output = _make_shell([])
+        with (
+            patch("lib.cache.load_setup_command", return_value=config),
+            patch("lib.cache.save_setup_command") as mock_save,
+        ):
+            shell._cmd_clone(["original", "10.0.0.6"])
+        mock_save.assert_called_once()
+        self.assertEqual(config.host, "10.0.0.6")
+
+    def test_clone_with_new_name(self) -> None:
+        config = SetupConfig(
+            host="10.0.0.5",
+            username="admin",
+            system_type="server_lite",
+        )
+        shell, _ = _make_shell([])
+        with (
+            patch("lib.cache.load_setup_command", return_value=config),
+            patch("lib.cache.save_setup_command"),
+        ):
+            shell._cmd_clone(["original", "10.0.0.7", "replica"])
+        self.assertEqual(config.friendly_name, "replica")
+
+    def test_clone_invalid_host_raises(self) -> None:
+        config = SetupConfig(host="10.0.0.5", username="admin", system_type="server_lite")
+        shell, _ = _make_shell([])
+        with patch("lib.cache.load_setup_command", return_value=config):
+            with self.assertRaises(ValueError):
+                shell._cmd_clone(["src", "not a valid host!!"])
+
+
+class TestTagUntag(unittest.TestCase):
+    def _config(self, tags=None) -> SetupConfig:
+        return SetupConfig(
+            host="10.0.0.5",
+            username="admin",
+            system_type="server_lite",
+            tags=list(tags) if tags else None,
+        )
+
+    def test_tag_adds_tags(self) -> None:
+        config = self._config()
+        shell, output = _make_shell([])
+        with (
+            patch("lib.cache.load_setup_command", return_value=config),
+            patch("lib.cache.save_setup_command"),
+        ):
+            shell._cmd_tag(["myhost", "prod", "web"])
+        self.assertIn("prod", config.tags or [])
+        self.assertIn("web", config.tags or [])
+
+    def test_tag_deduplicates(self) -> None:
+        config = self._config(tags=["prod"])
+        shell, _ = _make_shell([])
+        with (
+            patch("lib.cache.load_setup_command", return_value=config),
+            patch("lib.cache.save_setup_command"),
+        ):
+            shell._cmd_tag(["myhost", "prod", "staging"])
+        self.assertEqual(config.tags, ["prod", "staging"])
+
+    def test_untag_removes_tags(self) -> None:
+        config = self._config(tags=["prod", "web", "legacy"])
+        shell, output = _make_shell([])
+        with (
+            patch("lib.cache.load_setup_command", return_value=config),
+            patch("lib.cache.save_setup_command"),
+        ):
+            shell._cmd_untag(["myhost", "legacy", "web"])
+        self.assertEqual(config.tags, ["prod"])
+
+    def test_untag_missing_config_raises(self) -> None:
+        shell, _ = _make_shell([])
+        with patch("lib.cache.load_setup_command", return_value=None):
+            with self.assertRaises(ValueError):
+                shell._cmd_untag(["no-such", "tag"])
+
+
 if __name__ == "__main__":
     unittest.main()

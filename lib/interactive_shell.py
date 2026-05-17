@@ -34,18 +34,22 @@ OutputFn = Callable[[str], None]
 
 HELP_TEXT = """\
 Available commands:
-  list/ls [pattern] [--json]  List saved configurations (--json for scripting)
-  info [pattern] [--compact]  Show saved configuration details (--compact: one line each)
-  cmd [pattern]               Show reconstructed setup commands
-  new/setup                   Guided flow to create a new saved setup
-  deploy <pattern> [--yes]    Redeploy saved configurations
-  rm/remove <pattern> [--yes] Remove saved configurations
-  recall <host> [user]        Fetch/reconstruct a remote setup command
-  reconstruct [--compact]     Reconstruct local host configuration
-  proxmox                     Drop into the proxmox shell
-  workspace [path]            Show or change the active workspace
-  help                        Show this help text
-  quit/exit                   Leave the shell
+  list/ls [pattern] [--json]        List saved configurations (--json for scripting)
+  info [pattern] [--compact]        Show saved configuration details (--compact: one line each)
+  cmd [pattern]                     Show reconstructed setup commands
+  new/setup                         Guided flow to create a new saved setup
+  rename <pattern> <new-name>       Rename (re-label) a saved configuration
+  clone <pattern> <new-host> [name] Copy a saved configuration to a new host
+  tag <pattern> <tag> [tag ...]     Add tags to a saved configuration
+  untag <pattern> <tag> [tag ...]   Remove tags from a saved configuration
+  deploy <pattern> [--yes]          Redeploy saved configurations
+  rm/remove <pattern> [--yes]       Remove saved configurations
+  recall <host> [user]              Fetch/reconstruct a remote setup command
+  reconstruct [--compact]           Reconstruct local host configuration
+  proxmox                           Drop into the proxmox shell
+  workspace [path]                  Show or change the active workspace
+  help                              Show this help text
+  quit/exit                         Leave the shell
 """
 
 
@@ -124,6 +128,9 @@ class InteractiveShell:
     # Internal helpers
 
     def _make_prompt(self) -> str:
+        if self.state.workspace:
+            label = Path(self.state.workspace).name or self.state.workspace
+            return f"infra_tools[{label}]> "
         return "infra_tools> "
 
     def _run_init_file(self, init_file: Optional[Path] = None) -> None:
@@ -172,6 +179,10 @@ class InteractiveShell:
             "command": self._cmd_command,
             "new": self._cmd_new,
             "setup": self._cmd_new,
+            "rename": self._cmd_rename,
+            "clone": self._cmd_clone,
+            "tag": self._cmd_tag,
+            "untag": self._cmd_untag,
             "deploy": self._cmd_deploy,
             "rm": self._cmd_remove,
             "remove": self._cmd_remove,
@@ -567,6 +578,80 @@ class InteractiveShell:
         )
         self._output("Command:")
         self._output("  " + " ".join(config.to_setup_command()))
+
+        if self._prompt_yes_no("Deploy now?", default=False):
+            from infra_tools import deploy_configurations
+            deploy_configurations(config.host, True)
+
+    def _cmd_rename(self, args: list[str]) -> None:
+        if len(args) != 2:
+            raise ValueError("Usage: rename <pattern> <new-name>")
+        pattern, new_name = args[0], args[1].strip()
+        if not new_name:
+            raise ValueError("New name must not be blank")
+        from lib.cache import load_setup_command, save_setup_command
+        config = load_setup_command(pattern)
+        if config is None:
+            raise ValueError(f"No saved setup found matching '{pattern}'")
+        old_label = config.friendly_name or config.host
+        config.friendly_name = new_name
+        save_setup_command(config, operation="setup")
+        self._output(f"Renamed '{old_label}' to '{new_name}'.")
+
+    def _cmd_clone(self, args: list[str]) -> None:
+        if len(args) < 2 or len(args) > 3:
+            raise ValueError("Usage: clone <pattern> <new-host> [new-name]")
+        pattern, new_host = args[0], args[1].strip()
+        new_name = args[2].strip() if len(args) == 3 else None
+        if not new_host:
+            raise ValueError("New host must not be blank")
+        from lib.cache import load_setup_command, save_setup_command
+        from lib.validators import validate_host
+        if not validate_host(new_host):
+            raise ValueError(f"Invalid IP address or hostname: {new_host}")
+        config = load_setup_command(pattern)
+        if config is None:
+            raise ValueError(f"No saved setup found matching '{pattern}'")
+        config.host = new_host
+        if new_name:
+            config.friendly_name = new_name
+        save_setup_command(config, operation="setup")
+        label = config.friendly_name or new_host
+        self._output(f"Cloned to '{label}' ({new_host}).")
+
+    def _cmd_tag(self, args: list[str]) -> None:
+        if len(args) < 2:
+            raise ValueError("Usage: tag <pattern> <tag> [tag ...]")
+        pattern, new_tags = args[0], args[1:]
+        from lib.cache import load_setup_command, save_setup_command
+        config = load_setup_command(pattern)
+        if config is None:
+            raise ValueError(f"No saved setup found matching '{pattern}'")
+        existing = list(config.tags or [])
+        added = [t for t in new_tags if t not in existing]
+        config.tags = existing + added
+        save_setup_command(config, operation="setup")
+        label = config.friendly_name or config.host
+        self._output(
+            f"Tags for '{label}': {', '.join(config.tags)}"
+            if config.tags else f"No tags on '{label}'."
+        )
+
+    def _cmd_untag(self, args: list[str]) -> None:
+        if len(args) < 2:
+            raise ValueError("Usage: untag <pattern> <tag> [tag ...]")
+        pattern, remove_tags = args[0], set(args[1:])
+        from lib.cache import load_setup_command, save_setup_command
+        config = load_setup_command(pattern)
+        if config is None:
+            raise ValueError(f"No saved setup found matching '{pattern}'")
+        config.tags = [t for t in (config.tags or []) if t not in remove_tags]
+        save_setup_command(config, operation="setup")
+        label = config.friendly_name or config.host
+        self._output(
+            f"Tags for '{label}': {', '.join(config.tags)}"
+            if config.tags else f"No tags remaining on '{label}'."
+        )
 
     def _cmd_deploy(self, args: list[str]) -> None:
         rest, yes = self._split_yes_flag(args)
