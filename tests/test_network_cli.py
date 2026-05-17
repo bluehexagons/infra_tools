@@ -128,6 +128,14 @@ class TestNetworkCli(unittest.TestCase):
         self.assertEqual(args.profile, "homelab")
         self.assertTrue(args.proxmox)
 
+    def test_help_epilog_aligns_network_command(self) -> None:
+        parser, _setup_parser, _patch_parser = infra_tools.create_infra_tools_parser()
+
+        self.assertIn(
+            "network [subcommand]        Manage generic network inventory profiles",
+            parser.epilog,
+        )
+
     def test_init_and_add_host_through_main(self) -> None:
         with tempfile.TemporaryDirectory() as workspace:
             with patch.object(

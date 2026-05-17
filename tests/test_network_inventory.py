@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -16,7 +17,9 @@ from lib.network_inventory import (
     add_network_host,
     load_network_profiles,
     save_network_profile,
+    save_network_profiles,
     upsert_network_profile,
+    validate_network_subnet,
 )
 
 
@@ -112,6 +115,31 @@ class TestNetworkInventory(unittest.TestCase):
         loaded = load_network_profiles(self.workspace)
         self.assertEqual(len(loaded), 1)
         self.assertEqual(loaded[0].management_sources, ["192.168.1.0/24"])
+
+    def test_save_network_profile_skips_unchanged_write(self) -> None:
+        profile = NetworkProfile(name="homelab", management_sources=["192.168.1.0/24"])
+        save_network_profile(profile, self.workspace)
+
+        with patch(
+            "lib.network_inventory.save_network_profiles",
+            wraps=save_network_profiles,
+        ) as mock_save_profiles:
+            loaded = save_network_profile(profile, self.workspace)
+
+        self.assertEqual(loaded.management_sources, ["192.168.1.0/24"])
+        mock_save_profiles.assert_not_called()
+
+    def test_subnet_from_dict_defers_vlan_validation(self) -> None:
+        subnet = NetworkSubnet.from_dict(
+            {
+                "name": "servers",
+                "cidr": "10.20.0.0/24",
+                "vlan_id": "not-a-vlan",
+            }
+        )
+
+        with self.assertRaises(ValueError):
+            validate_network_subnet(subnet)
 
 
 if __name__ == "__main__":

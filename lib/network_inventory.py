@@ -37,16 +37,11 @@ class NetworkSubnet:
 
     @classmethod
     def from_dict(cls, data: JSONDict) -> "NetworkSubnet":
-        vlan_id_raw = data.get("vlan_id")
         return cls(
             name=str(data.get("name") or ""),
             cidr=str(data.get("cidr") or ""),
             zone=cast(Optional[str], data.get("zone")),
-            vlan_id=(
-                validate_network_vlan_id(vlan_id_raw)
-                if vlan_id_raw is not None
-                else None
-            ),
+            vlan_id=cast(Optional[int], data.get("vlan_id")),
             gateway=cast(Optional[str], data.get("gateway")),
         )
 
@@ -238,6 +233,8 @@ def save_network_profile(
     name_lc = profile.name.lower()
     for index, existing in enumerate(profiles):
         if existing.name.lower() == name_lc:
+            if existing.to_dict() == profile.to_dict():
+                return existing
             profiles[index] = profile
             save_network_profiles(profiles, workspace)
             return profile

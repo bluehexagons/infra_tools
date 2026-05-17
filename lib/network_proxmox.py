@@ -59,20 +59,19 @@ def import_registered_proxmox_hosts(
     """Import registered Proxmox nodes into a generic network profile.
 
     The import is idempotent: Proxmox-sourced host records are replaced when
-    they match by name, address, or ``profile_ref``. Non-Proxmox records are not
-    overwritten; those conflicts are reported as skipped hosts.
+    they match by name or ``profile_ref``. Address-only collisions and
+    non-Proxmox records are not overwritten; those conflicts are reported as
+    skipped hosts.
     """
 
     profile = find_network_profile(profile_name, workspace) or NetworkProfile(
         name=profile_name
     )
-    proxmox_hosts = _filter_proxmox_hosts(
-        load_proxmox_hosts(workspace),
+    proxmox_hosts = _load_selected_proxmox_hosts(
+        workspace,
         targets=targets,
         tags=tags,
     )
-    if not proxmox_hosts:
-        raise ValueError("No registered Proxmox hosts matched the import filters")
 
     imported: list[NetworkHost] = []
     skipped: list[str] = []
@@ -112,13 +111,11 @@ def import_proxmox_guest_networks(
     profile = find_network_profile(profile_name, workspace) or NetworkProfile(
         name=profile_name
     )
-    proxmox_hosts = _filter_proxmox_hosts(
-        load_proxmox_hosts(workspace),
+    proxmox_hosts = _load_selected_proxmox_hosts(
+        workspace,
         targets=targets,
         tags=tags,
     )
-    if not proxmox_hosts:
-        raise ValueError("No registered Proxmox hosts matched the import filters")
 
     imported_networks: list[str] = []
     imported_subnets: list[NetworkSubnet] = []
@@ -132,12 +129,12 @@ def import_proxmox_guest_networks(
             skipped_guests.append(f"{proxmox_host.name}: {exc}")
             continue
         for guest in guests:
-            scanned_guests += 1
             try:
                 config = get_container_config(proxmox_host, guest.vmid)
             except ProxmoxManageError as exc:
                 skipped_guests.append(f"{proxmox_host.name}/{guest.vmid}: {exc}")
                 continue
+            scanned_guests += 1
             for subnet in _guest_subnets_from_config(proxmox_host, guest, config):
                 if subnet.cidr not in profile.guest_networks:
                     profile.guest_networks.append(subnet.cidr)
@@ -155,6 +152,25 @@ def import_proxmox_guest_networks(
     )
 
 
+def _load_selected_proxmox_hosts(
+    workspace: Optional[str],
+    *,
+    targets: Optional[list[str]],
+    tags: Optional[list[str]],
+) -> list[ProxmoxHost]:
+    registered_hosts = load_proxmox_hosts(workspace)
+    if not registered_hosts:
+        raise ValueError("No Proxmox hosts are registered; run 'proxmox add' first")
+    proxmox_hosts = _filter_proxmox_hosts(
+        registered_hosts,
+        targets=targets,
+        tags=tags,
+    )
+    if not proxmox_hosts:
+        raise ValueError("No registered Proxmox hosts matched the import filters")
+    return proxmox_hosts
+
+
 def _filter_proxmox_hosts(
     hosts: list[ProxmoxHost],
     *,
@@ -165,7 +181,11 @@ def _filter_proxmox_hosts(
     tag_set = set(tags or [])
     filtered: list[ProxmoxHost] = []
     for host in hosts:
-        if target_set and host.name.lower() not in target_set and host.address not in target_set:
+        if (
+            target_set
+            and host.name.lower() not in target_set
+            and host.address.lower() not in target_set
+        ):
             continue
         if tag_set and not tag_set.issubset(set(host.tags)):
             continue
@@ -189,17 +209,18 @@ def _upsert_proxmox_network_host(
     incoming: NetworkHost,
 ) -> bool:
     for index, existing in enumerate(profile.hosts):
-        matched = (
+        matches_identity = (
             existing.profile_ref == incoming.profile_ref
             or existing.name.lower() == incoming.name.lower()
-            or existing.address == incoming.address
         )
-        if not matched:
+        if matches_identity:
+            if existing.provider != "proxmox" and existing.profile_ref != incoming.profile_ref:
+                return False
+            profile.hosts[index] = incoming
+            return True
+        if existing.address != incoming.address:
             continue
-        if existing.provider != "proxmox" and existing.profile_ref != incoming.profile_ref:
-            return False
-        profile.hosts[index] = incoming
-        return True
+        return False
     profile.hosts.append(incoming)
     return True
 
@@ -258,8 +279,21 @@ def _subnet_name(host_name: str, vmid: int, cidr: str) -> str:
 
 
 def _add_subnet_if_missing(profile: NetworkProfile, incoming: NetworkSubnet) -> bool:
-    existing_cidrs = {subnet.cidr for subnet in profile.subnets}
-    if incoming.cidr in existing_cidrs:
+    for existing in profile.subnets:
+        if existing.cidr != incoming.cidr:
+            continue
+        if (
+            existing.zone != incoming.zone
+            or existing.vlan_id != incoming.vlan_id
+            or existing.gateway != incoming.gateway
+        ):
+            raise ValueError(
+                "Conflicting subnet definitions for "
+                f"{incoming.cidr}: existing zone={existing.zone!r} "
+                f"vlan_id={existing.vlan_id!r} gateway={existing.gateway!r}, "
+                f"incoming zone={incoming.zone!r} vlan_id={incoming.vlan_id!r} "
+                f"gateway={incoming.gateway!r}"
+            )
         return False
     existing_names = {subnet.name.lower() for subnet in profile.subnets}
     name = incoming.name

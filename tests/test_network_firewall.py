@@ -47,6 +47,7 @@ class TestProxmoxFirewallPlan(unittest.TestCase):
 
         self.assertFalse(plan.safe_to_apply)
         self.assertIn("management source", plan.errors[0])
+        self.assertEqual(plan.rules, [])
 
     def test_missing_guest_networks_is_warning(self) -> None:
         profile = NetworkProfile(
@@ -88,10 +89,23 @@ class TestProxmoxFirewallPlan(unittest.TestCase):
 
         self.assertTrue(rendered.safe_to_apply)
         self.assertEqual(rendered.artifacts[0].path, "/etc/pve/firewall/cluster.fw")
-        self.assertIn("[IPSET management]", rendered.artifacts[0].content)
+        self.assertIn("[IPSET infra-management]", rendered.artifacts[0].content)
         self.assertIn("[group infra-deny-control-plane]", rendered.artifacts[0].content)
         self.assertIn("GROUP infra-cluster-management", rendered.artifacts[1].content)
         self.assertIn("GROUP infra-deny-control-plane", rendered.artifacts[2].content)
+
+    def test_unsafe_plan_does_not_render_artifacts(self) -> None:
+        profile = NetworkProfile(
+            name="homelab",
+            control_plane=["10.0.0.10"],
+        )
+
+        rendered = render_proxmox_firewall_plan(
+            build_proxmox_control_plane_lockdown_plan(profile)
+        )
+
+        self.assertFalse(rendered.safe_to_apply)
+        self.assertEqual(rendered.artifacts, [])
 
     def test_rendered_format_includes_artifacts(self) -> None:
         profile = NetworkProfile(

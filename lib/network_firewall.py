@@ -139,38 +139,40 @@ def build_proxmox_control_plane_lockdown_plan(
         FirewallAddressSet("infra-control-plane", list(profile.control_plane)),
         FirewallAddressSet("infra-guests", list(profile.guest_networks)),
     ]
-    rules = [
-        FirewallRulePlan(
-            action="ACCEPT",
-            source="+infra-management",
-            destination="+infra-control-plane",
-            protocol="tcp",
-            ports=list(PROXMOX_MANAGEMENT_TCP_PORTS),
-            description="Allow management sources to reach SSH and Proxmox API",
-        ),
-        FirewallRulePlan(
-            action="ACCEPT",
-            source="+infra-control-plane",
-            destination="+infra-control-plane",
-            protocol="tcp",
-            ports=list(PROXMOX_CLUSTER_TCP_PORTS),
-            description="Allow Proxmox console and migration traffic between nodes",
-        ),
-        FirewallRulePlan(
-            action="ACCEPT",
-            source="+infra-control-plane",
-            destination="+infra-control-plane",
-            protocol="udp",
-            ports=list(PROXMOX_CLUSTER_UDP_PORTS),
-            description="Allow Proxmox cluster messaging between nodes",
-        ),
-        FirewallRulePlan(
-            action="DROP",
-            source="+infra-guests",
-            destination="+infra-control-plane",
-            description="Block guests from reaching Proxmox control-plane addresses",
-        ),
-    ]
+    rules: list[FirewallRulePlan] = []
+    if not errors:
+        rules = [
+            FirewallRulePlan(
+                action="ACCEPT",
+                source="+infra-management",
+                destination="+infra-control-plane",
+                protocol="tcp",
+                ports=list(PROXMOX_MANAGEMENT_TCP_PORTS),
+                description="Allow management sources to reach SSH and Proxmox API",
+            ),
+            FirewallRulePlan(
+                action="ACCEPT",
+                source="+infra-control-plane",
+                destination="+infra-control-plane",
+                protocol="tcp",
+                ports=list(PROXMOX_CLUSTER_TCP_PORTS),
+                description="Allow Proxmox console and migration traffic between nodes",
+            ),
+            FirewallRulePlan(
+                action="ACCEPT",
+                source="+infra-control-plane",
+                destination="+infra-control-plane",
+                protocol="udp",
+                ports=list(PROXMOX_CLUSTER_UDP_PORTS),
+                description="Allow Proxmox cluster messaging between nodes",
+            ),
+            FirewallRulePlan(
+                action="DROP",
+                source="+infra-guests",
+                destination="+infra-control-plane",
+                description="Block guests from reaching Proxmox control-plane addresses",
+            ),
+        ]
     return ProxmoxFirewallPlan(
         profile=profile.name,
         address_sets=address_sets,
@@ -211,6 +213,14 @@ def format_proxmox_firewall_plan(plan: ProxmoxFirewallPlan) -> str:
 def render_proxmox_firewall_plan(plan: ProxmoxFirewallPlan) -> ProxmoxRenderedPlan:
     """Render a read-only plan into Proxmox-native firewall artifacts."""
 
+    if not plan.safe_to_apply:
+        return ProxmoxRenderedPlan(
+            profile=plan.profile,
+            artifacts=[],
+            warnings=list(plan.warnings),
+            errors=list(plan.errors),
+        )
+
     management_entries = _entries_for(plan, "infra-management")
     control_entries = _entries_for(plan, "infra-control-plane")
     guest_entries = _entries_for(plan, "infra-guests")
@@ -218,8 +228,7 @@ def render_proxmox_firewall_plan(plan: ProxmoxFirewallPlan) -> ProxmoxRenderedPl
         ProxmoxRenderedArtifact(
             path="/etc/pve/firewall/cluster.fw",
             description=(
-                "Cluster-wide IP sets and security groups. "
-                "Uses Proxmox's standard host `management` IP set."
+                "Cluster-wide IP sets and security groups."
             ),
             content=_render_cluster_fw(
                 management_entries,
@@ -285,7 +294,7 @@ def _render_cluster_fw(
     guest_entries: list[str],
 ) -> str:
     lines: list[str] = []
-    lines.extend(_render_ipset("management", management_entries))
+    lines.extend(_render_ipset("infra-management", management_entries))
     lines.append("")
     lines.extend(_render_ipset("infra-control-plane", control_entries))
     lines.append("")
@@ -294,8 +303,8 @@ def _render_cluster_fw(
     lines.extend(
         [
             "[group infra-cluster-management]",
-            "IN SSH(ACCEPT) -source +management",
-            "IN ACCEPT -p tcp -dport 8006 -source +management",
+            "IN SSH(ACCEPT) -source +infra-management",
+            "IN ACCEPT -p tcp -dport 8006 -source +infra-management",
             "IN ACCEPT -p tcp -dport 5900:5999 -source +infra-control-plane",
             "IN ACCEPT -p tcp -dport 60000:60050 -source +infra-control-plane",
             "IN ACCEPT -p udp -dport 5405:5412 -source +infra-control-plane",
