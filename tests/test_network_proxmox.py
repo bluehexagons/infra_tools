@@ -6,6 +6,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -15,8 +16,12 @@ from lib.network_inventory import (
     find_network_profile,
     save_network_profile,
 )
-from lib.network_proxmox import import_registered_proxmox_hosts
+from lib.network_proxmox import (
+    import_proxmox_guest_networks,
+    import_registered_proxmox_hosts,
+)
 from lib.proxmox_hosts import ProxmoxHost, add_proxmox_host
+from lib.proxmox_manage import ContainerInfo
 
 
 class TestNetworkProxmoxImport(unittest.TestCase):
@@ -102,6 +107,76 @@ class TestNetworkProxmoxImport(unittest.TestCase):
         self.assertIsNotNone(profile)
         assert profile is not None
         self.assertEqual(profile.hosts[0].provider, "generic")
+
+    @patch("lib.network_proxmox.get_container_config")
+    @patch("lib.network_proxmox.list_containers")
+    def test_imports_guest_networks(self, mock_list, mock_config) -> None:
+        add_proxmox_host(ProxmoxHost(name="pve1", address="10.0.0.10"), self.workspace)
+        mock_list.return_value = [
+            ContainerInfo(vmid=100, status="running", name="web", guest_type="lxc"),
+            ContainerInfo(vmid=101, status="running", name="db", guest_type="vm"),
+        ]
+        mock_config.side_effect = [
+            {
+                "net0": (
+                    "name=eth0,bridge=vmbr20,ip=10.20.0.50/24,"
+                    "gw=10.20.0.1,tag=20,type=veth"
+                )
+            },
+            {
+                "ipconfig0": "ip=10.30.0.60/24,gw=10.30.0.1",
+            },
+        ]
+
+        result = import_proxmox_guest_networks("homelab", self.workspace)
+
+        self.assertEqual(result.scanned_guests, 2)
+        self.assertEqual(result.imported_networks, ["10.20.0.0/24", "10.30.0.0/24"])
+        profile = find_network_profile("homelab", self.workspace)
+        self.assertIsNotNone(profile)
+        assert profile is not None
+        self.assertEqual(profile.guest_networks, ["10.20.0.0/24", "10.30.0.0/24"])
+        self.assertEqual(profile.subnets[0].zone, "guests")
+        self.assertEqual(profile.subnets[0].vlan_id, 20)
+
+    @patch("lib.network_proxmox.get_container_config")
+    @patch("lib.network_proxmox.list_containers")
+    def test_guest_network_import_is_idempotent(self, mock_list, mock_config) -> None:
+        add_proxmox_host(ProxmoxHost(name="pve1", address="10.0.0.10"), self.workspace)
+        mock_list.return_value = [
+            ContainerInfo(vmid=100, status="running", name="web", guest_type="lxc"),
+        ]
+        mock_config.return_value = {
+            "net0": "name=eth0,bridge=vmbr20,ip=10.20.0.50/24,tag=20,type=veth"
+        }
+
+        import_proxmox_guest_networks("homelab", self.workspace)
+        import_proxmox_guest_networks("homelab", self.workspace)
+
+        profile = find_network_profile("homelab", self.workspace)
+        self.assertIsNotNone(profile)
+        assert profile is not None
+        self.assertEqual(profile.guest_networks, ["10.20.0.0/24"])
+        self.assertEqual(len(profile.subnets), 1)
+
+    @patch("lib.network_proxmox.get_container_config")
+    @patch("lib.network_proxmox.list_containers")
+    def test_guest_network_import_ignores_dhcp(self, mock_list, mock_config) -> None:
+        add_proxmox_host(ProxmoxHost(name="pve1", address="10.0.0.10"), self.workspace)
+        mock_list.return_value = [
+            ContainerInfo(vmid=100, status="running", name="web", guest_type="lxc"),
+        ]
+        mock_config.return_value = {
+            "net0": "name=eth0,bridge=vmbr20,ip=dhcp,type=veth"
+        }
+
+        result = import_proxmox_guest_networks("homelab", self.workspace)
+
+        self.assertEqual(result.imported_networks, [])
+        profile = find_network_profile("homelab", self.workspace)
+        self.assertIsNotNone(profile)
+        assert profile is not None
+        self.assertEqual(profile.guest_networks, [])
 
 
 if __name__ == "__main__":

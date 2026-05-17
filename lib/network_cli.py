@@ -15,7 +15,10 @@ from lib.network_inventory import (
     load_network_profiles,
     upsert_network_profile,
 )
-from lib.network_proxmox import import_registered_proxmox_hosts
+from lib.network_proxmox import (
+    import_proxmox_guest_networks,
+    import_registered_proxmox_hosts,
+)
 
 
 def add_network_subparser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
@@ -142,6 +145,27 @@ def add_network_subparser(subparsers: argparse._SubParsersAction) -> argparse.Ar
     )
     import_proxmox.set_defaults(_handler=_cmd_import_proxmox)
 
+    import_guests = sub.add_parser(
+        "import-proxmox-guests",
+        help="Import guest subnets from registered Proxmox hosts",
+    )
+    import_guests.add_argument("profile", help="Network profile name")
+    import_guests.add_argument(
+        "--host",
+        action="append",
+        dest="hosts",
+        default=[],
+        help="Registered Proxmox host name or address to scan; repeatable",
+    )
+    import_guests.add_argument(
+        "--tag",
+        action="append",
+        dest="tags",
+        default=[],
+        help="Only scan Proxmox hosts with this registry tag; repeatable",
+    )
+    import_guests.set_defaults(_handler=_cmd_import_proxmox_guests)
+
     return parser
 
 
@@ -152,7 +176,7 @@ def run_network_command(args: argparse.Namespace) -> int:
     if handler is None:
         print(
             "Error: network command required "
-            "(list, show, init, add-host, import-proxmox)"
+            "(list, show, init, add-host, import-proxmox, import-proxmox-guests)"
         )
         return 1
     try:
@@ -273,6 +297,33 @@ def _cmd_import_proxmox(args: argparse.Namespace, workspace: Optional[str]) -> i
         print("Skipped conflicting non-Proxmox host(s):")
         for host_name in result.skipped_hosts:
             print(f"  {host_name}")
+    return 0
+
+
+def _cmd_import_proxmox_guests(
+    args: argparse.Namespace,
+    workspace: Optional[str],
+) -> int:
+    result = import_proxmox_guest_networks(
+        args.profile,
+        workspace,
+        targets=list(args.hosts),
+        tags=list(args.tags),
+    )
+    print(
+        f"Scanned {result.scanned_guests} Proxmox guest(s) for "
+        f"network profile '{result.profile.name}'."
+    )
+    if result.imported_networks:
+        print("Imported guest networks:")
+        for cidr in result.imported_networks:
+            print(f"  {cidr}")
+    else:
+        print("No new guest networks imported.")
+    if result.skipped_guests:
+        print("Skipped guest scan(s):")
+        for skipped in result.skipped_guests:
+            print(f"  {skipped}")
     return 0
 
 
