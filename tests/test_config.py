@@ -419,6 +419,14 @@ class TestSetupConfigFromArgs(unittest.TestCase):
         self.assertFalse(config.include_cli_tools)
         self.assertFalse(config.include_desktop)
 
+    def test_from_dict_server_proxmox_defaults_no_restart_when_missing(self):
+        config = SetupConfig.from_dict(
+            'pve1',
+            'server_proxmox',
+            {'username': 'root'},
+        )
+        self.assertTrue(config.no_restart)
+
 
 class TestSetupConfigHostedFields(unittest.TestCase):
     def _make_config(self, **kwargs):

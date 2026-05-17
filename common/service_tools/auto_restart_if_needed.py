@@ -19,6 +19,7 @@ from logging import ERROR, INFO
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
 from lib.logging_utils import get_service_logger, log_event
+from lib.plugin_registry import get_system_type_definition
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
 from lib.machine_state import load_setup_config
 
@@ -122,7 +123,11 @@ def is_no_restart_mode() -> bool:
     try:
         config = load_setup_config()
         if config:
-            return bool(config.get("no_restart", False))
+            if "no_restart" in config:
+                return bool(config.get("no_restart", False))
+            system_type = config.get("system_type")
+            if isinstance(system_type, str):
+                return get_system_type_definition(system_type).default_no_restart
     except Exception:
         pass
     return False

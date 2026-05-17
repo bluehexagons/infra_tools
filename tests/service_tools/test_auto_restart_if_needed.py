@@ -90,6 +90,10 @@ class TestIsNoRestartMode(unittest.TestCase):
     def test_returns_false_when_key_missing(self, _load):
         self.assertFalse(auto_restart_if_needed.is_no_restart_mode())
 
+    @patch("common.service_tools.auto_restart_if_needed.load_setup_config", return_value={"username": "u", "system_type": "server_proxmox"})
+    def test_returns_true_for_server_proxmox_when_key_missing(self, _load):
+        self.assertTrue(auto_restart_if_needed.is_no_restart_mode())
+
 
 if __name__ == "__main__":
     unittest.main()

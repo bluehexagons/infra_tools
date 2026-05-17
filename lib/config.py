@@ -565,6 +565,8 @@ class SetupConfig:
             data['tags'] = None
 
         data['container_storage'] = _normalize_container_storage(data.get('container_storage'))
+        if 'no_restart' not in data or data.get('no_restart') is None:
+            data['no_restart'] = get_system_type_definition(system_type).default_no_restart
             
         if 'friendly_name' not in data:
             data['friendly_name'] = None
