@@ -59,6 +59,34 @@ The first generated policy should:
   reachability.
 - Avoid storing secrets in network inventory files.
 
+## First Release Scope
+
+Include:
+
+- Generic profile inventory for management sources, control-plane addresses,
+  guest networks, subnets, VLAN IDs, and hosts.
+- Manual profile editing through CLI commands.
+- Proxmox host import from the existing workspace host registry.
+- Proxmox guest subnet import from static guest configuration.
+- A read-only Proxmox control-plane lockdown planner.
+- Clear warnings and errors when a profile is not safe to apply, especially when
+  management sources are missing.
+
+Defer:
+
+- DHCP lease, ARP, and guest-agent discovery. These are useful but need source
+  confidence tracking before they should influence firewall policy.
+- Proxmox SDN/VNet firewall support. Start with stable cluster/node/guest
+  firewall intent, then add SDN-specific generation later.
+- Managed switch and router adapters. The generic model should allow them, but
+  first release should not require device-specific credentials or APIs.
+- Cloud/provider adapters. These can share the same policy model once Proxmox is
+  proven.
+- Remote apply, backup, and rollback until the planner is deterministic and easy
+  to review.
+- Fully interactive wizard flow. The wizard should wrap the proven CLI/import/plan
+  primitives instead of becoming a separate path.
+
 ## CLI Shape
 
 Generic commands:
@@ -69,6 +97,7 @@ infra_tools.py network init homelab --management 192.168.1.0/24
 infra_tools.py network add-host homelab pve1 10.0.0.10 --provider proxmox --role control-plane
 infra_tools.py network import-proxmox homelab --tag prod
 infra_tools.py network import-proxmox-guests homelab --tag prod
+infra_tools.py network plan-proxmox homelab
 infra_tools.py network show homelab
 ```
 

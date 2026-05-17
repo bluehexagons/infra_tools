@@ -1,0 +1,78 @@
+"""Tests for read-only network firewall planning."""
+
+from __future__ import annotations
+
+import os
+import sys
+import unittest
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from lib.network_firewall import (
+    build_proxmox_control_plane_lockdown_plan,
+    format_proxmox_firewall_plan,
+)
+from lib.network_inventory import NetworkProfile
+
+
+class TestProxmoxFirewallPlan(unittest.TestCase):
+    def test_builds_control_plane_lockdown_plan(self) -> None:
+        profile = NetworkProfile(
+            name="homelab",
+            management_sources=["192.168.1.0/24"],
+            control_plane=["10.0.0.10", "10.0.0.11"],
+            guest_networks=["10.20.0.0/24"],
+        )
+
+        plan = build_proxmox_control_plane_lockdown_plan(profile)
+
+        self.assertTrue(plan.safe_to_apply)
+        self.assertEqual(plan.errors, [])
+        self.assertEqual(plan.address_sets[0].name, "infra-management")
+        self.assertEqual(plan.address_sets[0].entries, ["192.168.1.0/24"])
+        self.assertEqual(plan.rules[-1].action, "DROP")
+        self.assertEqual(plan.rules[-1].source, "+infra-guests")
+        self.assertEqual(plan.rules[-1].destination, "+infra-control-plane")
+
+    def test_missing_management_source_is_error(self) -> None:
+        profile = NetworkProfile(
+            name="homelab",
+            control_plane=["10.0.0.10"],
+            guest_networks=["10.20.0.0/24"],
+        )
+
+        plan = build_proxmox_control_plane_lockdown_plan(profile)
+
+        self.assertFalse(plan.safe_to_apply)
+        self.assertIn("management source", plan.errors[0])
+
+    def test_missing_guest_networks_is_warning(self) -> None:
+        profile = NetworkProfile(
+            name="homelab",
+            management_sources=["192.168.1.0/24"],
+            control_plane=["10.0.0.10"],
+        )
+
+        plan = build_proxmox_control_plane_lockdown_plan(profile)
+
+        self.assertTrue(plan.safe_to_apply)
+        self.assertIn("No guest networks", plan.warnings[0])
+
+    def test_format_plan_includes_rules(self) -> None:
+        profile = NetworkProfile(
+            name="homelab",
+            management_sources=["192.168.1.0/24"],
+            control_plane=["10.0.0.10"],
+            guest_networks=["10.20.0.0/24"],
+        )
+        plan = build_proxmox_control_plane_lockdown_plan(profile)
+
+        rendered = format_proxmox_firewall_plan(plan)
+
+        self.assertIn("Proxmox firewall plan: homelab", rendered)
+        self.assertIn("infra-management", rendered)
+        self.assertIn("DROP", rendered)
+
+
+if __name__ == "__main__":
+    unittest.main()

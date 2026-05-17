@@ -6,6 +6,10 @@ import argparse
 import json
 from typing import Optional
 
+from lib.network_firewall import (
+    format_proxmox_firewall_plan,
+    plan_proxmox_control_plane_lockdown,
+)
 from lib.network_inventory import (
     NetworkHost,
     NetworkProfile,
@@ -166,6 +170,14 @@ def add_network_subparser(subparsers: argparse._SubParsersAction) -> argparse.Ar
     )
     import_guests.set_defaults(_handler=_cmd_import_proxmox_guests)
 
+    plan_proxmox = sub.add_parser(
+        "plan-proxmox",
+        help="Plan Proxmox control-plane firewall lockdown without applying it",
+    )
+    plan_proxmox.add_argument("profile", help="Network profile name")
+    plan_proxmox.add_argument("--json", action="store_true", help="Output JSON")
+    plan_proxmox.set_defaults(_handler=_cmd_plan_proxmox)
+
     return parser
 
 
@@ -176,7 +188,8 @@ def run_network_command(args: argparse.Namespace) -> int:
     if handler is None:
         print(
             "Error: network command required "
-            "(list, show, init, add-host, import-proxmox, import-proxmox-guests)"
+            "(list, show, init, add-host, import-proxmox, "
+            "import-proxmox-guests, plan-proxmox)"
         )
         return 1
     try:
@@ -325,6 +338,15 @@ def _cmd_import_proxmox_guests(
         for skipped in result.skipped_guests:
             print(f"  {skipped}")
     return 0
+
+
+def _cmd_plan_proxmox(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    plan = plan_proxmox_control_plane_lockdown(args.profile, workspace)
+    if args.json:
+        print(json.dumps(plan.to_dict(), indent=2, sort_keys=True))
+    else:
+        print(format_proxmox_firewall_plan(plan))
+    return 0 if plan.safe_to_apply else 1
 
 
 def _print_list(label: str, values: list[str]) -> None:
