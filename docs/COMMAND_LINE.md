@@ -268,6 +268,7 @@ Register Proxmox hosts and manage their VMs or LXC compatibility guests:
 infra_tools.py proxmox add <name> <address> [--user USER] [--key PATH]
 infra_tools.py proxmox probe <host>
 infra_tools.py proxmox probe-cluster <address> [--user USER] [--key PATH] [--tag TAG]
+infra_tools.py proxmox rolling-update <target> [<target> ...] [--dry-run] [--reboot-timeout SECONDS]
 infra_tools.py proxmox hosts
 infra_tools.py proxmox remove <name>
 
@@ -298,8 +299,11 @@ infra_tools.py proxmox [shell]
 commands can reuse them.
 `probe-cluster` starts from one reachable node IP/hostname, discovers every cluster member using Proxmox's configured node names,
 and seeds host records for the whole cluster in one step. `--tag` is repeatable and applies those tags to newly discovered nodes.
+`rolling-update` uses each target's saved setup command, rehydrates workspace credentials before patching, stops on the first
+failure, and only reboots a node when `/var/run/reboot-required` exists.
 `modify` and `reconfigure` changes to a running guest are queued as pending by Proxmox.
-All subcommands accept `--dry-run` to print the remote command without executing it.
+Mutating Proxmox subcommands such as `reconfigure`, `modify`, `resize-disk`, notification setup, and `rolling-update`
+accept `--dry-run` to print or validate the planned work without executing it.
 
 ## Interactive Shell
 

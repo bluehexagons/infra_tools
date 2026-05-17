@@ -333,6 +333,31 @@ def _apply_hosted_proxmox_defaults(
         config.container_storage = updated_specs
 
 
+def prepare_validated_runtime_config(
+    config: SetupConfig,
+    workspace: Optional[str],
+) -> SetupConfig:
+    """Apply saved-host defaults, resolve credentials, and validate a setup."""
+    _apply_hosted_proxmox_defaults(config, workspace)
+    runtime_config = prepare_runtime_config(config)
+    validate_timezone_name(runtime_config.timezone)
+    validate_apt_packages(runtime_config.apt_packages)
+    validate_notification_args(runtime_config.notify_specs)
+    validate_ssl_email(runtime_config.ssl_email)
+    validate_deploy_specs(runtime_config.deploy_specs)
+    validate_deploy_targets(runtime_config.deploy_targets)
+    validate_sync_specs(runtime_config.sync_specs)
+    validate_scrub_specs(runtime_config.scrub_specs)
+    validate_smb_mount_specs(runtime_config.smb_mounts)
+    validate_samba_share_specs(
+        runtime_config.samba_shares,
+        runtime_config.share_credentials,
+    )
+    validate_hosted_flags(runtime_config)
+    validate_samba_share_credentials(runtime_config)
+    return runtime_config
+
+
 def run_remote_setup(config: SetupConfig) -> int:
     is_local = config.host in ["localhost", "127.0.0.1"]
     
@@ -486,19 +511,10 @@ def setup_main(system_type: str, description: str, success_msg_fn: Callable[[Set
     config = SetupConfig.from_args(args, system_type)
 
     try:
-        _apply_hosted_proxmox_defaults(config, getattr(args, "workspace", None))
-        runtime_config = prepare_runtime_config(config)
-        validate_timezone_name(runtime_config.timezone)
-        validate_apt_packages(runtime_config.apt_packages)
-        validate_notification_args(runtime_config.notify_specs)
-        validate_ssl_email(runtime_config.ssl_email)
-        validate_deploy_specs(runtime_config.deploy_specs)
-        validate_deploy_targets(runtime_config.deploy_targets)
-        validate_sync_specs(runtime_config.sync_specs)
-        validate_scrub_specs(runtime_config.scrub_specs)
-        validate_smb_mount_specs(runtime_config.smb_mounts)
-        validate_samba_share_specs(runtime_config.samba_shares, runtime_config.share_credentials)
-        validate_samba_share_credentials(runtime_config)
+        runtime_config = prepare_validated_runtime_config(
+            config,
+            getattr(args, "workspace", None),
+        )
     except ValueError as e:
         print(f"Error: {e}")
         return 1

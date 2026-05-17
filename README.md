@@ -199,6 +199,7 @@ subcommand to enter an interactive shell, or use subcommands directly:
 python3 infra_tools.py proxmox add pve1 10.0.0.10 --user root --key ~/.ssh/proxmox_ed25519
 python3 infra_tools.py proxmox probe pve1
 python3 infra_tools.py proxmox probe-cluster 10.0.0.10 --key ~/.ssh/proxmox_ed25519 --tag prod
+python3 infra_tools.py proxmox rolling-update pve1 pve2 pve3
 python3 infra_tools.py proxmox hosts
 python3 infra_tools.py proxmox ls pve1
 
@@ -227,6 +228,9 @@ runs can target a registered host by name and omit manual pool names.
 `proxmox probe-cluster` starts from one reachable node IP/hostname, discovers every cluster member from
 Proxmox's configured node names, and seeds the host registry for the whole cluster in one step; `--tag`
 values are applied to newly discovered nodes.
+`proxmox rolling-update` reuses saved setup commands plus workspace credentials, validates every target
+before touching any node, applies patches in the order given, and waits for any required reboot before
+continuing.
 Proxmox notifications use the native Proxmox webhook endpoint and matcher via `pvesh` — no local hook script
 is installed. `modify` and `reconfigure` changes that affect a running guest may require a restart.
 

@@ -57,7 +57,11 @@ from lib.proxmox_cli import add_proxmox_subparser, run_proxmox_command
 from lib.python_setup import run_local_python_setup
 from lib.recall import run_recall_command
 from lib.reconstruct import run_reconstruct_command
-from lib.setup_common import REMOTE_SCRIPT_PATH, run_remote_setup
+from lib.setup_common import (
+    REMOTE_SCRIPT_PATH,
+    _apply_hosted_proxmox_defaults,
+    run_remote_setup,
+)
 from lib.system_utils import get_current_username
 from lib.types import Deployments, JSONDict, JSONList, StrList
 from lib.validators import validate_host, validate_username
@@ -652,19 +656,7 @@ def _execute_patch_config(config: SetupConfig) -> int:
     print()
 
     try:
-        runtime_config = prepare_runtime_config(config)
-        validate_timezone_name(runtime_config.timezone)
-        validate_apt_packages(runtime_config.apt_packages)
-        validate_notification_args(runtime_config.notify_specs)
-        validate_ssl_email(runtime_config.ssl_email)
-        validate_deploy_specs(runtime_config.deploy_specs)
-        validate_deploy_targets(runtime_config.deploy_targets)
-        validate_sync_specs(runtime_config.sync_specs)
-        validate_scrub_specs(runtime_config.scrub_specs)
-        validate_smb_mount_specs(runtime_config.smb_mounts)
-        validate_samba_share_specs(runtime_config.samba_shares, runtime_config.share_credentials)
-        validate_hosted_flags(runtime_config)
-        validate_samba_share_credentials(runtime_config)
+        runtime_config = _prepare_runtime_config_for_cli(config)
     except ValueError as exc:
         print(f"Error: {exc}")
         return 1
@@ -698,6 +690,27 @@ def _execute_patch_config(config: SetupConfig) -> int:
 
     print("=" * 60)
     return 0
+
+
+def _prepare_runtime_config_for_cli(config: SetupConfig) -> SetupConfig:
+    _apply_hosted_proxmox_defaults(config, None)
+    runtime_config = prepare_runtime_config(config)
+    validate_timezone_name(runtime_config.timezone)
+    validate_apt_packages(runtime_config.apt_packages)
+    validate_notification_args(runtime_config.notify_specs)
+    validate_ssl_email(runtime_config.ssl_email)
+    validate_deploy_specs(runtime_config.deploy_specs)
+    validate_deploy_targets(runtime_config.deploy_targets)
+    validate_sync_specs(runtime_config.sync_specs)
+    validate_scrub_specs(runtime_config.scrub_specs)
+    validate_smb_mount_specs(runtime_config.smb_mounts)
+    validate_samba_share_specs(
+        runtime_config.samba_shares,
+        runtime_config.share_credentials,
+    )
+    validate_hosted_flags(runtime_config)
+    validate_samba_share_credentials(runtime_config)
+    return runtime_config
 
 
 def deploy_configurations(pattern: str, force: bool) -> int:
@@ -758,19 +771,7 @@ def run_setup_command(args: argparse.Namespace) -> int:
     config = SetupConfig.from_args(args, args.system_type)
     
     try:
-        runtime_config = prepare_runtime_config(config)
-        validate_timezone_name(runtime_config.timezone)
-        validate_apt_packages(runtime_config.apt_packages)
-        validate_notification_args(runtime_config.notify_specs)
-        validate_ssl_email(runtime_config.ssl_email)
-        validate_deploy_specs(runtime_config.deploy_specs)
-        validate_deploy_targets(runtime_config.deploy_targets)
-        validate_sync_specs(runtime_config.sync_specs)
-        validate_scrub_specs(runtime_config.scrub_specs)
-        validate_smb_mount_specs(runtime_config.smb_mounts)
-        validate_samba_share_specs(runtime_config.samba_shares, runtime_config.share_credentials)
-        validate_hosted_flags(runtime_config)
-        validate_samba_share_credentials(runtime_config)
+        runtime_config = _prepare_runtime_config_for_cli(config)
     except ValueError as e:
         print(f"Error: {e}")
         return 1

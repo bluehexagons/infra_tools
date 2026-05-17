@@ -11,6 +11,7 @@ import argparse
 from dataclasses import replace
 from typing import Optional
 
+from lib.cluster_update import run_cluster_update
 from lib.proxmox_guest import probe_proxmox_cluster, probe_proxmox_host
 from lib.proxmox_hosts import (
     ProxmoxHost,
@@ -118,6 +119,28 @@ def add_proxmox_subparser(subparsers: argparse._SubParsersAction) -> argparse.Ar
         help="Tag to apply to newly discovered nodes; repeatable",
     )
     probe_cluster.set_defaults(_handler=_cmd_probe_cluster)
+
+    rolling_update = sub.add_parser(
+        "rolling-update",
+        help="Patch saved node configs in order, rebooting each node if needed",
+    )
+    rolling_update.add_argument(
+        "targets",
+        nargs="+",
+        help="Saved setup names/hosts to update in order",
+    )
+    rolling_update.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate and print patch plans without changing the nodes",
+    )
+    rolling_update.add_argument(
+        "--reboot-timeout",
+        type=int,
+        default=300,
+        help="Seconds to wait for each node to come back after reboot (default: 300)",
+    )
+    rolling_update.set_defaults(_handler=_cmd_rolling_update)
 
     ls = sub.add_parser("ls", aliases=["list"], help="List guests on a host")
     ls.add_argument("host", help="Registered host name or address")
@@ -450,6 +473,15 @@ def _cmd_probe_cluster(args: argparse.Namespace, workspace: Optional[str]) -> in
             f"tags={tags_text}"
         )
     return 0
+
+
+def _cmd_rolling_update(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    return run_cluster_update(
+        list(args.targets),
+        workspace=workspace,
+        dry_run=args.dry_run,
+        reboot_timeout=args.reboot_timeout,
+    )
 
 
 def _cmd_containers_ls(args: argparse.Namespace, workspace: Optional[str]) -> int:

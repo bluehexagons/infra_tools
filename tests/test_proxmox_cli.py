@@ -148,6 +148,18 @@ class TestProxmoxCliHosts(_CliFixture):
         loaded = load_proxmox_hosts(self.workspace)
         self.assertEqual([host.name for host in loaded], ["pve1", "pve2"])
 
+    @patch("lib.proxmox_cli.run_cluster_update", return_value=0)
+    def test_rolling_update_dispatches_to_cluster_updater(self, mock_run_cluster_update) -> None:
+        rc, _ = self._run("rolling-update", "pve1", "pve2", "--reboot-timeout", "180")
+
+        self.assertEqual(rc, 0)
+        mock_run_cluster_update.assert_called_once_with(
+            ["pve1", "pve2"],
+            workspace=self.workspace,
+            dry_run=False,
+            reboot_timeout=180,
+        )
+
 
 class TestProxmoxCliContainerOps(_CliFixture):
     def setUp(self) -> None:
