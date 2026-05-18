@@ -55,6 +55,7 @@ from lib.orchestrator_bootstrap import run_orchestrator_bootstrap
 from lib.plugin_registry import format_system_type_help, get_system_type_names
 from lib.network_cli import add_network_subparser, run_network_command
 from lib.proxmox_cli import add_proxmox_subparser, run_proxmox_command
+from lib.sysadmin_cli import add_sysadmin_subparsers, run_sysadmin_command
 from lib.python_setup import run_local_python_setup
 from lib.recall import run_recall_command
 from lib.reconstruct import run_reconstruct_command
@@ -101,6 +102,15 @@ def _build_infra_tools_epilog() -> str:
     proxmox [subcommand]        Manage Proxmox hosts and containers (interactive shell with no args)
     shell                       Interactive REPL for managing saved configurations
     credentials                 Manage workspace credentials
+
+Sysadmin Shortcuts:
+    mount <host:path> <local>   Mount a remote directory via sshfs
+    umount <local|host>         Unmount an sshfs mount
+    health <host>               Show uptime, disk, memory, failed units, pending upgrades
+    ssh <host> [-- cmd]         Open SSH session using saved config
+    push <local> <host:path>    Rsync a local path to a remote host
+    pull <host:path> [local]    Rsync a remote path to local
+    key push <host>             Install local public key on a remote host
 
 System Types for setup:
 {format_system_type_help()}
@@ -337,6 +347,7 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
 
     add_network_subparser(subparsers)
     add_proxmox_subparser(subparsers)
+    add_sysadmin_subparsers(subparsers)
 
     shell_parser = subparsers.add_parser(
         "shell",
@@ -937,6 +948,8 @@ def main() -> int:
         return run_network_command(args)
     elif args.command == "proxmox":
         return run_proxmox_command(args)
+    elif args.command in {"mount", "umount", "health", "ssh", "push", "pull", "key"}:
+        return run_sysadmin_command(args)
     elif args.command == "shell":
         return run_interactive_shell(getattr(args, "workspace", None))
     elif args.command == "credentials":
