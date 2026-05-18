@@ -5,6 +5,9 @@ Complete reference for the unified infra_tools CLI.
 > **Sysadmin shortcuts** (`mount`, `health`, `ssh`, `push`, `pull`, `df`, `fan`,
 > `svc`, `logs`, `upgrade`, `reachable`, `key`) have their own page:
 > [SYSADMIN.md](./SYSADMIN.md).
+>
+> **Network inventory and Proxmox firewall planning** (`network ...`) have
+> their own page: [NETWORKING.md](./NETWORKING.md).
 
 ## Unified Entry Point
 
@@ -45,6 +48,14 @@ infra_tools.py self-setup [options]
 
 # Drop into the interactive infra_tools REPL
 infra_tools.py shell
+
+# Workspace-backed network inventory and read-only Proxmox firewall planning
+infra_tools.py network list
+infra_tools.py network init <profile> [--management CIDR] [--control-plane CIDR] [--guest-network CIDR]
+infra_tools.py network add-host <profile> <name> <address> [--provider NAME] [--role ROLE]
+infra_tools.py network import-proxmox <profile> [--host NAME] [--tag TAG]
+infra_tools.py network import-proxmox-guests <profile> [--host NAME] [--tag TAG]
+infra_tools.py network plan-proxmox <profile> [--proxmox] [--json]
 
 # Sysadmin shortcuts (see SYSADMIN.md for full reference)
 infra_tools.py mount <host>:<path> <local>
@@ -277,6 +288,35 @@ infra_tools.py cmd [pattern]                   # Show reconstructed command
 infra_tools.py rm <pattern>                    # Remove configurations
 infra_tools.py deploy <pattern> [--yes]        # Redeploy systems
 ```
+
+## Network Inventory and Planning
+
+Use `infra_tools.py network` to keep a workspace-backed inventory of management
+sources, control-plane addresses, guest networks, subnets, VLAN-tagged subnets,
+and tagged hosts, then generate a read-only Proxmox control-plane lockdown plan.
+
+```bash
+# Inventory
+infra_tools.py network list
+infra_tools.py network show <profile> [--json]
+infra_tools.py network init <profile> [--management CIDR] [--control-plane CIDR] [--guest-network CIDR]
+infra_tools.py network add-host <profile> <name> <address> [--provider NAME] [--role ROLE]
+
+# Proxmox imports
+infra_tools.py network import-proxmox <profile> [--host NAME] [--tag TAG] [--no-control-plane]
+infra_tools.py network import-proxmox-guests <profile> [--host NAME] [--tag TAG]
+
+# Read-only planning
+infra_tools.py network plan-proxmox <profile> [--json]
+infra_tools.py network plan-proxmox <profile> --proxmox
+```
+
+Notes:
+
+- The inventory lives at `<workspace>/network_inventory.json` with mode `0600`.
+- Pass `--workspace PATH` immediately after `network` to isolate profiles for a project or environment.
+- `plan-proxmox` is read-only: it prints an abstract plan, or with `--proxmox` renders reviewable snippets for `/etc/pve/firewall/cluster.fw`, `/etc/pve/nodes/<node>/host.fw`, and `/etc/pve/firewall/<VMID>.fw`.
+- The planner returns a non-zero status until at least one management source and one control-plane address are present.
 
 ## Proxmox Management
 

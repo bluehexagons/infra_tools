@@ -22,6 +22,7 @@ python3 infra_tools.py credentials set guest s3cret
 - **Workstations**: Desktop environments (XFCE, i3, LXQt), RDP, browsers, audio
 - **Storage**: Samba shares, rsync sync, par2 integrity verification
 - **Security**: Firewall, SSH hardening, fail2ban, hardened OS auto-updates, weekly cleanup maintenance, journald size limits
+- **Network inventory**: workspace-backed network profiles and read-only Proxmox control-plane firewall planning — see [docs/NETWORKING.md](./docs/NETWORKING.md)
 - **Sysadmin shortcuts**: mount, health, ssh, push/pull, df, fan, svc, logs, upgrade, reachable — see [docs/SYSADMIN.md](./docs/SYSADMIN.md)
 
 Background maintenance includes a `cleanup-maintenance` systemd timer that reclaims temporary files,
@@ -40,12 +41,12 @@ package releases are avoided where the package manager supports a freshness cuto
 
 | Script | Description |
 |--------|-------------|
-| `infra_tools.py` | **Unified entry point** - Use `setup`, `patch`, `list`, `info`, `cmd`, `rm`, `deploy`, `recall`, `reconstruct`, `completions`, `python-tools`, `bootstrap`, `credentials`, `proxmox`, `shell`, or any [sysadmin shortcut](./docs/SYSADMIN.md) |
+| `infra_tools.py` | **Unified entry point** - Use `setup`, `patch`, `list`, `info`, `cmd`, `rm`, `deploy`, `recall`, `reconstruct`, `completions`, `python-tools`, `bootstrap`, `credentials`, `network`, `proxmox`, `shell`, or any [sysadmin shortcut](./docs/SYSADMIN.md) |
 
 Use `infra_tools.py` for all system setup, saved-configuration management, patching, recall, reconstruction,
 local Python tooling, and shell-completion setup.
 
-See [Command-Line Reference](./docs/COMMAND_LINE.md) for setup/patch flags and [Sysadmin Commands](./docs/SYSADMIN.md) for day-to-day shortcuts.
+See [Command-Line Reference](./docs/COMMAND_LINE.md) for setup/patch flags, [Network Inventory](./docs/NETWORKING.md) for the `network` workflow, and [Sysadmin Commands](./docs/SYSADMIN.md) for day-to-day shortcuts.
 
 ## Common Examples
 
@@ -247,6 +248,25 @@ before touching any node, applies patches in the order given, and waits for any 
 continuing.
 Proxmox notifications use the native Proxmox webhook endpoint and matcher via `pvesh` — no local hook script
 is installed. `modify` and `reconfigure` changes that affect a running guest may require a restart.
+
+### Network Inventory and Proxmox Firewall Planning
+
+The `network` command keeps a workspace-scoped inventory of management sources,
+control-plane addresses, guest networks, and tagged hosts, then renders a
+read-only Proxmox control-plane lockdown plan for review.
+
+```bash
+python3 infra_tools.py network init homelab --management 192.168.1.0/24
+python3 infra_tools.py network import-proxmox homelab --tag prod
+python3 infra_tools.py network import-proxmox-guests homelab --tag prod
+python3 infra_tools.py network plan-proxmox homelab
+python3 infra_tools.py network plan-proxmox homelab --proxmox
+```
+
+Profiles are stored in `<workspace>/network_inventory.json` (mode `0600`).
+The current planner is intentionally read-only and exits non-zero when required
+safety inputs such as management sources or control-plane addresses are missing.
+See [docs/NETWORKING.md](./docs/NETWORKING.md) for the full command reference.
 
 ### Interactive Shell
 
