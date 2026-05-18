@@ -61,99 +61,56 @@ Falls back gracefully if individual commands are unavailable.
 
 ### 3. `df` — multi-host disk usage table
 
-**Command shape:**
-```
-infra_tools.py df <host> [<host2> ...] [--username U] [--key K]
-```
-
-Runs `df -h` in parallel across all listed hosts and formats the results as a
-combined table sorted by percent used, with hosts >85% highlighted. Reuses
-`concurrent_operations` for parallel execution.
-
-**Status:** Planned.
-
----
+**Status:** Implemented — `lib/sysadmin_fan.py`.
 
 ### 4. `fan` — parallel SSH fan-out
 
-**Command shape:**
-```
-infra_tools.py fan <host> [<host2> ...] -- <command> [args...]
-```
-
-Runs a shell command on multiple hosts in parallel using `concurrent_operations`,
-collects stdout/stderr per host, prints a tabular summary with exit codes. A
-`--group` flag can name saved host groups (stored in the workspace) for easy reuse.
-
-**Status:** Planned.
-
----
+**Status:** Implemented — `lib/sysadmin_fan.py`.
 
 ### 5. `push` / `pull` — rsync wrappers
 
-**Command shape:**
-```
-infra_tools.py push <local_path> <host>:<remote_path> [--dry-run] [--delete]
-infra_tools.py pull <host>:<remote_path> [<local_path>] [--dry-run]
-```
-
-Thin rsync wrappers with SSH key/username from saved config, progress output,
-partial-file support, and `--dry-run` mode. `push` defaults to `--dry-run` if
-`--delete` is specified, requiring explicit confirmation.
-
-**Status:** Planned.
-
----
+**Status:** Implemented — `lib/sysadmin_transfer.py`.
 
 ### 6. `ssh` — saved-config SSH shortcut
 
-**Command shape:**
-```
-infra_tools.py ssh <host> [-- <remote_command>]
-```
-
-Looks up the saved `SetupConfig` for `<host>` to get username, key, and port, then
-execs into a real SSH session. Passes through arbitrary remote commands. Adds
-`ControlMaster=auto` for connection reuse.
-
-**Status:** Planned.
-
----
+**Status:** Implemented — `lib/sysadmin_ssh.py`.
 
 ### 7. `key push` — idempotent pubkey install
 
-**Command shape:**
-```
-infra_tools.py key push <host> [--pubkey ~/.ssh/id_ed25519.pub] [--username U]
-```
+**Status:** Implemented — `lib/sysadmin_keys.py`.
 
-Appends the local public key to `~/.ssh/authorized_keys` on the remote, creating
-the file and directory with correct permissions if needed. Idempotent — checks for
-existing key before appending.
+### 8. `svc` — systemctl proxy
 
-**Status:** Planned.
+**Status:** Implemented — `lib/sysadmin_svc.py`.
+
+### 9. `logs` — journalctl tail
+
+**Status:** Implemented — `lib/sysadmin_svc.py`.
+
+### 10. `upgrade` — parallel apt upgrade
+
+**Status:** Implemented — `lib/sysadmin_upgrade.py`.
+
+### 11. `reachable` — SSH reachability probe
+
+**Status:** Implemented — `lib/sysadmin_reachable.py`.
 
 ---
-
-## Implementation Order
-
-1. `mount` / `umount` — most-requested, tangible daily use
-2. `health` — immediate diagnostic value
-3. `ssh` — tiny, very useful
-4. `push` / `pull` — rsync wrappers
-5. `key push` — small, useful for onboarding
-6. `df` — multi-host variant of health disk section
-7. `fan` — most complex; requires host-group storage
 
 ## File Layout
 
 ```
 lib/
-  sysadmin_mount.py      # mount/umount logic
-  sysadmin_health.py     # health check logic
-  sysadmin_transfer.py   # push/pull rsync wrappers
-  sysadmin_cli.py        # shared argument parsing + dispatch for all sysadmin subcommands
+  sysadmin_cli.py        # argument parsing + dispatch for all sysadmin subcommands
+  sysadmin_fan.py        # df, fan (parallel SSH)
+  sysadmin_health.py     # health check
+  sysadmin_keys.py       # key push
+  sysadmin_mount.py      # mount/umount (sshfs)
+  sysadmin_reachable.py  # reachable (SSH probe)
+  sysadmin_ssh.py        # ssh shortcut
+  sysadmin_svc.py        # svc, logs (systemctl/journalctl)
+  sysadmin_transfer.py   # push/pull (rsync)
+  sysadmin_upgrade.py    # upgrade (apt)
 ```
 
-All new modules follow the existing pattern: a `add_*_subparser()` function and a
-`run_*_command()` function, wired into `infra_tools.py`'s main dispatch block.
+User-facing documentation lives in `docs/SYSADMIN.md`.

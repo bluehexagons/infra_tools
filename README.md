@@ -22,6 +22,7 @@ python3 infra_tools.py credentials set guest s3cret
 - **Workstations**: Desktop environments (XFCE, i3, LXQt), RDP, browsers, audio
 - **Storage**: Samba shares, rsync sync, par2 integrity verification
 - **Security**: Firewall, SSH hardening, fail2ban, hardened OS auto-updates, weekly cleanup maintenance, journald size limits
+- **Sysadmin shortcuts**: mount, health, ssh, push/pull, df, fan, svc, logs, upgrade, reachable — see [docs/SYSADMIN.md](./docs/SYSADMIN.md)
 
 Background maintenance includes a `cleanup-maintenance` systemd timer that reclaims temporary files,
 stale infra_tools setup/deploy artifacts, unused APT packages, old package-manager caches, and oversized journals.
@@ -39,12 +40,12 @@ package releases are avoided where the package manager supports a freshness cuto
 
 | Script | Description |
 |--------|-------------|
-| `infra_tools.py` | **Unified entry point** - Use `setup`, `patch`, `list`, `info`, `cmd`, `rm`, `deploy`, `recall`, `reconstruct`, `completions`, `python-tools`, `bootstrap`, `credentials`, `proxmox`, or `shell` |
+| `infra_tools.py` | **Unified entry point** - Use `setup`, `patch`, `list`, `info`, `cmd`, `rm`, `deploy`, `recall`, `reconstruct`, `completions`, `python-tools`, `bootstrap`, `credentials`, `proxmox`, `shell`, or any [sysadmin shortcut](./docs/SYSADMIN.md) |
 
 Use `infra_tools.py` for all system setup, saved-configuration management, patching, recall, reconstruction,
 local Python tooling, and shell-completion setup.
 
-See [Command-Line Reference](./docs/COMMAND_LINE.md) for all flags.
+See [Command-Line Reference](./docs/COMMAND_LINE.md) for setup/patch flags and [Sysadmin Commands](./docs/SYSADMIN.md) for day-to-day shortcuts.
 
 ## Common Examples
 
@@ -365,6 +366,46 @@ Use `--credential USERNAME PASSWORD` to define share passwords once, then refere
 in `--share` or `--mount-smb`. The `USERS` field accepts a comma-separated list of `username` or `username:password`
 entries, and each bare username must have a matching saved credential. Use `infra_tools.py credentials set USERNAME
 PASSWORD` to manage the shared workspace store directly.
+
+### Sysadmin Shortcuts
+
+Day-to-day commands that work against any saved (or ad-hoc) host. Credentials are
+inherited from the saved config automatically. See [docs/SYSADMIN.md](./docs/SYSADMIN.md)
+for the full reference.
+
+```bash
+# Mount a remote directory (sshfs)
+infra_tools mount myserver:/var/log /mnt/logs
+infra_tools umount /mnt/logs
+
+# Health dump: uptime, memory, disk, failed units, pending upgrades
+infra_tools health myserver
+
+# Open an SSH session with saved credentials
+infra_tools ssh myserver
+infra_tools ssh myserver -- journalctl -f
+
+# File transfer (rsync)
+infra_tools push ./dist myserver:/var/www/app
+infra_tools pull myserver:/var/log ./logs
+
+# Disk usage across multiple hosts (sorted by %, >85% flagged)
+infra_tools df web1 web2 db1
+
+# Run a command on multiple hosts in parallel
+infra_tools fan web1 web2 db1 -- uptime
+
+# Manage systemd services
+infra_tools svc myserver nginx
+infra_tools svc myserver nginx restart
+infra_tools logs myserver nginx -f
+
+# Upgrade packages (parallel, reports reboot-required)
+infra_tools upgrade web1 web2
+
+# Check which saved hosts are reachable
+infra_tools reachable
+```
 
 ### Game Lobby Server (Antistatic)
 ```bash

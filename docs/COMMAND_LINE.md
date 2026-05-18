@@ -2,6 +2,10 @@
 
 Complete reference for the unified infra_tools CLI.
 
+> **Sysadmin shortcuts** (`mount`, `health`, `ssh`, `push`, `pull`, `df`, `fan`,
+> `svc`, `logs`, `upgrade`, `reachable`, `key`) have their own page:
+> [SYSADMIN.md](./SYSADMIN.md).
+
 ## Unified Entry Point
 
 The `infra_tools.py` script provides a unified interface for all operations:
@@ -41,6 +45,21 @@ infra_tools.py self-setup [options]
 
 # Drop into the interactive infra_tools REPL
 infra_tools.py shell
+
+# Sysadmin shortcuts (see SYSADMIN.md for full reference)
+infra_tools.py mount <host>:<path> <local>
+infra_tools.py umount <local|host>
+infra_tools.py health <host>
+infra_tools.py ssh <host> [-- cmd]
+infra_tools.py push <local> <host>:<path>
+infra_tools.py pull <host>:<path> [local]
+infra_tools.py key push <host>
+infra_tools.py df <host> [<host2> ...]
+infra_tools.py fan <host> [<host2> ...] -- <cmd>
+infra_tools.py svc <host> <unit> [action]
+infra_tools.py logs <host> <unit> [-f] [-n N]
+infra_tools.py upgrade <host> [<host2> ...] [--check]
+infra_tools.py reachable [hosts|--pattern GLOB]
 ```
 
 ### System Types for `setup` command
