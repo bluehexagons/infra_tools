@@ -101,16 +101,17 @@ def run_fan(
 # df (multi-host disk table)
 # ---------------------------------------------------------------------------
 
-_DF_COMMAND = "df -h --output=pcent,size,used,avail,target 2>/dev/null || df -h"
+_DF_COMMAND = "df -h --output=pcent,size,used,avail,target"
 _WARN_PCT = 85
 
 
 def _parse_df_lines(raw: str, host: str) -> list[tuple[str, str, str, str, str, str]]:
-    """Parse df output into (host, pct, size, used, avail, target) rows."""
+    """Parse df --output=pcent,size,used,avail,target into (host, pct, size, used, avail, target) rows."""
     rows = []
     for line in raw.splitlines():
         parts = line.split()
-        if not parts or parts[0] in ("Use%", "Capacity"):
+        # Skip header row and empty lines
+        if not parts or parts[0] in ("Use%", "Capacity", "IUse%"):
             continue
         if len(parts) >= 5:
             pct_str = parts[0].rstrip("%")
@@ -143,7 +144,8 @@ def run_df(
     all_rows: list[tuple[str, str, str, str, str, str, int]] = []
     for host, rc, stdout, stderr in raw_results:
         if rc != 0:
-            print(f"Warning: could not reach {host}", file=sys.stderr)
+            msg = stderr.strip() or "command failed"
+            print(f"Warning: {host}: {msg}", file=sys.stderr)
             continue
         for row in _parse_df_lines(stdout, host):
             pct = int(row[1].rstrip("%"))

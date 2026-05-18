@@ -51,7 +51,7 @@ def _build_rsync_cmd(
         raise RuntimeError("rsync not found")
 
     transport = build_rsync_ssh_transport(ssh_key=ssh_key, port=port, batch_mode=True)
-    cmd = ["rsync", "-avzP", "-e", transport, src, dst]
+    cmd = ["rsync", "-avP", "-e", transport, src, dst]
     if delete:
         cmd.append("--delete")
     if dry_run:

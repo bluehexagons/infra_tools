@@ -12,18 +12,16 @@ from lib.ssh_utils import build_ssh_command
 
 # Remote shell script — runs as a single SSH invocation
 _HEALTH_SCRIPT = r"""
-set -e
-
 echo "=== UPTIME ==="
-uptime
+uptime 2>/dev/null || echo "(unavailable)"
 
 echo ""
 echo "=== MEMORY ==="
-free -h
+free -h 2>/dev/null || echo "(unavailable)"
 
 echo ""
 echo "=== DISK ==="
-df -h --output=source,size,used,avail,pcent,target 2>/dev/null || df -h
+df -h --output=source,size,used,avail,pcent,target 2>/dev/null || df -h 2>/dev/null || echo "(unavailable)"
 
 echo ""
 echo "=== FAILED UNITS ==="

@@ -50,7 +50,6 @@ def _build_sshfs_options(
     if port:
         opts.append(f"port={port}")
     opts.append("reconnect")
-    opts.append("ServerAliveInterval=30")
     if read_only:
         opts.append("ro")
 

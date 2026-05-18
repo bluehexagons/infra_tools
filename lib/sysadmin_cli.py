@@ -231,6 +231,112 @@ def _add_fan_parser(sub: argparse._SubParsersAction) -> None:
     p.set_defaults(_sysadmin_cmd="fan")
 
 
+def _add_svc_parser(sub: argparse._SubParsersAction) -> None:
+    from lib.sysadmin_svc import VALID_ACTIONS
+    p = sub.add_parser(
+        "svc",
+        help="Manage a systemd service on a remote host",
+        description=(
+            "Run systemctl actions on a remote service. Non-status actions use sudo "
+            "and show a status readout afterward."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  infra_tools.py svc myserver nginx\n"
+            "  infra_tools.py svc myserver nginx restart\n"
+            "  infra_tools.py svc myserver myapp.service stop"
+        ),
+    )
+    p.add_argument("host", help="Remote host (IP or hostname)")
+    p.add_argument("unit", help="Systemd unit name (e.g. nginx, myapp.service)")
+    p.add_argument(
+        "action",
+        nargs="?",
+        default="status",
+        choices=VALID_ACTIONS,
+        help="Action to perform (default: status)",
+    )
+    p.add_argument("--username", "-u", help="SSH username (overrides saved config)")
+    p.add_argument("--key", "-i", dest="ssh_key", help="SSH identity file")
+    p.set_defaults(_sysadmin_cmd="svc")
+
+
+def _add_logs_parser(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser(
+        "logs",
+        help="Show or follow journalctl logs for a remote service",
+        description="Print recent journal entries for a systemd unit on a remote host.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  infra_tools.py logs myserver nginx\n"
+            "  infra_tools.py logs myserver myapp -f\n"
+            "  infra_tools.py logs myserver nginx -n 100"
+        ),
+    )
+    p.add_argument("host", help="Remote host (IP or hostname)")
+    p.add_argument("unit", help="Systemd unit name")
+    p.add_argument("-n", "--lines", type=int, default=50, help="Number of lines to show (default: 50)")
+    p.add_argument("-f", "--follow", action="store_true", help="Follow log output")
+    p.add_argument("--username", "-u", help="SSH username (overrides saved config)")
+    p.add_argument("--key", "-i", dest="ssh_key", help="SSH identity file")
+    p.set_defaults(_sysadmin_cmd="logs")
+
+
+def _add_upgrade_parser(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser(
+        "upgrade",
+        help="Run apt upgrade on one or more remote hosts",
+        description=(
+            "Run apt-get update && apt-get upgrade on each host in parallel, "
+            "then report which hosts need a reboot."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  infra_tools.py upgrade myserver\n"
+            "  infra_tools.py upgrade web1 web2 db1\n"
+            "  infra_tools.py upgrade web1 --check"
+        ),
+    )
+    p.add_argument("hosts", nargs="+", help="Remote hosts (IP or hostname)")
+    p.add_argument("--username", "-u", help="SSH username (overrides saved config)")
+    p.add_argument("--key", "-i", dest="ssh_key", help="SSH identity file")
+    p.add_argument("--check", action="store_true", help="Only report pending upgrade counts, do not upgrade")
+    p.set_defaults(_sysadmin_cmd="upgrade")
+
+
+def _add_reachable_parser(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser(
+        "reachable",
+        help="Check which saved hosts are reachable via SSH",
+        description=(
+            "Probe saved hosts in parallel and print a reachability table with "
+            "latency. With no arguments checks all saved hosts."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  infra_tools.py reachable\n"
+            "  infra_tools.py reachable '*.example.com'\n"
+            "  infra_tools.py reachable web1 web2 db1"
+        ),
+    )
+    p.add_argument(
+        "hosts",
+        nargs="*",
+        help="Hosts to probe (default: all saved hosts)",
+    )
+    p.add_argument(
+        "--pattern",
+        help="Glob pattern to filter saved hosts (e.g. '*.example.com')",
+    )
+    p.add_argument("--username", "-u", help="SSH username (overrides saved config)")
+    p.add_argument("--key", "-i", dest="ssh_key", help="SSH identity file")
+    p.set_defaults(_sysadmin_cmd="reachable")
+
+
 def add_sysadmin_subparsers(subparsers: argparse._SubParsersAction) -> None:
     """Register all sysadmin convenience subcommands."""
     _add_mount_parser(subparsers)
@@ -242,6 +348,10 @@ def add_sysadmin_subparsers(subparsers: argparse._SubParsersAction) -> None:
     _add_key_parser(subparsers)
     _add_df_parser(subparsers)
     _add_fan_parser(subparsers)
+    _add_svc_parser(subparsers)
+    _add_logs_parser(subparsers)
+    _add_upgrade_parser(subparsers)
+    _add_reachable_parser(subparsers)
 
 
 def run_sysadmin_command(args: argparse.Namespace) -> int:
@@ -342,6 +452,46 @@ def run_sysadmin_command(args: argparse.Namespace) -> int:
         return run_fan(
             args.hosts,
             remote_command,
+            username=getattr(args, "username", None),
+            ssh_key=getattr(args, "ssh_key", None),
+        )
+
+    if cmd == "svc":
+        from lib.sysadmin_svc import run_svc
+        return run_svc(
+            args.host,
+            args.unit,
+            action=args.action,
+            username=getattr(args, "username", None),
+            ssh_key=getattr(args, "ssh_key", None),
+        )
+
+    if cmd == "logs":
+        from lib.sysadmin_svc import run_logs
+        return run_logs(
+            args.host,
+            args.unit,
+            lines=args.lines,
+            follow=args.follow,
+            username=getattr(args, "username", None),
+            ssh_key=getattr(args, "ssh_key", None),
+        )
+
+    if cmd == "upgrade":
+        from lib.sysadmin_upgrade import run_upgrade
+        return run_upgrade(
+            args.hosts,
+            username=getattr(args, "username", None),
+            ssh_key=getattr(args, "ssh_key", None),
+            check_only=args.check,
+        )
+
+    if cmd == "reachable":
+        from lib.sysadmin_reachable import run_reachable
+        explicit_hosts = getattr(args, "hosts", []) or None
+        return run_reachable(
+            pattern=getattr(args, "pattern", None),
+            hosts=explicit_hosts,
             username=getattr(args, "username", None),
             ssh_key=getattr(args, "ssh_key", None),
         )

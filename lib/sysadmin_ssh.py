@@ -7,7 +7,7 @@ import sys
 from typing import Optional
 
 from lib.cache import load_setup_command
-from lib.ssh_utils import build_ssh_command, get_workspace_known_hosts_path
+from lib.ssh_utils import build_ssh_command
 
 
 def run_ssh(

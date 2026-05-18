@@ -113,6 +113,10 @@ Sysadmin Shortcuts:
     key push <host>             Install local public key on a remote host
     df <host> [<host2> ...]     Multi-host disk usage table (>85% highlighted)
     fan <host> [..] -- <cmd>    Run a command on multiple hosts in parallel
+    svc <host> <unit> [action]  Manage a systemd service (status/restart/start/stop/…)
+    logs <host> <unit>          Show or follow journalctl output for a service
+    upgrade <host> [<host2>…]   Run apt upgrade in parallel; report reboot-required
+    reachable [hosts|pattern]   Check which saved hosts are reachable via SSH
 
 System Types for setup:
 {format_system_type_help()}
@@ -950,7 +954,7 @@ def main() -> int:
         return run_network_command(args)
     elif args.command == "proxmox":
         return run_proxmox_command(args)
-    elif args.command in {"mount", "umount", "health", "ssh", "push", "pull", "key", "df", "fan"}:
+    elif args.command in {"mount", "umount", "health", "ssh", "push", "pull", "key", "df", "fan", "svc", "logs", "upgrade", "reachable"}:
         return run_sysadmin_command(args)
     elif args.command == "shell":
         return run_interactive_shell(getattr(args, "workspace", None))
