@@ -111,6 +111,8 @@ Sysadmin Shortcuts:
     push <local> <host:path>    Rsync a local path to a remote host
     pull <host:path> [local]    Rsync a remote path to local
     key push <host>             Install local public key on a remote host
+    df <host> [<host2> ...]     Multi-host disk usage table (>85% highlighted)
+    fan <host> [..] -- <cmd>    Run a command on multiple hosts in parallel
 
 System Types for setup:
 {format_system_type_help()}
@@ -948,7 +950,7 @@ def main() -> int:
         return run_network_command(args)
     elif args.command == "proxmox":
         return run_proxmox_command(args)
-    elif args.command in {"mount", "umount", "health", "ssh", "push", "pull", "key"}:
+    elif args.command in {"mount", "umount", "health", "ssh", "push", "pull", "key", "df", "fan"}:
         return run_sysadmin_command(args)
     elif args.command == "shell":
         return run_interactive_shell(getattr(args, "workspace", None))

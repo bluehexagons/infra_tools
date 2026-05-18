@@ -184,6 +184,53 @@ def _add_key_parser(sub: argparse._SubParsersAction) -> None:
 # Public registration
 # ---------------------------------------------------------------------------
 
+def _add_df_parser(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser(
+        "df",
+        help="Show disk usage across one or more remote hosts",
+        description=(
+            "Run df on one or more remote hosts in parallel and print a combined "
+            "table sorted by usage, with entries over 85% highlighted."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  infra_tools.py df myserver\n"
+            "  infra_tools.py df web1 web2 db1 --username admin"
+        ),
+    )
+    p.add_argument("hosts", nargs="+", help="Remote hosts (IP or hostname)")
+    p.add_argument("--username", "-u", help="SSH username (overrides saved config)")
+    p.add_argument("--key", "-i", dest="ssh_key", help="SSH identity file")
+    p.set_defaults(_sysadmin_cmd="df")
+
+
+def _add_fan_parser(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser(
+        "fan",
+        help="Run a command on multiple hosts in parallel",
+        description=(
+            "SSH into multiple hosts concurrently and run a shell command, printing "
+            "each host's output with a header and a pass/fail summary at the end."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  infra_tools.py fan web1 web2 -- uptime\n"
+            "  infra_tools.py fan web1 web2 db1 -- systemctl restart myapp"
+        ),
+    )
+    p.add_argument("hosts", nargs="+", help="Remote hosts (IP or hostname)")
+    p.add_argument("--username", "-u", help="SSH username (overrides saved config)")
+    p.add_argument("--key", "-i", dest="ssh_key", help="SSH identity file")
+    p.add_argument(
+        "remote_command",
+        nargs=argparse.REMAINDER,
+        help="Command to run (after --)",
+    )
+    p.set_defaults(_sysadmin_cmd="fan")
+
+
 def add_sysadmin_subparsers(subparsers: argparse._SubParsersAction) -> None:
     """Register all sysadmin convenience subcommands."""
     _add_mount_parser(subparsers)
@@ -193,6 +240,8 @@ def add_sysadmin_subparsers(subparsers: argparse._SubParsersAction) -> None:
     _add_push_parser(subparsers)
     _add_pull_parser(subparsers)
     _add_key_parser(subparsers)
+    _add_df_parser(subparsers)
+    _add_fan_parser(subparsers)
 
 
 def run_sysadmin_command(args: argparse.Namespace) -> int:
@@ -272,6 +321,30 @@ def run_sysadmin_command(args: argparse.Namespace) -> int:
         import sys
         print("Error: key subcommand required (push)", file=sys.stderr)
         return 1
+
+    if cmd == "df":
+        from lib.sysadmin_fan import run_df
+        return run_df(
+            args.hosts,
+            username=getattr(args, "username", None),
+            ssh_key=getattr(args, "ssh_key", None),
+        )
+
+    if cmd == "fan":
+        from lib.sysadmin_fan import run_fan
+        remote_command = getattr(args, "remote_command", [])
+        if remote_command and remote_command[0] == "--":
+            remote_command = remote_command[1:]
+        if not remote_command:
+            import sys
+            print("Error: a remote command is required after --", file=sys.stderr)
+            return 1
+        return run_fan(
+            args.hosts,
+            remote_command,
+            username=getattr(args, "username", None),
+            ssh_key=getattr(args, "ssh_key", None),
+        )
 
     import sys
     print(f"Error: unknown sysadmin command {cmd!r}", file=sys.stderr)
