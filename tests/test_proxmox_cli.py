@@ -263,6 +263,116 @@ class TestProxmoxCliContainerOps(_CliFixture):
         self.assertIn("No registered Proxmox host", out)
 
 
+class TestProxmoxPlanRebalanceApply(_CliFixture):
+    """End-to-end tests for `proxmox plan rebalance --apply` wiring.
+
+    Patches the SSH-heavy collaborators so the handler runs in-process.
+    """
+
+    _GIB = 1024 ** 3
+
+    def setUp(self) -> None:
+        super().setUp()
+        add_proxmox_host(
+            ProxmoxHost(name="hot", address="10.0.0.10"), self.workspace
+        )
+        add_proxmox_host(
+            ProxmoxHost(name="cool", address="10.0.0.11"), self.workspace
+        )
+
+    def _snapshots(self) -> list:
+        from lib.proxmox_placement import NodeSnapshot
+        from lib.proxmox_summary import NodeSummary
+        hot = NodeSnapshot(
+            host=ProxmoxHost(name="hot", address="10.0.0.10"),
+            summary=NodeSummary(
+                node_name="hot", cpu_usage=0.95, cpu_count=8,
+                memory_used=14 * self._GIB, memory_total=16 * self._GIB,
+                swap_used=0, swap_total=0,
+                disk_used=50 * self._GIB, disk_total=500 * self._GIB,
+                uptime_seconds=3600, guests_running=3,
+            ),
+        )
+        cool = NodeSnapshot(
+            host=ProxmoxHost(name="cool", address="10.0.0.11"),
+            summary=NodeSummary(
+                node_name="cool", cpu_usage=0.10, cpu_count=8,
+                memory_used=2 * self._GIB, memory_total=16 * self._GIB,
+                swap_used=0, swap_total=0,
+                disk_used=50 * self._GIB, disk_total=500 * self._GIB,
+                uptime_seconds=3600, guests_running=1,
+            ),
+        )
+        return [hot, cool]
+
+    def _guests(self) -> dict[str, list]:
+        from lib.proxmox_manage import ContainerInfo
+        return {
+            "hot": [
+                ContainerInfo(vmid=101, status="running", name="web", guest_type="vm"),
+            ],
+            "cool": [
+                ContainerInfo(vmid=200, status="running", name="db", guest_type="lxc"),
+            ],
+        }
+
+    def _patches(self, list_calls: dict[str, list]):
+        return [
+            patch(
+                "lib.proxmox_cli.collect_snapshots",
+                return_value=(self._snapshots(), []),
+            ),
+            patch(
+                "lib.proxmox_cli.list_containers",
+                side_effect=lambda host: list_calls.get(host.name, []),
+            ),
+        ]
+
+    def test_apply_migrates_to_top_candidate_when_to_omitted(self) -> None:
+        list_calls = self._guests()
+        with self._patches(list_calls)[0], self._patches(list_calls)[1], \
+             patch("lib.proxmox_cli.migrate_guest") as mock_migrate:
+            rc, out = self._run(
+                "plan", "rebalance", "--apply", "101", "--yes", "--dry-run"
+            )
+        self.assertEqual(rc, 0)
+        self.assertIn("Would migrate VMID 101 from hot to cool", out)
+        mock_migrate.assert_called_once()
+        kwargs = mock_migrate.call_args.kwargs
+        self.assertTrue(kwargs["dry_run"])
+        self.assertFalse(kwargs["online"])
+
+    def test_apply_rejects_vmid_not_on_hot_node(self) -> None:
+        list_calls = self._guests()
+        with self._patches(list_calls)[0], self._patches(list_calls)[1], \
+             patch("lib.proxmox_cli.migrate_guest") as mock_migrate:
+            rc, out = self._run(
+                "plan", "rebalance", "--apply", "200", "--yes"
+            )
+        self.assertEqual(rc, 1)
+        self.assertIn("not running on any hot node", out)
+        mock_migrate.assert_not_called()
+
+    def test_apply_rejects_when_to_is_source(self) -> None:
+        list_calls = self._guests()
+        with self._patches(list_calls)[0], self._patches(list_calls)[1], \
+             patch("lib.proxmox_cli.migrate_guest") as mock_migrate:
+            rc, out = self._run(
+                "plan", "rebalance", "--apply", "101", "--to", "hot", "--yes"
+            )
+        self.assertEqual(rc, 1)
+        self.assertIn("source host", out)
+        mock_migrate.assert_not_called()
+
+    def test_rebalance_without_apply_prints_suggestions(self) -> None:
+        list_calls = self._guests()
+        with self._patches(list_calls)[0], self._patches(list_calls)[1]:
+            rc, out = self._run("plan", "rebalance")
+        self.assertEqual(rc, 0)
+        self.assertIn("Hot: hot", out)
+        self.assertIn("cool", out)
+
+
 class TestProxmoxCliNotifications(_CliFixture):
     def setUp(self) -> None:
         super().setUp()

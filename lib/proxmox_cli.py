@@ -34,6 +34,7 @@ from lib.proxmox_hosts import (
     sync_proxmox_host,
 )
 from lib.proxmox_manage import (
+    ContainerInfo,
     DEFAULT_NOTIFICATION_ENDPOINT,
     DEFAULT_NOTIFICATION_MATCHER,
     DEFAULT_NOTIFICATION_SEVERITIES,
@@ -359,6 +360,40 @@ def add_proxmox_subparser(subparsers: argparse._SubParsersAction) -> argparse.Ar
         type=int,
         default=3,
         help="Maximum destinations to print per hot node (default: 3)",
+    )
+    plan_rebalance_p.add_argument(
+        "--apply",
+        type=int,
+        metavar="VMID",
+        help="Migrate this guest away from its hot node (requires the guest "
+             "to live on a node flagged as hot)",
+    )
+    plan_rebalance_p.add_argument(
+        "--to",
+        help="Destination host name or address for --apply "
+             "(default: top-ranked candidate)",
+    )
+    plan_rebalance_p.add_argument(
+        "--online",
+        action="store_true",
+        help="Keep VMs running during --apply migration (requires shared or "
+             "migrated storage)",
+    )
+    plan_rebalance_p.add_argument(
+        "--with-local-disks",
+        action="store_true",
+        help="Migrate local disks during --apply",
+    )
+    plan_rebalance_p.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        help="Skip the confirmation prompt for --apply",
+    )
+    plan_rebalance_p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="With --apply, print the migrate command without executing it",
     )
     plan_rebalance_p.set_defaults(_handler=_cmd_plan_rebalance)
 
@@ -968,7 +1003,7 @@ def _cmd_plan_rebalance(args: argparse.Namespace, workspace: Optional[str]) -> i
         print("No Proxmox hosts registered. Use 'proxmox add' first.")
         return 1
     snapshots, warnings = collect_snapshots(hosts)
-    guests_by_host: dict[str, list[str]] = {}
+    guests_by_host: dict[str, list[ContainerInfo]] = {}
     for snap in snapshots:
         try:
             guests = list_containers(snap.host)
@@ -976,16 +1011,101 @@ def _cmd_plan_rebalance(args: argparse.Namespace, workspace: Optional[str]) -> i
             warnings.append(f"{snap.host.name}: list_containers failed: {exc}")
             continue
         guests_by_host[snap.host.name] = [
+            g for g in guests if g.status.lower() == "running"
+        ]
+
+    guest_descriptions = {
+        host_name: [
             f"{g.vmid:>4} {g.guest_type:<3} {g.status:<8} {g.name}"
             for g in guests
-            if g.status.lower() == "running"
         ]
-    suggestions = plan_rebalance(snapshots, guests_by_host)
+        for host_name, guests in guests_by_host.items()
+    }
+    suggestions = plan_rebalance(snapshots, guest_descriptions)
     print(format_rebalance(suggestions, limit=args.limit))
     if warnings:
         print("\nWarnings:")
         for w in warnings:
             print(f"  - {w}")
+
+    if args.apply is None:
+        return 0
+
+    # --apply: locate the requested guest on a hot node, pick a destination,
+    # confirm, then call migrate_guest. Refuse if the source node is not hot
+    # — rebalance is the wrong tool for ad-hoc migrations (use `proxmox
+    # migrate` for that).
+    hot_hosts = {sug.hot_host: sug for sug in suggestions}
+    if not hot_hosts:
+        print("\n--apply: no nodes are over the rebalance thresholds; nothing to do.")
+        return 1
+
+    source_host: Optional[ProxmoxHost] = None
+    source_guest: Optional[ContainerInfo] = None
+    for host_name, guests in guests_by_host.items():
+        if host_name not in hot_hosts:
+            continue
+        for g in guests:
+            if g.vmid == args.apply:
+                source_guest = g
+                source_host = next(
+                    s.host for s in snapshots if s.host.name == host_name
+                )
+                break
+        if source_guest:
+            break
+
+    if not source_guest or not source_host:
+        print(
+            f"\n--apply: VMID {args.apply} is not running on any hot node. "
+            f"Hot nodes: {', '.join(sorted(hot_hosts)) or '(none)'}."
+        )
+        return 1
+
+    sug = hot_hosts[source_host.name]
+    if args.to:
+        target_host = _resolve_host(args.to, workspace)
+        if target_host.name == source_host.name:
+            print(f"\n--apply: target {args.to} is the source host.")
+            return 1
+    else:
+        fits = [c for c in sug.destinations if c.fits]
+        if not fits:
+            print(
+                f"\n--apply: no destination on the cluster has room for "
+                f"VMID {args.apply}. Pass --to to override."
+            )
+            return 1
+        target_host = _resolve_host(fits[0].host_name, workspace)
+
+    print(
+        f"\n--apply: migrate VMID {args.apply} ({source_guest.name}, "
+        f"{source_guest.guest_type}) from {source_host.name} to {target_host.name}"
+        + (" [online]" if args.online else "")
+        + (" [with-local-disks]" if args.with_local_disks else "")
+        + (" [dry-run]" if args.dry_run else "")
+    )
+    if not args.yes and not args.dry_run:
+        try:
+            response = input("Proceed? [y/N] ").strip().lower()
+        except EOFError:
+            response = ""
+        if response not in {"y", "yes"}:
+            print("Aborted.")
+            return 1
+
+    migrate_guest(
+        source_host,
+        args.apply,
+        target_host,
+        online=args.online,
+        with_local_disks=args.with_local_disks,
+        dry_run=args.dry_run,
+    )
+    prefix = "Would migrate" if args.dry_run else "Migrated"
+    print(
+        f"{prefix} VMID {args.apply} from {source_host.name} to {target_host.name}."
+    )
     return 0
 
 
