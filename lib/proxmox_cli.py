@@ -16,6 +16,14 @@ from lib.proxmox_backup import BackupInfo, ProxmoxBackupError, create_backup, li
 from lib.proxmox_guest import probe_proxmox_cluster, probe_proxmox_host
 from lib.proxmox_migrate import ProxmoxMigrateError, migrate_guest
 from lib.proxmox_storage import OrphanedVolume, ProxmoxStorageError, delete_volume, list_orphaned_volumes
+from lib.proxmox_placement import (
+    PlacementRequest,
+    collect_snapshots,
+    format_plan,
+    format_rebalance,
+    plan_placement,
+    plan_rebalance,
+)
 from lib.proxmox_summary import NodeSummary, ProxmoxSummaryError, format_node_summary, get_node_summary
 from lib.proxmox_hosts import (
     ProxmoxHost,
@@ -280,6 +288,79 @@ def add_proxmox_subparser(subparsers: argparse._SubParsersAction) -> argparse.Ar
         help="Registered host name(s) or address(es)",
     )
     top.set_defaults(_handler=_cmd_top)
+
+    plan = sub.add_parser(
+        "plan",
+        help="Read-only placement and rebalance advisor",
+        description=(
+            "Suggest where to put a new guest, or which guests on overloaded "
+            "nodes could be moved. Read-only: prints rankings, never migrates."
+        ),
+    )
+    plan_sub = plan.add_subparsers(dest="plan_command", help="Plan subcommand")
+    plan.set_defaults(_handler=_cmd_plan_missing)
+
+    plan_place = plan_sub.add_parser(
+        "place",
+        help="Rank registered hosts for a prospective guest",
+    )
+    plan_place.add_argument(
+        "--cores", type=int, default=1, help="Cores the guest will use (default: 1)"
+    )
+    plan_place.add_argument(
+        "--memory",
+        type=int,
+        default=512,
+        dest="memory_mib",
+        help="Memory in MiB (default: 512)",
+    )
+    plan_place.add_argument(
+        "--disk",
+        type=int,
+        default=0,
+        dest="disk_gib",
+        help="Root disk in GiB (default: 0, no disk constraint)",
+    )
+    plan_place.add_argument(
+        "--prefer-tag",
+        action="append",
+        default=[],
+        dest="prefer_tags",
+        help="Boost hosts with this tag (repeatable)",
+    )
+    plan_place.add_argument(
+        "--avoid-tag",
+        action="append",
+        default=[],
+        dest="avoid_tags",
+        help="Disqualify hosts with this tag (repeatable)",
+    )
+    plan_place.add_argument(
+        "--exclude",
+        action="append",
+        default=[],
+        dest="exclude_nodes",
+        help="Disqualify a host or node name (repeatable)",
+    )
+    plan_place.add_argument(
+        "--limit",
+        type=int,
+        default=5,
+        help="Maximum candidates to print (default: 5)",
+    )
+    plan_place.set_defaults(_handler=_cmd_plan_place)
+
+    plan_rebalance_p = plan_sub.add_parser(
+        "rebalance",
+        help="Flag overloaded nodes and suggest destinations for their guests",
+    )
+    plan_rebalance_p.add_argument(
+        "--limit",
+        type=int,
+        default=3,
+        help="Maximum destinations to print per hot node (default: 3)",
+    )
+    plan_rebalance_p.set_defaults(_handler=_cmd_plan_rebalance)
 
     backups_list = sub.add_parser(
         "backups",
@@ -854,6 +935,58 @@ def _cmd_top(args: argparse.Namespace, workspace: Optional[str]) -> int:
         if len(args.hosts) > 1:
             print()
     return 1 if any_error else 0
+
+
+def _cmd_plan_missing(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    print("Usage: infra_tools.py proxmox plan {place,rebalance} [...]")
+    return 1
+
+
+def _cmd_plan_place(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    hosts = load_proxmox_hosts(workspace)
+    if not hosts:
+        print("No Proxmox hosts registered. Use 'proxmox add' first.")
+        return 1
+    request = PlacementRequest(
+        cores=args.cores,
+        memory_mib=args.memory_mib,
+        disk_gib=args.disk_gib,
+        prefer_tags=list(args.prefer_tags or []),
+        avoid_tags=list(args.avoid_tags or []),
+        exclude_nodes=list(args.exclude_nodes or []),
+    )
+    snapshots, warnings = collect_snapshots(hosts)
+    plan = plan_placement(snapshots, request)
+    plan.warnings.extend(warnings)
+    print(format_plan(plan, limit=args.limit))
+    return 0 if any(c.fits for c in plan.candidates) else 1
+
+
+def _cmd_plan_rebalance(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    hosts = load_proxmox_hosts(workspace)
+    if not hosts:
+        print("No Proxmox hosts registered. Use 'proxmox add' first.")
+        return 1
+    snapshots, warnings = collect_snapshots(hosts)
+    guests_by_host: dict[str, list[str]] = {}
+    for snap in snapshots:
+        try:
+            guests = list_containers(snap.host)
+        except ProxmoxManageError as exc:
+            warnings.append(f"{snap.host.name}: list_containers failed: {exc}")
+            continue
+        guests_by_host[snap.host.name] = [
+            f"{g.vmid:>4} {g.guest_type:<3} {g.status:<8} {g.name}"
+            for g in guests
+            if g.status.lower() == "running"
+        ]
+    suggestions = plan_rebalance(snapshots, guests_by_host)
+    print(format_rebalance(suggestions, limit=args.limit))
+    if warnings:
+        print("\nWarnings:")
+        for w in warnings:
+            print(f"  - {w}")
+    return 0
 
 
 def _cmd_backups_list(args: argparse.Namespace, workspace: Optional[str]) -> int:
