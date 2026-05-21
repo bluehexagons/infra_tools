@@ -29,8 +29,8 @@ from game.antistatic_steps import (
     _maybe_configure_antistatic_firewall,
     _download_antistatic_binary,
     _download_antistatic_db_binary,
-    _fetch_preferred_antistatic_db_release,
-    _fetch_preferred_antistatic_release,
+    _fetch_latest_antistatic_db_release,
+    _fetch_latest_antistatic_release,
     _maybe_configure_direct_port_firewall,
     _maybe_configure_nginx_proxy,
     _remove_empty_domain_nginx_proxy,
@@ -370,7 +370,7 @@ class TestAntistaticFirewallHandling(unittest.TestCase):
 
 
 class TestAntistaticReleaseDownloads(unittest.TestCase):
-    def test_fetch_preferred_release_prefers_aged_release(self):
+    def test_fetch_latest_release_prefers_newest_release(self):
         release_payload = [
             {
                 "tag_name": "v1.2.4",
@@ -402,15 +402,15 @@ class TestAntistaticReleaseDownloads(unittest.TestCase):
             "lib.release_management.run",
             return_value=MagicMock(returncode=0, stdout=json.dumps(release_payload)),
         ), patch.dict(os.environ, {"INFRA_TOOLS_DEPENDENCY_MIN_AGE_DAYS": "7"}):
-            tag_name, download_url = _fetch_preferred_antistatic_release("amd64")
+            tag_name, download_url = _fetch_latest_antistatic_release("amd64")
 
-        self.assertEqual(tag_name, "v1.2.3")
+        self.assertEqual(tag_name, "v1.2.4")
         self.assertEqual(
             download_url,
-            "https://example.invalid/antistatic-server-linux-amd64",
+            "https://example.invalid/antistatic-server-linux-amd64-fresh",
         )
 
-    def test_fetch_preferred_release_requires_matching_asset(self):
+    def test_fetch_latest_release_requires_matching_asset(self):
         release_payload = [
             {
                 "tag_name": "v1.2.3",
@@ -431,14 +431,14 @@ class TestAntistaticReleaseDownloads(unittest.TestCase):
             return_value=MagicMock(returncode=0, stdout=json.dumps(release_payload)),
         ):
             with self.assertRaises(RuntimeError):
-                _fetch_preferred_antistatic_release("amd64")
+                _fetch_latest_antistatic_release("amd64")
 
     @patch("game.antistatic_steps._write_installed_antistatic_release")
-    @patch("game.antistatic_steps.run")
-    @patch("game.antistatic_steps.os.path.exists", return_value=False)
+    @patch("lib.release_management.run")
+    @patch("lib.release_management.os.path.exists", return_value=False)
     @patch("game.antistatic_steps._read_installed_antistatic_release", return_value="v1.2.2")
     @patch(
-        "game.antistatic_steps._fetch_preferred_antistatic_release",
+        "game.antistatic_steps._fetch_latest_antistatic_release",
         return_value=("v1.2.3", "https://example.invalid/antistatic-server-linux-amd64"),
     )
     def test_download_binary_reinstalls_when_new_release_available(
@@ -469,11 +469,11 @@ class TestAntistaticReleaseDownloads(unittest.TestCase):
         mock_write_release.assert_called_once_with("v1.2.3")
 
     @patch("game.antistatic_steps._write_installed_antistatic_release")
-    @patch("game.antistatic_steps.run")
-    @patch("game.antistatic_steps.os.path.exists", return_value=True)
+    @patch("lib.release_management.run")
+    @patch("lib.release_management.os.path.exists", return_value=True)
     @patch("game.antistatic_steps._read_installed_antistatic_release", return_value="v1.2.3")
     @patch(
-        "game.antistatic_steps._fetch_preferred_antistatic_release",
+        "game.antistatic_steps._fetch_latest_antistatic_release",
         return_value=("v1.2.3", "https://example.invalid/antistatic-server-linux-amd64"),
     )
     def test_download_binary_skips_reinstall_when_latest_release_already_present(
@@ -492,7 +492,7 @@ class TestAntistaticReleaseDownloads(unittest.TestCase):
 
 
 class TestAntistaticDbReleaseDownloads(unittest.TestCase):
-    def test_fetch_preferred_release_returns_tag_and_asset_url(self):
+    def test_fetch_latest_release_returns_tag_and_asset_url(self):
         release_payload = [
             {
                 "tag_name": "v0.1.0",
@@ -512,7 +512,7 @@ class TestAntistaticDbReleaseDownloads(unittest.TestCase):
             "lib.release_management.run",
             return_value=MagicMock(returncode=0, stdout=json.dumps(release_payload)),
         ):
-            tag_name, download_url = _fetch_preferred_antistatic_db_release("amd64")
+            tag_name, download_url = _fetch_latest_antistatic_db_release("amd64")
 
         self.assertEqual(tag_name, "v0.1.0")
         self.assertEqual(
@@ -520,7 +520,7 @@ class TestAntistaticDbReleaseDownloads(unittest.TestCase):
             "https://example.invalid/antistatic-db-linux-amd64",
         )
 
-    def test_fetch_preferred_release_requires_matching_asset(self):
+    def test_fetch_latest_release_requires_matching_asset(self):
         release_payload = [
             {
                 "tag_name": "v0.1.0",
@@ -541,14 +541,14 @@ class TestAntistaticDbReleaseDownloads(unittest.TestCase):
             return_value=MagicMock(returncode=0, stdout=json.dumps(release_payload)),
         ):
             with self.assertRaises(RuntimeError):
-                _fetch_preferred_antistatic_db_release("amd64")
+                _fetch_latest_antistatic_db_release("amd64")
 
     @patch("game.antistatic_steps._write_installed_antistatic_db_release")
-    @patch("game.antistatic_steps.run")
-    @patch("game.antistatic_steps.os.path.exists", return_value=False)
+    @patch("lib.release_management.run")
+    @patch("lib.release_management.os.path.exists", return_value=False)
     @patch("game.antistatic_steps._read_installed_antistatic_db_release", return_value="v0.0.9")
     @patch(
-        "game.antistatic_steps._fetch_preferred_antistatic_db_release",
+        "game.antistatic_steps._fetch_latest_antistatic_db_release",
         return_value=("v0.1.0", "https://example.invalid/antistatic-db-linux-amd64"),
     )
     def test_download_binary_reinstalls_when_new_release_available(
@@ -579,11 +579,11 @@ class TestAntistaticDbReleaseDownloads(unittest.TestCase):
         mock_write_release.assert_called_once_with("v0.1.0")
 
     @patch("game.antistatic_steps._write_installed_antistatic_db_release")
-    @patch("game.antistatic_steps.run")
-    @patch("game.antistatic_steps.os.path.exists", return_value=True)
+    @patch("lib.release_management.run")
+    @patch("lib.release_management.os.path.exists", return_value=True)
     @patch("game.antistatic_steps._read_installed_antistatic_db_release", return_value="v0.1.0")
     @patch(
-        "game.antistatic_steps._fetch_preferred_antistatic_db_release",
+        "game.antistatic_steps._fetch_latest_antistatic_db_release",
         return_value=("v0.1.0", "https://example.invalid/antistatic-db-linux-amd64"),
     )
     def test_download_binary_skips_reinstall_when_latest_release_already_present(

@@ -47,7 +47,42 @@ def select_preferred_github_release_asset(
     missing_asset_description: str,
 ) -> tuple[str, str]:
     """Return the preferred release tag and asset URL matching the selector."""
-    for release in order_preferred_github_releases(releases):
+    return _select_github_release_asset(
+        order_preferred_github_releases(releases),
+        asset_matches=asset_matches,
+        missing_asset_description=missing_asset_description,
+    )
+
+
+def select_latest_github_release_asset(
+    releases: list[Mapping[str, Any]],
+    *,
+    asset_matches: Callable[[str, str], bool],
+    missing_asset_description: str,
+) -> tuple[str, str]:
+    """Return the latest stable release tag and asset URL matching the selector."""
+    stable_releases = [
+        release
+        for release in releases
+        if not bool(release.get("draft")) and not bool(release.get("prerelease"))
+    ]
+    return _select_github_release_asset(
+        stable_releases,
+        asset_matches=asset_matches,
+        missing_asset_description=missing_asset_description,
+    )
+
+
+def _select_github_release_asset(
+    releases: list[Mapping[str, Any]],
+    *,
+    asset_matches: Callable[[str, str], bool],
+    missing_asset_description: str,
+) -> tuple[str, str]:
+    """Return the first matching release asset from an ordered release list."""
+    if not releases:
+        raise RuntimeError(missing_asset_description)
+    for release in releases:
         tag_name = release.get("tag_name")
         if not isinstance(tag_name, str) or not tag_name:
             continue
@@ -78,6 +113,22 @@ def fetch_preferred_github_release_asset(
     """Fetch and select the preferred GitHub release asset for a repository."""
     releases = fetch_github_releases(repo, per_page=per_page)
     return select_preferred_github_release_asset(
+        releases,
+        asset_matches=asset_matches,
+        missing_asset_description=missing_asset_description,
+    )
+
+
+def fetch_latest_github_release_asset(
+    repo: str,
+    *,
+    asset_matches: Callable[[str, str], bool],
+    missing_asset_description: str,
+    per_page: int = 20,
+) -> tuple[str, str]:
+    """Fetch and select the latest stable GitHub release asset for a repository."""
+    releases = fetch_github_releases(repo, per_page=per_page)
+    return select_latest_github_release_asset(
         releases,
         asset_matches=asset_matches,
         missing_asset_description=missing_asset_description,
@@ -115,3 +166,31 @@ def write_json_state(path: str, payload: Mapping[str, Any], *, mode: int | None 
         file_obj.write("\n")
     if mode is not None:
         os.chmod(path, mode)
+
+
+def install_binary_release(
+    *,
+    binary_name: str,
+    binary_path: str,
+    tag_name: str,
+    download_url: str,
+    installed_tag: str | None,
+    persist_installed_tag: Callable[[str], None],
+) -> str:
+    """Download and replace a release-managed binary when the tag changes."""
+    if installed_tag == tag_name and os.path.exists(binary_path):
+        print(f"  ✓ {os.path.basename(binary_path)} already up to date ({tag_name})")
+        return tag_name
+
+    print(f"  Downloading {binary_name} ({tag_name})...")
+    tmp_path = f"/tmp/{binary_name}.{tag_name}"
+    run(
+        f"curl -fL -o {shlex.quote(tmp_path)} {shlex.quote(download_url)}",
+        check=True,
+        display_cmd=f"curl -fL -o {tmp_path} <release URL>",
+    )
+    run(f"chmod +x {shlex.quote(tmp_path)}", check=True)
+    run(f"mv {shlex.quote(tmp_path)} {shlex.quote(binary_path)}", check=True)
+    persist_installed_tag(tag_name)
+    print(f"  ✓ Installed {binary_path} ({tag_name})")
+    return tag_name
