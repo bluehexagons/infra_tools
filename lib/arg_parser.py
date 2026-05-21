@@ -230,6 +230,17 @@ def add_setup_arguments(
                        help="Deploy the antistatic-db service behind nginx. "
                             "DOMAIN is the optional public hostname; PORT is the internal listen port "
                             "(default: 8081). Hostless specs like :8081 listen directly without nginx.")
+
+    parser.add_argument(
+        "--gogs",
+        dest="gogs",
+        nargs="+",
+        metavar="GOGS",
+        help="Deploy Gogs as a minimal self-hosted Git service. "
+             "Usage: --gogs DOMAIN[:PORT] [DATA_PATH]. DOMAIN is the optional public "
+             "hostname, PORT defaults to 3000, and DATA_PATH defaults to /var/lib/gogs. "
+             "Hostless specs like :3000 or 3000 listen directly without nginx.",
+    )
     
     parser.add_argument("--no-restart", dest="no_restart",
                         action="store_true",

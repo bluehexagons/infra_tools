@@ -107,6 +107,9 @@ def print_setup_summary(config: SetupConfig, description: Optional[str] = None) 
         print(f"Notifications: {len(config.notify_specs)} target(s)")
         for notify_type, target in config.notify_specs:
             print(f"  - {notify_type}: {target}")
+
+    if config.gogs:
+        print(f"Gogs: {' '.join(config.gogs)}")
     
     print("=" * 60)
     print()

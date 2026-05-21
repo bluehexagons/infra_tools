@@ -33,6 +33,7 @@ PLUGIN = PluginDefinition(
         "install_cli_tools",
         "check_restart_required",
         "configure_auto_update_ruby",
+        "configure_auto_update_gogs",
         "install_mail_utils",
         "configure_swap",
         "install_apt_packages",
@@ -134,6 +135,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
 
     from common.steps import (
         check_restart_required,
+        configure_auto_update_gogs,
         configure_auto_update_ruby,
         configure_auto_update_uv,
         configure_ipv4_preference,
@@ -172,6 +174,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "install_cli_tools": install_cli_tools,
         "check_restart_required": check_restart_required,
         "configure_auto_update_ruby": configure_auto_update_ruby,
+        "configure_auto_update_gogs": configure_auto_update_gogs,
         "install_mail_utils": install_mail_utils,
         "configure_swap": configure_swap,
         "install_apt_packages": install_apt_packages,

@@ -176,6 +176,7 @@ class SetupConfig:
     notify_specs: Optional[NestedStrList] = None
     antistatic_server: MaybeStr = None  # "DOMAIN[:port]" spec
     antistatic_db: MaybeStr = None  # "DOMAIN[:port]" spec
+    gogs: Optional[StrList] = None  # ["DOMAIN[:port]", "DATA_PATH"?]
     no_restart: bool = False
     # Hosted guest provisioning (Proxmox VM/LXC)
     hosted_node: MaybeStr = None
@@ -334,6 +335,10 @@ class SetupConfig:
 
         if self.antistatic_db:
             args.append(f"--antistatic-db {shlex.quote(self.antistatic_db)}")
+
+        if self.gogs:
+            escaped_gogs = " ".join(shlex.quote(str(part)) for part in self.gogs)
+            args.append(f"--gogs {escaped_gogs}")
         
         if self.no_restart:
             args.append("--no-restart")
@@ -538,6 +543,10 @@ class SetupConfig:
         # Antistatic DB service
         if self.antistatic_db:
             cmd_parts.append(f"--antistatic-db {shlex.quote(self.antistatic_db)}")
+
+        if self.gogs:
+            escaped_gogs = " ".join(shlex.quote(str(part)) for part in self.gogs)
+            cmd_parts.append(f"--gogs {escaped_gogs}")
         
         # Restart control
         if self.no_restart:
@@ -688,6 +697,7 @@ class SetupConfig:
             notify_specs=getattr(args, 'notify_specs', None),
             antistatic_server=getattr(args, 'antistatic_server', None),
             antistatic_db=getattr(args, 'antistatic_db', None),
+            gogs=getattr(args, 'gogs', None),
             no_restart=no_restart,
             hosted_node=getattr(args, 'hosted_node', None),
             hosted_user=getattr(args, 'hosted_user', 'root'),

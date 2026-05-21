@@ -57,6 +57,18 @@ def extend_antistatic_steps(config: SetupConfig, steps: list[tuple[str, StepFunc
         steps.append(("Setting up antistatic-db service", setup_antistatic_db))
 
 
+def extend_gogs_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -> None:
+    """Append Gogs setup and update steps when configured."""
+    if not config.gogs:
+        return
+
+    from common.steps import configure_auto_update_gogs
+    from web.gogs_steps import setup_gogs
+
+    steps.append(("Setting up Gogs service", setup_gogs))
+    steps.append(("Configuring Gogs auto-update", configure_auto_update_gogs))
+
+
 def build_server_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
     """Build server-oriented setup steps from plugin-owned capability helpers."""
 
@@ -94,5 +106,6 @@ def build_server_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
     extend_app_server_steps(config, steps)
     extend_build_server_steps(config, steps)
     extend_antistatic_steps(config, steps)
+    extend_gogs_steps(config, steps)
     steps.extend(get_final_steps())
     return steps

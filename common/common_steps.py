@@ -555,6 +555,19 @@ def configure_auto_update_uv(config: SetupConfig) -> None:
     )
 
 
+def configure_auto_update_gogs(config: SetupConfig) -> None:
+    """Configure automatic updates for Gogs."""
+    _configure_auto_update_systemd(
+        service_name="auto-update-gogs",
+        service_desc="Auto-update Gogs service",
+        timer_desc="Auto-update Gogs weekly",
+        script_name="auto_update_gogs.py",
+        schedule="Sun *-*-* 05:30:00",
+        check_path="/usr/local/bin/gogs",
+        check_name="Gogs",
+    )
+
+
 def install_mail_utils(config: SetupConfig) -> None:
     """Install mail utilities for email notifications."""
     # Only install if mailbox notifications are configured

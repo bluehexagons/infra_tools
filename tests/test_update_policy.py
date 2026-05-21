@@ -14,8 +14,10 @@ from lib.update_policy import (
     dependency_min_age_days,
     ecosystem_auto_upgrade_enabled,
     env_flag_enabled,
+    order_preferred_github_releases,
     node_latest_auto_update_enabled,
     npm_freshness_args,
+    select_preferred_github_release,
     uv_exclude_newer_args,
 )
 
@@ -58,6 +60,30 @@ class TestUpdatePolicy(unittest.TestCase):
             dependency_min_age_days(env={DEPENDENCY_MIN_AGE_DAYS_ENV: "soon"})
         with self.assertRaisesRegex(ValueError, "must be 0 or greater"):
             dependency_min_age_days(env={DEPENDENCY_MIN_AGE_DAYS_ENV: "-1"})
+
+    def test_order_preferred_github_releases_prefers_aged_stable_release(self):
+        releases = [
+            {"tag_name": "v2.0.0", "published_at": "2026-05-17T12:00:00Z", "draft": False, "prerelease": False},
+            {"tag_name": "v1.9.0", "published_at": "2026-05-10T12:00:00Z", "draft": False, "prerelease": False},
+        ]
+        ordered = order_preferred_github_releases(
+            releases,
+            now=datetime(2026, 5, 17, 12, 0, tzinfo=timezone.utc),
+            env={DEPENDENCY_MIN_AGE_DAYS_ENV: "3"},
+        )
+        self.assertEqual([release["tag_name"] for release in ordered], ["v1.9.0", "v2.0.0"])
+
+    def test_select_preferred_github_release_falls_back_to_latest_when_needed(self):
+        releases = [
+            {"tag_name": "v2.0.0", "published_at": "2026-05-17T12:00:00Z", "draft": False, "prerelease": False},
+            {"tag_name": "v2.0.0-rc1", "published_at": "2026-05-12T12:00:00Z", "draft": False, "prerelease": True},
+        ]
+        selected = select_preferred_github_release(
+            releases,
+            now=datetime(2026, 5, 17, 12, 0, tzinfo=timezone.utc),
+            env={DEPENDENCY_MIN_AGE_DAYS_ENV: "7"},
+        )
+        self.assertEqual(selected["tag_name"], "v2.0.0")
 
 
 if __name__ == "__main__":

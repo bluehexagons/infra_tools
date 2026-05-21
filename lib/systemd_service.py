@@ -132,6 +132,8 @@ def cleanup_all_infra_services(dry_run: bool = False) -> None:
         r"^auto-update-node\.timer$",
         r"^auto-update-apt\.service$",
         r"^auto-update-apt\.timer$",
+        r"^auto-update-gogs\.service$",
+        r"^auto-update-gogs\.timer$",
         # Auto-restart service
         r"^auto-restart-if-needed\.service$",
         r"^auto-restart-if-needed\.timer$",
@@ -141,6 +143,8 @@ def cleanup_all_infra_services(dry_run: bool = False) -> None:
         r"^antistatic\.service$",
         # Antistatic DB service
         r"^antistatic-db\.service$",
+        # Gogs service
+        r"^gogs\.service$",
     ]
     
     units_to_remove = []

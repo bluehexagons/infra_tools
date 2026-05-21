@@ -187,6 +187,12 @@ class TestSetupConfigToRemoteArgs(unittest.TestCase):
         args_str = ' '.join(args)
         self.assertIn('--antistatic-db db.example.com:8081', args_str)
 
+    def test_gogs(self):
+        config = self._make_config(gogs=['git.example.com:3000', '/srv/gogs'])
+        args = config.to_remote_args()
+        args_str = ' '.join(args)
+        self.assertIn('--gogs git.example.com:3000 /srv/gogs', args_str)
+
     def test_friendly_name_included(self):
         config = self._make_config(friendly_name='scrapbox')
         args = config.to_remote_args()
@@ -355,6 +361,7 @@ class TestSetupConfigFromArgs(unittest.TestCase):
             notify_specs=None,
             antistatic_server=None,
             antistatic_db=None,
+            gogs=None,
             hosted_node=None,
             hosted_user='root',
             hosted_key=None,
@@ -412,6 +419,13 @@ class TestSetupConfigFromArgs(unittest.TestCase):
             'server_web',
         )
         self.assertEqual(config.antistatic_db, 'db.example.com')
+
+    def test_gogs_from_args(self):
+        config = SetupConfig.from_args(
+            self._make_args(gogs=['git.example.com:3000', '/srv/gogs']),
+            'server_web',
+        )
+        self.assertEqual(config.gogs, ['git.example.com:3000', '/srv/gogs'])
 
     def test_server_proxmox_defaults_no_restart(self):
         config = SetupConfig.from_args(self._make_args(), 'server_proxmox')

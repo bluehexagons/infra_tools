@@ -127,6 +127,23 @@ class TestHostedFlagParsing(unittest.TestCase):
         self.assertEqual(args.antistatic_server, "lobby.example.com:9090")
         self.assertEqual(args.antistatic_db, "db.example.com:9091")
 
+    def test_gogs_flag_with_domain_only(self):
+        args = self.parser.parse_args([
+            "10.0.0.50",
+            "--gogs",
+            "git.example.com:3000",
+        ])
+        self.assertEqual(args.gogs, ["git.example.com:3000"])
+
+    def test_gogs_flag_with_optional_data_path(self):
+        args = self.parser.parse_args([
+            "10.0.0.50",
+            "--gogs",
+            "git.example.com:3000",
+            "/srv/gogs",
+        ])
+        self.assertEqual(args.gogs, ["git.example.com:3000", "/srv/gogs"])
+
 
 class TestHostedFlagsNotInRemoteParser(unittest.TestCase):
     def setUp(self):

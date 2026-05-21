@@ -235,6 +235,32 @@ def validate_deploy_targets(targets: Optional[list[str]]) -> None:
             raise ValueError(f"Invalid deploy target host: {target}")
 
 
+def validate_gogs_settings(gogs: Optional[list[str]]) -> None:
+    """Validate Gogs setup arguments before setup or patch execution."""
+    if not gogs:
+        return
+
+    if len(gogs) not in (1, 2):
+        raise ValueError("--gogs requires DOMAIN[:PORT] and optional DATA_PATH")
+
+    spec = str(gogs[0]).strip()
+    if not spec:
+        raise ValueError("Gogs target spec must be a non-empty string")
+
+    from web.gogs_steps import parse_gogs_spec
+    from lib.validators import validate_host
+
+    domain, _port = parse_gogs_spec(spec, strict=True)
+    if domain and not validate_host(domain):
+        raise ValueError(f"Invalid Gogs domain: {domain}")
+
+    if len(gogs) == 2:
+        data_path = str(gogs[1]).strip()
+        if not os.path.isabs(data_path):
+            raise ValueError(f"Gogs data path must be absolute: {data_path}")
+        validate_filesystem_path(data_path, must_exist=False)
+
+
 def validate_deploy_specs(deploy_specs: Optional[list[list[str]]]) -> None:
     """Validate deploy specs before setup or patch execution."""
 

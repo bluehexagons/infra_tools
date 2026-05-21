@@ -87,6 +87,19 @@ class TestWorkspaceCli(unittest.TestCase):
         self.assertEqual(args.antistatic_server, "lobby.example.com:9090")
         self.assertEqual(args.antistatic_db, "db.example.com:9091")
 
+    def test_infra_tools_setup_parser_accepts_gogs_flag(self):
+        parser, _setup_parser, _patch_parser = infra_tools.create_infra_tools_parser()
+        args = parser.parse_args([
+            "setup",
+            "server_web",
+            "example.com",
+            "--gogs",
+            "git.example.com:3000",
+            "/srv/gogs",
+        ])
+        self.assertEqual(args.command, "setup")
+        self.assertEqual(args.gogs, ["git.example.com:3000", "/srv/gogs"])
+
     def test_reconstruct_command_uses_unified_setup_entrypoint(self):
         config = SetupConfig(
             host="example.com",

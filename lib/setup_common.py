@@ -27,6 +27,7 @@ from lib.validation import (
     validate_apt_packages,
     validate_deploy_specs,
     validate_deploy_targets,
+    validate_gogs_settings,
     validate_hosted_flags,
     validate_samba_share_credentials,
     validate_samba_share_specs,
@@ -353,6 +354,7 @@ def prepare_validated_runtime_config(
         runtime_config.samba_shares,
         runtime_config.share_credentials,
     )
+    validate_gogs_settings(runtime_config.gogs)
     validate_hosted_flags(runtime_config)
     validate_samba_share_credentials(runtime_config)
     return runtime_config

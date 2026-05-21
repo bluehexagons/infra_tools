@@ -71,6 +71,7 @@ from lib.validation import (
     validate_apt_packages,
     validate_deploy_specs,
     validate_deploy_targets,
+    validate_gogs_settings,
     validate_hosted_flags,
     validate_samba_share_credentials,
     validate_samba_share_specs,
@@ -557,6 +558,8 @@ def show_info(pattern: Optional[str] = None, *, compact: bool = False) -> int:
             features.append("Flatpak")
         if args.get("enable_samba"):
             features.append("Samba")
+        if args.get("gogs"):
+            features.append("Gogs")
 
         if features:
             print(f"Features: {', '.join(features)}")
@@ -728,6 +731,7 @@ def _prepare_runtime_config_for_cli(config: SetupConfig) -> SetupConfig:
         runtime_config.samba_shares,
         runtime_config.share_credentials,
     )
+    validate_gogs_settings(runtime_config.gogs)
     validate_hosted_flags(runtime_config)
     validate_samba_share_credentials(runtime_config)
     return runtime_config
