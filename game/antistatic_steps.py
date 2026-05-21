@@ -6,7 +6,6 @@ as a systemd service behind an nginx reverse proxy.
 
 from __future__ import annotations
 
-import json
 import os
 import shlex
 from typing import TYPE_CHECKING
@@ -14,6 +13,12 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from lib.config import SetupConfig
 
+from lib.release_management import (
+    detect_release_arch,
+    fetch_preferred_github_release_asset,
+    load_json_state,
+    write_json_state,
+)
 from lib.remote_utils import run, user_exists, is_service_active
 from lib.systemd_service import cleanup_service
 
@@ -72,11 +77,7 @@ def parse_antistatic_db_spec(spec: str) -> tuple[str, int]:
 
 def _detect_arch() -> str:
     """Return the GitHub release architecture suffix for this machine."""
-    result = run("uname -m", capture_output=True)
-    arch = result.stdout.strip() if result.stdout else "x86_64"
-    if arch in ("aarch64", "arm64"):
-        return "arm64"
-    return "amd64"
+    return detect_release_arch()
 
 
 def _ensure_antistatic_user() -> None:
@@ -103,148 +104,81 @@ def _ensure_antistatic_db_user() -> None:
     print(f"  ✓ Created system user: {ANTISTATIC_DB_USER}")
 
 
-def _fetch_latest_antistatic_release(arch: str) -> tuple[str, str]:
-    """Return the latest release tag and binary download URL for this architecture."""
+def _fetch_preferred_antistatic_release(arch: str) -> tuple[str, str]:
+    """Return the preferred release tag and binary download URL for this architecture."""
     binary_name = f"antistatic-server-linux-{arch}"
-    api_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-
-    result = run(
-        f"curl -sf {shlex.quote(api_url)}",
-        capture_output=True,
-        display_cmd=f"curl -sf https://api.github.com/repos/{GITHUB_REPO}/releases/latest",
-    )
-    if result.returncode != 0 or not result.stdout:
-        raise RuntimeError("Failed to fetch latest release info from GitHub")
-
-    try:
-        release_data = json.loads(result.stdout)
-        tag_name = release_data.get("tag_name")
-        if not isinstance(tag_name, str) or not tag_name:
-            raise RuntimeError("Latest GitHub release response did not include tag_name")
-        assets = release_data.get("assets", [])
-        download_url: str | None = next(
-            (a["browser_download_url"] for a in assets if a["name"] == binary_name),
-            None,
-        )
-    except (json.JSONDecodeError, KeyError) as exc:
-        raise RuntimeError(f"Failed to parse GitHub release data: {exc}") from exc
-
-    if not download_url:
-        raise RuntimeError(
-            f"No binary found for '{binary_name}' in the latest release of "
+    return fetch_preferred_github_release_asset(
+        GITHUB_REPO,
+        asset_matches=lambda _tag_name, asset_name: asset_name == binary_name,
+        missing_asset_description=(
+            f"No binary found for '{binary_name}' in the preferred releases of "
             f"https://github.com/{GITHUB_REPO}"
-        )
-
-    return tag_name, download_url
-
-
-def _fetch_latest_antistatic_db_release(arch: str) -> tuple[str, str]:
-    """Return the latest antistatic-db release tag and binary URL."""
-    binary_name = f"antistatic-db-linux-{arch}"
-    api_url = f"https://api.github.com/repos/{ANTISTATIC_DB_GITHUB_REPO}/releases/latest"
-
-    result = run(
-        f"curl -sf {shlex.quote(api_url)}",
-        capture_output=True,
-        display_cmd=(
-            f"curl -sf https://api.github.com/repos/"
-            f"{ANTISTATIC_DB_GITHUB_REPO}/releases/latest"
         ),
     )
-    if result.returncode != 0 or not result.stdout:
-        raise RuntimeError("Failed to fetch latest antistatic-db release info from GitHub")
 
-    try:
-        release_data = json.loads(result.stdout)
-        tag_name = release_data.get("tag_name")
-        if not isinstance(tag_name, str) or not tag_name:
-            raise RuntimeError("Latest antistatic-db release response did not include tag_name")
-        assets = release_data.get("assets", [])
-        download_url: str | None = next(
-            (a["browser_download_url"] for a in assets if a["name"] == binary_name),
-            None,
-        )
-    except (json.JSONDecodeError, KeyError) as exc:
-        raise RuntimeError(f"Failed to parse antistatic-db GitHub release data: {exc}") from exc
 
-    if not download_url:
-        raise RuntimeError(
-            f"No binary found for '{binary_name}' in the latest release of "
+def _fetch_preferred_antistatic_db_release(arch: str) -> tuple[str, str]:
+    """Return the preferred antistatic-db release tag and binary URL."""
+    binary_name = f"antistatic-db-linux-{arch}"
+    return fetch_preferred_github_release_asset(
+        ANTISTATIC_DB_GITHUB_REPO,
+        asset_matches=lambda _tag_name, asset_name: asset_name == binary_name,
+        missing_asset_description=(
+            f"No binary found for '{binary_name}' in the preferred releases of "
             f"https://github.com/{ANTISTATIC_DB_GITHUB_REPO}"
-        )
-
-    return tag_name, download_url
+        ),
+    )
 
 
 def _read_installed_antistatic_release() -> str | None:
     """Return the recorded antistatic release tag, if available."""
-    try:
-        with open(ANTISTATIC_RELEASE_STATE_FILE, "r", encoding="utf-8") as fh:
-            release_state = json.load(fh)
-    except FileNotFoundError:
+    if not os.path.exists(ANTISTATIC_RELEASE_STATE_FILE):
         return None
-    except (OSError, json.JSONDecodeError) as exc:
-        print(f"  ⚠ Warning: Failed to read antistatic release metadata: {exc}")
-        return None
-
-    if not isinstance(release_state, dict):
-        print("  ⚠ Warning: Invalid antistatic release metadata, reinstalling latest release")
-        return None
-
+    release_state = load_json_state(
+        ANTISTATIC_RELEASE_STATE_FILE,
+        read_error_label="antistatic release metadata",
+        invalid_state_message="Invalid antistatic release metadata, reinstalling preferred release",
+    )
     tag_name = release_state.get("tag_name")
     if not isinstance(tag_name, str) or not tag_name:
-        print("  ⚠ Warning: Missing antistatic release tag in metadata, reinstalling latest release")
+        print("  ⚠ Warning: Missing antistatic release tag in metadata, reinstalling preferred release")
         return None
     return tag_name
 
 
 def _write_installed_antistatic_release(tag_name: str) -> None:
     """Persist the installed antistatic release tag for future update checks."""
-    state_dir = os.path.dirname(ANTISTATIC_RELEASE_STATE_FILE)
-    run(f"mkdir -p {shlex.quote(state_dir)}", check=True)
-    with open(ANTISTATIC_RELEASE_STATE_FILE, "w", encoding="utf-8") as fh:
-        json.dump({"tag_name": tag_name}, fh)
-        fh.write("\n")
+    write_json_state(ANTISTATIC_RELEASE_STATE_FILE, {"tag_name": tag_name})
 
 
 def _read_installed_antistatic_db_release() -> str | None:
     """Return the recorded antistatic-db release tag, if available."""
-    try:
-        with open(ANTISTATIC_DB_RELEASE_STATE_FILE, "r", encoding="utf-8") as fh:
-            release_state = json.load(fh)
-    except FileNotFoundError:
+    if not os.path.exists(ANTISTATIC_DB_RELEASE_STATE_FILE):
         return None
-    except (OSError, json.JSONDecodeError) as exc:
-        print(f"  ⚠ Warning: Failed to read antistatic-db release metadata: {exc}")
-        return None
-
-    if not isinstance(release_state, dict):
-        print("  ⚠ Warning: Invalid antistatic-db release metadata, reinstalling latest release")
-        return None
-
+    release_state = load_json_state(
+        ANTISTATIC_DB_RELEASE_STATE_FILE,
+        read_error_label="antistatic-db release metadata",
+        invalid_state_message="Invalid antistatic-db release metadata, reinstalling preferred release",
+    )
     tag_name = release_state.get("tag_name")
     if not isinstance(tag_name, str) or not tag_name:
-        print("  ⚠ Warning: Missing antistatic-db release tag in metadata, reinstalling latest release")
+        print("  ⚠ Warning: Missing antistatic-db release tag in metadata, reinstalling preferred release")
         return None
     return tag_name
 
 
 def _write_installed_antistatic_db_release(tag_name: str) -> None:
     """Persist the installed antistatic-db release tag for future update checks."""
-    state_dir = os.path.dirname(ANTISTATIC_DB_RELEASE_STATE_FILE)
-    run(f"mkdir -p {shlex.quote(state_dir)}", check=True)
-    with open(ANTISTATIC_DB_RELEASE_STATE_FILE, "w", encoding="utf-8") as fh:
-        json.dump({"tag_name": tag_name}, fh)
-        fh.write("\n")
+    write_json_state(ANTISTATIC_DB_RELEASE_STATE_FILE, {"tag_name": tag_name})
 
 
 def _download_antistatic_binary(arch: str) -> str:
-    """Install the newest antistatic-server release when needed.
+    """Install the preferred antistatic-server release when needed.
 
     Returns the release tag that should be running after setup completes.
     """
     binary_name = f"antistatic-server-linux-{arch}"
-    latest_tag, download_url = _fetch_latest_antistatic_release(arch)
+    latest_tag, download_url = _fetch_preferred_antistatic_release(arch)
     installed_tag = _read_installed_antistatic_release()
     if installed_tag == latest_tag and os.path.exists(ANTISTATIC_BINARY):
         print(f"  ✓ antistatic-server already up to date ({latest_tag})")
@@ -265,9 +199,9 @@ def _download_antistatic_binary(arch: str) -> str:
 
 
 def _download_antistatic_db_binary(arch: str) -> str:
-    """Install the newest antistatic-db release when needed."""
+    """Install the preferred antistatic-db release when needed."""
     binary_name = f"antistatic-db-linux-{arch}"
-    latest_tag, download_url = _fetch_latest_antistatic_db_release(arch)
+    latest_tag, download_url = _fetch_preferred_antistatic_db_release(arch)
     installed_tag = _read_installed_antistatic_db_release()
     if installed_tag == latest_tag and os.path.exists(ANTISTATIC_DB_BINARY):
         print(f"  ✓ antistatic-db already up to date ({latest_tag})")

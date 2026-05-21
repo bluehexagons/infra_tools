@@ -10,9 +10,14 @@ from typing import Any, Mapping
 
 from lib.config import SetupConfig
 from lib.nginx_config import SSL_CIPHERS, SSL_PROTOCOLS, generate_self_signed_cert, get_ssl_cert_path
+from lib.release_management import (
+    detect_release_arch,
+    fetch_preferred_github_release_asset,
+    load_json_state,
+    write_json_state,
+)
 from lib.remote_utils import generate_password, is_service_active, run, user_exists
 from lib.systemd_service import cleanup_service
-from lib.update_policy import order_preferred_github_releases
 from web.cloudflare_steps import run_cloudflare_tunnel_setup
 from web.ssl_steps import install_certbot, obtain_letsencrypt_certificate, setup_certificate_renewal
 from web.web_steps import install_nginx
@@ -101,45 +106,24 @@ def _get_git_home() -> str:
     return fields[5]
 
 
-def _detect_arch() -> str:
-    result = run("uname -m", capture_output=True)
-    arch = result.stdout.strip() if result.stdout else "x86_64"
-    if arch in ("aarch64", "arm64"):
-        return "arm64"
-    return "amd64"
-
-
 def _load_gogs_state() -> dict[str, Any]:
-    try:
-        with open(GOGS_STATE_FILE, "r", encoding="utf-8") as file_obj:
-            payload = json.load(file_obj)
-    except FileNotFoundError:
-        return {}
-    except (OSError, json.JSONDecodeError) as exc:
-        print(f"  ⚠ Warning: Failed to read Gogs state file: {exc}")
-        return {}
-    if not isinstance(payload, dict):
-        print("  ⚠ Warning: Invalid Gogs state file contents")
-        return {}
-    return payload
+    return load_json_state(
+        GOGS_STATE_FILE,
+        read_error_label="Gogs state file",
+        invalid_state_message="Invalid Gogs state file contents",
+    )
 
 
 def write_gogs_state(tag_name: str, data_path: str, config_path: str) -> None:
-    state_dir = os.path.dirname(GOGS_STATE_FILE)
-    os.makedirs(state_dir, exist_ok=True)
-    with open(GOGS_STATE_FILE, "w", encoding="utf-8") as file_obj:
-        json.dump(
-            {
-                "tag_name": tag_name,
-                "data_path": data_path,
-                "config_path": config_path,
-            },
-            file_obj,
-            indent=2,
-            sort_keys=True,
-        )
-        file_obj.write("\n")
-    os.chmod(GOGS_STATE_FILE, 0o600)
+    write_json_state(
+        GOGS_STATE_FILE,
+        {
+            "tag_name": tag_name,
+            "data_path": data_path,
+            "config_path": config_path,
+        },
+        mode=0o600,
+    )
 
 
 def read_installed_gogs_release() -> str | None:
@@ -153,53 +137,21 @@ def read_gogs_state() -> Mapping[str, Any]:
     return _load_gogs_state()
 
 
-def _fetch_gogs_releases() -> list[Mapping[str, Any]]:
-    api_url = f"https://api.github.com/repos/{GOGS_GITHUB_REPO}/releases?per_page=20"
-    result = run(
-        f"curl -sf {shlex.quote(api_url)}",
-        capture_output=True,
-        display_cmd=f"curl -sf https://api.github.com/repos/{GOGS_GITHUB_REPO}/releases?per_page=20",
-    )
-    if result.returncode != 0 or not result.stdout:
-        raise RuntimeError("Failed to fetch Gogs release data from GitHub")
-    try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"Failed to parse Gogs release data: {exc}") from exc
-    if not isinstance(payload, list):
-        raise RuntimeError("Unexpected Gogs release response payload")
-    return payload
-
-
 def fetch_preferred_gogs_release(arch: str) -> tuple[str, str]:
     """Return the preferred Gogs release tag and download URL for this architecture."""
-    releases = _fetch_gogs_releases()
     binary_name_suffix = f"_linux_{arch}.tar.gz"
-    for release in order_preferred_github_releases(releases):
-        tag_name = release.get("tag_name")
-        if not isinstance(tag_name, str) or not tag_name:
-            continue
-        assets = release.get("assets")
-        if not isinstance(assets, list):
-            continue
-        for asset in assets:
-            if not isinstance(asset, dict):
-                continue
-            asset_name = asset.get("name")
-            download_url = asset.get("browser_download_url")
-            if (
-                isinstance(asset_name, str)
-                and isinstance(download_url, str)
-                and asset_name.startswith(f"gogs_{tag_name}")
-                and asset_name.endswith(binary_name_suffix)
-            ):
-                return tag_name, download_url
-    raise RuntimeError(f"No Gogs Linux release asset found for architecture '{arch}'")
+    return fetch_preferred_github_release_asset(
+        GOGS_GITHUB_REPO,
+        asset_matches=lambda tag_name, asset_name: (
+            asset_name.startswith(f"gogs_{tag_name}") and asset_name.endswith(binary_name_suffix)
+        ),
+        missing_asset_description=f"No Gogs Linux release asset found for architecture '{arch}'",
+    )
 
 
 def install_or_update_gogs_release() -> tuple[str, bool]:
     """Install the preferred Gogs release and return (tag, changed)."""
-    arch = _detect_arch()
+    arch = detect_release_arch()
     tag_name, download_url = fetch_preferred_gogs_release(arch)
     release_dir = f"{GOGS_RELEASES_DIR}/{tag_name}"
     installed_tag = read_installed_gogs_release()

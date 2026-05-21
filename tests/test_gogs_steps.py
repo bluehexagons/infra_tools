@@ -35,7 +35,7 @@ class TestParseGogsSpec(unittest.TestCase):
 
 
 class TestFetchPreferredGogsRelease(unittest.TestCase):
-    @patch("web.gogs_steps.run")
+    @patch("lib.release_management.run")
     def test_prefers_aged_release_when_available(self, mock_run):
         payload = [
             {
