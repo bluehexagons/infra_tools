@@ -23,7 +23,8 @@ from lib.deploy_utils import (
     save_deployment_metadata,
     should_redeploy
 )
-from lib.systemd_service import create_rails_service
+from lib.systemd_service import create_rails_service, create_managed_service
+from lib.project_manifest import Component, Manifest, load_manifest
 
 
 class DeploymentOrchestrator:
@@ -621,6 +622,171 @@ class DeploymentOrchestrator:
             'api_subdomain': api_subdomain
         }
     
+    # ------------------------------------------------------------------
+    # infra.json manifest deploys (see docs/plans/PROJECT_MANIFEST.md)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _service_name(component: Component) -> str:
+        """systemd unit base name for a manifest service component."""
+        return f"app-{component.name}"
+
+    def deploy_manifest(self, manifest: Manifest, source_path: str, domain: Optional[str],
+                        path: str, git_url: str, commit_hash: Optional[str],
+                        keep_source: bool = False) -> list[dict[str, Any]]:
+        """Deploy every component of an infra.json manifest.
+
+        Returns one nginx "dep" descriptor per component. Components declare
+        their own domains, so a single repo can serve a static apex site and a
+        reverse-proxied API subdomain from one deploy. This always performs a
+        full build; incremental skip (mirroring should_redeploy) is a future
+        optimization, kept out for a small, auditable surface.
+        """
+        dest_path = self.get_deployment_path(domain, path, git_url)
+        print(f"Deploying manifest ({len(manifest.components)} component(s)) to {dest_path}...")
+
+        # Stop any services this manifest previously installed before files move.
+        for component in manifest.components:
+            if component.is_service:
+                run(f"systemctl stop {shlex.quote(self._service_name(component))}.service", check=False)
+
+        parent_dir = os.path.dirname(dest_path)
+        if parent_dir and not os.path.exists(parent_dir):
+            os.makedirs(parent_dir, exist_ok=True)
+        if os.path.exists(dest_path):
+            print(f"  Removing existing deployment at {dest_path}...")
+            shutil.rmtree(dest_path)
+
+        if keep_source:
+            shutil.copytree(source_path, dest_path)
+            print(f"  ✓ Copied to {dest_path}")
+        else:
+            shutil.move(source_path, dest_path)
+            print(f"  ✓ Moved to {dest_path}")
+
+        deps: list[dict[str, Any]] = []
+        for component in manifest.components:
+            print(f"  Component '{component.name}' ({component.type}) → {component.domain}{component.path}")
+            self._run_component_build(component, dest_path)
+            if component.is_service:
+                self._install_service_component(component, dest_path)
+            deps.append(self._component_dep(component, dest_path))
+
+        result = run(
+            f"chown -R {shlex.quote(self.web_user)}:{shlex.quote(self.web_group)} {shlex.quote(dest_path)}",
+            check=False,
+        )
+        if result.returncode != 0:
+            print(f"  ⚠ Warning: Could not set ownership to {self.web_user}:{self.web_group}")
+        run(f"chmod -R 755 {shlex.quote(dest_path)}", check=False)
+
+        save_deployment_metadata(dest_path, git_url, commit_hash)
+        print(f"  ✓ Manifest deployed to {dest_path}")
+        return deps
+
+    def _run_component_build(self, component: Component, dest_path: str) -> None:
+        """Run a component's build command(s) at the repo root with its env."""
+        if not component.build:
+            return
+        env_prefix = "".join(f"{key}={shlex.quote(value)} " for key, value in component.env.items())
+        for command in component.build:
+            print(f"    build: {command}")
+            result = run(
+                f"cd {shlex.quote(dest_path)} && {env_prefix}{command}",
+                check=False,
+                capture_output=True,
+            )
+            if result.returncode != 0:
+                error = self._get_command_error(result, "build command failed")
+                raise RuntimeError(f"Component '{component.name}' build failed: {error}")
+
+    def _component_dep(self, component: Component, dest_path: str) -> dict[str, Any]:
+        """Translate a component into an nginx deployment descriptor."""
+        dep: dict[str, Any] = {
+            'dest_path': dest_path,
+            'domain': component.domain,
+            'path': component.path,
+            'api_subdomain': False,
+            'frontend_port': None,
+            'frontend_serve_path': None,
+        }
+        if component.is_static:
+            serve_path = os.path.normpath(os.path.join(dest_path, component.output or ""))
+            dep.update(
+                project_type='static',
+                needs_proxy=False,
+                serve_path=serve_path,
+                backend_port=None,
+            )
+            return dep
+        # service: nginx reverse-proxies the component's domain to its loopback port
+        dep.update(
+            project_type='service',
+            needs_proxy=True,
+            serve_path=dest_path,
+            backend_port=component.port,
+            proxy_port=component.port,
+        )
+        return dep
+
+    def _resolve_working_dir(self, component: Component, dest_path: str) -> str:
+        working_dir = component.working_dir
+        if not working_dir:
+            return dest_path
+        if os.path.isabs(working_dir):
+            return working_dir
+        return os.path.normpath(os.path.join(dest_path, working_dir))
+
+    def _install_service_component(self, component: Component, dest_path: str) -> None:
+        working_dir = self._resolve_working_dir(component, dest_path)
+        if component.exec:
+            exec_start = component.exec
+        else:
+            binary_path = os.path.normpath(os.path.join(dest_path, component.binary or ""))
+            if not os.path.exists(binary_path):
+                raise RuntimeError(
+                    f"Component '{component.name}': binary not found after build: {binary_path}"
+                )
+            exec_start = binary_path
+        create_managed_service(
+            self._service_name(component),
+            exec_start,
+            working_dir,
+            self.web_user,
+            self.web_group,
+            env_file=component.env_file,
+            description=f"infra.json service: {component.name}",
+        )
+        if component.health:
+            self._poll_health(component)
+
+    def _poll_health(self, component: Component, attempts: int = 10, delay: float = 1.0) -> None:
+        """Poll a service's health endpoint until it answers, then return.
+
+        Any HTTP response below 500 counts as "up" (the service is bound and
+        routing). A persistent failure only warns: a transient slow start
+        should not abort an otherwise-successful multi-component deploy.
+        """
+        import time
+        import urllib.error
+        import urllib.request
+
+        url = f"http://127.0.0.1:{component.port}{component.health}"
+        for _attempt in range(attempts):
+            try:
+                with urllib.request.urlopen(url, timeout=3) as resp:
+                    if resp.status < 500:
+                        print(f"  ✓ Health check passed for '{component.name}' ({url} → {resp.status})")
+                        return
+            except urllib.error.HTTPError as exc:
+                if exc.code < 500:
+                    print(f"  ✓ Health check passed for '{component.name}' ({url} → {exc.code})")
+                    return
+            except (urllib.error.URLError, OSError):
+                pass
+            time.sleep(delay)
+        print(f"  ⚠ Warning: health check for '{component.name}' did not pass after {attempts} attempts ({url})")
+
     def build_project(self, project_path: str, project_type: str, site_root: Optional[str] = None, app_name: Optional[str] = None, reset_migrations: bool = False):
         if project_type == "rails":
             self._build_rails_project(project_path, app_name, reset_migrations)

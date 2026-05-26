@@ -127,6 +127,8 @@ def cleanup_all_infra_services(dry_run: bool = False) -> None:
         r"^node-.*\.service$",
         # Rails app services
         r"^rails-.*\.service$",
+        # Manifest-defined (infra.json) service components
+        r"^app-.*\.service$",
         # Auto-update timers
         r"^auto-update-node\.service$",
         r"^auto-update-node\.timer$",
@@ -261,6 +263,87 @@ def create_node_service(app_name: str, app_path: str, port: int,
     time.sleep(1)
     
     result = run(f"systemctl is-active {service_name}", check=False)
+    if result.returncode != 0:
+        print(f"  ⚠ Warning: {service_name} may not be running. Check with: systemctl status {service_name}")
+    else:
+        print(f"  ✓ {service_name} is running")
+
+
+def generate_managed_service(name: str, exec_start: str, working_dir: str,
+                             web_user: str = "www-data", web_group: str = "www-data",
+                             env_file: Optional[str] = None,
+                             description: Optional[str] = None) -> str:
+    """Generate a hardened systemd unit for a manifest service component.
+
+    Unlike the Rails/Node generators this makes no assumptions about the
+    runtime: the component supplies its own ExecStart (a binary path or full
+    command) and reads its configuration (including which port to bind) from
+    ``env_file``. infra_tools only needs the port for the nginx upstream.
+    """
+    lines = [
+        "[Unit]",
+        f"Description={description or f'infra_tools managed service: {name}'}",
+        "After=network.target",
+        "",
+        "[Service]",
+        "Type=simple",
+        f"User={web_user}",
+        f"Group={web_group}",
+        f"WorkingDirectory={working_dir}",
+    ]
+    if env_file:
+        lines.append(f"EnvironmentFile={env_file}")
+    lines += [
+        f"ExecStart={exec_start}",
+        "Restart=always",
+        "RestartSec=5",
+        # Conservative hardening: read-only system dirs while still allowing
+        # writes under /var and /opt (e.g. a SQLite data directory).
+        "NoNewPrivileges=true",
+        "PrivateTmp=true",
+        "ProtectSystem=full",
+        "ProtectHome=true",
+        "ProtectControlGroups=true",
+        "ProtectKernelTunables=true",
+        "RestrictSUIDSGID=true",
+        "",
+        "[Install]",
+        "WantedBy=multi-user.target",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def create_managed_service(service_name: str, exec_start: str, working_dir: str,
+                           web_user: str, web_group: str,
+                           env_file: Optional[str] = None,
+                           description: Optional[str] = None) -> None:
+    """Create, enable, and start a manifest-defined systemd service."""
+    service_file = f"/etc/systemd/system/{service_name}.service"
+
+    # Clean up any previous unit before installing the new one.
+    cleanup_service(service_name)
+
+    service_content = generate_managed_service(
+        service_name, exec_start, working_dir, web_user, web_group, env_file, description
+    )
+
+    try:
+        with open(service_file, 'w') as f:
+            f.write(service_content)
+    except PermissionError as e:
+        raise PermissionError(f"Failed to write service file {service_file}. Need root permissions.") from e
+
+    run("systemctl daemon-reload")
+    run(f"systemctl enable {shlex.quote(service_name)}")
+    run(f"systemctl restart {shlex.quote(service_name)}")
+
+    print(f"  ✓ Created and started systemd service: {service_name}")
+
+    import time
+    time.sleep(1)
+
+    result = run(f"systemctl is-active {shlex.quote(service_name)}", check=False)
     if result.returncode != 0:
         print(f"  ⚠ Warning: {service_name} may not be running. Check with: systemctl status {service_name}")
     else:

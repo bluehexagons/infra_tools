@@ -1,9 +1,13 @@
 # Project Manifest (`infra.json`) — Design
 
-> **Status:** Phase 1 implemented (`lib/project_manifest.py` loader + validation
-> + `tests/test_project_manifest.py`); phases 2–3 still pending. This document
-> specifies a repo-side manifest that lets a deployed repository describe *how*
-> it should be built and served, instead of infra_tools guessing from file presence.
+> **Status:** Phases 1–2 implemented. Phase 1: `lib/project_manifest.py` loader
+> + validation. Phase 2: `DeploymentOrchestrator.deploy_manifest` +
+> `create_managed_service`, wired into the `deploy_repository` entrypoint and
+> the `setup ... --deploy` path; tests in `tests/test_project_manifest.py` and
+> `tests/test_manifest_deploy.py`. Phase 3 (CI/CD reuse) is deliberately deferred
+> — see below. This document specifies a repo-side manifest that lets a deployed
+> repository describe *how* it should be built and served, instead of infra_tools
+> guessing from file presence.
 
 ## Motivation
 
@@ -89,7 +93,7 @@ Top level:
 | `binary`        | string | one of   | Path (relative to repo root) to the built executable to install/run.  |
 | `exec`          | string | binary/exec | Full command to run instead of a single binary.                    |
 | `port`          | int    | yes      | Loopback port the service listens on (used for the nginx upstream).   |
-| `systemd_unit`  | string | no       | Path to a unit file in the repo to install as a template. If omitted, infra_tools generates one (analogous to `create_rails_service`). |
+| `systemd_unit`  | string | no       | Repo-relative path to a reference unit file. **Phase 2 note:** the orchestrator currently always *generates* a hardened unit from the manifest fields (resolved binary/`exec`, `working_dir`, `env_file`) so the runtime paths match the actual release dir; the repo's unit is validated for path-safety but its contents are not yet installed verbatim. Honoring a repo-supplied unit as a template is a future enhancement. |
 | `env_file`      | string | no       | Absolute path on the server for systemd `EnvironmentFile=`. Secrets live here, **never** in the repo. |
 | `reverse_proxy` | bool   | no       | Default `true`. nginx proxies `domain` → `127.0.0.1:port`.            |
 | `health`        | string | no       | HTTP path polled after (re)start to confirm the service is up.        |
@@ -145,10 +149,25 @@ serve a static apex site and a reverse-proxied API subdomain from a single deplo
 
 1. **Foundation (done):** `lib/project_manifest.py` loader + dataclasses +
    strict validation; unit tests for parse/validate; this doc.
-2. **Orchestrator wiring:** multi-component build in `DeploymentOrchestrator`;
-   generalize service creation; per-component nginx generation; health polling.
-3. **CI/CD reuse (optional):** executor reads the manifest instead of server-side
-   script config.
+2. **Orchestrator wiring (done):** `DeploymentOrchestrator.deploy_manifest`
+   moves the source into the release dir, runs each component's `build` (with its
+   `env`), and produces one nginx descriptor per component — `static` → a static
+   `serve_path`, `service` → a reverse proxy to `127.0.0.1:<port>`. Service
+   components install a generated hardened systemd unit via
+   `create_managed_service` (`lib/systemd_service.py`) wired to `env_file`, and
+   their `health` endpoint is polled after start. `deploy_repository` now returns
+   a list of descriptors (one per component; legacy single-project deploys return
+   a one-element list), grouped per-domain by the existing nginx generation so a
+   repo can serve a static apex site and a proxied API subdomain from one deploy.
+   Always does a full build; incremental skip (mirroring `should_redeploy`) is a
+   future optimization kept out to limit surface area.
+3. **CI/CD reuse (optional — deferred):** the `cicd_executor` deploy path builds
+   in a CI workspace and rsyncs a *single* artifact to a *single* remote path,
+   generating nginx for one domain. The manifest's multi-component / multi-domain
+   model does not map cleanly onto that single-artifact push without a larger
+   rework of the remote-push pipeline, so this phase is intentionally not built
+   yet. The `setup ... --deploy` path (which builds and serves locally) is the
+   supported manifest path today.
 
 ## Testing
 

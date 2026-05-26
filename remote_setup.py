@@ -231,7 +231,7 @@ def main() -> int:
                     if not deploy_spec: continue
 
                     print(f"\nDeploying pre-uploaded repository: {repo_name}")
-                    info = deploy_repository(
+                    infos = deploy_repository(
                         source_path=source_path,
                         deploy_spec=deploy_spec,
                         git_url=git_url,
@@ -243,8 +243,8 @@ def main() -> int:
                         api_subdomain=config.api_subdomain,
                         reset_migrations=config.reset_migrations
                     )
-                    if info:
-                        deployments.append(info)
+                    if infos:
+                        deployments.extend(infos)
         else:
             temp_dir = tempfile.mkdtemp(prefix="infra_deploy_")
             try:
@@ -274,7 +274,7 @@ def main() -> int:
                         deploy_spec = deploy_spec.strip()
                         if not deploy_spec: continue
 
-                        info = deploy_repository(
+                        infos = deploy_repository(
                             source_path=clone_path,
                             deploy_spec=deploy_spec,
                             git_url=git_url,
@@ -286,8 +286,8 @@ def main() -> int:
                             api_subdomain=config.api_subdomain,
                             reset_migrations=config.reset_migrations
                         )
-                        if info:
-                            deployments.append(info)
+                        if infos:
+                            deployments.extend(infos)
             finally:
                 if os.path.exists(temp_dir):
                     shutil.rmtree(temp_dir)
