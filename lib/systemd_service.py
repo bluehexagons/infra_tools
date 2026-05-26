@@ -314,23 +314,16 @@ def generate_managed_service(name: str, exec_start: str, working_dir: str,
     return "\n".join(lines)
 
 
-def create_managed_service(service_name: str, exec_start: str, working_dir: str,
-                           web_user: str, web_group: str,
-                           env_file: Optional[str] = None,
-                           description: Optional[str] = None) -> None:
-    """Create, enable, and start a manifest-defined systemd service."""
+def _install_and_start_unit(service_name: str, unit_content: str) -> None:
+    """Write a unit file, (re)load, enable, restart, and verify it is active."""
     service_file = f"/etc/systemd/system/{service_name}.service"
 
     # Clean up any previous unit before installing the new one.
     cleanup_service(service_name)
 
-    service_content = generate_managed_service(
-        service_name, exec_start, working_dir, web_user, web_group, env_file, description
-    )
-
     try:
         with open(service_file, 'w') as f:
-            f.write(service_content)
+            f.write(unit_content)
     except PermissionError as e:
         raise PermissionError(f"Failed to write service file {service_file}. Need root permissions.") from e
 
@@ -348,6 +341,26 @@ def create_managed_service(service_name: str, exec_start: str, working_dir: str,
         print(f"  ⚠ Warning: {service_name} may not be running. Check with: systemctl status {service_name}")
     else:
         print(f"  ✓ {service_name} is running")
+
+
+def create_managed_service(service_name: str, exec_start: str, working_dir: str,
+                           web_user: str, web_group: str,
+                           env_file: Optional[str] = None,
+                           description: Optional[str] = None) -> None:
+    """Create, enable, and start a manifest-defined systemd service."""
+    unit_content = generate_managed_service(
+        service_name, exec_start, working_dir, web_user, web_group, env_file, description
+    )
+    _install_and_start_unit(service_name, unit_content)
+
+
+def install_unit_file(service_name: str, unit_content: str) -> None:
+    """Install a fully-specified (already-rendered) unit and start it.
+
+    Used for repo-supplied ``systemd_unit`` templates: infra_tools substitutes
+    the deploy-time values and trusts the repo author's [Service] hardening.
+    """
+    _install_and_start_unit(service_name, unit_content)
 
 
 def generate_rails_service(app_name: str, app_path: str, secret_key_base: str, port: int = 3000,

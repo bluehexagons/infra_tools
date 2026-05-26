@@ -13,8 +13,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from lib.project_manifest import (
     MANIFEST_FILENAME,
     Manifest,
+    has_placeholder,
     load_manifest,
     parse_manifest,
+    render_template,
 )
 
 
@@ -206,6 +208,74 @@ class TestRejects(unittest.TestCase):
 
     def test_reverse_proxy_not_bool(self):
         self._assert_rejected(_manifest(_service(reverse_proxy="yes")), "boolean")
+
+
+class TestTemplating(unittest.TestCase):
+    def test_render_substitutes(self):
+        out = render_template(
+            "{{base_dir}}/{{name}}/.env",
+            {"base_dir": "/var/www", "name": "api"},
+        )
+        self.assertEqual(out, "/var/www/api/.env")
+
+    def test_render_allows_inner_whitespace(self):
+        self.assertEqual(render_template("{{ port }}", {"port": "8080"}), "8080")
+
+    def test_render_unknown_variable_raises(self):
+        with self.assertRaises(ValueError) as ctx:
+            render_template("{{nope}}", {"port": "8080"})
+        self.assertIn("nope", str(ctx.exception))
+
+    def test_render_no_placeholder_unchanged(self):
+        self.assertEqual(render_template("/opt/app/.env", {}), "/opt/app/.env")
+
+    def test_has_placeholder(self):
+        self.assertTrue(has_placeholder("{{base_dir}}/x"))
+        self.assertFalse(has_placeholder("/opt/app"))
+
+
+class TestTemplatedFieldValidation(unittest.TestCase):
+    def _assert_rejected(self, data: object, needle: str = "") -> None:
+        with self.assertRaises(ValueError) as ctx:
+            parse_manifest(data)
+        if needle:
+            self.assertIn(needle, str(ctx.exception))
+
+    def test_env_file_with_placeholder_accepted(self):
+        comp = parse_manifest(
+            _manifest(_service(env_file="{{base_dir}}/{{name}}/.env"))
+        ).components[0]
+        self.assertEqual(comp.env_file, "{{base_dir}}/{{name}}/.env")
+
+    def test_env_file_relative_without_placeholder_rejected(self):
+        self._assert_rejected(_manifest(_service(env_file="relative/.env")), "absolute")
+
+    def test_env_file_unknown_placeholder_rejected(self):
+        self._assert_rejected(
+            _manifest(_service(env_file="{{bogus}}/.env")), "unknown template variable"
+        )
+
+    def test_exec_placeholders_accepted(self):
+        comp = parse_manifest(
+            _manifest(_service(binary=None, exec="{{binary}} --port {{port}}"))
+        ).components[0]
+        self.assertEqual(comp.exec, "{{binary}} --port {{port}}")
+
+    def test_exec_unknown_placeholder_rejected(self):
+        self._assert_rejected(
+            _manifest(_service(binary=None, exec="{{wat}}")), "unknown template variable"
+        )
+
+    def test_working_dir_placeholder_accepted(self):
+        comp = parse_manifest(
+            _manifest(_service(working_dir="{{release_dir}}/server"))
+        ).components[0]
+        self.assertEqual(comp.working_dir, "{{release_dir}}/server")
+
+    def test_working_dir_unknown_placeholder_rejected(self):
+        self._assert_rejected(
+            _manifest(_service(working_dir="{{nope}}")), "unknown template variable"
+        )
 
 
 class TestLoadManifest(unittest.TestCase):

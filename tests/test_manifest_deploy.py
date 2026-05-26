@@ -97,17 +97,40 @@ class TestComponentDescriptor(unittest.TestCase):
         self.assertEqual(self.orch._service_name(_service_component()), "app-api")
 
     def test_working_dir_defaults_to_release(self):
-        self.assertEqual(
-            self.orch._resolve_working_dir(_service_component(), "/var/www/site"),
-            "/var/www/site",
-        )
+        ctx = self.orch._service_context(_service_component(), "/var/www/site")
+        self.assertEqual(ctx['working_dir'], "/var/www/site")
 
     def test_working_dir_relative_resolved(self):
         comp = _service_component(working_dir="server")
-        self.assertEqual(
-            self.orch._resolve_working_dir(comp, "/var/www/site"),
-            "/var/www/site/server",
+        ctx = self.orch._service_context(comp, "/var/www/site")
+        self.assertEqual(ctx['working_dir'], "/var/www/site/server")
+
+
+class TestServiceContext(unittest.TestCase):
+    def setUp(self):
+        self.orch = DeploymentOrchestrator(base_dir="/var/www", web_user="rails", web_group="rails")
+
+    def test_resolves_binary_working_dir_env_file(self):
+        comp = _service_component(
+            working_dir="{{release_dir}}/server",
+            env_file="{{base_dir}}/{{name}}/.env",
         )
+        ctx = self.orch._service_context(comp, "/var/www/shop")
+        self.assertEqual(ctx['release_dir'], "/var/www/shop")
+        self.assertEqual(ctx['base_dir'], "/var/www")
+        self.assertEqual(ctx['port'], "8090")
+        self.assertEqual(ctx['binary'], "/var/www/shop/server/app")
+        self.assertEqual(ctx['working_dir'], "/var/www/shop/server")
+        self.assertEqual(ctx['env_file'], "/var/www/api/.env")
+        self.assertEqual(ctx['service_name'], "app-api")
+
+    def test_exec_component_context_has_no_binary(self):
+        # With exec (and no binary field), {{binary}} is intentionally absent;
+        # referencing it would fail fast at render time.
+        comp = _service_component(binary=None, exec="/srv/app --port {{port}}")
+        ctx = self.orch._service_context(comp, "/var/www/shop")
+        self.assertNotIn('binary', ctx)
+        self.assertEqual(ctx['port'], "8090")
 
 
 class TestNginxIntegration(unittest.TestCase):
@@ -244,6 +267,77 @@ class TestDeployManifest(unittest.TestCase):
                 keep_source=True,
             )
         self.assertIn("binary not found", str(ctx.exception))
+
+
+class TestDeployManifestUnitTemplate(unittest.TestCase):
+    """A repo-supplied systemd_unit is installed as a substituted template."""
+
+    def setUp(self):
+        self.base_dir = tempfile.mkdtemp(prefix="manifest_base_")
+        self.source = tempfile.mkdtemp(prefix="manifest_src_")
+        self.orch = DeploymentOrchestrator(base_dir=self.base_dir, web_user="rails", web_group="rails")
+
+        manifest = {
+            "version": 1,
+            "components": [
+                {"name": "api", "type": "service", "domain": "api.example.com",
+                 "build": "server/build.sh", "binary": "server/app",
+                 "systemd_unit": "server/app.service.tmpl",
+                 "env_file": "/opt/app/.env", "working_dir": "{{release_dir}}/server",
+                 "port": 8090, "health": "/health"},
+            ],
+        }
+        with open(os.path.join(self.source, "infra.json"), "w") as f:
+            json.dump(manifest, f)
+        os.makedirs(os.path.join(self.source, "server"))
+        with open(os.path.join(self.source, "server", "app"), "w") as f:
+            f.write("#!/bin/sh\n")
+        with open(os.path.join(self.source, "server", "app.service.tmpl"), "w") as f:
+            f.write(
+                "[Service]\n"
+                "ExecStart={{binary}}\n"
+                "WorkingDirectory={{working_dir}}\n"
+                "EnvironmentFile={{env_file}}\n"
+                "User={{web_user}}\n"
+                "Environment=LISTEN_ADDR=:{{port}}\n"
+            )
+        with open(os.path.join(self.source, "infra.json")) as f:
+            self.manifest: Manifest = parse_manifest(json.load(f))
+
+    def tearDown(self):
+        for path in (self.base_dir, self.source):
+            if os.path.exists(path):
+                shutil.rmtree(path)
+
+    @patch.object(DeploymentOrchestrator, '_poll_health')
+    @patch('lib.deployment.install_unit_file')
+    @patch('lib.deployment.create_managed_service')
+    @patch('lib.deployment.save_deployment_metadata')
+    @patch('lib.deployment.run')
+    def test_installs_rendered_unit(self, mock_run, mock_meta, mock_create, mock_install, mock_health):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        self.orch.deploy_manifest(
+            manifest=self.manifest, source_path=self.source,
+            domain="api.example.com", path="/",
+            git_url="https://git.example.com/shop.git", commit_hash="abc123",
+            keep_source=True,
+        )
+
+        dest = os.path.join(self.base_dir, "api_example_com")
+
+        # The generated-unit path must NOT be used when systemd_unit is present.
+        mock_create.assert_not_called()
+        mock_install.assert_called_once()
+        service_name, rendered = mock_install.call_args.args
+        self.assertEqual(service_name, "app-api")
+        # Placeholders resolved to deploy-time values.
+        self.assertIn(f"ExecStart={os.path.join(dest, 'server', 'app')}", rendered)
+        self.assertIn(f"WorkingDirectory={os.path.join(dest, 'server')}", rendered)
+        self.assertIn("EnvironmentFile=/opt/app/.env", rendered)
+        self.assertIn("User=rails", rendered)
+        self.assertIn("LISTEN_ADDR=:8090", rendered)
+        self.assertNotIn("{{", rendered)
 
 
 if __name__ == "__main__":

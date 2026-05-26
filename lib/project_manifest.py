@@ -26,6 +26,55 @@ MIN_PORT = 1024
 MAX_PORT = 65535
 
 _NAME_PATTERN = re.compile(r"^[a-z0-9-]+$")
+_PLACEHOLDER_RE = re.compile(r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}")
+
+# Deploy-time template variables that may appear as ``{{name}}`` in a service
+# component's env_file / working_dir / exec, and in a repo-supplied systemd_unit
+# file. The orchestrator supplies the concrete values at deploy time.
+TEMPLATE_VARS = frozenset({
+    "release_dir",   # absolute path of the deployed release
+    "base_dir",      # deployment root (e.g. /var/www)
+    "name",          # component name
+    "service_name",  # systemd unit base name (app-<name>)
+    "domain",        # component domain
+    "path",          # component URL path
+    "web_user",      # service user
+    "web_group",     # service group
+    "port",          # loopback port
+    "binary",        # resolved absolute binary path
+    "working_dir",   # resolved working directory
+    "env_file",      # resolved EnvironmentFile path
+})
+
+
+def has_placeholder(text: str) -> bool:
+    """True if text contains any ``{{...}}`` template placeholder."""
+    return "{{" in text
+
+
+def render_template(text: str, context: dict[str, str]) -> str:
+    """Substitute ``{{name}}`` placeholders from context.
+
+    Raises ValueError on an unknown variable so typos fail fast instead of
+    silently producing a broken path or unit file.
+    """
+    def replace(match: "re.Match[str]") -> str:
+        key = match.group(1)
+        if key not in context:
+            raise ValueError(f"unknown template variable: {{{{{key}}}}}")
+        return context[key]
+
+    return _PLACEHOLDER_RE.sub(replace, text)
+
+
+def _validate_placeholders(text: str, field: str, where: str) -> None:
+    """Reject any ``{{name}}`` referencing a variable not in TEMPLATE_VARS."""
+    for match in _PLACEHOLDER_RE.finditer(text):
+        if match.group(1) not in TEMPLATE_VARS:
+            raise ValueError(
+                f"{where}: {field} references unknown template variable "
+                f"{{{{{match.group(1)}}}}}; known: {', '.join(sorted(TEMPLATE_VARS))}"
+            )
 
 _COMMON_FIELDS = {"name", "type", "domain", "path", "build", "env"}
 _STATIC_FIELDS = {"output"}
@@ -187,8 +236,10 @@ def _parse_service(entry: dict, where: str, common: dict) -> Component:
         if not isinstance(binary, str) or not binary:
             raise ValueError(f"{where}: binary must be a non-empty string")
         _require_repo_relative(binary, "binary", where)
-    if exec_cmd is not None and (not isinstance(exec_cmd, str) or not exec_cmd):
-        raise ValueError(f"{where}: exec must be a non-empty string")
+    if exec_cmd is not None:
+        if not isinstance(exec_cmd, str) or not exec_cmd:
+            raise ValueError(f"{where}: exec must be a non-empty string")
+        _validate_placeholders(exec_cmd, "exec", where)
 
     port = entry.get("port")
     if not isinstance(port, int) or isinstance(port, bool):
@@ -204,8 +255,16 @@ def _parse_service(entry: dict, where: str, common: dict) -> Component:
 
     env_file = entry.get("env_file")
     if env_file is not None:
-        if not isinstance(env_file, str) or not os.path.isabs(env_file):
-            raise ValueError(f"{where}: env_file must be an absolute server-side path")
+        if not isinstance(env_file, str) or not env_file:
+            raise ValueError(f"{where}: env_file must be a non-empty string")
+        _validate_placeholders(env_file, "env_file", where)
+        # Must resolve to an absolute server-side path: either literally absolute
+        # or built from placeholders (e.g. {{base_dir}}/{{name}}/.env).
+        if not has_placeholder(env_file) and not os.path.isabs(env_file):
+            raise ValueError(
+                f"{where}: env_file must be an absolute server-side path or use "
+                f"{{{{...}}}} placeholders"
+            )
 
     reverse_proxy = entry.get("reverse_proxy", True)
     if not isinstance(reverse_proxy, bool):
@@ -216,8 +275,10 @@ def _parse_service(entry: dict, where: str, common: dict) -> Component:
         raise ValueError(f"{where}: health must be a string starting with '/'")
 
     working_dir = entry.get("working_dir")
-    if working_dir is not None and (not isinstance(working_dir, str) or not working_dir):
-        raise ValueError(f"{where}: working_dir must be a non-empty string")
+    if working_dir is not None:
+        if not isinstance(working_dir, str) or not working_dir:
+            raise ValueError(f"{where}: working_dir must be a non-empty string")
+        _validate_placeholders(working_dir, "working_dir", where)
 
     return Component(
         binary=binary,

@@ -23,8 +23,8 @@ from lib.deploy_utils import (
     save_deployment_metadata,
     should_redeploy
 )
-from lib.systemd_service import create_rails_service, create_managed_service
-from lib.project_manifest import Component, Manifest, load_manifest
+from lib.systemd_service import create_rails_service, create_managed_service, install_unit_file
+from lib.project_manifest import Component, Manifest, load_manifest, render_template
 
 
 class DeploymentOrchestrator:
@@ -729,34 +729,77 @@ class DeploymentOrchestrator:
         )
         return dep
 
-    def _resolve_working_dir(self, component: Component, dest_path: str) -> str:
+    def _service_context(self, component: Component, dest_path: str) -> dict[str, str]:
+        """Build the deploy-time {{...}} substitution context for a service.
+
+        Variables are resolved in dependency order (binary, then working_dir,
+        then env_file) so later fields and a repo-supplied unit template can
+        reference the earlier ones (e.g. ExecStart={{binary}}).
+        """
+        context: dict[str, str] = {
+            'release_dir': dest_path,
+            'base_dir': self.base_dir,
+            'name': component.name,
+            'service_name': self._service_name(component),
+            'domain': component.domain,
+            'path': component.path,
+            'web_user': self.web_user,
+            'web_group': self.web_group,
+            'port': str(component.port) if component.port is not None else '',
+        }
+        if component.binary:
+            resolved = render_template(component.binary, context)
+            context['binary'] = os.path.normpath(os.path.join(dest_path, resolved))
+        context['working_dir'] = self._resolve_working_dir(component, dest_path, context)
+        if component.env_file:
+            context['env_file'] = render_template(component.env_file, context)
+        return context
+
+    def _resolve_working_dir(self, component: Component, dest_path: str,
+                             context: dict[str, str]) -> str:
         working_dir = component.working_dir
         if not working_dir:
             return dest_path
+        working_dir = render_template(working_dir, context)
         if os.path.isabs(working_dir):
             return working_dir
         return os.path.normpath(os.path.join(dest_path, working_dir))
 
     def _install_service_component(self, component: Component, dest_path: str) -> None:
-        working_dir = self._resolve_working_dir(component, dest_path)
-        if component.exec:
-            exec_start = component.exec
-        else:
-            binary_path = os.path.normpath(os.path.join(dest_path, component.binary or ""))
+        context = self._service_context(component, dest_path)
+
+        # Verify the built artifact exists before wiring a unit around it.
+        if component.binary:
+            binary_path = context['binary']
             if not os.path.exists(binary_path):
                 raise RuntimeError(
                     f"Component '{component.name}': binary not found after build: {binary_path}"
                 )
-            exec_start = binary_path
-        create_managed_service(
-            self._service_name(component),
-            exec_start,
-            working_dir,
-            self.web_user,
-            self.web_group,
-            env_file=component.env_file,
-            description=f"infra.json service: {component.name}",
-        )
+
+        service_name = self._service_name(component)
+
+        if component.systemd_unit:
+            # Honor the repo's hardened unit: substitute placeholders, install it.
+            unit_src = os.path.normpath(os.path.join(dest_path, component.systemd_unit))
+            if not os.path.exists(unit_src):
+                raise RuntimeError(
+                    f"Component '{component.name}': systemd_unit not found: {unit_src}"
+                )
+            with open(unit_src, "r", encoding="utf-8") as handle:
+                unit_content = render_template(handle.read(), context)
+            install_unit_file(service_name, unit_content)
+        else:
+            exec_start = render_template(component.exec, context) if component.exec else context['binary']
+            create_managed_service(
+                service_name,
+                exec_start,
+                context['working_dir'],
+                self.web_user,
+                self.web_group,
+                env_file=context.get('env_file'),
+                description=f"infra.json service: {component.name}",
+            )
+
         if component.health:
             self._poll_health(component)
 

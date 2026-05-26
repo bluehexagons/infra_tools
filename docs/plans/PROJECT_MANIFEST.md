@@ -1,13 +1,15 @@
 # Project Manifest (`infra.json`) — Design
 
-> **Status:** Phases 1–2 implemented. Phase 1: `lib/project_manifest.py` loader
-> + validation. Phase 2: `DeploymentOrchestrator.deploy_manifest` +
-> `create_managed_service`, wired into the `deploy_repository` entrypoint and
-> the `setup ... --deploy` path; tests in `tests/test_project_manifest.py` and
+> **Status:** Phases 1–2 implemented, including deploy-time `{{...}}` templating
+> (`render_template`) for `env_file` / `working_dir` / `exec` and repo-supplied
+> `systemd_unit` files. Phase 1: `lib/project_manifest.py` loader + validation.
+> Phase 2: `DeploymentOrchestrator.deploy_manifest` + `create_managed_service` /
+> `install_unit_file`, wired into the `deploy_repository` entrypoint and the
+> `setup ... --deploy` path; tests in `tests/test_project_manifest.py` and
 > `tests/test_manifest_deploy.py`. Phase 3 (CI/CD reuse) is deliberately deferred
-> — see below. This document specifies a repo-side manifest that lets a deployed
-> repository describe *how* it should be built and served, instead of infra_tools
-> guessing from file presence.
+> to a future project — see `docs/plans/CICD_MANIFEST_REUSE.md`. This document
+> specifies a repo-side manifest that lets a deployed repository describe *how*
+> it should be built and served, instead of infra_tools guessing from file presence.
 
 ## Motivation
 
@@ -93,8 +95,8 @@ Top level:
 | `binary`        | string | one of   | Path (relative to repo root) to the built executable to install/run.  |
 | `exec`          | string | binary/exec | Full command to run instead of a single binary.                    |
 | `port`          | int    | yes      | Loopback port the service listens on (used for the nginx upstream).   |
-| `systemd_unit`  | string | no       | Repo-relative path to a reference unit file. **Phase 2 note:** the orchestrator currently always *generates* a hardened unit from the manifest fields (resolved binary/`exec`, `working_dir`, `env_file`) so the runtime paths match the actual release dir; the repo's unit is validated for path-safety but its contents are not yet installed verbatim. Honoring a repo-supplied unit as a template is a future enhancement. |
-| `env_file`      | string | no       | Absolute path on the server for systemd `EnvironmentFile=`. Secrets live here, **never** in the repo. |
+| `systemd_unit`  | string | no       | Repo-relative path to a unit file. If set, infra_tools reads it, substitutes `{{...}}` placeholders (see [Templating](#templating)), and installs the result as `app-<name>.service` — so a repo can ship its own hardened unit. If omitted, infra_tools generates a hardened unit from the fields below. |
+| `env_file`      | string | no       | Server-side path for systemd `EnvironmentFile=`; must be absolute or built from `{{...}}` placeholders. Secrets live here, **never** in the repo. |
 | `reverse_proxy` | bool   | no       | Default `true`. nginx proxies `domain` → `127.0.0.1:port`.            |
 | `health`        | string | no       | HTTP path polled after (re)start to confirm the service is up.        |
 | `working_dir`   | string | no       | Server-side working directory; default the deployment release dir.    |
@@ -102,6 +104,40 @@ Top level:
 Validation rejects: unknown `version`, duplicate `name`s, unknown `type`,
 missing required fields, `output` escaping the repo root, and `port` outside
 `1024–65535`. Unknown fields are rejected (fail fast) to surface typos.
+
+## Templating
+
+Install directories and other runtime values are only known at deploy time, so
+a service component's `env_file`, `working_dir`, and `exec`, plus the contents of
+a repo-supplied `systemd_unit` file, may contain `{{name}}` placeholders that
+infra_tools substitutes during deploy (`render_template` in
+`lib/project_manifest.py`). Syntax is `{{var}}` (double braces, optional inner
+whitespace) — chosen over `${var}` so it never collides with shell `${...}` in
+`exec`/unit `ExecStart` strings.
+
+Available variables (`TEMPLATE_VARS`):
+
+| Variable         | Value                                                        |
+|------------------|--------------------------------------------------------------|
+| `release_dir`    | absolute path of the deployed release                        |
+| `base_dir`       | deployment root (e.g. `/var/www`)                            |
+| `name`           | component name                                               |
+| `service_name`   | systemd unit base name (`app-<name>`)                       |
+| `domain`         | component domain                                            |
+| `path`           | component URL path                                          |
+| `web_user` / `web_group` | service user / group                                |
+| `port`           | loopback port                                               |
+| `binary`         | resolved absolute binary path (when `binary` is set)        |
+| `working_dir`    | resolved working directory                                  |
+| `env_file`       | resolved `EnvironmentFile` path                             |
+
+Placeholder names in `env_file`/`working_dir`/`exec` are validated against this
+set at parse time (typos fail fast); the same check runs at render time for unit
+files. Variables are resolved in dependency order (`binary` → `working_dir` →
+`env_file` → `exec`/unit), so later fields can reference earlier ones, e.g.
+`ExecStart={{binary}}` and `EnvironmentFile={{env_file}}`. The SQLite/data
+directory should stay **outside** `release_dir` (the release is replaced on each
+deploy) — keep it on a fixed server path referenced via the `env_file`.
 
 ## Integration with the `--deploy` path
 
@@ -161,13 +197,13 @@ serve a static apex site and a reverse-proxied API subdomain from a single deplo
    repo can serve a static apex site and a proxied API subdomain from one deploy.
    Always does a full build; incremental skip (mirroring `should_redeploy`) is a
    future optimization kept out to limit surface area.
-3. **CI/CD reuse (optional — deferred):** the `cicd_executor` deploy path builds
-   in a CI workspace and rsyncs a *single* artifact to a *single* remote path,
-   generating nginx for one domain. The manifest's multi-component / multi-domain
-   model does not map cleanly onto that single-artifact push without a larger
-   rework of the remote-push pipeline, so this phase is intentionally not built
-   yet. The `setup ... --deploy` path (which builds and serves locally) is the
-   supported manifest path today.
+3. **CI/CD reuse (deferred to a future project):** the `cicd_executor` deploy
+   path builds in a CI workspace and rsyncs a *single* artifact to a *single*
+   remote path, generating nginx for one domain. The manifest's multi-component /
+   multi-domain model does not map cleanly onto that single-artifact push without
+   a larger rework of the remote-push pipeline, so this is split out as its own
+   project — see `docs/plans/CICD_MANIFEST_REUSE.md`. The `setup ... --deploy`
+   path (which builds and serves locally) is the supported manifest path today.
 
 ## Testing
 
@@ -194,7 +230,7 @@ Following `AGENTS.md` / `python3 -m unittest discover -s tests`:
       "domain": "api.bluehexagons.com", "reverse_proxy": true,
       "build": "server/deploy/build.sh",
       "binary": "server/bx-server",
-      "systemd_unit": "server/deploy/bx-server.service",
+      "systemd_unit": "server/deploy/bx-server.service.tmpl",
       "env_file": "/opt/bx-server/.env",
       "port": 8080, "health": "/api/health" }
   ]
@@ -203,4 +239,7 @@ Following `AGENTS.md` / `python3 -m unittest discover -s tests`:
 
 The static build excludes the shop UI by default (`npm run build`); the API is a
 single static Go binary managed by systemd and reverse-proxied on the `api.`
-subdomain so session cookies stay same-site with the apex site.
+subdomain so session cookies stay same-site with the apex site. The repo ships a
+templated `bx-server.service.tmpl` (placeholders for the release dir, binary,
+user, `env_file`, and `port`) that infra_tools renders and installs, preserving
+the repo author's hardening (`ProtectSystem=strict`, `ReadWritePaths`, etc.).
