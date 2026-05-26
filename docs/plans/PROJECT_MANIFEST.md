@@ -1,8 +1,9 @@
 # Project Manifest (`infra.json`) — Design
 
-> **Status:** Design / proposal. Not yet implemented. This document specifies a
-> repo-side manifest that lets a deployed repository describe *how* it should be
-> built and served, instead of infra_tools guessing from file presence.
+> **Status:** Phase 1 implemented (`lib/project_manifest.py` loader + validation
+> + `tests/test_project_manifest.py`); phases 2–3 still pending. This document
+> specifies a repo-side manifest that lets a deployed repository describe *how*
+> it should be built and served, instead of infra_tools guessing from file presence.
 
 ## Motivation
 
@@ -142,7 +143,7 @@ serve a static apex site and a reverse-proxied API subdomain from a single deplo
 
 ## Phased implementation
 
-1. **Foundation (this design):** `lib/project_manifest.py` loader + dataclasses +
+1. **Foundation (done):** `lib/project_manifest.py` loader + dataclasses +
    strict validation; unit tests for parse/validate; this doc.
 2. **Orchestrator wiring:** multi-component build in `DeploymentOrchestrator`;
    generalize service creation; per-component nginx generation; health polling.
