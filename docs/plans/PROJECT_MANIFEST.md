@@ -125,19 +125,23 @@ Available variables (`TEMPLATE_VARS`):
 | `service_name`   | systemd unit base name (`app-<name>`)                       |
 | `domain`         | component domain                                            |
 | `path`           | component URL path                                          |
-| `web_user` / `web_group` | service user / group                                |
+| `web_user` / `web_group` | the service's **dedicated** user/group (see DEPLOY_ISOLATION.md) |
 | `port`           | loopback port                                               |
 | `binary`         | resolved absolute binary path (when `binary` is set)        |
 | `working_dir`    | resolved working directory                                  |
 | `env_file`       | resolved `EnvironmentFile` path                             |
+| `shared_dir`     | infra_tools-managed persistent dir for the component        |
+| `data_dir`       | writable data dir under `shared_dir` (e.g. SQLite)          |
 
 Placeholder names in `env_file`/`working_dir`/`exec` are validated against this
 set at parse time (typos fail fast); the same check runs at render time for unit
 files. Variables are resolved in dependency order (`binary` → `working_dir` →
 `env_file` → `exec`/unit), so later fields can reference earlier ones, e.g.
-`ExecStart={{binary}}` and `EnvironmentFile={{env_file}}`. The SQLite/data
-directory should stay **outside** `release_dir` (the release is replaced on each
-deploy) — keep it on a fixed server path referenced via the `env_file`.
+`ExecStart={{binary}}` and `EnvironmentFile={{env_file}}`. Writable/persistent
+state should use the infra_tools-managed `{{data_dir}}` (it lives outside
+`release_dir`, which is replaced on each deploy, and is owned by the service's
+dedicated user). See `docs/plans/DEPLOY_ISOLATION.md` for the per-service user and
+managed-persistence model.
 
 ## Integration with the `--deploy` path
 

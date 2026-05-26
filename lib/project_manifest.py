@@ -44,6 +44,8 @@ TEMPLATE_VARS = frozenset({
     "binary",        # resolved absolute binary path
     "working_dir",   # resolved working directory
     "env_file",      # resolved EnvironmentFile path
+    "shared_dir",    # infra_tools-managed persistent dir for this component
+    "data_dir",      # writable data dir under shared_dir (e.g. for SQLite)
 })
 
 

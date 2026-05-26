@@ -1,6 +1,7 @@
 """Deployment orchestration - shared between local and remote environments."""
 
 from __future__ import annotations
+import hashlib
 import json
 import os
 import shlex
@@ -627,9 +628,52 @@ class DeploymentOrchestrator:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _service_name(component: Component) -> str:
-        """systemd unit base name for a manifest service component."""
-        return f"app-{component.name}"
+    def _sanitize_user_part(text: str) -> str:
+        """Reduce arbitrary text to a Linux user/unit-name-safe fragment."""
+        safe = re.sub(r"[^a-z0-9_-]", "-", text.lower())
+        return safe.strip("-_") or "x"
+
+    def _service_identity(self, dest_path: str, component: Component) -> tuple[str, str]:
+        """Return (systemd_unit_name, service_username) for a service component.
+
+        Keyed by both the release dir name and the component name so it is unique
+        across repos on one host (two repos can each have a component named
+        'api'). The systemd unit name has no practical length limit; the Linux
+        username is capped to a valid length, falling back to a short hash suffix
+        when truncation is needed so it stays deterministic and collision-free.
+        """
+        app_name = os.path.basename(dest_path.rstrip("/"))
+        base = f"app-{self._sanitize_user_part(app_name)}-{component.name}"
+        unit_name = base
+        if len(base) <= 31:
+            username = base
+        else:
+            digest = hashlib.sha1(base.encode()).hexdigest()[:8]
+            username = f"{base[:22].rstrip('-_')}-{digest}"
+        return unit_name, username
+
+    def _component_shared_dir(self, dest_path: str, component: Component) -> str:
+        """infra_tools-managed persistent dir for a service component.
+
+        Lives outside the release dir (under the same .infra_tools_shared root as
+        Rails state) so it survives the release being replaced on each deploy.
+        """
+        app_name = os.path.basename(dest_path.rstrip("/"))
+        return os.path.join(self._get_persistent_root(app_name), component.name)
+
+    def _component_data_dir(self, dest_path: str, component: Component) -> str:
+        return os.path.join(self._component_shared_dir(dest_path, component), "data")
+
+    def _ensure_service_user(self, username: str) -> None:
+        """Create a locked-down --system, nologin user for a service (idempotent)."""
+        result = run(f"id {shlex.quote(username)}", check=False)
+        if result.returncode == 0:
+            return
+        print(f"  Creating service user: {username}")
+        run(
+            f"useradd --system --no-create-home --shell /usr/sbin/nologin {shlex.quote(username)}",
+            check=False,
+        )
 
     def deploy_manifest(self, manifest: Manifest, source_path: str, domain: Optional[str],
                         path: str, git_url: str, commit_hash: Optional[str],
@@ -648,7 +692,8 @@ class DeploymentOrchestrator:
         # Stop any services this manifest previously installed before files move.
         for component in manifest.components:
             if component.is_service:
-                run(f"systemctl stop {shlex.quote(self._service_name(component))}.service", check=False)
+                unit_name, _ = self._service_identity(dest_path, component)
+                run(f"systemctl stop {shlex.quote(unit_name)}.service", check=False)
 
         parent_dir = os.path.dirname(dest_path)
         if parent_dir and not os.path.exists(parent_dir):
@@ -664,14 +709,16 @@ class DeploymentOrchestrator:
             shutil.move(source_path, dest_path)
             print(f"  ✓ Moved to {dest_path}")
 
+        # Build every component, then describe it for nginx.
         deps: list[dict[str, Any]] = []
         for component in manifest.components:
             print(f"  Component '{component.name}' ({component.type}) → {component.domain}{component.path}")
             self._run_component_build(component, dest_path)
-            if component.is_service:
-                self._install_service_component(component, dest_path)
             deps.append(self._component_dep(component, dest_path))
 
+        # The release tree is deploy-owned and world-readable so nginx can serve
+        # static files and each (separately-owned) service user can read and exec
+        # its binary. Service writable state lives in a service-owned data dir.
         result = run(
             f"chown -R {shlex.quote(self.web_user)}:{shlex.quote(self.web_group)} {shlex.quote(dest_path)}",
             check=False,
@@ -679,6 +726,11 @@ class DeploymentOrchestrator:
         if result.returncode != 0:
             print(f"  ⚠ Warning: Could not set ownership to {self.web_user}:{self.web_group}")
         run(f"chmod -R 755 {shlex.quote(dest_path)}", check=False)
+
+        # Start services after the release tree is readable so they can exec.
+        for component in manifest.components:
+            if component.is_service:
+                self._install_service_component(component, dest_path)
 
         save_deployment_metadata(dest_path, git_url, commit_hash)
         print(f"  ✓ Manifest deployed to {dest_path}")
@@ -736,16 +788,20 @@ class DeploymentOrchestrator:
         then env_file) so later fields and a repo-supplied unit template can
         reference the earlier ones (e.g. ExecStart={{binary}}).
         """
+        unit_name, username = self._service_identity(dest_path, component)
         context: dict[str, str] = {
             'release_dir': dest_path,
             'base_dir': self.base_dir,
             'name': component.name,
-            'service_name': self._service_name(component),
+            'service_name': unit_name,
             'domain': component.domain,
             'path': component.path,
-            'web_user': self.web_user,
-            'web_group': self.web_group,
+            # For a service, the user is its own dedicated, isolated identity.
+            'web_user': username,
+            'web_group': username,
             'port': str(component.port) if component.port is not None else '',
+            'shared_dir': self._component_shared_dir(dest_path, component),
+            'data_dir': self._component_data_dir(dest_path, component),
         }
         if component.binary:
             resolved = render_template(component.binary, context)
@@ -767,6 +823,8 @@ class DeploymentOrchestrator:
 
     def _install_service_component(self, component: Component, dest_path: str) -> None:
         context = self._service_context(component, dest_path)
+        username = context['web_user']
+        service_name = context['service_name']
 
         # Verify the built artifact exists before wiring a unit around it.
         if component.binary:
@@ -776,7 +834,13 @@ class DeploymentOrchestrator:
                     f"Component '{component.name}': binary not found after build: {binary_path}"
                 )
 
-        service_name = self._service_name(component)
+        # Dedicated, isolated service user owning only its managed data dir.
+        self._ensure_service_user(username)
+        data_dir = context['data_dir']
+        shared_dir = context['shared_dir']
+        self._ensure_dir(data_dir)  # also creates shared_dir + the shared root
+        run(f"chown -R {shlex.quote(username)}:{shlex.quote(username)} {shlex.quote(shared_dir)}", check=False)
+        run(f"chmod 0750 {shlex.quote(shared_dir)} {shlex.quote(data_dir)}", check=False)
 
         if component.systemd_unit:
             # Honor the repo's hardened unit: substitute placeholders, install it.
@@ -794,8 +858,8 @@ class DeploymentOrchestrator:
                 service_name,
                 exec_start,
                 context['working_dir'],
-                self.web_user,
-                self.web_group,
+                username,
+                username,
                 env_file=context.get('env_file'),
                 description=f"infra.json service: {component.name}",
             )

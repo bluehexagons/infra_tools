@@ -93,8 +93,18 @@ class TestComponentDescriptor(unittest.TestCase):
         self.assertEqual(dep['domain'], "api.example.com")
         self.assertFalse(dep['api_subdomain'])
 
-    def test_service_name(self):
-        self.assertEqual(self.orch._service_name(_service_component()), "app-api")
+    def test_service_identity(self):
+        unit, user = self.orch._service_identity("/var/www/example_com", _service_component())
+        self.assertEqual(unit, "app-example_com-api")
+        self.assertEqual(user, "app-example_com-api")
+
+    def test_service_identity_caps_username(self):
+        comp = _service_component(name="a-very-long-component-name-indeed")
+        unit, user = self.orch._service_identity("/var/www/some_long_app_dir", comp)
+        # systemd unit name keeps the full identity; the Linux username is capped.
+        self.assertGreater(len(unit), 31)
+        self.assertLessEqual(len(user), 31)
+        self.assertTrue(user.startswith("app-"))
 
     def test_working_dir_defaults_to_release(self):
         ctx = self.orch._service_context(_service_component(), "/var/www/site")
@@ -122,7 +132,17 @@ class TestServiceContext(unittest.TestCase):
         self.assertEqual(ctx['binary'], "/var/www/shop/server/app")
         self.assertEqual(ctx['working_dir'], "/var/www/shop/server")
         self.assertEqual(ctx['env_file'], "/var/www/api/.env")
-        self.assertEqual(ctx['service_name'], "app-api")
+        self.assertEqual(ctx['service_name'], "app-shop-api")
+        # Dedicated user and managed dirs.
+        self.assertEqual(ctx['web_user'], "app-shop-api")
+        self.assertEqual(ctx['web_group'], "app-shop-api")
+        self.assertEqual(ctx['shared_dir'], "/var/www/.infra_tools_shared/shop/api")
+        self.assertEqual(ctx['data_dir'], "/var/www/.infra_tools_shared/shop/api/data")
+
+    def test_shared_dir_can_be_referenced(self):
+        comp = _service_component(env_file="{{shared_dir}}/.env")
+        ctx = self.orch._service_context(comp, "/var/www/shop")
+        self.assertEqual(ctx['env_file'], "/var/www/.infra_tools_shared/shop/api/.env")
 
     def test_exec_component_context_has_no_binary(self):
         # With exec (and no binary field), {{binary}} is intentionally absent;
@@ -213,13 +233,22 @@ class TestDeployManifest(unittest.TestCase):
         self.assertEqual(by_domain['api.example.com']['backend_port'], 8090)
         self.assertTrue(by_domain['api.example.com']['needs_proxy'])
 
-        # Service was installed with the resolved binary path and env_file.
+        # Service was installed under its app-scoped name, as its dedicated user,
+        # with the resolved binary path and env_file.
         mock_service.assert_called_once()
         args, kwargs = mock_service.call_args
-        self.assertEqual(args[0], "app-api")                       # service name
+        self.assertEqual(args[0], "app-example_com-api")           # service name
         self.assertEqual(args[1], os.path.join(dest, "server", "app"))  # exec_start
+        self.assertEqual(args[3], "app-example_com-api")           # web_user (dedicated)
+        self.assertEqual(args[4], "app-example_com-api")           # web_group
         self.assertEqual(kwargs['env_file'], "/opt/app/.env")
         mock_health.assert_called_once()
+
+        # The managed, service-owned data dir was created outside the release.
+        data_dir = os.path.join(self.base_dir, ".infra_tools_shared", "example_com", "api", "data")
+        self.assertTrue(os.path.isdir(data_dir))
+        # A dedicated service user was ensured (id lookup attempted).
+        self.assertTrue(any("id app-example_com-api" in c.args[0] for c in mock_run.call_args_list))
 
         # Both build commands ran at the release root.
         build_cmds = [c.args[0] for c in mock_run.call_args_list if "&&" in c.args[0]]
@@ -325,17 +354,18 @@ class TestDeployManifestUnitTemplate(unittest.TestCase):
         )
 
         dest = os.path.join(self.base_dir, "api_example_com")
+        service_user = "app-api_example_com-api"
 
         # The generated-unit path must NOT be used when systemd_unit is present.
         mock_create.assert_not_called()
         mock_install.assert_called_once()
         service_name, rendered = mock_install.call_args.args
-        self.assertEqual(service_name, "app-api")
-        # Placeholders resolved to deploy-time values.
+        self.assertEqual(service_name, service_user)
+        # Placeholders resolved to deploy-time values, incl. the dedicated user.
         self.assertIn(f"ExecStart={os.path.join(dest, 'server', 'app')}", rendered)
         self.assertIn(f"WorkingDirectory={os.path.join(dest, 'server')}", rendered)
         self.assertIn("EnvironmentFile=/opt/app/.env", rendered)
-        self.assertIn("User=rails", rendered)
+        self.assertIn(f"User={service_user}", rendered)
         self.assertIn("LISTEN_ADDR=:8090", rendered)
         self.assertNotIn("{{", rendered)
 
