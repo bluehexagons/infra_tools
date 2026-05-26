@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import unittest
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -37,10 +38,16 @@ class TestParseGogsSpec(unittest.TestCase):
 class TestFetchPreferredGogsRelease(unittest.TestCase):
     @patch("lib.release_management.run")
     def test_prefers_aged_release_when_available(self, mock_run):
+        # Dates are relative to now so the test stays stable over time: the
+        # newest release is within the 7-day min-age window (too fresh) and
+        # the older one is well past it (aged, hence preferred).
+        now = datetime.now(timezone.utc)
+        fresh = (now - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        aged = (now - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
         payload = [
             {
                 "tag_name": "v2.0.0",
-                "published_at": "2026-05-17T12:00:00Z",
+                "published_at": fresh,
                 "draft": False,
                 "prerelease": False,
                 "assets": [
@@ -52,7 +59,7 @@ class TestFetchPreferredGogsRelease(unittest.TestCase):
             },
             {
                 "tag_name": "v1.9.0",
-                "published_at": "2026-05-01T12:00:00Z",
+                "published_at": aged,
                 "draft": False,
                 "prerelease": False,
                 "assets": [
