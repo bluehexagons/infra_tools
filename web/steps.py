@@ -51,6 +51,8 @@ from .build_server_steps import (
     configure_deploy_targets,
     configure_deploy_known_hosts,
     create_build_workspace_dirs,
+    install_build_node,
+    install_build_python_tools,
     install_build_dependencies,
 )
 
@@ -87,5 +89,7 @@ __all__ = [
     'configure_deploy_targets',
     'configure_deploy_known_hosts',
     'create_build_workspace_dirs',
+    'install_build_node',
+    'install_build_python_tools',
     'install_build_dependencies',
 ]

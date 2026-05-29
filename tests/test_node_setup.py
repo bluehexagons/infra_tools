@@ -71,9 +71,10 @@ class TestNodeSetup(unittest.TestCase):
         self.assertTrue(all("--before=" in command for command in npm_commands))
         self.assertTrue(all("HOME=/home/user USER=user LOGNAME=user" in command for command in npm_commands))
 
+    @patch("common.common_steps.open", new_callable=mock_open, read_data='export NVM_DIR="$HOME/.nvm"\n')
     @patch("common.common_steps.os.path.exists")
     @patch("common.common_steps.run")
-    def test_install_node_repairs_existing_nvm_ownership_before_returning(self, mock_run, mock_exists):
+    def test_install_node_repairs_existing_nvm_ownership_before_returning(self, mock_run, mock_exists, _open):
         def exists(path: str) -> bool:
             return path in {
                 "/home/user/.nvm",

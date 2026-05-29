@@ -6,9 +6,14 @@ import os
 import json
 import shlex
 
+from common.common_steps import install_node_for_user, install_or_update_uv
 from lib.config import SetupConfig
 from lib.remote_utils import run, is_package_installed
 from lib.workspace import get_known_hosts_path
+
+
+CICD_USER = "webhook"
+CICD_HOME = "/var/lib/infra_tools/cicd"
 
 
 def generate_deploy_ssh_key(config: SetupConfig) -> None:
@@ -114,6 +119,22 @@ def create_build_workspace_dirs(config: SetupConfig) -> None:
     run("chmod -R 750 /var/lib/infra_tools/cicd")
     
     print("  ✓ Created build workspace directories")
+
+
+def install_build_node(config: SetupConfig) -> None:
+    """Install nvm-managed Node.js for the CI/CD build user."""
+    install_node_for_user(CICD_USER, CICD_HOME)
+
+
+def install_build_python_tools(config: SetupConfig) -> None:
+    """Install uv for the CI/CD build user."""
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
+    run("apt-get install -y -qq python3 python3-venv curl")
+
+    if install_or_update_uv(user_home=CICD_HOME, username=CICD_USER):
+        print("  ✓ uv installed for build user")
+    else:
+        raise RuntimeError("uv installation failed for build user")
 
 
 def install_build_dependencies(config: SetupConfig) -> None:

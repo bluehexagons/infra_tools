@@ -273,6 +273,34 @@ def _user_tool_paths(user_home: str) -> list[str]:
     ]
 
 
+def _ensure_nvm_shell_init(username: str, user_home: str) -> None:
+    """Add nvm initialization to the user's .bashrc when missing."""
+    bashrc_path = f"{user_home}/.bashrc"
+    nvm_init = '''
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+[ -s "$NVM_DIR/bash_completion" ] && . "$NVM_DIR/bash_completion"
+'''
+
+    if os.path.exists(bashrc_path):
+        with open(bashrc_path, "r") as f:
+            bashrc_content = f.read()
+        if 'export NVM_DIR="$HOME/.nvm"' not in bashrc_content:
+            with open(bashrc_path, "a") as f:
+                f.write(nvm_init)
+    else:
+        skel_bashrc = "/etc/skel/.bashrc"
+        if os.path.exists(skel_bashrc):
+            run(f"cp {shlex.quote(skel_bashrc)} {shlex.quote(bashrc_path)}")
+            with open(bashrc_path, "a") as f:
+                f.write(nvm_init)
+        else:
+            with open(bashrc_path, "w") as f:
+                f.write(nvm_init)
+
+    run(f"chown {shlex.quote(username)}:{shlex.quote(username)} {shlex.quote(bashrc_path)}")
+
+
 def install_go(config: SetupConfig) -> None:
     result = run("which go", check=False)
     if result.returncode == 0:
@@ -305,15 +333,17 @@ def install_go(config: SetupConfig) -> None:
     print(f"  ✓ Go {go_version} installed")
 
 
-def install_node(config: SetupConfig) -> None:
-    user_home = f"/home/{config.username}"
+def install_node_for_user(username: str, user_home: str) -> None:
+    """Install nvm-managed Node.js for a specific login/build user."""
     nvm_dir = f"{user_home}/.nvm"
     safe_nvm_dir = shlex.quote(nvm_dir)
     nvm_sh = os.path.join(nvm_dir, "nvm.sh")
 
-    _chown_existing_paths(config.username, _user_tool_paths(user_home))
+    _chown_existing_paths(username, _user_tool_paths(user_home))
     
     if os.path.exists(nvm_sh):
+        _ensure_nvm_shell_init(username, user_home)
+        _chown_existing_paths(username, _user_tool_paths(user_home))
         print("  ✓ nvm already installed")
         return
     
@@ -325,13 +355,13 @@ def install_node(config: SetupConfig) -> None:
     # Install nvm as the user, explicitly setting NVM_DIR to avoid picking up
     # any system-wide NVM_DIR (e.g. /opt/nvm) from the environment
     result = _run_as_login_user(
-        config.username,
+        username,
         user_home,
         f"export NVM_DIR={safe_nvm_dir} && "
         f"curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/{nvm_version}/install.sh | bash",
         check=False
     )
-    _chown_existing_paths(config.username, _user_tool_paths(user_home))
+    _chown_existing_paths(username, _user_tool_paths(user_home))
     if result.returncode != 0 or not os.path.exists(nvm_sh):
         print("  ✗ nvm installation failed")
         return
@@ -339,7 +369,7 @@ def install_node(config: SetupConfig) -> None:
     # Install Node.js LTS
     nvm_env = f"export NVM_DIR={safe_nvm_dir} && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\""
     _run_as_login_user(
-        config.username,
+        username,
         user_home,
         f"{nvm_env} && nvm install --lts && nvm alias default 'lts/*'",
     )
@@ -348,47 +378,24 @@ def install_node(config: SetupConfig) -> None:
     npm_freshness = shlex.join(npm_freshness_args())
     npm_freshness_suffix = f" {npm_freshness}" if npm_freshness else ""
     _run_as_login_user(
-        config.username,
+        username,
         user_home,
         f"{nvm_env} && npm install -g npm@latest{npm_freshness_suffix}",
     )
     _run_as_login_user(
-        config.username,
+        username,
         user_home,
         f"{nvm_env} && npm install -g pnpm{npm_freshness_suffix}",
     )
     
-    # Add nvm initialization to .bashrc if not already present
-    bashrc_path = f"{user_home}/.bashrc"
-    nvm_init = '''
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-[ -s "$NVM_DIR/bash_completion" ] && . "$NVM_DIR/bash_completion"
-'''
-    
-    if os.path.exists(bashrc_path):
-        with open(bashrc_path, "r") as f:
-            bashrc_content = f.read()
-        # Check for the specific export line to avoid false positives
-        if 'export NVM_DIR="$HOME/.nvm"' not in bashrc_content:
-            with open(bashrc_path, "a") as f:
-                f.write(nvm_init)
-    else:
-        # .bashrc doesn't exist - this is unusual but we'll create it with nvm config
-        # Copy from skeleton first if available
-        skel_bashrc = "/etc/skel/.bashrc"
-        if os.path.exists(skel_bashrc):
-            run(f"cp {shlex.quote(skel_bashrc)} {shlex.quote(bashrc_path)}")
-            with open(bashrc_path, "a") as f:
-                f.write(nvm_init)
-        else:
-            with open(bashrc_path, "w") as f:
-                f.write(nvm_init)
-    
-    run(f"chown {shlex.quote(config.username)}:{shlex.quote(config.username)} {shlex.quote(bashrc_path)}")
-    _chown_existing_paths(config.username, _user_tool_paths(user_home))
+    _ensure_nvm_shell_init(username, user_home)
+    _chown_existing_paths(username, _user_tool_paths(user_home))
     
     print("  ✓ nvm + Node.js LTS + NPM (latest) + PNPM installed for user")
+
+
+def install_node(config: SetupConfig) -> None:
+    install_node_for_user(config.username, f"/home/{config.username}")
 
 
 def _validate_uv_install_script(script_path: str) -> bool:

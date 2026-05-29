@@ -19,6 +19,7 @@ import subprocess
 import shlex
 import time
 import fcntl
+import pwd
 from pathlib import Path
 from typing import Optional
 
@@ -36,6 +37,11 @@ JOBS_DIR = os.path.join(STATE_DIR, "jobs")
 WORKSPACES_DIR = os.path.join(STATE_DIR, "workspaces")
 LOGS_DIR = os.path.join(STATE_DIR, "logs")
 LOCK_FILE = os.path.join(STATE_DIR, "executor.lock")
+
+
+def get_build_home() -> str:
+    """Return the home directory for the current build user."""
+    return pwd.getpwuid(os.getuid()).pw_dir
 
 
 def load_config() -> dict:
@@ -152,6 +158,24 @@ def run_script(script_path: str, workspace: str, log_file: str) -> bool:
     if not os.path.exists(script_path):
         log_event(logger, "Script not found", level=40, script_path=script_path)
         return False
+
+    build_home = get_build_home()
+    nvm_dir = os.path.join(build_home, ".nvm")
+    local_bin = os.path.join(build_home, ".local", "bin")
+    script_path_env = os.pathsep.join([local_bin, os.environ.get("PATH", "")])
+    script_command = (
+        f"export HOME={shlex.quote(build_home)} && "
+        f"export NVM_DIR={shlex.quote(nvm_dir)} && "
+        f"export PATH={shlex.quote(script_path_env)} && "
+        '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"; '
+        f"exec /bin/bash {shlex.quote(script_path)}"
+    )
+    script_env = {
+        **os.environ,
+        "HOME": build_home,
+        "NVM_DIR": nvm_dir,
+        "PATH": script_path_env,
+    }
     
     try:
         log_event(logger, "Running script", script_path=script_path)
@@ -162,8 +186,9 @@ def run_script(script_path: str, workspace: str, log_file: str) -> bool:
             log.write(f"{'='*80}\n\n")
             
             result = subprocess.run(
-                ['/bin/bash', script_path],
+                ['/bin/bash', '-lc', script_command],
                 cwd=workspace,
+                env=script_env,
                 stdout=log,
                 stderr=subprocess.STDOUT,
                 timeout=3600  # 1 hour timeout

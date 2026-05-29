@@ -11,6 +11,10 @@ from lib.remote_utils import run, is_package_installed
 from lib.systemd_service import cleanup_service
 
 
+CICD_USER = "webhook"
+CICD_HOME = "/var/lib/infra_tools/cicd"
+
+
 def install_cicd_dependencies(config: SetupConfig) -> None:
     """Install dependencies required for CI/CD system."""
     packages = ['git']
@@ -31,14 +35,15 @@ def install_cicd_dependencies(config: SetupConfig) -> None:
 
 def create_cicd_user(config: SetupConfig) -> None:
     """Create dedicated user for webhook receiver service."""
-    user = "webhook"
+    user = CICD_USER
     
     result = run(f"id {user}", check=False)
     if result.returncode == 0:
+        run(f"usermod --home {CICD_HOME} {user}", check=False)
         print(f"  ✓ User '{user}' already exists")
         return
     
-    run(f"useradd --system --no-create-home --shell /usr/sbin/nologin {user}")
+    run(f"useradd --system --home-dir {CICD_HOME} --no-create-home --shell /usr/sbin/nologin {user}")
     print(f"  ✓ Created user '{user}'")
 
 
@@ -46,9 +51,9 @@ def create_cicd_directories(config: SetupConfig) -> None:
     """Create directories for CI/CD system."""
     directories = [
         "/etc/infra_tools/cicd",
-        "/var/lib/infra_tools/cicd/jobs",
-        "/var/lib/infra_tools/cicd/workspaces",
-        "/var/lib/infra_tools/cicd/logs",
+        f"{CICD_HOME}/jobs",
+        f"{CICD_HOME}/workspaces",
+        f"{CICD_HOME}/logs",
     ]
     
     for directory in directories:
@@ -57,14 +62,14 @@ def create_cicd_directories(config: SetupConfig) -> None:
     
     # Set ownership - critical for security
     # Ensure the 'webhook' user exists before attempting chown
-    user_check = run("id webhook", check=False)
+    user_check = run(f"id {CICD_USER}", check=False)
     if user_check.returncode != 0:
-        print("  ⚠ Warning: Cannot set ownership for CI/CD directories because user 'webhook' does not exist.")
+        print(f"  ⚠ Warning: Cannot set ownership for CI/CD directories because user '{CICD_USER}' does not exist.")
         print("    Please run the user creation step before creating CI/CD directories.")
     else:
         try:
-            run("chown -R webhook:webhook /var/lib/infra_tools/cicd")
-            run("chmod -R 750 /var/lib/infra_tools/cicd")
+            run(f"chown -R {CICD_USER}:{CICD_USER} {CICD_HOME}")
+            run(f"chmod -R 750 {CICD_HOME}")
         except Exception as e:
             print(f"  ⚠ Warning: Failed to set directory permissions: {e}")
             print("  This may cause security or permission issues.")
@@ -175,6 +180,7 @@ Type=simple
 User=webhook
 Group=webhook
 WorkingDirectory=/opt/infra_tools/web/service_tools
+Environment=HOME=/var/lib/infra_tools/cicd
 Environment=INFRA_TOOLS_WORKSPACE=/var/lib/infra_tools/cicd
 EnvironmentFile=/etc/infra_tools/cicd/webhook.env
 ExecStart=/usr/bin/python3 /opt/infra_tools/web/service_tools/webhook_receiver.py
@@ -251,6 +257,7 @@ Type=oneshot
 User=webhook
 Group=webhook
 WorkingDirectory=/opt/infra_tools/web/service_tools
+Environment=HOME=/var/lib/infra_tools/cicd
 Environment=INFRA_TOOLS_WORKSPACE=/var/lib/infra_tools/cicd
 ExecStart=/usr/bin/python3 /opt/infra_tools/web/service_tools/cicd_executor.py
 TimeoutStartSec=2h
