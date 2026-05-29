@@ -60,6 +60,10 @@ class TestAutoUpdateNode(unittest.TestCase):
         args, kwargs = mock_run.call_args
         self.assertEqual(args[0][:2], ["/bin/bash", "-lc"])
         self.assertIn("nvm version default", args[0][2])
+        self.assertEqual(kwargs["cwd"], "/home/user")
+        self.assertEqual(kwargs["env"]["HOME"], "/home/user")
+        self.assertIn("USER", kwargs["env"])
+        self.assertIn("LOGNAME", kwargs["env"])
         self.assertNotIn("shell", kwargs)
 
     @patch("web.service_tools.auto_update_node.send_notification_safe")

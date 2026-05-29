@@ -48,6 +48,8 @@ def get_nvm_dir() -> str:
 def run_nvm_command(args: list[str]) -> subprocess.CompletedProcess[str]:
     """Run a command with nvm environment loaded."""
     nvm_dir = get_nvm_dir()
+    home_dir = os.path.dirname(nvm_dir)
+    pw_entry = pwd.getpwuid(os.getuid())
     full_cmd = (
         f'export NVM_DIR={shlex.quote(nvm_dir)} && '
         '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && '
@@ -58,6 +60,13 @@ def run_nvm_command(args: list[str]) -> subprocess.CompletedProcess[str]:
         ["/bin/bash", "-lc", full_cmd],
         capture_output=True,
         text=True,
+        cwd=home_dir,
+        env={
+            **os.environ,
+            "HOME": home_dir,
+            "USER": pw_entry.pw_name,
+            "LOGNAME": pw_entry.pw_name,
+        },
     )
     return result
 

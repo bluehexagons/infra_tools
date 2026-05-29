@@ -44,11 +44,22 @@ class TestNodeSetup(unittest.TestCase):
     @patch("common.common_steps.os.path.exists")
     @patch("common.common_steps.run")
     def test_install_node_uses_npm_freshness_cutoff(self, mock_run, mock_exists, _open):
+        nvm_installed = {"value": False}
+
         def exists(path: str) -> bool:
-            return path in {"/home/user/.nvm/nvm.sh", "/home/user/.bashrc"}
+            if path == "/home/user/.nvm/nvm.sh":
+                return nvm_installed["value"]
+            if path == "/home/user/.nvm":
+                return nvm_installed["value"]
+            return path == "/home/user/.bashrc"
+
+        def run_command(command: str, *args, **kwargs):
+            if "curl -o-" in command and "nvm-sh/nvm" in command:
+                nvm_installed["value"] = True
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
 
         mock_exists.side_effect = exists
-        mock_run.return_value = SimpleNamespace(returncode=0, stdout="", stderr="")
+        mock_run.side_effect = run_command
         config = SetupConfig(host="host", username="user", system_type="server_web", install_node=True)
 
         with patch.dict(os.environ, {DEPENDENCY_MIN_AGE_DAYS_ENV: "2"}):
@@ -58,6 +69,28 @@ class TestNodeSetup(unittest.TestCase):
         npm_commands = [command for command in commands if "npm install -g" in command]
         self.assertEqual(len(npm_commands), 2)
         self.assertTrue(all("--before=" in command for command in npm_commands))
+        self.assertTrue(all("HOME=/home/user USER=user LOGNAME=user" in command for command in npm_commands))
+
+    @patch("common.common_steps.os.path.exists")
+    @patch("common.common_steps.run")
+    def test_install_node_repairs_existing_nvm_ownership_before_returning(self, mock_run, mock_exists):
+        def exists(path: str) -> bool:
+            return path in {
+                "/home/user/.nvm",
+                "/home/user/.nvm/nvm.sh",
+                "/home/user/.npm",
+            }
+
+        mock_exists.side_effect = exists
+        mock_run.return_value = SimpleNamespace(returncode=0, stdout="", stderr="")
+        config = SetupConfig(host="host", username="user", system_type="server_web", install_node=True)
+
+        common_steps.install_node(config)
+
+        commands = [args[0] for args, _ in mock_run.call_args_list]
+        self.assertIn("chown -R user:user /home/user/.nvm", commands)
+        self.assertIn("chown -R user:user /home/user/.npm", commands)
+        self.assertFalse(any("apt-get install" in command for command in commands))
 
 
 if __name__ == "__main__":

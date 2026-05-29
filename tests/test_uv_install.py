@@ -6,9 +6,12 @@ import os
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
+from common import common_steps
 from common.common_steps import _validate_uv_install_script
 
 
@@ -157,6 +160,35 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
                 self.assertFalse(result)
             finally:
                 os.unlink(f.name)
+
+
+class TestInstallOrUpdateUv(unittest.TestCase):
+    @patch("common.common_steps.os.path.exists")
+    @patch("common.common_steps.run")
+    def test_user_uv_update_repairs_ownership_and_sets_login_env(self, mock_run, mock_exists):
+        def exists(path: str) -> bool:
+            return path in {
+                "/home/user/.local",
+                "/home/user/.local/bin/uv",
+                "/home/user/.cache",
+            }
+
+        mock_exists.side_effect = exists
+        mock_run.return_value = SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        result = common_steps.install_or_update_uv("/home/user", username="user")
+
+        self.assertTrue(result)
+        commands = [args[0] for args, _ in mock_run.call_args_list]
+        self.assertIn("chown -R user:user /home/user/.local", commands)
+        self.assertIn("chown -R user:user /home/user/.cache", commands)
+        self.assertTrue(
+            any(
+                "HOME=/home/user USER=user LOGNAME=user" in command
+                and "/home/user/.local/bin/uv self update" in command
+                for command in commands
+            )
+        )
 
 
 if __name__ == '__main__':

@@ -233,6 +233,46 @@ def install_ruby(config: SetupConfig) -> None:
         print("  ⚠ Ruby installed, but bundled apt package was unavailable")
 
 
+def _run_as_login_user(
+    username: str,
+    user_home: str,
+    command: str,
+    *,
+    check: bool = True,
+    capture_output: bool = False,
+) -> subprocess.CompletedProcess[str]:
+    """Run a shell command as a login user's home-scoped tool environment."""
+    safe_username = shlex.quote(username)
+    safe_home = shlex.quote(user_home)
+    shell_script = f"cd {safe_home} && {command}"
+    return run(
+        f"runuser -u {safe_username} -- env "
+        f"HOME={safe_home} USER={safe_username} LOGNAME={safe_username} "
+        f"bash -lc {shlex.quote(shell_script)}",
+        check=check,
+        capture_output=capture_output,
+    )
+
+
+def _chown_existing_paths(username: str, paths: list[str]) -> None:
+    """Ensure existing user-tool paths belong to the target login user."""
+    safe_username = shlex.quote(username)
+    existing_paths = [path for path in paths if os.path.exists(path)]
+    for path in existing_paths:
+        run(f"chown -R {safe_username}:{safe_username} {shlex.quote(path)}", check=False)
+
+
+def _user_tool_paths(user_home: str) -> list[str]:
+    """Return per-user tool paths that should never be root-owned."""
+    return [
+        os.path.join(user_home, ".nvm"),
+        os.path.join(user_home, ".npm"),
+        os.path.join(user_home, ".cache"),
+        os.path.join(user_home, ".config"),
+        os.path.join(user_home, ".local"),
+    ]
+
+
 def install_go(config: SetupConfig) -> None:
     result = run("which go", check=False)
     if result.returncode == 0:
@@ -266,12 +306,14 @@ def install_go(config: SetupConfig) -> None:
 
 
 def install_node(config: SetupConfig) -> None:
-    safe_username = shlex.quote(config.username)
     user_home = f"/home/{config.username}"
     nvm_dir = f"{user_home}/.nvm"
     safe_nvm_dir = shlex.quote(nvm_dir)
+    nvm_sh = os.path.join(nvm_dir, "nvm.sh")
+
+    _chown_existing_paths(config.username, _user_tool_paths(user_home))
     
-    if os.path.exists(nvm_dir):
+    if os.path.exists(nvm_sh):
         print("  ✓ nvm already installed")
         return
     
@@ -282,24 +324,39 @@ def install_node(config: SetupConfig) -> None:
     
     # Install nvm as the user, explicitly setting NVM_DIR to avoid picking up
     # any system-wide NVM_DIR (e.g. /opt/nvm) from the environment
-    result = run(
-        f"runuser -u {safe_username} -- bash -c "
-        f"'export NVM_DIR={safe_nvm_dir} && "
-        f"curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/{nvm_version}/install.sh | bash'",
+    result = _run_as_login_user(
+        config.username,
+        user_home,
+        f"export NVM_DIR={safe_nvm_dir} && "
+        f"curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/{nvm_version}/install.sh | bash",
         check=False
     )
-    if result.returncode != 0 or not os.path.exists(os.path.join(nvm_dir, "nvm.sh")):
+    _chown_existing_paths(config.username, _user_tool_paths(user_home))
+    if result.returncode != 0 or not os.path.exists(nvm_sh):
         print("  ✗ nvm installation failed")
         return
     
     # Install Node.js LTS
-    run(f"runuser -u {safe_username} -- bash -c 'export NVM_DIR={safe_nvm_dir} && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && nvm install --lts'")
+    nvm_env = f"export NVM_DIR={safe_nvm_dir} && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\""
+    _run_as_login_user(
+        config.username,
+        user_home,
+        f"{nvm_env} && nvm install --lts && nvm alias default 'lts/*'",
+    )
     
     # Update npm and install pnpm
     npm_freshness = shlex.join(npm_freshness_args())
     npm_freshness_suffix = f" {npm_freshness}" if npm_freshness else ""
-    run(f"runuser -u {safe_username} -- bash -c 'export NVM_DIR={safe_nvm_dir} && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npm install -g npm@latest{npm_freshness_suffix}'")
-    run(f"runuser -u {safe_username} -- bash -c 'export NVM_DIR={safe_nvm_dir} && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npm install -g pnpm{npm_freshness_suffix}'")
+    _run_as_login_user(
+        config.username,
+        user_home,
+        f"{nvm_env} && npm install -g npm@latest{npm_freshness_suffix}",
+    )
+    _run_as_login_user(
+        config.username,
+        user_home,
+        f"{nvm_env} && npm install -g pnpm{npm_freshness_suffix}",
+    )
     
     # Add nvm initialization to .bashrc if not already present
     bashrc_path = f"{user_home}/.bashrc"
@@ -328,7 +385,8 @@ export NVM_DIR="$HOME/.nvm"
             with open(bashrc_path, "w") as f:
                 f.write(nvm_init)
     
-    run(f"chown {safe_username}:{safe_username} {shlex.quote(bashrc_path)}")
+    run(f"chown {shlex.quote(config.username)}:{shlex.quote(config.username)} {shlex.quote(bashrc_path)}")
+    _chown_existing_paths(config.username, _user_tool_paths(user_home))
     
     print("  ✓ nvm + Node.js LTS + NPM (latest) + PNPM installed for user")
 
@@ -358,7 +416,8 @@ def install_or_update_uv(user_home: str, username: Optional[str] = None) -> bool
     """Install or update uv for a user. Returns True if uv is available afterwards."""
     uv_path = os.path.join(user_home, ".local", "bin", "uv")
     safe_home = shlex.quote(user_home)
-    safe_username = shlex.quote(username) if username else None
+    if username:
+        _chown_existing_paths(username, _user_tool_paths(user_home))
 
     if is_dry_run():
         print("  [DRY-RUN] Skipping uv install/update")
@@ -387,8 +446,10 @@ def install_or_update_uv(user_home: str, username: Optional[str] = None) -> bool
                 return False
 
             if username:
-                install_result = run(
-                    f"runuser -u {safe_username} -- env HOME={safe_home} sh {safe_installer}",
+                install_result = _run_as_login_user(
+                    username,
+                    user_home,
+                    f"sh {safe_installer}",
                     check=False
                 )
             else:
@@ -404,10 +465,13 @@ def install_or_update_uv(user_home: str, username: Optional[str] = None) -> bool
 
     safe_uv_path = shlex.quote(uv_path)
     if username:
-        update_result = run(
-            f"runuser -u {safe_username} -- env HOME={safe_home} {safe_uv_path} self update",
+        update_result = _run_as_login_user(
+            username,
+            user_home,
+            f"{safe_uv_path} self update",
             check=False
         )
+        _chown_existing_paths(username, _user_tool_paths(user_home))
     else:
         update_result = run(f"env HOME={safe_home} {safe_uv_path} self update", check=False)
 
