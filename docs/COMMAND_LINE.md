@@ -33,6 +33,10 @@ infra_tools.py cmd [pattern]
 infra_tools.py rm <pattern>
 infra_tools.py deploy <pattern> [--yes]
 
+# Audit and prune GitHub repo storage
+infra_tools.py maintenance github audit [--root PATH] [--json]
+infra_tools.py maintenance github prune [--root PATH] [--keep-releases N] [--delete-caches] [--cache-older-than-days N] [--yes] [--dry-run]
+
 # Manage workspace credentials
 infra_tools.py credentials set <username> <password>
 infra_tools.py credentials list
@@ -228,6 +232,23 @@ python3 infra_tools.py setup server_lite 192.168.1.10 --antistatic-server :8080
 # Deploy antistatic-db
 python3 infra_tools.py setup server_web 192.168.1.10 --antistatic-db db.example.com --ssl
 ```
+
+## GitHub Maintenance
+
+The `maintenance github` command audits and prunes GitHub repository storage for local checkouts.
+
+```bash
+infra_tools.py maintenance github audit --root /home/loren/repos
+infra_tools.py maintenance github prune --root /home/loren/repos --yes
+infra_tools.py maintenance github prune --root /home/loren/repos --delete-caches --yes
+```
+
+Defaults:
+
+- `--keep-releases 2`
+- delete expired artifacts by default
+- delete caches only when `--delete-caches` is set
+- cache pruning defaults to entries not accessed in 90 days
 
 The services run as locked-down systemd units (`antistatic.service` and `antistatic-db.service`) with `Restart=on-failure`, security hardening (`NoNewPrivileges`, `PrivateTmp`, `ProtectSystem=strict`, `ProtectHome`), and optional nginx configuration when a hostname is provided.
 

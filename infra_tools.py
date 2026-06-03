@@ -48,6 +48,7 @@ from lib.credentials import (
     set_workspace_credential,
     store_cli_credentials,
 )
+from lib.github_maintenance import add_maintenance_subparser, run_maintenance_command
 from lib.display import print_name_and_tags, print_setup_summary, print_success_header
 from lib.interactive_shell import run_interactive_shell
 from lib.notifications import validate_notification_args
@@ -99,6 +100,7 @@ def _build_infra_tools_epilog() -> str:
     completions                 Install shell completion for infra_tools.py
     python-tools                Install local Python aliases, uv, and completion
     bootstrap                   Install packages, launcher, and completions (alias: self-setup)
+    maintenance github ...      Audit/prune GitHub releases, artifacts, and caches
     network [subcommand]        Manage generic network inventory profiles
     proxmox [subcommand]        Manage Proxmox hosts and containers (interactive shell with no args)
     shell                       Interactive REPL for managing saved configurations
@@ -354,6 +356,7 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
 
     add_network_subparser(subparsers)
     add_proxmox_subparser(subparsers)
+    add_maintenance_subparser(subparsers)
     add_sysadmin_subparsers(subparsers)
 
     shell_parser = subparsers.add_parser(
@@ -958,6 +961,8 @@ def main() -> int:
         return run_network_command(args)
     elif args.command == "proxmox":
         return run_proxmox_command(args)
+    elif args.command == "maintenance":
+        return run_maintenance_command(args)
     elif args.command in {"mount", "umount", "health", "ssh", "push", "pull", "key", "df", "fan", "svc", "logs", "upgrade", "reachable"}:
         return run_sysadmin_command(args)
     elif args.command == "shell":
