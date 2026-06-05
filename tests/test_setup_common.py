@@ -242,6 +242,64 @@ class TestRunRemoteSetupArgumentSecurity(unittest.TestCase):
         self.assertIn("--args-file", remote_command)
         self.assertNotIn("supersecret", remote_command)
 
+    def test_remote_ssh_command_clears_install_dir_before_upload_extract(self):
+        from lib import setup_common
+
+        config = _make_config(host="example.com")
+        process = MagicMock()
+        process.stdin = io.BytesIO()
+        process.stdout = io.BytesIO(b"")
+        process.wait.return_value = 0
+
+        with patch.object(setup_common, "copy_project_files"), \
+             patch.object(setup_common, "prepare_deployments"), \
+             patch.object(setup_common, "build_ssh_command", return_value=["ssh"]) as mock_build_ssh, \
+             patch("subprocess.Popen", return_value=process):
+            result = setup_common.run_remote_setup(config)
+
+        self.assertEqual(result, 0)
+        remote_command = mock_build_ssh.call_args.kwargs["remote_command"]
+        self.assertIn("rm -rf /opt/infra_tools && mkdir -p /opt/infra_tools", remote_command)
+        self.assertLess(remote_command.index("rm -rf"), remote_command.index("tar xzf -"))
+
+
+class TestCloneRepository(unittest.TestCase):
+    def test_existing_cache_is_cleaned_after_reset(self):
+        from lib import setup_common
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = os.path.join(tmpdir, "cache")
+            work_dir = os.path.join(tmpdir, "work")
+            cache_repo = os.path.join(cache_dir, "repo")
+            os.makedirs(cache_repo)
+            os.makedirs(work_dir)
+            with open(os.path.join(cache_repo, "index.html"), "w", encoding="utf-8") as file_obj:
+                file_obj.write("ok")
+
+            run_results = [
+                MagicMock(returncode=0),
+                MagicMock(returncode=0, stdout="origin/main\n"),
+                MagicMock(returncode=0),
+                MagicMock(returncode=0),
+            ]
+
+            with patch("subprocess.run", side_effect=run_results) as mock_run, \
+                 patch("lib.deploy_utils.get_git_commit_hash", return_value="abc123"):
+                result = setup_common.clone_repository(
+                    "https://git.example.com/repo.git",
+                    work_dir,
+                    cache_dir=cache_dir,
+                )
+
+        self.assertEqual(result, (os.path.join(work_dir, "repo"), "abc123"))
+        commands = [call.args[0] for call in mock_run.call_args_list]
+        self.assertIn(["git", "-C", cache_repo, "reset", "--hard", "origin/main"], commands)
+        self.assertIn(["git", "-C", cache_repo, "clean", "-fdx"], commands)
+        self.assertLess(
+            commands.index(["git", "-C", cache_repo, "reset", "--hard", "origin/main"]),
+            commands.index(["git", "-C", cache_repo, "clean", "-fdx"]),
+        )
+
 
 class TestSetupMainValidation(unittest.TestCase):
 

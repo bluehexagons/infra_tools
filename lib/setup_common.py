@@ -112,7 +112,17 @@ def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = Non
                     if result.returncode != 0:
                         print(f"  Error resetting repository: {result.stderr}")
                         return None
-                    
+
+                    result = subprocess.run(
+                        ["git", "-C", cache_path, "clean", "-fdx"],
+                        capture_output=True,
+                        text=True,
+                        timeout=30
+                    )
+                    if result.returncode != 0:
+                        print(f"  Error cleaning repository: {result.stderr}")
+                        return None
+
                     print(f"  ✓ Updated cached repository")
                 except Exception as e:
                     print(f"  Error updating repository: {e}")
@@ -437,6 +447,7 @@ def run_remote_setup(config: SetupConfig) -> int:
             remote_cmd_args = [remote_python, remote_script, "--args-file", remote_args_path]
             remote_shell_cmd = chain_remote_commands(
                 [
+                    ["rm", "-rf", REMOTE_INSTALL_DIR],
                     ["mkdir", "-p", REMOTE_INSTALL_DIR],
                     ["cd", REMOTE_INSTALL_DIR],
                     ["tar", "xzf", "-"],
