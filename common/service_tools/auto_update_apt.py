@@ -3,11 +3,12 @@
 Auto-update APT Packages
 
 This script updates all packages from all configured APT repositories using
-dist-upgrade. It replaces the traditional unattended-upgrades approach by:
+dist-upgrade, while refusing automated package removals. It replaces the
+traditional unattended-upgrades approach by:
 
 - Not requiring any hardcoded origins or codenames
 - Automatically handling all configured repositories
-- Supporting release version switches (dist-upgrade resolves dependency changes)
+- Supporting dependency additions while refusing automated package removals
 
 Logs to: /var/log/infra_tools/security/auto_update_apt.log
 """
@@ -24,6 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../
 
 from lib.logging_utils import get_service_logger
 from lib.logging_utils import log_event
+from lib.apt_sources import disable_duplicate_vivaldi_source
 from lib.maintenance_defaults import APT_LOCK_OPTIONS
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
 
@@ -35,6 +37,9 @@ logger = get_service_logger('auto_update_apt', 'security', use_syslog=True)
 DPKG_OPTIONS = [
     '-o', 'Dpkg::Options::=--force-confdef',
     '-o', 'Dpkg::Options::=--force-confold',
+]
+APT_UPGRADE_SAFETY_OPTIONS = [
+    '--no-remove',
 ]
 
 def run_apt_command(args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -56,12 +61,14 @@ def update_package_lists() -> bool:
 
 
 def upgrade_packages() -> tuple[bool, str]:
-    """Run apt-get dist-upgrade to upgrade all packages.
+    """Run apt-get dist-upgrade to upgrade all packages without removals.
 
     Returns:
         Tuple of (success, output_summary).
     """
-    result = run_apt_command(['dist-upgrade', '-y', '-qq'] + DPKG_OPTIONS + APT_LOCK_OPTIONS)
+    result = run_apt_command(
+        ['dist-upgrade', '-y', '-qq'] + APT_UPGRADE_SAFETY_OPTIONS + DPKG_OPTIONS + APT_LOCK_OPTIONS
+    )
     output = result.stdout.strip()
     if result.returncode != 0:
         log_event(logger, "apt-get dist-upgrade failed", level=ERROR, stderr=result.stderr.strip())
@@ -83,6 +90,14 @@ def main() -> int:
     """Main function to update APT packages."""
     log_event(logger, "Starting APT package update")
     notification_configs = load_notification_configs_from_state(logger)
+
+    try:
+        disabled_path = disable_duplicate_vivaldi_source()
+    except (OSError, ValueError) as e:
+        log_event(logger, "APT source cleanup failed", level=WARNING, error=str(e))
+    else:
+        if disabled_path:
+            log_event(logger, "Disabled duplicate Vivaldi APT source", path=disabled_path)
 
     if not update_package_lists():
         send_notification_safe(

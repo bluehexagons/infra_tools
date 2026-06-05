@@ -67,6 +67,14 @@ Build servers and app servers integrate with the existing system type infrastruc
 
 ### Build Server
 
+Build jobs run as the dedicated `webhook` user. That user has
+`/var/lib/infra_tools/cicd` as its home directory so nvm, npm caches, uv, and
+other build-user state stay with the CI/CD workspace instead of under root or
+the interactive operator account. When `--build-server --node` is selected,
+infra_tools installs nvm-managed Node.js for both the requested login user and
+the `webhook` build user. When `--build-server --python` is selected, uv is
+also installed for the `webhook` build user.
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                      BUILD SERVER                           │
@@ -78,6 +86,8 @@ Build servers and app servers integrate with the existing system type infrastruc
 │  ├── workspaces/           # Git clones + builds           │
 │  ├── jobs/                 # Job queue                      │
 │  ├── logs/                 # Build logs                     │
+│  ├── .nvm/                 # Optional Node toolchain        │
+│  ├── .local/bin/uv         # Optional uv toolchain          │
 │  └── .ssh/deploy_key       # SSH key for app servers       │
 │                                                             │
 │  /etc/infra_tools/cicd/                                    │

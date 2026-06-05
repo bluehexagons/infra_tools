@@ -1,6 +1,7 @@
 """Deployment orchestration - shared between local and remote environments."""
 
 from __future__ import annotations
+import hashlib
 import json
 import os
 import shlex
@@ -14,6 +15,7 @@ from datetime import datetime
 from typing import Optional, Any
 
 from lib.remote_utils import run
+from lib.update_policy import npm_freshness_args
 from lib.deploy_utils import (
     create_safe_directory_name,
     detect_project_type,
@@ -22,15 +24,16 @@ from lib.deploy_utils import (
     save_deployment_metadata,
     should_redeploy
 )
-from lib.systemd_service import create_rails_service
+from lib.systemd_service import create_rails_service, create_managed_service, install_unit_file
+from lib.project_manifest import Component, Manifest, has_placeholder, load_manifest, render_template
 
 
 class DeploymentOrchestrator:
     
-    def __init__(self, base_dir: str = "/var/www", web_user: str = "www-data", web_group: str = "www-data"):
+    def __init__(self, base_dir: str = "/var/www", deploy_user: str = "web-deploy", deploy_group: str = "web-deploy"):
         self.base_dir = base_dir
-        self.web_user = web_user
-        self.web_group = web_group
+        self.deploy_user = deploy_user
+        self.deploy_group = deploy_group
 
     def _get_persistent_root(self, app_name: str) -> str:
         return os.path.join(self.base_dir, ".infra_tools_shared", app_name)
@@ -124,6 +127,7 @@ class DeploymentOrchestrator:
             (os.path.join("public", "uploads"), os.path.join(persistent_root, "public", "uploads")),
             (os.path.join("public", "system"), os.path.join(persistent_root, "public", "system")),
             ("log", os.path.join(persistent_root, "log")),
+            ("tmp", os.path.join(persistent_root, "tmp")),
         ]
 
         for rel_src, persistent_dst in dirs_to_persist:
@@ -156,6 +160,7 @@ class DeploymentOrchestrator:
             (os.path.join("public", "uploads"), os.path.join(persistent_root, "public", "uploads")),
             (os.path.join("public", "system"), os.path.join(persistent_root, "public", "system")),
             ("log", os.path.join(persistent_root, "log")),
+            ("tmp", os.path.join(persistent_root, "tmp")),
         ]
 
         for rel_path, persistent_path in dirs_to_link:
@@ -192,6 +197,7 @@ class DeploymentOrchestrator:
                 return None
         
         self._ensure_dir(backup_dir)
+        os.chmod(backup_dir, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP)
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_filename = f"{app_name}_production_{timestamp}.sqlite3"
@@ -201,8 +207,8 @@ class DeploymentOrchestrator:
             print(f"  Creating database backup: {backup_filename}")
             shutil.copy2(db_path, backup_path)
             
-            # Set explicit permissions: rw-rw-r-- (664)
-            os.chmod(backup_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH)
+            # Keep database backups private until deploy reconciliation chowns the tree.
+            os.chmod(backup_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP)
             
             # Verify backup was created and has size > 0
             if os.path.exists(backup_path):
@@ -429,6 +435,50 @@ class DeploymentOrchestrator:
         
         return self._find_free_port(default_port)
 
+    def _service_file_user(self, service_file: str) -> Optional[str]:
+        """Read the User= from an existing systemd service file, if available."""
+        try:
+            with open(service_file, 'r') as f:
+                content = f.read()
+        except OSError:
+            return None
+        match = re.search(r'^\s*User=(\S+)\s*$', content, re.MULTILINE)
+        return match.group(1) if match else None
+
+    def _capped_identity(self, prefix: str, raw_name: str) -> str:
+        base = f"{prefix}-{self._sanitize_user_part(raw_name)}"
+        if len(base) <= 31:
+            return base
+        digest = hashlib.sha1(base.encode()).hexdigest()[:8]
+        return f"{base[:22].rstrip('-_')}-{digest}"
+
+    def _legacy_rails_runtime_user(self, app_name: str) -> str:
+        return self._capped_identity("rails", app_name)
+
+    def _prepare_rails_runtime_state(self, persistent_root: str, runtime_user: str) -> None:
+        self._ensure_service_user(runtime_user)
+        if not os.path.exists(persistent_root):
+            return
+        root = shlex.quote(persistent_root)
+        shared_root = shlex.quote(os.path.dirname(persistent_root))
+        run(f"chmod 755 {shared_root}", check=False)
+        run(f"chown -R {shlex.quote(runtime_user)}:{shlex.quote(runtime_user)} {root}", check=False)
+        run(f"find {root} -type d -exec chmod 750 {{}} +", check=False)
+        run(f"find {root} -type f -exec chmod 640 {{}} +", check=False)
+        run(f"chmod 755 {root}", check=False)
+
+        public_root = shlex.quote(os.path.join(persistent_root, "public"))
+        run(f"if [ -d {public_root} ]; then chmod 755 {public_root}; fi", check=False)
+        for rel_path in (os.path.join("public", "uploads"), os.path.join("public", "system")):
+            public_path = shlex.quote(os.path.join(persistent_root, rel_path))
+            run(
+                f"if [ -d {public_path} ]; then "
+                f"find {public_path} -type d -exec chmod 755 {{}} +; "
+                f"find {public_path} -type f -exec chmod 644 {{}} +; "
+                "fi",
+                check=False,
+            )
+
     def get_deployment_path(self, domain: Optional[str], path: str, git_url: str) -> str:
         dir_name = create_safe_directory_name(domain, path)
         
@@ -464,16 +514,27 @@ class DeploymentOrchestrator:
                 service_name = f"rails-{app_name}"
                 service_file = f"/etc/systemd/system/{service_name}.service"
                 backend_port = self._get_assigned_port(service_name, 3000)
-                
+                runtime_user = self._legacy_rails_runtime_user(app_name)
+                service_missing = not os.path.exists(service_file)
+                existing_user = None if service_missing else self._service_file_user(service_file)
+                service_needs_recreate = service_missing or (
+                    existing_user is not None and existing_user != runtime_user
+                )
+
+                # Skipped deploys still need to migrate persistent state from
+                # older deploy users to the per-app Rails runtime user.
+                self._prepare_rails_runtime_state(persistent_root, runtime_user)
+
                 # Ensure service exists and is running (may have been
                 # removed by cleanup_all_infra_services before this run)
-                if not os.path.exists(service_file):
-                    print(f"  Service {service_name} missing, recreating...")
-                    
+                if service_needs_recreate:
+                    reason = "missing" if service_missing else f"uses {existing_user}"
+                    print(f"  Service {service_name} {reason}, recreating...")
+
                     cors_origins = self._build_cors_origins(domain)
-                    
+
                     create_rails_service(app_name, dest_path, backend_port,
-                                        self.web_user, self.web_group,
+                                        runtime_user, runtime_user,
                                         env_vars={
                                             "CORS_ORIGINS": ",".join(cors_origins) if cors_origins else "",
                                             "FRONTEND_URL": cors_origins[0] if cors_origins else "",
@@ -557,16 +618,15 @@ class DeploymentOrchestrator:
         self.build_project(dest_path, project_type, site_root=site_root, app_name=app_name, reset_migrations=reset_migrations)
 
         if project_type == "rails":
-            run(f"chown -R {shlex.quote(self.web_user)}:{shlex.quote(self.web_group)} {shlex.quote(persistent_root)}", check=False)
-            run(f"find {shlex.quote(persistent_root)} -type d -exec chmod 775 {{}} +", check=False)
-            run(f"find {shlex.quote(persistent_root)} -type f -exec chmod 664 {{}} +", check=False)
+            runtime_user = self._legacy_rails_runtime_user(app_name)
+            self._prepare_rails_runtime_state(persistent_root, runtime_user)
 
         result = run(
-            f"chown -R {shlex.quote(self.web_user)}:{shlex.quote(self.web_group)} {shlex.quote(dest_path)}",
+            f"chown -R {shlex.quote(self.deploy_user)}:{shlex.quote(self.deploy_group)} {shlex.quote(dest_path)}",
             check=False,
         )
         if result.returncode != 0:
-            print(f"  ⚠ Warning: Could not set ownership to {self.web_user}:{self.web_group}")
+            print(f"  ⚠ Warning: Could not set ownership to {self.deploy_user}:{self.deploy_group}")
 
         run(f"chmod -R 775 {shlex.quote(dest_path)}")
         
@@ -577,10 +637,11 @@ class DeploymentOrchestrator:
         if project_type == "rails":
             service_name = f"rails-{app_name}"
             backend_port = self._get_assigned_port(service_name, 3000)
+            runtime_user = self._legacy_rails_runtime_user(app_name)
             
             cors_origins = self._build_cors_origins(domain)
             
-            create_rails_service(app_name, dest_path, backend_port, self.web_user, self.web_group, 
+            create_rails_service(app_name, dest_path, backend_port, runtime_user, runtime_user,
                                env_vars={
                                    "CORS_ORIGINS": ",".join(cors_origins) if cors_origins else "",
                                    "FRONTEND_URL": cors_origins[0] if cors_origins else "",
@@ -620,6 +681,292 @@ class DeploymentOrchestrator:
             'api_subdomain': api_subdomain
         }
     
+    # ------------------------------------------------------------------
+    # infra.json manifest deploys (see docs/plans/PROJECT_MANIFEST.md)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _sanitize_user_part(text: str) -> str:
+        """Reduce arbitrary text to a Linux user/unit-name-safe fragment."""
+        safe = re.sub(r"[^a-z0-9_-]", "-", text.lower())
+        return safe.strip("-_") or "x"
+
+    def _service_identity(self, dest_path: str, component: Component) -> tuple[str, str]:
+        """Return (systemd_unit_name, service_username) for a service component.
+
+        Keyed by both the release dir name and the component name so it is unique
+        across repos on one host (two repos can each have a component named
+        'api'). The systemd unit name has no practical length limit; the Linux
+        username is capped to a valid length, falling back to a short hash suffix
+        when truncation is needed so it stays deterministic and collision-free.
+        """
+        app_name = os.path.basename(dest_path.rstrip("/"))
+        base = f"app-{self._sanitize_user_part(app_name)}-{component.name}"
+        unit_name = base
+        if len(base) <= 31:
+            username = base
+        else:
+            digest = hashlib.sha1(base.encode()).hexdigest()[:8]
+            username = f"{base[:22].rstrip('-_')}-{digest}"
+        return unit_name, username
+
+    def _component_shared_dir(self, dest_path: str, component: Component) -> str:
+        """infra_tools-managed persistent dir for a service component.
+
+        Lives outside the release dir (under the same .infra_tools_shared root as
+        Rails state) so it survives the release being replaced on each deploy.
+        """
+        app_name = os.path.basename(dest_path.rstrip("/"))
+        return os.path.join(self._get_persistent_root(app_name), component.name)
+
+    def _component_data_dir(self, dest_path: str, component: Component) -> str:
+        return os.path.join(self._component_shared_dir(dest_path, component), "data")
+
+    def _ensure_service_user(self, username: str) -> None:
+        """Create a locked-down --system, nologin user for a service (idempotent)."""
+        result = run(f"id {shlex.quote(username)}", check=False)
+        if result.returncode == 0:
+            return
+        print(f"  Creating service user: {username}")
+        run(
+            f"useradd --system --no-create-home --shell /usr/sbin/nologin {shlex.quote(username)}",
+            check=False,
+        )
+
+    def deploy_manifest(self, manifest: Manifest, source_path: str, domain: Optional[str],
+                        path: str, git_url: str, commit_hash: Optional[str],
+                        keep_source: bool = False) -> list[dict[str, Any]]:
+        """Deploy every component of an infra.json manifest.
+
+        Returns one nginx "dep" descriptor per component. Components declare
+        their own domains, so a single repo can serve a static apex site and a
+        reverse-proxied API subdomain from one deploy. This always performs a
+        full build; incremental skip (mirroring should_redeploy) is a future
+        optimization, kept out for a small, auditable surface.
+        """
+        dest_path = self.get_deployment_path(domain, path, git_url)
+        print(f"Deploying manifest ({len(manifest.components)} component(s)) to {dest_path}...")
+
+        # Stop any services this manifest previously installed before files move.
+        for component in manifest.components:
+            if component.is_service:
+                unit_name, _ = self._service_identity(dest_path, component)
+                run(f"systemctl stop {shlex.quote(unit_name)}.service", check=False)
+
+        parent_dir = os.path.dirname(dest_path)
+        if parent_dir and not os.path.exists(parent_dir):
+            os.makedirs(parent_dir, exist_ok=True)
+        if os.path.exists(dest_path):
+            print(f"  Removing existing deployment at {dest_path}...")
+            shutil.rmtree(dest_path)
+
+        if keep_source:
+            shutil.copytree(source_path, dest_path)
+            print(f"  ✓ Copied to {dest_path}")
+        else:
+            shutil.move(source_path, dest_path)
+            print(f"  ✓ Moved to {dest_path}")
+
+        # Build every component, then describe it for nginx.
+        deps: list[dict[str, Any]] = []
+        for component in manifest.components:
+            component_domain = self._component_domain(component, domain)
+            print(f"  Component '{component.name}' ({component.type}) → {component_domain}{component.path}")
+            self._run_component_build(component, dest_path)
+            deps.append(self._component_dep(component, dest_path, domain))
+
+        # The release tree is deploy-owned and world-readable so nginx can serve
+        # static files and each (separately-owned) service user can read and exec
+        # its binary. Service writable state lives in a service-owned data dir.
+        result = run(
+            f"chown -R {shlex.quote(self.deploy_user)}:{shlex.quote(self.deploy_group)} {shlex.quote(dest_path)}",
+            check=False,
+        )
+        if result.returncode != 0:
+            print(f"  ⚠ Warning: Could not set ownership to {self.deploy_user}:{self.deploy_group}")
+        run(f"chmod -R 755 {shlex.quote(dest_path)}", check=False)
+
+        # Start services after the release tree is readable so they can exec.
+        for component in manifest.components:
+            if component.is_service:
+                self._install_service_component(component, dest_path, domain)
+
+        save_deployment_metadata(dest_path, git_url, commit_hash)
+        print(f"  ✓ Manifest deployed to {dest_path}")
+        return deps
+
+    def _run_component_build(self, component: Component, dest_path: str) -> None:
+        """Run a component's build command(s) at the repo root with its env."""
+        if not component.build:
+            return
+        env_prefix = "".join(f"{key}={shlex.quote(value)} " for key, value in component.env.items())
+        for command in component.build:
+            print(f"    build: {command}")
+            result = run(
+                f"cd {shlex.quote(dest_path)} && {env_prefix}{command}",
+                check=False,
+                capture_output=True,
+            )
+            if result.returncode != 0:
+                error = self._get_command_error(result, "build command failed")
+                raise RuntimeError(f"Component '{component.name}' build failed: {error}")
+
+    def _component_domain(self, component: Component, deploy_domain: Optional[str]) -> str:
+        if not has_placeholder(component.domain):
+            return component.domain
+        if not deploy_domain:
+            raise RuntimeError(
+                f"Component '{component.name}' domain uses {{domain}}, but no deploy domain was provided"
+            )
+        return render_template(component.domain, {'domain': deploy_domain})
+
+    def _component_dep(self, component: Component, dest_path: str,
+                       deploy_domain: Optional[str] = None) -> dict[str, Any]:
+        """Translate a component into an nginx deployment descriptor."""
+        component_domain = self._component_domain(component, deploy_domain)
+        dep: dict[str, Any] = {
+            'dest_path': dest_path,
+            'domain': component_domain,
+            'path': component.path,
+            'api_subdomain': False,
+            'frontend_port': None,
+            'frontend_serve_path': None,
+        }
+        if component.is_static:
+            serve_path = os.path.normpath(os.path.join(dest_path, component.output or ""))
+            dep.update(
+                project_type='static',
+                needs_proxy=False,
+                serve_path=serve_path,
+                backend_port=None,
+            )
+            return dep
+        # service: nginx reverse-proxies the component's domain to its loopback port
+        dep.update(
+            project_type='service',
+            needs_proxy=True,
+            serve_path=dest_path,
+            backend_port=component.port,
+            proxy_port=component.port,
+            preserve_path=True,
+        )
+        return dep
+
+    def _service_context(self, component: Component, dest_path: str,
+                         deploy_domain: Optional[str] = None) -> dict[str, str]:
+        """Build the deploy-time {{...}} substitution context for a service.
+
+        Variables are resolved in dependency order (binary, then working_dir,
+        then env_file) so later fields and a repo-supplied unit template can
+        reference the earlier ones (e.g. ExecStart={{binary}}).
+        """
+        unit_name, username = self._service_identity(dest_path, component)
+        context: dict[str, str] = {
+            'release_dir': dest_path,
+            'base_dir': self.base_dir,
+            'name': component.name,
+            'service_name': unit_name,
+            'domain': self._component_domain(component, deploy_domain),
+            'path': component.path,
+            # For a service, the user is its own dedicated, isolated identity.
+            'web_user': username,
+            'web_group': username,
+            'port': str(component.port) if component.port is not None else '',
+            'shared_dir': self._component_shared_dir(dest_path, component),
+            'data_dir': self._component_data_dir(dest_path, component),
+        }
+        if component.binary:
+            resolved = render_template(component.binary, context)
+            context['binary'] = os.path.normpath(os.path.join(dest_path, resolved))
+        context['working_dir'] = self._resolve_working_dir(component, dest_path, context)
+        if component.env_file:
+            context['env_file'] = render_template(component.env_file, context)
+        return context
+
+    def _resolve_working_dir(self, component: Component, dest_path: str,
+                             context: dict[str, str]) -> str:
+        working_dir = component.working_dir
+        if not working_dir:
+            return dest_path
+        working_dir = render_template(working_dir, context)
+        if os.path.isabs(working_dir):
+            return working_dir
+        return os.path.normpath(os.path.join(dest_path, working_dir))
+
+    def _install_service_component(self, component: Component, dest_path: str,
+                                   deploy_domain: Optional[str] = None) -> None:
+        context = self._service_context(component, dest_path, deploy_domain)
+        username = context['web_user']
+        service_name = context['service_name']
+
+        # Verify the built artifact exists before wiring a unit around it.
+        if component.binary:
+            binary_path = context['binary']
+            if not os.path.exists(binary_path):
+                raise RuntimeError(
+                    f"Component '{component.name}': binary not found after build: {binary_path}"
+                )
+
+        # Dedicated, isolated service user owning only its managed data dir.
+        self._ensure_service_user(username)
+        data_dir = context['data_dir']
+        shared_dir = context['shared_dir']
+        self._ensure_dir(data_dir)  # also creates shared_dir + the shared root
+        run(f"chown -R {shlex.quote(username)}:{shlex.quote(username)} {shlex.quote(shared_dir)}", check=False)
+        run(f"chmod 0750 {shlex.quote(shared_dir)} {shlex.quote(data_dir)}", check=False)
+
+        if component.systemd_unit:
+            # Honor the repo's hardened unit: substitute placeholders, install it.
+            unit_src = os.path.normpath(os.path.join(dest_path, component.systemd_unit))
+            if not os.path.exists(unit_src):
+                raise RuntimeError(
+                    f"Component '{component.name}': systemd_unit not found: {unit_src}"
+                )
+            with open(unit_src, "r", encoding="utf-8") as handle:
+                unit_content = render_template(handle.read(), context)
+            install_unit_file(service_name, unit_content)
+        else:
+            exec_start = render_template(component.exec, context) if component.exec else context['binary']
+            create_managed_service(
+                service_name,
+                exec_start,
+                context['working_dir'],
+                username,
+                username,
+                env_file=context.get('env_file'),
+                description=f"infra.json service: {component.name}",
+            )
+
+        if component.health:
+            self._poll_health(component)
+
+    def _poll_health(self, component: Component, attempts: int = 10, delay: float = 1.0) -> None:
+        """Poll a service's health endpoint until it answers, then return.
+
+        Any HTTP response below 500 counts as "up" (the service is bound and
+        routing). A persistent failure only warns: a transient slow start
+        should not abort an otherwise-successful multi-component deploy.
+        """
+        import time
+        import urllib.error
+        import urllib.request
+
+        url = f"http://127.0.0.1:{component.port}{component.health}"
+        for _attempt in range(attempts):
+            try:
+                with urllib.request.urlopen(url, timeout=3) as resp:
+                    if resp.status < 500:
+                        print(f"  ✓ Health check passed for '{component.name}' ({url} → {resp.status})")
+                        return
+            except urllib.error.HTTPError as exc:
+                if exc.code < 500:
+                    print(f"  ✓ Health check passed for '{component.name}' ({url} → {exc.code})")
+                    return
+            except (urllib.error.URLError, OSError):
+                pass
+            time.sleep(delay)
+        print(f"  ⚠ Warning: health check for '{component.name}' did not pass after {attempts} attempts ({url})")
+
     def build_project(self, project_path: str, project_type: str, site_root: Optional[str] = None, app_name: Optional[str] = None, reset_migrations: bool = False):
         if project_type == "rails":
             self._build_rails_project(project_path, app_name, reset_migrations)
@@ -825,16 +1172,20 @@ class DeploymentOrchestrator:
                             site_root: Optional[str] = None, require_build_output: bool = False) -> bool:
         print(f"  Building Node.js project at {project_path}")
         
+        package_lock = os.path.join(project_path, "package-lock.json")
+        npm_install_command = "npm ci" if os.path.exists(package_lock) else "npm install"
+        freshness_args = shlex.join(npm_freshness_args())
+        freshness_suffix = f" {freshness_args}" if freshness_args else ""
         install_result = run(
-            f"cd {shlex.quote(project_path)} && TMPDIR=/var/tmp npm install",
+            f"cd {shlex.quote(project_path)} && TMPDIR=/var/tmp {npm_install_command}{freshness_suffix}",
             check=False,
             capture_output=True,
         )
         if install_result.returncode != 0:
-            error = self._get_command_error(install_result, "npm install failed")
+            error = self._get_command_error(install_result, f"{npm_install_command} failed")
             if require_build_output:
                 raise RuntimeError(f"Frontend dependency install failed: {error}")
-            print(f"  ⚠ npm install failed, skipping build step: {error}")
+            print(f"  ⚠ {npm_install_command} failed, skipping build step: {error}")
             return False
         
         # Check if a build script is defined in package.json before running it

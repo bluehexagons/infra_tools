@@ -19,13 +19,15 @@ try:
 except ImportError:
     argcomplete = None
 
-from lib.config import SetupConfig
+from lib.config import SetupConfig, _normalize_container_storage
 from lib.credentials import prepare_runtime_config, store_cli_credentials
+from lib.proxmox_hosts import find_proxmox_host
 from lib.validators import validate_host, validate_username
 from lib.validation import (
     validate_apt_packages,
     validate_deploy_specs,
     validate_deploy_targets,
+    validate_gogs_settings,
     validate_hosted_flags,
     validate_samba_share_credentials,
     validate_samba_share_specs,
@@ -33,6 +35,7 @@ from lib.validation import (
     validate_scrub_specs,
     validate_ssl_email,
     validate_sync_specs,
+    validate_memory_string,
     validate_timezone_name,
     validate_workspace_dir,
 )
@@ -109,7 +112,17 @@ def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = Non
                     if result.returncode != 0:
                         print(f"  Error resetting repository: {result.stderr}")
                         return None
-                    
+
+                    result = subprocess.run(
+                        ["git", "-C", cache_path, "clean", "-fdx"],
+                        capture_output=True,
+                        text=True,
+                        timeout=30
+                    )
+                    if result.returncode != 0:
+                        print(f"  Error cleaning repository: {result.stderr}")
+                        return None
+
                     print(f"  ✓ Updated cached repository")
                 except Exception as e:
                     print(f"  Error updating repository: {e}")
@@ -259,6 +272,104 @@ def _write_remote_args_file(build_dir: str, remote_arg_tokens: list[str]) -> str
     return args_path
 
 
+def _default_root_storage_for_host(host) -> Optional[str]:
+    if host.default_storage:
+        return host.default_storage
+    if host.facts and host.facts.default_root_storage:
+        return host.facts.default_root_storage
+    return None
+
+
+def _default_template_storage_for_host(host) -> Optional[str]:
+    if host.default_template_storage:
+        return host.default_template_storage
+    if host.facts and host.facts.default_template_storage:
+        return host.facts.default_template_storage
+    return None
+
+
+def _is_storage_amount(value: str) -> bool:
+    try:
+        validate_memory_string(value, "--storage AMOUNT")
+    except ValueError:
+        return False
+    return True
+
+
+def _apply_hosted_proxmox_defaults(
+    config: SetupConfig,
+    workspace: Optional[str],
+) -> None:
+    """Resolve saved Proxmox host details and expand shorthand storage specs."""
+    if not config.hosted_node:
+        return
+
+    host = find_proxmox_host(str(config.hosted_node), workspace)
+    if host:
+        if config.hosted_node == host.name:
+            config.hosted_node = host.address
+        if not config.hosted_key and host.ssh_key:
+            config.hosted_key = host.ssh_key
+
+    storage_specs = _normalize_container_storage(config.container_storage)
+    if not storage_specs:
+        return
+
+    root_pool = _default_root_storage_for_host(host) if host else None
+    template_pool = _default_template_storage_for_host(host) if host else None
+    root_pool = root_pool or "auto"
+    template_pool = template_pool or "auto"
+    updated_specs: list[list[str]] = []
+    changed = False
+
+    for spec in storage_specs:
+        normalized = list(spec)
+        if normalized and normalized[0] == "root":
+            if len(normalized) == 2 and _is_storage_amount(normalized[1]):
+                normalized = ["root", root_pool, normalized[1]]
+                changed = True
+            elif len(normalized) == 3 and normalized[1] in {"default", "host"}:
+                normalized = ["root", root_pool, normalized[2]]
+                changed = True
+        elif normalized and normalized[0] == "template":
+            if len(normalized) == 1:
+                normalized = ["template", template_pool]
+                changed = True
+            elif len(normalized) == 2 and normalized[1] in {"default", "host"}:
+                normalized = ["template", template_pool]
+                changed = True
+        updated_specs.append(normalized)
+
+    if changed:
+        config.container_storage = updated_specs
+
+
+def prepare_validated_runtime_config(
+    config: SetupConfig,
+    workspace: Optional[str],
+) -> SetupConfig:
+    """Apply saved-host defaults, resolve credentials, and validate a setup."""
+    _apply_hosted_proxmox_defaults(config, workspace)
+    runtime_config = prepare_runtime_config(config)
+    validate_timezone_name(runtime_config.timezone)
+    validate_apt_packages(runtime_config.apt_packages)
+    validate_notification_args(runtime_config.notify_specs)
+    validate_ssl_email(runtime_config.ssl_email)
+    validate_deploy_specs(runtime_config.deploy_specs)
+    validate_deploy_targets(runtime_config.deploy_targets)
+    validate_sync_specs(runtime_config.sync_specs)
+    validate_scrub_specs(runtime_config.scrub_specs)
+    validate_smb_mount_specs(runtime_config.smb_mounts)
+    validate_samba_share_specs(
+        runtime_config.samba_shares,
+        runtime_config.share_credentials,
+    )
+    validate_gogs_settings(runtime_config.gogs)
+    validate_hosted_flags(runtime_config)
+    validate_samba_share_credentials(runtime_config)
+    return runtime_config
+
+
 def run_remote_setup(config: SetupConfig) -> int:
     is_local = config.host in ["localhost", "127.0.0.1"]
     
@@ -336,6 +447,7 @@ def run_remote_setup(config: SetupConfig) -> int:
             remote_cmd_args = [remote_python, remote_script, "--args-file", remote_args_path]
             remote_shell_cmd = chain_remote_commands(
                 [
+                    ["rm", "-rf", REMOTE_INSTALL_DIR],
                     ["mkdir", "-p", REMOTE_INSTALL_DIR],
                     ["cd", REMOTE_INSTALL_DIR],
                     ["tar", "xzf", "-"],
@@ -412,23 +524,15 @@ def setup_main(system_type: str, description: str, success_msg_fn: Callable[[Set
     config = SetupConfig.from_args(args, system_type)
 
     try:
-        runtime_config = prepare_runtime_config(config)
-        validate_timezone_name(runtime_config.timezone)
-        validate_apt_packages(runtime_config.apt_packages)
-        validate_notification_args(runtime_config.notify_specs)
-        validate_ssl_email(runtime_config.ssl_email)
-        validate_deploy_specs(runtime_config.deploy_specs)
-        validate_deploy_targets(runtime_config.deploy_targets)
-        validate_sync_specs(runtime_config.sync_specs)
-        validate_scrub_specs(runtime_config.scrub_specs)
-        validate_smb_mount_specs(runtime_config.smb_mounts)
-        validate_samba_share_specs(runtime_config.samba_shares, runtime_config.share_credentials)
-        validate_samba_share_credentials(runtime_config)
+        runtime_config = prepare_validated_runtime_config(
+            config,
+            getattr(args, "workspace", None),
+        )
     except ValueError as e:
         print(f"Error: {e}")
         return 1
 
-    # Container provisioning (if --hosted)
+    # Hosted guest provisioning (if --hosted)
     if config.hosted_node:
         try:
             validate_hosted_flags(config)

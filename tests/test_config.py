@@ -140,8 +140,28 @@ class TestSetupConfigToRemoteArgs(unittest.TestCase):
         config = self._make_config(deploy_specs=[['example.com/', 'https://github.com/user/repo.git']])
         args = config.to_remote_args()
         args_str = ' '.join(args)
-        self.assertIn('--lite-deploy', args_str)
+        # Default deployment mode doesn't add a flag; lite and full modes use --deployment-lite/--deployment-full
         self.assertIn('--deploy', args_str)
+
+    def test_deployment_mode_flags(self):
+        deploy_specs = [['example.com/', 'https://github.com/user/repo.git']]
+
+        lite = self._make_config(deploy_specs=deploy_specs, deployment_mode='lite')
+        self.assertIn('--deployment-lite', lite.to_remote_args())
+        self.assertIn('--deployment-lite', lite.to_setup_command())
+
+        full = self._make_config(deploy_specs=deploy_specs, deployment_mode='full')
+        self.assertTrue(full.full_deploy)
+        self.assertIn('--deployment-full', full.to_remote_args())
+        self.assertIn('--deployment-full', full.to_setup_command())
+
+    def test_deploy_latest(self):
+        config = self._make_config(deploy_latest=True)
+        args = config.to_remote_args()
+        self.assertIn('--deploy-latest', args)
+        args = config.to_setup_command()
+        self.assertIn('--deploy-latest', args)
+        self.assertNotIn('deploy_latest', config.to_dict())
 
     def test_sync_specs(self):
         config = self._make_config(sync_specs=[['/src', '/dst', 'daily']])
@@ -186,6 +206,12 @@ class TestSetupConfigToRemoteArgs(unittest.TestCase):
         args = config.to_remote_args()
         args_str = ' '.join(args)
         self.assertIn('--antistatic-db db.example.com:8081', args_str)
+
+    def test_gogs(self):
+        config = self._make_config(gogs=['git.example.com:3000', '/srv/gogs'])
+        args = config.to_remote_args()
+        args_str = ' '.join(args)
+        self.assertIn('--gogs git.example.com:3000 /srv/gogs', args_str)
 
     def test_friendly_name_included(self):
         config = self._make_config(friendly_name='scrapbox')
@@ -241,6 +267,16 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
         config = self._make_config(machine_type='hardware')
         parts = config.to_setup_command()
         self.assertTrue(any('--machine' in p for p in parts))
+
+    def test_lxc_machine_type_included_when_system_default_is_vm(self):
+        config = self._make_config(system_type='server_web', machine_type='unprivileged')
+        parts = config.to_setup_command()
+        self.assertIn('--machine unprivileged', parts)
+
+    def test_vm_machine_type_omitted_when_system_default_is_vm(self):
+        config = self._make_config(system_type='server_web', machine_type='vm')
+        parts = config.to_setup_command()
+        self.assertFalse(any('--machine' in p for p in parts))
 
     def test_password_not_included(self):
         config = self._make_config(password='secret')
@@ -321,7 +357,9 @@ class TestSetupConfigFromArgs(unittest.TestCase):
             enable_rdp=None,
             smb_mounts=None,
             enable_smbclient=None,
-            no_restart=None,
+            auto_restart=None,
+            auto_restart_force_days=None,
+            auto_restart_grace=None,
             machine_type=None,
             password=None,
             ssh_key=None,
@@ -355,6 +393,7 @@ class TestSetupConfigFromArgs(unittest.TestCase):
             notify_specs=None,
             antistatic_server=None,
             antistatic_db=None,
+            gogs=None,
             hosted_node=None,
             hosted_user='root',
             hosted_key=None,
@@ -368,6 +407,7 @@ class TestSetupConfigFromArgs(unittest.TestCase):
 
     def test_workstation_defaults_come_from_registry(self):
         config = SetupConfig.from_args(self._make_args(), 'workstation_desktop')
+        self.assertEqual(config.machine_type, 'vm')
         self.assertFalse(config.enable_rdp)
         self.assertTrue(config.include_desktop)
         self.assertTrue(config.include_cli_tools)
@@ -381,9 +421,29 @@ class TestSetupConfigFromArgs(unittest.TestCase):
 
     def test_pc_dev_defaults_include_office_and_smbclient(self):
         config = SetupConfig.from_args(self._make_args(), 'pc_dev')
+        self.assertEqual(config.machine_type, 'vm')
         self.assertTrue(config.install_office)
         self.assertTrue(config.enable_smbclient)
         self.assertTrue(config.include_pc_dev_apps)
+
+    def test_server_web_defaults_to_vm(self):
+        config = SetupConfig.from_args(self._make_args(), 'server_web')
+        self.assertEqual(config.machine_type, 'vm')
+
+    def test_build_server_defaults_to_vm(self):
+        config = SetupConfig.from_args(
+            self._make_args(is_build_server=True),
+            'server_lite',
+        )
+        self.assertTrue(config.is_build_server)
+        self.assertEqual(config.machine_type, 'vm')
+
+    def test_explicit_machine_type_overrides_vm_default(self):
+        config = SetupConfig.from_args(
+            self._make_args(machine_type='unprivileged'),
+            'workstation_dev',
+        )
+        self.assertEqual(config.machine_type, 'unprivileged')
 
     def test_antistatic_db_from_args(self):
         config = SetupConfig.from_args(
@@ -392,11 +452,37 @@ class TestSetupConfigFromArgs(unittest.TestCase):
         )
         self.assertEqual(config.antistatic_db, 'db.example.com')
 
-    def test_server_proxmox_defaults_no_restart(self):
+    def test_gogs_from_args(self):
+        config = SetupConfig.from_args(
+            self._make_args(gogs=['git.example.com:3000', '/srv/gogs']),
+            'server_web',
+        )
+        self.assertEqual(config.gogs, ['git.example.com:3000', '/srv/gogs'])
+
+    def test_server_proxmox_defaults_defer_restart_with_force_deadline(self):
         config = SetupConfig.from_args(self._make_args(), 'server_proxmox')
-        self.assertTrue(config.no_restart)
+        self.assertFalse(config.auto_restart)
+        self.assertEqual(config.auto_restart_force_days, 7)
+        self.assertEqual(config.auto_restart_grace, 5)
         self.assertFalse(config.include_cli_tools)
         self.assertFalse(config.include_desktop)
+
+    def test_from_dict_server_proxmox_defaults_restart_policy_when_missing(self):
+        config = SetupConfig.from_dict(
+            'pve1',
+            'server_proxmox',
+            {'username': 'root'},
+        )
+        self.assertFalse(config.auto_restart)
+        self.assertEqual(config.auto_restart_force_days, 7)
+
+    def test_from_dict_maps_legacy_no_restart(self):
+        config = SetupConfig.from_dict(
+            'server1',
+            'server_lite',
+            {'username': 'root', 'no_restart': True},
+        )
+        self.assertFalse(config.auto_restart)
 
 
 class TestSetupConfigHostedFields(unittest.TestCase):

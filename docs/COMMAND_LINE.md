@@ -2,6 +2,13 @@
 
 Complete reference for the unified infra_tools CLI.
 
+> **Sysadmin shortcuts** (`mount`, `health`, `ssh`, `push`, `pull`, `df`, `fan`,
+> `svc`, `logs`, `upgrade`, `reachable`, `key`) have their own page:
+> [SYSADMIN.md](./SYSADMIN.md).
+>
+> **Network inventory and Proxmox firewall planning** (`network ...`) have
+> their own page: [NETWORKING.md](./NETWORKING.md).
+
 ## Unified Entry Point
 
 The `infra_tools.py` script provides a unified interface for all operations:
@@ -26,6 +33,10 @@ infra_tools.py cmd [pattern]
 infra_tools.py rm <pattern>
 infra_tools.py deploy <pattern> [--yes]
 
+# Audit and prune GitHub repo storage
+infra_tools.py maintenance github audit [--root PATH] [--json]
+infra_tools.py maintenance github prune [--root PATH] [--keep-releases N] [--delete-caches] [--cache-older-than-days N] [--yes] [--dry-run]
+
 # Manage workspace credentials
 infra_tools.py credentials set <username> <password>
 infra_tools.py credentials list
@@ -41,6 +52,29 @@ infra_tools.py self-setup [options]
 
 # Drop into the interactive infra_tools REPL
 infra_tools.py shell
+
+# Workspace-backed network inventory and read-only Proxmox firewall planning
+infra_tools.py network list
+infra_tools.py network init <profile> [--management CIDR] [--control-plane CIDR] [--guest-network CIDR]
+infra_tools.py network add-host <profile> <name> <address> [--provider NAME] [--role ROLE]
+infra_tools.py network import-proxmox <profile> [--host NAME] [--tag TAG]
+infra_tools.py network import-proxmox-guests <profile> [--host NAME] [--tag TAG]
+infra_tools.py network plan-proxmox <profile> [--proxmox] [--json]
+
+# Sysadmin shortcuts (see SYSADMIN.md for full reference)
+infra_tools.py mount <host>:<path> <local>
+infra_tools.py umount <local|host>
+infra_tools.py health <host>
+infra_tools.py ssh <host> [-- cmd]
+infra_tools.py push <local> <host>:<path>
+infra_tools.py pull <host>:<path> [local]
+infra_tools.py key push <host>
+infra_tools.py df <host> [<host2> ...]
+infra_tools.py fan <host> [<host2> ...] -- <cmd>
+infra_tools.py svc <host> <unit> [action]
+infra_tools.py logs <host> <unit> [-f] [-n N]
+infra_tools.py upgrade <host> [<host2> ...] [--check]
+infra_tools.py reachable [hosts|--pattern GLOB]
 ```
 
 ### System Types for `setup` command
@@ -67,19 +101,34 @@ infra_tools.py setup workstation_desktop 192.168.1.50 --desktop i3 --browser fir
 # Patch an existing server
 infra_tools.py patch web.com --deploy api.web.com https://github.com/user/api.git
 
-# Provision a hosted LXC on a Proxmox node, then configure it as a web server
+# Provision a hosted Proxmox VM, then configure it as a web server
 infra_tools.py setup server_web 10.0.0.50 admin \
-  --hosted 10.0.0.10 \
-  --hosted-user root \
-  --hosted-key ~/.ssh/proxmox_ed25519 \
+  --hosted pve1 \
   --memory 4G \
-  --storage root auto 20G \
-  --storage template local \
+  --storage root 32G \
   --cores 2 \
   --base debian \
-  --name web-01 \
+  --name web-01-vm \
   --ruby --node --ssl
 ```
+
+---
+
+## Upgrade Notes
+
+Main-era hosted LXC commands for `server_web`, `workstation_desktop`,
+`workstation_dev`, or `pc_dev` must now pass `--machine unprivileged` when you
+rerun them against an existing LXC. Without that flag, those system types use
+the VM-first setup/provisioning path.
+
+Saved workflows are preferred for existing systems. `infra_tools.py deploy` and
+`infra_tools.py patch` preserve the saved machine type when `--machine` is not
+provided, and `infra_tools.py cmd` prints `--machine unprivileged` for saved LXC
+configs whose current system-type default is VM.
+
+`server_proxmox` remains a hardware setup flow with normal automatic restarts
+disabled by default. Proxmox hosts still force a restart after 7 days of
+deferrals unless `--auto-restart-force-days 0` is set.
 
 ---
 
@@ -93,11 +142,13 @@ infra_tools.py setup server_web 10.0.0.50 admin \
 | `-p, --password PASS` | User password |
 | `-t, --timezone TZ` | Timezone (defaults to UTC) |
 | `--workspace PATH` | Workspace root for config, credentials, known_hosts, and history |
-| `--machine TYPE` | Machine type: `unprivileged` (LXC, default), `vm`, `privileged`, `hardware`, `oci` |
+| `--machine TYPE` | Machine type override. Defaults are system-specific: VM for workstation_desktop/workstation_dev/pc_dev/server_web and build-server flows; otherwise `unprivileged` (LXC) |
 | `--name NAME` | Friendly name for this configuration |
 | `--tags TAG1,TAG2` | Comma-separated tags for this configuration |
 | `--dry-run` | Simulate execution without making changes |
-| `--no-restart` | Disable automatic restarts after updates |
+| `--auto-restart` / `--no-auto-restart` | Enable or disable normal automatic restarts after updates. `--no-restart` is a deprecated alias for `--no-auto-restart` |
+| `--auto-restart-force-days N` | Force restart after N days of deferrals. Use `0` to never force |
+| `--auto-restart-grace N` | Warning period in minutes before an automatic restart starts |
 
 ## Desktop/Workstation Flags
 
@@ -124,41 +175,43 @@ infra_tools.py setup server_web 10.0.0.50 admin \
 | `--python` | Install Python aliases + uv |
 | `--workspace PATH` | Workspace isolation for this setup |
 
-## Hosted Proxmox LXC Flags
+## Hosted Proxmox Guest Flags
 
-Use these flags with `infra_tools.py setup ...` to create an LXC container on a Proxmox host before the normal setup flow continues against that new container.
+Use these flags with `infra_tools.py setup ...` to create a Proxmox guest before the normal setup flow continues against that new machine. VM is now the default for `workstation_desktop`, `workstation_dev`, `pc_dev`, `server_web`, and `--build-server`; pass `--machine unprivileged` to stay on the LXC path.
 
 | Flag | Description |
 |------|-------------|
-| `--hosted HOST` | Proxmox node IP or hostname where the container will be created |
+| `--hosted HOST` | Proxmox node IP/hostname, or a registered Proxmox host name from the workspace registry |
 | `--hosted-user USER` | SSH user for the Proxmox node (default: `root`) |
 | `--hosted-key PATH` | SSH key for the Proxmox node |
-| `--memory SIZE` | Container memory, such as `2G` or `512M` |
+| `--memory SIZE` | Hosted guest memory, such as `2G` or `512M` |
 | `--storage root POOL AMOUNT` | Required root filesystem storage spec; `POOL` may be a Proxmox storage name or `auto` |
-| `--storage template POOL` | Optional template storage spec; use to force where the base image is downloaded |
-| `--cores N` | Container vCPU count (default: `1`) |
-| `--base NAME` | Base template family to download, such as `debian` or `ubuntu` (default: `debian`) |
+| `--storage root AMOUNT` | Shorthand root storage spec that reuses a saved host default pool and otherwise falls back to `auto` |
+| `--storage template POOL` | Optional LXC-only template storage spec; use to force where the base image is downloaded |
+| `--storage template` | LXC shorthand that reuses the saved/default template storage pool |
+| `--cores N` | Hosted guest vCPU count (default: `1`) |
+| `--base NAME` | Base template/image family to download, such as `debian` or `ubuntu` (default: `debian`) |
 | `--workspace PATH` | Workspace isolation for this setup |
 
 Notes:
 
 - `--storage` is repeatable and storage types are unique.
 - `root` storage is required when `--hosted` is used.
-- `template` storage is optional; if omitted, the tool prefers the root pool when it supports templates and otherwise auto-selects a template-capable pool.
+- If `--hosted` matches a registered Proxmox host, infra_tools reuses that host's saved SSH key and probed storage defaults.
+- With a raw Proxmox node address, `--storage root AMOUNT`, `--storage root default AMOUNT`, and `--storage template` fall back to `auto` pools.
+- `template` storage is LXC-only; if omitted, the tool prefers the root pool when it supports templates and otherwise auto-selects a template-capable pool.
+- VM-first hosted flows expect an image-capable root pool such as `local-lvm`.
 
 Full example:
 
 ```bash
 python3 infra_tools.py setup server_web 10.0.0.50 admin \
-  --hosted 10.0.0.10 \
-  --hosted-user root \
-  --hosted-key ~/.ssh/proxmox_ed25519 \
+  --hosted pve1 \
   --memory 4G \
-  --storage root auto 20G \
-  --storage template local \
+  --storage root 32G \
   --cores 2 \
   --base debian \
-  --name web-01 \
+  --name web-01-vm \
   --ruby --node --ssl --ssl-email admin@example.com \
   --workspace /workspace/myapp \
   --deploy example.com https://github.com/user/repo.git
@@ -169,7 +222,9 @@ python3 infra_tools.py setup server_web 10.0.0.50 admin \
 | Flag | Description |
 |------|-------------|
 | `--deploy DOMAIN GIT_URL` | Deploy repository to domain. `GIT_URL` can be a local directory path or a git URL |
-| `--full-deploy` | Always rebuild deployments (don't skip unchanged) |
+| `--deployment-lite` | Use cached/pre-uploaded repository files only, with no updates (skips repos that aren't cached) |
+| `--deployment-full` | Always pull fresh repositories and rebuild everything (a full redeploy; implies `--full-deploy`) |
+| `--full-deploy` | Always rebuild deployments even if unchanged (default mode still updates repositories first) |
 | `--ssl` | Enable Let's Encrypt SSL |
 | `--ssl-email EMAIL` | Email for SSL registration |
 | `--cloudflare` | Configure Cloudflare Tunnel. Generated nginx sites do not redirect HTTP to HTTPS because cloudflared connects to the origin over HTTP |
@@ -200,6 +255,23 @@ python3 infra_tools.py setup server_lite 192.168.1.10 --antistatic-server :8080
 # Deploy antistatic-db
 python3 infra_tools.py setup server_web 192.168.1.10 --antistatic-db db.example.com --ssl
 ```
+
+## GitHub Maintenance
+
+The `maintenance github` command audits and prunes GitHub repository storage for local checkouts.
+
+```bash
+infra_tools.py maintenance github audit --root /home/loren/repos
+infra_tools.py maintenance github prune --root /home/loren/repos --yes
+infra_tools.py maintenance github prune --root /home/loren/repos --delete-caches --yes
+```
+
+Defaults:
+
+- `--keep-releases 2`
+- delete expired artifacts by default
+- delete caches only when `--delete-caches` is set
+- cache pruning defaults to entries not accessed in 90 days
 
 The services run as locked-down systemd units (`antistatic.service` and `antistatic-db.service`) with `Restart=on-failure`, security hardening (`NoNewPrivileges`, `PrivateTmp`, `ProtectSystem=strict`, `ProtectHome`), and optional nginx configuration when a hostname is provided.
 
@@ -261,17 +333,49 @@ infra_tools.py rm <pattern>                    # Remove configurations
 infra_tools.py deploy <pattern> [--yes]        # Redeploy systems
 ```
 
+## Network Inventory and Planning
+
+Use `infra_tools.py network` to keep a workspace-backed inventory of management
+sources, control-plane addresses, guest networks, subnets, VLAN-tagged subnets,
+and tagged hosts, then generate a read-only Proxmox control-plane lockdown plan.
+
+```bash
+# Inventory
+infra_tools.py network list
+infra_tools.py network show <profile> [--json]
+infra_tools.py network init <profile> [--management CIDR] [--control-plane CIDR] [--guest-network CIDR]
+infra_tools.py network add-host <profile> <name> <address> [--provider NAME] [--role ROLE]
+
+# Proxmox imports
+infra_tools.py network import-proxmox <profile> [--host NAME] [--tag TAG] [--no-control-plane]
+infra_tools.py network import-proxmox-guests <profile> [--host NAME] [--tag TAG]
+
+# Read-only planning
+infra_tools.py network plan-proxmox <profile> [--json]
+infra_tools.py network plan-proxmox <profile> --proxmox
+```
+
+Notes:
+
+- The inventory lives at `<workspace>/network_inventory.json` with mode `0600`.
+- Pass `--workspace PATH` immediately after `network` to isolate profiles for a project or environment.
+- `plan-proxmox` is read-only: it prints an abstract plan, or with `--proxmox` renders reviewable snippets for `/etc/pve/firewall/cluster.fw`, `/etc/pve/nodes/<node>/host.fw`, and `/etc/pve/firewall/<VMID>.fw`.
+- The planner returns a non-zero status until at least one management source and one control-plane address are present.
+
 ## Proxmox Management
 
-Register Proxmox hosts and manage their LXC containers:
+Register Proxmox hosts and manage their VMs or LXC compatibility guests:
 
 ```bash
 # Host registry
 infra_tools.py proxmox add <name> <address> [--user USER] [--key PATH]
+infra_tools.py proxmox probe <host>
+infra_tools.py proxmox probe-cluster <address> [--user USER] [--key PATH] [--tag TAG]
+infra_tools.py proxmox rolling-update <target> [<target> ...] [--dry-run] [--reboot-timeout SECONDS]
 infra_tools.py proxmox hosts
 infra_tools.py proxmox remove <name>
 
-# Container lifecycle
+# Guest lifecycle
 infra_tools.py proxmox ls <host>
 infra_tools.py proxmox status <host> <vmid>
 infra_tools.py proxmox start <host> <vmid>
@@ -279,7 +383,7 @@ infra_tools.py proxmox stop <host> <vmid> [--force]
 infra_tools.py proxmox destroy <host> <vmid> [-y] [--force]
 infra_tools.py proxmox health <host> <vmid> [--no-ssh]
 
-# Container configuration
+# Guest configuration
 infra_tools.py proxmox config <host> <vmid> [--pending]
 infra_tools.py proxmox reconfigure <host> <vmid> --set KEY=VALUE [--set ...]
 infra_tools.py proxmox modify <host> <vmid> [--cores N] [--memory N[M|G]]
@@ -293,9 +397,16 @@ infra_tools.py proxmox notifications test-webhook <host>
 infra_tools.py proxmox [shell]
 ```
 
-`config` shows the running pct configuration; `--pending` shows changes that take effect on next restart.
-`modify` and `reconfigure` changes to a running container are queued as pending by Proxmox.
-All subcommands accept `--dry-run` to print the remote command without executing it.
+`config` shows the running guest configuration from `pct` or `qm`, and `--pending` shows changes that take effect on next restart.
+`probe` caches bridge, gateway, DNS, and storage-pool recommendations back into the host registry so later `setup --hosted`
+commands can reuse them.
+`probe-cluster` starts from one reachable node IP/hostname, discovers every cluster member using Proxmox's configured node names,
+and seeds host records for the whole cluster in one step. `--tag` is repeatable and applies those tags to newly discovered nodes.
+`rolling-update` uses each target's saved setup command, rehydrates workspace credentials before patching, stops on the first
+failure, and only reboots a node when `/var/run/reboot-required` exists.
+`modify` and `reconfigure` changes to a running guest are queued as pending by Proxmox.
+Mutating Proxmox subcommands such as `reconfigure`, `modify`, `resize-disk`, notification setup, and `rolling-update`
+accept `--dry-run` to print or validate the planned work without executing it.
 
 ## Interactive Shell
 
@@ -310,6 +421,7 @@ as other commands. Available commands inside the shell:
 list [pattern] [--json]    list saved configurations
 info [pattern] [--compact] show configuration details
 cmd [pattern]              show reconstructed setup command
+new / setup                guided flow to create a new saved setup
 deploy <pattern> [--yes]   redeploy saved configurations
 rm <pattern> [--yes]       remove saved configurations
 recall <host> [user]       fetch a setup command from a remote host
@@ -323,6 +435,11 @@ quit / exit                leave the shell
 The shell loads `~/.infra_toolsrc` on startup. Put any commands to run at the start of each session
 there — for example `workspace /path/to/project`. Command history is persisted at
 `~/.local/share/infra_tools/shell_history`.
+
+`new` / `setup` is a lightweight guided wizard: it can reuse an existing saved
+setup as a starting point, optionally choose a registered Proxmox host, then
+prompt for common fields such as name, IP/hostname, machine type, system type,
+and a few common workstation or web-server options before saving the result.
 
 ## Utility Commands
 

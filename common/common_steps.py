@@ -9,10 +9,12 @@ import subprocess
 import tempfile
 from typing import Optional
 
+from lib.apt_sources import disable_duplicate_vivaldi_source
 from lib.config import SetupConfig
 from lib.machine_state import can_manage_time_sync
 from lib.remote_utils import run, is_dry_run, is_package_installed, is_service_active, file_contains, install_package
 from lib.systemd_service import cleanup_service
+from lib.update_policy import ECOSYSTEM_AUTO_UPGRADE_ENV, npm_freshness_args
 
 
 def set_user_password(username: str, password: str) -> bool:
@@ -31,6 +33,13 @@ def set_user_password(username: str, password: str) -> bool:
 def update_and_upgrade_packages(config: SetupConfig) -> None:
     print("  Updating package lists...")
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
+    try:
+        disabled_path = disable_duplicate_vivaldi_source()
+    except (OSError, ValueError) as e:
+        print(f"  ⚠ Could not clean duplicate Vivaldi APT source: {e}")
+    else:
+        if disabled_path:
+            print(f"  ✓ Disabled duplicate Vivaldi APT source: {disabled_path}")
     run("apt-get update -qq")
     print("  Upgrading packages...")
     run("apt-get upgrade -y -qq")
@@ -226,17 +235,81 @@ def install_ruby(config: SetupConfig) -> None:
         print("  ✓ Ruby + bundler already installed")
         return
     run("apt-get -o DPkg::Lock::Timeout=60 install -y -qq ruby ruby-dev bundler", check=False)
-    run("gem install bundler --no-document", check=False)
-    if shutil.which("ruby"):
+    if shutil.which("ruby") and (shutil.which("bundle") or shutil.which("bundler")):
         print("  ✓ Ruby + bundler installed from apt packages")
+    elif shutil.which("ruby"):
+        print("  ⚠ Ruby installed, but bundled apt package was unavailable")
+
+
+def _run_as_login_user(
+    username: str,
+    user_home: str,
+    command: str,
+    *,
+    check: bool = True,
+    capture_output: bool = False,
+) -> subprocess.CompletedProcess[str]:
+    """Run a shell command as a login user's home-scoped tool environment."""
+    safe_username = shlex.quote(username)
+    safe_home = shlex.quote(user_home)
+    shell_script = f"cd {safe_home} && {command}"
+    return run(
+        f"runuser -u {safe_username} -- env "
+        f"HOME={safe_home} USER={safe_username} LOGNAME={safe_username} "
+        f"bash -lc {shlex.quote(shell_script)}",
+        check=check,
+        capture_output=capture_output,
+    )
+
+
+def _chown_existing_paths(username: str, paths: list[str]) -> None:
+    """Ensure existing user-tool paths belong to the target login user."""
+    safe_username = shlex.quote(username)
+    existing_paths = [path for path in paths if os.path.exists(path)]
+    for path in existing_paths:
+        run(f"chown -R {safe_username}:{safe_username} {shlex.quote(path)}", check=False)
+
+
+def _user_tool_paths(user_home: str) -> list[str]:
+    """Return per-user tool paths that should never be root-owned."""
+    return [
+        os.path.join(user_home, ".nvm"),
+        os.path.join(user_home, ".npm"),
+        os.path.join(user_home, ".cache"),
+        os.path.join(user_home, ".config"),
+        os.path.join(user_home, ".local"),
+    ]
+
+
+def _ensure_nvm_shell_init(username: str, user_home: str) -> None:
+    """Add nvm initialization to the user's .bashrc when missing."""
+    bashrc_path = f"{user_home}/.bashrc"
+    nvm_init = '''
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+[ -s "$NVM_DIR/bash_completion" ] && . "$NVM_DIR/bash_completion"
+'''
+
+    if os.path.exists(bashrc_path):
+        with open(bashrc_path, "r") as f:
+            bashrc_content = f.read()
+        if 'export NVM_DIR="$HOME/.nvm"' not in bashrc_content:
+            with open(bashrc_path, "a") as f:
+                f.write(nvm_init)
+    else:
+        skel_bashrc = "/etc/skel/.bashrc"
+        if os.path.exists(skel_bashrc):
+            run(f"cp {shlex.quote(skel_bashrc)} {shlex.quote(bashrc_path)}")
+            with open(bashrc_path, "a") as f:
+                f.write(nvm_init)
+        else:
+            with open(bashrc_path, "w") as f:
+                f.write(nvm_init)
+
+    run(f"chown {shlex.quote(username)}:{shlex.quote(username)} {shlex.quote(bashrc_path)}")
 
 
 def install_go(config: SetupConfig) -> None:
-    result = run("which go", check=False)
-    if result.returncode == 0:
-        print("  ✓ Go already installed")
-        return
-    
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get install -y -qq curl wget")
     result = run("curl -s https://go.dev/VERSION?m=text | head -1", check=False, capture_output=True)
@@ -248,6 +321,24 @@ def install_go(config: SetupConfig) -> None:
     if not go_version.startswith("go"):
         print("  ⚠ Invalid Go version format, skipping")
         return
+
+    go_binary = "/usr/local/go/bin/go"
+    if not os.path.exists(go_binary):
+        found_go = shutil.which("go")
+        if found_go:
+            go_binary = found_go
+
+    if os.path.exists(go_binary):
+        installed_result = run(f"{shlex.quote(go_binary)} version", check=False, capture_output=True)
+        if installed_result.returncode == 0:
+            version_parts = installed_result.stdout.strip().split()
+            installed_version = version_parts[2] if len(version_parts) >= 3 else "unknown"
+            if installed_version == go_version:
+                print(f"  ✓ Go already up to date ({go_version})")
+                return
+            print(f"  Updating Go from {installed_version} to {go_version}...")
+        else:
+            print("  ⚠ Existing Go binary could not report a version; reinstalling")
     
     go_archive = f"{go_version}.linux-amd64.tar.gz"
     run(f"wget -q https://go.dev/dl/{go_archive} -O /tmp/{go_archive}")
@@ -263,14 +354,28 @@ def install_go(config: SetupConfig) -> None:
     print(f"  ✓ Go {go_version} installed")
 
 
-def install_node(config: SetupConfig) -> None:
-    safe_username = shlex.quote(config.username)
-    user_home = f"/home/{config.username}"
+def install_node_for_user(username: str, user_home: str) -> None:
+    """Install nvm-managed Node.js for a specific login/build user."""
     nvm_dir = f"{user_home}/.nvm"
     safe_nvm_dir = shlex.quote(nvm_dir)
+    nvm_sh = os.path.join(nvm_dir, "nvm.sh")
+
+    _chown_existing_paths(username, _user_tool_paths(user_home))
     
-    if os.path.exists(nvm_dir):
-        print("  ✓ nvm already installed")
+    if os.path.exists(nvm_sh):
+        _ensure_nvm_shell_init(username, user_home)
+        verify_result = _run_as_login_user(
+            username,
+            user_home,
+            f"export NVM_DIR={safe_nvm_dir} && "
+            '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && nvm --version',
+            check=False,
+        )
+        _chown_existing_paths(username, _user_tool_paths(user_home))
+        if verify_result.returncode == 0:
+            print("  ✓ nvm already installed")
+        else:
+            print("  ⚠ nvm is installed but could not be loaded for user")
         return
     
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
@@ -280,53 +385,48 @@ def install_node(config: SetupConfig) -> None:
     
     # Install nvm as the user, explicitly setting NVM_DIR to avoid picking up
     # any system-wide NVM_DIR (e.g. /opt/nvm) from the environment
-    result = run(
-        f"runuser -u {safe_username} -- bash -c "
-        f"'export NVM_DIR={safe_nvm_dir} && "
-        f"curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/{nvm_version}/install.sh | bash'",
+    result = _run_as_login_user(
+        username,
+        user_home,
+        f"export NVM_DIR={safe_nvm_dir} && "
+        f"curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/{nvm_version}/install.sh | bash",
         check=False
     )
-    if result.returncode != 0 or not os.path.exists(os.path.join(nvm_dir, "nvm.sh")):
+    _chown_existing_paths(username, _user_tool_paths(user_home))
+    if result.returncode != 0 or not os.path.exists(nvm_sh):
         print("  ✗ nvm installation failed")
         return
     
     # Install Node.js LTS
-    run(f"runuser -u {safe_username} -- bash -c 'export NVM_DIR={safe_nvm_dir} && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && nvm install --lts'")
+    nvm_env = f"export NVM_DIR={safe_nvm_dir} && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\""
+    _run_as_login_user(
+        username,
+        user_home,
+        f"{nvm_env} && nvm install --lts && nvm alias default 'lts/*'",
+    )
     
     # Update npm and install pnpm
-    run(f"runuser -u {safe_username} -- bash -c 'export NVM_DIR={safe_nvm_dir} && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npm install -g npm@latest'")
-    run(f"runuser -u {safe_username} -- bash -c 'export NVM_DIR={safe_nvm_dir} && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npm install -g pnpm'")
+    npm_freshness = shlex.join(npm_freshness_args())
+    npm_freshness_suffix = f" {npm_freshness}" if npm_freshness else ""
+    _run_as_login_user(
+        username,
+        user_home,
+        f"{nvm_env} && npm install -g npm@latest{npm_freshness_suffix}",
+    )
+    _run_as_login_user(
+        username,
+        user_home,
+        f"{nvm_env} && npm install -g pnpm{npm_freshness_suffix}",
+    )
     
-    # Add nvm initialization to .bashrc if not already present
-    bashrc_path = f"{user_home}/.bashrc"
-    nvm_init = '''
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-[ -s "$NVM_DIR/bash_completion" ] && . "$NVM_DIR/bash_completion"
-'''
-    
-    if os.path.exists(bashrc_path):
-        with open(bashrc_path, "r") as f:
-            bashrc_content = f.read()
-        # Check for the specific export line to avoid false positives
-        if 'export NVM_DIR="$HOME/.nvm"' not in bashrc_content:
-            with open(bashrc_path, "a") as f:
-                f.write(nvm_init)
-    else:
-        # .bashrc doesn't exist - this is unusual but we'll create it with nvm config
-        # Copy from skeleton first if available
-        skel_bashrc = "/etc/skel/.bashrc"
-        if os.path.exists(skel_bashrc):
-            run(f"cp {shlex.quote(skel_bashrc)} {shlex.quote(bashrc_path)}")
-            with open(bashrc_path, "a") as f:
-                f.write(nvm_init)
-        else:
-            with open(bashrc_path, "w") as f:
-                f.write(nvm_init)
-    
-    run(f"chown {safe_username}:{safe_username} {shlex.quote(bashrc_path)}")
+    _ensure_nvm_shell_init(username, user_home)
+    _chown_existing_paths(username, _user_tool_paths(user_home))
     
     print("  ✓ nvm + Node.js LTS + NPM (latest) + PNPM installed for user")
+
+
+def install_node(config: SetupConfig) -> None:
+    install_node_for_user(config.username, f"/home/{config.username}")
 
 
 def _validate_uv_install_script(script_path: str) -> bool:
@@ -354,7 +454,8 @@ def install_or_update_uv(user_home: str, username: Optional[str] = None) -> bool
     """Install or update uv for a user. Returns True if uv is available afterwards."""
     uv_path = os.path.join(user_home, ".local", "bin", "uv")
     safe_home = shlex.quote(user_home)
-    safe_username = shlex.quote(username) if username else None
+    if username:
+        _chown_existing_paths(username, _user_tool_paths(user_home))
 
     if is_dry_run():
         print("  [DRY-RUN] Skipping uv install/update")
@@ -383,8 +484,10 @@ def install_or_update_uv(user_home: str, username: Optional[str] = None) -> bool
                 return False
 
             if username:
-                install_result = run(
-                    f"runuser -u {safe_username} -- env HOME={safe_home} sh {safe_installer}",
+                install_result = _run_as_login_user(
+                    username,
+                    user_home,
+                    f"sh {safe_installer}",
                     check=False
                 )
             else:
@@ -400,10 +503,13 @@ def install_or_update_uv(user_home: str, username: Optional[str] = None) -> bool
 
     safe_uv_path = shlex.quote(uv_path)
     if username:
-        update_result = run(
-            f"runuser -u {safe_username} -- env HOME={safe_home} {safe_uv_path} self update",
+        update_result = _run_as_login_user(
+            username,
+            user_home,
+            f"{safe_uv_path} self update",
             check=False
         )
+        _chown_existing_paths(username, _user_tool_paths(user_home))
     else:
         update_result = run(f"env HOME={safe_home} {safe_uv_path} self update", check=False)
 
@@ -456,7 +562,8 @@ def _configure_auto_update_systemd(
     schedule: str,
     check_path: str,
     check_name: str,
-    user: Optional[str] = None
+    user: Optional[str] = None,
+    environment: Optional[dict[str, str]] = None,
 ) -> None:
     """Helper to configure systemd service and timer for auto-updates."""
     if not os.path.exists(check_path):
@@ -472,6 +579,12 @@ def _configure_auto_update_systemd(
     script_path = f"/opt/infra_tools/common/service_tools/{script_name}"
     
     user_line = f"User={user}\n" if user else ""
+    environment_lines = ""
+    if environment:
+        environment_lines = "".join(
+            f'Environment="{name}={value}"\n'
+            for name, value in sorted(environment.items())
+        )
     
     service_content = f"""[Unit]
 Description={service_desc}
@@ -479,7 +592,7 @@ Documentation=man:systemd.service(5)
 
 [Service]
 Type=oneshot
-{user_line}ExecStart=/usr/bin/python3 {script_path}
+{user_line}{environment_lines}ExecStart=/usr/bin/python3 {script_path}
 StandardOutput=journal
 StandardError=journal
 """
@@ -522,6 +635,7 @@ def configure_auto_update_ruby(config: SetupConfig) -> None:
         schedule="Sun *-*-* 04:00:00",
         check_path=gem_path,
         check_name="Ruby gems",
+        environment={ECOSYSTEM_AUTO_UPGRADE_ENV: "0"},
     )
 
 
@@ -538,7 +652,21 @@ def configure_auto_update_uv(config: SetupConfig) -> None:
         schedule="Sun *-*-* 05:00:00",
         check_path=uv_path,
         check_name="uv",
-        user=config.username
+        user=config.username,
+        environment={ECOSYSTEM_AUTO_UPGRADE_ENV: "0"},
+    )
+
+
+def configure_auto_update_gogs(config: SetupConfig) -> None:
+    """Configure automatic updates for Gogs."""
+    _configure_auto_update_systemd(
+        service_name="auto-update-gogs",
+        service_desc="Auto-update Gogs service",
+        timer_desc="Auto-update Gogs weekly",
+        script_name="auto_update_gogs.py",
+        schedule="Sun *-*-* 05:30:00",
+        check_path="/usr/local/bin/gogs",
+        check_name="Gogs",
     )
 
 

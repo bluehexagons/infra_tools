@@ -9,6 +9,9 @@ import shlex
 from lib.remote_utils import run
 
 
+SYSTEMD_DIR = "/etc/systemd/system"
+
+
 def _unit_has_install_section(unit_file: str) -> bool:
     """Return True when a unit file contains an [Install] section."""
     try:
@@ -16,6 +19,50 @@ def _unit_has_install_section(unit_file: str) -> bool:
             return "[Install]" in f.read()
     except OSError:
         return False
+
+
+def _read_rails_service_settings(service_file: str) -> tuple[str | None, str | None]:
+    try:
+        with open(service_file, "r", encoding="utf-8") as f:
+            content = f.read()
+    except OSError:
+        return None, None
+
+    secret_match = re.search(r'Environment="SECRET_KEY_BASE=([^"]+)"', content)
+    working_dir_match = re.search(r"^WorkingDirectory=(.+)$", content, re.MULTILINE)
+    secret_key_base = secret_match.group(1) if secret_match else None
+    working_dir = working_dir_match.group(1).strip() if working_dir_match else None
+    return secret_key_base, working_dir
+
+
+def _rails_secret_file(app_name: str, app_path: str) -> str:
+    return os.path.join(os.path.dirname(app_path), ".infra_tools_shared", app_name, "secret_key_base")
+
+
+def _read_persisted_rails_secret(app_name: str, app_path: str) -> str | None:
+    try:
+        with open(_rails_secret_file(app_name, app_path), "r", encoding="utf-8") as f:
+            secret_key_base = f.read().strip()
+    except OSError:
+        return None
+    return secret_key_base or None
+
+
+def _write_persisted_rails_secret(app_name: str, app_path: str, secret_key_base: str) -> None:
+    secret_file = _rails_secret_file(app_name, app_path)
+    try:
+        os.makedirs(os.path.dirname(secret_file), exist_ok=True)
+        with open(secret_file, "w", encoding="utf-8") as f:
+            f.write(f"{secret_key_base}\n")
+        os.chmod(secret_file, 0o600)
+    except OSError as e:
+        print(f"  ⚠ Failed to persist Rails SECRET_KEY_BASE: {e}")
+
+
+def _persist_rails_secret_from_unit(unit_file: str, app_name: str) -> None:
+    secret_key_base, app_path = _read_rails_service_settings(unit_file)
+    if secret_key_base and app_path:
+        _write_persisted_rails_secret(app_name, app_path, secret_key_base)
 
 
 def cleanup_systemd_unit(unit_name: str, unit_type: str = "service") -> None:
@@ -29,7 +76,7 @@ def cleanup_systemd_unit(unit_name: str, unit_type: str = "service") -> None:
         unit_name: Base name of the unit (without extension)
         unit_type: Type of unit - "service", "timer", or "mount"
     """
-    unit_file = f"/etc/systemd/system/{unit_name}.{unit_type}"
+    unit_file = os.path.join(SYSTEMD_DIR, f"{unit_name}.{unit_type}")
     
     # Stop and disable the unit
     if os.path.exists(unit_file):
@@ -59,9 +106,9 @@ def cleanup_service(service_name: str) -> None:
         # Cleans up just the timer
         cleanup_service("myapp-update")
     """
-    service_file = f"/etc/systemd/system/{service_name}.service"
-    timer_file = f"/etc/systemd/system/{service_name}.timer"
-    path_file = f"/etc/systemd/system/{service_name}.path"
+    service_file = os.path.join(SYSTEMD_DIR, f"{service_name}.service")
+    timer_file = os.path.join(SYSTEMD_DIR, f"{service_name}.timer")
+    path_file = os.path.join(SYSTEMD_DIR, f"{service_name}.path")
     
     needs_reload = False
     
@@ -78,6 +125,8 @@ def cleanup_service(service_name: str) -> None:
     
     # Stop service; disable only when it declares an [Install] section
     if os.path.exists(service_file):
+        if service_name.startswith("rails-"):
+            _persist_rails_secret_from_unit(service_file, service_name[len("rails-"):])
         run(f"systemctl stop {shlex.quote(service_name)}.service", check=False)
         if _unit_has_install_section(service_file):
             run(f"systemctl disable {shlex.quote(service_name)}.service", check=False)
@@ -107,7 +156,7 @@ def cleanup_all_infra_services(dry_run: bool = False) -> None:
         # Preview what would be removed (dry run)
         cleanup_all_infra_services(dry_run=True)
     """
-    systemd_dir = "/etc/systemd/system"
+    systemd_dir = SYSTEMD_DIR
     # Patterns for infra_tools-created units
     # These patterns match services, timers, and mounts created by various components
     infra_patterns = [
@@ -127,11 +176,15 @@ def cleanup_all_infra_services(dry_run: bool = False) -> None:
         r"^node-.*\.service$",
         # Rails app services
         r"^rails-.*\.service$",
+        # Manifest-defined (infra.json) service components
+        r"^app-.*\.service$",
         # Auto-update timers
         r"^auto-update-node\.service$",
         r"^auto-update-node\.timer$",
         r"^auto-update-apt\.service$",
         r"^auto-update-apt\.timer$",
+        r"^auto-update-gogs\.service$",
+        r"^auto-update-gogs\.timer$",
         # Auto-restart service
         r"^auto-restart-if-needed\.service$",
         r"^auto-restart-if-needed\.timer$",
@@ -141,6 +194,8 @@ def cleanup_all_infra_services(dry_run: bool = False) -> None:
         r"^antistatic\.service$",
         # Antistatic DB service
         r"^antistatic-db\.service$",
+        # Gogs service
+        r"^gogs\.service$",
     ]
     
     units_to_remove = []
@@ -176,6 +231,10 @@ def cleanup_all_infra_services(dry_run: bool = False) -> None:
     for unit in timers + services + mounts + others:
         unit_type = unit.rsplit(".", 1)[1]
         unit_path = os.path.join(systemd_dir, unit)
+
+        if unit.startswith("rails-") and unit.endswith(".service"):
+            app_name = unit[len("rails-"):-len(".service")]
+            _persist_rails_secret_from_unit(unit_path, app_name)
         
         # Stop the unit (ignore errors if not running)
         run(f"systemctl stop {shlex.quote(unit)}", check=False)
@@ -228,7 +287,7 @@ def create_node_service(app_name: str, app_path: str, port: int,
                        web_user: str, web_group: str) -> None:
     """Create and enable a Node.js systemd service."""
     service_name = f"node-{app_name}"
-    service_file = f"/etc/systemd/system/{service_name}.service"
+    service_file = os.path.join(SYSTEMD_DIR, f"{service_name}.service")
     
     # Clean up existing service before creating new one
     cleanup_service(service_name)
@@ -261,6 +320,100 @@ def create_node_service(app_name: str, app_path: str, port: int,
         print(f"  ⚠ Warning: {service_name} may not be running. Check with: systemctl status {service_name}")
     else:
         print(f"  ✓ {service_name} is running")
+
+
+def generate_managed_service(name: str, exec_start: str, working_dir: str,
+                             web_user: str = "www-data", web_group: str = "www-data",
+                             env_file: Optional[str] = None,
+                             description: Optional[str] = None) -> str:
+    """Generate a hardened systemd unit for a manifest service component.
+
+    Unlike the Rails/Node generators this makes no assumptions about the
+    runtime: the component supplies its own ExecStart (a binary path or full
+    command) and reads its configuration (including which port to bind) from
+    ``env_file``. infra_tools only needs the port for the nginx upstream.
+    """
+    lines = [
+        "[Unit]",
+        f"Description={description or f'infra_tools managed service: {name}'}",
+        "After=network.target",
+        "",
+        "[Service]",
+        "Type=simple",
+        f"User={web_user}",
+        f"Group={web_group}",
+        f"WorkingDirectory={working_dir}",
+    ]
+    if env_file:
+        lines.append(f"EnvironmentFile={env_file}")
+    lines += [
+        f"ExecStart={exec_start}",
+        "Restart=always",
+        "RestartSec=5",
+        # Conservative hardening: read-only system dirs while still allowing
+        # writes under /var and /opt (e.g. a SQLite data directory).
+        "NoNewPrivileges=true",
+        "PrivateTmp=true",
+        "ProtectSystem=full",
+        "ProtectHome=true",
+        "ProtectControlGroups=true",
+        "ProtectKernelTunables=true",
+        "RestrictSUIDSGID=true",
+        "",
+        "[Install]",
+        "WantedBy=multi-user.target",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def _install_and_start_unit(service_name: str, unit_content: str) -> None:
+    """Write a unit file, (re)load, enable, restart, and verify it is active."""
+    service_file = os.path.join(SYSTEMD_DIR, f"{service_name}.service")
+
+    # Clean up any previous unit before installing the new one.
+    cleanup_service(service_name)
+
+    try:
+        with open(service_file, 'w') as f:
+            f.write(unit_content)
+    except PermissionError as e:
+        raise PermissionError(f"Failed to write service file {service_file}. Need root permissions.") from e
+
+    run("systemctl daemon-reload")
+    run(f"systemctl enable {shlex.quote(service_name)}")
+    run(f"systemctl restart {shlex.quote(service_name)}")
+
+    print(f"  ✓ Created and started systemd service: {service_name}")
+
+    import time
+    time.sleep(1)
+
+    result = run(f"systemctl is-active {shlex.quote(service_name)}", check=False)
+    if result.returncode != 0:
+        print(f"  ⚠ Warning: {service_name} may not be running. Check with: systemctl status {service_name}")
+    else:
+        print(f"  ✓ {service_name} is running")
+
+
+def create_managed_service(service_name: str, exec_start: str, working_dir: str,
+                           web_user: str, web_group: str,
+                           env_file: Optional[str] = None,
+                           description: Optional[str] = None) -> None:
+    """Create, enable, and start a manifest-defined systemd service."""
+    unit_content = generate_managed_service(
+        service_name, exec_start, working_dir, web_user, web_group, env_file, description
+    )
+    _install_and_start_unit(service_name, unit_content)
+
+
+def install_unit_file(service_name: str, unit_content: str) -> None:
+    """Install a fully-specified (already-rendered) unit and start it.
+
+    Used for repo-supplied ``systemd_unit`` templates: infra_tools substitutes
+    the deploy-time values and trusts the repo author's [Service] hardening.
+    """
+    _install_and_start_unit(service_name, unit_content)
 
 
 def generate_rails_service(app_name: str, app_path: str, secret_key_base: str, port: int = 3000,
@@ -304,27 +457,29 @@ def create_rails_service(app_name: str, app_path: str, port: int,
                         env_vars: Optional[dict[str, str]] = None) -> None:
     """Create and enable a Rails systemd service."""
     service_name = f"rails-{app_name}"
-    service_file = f"/etc/systemd/system/{service_name}.service"
+    service_file = os.path.join(SYSTEMD_DIR, f"{service_name}.service")
     
     secret_key_base = secrets.token_hex(64)
     
     # Preserve existing SECRET_KEY_BASE if service exists (read BEFORE cleanup)
     if os.path.exists(service_file):
-        try:
-            with open(service_file, 'r') as f:
-                content = f.read()
-                match = re.search(r'Environment="SECRET_KEY_BASE=([a-f0-9]+)"', content)
-                if match:
-                    secret_key_base = match.group(1)  # Value preserved in variable
-                    print(f"  ℹ Preserving existing SECRET_KEY_BASE")
-        except OSError:
-            pass
+        existing_secret, _app_path = _read_rails_service_settings(service_file)
+        if existing_secret:
+            secret_key_base = existing_secret
+            _write_persisted_rails_secret(app_name, app_path, secret_key_base)
+            print(f"  ℹ Preserving existing SECRET_KEY_BASE")
+    else:
+        persisted_secret = _read_persisted_rails_secret(app_name, app_path)
+        if persisted_secret:
+            secret_key_base = persisted_secret
+            print(f"  ℹ Restoring persisted SECRET_KEY_BASE")
     
     # Clean up existing service before creating new one
     # Note: secret_key_base is already stored in variable above
     cleanup_service(service_name)
     
     service_content = generate_rails_service(app_name, app_path, secret_key_base, port, web_user, web_group, env_vars)
+    _write_persisted_rails_secret(app_name, app_path, secret_key_base)
     
     try:
         with open(service_file, 'w') as f:

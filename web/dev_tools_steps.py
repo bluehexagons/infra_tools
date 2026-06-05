@@ -9,6 +9,7 @@ from common.common_steps import configure_auto_update_ruby as _configure_auto_up
 from lib.config import SetupConfig
 from lib.remote_utils import run
 from lib.systemd_service import cleanup_service
+from lib.update_policy import ECOSYSTEM_AUTO_UPGRADE_ENV
 
 
 def _configure_auto_update_systemd(
@@ -19,7 +20,8 @@ def _configure_auto_update_systemd(
     schedule: str,
     check_path: str,
     check_name: str,
-    user: Optional[str] = None
+    user: Optional[str] = None,
+    environment: Optional[dict[str, str]] = None,
 ) -> None:
     """Helper to configure systemd service and timer for auto-updates."""
     if not os.path.exists(check_path):
@@ -35,6 +37,12 @@ def _configure_auto_update_systemd(
     script_path = f"/opt/infra_tools/web/service_tools/{script_name}"
     
     user_line = f"User={user}\n" if user else ""
+    environment_lines = ""
+    if environment:
+        environment_lines = "".join(
+            f'Environment="{name}={value}"\n'
+            for name, value in sorted(environment.items())
+        )
     
     service_content = f"""[Unit]
 Description={service_desc}
@@ -42,7 +50,7 @@ Documentation=man:systemd.service(5)
 
 [Service]
 Type=oneshot
-{user_line}ExecStart=/usr/bin/python3 {script_path}
+{user_line}{environment_lines}ExecStart=/usr/bin/python3 {script_path}
 StandardOutput=journal
 StandardError=journal
 """
@@ -86,7 +94,8 @@ def configure_auto_update_node(config: SetupConfig) -> None:
         schedule="Sun *-*-* 03:00:00",
         check_path=nvm_dir,
         check_name="Node.js",
-        user=config.username
+        user=config.username,
+        environment={ECOSYSTEM_AUTO_UPGRADE_ENV: "0"},
     )
 
 

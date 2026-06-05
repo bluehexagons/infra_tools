@@ -62,6 +62,9 @@ class TestRenderUserData(unittest.TestCase):
         out = _render_user_data(username="root", pubkey_contents="ssh-ed25519 AAAA test")
         self.assertIn("- name: root", out)
         self.assertIn("ssh-ed25519 AAAA test", out)
+        self.assertIn("packages:", out)
+        self.assertIn("qemu-guest-agent", out)
+        self.assertIn("systemctl enable --now qemu-guest-agent", out)
 
     def test_creates_non_root_user(self):
         out = _render_user_data(username="alice", pubkey_contents="ssh-ed25519 KEY")
@@ -73,6 +76,7 @@ class TestRenderUserData(unittest.TestCase):
     def test_no_pubkey(self):
         out = _render_user_data(username="root", pubkey_contents=None)
         self.assertNotIn("ssh_authorized_keys", out)
+        self.assertIn("qemu-guest-agent", out)
 
 
 class TestCheckVMExists(unittest.TestCase):

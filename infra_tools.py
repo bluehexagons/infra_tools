@@ -48,16 +48,23 @@ from lib.credentials import (
     set_workspace_credential,
     store_cli_credentials,
 )
+from lib.github_maintenance import add_maintenance_subparser, run_maintenance_command
 from lib.display import print_name_and_tags, print_setup_summary, print_success_header
 from lib.interactive_shell import run_interactive_shell
 from lib.notifications import validate_notification_args
 from lib.orchestrator_bootstrap import run_orchestrator_bootstrap
 from lib.plugin_registry import format_system_type_help, get_system_type_names
+from lib.network_cli import add_network_subparser, run_network_command
 from lib.proxmox_cli import add_proxmox_subparser, run_proxmox_command
+from lib.sysadmin_cli import add_sysadmin_subparsers, run_sysadmin_command
 from lib.python_setup import run_local_python_setup
 from lib.recall import run_recall_command
 from lib.reconstruct import run_reconstruct_command
-from lib.setup_common import REMOTE_SCRIPT_PATH, run_remote_setup
+from lib.setup_common import (
+    REMOTE_SCRIPT_PATH,
+    _apply_hosted_proxmox_defaults,
+    run_remote_setup,
+)
 from lib.system_utils import get_current_username
 from lib.types import Deployments, JSONDict, JSONList, StrList
 from lib.validators import validate_host, validate_username
@@ -65,6 +72,7 @@ from lib.validation import (
     validate_apt_packages,
     validate_deploy_specs,
     validate_deploy_targets,
+    validate_gogs_settings,
     validate_hosted_flags,
     validate_samba_share_credentials,
     validate_samba_share_specs,
@@ -92,9 +100,26 @@ def _build_infra_tools_epilog() -> str:
     completions                 Install shell completion for infra_tools.py
     python-tools                Install local Python aliases, uv, and completion
     bootstrap                   Install packages, launcher, and completions (alias: self-setup)
+    maintenance github ...      Audit/prune GitHub releases, artifacts, and caches
+    network [subcommand]        Manage generic network inventory profiles
     proxmox [subcommand]        Manage Proxmox hosts and containers (interactive shell with no args)
     shell                       Interactive REPL for managing saved configurations
     credentials                 Manage workspace credentials
+
+Sysadmin Shortcuts:
+    mount <host:path> <local>   Mount a remote directory via sshfs
+    umount <local|host>         Unmount an sshfs mount
+    health <host>               Show uptime, disk, memory, failed units, pending upgrades
+    ssh <host> [-- cmd]         Open SSH session using saved config
+    push <local> <host:path>    Rsync a local path to a remote host
+    pull <host:path> [local]    Rsync a remote path to local
+    key push <host>             Install local public key on a remote host
+    df <host> [<host2> ...]     Multi-host disk usage table (>85% highlighted)
+    fan <host> [..] -- <cmd>    Run a command on multiple hosts in parallel
+    svc <host> <unit> [action]  Manage a systemd service (status/restart/start/stop/…)
+    logs <host> <unit>          Show or follow journalctl output for a service
+    upgrade <host> [<host2>…]   Run apt upgrade in parallel; report reboot-required
+    reachable [hosts|pattern]   Check which saved hosts are reachable via SSH
 
 System Types for setup:
 {format_system_type_help()}
@@ -216,12 +241,7 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
         "deploy",
         help="Redeploy saved configurations",
     )
-    deploy_parser.add_argument("pattern", help="Host, name, or tag filter to redeploy")
-    deploy_parser.add_argument("-y", "--yes", action="store_true", help="Deploy without prompting")
-    deploy_parser.add_argument(
-        "--workspace",
-        help="Workspace root for saved setups, credentials, known_hosts, and history"
-    )
+    add_deploy_command_arguments(deploy_parser, include_workspace=True)
 
     recall_parser = subparsers.add_parser(
         "recall",
@@ -329,7 +349,10 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
     credentials_remove_parser = credentials_subparsers.add_parser("remove", help="Remove a saved credential")
     credentials_remove_parser.add_argument("username", help="Credential username to remove")
 
+    add_network_subparser(subparsers)
     add_proxmox_subparser(subparsers)
+    add_maintenance_subparser(subparsers)
+    add_sysadmin_subparsers(subparsers)
 
     shell_parser = subparsers.add_parser(
         "shell",
@@ -533,6 +556,8 @@ def show_info(pattern: Optional[str] = None, *, compact: bool = False) -> int:
             features.append("Flatpak")
         if args.get("enable_samba"):
             features.append("Samba")
+        if args.get("gogs"):
+            features.append("Gogs")
 
         if features:
             print(f"Features: {', '.join(features)}")
@@ -652,19 +677,7 @@ def _execute_patch_config(config: SetupConfig) -> int:
     print()
 
     try:
-        runtime_config = prepare_runtime_config(config)
-        validate_timezone_name(runtime_config.timezone)
-        validate_apt_packages(runtime_config.apt_packages)
-        validate_notification_args(runtime_config.notify_specs)
-        validate_ssl_email(runtime_config.ssl_email)
-        validate_deploy_specs(runtime_config.deploy_specs)
-        validate_deploy_targets(runtime_config.deploy_targets)
-        validate_sync_specs(runtime_config.sync_specs)
-        validate_scrub_specs(runtime_config.scrub_specs)
-        validate_smb_mount_specs(runtime_config.smb_mounts)
-        validate_samba_share_specs(runtime_config.samba_shares, runtime_config.share_credentials)
-        validate_hosted_flags(runtime_config)
-        validate_samba_share_credentials(runtime_config)
+        runtime_config = _prepare_runtime_config_for_cli(config)
     except ValueError as exc:
         print(f"Error: {exc}")
         return 1
@@ -700,7 +713,91 @@ def _execute_patch_config(config: SetupConfig) -> int:
     return 0
 
 
-def deploy_configurations(pattern: str, force: bool) -> int:
+def _patch_preserve_keys(args: argparse.Namespace) -> set[str]:
+    preserve_keys: set[str] = set()
+    if getattr(args, "machine_type", None) is None:
+        preserve_keys.add("machine_type")
+    if getattr(args, "hosted_node", None) is None:
+        preserve_keys.update(
+            {
+                "hosted_node",
+                "hosted_user",
+                "hosted_key",
+                "container_memory",
+                "container_storage",
+                "container_cores",
+                "container_base",
+                "vm_image",
+            }
+        )
+    return preserve_keys
+
+
+def _prepare_runtime_config_for_cli(config: SetupConfig) -> SetupConfig:
+    _apply_hosted_proxmox_defaults(config, None)
+    runtime_config = prepare_runtime_config(config)
+    validate_timezone_name(runtime_config.timezone)
+    validate_apt_packages(runtime_config.apt_packages)
+    validate_notification_args(runtime_config.notify_specs)
+    validate_ssl_email(runtime_config.ssl_email)
+    validate_deploy_specs(runtime_config.deploy_specs)
+    validate_deploy_targets(runtime_config.deploy_targets)
+    validate_sync_specs(runtime_config.sync_specs)
+    validate_scrub_specs(runtime_config.scrub_specs)
+    validate_smb_mount_specs(runtime_config.smb_mounts)
+    validate_samba_share_specs(
+        runtime_config.samba_shares,
+        runtime_config.share_credentials,
+    )
+    validate_gogs_settings(runtime_config.gogs)
+    validate_hosted_flags(runtime_config)
+    validate_samba_share_credentials(runtime_config)
+    return runtime_config
+
+
+def add_deploy_command_arguments(
+    parser: argparse.ArgumentParser,
+    *,
+    include_workspace: bool = False,
+) -> None:
+    parser.add_argument("pattern", help="Host, name, or tag filter to redeploy")
+    parser.add_argument("-y", "--yes", action="store_true", help="Deploy without prompting")
+    parser.add_argument(
+        "--deploy-latest",
+        dest="deploy_latest",
+        action="store_true",
+        help="Deploy the latest versions of packages and releases, bypassing the release age policy",
+    )
+    if include_workspace:
+        parser.add_argument(
+            "--workspace",
+            help="Workspace root for saved setups, credentials, known_hosts, and history"
+        )
+
+
+class DeployArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        usage = self.format_usage().strip()
+        if usage.startswith("usage:"):
+            usage = "Usage:" + usage[len("usage:"):]
+        raise ValueError(f"{usage}\n{message}")
+
+
+def parse_deploy_command_args(args: list[str]) -> argparse.Namespace:
+    parser = DeployArgumentParser(prog="deploy", add_help=False)
+    add_deploy_command_arguments(parser)
+    return parser.parse_args(args)
+
+
+def run_deploy_command(args: argparse.Namespace) -> int:
+    return deploy_configurations(
+        args.pattern,
+        args.yes,
+        getattr(args, "deploy_latest", False),
+    )
+
+
+def deploy_configurations(pattern: str, force: bool, deploy_latest: bool = False) -> int:
     configs = get_all_configs(pattern)
     if not configs:
         print(f"No configurations found matching '{pattern}'")
@@ -729,6 +826,7 @@ def deploy_configurations(pattern: str, force: bool) -> int:
             if not isinstance(host, str) or not isinstance(system_type, str) or not isinstance(args_dict, dict):
                 raise ValueError("Invalid cached configuration format")
             config = SetupConfig.from_dict(host, system_type, cast(JSONDict, args_dict))
+            config.deploy_latest = deploy_latest
             if _execute_patch_config(config) != 0:
                 failures += 1
         except Exception as exc:
@@ -758,19 +856,7 @@ def run_setup_command(args: argparse.Namespace) -> int:
     config = SetupConfig.from_args(args, args.system_type)
     
     try:
-        runtime_config = prepare_runtime_config(config)
-        validate_timezone_name(runtime_config.timezone)
-        validate_apt_packages(runtime_config.apt_packages)
-        validate_notification_args(runtime_config.notify_specs)
-        validate_ssl_email(runtime_config.ssl_email)
-        validate_deploy_specs(runtime_config.deploy_specs)
-        validate_deploy_targets(runtime_config.deploy_targets)
-        validate_sync_specs(runtime_config.sync_specs)
-        validate_scrub_specs(runtime_config.scrub_specs)
-        validate_smb_mount_specs(runtime_config.smb_mounts)
-        validate_samba_share_specs(runtime_config.samba_shares, runtime_config.share_credentials)
-        validate_hosted_flags(runtime_config)
-        validate_samba_share_credentials(runtime_config)
+        runtime_config = _prepare_runtime_config_for_cli(config)
     except ValueError as e:
         print(f"Error: {e}")
         return 1
@@ -861,7 +947,11 @@ def run_patch_command(args: argparse.Namespace) -> int:
         return 1
     
     new_config = SetupConfig.from_args(args, cached_config.system_type)
-    merged_config = merge_setup_configs(cached_config, new_config)
+    merged_config = merge_setup_configs(
+        cached_config,
+        new_config,
+        preserve_keys=_patch_preserve_keys(args),
+    )
     return _execute_patch_config(merged_config)
 
 
@@ -898,7 +988,7 @@ def main() -> int:
     elif args.command in {"rm", "remove"}:
         return remove_configurations(args.pattern, args.yes)
     elif args.command == "deploy":
-        return deploy_configurations(args.pattern, args.yes)
+        return run_deploy_command(args)
     elif args.command == "reconstruct":
         return run_reconstruct_command(args.compact)
     elif args.command == "recall":
@@ -929,8 +1019,14 @@ def main() -> int:
             requested_user=args.bootstrap_user,
             skip_system_packages=args.skip_system_packages,
         )
+    elif args.command == "network":
+        return run_network_command(args)
     elif args.command == "proxmox":
         return run_proxmox_command(args)
+    elif args.command == "maintenance":
+        return run_maintenance_command(args)
+    elif args.command in {"mount", "umount", "health", "ssh", "push", "pull", "key", "df", "fan", "svc", "logs", "upgrade", "reachable"}:
+        return run_sysadmin_command(args)
     elif args.command == "shell":
         return run_interactive_shell(getattr(args, "workspace", None))
     elif args.command == "credentials":

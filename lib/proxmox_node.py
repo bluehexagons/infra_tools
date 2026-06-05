@@ -7,69 +7,58 @@ Designed to be called locally before remote_setup runs against the container.
 
 from __future__ import annotations
 
-import ipaddress
-import os
 import re
 import subprocess
 import shlex
-import sys
 import time
 from typing import Optional, cast
 
 from lib.config import SetupConfig
+from lib.proxmox_guest import (
+    ProvisionError,
+    _build_guest_hostname,
+    _get_bridge_prefix_length,
+    _get_host_gateway,
+    _get_host_nameservers,
+    _get_next_vmid,
+    _is_usable_nameserver,
+    _resolve_public_key_path,
+    _resolve_storage_pool,
+    _ssh_opts,
+    _ssh_run,
+    _storage_pool_supports_content,
+    _wait_for_guest_ssh,
+    auto_detect_bridge,
+)
 from lib.types import NestedStrList, StrList
 
 
 class ContainerAlreadyExists(Exception):
     """Raised when the target container already exists on the Proxmox node."""
 
-
-class ProvisionError(Exception):
-    """Raised when container provisioning fails."""
-
-
-def _ssh_opts(hosted_key: Optional[str] = None) -> StrList:
-    """Build SSH options list for Proxmox node connections."""
-    opts = [
-        "-o", "StrictHostKeyChecking=accept-new",
-        "-o", "ConnectTimeout=30",
-        "-o", "ServerAliveInterval=30",
-    ]
-    if hosted_key:
-        opts.extend(["-i", hosted_key])
-    return opts
+def _build_container_hostname(target_ip: str, friendly_name: Optional[str]) -> str:
+    """Derive a hostname for the container."""
+    return _build_guest_hostname(target_ip, friendly_name, default_prefix="lxc")
 
 
-def _ssh_run(
+def _wait_for_container_ssh(
+    target_ip: str,
     node_ip: str,
     user: str,
     ssh_opts: StrList,
-    cmd: str,
+    timeout: int = 90,
     dry_run: bool = False,
-    log_cmd: Optional[str] = None,
-) -> subprocess.CompletedProcess[str]:
-    """Run a command on the Proxmox host via SSH."""
-    display_cmd = log_cmd if log_cmd is not None else cmd
-    display_cmd = display_cmd[:80] + "..." if len(display_cmd) > 80 else display_cmd
-    print(f"  Running on {node_ip}: {display_cmd}")
-    sys.stdout.flush()
-
-    if dry_run:
-        print("  [DRY-RUN] Command not executed")
-        return subprocess.CompletedProcess(
-            args=[cmd], returncode=0, stdout="", stderr=""
-        )
-
-    ssh_cmd = ["ssh"] + ssh_opts + [f"{user}@{node_ip}", cmd]
-    result = subprocess.run(
-        ssh_cmd, capture_output=True, text=True, timeout=120
+) -> None:
+    """Wait for sshd inside the new container to accept TCP connections."""
+    _wait_for_guest_ssh(
+        target_ip,
+        node_ip,
+        user,
+        ssh_opts,
+        timeout=timeout,
+        dry_run=dry_run,
+        label="Container",
     )
-    if result.returncode != 0:
-        stderr = result.stderr.strip()
-        if stderr:
-            print(f"    Warning: {stderr[:200]}")
-        sys.stdout.flush()
-    return result
 
 
 def _normalize_storage_specs(storage_specs: NestedStrList | None) -> list[StrList]:
@@ -87,46 +76,6 @@ def _get_storage_spec(storage_specs: NestedStrList | None, storage_type: str) ->
         if spec and spec[0] == storage_type:
             return spec
     return None
-
-
-def _storage_pool_supports_content(
-    pool: str,
-    content_filter: str,
-    node_ip: str,
-    user: str,
-    ssh_opts: StrList,
-    dry_run: bool = False,
-) -> bool:
-    result = _ssh_run(
-        node_ip, user, ssh_opts,
-        f"pvesm status --content {shlex.quote(content_filter)}",
-        dry_run=dry_run,
-    )
-
-    if dry_run:
-        return True
-
-    if result.returncode != 0:
-        fallback_result = _ssh_run(
-            node_ip, user, ssh_opts,
-            "pvesm status",
-            dry_run=dry_run,
-        )
-        if fallback_result.returncode != 0:
-            return False
-
-        for line in fallback_result.stdout.strip().split('\n')[1:]:
-            parts = line.split()
-            if parts and parts[0] == pool and len(parts) >= 3 and parts[2] == "active":
-                return True
-        return False
-
-    for line in result.stdout.strip().split('\n')[1:]:
-        parts = line.split()
-        if parts and parts[0] == pool and len(parts) >= 3 and parts[2] == "active":
-            return True
-
-    return False
 
 
 def check_container_exists(
@@ -173,230 +122,6 @@ def check_container_exists(
                 return True
 
     return False
-
-
-def auto_detect_bridge(
-    node_ip: str,
-    user: str = "root",
-    hosted_key: Optional[str] = None,
-    dry_run: bool = False
-) -> str:
-    """Auto-detect the network bridge on the Proxmox host.
-
-    Looks for vmbr* interfaces, preferring vmbr0.
-    """
-    opts = _ssh_opts(hosted_key)
-    result = _ssh_run(
-        node_ip, user, opts,
-        "ip -o link show | grep -o 'vmbr[0-9]*' | head -5",
-        dry_run=dry_run
-    )
-
-    if dry_run:
-        print("  [DRY-RUN] Would detect bridge")
-        return "vmbr0"
-
-    if result.returncode != 0:
-        stderr = (result.stderr or "").strip()
-        raise ProvisionError(
-            f"Failed to query bridges on Proxmox host {node_ip}: "
-            f"{stderr or 'ssh command failed'}"
-        )
-
-    bridges = [b.strip() for b in result.stdout.strip().split('\n') if b.strip()]
-
-    if not bridges:
-        raise ProvisionError(
-            "No vmbr* network bridge found on the Proxmox host"
-        )
-
-    bridge = bridges[0]
-    if bridge != "vmbr0" and "vmbr0" in bridges:
-        bridge = "vmbr0"
-
-    print(f"  ✓ Detected bridge: {bridge}")
-    return bridge
-
-
-def _get_bridge_prefix_length(
-    node_ip: str,
-    user: str,
-    ssh_opts: StrList,
-    bridge: str,
-    dry_run: bool = False,
-) -> str:
-    result = _ssh_run(
-        node_ip, user, ssh_opts,
-        f"ip -o -f inet addr show dev {shlex.quote(bridge)} | awk 'NR==1 {{print $4}}'",
-        dry_run=dry_run,
-    )
-
-    if dry_run:
-        return "24"
-
-    cidr = result.stdout.strip()
-    if not cidr or "/" not in cidr:
-        raise ProvisionError(f"Could not detect IPv4 prefix length for bridge {bridge}")
-
-    prefix = cidr.split("/", 1)[1]
-    print(f"  ✓ Detected bridge network: {cidr}")
-    return prefix
-
-
-def _get_host_gateway(
-    node_ip: str,
-    user: str,
-    ssh_opts: StrList,
-    dry_run: bool = False
-) -> str:
-    """Get the default gateway from the Proxmox host."""
-    result = _ssh_run(
-        node_ip, user, ssh_opts,
-        "ip route | awk '/default/ {print $3; exit}'",
-        dry_run=dry_run
-    )
-
-    if dry_run:
-        return "10.0.0.1"
-
-    gateway = result.stdout.strip()
-    if not gateway:
-        raise ProvisionError("Could not detect default gateway on Proxmox host")
-
-    print(f"  ✓ Detected gateway: {gateway}")
-    return gateway
-
-
-def _is_usable_nameserver(addr: str) -> bool:
-    """Return True if addr is a globally routable nameserver the container can reach."""
-    try:
-        ip = ipaddress.ip_address(addr)
-    except ValueError:
-        return False
-    # Containers have their own loopback; the host's resolved stub at 127.0.0.53
-    # (or any loopback / link-local / unspecified address) is not reachable from the container.
-    if ip.is_loopback or ip.is_link_local or ip.is_unspecified or ip.is_multicast:
-        return False
-    return True
-
-
-def _get_host_nameservers(
-    node_ip: str,
-    user: str,
-    ssh_opts: StrList,
-    dry_run: bool = False
-) -> StrList:
-    """Get nameservers from the Proxmox host, filtering out unreachable addresses."""
-    # Prefer resolvectl (gives upstream DNS even when /etc/resolv.conf points at the
-    # systemd-resolved stub). Fall back to /etc/resolv.conf when resolvectl isn't installed.
-    result = _ssh_run(
-        node_ip, user, ssh_opts,
-        "resolvectl dns 2>/dev/null | awk '{for (i=2;i<=NF;i++) print $i}' | sort -u; "
-        "grep -oP '^nameserver\\s+\\K\\S+' /etc/resolv.conf",
-        dry_run=dry_run
-    )
-
-    if dry_run:
-        return ["8.8.8.8"]
-
-    seen: set[str] = set()
-    nameservers: StrList = []
-    for ns in (result.stdout or "").split('\n'):
-        ns = ns.strip()
-        if not ns or ns in seen:
-            continue
-        if not _is_usable_nameserver(ns):
-            continue
-        seen.add(ns)
-        nameservers.append(ns)
-        if len(nameservers) >= 3:
-            break
-
-    if not nameservers:
-        print("  ⚠ No usable nameservers detected on host (only loopback?), using 1.1.1.1")
-        return ["1.1.1.1"]
-
-    print(f"  ✓ Detected nameservers: {', '.join(nameservers)}")
-    return nameservers
-
-
-def _get_next_vmid(
-    node_ip: str,
-    user: str,
-    ssh_opts: StrList,
-    dry_run: bool = False
-) -> int:
-    """Get the next available VMID from the Proxmox cluster."""
-    result = _ssh_run(
-        node_ip, user, ssh_opts,
-        "pvesh get /cluster/nextid",
-        dry_run=dry_run
-    )
-
-    if dry_run:
-        return 100
-
-    try:
-        vmid = int(result.stdout.strip())
-    except (ValueError, TypeError):
-        raise ProvisionError(
-            f"Could not determine next VMID: {result.stdout.strip()}"
-        )
-
-    print(f"  ✓ Next VMID: {vmid}")
-    return vmid
-
-
-def _resolve_storage_pool(
-    pool_arg: str,
-    node_ip: str,
-    user: str,
-    ssh_opts: StrList,
-    content_filter: str,
-    dry_run: bool = False
-) -> str:
-    """Resolve a storage pool name.
-
-    If pool_arg is 'auto', find the first enabled pool with available space
-    that supports the requested content type.
-    """
-    if pool_arg != "auto":
-        print(f"  ✓ Using storage pool: {pool_arg}")
-        if not _storage_pool_supports_content(
-            pool_arg, content_filter, node_ip, user, ssh_opts, dry_run=dry_run
-        ):
-            raise ProvisionError(
-                f"Storage pool '{pool_arg}' does not support content type '{content_filter}'"
-            )
-        return pool_arg
-
-    result = _ssh_run(
-        node_ip, user, ssh_opts,
-        f"pvesm status --content {shlex.quote(content_filter)}",
-        dry_run=dry_run
-    )
-
-    if dry_run:
-        print("  [DRY-RUN] Would resolve storage pool")
-        return "local-lvm"
-
-    if result.returncode != 0:
-        raise ProvisionError(
-            f"Could not query storage pools for content type '{content_filter}'"
-        )
-
-    for line in result.stdout.strip().split('\n')[1:]:  # skip header
-        parts = line.split()
-        # pvesm status columns: Name Type Status Total Used Available %
-        if len(parts) >= 3 and parts[2] == "active":
-            pool = parts[0]
-            print(f"  ✓ Auto-selected storage pool: {pool}")
-            return pool
-
-    raise ProvisionError(
-        "No suitable storage pool found. Specify one explicitly with --storage root POOL AMOUNT or --storage template POOL"
-    )
-
 
 def _resolve_template_storage(
     root_pool: str,
@@ -568,41 +293,6 @@ def _resolve_template_name(
     return template_path
 
 
-def _build_container_hostname(target_ip: str, friendly_name: Optional[str]) -> str:
-    """Derive a hostname for the container.
-
-    Uses friendly_name if set, otherwise derives from IP. Result is clamped to
-    63 characters per RFC 1123 so `pct create --hostname` accepts it.
-    """
-    if friendly_name:
-        # Sanitize: lowercase, replace non-alphanumeric with hyphens
-        hostname = re.sub(r'[^a-z0-9-]', '-', friendly_name.lower()).strip('-')
-        # Remove consecutive hyphens
-        hostname = re.sub(r'-+', '-', hostname)
-        if hostname:
-            return hostname[:63].rstrip('-') or hostname[:63]
-
-    # Derive from IP: 10.0.0.50 → lxc-10-0-0-50
-    return ("lxc-" + target_ip.replace(".", "-"))[:63]
-
-
-def _resolve_public_key_path(ssh_key: Optional[str]) -> Optional[str]:
-    """Return the local path to the public key matching the given private key, if any.
-
-    Convention: <ssh_key>.pub. Returns None if ssh_key is unset, the .pub file is
-    missing, or the file is empty.
-    """
-    if not ssh_key:
-        return None
-    pub_path = ssh_key + ".pub"
-    try:
-        if os.path.isfile(pub_path) and os.path.getsize(pub_path) > 0:
-            return pub_path
-    except OSError:
-        return None
-    return None
-
-
 def _upload_pubkey_to_host(
     pub_path: str,
     node_ip: str,
@@ -650,42 +340,6 @@ def _upload_pubkey_to_host(
             f"{proc.stderr.strip() or 'unknown error'}"
         )
     return remote_path
-
-
-def _wait_for_container_ssh(
-    target_ip: str,
-    node_ip: str,
-    user: str,
-    ssh_opts: StrList,
-    timeout: int = 90,
-    dry_run: bool = False,
-) -> None:
-    """Wait for sshd inside the new container to accept TCP connections.
-
-    Uses /dev/tcp from the Proxmox host so we don't need any local network
-    visibility into the container.
-    """
-    if dry_run:
-        return
-
-    deadline = time.monotonic() + timeout
-    probe = (
-        f"timeout 3 bash -c '</dev/tcp/{shlex.quote(target_ip)}/22' "
-        f"&& echo READY"
-    )
-    last_err = ""
-    while time.monotonic() < deadline:
-        result = _ssh_run(node_ip, user, ssh_opts, probe, dry_run=False)
-        if result.returncode == 0 and "READY" in result.stdout:
-            print(f"  ✓ Container SSH is reachable at {target_ip}:22")
-            return
-        last_err = (result.stderr or result.stdout or "").strip()
-        time.sleep(3)
-    raise ProvisionError(
-        f"Timed out after {timeout}s waiting for SSH on {target_ip}:22 "
-        f"(last probe: {last_err or 'no response'})"
-    )
-
 
 def _create_container(
     vmid: int,

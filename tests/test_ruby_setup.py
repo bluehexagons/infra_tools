@@ -5,12 +5,13 @@ from __future__ import annotations
 import os
 import sys
 import unittest
-from unittest.mock import call, patch
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.config import SetupConfig
 from lib.system_types import get_steps_for_system_type
+from lib.update_policy import ECOSYSTEM_AUTO_UPGRADE_ENV
 import common.common_steps as common_steps
 
 
@@ -22,25 +23,33 @@ class TestRubySetup(unittest.TestCase):
         common_steps.install_ruby(config)
         mock_run.assert_not_called()
 
-    @patch("common.common_steps.shutil.which", side_effect=[None, None])
+    @patch("common.common_steps.shutil.which", side_effect=[None, "/usr/bin/ruby", "/usr/bin/bundle"])
     @patch("common.common_steps.run")
     def test_install_ruby_uses_apt_packages(self, mock_run, _which):
         config = SetupConfig(host="host", username="user", system_type="server_dev", install_ruby=True)
         common_steps.install_ruby(config)
-        mock_run.assert_has_calls([
-            call("apt-get -o DPkg::Lock::Timeout=60 install -y -qq ruby ruby-dev bundler", check=False),
-            call("gem install bundler --no-document", check=False),
-        ])
+        mock_run.assert_called_once_with(
+            "apt-get -o DPkg::Lock::Timeout=60 install -y -qq ruby ruby-dev bundler",
+            check=False,
+        )
 
-    @patch("common.common_steps.shutil.which", side_effect=["/usr/bin/ruby", None, None, None])
+    @patch("common.common_steps.shutil.which", side_effect=[
+        "/usr/bin/ruby",
+        None,
+        None,
+        "/usr/bin/ruby",
+        None,
+        None,
+        "/usr/bin/ruby",
+    ])
     @patch("common.common_steps.run")
     def test_install_ruby_reinstalls_when_bundler_missing(self, mock_run, _which):
         config = SetupConfig(host="host", username="user", system_type="server_dev", install_ruby=True)
         common_steps.install_ruby(config)
-        mock_run.assert_has_calls([
-            call("apt-get -o DPkg::Lock::Timeout=60 install -y -qq ruby ruby-dev bundler", check=False),
-            call("gem install bundler --no-document", check=False),
-        ])
+        mock_run.assert_called_once_with(
+            "apt-get -o DPkg::Lock::Timeout=60 install -y -qq ruby ruby-dev bundler",
+            check=False,
+        )
 
     @patch("common.common_steps._configure_auto_update_systemd")
     @patch("common.common_steps.shutil.which", return_value="/usr/bin/gem")
@@ -55,6 +64,7 @@ class TestRubySetup(unittest.TestCase):
             schedule="Sun *-*-* 04:00:00",
             check_path="/usr/bin/gem",
             check_name="Ruby gems",
+            environment={ECOSYSTEM_AUTO_UPGRADE_ENV: "0"},
         )
 
     def test_ruby_auto_update_step_uses_common_cleanup_implementation(self):

@@ -79,7 +79,7 @@ class TestSshOpts(unittest.TestCase):
 
 
 class TestAutoDetectBridge(unittest.TestCase):
-    @patch("lib.proxmox_node._ssh_run")
+    @patch("lib.proxmox_guest._ssh_run")
     def test_detects_vmbr0(self, mock_run):
         mock_run.return_value = MagicMock(
             stdout="vmbr0\nvmbr1\n", returncode=0
@@ -87,7 +87,7 @@ class TestAutoDetectBridge(unittest.TestCase):
         result = auto_detect_bridge("10.0.0.1", "root", dry_run=False)
         self.assertEqual(result, "vmbr0")
 
-    @patch("lib.proxmox_node._ssh_run")
+    @patch("lib.proxmox_guest._ssh_run")
     def test_prefers_vmbr0(self, mock_run):
         mock_run.return_value = MagicMock(
             stdout="vmbr1\nvmbr0\n", returncode=0
@@ -95,7 +95,7 @@ class TestAutoDetectBridge(unittest.TestCase):
         result = auto_detect_bridge("10.0.0.1", "root", dry_run=False)
         self.assertEqual(result, "vmbr0")
 
-    @patch("lib.proxmox_node._ssh_run")
+    @patch("lib.proxmox_guest._ssh_run")
     def test_no_bridge_raises(self, mock_run):
         mock_run.return_value = MagicMock(stdout="", returncode=0)
         with self.assertRaises(Exception):
@@ -107,19 +107,19 @@ class TestAutoDetectBridge(unittest.TestCase):
 
 
 class TestResolveStoragePool(unittest.TestCase):
-    @patch("lib.proxmox_node._ssh_run")
+    @patch("lib.proxmox_guest._ssh_run")
     def test_explicit_pool(self, mock_run):
         mock_run.return_value = MagicMock(stdout="Name Type Status\nlocal-lvm dir active\n", returncode=0)
         result = _resolve_storage_pool("local-lvm", "10.0.0.1", "root", [], "images,rootdir")
         self.assertEqual(result, "local-lvm")
 
-    @patch("lib.proxmox_node._ssh_run")
+    @patch("lib.proxmox_guest._ssh_run")
     def test_explicit_pool_inactive_raises(self, mock_run):
         mock_run.return_value = MagicMock(stdout="Name Type Status\nlocal dir active\n", returncode=0)
         with self.assertRaises(ProvisionError):
             _resolve_storage_pool("local-lvm", "10.0.0.1", "root", [], "images,rootdir")
 
-    @patch("lib.proxmox_node._ssh_run")
+    @patch("lib.proxmox_guest._ssh_run")
     def test_explicit_pool_uses_unfiltered_fallback(self, mock_run):
         filtered = MagicMock(stdout="", stderr="unsupported option", returncode=1)
         unfiltered = MagicMock(
@@ -130,7 +130,7 @@ class TestResolveStoragePool(unittest.TestCase):
         result = _resolve_storage_pool("local-lvm", "10.0.0.1", "root", [], "images,rootdir")
         self.assertEqual(result, "local-lvm")
 
-    @patch("lib.proxmox_node._ssh_run")
+    @patch("lib.proxmox_guest._ssh_run")
     def test_auto_selects_active_pool(self, mock_run):
         mock_run.return_value = MagicMock(
             stdout="Name         Type    Status  Total    Used    Available  %\n"
@@ -141,7 +141,7 @@ class TestResolveStoragePool(unittest.TestCase):
         result = _resolve_storage_pool("auto", "10.0.0.1", "root", [], "images,rootdir")
         self.assertEqual(result, "local")
 
-    @patch("lib.proxmox_node._ssh_run")
+    @patch("lib.proxmox_guest._ssh_run")
     def test_auto_no_pools_raises(self, mock_run):
         mock_run.return_value = MagicMock(
             stdout="Name  Type  Status\n", returncode=0
@@ -149,7 +149,7 @@ class TestResolveStoragePool(unittest.TestCase):
         with self.assertRaises(Exception):
             _resolve_storage_pool("auto", "10.0.0.1", "root", [], "images,rootdir")
 
-    @patch("lib.proxmox_node._ssh_run")
+    @patch("lib.proxmox_guest._ssh_run")
     def test_auto_filtered_query_failure_raises(self, mock_run):
         mock_run.return_value = MagicMock(stdout="", stderr="unsupported option", returncode=1)
         with self.assertRaises(ProvisionError):
@@ -157,7 +157,7 @@ class TestResolveStoragePool(unittest.TestCase):
 
 
 class TestBridgePrefixDetection(unittest.TestCase):
-    @patch("lib.proxmox_node._ssh_run")
+    @patch("lib.proxmox_guest._ssh_run")
     def test_detects_prefix(self, mock_run):
         mock_run.return_value = MagicMock(stdout="10.0.0.1/23\n", returncode=0)
         result = _get_bridge_prefix_length("10.0.0.1", "root", [], "vmbr0")
@@ -290,14 +290,14 @@ class TestCheckContainerExists(unittest.TestCase):
 
 
 class TestAutoDetectBridge(unittest.TestCase):
-    @patch("lib.proxmox_node._ssh_run")
+    @patch("lib.proxmox_guest._ssh_run")
     def test_ssh_failure_raises(self, mock_run):
         mock_run.return_value = MagicMock(stdout="", stderr="ssh: timeout", returncode=255)
         with self.assertRaises(ProvisionError) as ctx:
             auto_detect_bridge("10.0.0.1")
         self.assertIn("Failed to query bridges", str(ctx.exception))
 
-    @patch("lib.proxmox_node._ssh_run")
+    @patch("lib.proxmox_guest._ssh_run")
     def test_prefers_vmbr0(self, mock_run):
         mock_run.return_value = MagicMock(stdout="vmbr1\nvmbr0\nvmbr2\n", returncode=0)
         self.assertEqual(auto_detect_bridge("10.0.0.1"), "vmbr0")
@@ -320,7 +320,7 @@ class TestNameserverFiltering(unittest.TestCase):
     def test_invalid_rejected(self):
         self.assertFalse(_is_usable_nameserver("not-an-ip"))
 
-    @patch("lib.proxmox_node._ssh_run")
+    @patch("lib.proxmox_guest._ssh_run")
     def test_filters_loopback_from_resolv_conf(self, mock_run):
         # systemd-resolved scenario: resolvectl prints upstream, resolv.conf has stub.
         mock_run.return_value = MagicMock(
@@ -330,7 +330,7 @@ class TestNameserverFiltering(unittest.TestCase):
         result = _get_host_nameservers("10.0.0.1", "root", [])
         self.assertEqual(result, ["1.1.1.1", "8.8.8.8"])
 
-    @patch("lib.proxmox_node._ssh_run")
+    @patch("lib.proxmox_guest._ssh_run")
     def test_falls_back_when_only_loopback(self, mock_run):
         mock_run.return_value = MagicMock(stdout="127.0.0.53\n", returncode=0)
         result = _get_host_nameservers("10.0.0.1", "root", [])

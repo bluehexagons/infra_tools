@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 import unittest
 from unittest.mock import call, mock_open, patch
 
@@ -12,6 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from lib.systemd_service import (
     cleanup_all_infra_services,
     cleanup_service,
+    create_rails_service,
     generate_node_service,
     generate_rails_service,
 )
@@ -153,6 +155,28 @@ class TestCleanupFunctions(unittest.TestCase):
         self.assertIn("systemctl daemon-reload", run_commands)
         self.assertIn("systemctl reset-failed", run_commands)
 
+    @patch("lib.systemd_service.run")
+    def test_cleanup_all_persists_rails_secret_before_removing_service(self, mock_run):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            systemd_dir = os.path.join(temp_dir, "systemd")
+            app_path = os.path.join(temp_dir, "apps", "example_com")
+            os.makedirs(systemd_dir)
+            os.makedirs(app_path)
+
+            service_path = os.path.join(systemd_dir, "rails-example_com.service")
+            with open(service_path, "w", encoding="utf-8") as handle:
+                handle.write(generate_rails_service("example_com", app_path, "stable-secret"))
+
+            mock_run.return_value.returncode = 0
+
+            with patch("lib.systemd_service.SYSTEMD_DIR", systemd_dir):
+                cleanup_all_infra_services()
+
+            secret_path = os.path.join(temp_dir, "apps", ".infra_tools_shared", "example_com", "secret_key_base")
+            with open(secret_path, "r", encoding="utf-8") as handle:
+                self.assertEqual(handle.read().strip(), "stable-secret")
+            self.assertFalse(os.path.exists(service_path))
+
     @patch("lib.systemd_service.os.remove")
     @patch("lib.systemd_service.run")
     @patch("lib.systemd_service.os.listdir", return_value=["auto-update-apt.service", "auto-update-apt.timer"])
@@ -161,6 +185,29 @@ class TestCleanupFunctions(unittest.TestCase):
         cleanup_all_infra_services(dry_run=True)
         mock_run.assert_not_called()
         mock_remove.assert_not_called()
+
+    @patch("time.sleep")
+    @patch("lib.systemd_service.run")
+    def test_create_rails_service_restores_persisted_secret(self, mock_run, _sleep):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            systemd_dir = os.path.join(temp_dir, "systemd")
+            app_path = os.path.join(temp_dir, "apps", "example_com")
+            secret_dir = os.path.join(temp_dir, "apps", ".infra_tools_shared", "example_com")
+            os.makedirs(systemd_dir)
+            os.makedirs(app_path)
+            os.makedirs(secret_dir)
+
+            with open(os.path.join(secret_dir, "secret_key_base"), "w", encoding="utf-8") as handle:
+                handle.write("persisted-secret\n")
+
+            mock_run.return_value.returncode = 0
+
+            with patch("lib.systemd_service.SYSTEMD_DIR", systemd_dir):
+                create_rails_service("example_com", app_path, 3000, "rails-example_com", "rails-example_com")
+
+            service_path = os.path.join(systemd_dir, "rails-example_com.service")
+            with open(service_path, "r", encoding="utf-8") as handle:
+                self.assertIn("SECRET_KEY_BASE=persisted-secret", handle.read())
 
 
 if __name__ == '__main__':

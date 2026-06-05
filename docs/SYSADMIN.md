@@ -1,0 +1,374 @@
+# Sysadmin Convenience Commands
+
+Quick-access commands for daily server administration tasks. All commands
+inherit SSH credentials (username, key, port) from the saved infra_tools
+configuration for the host when available, so you rarely need to pass them
+explicitly.
+
+## Command Index
+
+| Command | Summary |
+|---------|---------|
+| [`mount`](#mount) | Mount a remote directory via sshfs |
+| [`umount`](#umount) | Unmount an sshfs mount |
+| [`health`](#health) | One-shot health summary for a remote host |
+| [`ssh`](#ssh) | Open an SSH session using saved config |
+| [`push`](#push) | Rsync a local path to a remote host |
+| [`pull`](#pull) | Rsync a remote path to local |
+| [`key push`](#key-push) | Install a local public key on a remote host |
+| [`df`](#df) | Multi-host disk usage table |
+| [`fan`](#fan) | Run a command on multiple hosts in parallel |
+| [`svc`](#svc) | Manage a systemd service |
+| [`logs`](#logs) | Show or follow journalctl output |
+| [`upgrade`](#upgrade) | Run apt upgrade across one or more hosts |
+| [`reachable`](#reachable) | Check which saved hosts respond via SSH |
+
+---
+
+## mount
+
+Mount a remote directory using sshfs. The local mountpoint is created
+automatically if it does not exist.
+
+```
+infra_tools.py mount <host>:<remote_path> <local_path> [options]
+```
+
+| Option | Description |
+|--------|-------------|
+| `host:path` | Remote host and path, e.g. `myhost:/srv/data` |
+| `local_path` | Local mountpoint (created if absent) |
+| `--ro` | Mount read-only |
+| `-u, --username U` | SSH username (overrides saved config) |
+| `-i, --key PATH` | SSH identity file (overrides saved config) |
+| `-p, --port N` | SSH port |
+
+```bash
+infra_tools.py mount myserver:/var/log /mnt/myserver-logs
+infra_tools.py mount myserver:/srv/data /mnt/data --ro
+infra_tools.py mount 10.0.0.10:/home/admin /mnt/admin -u admin -i ~/.ssh/id_ed25519
+```
+
+Mounts use `reconnect` and `ServerAliveInterval=30` so short network
+interruptions recover automatically.
+
+---
+
+## umount
+
+Unmount an sshfs mount by local path or by host name.
+
+```
+infra_tools.py umount <local_path|hostname>
+```
+
+```bash
+infra_tools.py umount /mnt/myserver-logs   # by local path
+infra_tools.py umount myserver             # by host name (finds the mount automatically)
+```
+
+When given a host name, `findmnt` is used to locate the mount point. If more
+than one mount matches the host, you must specify the local path directly.
+
+---
+
+## health
+
+SSH into a host and print a structured health summary:
+
+- Uptime and load average
+- Memory and swap usage
+- Disk usage across all mounts (entries above 85% are prefixed with `[!]`)
+- Failed systemd units
+- Last 10 journal errors
+- Pending apt upgrade count
+- Reboot-required status
+
+```
+infra_tools.py health <host> [options]
+```
+
+| Option | Description |
+|--------|-------------|
+| `host` | Remote host (IP or hostname) |
+| `-u, --username U` | SSH username (overrides saved config) |
+| `-i, --key PATH` | SSH identity file (overrides saved config) |
+
+```bash
+infra_tools.py health myserver
+infra_tools.py health 10.0.0.10 -u admin
+```
+
+Each section degrades gracefully — if a command is unavailable on the remote
+host (e.g. `journalctl` on a non-systemd system), that section prints
+`(unavailable)` and the rest continues.
+
+---
+
+## ssh
+
+Open an interactive SSH session using credentials from the saved infra_tools
+config for the host. Adds `ControlMaster=auto` for connection reuse.
+
+```
+infra_tools.py ssh <host> [options] [-- <remote_command>]
+```
+
+| Option | Description |
+|--------|-------------|
+| `host` | Remote host (IP or hostname) |
+| `-u, --username U` | SSH username (overrides saved config) |
+| `-i, --key PATH` | SSH identity file (overrides saved config) |
+| `-p, --port N` | SSH port |
+| `-- cmd ...` | Run a remote command instead of opening a shell |
+
+```bash
+infra_tools.py ssh myserver
+infra_tools.py ssh myserver -- journalctl -f
+infra_tools.py ssh myserver -- systemctl status nginx
+```
+
+Uses `execvp` to replace the current process, so the terminal is fully
+interactive (signals, terminal size, etc. all work correctly).
+
+---
+
+## push
+
+Sync a local file or directory to a remote host using rsync over SSH.
+
+```
+infra_tools.py push <local_path> <host>:<remote_path> [options]
+```
+
+| Option | Description |
+|--------|-------------|
+| `local_path` | Local source path |
+| `host:path` | Remote destination |
+| `--delete` | Delete files from the remote that are absent locally |
+| `-n, --dry-run` | Show what would be transferred without transferring |
+| `-u, --username U` | SSH username |
+| `-i, --key PATH` | SSH identity file |
+| `-p, --port N` | SSH port |
+
+```bash
+infra_tools.py push ./dist myserver:/var/www/app
+infra_tools.py push ./data myserver:/backup/data --dry-run
+infra_tools.py push ./data myserver:/backup/data --delete
+```
+
+When `--delete` is specified without `--dry-run`, a confirmation prompt is
+shown before proceeding.
+
+---
+
+## pull
+
+Sync a remote file or directory to local using rsync over SSH.
+
+```
+infra_tools.py pull <host>:<remote_path> [<local_path>] [options]
+```
+
+| Option | Description |
+|--------|-------------|
+| `host:path` | Remote source |
+| `local_path` | Local destination (defaults to `./<basename>`) |
+| `-n, --dry-run` | Show what would be transferred without transferring |
+| `-u, --username U` | SSH username |
+| `-i, --key PATH` | SSH identity file |
+| `-p, --port N` | SSH port |
+
+```bash
+infra_tools.py pull myserver:/var/log ./logs
+infra_tools.py pull myserver:/srv/data          # saves to ./data
+infra_tools.py pull myserver:/var/log --dry-run
+```
+
+---
+
+## key push
+
+Append the local public key to `~/.ssh/authorized_keys` on the remote host.
+Idempotent — skips if the key is already present. Creates the `.ssh` directory
+and `authorized_keys` file with correct permissions if needed.
+
+```
+infra_tools.py key push <host> [options]
+```
+
+| Option | Description |
+|--------|-------------|
+| `host` | Remote host (IP or hostname) |
+| `--pubkey PATH` | Public key file (default: `~/.ssh/id_ed25519.pub`) |
+| `-u, --username U` | SSH username (overrides saved config) |
+| `-i, --key PATH` | SSH key to authenticate with |
+
+```bash
+infra_tools.py key push myserver
+infra_tools.py key push myserver --pubkey ~/.ssh/id_rsa.pub
+infra_tools.py key push 10.0.0.10 -u admin -i ~/.ssh/bootstrap_key
+```
+
+---
+
+## df
+
+Run `df -h` on one or more remote hosts in parallel and print a combined table
+sorted by percent used. Entries above 85% are prefixed with `[!]`.
+
+```
+infra_tools.py df <host> [<host2> ...] [options]
+```
+
+| Option | Description |
+|--------|-------------|
+| `hosts` | One or more remote hosts |
+| `-u, --username U` | SSH username (overrides saved config) |
+| `-i, --key PATH` | SSH identity file |
+
+```bash
+infra_tools.py df myserver
+infra_tools.py df web1 web2 db1
+infra_tools.py df web1 web2 -u admin
+```
+
+Hosts that cannot be reached are reported as warnings and omitted from the table.
+
+---
+
+## fan
+
+Run a shell command on multiple hosts concurrently, printing each host's output
+in a labeled block followed by a pass/fail summary.
+
+```
+infra_tools.py fan <host> [<host2> ...] [options] -- <command>
+```
+
+| Option | Description |
+|--------|-------------|
+| `hosts` | One or more remote hosts |
+| `-- cmd` | Command to execute (required) |
+| `-u, --username U` | SSH username (overrides saved config) |
+| `-i, --key PATH` | SSH identity file |
+
+```bash
+infra_tools.py fan web1 web2 -- uptime
+infra_tools.py fan web1 web2 db1 -- systemctl restart myapp
+infra_tools.py fan web1 web2 -u deploy -- git -C /srv/app pull
+```
+
+All hosts run concurrently. Output is serialized per host after all results are
+collected, sorted by hostname for stable output.
+
+---
+
+## svc
+
+Manage a systemd service on a remote host. Defaults to `status`.
+
+```
+infra_tools.py svc <host> <unit> [action] [options]
+```
+
+| Argument | Description |
+|----------|-------------|
+| `host` | Remote host (IP or hostname) |
+| `unit` | Unit name, e.g. `nginx`, `myapp.service` |
+| `action` | `status` (default), `restart`, `start`, `stop`, `enable`, `disable`, `reload` |
+
+| Option | Description |
+|--------|-------------|
+| `-u, --username U` | SSH username (overrides saved config) |
+| `-i, --key PATH` | SSH identity file |
+
+```bash
+infra_tools.py svc myserver nginx              # show status
+infra_tools.py svc myserver nginx restart      # restart and show status
+infra_tools.py svc myserver myapp.service stop
+infra_tools.py svc myserver nginx enable
+```
+
+Mutating actions (`restart`, `start`, `stop`, `enable`, `disable`, `reload`)
+use `sudo` and display a status readout afterward.
+
+---
+
+## logs
+
+Show recent journal entries for a systemd unit, or follow live output.
+
+```
+infra_tools.py logs <host> <unit> [options]
+```
+
+| Option | Description |
+|--------|-------------|
+| `-n, --lines N` | Number of lines to show (default: 50) |
+| `-f, --follow` | Follow live output |
+| `-u, --username U` | SSH username (overrides saved config) |
+| `-i, --key PATH` | SSH identity file |
+
+```bash
+infra_tools.py logs myserver nginx
+infra_tools.py logs myserver myapp -f
+infra_tools.py logs myserver nginx -n 200
+```
+
+Uses `execvp` so `-f` gives a true live stream with correct terminal behavior.
+
+---
+
+## upgrade
+
+Run `apt-get update && apt-get upgrade` on one or more hosts in parallel.
+Reports which hosts require a reboot after upgrading.
+
+```
+infra_tools.py upgrade <host> [<host2> ...] [options]
+```
+
+| Option | Description |
+|--------|-------------|
+| `hosts` | One or more remote hosts |
+| `--check` | Only count pending upgrades; do not install |
+| `-u, --username U` | SSH username (overrides saved config) |
+| `-i, --key PATH` | SSH identity file |
+
+```bash
+infra_tools.py upgrade myserver
+infra_tools.py upgrade web1 web2 db1
+infra_tools.py upgrade web1 web2 --check     # show pending counts only
+```
+
+Requires `sudo` access on the remote host. Hosts that fail are reported and do
+not affect the result for other hosts.
+
+---
+
+## reachable
+
+Probe hosts via SSH and print a latency table. Hosts that do not respond within
+5 seconds are marked unreachable.
+
+```
+infra_tools.py reachable [<hosts>] [options]
+```
+
+| Option | Description |
+|--------|-------------|
+| `hosts` | Explicit host list (default: all saved configs) |
+| `--pattern GLOB` | Filter saved hosts by glob pattern |
+| `-u, --username U` | SSH username (overrides saved config) |
+| `-i, --key PATH` | SSH identity file |
+
+```bash
+infra_tools.py reachable                      # probe all saved hosts
+infra_tools.py reachable '*.example.com'      # glob filter on saved hosts
+infra_tools.py reachable --pattern 'web*'
+infra_tools.py reachable web1 web2 db1        # explicit host list
+```
+
+All probes run concurrently. The summary line lists any unreachable hosts by
+name. Exit code is 1 if any host is unreachable, 0 if all respond.

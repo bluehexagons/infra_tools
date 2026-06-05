@@ -12,7 +12,13 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from lib.proxmox_hosts import ProxmoxHost, add_proxmox_host, load_proxmox_hosts
+from lib.proxmox_hosts import (
+    ProxmoxHost,
+    ProxmoxHostFacts,
+    ProxmoxStoragePool,
+    add_proxmox_host,
+    load_proxmox_hosts,
+)
 from lib.proxmox_shell import ProxmoxShell
 
 
@@ -62,6 +68,55 @@ class TestShellHostManagement(_ShellFixture):
         with self.assertRaises(ValueError):
             self.shell.dispatch("use missing")
 
+    @patch("lib.proxmox_shell.probe_proxmox_host")
+    def test_probe_caches_host_defaults(self, mock_probe) -> None:
+        self.shell.dispatch("add pve1 10.0.0.10")
+        self.shell.dispatch("use pve1")
+        self.outputs.clear()
+        mock_probe.return_value = ProxmoxHostFacts(
+            node_name="pve1",
+            bridges=["vmbr0"],
+            gateway="10.0.0.1",
+            nameservers=["1.1.1.1"],
+            storage_pools=[
+                ProxmoxStoragePool(
+                    name="local-lvm",
+                    type="lvmthin",
+                    status="active",
+                    content=["images", "rootdir"],
+                )
+            ],
+            default_root_storage="local-lvm",
+            default_template_storage="local",
+            default_bridge="vmbr0",
+        )
+
+        self.shell.dispatch("probe")
+
+        loaded = load_proxmox_hosts(self.workspace)
+        self.assertEqual(loaded[0].default_storage, "local-lvm")
+        self.assertEqual(loaded[0].default_template_storage, "local")
+        self.assertEqual(loaded[0].default_bridge, "vmbr0")
+        self.assertIsNotNone(loaded[0].facts)
+        self.assert_output_contains("Cached host facts")
+        self.assert_output_contains("local-lvm")
+
+    @patch("lib.proxmox_shell.probe_proxmox_cluster")
+    def test_probe_cluster_registers_all_nodes(self, mock_probe_cluster) -> None:
+        mock_probe_cluster.return_value = [
+            ProxmoxHost(name="pve1", address="10.0.0.10", tags=["prod"]),
+            ProxmoxHost(name="pve2", address="10.0.0.11", tags=["prod"]),
+        ]
+
+        self.shell.dispatch("probe-cluster 10.0.0.10 --tag prod")
+
+        loaded = load_proxmox_hosts(self.workspace)
+        self.assertEqual([host.name for host in loaded], ["pve1", "pve2"])
+        self.assertIsNotNone(self.shell.state.active_host)
+        assert self.shell.state.active_host is not None
+        self.assertEqual(self.shell.state.active_host.name, "pve1")
+        self.assert_output_contains("Discovered 2 Proxmox node(s)")
+
     def test_remove_clears_active_host(self) -> None:
         self.shell.dispatch("add pve1 10.0.0.10")
         self.shell.dispatch("use pve1")
@@ -95,19 +150,24 @@ class TestShellContainerOps(_ShellFixture):
 
     @patch("lib.proxmox_manage._ssh_run")
     def test_ls_lists_containers(self, mock_run) -> None:
-        mock_run.return_value = _completed(
-            "VMID Status Name\n100 running web\n101 stopped db\n"
-        )
+        mock_run.side_effect = [
+            _completed("VMID Status Name\n100 running web\n101 stopped db\n"),
+            _completed("VMID NAME STATUS MEM(MB) BOOTDISK(GB) PID\n"),
+        ]
         self.shell.dispatch("ls")
         self.assert_output_contains("100")
         self.assert_output_contains("web")
         self.assert_output_contains("101")
+        self.assert_output_contains("lxc")
 
     @patch("lib.proxmox_manage._ssh_run")
     def test_ls_when_empty_says_so(self, mock_run) -> None:
-        mock_run.return_value = _completed("VMID Status Name\n")
+        mock_run.side_effect = [
+            _completed("VMID Status Name\n"),
+            _completed("VMID NAME STATUS MEM(MB) BOOTDISK(GB) PID\n"),
+        ]
         self.shell.dispatch("ls")
-        self.assert_output_contains("(no containers)")
+        self.assert_output_contains("(no guests)")
 
     @patch("lib.proxmox_manage._ssh_run")
     def test_status_dispatch(self, mock_run) -> None:
@@ -123,7 +183,7 @@ class TestShellContainerOps(_ShellFixture):
             _completed(""),
         ]
         self.shell.dispatch("start 100")
-        self.assert_output_contains("Started container 100")
+        self.assert_output_contains("Started guest 100")
 
     @patch("lib.proxmox_manage._ssh_run")
     def test_stop_default_uses_shutdown(self, mock_run) -> None:
@@ -182,28 +242,33 @@ class TestShellDestroyConfirmation(_ShellFixture):
     def test_destroy_calls_confirm_and_proceeds_on_yes(self, mock_run) -> None:
         self._confirm_response = True
         mock_run.side_effect = [
-            _completed("VMID Status Name\n100 stopped web\n"),  # list_containers
+            _completed("VMID Status Name\n100 stopped web\n"),  # pct list
+            _completed("VMID NAME STATUS MEM(MB) BOOTDISK(GB) PID\n"),  # qm list
             _completed("status: stopped\n"),                     # status pre-destroy
             _completed(""),                                       # destroy
         ]
         self.shell.dispatch("destroy 100")
         self.assertEqual(self.confirm_calls, [True])
-        self.assert_output_contains("Destroyed container 100")
+        self.assert_output_contains("Destroyed guest 100")
 
     @patch("lib.proxmox_manage._ssh_run")
     def test_destroy_aborts_when_confirm_false(self, mock_run) -> None:
         self._confirm_response = False
-        mock_run.return_value = _completed(
-            "VMID Status Name\n100 stopped web\n"
-        )
+        mock_run.side_effect = [
+            _completed("VMID Status Name\n100 stopped web\n"),
+            _completed("VMID NAME STATUS MEM(MB) BOOTDISK(GB) PID\n"),
+        ]
         self.shell.dispatch("destroy 100")
         self.assert_output_contains("cancelled")
         # Only the list_containers call should have happened.
-        self.assertEqual(mock_run.call_count, 1)
+        self.assertEqual(mock_run.call_count, 2)
 
     @patch("lib.proxmox_manage._ssh_run")
     def test_destroy_unknown_vmid_raises(self, mock_run) -> None:
-        mock_run.return_value = _completed("VMID Status Name\n")
+        mock_run.side_effect = [
+            _completed("VMID Status Name\n"),
+            _completed("VMID NAME STATUS MEM(MB) BOOTDISK(GB) PID\n"),
+        ]
         with self.assertRaises(ValueError):
             self.shell.dispatch("destroy 999")
 
@@ -213,6 +278,7 @@ class TestShellMisc(_ShellFixture):
         self.shell.dispatch("help")
         self.assert_output_contains("destroy")
         self.assert_output_contains("health")
+        self.assert_output_contains("probe")
 
     def test_unknown_command_raises(self) -> None:
         with self.assertRaises(ValueError):
@@ -247,6 +313,26 @@ class TestShellMisc(_ShellFixture):
             self.shell.dispatch("status notanumber")
         with self.assertRaises(ValueError):
             self.shell.dispatch("status -1")
+
+    def test_host_command_shows_saved_defaults(self) -> None:
+        add_proxmox_host(
+            ProxmoxHost(
+                name="pve1",
+                address="10.0.0.10",
+                default_storage="local-lvm",
+                default_template_storage="local",
+                default_bridge="vmbr0",
+            ),
+            self.workspace,
+        )
+        self.shell.dispatch("use pve1")
+        self.outputs.clear()
+
+        self.shell.dispatch("host")
+
+        self.assert_output_contains("Root pool: local-lvm")
+        self.assert_output_contains("Template:  local")
+        self.assert_output_contains("Bridge:    vmbr0")
 
 
 class TestShellLifecycleCommands(_ShellFixture):

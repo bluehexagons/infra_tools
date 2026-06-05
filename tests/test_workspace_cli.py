@@ -37,6 +37,66 @@ class TestWorkspaceCli(unittest.TestCase):
         self.assertEqual(args.workspace, "/tmp/workspace")
         self.assertEqual(args.pattern, "prod")
 
+    def test_setup_parser_accepts_deploy_latest_pairs(self):
+        parser, _setup_parser, _patch_parser = infra_tools.create_infra_tools_parser()
+        args = parser.parse_args([
+            "setup",
+            "server_web",
+            "example.com",
+            "testuser",
+            "--ruby",
+            "--node",
+            "--deploy-latest",
+            "hexagonalhomelab.com/,/",
+            "https://github.com/bluehexagons/bluehexagons.git",
+            "--deploy-latest",
+            "clicker.hexagonalhomelab.com",
+            "https://github.com/bluehexagons/rails_test.git",
+            "--deploy-latest",
+            "foodguide.hexagonalhomelab.com,/foodguide,hexagonalhomelab.com/foodguide",
+            "https://github.com/bluehexagons/foodguide.git",
+        ])
+
+        self.assertTrue(args.deploy_latest)
+        self.assertEqual(args.deploy_specs, [
+            ["hexagonalhomelab.com/,/", "https://github.com/bluehexagons/bluehexagons.git"],
+            ["clicker.hexagonalhomelab.com", "https://github.com/bluehexagons/rails_test.git"],
+            ["foodguide.hexagonalhomelab.com,/foodguide,hexagonalhomelab.com/foodguide", "https://github.com/bluehexagons/foodguide.git"],
+        ])
+
+    def test_remote_setup_parser_accepts_deploy_latest_pairs(self):
+        parser = create_setup_argument_parser("test", for_remote=True, allow_steps=True)
+        args = parser.parse_args([
+            "--system-type",
+            "server_web",
+            "--deploy-latest",
+            "clicker.example.com",
+            "https://github.com/user/clicker.git",
+        ])
+
+        self.assertTrue(args.deploy_latest)
+        self.assertEqual(args.deploy_specs, [["clicker.example.com", "https://github.com/user/clicker.git"]])
+
+    def test_setup_parser_still_accepts_repeated_deploy_flags(self):
+        parser, _setup_parser, _patch_parser = infra_tools.create_infra_tools_parser()
+        args = parser.parse_args([
+            "setup",
+            "server_web",
+            "example.com",
+            "testuser",
+            "--deploy",
+            "clicker.example.com",
+            "https://github.com/user/clicker.git",
+            "--deploy",
+            "food.example.com",
+            "https://github.com/user/food.git",
+        ])
+
+        self.assertEqual(args.deploy_specs, [
+            ["clicker.example.com", "https://github.com/user/clicker.git"],
+            ["food.example.com", "https://github.com/user/food.git"],
+        ])
+
     def test_infra_tools_parser_accepts_recall_command(self):
         parser, _setup_parser, _patch_parser = infra_tools.create_infra_tools_parser()
         args = parser.parse_args(["recall", "example.com", "admin", "--key", "~/.ssh/id_ed25519"])
@@ -86,6 +146,19 @@ class TestWorkspaceCli(unittest.TestCase):
         self.assertEqual(args.command, "setup")
         self.assertEqual(args.antistatic_server, "lobby.example.com:9090")
         self.assertEqual(args.antistatic_db, "db.example.com:9091")
+
+    def test_infra_tools_setup_parser_accepts_gogs_flag(self):
+        parser, _setup_parser, _patch_parser = infra_tools.create_infra_tools_parser()
+        args = parser.parse_args([
+            "setup",
+            "server_web",
+            "example.com",
+            "--gogs",
+            "git.example.com:3000",
+            "/srv/gogs",
+        ])
+        self.assertEqual(args.command, "setup")
+        self.assertEqual(args.gogs, ["git.example.com:3000", "/srv/gogs"])
 
     def test_reconstruct_command_uses_unified_setup_entrypoint(self):
         config = SetupConfig(
@@ -393,6 +466,46 @@ class TestWorkspaceCli(unittest.TestCase):
         self.assertEqual(result, 1)
         mock_run_remote.assert_not_called()
         mock_print.assert_called_with("Error: Invalid timezone: Mars/Olympus")
+
+    def test_run_patch_command_preserves_cached_lxc_machine_when_omitted(self):
+        parser, _setup_parser, _patch_parser = infra_tools.create_infra_tools_parser()
+        args = parser.parse_args(["patch", "example.com", "testuser"])
+        cached = SetupConfig(
+            host="example.com",
+            username="testuser",
+            system_type="server_web",
+            machine_type="unprivileged",
+        )
+
+        with patch("infra_tools.validate_host", return_value=True), \
+             patch("infra_tools.validate_username", return_value=True), \
+             patch("infra_tools.load_setup_command", return_value=cached), \
+             patch("infra_tools._execute_patch_config", return_value=0) as mock_execute:
+            result = infra_tools.run_patch_command(args)
+
+        self.assertEqual(result, 0)
+        patched_config = mock_execute.call_args.args[0]
+        self.assertEqual(patched_config.machine_type, "unprivileged")
+
+    def test_run_patch_command_allows_explicit_machine_override(self):
+        parser, _setup_parser, _patch_parser = infra_tools.create_infra_tools_parser()
+        args = parser.parse_args(["patch", "example.com", "testuser", "--machine", "vm"])
+        cached = SetupConfig(
+            host="example.com",
+            username="testuser",
+            system_type="server_web",
+            machine_type="unprivileged",
+        )
+
+        with patch("infra_tools.validate_host", return_value=True), \
+             patch("infra_tools.validate_username", return_value=True), \
+             patch("infra_tools.load_setup_command", return_value=cached), \
+             patch("infra_tools._execute_patch_config", return_value=0) as mock_execute:
+            result = infra_tools.run_patch_command(args)
+
+        self.assertEqual(result, 0)
+        patched_config = mock_execute.call_args.args[0]
+        self.assertEqual(patched_config.machine_type, "vm")
 
     @patch("builtins.print")
     @patch("infra_tools.validate_samba_share_credentials")

@@ -8,8 +8,9 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
+from deploy.deploy_steps import DEPLOY_USER, DEPLOY_GROUP, ensure_deploy_user
+from lib.deployment import DeploymentOrchestrator
 from lib.systemd_service import create_rails_service, create_node_service
-from lib.remote_utils import run
 
 
 def main():
@@ -26,14 +27,19 @@ def main():
     print()
     
     try:
-        run("id rails || useradd -m -s /bin/bash rails", check=False)
+        ensure_deploy_user(DEPLOY_USER)
+        orchestrator = DeploymentOrchestrator(deploy_user=DEPLOY_USER, deploy_group=DEPLOY_GROUP)
+        rails_user = orchestrator._legacy_rails_runtime_user(app_name)
+        orchestrator._prepare_rails_runtime_state(orchestrator._get_persistent_root(app_name), rails_user)
         
-        create_rails_service(app_name, app_path, 3000, "rails", "rails")
+        create_rails_service(app_name, app_path, 3000, rails_user, rails_user)
         
         frontend_path = os.path.join(app_path, "frontend")
         if os.path.exists(frontend_path):
             print(f"\nDetected frontend at {frontend_path}")
-            create_node_service(app_name, frontend_path, 4000, "rails", "rails")
+            node_user = orchestrator._capped_identity("node", app_name)
+            orchestrator._ensure_service_user(node_user)
+            create_node_service(app_name, frontend_path, 4000, node_user, node_user)
             
         print("\n✓ Service setup complete!")
         print("\nYou can check the service status with:")

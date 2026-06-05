@@ -11,12 +11,15 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.proxmox_hosts import (
     ProxmoxHost,
+    ProxmoxHostFacts,
+    ProxmoxStoragePool,
     add_proxmox_host,
     find_proxmox_host,
     get_proxmox_hosts_path,
     load_proxmox_hosts,
     remove_proxmox_host,
     save_proxmox_hosts,
+    sync_proxmox_host,
 )
 
 
@@ -34,7 +37,32 @@ class TestProxmoxHostRecord(unittest.TestCase):
         host = ProxmoxHost(
             name="pve1", address="10.0.0.10", user="root",
             ssh_key="/key", description="primary",
-            default_storage="local-lvm", default_bridge="vmbr0",
+            default_storage="local-lvm",
+            default_template_storage="local",
+            default_bridge="vmbr0",
+            facts=ProxmoxHostFacts(
+                node_name="pve1",
+                bridges=["vmbr0", "vmbr1"],
+                gateway="10.0.0.1",
+                nameservers=["1.1.1.1", "8.8.8.8"],
+                storage_pools=[
+                    ProxmoxStoragePool(
+                        name="local-lvm",
+                        type="lvmthin",
+                        status="active",
+                        content=["images", "rootdir"],
+                    ),
+                    ProxmoxStoragePool(
+                        name="local",
+                        type="dir",
+                        status="active",
+                        content=["vztmpl"],
+                    ),
+                ],
+                default_root_storage="local-lvm",
+                default_template_storage="local",
+                default_bridge="vmbr0",
+            ),
             tags=["prod", "az-east"],
         )
         restored = ProxmoxHost.from_dict(host.to_dict())
@@ -50,6 +78,14 @@ class TestProxmoxHostRecord(unittest.TestCase):
         with self.assertRaises(ValueError):
             ProxmoxHost.from_dict({
                 "name": "pve", "address": "10.0.0.10", "tags": "prod"
+            })
+
+    def test_from_dict_rejects_bad_facts_lists(self) -> None:
+        with self.assertRaises(ValueError):
+            ProxmoxHost.from_dict({
+                "name": "pve",
+                "address": "10.0.0.10",
+                "facts": {"bridges": "vmbr0"},
             })
 
 
@@ -115,6 +151,34 @@ class TestAddProxmoxHost(_WorkspaceFixture):
             add_proxmox_host(ProxmoxHost(name="", address="10.0.0.1"), self.workspace)
         with self.assertRaises(ValueError):
             add_proxmox_host(ProxmoxHost(name="pve", address=""), self.workspace)
+
+    def test_sync_merges_by_address_and_preserves_existing_metadata(self) -> None:
+        add_proxmox_host(
+            ProxmoxHost(
+                name="seed",
+                address="10.0.0.10",
+                description="manual note",
+                tags=["prod"],
+                default_storage="manual-root",
+            ),
+            self.workspace,
+        )
+
+        synced = sync_proxmox_host(
+            ProxmoxHost(
+                name="pve1",
+                address="10.0.0.10",
+                default_template_storage="local",
+                tags=["cluster"],
+            ),
+            self.workspace,
+        )
+
+        self.assertEqual(synced.name, "pve1")
+        self.assertEqual(synced.description, "manual note")
+        self.assertEqual(synced.default_storage, "manual-root")
+        self.assertEqual(synced.default_template_storage, "local")
+        self.assertEqual(synced.tags, ["prod", "cluster"])
 
 
 class TestFindAndRemove(_WorkspaceFixture):

@@ -23,6 +23,7 @@ The flow is:
 from __future__ import annotations
 
 import shlex
+import subprocess
 import time
 from dataclasses import dataclass
 from typing import Optional, cast
@@ -34,9 +35,9 @@ from lib.cloud_images import (
     resolve_cloud_image,
 )
 from lib.config import SetupConfig
-from lib.proxmox_node import (
+from lib.proxmox_guest import (
     ProvisionError,
-    _build_container_hostname,
+    _build_guest_hostname,
     _get_bridge_prefix_length,
     _get_host_gateway,
     _get_host_nameservers,
@@ -45,7 +46,7 @@ from lib.proxmox_node import (
     _resolve_storage_pool,
     _ssh_opts,
     _ssh_run,
-    _wait_for_container_ssh,
+    _wait_for_guest_ssh,
     auto_detect_bridge,
 )
 from lib.types import NestedStrList, StrList
@@ -231,6 +232,9 @@ def _render_user_data(
         "#cloud-config",
         f"hostname: __HOSTNAME__",
         "manage_etc_hosts: true",
+        "package_update: true",
+        "packages:",
+        "  - qemu-guest-agent",
         "users:",
         "  - name: root",
         "    lock_passwd: false",
@@ -250,6 +254,10 @@ def _render_user_data(
             lines.append("    ssh_authorized_keys:")
             lines.append(f"      - {pubkey_contents.strip()}")
     lines.append("ssh_pwauth: false")
+    lines.extend([
+        "runcmd:",
+        "  - systemctl enable --now qemu-guest-agent",
+    ])
     lines.append("")
     return "\n".join(lines)
 
@@ -275,7 +283,6 @@ def _upload_user_data(
         f"{user}@{node_ip}",
         f"cat > {shlex.quote(remote_path)}",
     ]
-    import subprocess
     proc = subprocess.run(
         write_cmd, input=rendered, text=True, capture_output=True, timeout=60
     )
@@ -398,6 +405,39 @@ def _create_vm(
     print(f"  ✓ VM {vmid} created and started ({hostname}, {target_ip})")
 
 
+def _wait_for_guest_agent(
+    vmid: int,
+    node_ip: str,
+    user: str,
+    ssh_opts: StrList,
+    *,
+    timeout: int = 180,
+    poll_interval: int = 5,
+    dry_run: bool = False,
+) -> None:
+    """Wait briefly for qemu-guest-agent to become reachable."""
+    if dry_run:
+        print(f"  [DRY-RUN] Would wait for qemu-guest-agent in VM {vmid}")
+        return
+
+    print("  Waiting for qemu-guest-agent...")
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        result = _ssh_run(
+            node_ip,
+            user,
+            ssh_opts,
+            f"qm agent {vmid} ping",
+            dry_run=False,
+        )
+        if result.returncode == 0:
+            print("  ✓ qemu-guest-agent is responding")
+            return
+        time.sleep(poll_interval)
+
+    print("  ⚠ qemu-guest-agent did not come up before SSH handoff; continuing")
+
+
 def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
     """Orchestrate Proxmox VM provisioning.
 
@@ -430,9 +470,11 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
     memory_mb = _parse_memory_mb(memory_str)
     disk_size_gib = _parse_disk_size_gib(disk_amount)
 
-    hostname = _build_container_hostname(target_ip, config.friendly_name)
-    if hostname.startswith("lxc-"):
-        hostname = "vm-" + hostname[len("lxc-"):]
+    hostname = _build_guest_hostname(
+        target_ip,
+        config.friendly_name,
+        default_prefix="vm",
+    )
 
     resolved, catalog_entry = _resolve_image(config, image)
 
@@ -524,8 +566,15 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
             ssh_opts=ssh_opts,
             dry_run=dry_run,
         )
+        _wait_for_guest_agent(
+            vmid,
+            node_ip,
+            user,
+            ssh_opts,
+            dry_run=dry_run,
+        )
         # Cloud-init takes longer than LXC startup; bump the timeout.
-        _wait_for_container_ssh(
+        _wait_for_guest_ssh(
             target_ip, node_ip, user, ssh_opts, timeout=300, dry_run=dry_run
         )
     finally:

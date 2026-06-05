@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Workspace registry of known Proxmox hosts.
 
-Each host record persists the connection details needed to manage LXC
-containers on it (IP/hostname, SSH user, optional SSH key, optional default
+Each host record persists the connection details needed to manage Proxmox
+guests on it (IP/hostname, SSH user, optional SSH key, optional default
 storage pool, optional friendly description). Records are stored in
 ``proxmox_hosts.json`` inside the active workspace.
 """
@@ -22,8 +22,91 @@ PROXMOX_HOSTS_FILENAME = "proxmox_hosts.json"
 
 
 @dataclass
+class ProxmoxStoragePool:
+    """Cached metadata for a storage pool discovered on a Proxmox node."""
+
+    name: str
+    type: Optional[str] = None
+    status: Optional[str] = None
+    content: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> JSONDict:
+        return cast(JSONDict, asdict(self))
+
+    @classmethod
+    def from_dict(cls, data: JSONDict) -> "ProxmoxStoragePool":
+        if "name" not in data:
+            raise ValueError("Proxmox storage pool record missing 'name'")
+        content_raw = data.get("content") or []
+        if not isinstance(content_raw, list):
+            raise ValueError("Proxmox storage pool 'content' must be a list")
+        return cls(
+            name=str(data["name"]),
+            type=cast(Optional[str], data.get("type")),
+            status=cast(Optional[str], data.get("status")),
+            content=[str(value) for value in content_raw],
+        )
+
+
+@dataclass
+class ProxmoxHostFacts:
+    """Cached discovery data for a Proxmox node."""
+
+    node_name: Optional[str] = None
+    bridges: list[str] = field(default_factory=list)
+    gateway: Optional[str] = None
+    nameservers: list[str] = field(default_factory=list)
+    storage_pools: list[ProxmoxStoragePool] = field(default_factory=list)
+    default_root_storage: Optional[str] = None
+    default_template_storage: Optional[str] = None
+    default_bridge: Optional[str] = None
+
+    def to_dict(self) -> JSONDict:
+        payload = {
+            "node_name": self.node_name,
+            "bridges": list(self.bridges),
+            "gateway": self.gateway,
+            "nameservers": list(self.nameservers),
+            "storage_pools": [pool.to_dict() for pool in self.storage_pools],
+            "default_root_storage": self.default_root_storage,
+            "default_template_storage": self.default_template_storage,
+            "default_bridge": self.default_bridge,
+        }
+        return cast(JSONDict, payload)
+
+    @classmethod
+    def from_dict(cls, data: JSONDict) -> "ProxmoxHostFacts":
+        bridges_raw = data.get("bridges") or []
+        if not isinstance(bridges_raw, list):
+            raise ValueError("Proxmox host facts 'bridges' must be a list")
+        nameservers_raw = data.get("nameservers") or []
+        if not isinstance(nameservers_raw, list):
+            raise ValueError("Proxmox host facts 'nameservers' must be a list")
+        storage_raw = data.get("storage_pools") or []
+        if not isinstance(storage_raw, list):
+            raise ValueError("Proxmox host facts 'storage_pools' must be a list")
+        storage_pools: list[ProxmoxStoragePool] = []
+        for entry in storage_raw:
+            if not isinstance(entry, dict):
+                raise ValueError("Proxmox host facts storage pool entries must be objects")
+            storage_pools.append(ProxmoxStoragePool.from_dict(cast(JSONDict, entry)))
+        return cls(
+            node_name=cast(Optional[str], data.get("node_name")),
+            bridges=[str(value) for value in bridges_raw],
+            gateway=cast(Optional[str], data.get("gateway")),
+            nameservers=[str(value) for value in nameservers_raw],
+            storage_pools=storage_pools,
+            default_root_storage=cast(Optional[str], data.get("default_root_storage")),
+            default_template_storage=cast(
+                Optional[str], data.get("default_template_storage")
+            ),
+            default_bridge=cast(Optional[str], data.get("default_bridge")),
+        )
+
+
+@dataclass
 class ProxmoxHost:
-    """Connection details for a single Proxmox node."""
+    """Connection details and cached discovery data for a Proxmox node."""
 
     name: str
     address: str
@@ -31,7 +114,9 @@ class ProxmoxHost:
     ssh_key: Optional[str] = None
     description: Optional[str] = None
     default_storage: Optional[str] = None
+    default_template_storage: Optional[str] = None
     default_bridge: Optional[str] = None
+    facts: Optional[ProxmoxHostFacts] = None
     tags: list[str] = field(default_factory=list)
 
     def to_dict(self) -> JSONDict:
@@ -51,7 +136,15 @@ class ProxmoxHost:
             ssh_key=cast(Optional[str], data.get("ssh_key")),
             description=cast(Optional[str], data.get("description")),
             default_storage=cast(Optional[str], data.get("default_storage")),
+            default_template_storage=cast(
+                Optional[str], data.get("default_template_storage")
+            ),
             default_bridge=cast(Optional[str], data.get("default_bridge")),
+            facts=(
+                ProxmoxHostFacts.from_dict(cast(JSONDict, data["facts"]))
+                if isinstance(data.get("facts"), dict)
+                else None
+            ),
             tags=[str(t) for t in tags_raw],
         )
 
@@ -120,6 +213,32 @@ def find_proxmox_host(
     return None
 
 
+def _merge_host_tags(existing: list[str], incoming: list[str]) -> list[str]:
+    tags = list(existing)
+    for tag in incoming:
+        if tag not in tags:
+            tags.append(tag)
+    return tags
+
+
+def merge_proxmox_host(existing: ProxmoxHost, incoming: ProxmoxHost) -> ProxmoxHost:
+    """Merge discovered host data into an existing registry entry."""
+    return ProxmoxHost(
+        name=incoming.name,
+        address=incoming.address,
+        user=existing.user or incoming.user,
+        ssh_key=existing.ssh_key or incoming.ssh_key,
+        description=existing.description or incoming.description,
+        default_storage=existing.default_storage or incoming.default_storage,
+        default_template_storage=(
+            existing.default_template_storage or incoming.default_template_storage
+        ),
+        default_bridge=existing.default_bridge or incoming.default_bridge,
+        facts=incoming.facts or existing.facts,
+        tags=_merge_host_tags(existing.tags, incoming.tags),
+    )
+
+
 def add_proxmox_host(
     host: ProxmoxHost,
     workspace: Optional[str] = None,
@@ -147,6 +266,28 @@ def add_proxmox_host(
             hosts[i] = host
             save_proxmox_hosts(hosts, workspace)
             return host
+    hosts.append(host)
+    save_proxmox_hosts(hosts, workspace)
+    return host
+
+
+def sync_proxmox_host(
+    host: ProxmoxHost,
+    workspace: Optional[str] = None,
+) -> ProxmoxHost:
+    """Insert or merge a host by matching either name or address."""
+    if not host.name or not host.name.strip():
+        raise ValueError("Proxmox host name is required")
+    if not host.address or not host.address.strip():
+        raise ValueError("Proxmox host address is required")
+
+    hosts = load_proxmox_hosts(workspace)
+    name_lc = host.name.lower()
+    for index, existing in enumerate(hosts):
+        if existing.name.lower() == name_lc or existing.address == host.address:
+            hosts[index] = merge_proxmox_host(existing, host)
+            save_proxmox_hosts(hosts, workspace)
+            return hosts[index]
     hosts.append(host)
     save_proxmox_hosts(hosts, workspace)
     return host

@@ -8,6 +8,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr
+from io import StringIO
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -63,10 +65,19 @@ class TestGetRotatingLogger(unittest.TestCase):
 
     def test_fallback_on_bad_path(self):
         # /proc is not writable, so the logger should fallback to stderr
-        logger = get_rotating_logger('test_logger_fallback', '/proc/nonexistent/test.log')
+        with redirect_stderr(StringIO()):
+            logger = get_rotating_logger('test_logger_fallback', '/proc/nonexistent/test.log')
         self.assertIsInstance(logger, logging.Logger)
         # Should have a fallback handler
         self.assertGreater(len(logger.handlers), 0)
+
+    def test_non_root_does_not_touch_var_log(self):
+        log_file = '/var/log/infra_tools/test/non_root.log'
+        with patch('lib.logging_utils.os.geteuid', return_value=1000):
+            logger = get_rotating_logger('test_logger_non_root_var_log', log_file)
+        self.assertIsInstance(logger, logging.Logger)
+        self.assertGreater(len(logger.handlers), 0)
+        self.assertFalse(os.path.exists(log_file))
 
 
 class TestLogMessage(unittest.TestCase):

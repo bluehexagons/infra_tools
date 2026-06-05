@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from lib.arg_parser import create_setup_argument_parser
 from lib.config import SetupConfig
 from lib import python_setup
+from lib.update_policy import DEPENDENCY_MIN_AGE_DAYS_ENV, ECOSYSTEM_AUTO_UPGRADE_ENV
 from lib.system_types import get_steps_for_system_type
 import common.common_steps as common_steps
 
@@ -47,6 +48,22 @@ class TestPythonFlag(unittest.TestCase):
     def test_install_or_update_uv_returns_true_in_dry_run(self, _is_dry_run):
         self.assertTrue(common_steps.install_or_update_uv(user_home="/home/user", username="user"))
 
+    @patch("common.common_steps._configure_auto_update_systemd")
+    def test_configure_auto_update_uv_disables_ecosystem_auto_upgrades(self, mock_configure):
+        config = SetupConfig(host="host", username="user", system_type="server_dev", install_python=True)
+        common_steps.configure_auto_update_uv(config)
+        mock_configure.assert_called_once_with(
+            service_name="auto-update-uv",
+            service_desc="Auto-update uv package manager",
+            timer_desc="Auto-update uv weekly",
+            script_name="auto_update_uv.py",
+            schedule="Sun *-*-* 05:00:00",
+            check_path="/home/user/.local/bin/uv",
+            check_name="uv",
+            user="user",
+            environment={ECOSYSTEM_AUTO_UPGRADE_ENV: "0"},
+        )
+
 
 class TestSetupAdminPython(unittest.TestCase):
     @patch("lib.python_setup.run_completion_setup", return_value=0)
@@ -71,13 +88,17 @@ class TestSetupAdminPython(unittest.TestCase):
         mock_run_completion_setup,
     ):
         mock_subprocess_run.return_value = argparse.Namespace(returncode=0, stdout="", stderr="")
-        result = python_setup.run_local_python_setup("bash")
+        with patch.dict(os.environ, {DEPENDENCY_MIN_AGE_DAYS_ENV: "2"}):
+            result = python_setup.run_local_python_setup("bash")
         self.assertEqual(result, 0)
         mock_makedirs.assert_called_once()
         mock_symlink.assert_called_once_with("/usr/bin/python3", "/tmp/testuser/.local/bin/python")
         mock_install_or_update_uv.assert_called_once()
         _which.assert_has_calls([call("python3"), call("python")])
         mock_subprocess_run.assert_called_once()
+        argcomplete_cmd = mock_subprocess_run.call_args.args[0]
+        self.assertEqual(argcomplete_cmd[:5], ["/tmp/testuser/.local/bin/uv", "tool", "install", "--upgrade", "argcomplete"])
+        self.assertIn("--exclude-newer", argcomplete_cmd)
         mock_run_completion_setup.assert_has_calls([
             call(shell="bash", global_install=False, command_name="infra_tools.py"),
             call(shell="bash", global_install=False, command_name="infra_tools"),

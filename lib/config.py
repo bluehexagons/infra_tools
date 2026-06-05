@@ -27,6 +27,49 @@ CLI_SYSTEMS = [
 ]
 
 
+def _resolve_machine_type(
+    args: argparse.Namespace,
+    *,
+    system_default: Optional[str],
+    is_build_server: bool,
+) -> str:
+    explicit_machine_type = getattr(args, "machine_type", None)
+    if explicit_machine_type:
+        return explicit_machine_type
+    if is_build_server:
+        return "vm"
+    if system_default:
+        return system_default
+    return DEFAULT_MACHINE_TYPE
+
+
+def _default_machine_type_for_setup(
+    system_type: str,
+    *,
+    is_build_server: bool = False,
+) -> str:
+    if is_build_server:
+        return "vm"
+    system_default = get_system_type_definition(system_type).default_machine_type
+    return system_default or DEFAULT_MACHINE_TYPE
+
+
+def _validate_non_negative_int(name: str, value: int) -> int:
+    if value < 0:
+        raise ValueError(f"{name} must be non-negative")
+    return value
+
+
+def _optional_bool_arg(args: argparse.Namespace, name: str) -> Optional[bool]:
+    value = getattr(args, name, None)
+    return value if isinstance(value, bool) else None
+
+
+def _optional_int_arg(args: argparse.Namespace, name: str) -> Optional[int]:
+    value = getattr(args, name, None)
+    return value if isinstance(value, int) else None
+
+
 def _normalize_container_storage(value: NestedStrList | list[str] | None) -> Optional[NestedStrList]:
     if not value:
         return None
@@ -140,7 +183,9 @@ class SetupConfig:
     install_python: bool = False
     custom_steps: Optional[str] = None
     deploy_specs: Optional[NestedStrList] = None
+    deployment_mode: str = "default"  # "default" (smart cache), "lite" (cached only), "full" (always fresh)
     full_deploy: bool = False
+    deploy_latest: bool = False
     reset_migrations: bool = False
     enable_ssl: bool = False
     ssl_email: Optional[str] = None
@@ -160,8 +205,11 @@ class SetupConfig:
     notify_specs: Optional[NestedStrList] = None
     antistatic_server: MaybeStr = None  # "DOMAIN[:port]" spec
     antistatic_db: MaybeStr = None  # "DOMAIN[:port]" spec
-    no_restart: bool = False
-    # Container hosting (Proxmox LXC)
+    gogs: Optional[StrList] = None  # ["DOMAIN[:port]", "DATA_PATH"?]
+    auto_restart: bool = True
+    auto_restart_force_days: int = 7
+    auto_restart_grace: int = 5
+    # Hosted guest provisioning (Proxmox VM/LXC)
     hosted_node: MaybeStr = None
     hosted_user: str = "root"
     hosted_key: MaybeStr = None
@@ -177,7 +225,17 @@ class SetupConfig:
     include_pc_dev_apps: bool = False
     include_web_server: bool = False
     include_web_firewall: bool = False
-    
+
+    def __post_init__(self) -> None:
+        # "full" deployment mode means "always pull fresh repositories and
+        # rebuild everything" (a full redeploy). That necessarily implies
+        # full_deploy, so keep the two in sync. Without this, passing
+        # --deployment-full alone would still report "Full deploy: No" and
+        # should_redeploy() could skip unchanged deployments, contradicting
+        # the requested full redeploy.
+        if self.deployment_mode == "full":
+            self.full_deploy = True
+
     def to_remote_args(self) -> StrList:
         """Generate command line arguments for remote execution."""
         args: StrList = []
@@ -244,11 +302,20 @@ class SetupConfig:
             args.append(f"--steps {shlex.quote(self.custom_steps)}")
         
         if self.deploy_specs:
-            args.append("--lite-deploy")
-            if self.full_deploy:
+            if self.deployment_mode == "lite":
+                args.append("--deployment-lite")
+            elif self.deployment_mode == "full":
+                # --deployment-full already implies a full rebuild on the remote
+                args.append("--deployment-full")
+            elif self.full_deploy:
                 args.append("--full-deploy")
+            # Use --deploy-latest for each spec if deploy_latest is set, otherwise --deploy
+            flag = "--deploy-latest" if self.deploy_latest else "--deploy"
             for deploy_spec, git_url in self.deploy_specs:
-                args.append(f"--deploy {shlex.quote(deploy_spec)} {shlex.quote(git_url)}")
+                args.append(f"{flag} {shlex.quote(deploy_spec)} {shlex.quote(git_url)}")
+        elif self.deploy_latest:
+            # deploy_latest without specs doesn't make sense, but keep for backward compat
+            args.append("--deploy-latest")
         
         if self.reset_migrations:
             args.append("--reset-migrations")
@@ -318,9 +385,17 @@ class SetupConfig:
 
         if self.antistatic_db:
             args.append(f"--antistatic-db {shlex.quote(self.antistatic_db)}")
+
+        if self.gogs:
+            escaped_gogs = " ".join(shlex.quote(str(part)) for part in self.gogs)
+            args.append(f"--gogs {escaped_gogs}")
         
-        if self.no_restart:
-            args.append("--no-restart")
+        if self.auto_restart:
+            args.append("--auto-restart")
+        else:
+            args.append("--no-auto-restart")
+        args.append(f"--auto-restart-force-days {self.auto_restart_force_days}")
+        args.append(f"--auto-restart-grace {self.auto_restart_grace}")
                 
         return args
     
@@ -350,8 +425,12 @@ class SetupConfig:
         if self.timezone and self.timezone != "UTC":
             cmd_parts.append(f"-t {shlex.quote(self.timezone)}")
         
-        # Machine type (if not default)
-        if self.machine_type != DEFAULT_MACHINE_TYPE:
+        # Machine type (if not the current setup default for this flow)
+        default_machine_type = _default_machine_type_for_setup(
+            self.system_type,
+            is_build_server=self.is_build_server,
+        )
+        if self.machine_type != default_machine_type:
             cmd_parts.append(f"--machine {shlex.quote(self.machine_type)}")
         
         # Name and tags
@@ -411,10 +490,20 @@ class SetupConfig:
         
         # Deployments
         if self.deploy_specs:
-            if self.full_deploy:
+            if self.deployment_mode == "lite":
+                cmd_parts.append("--deployment-lite")
+            elif self.deployment_mode == "full":
+                # --deployment-full already implies a full rebuild on the remote
+                cmd_parts.append("--deployment-full")
+            elif self.full_deploy:
                 cmd_parts.append("--full-deploy")
+            # Use --deploy-latest for each spec if deploy_latest is set, otherwise --deploy
+            flag = "--deploy-latest" if self.deploy_latest else "--deploy"
             for deploy_spec, git_url in self.deploy_specs:
-                cmd_parts.append(f"--deploy {shlex.quote(deploy_spec)} {shlex.quote(git_url)}")
+                cmd_parts.append(f"{flag} {shlex.quote(deploy_spec)} {shlex.quote(git_url)}")
+        elif self.deploy_latest:
+            # deploy_latest without specs doesn't make sense, but keep for backward compat
+            cmd_parts.append("--deploy-latest")
         
         if self.reset_migrations:
             cmd_parts.append("--reset-migrations")
@@ -522,10 +611,19 @@ class SetupConfig:
         # Antistatic DB service
         if self.antistatic_db:
             cmd_parts.append(f"--antistatic-db {shlex.quote(self.antistatic_db)}")
+
+        if self.gogs:
+            escaped_gogs = " ".join(shlex.quote(str(part)) for part in self.gogs)
+            cmd_parts.append(f"--gogs {escaped_gogs}")
         
         # Restart control
-        if self.no_restart:
-            cmd_parts.append("--no-restart")
+        system_defaults = get_system_type_definition(self.system_type)
+        if self.auto_restart != system_defaults.default_auto_restart:
+            cmd_parts.append("--auto-restart" if self.auto_restart else "--no-auto-restart")
+        if self.auto_restart_force_days != system_defaults.default_auto_restart_force_days:
+            cmd_parts.append(f"--auto-restart-force-days {self.auto_restart_force_days}")
+        if self.auto_restart_grace != 5:
+            cmd_parts.append(f"--auto-restart-grace {self.auto_restart_grace}")
         
         return cmd_parts
 
@@ -534,6 +632,7 @@ class SetupConfig:
         data.pop('host', None)
         data.pop('system_type', None)
         data.pop('share_credentials', None)
+        data.pop('deploy_latest', None)
         data['samba_shares'] = _strip_passwords_from_samba_shares(self.samba_shares)
         data['smb_mounts'] = _strip_passwords_from_smb_mounts(self.smb_mounts)
         if self.tags:
@@ -549,6 +648,24 @@ class SetupConfig:
             data['tags'] = None
 
         data['container_storage'] = _normalize_container_storage(data.get('container_storage'))
+        system_defaults = get_system_type_definition(system_type)
+        if 'auto_restart' not in data or data.get('auto_restart') is None:
+            if 'no_restart' in data and data.get('no_restart') is not None:
+                data['auto_restart'] = not bool(data.pop('no_restart'))
+            else:
+                data['auto_restart'] = system_defaults.default_auto_restart
+        else:
+            data.pop('no_restart', None)
+        if 'auto_restart_force_days' not in data or data.get('auto_restart_force_days') is None:
+            data['auto_restart_force_days'] = system_defaults.default_auto_restart_force_days
+        data['auto_restart_force_days'] = _validate_non_negative_int(
+            'auto_restart_force_days', int(data['auto_restart_force_days'])
+        )
+        if 'auto_restart_grace' not in data or data.get('auto_restart_grace') is None:
+            data['auto_restart_grace'] = 5
+        data['auto_restart_grace'] = _validate_non_negative_int(
+            'auto_restart_grace', int(data['auto_restart_grace'])
+        )
             
         if 'friendly_name' not in data:
             data['friendly_name'] = None
@@ -600,6 +717,14 @@ class SetupConfig:
             enable_smbclient = True
         elif enable_smbclient is None:
             enable_smbclient = False
+
+        is_build_server = bool(getattr(args, 'is_build_server', False))
+        is_app_server = bool(getattr(args, 'is_app_server', False))
+        machine_type = _resolve_machine_type(
+            args,
+            system_default=system_type_definition.default_machine_type,
+            is_build_server=is_build_server,
+        )
         
         include_desktop = (
             system_type_definition.include_desktop
@@ -612,15 +737,27 @@ class SetupConfig:
         include_web_server = system_type_definition.include_web_server
         include_web_firewall = system_type_definition.include_web_firewall
         
-        no_restart = getattr(args, 'no_restart', None)
-        if no_restart is None:
-            no_restart = system_type_definition.default_no_restart
+        auto_restart = _optional_bool_arg(args, 'auto_restart')
+        if auto_restart is None:
+            auto_restart = system_type_definition.default_auto_restart
+
+        auto_restart_force_days = _optional_int_arg(args, 'auto_restart_force_days')
+        if auto_restart_force_days is None:
+            auto_restart_force_days = system_type_definition.default_auto_restart_force_days
+        auto_restart_force_days = _validate_non_negative_int(
+            'auto_restart_force_days', auto_restart_force_days
+        )
+
+        auto_restart_grace = _optional_int_arg(args, 'auto_restart_grace')
+        if auto_restart_grace is None:
+            auto_restart_grace = 5
+        auto_restart_grace = _validate_non_negative_int('auto_restart_grace', auto_restart_grace)
         
         return cls(
             host=args.host,
             username=username,
             system_type=system_type,
-            machine_type=getattr(args, 'machine_type', None) or system_type_definition.default_machine_type or DEFAULT_MACHINE_TYPE,
+            machine_type=machine_type,
             password=getattr(args, 'password', None),
             ssh_key=getattr(args, 'ssh_key', None),
             timezone=timezone,
@@ -642,14 +779,16 @@ class SetupConfig:
             install_python=getattr(args, 'install_python', False),
             custom_steps=getattr(args, 'custom_steps', None),
             deploy_specs=getattr(args, 'deploy_specs', None),
+            deployment_mode=getattr(args, 'deployment_mode', 'default'),
             full_deploy=getattr(args, 'full_deploy', False),
+            deploy_latest=getattr(args, 'deploy_latest', False),
             reset_migrations=getattr(args, 'reset_migrations', False),
             enable_ssl=getattr(args, 'enable_ssl', False),
             ssl_email=getattr(args, 'ssl_email', None),
             enable_cloudflare=getattr(args, 'enable_cloudflare', False),
             enable_cicd=getattr(args, 'enable_cicd', False),
-            is_build_server=getattr(args, 'is_build_server', False),
-            is_app_server=getattr(args, 'is_app_server', False),
+            is_build_server=is_build_server,
+            is_app_server=is_app_server,
             deploy_targets=getattr(args, 'deploy_targets', None),
             api_subdomain=getattr(args, 'api_subdomain', False),
             enable_samba=getattr(args, 'enable_samba', False),
@@ -662,7 +801,10 @@ class SetupConfig:
             notify_specs=getattr(args, 'notify_specs', None),
             antistatic_server=getattr(args, 'antistatic_server', None),
             antistatic_db=getattr(args, 'antistatic_db', None),
-            no_restart=no_restart,
+            gogs=getattr(args, 'gogs', None),
+            auto_restart=auto_restart,
+            auto_restart_force_days=auto_restart_force_days,
+            auto_restart_grace=auto_restart_grace,
             hosted_node=getattr(args, 'hosted_node', None),
             hosted_user=getattr(args, 'hosted_user', 'root'),
             hosted_key=getattr(args, 'hosted_key', None),

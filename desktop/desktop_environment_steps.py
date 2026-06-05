@@ -78,7 +78,7 @@ Hidden=true
     if not os.path.exists(pm_stub):
         with open(pm_stub, "w") as f:
             f.write("""#!/bin/bash
-# Stub for pm-is-supported to suppress XFCE warnings in containers/RDP
+# Stub for pm-is-supported to suppress XFCE warnings in headless/RDP sessions
 # Always returns false (1) - no power management available
 exit 1
 """)

@@ -133,6 +133,13 @@ Each script should:
 - Output to stdout/stderr (captured in logs)
 - Be idempotent (safe to run multiple times)
 
+Build scripts run as `webhook` with `HOME=/var/lib/infra_tools/cicd`. The
+executor sources `/var/lib/infra_tools/cicd/.nvm/nvm.sh` when present before
+running scripts, so `--build-server --node` projects can call `node`, `npm`,
+and `pnpm` without adding nvm bootstrap code to every script. `--build-server
+--python` installs uv at `/var/lib/infra_tools/cicd/.local/bin/uv` for scripts
+that need it.
+
 ### Example Scripts
 
 **scripts/ci-install.sh**:
@@ -334,7 +341,8 @@ curl http://localhost:8080/webhook/health
 
 4. **Test script manually**:
    ```bash
-   sudo -u webhook bash /var/lib/infra_tools/cicd/workspaces/<repo>/scripts/ci-build.sh
+   sudo -u webhook env HOME=/var/lib/infra_tools/cicd bash -lc \
+     'export NVM_DIR="$HOME/.nvm"; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"; bash /var/lib/infra_tools/cicd/workspaces/<repo>/scripts/ci-build.sh'
    ```
 
 ### Repository Clone Failing
@@ -351,8 +359,8 @@ curl http://localhost:8080/webhook/health
 
 3. **For private repos**, configure deploy keys:
    ```bash
-   sudo -u webhook ssh-keygen -t ed25519 -C "webhook@yourserver"
-   cat /home/webhook/.ssh/id_ed25519.pub  # Add to GitHub deploy keys
+   sudo -u webhook env HOME=/var/lib/infra_tools/cicd ssh-keygen -t ed25519 -C "webhook@yourserver"
+   cat /var/lib/infra_tools/cicd/.ssh/id_ed25519.pub  # Add to GitHub deploy keys
    ```
 
 ### Rate Limiting Issues

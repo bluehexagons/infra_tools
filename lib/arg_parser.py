@@ -9,6 +9,42 @@ from lib.config import MACHINE_TYPES, DEFAULT_MACHINE_TYPE
 from lib.plugin_registry import get_system_type_names
 
 
+class _DeploySpecActionBase(argparse.Action):
+    """Base class for parsing deployment spec/repository pairs."""
+    flag_name = "--deploy"
+    set_deploy_latest = False
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: str | list[str],
+        option_string: str | None = None,
+    ) -> None:
+        raw_values = [values] if isinstance(values, str) else values
+        if len(raw_values) % 2 != 0:
+            parser.error(f"{self.flag_name} requires DOMAIN_OR_PATH and GIT_URL pairs")
+
+        if self.set_deploy_latest:
+            setattr(namespace, "deploy_latest", True)
+
+        deploy_specs = list(getattr(namespace, "deploy_specs", None) or [])
+        for index in range(0, len(raw_values), 2):
+            deploy_specs.append([raw_values[index], raw_values[index + 1]])
+        setattr(namespace, "deploy_specs", deploy_specs)
+
+
+class DeploySpecAction(_DeploySpecActionBase):
+    """Parse deployment specs for --deploy flag."""
+    pass
+
+
+class DeployLatestSpecAction(_DeploySpecActionBase):
+    """Parse deployment specs for --deploy-latest flag, also enabling latest-version policy."""
+    flag_name = "--deploy-latest"
+    set_deploy_latest = True
+
+
 def add_setup_arguments(
     parser: argparse.ArgumentParser,
     for_remote: bool = False,
@@ -40,33 +76,35 @@ def add_setup_arguments(
     parser.add_argument("--machine", dest="machine_type",
                        choices=MACHINE_TYPES,
                        default=None,
-                       help=f"Machine type: unprivileged (LXC, default), vm, privileged, hardware, oci (Docker/Podman)")
+                       help="Machine type override. Defaults are system-specific: "
+                            "VM for workstation_desktop/workstation_dev/pc_dev/server_web "
+                            "and build-server flows; otherwise unprivileged (LXC).")
     
     if not for_remote:
         parser.add_argument("--name", dest="friendly_name", help="Friendly name for this configuration")
         parser.add_argument("--tags", dest="tags", help="Comma-separated list of tags for this configuration")
 
-        # Container hosting (Proxmox LXC creation)
+        # Hosted guest provisioning (Proxmox VM/LXC creation)
         parser.add_argument("--hosted", dest="hosted_node",
-                           help="Proxmox node IP/hostname to create LXC container on")
+                           help="Proxmox node IP/hostname where the hosted guest will be created")
         parser.add_argument("--hosted-user", dest="hosted_user", default="root",
                            help="SSH user for Proxmox node (default: root)")
         parser.add_argument("--hosted-key", dest="hosted_key",
                            help="SSH key for Proxmox node (default: SSH config)")
         parser.add_argument("--memory", dest="container_memory",
-                           help="Container memory (e.g. 2G, 512M)")
+                           help="Hosted guest memory (e.g. 2G, 512M)")
         parser.add_argument("--storage", dest="container_storage",
                            action="append", nargs="+", metavar="STORAGE",
-                           help="Container storage spec: root POOL AMOUNT or template POOL; repeat as needed")
+                           help="Hosted guest storage spec: root POOL AMOUNT, or template POOL for LXC only; repeat as needed")
         parser.add_argument("--cores", dest="container_cores", type=int, default=1,
-                           help="Container CPU cores (default: 1)")
+                           help="Hosted guest CPU cores (default: 1)")
         parser.add_argument("--base", dest="container_base", default="debian",
-                           help="Base OS template (default: debian, auto-downloads latest)")
+                           help="Base OS family for the LXC template or VM image catalog (default: debian)")
         parser.add_argument("--image", dest="vm_image", default=None,
-                           help="VM cloud image override: http(s) URL to a qcow2, or a "
-                                "Proxmox storage reference like 'local:iso/foo.qcow2'. "
-                                "Only used when --machine vm. Defaults to the curated "
-                                "Debian catalog (lib/cloud_images.py).")
+                            help="VM cloud image override: http(s) URL to a qcow2, or a "
+                                 "Proxmox storage reference like 'local:iso/foo.qcow2'. "
+                                 "Only used when --machine vm. Defaults to the curated "
+                                 "Debian catalog (lib/cloud_images.py).")
     else:
         parser.add_argument("--name", dest="friendly_name", default=None,
                            help="Friendly name for this configuration")
@@ -136,16 +174,21 @@ def add_setup_arguments(
                        help="Install Python tooling (python aliases and uv). For shell autocompletion, use the local completions installer script.")
     
     # Deployment options
-    parser.add_argument("--deploy", dest="deploy_specs", 
-                       action="append", nargs=2, metavar=("DOMAIN_OR_PATH", "GIT_URL"),
-                       help="Deploy a git repository (domain.com/path or /path) to auto-configure nginx (can be used multiple times)")
+    parser.add_argument("--deploy", dest="deploy_specs",
+                       action=DeploySpecAction, nargs="+", metavar="DEPLOY",
+                       help="Deploy git repositories as DOMAIN_OR_PATH GIT_URL pairs (can be used multiple times)")
     
-    if for_remote:
-        parser.add_argument("--lite-deploy", action="store_true",
-                           help="Use pre-uploaded repository files instead of cloning (for remote execution)")
+    deployment_mode_group = parser.add_mutually_exclusive_group()
+    deployment_mode_group.add_argument("--deployment-lite", dest="deployment_mode", action="store_const", const="lite",
+                                       help="Use uploaded repository files only (skip if not available)")
+    deployment_mode_group.add_argument("--deployment-full", dest="deployment_mode", action="store_const", const="full",
+                                       help="Upload a fresh repository copy and rebuild everything (force redeploy)")
     
     parser.add_argument("--full-deploy", dest="full_deploy", action="store_true",
                        help="Always rebuild deployments even if they haven't changed (default: skip unchanged deployments)")
+    parser.add_argument("--deploy-latest", action=DeployLatestSpecAction, nargs=2, 
+                        metavar=("DOMAIN_OR_PATH", "GIT_URL"),
+                        help="Deploy latest packages and releases (bypassing age policy); requires DOMAIN_OR_PATH and GIT_URL")
     parser.add_argument("--reset-migrations", dest="reset_migrations", action="store_true",
                        help="Reset Rails database schema using db:schema:load (use when migrations were squashed or reset)")
     parser.add_argument("--ssl", dest="enable_ssl", 
@@ -228,11 +271,34 @@ def add_setup_arguments(
                        help="Deploy the antistatic-db service behind nginx. "
                             "DOMAIN is the optional public hostname; PORT is the internal listen port "
                             "(default: 8081). Hostless specs like :8081 listen directly without nginx.")
+
+    parser.add_argument(
+        "--gogs",
+        dest="gogs",
+        nargs="+",
+        metavar="GOGS",
+        help="Deploy Gogs as a minimal self-hosted Git service. "
+             "Usage: --gogs DOMAIN[:PORT] [DATA_PATH]. DOMAIN is the optional public "
+             "hostname, PORT defaults to 3000, and DATA_PATH defaults to /var/lib/gogs. "
+             "Hostless specs like :3000 or 3000 listen directly without nginx.",
+    )
     
-    parser.add_argument("--no-restart", dest="no_restart",
-                        action="store_true",
-                        default=None if not for_remote else False,
-                        help="Disable automatic restarts after updates. Instead of restarting, a notification will be sent. Default for server_proxmox.")
+    restart_group = parser.add_mutually_exclusive_group()
+    restart_group.add_argument("--auto-restart", dest="auto_restart",
+                               action="store_true",
+                               default=None if not for_remote else False,
+                               help="Allow automatic restarts after updates when no users are active.")
+    restart_group.add_argument("--no-auto-restart", "--no-restart", dest="auto_restart",
+                               action="store_false",
+                               help="Disable normal automatic restarts after updates. --no-restart is deprecated.")
+    parser.add_argument("--auto-restart-force-days", dest="auto_restart_force_days",
+                        type=int,
+                        default=None,
+                        help="Force restart after this many days of deferral. Use 0 to never force.")
+    parser.add_argument("--auto-restart-grace", dest="auto_restart_grace",
+                        type=int,
+                        default=None,
+                        help="Minutes of warning before an automatic restart starts.")
     
     parser.add_argument("--dry-run", action="store_true",
                        help="Show what would be done without executing commands")

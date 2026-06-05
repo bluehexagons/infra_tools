@@ -13,6 +13,7 @@ from lib.validation import (
     validate_apt_packages,
     validate_deploy_specs,
     validate_deploy_targets,
+    validate_gogs_settings,
     validate_samba_share_specs,
     validate_directory_empty,
     validate_scrub_specs,
@@ -133,6 +134,29 @@ class TestValidateDeploySpecs(unittest.TestCase):
     def test_empty_deploy_spec_entry_fails(self):
         with self.assertRaisesRegex(ValueError, "Deploy target spec list must not contain empty entries"):
             validate_deploy_specs([['example.com,,other.example.com', 'https://github.com/user/repo.git']])
+
+
+class TestValidateGogsSettings(unittest.TestCase):
+    def test_none_passes(self):
+        validate_gogs_settings(None)
+
+    def test_valid_domain_and_default_path_pass(self):
+        validate_gogs_settings(['git.example.com:3000'])
+
+    def test_valid_domain_and_absolute_data_path_pass(self):
+        validate_gogs_settings(['git.example.com:3000', '/srv/gogs'])
+
+    def test_invalid_argument_count_fails(self):
+        with self.assertRaisesRegex(ValueError, "--gogs requires DOMAIN\\[:PORT\\] and optional DATA_PATH"):
+            validate_gogs_settings(['git.example.com', '/srv/gogs', 'extra'])
+
+    def test_invalid_domain_fails(self):
+        with self.assertRaisesRegex(ValueError, "Invalid Gogs domain: bad domain"):
+            validate_gogs_settings(['bad domain:3000'])
+
+    def test_relative_data_path_fails(self):
+        with self.assertRaisesRegex(ValueError, "Gogs data path must be absolute: relative/path"):
+            validate_gogs_settings(['git.example.com', 'relative/path'])
 
 
 class TestValidateSyncSpecs(unittest.TestCase):

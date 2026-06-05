@@ -31,6 +31,44 @@ def extract_repo_name(git_url: str) -> str:
     return repo_name
 
 
+def get_repository_source_path(
+    git_url: str,
+    deployment_mode: str,
+    dry_run: bool = False
+) -> Optional[tuple[str, str]]:
+    """
+    Get the uploaded source path for a repository.
+
+    Repositories are cloned by the local launcher and uploaded with infra_tools,
+    so private repositories only require local access. The remote never fetches
+    from Git directly; deployment modes control rebuild behavior, not source
+    acquisition.
+
+    Returns: (source_path, commit_hash) or None if deployment should be skipped.
+    """
+    repo_name = extract_repo_name(git_url)
+    cache_path = f'/opt/infra_tools/deployments/{repo_name}'
+
+    if not os.path.exists(cache_path):
+        print(f"\n⚠ Uploaded repository files not found at {cache_path}, skipping {git_url}")
+        return None
+
+    commit_hash = ""
+    commit_file = f'{cache_path}.commit'
+    if os.path.exists(commit_file):
+        try:
+            with open(commit_file, 'r') as f:
+                content = f.read().strip()
+                if content:
+                    commit_hash = content
+        except OSError:
+            pass
+
+    mode_label = deployment_mode if deployment_mode in {"default", "lite", "full"} else "default"
+    print(f"\nUsing uploaded {repo_name} ({mode_label} mode)")
+    return (cache_path, commit_hash)
+
+
 def _load_args_file(args_file: str) -> list[str]:
     try:
         with open(args_file, "r", encoding="utf-8") as file_obj:
@@ -86,7 +124,10 @@ def main() -> int:
     )
     
     args = parser.parse_args(_resolve_cli_args(sys.argv[1:]))
-    
+
+    if args.deploy_latest:
+        os.environ["INFRA_TOOLS_DEPENDENCY_MIN_AGE_DAYS"] = "0"
+
     if args.dry_run:
         set_dry_run(True)
         print("=" * 60)
@@ -98,6 +139,10 @@ def main() -> int:
     except ValueError as e:
         print(f"Error: {e}")
         return 1
+    
+    # When using --deploy-latest with lite mode, upgrade to default mode for fresh clone
+    if args.deploy_latest and config.deployment_mode == "lite":
+        config.deployment_mode = "default"
     
     if not validate_username(config.username):
         print(f"Error: Invalid username: {config.username}")
@@ -196,9 +241,6 @@ def main() -> int:
     
     if config.deploy_specs:
         from deploy.deploy_steps import deploy_repository
-        import shutil
-        import tempfile
-        import subprocess
         
         print("\n" + "=" * 60)
         print("Deploying repositories...")
@@ -206,91 +248,30 @@ def main() -> int:
         
         deployments: Deployments = []
         
-        if args.lite_deploy:
-            for deploy_specs_str, git_url in config.deploy_specs:
-                repo_name = extract_repo_name(git_url)
-                source_path = f'/opt/infra_tools/deployments/{repo_name}'
-                
-                if not os.path.exists(source_path):
-                    print(f"\n⚠ Warning: {source_path} not found, skipping {git_url}")
+        for deploy_specs_str, git_url in config.deploy_specs:
+            repo_result = get_repository_source_path(git_url, config.deployment_mode, config.dry_run)
+            if repo_result is None:
+                continue
+            
+            source_path, commit_hash = repo_result
+            
+            for deploy_spec in deploy_specs_str.split(','):
+                deploy_spec = deploy_spec.strip()
+                if not deploy_spec:
                     continue
-                
-                commit_hash: str = ""
-                commit_file = f'/opt/infra_tools/deployments/{repo_name}.commit'
-                if os.path.exists(commit_file):
-                    try:
-                        with open(commit_file, 'r') as f:
-                            content = f.read().strip()
-                            if content:
-                                commit_hash = content
-                    except Exception:
-                        pass
-                
-                for deploy_spec in deploy_specs_str.split(','):
-                    deploy_spec = deploy_spec.strip()
-                    if not deploy_spec: continue
 
-                    print(f"\nDeploying pre-uploaded repository: {repo_name}")
-                    info = deploy_repository(
-                        source_path=source_path,
-                        deploy_spec=deploy_spec,
-                        git_url=git_url,
-                        commit_hash=commit_hash,
-                        full_deploy=config.full_deploy,
-                        web_user="rails",
-                        web_group="rails",
-                        keep_source=True,
-                        api_subdomain=config.api_subdomain,
-                        reset_migrations=config.reset_migrations
-                    )
-                    if info:
-                        deployments.append(info)
-        else:
-            temp_dir = tempfile.mkdtemp(prefix="infra_deploy_")
-            try:
-                for deploy_specs_str, git_url in config.deploy_specs:
-                    repo_name = extract_repo_name(git_url)
-                    clone_path = os.path.join(temp_dir, repo_name)
-                    
-                    print(f"\nCloning {git_url}...")
-                    result = subprocess.run(
-                        ["git", "clone", git_url, clone_path],
-                        capture_output=True,
-                        text=True,
-                        timeout=300
-                    )
-                    
-                    if result.returncode != 0:
-                        print(f"  Error cloning repository: {result.stderr}")
-                        continue
-                    
-                    print(f"  ✓ Cloned to {clone_path}")
-                    
-                    from lib.deploy_utils import get_git_commit_hash
-                    commit_hash_result = get_git_commit_hash(clone_path)
-                    commit_hash: str = commit_hash_result if commit_hash_result else ""
-                    
-                    for deploy_spec in deploy_specs_str.split(','):
-                        deploy_spec = deploy_spec.strip()
-                        if not deploy_spec: continue
-
-                        info = deploy_repository(
-                            source_path=clone_path,
-                            deploy_spec=deploy_spec,
-                            git_url=git_url,
-                            commit_hash=commit_hash,
-                            full_deploy=config.full_deploy,
-                            web_user="rails",
-                            web_group="rails",
-                            keep_source=True,
-                            api_subdomain=config.api_subdomain,
-                            reset_migrations=config.reset_migrations
-                        )
-                        if info:
-                            deployments.append(info)
-            finally:
-                if os.path.exists(temp_dir):
-                    shutil.rmtree(temp_dir)
+                infos = deploy_repository(
+                    source_path=source_path,
+                    deploy_spec=deploy_spec,
+                    git_url=git_url,
+                    commit_hash=commit_hash,
+                    full_deploy=config.full_deploy,
+                    keep_source=True,
+                    api_subdomain=config.api_subdomain,
+                    reset_migrations=config.reset_migrations
+                )
+                if infos:
+                    deployments.extend(infos)
         
         if deployments:
             print("\n" + "=" * 60)

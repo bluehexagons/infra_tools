@@ -262,7 +262,8 @@ If you need to run seeds manually on an existing production database:
 
 ```bash
 cd /var/www/<app_directory>
-sudo -u rails RAILS_ENV=production bundle exec rake db:seed
+APP_USER=$(systemctl show -p User --value rails-<app_name>.service)
+sudo -u "$APP_USER" RAILS_ENV=production bundle exec rake db:seed
 ```
 
 **WARNING**: Only run seeds manually if:
@@ -393,7 +394,8 @@ Running database migrations...
 3. **Rollback the migration** (if needed):
    ```bash
    cd /var/www/<app_directory>
-   sudo -u rails RAILS_ENV=production bundle exec rake db:rollback
+   APP_USER=$(systemctl show -p User --value rails-<app_name>.service)
+   sudo -u "$APP_USER" RAILS_ENV=production bundle exec rake db:rollback
    ```
 
 4. **Restart the service**:
@@ -414,6 +416,7 @@ Production databases are stored in a persistent location that survives redeploym
   ├── backups/                     # Automatic backups
   │   └── <app>_production_*.sqlite3
   ├── storage/                     # Active Storage files
+  ├── tmp/                         # Rails runtime temp/cache files
   ├── log/                         # Rails logs
   └── public/
       ├── uploads/                 # User uploads
@@ -429,6 +432,7 @@ Each deployment creates symlinks from the release directory to the persistent st
   ├── db/
   │   └── production.sqlite3 -> /var/www/.infra_tools_shared/<app_name>/db/production.sqlite3
   ├── storage/ -> /var/www/.infra_tools_shared/<app_name>/storage/
+  ├── tmp/ -> /var/www/.infra_tools_shared/<app_name>/tmp/
   ├── log/ -> /var/www/.infra_tools_shared/<app_name>/log/
   └── public/
       ├── uploads/ -> /var/www/.infra_tools_shared/<app_name>/public/uploads/
@@ -556,8 +560,8 @@ If backups fail due to disk space:
 ### Backup Permissions
 
 Backups are created with the same permissions as the database:
-- Owner: `rails:rails` (or configured web user)
-- Permissions: `664` (owner and group can read/write)
+- Owner: the Rails runtime user from `rails-<app_name>.service` (`rails-<app_name>` by default, capped with a hash for long names)
+- Permissions after deploy reconciliation: `640` (owner can read/write, group can read)
 
 ### Sensitive Data
 
@@ -571,6 +575,31 @@ Backups contain the full production database, including:
 - Include backups in encryption-at-rest strategy
 - Exclude from public backups/syncs
 - Consider backup retention policies for compliance
+
+## Automatic Updates, Supply Chain Risk, and Maintenance
+
+Infra tools keeps operating-system patching enabled by default because delayed
+security updates are usually a larger risk than signed distribution package
+updates. The APT timer runs `apt-get dist-upgrade --no-remove`, so it can apply
+normal dependency additions but fails instead of automatically removing packages.
+
+Language ecosystem auto-upgrades are more conservative. Node.js, Ruby, and uv
+timers are installed with `INFRA_TOOLS_ECOSYSTEM_AUTO_UPGRADE=0`, so they do not
+silently pull the latest global npm packages, gems, or uv-managed tools. Set
+`INFRA_TOOLS_ECOSYSTEM_AUTO_UPGRADE=1` in a systemd drop-in only for systems
+where that supply-chain risk is acceptable. Node.js defaults to the LTS track,
+but if a non-LTS/latest Node.js track is already installed, the updater treats
+that as an explicit opt-in and keeps that track current too.
+
+Dependency-resolving npm and uv installs also avoid very new releases by default.
+`INFRA_TOOLS_DEPENDENCY_MIN_AGE_DAYS=7` produces npm `--before` and uv
+`--exclude-newer` cutoffs where those package managers support them. Set the
+value to `0` only when a system intentionally needs same-day package releases.
+
+Deployment builds prefer lockfile-backed installs when possible. Frontend builds
+use `npm ci` when `package-lock.json` exists and pass the freshness cutoff to
+npm, while Rails builds keep Bundler in deployment mode so lockfiles drive
+dependency resolution.
 
 ## System Maintenance and Log Retention
 

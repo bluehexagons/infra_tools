@@ -12,6 +12,7 @@ from unittest.mock import patch, MagicMock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.config import SetupConfig
+from lib.proxmox_hosts import ProxmoxHost, ProxmoxHostFacts, add_proxmox_host
 
 
 def _make_config(**kwargs) -> SetupConfig:
@@ -240,6 +241,64 @@ class TestRunRemoteSetupArgumentSecurity(unittest.TestCase):
         remote_command = mock_build_ssh.call_args.kwargs["remote_command"]
         self.assertIn("--args-file", remote_command)
         self.assertNotIn("supersecret", remote_command)
+
+    def test_remote_ssh_command_clears_install_dir_before_upload_extract(self):
+        from lib import setup_common
+
+        config = _make_config(host="example.com")
+        process = MagicMock()
+        process.stdin = io.BytesIO()
+        process.stdout = io.BytesIO(b"")
+        process.wait.return_value = 0
+
+        with patch.object(setup_common, "copy_project_files"), \
+             patch.object(setup_common, "prepare_deployments"), \
+             patch.object(setup_common, "build_ssh_command", return_value=["ssh"]) as mock_build_ssh, \
+             patch("subprocess.Popen", return_value=process):
+            result = setup_common.run_remote_setup(config)
+
+        self.assertEqual(result, 0)
+        remote_command = mock_build_ssh.call_args.kwargs["remote_command"]
+        self.assertIn("rm -rf /opt/infra_tools && mkdir -p /opt/infra_tools", remote_command)
+        self.assertLess(remote_command.index("rm -rf"), remote_command.index("tar xzf -"))
+
+
+class TestCloneRepository(unittest.TestCase):
+    def test_existing_cache_is_cleaned_after_reset(self):
+        from lib import setup_common
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = os.path.join(tmpdir, "cache")
+            work_dir = os.path.join(tmpdir, "work")
+            cache_repo = os.path.join(cache_dir, "repo")
+            os.makedirs(cache_repo)
+            os.makedirs(work_dir)
+            with open(os.path.join(cache_repo, "index.html"), "w", encoding="utf-8") as file_obj:
+                file_obj.write("ok")
+
+            run_results = [
+                MagicMock(returncode=0),
+                MagicMock(returncode=0, stdout="origin/main\n"),
+                MagicMock(returncode=0),
+                MagicMock(returncode=0),
+            ]
+
+            with patch("subprocess.run", side_effect=run_results) as mock_run, \
+                 patch("lib.deploy_utils.get_git_commit_hash", return_value="abc123"):
+                result = setup_common.clone_repository(
+                    "https://git.example.com/repo.git",
+                    work_dir,
+                    cache_dir=cache_dir,
+                )
+
+        self.assertEqual(result, (os.path.join(work_dir, "repo"), "abc123"))
+        commands = [call.args[0] for call in mock_run.call_args_list]
+        self.assertIn(["git", "-C", cache_repo, "reset", "--hard", "origin/main"], commands)
+        self.assertIn(["git", "-C", cache_repo, "clean", "-fdx"], commands)
+        self.assertLess(
+            commands.index(["git", "-C", cache_repo, "reset", "--hard", "origin/main"]),
+            commands.index(["git", "-C", cache_repo, "clean", "-fdx"]),
+        )
 
 
 class TestSetupMainValidation(unittest.TestCase):
@@ -519,6 +578,224 @@ class TestExpandRemoteArgs(unittest.TestCase):
                 "docs",
                 "/",
             ],
+        )
+
+
+class TestHostedProvisioningDispatch(unittest.TestCase):
+    def _make_args(self) -> MagicMock:
+        args = MagicMock()
+        args.workspace = None
+        args.host = "testhost"
+        args.username = "testuser"
+        args.dry_run = False
+        return args
+
+    @patch("builtins.print")
+    def test_hosted_vm_setup_dispatches_to_provision_vm(self, _mock_print):
+        from lib import setup_common
+
+        parser = MagicMock()
+        parser.parse_args.return_value = self._make_args()
+        config = _make_config(
+            system_type="server_web",
+            machine_type="vm",
+            hosted_node="10.0.0.1",
+            container_memory="2G",
+            container_storage=[["root", "local-lvm", "10G"]],
+            vm_image="local:iso/debian-12-generic-amd64.qcow2",
+        )
+
+        with patch.object(setup_common, "create_argument_parser", return_value=parser), \
+             patch.object(setup_common, "validate_host", return_value=True), \
+             patch.object(setup_common, "validate_username", return_value=True), \
+             patch.object(setup_common, "prepare_runtime_config", return_value=config), \
+             patch.object(setup_common, "validate_hosted_flags"), \
+             patch.object(setup_common, "validate_samba_share_credentials"), \
+             patch.object(setup_common, "print_setup_summary"), \
+             patch.object(setup_common, "store_cli_credentials"), \
+             patch.object(setup_common, "save_setup_command"), \
+             patch.object(setup_common, "run_remote_setup", return_value=0) as mock_run_remote, \
+             patch("lib.config.SetupConfig.from_args", return_value=config), \
+             patch("lib.proxmox_vm.provision_vm") as mock_provision_vm:
+            result = setup_common.setup_main("server_web", "Test", lambda c: None)
+
+        self.assertEqual(result, 0)
+        mock_provision_vm.assert_called_once_with(config, image=config.vm_image)
+        mock_run_remote.assert_called_once_with(config)
+
+    @patch("builtins.print")
+    def test_hosted_vm_setup_continues_when_vm_already_exists(self, _mock_print):
+        from lib import setup_common
+        from lib.proxmox_vm import VMAlreadyExists
+
+        parser = MagicMock()
+        parser.parse_args.return_value = self._make_args()
+        config = _make_config(
+            system_type="server_web",
+            machine_type="vm",
+            hosted_node="10.0.0.1",
+            container_memory="2G",
+            container_storage=[["root", "local-lvm", "10G"]],
+        )
+
+        with patch.object(setup_common, "create_argument_parser", return_value=parser), \
+             patch.object(setup_common, "validate_host", return_value=True), \
+             patch.object(setup_common, "validate_username", return_value=True), \
+             patch.object(setup_common, "prepare_runtime_config", return_value=config), \
+             patch.object(setup_common, "validate_hosted_flags"), \
+             patch.object(setup_common, "validate_samba_share_credentials"), \
+             patch.object(setup_common, "print_setup_summary"), \
+             patch.object(setup_common, "store_cli_credentials"), \
+             patch.object(setup_common, "save_setup_command"), \
+             patch.object(setup_common, "run_remote_setup", return_value=0) as mock_run_remote, \
+             patch("lib.config.SetupConfig.from_args", return_value=config), \
+             patch("lib.proxmox_vm.provision_vm", side_effect=VMAlreadyExists()):
+            result = setup_common.setup_main("server_web", "Test", lambda c: None)
+
+        self.assertEqual(result, 0)
+        mock_run_remote.assert_called_once_with(config)
+
+    @patch("builtins.print")
+    def test_hosted_lxc_setup_dispatches_to_provision_container(self, _mock_print):
+        from lib import setup_common
+
+        parser = MagicMock()
+        parser.parse_args.return_value = self._make_args()
+        config = _make_config(
+            machine_type="unprivileged",
+            hosted_node="10.0.0.1",
+            container_memory="2G",
+            container_storage=[["root", "local-lvm", "10G"], ["template", "local"]],
+        )
+
+        with patch.object(setup_common, "create_argument_parser", return_value=parser), \
+             patch.object(setup_common, "validate_host", return_value=True), \
+             patch.object(setup_common, "validate_username", return_value=True), \
+             patch.object(setup_common, "prepare_runtime_config", return_value=config), \
+             patch.object(setup_common, "validate_hosted_flags"), \
+             patch.object(setup_common, "validate_samba_share_credentials"), \
+             patch.object(setup_common, "print_setup_summary"), \
+             patch.object(setup_common, "store_cli_credentials"), \
+             patch.object(setup_common, "save_setup_command"), \
+             patch.object(setup_common, "run_remote_setup", return_value=0) as mock_run_remote, \
+             patch("lib.config.SetupConfig.from_args", return_value=config), \
+             patch("lib.proxmox_node.provision_container") as mock_provision_container:
+            result = setup_common.setup_main("server_lite", "Test", lambda c: None)
+
+        self.assertEqual(result, 0)
+        mock_provision_container.assert_called_once_with(config)
+        mock_run_remote.assert_called_once_with(config)
+
+    @patch("builtins.print")
+    def test_hosted_vm_setup_expands_saved_host_root_storage(self, _mock_print):
+        from lib import setup_common
+
+        with tempfile.TemporaryDirectory() as workspace:
+            add_proxmox_host(
+                ProxmoxHost(
+                    name="pve1",
+                    address="10.0.0.1",
+                    ssh_key="/keys/proxmox",
+                    facts=ProxmoxHostFacts(
+                        default_root_storage="local-lvm",
+                        default_bridge="vmbr0",
+                    ),
+                ),
+                workspace,
+            )
+            parser = MagicMock()
+            args = self._make_args()
+            args.workspace = workspace
+            parser.parse_args.return_value = args
+            config = _make_config(
+                system_type="server_web",
+                machine_type="vm",
+                hosted_node="pve1",
+                hosted_key=None,
+                container_memory="2G",
+                container_storage=[["root", "10G"]],
+                vm_image="local:iso/debian-12-generic-amd64.qcow2",
+            )
+
+            with patch.object(setup_common, "create_argument_parser", return_value=parser), \
+                 patch.object(setup_common, "validate_host", return_value=True), \
+                 patch.object(setup_common, "validate_username", return_value=True), \
+                 patch.object(setup_common, "prepare_runtime_config", return_value=config), \
+                 patch.object(setup_common, "validate_samba_share_credentials"), \
+                 patch.object(setup_common, "print_setup_summary"), \
+                 patch.object(setup_common, "store_cli_credentials"), \
+                 patch.object(setup_common, "save_setup_command"), \
+                 patch.object(setup_common, "run_remote_setup", return_value=0), \
+                 patch("lib.config.SetupConfig.from_args", return_value=config), \
+                 patch("lib.proxmox_vm.provision_vm") as mock_provision_vm:
+                result = setup_common.setup_main("server_web", "Test", lambda c: None)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(config.hosted_node, "10.0.0.1")
+        self.assertEqual(config.hosted_key, "/keys/proxmox")
+        self.assertEqual(config.container_storage, [["root", "local-lvm", "10G"]])
+        mock_provision_vm.assert_called_once_with(config, image=config.vm_image)
+
+    @patch("builtins.print")
+    def test_hosted_lxc_setup_expands_saved_template_storage(self, _mock_print):
+        from lib import setup_common
+
+        with tempfile.TemporaryDirectory() as workspace:
+            add_proxmox_host(
+                ProxmoxHost(
+                    name="pve1",
+                    address="10.0.0.1",
+                    default_storage="local-lvm",
+                    facts=ProxmoxHostFacts(default_template_storage="local"),
+                ),
+                workspace,
+            )
+            parser = MagicMock()
+            args = self._make_args()
+            args.workspace = workspace
+            parser.parse_args.return_value = args
+            config = _make_config(
+                machine_type="unprivileged",
+                hosted_node="pve1",
+                container_memory="2G",
+                container_storage=[["root", "host", "10G"], ["template"]],
+            )
+
+            with patch.object(setup_common, "create_argument_parser", return_value=parser), \
+                 patch.object(setup_common, "validate_host", return_value=True), \
+                 patch.object(setup_common, "validate_username", return_value=True), \
+                 patch.object(setup_common, "prepare_runtime_config", return_value=config), \
+                 patch.object(setup_common, "validate_samba_share_credentials"), \
+                 patch.object(setup_common, "print_setup_summary"), \
+                 patch.object(setup_common, "store_cli_credentials"), \
+                 patch.object(setup_common, "save_setup_command"), \
+                 patch.object(setup_common, "run_remote_setup", return_value=0), \
+                 patch("lib.config.SetupConfig.from_args", return_value=config), \
+                 patch("lib.proxmox_node.provision_container") as mock_provision_container:
+                result = setup_common.setup_main("server_lite", "Test", lambda c: None)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(
+            config.container_storage,
+            [["root", "local-lvm", "10G"], ["template", "local"]],
+        )
+        mock_provision_container.assert_called_once_with(config)
+
+    def test_hosted_setup_expands_unregistered_storage_shorthand_to_auto(self):
+        from lib import setup_common
+
+        with tempfile.TemporaryDirectory() as workspace:
+            config = _make_config(
+                hosted_node="10.0.0.1",
+                container_storage=[["root", "10G"], ["template"]],
+            )
+
+            setup_common._apply_hosted_proxmox_defaults(config, workspace)
+
+        self.assertEqual(config.hosted_node, "10.0.0.1")
+        self.assertEqual(
+            config.container_storage,
+            [["root", "auto", "10G"], ["template", "auto"]],
         )
 
 

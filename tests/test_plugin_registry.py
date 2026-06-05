@@ -112,6 +112,24 @@ class TestPluginRegistry(unittest.TestCase):
         self.assertEqual(step_names[0], "Creating remoteusers group")
         self.assertEqual(step_names[-1], "Checking if restart required")
 
+    def test_build_server_adds_build_user_tool_steps(self):
+        config = SetupConfig(
+            host="host",
+            username="user",
+            system_type="server_web",
+            is_build_server=True,
+            install_node=True,
+            install_python=True,
+        )
+        step_names = [name for name, _ in get_steps_for_system_type(config)]
+        self.assertIn("Installing Node.js (nvm + latest LTS + PNPM)", step_names)
+        self.assertIn("Installing build-user Node.js", step_names)
+        self.assertIn("Installing build-user Python tooling", step_names)
+        self.assertLess(
+            step_names.index("Creating build workspace directories"),
+            step_names.index("Installing build-user Node.js"),
+        )
+
     def test_duplicate_plugin_names_fail(self):
         plugin = PluginDefinition(name="dup", module="plugins.one")
         with self.assertRaisesRegex(ValueError, "Duplicate plugin name"):

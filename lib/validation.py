@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 from pathlib import Path
@@ -234,6 +235,32 @@ def validate_deploy_targets(targets: Optional[list[str]]) -> None:
             raise ValueError(f"Invalid deploy target host: {target}")
 
 
+def validate_gogs_settings(gogs: Optional[list[str]]) -> None:
+    """Validate Gogs setup arguments before setup or patch execution."""
+    if not gogs:
+        return
+
+    if len(gogs) not in (1, 2):
+        raise ValueError("--gogs requires DOMAIN[:PORT] and optional DATA_PATH")
+
+    spec = str(gogs[0]).strip()
+    if not spec:
+        raise ValueError("Gogs target spec must be a non-empty string")
+
+    from web.gogs_steps import parse_gogs_spec
+    from lib.validators import validate_host
+
+    domain, _port = parse_gogs_spec(spec, strict=True)
+    if domain and not validate_host(domain):
+        raise ValueError(f"Invalid Gogs domain: {domain}")
+
+    if len(gogs) == 2:
+        data_path = str(gogs[1]).strip()
+        if not os.path.isabs(data_path):
+            raise ValueError(f"Gogs data path must be absolute: {data_path}")
+        validate_filesystem_path(data_path, must_exist=False)
+
+
 def validate_deploy_specs(deploy_specs: Optional[list[list[str]]]) -> None:
     """Validate deploy specs before setup or patch execution."""
 
@@ -438,6 +465,8 @@ def validate_positive_integer(value: str, name: str = "value") -> int:
 
 _MEMORY_PATTERN = re.compile(r'^\d+[KMGT]$', re.IGNORECASE)
 _PACKAGE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+.-]*$")
+_NETWORK_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+_NETWORK_PROVIDER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
 
 
 def validate_memory_string(value: str, name: str = "memory") -> None:
@@ -469,6 +498,65 @@ def validate_package_name(value: str, name: str = "package") -> str:
         raise ValueError(f"Invalid {name} name: {value}")
 
     return normalized_value
+
+
+def validate_network_name(value: str, name: str = "network name") -> str:
+    """Validate a generic network inventory name or role label."""
+
+    normalized_value = value.strip()
+    if not normalized_value or not _NETWORK_NAME_PATTERN.match(normalized_value):
+        raise ValueError(
+            f"{name} must start with a letter or digit and contain only "
+            "letters, digits, dots, underscores, or hyphens"
+        )
+    return normalized_value
+
+
+def validate_network_provider(value: str) -> str:
+    """Validate a network inventory provider tag."""
+
+    normalized_value = value.strip()
+    if not normalized_value or not _NETWORK_PROVIDER_PATTERN.match(normalized_value):
+        raise ValueError(f"Invalid provider name: {value}")
+    return normalized_value
+
+
+def validate_network_ip(value: str, name: str = "network address") -> str:
+    """Validate an IP address and return its normalized text form."""
+
+    try:
+        return str(ipaddress.ip_address(value))
+    except ValueError as exc:
+        raise ValueError(f"Invalid {name}: {value}") from exc
+
+
+def validate_network_cidr(value: str, name: str = "network CIDR") -> str:
+    """Validate a CIDR and return its normalized text form."""
+
+    try:
+        return str(ipaddress.ip_network(value, strict=False))
+    except ValueError as exc:
+        raise ValueError(f"Invalid {name}: {value}") from exc
+
+
+def validate_network_ip_or_cidr(value: str, name: str = "network address") -> str:
+    """Validate either an IP address or a CIDR range."""
+
+    if "/" in value:
+        return validate_network_cidr(value, name)
+    return validate_network_ip(value, name)
+
+
+def validate_network_vlan_id(value: int | str) -> int:
+    """Validate an IEEE 802.1Q VLAN ID."""
+
+    try:
+        vlan_id = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid VLAN ID: {value}") from exc
+    if not 1 <= vlan_id <= 4094:
+        raise ValueError(f"VLAN ID must be between 1 and 4094: {vlan_id}")
+    return vlan_id
 
 
 def validate_hosted_flags(config: Any) -> None:

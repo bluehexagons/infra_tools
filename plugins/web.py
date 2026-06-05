@@ -48,6 +48,8 @@ PLUGIN = PluginDefinition(
         "configure_deploy_targets",
         "configure_deploy_known_hosts",
         "create_build_workspace_dirs",
+        "install_build_node",
+        "install_build_python_tools",
         "install_build_dependencies",
     ),
     custom_step_provider="plugins.web:get_custom_step_functions",
@@ -148,6 +150,8 @@ def extend_build_server_steps(config: SetupConfig, steps: list[tuple[str, StepFu
         create_webhook_receiver_service,
         generate_deploy_ssh_key,
         generate_webhook_secret,
+        install_build_node,
+        install_build_python_tools,
         install_build_dependencies,
         install_cicd_dependencies,
         install_webhook_manager_helper,
@@ -163,6 +167,16 @@ def extend_build_server_steps(config: SetupConfig, steps: list[tuple[str, StepFu
             ("Installing CI/CD dependencies", install_cicd_dependencies),
             ("Creating CI/CD user", create_cicd_user),
             ("Creating build workspace directories", create_build_workspace_dirs),
+            *(
+                [("Installing build-user Node.js", install_build_node)]
+                if config.install_node
+                else []
+            ),
+            *(
+                [("Installing build-user Python tooling", install_build_python_tools)]
+                if config.install_python
+                else []
+            ),
             ("Generating webhook secret", generate_webhook_secret),
             ("Creating default webhook configuration", create_default_webhook_config),
             ("Creating webhook receiver service", create_webhook_receiver_service),
@@ -205,6 +219,8 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         generate_deploy_ssh_key,
         generate_webhook_secret,
         install_app_server_dependencies,
+        install_build_node,
+        install_build_python_tools,
         install_build_dependencies,
         install_certbot,
         install_cicd_dependencies,
@@ -247,5 +263,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "configure_deploy_targets": configure_deploy_targets,
         "configure_deploy_known_hosts": configure_deploy_known_hosts,
         "create_build_workspace_dirs": create_build_workspace_dirs,
+        "install_build_node": install_build_node,
+        "install_build_python_tools": install_build_python_tools,
         "install_build_dependencies": install_build_dependencies,
     }

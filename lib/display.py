@@ -67,10 +67,14 @@ def print_setup_summary(config: SetupConfig, description: Optional[str] = None) 
         print(f"Deployments: {len(config.deploy_specs)} repository(ies)")
         for location, git_url in config.deploy_specs:
             print(f"  - {git_url} -> {location}")
-        if config.full_deploy:
-            print("Full deploy: Yes (rebuild all deployments)")
+        if config.deployment_mode == "lite":
+            print("Deploy mode: Lite (use uploaded repository copy, no remote updates)")
+        elif config.deployment_mode == "full":
+            print("Deploy mode: Full (upload fresh repository copy, rebuild all deployments)")
         else:
-            print("Full deploy: No (skip unchanged deployments)")
+            print("Deploy mode: Default (upload repository copy, redeploy if changed)")
+        if config.full_deploy and config.deployment_mode != "full":
+            print("Full deploy: Yes (rebuild all deployments even if unchanged)")
         if config.enable_ssl:
             print("SSL: Yes (Let's Encrypt)")
             if config.ssl_email:
@@ -107,6 +111,9 @@ def print_setup_summary(config: SetupConfig, description: Optional[str] = None) 
         print(f"Notifications: {len(config.notify_specs)} target(s)")
         for notify_type, target in config.notify_specs:
             print(f"  - {notify_type}: {target}")
+
+    if config.gogs:
+        print(f"Gogs: {' '.join(config.gogs)}")
     
     print("=" * 60)
     print()

@@ -7,6 +7,7 @@ import io
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -42,6 +43,19 @@ class TestRunTestsExpensivePrereqs(unittest.TestCase):
     def test_live_proxmox_prereq_check_reports_missing_env(self) -> None:
         stdout = io.StringIO()
         with _env_unset("PROXMOX_TEST_HOST"), \
+             _env_unset("PROXMOX_TEST_IP"), \
+             contextlib.redirect_stdout(stdout):
+            rc = run_tests.main(["--check-prereqs", "--expensive", "live_proxmox"])
+        self.assertEqual(rc, 2)
+        output = stdout.getvalue()
+        self.assertIn("live_proxmox", output)
+        self.assertIn("PROXMOX_TEST_HOST", output)
+        self.assertIn("PROXMOX_TEST_IP", output)
+
+    def test_live_proxmox_lxc_prereq_check_requires_template(self) -> None:
+        stdout = io.StringIO()
+        with patch.dict(os.environ, {"PROXMOX_TEST_GUEST_TYPE": "lxc"}), \
+             _env_unset("PROXMOX_TEST_HOST"), \
              _env_unset("PROXMOX_TEST_TEMPLATE"), \
              contextlib.redirect_stdout(stdout):
             rc = run_tests.main(["--check-prereqs", "--expensive", "live_proxmox"])
