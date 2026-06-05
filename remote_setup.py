@@ -386,8 +386,6 @@ def main() -> int:
                     git_url=git_url,
                     commit_hash=commit_hash,
                     full_deploy=config.full_deploy,
-                    web_user="rails",
-                    web_group="rails",
                     keep_source=True,
                     api_subdomain=config.api_subdomain,
                     reset_migrations=config.reset_migrations

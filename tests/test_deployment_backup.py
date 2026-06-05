@@ -56,6 +56,8 @@ class TestDatabaseBackup(unittest.TestCase):
         with open(backup_path, 'r') as f:
             content = f.read()
         self.assertEqual(content, "fake database content")
+        self.assertEqual(os.stat(backup_dir).st_mode & 0o777, 0o750)
+        self.assertEqual(os.stat(backup_path).st_mode & 0o777, 0o640)
     
     def test_backup_database_nonexistent(self):
         """Test backup of non-existent database returns None."""
@@ -570,6 +572,8 @@ class TestSkippedDeploymentServiceRecreation(unittest.TestCase):
         call_args = mock_create_service.call_args
         self.assertEqual(call_args[0][0], 'example_com')  # app_name
         self.assertIsNotNone(call_args[0][2])  # port
+        self.assertEqual(call_args[0][3], 'rails-example_com')
+        self.assertEqual(call_args[0][4], 'rails-example_com')
     
     @patch('lib.deployment.create_rails_service')
     @patch('lib.deployment.run')
@@ -598,6 +602,78 @@ class TestSkippedDeploymentServiceRecreation(unittest.TestCase):
         
         # Service should NOT have been recreated
         mock_create_service.assert_not_called()
+
+    @patch.object(DeploymentOrchestrator, '_service_file_user', return_value='rails')
+    @patch('lib.deployment.create_rails_service')
+    @patch('lib.deployment.run')
+    @patch('os.path.exists')
+    def test_skipped_deploy_recreates_legacy_rails_user_service(
+        self, mock_exists, mock_run, mock_create_service, _service_file_user
+    ):
+        """A skipped deployment migrates an existing service off the legacy rails user."""
+        def selective_exists(path):
+            if path == '/etc/systemd/system/rails-example_com.service':
+                return True
+            return _real_exists(path)
+
+        mock_exists.side_effect = selective_exists
+        mock_run.return_value = MagicMock(returncode=0)
+
+        result = self.orchestrator.deploy_from_archive(
+            source_path='/tmp/fake_source',
+            domain='example.com',
+            path='/',
+            git_url='https://git.example.com/repo.git',
+            commit_hash='abc123',
+            full_deploy=False,
+        )
+
+        self.assertTrue(result.get('skipped'))
+        mock_create_service.assert_called_once()
+        call_args = mock_create_service.call_args
+        self.assertEqual(call_args[0][3], 'rails-example_com')
+        self.assertEqual(call_args[0][4], 'rails-example_com')
+
+
+class TestRailsRuntimeStatePermissions(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.orchestrator = DeploymentOrchestrator(base_dir=self.tmpdir)
+        self.persistent_root = os.path.join(self.tmpdir, ".infra_tools_shared", "example_com")
+        for rel_dir in (
+            "db",
+            "backups",
+            "storage",
+            "log",
+            "tmp",
+            os.path.join("public", "uploads"),
+            os.path.join("public", "system"),
+        ):
+            os.makedirs(os.path.join(self.persistent_root, rel_dir), exist_ok=True)
+
+    def tearDown(self):
+        import shutil
+        if os.path.exists(self.tmpdir):
+            shutil.rmtree(self.tmpdir)
+
+    @patch('lib.deployment.run')
+    def test_runtime_state_permissions_keep_private_state_non_world_readable(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout='', stderr='')
+
+        self.orchestrator._prepare_rails_runtime_state(self.persistent_root, 'rails-example_com')
+
+        commands = [call.args[0] for call in mock_run.call_args_list]
+        all_commands = "\n".join(commands)
+
+        self.assertIn(f"find {self.persistent_root} -type d -exec chmod 750", all_commands)
+        self.assertIn(f"find {self.persistent_root} -type f -exec chmod 640", all_commands)
+        self.assertIn(f"chmod 755 {self.persistent_root}", commands)
+        self.assertIn("public/uploads", all_commands)
+        self.assertIn("public/system", all_commands)
+        self.assertIn("-type d -exec chmod 755", all_commands)
+        self.assertIn("-type f -exec chmod 644", all_commands)
+        self.assertNotIn("chmod 775", all_commands)
+        self.assertNotIn("chmod 664", all_commands)
 
 
 class TestRailsFrontendServePathDetection(unittest.TestCase):
@@ -772,6 +848,9 @@ class TestRailsFrontendServePathDetection(unittest.TestCase):
         mock_get_assigned_port.assert_called_once()
         mock_link_state.assert_called_once()
         mock_create_service.assert_called_once()
+        call_args = mock_create_service.call_args
+        self.assertEqual(call_args[0][3], 'rails-example_com')
+        self.assertEqual(call_args[0][4], 'rails-example_com')
 
 
 if __name__ == '__main__':

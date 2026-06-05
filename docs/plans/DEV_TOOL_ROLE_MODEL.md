@@ -48,8 +48,8 @@ Target users:
 
 - operator/login user: `config.username`
 - CI/CD user: `webhook`
-- app/runtime users: deployment-specific service users, or the current legacy
-  `rails` user path until that is replaced
+- app/runtime users: deployment-specific service users (`app-*` for manifest
+  services, `rails-<app>` for legacy Rails services)
 
 This role currently installs user-scoped Node and uv for `config.username`, but
 CI/CD workspaces run as `webhook`. That means the build server can still depend
@@ -107,5 +107,5 @@ the larger redesign:
 - Teach `--build-server` to install Node/uv/Ruby for the build job user when
   the server will build those project types.
 - Make deploy manifests declare build-time and runtime requirements separately.
-- Remove the legacy single `rails` user path and align Rails/node services with
-  per-app users described in `docs/plans/DEPLOY_ISOLATION.md`.
+- Continue reducing app-server build-tool installs so runtime users do not
+  inherit broader toolchain ownership than they need.

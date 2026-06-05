@@ -1,19 +1,18 @@
 # Deploy Isolation: per-service users & managed persistence
 
-> **Status:** Implemented for the **manifest** (`infra.json`) deploy path. The
-> legacy detection path (Rails/node single shared `rails` user) is unchanged;
-> migrating it is documented as future work below.
+> **Status:** Implemented for the **manifest** (`infra.json`) deploy path and
+> the legacy Rails detection path. Release trees use a deployment owner; runtime
+> services use dedicated `--system` users.
 
 ## Problem
 
 Two gaps in the deploy path, surfaced while wiring `infra.json`:
 
-1. **No user isolation.** The `setup ... --deploy` path runs *every* deployed
-   site and service as one shared `rails` user (`remote_setup.py`,
-   `deploy/deploy_steps.py`). A compromise in any one app can read/write every
-   other app's files. (Other infra_tools components — `gogs`, the cicd
-   `webhook`, `app_server_steps` — already use dedicated `--system` users; the
-   deploy path just doesn't.)
+1. **No user isolation.** The older `setup ... --deploy` path ran deployed
+   Rails apps under one shared `rails` user (`remote_setup.py`,
+   `deploy/deploy_steps.py`). A compromise in any one app could read/write every
+   other app's files. infra_tools now uses the `web-deploy` owner for release trees
+   and per-app runtime users for Rails (`rails-<app>`).
 
 2. **Inconsistent persistence.** Rails sites keep durable state in an
    infra_tools-managed root (`<base>/.infra_tools_shared/<app>/…`, symlinked into
@@ -41,11 +40,12 @@ Two gaps in the deploy path, surfaced while wiring `infra.json`:
   `.infra_tools_shared` keeps all persistence in one place, co-located with the
   per-app backups already written there.
 
-- **Users: one dedicated `--system` user per service component.** Each service
-  runs as its own `nologin` user that owns only its `shared_dir`/`data_dir`. The
-  release tree stays owned by the deploy user and world-readable so nginx can
-  serve static files and the service can read its binary. Static components need
-  no user at all.
+- **Users: dedicated `--system` runtime users.** Each manifest service runs as
+  its own `nologin` user that owns only its `shared_dir`/`data_dir`. Legacy Rails
+  services run as `rails-<app>` users that own only their persistent Rails state.
+  The release tree stays owned by the `web-deploy` user and world-readable so nginx can
+  serve static files and services can read their code/binaries. Static components
+  need no runtime user at all.
 
 ## Service identity & naming
 
@@ -64,13 +64,19 @@ alone clashed if two repos shared a component name.
 
 The `app-*` prefix keeps these covered by `cleanup_all_infra_services`.
 
+Legacy Rails services keep the existing `rails-<app_name>.service` unit naming,
+but the unit's `User=`/`Group=` are `rails-<app_name>` (capped with a
+deterministic hash suffix when the Linux username would be too long).
+
 ## Ownership / permission matrix
 
 | Path                         | Owner               | Mode  | Why                                  |
 |------------------------------|---------------------|-------|--------------------------------------|
-| release dir (`/var/www/<app>`) | deploy user:group | 0755  | nginx reads static; service reads binary (world r-x) |
+| release dir (`/var/www/<app>`) | `web-deploy:web-deploy` | 0755  | nginx reads static; service reads binary (world r-x) |
 | `{{shared_dir}}` / `{{data_dir}}` | service user      | 0750  | only the service may read/write its data; not world-readable |
 | operator secrets (`{{shared_dir}}/.env`) | service user | 0640 | `EnvironmentFile=`; readable by the service only |
+| Rails private persistent state (`db`, `storage`, `log`, `tmp`, `backups`) | `rails-<app>` | 0750 dirs / 0640 files | Rails writes private state without exposing it to other app users |
+| Rails public persistent state (`public/uploads`, `public/system`) | `rails-<app>` | 0755 dirs / 0644 files | nginx can serve public files through release symlinks |
 
 A service therefore needs no write access anywhere in the release tree; its only
 writable location is its own `data_dir`, which pairs naturally with
@@ -89,7 +95,7 @@ User={{web_user}}        # resolved to the dedicated per-service user
 ```
 
 For a service component, `{{web_user}}`/`{{web_group}}` resolve to the service's
-**dedicated** user (not the global deploy user), so a repo-supplied unit gets the
+**dedicated** user (not the release-tree owner), so a repo-supplied unit gets the
 isolated identity automatically.
 
 ## Implementation (manifest path)
@@ -101,15 +107,27 @@ isolated identity automatically.
 - `_install_service_component` creates `shared_dir`/`data_dir`, ensures the user,
   chowns the data tree to it (0750), and builds the unit context with the
   dedicated user + `{{data_dir}}`/`{{shared_dir}}`.
-- The release-tree chown to the deploy user is unchanged; only the (separate)
+- The release-tree chown to `web-deploy` is unchanged; only the (separate)
   data tree is service-owned.
+
+## Implementation (legacy Rails path)
+
+- `deploy_repository()` ensures a locked-down `web-deploy` owner instead of a
+  framework-named user.
+- `DeploymentOrchestrator` owns release/static trees as `web-deploy:web-deploy`.
+- Rails runtime identity is derived from the release dir: `rails-<app_name>`
+  with the same 31-character cap/hash strategy used for manifest users.
+- Rails writable paths (`db`, `storage`, `public/uploads`, `public/system`,
+  `log`, `tmp`) live under `.infra_tools_shared/<app>` and are symlinked into
+  the release, then chowned to the Rails runtime user.
+- Skipped deployments recreate a missing service and also replace an existing
+  service whose `User=` still points at the old shared `rails` account.
 
 ## Future work (not done here)
 
-- **Legacy path migration.** Give Rails/node deploys per-app dedicated users too,
-  and reconcile the existing single-`rails`-user deployments (a one-time
-  ownership migration). Deferred to avoid disrupting live single-user sites on a
-  non-overhaul branch.
-- **Backups under the service user.** The per-app backup dir
-  (`.infra_tools_shared/<app>/backups`) currently follows the deploy user; align
-  it with the per-service ownership when the legacy path moves.
+- **Existing-host cleanup.** Code paths now recreate services with per-app
+  users, but hosts may still have an unused legacy `rails` account after all
+  deployments have been migrated.
+- **Legacy Node runtime.** Legacy Node deploys are still served as static build
+  output in the normal deployment path. The manual service helper uses
+  `node-<app>` if it has to create a Node service.

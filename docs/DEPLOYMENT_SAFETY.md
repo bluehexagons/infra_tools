@@ -262,7 +262,8 @@ If you need to run seeds manually on an existing production database:
 
 ```bash
 cd /var/www/<app_directory>
-sudo -u rails RAILS_ENV=production bundle exec rake db:seed
+APP_USER=$(systemctl show -p User --value rails-<app_name>.service)
+sudo -u "$APP_USER" RAILS_ENV=production bundle exec rake db:seed
 ```
 
 **WARNING**: Only run seeds manually if:
@@ -393,7 +394,8 @@ Running database migrations...
 3. **Rollback the migration** (if needed):
    ```bash
    cd /var/www/<app_directory>
-   sudo -u rails RAILS_ENV=production bundle exec rake db:rollback
+   APP_USER=$(systemctl show -p User --value rails-<app_name>.service)
+   sudo -u "$APP_USER" RAILS_ENV=production bundle exec rake db:rollback
    ```
 
 4. **Restart the service**:
@@ -414,6 +416,7 @@ Production databases are stored in a persistent location that survives redeploym
   ├── backups/                     # Automatic backups
   │   └── <app>_production_*.sqlite3
   ├── storage/                     # Active Storage files
+  ├── tmp/                         # Rails runtime temp/cache files
   ├── log/                         # Rails logs
   └── public/
       ├── uploads/                 # User uploads
@@ -429,6 +432,7 @@ Each deployment creates symlinks from the release directory to the persistent st
   ├── db/
   │   └── production.sqlite3 -> /var/www/.infra_tools_shared/<app_name>/db/production.sqlite3
   ├── storage/ -> /var/www/.infra_tools_shared/<app_name>/storage/
+  ├── tmp/ -> /var/www/.infra_tools_shared/<app_name>/tmp/
   ├── log/ -> /var/www/.infra_tools_shared/<app_name>/log/
   └── public/
       ├── uploads/ -> /var/www/.infra_tools_shared/<app_name>/public/uploads/
@@ -556,8 +560,8 @@ If backups fail due to disk space:
 ### Backup Permissions
 
 Backups are created with the same permissions as the database:
-- Owner: `rails:rails` (or configured web user)
-- Permissions: `664` (owner and group can read/write)
+- Owner: the Rails runtime user from `rails-<app_name>.service` (`rails-<app_name>` by default, capped with a hash for long names)
+- Permissions after deploy reconciliation: `640` (owner can read/write, group can read)
 
 ### Sensitive Data
 

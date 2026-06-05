@@ -52,11 +52,11 @@ class TestGenerateManagedService(unittest.TestCase):
     def test_includes_exec_and_hardening(self):
         unit = generate_managed_service(
             "app-api", "/var/www/site/server/app", "/var/www/site",
-            web_user="rails", web_group="rails",
+            web_user="app-site-api", web_group="app-site-api",
         )
         self.assertIn("ExecStart=/var/www/site/server/app", unit)
         self.assertIn("WorkingDirectory=/var/www/site", unit)
-        self.assertIn("User=rails", unit)
+        self.assertIn("User=app-site-api", unit)
         self.assertIn("NoNewPrivileges=true", unit)
         self.assertIn("ProtectSystem=full", unit)
         self.assertIn("[Install]", unit)
@@ -125,7 +125,7 @@ class TestComponentDescriptor(unittest.TestCase):
 
 class TestServiceContext(unittest.TestCase):
     def setUp(self):
-        self.orch = DeploymentOrchestrator(base_dir="/var/www", web_user="rails", web_group="rails")
+        self.orch = DeploymentOrchestrator(base_dir="/var/www")
 
     def test_resolves_binary_working_dir_env_file(self):
         comp = _service_component(
@@ -197,7 +197,7 @@ class TestDeployManifest(unittest.TestCase):
     def setUp(self):
         self.base_dir = tempfile.mkdtemp(prefix="manifest_base_")
         self.source = tempfile.mkdtemp(prefix="manifest_src_")
-        self.orch = DeploymentOrchestrator(base_dir=self.base_dir, web_user="rails", web_group="rails")
+        self.orch = DeploymentOrchestrator(base_dir=self.base_dir)
 
         # A repo with a static site and a service, plus the artifacts a build
         # would have produced (so the binary-exists check passes).
@@ -325,7 +325,7 @@ class TestDeployManifestUnitTemplate(unittest.TestCase):
     def setUp(self):
         self.base_dir = tempfile.mkdtemp(prefix="manifest_base_")
         self.source = tempfile.mkdtemp(prefix="manifest_src_")
-        self.orch = DeploymentOrchestrator(base_dir=self.base_dir, web_user="rails", web_group="rails")
+        self.orch = DeploymentOrchestrator(base_dir=self.base_dir)
 
         manifest = {
             "version": 1,

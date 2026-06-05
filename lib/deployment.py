@@ -30,10 +30,10 @@ from lib.project_manifest import Component, Manifest, has_placeholder, load_mani
 
 class DeploymentOrchestrator:
     
-    def __init__(self, base_dir: str = "/var/www", web_user: str = "www-data", web_group: str = "www-data"):
+    def __init__(self, base_dir: str = "/var/www", deploy_user: str = "web-deploy", deploy_group: str = "web-deploy"):
         self.base_dir = base_dir
-        self.web_user = web_user
-        self.web_group = web_group
+        self.deploy_user = deploy_user
+        self.deploy_group = deploy_group
 
     def _get_persistent_root(self, app_name: str) -> str:
         return os.path.join(self.base_dir, ".infra_tools_shared", app_name)
@@ -127,6 +127,7 @@ class DeploymentOrchestrator:
             (os.path.join("public", "uploads"), os.path.join(persistent_root, "public", "uploads")),
             (os.path.join("public", "system"), os.path.join(persistent_root, "public", "system")),
             ("log", os.path.join(persistent_root, "log")),
+            ("tmp", os.path.join(persistent_root, "tmp")),
         ]
 
         for rel_src, persistent_dst in dirs_to_persist:
@@ -159,6 +160,7 @@ class DeploymentOrchestrator:
             (os.path.join("public", "uploads"), os.path.join(persistent_root, "public", "uploads")),
             (os.path.join("public", "system"), os.path.join(persistent_root, "public", "system")),
             ("log", os.path.join(persistent_root, "log")),
+            ("tmp", os.path.join(persistent_root, "tmp")),
         ]
 
         for rel_path, persistent_path in dirs_to_link:
@@ -195,6 +197,7 @@ class DeploymentOrchestrator:
                 return None
         
         self._ensure_dir(backup_dir)
+        os.chmod(backup_dir, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP)
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_filename = f"{app_name}_production_{timestamp}.sqlite3"
@@ -204,8 +207,8 @@ class DeploymentOrchestrator:
             print(f"  Creating database backup: {backup_filename}")
             shutil.copy2(db_path, backup_path)
             
-            # Set explicit permissions: rw-rw-r-- (664)
-            os.chmod(backup_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH)
+            # Keep database backups private until deploy reconciliation chowns the tree.
+            os.chmod(backup_path, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP)
             
             # Verify backup was created and has size > 0
             if os.path.exists(backup_path):
@@ -432,6 +435,48 @@ class DeploymentOrchestrator:
         
         return self._find_free_port(default_port)
 
+    def _service_file_user(self, service_file: str) -> Optional[str]:
+        """Read the User= from an existing systemd service file, if available."""
+        try:
+            with open(service_file, 'r') as f:
+                content = f.read()
+        except OSError:
+            return None
+        match = re.search(r'^\s*User=(\S+)\s*$', content, re.MULTILINE)
+        return match.group(1) if match else None
+
+    def _capped_identity(self, prefix: str, raw_name: str) -> str:
+        base = f"{prefix}-{self._sanitize_user_part(raw_name)}"
+        if len(base) <= 31:
+            return base
+        digest = hashlib.sha1(base.encode()).hexdigest()[:8]
+        return f"{base[:22].rstrip('-_')}-{digest}"
+
+    def _legacy_rails_runtime_user(self, app_name: str) -> str:
+        return self._capped_identity("rails", app_name)
+
+    def _prepare_rails_runtime_state(self, persistent_root: str, runtime_user: str) -> None:
+        self._ensure_service_user(runtime_user)
+        if not os.path.exists(persistent_root):
+            return
+        root = shlex.quote(persistent_root)
+        run(f"chown -R {shlex.quote(runtime_user)}:{shlex.quote(runtime_user)} {root}", check=False)
+        run(f"find {root} -type d -exec chmod 750 {{}} +", check=False)
+        run(f"find {root} -type f -exec chmod 640 {{}} +", check=False)
+        run(f"chmod 755 {root}", check=False)
+
+        public_root = shlex.quote(os.path.join(persistent_root, "public"))
+        run(f"if [ -d {public_root} ]; then chmod 755 {public_root}; fi", check=False)
+        for rel_path in (os.path.join("public", "uploads"), os.path.join("public", "system")):
+            public_path = shlex.quote(os.path.join(persistent_root, rel_path))
+            run(
+                f"if [ -d {public_path} ]; then "
+                f"find {public_path} -type d -exec chmod 755 {{}} +; "
+                f"find {public_path} -type f -exec chmod 644 {{}} +; "
+                "fi",
+                check=False,
+            )
+
     def get_deployment_path(self, domain: Optional[str], path: str, git_url: str) -> str:
         dir_name = create_safe_directory_name(domain, path)
         
@@ -467,16 +512,24 @@ class DeploymentOrchestrator:
                 service_name = f"rails-{app_name}"
                 service_file = f"/etc/systemd/system/{service_name}.service"
                 backend_port = self._get_assigned_port(service_name, 3000)
+                runtime_user = self._legacy_rails_runtime_user(app_name)
+                service_missing = not os.path.exists(service_file)
+                existing_user = None if service_missing else self._service_file_user(service_file)
+                service_needs_recreate = service_missing or (
+                    existing_user is not None and existing_user != runtime_user
+                )
                 
                 # Ensure service exists and is running (may have been
                 # removed by cleanup_all_infra_services before this run)
-                if not os.path.exists(service_file):
-                    print(f"  Service {service_name} missing, recreating...")
+                if service_needs_recreate:
+                    reason = "missing" if service_missing else f"uses {existing_user}"
+                    print(f"  Service {service_name} {reason}, recreating...")
+                    self._prepare_rails_runtime_state(persistent_root, runtime_user)
                     
                     cors_origins = self._build_cors_origins(domain)
                     
                     create_rails_service(app_name, dest_path, backend_port,
-                                        self.web_user, self.web_group,
+                                        runtime_user, runtime_user,
                                         env_vars={
                                             "CORS_ORIGINS": ",".join(cors_origins) if cors_origins else "",
                                             "FRONTEND_URL": cors_origins[0] if cors_origins else "",
@@ -560,16 +613,15 @@ class DeploymentOrchestrator:
         self.build_project(dest_path, project_type, site_root=site_root, app_name=app_name, reset_migrations=reset_migrations)
 
         if project_type == "rails":
-            run(f"chown -R {shlex.quote(self.web_user)}:{shlex.quote(self.web_group)} {shlex.quote(persistent_root)}", check=False)
-            run(f"find {shlex.quote(persistent_root)} -type d -exec chmod 775 {{}} +", check=False)
-            run(f"find {shlex.quote(persistent_root)} -type f -exec chmod 664 {{}} +", check=False)
+            runtime_user = self._legacy_rails_runtime_user(app_name)
+            self._prepare_rails_runtime_state(persistent_root, runtime_user)
 
         result = run(
-            f"chown -R {shlex.quote(self.web_user)}:{shlex.quote(self.web_group)} {shlex.quote(dest_path)}",
+            f"chown -R {shlex.quote(self.deploy_user)}:{shlex.quote(self.deploy_group)} {shlex.quote(dest_path)}",
             check=False,
         )
         if result.returncode != 0:
-            print(f"  ⚠ Warning: Could not set ownership to {self.web_user}:{self.web_group}")
+            print(f"  ⚠ Warning: Could not set ownership to {self.deploy_user}:{self.deploy_group}")
 
         run(f"chmod -R 775 {shlex.quote(dest_path)}")
         
@@ -580,10 +632,11 @@ class DeploymentOrchestrator:
         if project_type == "rails":
             service_name = f"rails-{app_name}"
             backend_port = self._get_assigned_port(service_name, 3000)
+            runtime_user = self._legacy_rails_runtime_user(app_name)
             
             cors_origins = self._build_cors_origins(domain)
             
-            create_rails_service(app_name, dest_path, backend_port, self.web_user, self.web_group, 
+            create_rails_service(app_name, dest_path, backend_port, runtime_user, runtime_user,
                                env_vars={
                                    "CORS_ORIGINS": ",".join(cors_origins) if cors_origins else "",
                                    "FRONTEND_URL": cors_origins[0] if cors_origins else "",
@@ -721,11 +774,11 @@ class DeploymentOrchestrator:
         # static files and each (separately-owned) service user can read and exec
         # its binary. Service writable state lives in a service-owned data dir.
         result = run(
-            f"chown -R {shlex.quote(self.web_user)}:{shlex.quote(self.web_group)} {shlex.quote(dest_path)}",
+            f"chown -R {shlex.quote(self.deploy_user)}:{shlex.quote(self.deploy_group)} {shlex.quote(dest_path)}",
             check=False,
         )
         if result.returncode != 0:
-            print(f"  ⚠ Warning: Could not set ownership to {self.web_user}:{self.web_group}")
+            print(f"  ⚠ Warning: Could not set ownership to {self.deploy_user}:{self.deploy_group}")
         run(f"chmod -R 755 {shlex.quote(dest_path)}", check=False)
 
         # Start services after the release tree is readable so they can exec.

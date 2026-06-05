@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shlex
+import shutil
 from typing import Optional
 
 from lib.types import Deployments, StrList, PathPair
@@ -12,6 +13,71 @@ from lib.remote_utils import run
 
 SSL_PROTOCOLS = "TLSv1.2 TLSv1.3"
 SSL_CIPHERS = "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384"
+NGINX_SITES_AVAILABLE_DIR = "/etc/nginx/sites-available"
+NGINX_SITES_ENABLED_DIR = "/etc/nginx/sites-enabled"
+PRESERVED_SITE_PREFIXES = ("antistatic_", "gogs_")
+GENERATED_CONFIG_MARKER = "# Managed by infra_tools deployment nginx generator"
+
+
+def _config_name_for_domain(domain: Optional[str]) -> str:
+    return domain.replace('.', '_') if domain else 'default'
+
+
+def _remove_path(path: str) -> None:
+    if not os.path.lexists(path):
+        return
+    if os.path.isdir(path) and not os.path.islink(path):
+        shutil.rmtree(path)
+    else:
+        os.remove(path)
+
+
+def _is_infra_tools_deployment_site(path: str) -> bool:
+    read_path = os.path.realpath(path) if os.path.islink(path) else path
+    try:
+        with open(read_path, 'r', encoding='utf-8') as handle:
+            content = handle.read()
+    except OSError:
+        return False
+
+    if GENERATED_CONFIG_MARKER in content:
+        return True
+
+    # Legacy generated deployment configs predate the explicit marker. Keep the
+    # heuristic narrow so unrelated nginx sites are not swept up.
+    return all(token in content for token in (
+        "map $uri $assets_expires_",
+        "map $uri $assets_cc_",
+        "location /.well-known/acme-challenge/",
+        "add_header Strict-Transport-Security",
+    ))
+
+
+def _reconcile_deployment_sites(current_config_names: set[str]) -> None:
+    """Remove stale app deployment nginx sites before writing current ones.
+
+    App deployments own unprefixed ``sites-available``/``sites-enabled`` names
+    such as ``example_com`` and ``default``. Prefix-owned service configs (Gogs,
+    antistatic) are managed by their own setup steps and must be left alone.
+    """
+    for directory in (NGINX_SITES_ENABLED_DIR, NGINX_SITES_AVAILABLE_DIR):
+        if not os.path.isdir(directory):
+            continue
+
+        for name in os.listdir(directory):
+            if name in current_config_names or name.startswith(PRESERVED_SITE_PREFIXES):
+                continue
+
+            path = os.path.join(directory, name)
+            if not _is_infra_tools_deployment_site(path):
+                continue
+
+            try:
+                _remove_path(path)
+            except OSError as e:
+                print(f"  ⚠ Failed to remove stale nginx config {path}: {e}")
+            else:
+                print(f"  ✓ Removed stale nginx config: {path}")
 
 
 def get_ssl_cert_path(domain: Optional[str]) -> PathPair:
@@ -240,7 +306,7 @@ def generate_merged_nginx_config(
     server_name_directive = f"server_name {domain};" if domain else "server_name _;"
     default_server = " default_server" if is_default else ""
     
-    domain_slug = domain.replace('.', '_') if domain else 'default'
+    domain_slug = _config_name_for_domain(domain)
     cache_maps, expires_var, cc_var = _make_cache_maps(domain_slug)
     forwarded_proto = "https" if not enable_https_redirect else "$scheme"
     enable_path_redirect = enable_https_redirect
@@ -391,7 +457,7 @@ server {{
 }}
 """
     
-    return "\n".join([cache_maps] + api_configs + [main_config])
+    return "\n".join([GENERATED_CONFIG_MARKER, cache_maps] + api_configs + [main_config])
 
 
 def create_nginx_sites_for_groups(
@@ -401,6 +467,8 @@ def create_nginx_sites_for_groups(
     """Create nginx site configurations for grouped deployments."""
     
     run("mkdir -p /var/www/letsencrypt/.well-known/acme-challenge")
+    current_config_names = {_config_name_for_domain(domain) for domain in grouped_deployments}
+    _reconcile_deployment_sites(current_config_names)
     
     for domain, deployments in grouped_deployments.items():
         cert_domain = domain or 'default'
@@ -413,11 +481,11 @@ def create_nginx_sites_for_groups(
                     if dep.get('api_subdomain', False):
                         generate_self_signed_cert(f"api.{domain}")
             
-            config_name = domain.replace('.', '_')
+            config_name = _config_name_for_domain(domain)
         else:
-            config_name = "default"
-            
-        config_file = f"/etc/nginx/sites-available/{config_name}"
+            config_name = _config_name_for_domain(domain)
+
+        config_file = os.path.join(NGINX_SITES_AVAILABLE_DIR, config_name)
         
         is_default = (domain is None)
         
@@ -434,8 +502,13 @@ def create_nginx_sites_for_groups(
         
         print(f"  ✓ Created nginx config: {config_file}")
         
-        enabled_link = f"/etc/nginx/sites-enabled/{config_name}"
-        if not os.path.exists(enabled_link):
+        enabled_link = os.path.join(NGINX_SITES_ENABLED_DIR, config_name)
+        if os.path.lexists(enabled_link) and (
+            not os.path.islink(enabled_link) or os.path.realpath(enabled_link) != config_file
+        ):
+            _remove_path(enabled_link)
+
+        if not os.path.lexists(enabled_link):
             run(f"ln -s {shlex.quote(config_file)} {shlex.quote(enabled_link)}")
             print(f"  ✓ Enabled nginx site: {config_name}")
             

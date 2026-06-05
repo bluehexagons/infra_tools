@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -14,6 +15,9 @@ from lib.nginx_config import (
     _make_cache_maps,
     _make_proxy_location,
     _make_static_location,
+    _reconcile_deployment_sites,
+    create_nginx_sites_for_groups,
+    GENERATED_CONFIG_MARKER,
     generate_merged_nginx_config,
     SSL_PROTOCOLS,
 )
@@ -107,6 +111,7 @@ class TestGenerateMergedNginxConfig(unittest.TestCase):
             'project_type': 'static',
         }]
         config = generate_merged_nginx_config('example.com', deployments)
+        self.assertIn(GENERATED_CONFIG_MARKER, config)
         self.assertIn('server_name example.com', config)
         self.assertIn('listen 80', config)
         self.assertIn('listen 443 ssl', config)
@@ -253,6 +258,86 @@ class TestGenerateMergedNginxConfig(unittest.TestCase):
         config = generate_merged_nginx_config('example.com', deployments)
         self.assertIn('Strict-Transport-Security', config)
         self.assertIn('max-age=63072000', config)
+
+
+class TestReconcileDeploymentSites(unittest.TestCase):
+    def test_removes_stale_deployment_sites_only(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            available = os.path.join(temp_dir, 'sites-available')
+            enabled = os.path.join(temp_dir, 'sites-enabled')
+            os.makedirs(available)
+            os.makedirs(enabled)
+
+            names = (
+                'current_com', 'api_old_com', 'default',
+                'antistatic_game_com', 'gogs_git_com', 'manual_site',
+            )
+            legacy_generated = """
+map $uri $assets_expires_api_old_com {
+}
+map $uri $assets_cc_api_old_com {
+}
+server {
+    location /.well-known/acme-challenge/ {
+        root /var/www/letsencrypt;
+    }
+    add_header Strict-Transport-Security "max-age=63072000" always;
+}
+"""
+            for directory in (available, enabled):
+                for name in names:
+                    with open(os.path.join(directory, name), 'w', encoding='utf-8') as handle:
+                        handle.write(legacy_generated if name == 'api_old_com' else name)
+
+            old_link = os.path.join(enabled, 'old_link_com')
+            os.symlink(os.path.join(available, 'api_old_com'), old_link)
+
+            with patch('lib.nginx_config.NGINX_SITES_AVAILABLE_DIR', available), \
+                 patch('lib.nginx_config.NGINX_SITES_ENABLED_DIR', enabled):
+                _reconcile_deployment_sites({'current_com', 'default'})
+
+            for directory in (available, enabled):
+                self.assertTrue(os.path.exists(os.path.join(directory, 'current_com')))
+                self.assertTrue(os.path.exists(os.path.join(directory, 'default')))
+                self.assertTrue(os.path.exists(os.path.join(directory, 'antistatic_game_com')))
+                self.assertTrue(os.path.exists(os.path.join(directory, 'gogs_git_com')))
+                self.assertTrue(os.path.exists(os.path.join(directory, 'manual_site')))
+                self.assertFalse(os.path.lexists(os.path.join(directory, 'api_old_com')))
+            self.assertFalse(os.path.lexists(old_link))
+
+    @patch('lib.nginx_config.generate_self_signed_cert')
+    @patch('lib.nginx_config.run')
+    def test_create_sites_repairs_wrong_enabled_path(self, mock_run, _mock_cert):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            available = os.path.join(temp_dir, 'sites-available')
+            enabled = os.path.join(temp_dir, 'sites-enabled')
+            os.makedirs(available)
+            os.makedirs(enabled)
+
+            enabled_link = os.path.join(enabled, 'example_com')
+            with open(enabled_link, 'w', encoding='utf-8') as handle:
+                handle.write('stale file')
+
+            def run_side_effect(cmd, *_args, **_kwargs):
+                if cmd.startswith('ln -s '):
+                    os.symlink(os.path.join(available, 'example_com'), enabled_link)
+                return MagicMock(returncode=0)
+
+            mock_run.side_effect = run_side_effect
+
+            deployments = [{
+                'path': '/',
+                'needs_proxy': False,
+                'serve_path': '/var/www/html',
+                'project_type': 'static',
+            }]
+
+            with patch('lib.nginx_config.NGINX_SITES_AVAILABLE_DIR', available), \
+                 patch('lib.nginx_config.NGINX_SITES_ENABLED_DIR', enabled):
+                create_nginx_sites_for_groups({'example.com': deployments}, enable_https_redirect=False)
+
+            self.assertTrue(os.path.islink(enabled_link))
+            self.assertEqual(os.path.realpath(enabled_link), os.path.join(available, 'example_com'))
 
 
 if __name__ == '__main__':
