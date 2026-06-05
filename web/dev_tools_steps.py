@@ -9,7 +9,7 @@ from common.common_steps import configure_auto_update_ruby as _configure_auto_up
 from lib.config import SetupConfig
 from lib.remote_utils import run
 from lib.systemd_service import cleanup_service
-from lib.update_policy import ECOSYSTEM_AUTO_UPGRADE_ENV, NODE_LATEST_AUTO_UPDATE_ENV
+from lib.update_policy import ECOSYSTEM_AUTO_UPGRADE_ENV
 
 
 def _configure_auto_update_systemd(
@@ -95,10 +95,7 @@ def configure_auto_update_node(config: SetupConfig) -> None:
         check_path=nvm_dir,
         check_name="Node.js",
         user=config.username,
-        environment={
-            ECOSYSTEM_AUTO_UPGRADE_ENV: "0",
-            NODE_LATEST_AUTO_UPDATE_ENV: "0",
-        },
+        environment={ECOSYSTEM_AUTO_UPGRADE_ENV: "0"},
     )
 
 

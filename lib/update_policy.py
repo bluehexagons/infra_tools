@@ -9,7 +9,6 @@ from typing import Any
 
 
 ECOSYSTEM_AUTO_UPGRADE_ENV = "INFRA_TOOLS_ECOSYSTEM_AUTO_UPGRADE"
-NODE_LATEST_AUTO_UPDATE_ENV = "INFRA_TOOLS_NODE_LATEST_AUTO_UPDATE"
 DEPENDENCY_MIN_AGE_DAYS_ENV = "INFRA_TOOLS_DEPENDENCY_MIN_AGE_DAYS"
 DEFAULT_DEPENDENCY_MIN_AGE_DAYS = 7
 
@@ -33,11 +32,6 @@ def env_flag_enabled(
 def ecosystem_auto_upgrade_enabled(env: Mapping[str, str] | None = None) -> bool:
     """Return whether global npm/gem/uv-tool upgrades are allowed."""
     return env_flag_enabled(ECOSYSTEM_AUTO_UPGRADE_ENV, env=env)
-
-
-def node_latest_auto_update_enabled(env: Mapping[str, str] | None = None) -> bool:
-    """Return whether Node.js latest-track auto-updates are allowed."""
-    return env_flag_enabled(NODE_LATEST_AUTO_UPDATE_ENV, env=env)
 
 
 def dependency_min_age_days(env: Mapping[str, str] | None = None) -> int:

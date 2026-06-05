@@ -33,7 +33,8 @@ persistent and runtime journal usage at `100M`.
 Automatic update policy is intentionally conservative for language ecosystems. APT updates still run
 automatically, but the updater refuses automated package removals. Node.js, Ruby, and uv timers no longer
 auto-upgrade global npm packages, gems, or uv-managed tools unless `INFRA_TOOLS_ECOSYSTEM_AUTO_UPGRADE=1`
-is set for the service; Node.js latest-track updates also require `INFRA_TOOLS_NODE_LATEST_AUTO_UPDATE=1`.
+is set for the service. Node.js defaults to the LTS track; if a non-LTS/latest Node.js track is already
+installed, the Node updater treats that as an explicit opt-in and keeps that track current too.
 Dependency-resolving npm and uv installs default to `INFRA_TOOLS_DEPENDENCY_MIN_AGE_DAYS=7` so very new
 package releases are avoided where the package manager supports a freshness cutoff.
 

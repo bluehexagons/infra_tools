@@ -15,7 +15,6 @@ from lib.config import SetupConfig
 from lib.update_policy import (
     DEPENDENCY_MIN_AGE_DAYS_ENV,
     ECOSYSTEM_AUTO_UPGRADE_ENV,
-    NODE_LATEST_AUTO_UPDATE_ENV,
 )
 from web import dev_tools_steps
 
@@ -34,10 +33,7 @@ class TestNodeSetup(unittest.TestCase):
             check_path="/home/user/.nvm",
             check_name="Node.js",
             user="user",
-            environment={
-                ECOSYSTEM_AUTO_UPGRADE_ENV: "0",
-                NODE_LATEST_AUTO_UPDATE_ENV: "0",
-            },
+            environment={ECOSYSTEM_AUTO_UPGRADE_ENV: "0"},
         )
 
     @patch("common.common_steps.open", new_callable=mock_open, read_data="")
@@ -91,6 +87,7 @@ class TestNodeSetup(unittest.TestCase):
         commands = [args[0] for args, _ in mock_run.call_args_list]
         self.assertIn("chown -R user:user /home/user/.nvm", commands)
         self.assertIn("chown -R user:user /home/user/.npm", commands)
+        self.assertTrue(any("HOME=/home/user USER=user LOGNAME=user" in command and "nvm --version" in command for command in commands))
         self.assertFalse(any("apt-get install" in command for command in commands))
 
 

@@ -583,9 +583,9 @@ Language ecosystem auto-upgrades are more conservative. Node.js, Ruby, and uv
 timers are installed with `INFRA_TOOLS_ECOSYSTEM_AUTO_UPGRADE=0`, so they do not
 silently pull the latest global npm packages, gems, or uv-managed tools. Set
 `INFRA_TOOLS_ECOSYSTEM_AUTO_UPGRADE=1` in a systemd drop-in only for systems
-where that supply-chain risk is acceptable. Node.js latest-track runtime updates
-also require `INFRA_TOOLS_NODE_LATEST_AUTO_UPDATE=1`; the default LTS track still
-receives runtime patch updates.
+where that supply-chain risk is acceptable. Node.js defaults to the LTS track,
+but if a non-LTS/latest Node.js track is already installed, the updater treats
+that as an explicit opt-in and keeps that track current too.
 
 Dependency-resolving npm and uv installs also avoid very new releases by default.
 `INFRA_TOOLS_DEPENDENCY_MIN_AGE_DAYS=7` produces npm `--before` and uv

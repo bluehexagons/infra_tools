@@ -343,8 +343,18 @@ def install_node_for_user(username: str, user_home: str) -> None:
     
     if os.path.exists(nvm_sh):
         _ensure_nvm_shell_init(username, user_home)
+        verify_result = _run_as_login_user(
+            username,
+            user_home,
+            f"export NVM_DIR={safe_nvm_dir} && "
+            '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && nvm --version',
+            check=False,
+        )
         _chown_existing_paths(username, _user_tool_paths(user_home))
-        print("  ✓ nvm already installed")
+        if verify_result.returncode == 0:
+            print("  ✓ nvm already installed")
+        else:
+            print("  ⚠ nvm is installed but could not be loaded for user")
         return
     
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
