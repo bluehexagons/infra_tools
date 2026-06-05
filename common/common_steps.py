@@ -302,11 +302,6 @@ export NVM_DIR="$HOME/.nvm"
 
 
 def install_go(config: SetupConfig) -> None:
-    result = run("which go", check=False)
-    if result.returncode == 0:
-        print("  ✓ Go already installed")
-        return
-    
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get install -y -qq curl wget")
     result = run("curl -s https://go.dev/VERSION?m=text | head -1", check=False, capture_output=True)
@@ -318,6 +313,24 @@ def install_go(config: SetupConfig) -> None:
     if not go_version.startswith("go"):
         print("  ⚠ Invalid Go version format, skipping")
         return
+
+    go_binary = "/usr/local/go/bin/go"
+    if not os.path.exists(go_binary):
+        found_go = shutil.which("go")
+        if found_go:
+            go_binary = found_go
+
+    if os.path.exists(go_binary):
+        installed_result = run(f"{shlex.quote(go_binary)} version", check=False, capture_output=True)
+        if installed_result.returncode == 0:
+            version_parts = installed_result.stdout.strip().split()
+            installed_version = version_parts[2] if len(version_parts) >= 3 else "unknown"
+            if installed_version == go_version:
+                print(f"  ✓ Go already up to date ({go_version})")
+                return
+            print(f"  Updating Go from {installed_version} to {go_version}...")
+        else:
+            print("  ⚠ Existing Go binary could not report a version; reinstalling")
     
     go_archive = f"{go_version}.linux-amd64.tar.gz"
     run(f"wget -q https://go.dev/dl/{go_archive} -O /tmp/{go_archive}")
