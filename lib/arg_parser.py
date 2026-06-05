@@ -9,6 +9,26 @@ from lib.config import MACHINE_TYPES, DEFAULT_MACHINE_TYPE
 from lib.plugin_registry import get_system_type_names
 
 
+class DeploySpecAction(argparse.Action):
+    """Accept one or more deployment spec/repository pairs per --deploy."""
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: str | list[str],
+        option_string: str | None = None,
+    ) -> None:
+        raw_values = [values] if isinstance(values, str) else values
+        if len(raw_values) % 2 != 0:
+            parser.error("--deploy requires DOMAIN_OR_PATH and GIT_URL pairs")
+
+        deploy_specs = list(getattr(namespace, self.dest, None) or [])
+        for index in range(0, len(raw_values), 2):
+            deploy_specs.append([raw_values[index], raw_values[index + 1]])
+        setattr(namespace, self.dest, deploy_specs)
+
+
 def add_setup_arguments(
     parser: argparse.ArgumentParser,
     for_remote: bool = False,
@@ -138,9 +158,9 @@ def add_setup_arguments(
                        help="Install Python tooling (python aliases and uv). For shell autocompletion, use the local completions installer script.")
     
     # Deployment options
-    parser.add_argument("--deploy", dest="deploy_specs", 
-                       action="append", nargs=2, metavar=("DOMAIN_OR_PATH", "GIT_URL"),
-                       help="Deploy a git repository (domain.com/path or /path) to auto-configure nginx (can be used multiple times)")
+    parser.add_argument("--deploy", dest="deploy_specs",
+                       action=DeploySpecAction, nargs="+", metavar="DEPLOY",
+                       help="Deploy git repositories as DOMAIN_OR_PATH GIT_URL pairs (can be used multiple times)")
     
     if for_remote:
         parser.add_argument("--lite-deploy", action="store_true",
