@@ -37,153 +37,36 @@ def get_repository_source_path(
     dry_run: bool = False
 ) -> Optional[tuple[str, str]]:
     """
-    Get the source path for a repository based on deployment mode.
-    
-    Returns: (source_path, commit_hash) or None if deployment should be skipped
-    Deployment modes:
-    - "lite": Use cached only, skip if not available
-    - "default": Smart cache - check for updates, use cache if up-to-date
-    - "full": Always fresh clone from GitHub
+    Get the uploaded source path for a repository.
+
+    Repositories are cloned by the local launcher and uploaded with infra_tools,
+    so private repositories only require local access. The remote never fetches
+    from Git directly; deployment modes control rebuild behavior, not source
+    acquisition.
+
+    Returns: (source_path, commit_hash) or None if deployment should be skipped.
     """
-    import subprocess
-    import tempfile
-    import shutil
-    from lib.deploy_utils import get_git_commit_hash
-    
     repo_name = extract_repo_name(git_url)
     cache_path = f'/opt/infra_tools/deployments/{repo_name}'
-    
-    if deployment_mode == "lite":
-        # Lite mode: use cached only
-        if not os.path.exists(cache_path):
-            print(f"\n⚠ Lite mode: {cache_path} not found, skipping {git_url}")
-            return None
-        
-        commit_hash = ""
-        commit_file = f'{cache_path}.commit'
-        if os.path.exists(commit_file):
-            try:
-                with open(commit_file, 'r') as f:
-                    content = f.read().strip()
-                    if content:
-                        commit_hash = content
-            except Exception:
-                pass
-        
-        print(f"\nUsing cached {repo_name}")
-        return (cache_path, commit_hash)
-    
-    elif deployment_mode == "full":
-        # Full mode: always fresh clone
-        temp_dir = tempfile.mkdtemp(prefix="infra_deploy_")
-        clone_path = os.path.join(temp_dir, repo_name)
-        
-        if not dry_run:
-            print(f"\nCloning {git_url}...")
-            result = subprocess.run(
-                ["git", "clone", git_url, clone_path],
-                capture_output=True,
-                text=True,
-                timeout=300
-            )
-            
-            if result.returncode != 0:
-                print(f"  Error cloning repository: {result.stderr}")
-                shutil.rmtree(temp_dir, ignore_errors=True)
-                return None
-            
-            print(f"  ✓ Cloned to {clone_path}")
-            commit_hash_result = get_git_commit_hash(clone_path)
-            commit_hash = commit_hash_result if commit_hash_result else ""
-            return (clone_path, commit_hash)
-        else:
-            print(f"  [DRY RUN] Would clone {git_url}")
-            return (clone_path, "")
-    
-    else:
-        # Default mode: smart cache
-        if os.path.exists(cache_path):
-            commit_file = f'{cache_path}.commit'
-            cached_commit = ""
-            if os.path.exists(commit_file):
-                try:
-                    with open(commit_file, 'r') as f:
-                        content = f.read().strip()
-                        if content:
-                            cached_commit = content
-                except Exception:
-                    pass
-            
-            if not dry_run:
-                # Check if remote has newer commits
-                try:
-                    # Fetch updates
-                    subprocess.run(
-                        ["git", "-C", cache_path, "fetch", "--all"],
-                        capture_output=True,
-                        text=True,
-                        timeout=60
-                    )
-                    
-                    # Get remote HEAD
-                    result = subprocess.run(
-                        ["git", "-C", cache_path, "rev-parse", "origin/HEAD"],
-                        capture_output=True,
-                        text=True,
-                        timeout=30
-                    )
-                    
-                    remote_commit = result.stdout.strip() if result.returncode == 0 else None
-                    
-                    if remote_commit and remote_commit != cached_commit:
-                        # Remote has changes, pull and update
-                        print(f"\nUpdating {repo_name} from remote...")
-                        subprocess.run(
-                            ["git", "-C", cache_path, "pull", "--all"],
-                            capture_output=True,
-                            text=True,
-                            timeout=300
-                        )
-                        commit_hash_result = get_git_commit_hash(cache_path)
-                        commit_hash = commit_hash_result if commit_hash_result else cached_commit
-                        print(f"  ✓ Updated to {commit_hash[:7] if commit_hash else 'latest'}")
-                    else:
-                        print(f"\nUsing cached {repo_name} (up-to-date)")
-                        commit_hash = cached_commit
-                except Exception as e:
-                    print(f"\nWarning checking for updates: {e}, using cached")
-                    commit_hash = cached_commit
-            else:
-                print(f"  [DRY RUN] Would check and possibly update {cache_path}")
-                commit_hash = cached_commit
-            
-            return (cache_path, commit_hash)
-        else:
-            # Cache doesn't exist, do fresh clone
-            temp_dir = tempfile.mkdtemp(prefix="infra_deploy_")
-            clone_path = os.path.join(temp_dir, repo_name)
-            
-            if not dry_run:
-                print(f"\nCloning {git_url} (cache miss)...")
-                result = subprocess.run(
-                    ["git", "clone", git_url, clone_path],
-                    capture_output=True,
-                    text=True,
-                    timeout=300
-                )
-                
-                if result.returncode != 0:
-                    print(f"  Error cloning repository: {result.stderr}")
-                    shutil.rmtree(temp_dir, ignore_errors=True)
-                    return None
-                
-                print(f"  ✓ Cloned to {clone_path}")
-                commit_hash_result = get_git_commit_hash(clone_path)
-                commit_hash = commit_hash_result if commit_hash_result else ""
-                return (clone_path, commit_hash)
-            else:
-                print(f"  [DRY RUN] Would clone {git_url}")
-                return (clone_path, "")
+
+    if not os.path.exists(cache_path):
+        print(f"\n⚠ Uploaded repository files not found at {cache_path}, skipping {git_url}")
+        return None
+
+    commit_hash = ""
+    commit_file = f'{cache_path}.commit'
+    if os.path.exists(commit_file):
+        try:
+            with open(commit_file, 'r') as f:
+                content = f.read().strip()
+                if content:
+                    commit_hash = content
+        except OSError:
+            pass
+
+    mode_label = deployment_mode if deployment_mode in {"default", "lite", "full"} else "default"
+    print(f"\nUsing uploaded {repo_name} ({mode_label} mode)")
+    return (cache_path, commit_hash)
 
 
 def _load_args_file(args_file: str) -> list[str]:
@@ -358,9 +241,6 @@ def main() -> int:
     
     if config.deploy_specs:
         from deploy.deploy_steps import deploy_repository
-        import shutil
-        import tempfile
-        import subprocess
         
         print("\n" + "=" * 60)
         print("Deploying repositories...")
