@@ -58,6 +58,16 @@ def _ensure_fallback_handler(logger: Logger, level: int = INFO) -> None:
     logger.addHandler(handler)
 
 
+def _can_write_log_path(log_path: Path) -> bool:
+    """Return true when the current process should try file logging there."""
+    try:
+        if log_path.is_relative_to(Path("/var/log")) and hasattr(os, "geteuid") and os.geteuid() != 0:
+            return False
+    except ValueError:
+        pass
+    return True
+
+
 def get_standard_formatter() -> Formatter:
     """Get the standard formatter for all infra_tools logs.
     
@@ -92,6 +102,10 @@ def get_rotating_logger(
         logger.propagate = False
 
     log_path = Path(log_file)
+    if not _can_write_log_path(log_path):
+        _ensure_fallback_handler(logger, level)
+        return logger
+
     try:
         log_path.parent.mkdir(parents=True, exist_ok=True)
     except (OSError, IOError) as e:
