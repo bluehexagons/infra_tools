@@ -54,6 +54,22 @@ def _default_machine_type_for_setup(
     return system_default or DEFAULT_MACHINE_TYPE
 
 
+def _validate_non_negative_int(name: str, value: int) -> int:
+    if value < 0:
+        raise ValueError(f"{name} must be non-negative")
+    return value
+
+
+def _optional_bool_arg(args: argparse.Namespace, name: str) -> Optional[bool]:
+    value = getattr(args, name, None)
+    return value if isinstance(value, bool) else None
+
+
+def _optional_int_arg(args: argparse.Namespace, name: str) -> Optional[int]:
+    value = getattr(args, name, None)
+    return value if isinstance(value, int) else None
+
+
 def _normalize_container_storage(value: NestedStrList | list[str] | None) -> Optional[NestedStrList]:
     if not value:
         return None
@@ -188,7 +204,9 @@ class SetupConfig:
     antistatic_server: MaybeStr = None  # "DOMAIN[:port]" spec
     antistatic_db: MaybeStr = None  # "DOMAIN[:port]" spec
     gogs: Optional[StrList] = None  # ["DOMAIN[:port]", "DATA_PATH"?]
-    no_restart: bool = False
+    auto_restart: bool = True
+    auto_restart_force_days: int = 7
+    auto_restart_grace: int = 5
     # Hosted guest provisioning (Proxmox VM/LXC)
     hosted_node: MaybeStr = None
     hosted_user: str = "root"
@@ -351,8 +369,12 @@ class SetupConfig:
             escaped_gogs = " ".join(shlex.quote(str(part)) for part in self.gogs)
             args.append(f"--gogs {escaped_gogs}")
         
-        if self.no_restart:
-            args.append("--no-restart")
+        if self.auto_restart:
+            args.append("--auto-restart")
+        else:
+            args.append("--no-auto-restart")
+        args.append(f"--auto-restart-force-days {self.auto_restart_force_days}")
+        args.append(f"--auto-restart-grace {self.auto_restart_grace}")
                 
         return args
     
@@ -564,8 +586,13 @@ class SetupConfig:
             cmd_parts.append(f"--gogs {escaped_gogs}")
         
         # Restart control
-        if self.no_restart:
-            cmd_parts.append("--no-restart")
+        system_defaults = get_system_type_definition(self.system_type)
+        if self.auto_restart != system_defaults.default_auto_restart:
+            cmd_parts.append("--auto-restart" if self.auto_restart else "--no-auto-restart")
+        if self.auto_restart_force_days != system_defaults.default_auto_restart_force_days:
+            cmd_parts.append(f"--auto-restart-force-days {self.auto_restart_force_days}")
+        if self.auto_restart_grace != 5:
+            cmd_parts.append(f"--auto-restart-grace {self.auto_restart_grace}")
         
         return cmd_parts
 
@@ -589,8 +616,24 @@ class SetupConfig:
             data['tags'] = None
 
         data['container_storage'] = _normalize_container_storage(data.get('container_storage'))
-        if 'no_restart' not in data or data.get('no_restart') is None:
-            data['no_restart'] = get_system_type_definition(system_type).default_no_restart
+        system_defaults = get_system_type_definition(system_type)
+        if 'auto_restart' not in data or data.get('auto_restart') is None:
+            if 'no_restart' in data and data.get('no_restart') is not None:
+                data['auto_restart'] = not bool(data.pop('no_restart'))
+            else:
+                data['auto_restart'] = system_defaults.default_auto_restart
+        else:
+            data.pop('no_restart', None)
+        if 'auto_restart_force_days' not in data or data.get('auto_restart_force_days') is None:
+            data['auto_restart_force_days'] = system_defaults.default_auto_restart_force_days
+        data['auto_restart_force_days'] = _validate_non_negative_int(
+            'auto_restart_force_days', int(data['auto_restart_force_days'])
+        )
+        if 'auto_restart_grace' not in data or data.get('auto_restart_grace') is None:
+            data['auto_restart_grace'] = 5
+        data['auto_restart_grace'] = _validate_non_negative_int(
+            'auto_restart_grace', int(data['auto_restart_grace'])
+        )
             
         if 'friendly_name' not in data:
             data['friendly_name'] = None
@@ -662,9 +705,21 @@ class SetupConfig:
         include_web_server = system_type_definition.include_web_server
         include_web_firewall = system_type_definition.include_web_firewall
         
-        no_restart = getattr(args, 'no_restart', None)
-        if no_restart is None:
-            no_restart = system_type_definition.default_no_restart
+        auto_restart = _optional_bool_arg(args, 'auto_restart')
+        if auto_restart is None:
+            auto_restart = system_type_definition.default_auto_restart
+
+        auto_restart_force_days = _optional_int_arg(args, 'auto_restart_force_days')
+        if auto_restart_force_days is None:
+            auto_restart_force_days = system_type_definition.default_auto_restart_force_days
+        auto_restart_force_days = _validate_non_negative_int(
+            'auto_restart_force_days', auto_restart_force_days
+        )
+
+        auto_restart_grace = _optional_int_arg(args, 'auto_restart_grace')
+        if auto_restart_grace is None:
+            auto_restart_grace = 5
+        auto_restart_grace = _validate_non_negative_int('auto_restart_grace', auto_restart_grace)
         
         return cls(
             host=args.host,
@@ -713,7 +768,9 @@ class SetupConfig:
             antistatic_server=getattr(args, 'antistatic_server', None),
             antistatic_db=getattr(args, 'antistatic_db', None),
             gogs=getattr(args, 'gogs', None),
-            no_restart=no_restart,
+            auto_restart=auto_restart,
+            auto_restart_force_days=auto_restart_force_days,
+            auto_restart_grace=auto_restart_grace,
             hosted_node=getattr(args, 'hosted_node', None),
             hosted_user=getattr(args, 'hosted_user', 'root'),
             hosted_key=getattr(args, 'hosted_key', None),

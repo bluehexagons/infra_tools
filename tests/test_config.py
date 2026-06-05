@@ -337,7 +337,9 @@ class TestSetupConfigFromArgs(unittest.TestCase):
             enable_rdp=None,
             smb_mounts=None,
             enable_smbclient=None,
-            no_restart=None,
+            auto_restart=None,
+            auto_restart_force_days=None,
+            auto_restart_grace=None,
             machine_type=None,
             password=None,
             ssh_key=None,
@@ -437,19 +439,30 @@ class TestSetupConfigFromArgs(unittest.TestCase):
         )
         self.assertEqual(config.gogs, ['git.example.com:3000', '/srv/gogs'])
 
-    def test_server_proxmox_defaults_no_restart(self):
+    def test_server_proxmox_defaults_defer_restart_with_force_deadline(self):
         config = SetupConfig.from_args(self._make_args(), 'server_proxmox')
-        self.assertTrue(config.no_restart)
+        self.assertFalse(config.auto_restart)
+        self.assertEqual(config.auto_restart_force_days, 7)
+        self.assertEqual(config.auto_restart_grace, 5)
         self.assertFalse(config.include_cli_tools)
         self.assertFalse(config.include_desktop)
 
-    def test_from_dict_server_proxmox_defaults_no_restart_when_missing(self):
+    def test_from_dict_server_proxmox_defaults_restart_policy_when_missing(self):
         config = SetupConfig.from_dict(
             'pve1',
             'server_proxmox',
             {'username': 'root'},
         )
-        self.assertTrue(config.no_restart)
+        self.assertFalse(config.auto_restart)
+        self.assertEqual(config.auto_restart_force_days, 7)
+
+    def test_from_dict_maps_legacy_no_restart(self):
+        config = SetupConfig.from_dict(
+            'server1',
+            'server_lite',
+            {'username': 'root', 'no_restart': True},
+        )
+        self.assertFalse(config.auto_restart)
 
 
 class TestSetupConfigHostedFields(unittest.TestCase):

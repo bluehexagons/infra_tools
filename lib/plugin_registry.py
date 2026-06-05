@@ -36,7 +36,8 @@ class SystemTypeDefinition:
     default_enable_rdp: bool = False
     default_install_office: bool = False
     default_enable_smbclient: bool = False
-    default_no_restart: bool = False
+    default_auto_restart: bool = True
+    default_auto_restart_force_days: int = 7
     default_machine_type: str | None = None
     default_browser: str | None = None
     step_builder: str | None = None

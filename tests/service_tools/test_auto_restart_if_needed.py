@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import os
-import sys
 import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -14,85 +14,98 @@ from common.service_tools import auto_restart_if_needed
 
 
 class TestAutoRestartIfNeeded(unittest.TestCase):
+    @patch("common.service_tools.auto_restart_if_needed.save_restart_state")
+    @patch("common.service_tools.auto_restart_if_needed.load_restart_state", return_value={})
+    @patch("common.service_tools.auto_restart_if_needed.time.time", return_value=100000)
     @patch("common.service_tools.auto_restart_if_needed.send_notification_safe")
     @patch("common.service_tools.auto_restart_if_needed.load_notification_configs_from_state", return_value=["cfg"])
-    @patch("common.service_tools.auto_restart_if_needed.get_logged_in_users", return_value=["user pts/0"])
-    @patch("common.service_tools.auto_restart_if_needed.is_no_restart_mode", return_value=False)
+    @patch("common.service_tools.auto_restart_if_needed.get_active_sessions", return_value=["1 user seat0 tty2"])
+    @patch("common.service_tools.auto_restart_if_needed.get_uptime_seconds", return_value=3600)
+    @patch("common.service_tools.auto_restart_if_needed.can_restart_system", return_value=True)
+    @patch("common.service_tools.auto_restart_if_needed.load_restart_policy", return_value={"auto_restart": True, "force_days": 7, "grace": 5})
     @patch("common.service_tools.auto_restart_if_needed.check_restart_required", return_value=True)
-    def test_manual_restart_notification_when_users_logged_in(
-        self, _check, _no_restart, _users, _load, mock_notify
-    ):
-        with self.assertLogs(auto_restart_if_needed.logger, level="INFO") as logs:
-            result = auto_restart_if_needed.main()
-        self.assertEqual(result, 0)
-        mock_notify.assert_called_once()
-        self.assertIn("manual restart needed", mock_notify.call_args.kwargs["subject"])
-        self.assertIn("Users are logged in, skipping restart | session_type='ssh-console'", "\n".join(logs.output))
-
-    @patch("common.service_tools.auto_restart_if_needed.perform_restart", return_value=0)
-    @patch("common.service_tools.auto_restart_if_needed.check_rdp_sessions", return_value=False)
-    @patch("common.service_tools.auto_restart_if_needed.check_desktop_sessions", return_value=False)
-    @patch("common.service_tools.auto_restart_if_needed.get_logged_in_users", return_value=[])
-    @patch("common.service_tools.auto_restart_if_needed.is_no_restart_mode", return_value=False)
-    @patch("common.service_tools.auto_restart_if_needed.load_notification_configs_from_state", return_value=["cfg"])
-    @patch("common.service_tools.auto_restart_if_needed.check_restart_required", return_value=True)
-    def test_auto_restart_path(
-        self, _check, _load, _no_restart, _users, _desktop, _rdp, mock_restart
+    def test_defers_when_sessions_active(
+        self, _check, _policy, _can_restart, _uptime, _sessions, _load, mock_notify, _time, _state, mock_save
     ):
         result = auto_restart_if_needed.main()
         self.assertEqual(result, 0)
-        mock_restart.assert_called_once_with(["cfg"])
+        mock_notify.assert_called_once()
+        self.assertIn("deferred", mock_notify.call_args.kwargs["subject"])
+        mock_save.assert_called_once()
+
+    @patch("common.service_tools.auto_restart_if_needed.perform_restart", return_value=0)
+    @patch("common.service_tools.auto_restart_if_needed.get_active_sessions", return_value=[])
+    @patch("common.service_tools.auto_restart_if_needed.get_uptime_seconds", return_value=3600)
+    @patch("common.service_tools.auto_restart_if_needed.can_restart_system", return_value=True)
+    @patch("common.service_tools.auto_restart_if_needed.load_restart_policy", return_value={"auto_restart": True, "force_days": 7, "grace": 5})
+    @patch("common.service_tools.auto_restart_if_needed.check_restart_required", return_value=True)
+    @patch("common.service_tools.auto_restart_if_needed.load_notification_configs_from_state", return_value=["cfg"])
+    def test_auto_restart_path(self, _load, _check, _policy, _can_restart, _uptime, _sessions, mock_restart):
+        result = auto_restart_if_needed.main()
+        self.assertEqual(result, 0)
+        mock_restart.assert_called_once_with(["cfg"], 5, forced=False)
 
     @patch("common.service_tools.auto_restart_if_needed.send_notification_safe")
+    @patch("common.service_tools.auto_restart_if_needed.shutil.which", return_value="/sbin/shutdown")
     @patch("common.service_tools.auto_restart_if_needed.subprocess.run", side_effect=subprocess.CalledProcessError(1, "shutdown"))
-    def test_perform_restart_failure_notifies(self, _run, mock_notify):
+    def test_perform_restart_failure_notifies(self, _run, _which, mock_notify):
         with self.assertLogs(auto_restart_if_needed.logger, level="ERROR") as logs:
-            result = auto_restart_if_needed.perform_restart(["cfg"])
+            result = auto_restart_if_needed.perform_restart(["cfg"], 5)
         self.assertEqual(result, 1)
         self.assertEqual(mock_notify.call_count, 2)
         self.assertIn("automatic restart failed", mock_notify.call_args.kwargs["subject"])
         self.assertIn("Failed to initiate restart | error=", "\n".join(logs.output))
 
+    @patch("common.service_tools.auto_restart_if_needed.perform_restart", return_value=0)
+    @patch("common.service_tools.auto_restart_if_needed.load_restart_state", return_value={"first_required": 0})
+    @patch("common.service_tools.auto_restart_if_needed.time.time", return_value=8 * 24 * 60 * 60)
+    @patch("common.service_tools.auto_restart_if_needed.get_active_sessions", return_value=["1 user seat0 tty2"])
+    @patch("common.service_tools.auto_restart_if_needed.get_uptime_seconds", return_value=3600)
+    @patch("common.service_tools.auto_restart_if_needed.can_restart_system", return_value=True)
+    @patch("common.service_tools.auto_restart_if_needed.load_restart_policy", return_value={"auto_restart": False, "force_days": 7, "grace": 5})
+    @patch("common.service_tools.auto_restart_if_needed.check_restart_required", return_value=True)
+    @patch("common.service_tools.auto_restart_if_needed.load_notification_configs_from_state", return_value=["cfg"])
+    def test_force_deadline_restarts_even_when_disabled(
+        self, _load, _check, _policy, _can_restart, _uptime, _sessions, _time, _state, mock_restart
+    ):
+        result = auto_restart_if_needed.main()
+        self.assertEqual(result, 0)
+        mock_restart.assert_called_once_with(["cfg"], 5, forced=True)
+
+    @patch("common.service_tools.auto_restart_if_needed.save_restart_state")
+    @patch("common.service_tools.auto_restart_if_needed.load_restart_state", return_value={})
+    @patch("common.service_tools.auto_restart_if_needed.time.time", return_value=100000)
     @patch("common.service_tools.auto_restart_if_needed.send_notification_safe")
     @patch("common.service_tools.auto_restart_if_needed.load_notification_configs_from_state", return_value=["cfg"])
-    @patch("common.service_tools.auto_restart_if_needed.is_no_restart_mode", return_value=True)
+    @patch("common.service_tools.auto_restart_if_needed.get_uptime_seconds", return_value=60)
+    @patch("common.service_tools.auto_restart_if_needed.can_restart_system", return_value=True)
+    @patch("common.service_tools.auto_restart_if_needed.load_restart_policy", return_value={"auto_restart": True, "force_days": 7, "grace": 5})
     @patch("common.service_tools.auto_restart_if_needed.check_restart_required", return_value=True)
-    def test_no_restart_mode_sends_notification(self, _check, _no_restart, _load, mock_notify):
+    def test_defers_during_minimum_uptime(
+        self, _check, _policy, _can_restart, _uptime, _load, mock_notify, _time, _state, mock_save
+    ):
         result = auto_restart_if_needed.main()
         self.assertEqual(result, 0)
         mock_notify.assert_called_once()
-        self.assertIn("automatic restart disabled", mock_notify.call_args.kwargs["subject"])
-
-    @patch("common.service_tools.auto_restart_if_needed.perform_restart")
-    @patch("common.service_tools.auto_restart_if_needed.send_notification_safe")
-    @patch("common.service_tools.auto_restart_if_needed.load_notification_configs_from_state", return_value=["cfg"])
-    @patch("common.service_tools.auto_restart_if_needed.is_no_restart_mode", return_value=True)
-    @patch("common.service_tools.auto_restart_if_needed.check_restart_required", return_value=True)
-    def test_no_restart_mode_does_not_restart(self, _check, _no_restart, _load, _notify, mock_restart):
-        auto_restart_if_needed.main()
-        mock_restart.assert_not_called()
+        mock_save.assert_called_once()
 
 
-class TestIsNoRestartMode(unittest.TestCase):
-    @patch("common.service_tools.auto_restart_if_needed.load_setup_config", return_value={"no_restart": True, "username": "u", "system_type": "server_proxmox"})
-    def test_returns_true_when_configured(self, _load):
-        self.assertTrue(auto_restart_if_needed.is_no_restart_mode())
+class TestRestartPolicy(unittest.TestCase):
+    @patch("common.service_tools.auto_restart_if_needed.load_setup_config", return_value={"auto_restart": False, "username": "u", "system_type": "server_lite"})
+    def test_reads_configured_auto_restart(self, _load):
+        policy = auto_restart_if_needed.load_restart_policy()
+        self.assertFalse(policy["auto_restart"])
 
-    @patch("common.service_tools.auto_restart_if_needed.load_setup_config", return_value={"no_restart": False, "username": "u", "system_type": "server_lite"})
-    def test_returns_false_when_not_configured(self, _load):
-        self.assertFalse(auto_restart_if_needed.is_no_restart_mode())
-
-    @patch("common.service_tools.auto_restart_if_needed.load_setup_config", return_value=None)
-    def test_returns_false_when_no_state(self, _load):
-        self.assertFalse(auto_restart_if_needed.is_no_restart_mode())
-
-    @patch("common.service_tools.auto_restart_if_needed.load_setup_config", return_value={"username": "u", "system_type": "server_lite"})
-    def test_returns_false_when_key_missing(self, _load):
-        self.assertFalse(auto_restart_if_needed.is_no_restart_mode())
+    @patch("common.service_tools.auto_restart_if_needed.load_setup_config", return_value={"no_restart": True, "username": "u", "system_type": "server_lite"})
+    def test_maps_legacy_no_restart(self, _load):
+        policy = auto_restart_if_needed.load_restart_policy()
+        self.assertFalse(policy["auto_restart"])
 
     @patch("common.service_tools.auto_restart_if_needed.load_setup_config", return_value={"username": "u", "system_type": "server_proxmox"})
-    def test_returns_true_for_server_proxmox_when_key_missing(self, _load):
-        self.assertTrue(auto_restart_if_needed.is_no_restart_mode())
+    def test_uses_proxmox_defaults(self, _load):
+        policy = auto_restart_if_needed.load_restart_policy()
+        self.assertFalse(policy["auto_restart"])
+        self.assertEqual(policy["force_days"], 7)
 
 
 if __name__ == "__main__":

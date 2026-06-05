@@ -596,6 +596,10 @@ def configure_firewall_ssh_only(config: SetupConfig) -> None:
 
 def configure_auto_restart(config: SetupConfig) -> None:
     """Configure automatic restart at 2 AM when updates require it."""
+    if not can_modify_kernel():
+        print("  ✓ Skipping automatic restart service (container)")
+        return
+
     service_name = "auto-restart-if-needed"
     service_file = f"/etc/systemd/system/{service_name}.service"
     timer_file = f"/etc/systemd/system/{service_name}.timer"
@@ -622,8 +626,8 @@ Description=Auto-restart system if needed (daily at 2 AM)
 Documentation=man:systemd.timer(5)
 
 [Timer]
+OnBootSec=30min
 OnCalendar=*-*-* 02:00:00
-Persistent=true
 RandomizedDelaySec=10min
 
 [Install]
@@ -637,7 +641,7 @@ WantedBy=timers.target
     run("systemctl enable auto-restart-if-needed.timer")
     run("systemctl start auto-restart-if-needed.timer")
     
-    print("  ✓ Automatic restart service configured (daily at 2 AM when needed)")
+    print("  ✓ Automatic restart service configured (daily at 2 AM and 30 minutes after boot when needed)")
 
 
 def configure_cleanup_maintenance(config: SetupConfig) -> None:

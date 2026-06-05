@@ -58,8 +58,9 @@ machine type, patch preserves it when `--machine` is omitted, and
 whose current setup default is VM.
 
 Proxmox host setup does not need a migration flag: `server_proxmox` remains a
-hardware flow with automatic restarts disabled by default. Bring those hosts up
-to date by rerunning the saved setup or patch command normally.
+hardware flow with normal automatic restarts disabled by default and a 7-day
+forced restart deadline. Bring those hosts up to date by rerunning the saved
+setup or patch command normally.
 
 ## Usage
 

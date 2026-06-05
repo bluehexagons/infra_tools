@@ -242,10 +242,22 @@ def add_setup_arguments(
              "Hostless specs like :3000 or 3000 listen directly without nginx.",
     )
     
-    parser.add_argument("--no-restart", dest="no_restart",
-                        action="store_true",
-                        default=None if not for_remote else False,
-                        help="Disable automatic restarts after updates. Instead of restarting, a notification will be sent. Default for server_proxmox.")
+    restart_group = parser.add_mutually_exclusive_group()
+    restart_group.add_argument("--auto-restart", dest="auto_restart",
+                               action="store_true",
+                               default=None if not for_remote else False,
+                               help="Allow automatic restarts after updates when no users are active.")
+    restart_group.add_argument("--no-auto-restart", "--no-restart", dest="auto_restart",
+                               action="store_false",
+                               help="Disable normal automatic restarts after updates. --no-restart is deprecated.")
+    parser.add_argument("--auto-restart-force-days", dest="auto_restart_force_days",
+                        type=int,
+                        default=None,
+                        help="Force restart after this many days of deferral. Use 0 to never force.")
+    parser.add_argument("--auto-restart-grace", dest="auto_restart_grace",
+                        type=int,
+                        default=None,
+                        help="Minutes of warning before an automatic restart starts.")
     
     parser.add_argument("--dry-run", action="store_true",
                        help="Show what would be done without executing commands")
