@@ -291,14 +291,16 @@ class SetupConfig:
         if self.custom_steps:
             args.append(f"--steps {shlex.quote(self.custom_steps)}")
         
-        if self.deploy_latest:
-            args.append("--deploy-latest")
-
         if self.deploy_specs:
             if self.full_deploy:
                 args.append("--full-deploy")
+            # Use --deploy-latest for each spec if deploy_latest is set, otherwise --deploy
+            flag = "--deploy-latest" if self.deploy_latest else "--deploy"
             for deploy_spec, git_url in self.deploy_specs:
-                args.append(f"--deploy {shlex.quote(deploy_spec)} {shlex.quote(git_url)}")
+                args.append(f"{flag} {shlex.quote(deploy_spec)} {shlex.quote(git_url)}")
+        elif self.deploy_latest:
+            # deploy_latest without specs doesn't make sense, but keep for backward compat
+            args.append("--deploy-latest")
         
         if self.reset_migrations:
             args.append("--reset-migrations")
@@ -472,14 +474,16 @@ class SetupConfig:
             cmd_parts.append(f"--steps {shlex.quote(self.custom_steps)}")
         
         # Deployments
-        if self.deploy_latest:
-            cmd_parts.append("--deploy-latest")
-
         if self.deploy_specs:
             if self.full_deploy:
                 cmd_parts.append("--full-deploy")
+            # Use --deploy-latest for each spec if deploy_latest is set, otherwise --deploy
+            flag = "--deploy-latest" if self.deploy_latest else "--deploy"
             for deploy_spec, git_url in self.deploy_specs:
-                cmd_parts.append(f"--deploy {shlex.quote(deploy_spec)} {shlex.quote(git_url)}")
+                cmd_parts.append(f"{flag} {shlex.quote(deploy_spec)} {shlex.quote(git_url)}")
+        elif self.deploy_latest:
+            # deploy_latest without specs doesn't make sense, but keep for backward compat
+            cmd_parts.append("--deploy-latest")
         
         if self.reset_migrations:
             cmd_parts.append("--reset-migrations")
