@@ -67,10 +67,14 @@ def print_setup_summary(config: SetupConfig, description: Optional[str] = None) 
         print(f"Deployments: {len(config.deploy_specs)} repository(ies)")
         for location, git_url in config.deploy_specs:
             print(f"  - {git_url} -> {location}")
-        if config.full_deploy:
-            print("Full deploy: Yes (rebuild all deployments)")
+        if config.deployment_mode == "lite":
+            print("Deploy mode: Lite (use cached repositories, no updates)")
+        elif config.deployment_mode == "full":
+            print("Deploy mode: Full (fresh clone, rebuild all deployments)")
         else:
-            print("Full deploy: No (skip unchanged deployments)")
+            print("Deploy mode: Default (update repositories, redeploy if changed)")
+        if config.full_deploy and config.deployment_mode != "full":
+            print("Full deploy: Yes (rebuild all deployments even if unchanged)")
         if config.enable_ssl:
             print("SSL: Yes (Let's Encrypt)")
             if config.ssl_email:

@@ -222,7 +222,9 @@ python3 infra_tools.py setup server_web 10.0.0.50 admin \
 | Flag | Description |
 |------|-------------|
 | `--deploy DOMAIN GIT_URL` | Deploy repository to domain. `GIT_URL` can be a local directory path or a git URL |
-| `--full-deploy` | Always rebuild deployments (don't skip unchanged) |
+| `--deployment-lite` | Use cached/pre-uploaded repository files only, with no updates (skips repos that aren't cached) |
+| `--deployment-full` | Always pull fresh repositories and rebuild everything (a full redeploy; implies `--full-deploy`) |
+| `--full-deploy` | Always rebuild deployments even if unchanged (default mode still updates repositories first) |
 | `--ssl` | Enable Let's Encrypt SSL |
 | `--ssl-email EMAIL` | Email for SSL registration |
 | `--cloudflare` | Configure Cloudflare Tunnel. Generated nginx sites do not redirect HTTP to HTTPS because cloudflared connects to the origin over HTTP |

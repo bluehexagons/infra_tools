@@ -225,7 +225,17 @@ class SetupConfig:
     include_pc_dev_apps: bool = False
     include_web_server: bool = False
     include_web_firewall: bool = False
-    
+
+    def __post_init__(self) -> None:
+        # "full" deployment mode means "always pull fresh repositories and
+        # rebuild everything" (a full redeploy). That necessarily implies
+        # full_deploy, so keep the two in sync. Without this, passing
+        # --deployment-full alone would still report "Full deploy: No" and
+        # should_redeploy() could skip unchanged deployments, contradicting
+        # the requested full redeploy.
+        if self.deployment_mode == "full":
+            self.full_deploy = True
+
     def to_remote_args(self) -> StrList:
         """Generate command line arguments for remote execution."""
         args: StrList = []
@@ -292,7 +302,12 @@ class SetupConfig:
             args.append(f"--steps {shlex.quote(self.custom_steps)}")
         
         if self.deploy_specs:
-            if self.full_deploy:
+            if self.deployment_mode == "lite":
+                args.append("--deployment-lite")
+            elif self.deployment_mode == "full":
+                # --deployment-full already implies a full rebuild on the remote
+                args.append("--deployment-full")
+            elif self.full_deploy:
                 args.append("--full-deploy")
             # Use --deploy-latest for each spec if deploy_latest is set, otherwise --deploy
             flag = "--deploy-latest" if self.deploy_latest else "--deploy"
@@ -475,7 +490,12 @@ class SetupConfig:
         
         # Deployments
         if self.deploy_specs:
-            if self.full_deploy:
+            if self.deployment_mode == "lite":
+                cmd_parts.append("--deployment-lite")
+            elif self.deployment_mode == "full":
+                # --deployment-full already implies a full rebuild on the remote
+                cmd_parts.append("--deployment-full")
+            elif self.full_deploy:
                 cmd_parts.append("--full-deploy")
             # Use --deploy-latest for each spec if deploy_latest is set, otherwise --deploy
             flag = "--deploy-latest" if self.deploy_latest else "--deploy"

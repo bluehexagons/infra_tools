@@ -143,6 +143,18 @@ class TestSetupConfigToRemoteArgs(unittest.TestCase):
         # Default deployment mode doesn't add a flag; lite and full modes use --deployment-lite/--deployment-full
         self.assertIn('--deploy', args_str)
 
+    def test_deployment_mode_flags(self):
+        deploy_specs = [['example.com/', 'https://github.com/user/repo.git']]
+
+        lite = self._make_config(deploy_specs=deploy_specs, deployment_mode='lite')
+        self.assertIn('--deployment-lite', lite.to_remote_args())
+        self.assertIn('--deployment-lite', lite.to_setup_command())
+
+        full = self._make_config(deploy_specs=deploy_specs, deployment_mode='full')
+        self.assertTrue(full.full_deploy)
+        self.assertIn('--deployment-full', full.to_remote_args())
+        self.assertIn('--deployment-full', full.to_setup_command())
+
     def test_deploy_latest(self):
         config = self._make_config(deploy_latest=True)
         args = config.to_remote_args()
