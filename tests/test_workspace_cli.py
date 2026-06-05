@@ -58,6 +58,46 @@ class TestWorkspaceCli(unittest.TestCase):
             ["food.example.com,/food,example.com/food", "https://github.com/user/food.git"],
         ])
 
+    def test_setup_parser_accepts_deploy_latest_pairs(self):
+        parser, _setup_parser, _patch_parser = infra_tools.create_infra_tools_parser()
+        args = parser.parse_args([
+            "setup",
+            "server_web",
+            "example.com",
+            "testuser",
+            "--ruby",
+            "--node",
+            "--deploy-latest",
+            "hexagonalhomelab.com/,/",
+            "https://github.com/bluehexagons/bluehexagons.git",
+            "--deploy-latest",
+            "clicker.hexagonalhomelab.com",
+            "https://github.com/bluehexagons/rails_test.git",
+            "--deploy-latest",
+            "foodguide.hexagonalhomelab.com,/foodguide,hexagonalhomelab.com/foodguide",
+            "https://github.com/bluehexagons/foodguide.git",
+        ])
+
+        self.assertTrue(args.deploy_latest)
+        self.assertEqual(args.deploy_specs, [
+            ["hexagonalhomelab.com/,/", "https://github.com/bluehexagons/bluehexagons.git"],
+            ["clicker.hexagonalhomelab.com", "https://github.com/bluehexagons/rails_test.git"],
+            ["foodguide.hexagonalhomelab.com,/foodguide,hexagonalhomelab.com/foodguide", "https://github.com/bluehexagons/foodguide.git"],
+        ])
+
+    def test_remote_setup_parser_accepts_deploy_latest_pairs(self):
+        parser = create_setup_argument_parser("test", for_remote=True, allow_steps=True)
+        args = parser.parse_args([
+            "--system-type",
+            "server_web",
+            "--deploy-latest",
+            "clicker.example.com",
+            "https://github.com/user/clicker.git",
+        ])
+
+        self.assertTrue(args.deploy_latest)
+        self.assertEqual(args.deploy_specs, [["clicker.example.com", "https://github.com/user/clicker.git"]])
+
     def test_setup_parser_still_accepts_repeated_deploy_flags(self):
         parser, _setup_parser, _patch_parser = infra_tools.create_infra_tools_parser()
         args = parser.parse_args([
