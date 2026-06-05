@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 from typing import Optional
 
+from lib.apt_sources import disable_duplicate_vivaldi_source
 from lib.config import SetupConfig
 from lib.machine_state import can_manage_time_sync
 from lib.remote_utils import run, is_dry_run, is_package_installed, is_service_active, file_contains, install_package
@@ -32,6 +33,13 @@ def set_user_password(username: str, password: str) -> bool:
 def update_and_upgrade_packages(config: SetupConfig) -> None:
     print("  Updating package lists...")
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
+    try:
+        disabled_path = disable_duplicate_vivaldi_source()
+    except (OSError, ValueError) as e:
+        print(f"  ⚠ Could not clean duplicate Vivaldi APT source: {e}")
+    else:
+        if disabled_path:
+            print(f"  ✓ Disabled duplicate Vivaldi APT source: {disabled_path}")
     run("apt-get update -qq")
     print("  Upgrading packages...")
     run("apt-get upgrade -y -qq")
