@@ -89,6 +89,8 @@ def main() -> int:
 
     if args.deploy_latest:
         os.environ["INFRA_TOOLS_DEPENDENCY_MIN_AGE_DAYS"] = "0"
+        # When using --deploy-latest, disable lite_deploy to force fresh clones
+        args.lite_deploy = False
 
     if args.dry_run:
         set_dry_run(True)
