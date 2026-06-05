@@ -25,7 +25,7 @@ from lib.deploy_utils import (
     should_redeploy
 )
 from lib.systemd_service import create_rails_service, create_managed_service, install_unit_file
-from lib.project_manifest import Component, Manifest, load_manifest, render_template
+from lib.project_manifest import Component, Manifest, has_placeholder, load_manifest, render_template
 
 
 class DeploymentOrchestrator:
@@ -712,9 +712,10 @@ class DeploymentOrchestrator:
         # Build every component, then describe it for nginx.
         deps: list[dict[str, Any]] = []
         for component in manifest.components:
-            print(f"  Component '{component.name}' ({component.type}) → {component.domain}{component.path}")
+            component_domain = self._component_domain(component, domain)
+            print(f"  Component '{component.name}' ({component.type}) → {component_domain}{component.path}")
             self._run_component_build(component, dest_path)
-            deps.append(self._component_dep(component, dest_path))
+            deps.append(self._component_dep(component, dest_path, domain))
 
         # The release tree is deploy-owned and world-readable so nginx can serve
         # static files and each (separately-owned) service user can read and exec
@@ -730,7 +731,7 @@ class DeploymentOrchestrator:
         # Start services after the release tree is readable so they can exec.
         for component in manifest.components:
             if component.is_service:
-                self._install_service_component(component, dest_path)
+                self._install_service_component(component, dest_path, domain)
 
         save_deployment_metadata(dest_path, git_url, commit_hash)
         print(f"  ✓ Manifest deployed to {dest_path}")
@@ -752,11 +753,22 @@ class DeploymentOrchestrator:
                 error = self._get_command_error(result, "build command failed")
                 raise RuntimeError(f"Component '{component.name}' build failed: {error}")
 
-    def _component_dep(self, component: Component, dest_path: str) -> dict[str, Any]:
+    def _component_domain(self, component: Component, deploy_domain: Optional[str]) -> str:
+        if not has_placeholder(component.domain):
+            return component.domain
+        if not deploy_domain:
+            raise RuntimeError(
+                f"Component '{component.name}' domain uses {{domain}}, but no deploy domain was provided"
+            )
+        return render_template(component.domain, {'domain': deploy_domain})
+
+    def _component_dep(self, component: Component, dest_path: str,
+                       deploy_domain: Optional[str] = None) -> dict[str, Any]:
         """Translate a component into an nginx deployment descriptor."""
+        component_domain = self._component_domain(component, deploy_domain)
         dep: dict[str, Any] = {
             'dest_path': dest_path,
-            'domain': component.domain,
+            'domain': component_domain,
             'path': component.path,
             'api_subdomain': False,
             'frontend_port': None,
@@ -778,10 +790,12 @@ class DeploymentOrchestrator:
             serve_path=dest_path,
             backend_port=component.port,
             proxy_port=component.port,
+            preserve_path=True,
         )
         return dep
 
-    def _service_context(self, component: Component, dest_path: str) -> dict[str, str]:
+    def _service_context(self, component: Component, dest_path: str,
+                         deploy_domain: Optional[str] = None) -> dict[str, str]:
         """Build the deploy-time {{...}} substitution context for a service.
 
         Variables are resolved in dependency order (binary, then working_dir,
@@ -794,7 +808,7 @@ class DeploymentOrchestrator:
             'base_dir': self.base_dir,
             'name': component.name,
             'service_name': unit_name,
-            'domain': component.domain,
+            'domain': self._component_domain(component, deploy_domain),
             'path': component.path,
             # For a service, the user is its own dedicated, isolated identity.
             'web_user': username,
@@ -821,8 +835,9 @@ class DeploymentOrchestrator:
             return working_dir
         return os.path.normpath(os.path.join(dest_path, working_dir))
 
-    def _install_service_component(self, component: Component, dest_path: str) -> None:
-        context = self._service_context(component, dest_path)
+    def _install_service_component(self, component: Component, dest_path: str,
+                                   deploy_domain: Optional[str] = None) -> None:
+        context = self._service_context(component, dest_path, deploy_domain)
         username = context['web_user']
         service_name = context['service_name']
 

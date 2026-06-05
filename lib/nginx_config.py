@@ -74,9 +74,10 @@ map $uri {cc_var} {{
 
 def _make_proxy_location(path: str, port: int, comment: str, enable_websocket: bool = False,
                         expires_var: Optional[str] = None, cc_var: Optional[str] = None,
-                        forwarded_proto: str = "$scheme", enable_path_redirect: bool = True) -> str:
+                        forwarded_proto: str = "$scheme", enable_path_redirect: bool = True,
+                        preserve_path: bool = False) -> str:
     """Generate a proxy_pass location block."""
-    slash = "/" if path != "/" else ""
+    slash = "" if preserve_path or path == "/" else "/"
     
     content = [
         f"        proxy_pass http://127.0.0.1:{port}{slash};",
@@ -325,7 +326,8 @@ def generate_merged_nginx_config(
                 locations.append(_make_proxy_location(
                     location_path, proxy_port, f"# Proxy for {path}",
                     expires_var=expires_var, cc_var=cc_var,
-                    forwarded_proto=forwarded_proto, enable_path_redirect=enable_path_redirect
+                    forwarded_proto=forwarded_proto, enable_path_redirect=enable_path_redirect,
+                    preserve_path=dep.get('preserve_path', False)
                 ))
         else:
             serve_path = dep['serve_path']

@@ -202,7 +202,9 @@ def _parse_component(entry: object, index: int) -> Component:
     where = f"component {name!r}"
 
     domain = _require_str(entry, "domain", where)
-    if not validate_host(domain):
+    if has_placeholder(domain):
+        _validate_placeholders(domain, "domain", where)
+    elif not validate_host(domain):
         raise ValueError(f"{where}: invalid domain: {domain}")
 
     path = entry.get("path", "/")

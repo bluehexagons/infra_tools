@@ -148,6 +148,10 @@ class TestRejects(unittest.TestCase):
     def test_invalid_domain(self):
         self._assert_rejected(_manifest(_static(domain="not a host")), "domain")
 
+    def test_domain_placeholder_accepted(self):
+        comp = parse_manifest(_manifest(_static(domain="{{domain}}"))).components[0]
+        self.assertEqual(comp.domain, "{{domain}}")
+
     def test_invalid_name(self):
         self._assert_rejected(_manifest(_static(name="Site_1")), "name")
 
@@ -308,7 +312,8 @@ class TestLoadManifest(unittest.TestCase):
         manifest = load_manifest(repo)
         assert manifest is not None
         names = {c.name for c in manifest.components}
-        self.assertEqual(names, {"site", "shop-api"})
+        self.assertEqual(names, {"site"})
+        self.assertEqual(manifest.components[0].domain, "{{domain}}")
 
 
 if __name__ == "__main__":

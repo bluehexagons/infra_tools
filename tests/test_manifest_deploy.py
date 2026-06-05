@@ -92,6 +92,13 @@ class TestComponentDescriptor(unittest.TestCase):
         self.assertEqual(dep['proxy_port'], 8090)
         self.assertEqual(dep['domain'], "api.example.com")
         self.assertFalse(dep['api_subdomain'])
+        self.assertTrue(dep['preserve_path'])
+
+    def test_deploy_domain_placeholder(self):
+        dep = self.orch._component_dep(
+            _static_component(domain="{{domain}}"), "/var/www/site", "deployed.example"
+        )
+        self.assertEqual(dep['domain'], "deployed.example")
 
     def test_service_identity(self):
         unit, user = self.orch._service_identity("/var/www/example_com", _service_component())
@@ -144,6 +151,12 @@ class TestServiceContext(unittest.TestCase):
         ctx = self.orch._service_context(comp, "/var/www/shop")
         self.assertEqual(ctx['env_file'], "/var/www/.infra_tools_shared/shop/api/.env")
 
+    def test_deploy_domain_available_to_service_templates(self):
+        comp = _service_component(domain="{{domain}}", env_file="{{base_dir}}/{{domain}}/.env")
+        ctx = self.orch._service_context(comp, "/var/www/shop", "deployed.example")
+        self.assertEqual(ctx['domain'], "deployed.example")
+        self.assertEqual(ctx['env_file'], "/var/www/deployed.example/.env")
+
     def test_exec_component_context_has_no_binary(self):
         # With exec (and no binary field), {{binary}} is intentionally absent;
         # referencing it would fail fast at render time.
@@ -170,6 +183,14 @@ class TestNginxIntegration(unittest.TestCase):
         cfg = generate_merged_nginx_config("api.example.com", [dep], enable_https_redirect=False)
         self.assertIn("proxy_pass http://127.0.0.1:8090", cfg)
         self.assertIn("server_name api.example.com;", cfg)
+
+    def test_service_subpath_preserves_request_uri(self):
+        dep = self.orch._component_dep(
+            _service_component(domain="example.com", path="/api"), "/var/www/site"
+        )
+        cfg = generate_merged_nginx_config("example.com", [dep], enable_https_redirect=False)
+        self.assertIn("location /api/", cfg)
+        self.assertIn("proxy_pass http://127.0.0.1:8090;", cfg)
 
 
 class TestDeployManifest(unittest.TestCase):
