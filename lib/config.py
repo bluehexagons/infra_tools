@@ -183,6 +183,7 @@ class SetupConfig:
     install_python: bool = False
     custom_steps: Optional[str] = None
     deploy_specs: Optional[NestedStrList] = None
+    deployment_mode: str = "default"  # "default" (smart cache), "lite" (cached only), "full" (always fresh)
     full_deploy: bool = False
     deploy_latest: bool = False
     reset_migrations: bool = False
@@ -294,7 +295,6 @@ class SetupConfig:
             args.append("--deploy-latest")
 
         if self.deploy_specs:
-            args.append("--lite-deploy")
             if self.full_deploy:
                 args.append("--full-deploy")
             for deploy_spec, git_url in self.deploy_specs:
@@ -755,6 +755,7 @@ class SetupConfig:
             install_python=getattr(args, 'install_python', False),
             custom_steps=getattr(args, 'custom_steps', None),
             deploy_specs=getattr(args, 'deploy_specs', None),
+            deployment_mode=getattr(args, 'deployment_mode', 'default'),
             full_deploy=getattr(args, 'full_deploy', False),
             deploy_latest=getattr(args, 'deploy_latest', False),
             reset_migrations=getattr(args, 'reset_migrations', False),

@@ -178,9 +178,11 @@ def add_setup_arguments(
                        action=DeploySpecAction, nargs="+", metavar="DEPLOY",
                        help="Deploy git repositories as DOMAIN_OR_PATH GIT_URL pairs (can be used multiple times)")
     
-    if for_remote:
-        parser.add_argument("--lite-deploy", action="store_true",
-                           help="Use pre-uploaded repository files instead of cloning (for remote execution)")
+    deployment_mode_group = parser.add_mutually_exclusive_group()
+    deployment_mode_group.add_argument("--deployment-lite", dest="deployment_mode", action="store_const", const="lite",
+                                       help="Use pre-uploaded/cached repository files only (skip if not available)")
+    deployment_mode_group.add_argument("--deployment-full", dest="deployment_mode", action="store_const", const="full",
+                                       help="Always pull fresh repositories and rebuild everything (force redeploy)")
     
     parser.add_argument("--full-deploy", dest="full_deploy", action="store_true",
                        help="Always rebuild deployments even if they haven't changed (default: skip unchanged deployments)")

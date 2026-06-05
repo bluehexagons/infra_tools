@@ -31,6 +31,161 @@ def extract_repo_name(git_url: str) -> str:
     return repo_name
 
 
+def get_repository_source_path(
+    git_url: str,
+    deployment_mode: str,
+    dry_run: bool = False
+) -> Optional[tuple[str, str]]:
+    """
+    Get the source path for a repository based on deployment mode.
+    
+    Returns: (source_path, commit_hash) or None if deployment should be skipped
+    Deployment modes:
+    - "lite": Use cached only, skip if not available
+    - "default": Smart cache - check for updates, use cache if up-to-date
+    - "full": Always fresh clone from GitHub
+    """
+    import subprocess
+    import tempfile
+    import shutil
+    from lib.deploy_utils import get_git_commit_hash
+    
+    repo_name = extract_repo_name(git_url)
+    cache_path = f'/opt/infra_tools/deployments/{repo_name}'
+    
+    if deployment_mode == "lite":
+        # Lite mode: use cached only
+        if not os.path.exists(cache_path):
+            print(f"\n⚠ Lite mode: {cache_path} not found, skipping {git_url}")
+            return None
+        
+        commit_hash = ""
+        commit_file = f'{cache_path}.commit'
+        if os.path.exists(commit_file):
+            try:
+                with open(commit_file, 'r') as f:
+                    content = f.read().strip()
+                    if content:
+                        commit_hash = content
+            except Exception:
+                pass
+        
+        print(f"\nUsing cached {repo_name}")
+        return (cache_path, commit_hash)
+    
+    elif deployment_mode == "full":
+        # Full mode: always fresh clone
+        temp_dir = tempfile.mkdtemp(prefix="infra_deploy_")
+        clone_path = os.path.join(temp_dir, repo_name)
+        
+        if not dry_run:
+            print(f"\nCloning {git_url}...")
+            result = subprocess.run(
+                ["git", "clone", git_url, clone_path],
+                capture_output=True,
+                text=True,
+                timeout=300
+            )
+            
+            if result.returncode != 0:
+                print(f"  Error cloning repository: {result.stderr}")
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                return None
+            
+            print(f"  ✓ Cloned to {clone_path}")
+            commit_hash_result = get_git_commit_hash(clone_path)
+            commit_hash = commit_hash_result if commit_hash_result else ""
+            return (clone_path, commit_hash)
+        else:
+            print(f"  [DRY RUN] Would clone {git_url}")
+            return (clone_path, "")
+    
+    else:
+        # Default mode: smart cache
+        if os.path.exists(cache_path):
+            commit_file = f'{cache_path}.commit'
+            cached_commit = ""
+            if os.path.exists(commit_file):
+                try:
+                    with open(commit_file, 'r') as f:
+                        content = f.read().strip()
+                        if content:
+                            cached_commit = content
+                except Exception:
+                    pass
+            
+            if not dry_run:
+                # Check if remote has newer commits
+                try:
+                    # Fetch updates
+                    subprocess.run(
+                        ["git", "-C", cache_path, "fetch", "--all"],
+                        capture_output=True,
+                        text=True,
+                        timeout=60
+                    )
+                    
+                    # Get remote HEAD
+                    result = subprocess.run(
+                        ["git", "-C", cache_path, "rev-parse", "origin/HEAD"],
+                        capture_output=True,
+                        text=True,
+                        timeout=30
+                    )
+                    
+                    remote_commit = result.stdout.strip() if result.returncode == 0 else None
+                    
+                    if remote_commit and remote_commit != cached_commit:
+                        # Remote has changes, pull and update
+                        print(f"\nUpdating {repo_name} from remote...")
+                        subprocess.run(
+                            ["git", "-C", cache_path, "pull", "--all"],
+                            capture_output=True,
+                            text=True,
+                            timeout=300
+                        )
+                        commit_hash_result = get_git_commit_hash(cache_path)
+                        commit_hash = commit_hash_result if commit_hash_result else cached_commit
+                        print(f"  ✓ Updated to {commit_hash[:7] if commit_hash else 'latest'}")
+                    else:
+                        print(f"\nUsing cached {repo_name} (up-to-date)")
+                        commit_hash = cached_commit
+                except Exception as e:
+                    print(f"\nWarning checking for updates: {e}, using cached")
+                    commit_hash = cached_commit
+            else:
+                print(f"  [DRY RUN] Would check and possibly update {cache_path}")
+                commit_hash = cached_commit
+            
+            return (cache_path, commit_hash)
+        else:
+            # Cache doesn't exist, do fresh clone
+            temp_dir = tempfile.mkdtemp(prefix="infra_deploy_")
+            clone_path = os.path.join(temp_dir, repo_name)
+            
+            if not dry_run:
+                print(f"\nCloning {git_url} (cache miss)...")
+                result = subprocess.run(
+                    ["git", "clone", git_url, clone_path],
+                    capture_output=True,
+                    text=True,
+                    timeout=300
+                )
+                
+                if result.returncode != 0:
+                    print(f"  Error cloning repository: {result.stderr}")
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                    return None
+                
+                print(f"  ✓ Cloned to {clone_path}")
+                commit_hash_result = get_git_commit_hash(clone_path)
+                commit_hash = commit_hash_result if commit_hash_result else ""
+                return (clone_path, commit_hash)
+            else:
+                print(f"  [DRY RUN] Would clone {git_url}")
+                return (clone_path, "")
+
+
 def _load_args_file(args_file: str) -> list[str]:
     try:
         with open(args_file, "r", encoding="utf-8") as file_obj:
@@ -89,8 +244,6 @@ def main() -> int:
 
     if args.deploy_latest:
         os.environ["INFRA_TOOLS_DEPENDENCY_MIN_AGE_DAYS"] = "0"
-        # When using --deploy-latest, disable lite_deploy to force fresh clones
-        args.lite_deploy = False
 
     if args.dry_run:
         set_dry_run(True)
@@ -103,6 +256,10 @@ def main() -> int:
     except ValueError as e:
         print(f"Error: {e}")
         return 1
+    
+    # When using --deploy-latest with lite mode, upgrade to default mode for fresh clone
+    if args.deploy_latest and config.deployment_mode == "lite":
+        config.deployment_mode = "default"
     
     if not validate_username(config.username):
         print(f"Error: Invalid username: {config.username}")
@@ -211,91 +368,32 @@ def main() -> int:
         
         deployments: Deployments = []
         
-        if args.lite_deploy:
-            for deploy_specs_str, git_url in config.deploy_specs:
-                repo_name = extract_repo_name(git_url)
-                source_path = f'/opt/infra_tools/deployments/{repo_name}'
-                
-                if not os.path.exists(source_path):
-                    print(f"\n⚠ Warning: {source_path} not found, skipping {git_url}")
+        for deploy_specs_str, git_url in config.deploy_specs:
+            repo_result = get_repository_source_path(git_url, config.deployment_mode, config.dry_run)
+            if repo_result is None:
+                continue
+            
+            source_path, commit_hash = repo_result
+            
+            for deploy_spec in deploy_specs_str.split(','):
+                deploy_spec = deploy_spec.strip()
+                if not deploy_spec:
                     continue
-                
-                commit_hash: str = ""
-                commit_file = f'/opt/infra_tools/deployments/{repo_name}.commit'
-                if os.path.exists(commit_file):
-                    try:
-                        with open(commit_file, 'r') as f:
-                            content = f.read().strip()
-                            if content:
-                                commit_hash = content
-                    except Exception:
-                        pass
-                
-                for deploy_spec in deploy_specs_str.split(','):
-                    deploy_spec = deploy_spec.strip()
-                    if not deploy_spec: continue
 
-                    print(f"\nDeploying pre-uploaded repository: {repo_name}")
-                    infos = deploy_repository(
-                        source_path=source_path,
-                        deploy_spec=deploy_spec,
-                        git_url=git_url,
-                        commit_hash=commit_hash,
-                        full_deploy=config.full_deploy,
-                        web_user="rails",
-                        web_group="rails",
-                        keep_source=True,
-                        api_subdomain=config.api_subdomain,
-                        reset_migrations=config.reset_migrations
-                    )
-                    if infos:
-                        deployments.extend(infos)
-        else:
-            temp_dir = tempfile.mkdtemp(prefix="infra_deploy_")
-            try:
-                for deploy_specs_str, git_url in config.deploy_specs:
-                    repo_name = extract_repo_name(git_url)
-                    clone_path = os.path.join(temp_dir, repo_name)
-                    
-                    print(f"\nCloning {git_url}...")
-                    result = subprocess.run(
-                        ["git", "clone", git_url, clone_path],
-                        capture_output=True,
-                        text=True,
-                        timeout=300
-                    )
-                    
-                    if result.returncode != 0:
-                        print(f"  Error cloning repository: {result.stderr}")
-                        continue
-                    
-                    print(f"  ✓ Cloned to {clone_path}")
-                    
-                    from lib.deploy_utils import get_git_commit_hash
-                    commit_hash_result = get_git_commit_hash(clone_path)
-                    commit_hash: str = commit_hash_result if commit_hash_result else ""
-                    
-                    for deploy_spec in deploy_specs_str.split(','):
-                        deploy_spec = deploy_spec.strip()
-                        if not deploy_spec: continue
-
-                        infos = deploy_repository(
-                            source_path=clone_path,
-                            deploy_spec=deploy_spec,
-                            git_url=git_url,
-                            commit_hash=commit_hash,
-                            full_deploy=config.full_deploy,
-                            web_user="rails",
-                            web_group="rails",
-                            keep_source=True,
-                            api_subdomain=config.api_subdomain,
-                            reset_migrations=config.reset_migrations
-                        )
-                        if infos:
-                            deployments.extend(infos)
-            finally:
-                if os.path.exists(temp_dir):
-                    shutil.rmtree(temp_dir)
+                infos = deploy_repository(
+                    source_path=source_path,
+                    deploy_spec=deploy_spec,
+                    git_url=git_url,
+                    commit_hash=commit_hash,
+                    full_deploy=config.full_deploy,
+                    web_user="rails",
+                    web_group="rails",
+                    keep_source=True,
+                    api_subdomain=config.api_subdomain,
+                    reset_migrations=config.reset_migrations
+                )
+                if infos:
+                    deployments.extend(infos)
         
         if deployments:
             print("\n" + "=" * 60)

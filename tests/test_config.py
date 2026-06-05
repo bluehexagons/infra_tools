@@ -140,7 +140,7 @@ class TestSetupConfigToRemoteArgs(unittest.TestCase):
         config = self._make_config(deploy_specs=[['example.com/', 'https://github.com/user/repo.git']])
         args = config.to_remote_args()
         args_str = ' '.join(args)
-        self.assertIn('--lite-deploy', args_str)
+        # Default deployment mode doesn't add a flag; lite and full modes use --deployment-lite/--deployment-full
         self.assertIn('--deploy', args_str)
 
     def test_deploy_latest(self):
