@@ -266,10 +266,9 @@ class ConcurrentOperationManager:
         
         self._running_operations: dict[str, Operation] = {}
         self._operation_lock = threading.RLock()
+        self._idle_condition = threading.Condition(self._operation_lock)
+        self._pending_operations = 0
         self._shutdown = False
-        
-        self._workers: list[threading.Thread] = []
-        self._start_workers()
         
         self._metrics = {
             'operations_started': 0,
@@ -278,6 +277,9 @@ class ConcurrentOperationManager:
             'memory_throttles': 0,
             'resource_conflicts': 0
         }
+
+        self._workers: list[threading.Thread] = []
+        self._start_workers()
     
     def _start_workers(self) -> None:
         for i in range(self.max_concurrent):
@@ -294,7 +296,8 @@ class ConcurrentOperationManager:
                     continue
 
                 if not self._can_run_operation(execution_context):
-                    self.queue.enqueue(execution_context)
+                    if not self.queue.enqueue(execution_context):
+                        self._mark_operation_finished()
                     time.sleep(1.0)
                     continue
                 
@@ -308,7 +311,8 @@ class ConcurrentOperationManager:
                     with self._operation_lock:
                         del self._running_operations[execution_context.id]
                         execution_context.started_at = None
-                    self.queue.enqueue(execution_context)
+                    if not self.queue.enqueue(execution_context):
+                        self._mark_operation_finished()
                     time.sleep(2.0)
                     continue
                 
@@ -337,6 +341,8 @@ class ConcurrentOperationManager:
                     
                     with self._operation_lock:
                         self._running_operations.pop(execution_context.id, None)
+                        self._pending_operations = max(0, self._pending_operations - 1)
+                        self._idle_condition.notify_all()
                         
             except Exception as e:
                 print(f"Worker thread error: {e}")
@@ -345,19 +351,23 @@ class ConcurrentOperationManager:
     def wait_until_idle(self, timeout: float = 0.0) -> bool:
         """Wait until all operations are completed and queue is empty."""
         start_time = time.time()
-        while True:
-            with self._operation_lock:
-                running_count = len(self._running_operations)
-            
-            queue_size = self.queue.size()
-            
-            if running_count == 0 and queue_size == 0:
-                return True
-            
-            if timeout > 0 and (time.time() - start_time) > timeout:
-                return False
-                
-            time.sleep(0.5)
+        with self._idle_condition:
+            while self._pending_operations > 0:
+                if timeout <= 0:
+                    self._idle_condition.wait(timeout=0.5)
+                    continue
+
+                remaining = timeout - (time.time() - start_time)
+                if remaining <= 0:
+                    return False
+                self._idle_condition.wait(timeout=min(0.5, remaining))
+            return True
+
+    def _mark_operation_finished(self) -> None:
+        """Record a terminal operation when work could not be requeued."""
+        with self._idle_condition:
+            self._pending_operations = max(0, self._pending_operations - 1)
+            self._idle_condition.notify_all()
 
     def _get_execution_context(self) -> Optional[Operation]:
         return self.queue.dequeue()
@@ -441,7 +451,11 @@ class ConcurrentOperationManager:
             logger=logger
         )
         
-        success = self.queue.enqueue(operation)
+        with self._operation_lock:
+            success = self.queue.enqueue(operation)
+            if success:
+                self._pending_operations += 1
+
         if success:
             logger.log_step("queued", "completed", f"Operation queued with {priority.name} priority")
         else:
@@ -468,7 +482,10 @@ class ConcurrentOperationManager:
         }
     
     def cancel_operation(self, operation_id: str) -> bool:
-        return self.queue.remove(operation_id)
+        removed = self.queue.remove(operation_id)
+        if removed:
+            self._mark_operation_finished()
+        return removed
     
     def shutdown(self) -> None:
         self._shutdown = True
