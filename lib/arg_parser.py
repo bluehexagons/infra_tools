@@ -148,6 +148,8 @@ def add_setup_arguments(
     
     parser.add_argument("--full-deploy", dest="full_deploy", action="store_true",
                        help="Always rebuild deployments even if they haven't changed (default: skip unchanged deployments)")
+    parser.add_argument("--deploy-latest", dest="deploy_latest", action="store_true",
+                       help="Deploy the latest versions of packages and releases, bypassing the release age policy")
     parser.add_argument("--reset-migrations", dest="reset_migrations", action="store_true",
                        help="Reset Rails database schema using db:schema:load (use when migrations were squashed or reset)")
     parser.add_argument("--ssl", dest="enable_ssl", 

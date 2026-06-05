@@ -86,7 +86,10 @@ def main() -> int:
     )
     
     args = parser.parse_args(_resolve_cli_args(sys.argv[1:]))
-    
+
+    if args.deploy_latest:
+        os.environ["INFRA_TOOLS_DEPENDENCY_MIN_AGE_DAYS"] = "0"
+
     if args.dry_run:
         set_dry_run(True)
         print("=" * 60)

@@ -184,6 +184,7 @@ class SetupConfig:
     custom_steps: Optional[str] = None
     deploy_specs: Optional[NestedStrList] = None
     full_deploy: bool = False
+    deploy_latest: bool = False
     reset_migrations: bool = False
     enable_ssl: bool = False
     ssl_email: Optional[str] = None
@@ -289,6 +290,9 @@ class SetupConfig:
         if self.custom_steps:
             args.append(f"--steps {shlex.quote(self.custom_steps)}")
         
+        if self.deploy_latest:
+            args.append("--deploy-latest")
+
         if self.deploy_specs:
             args.append("--lite-deploy")
             if self.full_deploy:
@@ -468,6 +472,9 @@ class SetupConfig:
             cmd_parts.append(f"--steps {shlex.quote(self.custom_steps)}")
         
         # Deployments
+        if self.deploy_latest:
+            cmd_parts.append("--deploy-latest")
+
         if self.deploy_specs:
             if self.full_deploy:
                 cmd_parts.append("--full-deploy")
@@ -748,6 +755,7 @@ class SetupConfig:
             custom_steps=getattr(args, 'custom_steps', None),
             deploy_specs=getattr(args, 'deploy_specs', None),
             full_deploy=getattr(args, 'full_deploy', False),
+            deploy_latest=getattr(args, 'deploy_latest', False),
             reset_migrations=getattr(args, 'reset_migrations', False),
             enable_ssl=getattr(args, 'enable_ssl', False),
             ssl_email=getattr(args, 'ssl_email', None),

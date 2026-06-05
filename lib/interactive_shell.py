@@ -42,7 +42,7 @@ Available commands:
   clone <pattern> <new-host> [name] Copy a saved configuration to a new host
   tag <pattern> <tag> [tag ...]     Add tags to a saved configuration
   untag <pattern> <tag> [tag ...]   Remove tags from a saved configuration
-  deploy <pattern> [--yes]          Redeploy saved configurations
+  deploy <pattern> [--yes] [--deploy-latest]  Redeploy saved configurations
   rm/remove <pattern> [--yes]       Remove saved configurations
   recall <host> [user]              Fetch/reconstruct a remote setup command
   reconstruct [--compact]           Reconstruct local host configuration
@@ -197,6 +197,13 @@ class InteractiveShell:
         yes = any(a in {"-y", "--yes"} for a in args)
         rest = [a for a in args if a not in {"-y", "--yes"}]
         return rest, yes
+
+    @staticmethod
+    def _split_deploy_flags(args: list[str]) -> tuple[list[str], bool, bool]:
+        yes = any(a in {"-y", "--yes"} for a in args)
+        deploy_latest = any(a == "--deploy-latest" for a in args)
+        rest = [a for a in args if a not in {"-y", "--yes", "--deploy-latest"}]
+        return rest, yes, deploy_latest
 
     def _confirm(self, prompt: str) -> bool:
         try:
@@ -593,7 +600,7 @@ class InteractiveShell:
 
         if self._prompt_yes_no("Deploy now?", default=False):
             from infra_tools import deploy_configurations
-            deploy_configurations(config.host, True)
+            deploy_configurations(config.host, True, False)
 
     def _cmd_rename(self, args: list[str]) -> None:
         if len(args) != 2:
@@ -666,11 +673,11 @@ class InteractiveShell:
         )
 
     def _cmd_deploy(self, args: list[str]) -> None:
-        rest, yes = self._split_yes_flag(args)
+        rest, yes, deploy_latest = self._split_deploy_flags(args)
         if len(rest) != 1:
-            raise ValueError("Usage: deploy <pattern> [--yes]")
+            raise ValueError("Usage: deploy <pattern> [--yes] [--deploy-latest]")
         from infra_tools import deploy_configurations
-        deploy_configurations(rest[0], yes)
+        deploy_configurations(rest[0], yes, deploy_latest)
 
     def _cmd_remove(self, args: list[str]) -> None:
         rest, yes = self._split_yes_flag(args)

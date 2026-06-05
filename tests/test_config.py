@@ -143,6 +143,13 @@ class TestSetupConfigToRemoteArgs(unittest.TestCase):
         self.assertIn('--lite-deploy', args_str)
         self.assertIn('--deploy', args_str)
 
+    def test_deploy_latest(self):
+        config = self._make_config(deploy_latest=True)
+        args = config.to_remote_args()
+        self.assertIn('--deploy-latest', args)
+        args = config.to_setup_command()
+        self.assertIn('--deploy-latest', args)
+
     def test_sync_specs(self):
         config = self._make_config(sync_specs=[['/src', '/dst', 'daily']])
         args = config.to_remote_args()

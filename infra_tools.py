@@ -244,6 +244,12 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
     deploy_parser.add_argument("pattern", help="Host, name, or tag filter to redeploy")
     deploy_parser.add_argument("-y", "--yes", action="store_true", help="Deploy without prompting")
     deploy_parser.add_argument(
+        "--deploy-latest",
+        dest="deploy_latest",
+        action="store_true",
+        help="Deploy the latest versions of packages and releases, bypassing the release age policy",
+    )
+    deploy_parser.add_argument(
         "--workspace",
         help="Workspace root for saved setups, credentials, known_hosts, and history"
     )
@@ -760,7 +766,7 @@ def _prepare_runtime_config_for_cli(config: SetupConfig) -> SetupConfig:
     return runtime_config
 
 
-def deploy_configurations(pattern: str, force: bool) -> int:
+def deploy_configurations(pattern: str, force: bool, deploy_latest: bool = False) -> int:
     configs = get_all_configs(pattern)
     if not configs:
         print(f"No configurations found matching '{pattern}'")
@@ -789,6 +795,7 @@ def deploy_configurations(pattern: str, force: bool) -> int:
             if not isinstance(host, str) or not isinstance(system_type, str) or not isinstance(args_dict, dict):
                 raise ValueError("Invalid cached configuration format")
             config = SetupConfig.from_dict(host, system_type, cast(JSONDict, args_dict))
+            config.deploy_latest = deploy_latest
             if _execute_patch_config(config) != 0:
                 failures += 1
         except Exception as exc:
@@ -950,7 +957,7 @@ def main() -> int:
     elif args.command in {"rm", "remove"}:
         return remove_configurations(args.pattern, args.yes)
     elif args.command == "deploy":
-        return deploy_configurations(args.pattern, args.yes)
+        return deploy_configurations(args.pattern, args.yes, getattr(args, "deploy_latest", False))
     elif args.command == "reconstruct":
         return run_reconstruct_command(args.compact)
     elif args.command == "recall":

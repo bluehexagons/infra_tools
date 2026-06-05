@@ -103,7 +103,13 @@ class TestInteractiveShellDispatch(unittest.TestCase):
     def test_deploy_passes_yes_flag(self, mock_deploy):
         shell, _ = _make_shell(["deploy prod --yes", "exit"])
         shell.run()
-        mock_deploy.assert_called_once_with("prod", True)
+        mock_deploy.assert_called_once_with("prod", True, False)
+
+    @patch("infra_tools.deploy_configurations")
+    def test_deploy_passes_latest_flag(self, mock_deploy):
+        shell, _ = _make_shell(["deploy prod --yes --deploy-latest", "exit"])
+        shell.run()
+        mock_deploy.assert_called_once_with("prod", True, True)
 
     @patch("infra_tools.remove_configurations")
     def test_remove_passes_short_yes_flag(self, mock_remove):
