@@ -9,8 +9,10 @@ from lib.config import MACHINE_TYPES, DEFAULT_MACHINE_TYPE
 from lib.plugin_registry import get_system_type_names
 
 
-class DeploySpecAction(argparse.Action):
-    """Accept one or more deployment spec/repository pairs per --deploy."""
+class _DeploySpecActionBase(argparse.Action):
+    """Base class for parsing deployment spec/repository pairs."""
+    flag_name = "--deploy"
+    set_deploy_latest = False
 
     def __call__(
         self,
@@ -21,35 +23,26 @@ class DeploySpecAction(argparse.Action):
     ) -> None:
         raw_values = [values] if isinstance(values, str) else values
         if len(raw_values) % 2 != 0:
-            parser.error("--deploy requires DOMAIN_OR_PATH and GIT_URL pairs")
+            parser.error(f"{self.flag_name} requires DOMAIN_OR_PATH and GIT_URL pairs")
 
-        deploy_specs = list(getattr(namespace, self.dest, None) or [])
-        for index in range(0, len(raw_values), 2):
-            deploy_specs.append([raw_values[index], raw_values[index + 1]])
-        setattr(namespace, self.dest, deploy_specs)
-
-
-class DeployLatestAction(argparse.Action):
-    """Enable latest-version deployment, optionally adding deploy pairs."""
-
-    def __call__(
-        self,
-        parser: argparse.ArgumentParser,
-        namespace: argparse.Namespace,
-        values: list[str] | None,
-        option_string: str | None = None,
-    ) -> None:
-        setattr(namespace, self.dest, True)
-        raw_values = values or []
-        if not raw_values:
-            return
-        if len(raw_values) % 2 != 0:
-            parser.error("--deploy-latest requires DOMAIN_OR_PATH and GIT_URL pairs when deploy targets are provided")
+        if self.set_deploy_latest:
+            setattr(namespace, "deploy_latest", True)
 
         deploy_specs = list(getattr(namespace, "deploy_specs", None) or [])
         for index in range(0, len(raw_values), 2):
             deploy_specs.append([raw_values[index], raw_values[index + 1]])
         setattr(namespace, "deploy_specs", deploy_specs)
+
+
+class DeploySpecAction(_DeploySpecActionBase):
+    """Parse deployment specs for --deploy flag."""
+    pass
+
+
+class DeployLatestSpecAction(_DeploySpecActionBase):
+    """Parse deployment specs for --deploy-latest flag, also enabling latest-version policy."""
+    flag_name = "--deploy-latest"
+    set_deploy_latest = True
 
 
 def add_setup_arguments(
@@ -191,10 +184,9 @@ def add_setup_arguments(
     
     parser.add_argument("--full-deploy", dest="full_deploy", action="store_true",
                        help="Always rebuild deployments even if they haven't changed (default: skip unchanged deployments)")
-    parser.add_argument("--deploy-latest", dest="deploy_latest",
-                       action=DeployLatestAction, nargs="*", metavar="DEPLOY",
-                       default=False,
-                       help="Deploy latest packages and releases; optionally followed by DOMAIN_OR_PATH GIT_URL pairs")
+    parser.add_argument("--deploy-latest", action=DeployLatestSpecAction, nargs=2, 
+                        metavar=("DOMAIN_OR_PATH", "GIT_URL"),
+                        help="Deploy latest packages and releases (bypassing age policy); requires DOMAIN_OR_PATH and GIT_URL")
     parser.add_argument("--reset-migrations", dest="reset_migrations", action="store_true",
                        help="Reset Rails database schema using db:schema:load (use when migrations were squashed or reset)")
     parser.add_argument("--ssl", dest="enable_ssl", 

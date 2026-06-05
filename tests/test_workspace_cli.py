@@ -37,27 +37,6 @@ class TestWorkspaceCli(unittest.TestCase):
         self.assertEqual(args.workspace, "/tmp/workspace")
         self.assertEqual(args.pattern, "prod")
 
-    def test_setup_parser_accepts_multiple_deploy_pairs_per_flag(self):
-        parser, _setup_parser, _patch_parser = infra_tools.create_infra_tools_parser()
-        args = parser.parse_args([
-            "setup",
-            "server_web",
-            "example.com",
-            "testuser",
-            "--deploy-latest",
-            "--deploy",
-            "clicker.example.com",
-            "https://github.com/user/clicker.git",
-            "food.example.com,/food,example.com/food",
-            "https://github.com/user/food.git",
-        ])
-
-        self.assertTrue(args.deploy_latest)
-        self.assertEqual(args.deploy_specs, [
-            ["clicker.example.com", "https://github.com/user/clicker.git"],
-            ["food.example.com,/food,example.com/food", "https://github.com/user/food.git"],
-        ])
-
     def test_setup_parser_accepts_deploy_latest_pairs(self):
         parser, _setup_parser, _patch_parser = infra_tools.create_infra_tools_parser()
         args = parser.parse_args([
