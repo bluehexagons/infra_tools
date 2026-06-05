@@ -295,20 +295,20 @@ def _apply_hosted_proxmox_defaults(
         return
 
     host = find_proxmox_host(str(config.hosted_node), workspace)
-    if not host:
-        return
-
-    if config.hosted_node == host.name:
-        config.hosted_node = host.address
-    if not config.hosted_key and host.ssh_key:
-        config.hosted_key = host.ssh_key
+    if host:
+        if config.hosted_node == host.name:
+            config.hosted_node = host.address
+        if not config.hosted_key and host.ssh_key:
+            config.hosted_key = host.ssh_key
 
     storage_specs = _normalize_container_storage(config.container_storage)
     if not storage_specs:
         return
 
-    root_pool = _default_root_storage_for_host(host) or "auto"
-    template_pool = _default_template_storage_for_host(host) or "auto"
+    root_pool = _default_root_storage_for_host(host) if host else None
+    template_pool = _default_template_storage_for_host(host) if host else None
+    root_pool = root_pool or "auto"
+    template_pool = template_pool or "auto"
     updated_specs: list[list[str]] = []
     changed = False
 

@@ -248,6 +248,16 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
         parts = config.to_setup_command()
         self.assertTrue(any('--machine' in p for p in parts))
 
+    def test_lxc_machine_type_included_when_system_default_is_vm(self):
+        config = self._make_config(system_type='server_web', machine_type='unprivileged')
+        parts = config.to_setup_command()
+        self.assertIn('--machine unprivileged', parts)
+
+    def test_vm_machine_type_omitted_when_system_default_is_vm(self):
+        config = self._make_config(system_type='server_web', machine_type='vm')
+        parts = config.to_setup_command()
+        self.assertFalse(any('--machine' in p for p in parts))
+
     def test_password_not_included(self):
         config = self._make_config(password='secret')
         parts = config.to_setup_command()

@@ -175,8 +175,8 @@ python3 infra_tools.py setup server_web 10.0.0.50 admin \
   --deploy example.com https://github.com/user/repo.git
 ```
 
-To stay on the LXC path instead, add `--machine unprivileged`, use `--storage root auto ...`,
-and include a template pool:
+To stay on the LXC path instead, add `--machine unprivileged`, use a root
+storage spec, and include template storage:
 
 ```bash
 python3 infra_tools.py setup server_web 10.0.0.50 admin \
@@ -196,6 +196,11 @@ python3 infra_tools.py setup server_web 10.0.0.50 admin \
 `--storage root AMOUNT`, which reuses a saved Proxmox host default and otherwise falls back to
 Proxmox auto-detection. LXC `template` storage is optional and may be given as `--storage template`
 to reuse the saved/default template pool.
+
+Upgrade note: if you are rerunning a copied main-era single-system command for
+an existing hosted LXC `server_web`, `workstation_desktop`, `workstation_dev`,
+or `pc_dev`, add `--machine unprivileged`. Saved `deploy` and `patch` workflows
+preserve the cached machine type when `--machine` is omitted.
 
 ### Managing Proxmox Guests
 

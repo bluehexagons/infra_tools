@@ -114,6 +114,24 @@ infra_tools.py setup server_web 10.0.0.50 admin \
 
 ---
 
+## Upgrade Notes
+
+Main-era hosted LXC commands for `server_web`, `workstation_desktop`,
+`workstation_dev`, or `pc_dev` must now pass `--machine unprivileged` when you
+rerun them against an existing LXC. Without that flag, those system types use
+the VM-first setup/provisioning path.
+
+Saved workflows are preferred for existing systems. `infra_tools.py deploy` and
+`infra_tools.py patch` preserve the saved machine type when `--machine` is not
+provided, and `infra_tools.py cmd` prints `--machine unprivileged` for saved LXC
+configs whose current system-type default is VM.
+
+`server_proxmox` remains a hardware setup flow with `--no-restart` behavior by
+default, so existing Proxmox hosts do not need a command change beyond using the
+current saved setup or patch command.
+
+---
+
 ## Basic Flags
 
 | Flag | Description |
@@ -178,6 +196,7 @@ Notes:
 - `--storage` is repeatable and storage types are unique.
 - `root` storage is required when `--hosted` is used.
 - If `--hosted` matches a registered Proxmox host, infra_tools reuses that host's saved SSH key and probed storage defaults.
+- With a raw Proxmox node address, `--storage root AMOUNT`, `--storage root default AMOUNT`, and `--storage template` fall back to `auto` pools.
 - `template` storage is LXC-only; if omitted, the tool prefers the root pool when it supports templates and otherwise auto-selects a template-capable pool.
 - VM-first hosted flows expect an image-capable root pool such as `local-lvm`.
 

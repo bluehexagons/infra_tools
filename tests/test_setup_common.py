@@ -723,6 +723,23 @@ class TestHostedProvisioningDispatch(unittest.TestCase):
         )
         mock_provision_container.assert_called_once_with(config)
 
+    def test_hosted_setup_expands_unregistered_storage_shorthand_to_auto(self):
+        from lib import setup_common
+
+        with tempfile.TemporaryDirectory() as workspace:
+            config = _make_config(
+                hosted_node="10.0.0.1",
+                container_storage=[["root", "10G"], ["template"]],
+            )
+
+            setup_common._apply_hosted_proxmox_defaults(config, workspace)
+
+        self.assertEqual(config.hosted_node, "10.0.0.1")
+        self.assertEqual(
+            config.container_storage,
+            [["root", "auto", "10G"], ["template", "auto"]],
+        )
+
 
 if __name__ == '__main__':
     unittest.main()

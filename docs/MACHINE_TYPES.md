@@ -43,6 +43,24 @@ The `--machine` flag specifies the environment type, enabling setup commands to 
 - other setup flows still fall back to `unprivileged` unless you pass `--machine`
 - use `--machine unprivileged` to force an LXC on a VM-first workflow
 
+## Upgrade Notes For Main-Era LXC Systems
+
+Older `main` setups commonly relied on the global `unprivileged` default for
+hosted `server_web`, `workstation_desktop`, `workstation_dev`, and `pc_dev`
+commands. On this branch those flows are VM-first, so copied single-system LXC
+commands for existing systems must add `--machine unprivileged` before rerunning
+setup.
+
+For saved configurations, prefer `infra_tools deploy <name-or-host>` or
+`infra_tools patch <host>` over retyping old commands. Saved configs include the
+machine type, patch preserves it when `--machine` is omitted, and
+`infra_tools cmd <name-or-host>` prints `--machine unprivileged` for LXC systems
+whose current setup default is VM.
+
+Proxmox host setup does not need a migration flag: `server_proxmox` remains a
+hardware flow with automatic restarts disabled by default. Bring those hosts up
+to date by rerunning the saved setup or patch command normally.
+
 ## Usage
 
 ```bash
@@ -74,6 +92,9 @@ python3 infra_tools.py setup server_web 10.0.0.50 \
 
 For other system types, or when you want to be explicit, `--machine vm` still
 forces the VM flow. Use `--machine unprivileged` to stay on the LXC path.
+
+For raw Proxmox addresses, storage shorthand falls back to `auto`. For
+registered hosts, shorthand uses the saved/probed storage defaults first.
 
 By default, the curated Debian cloud-image catalog
 (`lib/cloud_images.py`) supplies the qcow2. Override with `--image`:

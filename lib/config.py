@@ -43,6 +43,17 @@ def _resolve_machine_type(
     return DEFAULT_MACHINE_TYPE
 
 
+def _default_machine_type_for_setup(
+    system_type: str,
+    *,
+    is_build_server: bool = False,
+) -> str:
+    if is_build_server:
+        return "vm"
+    system_default = get_system_type_definition(system_type).default_machine_type
+    return system_default or DEFAULT_MACHINE_TYPE
+
+
 def _normalize_container_storage(value: NestedStrList | list[str] | None) -> Optional[NestedStrList]:
     if not value:
         return None
@@ -371,8 +382,12 @@ class SetupConfig:
         if self.timezone and self.timezone != "UTC":
             cmd_parts.append(f"-t {shlex.quote(self.timezone)}")
         
-        # Machine type (if not default)
-        if self.machine_type != DEFAULT_MACHINE_TYPE:
+        # Machine type (if not the current setup default for this flow)
+        default_machine_type = _default_machine_type_for_setup(
+            self.system_type,
+            is_build_server=self.is_build_server,
+        )
+        if self.machine_type != default_machine_type:
             cmd_parts.append(f"--machine {shlex.quote(self.machine_type)}")
         
         # Name and tags

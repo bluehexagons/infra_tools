@@ -407,6 +407,46 @@ class TestWorkspaceCli(unittest.TestCase):
         mock_run_remote.assert_not_called()
         mock_print.assert_called_with("Error: Invalid timezone: Mars/Olympus")
 
+    def test_run_patch_command_preserves_cached_lxc_machine_when_omitted(self):
+        parser, _setup_parser, _patch_parser = infra_tools.create_infra_tools_parser()
+        args = parser.parse_args(["patch", "example.com", "testuser"])
+        cached = SetupConfig(
+            host="example.com",
+            username="testuser",
+            system_type="server_web",
+            machine_type="unprivileged",
+        )
+
+        with patch("infra_tools.validate_host", return_value=True), \
+             patch("infra_tools.validate_username", return_value=True), \
+             patch("infra_tools.load_setup_command", return_value=cached), \
+             patch("infra_tools._execute_patch_config", return_value=0) as mock_execute:
+            result = infra_tools.run_patch_command(args)
+
+        self.assertEqual(result, 0)
+        patched_config = mock_execute.call_args.args[0]
+        self.assertEqual(patched_config.machine_type, "unprivileged")
+
+    def test_run_patch_command_allows_explicit_machine_override(self):
+        parser, _setup_parser, _patch_parser = infra_tools.create_infra_tools_parser()
+        args = parser.parse_args(["patch", "example.com", "testuser", "--machine", "vm"])
+        cached = SetupConfig(
+            host="example.com",
+            username="testuser",
+            system_type="server_web",
+            machine_type="unprivileged",
+        )
+
+        with patch("infra_tools.validate_host", return_value=True), \
+             patch("infra_tools.validate_username", return_value=True), \
+             patch("infra_tools.load_setup_command", return_value=cached), \
+             patch("infra_tools._execute_patch_config", return_value=0) as mock_execute:
+            result = infra_tools.run_patch_command(args)
+
+        self.assertEqual(result, 0)
+        patched_config = mock_execute.call_args.args[0]
+        self.assertEqual(patched_config.machine_type, "vm")
+
     @patch("builtins.print")
     @patch("infra_tools.validate_samba_share_credentials")
     @patch("infra_tools.prepare_runtime_config")

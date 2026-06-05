@@ -239,6 +239,12 @@ class TestMergeSetupConfigs(unittest.TestCase):
         # None should not overwrite existing value
         self.assertEqual(merged.timezone, 'America/New_York')
 
+    def test_preserve_keys_keep_cached_values(self):
+        cached = self._make_config(system_type='server_web', machine_type='unprivileged')
+        new = self._make_config(system_type='server_web', machine_type='vm')
+        merged = merge_setup_configs(cached, new, preserve_keys={'machine_type'})
+        self.assertEqual(merged.machine_type, 'unprivileged')
+
     def test_deploy_specs_merge_no_duplicates(self):
         cached = self._make_config(deploy_specs=[['example.com/', 'https://git.com/repo1']])
         new = self._make_config(deploy_specs=[['example.com/', 'https://git.com/repo1'], ['other.com/', 'https://git.com/repo2']])

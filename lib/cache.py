@@ -206,14 +206,23 @@ def load_all_setup_commands() -> list[SetupConfig]:
     return sorted(configs, key=lambda config: (config.friendly_name or config.host).lower())
 
 
-def merge_setup_configs(cached_config: SetupConfig, new_config: SetupConfig) -> SetupConfig:
+def merge_setup_configs(
+    cached_config: SetupConfig,
+    new_config: SetupConfig,
+    *,
+    preserve_keys: set[str] | None = None,
+) -> SetupConfig:
     merged_dict = asdict(cached_config)
     new_dict = asdict(new_config)
+    preserve_keys = preserve_keys or set()
     
     for key, value in new_dict.items():
         if key in ('host', 'system_type'):
             continue
-            
+
+        if key in preserve_keys:
+            continue
+
         if key == 'deploy_specs' and key in merged_dict:
             if merged_dict[key] is None:
                 merged_dict[key] = value

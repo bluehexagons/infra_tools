@@ -718,6 +718,26 @@ def _execute_patch_config(config: SetupConfig) -> int:
     return 0
 
 
+def _patch_preserve_keys(args: argparse.Namespace) -> set[str]:
+    preserve_keys: set[str] = set()
+    if getattr(args, "machine_type", None) is None:
+        preserve_keys.add("machine_type")
+    if getattr(args, "hosted_node", None) is None:
+        preserve_keys.update(
+            {
+                "hosted_node",
+                "hosted_user",
+                "hosted_key",
+                "container_memory",
+                "container_storage",
+                "container_cores",
+                "container_base",
+                "vm_image",
+            }
+        )
+    return preserve_keys
+
+
 def _prepare_runtime_config_for_cli(config: SetupConfig) -> SetupConfig:
     _apply_hosted_proxmox_defaults(config, None)
     runtime_config = prepare_runtime_config(config)
@@ -889,7 +909,11 @@ def run_patch_command(args: argparse.Namespace) -> int:
         return 1
     
     new_config = SetupConfig.from_args(args, cached_config.system_type)
-    merged_config = merge_setup_configs(cached_config, new_config)
+    merged_config = merge_setup_configs(
+        cached_config,
+        new_config,
+        preserve_keys=_patch_preserve_keys(args),
+    )
     return _execute_patch_config(merged_config)
 
 
