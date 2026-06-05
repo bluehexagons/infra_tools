@@ -599,9 +599,41 @@ class TestSkippedDeploymentServiceRecreation(unittest.TestCase):
         )
         
         self.assertTrue(result.get('skipped'))
-        
+
         # Service should NOT have been recreated
         mock_create_service.assert_not_called()
+
+    @patch.object(DeploymentOrchestrator, '_prepare_rails_runtime_state')
+    @patch('lib.deployment.create_rails_service')
+    @patch('lib.deployment.run')
+    @patch('os.path.exists')
+    def test_skipped_deploy_reconciles_runtime_state_for_existing_service(
+        self, mock_exists, mock_run, mock_create_service, mock_prepare_runtime_state
+    ):
+        """A skipped deployment migrates persistent state even when the service already exists."""
+        def selective_exists(path):
+            if path == '/etc/systemd/system/rails-example_com.service':
+                return True
+            return _real_exists(path)
+
+        mock_exists.side_effect = selective_exists
+        mock_run.return_value = MagicMock(returncode=0)
+
+        result = self.orchestrator.deploy_from_archive(
+            source_path='/tmp/fake_source',
+            domain='example.com',
+            path='/',
+            git_url='https://git.example.com/repo.git',
+            commit_hash='abc123',
+            full_deploy=False,
+        )
+
+        self.assertTrue(result.get('skipped'))
+        mock_create_service.assert_not_called()
+        mock_prepare_runtime_state.assert_called_once_with(
+            os.path.join(self.tmpdir, ".infra_tools_shared", "example_com"),
+            'rails-example_com',
+        )
 
     @patch.object(DeploymentOrchestrator, '_service_file_user', return_value='rails')
     @patch('lib.deployment.create_rails_service')
@@ -665,6 +697,7 @@ class TestRailsRuntimeStatePermissions(unittest.TestCase):
         commands = [call.args[0] for call in mock_run.call_args_list]
         all_commands = "\n".join(commands)
 
+        self.assertIn(f"chmod 755 {os.path.dirname(self.persistent_root)}", commands)
         self.assertIn(f"find {self.persistent_root} -type d -exec chmod 750", all_commands)
         self.assertIn(f"find {self.persistent_root} -type f -exec chmod 640", all_commands)
         self.assertIn(f"chmod 755 {self.persistent_root}", commands)

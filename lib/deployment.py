@@ -460,6 +460,8 @@ class DeploymentOrchestrator:
         if not os.path.exists(persistent_root):
             return
         root = shlex.quote(persistent_root)
+        shared_root = shlex.quote(os.path.dirname(persistent_root))
+        run(f"chmod 755 {shared_root}", check=False)
         run(f"chown -R {shlex.quote(runtime_user)}:{shlex.quote(runtime_user)} {root}", check=False)
         run(f"find {root} -type d -exec chmod 750 {{}} +", check=False)
         run(f"find {root} -type f -exec chmod 640 {{}} +", check=False)
@@ -518,16 +520,19 @@ class DeploymentOrchestrator:
                 service_needs_recreate = service_missing or (
                     existing_user is not None and existing_user != runtime_user
                 )
-                
+
+                # Skipped deploys still need to migrate persistent state from
+                # older deploy users to the per-app Rails runtime user.
+                self._prepare_rails_runtime_state(persistent_root, runtime_user)
+
                 # Ensure service exists and is running (may have been
                 # removed by cleanup_all_infra_services before this run)
                 if service_needs_recreate:
                     reason = "missing" if service_missing else f"uses {existing_user}"
                     print(f"  Service {service_name} {reason}, recreating...")
-                    self._prepare_rails_runtime_state(persistent_root, runtime_user)
-                    
+
                     cors_origins = self._build_cors_origins(domain)
-                    
+
                     create_rails_service(app_name, dest_path, backend_port,
                                         runtime_user, runtime_user,
                                         env_vars={
