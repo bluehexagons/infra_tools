@@ -241,18 +241,7 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
         "deploy",
         help="Redeploy saved configurations",
     )
-    deploy_parser.add_argument("pattern", help="Host, name, or tag filter to redeploy")
-    deploy_parser.add_argument("-y", "--yes", action="store_true", help="Deploy without prompting")
-    deploy_parser.add_argument(
-        "--deploy-latest",
-        dest="deploy_latest",
-        action="store_true",
-        help="Deploy the latest versions of packages and releases, bypassing the release age policy",
-    )
-    deploy_parser.add_argument(
-        "--workspace",
-        help="Workspace root for saved setups, credentials, known_hosts, and history"
-    )
+    add_deploy_command_arguments(deploy_parser, include_workspace=True)
 
     recall_parser = subparsers.add_parser(
         "recall",
@@ -766,6 +755,48 @@ def _prepare_runtime_config_for_cli(config: SetupConfig) -> SetupConfig:
     return runtime_config
 
 
+def add_deploy_command_arguments(
+    parser: argparse.ArgumentParser,
+    *,
+    include_workspace: bool = False,
+) -> None:
+    parser.add_argument("pattern", help="Host, name, or tag filter to redeploy")
+    parser.add_argument("-y", "--yes", action="store_true", help="Deploy without prompting")
+    parser.add_argument(
+        "--deploy-latest",
+        dest="deploy_latest",
+        action="store_true",
+        help="Deploy the latest versions of packages and releases, bypassing the release age policy",
+    )
+    if include_workspace:
+        parser.add_argument(
+            "--workspace",
+            help="Workspace root for saved setups, credentials, known_hosts, and history"
+        )
+
+
+class DeployArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        usage = self.format_usage().strip()
+        if usage.startswith("usage:"):
+            usage = "Usage:" + usage[len("usage:"):]
+        raise ValueError(f"{usage}\n{message}")
+
+
+def parse_deploy_command_args(args: list[str]) -> argparse.Namespace:
+    parser = DeployArgumentParser(prog="deploy", add_help=False)
+    add_deploy_command_arguments(parser)
+    return parser.parse_args(args)
+
+
+def run_deploy_command(args: argparse.Namespace) -> int:
+    return deploy_configurations(
+        args.pattern,
+        args.yes,
+        getattr(args, "deploy_latest", False),
+    )
+
+
 def deploy_configurations(pattern: str, force: bool, deploy_latest: bool = False) -> int:
     configs = get_all_configs(pattern)
     if not configs:
@@ -957,7 +988,7 @@ def main() -> int:
     elif args.command in {"rm", "remove"}:
         return remove_configurations(args.pattern, args.yes)
     elif args.command == "deploy":
-        return deploy_configurations(args.pattern, args.yes, getattr(args, "deploy_latest", False))
+        return run_deploy_command(args)
     elif args.command == "reconstruct":
         return run_reconstruct_command(args.compact)
     elif args.command == "recall":

@@ -198,13 +198,6 @@ class InteractiveShell:
         rest = [a for a in args if a not in {"-y", "--yes"}]
         return rest, yes
 
-    @staticmethod
-    def _split_deploy_flags(args: list[str]) -> tuple[list[str], bool, bool]:
-        yes = any(a in {"-y", "--yes"} for a in args)
-        deploy_latest = any(a == "--deploy-latest" for a in args)
-        rest = [a for a in args if a not in {"-y", "--yes", "--deploy-latest"}]
-        return rest, yes, deploy_latest
-
     def _confirm(self, prompt: str) -> bool:
         try:
             response = self._input(prompt)
@@ -600,7 +593,7 @@ class InteractiveShell:
 
         if self._prompt_yes_no("Deploy now?", default=False):
             from infra_tools import deploy_configurations
-            deploy_configurations(config.host, True, False)
+            deploy_configurations(config.host, force=True)
 
     def _cmd_rename(self, args: list[str]) -> None:
         if len(args) != 2:
@@ -673,11 +666,9 @@ class InteractiveShell:
         )
 
     def _cmd_deploy(self, args: list[str]) -> None:
-        rest, yes, deploy_latest = self._split_deploy_flags(args)
-        if len(rest) != 1:
-            raise ValueError("Usage: deploy <pattern> [--yes] [--deploy-latest]")
-        from infra_tools import deploy_configurations
-        deploy_configurations(rest[0], yes, deploy_latest)
+        from infra_tools import parse_deploy_command_args, run_deploy_command
+
+        run_deploy_command(parse_deploy_command_args(args))
 
     def _cmd_remove(self, args: list[str]) -> None:
         rest, yes = self._split_yes_flag(args)
