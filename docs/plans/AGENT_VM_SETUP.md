@@ -22,7 +22,7 @@ setup tarball, and installed on the target under `/home/<user>/repos/<repo>`.
 
 ## Implemented First Cut
 
-- `server_dev` now defaults to `--machine vm`; use `--machine unprivileged` for
+- Setup flows now default to `--machine vm`; use `--machine unprivileged` for
   the LXC compatibility path.
 - `--gh` installs GitHub CLI from GitHub's Debian apt repository.
 - `--opencode` installs OpenCode with the official installer as the setup user

@@ -38,18 +38,18 @@ The `--machine` flag specifies the environment type, enabling setup commands to 
 
 ## Default Resolution
 
-- `workstation_desktop`, `workstation_dev`, `pc_dev`, `server_dev`, and `server_web` now default to `vm`
+- setup flows default to `vm` unless the system type has an explicit override
+- `server_proxmox` defaults to `hardware`
 - `--build-server` also defaults to `vm`
-- other setup flows still fall back to `unprivileged` unless you pass `--machine`
 - use `--machine unprivileged` to force an LXC on a VM-first workflow
 
 ## Upgrade Notes For Main-Era LXC Systems
 
 Older `main` setups commonly relied on the global `unprivileged` default for
 hosted `server_web`, `server_dev`, `workstation_desktop`, `workstation_dev`, and `pc_dev`
-commands. On this branch those flows are VM-first, so copied single-system LXC
-commands for existing systems must add `--machine unprivileged` before rerunning
-setup.
+commands. On this branch setup flows are VM-first by default, so copied
+single-system LXC commands for existing systems must add `--machine unprivileged`
+before rerunning setup.
 
 For saved configurations, prefer `infra_tools deploy <name-or-host>` or
 `infra_tools patch <host>` over retyping old commands. Saved configs include the
@@ -81,8 +81,8 @@ python3 infra_tools.py setup server_lite 192.168.1.30 --machine oci
 
 ## Provisioning a Proxmox VM
 
-Hosted workstation/web/build flows now default to VMs when you use `--hosted`,
-so you can provision a VM via `qm` + cloud-init without adding `--machine vm`:
+Hosted flows now default to VMs when you use `--hosted`, so you can provision a
+VM via `qm` + cloud-init without adding `--machine vm`:
 
 ```bash
 python3 infra_tools.py setup server_web 10.0.0.50 \
@@ -91,8 +91,7 @@ python3 infra_tools.py setup server_web 10.0.0.50 \
     --storage root local-lvm 32G
 ```
 
-For other system types, or when you want to be explicit, `--machine vm` still
-forces the VM flow. Use `--machine unprivileged` to stay on the LXC path.
+Use `--machine unprivileged` to stay on the LXC path.
 
 For raw Proxmox addresses, storage shorthand falls back to `auto`. For
 registered hosts, shorthand uses the saved/probed storage defaults first.

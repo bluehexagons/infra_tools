@@ -465,6 +465,17 @@ class TestSetupConfigFromArgs(unittest.TestCase):
         config = SetupConfig.from_args(self._make_args(), 'server_dev')
         self.assertEqual(config.machine_type, 'vm')
 
+    def test_server_lite_defaults_to_vm(self):
+        config = SetupConfig.from_args(self._make_args(), 'server_lite')
+        self.assertEqual(config.machine_type, 'vm')
+
+    def test_custom_steps_defaults_to_vm(self):
+        config = SetupConfig.from_args(
+            self._make_args(custom_steps='configure_swap'),
+            'custom_steps',
+        )
+        self.assertEqual(config.machine_type, 'vm')
+
     def test_build_server_defaults_to_vm(self):
         config = SetupConfig.from_args(
             self._make_args(is_build_server=True),
@@ -496,6 +507,7 @@ class TestSetupConfigFromArgs(unittest.TestCase):
 
     def test_server_proxmox_defaults_defer_restart_with_force_deadline(self):
         config = SetupConfig.from_args(self._make_args(), 'server_proxmox')
+        self.assertEqual(config.machine_type, 'hardware')
         self.assertFalse(config.auto_restart)
         self.assertEqual(config.auto_restart_force_days, 7)
         self.assertEqual(config.auto_restart_grace, 5)

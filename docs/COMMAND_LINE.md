@@ -140,8 +140,8 @@ Notes:
 - `--storage` is repeatable.
 - `root` storage is required when `--hosted` is used.
 - `template` storage is LXC-only.
-- VM is the default for hosted `workstation_desktop`, `workstation_dev`,
-  `pc_dev`, `server_dev`, `server_web`, and build-server flows.
+- VM is the default for hosted setup flows unless the system type explicitly
+  overrides its machine type.
 - `--machine unprivileged` keeps an existing or intentional LXC path.
 
 ## Deployment Flags

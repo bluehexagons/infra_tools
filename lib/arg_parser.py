@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 
 
-from lib.config import MACHINE_TYPES, DEFAULT_MACHINE_TYPE
+from lib.config import MACHINE_TYPES
 from lib.plugin_registry import get_system_type_names
 
 
@@ -76,9 +76,9 @@ def add_setup_arguments(
     parser.add_argument("--machine", dest="machine_type",
                        choices=MACHINE_TYPES,
                        default=None,
-                       help="Machine type override. Defaults are system-specific: "
-                            "VM for workstation_desktop/workstation_dev/pc_dev/server_web "
-                            "and build-server flows; otherwise unprivileged (LXC).")
+                       help="Machine type override. Defaults to VM unless the "
+                            "system type has an explicit override such as "
+                            "server_proxmox hardware.")
     
     if not for_remote:
         parser.add_argument("--name", dest="friendly_name", help="Friendly name for this configuration")

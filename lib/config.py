@@ -13,7 +13,7 @@ from lib.types import StrList, NestedStrList, JSONDict, MaybeStr
 SYSTEM_TYPES = get_system_type_names()
 
 MACHINE_TYPES = ["unprivileged", "vm", "privileged", "hardware", "oci"]
-DEFAULT_MACHINE_TYPE = "unprivileged"
+DEFAULT_MACHINE_TYPE = "vm"
 
 DESKTOP_SYSTEMS = [
     system_type.name
