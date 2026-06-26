@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.validation import (
     validate_apt_packages,
+    validate_agent_repositories,
     validate_deploy_specs,
     validate_deploy_targets,
     validate_gogs_settings,
@@ -134,6 +135,41 @@ class TestValidateDeploySpecs(unittest.TestCase):
     def test_empty_deploy_spec_entry_fails(self):
         with self.assertRaisesRegex(ValueError, "Deploy target spec list must not contain empty entries"):
             validate_deploy_specs([['example.com,,other.example.com', 'https://github.com/user/repo.git']])
+
+
+class TestValidateAgentRepositories(unittest.TestCase):
+    def test_none_passes(self):
+        validate_agent_repositories(None)
+
+    def test_valid_urls_pass(self):
+        validate_agent_repositories([
+            'https://github.com/user/repo.git',
+            'ssh://git@github.com/user/repo-two.git',
+            'git@github.com:user/repo_three.git',
+        ])
+
+    def test_empty_url_fails(self):
+        with self.assertRaisesRegex(ValueError, "--repo requires a non-empty git URL"):
+            validate_agent_repositories([''])
+
+    def test_option_like_url_fails(self):
+        with self.assertRaisesRegex(ValueError, "Invalid --repo git URL"):
+            validate_agent_repositories(['--upload-pack=bad'])
+
+    def test_local_path_fails(self):
+        with self.assertRaisesRegex(ValueError, "--repo must be"):
+            validate_agent_repositories(['/tmp/repo'])
+
+    def test_unsafe_repo_name_fails(self):
+        with self.assertRaisesRegex(ValueError, "Invalid --repo repository name"):
+            validate_agent_repositories(['https://github.com/user/bad repo.git'])
+
+    def test_duplicate_repo_name_fails(self):
+        with self.assertRaisesRegex(ValueError, "Duplicate --repo repository name: repo"):
+            validate_agent_repositories([
+                'https://github.com/one/repo.git',
+                'git@github.com:two/repo.git',
+            ])
 
 
 class TestValidateGogsSettings(unittest.TestCase):

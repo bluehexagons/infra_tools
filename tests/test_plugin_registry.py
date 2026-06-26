@@ -130,6 +130,28 @@ class TestPluginRegistry(unittest.TestCase):
             step_names.index("Installing build-user Node.js"),
         )
 
+    def test_server_dev_adds_agent_vm_steps(self):
+        config = SetupConfig(
+            host="host",
+            username="user",
+            system_type="server_dev",
+            install_gh=True,
+            install_opencode=True,
+            copy_agent_config=True,
+            copy_agent_keys=True,
+            agent_repos=["https://github.com/user/repo.git"],
+            include_cli_tools=True,
+        )
+        step_names = [name for name, _ in get_steps_for_system_type(config)]
+        self.assertIn("Installing GitHub CLI", step_names)
+        self.assertIn("Installing OpenCode", step_names)
+        self.assertIn("Copying agent tool configuration", step_names)
+        self.assertIn("Installing uploaded agent repositories", step_names)
+        self.assertLess(
+            step_names.index("Installing CLI tools"),
+            step_names.index("Installing GitHub CLI"),
+        )
+
     def test_duplicate_plugin_names_fail(self):
         plugin = PluginDefinition(name="dup", module="plugins.one")
         with self.assertRaisesRegex(ValueError, "Duplicate plugin name"):

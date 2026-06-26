@@ -181,6 +181,11 @@ class SetupConfig:
     install_go: bool = False
     install_node: bool = False
     install_python: bool = False
+    install_gh: bool = False
+    install_opencode: bool = False
+    copy_agent_keys: bool = False
+    copy_agent_config: bool = False
+    agent_repos: Optional[StrList] = None
     custom_steps: Optional[str] = None
     deploy_specs: Optional[NestedStrList] = None
     deployment_mode: str = "default"  # "default" (smart cache), "lite" (cached only), "full" (always fresh)
@@ -297,6 +302,22 @@ class SetupConfig:
         
         if self.install_python:
             args.append("--python")
+
+        if self.install_gh:
+            args.append("--gh")
+
+        if self.install_opencode:
+            args.append("--opencode")
+
+        if self.copy_agent_keys:
+            args.append("--copy-keys")
+
+        if self.copy_agent_config:
+            args.append("--copy-config")
+
+        if self.agent_repos:
+            for git_url in self.agent_repos:
+                args.append(f"--repo {shlex.quote(git_url)}")
         
         if self.custom_steps:
             args.append(f"--steps {shlex.quote(self.custom_steps)}")
@@ -483,6 +504,22 @@ class SetupConfig:
         
         if self.install_python:
             cmd_parts.append("--python")
+
+        if self.install_gh:
+            cmd_parts.append("--gh")
+
+        if self.install_opencode:
+            cmd_parts.append("--opencode")
+
+        if self.copy_agent_keys:
+            cmd_parts.append("--copy-keys")
+
+        if self.copy_agent_config:
+            cmd_parts.append("--copy-config")
+
+        if self.agent_repos:
+            for git_url in self.agent_repos:
+                cmd_parts.append(f"--repo {shlex.quote(git_url)}")
         
         # Custom steps
         if self.custom_steps:
@@ -777,6 +814,11 @@ class SetupConfig:
             install_go=getattr(args, 'install_go', False),
             install_node=getattr(args, 'install_node', False),
             install_python=getattr(args, 'install_python', False),
+            install_gh=getattr(args, 'install_gh', False),
+            install_opencode=getattr(args, 'install_opencode', False),
+            copy_agent_keys=getattr(args, 'copy_agent_keys', False),
+            copy_agent_config=getattr(args, 'copy_agent_config', False),
+            agent_repos=getattr(args, 'agent_repos', None),
             custom_steps=getattr(args, 'custom_steps', None),
             deploy_specs=getattr(args, 'deploy_specs', None),
             deployment_mode=getattr(args, 'deployment_mode', 'default'),

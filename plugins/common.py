@@ -21,6 +21,10 @@ PLUGIN = PluginDefinition(
         "install_go",
         "install_node",
         "install_python",
+        "install_github_cli",
+        "install_opencode",
+        "copy_agent_tooling_payload",
+        "install_agent_repositories",
         "configure_auto_update_uv",
         "update_and_upgrade_packages",
         "ensure_sudo_installed",
@@ -130,6 +134,29 @@ def extend_package_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]])
         steps.append(("Installing mail utilities for notifications", install_mail_utils))
 
 
+def extend_agent_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -> None:
+    """Append optional agent VM tooling and uploaded workspace steps."""
+
+    from common.agent_steps import (
+        copy_agent_tooling_payload,
+        install_agent_repositories,
+        install_github_cli,
+        install_opencode,
+    )
+
+    if config.install_gh:
+        steps.append(("Installing GitHub CLI", install_github_cli))
+
+    if config.install_opencode:
+        steps.append(("Installing OpenCode", install_opencode))
+
+    if config.copy_agent_config or config.copy_agent_keys:
+        steps.append(("Copying agent tool configuration", copy_agent_tooling_payload))
+
+    if config.agent_repos:
+        steps.append(("Installing uploaded agent repositories", install_agent_repositories))
+
+
 def get_custom_step_functions() -> Mapping[str, StepFunc]:
     """Return plugin-owned custom step functions exported by the common capability."""
 
@@ -156,12 +183,22 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         setup_user,
         update_and_upgrade_packages,
     )
+    from common.agent_steps import (
+        copy_agent_tooling_payload,
+        install_agent_repositories,
+        install_github_cli,
+        install_opencode,
+    )
 
     return {
         "install_ruby": install_ruby,
         "install_go": install_go,
         "install_node": install_node,
         "install_python": install_python,
+        "install_github_cli": install_github_cli,
+        "install_opencode": install_opencode,
+        "copy_agent_tooling_payload": copy_agent_tooling_payload,
+        "install_agent_repositories": install_agent_repositories,
         "configure_auto_update_uv": configure_auto_update_uv,
         "update_and_upgrade_packages": update_and_upgrade_packages,
         "ensure_sudo_installed": ensure_sudo_installed,

@@ -7,6 +7,7 @@ import os
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional, cast
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from lib.plugin_registry import resolve_validator
@@ -467,6 +468,8 @@ _MEMORY_PATTERN = re.compile(r'^\d+[KMGT]$', re.IGNORECASE)
 _PACKAGE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+.-]*$")
 _NETWORK_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 _NETWORK_PROVIDER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
+_GIT_SCP_URL_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+@[^:\s]+:.+$")
+_SAFE_REPO_NAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
 def validate_memory_string(value: str, name: str = "memory") -> None:
@@ -498,6 +501,50 @@ def validate_package_name(value: str, name: str = "package") -> str:
         raise ValueError(f"Invalid {name} name: {value}")
 
     return normalized_value
+
+
+def _repo_name_from_git_url(git_url: str) -> str:
+    repo_name = git_url.rstrip('/').split('/')[-1]
+    if ':' in repo_name:
+        repo_name = repo_name.rsplit(':', 1)[-1]
+    if repo_name.endswith('.git'):
+        repo_name = repo_name[:-4]
+    return repo_name
+
+
+def validate_agent_repositories(repositories: Optional[list[str]]) -> None:
+    """Validate git URLs supplied through --repo for agent VM workspaces."""
+    if not repositories:
+        return
+
+    seen_repo_names: set[str] = set()
+    for repository in repositories:
+        if not isinstance(repository, str):
+            raise ValueError("--repo requires a git URL")
+
+        git_url = repository.strip()
+        if not git_url:
+            raise ValueError("--repo requires a non-empty git URL")
+        if git_url.startswith('-'):
+            raise ValueError(f"Invalid --repo git URL: {repository}")
+        if any(ord(char) < 32 for char in git_url):
+            raise ValueError(f"Invalid --repo git URL: {repository}")
+
+        parsed = urlparse(git_url)
+        if parsed.scheme:
+            if parsed.scheme not in {"git", "http", "https", "ssh"} or not parsed.netloc:
+                raise ValueError(f"Invalid --repo git URL: {repository}")
+        elif not _GIT_SCP_URL_PATTERN.match(git_url):
+            raise ValueError(
+                "--repo must be an https://, ssh://, git://, or git@host:path git URL"
+            )
+
+        repo_name = _repo_name_from_git_url(git_url)
+        if not repo_name or not _SAFE_REPO_NAME_PATTERN.match(repo_name):
+            raise ValueError(f"Invalid --repo repository name derived from URL: {repository}")
+        if repo_name in seen_repo_names:
+            raise ValueError(f"Duplicate --repo repository name: {repo_name}")
+        seen_repo_names.add(repo_name)
 
 
 def validate_network_name(value: str, name: str = "network name") -> str:

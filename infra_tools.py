@@ -70,6 +70,7 @@ from lib.types import Deployments, JSONDict, JSONList, StrList
 from lib.validators import validate_host, validate_username
 from lib.validation import (
     validate_apt_packages,
+    validate_agent_repositories,
     validate_deploy_specs,
     validate_deploy_targets,
     validate_gogs_settings,
@@ -550,6 +551,10 @@ def show_info(pattern: Optional[str] = None, *, compact: bool = False) -> int:
             features.append("Go")
         if args.get("install_python"):
             features.append("Python")
+        if args.get("install_gh"):
+            features.append("GitHub CLI")
+        if args.get("install_opencode"):
+            features.append("OpenCode")
         if args.get("install_office"):
             features.append("Office")
         if args.get("use_flatpak"):
@@ -738,6 +743,7 @@ def _prepare_runtime_config_for_cli(config: SetupConfig) -> SetupConfig:
     runtime_config = prepare_runtime_config(config)
     validate_timezone_name(runtime_config.timezone)
     validate_apt_packages(runtime_config.apt_packages)
+    validate_agent_repositories(runtime_config.agent_repos)
     validate_notification_args(runtime_config.notify_specs)
     validate_ssl_email(runtime_config.ssl_email)
     validate_deploy_specs(runtime_config.deploy_specs)

@@ -38,7 +38,7 @@ The `--machine` flag specifies the environment type, enabling setup commands to 
 
 ## Default Resolution
 
-- `workstation_desktop`, `workstation_dev`, `pc_dev`, and `server_web` now default to `vm`
+- `workstation_desktop`, `workstation_dev`, `pc_dev`, `server_dev`, and `server_web` now default to `vm`
 - `--build-server` also defaults to `vm`
 - other setup flows still fall back to `unprivileged` unless you pass `--machine`
 - use `--machine unprivileged` to force an LXC on a VM-first workflow
@@ -46,7 +46,7 @@ The `--machine` flag specifies the environment type, enabling setup commands to 
 ## Upgrade Notes For Main-Era LXC Systems
 
 Older `main` setups commonly relied on the global `unprivileged` default for
-hosted `server_web`, `workstation_desktop`, `workstation_dev`, and `pc_dev`
+hosted `server_web`, `server_dev`, `workstation_desktop`, `workstation_dev`, and `pc_dev`
 commands. On this branch those flows are VM-first, so copied single-system LXC
 commands for existing systems must add `--machine unprivileged` before rerunning
 setup.

@@ -62,7 +62,20 @@ def print_setup_summary(config: SetupConfig, description: Optional[str] = None) 
     
     if config.custom_steps:
         print(f"Steps: {config.custom_steps}")
-    
+
+    if config.install_gh:
+        print("GitHub CLI: Yes")
+    if config.install_opencode:
+        print("OpenCode: Yes")
+    if config.copy_agent_config:
+        print("Agent config copy: Yes")
+    if config.copy_agent_keys:
+        print("Agent credential copy: Yes")
+    if config.agent_repos:
+        print(f"Agent repositories: {len(config.agent_repos)}")
+        for git_url in config.agent_repos:
+            print(f"  - {git_url}")
+
     if config.deploy_specs:
         print(f"Deployments: {len(config.deploy_specs)} repository(ies)")
         for location, git_url in config.deploy_specs:

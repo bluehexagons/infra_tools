@@ -11,6 +11,7 @@ Automated setup scripts for remote Linux systems (Debian).
 
 ```bash
 python3 infra_tools.py setup server_web example.com admin --ruby --node --deploy example.com https://github.com/user/repo.git
+python3 infra_tools.py setup server_dev 10.0.0.10 agentuser --gh --opencode --copy-keys --copy-config --repo https://github.com/user/my_codebase.git
 python3 infra_tools.py setup workstation_desktop 192.168.1.100 admin --desktop i3 --browser firefox
 python3 infra_tools.py patch example.com admin --ssl --deploy api.example.com https://github.com/user/api.git
 python3 infra_tools.py credentials set guest s3cret
@@ -58,6 +59,22 @@ python3 infra_tools.py setup server_web web.com \
   --ssl --ssl-email admin@web.com \
   --deploy web.com https://github.com/user/repo.git
 ```
+
+### Agent VM Workspace
+```bash
+python3 infra_tools.py setup server_dev 10.0.0.10 agentuser \
+  --gh \
+  --opencode \
+  --copy-keys \
+  --copy-config \
+  --repo https://github.com/user/my_codebase.git
+```
+
+This installs GitHub CLI and OpenCode, uploads selected local tool config and
+credentials, and copies each uploaded repo to `/home/agentuser/repos`. Existing
+repo destinations are skipped to avoid overwriting in-progress agent work. See
+[`docs/plans/AGENT_VM_SETUP.md`](docs/plans/AGENT_VM_SETUP.md) for current scope
+and unresolved credential edge cases.
 
 ### Remote Desktop Workstation
 ```bash
@@ -199,8 +216,8 @@ Proxmox auto-detection. LXC `template` storage is optional and may be given as `
 to reuse the saved/default template pool.
 
 Upgrade note: if you are rerunning a copied main-era single-system command for
-an existing hosted LXC `server_web`, `workstation_desktop`, `workstation_dev`,
-or `pc_dev`, add `--machine unprivileged`. Saved `deploy` and `patch` workflows
+an existing hosted LXC `server_web`, `server_dev`, `workstation_desktop`,
+`workstation_dev`, or `pc_dev`, add `--machine unprivileged`. Saved `deploy` and `patch` workflows
 preserve the cached machine type when `--machine` is omitted.
 
 ### Managing Proxmox Guests

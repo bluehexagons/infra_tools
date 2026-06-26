@@ -136,6 +136,21 @@ class TestSetupConfigToRemoteArgs(unittest.TestCase):
         args = config.to_remote_args()
         self.assertIn('--python', args)
 
+    def test_agent_tool_flags(self):
+        config = self._make_config(
+            install_gh=True,
+            install_opencode=True,
+            copy_agent_keys=True,
+            copy_agent_config=True,
+            agent_repos=['https://github.com/user/my_codebase.git'],
+        )
+        args_str = ' '.join(config.to_remote_args())
+        self.assertIn('--gh', args_str)
+        self.assertIn('--opencode', args_str)
+        self.assertIn('--copy-keys', args_str)
+        self.assertIn('--copy-config', args_str)
+        self.assertIn('--repo https://github.com/user/my_codebase.git', args_str)
+
     def test_deploy_specs(self):
         config = self._make_config(deploy_specs=[['example.com/', 'https://github.com/user/repo.git']])
         args = config.to_remote_args()
@@ -333,6 +348,22 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
         parts = config.to_setup_command()
         self.assertIn('--python', parts)
 
+    def test_agent_tool_flags_included(self):
+        config = self._make_config(
+            install_gh=True,
+            install_opencode=True,
+            copy_agent_keys=True,
+            copy_agent_config=True,
+            agent_repos=['git@github.com:user/my_codebase.git'],
+        )
+        parts = config.to_setup_command()
+        cmd = ' '.join(parts)
+        self.assertIn('--gh', parts)
+        self.assertIn('--opencode', parts)
+        self.assertIn('--copy-keys', parts)
+        self.assertIn('--copy-config', parts)
+        self.assertIn('--repo git@github.com:user/my_codebase.git', cmd)
+
     def test_smb_mount_password_redacted(self):
         config = self._make_config(
             smb_mounts=[['/mnt/share', '1.2.3.4', 'user1:secret1', 'docs', '/']]
@@ -428,6 +459,10 @@ class TestSetupConfigFromArgs(unittest.TestCase):
 
     def test_server_web_defaults_to_vm(self):
         config = SetupConfig.from_args(self._make_args(), 'server_web')
+        self.assertEqual(config.machine_type, 'vm')
+
+    def test_server_dev_defaults_to_vm(self):
+        config = SetupConfig.from_args(self._make_args(), 'server_dev')
         self.assertEqual(config.machine_type, 'vm')
 
     def test_build_server_defaults_to_vm(self):

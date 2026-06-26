@@ -169,9 +169,31 @@ def add_setup_arguments(
                        default=None if not for_remote else False,
                        help="Install nvm + latest Node.JS + PNPM + update NPM")
     parser.add_argument("--python", dest="install_python",
+                        action=argparse.BooleanOptionalAction if not for_remote else "store_true",
+                        default=None if not for_remote else False,
+                        help="Install Python tooling (python aliases and uv). For shell autocompletion, use the local completions installer script.")
+
+    # Agent VM tooling
+    parser.add_argument("--gh", dest="install_gh",
                        action=argparse.BooleanOptionalAction if not for_remote else "store_true",
                        default=None if not for_remote else False,
-                       help="Install Python tooling (python aliases and uv). For shell autocompletion, use the local completions installer script.")
+                       help="Install the GitHub CLI for agent workflows")
+    parser.add_argument("--opencode", dest="install_opencode",
+                       action=argparse.BooleanOptionalAction if not for_remote else "store_true",
+                       default=None if not for_remote else False,
+                       help="Install OpenCode for terminal-based AI agent workflows")
+    parser.add_argument("--copy-keys", dest="copy_agent_keys",
+                       action=argparse.BooleanOptionalAction if not for_remote else "store_true",
+                       default=None if not for_remote else False,
+                       help="Copy credentials for selected agent tools when available locally")
+    parser.add_argument("--copy-config", dest="copy_agent_config",
+                       action=argparse.BooleanOptionalAction if not for_remote else "store_true",
+                       default=None if not for_remote else False,
+                       help="Copy non-secret config for selected agent tools when available locally")
+    parser.add_argument("--repo", dest="agent_repos",
+                       action="append",
+                       metavar="GIT_URL",
+                       help="Clone a git repository locally and upload it to /home/USER/repos on the target; repeat as needed")
     
     # Deployment options
     parser.add_argument("--deploy", dest="deploy_specs",

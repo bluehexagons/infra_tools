@@ -10,6 +10,7 @@ Related pages:
 - [`NETWORKING.md`](./NETWORKING.md) for workspace network inventory
 - [`CICD.md`](./CICD.md) for webhook CI/CD setup
 - [`MACHINE_TYPES.md`](./MACHINE_TYPES.md) for machine type behavior
+- [`plans/AGENT_VM_SETUP.md`](./plans/AGENT_VM_SETUP.md) for agent VM setup scope and open questions
 
 ## Unified Entry Point
 
@@ -90,6 +91,35 @@ infra_tools.py proxmox ...
 | `--go` | Install Go |
 | `--python` | Install Python aliases + uv |
 
+### Agent VM Flags
+
+These flags prepare a `server_dev` VM for terminal AI-agent work. They also work
+on other setup types, but `server_dev` is the intended flow.
+
+```bash
+infra_tools.py setup server_dev 10.0.0.10 agentuser \
+  --gh --opencode --copy-keys --copy-config \
+  --repo https://github.com/user/my_codebase.git
+```
+
+| Flag | Description |
+|------|-------------|
+| `--gh` | Install GitHub CLI from GitHub's Debian apt repository |
+| `--opencode` | Install OpenCode into the setup user's home directory |
+| `--copy-config` | Stage selected local config for tools enabled by the same command |
+| `--copy-keys` | Stage selected local credentials for tools enabled by the same command |
+| `--repo GIT_URL` | Clone locally, upload with the setup bundle, and copy to `/home/USER/repos/NAME`; repeatable |
+
+Credential/config copy is intentionally tool-scoped:
+
+- `--gh --copy-config` copies GitHub CLI config such as `config.yml`, aliases, and extensions; it does not copy `hosts.yml`.
+- `--gh --copy-keys` copies GitHub CLI `hosts.yml` when present.
+- `--opencode --copy-config` copies `~/.config/opencode`, including global agents, skills, commands, plugins, and config files.
+- `--opencode --copy-keys` copies `~/.local/share/opencode/auth.json` when present.
+
+Uploaded repositories are skipped if the destination already exists, to avoid
+overwriting agent work on long-lived disposable VMs.
+
 ### Hosted Proxmox Flags
 
 | Flag | Description |
@@ -111,7 +141,7 @@ Notes:
 - `root` storage is required when `--hosted` is used.
 - `template` storage is LXC-only.
 - VM is the default for hosted `workstation_desktop`, `workstation_dev`,
-  `pc_dev`, `server_web`, and build-server flows.
+  `pc_dev`, `server_dev`, `server_web`, and build-server flows.
 - `--machine unprivileged` keeps an existing or intentional LXC path.
 
 ## Deployment Flags
