@@ -29,6 +29,8 @@ setup tarball, and installed on the target under `/home/<user>/repos/<repo>`.
   and adds likely user-local bin directories to `.bashrc`.
 - `--copy-config` stages config for tools selected in the same command.
 - `--copy-keys` stages credentials for tools selected in the same command.
+- Copied GitHub CLI credentials are used to run `gh auth setup-git` for the
+  setup user when `gh auth status` validates successfully.
 - `--repo` clones locally using the existing git cache/upload flow and copies
   uploaded repos into `/home/<user>/repos` on the target.
 - Existing repo destinations are skipped to avoid destroying uncommitted agent
@@ -41,7 +43,7 @@ requested.
 
 | Tool | `--copy-config` | `--copy-keys` |
 |------|-----------------|---------------|
-| GitHub CLI | `~/.config/gh/config.yml`, `aliases.yml`, `extensions/` | `~/.config/gh/hosts.yml` |
+| GitHub CLI | `~/.config/gh/config.yml`, `aliases.yml`, `extensions/` | `~/.config/gh/hosts.yml`; also wires git HTTPS auth through `gh` when auth validates |
 | OpenCode | `~/.config/opencode/` | `~/.local/share/opencode/auth.json` |
 
 OpenCode config files can themselves reference secrets or contain inline API

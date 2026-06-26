@@ -113,7 +113,7 @@ infra_tools.py setup server_dev 10.0.0.10 agentuser \
 Credential/config copy is intentionally tool-scoped:
 
 - `--gh --copy-config` copies GitHub CLI config such as `config.yml`, aliases, and extensions; it does not copy `hosts.yml`.
-- `--gh --copy-keys` copies GitHub CLI `hosts.yml` when present.
+- `--gh --copy-keys` copies GitHub CLI `hosts.yml` when present and runs `gh auth setup-git` for the setup user when auth validates.
 - `--opencode --copy-config` copies `~/.config/opencode`, including global agents, skills, commands, plugins, and config files.
 - `--opencode --copy-keys` copies `~/.local/share/opencode/auth.json` when present.
 

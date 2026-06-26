@@ -142,16 +142,38 @@ def _copy_payload_directory(config: SetupConfig, source: str, destination: str, 
     print(f"  Copied {label} config")
 
 
-def _copy_secret_file(config: SetupConfig, source: str, destination: str, label: str) -> None:
+def _copy_secret_file(config: SetupConfig, source: str, destination: str, label: str) -> bool:
     if not os.path.isfile(source):
         print(f"  No {label} credential payload found")
-        return
+        return False
 
     os.makedirs(os.path.dirname(destination), mode=0o700, exist_ok=True)
     shutil.copy2(source, destination)
     os.chmod(destination, 0o600)
     _chown_path(config, destination)
     print(f"  Copied {label} credentials")
+    return True
+
+
+def _configure_github_git_credentials(config: SetupConfig) -> None:
+    """Wire git HTTPS auth through gh for the setup user when gh auth works."""
+    user_home = _user_home(config)
+    result = _run_as_login_user(
+        config.username,
+        user_home,
+        'export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH" && '
+        'if gh auth status >/dev/null 2>&1; then '
+        'gh auth setup-git >/dev/null; '
+        'else exit 2; fi',
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode == 0:
+        print("  Configured git to use GitHub CLI credentials")
+    elif result.returncode == 2:
+        print("  GitHub CLI credentials copied, but gh auth status did not pass")
+    else:
+        print("  Warning: failed to configure git for GitHub CLI credentials")
 
 
 def copy_agent_tooling_payload(config: SetupConfig) -> None:
@@ -191,12 +213,14 @@ def copy_agent_tooling_payload(config: SetupConfig) -> None:
         )
 
     if config.copy_agent_keys and config.install_gh:
-        _copy_secret_file(
+        copied = _copy_secret_file(
             config,
             _payload_path("secrets", "gh", "hosts.yml"),
             os.path.join(user_home, ".config", "gh", "hosts.yml"),
             "GitHub CLI",
         )
+        if copied:
+            _configure_github_git_credentials(config)
 
 
 def install_agent_repositories(config: SetupConfig) -> None:
