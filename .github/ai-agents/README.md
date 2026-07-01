@@ -33,7 +33,7 @@ python3 -m py_compile file.py
 ## Machine Type Awareness
 
 ```python
-from lib.machine_state import can_modify_kernel, can_manage_swap
+from lib.machine_state import can_modify_kernel
 
 if not can_modify_kernel():
     print("  ✓ Skipping (container)")

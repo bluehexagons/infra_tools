@@ -4,7 +4,7 @@
 
 | Issue | Solution |
 |-------|----------|
-| Import errors | Add `sys.path.insert(0, '../lib')` at top of file |
+| Import errors | Run from the repo root or use the package import paths under `lib/` |
 | Permission denied | Use `can_modify_kernel()` check before system operations |
 | Test modifications | Mock system calls with `unittest.mock`, use `tempfile.TemporaryDirectory()` |
 
