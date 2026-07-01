@@ -13,6 +13,8 @@ this document focuses on what operators need to know.
 - Supports `--reset-migrations` for squashed or reset migration histories.
 - Keeps persistent Rails state under `.infra_tools_shared` so redeployments do
   not discard data.
+- Manifest service components get dedicated runtime users and per-component
+  writable state under `.infra_tools_shared/<app>/<component>`.
 - Installs a weekly cleanup timer and caps journal growth on server-style
   setups.
 - Uses conservative package-update policy for Node, Ruby, and uv by default.

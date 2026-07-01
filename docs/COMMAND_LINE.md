@@ -10,7 +10,6 @@ Related pages:
 - [`NETWORKING.md`](./NETWORKING.md) for workspace network inventory
 - [`CICD.md`](./CICD.md) for webhook CI/CD setup
 - [`MACHINE_TYPES.md`](./MACHINE_TYPES.md) for machine type behavior
-- [`plans/AGENT_VM_SETUP.md`](./plans/AGENT_VM_SETUP.md) for agent VM setup scope and open questions
 
 ## Unified Entry Point
 
@@ -156,6 +155,9 @@ Notes:
 | `--ssl-email EMAIL` | Email for SSL registration |
 | `--cloudflare` | Configure Cloudflare Tunnel |
 | `--api-subdomain` | Deploy Rails API to `api.domain.com` |
+
+Repos can also ship `infra.json` manifests for multi-component deploys; see
+`README.md` for the current overview.
 
 ## Build / App Servers
 

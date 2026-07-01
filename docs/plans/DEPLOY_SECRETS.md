@@ -11,9 +11,10 @@ The intended shape is simple:
 - let build env vary based on whether a component was enabled
 
 This remains a design note only. When implementation starts, the work should be
-built on top of:
+built on top of the current deployment and manifest code paths:
 
-- `docs/plans/PROJECT_MANIFEST.md`
-- `docs/plans/DEPLOY_ISOLATION.md`
+- `README.md`
+- `docs/DEPLOYMENT_SAFETY.md`
 - `lib/credentials.py`
+- `lib/deployment.py`
 - `lib/project_manifest.py`

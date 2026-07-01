@@ -23,6 +23,7 @@ python3 infra_tools.py credentials set guest s3cret
 - **Workstations**: Desktop environments (XFCE, i3, LXQt), RDP, browsers, audio
 - **Storage**: Samba shares, rsync sync, par2 integrity verification
 - **Security**: Firewall, SSH hardening, fail2ban, hardened OS auto-updates, weekly cleanup maintenance, journald size limits
+- **Deployments**: Single-service deploys plus repo-defined `infra.json` manifests for multi-component apps
 - **Network inventory**: workspace-backed network profiles and read-only Proxmox control-plane firewall planning — see [docs/NETWORKING.md](./docs/NETWORKING.md)
 - **Sysadmin shortcuts**: mount, health, ssh, push/pull, df, fan, svc, logs, upgrade, reachable — see [docs/SYSADMIN.md](./docs/SYSADMIN.md)
 
@@ -73,8 +74,7 @@ python3 infra_tools.py setup server_dev 10.0.0.10 agentuser \
 This installs GitHub CLI and OpenCode, uploads selected local tool config and
 credentials, and copies each uploaded repo to `/home/agentuser/repos`. Existing
 repo destinations are skipped to avoid overwriting in-progress agent work. See
-[`docs/plans/AGENT_VM_SETUP.md`](docs/plans/AGENT_VM_SETUP.md) for current scope
-and unresolved credential edge cases.
+[`docs/COMMAND_LINE.md`](./docs/COMMAND_LINE.md) for the current flag reference.
 
 ### Remote Desktop Workstation
 ```bash

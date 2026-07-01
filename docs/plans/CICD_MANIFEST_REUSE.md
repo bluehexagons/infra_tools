@@ -15,6 +15,8 @@ Why it is separate:
 
 If this work resumes, start from:
 
-- `docs/plans/PROJECT_MANIFEST.md`
+- `README.md`
+- `docs/CICD.md`
+- `lib/project_manifest.py`
 - `web/service_tools/cicd_executor.py`
 - `lib/deployment.py`
