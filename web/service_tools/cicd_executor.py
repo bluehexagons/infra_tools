@@ -20,6 +20,7 @@ import shlex
 import time
 import fcntl
 import pwd
+import stat
 from pathlib import Path
 from typing import Optional
 
@@ -27,6 +28,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../
 
 from lib.logging_utils import get_service_logger, log_event
 from lib.notifications import load_notification_configs_from_state, send_notification
+from web.service_tools.cicd_security import (
+    MAX_JOB_FILE_BYTES,
+    get_workspace_name,
+    validate_branch_ref,
+    validate_commit_sha,
+    validate_job_data,
+)
 
 logger = get_service_logger('cicd_executor', 'web', use_syslog=True)
 
@@ -60,85 +68,109 @@ def load_config() -> dict:
 
 def get_repo_workspace(repo_url: str) -> str:
     """Get workspace directory for a repository."""
-    # Extract repo name from URL
-    repo_name = repo_url.rstrip('/').split('/')[-1].replace('.git', '')
-    workspace = os.path.join(WORKSPACES_DIR, repo_name)
-    return workspace
+    return os.path.join(WORKSPACES_DIR, get_workspace_name(repo_url))
 
 
-def clone_or_update_repo(repo_url: str, workspace: str, ref: str) -> bool:
-    """Clone repository if it doesn't exist, or pull latest changes."""
+def clone_or_update_repo(repo_url: str, workspace: str, ref: str, commit_sha: str) -> bool:
+    """Create a fresh clone and check out the authenticated commit."""
     try:
-        if not os.path.exists(workspace):
-            log_event(logger, "Cloning repository", repo_url=repo_url)
-            result = subprocess.run(
-                ['git', 'clone', repo_url, workspace],
-                capture_output=True,
-                text=True,
-                timeout=300
-            )
-            if result.returncode != 0:
-                log_event(logger, "Failed to clone repository", level=40, repo_url=repo_url, stderr=result.stderr.strip())
-                return False
-        
-        log_event(logger, "Fetching latest changes", repo_url=repo_url)
+        if os.path.lexists(workspace):
+            if os.path.islink(workspace) or not os.path.isdir(workspace):
+                os.unlink(workspace)
+            else:
+                shutil.rmtree(workspace)
+
+        log_event(logger, "Creating fresh repository clone", repo_url=repo_url)
         result = subprocess.run(
-            ['git', 'fetch', '--all'],
+            [
+                'git',
+                'clone',
+                '--no-checkout',
+                '--origin',
+                'origin',
+                '--config',
+                'core.hooksPath=/dev/null',
+                '--',
+                repo_url,
+                workspace,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        if result.returncode != 0:
+            log_event(logger, "Failed to clone repository", level=40, repo_url=repo_url, stderr=result.stderr.strip())
+            return False
+
+        _validated_ref, branch, validated_sha = _validate_checkout_fields(ref, commit_sha)
+        remote_ref = f"refs/remotes/origin/{branch}"
+        refspec = f"+{ref}:{remote_ref}"
+
+        log_event(logger, "Fetching authenticated branch", repo_url=repo_url, branch=branch)
+        result = subprocess.run(
+            ['git', 'fetch', '--force', '--prune', 'origin', refspec],
             cwd=workspace,
             capture_output=True,
             text=True,
-            timeout=120
+            timeout=120,
         )
         if result.returncode != 0:
             log_event(logger, "Failed to fetch repository changes", level=40, repo_url=repo_url, stderr=result.stderr.strip())
             return False
-        
+
         result = subprocess.run(
-            ['git', 'reset', '--hard', 'HEAD'],
+            ['git', 'cat-file', '-e', f'{validated_sha}^{{commit}}'],
             cwd=workspace,
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=30,
         )
         if result.returncode != 0:
-            log_event(logger, "Failed to reset repository", level=40, repo_url=repo_url, stderr=result.stderr.strip())
+            log_event(logger, "Authenticated commit was not fetched", level=40, repo_url=repo_url, commit_sha=validated_sha[:8])
             return False
-        
+
         result = subprocess.run(
-            ['git', 'clean', '-fd'],
+            ['git', 'merge-base', '--is-ancestor', validated_sha, remote_ref],
             cwd=workspace,
             capture_output=True,
             text=True,
-            timeout=60
+            timeout=30,
         )
         if result.returncode != 0:
-            log_event(logger, "git clean had issues", level=30, repo_url=repo_url, stderr=result.stderr.strip())
-        
-        branch = ref.replace('refs/heads/', '')
-        log_event(logger, "Checking out branch", repo_url=repo_url, branch=branch)
-        result = subprocess.run(
-            ['git', 'checkout', branch],
-            cwd=workspace,
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-        if result.returncode != 0:
-            log_event(logger, "Failed to checkout branch", level=40, repo_url=repo_url, branch=branch, stderr=result.stderr.strip())
+            log_event(
+                logger,
+                "Authenticated commit is not reachable from configured branch",
+                level=40,
+                repo_url=repo_url,
+                branch=branch,
+                commit_sha=validated_sha[:8],
+            )
             return False
-        
+
+        log_event(logger, "Checking out authenticated commit", repo_url=repo_url, branch=branch, commit_sha=validated_sha[:8])
         result = subprocess.run(
-            ['git', 'pull', '--ff-only'],
+            ['git', 'checkout', '--detach', '--force', validated_sha],
             cwd=workspace,
             capture_output=True,
             text=True,
-            timeout=120
+            timeout=30,
         )
         if result.returncode != 0:
-            log_event(logger, "Failed to pull repository changes", level=40, repo_url=repo_url, branch=branch, stderr=result.stderr.strip())
+            log_event(logger, "Failed to checkout authenticated commit", level=40, repo_url=repo_url, commit_sha=validated_sha[:8], stderr=result.stderr.strip())
             return False
-        
-        log_event(logger, "Repository updated successfully", repo_url=repo_url, branch=branch)
+
+        result = subprocess.run(
+            ['git', 'clean', '-ffdx'],
+            cwd=workspace,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if result.returncode != 0:
+            log_event(logger, "Failed to clean repository workspace", level=40, repo_url=repo_url, stderr=result.stderr.strip())
+            return False
+
+        log_event(logger, "Repository checkout prepared", repo_url=repo_url, branch=branch, commit_sha=validated_sha[:8])
         return True
         
     except subprocess.TimeoutExpired:
@@ -147,6 +179,49 @@ def clone_or_update_repo(repo_url: str, workspace: str, ref: str) -> bool:
     except Exception as e:
         log_event(logger, "Failed to clone/update repository", level=40, repo_url=repo_url, error=str(e))
         return False
+
+
+def _validate_checkout_fields(ref: str, commit_sha: str) -> tuple[str, str, str]:
+    """Validate checkout fields through the shared job validator."""
+
+    safe_ref, branch = validate_branch_ref(ref)
+    safe_sha = validate_commit_sha(commit_sha)
+    return safe_ref, branch, safe_sha
+
+
+def _load_job_file(job_file: str) -> object:
+    """Load a small, regular job file without following symlinks."""
+
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    fd = os.open(job_file, flags)
+    try:
+        file_stat = os.fstat(fd)
+        if not stat.S_ISREG(file_stat.st_mode):
+            raise ValueError("job path must be a regular file")
+        if file_stat.st_size > MAX_JOB_FILE_BYTES:
+            raise ValueError("job file is too large")
+        with os.fdopen(fd, 'r', encoding='utf-8') as file_obj:
+            fd = -1
+            return json.load(file_obj)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
+def _consume_job_path(job_file: str) -> None:
+    """Remove one terminal queue entry without following symlinks."""
+
+    try:
+        path_stat = os.lstat(job_file)
+    except FileNotFoundError:
+        return
+
+    if stat.S_ISDIR(path_stat.st_mode):
+        shutil.rmtree(job_file)
+    else:
+        os.unlink(job_file)
 
 
 def run_script(script_path: str, workspace: str, log_file: str) -> bool:
@@ -218,17 +293,8 @@ def process_job(job_file: str) -> bool:
     log_event(logger, "Processing job", job_file=job_file)
     
     try:
-        with open(job_file, 'r') as f:
-            job_data = json.load(f)
-        
-        repo_url = job_data.get('repo_url')
-        ref = job_data.get('ref')
-        commit_sha = job_data.get('commit_sha')
-        pusher = job_data.get('pusher', 'unknown')
-        
-        if not repo_url or not ref or not commit_sha:
-            log_event(logger, "Invalid job data", level=40, job_file=job_file)
-            return False
+        job_data = _load_job_file(job_file)
+        repo_url, ref, branch, commit_sha, pusher = validate_job_data(job_data)
         
         config = load_config()
         repos = config.get('repositories', [])
@@ -242,12 +308,21 @@ def process_job(job_file: str) -> bool:
         if not repo_config:
             log_event(logger, "Repository not configured", level=40, repo_url=repo_url)
             return False
+
+        configured_branches = repo_config.get('branches', ['main', 'master'])
+        if branch not in configured_branches:
+            log_event(logger, "Job branch is not configured", level=40, repo_url=repo_url, branch=branch)
+            return False
         
         workspace = get_repo_workspace(repo_url)
-        os.makedirs(workspace, exist_ok=True)
-        
-        log_file = os.path.join(LOGS_DIR, f"{commit_sha[:8]}.log")
+        log_file = os.path.join(LOGS_DIR, f"{commit_sha}.log")
         os.makedirs(LOGS_DIR, exist_ok=True)
+
+        timestamp = job_data.get('timestamp', 'unknown')
+        if not isinstance(timestamp, str) or len(timestamp) > 64 or any(
+            ord(char) < 32 or ord(char) == 127 for char in timestamp
+        ):
+            timestamp = 'unknown'
         
         with open(log_file, 'w') as log:
             log.write(f"CI/CD Build Log\n")
@@ -256,13 +331,13 @@ def process_job(job_file: str) -> bool:
             log.write(f"Branch: {ref}\n")
             log.write(f"Commit: {commit_sha}\n")
             log.write(f"Pusher: {pusher}\n")
-            log.write(f"Timestamp: {job_data.get('timestamp', 'unknown')}\n")
+            log.write(f"Timestamp: {timestamp}\n")
             deploy_target = repo_config.get('deploy_target')
             if deploy_target:
                 log.write(f"Deploy Target: {deploy_target}\n")
             log.write(f"{'='*80}\n\n")
         
-        if not clone_or_update_repo(repo_url, workspace, ref):
+        if not clone_or_update_repo(repo_url, workspace, ref, commit_sha):
             log_event(logger, "Failed to clone/update repository", level=40, repo_url=repo_url, job_file=job_file)
             notify_failure(repo_url, commit_sha, "Failed to clone/update repository")
             return False
@@ -301,8 +376,6 @@ def process_job(job_file: str) -> bool:
             else:
                 notify_failure(repo_url, commit_sha, "Build failed", notification_configs)
         
-        os.remove(job_file)
-        
         log_event(
             logger,
             "Job completed",
@@ -316,6 +389,11 @@ def process_job(job_file: str) -> bool:
     except Exception as e:
         log_event(logger, "Error processing job", level=40, job_file=job_file, error=str(e))
         return False
+    finally:
+        try:
+            _consume_job_path(job_file)
+        except OSError as exc:
+            log_event(logger, "Failed to remove consumed job", level=30, job_file=job_file, error=str(exc))
 
 
 def perform_remote_deployment(
@@ -560,8 +638,7 @@ def cleanup_stale_workspaces(config: dict) -> int:
     for repo in repos:
         url = repo.get('url', '')
         if url:
-            repo_name = url.rstrip('/').split('/')[-1].replace('.git', '')
-            configured_workspaces.add(repo_name)
+            configured_workspaces.add(get_workspace_name(url))
 
     removed_count = 0
     for name in os.listdir(WORKSPACES_DIR):

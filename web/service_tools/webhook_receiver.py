@@ -21,6 +21,7 @@ import sys
 import json
 import hmac
 import hashlib
+import secrets
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Optional
@@ -29,7 +30,14 @@ from typing import Optional
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
 from lib.logging_utils import get_service_logger, log_event
-from lib.notifications import load_notification_configs_from_state, send_notification
+from web.service_tools.cicd_security import (
+    MAX_WEBHOOK_PAYLOAD_BYTES,
+    get_workspace_name,
+    validate_branch_ref,
+    validate_commit_sha,
+    validate_pusher,
+    validate_repo_url,
+)
 
 # Initialize centralized logger
 logger = get_service_logger('webhook_receiver', 'web', use_syslog=True)
@@ -97,24 +105,39 @@ def trigger_cicd_job(repo_url: str, ref: str, commit_sha: str, pusher: str) -> b
     try:
         os.makedirs(JOBS_DIR, exist_ok=True)
         
+        safe_repo_url = validate_repo_url(repo_url)
+        safe_ref, _branch = validate_branch_ref(ref)
+        safe_commit_sha = validate_commit_sha(commit_sha)
+        safe_pusher = validate_pusher(pusher)
+
         job_data = {
-            "repo_url": repo_url,
-            "ref": ref,
-            "commit_sha": commit_sha,
-            "pusher": pusher,
+            "repo_url": safe_repo_url,
+            "ref": safe_ref,
+            "commit_sha": safe_commit_sha,
+            "pusher": safe_pusher,
             "timestamp": datetime.now().strftime(TIMESTAMP_FORMAT)
         }
         
         timestamp = datetime.now().strftime(TIMESTAMP_FORMAT_FILE)
-        safe_repo_name = repo_url.rstrip('/').split('/')[-1].replace('.git', '')
-        job_file = os.path.join(JOBS_DIR, f"{timestamp}_{safe_repo_name}_{commit_sha}.json")
+        safe_repo_name = get_workspace_name(safe_repo_url)
+        nonce = secrets.token_hex(8)
+        job_file = os.path.join(
+            JOBS_DIR,
+            f"{timestamp}_{safe_repo_name}_{safe_commit_sha[:12]}_{nonce}.json",
+        )
         # Atomic write so the path activator never sees a half-written file.
         tmp_file = job_file + ".tmp"
         with open(tmp_file, 'w') as f:
             json.dump(job_data, f, indent=2)
         os.replace(tmp_file, job_file)
         
-        log_event(logger, "Created CI/CD job", job_file=job_file, repo_url=repo_url, commit_sha=commit_sha[:8])
+        log_event(
+            logger,
+            "Created CI/CD job",
+            job_file=job_file,
+            repo_url=safe_repo_url,
+            commit_sha=safe_commit_sha[:8],
+        )
         
         return True
         
@@ -136,8 +159,22 @@ class WebhookHandler(BaseHTTPRequestHandler):
             self.send_error(404, "Not Found")
             return
         
-        # Read request body
-        content_length = int(self.headers.get('Content-Length', 0))
+        content_length_header = self.headers.get('Content-Length')
+        if content_length_header is None:
+            self.send_error(411, "Content-Length Required")
+            return
+        try:
+            content_length = int(content_length_header)
+        except ValueError:
+            self.send_error(400, "Invalid Content-Length")
+            return
+        if content_length < 0:
+            self.send_error(400, "Invalid Content-Length")
+            return
+        if content_length > MAX_WEBHOOK_PAYLOAD_BYTES:
+            self.send_error(413, "Payload Too Large")
+            return
+
         body = self.rfile.read(content_length)
         
         # Get webhook secret from environment
@@ -157,9 +194,13 @@ class WebhookHandler(BaseHTTPRequestHandler):
         # Parse JSON payload
         try:
             payload = json.loads(body.decode('utf-8'))
-        except json.JSONDecodeError as e:
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
             log_event(logger, "Invalid JSON payload", level=40, error=str(e))
             self.send_error(400, "Invalid JSON")
+            return
+
+        if not isinstance(payload, dict):
+            self.send_error(400, "JSON payload must be an object")
             return
         
         # Get event type
@@ -167,10 +208,35 @@ class WebhookHandler(BaseHTTPRequestHandler):
         
         # Handle push events
         if event_type == 'push':
-            repo_url = payload.get('repository', {}).get('clone_url', '')
+            repository = payload.get('repository')
+            pusher_data = payload.get('pusher', {})
+            if not isinstance(repository, dict) or not isinstance(pusher_data, dict):
+                self.send_error(400, "Invalid Push Payload")
+                return
+
+            repo_url = repository.get('clone_url', '')
             ref = payload.get('ref', '')
             commit_sha = payload.get('after', '')
-            pusher = payload.get('pusher', {}).get('name', 'unknown')
+            pusher = pusher_data.get('name', 'unknown')
+
+            if payload.get("deleted") or (
+                isinstance(commit_sha, str) and commit_sha and not commit_sha.strip("0")
+            ):
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "ignored", "reason": "branch deleted"}).encode())
+                return
+
+            try:
+                repo_url = validate_repo_url(repo_url)
+                ref, branch = validate_branch_ref(ref)
+                commit_sha = validate_commit_sha(commit_sha)
+                pusher = validate_pusher(pusher)
+            except ValueError as exc:
+                log_event(logger, "Invalid push payload", level=30, error=str(exc))
+                self.send_error(400, "Invalid Push Payload")
+                return
             
             log_event(
                 logger,
@@ -201,7 +267,6 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 return
             
             # Check if the branch matches configured branches
-            branch = ref.replace('refs/heads/', '')
             configured_branches = repo_config.get('branches', ['main', 'master'])
             
             if branch not in configured_branches:

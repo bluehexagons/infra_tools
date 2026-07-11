@@ -209,7 +209,7 @@ RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallFilter=~@privileged @resources @mount
-ReadWritePaths=/var/lib/infra_tools/cicd
+ReadWritePaths=/var/lib/infra_tools/cicd/jobs
 CapabilityBoundingSet=
 AmbientCapabilities=
 UMask=0077
@@ -351,6 +351,7 @@ server {
         # Rate limiting
         limit_req zone=webhook_limit burst=5 nodelay;
         limit_req_status 429;
+        client_max_body_size 1m;
         
         # Proxy to webhook receiver
         proxy_pass http://127.0.0.1:8765;

@@ -7,10 +7,38 @@ import json
 import subprocess
 import shlex
 import tempfile
+import posixpath
 from typing import Optional
 
 from lib.ssh_utils import build_scp_command, build_ssh_command, build_rsync_ssh_transport, chain_remote_commands, shell_join
 from lib.types import JSONDict
+
+
+DEPLOY_ADMIN_HELPER = "/usr/local/sbin/infra-tools-deploy-admin"
+
+
+def _validate_config_name(domain: str) -> str:
+    """Return the safe nginx site name derived from a validated domain."""
+
+    config_name = domain.replace('.', '_')
+    if not config_name or len(config_name) > 254 or any(
+        not (char.isascii() and (char.isalnum() or char in "_-"))
+        for char in config_name
+    ):
+        raise ValueError(f"Invalid deployment domain: {domain}")
+    return config_name
+
+
+def _validate_deploy_path(deploy_path: str, base_dir: str) -> str:
+    """Require a deployment path to be a child of its configured base directory."""
+
+    normalized_base = posixpath.normpath(base_dir)
+    normalized_path = posixpath.normpath(deploy_path)
+    if not normalized_base.startswith('/') or not normalized_path.startswith('/'):
+        raise ValueError("Deployment paths must be absolute")
+    if normalized_path == normalized_base or posixpath.commonpath([normalized_base, normalized_path]) != normalized_base:
+        raise ValueError(f"Deployment path must be below {normalized_base}: {deploy_path}")
+    return normalized_path
 
 
 def load_deploy_targets() -> dict[str, JSONDict]:
@@ -128,7 +156,11 @@ def push_nginx_config(config_content: str, target_host: str, domain: str) -> boo
         print(f"  ✗ Unknown deploy target: {target_host}")
         return False
     
-    config_name = domain.replace('.', '_')
+    try:
+        config_name = _validate_config_name(domain)
+    except ValueError as exc:
+        print(f"  ✗ {exc}")
+        return False
     
     with tempfile.NamedTemporaryFile(mode='w', suffix='.conf', delete=False) as f:
         f.write(config_content)
@@ -140,7 +172,7 @@ def push_nginx_config(config_content: str, target_host: str, domain: str) -> boo
         user = target.get('user', 'deploy')
         host = target['host']
         
-        remote_temp_path = f"/tmp/{config_name}.conf"
+        remote_temp_path = f"/tmp/infra-tools-nginx-{config_name}.conf"
         scp_cmd = build_scp_command(
             host,
             user,
@@ -157,18 +189,8 @@ def push_nginx_config(config_content: str, target_host: str, domain: str) -> boo
             print(f"  ✗ Failed to upload nginx config: {result.stderr}")
             return False
         
-        remote_cmd = chain_remote_commands(
-            [
-                ["sudo", "mkdir", "-p", "/etc/nginx/sites-available"],
-                ["sudo", "mv", remote_temp_path, f"/etc/nginx/sites-available/{config_name}"],
-                [
-                    "sudo",
-                    "ln",
-                    "-sf",
-                    f"/etc/nginx/sites-available/{config_name}",
-                    f"/etc/nginx/sites-enabled/{config_name}",
-                ],
-            ]
+        remote_cmd = shell_join(
+            ["sudo", DEPLOY_ADMIN_HELPER, "install-nginx", config_name]
         )
         
         ssh_cmd = _build_ssh_cmd(target, remote_cmd)
@@ -188,12 +210,7 @@ def reload_nginx(target_host: str) -> bool:
     if not target:
         return False
     
-    remote_cmd = chain_remote_commands(
-        [
-            ["sudo", "nginx", "-t"],
-            ["sudo", "systemctl", "reload", "nginx"],
-        ]
-    )
+    remote_cmd = shell_join(["sudo", DEPLOY_ADMIN_HELPER, "reload-nginx"])
     ssh_cmd = _build_ssh_cmd(target, remote_cmd)
     
     try:
@@ -213,7 +230,9 @@ def restart_service(target_host: str, service_name: str) -> bool:
     if not target:
         return False
     
-    remote_cmd = shell_join(["sudo", "systemctl", "restart", service_name])
+    remote_cmd = shell_join(
+        ["sudo", DEPLOY_ADMIN_HELPER, "restart-service", service_name]
+    )
     ssh_cmd = _build_ssh_cmd(target, remote_cmd)
     
     try:
@@ -233,12 +252,25 @@ def remove_deployment(target_host: str, deploy_path: str, domain: Optional[str] 
     if not target:
         return False
     
-    cmds: list[list[str]] = [["sudo", "rm", "-rf", deploy_path]]
+    try:
+        safe_deploy_path = _validate_deploy_path(
+            deploy_path,
+            str(target.get("base_dir", "/var/www")),
+        )
+    except ValueError as exc:
+        print(f"  ✗ {exc}")
+        return False
+
+    cmds: list[list[str]] = [["rm", "-rf", "--", safe_deploy_path]]
     
     if domain:
-        config_name = domain.replace('.', '_')
-        cmds.append(["sudo", "rm", "-f", f"/etc/nginx/sites-enabled/{config_name}"])
-        cmds.append(["sudo", "rm", "-f", f"/etc/nginx/sites-available/{config_name}"])
+        try:
+            config_name = _validate_config_name(domain)
+        except ValueError as exc:
+            print(f"  ✗ {exc}")
+            return False
+        cmds.append(["sudo", DEPLOY_ADMIN_HELPER, "remove-nginx", config_name])
+        cmds.append(["sudo", DEPLOY_ADMIN_HELPER, "reload-nginx"])
 
     remote_cmd = chain_remote_commands(cmds)
     ssh_cmd = _build_ssh_cmd(target, remote_cmd)

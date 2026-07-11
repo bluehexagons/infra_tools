@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import os
-import shlex
+import shutil
 
 from lib.config import SetupConfig
 from lib.remote_utils import run, is_package_installed, is_service_active
+
+
+DEPLOY_ADMIN_SOURCE = "/opt/infra_tools/web/service_tools/deploy_admin.py"
+DEPLOY_ADMIN_HELPER = "/usr/local/sbin/infra-tools-deploy-admin"
 
 
 def install_app_server_dependencies(config: SetupConfig) -> None:
@@ -47,32 +51,19 @@ def create_deploy_user(config: SetupConfig) -> None:
 
 
 def configure_deploy_sudoers(config: SetupConfig) -> None:
-    """Configure sudoers for deploy user to manage nginx and services.
-    
-    Note: This allows deploy user to remove directories under /var/www/ but not
-    the /var/www directory itself, limiting the blast radius of rm operations.
-    Each deployment should be in its own subdirectory under /var/www/.
-    """
+    """Install the validated deploy helper and its minimal sudo permission."""
     sudoers_file = "/etc/sudoers.d/deploy-nginx"
-    
-    if os.path.exists(sudoers_file):
-        print("  ✓ Deploy sudoers already configured")
-        return
-    
-    # Restrict rm operations to subdirectories only, not the entire /var/www
-    sudoers_content = """# Allow deploy user to manage nginx and app services
-deploy ALL=(ALL) NOPASSWD: /usr/sbin/nginx -t
-deploy ALL=(ALL) NOPASSWD: /bin/systemctl reload nginx
-deploy ALL=(ALL) NOPASSWD: /bin/systemctl restart nginx
-deploy ALL=(ALL) NOPASSWD: /bin/systemctl restart rails-*
-deploy ALL=(ALL) NOPASSWD: /bin/systemctl restart node-*
-deploy ALL=(ALL) NOPASSWD: /bin/systemctl status rails-*
-deploy ALL=(ALL) NOPASSWD: /bin/systemctl status node-*
-deploy ALL=(ALL) NOPASSWD: /usr/bin/touch /var/log/infra_tools/*
-deploy ALL=(ALL) NOPASSWD: /usr/bin/mkdir -p /var/www/*
-# Restrict rm to subdirectories only (must have at least one path component after /var/www/)
-deploy ALL=(ALL) NOPASSWD: /usr/bin/rm -rf /var/www/*/*
-deploy ALL=(ALL) NOPASSWD: /bin/rm -rf /var/www/*/*
+
+    if not os.path.isfile(DEPLOY_ADMIN_SOURCE):
+        raise RuntimeError(f"Deploy admin helper source not found: {DEPLOY_ADMIN_SOURCE}")
+
+    os.makedirs(os.path.dirname(DEPLOY_ADMIN_HELPER), mode=0o755, exist_ok=True)
+    shutil.copyfile(DEPLOY_ADMIN_SOURCE, DEPLOY_ADMIN_HELPER)
+    os.chown(DEPLOY_ADMIN_HELPER, 0, 0)
+    os.chmod(DEPLOY_ADMIN_HELPER, 0o755)
+
+    sudoers_content = f"""# Validated privileged operations for the deploy account
+deploy ALL=(root) NOPASSWD: {DEPLOY_ADMIN_HELPER} *
 """
     
     os.makedirs("/etc/sudoers.d", exist_ok=True)
