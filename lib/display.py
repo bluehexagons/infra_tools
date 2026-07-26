@@ -65,8 +65,10 @@ def print_setup_summary(config: SetupConfig, description: Optional[str] = None) 
 
     if config.install_gh:
         print("GitHub CLI: Yes")
-    if config.install_opencode:
-        print("OpenCode: Yes")
+    if config.agent_suite:
+        print(f"Agent suite: {config.agent_suite}")
+    if config.selected_agent_tools():
+        print(f"Agent tools: {', '.join(config.selected_agent_tools())}")
     if config.copy_agent_config:
         print("Agent config copy: Yes")
     if config.copy_agent_keys:

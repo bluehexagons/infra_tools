@@ -38,6 +38,7 @@ except ImportError:
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from lib.arg_parser import add_setup_arguments
+from lib.agent_cli import add_agent_subparser, run_agent_command
 from lib.cache import get_cache_path_for_host, load_setup_command, merge_setup_configs, save_setup_command
 from lib.completions import run_completion_setup
 from lib.config import SetupConfig
@@ -101,6 +102,7 @@ def _build_infra_tools_epilog() -> str:
     completions                 Install shell completion for infra_tools.py
     python-tools                Install local Python aliases, uv, and completion
     bootstrap                   Install packages, launcher, and completions (alias: self-setup)
+    agent doctor               Check locally installed coding agents and credentials
     maintenance github ...      Audit/prune GitHub releases, artifacts, and caches
     network [subcommand]        Manage generic network inventory profiles
     proxmox [subcommand]        Manage Proxmox hosts and containers (interactive shell with no args)
@@ -354,6 +356,7 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
     add_proxmox_subparser(subparsers)
     add_maintenance_subparser(subparsers)
     add_sysadmin_subparsers(subparsers)
+    add_agent_subparser(subparsers)
 
     shell_parser = subparsers.add_parser(
         "shell",
@@ -553,8 +556,14 @@ def show_info(pattern: Optional[str] = None, *, compact: bool = False) -> int:
             features.append("Python")
         if args.get("install_gh"):
             features.append("GitHub CLI")
+        if args.get("install_codex"):
+            features.append("Codex CLI")
+        if args.get("install_claude"):
+            features.append("Claude Code")
         if args.get("install_opencode"):
             features.append("OpenCode")
+        if args.get("install_t3code"):
+            features.append("T3 Code")
         if args.get("install_office"):
             features.append("Office")
         if args.get("use_flatpak"):
@@ -1031,6 +1040,8 @@ def main() -> int:
         return run_proxmox_command(args)
     elif args.command == "maintenance":
         return run_maintenance_command(args)
+    elif args.command == "agent":
+        return run_agent_command(args)
     elif args.command in {"mount", "umount", "health", "ssh", "push", "pull", "key", "df", "fan", "svc", "logs", "upgrade", "reachable"}:
         return run_sysadmin_command(args)
     elif args.command == "shell":

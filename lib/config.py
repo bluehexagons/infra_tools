@@ -26,6 +26,8 @@ CLI_SYSTEMS = [
     if system_type.include_cli_tools
 ]
 
+AGENT_SUITES = ("terminal", "desktop", "full")
+
 
 def _resolve_machine_type(
     args: argparse.Namespace,
@@ -68,6 +70,11 @@ def _optional_bool_arg(args: argparse.Namespace, name: str) -> Optional[bool]:
 def _optional_int_arg(args: argparse.Namespace, name: str) -> Optional[int]:
     value = getattr(args, name, None)
     return value if isinstance(value, int) else None
+
+
+def _optional_str_arg(args: argparse.Namespace, name: str) -> Optional[str]:
+    value = getattr(args, name, None)
+    return value if isinstance(value, str) else None
 
 
 def _normalize_container_storage(value: NestedStrList | list[str] | None) -> Optional[NestedStrList]:
@@ -182,7 +189,11 @@ class SetupConfig:
     install_node: bool = False
     install_python: bool = False
     install_gh: bool = False
+    install_codex: bool = False
+    install_claude: bool = False
     install_opencode: bool = False
+    install_t3code: bool = False
+    agent_suite: MaybeStr = None
     copy_agent_keys: bool = False
     copy_agent_config: bool = False
     agent_repos: Optional[StrList] = None
@@ -240,6 +251,35 @@ class SetupConfig:
         # the requested full redeploy.
         if self.deployment_mode == "full":
             self.full_deploy = True
+
+        if self.agent_suite:
+            if self.agent_suite not in AGENT_SUITES:
+                raise ValueError(
+                    f"agent_suite must be one of: {', '.join(AGENT_SUITES)}"
+                )
+            self.install_gh = True
+            self.install_codex = True
+            self.install_claude = True
+            self.install_opencode = True
+            if self.agent_suite in {"desktop", "full"}:
+                self.install_t3code = True
+            if self.agent_suite == "full":
+                self.install_node = True
+                self.install_python = True
+                self.install_go = True
+
+    def selected_agent_tools(self) -> StrList:
+        """Return selected coding agents in stable display/install order."""
+        tools: StrList = []
+        for name, enabled in (
+            ("codex", self.install_codex),
+            ("claude", self.install_claude),
+            ("opencode", self.install_opencode),
+            ("t3code", self.install_t3code),
+        ):
+            if enabled:
+                tools.append(name)
+        return tools
 
     def to_remote_args(self) -> StrList:
         """Generate command line arguments for remote execution."""
@@ -306,8 +346,17 @@ class SetupConfig:
         if self.install_gh:
             args.append("--gh")
 
+        if self.install_codex:
+            args.append("--codex")
+
+        if self.install_claude:
+            args.append("--claude")
+
         if self.install_opencode:
             args.append("--opencode")
+
+        if self.install_t3code:
+            args.append("--t3code")
 
         if self.copy_agent_keys:
             args.append("--copy-keys")
@@ -508,8 +557,17 @@ class SetupConfig:
         if self.install_gh:
             cmd_parts.append("--gh")
 
+        if self.install_codex:
+            cmd_parts.append("--codex")
+
+        if self.install_claude:
+            cmd_parts.append("--claude")
+
         if self.install_opencode:
             cmd_parts.append("--opencode")
+
+        if self.install_t3code:
+            cmd_parts.append("--t3code")
 
         if self.copy_agent_keys:
             cmd_parts.append("--copy-keys")
@@ -815,7 +873,11 @@ class SetupConfig:
             install_node=getattr(args, 'install_node', False),
             install_python=getattr(args, 'install_python', False),
             install_gh=getattr(args, 'install_gh', False),
+            install_codex=getattr(args, 'install_codex', False),
+            install_claude=getattr(args, 'install_claude', False),
             install_opencode=getattr(args, 'install_opencode', False),
+            install_t3code=getattr(args, 'install_t3code', False),
+            agent_suite=_optional_str_arg(args, 'agent_suite'),
             copy_agent_keys=getattr(args, 'copy_agent_keys', False),
             copy_agent_config=getattr(args, 'copy_agent_config', False),
             agent_repos=getattr(args, 'agent_repos', None),

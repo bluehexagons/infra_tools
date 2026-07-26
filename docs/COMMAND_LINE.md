@@ -92,32 +92,62 @@ infra_tools.py proxmox ...
 
 ### Agent VM Flags
 
-These flags prepare a `server_dev` VM for terminal AI-agent work. They also work
-on other setup types, but `server_dev` is the intended flow.
+These flags prepare a Debian VM for agentic coding. They work with any setup
+type; `workstation_dev` is recommended when the agent needs a desktop/browser,
+and `server_dev` is useful for terminal-only guests.
 
 ```bash
-infra_tools.py setup server_dev 10.0.0.10 agentuser \
-  --gh --opencode --copy-keys --copy-config \
+infra_tools.py setup workstation_dev 10.0.0.10 agentuser \
+  --agent-suite terminal --copy-config \
   --repo https://github.com/user/my_codebase.git
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--gh` | Install GitHub CLI from GitHub's Debian apt repository |
-| `--opencode` | Install OpenCode into the setup user's home directory |
+| `--codex` | Install Codex CLI with [OpenAI's official installer](https://github.com/openai/codex#installation) |
+| `--claude` | Install Claude Code with [Anthropic's native installer](https://code.claude.com/docs/en/installation) |
+| `--opencode` | Install OpenCode with its [official installer](https://opencode.ai/docs/) |
+| `--t3code` | Install the verified [official T3 Code](https://github.com/pingdotgg/t3code) x86_64 AppImage, command, and desktop entry |
+| `--agent-suite terminal` | Install GitHub CLI, Codex CLI, Claude Code, OpenCode, and common coding utilities |
+| `--agent-suite desktop` | Install the terminal suite plus optional T3 Code |
+| `--agent-suite full` | Install the desktop suite plus Node, Python, and Go tooling |
 | `--copy-config` | Stage selected local config for tools enabled by the same command |
 | `--copy-keys` | Stage selected local credentials for tools enabled by the same command |
 | `--repo GIT_URL` | Clone locally, upload with the setup bundle, and copy to `/home/USER/repos/NAME`; repeatable |
+
+Codex CLI, Claude Code, OpenCode, and T3 Code are installed from their official
+distribution channels. infra_tools does not install these tools with npm. Any
+selected agent also installs a baseline containing build tools, CMake, Ninja,
+Git LFS, ripgrep, fd, fzf, jq, bat, tmux, direnv, and ShellCheck.
 
 Credential/config copy is intentionally tool-scoped:
 
 - `--gh --copy-config` copies GitHub CLI config such as `config.yml`, aliases, and extensions; it does not copy `hosts.yml`.
 - `--gh --copy-keys` copies GitHub CLI `hosts.yml` when present and runs `gh auth setup-git` for the setup user when auth validates.
+- `--codex --copy-config` copies known non-secret entries from `~/.codex`: `config.toml`, `AGENTS.md`, `skills`, and `rules`.
+- `--codex --copy-keys` copies `~/.codex/auth.json` when present.
+- `--claude --copy-config` copies known non-secret entries from `~/.claude`: settings, instructions, commands, agents, skills, and plugins.
+- `--claude --copy-keys` copies `~/.claude/.credentials.json` when present.
 - `--opencode --copy-config` copies `~/.config/opencode`, including global agents, skills, commands, plugins, and config files.
 - `--opencode --copy-keys` copies `~/.local/share/opencode/auth.json` when present.
+- T3 Code receives only a command wrapper and desktop entry; infra_tools does not copy T3 Code credentials.
 
 Uploaded repositories are skipped if the destination already exists, to avoid
 overwriting agent work on long-lived disposable VMs.
+
+On the configured VM, check the terminal suite without exposing credential
+contents:
+
+```bash
+infra_tools agent doctor
+infra_tools agent doctor --tool t3code
+infra_tools agent doctor --tool codex --tool claude --json
+```
+
+The default doctor check requires GitHub CLI, Codex CLI, Claude Code, and
+OpenCode. Missing credential files are reported as sign-in reminders but do not
+make an otherwise installed tool unhealthy.
 
 ### Hosted Proxmox Flags
 

@@ -21,8 +21,12 @@ PLUGIN = PluginDefinition(
         "install_go",
         "install_node",
         "install_python",
+        "install_agent_coding_tools",
         "install_github_cli",
+        "install_codex",
+        "install_claude",
         "install_opencode",
+        "install_t3code",
         "copy_agent_tooling_payload",
         "install_agent_repositories",
         "configure_auto_update_uv",
@@ -139,16 +143,32 @@ def extend_agent_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -
 
     from common.agent_steps import (
         copy_agent_tooling_payload,
+        install_agent_coding_tools,
         install_agent_repositories,
+        install_claude,
+        install_codex,
         install_github_cli,
         install_opencode,
+        install_t3code,
     )
+
+    if config.selected_agent_tools():
+        steps.append(("Installing common agent coding tools", install_agent_coding_tools))
 
     if config.install_gh:
         steps.append(("Installing GitHub CLI", install_github_cli))
 
+    if config.install_codex:
+        steps.append(("Installing Codex CLI", install_codex))
+
+    if config.install_claude:
+        steps.append(("Installing Claude Code", install_claude))
+
     if config.install_opencode:
         steps.append(("Installing OpenCode", install_opencode))
+
+    if config.install_t3code:
+        steps.append(("Installing T3 Code", install_t3code))
 
     if config.copy_agent_config or config.copy_agent_keys:
         steps.append(("Copying agent tool configuration", copy_agent_tooling_payload))
@@ -185,9 +205,13 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
     )
     from common.agent_steps import (
         copy_agent_tooling_payload,
+        install_agent_coding_tools,
         install_agent_repositories,
+        install_claude,
+        install_codex,
         install_github_cli,
         install_opencode,
+        install_t3code,
     )
 
     return {
@@ -195,8 +219,12 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "install_go": install_go,
         "install_node": install_node,
         "install_python": install_python,
+        "install_agent_coding_tools": install_agent_coding_tools,
         "install_github_cli": install_github_cli,
+        "install_codex": install_codex,
+        "install_claude": install_claude,
         "install_opencode": install_opencode,
+        "install_t3code": install_t3code,
         "copy_agent_tooling_payload": copy_agent_tooling_payload,
         "install_agent_repositories": install_agent_repositories,
         "configure_auto_update_uv": configure_auto_update_uv,

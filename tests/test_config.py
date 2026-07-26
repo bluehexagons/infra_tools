@@ -139,14 +139,20 @@ class TestSetupConfigToRemoteArgs(unittest.TestCase):
     def test_agent_tool_flags(self):
         config = self._make_config(
             install_gh=True,
+            install_codex=True,
+            install_claude=True,
             install_opencode=True,
+            install_t3code=True,
             copy_agent_keys=True,
             copy_agent_config=True,
             agent_repos=['https://github.com/user/my_codebase.git'],
         )
         args_str = ' '.join(config.to_remote_args())
         self.assertIn('--gh', args_str)
+        self.assertIn('--codex', args_str)
+        self.assertIn('--claude', args_str)
         self.assertIn('--opencode', args_str)
+        self.assertIn('--t3code', args_str)
         self.assertIn('--copy-keys', args_str)
         self.assertIn('--copy-config', args_str)
         self.assertIn('--repo https://github.com/user/my_codebase.git', args_str)
@@ -157,6 +163,29 @@ class TestSetupConfigToRemoteArgs(unittest.TestCase):
         args_str = ' '.join(args)
         # Default deployment mode doesn't add a flag; lite and full modes use --deployment-lite/--deployment-full
         self.assertIn('--deploy', args_str)
+
+    def test_terminal_agent_suite_selects_cli_agents_and_gh(self):
+        config = self._make_config(agent_suite='terminal')
+        self.assertTrue(config.install_gh)
+        self.assertEqual(
+            config.selected_agent_tools(),
+            ['codex', 'claude', 'opencode'],
+        )
+        self.assertFalse(config.install_t3code)
+
+    def test_full_agent_suite_selects_runtimes_and_t3code(self):
+        config = self._make_config(agent_suite='full')
+        self.assertEqual(
+            config.selected_agent_tools(),
+            ['codex', 'claude', 'opencode', 't3code'],
+        )
+        self.assertTrue(config.install_node)
+        self.assertTrue(config.install_python)
+        self.assertTrue(config.install_go)
+
+    def test_invalid_agent_suite_fails(self):
+        with self.assertRaisesRegex(ValueError, 'agent_suite must be one of'):
+            self._make_config(agent_suite='everything')
 
     def test_deployment_mode_flags(self):
         deploy_specs = [['example.com/', 'https://github.com/user/repo.git']]
@@ -351,7 +380,10 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
     def test_agent_tool_flags_included(self):
         config = self._make_config(
             install_gh=True,
+            install_codex=True,
+            install_claude=True,
             install_opencode=True,
+            install_t3code=True,
             copy_agent_keys=True,
             copy_agent_config=True,
             agent_repos=['git@github.com:user/my_codebase.git'],
@@ -359,7 +391,10 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
         parts = config.to_setup_command()
         cmd = ' '.join(parts)
         self.assertIn('--gh', parts)
+        self.assertIn('--codex', parts)
+        self.assertIn('--claude', parts)
         self.assertIn('--opencode', parts)
+        self.assertIn('--t3code', parts)
         self.assertIn('--copy-keys', parts)
         self.assertIn('--copy-config', parts)
         self.assertIn('--repo git@github.com:user/my_codebase.git', cmd)

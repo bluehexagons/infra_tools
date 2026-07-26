@@ -11,7 +11,7 @@ Automated setup scripts for remote Linux systems (Debian).
 
 ```bash
 python3 infra_tools.py setup server_web example.com admin --ruby --node --deploy example.com https://github.com/user/repo.git
-python3 infra_tools.py setup server_dev 10.0.0.10 agentuser --gh --opencode --copy-keys --copy-config --repo https://github.com/user/my_codebase.git
+python3 infra_tools.py setup server_dev 10.0.0.10 agentuser --agent-suite terminal --copy-config --repo https://github.com/user/my_codebase.git
 python3 infra_tools.py setup workstation_desktop 192.168.1.100 admin --desktop i3 --browser firefox
 python3 infra_tools.py patch example.com admin --ssl --deploy api.example.com https://github.com/user/api.git
 python3 infra_tools.py credentials set guest s3cret
@@ -44,7 +44,7 @@ package releases are avoided where the package manager supports a freshness cuto
 
 | Script | Description |
 |--------|-------------|
-| `infra_tools.py` | **Unified entry point** - Use `setup`, `patch`, `list`, `info`, `cmd`, `rm`, `deploy`, `recall`, `reconstruct`, `completions`, `python-tools`, `bootstrap`, `credentials`, `network`, `proxmox`, `shell`, or any [sysadmin shortcut](./docs/SYSADMIN.md) |
+| `infra_tools.py` | **Unified entry point** - Use `setup`, `patch`, `list`, `info`, `cmd`, `rm`, `deploy`, `recall`, `reconstruct`, `completions`, `python-tools`, `bootstrap`, `agent`, `credentials`, `network`, `proxmox`, `shell`, or any [sysadmin shortcut](./docs/SYSADMIN.md) |
 
 Use `infra_tools.py` for all system setup, saved-configuration management, patching, recall, reconstruction,
 local Python tooling, and shell-completion setup.
@@ -64,17 +64,18 @@ python3 infra_tools.py setup server_web web.com \
 ### Agent VM Workspace
 ```bash
 python3 infra_tools.py setup server_dev 10.0.0.10 agentuser \
-  --gh \
-  --opencode \
-  --copy-keys \
+  --agent-suite terminal \
   --copy-config \
   --repo https://github.com/user/my_codebase.git
 ```
 
-This installs GitHub CLI and OpenCode, uploads selected local tool config and
-credentials, and copies each uploaded repo to `/home/agentuser/repos`. Existing
-repo destinations are skipped to avoid overwriting in-progress agent work. See
-[`docs/COMMAND_LINE.md`](./docs/COMMAND_LINE.md) for the current flag reference.
+This installs GitHub CLI, Codex CLI, Claude Code, OpenCode, and a common Debian
+coding-tool baseline. It uploads selected non-secret local config and copies
+each uploaded repo to `/home/agentuser/repos`. Add `--copy-keys` only for a VM
+trusted with your existing credentials. Existing repo destinations are skipped
+to avoid overwriting in-progress agent work. See
+[`docs/COMMAND_LINE.md`](./docs/COMMAND_LINE.md) for presets and individual
+tool flags.
 
 ### Remote Desktop Workstation
 ```bash
@@ -140,8 +141,8 @@ python3 infra_tools.py setup workstation_dev 10.0.0.50 agent \
   --desktop xfce \
   --rdp \
   --browser firefox \
-  --gh --opencode \
-  --copy-config --copy-keys \
+  --agent-suite terminal \
+  --copy-config \
   --repo https://github.com/user/my_codebase.git \
   --node --go --python
 
@@ -153,8 +154,26 @@ python3 infra_tools.py proxmox health pve1 100
 
 When a registered host has an SSH key, hosted setup reuses it for cloud-init and
 guest setup. Pass `--key ~/.ssh/agent_vm_ed25519` in step 3 to use a separate VM
-key instead. `--copy-keys` copies credentials only for the selected agent tools;
-omit it when the VM is not trusted with those credentials.
+key instead. The recommended command leaves authentication for first launch.
+Add `--copy-keys` to copy credentials for the selected tools only when the VM is
+trusted. Add `--t3code` for the optional T3 Code desktop AppImage on x86_64.
+
+The agent CLIs use their official user-scoped installers—not npm—and no installer
+is used to sign in automatically. On the VM, verify the tools and authenticate
+any account that was not copied:
+
+```bash
+infra_tools agent doctor
+codex
+claude
+opencode
+gh auth login
+```
+
+T3 Code support is deliberately minimal: infra_tools verifies the checksum
+published with the latest official x86_64 AppImage, installs it under
+`~/.local/share/t3code`, and adds `t3code` plus an application-menu entry. Run
+`infra_tools agent doctor --tool t3code` to check it without launching the GUI.
 
 SSH key access works immediately. Before the first RDP login, set a desktop
 password interactively so it is not exposed in shell history:

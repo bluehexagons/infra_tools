@@ -136,7 +136,10 @@ class TestPluginRegistry(unittest.TestCase):
             username="user",
             system_type="server_dev",
             install_gh=True,
+            install_codex=True,
+            install_claude=True,
             install_opencode=True,
+            install_t3code=True,
             copy_agent_config=True,
             copy_agent_keys=True,
             agent_repos=["https://github.com/user/repo.git"],
@@ -144,7 +147,11 @@ class TestPluginRegistry(unittest.TestCase):
         )
         step_names = [name for name, _ in get_steps_for_system_type(config)]
         self.assertIn("Installing GitHub CLI", step_names)
+        self.assertIn("Installing common agent coding tools", step_names)
+        self.assertIn("Installing Codex CLI", step_names)
+        self.assertIn("Installing Claude Code", step_names)
         self.assertIn("Installing OpenCode", step_names)
+        self.assertIn("Installing T3 Code", step_names)
         self.assertIn("Copying agent tool configuration", step_names)
         self.assertIn("Installing uploaded agent repositories", step_names)
         self.assertLess(

@@ -120,20 +120,34 @@ class TestHostedFlagParsing(unittest.TestCase):
         args = self.parser.parse_args([
             "10.0.0.50",
             "--gh",
+            "--codex",
+            "--claude",
             "--opencode",
+            "--t3code",
             "--copy-keys",
             "--copy-config",
             "--repo", "https://github.com/user/one.git",
             "--repo", "git@github.com:user/two.git",
         ])
         self.assertTrue(args.install_gh)
+        self.assertTrue(args.install_codex)
+        self.assertTrue(args.install_claude)
         self.assertTrue(args.install_opencode)
+        self.assertTrue(args.install_t3code)
         self.assertTrue(args.copy_agent_keys)
         self.assertTrue(args.copy_agent_config)
         self.assertEqual(args.agent_repos, [
             "https://github.com/user/one.git",
             "git@github.com:user/two.git",
         ])
+
+    def test_agent_suite_flag(self):
+        args = self.parser.parse_args([
+            "10.0.0.50",
+            "--agent-suite",
+            "terminal",
+        ])
+        self.assertEqual(args.agent_suite, "terminal")
 
     def test_antistatic_flags(self):
         args = self.parser.parse_args([
@@ -188,13 +202,19 @@ class TestHostedFlagsNotInRemoteParser(unittest.TestCase):
             "--system-type", "server_dev",
             "--username", "agentuser",
             "--gh",
+            "--codex",
+            "--claude",
             "--opencode",
+            "--t3code",
             "--copy-keys",
             "--copy-config",
             "--repo", "https://github.com/user/repo.git",
         ])
         self.assertTrue(args.install_gh)
+        self.assertTrue(args.install_codex)
+        self.assertTrue(args.install_claude)
         self.assertTrue(args.install_opencode)
+        self.assertTrue(args.install_t3code)
         self.assertTrue(args.copy_agent_keys)
         self.assertTrue(args.copy_agent_config)
         self.assertEqual(args.agent_repos, ["https://github.com/user/repo.git"])

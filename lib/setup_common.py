@@ -302,6 +302,71 @@ def _prepare_opencode_payload(config: SetupConfig, payload_dir: str, local_home:
             print(f"  No OpenCode credentials found at {source}")
 
 
+def _stage_selected_agent_config(
+    source_dir: str,
+    destination_dir: str,
+    names: tuple[str, ...],
+) -> bool:
+    staged = False
+    for name in names:
+        staged = _copy_existing_path(
+            os.path.join(source_dir, name),
+            os.path.join(destination_dir, name),
+        ) or staged
+    return staged
+
+
+def _prepare_codex_payload(config: SetupConfig, payload_dir: str, local_home: str) -> None:
+    codex_dir = os.path.join(local_home, ".codex")
+    if config.copy_agent_config:
+        destination = os.path.join(payload_dir, "config", "codex")
+        staged = _stage_selected_agent_config(
+            codex_dir,
+            destination,
+            ("config.toml", "AGENTS.md", "skills", "rules"),
+        )
+        print("  Staged Codex config" if staged else f"  No Codex config found at {codex_dir}")
+
+    if config.copy_agent_keys:
+        source = os.path.join(codex_dir, "auth.json")
+        destination = os.path.join(payload_dir, "secrets", "codex", "auth.json")
+        if _copy_existing_path(source, destination):
+            os.chmod(destination, 0o600)
+            print("  Staged Codex credentials")
+        else:
+            print(f"  No Codex credentials found at {source}")
+
+
+def _prepare_claude_payload(config: SetupConfig, payload_dir: str, local_home: str) -> None:
+    claude_dir = os.path.join(local_home, ".claude")
+    if config.copy_agent_config:
+        destination = os.path.join(payload_dir, "config", "claude")
+        staged = _stage_selected_agent_config(
+            claude_dir,
+            destination,
+            ("settings.json", "CLAUDE.md", "commands", "agents", "skills", "plugins"),
+        )
+        print(
+            "  Staged Claude Code config"
+            if staged
+            else f"  No Claude Code config found at {claude_dir}"
+        )
+
+    if config.copy_agent_keys:
+        source = os.path.join(claude_dir, ".credentials.json")
+        destination = os.path.join(
+            payload_dir,
+            "secrets",
+            "claude",
+            ".credentials.json",
+        )
+        if _copy_existing_path(source, destination):
+            os.chmod(destination, 0o600)
+            print("  Staged Claude Code credentials")
+        else:
+            print(f"  No Claude Code credentials found at {source}")
+
+
 def _prepare_github_cli_payload(config: SetupConfig, payload_dir: str, local_home: str) -> None:
     gh_config_dir = os.path.join(local_home, ".config", "gh")
 
@@ -335,7 +400,7 @@ def prepare_agent_payload(config: SetupConfig, payload_dir: str) -> None:
     if not (config.copy_agent_config or config.copy_agent_keys):
         return
 
-    selected_tools = config.install_gh or config.install_opencode
+    selected_tools = config.install_gh or bool(config.selected_agent_tools())
     if not selected_tools:
         print("\nAgent config/key copy requested, but no agent tool flags were selected")
         return
@@ -351,6 +416,10 @@ def prepare_agent_payload(config: SetupConfig, payload_dir: str) -> None:
     local_home = _local_user_home()
     os.makedirs(payload_dir, mode=0o700, exist_ok=True)
 
+    if config.install_codex:
+        _prepare_codex_payload(config, payload_dir, local_home)
+    if config.install_claude:
+        _prepare_claude_payload(config, payload_dir, local_home)
     if config.install_opencode:
         _prepare_opencode_payload(config, payload_dir, local_home)
     if config.install_gh:

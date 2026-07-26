@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 
 
-from lib.config import MACHINE_TYPES
+from lib.config import AGENT_SUITES, MACHINE_TYPES
 from lib.plugin_registry import get_system_type_names
 
 
@@ -178,10 +178,26 @@ def add_setup_arguments(
                        action=argparse.BooleanOptionalAction if not for_remote else "store_true",
                        default=None if not for_remote else False,
                        help="Install the GitHub CLI for agent workflows")
+    parser.add_argument("--codex", dest="install_codex",
+                       action=argparse.BooleanOptionalAction if not for_remote else "store_true",
+                       default=None if not for_remote else False,
+                       help="Install Codex CLI with OpenAI's official installer")
+    parser.add_argument("--claude", dest="install_claude",
+                       action=argparse.BooleanOptionalAction if not for_remote else "store_true",
+                       default=None if not for_remote else False,
+                       help="Install Claude Code with Anthropic's official installer")
     parser.add_argument("--opencode", dest="install_opencode",
                        action=argparse.BooleanOptionalAction if not for_remote else "store_true",
                        default=None if not for_remote else False,
-                       help="Install OpenCode for terminal-based AI agent workflows")
+                       help="Install OpenCode with its official installer")
+    parser.add_argument("--t3code", dest="install_t3code",
+                       action=argparse.BooleanOptionalAction if not for_remote else "store_true",
+                       default=None if not for_remote else False,
+                       help="Install the official T3 Code AppImage and desktop launcher (x86_64 only)")
+    parser.add_argument("--agent-suite", choices=AGENT_SUITES,
+                       help="Agent preset: terminal adds Codex, Claude Code, OpenCode, GitHub CLI, "
+                            "and common tools; desktop also adds T3 Code; full also adds Node, "
+                            "Python, and Go")
     parser.add_argument("--copy-keys", dest="copy_agent_keys",
                        action=argparse.BooleanOptionalAction if not for_remote else "store_true",
                        default=None if not for_remote else False,
