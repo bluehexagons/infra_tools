@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import pwd
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -43,9 +44,34 @@ class TestInstallSystemPackages(unittest.TestCase):
         self.assertEqual(result, 0)
         install_args = mock_run.call_args_list[1].args[0]
         self.assertIn("bash-completion", install_args)
+        self.assertIn("openssh-client", install_args)
+        self.assertIn("rsync", install_args)
+        self.assertIn("tar", install_args)
 
 
 class TestRunOrchestratorBootstrap(unittest.TestCase):
+    @patch(
+        "lib.orchestrator_bootstrap.install_launcher",
+        side_effect=OSError("read-only"),
+    )
+    @patch(
+        "lib.orchestrator_bootstrap.resolve_bootstrap_user",
+        return_value=("admin", "/home/admin"),
+    )
+    @patch("lib.orchestrator_bootstrap.install_system_packages", return_value=0)
+    def test_system_launcher_failure_fails_bootstrap(
+        self,
+        _mock_install_packages,
+        _mock_resolve_user,
+        _mock_install_launcher,
+    ):
+        result = orchestrator_bootstrap.run_orchestrator_bootstrap(
+            script_path="infra_tools.py",
+            shell="bash",
+            requested_user="admin",
+        )
+        self.assertEqual(result, 1)
+
     @patch("lib.orchestrator_bootstrap.install_launcher", return_value="/usr/local/bin/infra_tools")
     @patch("lib.orchestrator_bootstrap.resolve_bootstrap_user", return_value=("admin", "/home/admin"))
     @patch("lib.orchestrator_bootstrap.install_system_packages", return_value=0)
@@ -109,10 +135,31 @@ class TestInstallLauncher(unittest.TestCase):
             )
             self.assertEqual(launcher, os.path.join(target_dir, "infra_tools"))
             self.assertTrue(os.access(launcher, os.X_OK))
-            content = open(launcher, encoding="utf-8").read()
-            self.assertIn("#!/usr/bin/env bash", content)
+            with open(launcher, encoding="utf-8") as file_obj:
+                content = file_obj.read()
+            self.assertIn("#!/bin/sh", content)
             self.assertIn(project_script, content)
             self.assertIn("exec python3", content)
+
+    def test_install_launcher_safely_quotes_project_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_dir = os.path.join(tmp, "project with 'quote")
+            os.makedirs(project_dir)
+            project_script = os.path.join(project_dir, "infra_tools.py")
+            with open(project_script, "w", encoding="utf-8") as handle:
+                handle.write("import sys\nprint(sys.argv[1])\n")
+            launcher = orchestrator_bootstrap.install_launcher(
+                project_script,
+                target_dir=os.path.join(tmp, "bin"),
+            )
+            result = subprocess.run(
+                [launcher, "argument with spaces"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(result.stdout.strip(), "argument with spaces")
 
     def test_install_launcher_rejects_missing_script(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -143,7 +190,8 @@ class TestInstallTmpfilesConf(unittest.TestCase):
             conf_path = os.path.join(tmp, "infra_tools.conf")
             orchestrator_bootstrap.install_tmpfiles_conf(conf_path=conf_path)
             self.assertTrue(os.path.isfile(conf_path))
-            content = open(conf_path, encoding="utf-8").read()
+            with open(conf_path, encoding="utf-8") as file_obj:
+                content = file_obj.read()
             self.assertIn("infra_tools", content)
             mode = os.stat(conf_path).st_mode & 0o777
             self.assertEqual(mode, 0o644)

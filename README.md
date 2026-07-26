@@ -10,6 +10,9 @@ Automated setup scripts for remote Linux systems (Debian).
 ## Quick Start
 
 ```bash
+# Install for the current user (required command-line prerequisites must exist).
+curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
+
 python3 infra_tools.py setup server_web example.com admin --ruby --node --deploy example.com https://github.com/user/repo.git
 python3 infra_tools.py setup server_dev 10.0.0.10 agentuser --agent-suite terminal --copy-config --repo https://github.com/user/my_codebase.git
 python3 infra_tools.py setup workstation_desktop 192.168.1.100 admin --desktop i3 --browser firefox
@@ -538,9 +541,39 @@ saved setups, credentials, and history for a project or test environment.
 
 ### Local Orchestration Host Bootstrap
 
-To prepare the machine where you run `infra_tools.py`, an admin can install the local package prerequisites,
-drop an `infra_tools` launcher onto `PATH`, and configure the chosen user's Python tooling and shell
-completion in one step:
+The hosted installer downloads a GitHub source archive, installs prerequisites,
+creates system and user launchers, and configures Python tooling and completion:
+
+```bash
+# Current-user install when prerequisites already exist.
+curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
+
+# Full Debian bootstrap, including system packages.
+curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
+  sudo sh -s -- --user "$USER"
+
+# wget works too.
+wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
+```
+
+The installer can immediately hand off to any normal `setup` command. Arguments
+after `--setup` are forwarded unchanged:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
+  sudo sh -s -- --user "$USER" \
+  --setup server_proxmox 10.0.0.10 root \
+  --key "$HOME/.ssh/proxmox_ed25519" \
+  --name pve1
+```
+
+Run the one-liner only after reviewing [`install.sh`](./install.sh), particularly
+on privileged hosts. Re-running it updates the source and keeps the previous
+source directory as a timestamped backup. A bootstrap failure automatically
+restores the previous source. The optional setup runs as the selected user so
+workspace state and SSH keys resolve to that user's home.
+
+From an existing checkout, the equivalent bootstrap command is:
 
 ```bash
 sudo python3 infra_tools.py self-setup --user "$USER"

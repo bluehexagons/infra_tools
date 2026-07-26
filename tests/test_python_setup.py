@@ -66,6 +66,42 @@ class TestPythonFlag(unittest.TestCase):
 
 
 class TestSetupAdminPython(unittest.TestCase):
+    @patch("lib.python_setup.run_completion_setup")
+    @patch("lib.python_setup.install_launcher", side_effect=OSError("read-only"))
+    @patch("lib.python_setup.os.path.expanduser", return_value="/tmp/testuser")
+    @patch("lib.python_setup.os.makedirs")
+    @patch("lib.python_setup.subprocess.run")
+    @patch("lib.python_setup.install_or_update_uv", return_value=True)
+    @patch("lib.python_setup.validate_username", return_value=True)
+    @patch("lib.python_setup.get_current_username", return_value="admin")
+    @patch(
+        "lib.python_setup.shutil.which",
+        side_effect=["/usr/bin/python3", "/usr/bin/python"],
+    )
+    def test_user_launcher_failure_fails_setup(
+        self,
+        _which,
+        _current_username,
+        _validate_username,
+        _install_uv,
+        mock_subprocess_run,
+        _mock_makedirs,
+        _expanduser,
+        _install_launcher,
+        mock_completion,
+    ):
+        mock_subprocess_run.return_value = argparse.Namespace(
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+        result = python_setup.run_local_python_setup(
+            "bash",
+            script_path="/tmp/infra_tools.py",
+        )
+        self.assertEqual(result, 1)
+        mock_completion.assert_not_called()
+
     @patch("lib.python_setup.run_completion_setup", return_value=0)
     @patch("lib.python_setup.os.path.expanduser", return_value="/tmp/testuser")
     @patch("lib.python_setup.os.symlink")

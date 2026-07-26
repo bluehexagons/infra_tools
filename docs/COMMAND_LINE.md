@@ -300,10 +300,23 @@ See [`SYSADMIN.md`](./SYSADMIN.md) for the host shortcut commands (`mount`,
 ```bash
 python3 -m unittest discover -s tests
 ./run_tests.py --suite smoke
+curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
 sudo python3 infra_tools.py self-setup --user "$USER"
 uv tool install --upgrade argcomplete
 python3 infra_tools.py completions
 ```
 
-The full test matrix, live Proxmox categories, and bootstrap details remain in
-the code and `README.md`; this page is intentionally the concise command index.
+For a full Debian bootstrap or an immediate setup handoff:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
+  sudo sh -s -- --user "$USER"
+
+curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
+  sudo sh -s -- --user "$USER" \
+  --setup server_proxmox 10.0.0.10 root --key "$HOME/.ssh/proxmox_ed25519"
+```
+
+Everything after `--setup` is passed to `infra_tools setup`. The full test
+matrix, live Proxmox categories, and detailed bootstrap behavior remain in the
+code and `README.md`; this page is intentionally the concise command index.
