@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from common.agent_steps import (
     _download_verified_file,
     _latest_t3code_asset,
+    copy_agent_tooling_payload,
     install_claude,
     install_codex,
     install_opencode,
@@ -152,6 +153,57 @@ class TestAgentDoctor(unittest.TestCase):
             }
         ]):
             self.assertEqual(run_agent_command(args), 1)
+
+
+class TestAgentPayloadInstallation(unittest.TestCase):
+    def test_copied_credentials_are_removed_from_uploaded_payload(self):
+        config = SetupConfig(
+            host='host',
+            username='agent',
+            system_type='server_dev',
+            install_codex=True,
+            copy_agent_keys=True,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            payload_dir = os.path.join(directory, 'payload')
+            home = os.path.join(directory, 'home')
+            source = os.path.join(payload_dir, 'secrets', 'codex', 'auth.json')
+            os.makedirs(os.path.dirname(source))
+            os.makedirs(home)
+            with open(source, 'w', encoding='utf-8') as file_obj:
+                file_obj.write('{"token":"secret"}\n')
+
+            with (
+                patch('common.agent_steps.REMOTE_AGENT_PAYLOAD_DIR', payload_dir),
+                patch('common.agent_steps._user_home', return_value=home),
+                patch('common.agent_steps._chown_path'),
+            ):
+                copy_agent_tooling_payload(config)
+
+            destination = os.path.join(home, '.codex', 'auth.json')
+            self.assertTrue(os.path.isfile(destination))
+            self.assertEqual(os.stat(destination).st_mode & 0o777, 0o600)
+            self.assertFalse(os.path.exists(payload_dir))
+
+    def test_payload_is_removed_when_copying_fails(self):
+        config = SetupConfig(
+            host='host',
+            username='agent',
+            system_type='server_dev',
+            install_codex=True,
+            copy_agent_keys=True,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            payload_dir = os.path.join(directory, 'payload')
+            os.makedirs(payload_dir)
+            with (
+                patch('common.agent_steps.REMOTE_AGENT_PAYLOAD_DIR', payload_dir),
+                patch('common.agent_steps._copy_secret_file', side_effect=OSError('copy failed')),
+            ):
+                with self.assertRaisesRegex(OSError, 'copy failed'):
+                    copy_agent_tooling_payload(config)
+
+            self.assertFalse(os.path.exists(payload_dir))
 
 
 if __name__ == '__main__':

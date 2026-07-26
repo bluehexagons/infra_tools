@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import hashlib
 import os
 import sys
 import tempfile
@@ -261,6 +262,30 @@ class TestRunRemoteSetupArgumentSecurity(unittest.TestCase):
         remote_command = mock_build_ssh.call_args.kwargs["remote_command"]
         self.assertIn("rm -rf /opt/infra_tools && mkdir -p /opt/infra_tools", remote_command)
         self.assertLess(remote_command.index("rm -rf"), remote_command.index("tar xzf -"))
+        self.assertIn("chmod 0755 /opt/infra_tools", remote_command)
+        self.assertLess(
+            remote_command.index("tar xzf -"),
+            remote_command.index("chmod 0755 /opt/infra_tools"),
+        )
+
+    def test_local_install_dir_is_traversable_after_copy(self):
+        from lib import setup_common
+
+        config = _make_config(host="localhost")
+        process = MagicMock()
+        process.stdout = io.StringIO("")
+        process.wait.return_value = 0
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            install_dir = os.path.join(temp_dir, "infra_tools")
+            with patch.object(setup_common, "REMOTE_INSTALL_DIR", install_dir), \
+                 patch.object(setup_common, "copy_project_files"), \
+                 patch.object(setup_common.os, "geteuid", return_value=0), \
+                 patch("subprocess.Popen", return_value=process):
+                result = setup_common.run_remote_setup(config)
+
+            self.assertEqual(result, 0)
+            self.assertEqual(os.stat(install_dir).st_mode & 0o777, 0o755)
 
 
 class TestCloneRepository(unittest.TestCase):
@@ -270,7 +295,9 @@ class TestCloneRepository(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             cache_dir = os.path.join(tmpdir, "cache")
             work_dir = os.path.join(tmpdir, "work")
-            cache_repo = os.path.join(cache_dir, "repo")
+            git_url = "https://git.example.com/repo.git"
+            cache_digest = hashlib.sha256(git_url.encode("utf-8")).hexdigest()[:16]
+            cache_repo = os.path.join(cache_dir, f"repo-{cache_digest}")
             os.makedirs(cache_repo)
             os.makedirs(work_dir)
             with open(os.path.join(cache_repo, "index.html"), "w", encoding="utf-8") as file_obj:
@@ -286,7 +313,7 @@ class TestCloneRepository(unittest.TestCase):
             with patch("subprocess.run", side_effect=run_results) as mock_run, \
                  patch("lib.deploy_utils.get_git_commit_hash", return_value="abc123"):
                 result = setup_common.clone_repository(
-                    "https://git.example.com/repo.git",
+                    git_url,
                     work_dir,
                     cache_dir=cache_dir,
                 )
@@ -299,6 +326,35 @@ class TestCloneRepository(unittest.TestCase):
             commands.index(["git", "-C", cache_repo, "reset", "--hard", "origin/main"]),
             commands.index(["git", "-C", cache_repo, "clean", "-fdx"]),
         )
+
+    def test_cache_path_distinguishes_same_named_repositories(self):
+        from lib.setup_common import _repository_cache_path
+
+        first = _repository_cache_path(
+            "/cache",
+            "https://github.com/one/repo.git",
+            "repo",
+        )
+        second = _repository_cache_path(
+            "/cache",
+            "https://github.com/two/repo.git",
+            "repo",
+        )
+
+        self.assertNotEqual(first, second)
+        self.assertTrue(first.startswith("/cache/repo-"))
+        self.assertTrue(second.startswith("/cache/repo-"))
+
+    def test_requested_agent_repository_clone_failure_is_fatal(self):
+        from lib import setup_common
+
+        config = _make_config(
+            agent_repos=["https://github.com/user/missing.git"],
+        )
+        with tempfile.TemporaryDirectory() as target_dir, \
+             patch.object(setup_common, "clone_repository", return_value=None):
+            with self.assertRaisesRegex(RuntimeError, "requested agent repository"):
+                setup_common.prepare_agent_repositories(config, target_dir)
 
 
 class TestSetupMainValidation(unittest.TestCase):

@@ -390,71 +390,76 @@ def copy_agent_tooling_payload(config: SetupConfig) -> None:
 
     user_home = _user_home(config)
 
-    if config.copy_agent_config and config.install_codex:
-        _copy_payload_directory(
-            config,
-            _payload_path("config", "codex"),
-            os.path.join(user_home, ".codex"),
-            "Codex",
-        )
+    try:
+        if config.copy_agent_config and config.install_codex:
+            _copy_payload_directory(
+                config,
+                _payload_path("config", "codex"),
+                os.path.join(user_home, ".codex"),
+                "Codex",
+            )
 
-    if config.copy_agent_keys and config.install_codex:
-        _copy_secret_file(
-            config,
-            _payload_path("secrets", "codex", "auth.json"),
-            os.path.join(user_home, ".codex", "auth.json"),
-            "Codex",
-        )
+        if config.copy_agent_keys and config.install_codex:
+            _copy_secret_file(
+                config,
+                _payload_path("secrets", "codex", "auth.json"),
+                os.path.join(user_home, ".codex", "auth.json"),
+                "Codex",
+            )
 
-    if config.copy_agent_config and config.install_claude:
-        _copy_payload_directory(
-            config,
-            _payload_path("config", "claude"),
-            os.path.join(user_home, ".claude"),
-            "Claude Code",
-        )
+        if config.copy_agent_config and config.install_claude:
+            _copy_payload_directory(
+                config,
+                _payload_path("config", "claude"),
+                os.path.join(user_home, ".claude"),
+                "Claude Code",
+            )
 
-    if config.copy_agent_keys and config.install_claude:
-        _copy_secret_file(
-            config,
-            _payload_path("secrets", "claude", ".credentials.json"),
-            os.path.join(user_home, ".claude", ".credentials.json"),
-            "Claude Code",
-        )
+        if config.copy_agent_keys and config.install_claude:
+            _copy_secret_file(
+                config,
+                _payload_path("secrets", "claude", ".credentials.json"),
+                os.path.join(user_home, ".claude", ".credentials.json"),
+                "Claude Code",
+            )
 
-    if config.copy_agent_config and config.install_opencode:
-        _copy_payload_directory(
-            config,
-            _payload_path("config", "opencode"),
-            os.path.join(user_home, ".config", "opencode"),
-            "OpenCode",
-        )
+        if config.copy_agent_config and config.install_opencode:
+            _copy_payload_directory(
+                config,
+                _payload_path("config", "opencode"),
+                os.path.join(user_home, ".config", "opencode"),
+                "OpenCode",
+            )
 
-    if config.copy_agent_keys and config.install_opencode:
-        _copy_secret_file(
-            config,
-            _payload_path("secrets", "opencode", "auth.json"),
-            os.path.join(user_home, ".local", "share", "opencode", "auth.json"),
-            "OpenCode",
-        )
+        if config.copy_agent_keys and config.install_opencode:
+            _copy_secret_file(
+                config,
+                _payload_path("secrets", "opencode", "auth.json"),
+                os.path.join(user_home, ".local", "share", "opencode", "auth.json"),
+                "OpenCode",
+            )
 
-    if config.copy_agent_config and config.install_gh:
-        _copy_payload_directory(
-            config,
-            _payload_path("config", "gh"),
-            os.path.join(user_home, ".config", "gh"),
-            "GitHub CLI",
-        )
+        if config.copy_agent_config and config.install_gh:
+            _copy_payload_directory(
+                config,
+                _payload_path("config", "gh"),
+                os.path.join(user_home, ".config", "gh"),
+                "GitHub CLI",
+            )
 
-    if config.copy_agent_keys and config.install_gh:
-        copied = _copy_secret_file(
-            config,
-            _payload_path("secrets", "gh", "hosts.yml"),
-            os.path.join(user_home, ".config", "gh", "hosts.yml"),
-            "GitHub CLI",
-        )
-        if copied:
-            _configure_github_git_credentials(config)
+        if config.copy_agent_keys and config.install_gh:
+            copied = _copy_secret_file(
+                config,
+                _payload_path("secrets", "gh", "hosts.yml"),
+                os.path.join(user_home, ".config", "gh", "hosts.yml"),
+                "GitHub CLI",
+            )
+            if copied:
+                _configure_github_git_credentials(config)
+    finally:
+        if os.path.isdir(REMOTE_AGENT_PAYLOAD_DIR):
+            shutil.rmtree(REMOTE_AGENT_PAYLOAD_DIR)
+            print("  Removed uploaded agent configuration payload")
 
 
 def install_agent_repositories(config: SetupConfig) -> None:

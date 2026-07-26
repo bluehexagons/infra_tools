@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import io
 import json
 import os
@@ -60,6 +61,12 @@ AGENT_REPOS_DIRNAME = "agent_repos"
 AGENT_PAYLOAD_DIRNAME = "agent_payload"
 
 
+def _repository_cache_path(cache_dir: str, git_url: str, repo_name: str) -> str:
+    """Return a cache path unique to the complete repository URL."""
+    url_digest = hashlib.sha256(git_url.encode("utf-8")).hexdigest()[:16]
+    return os.path.join(cache_dir, f"{repo_name}-{url_digest}")
+
+
 def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = None, dry_run: bool = False) -> Optional[tuple[str, Optional[str]]]:
     repo_name = git_url.rstrip('/').split('/')[-1]
     if repo_name.endswith('.git'):
@@ -68,7 +75,7 @@ def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = Non
     clone_path = os.path.join(temp_dir, repo_name)
     
     if cache_dir:
-        cache_path = os.path.join(cache_dir, repo_name)
+        cache_path = _repository_cache_path(cache_dir, git_url, repo_name)
         
         if os.path.exists(cache_path):
             print(f"  Updating cached repository {repo_name}...")
@@ -258,7 +265,7 @@ def prepare_agent_repositories(config: SetupConfig, target_dir: str) -> None:
     for git_url in config.agent_repos:
         result = clone_repository(git_url, target_dir, cache_dir=GIT_CACHE_DIR, dry_run=config.dry_run)
         if result is None:
-            print(f"Warning: Failed to clone {git_url}, skipping...")
+            raise RuntimeError(f"Failed to clone requested agent repository: {git_url}")
 
 
 def _local_user_home() -> str:
@@ -611,6 +618,7 @@ def run_remote_setup(config: SetupConfig) -> int:
             if os.path.exists(REMOTE_INSTALL_DIR):
                 shutil.rmtree(REMOTE_INSTALL_DIR)
             shutil.copytree(build_dir, REMOTE_INSTALL_DIR, symlinks=True)
+            os.chmod(REMOTE_INSTALL_DIR, 0o755)
             
             env = os.environ.copy()
             env["LC_ALL"] = "C"
@@ -646,6 +654,7 @@ def run_remote_setup(config: SetupConfig) -> int:
                     ["mkdir", "-p", REMOTE_INSTALL_DIR],
                     ["cd", REMOTE_INSTALL_DIR],
                     ["tar", "xzf", "-"],
+                    ["chmod", "0755", REMOTE_INSTALL_DIR],
                     remote_cmd_args,
                 ]
             )

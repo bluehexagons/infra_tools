@@ -75,5 +75,18 @@ class TestRepositorySourcePath(unittest.TestCase):
         self.assertIsNone(result)
 
 
+class TestAgentPayloadCleanup(unittest.TestCase):
+    def test_main_removes_agent_payload_after_setup_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            payload_dir = os.path.join(directory, "agent_payload")
+            os.makedirs(payload_dir)
+            with patch.object(remote_setup, "REMOTE_AGENT_PAYLOAD_DIR", payload_dir), \
+                 patch.object(remote_setup, "_run_main", side_effect=RuntimeError("failed")):
+                with self.assertRaisesRegex(RuntimeError, "failed"):
+                    remote_setup.main()
+
+            self.assertFalse(os.path.exists(payload_dir))
+
+
 if __name__ == "__main__":
     unittest.main()

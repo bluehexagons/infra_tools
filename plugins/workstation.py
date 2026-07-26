@@ -60,6 +60,7 @@ def build_workstation_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
     """Build workstation-oriented setup steps from plugin-owned capability helpers."""
 
     from plugins.common import (
+        extend_agent_steps,
         extend_package_steps,
         extend_runtime_steps,
         get_cli_steps,
@@ -97,6 +98,7 @@ def build_workstation_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
     extend_desktop_app_steps(config, steps)
     extend_desktop_browser_and_office_steps(config, steps)
     extend_package_steps(config, steps)
+    extend_agent_steps(config, steps)
     extend_cicd_steps(config, steps)
     extend_app_server_steps(config, steps)
     extend_build_server_steps(config, steps)

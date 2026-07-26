@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -22,6 +23,22 @@ from lib.system_types import get_steps_for_system_type
 from lib.systemd_service import cleanup_all_infra_services
 from typing import Optional
 from lib.types import Deployments 
+
+
+REMOTE_AGENT_PAYLOAD_DIR = "/opt/infra_tools/agent_payload"
+
+
+def _remove_agent_payload() -> None:
+    """Remove uploaded agent config and credentials after any setup outcome."""
+    if not os.path.isdir(REMOTE_AGENT_PAYLOAD_DIR):
+        return
+    try:
+        shutil.rmtree(REMOTE_AGENT_PAYLOAD_DIR)
+    except OSError as exc:
+        print(
+            f"Warning: Failed to remove agent payload {REMOTE_AGENT_PAYLOAD_DIR}: {exc}",
+            file=sys.stderr,
+        )
 
 
 def extract_repo_name(git_url: str) -> str:
@@ -116,7 +133,7 @@ def config_from_remote_args(args: argparse.Namespace) -> SetupConfig:
     return config
 
 
-def main() -> int:
+def _run_main() -> int:
     parser = create_setup_argument_parser(
         description="Remote system setup",
         for_remote=True,
@@ -402,6 +419,13 @@ def main() -> int:
         )
     
     return 0
+
+
+def main() -> int:
+    try:
+        return _run_main()
+    finally:
+        _remove_agent_payload()
 
 
 if __name__ == "__main__":

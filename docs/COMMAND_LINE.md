@@ -133,8 +133,11 @@ Credential/config copy is intentionally tool-scoped:
 - `--opencode --copy-keys` copies `~/.local/share/opencode/auth.json` when present.
 - T3 Code receives only a command wrapper and desktop entry; infra_tools does not copy T3 Code credentials.
 
-Uploaded repositories are skipped if the destination already exists, to avoid
-overwriting agent work on long-lived disposable VMs.
+The root-only upload payload is removed after the selected config and credentials
+are copied. Repository caches are isolated by complete git URL. A requested
+repository that cannot be cloned stops setup instead of producing a successful
+VM without its workspace. Existing destinations on the VM are still skipped to
+avoid overwriting agent work on long-lived disposable VMs.
 
 On the configured VM, check the terminal suite without exposing credential
 contents:
