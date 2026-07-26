@@ -91,58 +91,95 @@ python3 infra_tools.py setup server_lite 192.168.1.10 \
   --scrub /mnt/backup .pardatabase 5% weekly
 ```
 
-### End-to-End: One Proxmox Server + Dev Workstation
+### Quick Setup: Proxmox Host to Agentic Coding VM
 
-A full start-to-finish setup with a single Proxmox node at `10.0.0.10` and a Debian
-dev workstation at `10.0.0.50`. Run all commands from your local orchestration host.
-The default hosted workstation flow now provisions a VM. Use `--machine unprivileged`
-only when you intentionally want the lighter-weight LXC compatibility path.
+This is the primary end-to-end path: start with an existing Proxmox VE host at
+`10.0.0.10`, inspect it with infra_tools, then create a Debian desktop VM at
+`10.0.0.50`. Run these commands from a trusted Linux orchestration machine, not
+from inside the future VM.
+
+Start from a current checkout. The Proxmox host itself does not need an existing
+checkout: `setup server_proxmox` uploads this checkout to `/opt/infra_tools`,
+replacing an older uploaded copy if one exists.
 
 ```bash
-# 0. (One-time) install infra_tools onto the orchestration host
-sudo python3 infra_tools.py self-setup --user "$USER"
+git clone https://github.com/bluehexagons/infra_tools.git
+cd infra_tools
+git pull --ff-only
 
-# 1. Harden and configure the Proxmox node itself.
-#    Assumes Proxmox VE is already installed and SSH-reachable as root.
-infra_tools setup server_proxmox 10.0.0.10 root \
+# Optional: install the infra_tools launcher and shell completion locally.
+sudo python3 infra_tools.py self-setup --user "$USER"
+```
+
+The examples use `~/.ssh/proxmox_ed25519`; its public key must exist alongside
+it as `~/.ssh/proxmox_ed25519.pub`, and root on the Proxmox host must accept it.
+
+```bash
+# 1. Upload the current infra_tools source and apply the Proxmox host setup.
+python3 infra_tools.py setup server_proxmox 10.0.0.10 root \
   --key ~/.ssh/proxmox_ed25519 \
-  --machine hardware \
   --name pve1
 
-# 2. Register the node so the proxmox subcommands can talk to it.
-infra_tools proxmox add pve1 10.0.0.10 \
+# 2. Register and probe the host, then pull a live resource/guest summary.
+python3 infra_tools.py proxmox add pve1 10.0.0.10 \
   --user root \
   --key ~/.ssh/proxmox_ed25519
-infra_tools proxmox probe pve1  # cache bridges/storage defaults for future hosted setups
-#    For a multi-node cluster, bootstrap every node at once from one seed address:
-#    infra_tools proxmox probe-cluster 10.0.0.10 --key ~/.ssh/proxmox_ed25519 --tag prod
-infra_tools proxmox hosts        # sanity check: pve1 is listed
-infra_tools proxmox ls pve1      # sanity check: no guests yet
+python3 infra_tools.py proxmox probe pve1
+python3 infra_tools.py proxmox top pve1
+python3 infra_tools.py proxmox ls pve1
 
-# 3. Provision a Debian dev-workstation VM on pve1 and configure it in one shot.
-#    workstation_dev now defaults to --machine vm, so --hosted creates a VM
-#    on the Proxmox node and the normal workstation_dev flow continues there.
-infra_tools setup workstation_dev 10.0.0.50 devuser \
+# 3. Create a Debian VM and configure XFCE, RDP, Firefox, and coding tools.
+#    10.0.0.50 must be unused and reachable on the Proxmox bridge subnet.
+python3 infra_tools.py setup workstation_dev 10.0.0.50 agent \
   --hosted pve1 \
   --base debian \
-  --name dev-01-vm \
+  --name agent-dev-01 \
   --cores 4 \
   --memory 8G \
   --storage root 40G \
-  --desktop i3 \
+  --desktop xfce \
   --rdp \
   --browser firefox \
-  --ruby --node --go --python \
-  --office
+  --gh --opencode \
+  --copy-config --copy-keys \
+  --repo https://github.com/user/my_codebase.git \
+  --node --go --python
 
-# 4. From now on you can manage the VM through pve1 without re-typing keys.
-infra_tools proxmox health pve1 100       # vmid Proxmox assigned to dev-01-vm
-infra_tools proxmox modify pve1 100 --cores 8 --memory 16G
+# 4. Find the assigned VMID, inspect the VM, and check guest connectivity.
+python3 infra_tools.py proxmox ls pve1
+python3 infra_tools.py proxmox config pve1 100
+python3 infra_tools.py proxmox health pve1 100
 ```
 
-Connect to the workstation over RDP at `10.0.0.50:3389` as `devuser`, or SSH in for
-a CLI session. To rebuild from the saved configuration later, run
-`infra_tools deploy dev-01-vm`.
+When a registered host has an SSH key, hosted setup reuses it for cloud-init and
+guest setup. Pass `--key ~/.ssh/agent_vm_ed25519` in step 3 to use a separate VM
+key instead. `--copy-keys` copies credentials only for the selected agent tools;
+omit it when the VM is not trusted with those credentials.
+
+SSH key access works immediately. Before the first RDP login, set a desktop
+password interactively so it is not exposed in shell history:
+
+```bash
+ssh -t agent@10.0.0.50 'sudo passwd agent'
+```
+
+Then connect over RDP to `10.0.0.50:3389` as `agent`. Replace `100` below with
+the VMID shown by `proxmox ls`:
+
+```bash
+python3 infra_tools.py proxmox status pve1 100
+python3 infra_tools.py proxmox pause pve1 100       # freeze RAM/CPU state
+python3 infra_tools.py proxmox resume pve1 100
+python3 infra_tools.py proxmox stop pve1 100        # graceful shutdown
+python3 infra_tools.py proxmox start pve1 100
+python3 infra_tools.py proxmox snapshot pve1 100 before_upgrade
+python3 infra_tools.py proxmox destroy pve1 100     # permanent; asks for confirmation
+```
+
+To reapply the saved workstation configuration later, run
+`python3 infra_tools.py deploy agent-dev-01`. For a multi-node cluster, use
+`proxmox probe-cluster` from one seed node instead of registering every node
+manually.
 
 #### Alternate: force the workstation onto an LXC
 
@@ -237,6 +274,8 @@ python3 infra_tools.py proxmox ls pve1
 
 # Guest lifecycle
 python3 infra_tools.py proxmox start pve1 101
+python3 infra_tools.py proxmox pause pve1 101
+python3 infra_tools.py proxmox resume pve1 101
 python3 infra_tools.py proxmox stop pve1 101
 python3 infra_tools.py proxmox health pve1 101
 python3 infra_tools.py proxmox destroy pve1 101 -y

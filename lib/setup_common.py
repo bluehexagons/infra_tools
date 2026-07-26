@@ -424,6 +424,8 @@ def _apply_hosted_proxmox_defaults(
             config.hosted_node = host.address
         if not config.hosted_key and host.ssh_key:
             config.hosted_key = host.ssh_key
+        if not config.ssh_key and host.ssh_key:
+            config.ssh_key = host.ssh_key
 
     storage_specs = _normalize_container_storage(config.container_storage)
     if not storage_specs:

@@ -228,6 +228,8 @@ infra_tools.py proxmox rolling-update <target> [<target> ...] [--dry-run] [--reb
 infra_tools.py proxmox ls <host>
 infra_tools.py proxmox status <host> <vmid>
 infra_tools.py proxmox start <host> <vmid>
+infra_tools.py proxmox pause <host> <vmid>  # alias: suspend
+infra_tools.py proxmox resume <host> <vmid>
 infra_tools.py proxmox stop <host> <vmid> [--force]
 infra_tools.py proxmox destroy <host> <vmid> [-y] [--force]
 infra_tools.py proxmox health <host> <vmid> [--no-ssh]

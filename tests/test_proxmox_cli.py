@@ -198,6 +198,39 @@ class TestProxmoxCliContainerOps(_CliFixture):
         self.assertIn("pct start 100", mock_run.call_args_list[1].args[3])
 
     @patch("lib.proxmox_manage._ssh_run")
+    def test_pause_runs_pct_suspend(self, mock_run) -> None:
+        mock_run.side_effect = [
+            _completed("status: running\n"),
+            _completed(""),
+        ]
+        rc, out = self._run("pause", "pve1", "100")
+        self.assertEqual(rc, 0)
+        self.assertIn("Paused guest 100", out)
+        self.assertIn("pct suspend 100", mock_run.call_args_list[-1].args[3])
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_suspend_alias_pauses_vm(self, mock_run) -> None:
+        mock_run.side_effect = [
+            _completed("CT 100 does not exist", returncode=2),
+            _completed("status: running\n"),
+            _completed(""),
+        ]
+        rc, _ = self._run("suspend", "pve1", "100")
+        self.assertEqual(rc, 0)
+        self.assertIn("qm suspend 100", mock_run.call_args_list[-1].args[3])
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_resume_runs_pct_resume(self, mock_run) -> None:
+        mock_run.side_effect = [
+            _completed("status: running\n"),
+            _completed(""),
+        ]
+        rc, out = self._run("resume", "pve1", "100")
+        self.assertEqual(rc, 0)
+        self.assertIn("Resumed guest 100", out)
+        self.assertIn("pct resume 100", mock_run.call_args_list[-1].args[3])
+
+    @patch("lib.proxmox_manage._ssh_run")
     def test_stop_force(self, mock_run) -> None:
         mock_run.side_effect = [
             _completed("status: running\n"),

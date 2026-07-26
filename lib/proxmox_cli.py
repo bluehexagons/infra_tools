@@ -50,12 +50,14 @@ from lib.proxmox_manage import (
     list_snapshots,
     modify_container,
     reconfigure_container,
+    resume_guest,
     resize_container_disk,
     rollback_guest,
     send_webhook_test_notification,
     snapshot_guest,
     start_container,
     stop_container,
+    suspend_guest,
     unlock_guest,
 )
 from lib.proxmox_shell import ProxmoxShell, run_proxmox_shell
@@ -173,6 +175,20 @@ def add_proxmox_subparser(subparsers: argparse._SubParsersAction) -> argparse.Ar
     start.add_argument("host", help="Registered host name or address")
     start.add_argument("vmid", type=int, help="Guest VMID")
     start.set_defaults(_handler=_cmd_start)
+
+    pause = sub.add_parser(
+        "pause",
+        aliases=["suspend"],
+        help="Pause/suspend a running guest",
+    )
+    pause.add_argument("host", help="Registered host name or address")
+    pause.add_argument("vmid", type=int, help="Guest VMID")
+    pause.set_defaults(_handler=_cmd_pause)
+
+    resume = sub.add_parser("resume", help="Resume a paused guest")
+    resume.add_argument("host", help="Registered host name or address")
+    resume.add_argument("vmid", type=int, help="Guest VMID")
+    resume.set_defaults(_handler=_cmd_resume)
 
     stop = sub.add_parser("stop", help="Shutdown (or force-stop) a guest")
     stop.add_argument("host", help="Registered host name or address")
@@ -806,6 +822,20 @@ def _cmd_start(args: argparse.Namespace, workspace: Optional[str]) -> int:
     host = _resolve_host(args.host, workspace)
     start_container(host, args.vmid)
     print(f"Started guest {args.vmid} on {host.name}.")
+    return 0
+
+
+def _cmd_pause(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    host = _resolve_host(args.host, workspace)
+    suspend_guest(host, args.vmid)
+    print(f"Paused guest {args.vmid} on {host.name}.")
+    return 0
+
+
+def _cmd_resume(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    host = _resolve_host(args.host, workspace)
+    resume_guest(host, args.vmid)
+    print(f"Resumed guest {args.vmid} on {host.name}.")
     return 0
 
 

@@ -733,8 +733,33 @@ class TestHostedProvisioningDispatch(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(config.hosted_node, "10.0.0.1")
         self.assertEqual(config.hosted_key, "/keys/proxmox")
+        self.assertEqual(config.ssh_key, "/keys/proxmox")
         self.assertEqual(config.container_storage, [["root", "local-lvm", "10G"]])
         mock_provision_vm.assert_called_once_with(config, image=config.vm_image)
+
+    def test_hosted_setup_preserves_explicit_guest_ssh_key(self):
+        from lib import setup_common
+
+        with tempfile.TemporaryDirectory() as workspace:
+            add_proxmox_host(
+                ProxmoxHost(
+                    name="pve1",
+                    address="10.0.0.1",
+                    ssh_key="/keys/proxmox",
+                ),
+                workspace,
+            )
+            config = _make_config(
+                hosted_node="pve1",
+                hosted_key=None,
+                ssh_key="/keys/agent-vm",
+                container_storage=[["root", "10G"]],
+            )
+
+            setup_common._apply_hosted_proxmox_defaults(config, workspace)
+
+        self.assertEqual(config.hosted_key, "/keys/proxmox")
+        self.assertEqual(config.ssh_key, "/keys/agent-vm")
 
     @patch("builtins.print")
     def test_hosted_lxc_setup_expands_saved_template_storage(self, _mock_print):
