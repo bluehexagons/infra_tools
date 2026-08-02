@@ -10,7 +10,7 @@ Automated setup scripts for remote Linux systems (Debian).
 ## Quick Start
 
 ```bash
-# Install for the current user (required command-line prerequisites must exist).
+# Install for the current user; privileged steps request sudo when needed.
 curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
 
 python3 infra_tools.py setup server_web example.com admin --ruby --node --deploy example.com https://github.com/user/repo.git
@@ -553,13 +553,22 @@ saved setups, credentials, and history for a project or test environment.
 ### Local Orchestration Host Bootstrap
 
 The hosted installer downloads a GitHub source archive, installs prerequisites,
-creates system and user launchers, and configures Python tooling and completion:
+creates system and user launchers, and configures Python tooling and completion.
+It can run as the current user; when a Debian package or local setup requires
+root, it invokes `sudo` for that step:
 
 ```bash
-# Current-user install when prerequisites already exist.
+# Install and configure a local headless Debian host in one step.
+curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
+  sh -s -- \
+  --setup server_lite localhost "$USER" \
+  --machine hardware \
+  --agent-suite terminal
+
+# Current-user install without running a setup.
 curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
 
-# Full Debian bootstrap, including system packages.
+# Or install a system-wide source tree and launcher explicitly.
 curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
   sudo sh -s -- --user "$USER"
 
@@ -568,7 +577,10 @@ wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/instal
 ```
 
 The installer can immediately hand off to any normal `setup` command. Arguments
-after `--setup` are forwarded unchanged:
+after `--setup` are forwarded unchanged. For `localhost`, the installer adds
+the selected install user when no setup username is supplied and elevates only
+the setup command as needed. Remote setup continues to run as the selected
+orchestration user and uses SSH credentials for the target:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
@@ -581,8 +593,8 @@ curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/insta
 Run the one-liner only after reviewing [`install.sh`](./install.sh), particularly
 on privileged hosts. Re-running it updates the source and keeps the previous
 source directory as a timestamped backup. A bootstrap failure automatically
-restores the previous source. The optional setup runs as the selected user so
-workspace state and SSH keys resolve to that user's home.
+restores the previous source. Local setup uses root only for privileged system
+changes while preserving the selected user's workspace and agent configuration.
 
 From an existing checkout, the equivalent bootstrap command is:
 

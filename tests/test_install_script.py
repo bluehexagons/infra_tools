@@ -6,7 +6,6 @@ import glob
 import json
 import os
 import subprocess
-import sys
 import tarfile
 import tempfile
 import textwrap
@@ -61,6 +60,33 @@ class TestInstallScript(unittest.TestCase):
             )
         os.chmod(getent_path, 0o755)
 
+        id_path = os.path.join(fake_bin, "id")
+        with open(id_path, "w", encoding="utf-8") as file_obj:
+            file_obj.write(
+                "#!/bin/sh\n"
+                'if [ "${INFRA_TOOLS_TEST_NON_ROOT:-0}" = "1" ]; then\n'
+                '    case "$1" in\n'
+                '        -un) printf "testuser\\n" ;;\n'
+                '        -u) printf "1000\\n" ;;\n'
+                '        *) exit 0 ;;\n'
+                "    esac\n"
+                "    exit 0\n"
+                "fi\n"
+                'exec /usr/bin/id "$@"\n'
+            )
+        os.chmod(id_path, 0o755)
+
+        sudo_path = os.path.join(fake_bin, "sudo")
+        with open(sudo_path, "w", encoding="utf-8") as file_obj:
+            file_obj.write(
+                "#!/bin/sh\n"
+                'if [ -n "${INFRA_TOOLS_TEST_SUDO_LOG:-}" ]; then\n'
+                '    printf "%s\\n" "$*" >> "$INFRA_TOOLS_TEST_SUDO_LOG"\n'
+                "fi\n"
+                'exec "$@"\n'
+            )
+        os.chmod(sudo_path, 0o755)
+
         archive_path = os.path.join(directory, "fixture.tar.gz")
         with tarfile.open(archive_path, "w:gz") as archive:
             archive.add(source_root, arcname="infra_tools-test")
@@ -107,6 +133,63 @@ class TestInstallScript(unittest.TestCase):
                 calls[1],
                 ["setup", "server_dev", "10.0.0.50", "agent", "--dry-run"],
             )
+
+    def test_local_setup_elevates_and_defaults_to_install_user(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fake_home, log_path, environment = self._create_fixture(directory)
+            environment["INFRA_TOOLS_TEST_NON_ROOT"] = "1"
+            sudo_log_path = os.path.join(directory, "sudo.log")
+            environment["INFRA_TOOLS_TEST_SUDO_LOG"] = sudo_log_path
+            install_dir = os.path.join(directory, "installed")
+            result = subprocess.run(
+                [
+                    "sh",
+                    INSTALL_SCRIPT,
+                    "--install-dir",
+                    install_dir,
+                    "--shell",
+                    "bash",
+                    "--setup",
+                    "server_lite",
+                    "localhost",
+                    "--machine",
+                    "hardware",
+                    "--agent-suite",
+                    "terminal",
+                    "--dry-run",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(os.path.isfile(os.path.join(install_dir, "infra_tools.py")))
+            self.assertTrue(os.access(
+                os.path.join(fake_home, ".local", "bin", "infra_tools"),
+                os.X_OK,
+            ))
+            with open(log_path, encoding="utf-8") as file_obj:
+                calls = [json.loads(line) for line in file_obj]
+            self.assertEqual(
+                calls[1],
+                [
+                    "setup",
+                    "server_lite",
+                    "localhost",
+                    "testuser",
+                    "--machine",
+                    "hardware",
+                    "--agent-suite",
+                    "terminal",
+                    "--dry-run",
+                ],
+            )
+            with open(sudo_log_path, encoding="utf-8") as file_obj:
+                sudo_call = file_obj.read()
+            self.assertIn("python3", sudo_call)
+            self.assertIn("setup server_lite localhost testuser", sudo_call)
 
     def test_update_keeps_previous_source_backup(self):
         with tempfile.TemporaryDirectory() as directory:

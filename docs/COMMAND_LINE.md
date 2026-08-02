@@ -306,6 +306,11 @@ See [`SYSADMIN.md`](./SYSADMIN.md) for the host shortcut commands (`mount`,
 python3 -m unittest discover -s tests
 ./run_tests.py --suite smoke
 curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
+  sh -s -- \
+  --setup server_lite localhost "$USER" \
+  --machine hardware \
+  --agent-suite terminal
 sudo python3 infra_tools.py self-setup --user "$USER"
 uv tool install --upgrade argcomplete
 python3 infra_tools.py completions
@@ -325,3 +330,5 @@ curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/insta
 Everything after `--setup` is passed to `infra_tools setup`. The full test
 matrix, live Proxmox categories, and detailed bootstrap behavior remain in the
 code and `README.md`; this page is intentionally the concise command index.
+For a local setup, the installer defaults an omitted setup username to the
+selected install user and uses `sudo` only for the privileged setup phase.

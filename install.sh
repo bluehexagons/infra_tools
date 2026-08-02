@@ -33,6 +33,8 @@ Examples:
   curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
     sudo sh -s -- --user "$USER"
   curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
+    sh -s -- --setup server_lite localhost "$USER" --machine hardware --agent-suite terminal
+  curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
     sudo sh -s -- --user "$USER" --setup server_proxmox 10.0.0.10 root --key /home/me/.ssh/id_ed25519
 EOF
 }
@@ -40,6 +42,16 @@ EOF
 fail() {
     printf 'infra_tools installer: %s\n' "$*" >&2
     exit 1
+}
+
+run_privileged() {
+    if [ "$(id -u)" -eq 0 ]; then
+        "$@"
+        return
+    fi
+
+    command -v sudo >/dev/null 2>&1 || fail "this step requires root privileges; install sudo or rerun the installer with sudo"
+    sudo "$@"
 }
 
 while [ "$#" -gt 0 ]; do
@@ -130,6 +142,28 @@ case "$SHELL_NAME" in
     *) SHELL_NAME=bash ;;
 esac
 
+LOCAL_SETUP=0
+if [ "$RUN_SETUP" -eq 1 ]; then
+    case "$2" in
+        localhost|127.0.0.1|::1) LOCAL_SETUP=1 ;;
+    esac
+
+    if [ "$LOCAL_SETUP" -eq 1 ]; then
+        SETUP_SYSTEM_TYPE=$1
+        SETUP_HOST=$2
+        shift 2
+        if [ "$#" -eq 0 ] || [ "${1#-}" != "$1" ]; then
+            set -- "$SETUP_SYSTEM_TYPE" "$SETUP_HOST" "$TARGET_USER" "$@"
+        else
+            set -- "$SETUP_SYSTEM_TYPE" "$SETUP_HOST" "$@"
+        fi
+
+        if [ "$(id -u)" -ne 0 ]; then
+            command -v sudo >/dev/null 2>&1 || fail "local setup requires sudo; install sudo or rerun the installer with sudo"
+        fi
+    fi
+fi
+
 missing_prerequisite=0
 for command_name in python3 git ssh rsync tar; do
     if ! command -v "$command_name" >/dev/null 2>&1; then
@@ -141,11 +175,10 @@ if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
 fi
 
 if [ "$missing_prerequisite" -eq 1 ]; then
-    [ "$(id -u)" -eq 0 ] || fail "python3, git, ssh, rsync, tar, and curl or wget are required; rerun the installer with sudo"
     command -v apt-get >/dev/null 2>&1 || fail "automatic prerequisite installation requires apt-get"
     printf '%s\n' "Installing bootstrap prerequisites..."
-    DEBIAN_FRONTEND=noninteractive apt-get update -qq
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+    run_privileged env DEBIAN_FRONTEND=noninteractive apt-get update -qq
+    run_privileged env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
         ca-certificates curl git openssh-client python3 rsync tar
 fi
 
@@ -267,9 +300,27 @@ run_for_target() {
     fi
 }
 
+run_local_setup() {
+    if [ -t 2 ] && [ -r /dev/tty ]; then
+        run_privileged env \
+            HOME="$TARGET_HOME" \
+            USER="$TARGET_USER" \
+            SUDO_USER="$TARGET_USER" \
+            python3 "$INSTALL_DIR/infra_tools.py" setup "$@" < /dev/tty
+    else
+        run_privileged env \
+            HOME="$TARGET_HOME" \
+            USER="$TARGET_USER" \
+            SUDO_USER="$TARGET_USER" \
+            python3 "$INSTALL_DIR/infra_tools.py" setup "$@"
+    fi
+}
+
 if [ "$RUN_SETUP" -eq 1 ]; then
     printf '\nRunning requested system setup as %s...\n' "$TARGET_USER"
-    if [ -t 2 ] && [ -r /dev/tty ]; then
+    if [ "$LOCAL_SETUP" -eq 1 ]; then
+        run_local_setup "$@"
+    elif [ -t 2 ] && [ -r /dev/tty ]; then
         run_for_target python3 "$INSTALL_DIR/infra_tools.py" setup "$@" < /dev/tty
     else
         run_for_target python3 "$INSTALL_DIR/infra_tools.py" setup "$@"
