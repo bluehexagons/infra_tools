@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from common.agent_steps import (
     _download_verified_file,
     _latest_t3code_asset,
+    _user_home,
     copy_agent_tooling_payload,
     install_claude,
     install_codex,
@@ -61,6 +62,21 @@ class TestOfficialAgentInstallers(unittest.TestCase):
             'https://github.com/pingdotgg/t3code/releases/download/v1/file',
         )
         self.assertEqual(digest, 'a' * 64)
+
+    def test_latest_t3code_asset_normalizes_digest_case(self):
+        response = io.BytesIO(
+            b'{"assets":[{"name":"T3-Code-1.2.3-x86_64.AppImage",'
+            b'"browser_download_url":"https://github.com/pingdotgg/t3code/releases/download/v1/file",'
+            b'"digest":"sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}]}'
+        )
+        with patch('urllib.request.urlopen', return_value=response):
+            _url, digest = _latest_t3code_asset()
+        self.assertEqual(digest, 'a' * 64)
+
+    def test_user_home_comes_from_account_database(self):
+        account = type('Account', (), {'pw_dir': '/srv/agent'})()
+        with patch('common.agent_steps.pwd.getpwnam', return_value=account):
+            self.assertEqual(_user_home(self.config), '/srv/agent')
 
     def test_verified_download_rejects_checksum_mismatch(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -195,9 +211,12 @@ class TestAgentPayloadInstallation(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as directory:
             payload_dir = os.path.join(directory, 'payload')
+            home = os.path.join(directory, 'home')
             os.makedirs(payload_dir)
+            os.makedirs(home)
             with (
                 patch('common.agent_steps.REMOTE_AGENT_PAYLOAD_DIR', payload_dir),
+                patch('common.agent_steps._user_home', return_value=home),
                 patch('common.agent_steps._copy_secret_file', side_effect=OSError('copy failed')),
             ):
                 with self.assertRaisesRegex(OSError, 'copy failed'):

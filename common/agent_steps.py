@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import platform
+import pwd
 import shlex
 import shutil
 import urllib.parse
@@ -39,7 +40,10 @@ AGENT_CODING_PACKAGES = (
 
 
 def _user_home(config: SetupConfig) -> str:
-    return f"/home/{config.username}"
+    try:
+        return pwd.getpwnam(config.username).pw_dir
+    except KeyError as exc:
+        raise RuntimeError(f"Target user does not exist: {config.username}") from exc
 
 
 def _chown_path(config: SetupConfig, path: str) -> None:
@@ -252,7 +256,7 @@ def _latest_t3code_asset() -> tuple[str, str]:
             )
             and urllib.parse.urlparse(url).hostname == "github.com"
         ):
-            return url, digest.removeprefix("sha256:")
+            return url, digest.removeprefix("sha256:").lower()
     raise RuntimeError("The latest official T3 Code release has no verified x86_64 AppImage")
 
 

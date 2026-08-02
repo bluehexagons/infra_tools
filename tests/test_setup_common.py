@@ -289,6 +289,26 @@ class TestRunRemoteSetupArgumentSecurity(unittest.TestCase):
 
 
 class TestCloneRepository(unittest.TestCase):
+    def test_repository_name_cannot_escape_work_directory(self):
+        from lib import setup_common
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            work_dir = os.path.join(tmpdir, "work")
+            os.makedirs(work_dir)
+            sentinel = os.path.join(tmpdir, "sentinel")
+            with open(sentinel, "w", encoding="utf-8") as file_obj:
+                file_obj.write("keep")
+
+            for git_url in (
+                "https://git.example.com/.",
+                "https://git.example.com/..",
+            ):
+                with self.subTest(git_url=git_url):
+                    self.assertIsNone(setup_common.clone_repository(git_url, work_dir))
+
+            with open(sentinel, encoding="utf-8") as file_obj:
+                self.assertEqual(file_obj.read(), "keep")
+
     def test_existing_cache_is_cleaned_after_reset(self):
         from lib import setup_common
 

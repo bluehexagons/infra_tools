@@ -469,7 +469,7 @@ _PACKAGE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+.-]*$")
 _NETWORK_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 _NETWORK_PROVIDER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
 _GIT_SCP_URL_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+@[^:\s]+:.+$")
-_SAFE_REPO_NAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
+_SAFE_REPO_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 def validate_memory_string(value: str, name: str = "memory") -> None:
@@ -525,9 +525,11 @@ def validate_agent_repositories(repositories: Optional[list[str]]) -> None:
         git_url = repository.strip()
         if not git_url:
             raise ValueError("--repo requires a non-empty git URL")
+        if git_url != repository:
+            raise ValueError(f"Invalid --repo git URL: {repository}")
         if git_url.startswith('-'):
             raise ValueError(f"Invalid --repo git URL: {repository}")
-        if any(ord(char) < 32 for char in git_url):
+        if any(ord(char) < 32 or ord(char) == 127 for char in git_url):
             raise ValueError(f"Invalid --repo git URL: {repository}")
 
         parsed = urlparse(git_url)

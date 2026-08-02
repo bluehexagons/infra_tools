@@ -71,6 +71,10 @@ def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = Non
     repo_name = git_url.rstrip('/').split('/')[-1]
     if repo_name.endswith('.git'):
         repo_name = repo_name[:-4]
+
+    if repo_name in {"", ".", ".."}:
+        print(f"  Error: unsafe repository name derived from {git_url}")
+        return None
     
     clone_path = os.path.join(temp_dir, repo_name)
     

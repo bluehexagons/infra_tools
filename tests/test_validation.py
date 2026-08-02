@@ -164,6 +164,20 @@ class TestValidateAgentRepositories(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid --repo repository name"):
             validate_agent_repositories(['https://github.com/user/bad repo.git'])
 
+        for invalid in (
+            'https://github.com/user/.',
+            'https://github.com/user/..',
+        ):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(
+                ValueError,
+                "Invalid --repo repository name",
+            ):
+                validate_agent_repositories([invalid])
+
+    def test_surrounding_whitespace_fails(self):
+        with self.assertRaisesRegex(ValueError, "Invalid --repo git URL"):
+            validate_agent_repositories([' https://github.com/user/repo.git'])
+
     def test_duplicate_repo_name_fails(self):
         with self.assertRaisesRegex(ValueError, "Duplicate --repo repository name: repo"):
             validate_agent_repositories([
