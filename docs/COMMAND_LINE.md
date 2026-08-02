@@ -59,7 +59,7 @@ infra_tools.py proxmox ...
 | `-p, --password PASS` | SSH password |
 | `-t, --timezone TZ` | Timezone |
 | `--workspace PATH` | Workspace root for config, credentials, known_hosts, and history |
-| `--machine TYPE` | Machine type override |
+| `--machine TYPE` | Machine type override; defaults to `auto` on the target |
 | `--name NAME` | Friendly name for the configuration |
 | `--tags TAG1,TAG2` | Comma-separated tags |
 | `--dry-run` | Simulate execution |
@@ -172,8 +172,10 @@ Notes:
 - `--storage` is repeatable.
 - `root` storage is required when `--hosted` is used.
 - `template` storage is LXC-only.
-- VM is the default for hosted setup flows unless the system type explicitly
-  overrides its machine type.
+- Direct setup defaults to `--machine auto`, which detects Debian bare metal,
+  VMs, and Proxmox LXC containers on the target.
+- Hosted Proxmox setup defaults to a VM because it is creating a new guest;
+  use `--machine unprivileged` for an LXC.
 - `--machine unprivileged` keeps an existing or intentional LXC path.
 
 ## Deployment Flags

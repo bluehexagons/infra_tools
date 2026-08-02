@@ -416,13 +416,14 @@ class InteractiveShell:
             ("vm", "Proxmox or other virtual machine"),
             ("unprivileged", "Unprivileged LXC"),
             ("privileged", "Privileged LXC"),
+            ("auto", "Detect the target machine type"),
         ]
         if proxmox_host is None:
             machine_options.insert(0, ("hardware", "Existing physical or already-provisioned host"))
         default_machine = (
             template.machine_type
             if template and any(option[0] == template.machine_type for option in machine_options)
-            else ("vm" if proxmox_host is not None else "hardware")
+            else ("vm" if proxmox_host is not None else "auto")
         )
         machine_type = self._prompt_choice(
             "Machine type",

@@ -65,6 +65,36 @@ class TestMachineStateHelpers(unittest.TestCase):
             with self._patch_machine_type(mt):
                 self.assertTrue(ms.can_restart_system(), f"Expected can_restart_system=True for {mt}")
 
+    def test_auto_machine_type_resolves_from_runtime(self):
+        with self._patch_machine_type('auto'), \
+             patch.object(ms, 'detect_machine_type', return_value='vm'):
+            self.assertTrue(ms.is_vm())
+
+
+class TestMachineTypeDetection(unittest.TestCase):
+    def test_detects_lxc_as_unprivileged(self):
+        with patch.object(ms, '_systemd_detect_virt', return_value='lxc'):
+            self.assertEqual(ms.detect_machine_type(), 'unprivileged')
+
+    def test_detects_oci_containers(self):
+        with patch.object(ms, '_systemd_detect_virt', return_value='docker'):
+            self.assertEqual(ms.detect_machine_type(), 'oci')
+
+    def test_detects_virtual_machines(self):
+        with patch.object(ms, '_systemd_detect_virt', return_value='kvm'):
+            self.assertEqual(ms.detect_machine_type(), 'vm')
+
+    def test_falls_back_to_bare_metal(self):
+        with patch.object(ms, '_systemd_detect_virt', return_value='none'), \
+             patch.object(ms, '_read_text', return_value=None), \
+             patch.object(ms.os.path, 'exists', return_value=False):
+            self.assertEqual(ms.detect_machine_type(), 'hardware')
+
+    def test_fallback_detects_lxc_from_cgroup(self):
+        with patch.object(ms, '_systemd_detect_virt', return_value=None), \
+             patch.object(ms, '_read_text', side_effect=[None, '0::/lxc/100']):
+            self.assertEqual(ms.detect_machine_type(), 'unprivileged')
+
 
 class TestSaveLoadMachineState(unittest.TestCase):
     def test_save_and_load(self):

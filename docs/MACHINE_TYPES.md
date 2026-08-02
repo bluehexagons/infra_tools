@@ -1,15 +1,33 @@
 # Machine Types
 
-The `--machine` flag specifies the environment type, enabling setup commands to adapt configuration based on platform capabilities.
+The `--machine` flag specifies the environment type, enabling setup commands to
+adapt configuration based on platform capabilities. The default is `auto`, so
+the remote setup process makes a best-effort guess from the target runtime.
+
+## Officially Supported Configurations
+
+infra_tools officially supports Debian in these configurations:
+
+- **Bare metal**: a physical Debian host, detected as `hardware`.
+- **Virtual machine**: a Debian VM on Proxmox or a hosted VPS such as
+  DigitalOcean, detected as `vm`.
+- **Proxmox LXC**: an unprivileged Debian LXC container, detected as
+  `unprivileged`.
+
+The detection is deliberately conservative. Use an explicit `--machine` value
+when the runtime cannot identify itself reliably or when an existing setup has
+a special requirement. OCI containers and privileged LXCs remain recognized
+compatibility labels, but they are not part of the official support target.
 
 ## Types
 
 | Type | Description | Example |
 |------|-------------|---------|
+| `auto` | Detect the target runtime and select a safe supported profile | Default |
 | `unprivileged` | Unprivileged LXC container for lightweight compatibility use | Proxmox LXC |
-| `vm` | Virtual machine (preferred for most hosted workstation/web/build flows) | Proxmox VM |
-| `privileged` | Privileged LXC container | Proxmox LXC with passthrough |
+| `vm` | Virtual machine | Proxmox VM or DigitalOcean VPS |
 | `hardware` | Bare metal | Physical server |
+| `privileged` | Privileged LXC container (compatibility label) | Proxmox LXC with passthrough |
 | `oci` | OCI container | Docker, Podman |
 
 ## Capability Matrix
@@ -38,40 +56,40 @@ The `--machine` flag specifies the environment type, enabling setup commands to 
 
 ## Default Resolution
 
-- setup flows default to `vm` unless the system type has an explicit override
-- `server_proxmox` defaults to `hardware`
-- `--build-server` also defaults to `vm`
-- use `--machine unprivileged` to force an LXC on a VM-first workflow
+- Direct setup and patch flows default to `auto` and resolve the machine type
+  on the target before setup steps run.
+- `auto` resolves to `hardware`, `vm`, or `unprivileged` for the officially
+  supported configurations.
+- Hosted Proxmox provisioning defaults to a VM because the guest does not exist
+  yet; use `--machine unprivileged` to provision an LXC instead.
+- `server_proxmox` also uses `auto` and normally resolves to `hardware` on the
+  Proxmox host itself.
 
-## Upgrade Notes For Main-Era LXC Systems
+## Existing Saved Configurations
 
-Older `main` setups commonly relied on the global `unprivileged` default for
-hosted `server_web`, `server_dev`, `workstation_desktop`, `workstation_dev`, and `pc_dev`
-commands. On this branch setup flows are VM-first by default, so copied
-single-system LXC commands for existing systems must add `--machine unprivileged`
-before rerunning setup.
+Saved configurations retain their explicit machine type. New commands use
+`auto`, while an older saved `vm`, `hardware`, or `unprivileged` selection is
+preserved when patching or deploying. This avoids changing the behavior of
+existing hosts unexpectedly.
 
 For saved configurations, prefer `infra_tools deploy <name-or-host>` or
-`infra_tools patch <host>` over retyping old commands. Saved configs include the
-machine type, patch preserves it when `--machine` is omitted, and
-`infra_tools cmd <name-or-host>` prints `--machine unprivileged` for LXC systems
-whose current setup default is VM.
+`infra_tools patch <host>` over retyping old commands. `infra_tools cmd
+<name-or-host>` prints an explicit override when the saved configuration is not
+using the new `auto` default.
 
-Proxmox host setup does not need a migration flag: `server_proxmox` remains a
-hardware flow with normal automatic restarts disabled by default and a 7-day
-forced restart deadline. Bring those hosts up to date by rerunning the saved
-setup or patch command normally.
+Proxmox host setup normally resolves to `hardware`, with normal automatic
+restarts disabled by default and a 7-day forced restart deadline.
 
 ## Usage
 
 ```bash
-# VM-first workstation default
+# Auto-detect the target (the normal direct-setup path)
 python3 infra_tools.py setup workstation_dev 192.168.1.10
 
-# Force LXC compatibility mode on a VM-first workflow
+# Force an officially supported Proxmox LXC profile
 python3 infra_tools.py setup workstation_dev 192.168.1.10 --machine unprivileged
 
-# Explicit machine type
+# Explicit machine types when needed
 python3 infra_tools.py setup workstation_dev 192.168.1.10 --machine privileged
 python3 infra_tools.py setup server_web 192.168.1.20 --machine hardware
 
@@ -81,8 +99,8 @@ python3 infra_tools.py setup server_lite 192.168.1.30 --machine oci
 
 ## Provisioning a Proxmox VM
 
-Hosted flows now default to VMs when you use `--hosted`, so you can provision a
-VM via `qm` + cloud-init without adding `--machine vm`:
+Hosted flows default to VMs when you use `--hosted`, so you can provision a VM
+via `qm` + cloud-init without adding `--machine vm`:
 
 ```bash
 python3 infra_tools.py setup server_web 10.0.0.50 \

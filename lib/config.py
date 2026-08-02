@@ -12,8 +12,9 @@ from lib.types import StrList, NestedStrList, JSONDict, MaybeStr
 
 SYSTEM_TYPES = get_system_type_names()
 
-MACHINE_TYPES = ["unprivileged", "vm", "privileged", "hardware", "oci"]
-DEFAULT_MACHINE_TYPE = "vm"
+AUTO_MACHINE_TYPE = "auto"
+MACHINE_TYPES = [AUTO_MACHINE_TYPE, "unprivileged", "vm", "privileged", "hardware", "oci"]
+DEFAULT_MACHINE_TYPE = AUTO_MACHINE_TYPE
 
 DESKTOP_SYSTEMS = [
     system_type.name
@@ -32,16 +33,18 @@ AGENT_SUITES = ("terminal", "desktop", "full")
 def _resolve_machine_type(
     args: argparse.Namespace,
     *,
-    system_default: Optional[str],
-    is_build_server: bool,
+    is_hosted: bool,
 ) -> str:
     explicit_machine_type = getattr(args, "machine_type", None)
     if explicit_machine_type:
         return explicit_machine_type
-    if is_build_server:
+
+    # Hosted setup creates a guest before remote setup runs, so it cannot use
+    # target-side detection. Keep the existing VM default for that path;
+    # callers can select an LXC explicitly with --machine unprivileged.
+    if is_hosted:
         return "vm"
-    if system_default:
-        return system_default
+
     return DEFAULT_MACHINE_TYPE
 
 
@@ -50,10 +53,8 @@ def _default_machine_type_for_setup(
     *,
     is_build_server: bool = False,
 ) -> str:
-    if is_build_server:
-        return "vm"
-    system_default = get_system_type_definition(system_type).default_machine_type
-    return system_default or DEFAULT_MACHINE_TYPE
+    del system_type, is_build_server
+    return DEFAULT_MACHINE_TYPE
 
 
 def _validate_non_negative_int(name: str, value: int) -> int:
@@ -817,8 +818,7 @@ class SetupConfig:
         is_app_server = bool(getattr(args, 'is_app_server', False))
         machine_type = _resolve_machine_type(
             args,
-            system_default=system_type_definition.default_machine_type,
-            is_build_server=is_build_server,
+            is_hosted=bool(getattr(args, 'hosted_node', None)),
         )
         
         include_desktop = (

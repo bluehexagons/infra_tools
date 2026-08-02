@@ -20,6 +20,17 @@ python3 infra_tools.py patch example.com admin --ssl --deploy api.example.com ht
 python3 infra_tools.py credentials set guest s3cret
 ```
 
+## Supported Configurations
+
+infra_tools officially targets Debian in three configurations: bare metal,
+virtual machines on Proxmox or a VPS provider such as DigitalOcean, and
+unprivileged LXC containers on Proxmox. The normal direct setup default is
+`--machine auto`, which detects the target and selects the appropriate safe
+profile. Use `--machine unprivileged` when provisioning an LXC explicitly;
+hosted Proxmox setup defaults to a VM because the new guest cannot be detected
+before it exists. See [`docs/MACHINE_TYPES.md`](docs/MACHINE_TYPES.md) for the
+capability matrix and compatibility notes.
+
 ## What It Does
 
 - **Servers**: Security hardening, Nginx/SSL, Ruby/Node/Go, app deployment, game lobby server
@@ -203,20 +214,20 @@ To reapply the saved workstation configuration later, run
 `proxmox probe-cluster` from one seed node instead of registering every node
 manually.
 
-#### Alternate: force the workstation onto an LXC
+#### Alternate: provision the workstation as an LXC
 
-Use `--machine unprivileged` only when you explicitly want a lighter-weight LXC.
+Use `--machine unprivileged` when you explicitly want a lighter-weight LXC.
 This keeps basic workstation support, but advanced VM-oriented polish such as
-full kernel/firewall behavior and the best desktop experience should be expected
-on the default VM path — see [`docs/MACHINE_TYPES.md`](docs/MACHINE_TYPES.md) for
-the full capability matrix.
+full kernel/firewall behavior and the best desktop experience is supported most
+reliably on a VM — see [`docs/MACHINE_TYPES.md`](docs/MACHINE_TYPES.md) for the
+full capability matrix.
 
 Replace step 3 with the LXC variant below. The Proxmox host setup (step 1) and
 registration (step 2) are unchanged.
 
 ```bash
 # 3b. Provision the workstation as an unprivileged Debian LXC instead.
-#     LXC still works for the basic path, but VM is now the primary hosted default.
+#     LXC is an officially supported Proxmox compatibility path.
 infra_tools setup workstation_dev 10.0.0.50 devuser \
   --machine unprivileged \
   --hosted pve1 \
@@ -428,14 +439,14 @@ needed to point the live Proxmox test at a real host.
 ### Real-System Smoke Test
 
 Before broad rollout, the highest-value manual validation is a short Proxmox
-smoke pass on one VM-first flow plus one LXC compatibility flow:
+smoke pass on one hosted VM flow plus one LXC compatibility flow:
 
 ```bash
 # 0. Register the Proxmox host and cache its defaults (skip if already done)
 infra_tools.py proxmox add pve1 10.0.0.10 --user root --key ~/.ssh/proxmox_ed25519
 infra_tools.py proxmox probe pve1
 
-# 1. VM-first hosted setup (primary path)
+# 1. Hosted VM setup (primary path)
 infra_tools.py setup workstation_dev 10.0.0.50 devuser \
   --hosted pve1 \
   --memory 8G \
@@ -464,7 +475,7 @@ infra_tools.py setup server_lite 10.0.0.60 appuser \
 
 For the VM path, verify SSH access and, if enabled, RDP login after first boot.
 For the LXC path, basic provisioning and guest-management behavior are the main
-compatibility target; advanced desktop polish is intentionally VM-first.
+compatibility target; advanced desktop polish is more reliable on a VM.
 
 Use `--credential USERNAME PASSWORD` to define share passwords once, then reference those users by username
 in `--share` or `--mount-smb`. The `USERS` field accepts a comma-separated list of `username` or `username:password`

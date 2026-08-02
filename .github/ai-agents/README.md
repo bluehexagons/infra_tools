@@ -40,7 +40,10 @@ if not can_modify_kernel():
     return
 ```
 
-**Types:** `unprivileged` (LXC), `vm`, `privileged`, `hardware`, `oci` (Docker/Podman)
+**Types:** `auto` (default), `unprivileged` (LXC), `vm`, `hardware`, plus the
+explicit compatibility labels `privileged` and `oci` (Docker/Podman). Official
+support targets Debian bare metal, Debian VMs, and unprivileged Debian LXC on
+Proxmox.
 
 See `docs/MACHINE_TYPES.md` for capability matrix.
 

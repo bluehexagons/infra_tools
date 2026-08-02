@@ -6,11 +6,13 @@ import os
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import mock_open, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import remote_setup
+from lib.config import SetupConfig
 
 
 class TestRemoteSetupArgsFile(unittest.TestCase):
@@ -27,6 +29,22 @@ class TestRemoteSetupArgsFile(unittest.TestCase):
                 ["--system-type", "server_lite", "--credential", "mediauser", "supersecret", "--dry-run"],
             )
             self.assertFalse(os.path.exists(args_path))
+
+    def test_remote_config_resolves_auto_machine_type(self):
+        args = SimpleNamespace(custom_steps=None, system_type='server_lite')
+        config = SetupConfig(
+            host='localhost',
+            username='root',
+            system_type='server_lite',
+            machine_type='auto',
+        )
+        with patch.object(remote_setup.SetupConfig, 'from_args', return_value=config), \
+             patch.object(remote_setup, 'resolve_machine_type', return_value='unprivileged') as resolve:
+            resolved = remote_setup.config_from_remote_args(args)
+
+        self.assertIs(resolved, config)
+        self.assertEqual(config.machine_type, 'unprivileged')
+        resolve.assert_called_once_with('auto')
 
     def test_load_args_file_rejects_non_list_payload(self):
         with tempfile.TemporaryDirectory() as tmpdir:

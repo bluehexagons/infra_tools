@@ -21,7 +21,7 @@ try:
 except ImportError:
     argcomplete = None
 
-from lib.config import SetupConfig, _normalize_container_storage
+from lib.config import DEFAULT_MACHINE_TYPE, SetupConfig, _normalize_container_storage
 from lib.credentials import prepare_runtime_config, store_cli_credentials
 from lib.proxmox_hosts import find_proxmox_host
 from lib.validators import validate_host, validate_username
@@ -493,6 +493,9 @@ def _apply_hosted_proxmox_defaults(
     """Resolve saved Proxmox host details and expand shorthand storage specs."""
     if not config.hosted_node:
         return
+
+    if config.machine_type == DEFAULT_MACHINE_TYPE:
+        config.machine_type = "vm"
 
     host = find_proxmox_host(str(config.hosted_node), workspace)
     if host:

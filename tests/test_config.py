@@ -312,15 +312,20 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
         parts = config.to_setup_command()
         self.assertTrue(any('--machine' in p for p in parts))
 
-    def test_lxc_machine_type_included_when_system_default_is_vm(self):
+    def test_lxc_machine_type_is_explicit(self):
         config = self._make_config(system_type='server_web', machine_type='unprivileged')
         parts = config.to_setup_command()
         self.assertIn('--machine unprivileged', parts)
 
-    def test_vm_machine_type_omitted_when_system_default_is_vm(self):
-        config = self._make_config(system_type='server_web', machine_type='vm')
+    def test_auto_machine_type_is_omitted_from_setup_command(self):
+        config = self._make_config(system_type='server_web', machine_type='auto')
         parts = config.to_setup_command()
         self.assertFalse(any('--machine' in p for p in parts))
+
+    def test_vm_machine_type_is_explicit_when_auto_is_the_default(self):
+        config = self._make_config(system_type='server_web', machine_type='vm')
+        parts = config.to_setup_command()
+        self.assertIn('--machine vm', parts)
 
     def test_password_not_included(self):
         config = self._make_config(password='secret')
@@ -471,9 +476,9 @@ class TestSetupConfigFromArgs(unittest.TestCase):
         defaults.update(overrides)
         return Namespace(**defaults)
 
-    def test_workstation_defaults_come_from_registry(self):
+    def test_workstation_defaults_to_auto_detection(self):
         config = SetupConfig.from_args(self._make_args(), 'workstation_desktop')
-        self.assertEqual(config.machine_type, 'vm')
+        self.assertEqual(config.machine_type, 'auto')
         self.assertFalse(config.enable_rdp)
         self.assertTrue(config.include_desktop)
         self.assertTrue(config.include_cli_tools)
@@ -487,36 +492,43 @@ class TestSetupConfigFromArgs(unittest.TestCase):
 
     def test_pc_dev_defaults_include_office_and_smbclient(self):
         config = SetupConfig.from_args(self._make_args(), 'pc_dev')
-        self.assertEqual(config.machine_type, 'vm')
+        self.assertEqual(config.machine_type, 'auto')
         self.assertTrue(config.install_office)
         self.assertTrue(config.enable_smbclient)
         self.assertTrue(config.include_pc_dev_apps)
 
-    def test_server_web_defaults_to_vm(self):
+    def test_server_web_defaults_to_auto_detection(self):
         config = SetupConfig.from_args(self._make_args(), 'server_web')
-        self.assertEqual(config.machine_type, 'vm')
+        self.assertEqual(config.machine_type, 'auto')
 
-    def test_server_dev_defaults_to_vm(self):
+    def test_server_dev_defaults_to_auto_detection(self):
         config = SetupConfig.from_args(self._make_args(), 'server_dev')
-        self.assertEqual(config.machine_type, 'vm')
+        self.assertEqual(config.machine_type, 'auto')
 
-    def test_server_lite_defaults_to_vm(self):
+    def test_server_lite_defaults_to_auto_detection(self):
         config = SetupConfig.from_args(self._make_args(), 'server_lite')
-        self.assertEqual(config.machine_type, 'vm')
+        self.assertEqual(config.machine_type, 'auto')
 
-    def test_custom_steps_defaults_to_vm(self):
+    def test_custom_steps_defaults_to_auto_detection(self):
         config = SetupConfig.from_args(
             self._make_args(custom_steps='configure_swap'),
             'custom_steps',
         )
-        self.assertEqual(config.machine_type, 'vm')
+        self.assertEqual(config.machine_type, 'auto')
 
-    def test_build_server_defaults_to_vm(self):
+    def test_build_server_defaults_to_auto_detection(self):
         config = SetupConfig.from_args(
             self._make_args(is_build_server=True),
             'server_lite',
         )
         self.assertTrue(config.is_build_server)
+        self.assertEqual(config.machine_type, 'auto')
+
+    def test_hosted_setup_defaults_to_vm_for_guest_provisioning(self):
+        config = SetupConfig.from_args(
+            self._make_args(hosted_node='pve1'),
+            'server_web',
+        )
         self.assertEqual(config.machine_type, 'vm')
 
     def test_explicit_machine_type_overrides_vm_default(self):
@@ -542,7 +554,7 @@ class TestSetupConfigFromArgs(unittest.TestCase):
 
     def test_server_proxmox_defaults_defer_restart_with_force_deadline(self):
         config = SetupConfig.from_args(self._make_args(), 'server_proxmox')
-        self.assertEqual(config.machine_type, 'hardware')
+        self.assertEqual(config.machine_type, 'auto')
         self.assertFalse(config.auto_restart)
         self.assertEqual(config.auto_restart_force_days, 7)
         self.assertEqual(config.auto_restart_grace, 5)
