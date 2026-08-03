@@ -127,6 +127,12 @@ def print_setup_summary(config: SetupConfig, description: Optional[str] = None) 
         for notify_type, target in config.notify_specs:
             print(f"  - {notify_type}: {target}")
 
+    if config.antistatic_server:
+        print(f"Antistatic server: {config.antistatic_server}")
+        print("  - Persistent reports: /var/lib/antistatic")
+        if config.antistatic_admin:
+            print(f"  - Admin user: {config.antistatic_admin}")
+
     if config.gogs:
         print(f"Gogs: {' '.join(config.gogs)}")
     

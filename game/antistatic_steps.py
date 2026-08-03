@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import shlex
+import tempfile
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -20,7 +21,7 @@ from lib.release_management import (
     load_json_state,
     write_json_state,
 )
-from lib.remote_utils import run, user_exists, is_service_active
+from lib.remote_utils import install_package, run, user_exists, is_service_active
 from lib.systemd_service import cleanup_service
 
 
@@ -28,6 +29,10 @@ ANTISTATIC_USER = "antistatic"
 ANTISTATIC_BINARY = "/usr/local/bin/antistatic-server"
 ANTISTATIC_SERVICE = "antistatic"
 ANTISTATIC_RELEASE_STATE_FILE = "/opt/infra_tools/state/antistatic_release.json"
+ANTISTATIC_DATA_DIR = "/var/lib/antistatic"
+ANTISTATIC_CONFIG_DIR = "/etc/antistatic"
+ANTISTATIC_ENV_FILE = f"{ANTISTATIC_CONFIG_DIR}/server.env"
+MIN_ANTISTATIC_RELEASE = (0, 10, 0)
 GITHUB_REPO = "bluehexagons/antistatic-server"
 DEFAULT_INTERNAL_PORT = 8080
 DEFAULT_STUN_PORT = 3478
@@ -45,20 +50,29 @@ DEFAULT_DB_INTERNAL_PORT = 8081
 FirewallRule = tuple[int, str, str]
 
 
-def parse_antistatic_spec(spec: str) -> tuple[str, int]:
+def parse_antistatic_spec(spec: str, *, strict: bool = False) -> tuple[str, int]:
     """Parse a 'DOMAIN[:port]' spec into (domain, port).
 
-    The port defaults to DEFAULT_INTERNAL_PORT when omitted or non-numeric.
+    The port defaults to DEFAULT_INTERNAL_PORT when omitted. Strict mode rejects
+    malformed and out-of-range ports instead of applying the legacy fallback.
     """
     spec = spec.strip()
     if spec.isdigit():
-        return "", int(spec)
+        port = int(spec)
+        if strict and not 1 <= port <= 65535:
+            raise ValueError(f"Antistatic server port must be between 1 and 65535: {port}")
+        return "", port
     if ":" in spec:
         domain, _, raw_port = spec.rpartition(":")
         try:
-            return domain.strip(), int(raw_port)
+            port = int(raw_port)
         except ValueError:
+            if strict:
+                raise ValueError(f"Invalid Antistatic server port: {raw_port}") from None
             return domain.strip(), DEFAULT_INTERNAL_PORT
+        if strict and not 1 <= port <= 65535:
+            raise ValueError(f"Antistatic server port must be between 1 and 65535: {port}")
+        return domain.strip(), port
     return spec.strip(), DEFAULT_INTERNAL_PORT
 
 
@@ -180,6 +194,7 @@ def _download_antistatic_binary(arch: str) -> str:
     """
     binary_name = f"antistatic-server-linux-{arch}"
     latest_tag, download_url = _fetch_latest_antistatic_release(arch)
+    _require_compatible_antistatic_release(latest_tag)
     return install_binary_release(
         binary_name=binary_name,
         binary_path=ANTISTATIC_BINARY,
@@ -188,6 +203,20 @@ def _download_antistatic_binary(arch: str) -> str:
         installed_tag=_read_installed_antistatic_release(),
         persist_installed_tag=_write_installed_antistatic_release,
     )
+
+
+def _require_compatible_antistatic_release(tag_name: str) -> None:
+    """Reject releases that predate persistent privacy reports and administration."""
+    version_text = tag_name.removeprefix("v")
+    version_parts = version_text.split(".")
+    if len(version_parts) != 3 or not all(part.isdigit() for part in version_parts):
+        raise RuntimeError(f"Invalid antistatic-server release tag: {tag_name}")
+    version = tuple(int(part) for part in version_parts)
+    if version < MIN_ANTISTATIC_RELEASE:
+        minimum = ".".join(str(part) for part in MIN_ANTISTATIC_RELEASE)
+        raise RuntimeError(
+            f"antistatic-server {tag_name} is incompatible; v{minimum} or newer is required"
+        )
 
 
 def _download_antistatic_db_binary(arch: str) -> str:
@@ -238,9 +267,16 @@ StartLimitBurst=3
 Type=simple
 User={ANTISTATIC_USER}
 Group={ANTISTATIC_USER}
+StateDirectory=antistatic
+WorkingDirectory={ANTISTATIC_DATA_DIR}
+Environment=ANTISTATIC_DATA_DIR={ANTISTATIC_DATA_DIR}
+EnvironmentFile=-{ANTISTATIC_ENV_FILE}
 ExecStart={ANTISTATIC_BINARY}{host_args} -port {port}{stun_args}{proxy_args}
+ExecStartPost=/usr/bin/curl --fail --silent --show-error --retry 5 --retry-connrefused --retry-delay 1 --max-time 2 http://127.0.0.1:{port}/health
 Restart=on-failure
 RestartSec=5
+TimeoutStopSec=40s
+UMask=0077
 
 NoNewPrivileges=yes
 PrivateTmp=yes
@@ -284,7 +320,15 @@ WantedBy=multi-user.target
 """
 
 
-def generate_antistatic_nginx_config(domain: str, port: int) -> str:
+def generate_antistatic_nginx_config(
+    domain: str,
+    port: int,
+    *,
+    enable_https_redirect: bool = True,
+    forwarded_proto: str = "$scheme",
+    forwarded_client_ip: str = "$remote_addr",
+    private_origin: bool = False,
+) -> str:
     """Return an nginx site config that proxies all traffic to the antistatic server."""
     if not domain:
         raise ValueError("Antistatic nginx config requires a non-empty domain")
@@ -292,13 +336,48 @@ def generate_antistatic_nginx_config(domain: str, port: int) -> str:
     from lib.nginx_config import SSL_PROTOCOLS, SSL_CIPHERS, get_ssl_cert_path
 
     cert_file, key_file = get_ssl_cert_path(domain)
+    http_listeners = (
+        "    listen 127.0.0.1:80;\n    listen [::1]:80;"
+        if private_origin
+        else "    listen 80;\n    listen [::]:80;"
+    )
+    https_listeners = (
+        "    listen 127.0.0.1:443 ssl;\n    listen [::1]:443 ssl;"
+        if private_origin
+        else "    listen 443 ssl;\n    listen [::]:443 ssl;"
+    )
+
+    http_location = """\
+    location / {
+        return 301 https://$host$request_uri;
+    }
+""" if enable_https_redirect else f"""\
+    location / {{
+        proxy_pass http://127.0.0.1:{port};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP {forwarded_client_ip};
+        proxy_set_header X-Forwarded-For {forwarded_client_ip};
+        proxy_set_header X-Forwarded-Proto {forwarded_proto};
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_read_timeout 30s;
+        proxy_buffering on;
+        proxy_intercept_errors off;
+    }}
+"""
 
     return f"""\
 server {{
-    listen 80;
-    listen [::]:80;
-    listen 443 ssl;
-    listen [::]:443 ssl;
+{http_listeners}
+    server_name {domain};
+
+    location /.well-known/acme-challenge/ {{
+        root /var/www/letsencrypt;
+    }}
+{http_location}}}
+
+server {{
+{https_listeners}
     http2 on;
 
     server_name {domain};
@@ -309,19 +388,18 @@ server {{
     ssl_prefer_server_ciphers on;
     ssl_ciphers {SSL_CIPHERS};
 
-    location /.well-known/acme-challenge/ {{
-        root /var/www/letsencrypt;
-    }}
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
 
     location / {{
         proxy_pass http://127.0.0.1:{port};
         proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP {forwarded_client_ip};
+        proxy_set_header X-Forwarded-For {forwarded_client_ip};
+        proxy_set_header X-Forwarded-Proto {forwarded_proto};
 
         proxy_http_version 1.1;
         proxy_set_header Connection "";
+        proxy_read_timeout 30s;
         proxy_buffering on;
         proxy_intercept_errors off;
     }}
@@ -329,7 +407,7 @@ server {{
 """
 
 
-def _configure_nginx_proxy(domain: str, port: int) -> None:
+def _configure_nginx_proxy(config: SetupConfig, domain: str, port: int) -> None:
     """Write an nginx site config and reload nginx."""
     from lib.nginx_config import generate_self_signed_cert
 
@@ -342,7 +420,16 @@ def _configure_nginx_proxy(domain: str, port: int) -> None:
 
     run("mkdir -p /var/www/letsencrypt/.well-known/acme-challenge")
 
-    config_content = generate_antistatic_nginx_config(domain, port)
+    forwarded_proto = "https" if config.enable_cloudflare else "$scheme"
+    forwarded_client_ip = "$http_cf_connecting_ip" if config.enable_cloudflare else "$remote_addr"
+    config_content = generate_antistatic_nginx_config(
+        domain,
+        port,
+        enable_https_redirect=config.enable_ssl and not config.enable_cloudflare,
+        forwarded_proto=forwarded_proto,
+        forwarded_client_ip=forwarded_client_ip,
+        private_origin=config.enable_cloudflare,
+    )
     with open(config_file, "w", encoding="utf-8") as fh:
         fh.write(config_content)
     print(f"  ✓ Created nginx config: {config_file}")
@@ -353,10 +440,48 @@ def _configure_nginx_proxy(domain: str, port: int) -> None:
 
     result = run("nginx -t", check=False)
     if result.returncode != 0:
-        print("  ⚠ nginx configuration test failed")
-    else:
-        run("systemctl reload nginx")
-        print("  ✓ nginx reloaded")
+        raise RuntimeError(f"Invalid nginx configuration for {domain}")
+    reload_result = run("systemctl reload nginx", check=False)
+    if reload_result.returncode != 0:
+        raise RuntimeError(f"Failed to reload nginx for {domain}")
+    print("  ✓ nginx reloaded")
+
+    if config.enable_ssl and not config.enable_cloudflare:
+        from web.ssl_steps import (
+            install_certbot,
+            obtain_letsencrypt_certificate,
+            setup_certificate_renewal,
+        )
+
+        install_certbot(config)
+        if obtain_letsencrypt_certificate([domain], config.ssl_email, domain):
+            with open(config_file, "w", encoding="utf-8") as fh:
+                fh.write(
+                    generate_antistatic_nginx_config(
+                        domain,
+                        port,
+                        enable_https_redirect=True,
+                        forwarded_proto=forwarded_proto,
+                        forwarded_client_ip=forwarded_client_ip,
+                        private_origin=False,
+                    )
+                )
+            setup_certificate_renewal()
+            result = run("nginx -t", check=False)
+            if result.returncode == 0:
+                reload_result = run("systemctl reload nginx", check=False)
+                if reload_result.returncode != 0:
+                    raise RuntimeError(f"Failed to reload nginx for {domain}")
+                print("  ✓ Let's Encrypt enabled for antistatic-server")
+            else:
+                raise RuntimeError(f"Invalid Let's Encrypt nginx configuration for {domain}")
+        else:
+            raise RuntimeError(f"Failed to obtain a trusted certificate for {domain}")
+
+    if config.enable_cloudflare:
+        from web.cloudflare_steps import run_cloudflare_tunnel_setup
+
+        run_cloudflare_tunnel_setup(config)
 
 
 def _remove_empty_domain_nginx_proxy() -> None:
@@ -370,9 +495,14 @@ def _remove_empty_domain_nginx_proxy() -> None:
             print(f"  ✓ Removed invalid nginx config: {path}")
 
 
-def _maybe_configure_nginx_proxy(domain: str, port: int, service_name: str) -> None:
+def _maybe_configure_nginx_proxy(
+    config: SetupConfig,
+    domain: str,
+    port: int,
+    service_name: str,
+) -> None:
     if domain:
-        _configure_nginx_proxy(domain, port)
+        _configure_nginx_proxy(config, domain, port)
         return
 
     _remove_empty_domain_nginx_proxy()
@@ -435,6 +565,87 @@ def _maybe_configure_antistatic_firewall(domain: str, port: int) -> None:
     )
 
 
+def _quote_systemd_environment_value(value: str) -> str:
+    """Quote a validated value for a systemd EnvironmentFile assignment."""
+    if any(ord(char) < 32 or ord(char) == 127 for char in value):
+        raise ValueError("Antistatic environment values must not contain control characters")
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def _antistatic_admin_password(config: SetupConfig) -> str | None:
+    if not config.antistatic_admin:
+        return None
+    for credential in config.share_credentials or []:
+        if len(credential) == 2 and credential[0] == config.antistatic_admin:
+            return credential[1]
+    raise ValueError(f"Missing credential for Antistatic admin: {config.antistatic_admin}")
+
+
+def _configure_antistatic_environment(config: SetupConfig) -> None:
+    """Install or remove the root-only optional admin environment file."""
+    password = _antistatic_admin_password(config)
+    if password is None:
+        if os.path.exists(ANTISTATIC_ENV_FILE):
+            os.remove(ANTISTATIC_ENV_FILE)
+            print("  ✓ Disabled antistatic-server admin credentials")
+        return
+
+    if os.path.lexists(ANTISTATIC_CONFIG_DIR) and (
+        os.path.islink(ANTISTATIC_CONFIG_DIR) or not os.path.isdir(ANTISTATIC_CONFIG_DIR)
+    ):
+        raise ValueError(f"Antistatic config path must be a real directory: {ANTISTATIC_CONFIG_DIR}")
+    os.makedirs(ANTISTATIC_CONFIG_DIR, mode=0o700, exist_ok=True)
+    os.chown(ANTISTATIC_CONFIG_DIR, 0, 0)
+    os.chmod(ANTISTATIC_CONFIG_DIR, 0o700)
+    content = (
+        f"ANTISTATIC_ADMIN_USERNAME={_quote_systemd_environment_value(config.antistatic_admin or '')}\n"
+        f"ANTISTATIC_ADMIN_PASSWORD={_quote_systemd_environment_value(password)}\n"
+    )
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=ANTISTATIC_CONFIG_DIR,
+        prefix=".server.env-",
+        delete=False,
+    ) as file_obj:
+        temp_path = file_obj.name
+        file_obj.write(content)
+    try:
+        os.chmod(temp_path, 0o600)
+        os.replace(temp_path, ANTISTATIC_ENV_FILE)
+        os.chmod(ANTISTATIC_ENV_FILE, 0o600)
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+    print("  ✓ Configured antistatic-server admin credentials")
+
+
+def _ensure_antistatic_dependencies() -> None:
+    """Install commands needed for release setup and systemd health checks."""
+    if not install_package(
+        "CA certificates",
+        "ca-certificates",
+        "apt-get install -y -qq ca-certificates",
+    ):
+        raise RuntimeError("CA certificates are required to install antistatic-server")
+    if not install_package("curl", "curl", "apt-get install -y -qq curl ca-certificates"):
+        raise RuntimeError("curl is required to install and monitor antistatic-server")
+
+
+def preflight_antistatic_releases(config: SetupConfig) -> None:
+    """Validate release availability before existing services are removed."""
+    if not (config.antistatic_server or config.antistatic_db) or config.dry_run:
+        return
+    _ensure_antistatic_dependencies()
+    arch = _detect_arch()
+    if config.antistatic_server:
+        tag_name, _download_url = _fetch_latest_antistatic_release(arch)
+        _require_compatible_antistatic_release(tag_name)
+    if config.antistatic_db:
+        _fetch_latest_antistatic_db_release(arch)
+
+
 def setup_antistatic_server(config: SetupConfig) -> None:
     """Install and run the antistatic lobby server behind nginx."""
     if not config.antistatic_server:
@@ -447,9 +658,11 @@ def setup_antistatic_server(config: SetupConfig) -> None:
 
     from web.web_steps import install_nginx
     install_nginx(config)
+    _ensure_antistatic_dependencies()
 
     _ensure_antistatic_user()
     _download_antistatic_binary(_detect_arch())
+    _configure_antistatic_environment(config)
 
     cleanup_service(ANTISTATIC_SERVICE)
 
@@ -471,12 +684,12 @@ def setup_antistatic_server(config: SetupConfig) -> None:
     if is_service_active(ANTISTATIC_SERVICE):
         print(f"  ✓ {ANTISTATIC_SERVICE} is running")
     else:
-        print(
-            f"  ⚠ Warning: {ANTISTATIC_SERVICE} may not be running. "
-            f"Check with: systemctl status {ANTISTATIC_SERVICE}"
+        raise RuntimeError(
+            f"{ANTISTATIC_SERVICE} failed its startup health check; "
+            f"inspect systemctl status {ANTISTATIC_SERVICE}"
         )
 
-    _maybe_configure_nginx_proxy(domain, port, ANTISTATIC_SERVICE)
+    _maybe_configure_nginx_proxy(config, domain, port, ANTISTATIC_SERVICE)
     _maybe_configure_antistatic_firewall(domain, port)
     if config.enable_cloudflare:
         print(
@@ -497,6 +710,7 @@ def setup_antistatic_db(config: SetupConfig) -> None:
 
     from web.web_steps import install_nginx
     install_nginx(config)
+    _ensure_antistatic_dependencies()
 
     _ensure_antistatic_db_user()
     _download_antistatic_db_binary(_detect_arch())
@@ -520,5 +734,5 @@ def setup_antistatic_db(config: SetupConfig) -> None:
             f"Check with: systemctl status {ANTISTATIC_DB_SERVICE}"
         )
 
-    _maybe_configure_nginx_proxy(domain, port, ANTISTATIC_DB_SERVICE)
+    _maybe_configure_nginx_proxy(config, domain, port, ANTISTATIC_DB_SERVICE)
     _maybe_configure_direct_port_firewall(domain, port, ANTISTATIC_DB_SERVICE)

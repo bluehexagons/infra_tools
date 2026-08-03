@@ -221,6 +221,7 @@ class SetupConfig:
     scrub_specs: Optional[NestedStrList] = None
     notify_specs: Optional[NestedStrList] = None
     antistatic_server: MaybeStr = None  # "DOMAIN[:port]" spec
+    antistatic_admin: MaybeStr = None  # Username; password stays in the credential store
     antistatic_db: MaybeStr = None  # "DOMAIN[:port]" spec
     gogs: Optional[StrList] = None  # ["DOMAIN[:port]", "DATA_PATH"?]
     auto_restart: bool = True
@@ -454,6 +455,9 @@ class SetupConfig:
         if self.antistatic_server:
             args.append(f"--antistatic-server {shlex.quote(self.antistatic_server)}")
 
+        if self.antistatic_admin:
+            args.append(f"--antistatic-admin {shlex.quote(self.antistatic_admin)}")
+
         if self.antistatic_db:
             args.append(f"--antistatic-db {shlex.quote(self.antistatic_db)}")
 
@@ -640,6 +644,9 @@ class SetupConfig:
         MIN_SHARE_FIELDS = SHARE_USERS_INDEX + 1
         required_share_credentials: StrList = []
         seen_share_credentials: set[str] = set()
+        if self.antistatic_admin:
+            required_share_credentials.append(self.antistatic_admin)
+            seen_share_credentials.add(self.antistatic_admin)
         redacted_share_specs: list[list[str]] = []
         if self.samba_shares:
             for share_spec in self.samba_shares:
@@ -703,6 +710,9 @@ class SetupConfig:
         # Antistatic lobby server
         if self.antistatic_server:
             cmd_parts.append(f"--antistatic-server {shlex.quote(self.antistatic_server)}")
+
+        if self.antistatic_admin:
+            cmd_parts.append(f"--antistatic-admin {shlex.quote(self.antistatic_admin)}")
 
         # Antistatic DB service
         if self.antistatic_db:
@@ -904,6 +914,7 @@ class SetupConfig:
             scrub_specs=getattr(args, 'scrub_specs', None),
             notify_specs=getattr(args, 'notify_specs', None),
             antistatic_server=getattr(args, 'antistatic_server', None),
+            antistatic_admin=getattr(args, 'antistatic_admin', None),
             antistatic_db=getattr(args, 'antistatic_db', None),
             gogs=getattr(args, 'gogs', None),
             auto_restart=auto_restart,

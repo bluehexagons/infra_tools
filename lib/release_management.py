@@ -184,13 +184,19 @@ def install_binary_release(
 
     print(f"  Downloading {binary_name} ({tag_name})...")
     tmp_path = f"/tmp/{binary_name}.{tag_name}"
-    run(
+    download_result = run(
         f"curl -fL -o {shlex.quote(tmp_path)} {shlex.quote(download_url)}",
         check=True,
         display_cmd=f"curl -fL -o {tmp_path} <release URL>",
     )
-    run(f"chmod +x {shlex.quote(tmp_path)}", check=True)
-    run(f"mv {shlex.quote(tmp_path)} {shlex.quote(binary_path)}", check=True)
+    if download_result.returncode != 0:
+        raise RuntimeError(f"Failed to download {binary_name} {tag_name}")
+    chmod_result = run(f"chmod +x {shlex.quote(tmp_path)}", check=True)
+    if chmod_result.returncode != 0:
+        raise RuntimeError(f"Failed to make {binary_name} {tag_name} executable")
+    install_result = run(f"mv {shlex.quote(tmp_path)} {shlex.quote(binary_path)}", check=True)
+    if install_result.returncode != 0:
+        raise RuntimeError(f"Failed to install {binary_name} {tag_name}")
     persist_installed_tag(tag_name)
     print(f"  ✓ Installed {binary_path} ({tag_name})")
     return tag_name

@@ -60,6 +60,15 @@ class TestSetupConfigToDict(unittest.TestCase):
         d = config.to_dict()
         self.assertNotIn('share_credentials', d)
 
+    def test_to_dict_keeps_antistatic_admin_username_without_password(self):
+        config = self._make_config(
+            antistatic_admin='operator',
+            share_credentials=[['operator', 'secret1']],
+        )
+        d = config.to_dict()
+        self.assertEqual(d['antistatic_admin'], 'operator')
+        self.assertNotIn('share_credentials', d)
+
     def test_to_dict_redacts_inline_share_passwords(self):
         config = self._make_config(samba_shares=[['read', 'share', '/mnt/data', 'user1:secret1,user2']])
         d = config.to_dict()
@@ -251,6 +260,16 @@ class TestSetupConfigToRemoteArgs(unittest.TestCase):
         args_str = ' '.join(args)
         self.assertIn('--antistatic-db db.example.com:8081', args_str)
 
+    def test_antistatic_admin(self):
+        config = self._make_config(
+            antistatic_server='lobby.example.com:8080',
+            antistatic_admin='operator',
+            share_credentials=[['operator', 'secret1']],
+        )
+        args_str = ' '.join(config.to_remote_args())
+        self.assertIn('--antistatic-admin operator', args_str)
+        self.assertIn('--credential operator secret1', args_str)
+
     def test_gogs(self):
         config = self._make_config(gogs=['git.example.com:3000', '/srv/gogs'])
         args = config.to_remote_args()
@@ -341,6 +360,17 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
         parts = config.to_setup_command()
         cmd = ' '.join(parts)
         self.assertIn('--credential user1 [REDACTED]', cmd)
+        self.assertNotIn('secret1', cmd)
+
+    def test_antistatic_admin_password_is_redacted(self):
+        config = self._make_config(
+            antistatic_server='lobby.example.com',
+            antistatic_admin='operator',
+            share_credentials=[['operator', 'secret1']],
+        )
+        cmd = ' '.join(config.to_setup_command())
+        self.assertIn('--antistatic-admin operator', cmd)
+        self.assertIn('--credential operator [REDACTED]', cmd)
         self.assertNotIn('secret1', cmd)
 
     def test_share_credentials_omitted_for_inline_share_passwords(self):
@@ -463,6 +493,7 @@ class TestSetupConfigFromArgs(unittest.TestCase):
             scrub_specs=None,
             notify_specs=None,
             antistatic_server=None,
+            antistatic_admin=None,
             antistatic_db=None,
             gogs=None,
             hosted_node=None,
@@ -544,6 +575,13 @@ class TestSetupConfigFromArgs(unittest.TestCase):
             'server_web',
         )
         self.assertEqual(config.antistatic_db, 'db.example.com')
+
+    def test_antistatic_admin_from_args(self):
+        config = SetupConfig.from_args(
+            self._make_args(antistatic_server='lobby.example.com', antistatic_admin='operator'),
+            'server_web',
+        )
+        self.assertEqual(config.antistatic_admin, 'operator')
 
     def test_gogs_from_args(self):
         config = SetupConfig.from_args(

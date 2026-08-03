@@ -9,9 +9,11 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
+from lib.config import SetupConfig
 from lib.validation import (
     validate_apt_packages,
     validate_agent_repositories,
+    validate_antistatic_settings,
     validate_deploy_specs,
     validate_deploy_targets,
     validate_gogs_settings,
@@ -207,6 +209,82 @@ class TestValidateGogsSettings(unittest.TestCase):
     def test_relative_data_path_fails(self):
         with self.assertRaisesRegex(ValueError, "Gogs data path must be absolute: relative/path"):
             validate_gogs_settings(['git.example.com', 'relative/path'])
+
+
+class TestValidateAntistaticSettings(unittest.TestCase):
+    def _make_config(self, **kwargs):
+        defaults = {
+            "host": "host",
+            "username": "root",
+            "system_type": "server_lite",
+            "antistatic_server": "lobby.example.com",
+        }
+        defaults.update(kwargs)
+        return SetupConfig(**defaults)
+
+    def test_server_without_admin_passes(self):
+        validate_antistatic_settings(self._make_config())
+
+    def test_invalid_domain_fails(self):
+        with self.assertRaisesRegex(ValueError, "Invalid Antistatic server domain"):
+            validate_antistatic_settings(self._make_config(antistatic_server="bad domain"))
+
+    def test_invalid_port_fails(self):
+        with self.assertRaisesRegex(ValueError, "Invalid Antistatic server port"):
+            validate_antistatic_settings(
+                self._make_config(antistatic_server="lobby.example.com:nope")
+            )
+
+    def test_admin_requires_server(self):
+        with self.assertRaisesRegex(ValueError, "requires --antistatic-server"):
+            validate_antistatic_settings(
+                self._make_config(antistatic_server=None, antistatic_admin="operator")
+            )
+
+    def test_admin_disable_requires_server_spec_for_remote_cleanup(self):
+        with self.assertRaisesRegex(ValueError, "requires --antistatic-server"):
+            validate_antistatic_settings(
+                self._make_config(antistatic_server=None, antistatic_admin="")
+            )
+
+    def test_admin_requires_proxy_hostname(self):
+        with self.assertRaisesRegex(ValueError, "hostname-based reverse proxy"):
+            validate_antistatic_settings(
+                self._make_config(
+                    antistatic_server=":8080",
+                    antistatic_admin="operator",
+                    enable_ssl=True,
+                    share_credentials=[["operator", "secret1"]],
+                )
+            )
+
+    def test_admin_requires_tls_ingress(self):
+        with self.assertRaisesRegex(ValueError, "requires --ssl or --cloudflare"):
+            validate_antistatic_settings(
+                self._make_config(
+                    antistatic_admin="operator",
+                    share_credentials=[["operator", "secret1"]],
+                )
+            )
+
+    def test_admin_with_ssl_and_credential_passes(self):
+        validate_antistatic_settings(
+            self._make_config(
+                antistatic_admin="operator",
+                enable_ssl=True,
+                share_credentials=[["operator", "secret1"]],
+            )
+        )
+
+    def test_admin_password_rejects_control_characters(self):
+        with self.assertRaisesRegex(ValueError, "password must not contain control"):
+            validate_antistatic_settings(
+                self._make_config(
+                    antistatic_admin="operator",
+                    enable_ssl=True,
+                    share_credentials=[["operator", "secret\nvalue"]],
+                )
+            )
 
 
 class TestValidateSyncSpecs(unittest.TestCase):

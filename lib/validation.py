@@ -262,6 +262,44 @@ def validate_gogs_settings(gogs: Optional[list[str]]) -> None:
         validate_filesystem_path(data_path, must_exist=False)
 
 
+def validate_antistatic_settings(config: "SetupConfig") -> None:
+    """Validate antistatic-server deployment and optional admin settings."""
+    if not config.antistatic_server:
+        if config.antistatic_admin is not None:
+            raise ValueError("--antistatic-admin requires --antistatic-server")
+        return
+
+    from game.antistatic_steps import parse_antistatic_spec
+    from lib.validators import validate_host
+
+    domain, _port = parse_antistatic_spec(config.antistatic_server, strict=True)
+    if domain and not validate_host(domain):
+        raise ValueError(f"Invalid Antistatic server domain: {domain}")
+
+    if not config.antistatic_admin:
+        return
+    if not domain:
+        raise ValueError("--antistatic-admin requires a hostname-based reverse proxy deployment")
+    if not (config.enable_ssl or config.enable_cloudflare):
+        raise ValueError("--antistatic-admin requires --ssl or --cloudflare")
+
+    username = config.antistatic_admin
+    if username != username.strip() or ":" in username or "," in username:
+        raise ValueError(f"Invalid Antistatic admin username: {username}")
+    if any(ord(char) < 32 or ord(char) == 127 for char in username):
+        raise ValueError("Antistatic admin username must not contain control characters")
+
+    password = None
+    for credential in config.share_credentials or []:
+        if len(credential) == 2 and credential[0] == username:
+            password = credential[1]
+            break
+    if password is None:
+        raise ValueError(f"Missing credential for Antistatic admin: {username}")
+    if any(ord(char) < 32 or ord(char) == 127 for char in password):
+        raise ValueError("Antistatic admin password must not contain control characters")
+
+
 def validate_deploy_specs(deploy_specs: Optional[list[list[str]]]) -> None:
     """Validate deploy specs before setup or patch execution."""
 

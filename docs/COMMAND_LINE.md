@@ -23,7 +23,7 @@ infra_tools.py info [pattern] [--compact]
 infra_tools.py cmd [pattern]
 infra_tools.py rm <pattern>
 infra_tools.py deploy <pattern> [--yes]
-infra_tools.py credentials set <username> <password>
+infra_tools.py credentials set <username> [password]
 infra_tools.py credentials list
 infra_tools.py credentials remove <username>
 infra_tools.py completions [options]
@@ -211,7 +211,33 @@ hostless specs such as `:8080` or `:8081` listen directly on the target port.
 | Flag | Description |
 |------|-------------|
 | `--antistatic-server [DOMAIN][:PORT]` | Deploy the lobby server |
+| `--antistatic-admin USERNAME` | Enable HTTPS-only report administration using the matching workspace credential |
+| `--no-antistatic-admin` | Disable administration and remove its remote credential file |
 | `--antistatic-db [DOMAIN][:PORT]` | Deploy antistatic-db |
+
+The lobby server stores bounded report collections under
+`/var/lib/antistatic`, sends a local `/health` probe after each service start,
+and exposes STUN directly on UDP 3478. Hostname deployments redirect ordinary
+HTTP traffic to HTTPS; `--cloudflare` instead marks tunnel traffic secure at
+the private nginx-to-server boundary.
+
+Admin access requires a hostname deployment and either `--ssl` or
+`--cloudflare`. Store its password separately, then reference the username:
+
+```bash
+infra_tools.py credentials set operator
+infra_tools.py setup server_lite 192.168.1.10 \
+  --antistatic-server lobby.example.com \
+  --antistatic-admin operator \
+  --ssl
+```
+
+Omitting the password prompts without exposing it in shell history or process
+arguments. `--credential operator PASSWORD` can set the same workspace
+credential during controlled non-interactive setup, but its value is visible in
+the invoking process arguments. Passwords are omitted from saved setup state,
+redacted from reconstructed commands, transferred in the mode-`0600` remote
+argument file, and installed as `/etc/antistatic/server.env` with mode `0600`.
 
 ## Storage And Data Movement
 

@@ -477,10 +477,13 @@ For the VM path, verify SSH access and, if enabled, RDP login after first boot.
 For the LXC path, basic provisioning and guest-management behavior are the main
 compatibility target; advanced desktop polish is more reliable on a VM.
 
-Use `--credential USERNAME PASSWORD` to define share passwords once, then reference those users by username
-in `--share` or `--mount-smb`. The `USERS` field accepts a comma-separated list of `username` or `username:password`
-entries, and each bare username must have a matching saved credential. Use `infra_tools.py credentials set USERNAME
-PASSWORD` to manage the shared workspace store directly.
+Use `infra_tools.py credentials set USERNAME` to enter passwords without exposing
+them in process arguments, then reference those users by username in `--share`
+or `--mount-smb`. The `USERS` field accepts a comma-separated list of `username`
+or `username:password` entries, and each bare username must have a matching saved
+credential. `--credential USERNAME PASSWORD` remains available for controlled
+non-interactive automation, but its password is visible in the invoking process
+arguments.
 
 ### Sysadmin Shortcuts
 
@@ -524,18 +527,31 @@ infra_tools reachable
 
 ### Game Lobby Server (Antistatic)
 ```bash
-# Deploy the antistatic lobby server behind nginx (reruns upgrade to the latest GitHub release)
-python3 infra_tools.py setup server_lite 192.168.1.10 --antistatic-server lobby.example.com
+# Deploy behind nginx with a trusted certificate (reruns upgrade to the latest GitHub release)
+python3 infra_tools.py setup server_lite 192.168.1.10 \
+  --antistatic-server lobby.example.com \
+  --ssl --ssl-email admin@example.com
 
 # With custom internal port (default: 8080)
 python3 infra_tools.py setup server_web 192.168.1.10 --antistatic-server lobby.example.com:9090 --ssl
+
+# Optional read-only report administration. The password is saved only in the
+# mode-0600 workspace credential store and installed in a root-only environment file.
+python3 infra_tools.py credentials set antistatic-admin
+python3 infra_tools.py setup server_lite 192.168.1.10 \
+  --antistatic-server lobby.example.com \
+  --antistatic-admin antistatic-admin \
+  --ssl --ssl-email admin@example.com
 
 # Hostless direct port, no nginx virtual host
 python3 infra_tools.py setup server_lite 192.168.1.10 --antistatic-server :8080
 # If UFW is active, hostless mode also opens the selected direct TCP port.
 
 # The lobby server binary is fetched from github.com/bluehexagons/antistatic-server/releases
-# Runs as a locked-down systemd service with automatic restart on failure
+# Reports use bounded JSONL storage under /var/lib/antistatic.
+# Runs as a locked-down systemd service with HTTP health checks and automatic restart on failure.
+# Admin access requires a hostname plus --ssl or --cloudflare; plaintext requests are rejected.
+# STUN remains directly reachable on UDP 3478 and cannot pass through an HTTP tunnel.
 
 # Deploy antistatic-db behind nginx, or use :8081 for direct hostless mode
 python3 infra_tools.py setup server_web 192.168.1.10 --antistatic-db db.example.com --ssl

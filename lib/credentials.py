@@ -182,14 +182,15 @@ def store_cli_credentials(config: SetupConfig, workspace: str | None = None) -> 
     save_workspace_credentials(credentials, workspace)
 
 
-def _collect_required_share_usernames(config: SetupConfig) -> list[str]:
+def _collect_required_credential_usernames(config: SetupConfig) -> list[str]:
     usernames: list[str] = []
     seen_usernames: set[str] = set()
 
-    if not config.samba_shares:
-        return usernames
+    if config.antistatic_admin:
+        usernames.append(config.antistatic_admin)
+        seen_usernames.add(config.antistatic_admin)
 
-    for share_spec in config.samba_shares:
+    for share_spec in config.samba_shares or []:
         if len(share_spec) < 4:
             continue
         for user_spec in str(share_spec[3]).split(","):
@@ -215,12 +216,17 @@ def _resolve_share_credentials(config: SetupConfig, credential_map: dict[str, st
                 seen_usernames.add(normalized_username)
                 resolved_credentials.append([normalized_username, normalized_password])
 
-    for username in _collect_required_share_usernames(config):
+    for username in _collect_required_credential_usernames(config):
         password = credential_map.get(username)
         if password is None:
+            if username == config.antistatic_admin:
+                raise ValueError(
+                    f"Missing credential for Antistatic admin: {username}. "
+                    "Run infra_tools.py credentials set USERNAME to enter it securely"
+                )
             raise ValueError(
                 f"Missing credential for share user: {username}. "
-                "Use --credential USERNAME PASSWORD or infra_tools.py credentials set USERNAME PASSWORD"
+                "Run infra_tools.py credentials set USERNAME or use --credential USERNAME PASSWORD"
             )
         if username not in seen_usernames:
             seen_usernames.add(username)
@@ -245,7 +251,7 @@ def _resolve_named_smb_mounts(
             if password is None:
                 raise ValueError(
                     f"Missing credential for SMB mount user: {username}. "
-                    "Use --credential USERNAME PASSWORD or infra_tools.py credentials set USERNAME PASSWORD"
+                    "Run infra_tools.py credentials set USERNAME or use --credential USERNAME PASSWORD"
                 )
             resolved_spec[2] = f"{username}:{password}"
         resolved_mounts.append(resolved_spec)

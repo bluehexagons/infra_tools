@@ -172,6 +172,13 @@ def _run_main() -> int:
     detect_os()
     print("OS: Debian")
     sys.stdout.flush()
+
+    if config.antistatic_server or config.antistatic_db:
+        from game.antistatic_steps import preflight_antistatic_releases
+
+        print("Preflighting Antistatic releases...")
+        preflight_antistatic_releases(config)
+        sys.stdout.flush()
     
     # Save machine state for services to reference
     save_machine_state(

@@ -296,12 +296,28 @@ def add_setup_arguments(
                        help="Configure notification target: TYPE (webhook|mailbox), TARGET (URL for webhook or email for mailbox). Sends alerts for important events (errors, warnings, successes). Can be used multiple times for multiple targets.")
     
     parser.add_argument("--antistatic-server", dest="antistatic_server",
-                       metavar="[DOMAIN][:PORT]",
-                       help="Deploy the antistatic lobby server behind nginx. "
+                        metavar="[DOMAIN][:PORT]",
+                        help="Deploy the antistatic lobby server behind nginx. "
                             "DOMAIN is the optional public hostname; PORT is the internal listen port "
                             f"(default: 8080). Hostless specs like :8080 listen directly without nginx. "
-                            "The built-in STUN responder uses direct public UDP 3478 even when Cloudflare tunnel "
-                            "support is enabled.")
+                             "The built-in STUN responder uses direct public UDP 3478 even when Cloudflare tunnel "
+                             "support is enabled.")
+
+    antistatic_admin_group = parser.add_mutually_exclusive_group()
+    antistatic_admin_group.add_argument(
+        "--antistatic-admin",
+        dest="antistatic_admin",
+        metavar="USERNAME",
+        help="Enable the HTTPS-only antistatic-server admin interface. Resolve the password "
+             "from --credential USERNAME PASSWORD or the workspace credential store.",
+    )
+    antistatic_admin_group.add_argument(
+        "--no-antistatic-admin",
+        dest="antistatic_admin",
+        action="store_const",
+        const="",
+        help="Disable the antistatic-server admin interface and remove its remote credentials.",
+    )
 
     parser.add_argument("--antistatic-db", dest="antistatic_db",
                        metavar="[DOMAIN][:PORT]",

@@ -24,6 +24,7 @@ System Types:
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import os
 import sys
@@ -72,6 +73,7 @@ from lib.validators import validate_host, validate_username
 from lib.validation import (
     validate_apt_packages,
     validate_agent_repositories,
+    validate_antistatic_settings,
     validate_deploy_specs,
     validate_deploy_targets,
     validate_gogs_settings,
@@ -345,7 +347,11 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
 
     credentials_set_parser = credentials_subparsers.add_parser("set", help="Save or replace a credential")
     credentials_set_parser.add_argument("username", help="Credential username")
-    credentials_set_parser.add_argument("password", help="Credential password")
+    credentials_set_parser.add_argument(
+        "password",
+        nargs="?",
+        help="Credential password (omit to enter it without exposing it in process arguments)",
+    )
 
     credentials_subparsers.add_parser("list", help="List saved credential usernames")
 
@@ -765,6 +771,7 @@ def _prepare_runtime_config_for_cli(config: SetupConfig) -> SetupConfig:
         runtime_config.share_credentials,
     )
     validate_gogs_settings(runtime_config.gogs)
+    validate_antistatic_settings(runtime_config)
     validate_hosted_flags(runtime_config)
     validate_samba_share_credentials(runtime_config)
     return runtime_config
@@ -1049,7 +1056,10 @@ def main() -> int:
     elif args.command == "credentials":
         try:
             if args.credentials_command == "set":
-                set_workspace_credential(args.username, args.password)
+                password = args.password
+                if password is None:
+                    password = getpass.getpass(f"Password for {args.username}: ")
+                set_workspace_credential(args.username, password)
                 print(f"Saved credential for {args.username} in {get_workspace_dir()}")
                 return 0
             if args.credentials_command == "list":

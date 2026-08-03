@@ -28,6 +28,7 @@ from lib.validators import validate_host, validate_username
 from lib.validation import (
     validate_apt_packages,
     validate_agent_repositories,
+    validate_antistatic_settings,
     validate_deploy_specs,
     validate_deploy_targets,
     validate_gogs_settings,
@@ -549,7 +550,7 @@ def prepare_validated_runtime_config(
 ) -> SetupConfig:
     """Apply saved-host defaults, resolve credentials, and validate a setup."""
     _apply_hosted_proxmox_defaults(config, workspace)
-    runtime_config = prepare_runtime_config(config)
+    runtime_config = prepare_runtime_config(config, workspace)
     validate_timezone_name(runtime_config.timezone)
     validate_apt_packages(runtime_config.apt_packages)
     validate_agent_repositories(runtime_config.agent_repos)
@@ -565,6 +566,7 @@ def prepare_validated_runtime_config(
         runtime_config.share_credentials,
     )
     validate_gogs_settings(runtime_config.gogs)
+    validate_antistatic_settings(runtime_config)
     validate_hosted_flags(runtime_config)
     validate_samba_share_credentials(runtime_config)
     return runtime_config

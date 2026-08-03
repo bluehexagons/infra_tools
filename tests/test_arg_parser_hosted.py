@@ -154,11 +154,18 @@ class TestHostedFlagParsing(unittest.TestCase):
             "10.0.0.50",
             "--antistatic-server",
             "lobby.example.com:9090",
+            "--antistatic-admin",
+            "operator",
             "--antistatic-db",
             "db.example.com:9091",
         ])
         self.assertEqual(args.antistatic_server, "lobby.example.com:9090")
+        self.assertEqual(args.antistatic_admin, "operator")
         self.assertEqual(args.antistatic_db, "db.example.com:9091")
+
+    def test_antistatic_admin_can_be_disabled(self):
+        args = self.parser.parse_args(["10.0.0.50", "--no-antistatic-admin"])
+        self.assertEqual(args.antistatic_admin, "")
 
     def test_gogs_flag_with_domain_only(self):
         args = self.parser.parse_args([
