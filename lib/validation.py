@@ -22,6 +22,13 @@ def _resolve_plugin_validator(name: str) -> Callable[..., object]:
     return resolve_validator(name)
 
 
+def _validate_no_control_characters(value: str, name: str) -> None:
+    """Reject values that could add lines to generated configuration files."""
+
+    if any(ord(char) < 32 or ord(char) == 127 for char in value):
+        raise ValueError(f"{name} must not contain control characters")
+
+
 def validate_filesystem_path(path: str, must_exist: bool = False, check_writable: bool = False) -> None:
     """Validate filesystem path with extended checks.
     
@@ -35,6 +42,8 @@ def validate_filesystem_path(path: str, must_exist: bool = False, check_writable
     """
     if not path:
         raise ValueError("Path must be a non-empty string")
+
+    _validate_no_control_characters(path, "Path")
     
     # Basic path format validation
     try:
@@ -385,8 +394,18 @@ def validate_smb_mount_specs(smb_mounts: Optional[list[list[str]]]) -> None:
         validate_filesystem_path(mount_config["mountpoint"], must_exist=False)
         if not validate_host(mount_config["ip"]):
             raise ValueError(f"Invalid SMB mount host: {mount_config['ip']}")
-        if not mount_config["share"] or "/" in mount_config["share"] or "\\" in mount_config["share"] or " " in mount_config["share"]:
+        if not mount_config["username"] or not mount_config["password"]:
+            raise ValueError("SMB mount credentials must include a non-empty username and password")
+        _validate_no_control_characters(mount_config["username"], "SMB mount username")
+        _validate_no_control_characters(mount_config["password"], "SMB mount password")
+        if (
+            not mount_config["share"]
+            or "/" in mount_config["share"]
+            or "\\" in mount_config["share"]
+            or any(char.isspace() for char in mount_config["share"])
+        ):
             raise ValueError(f"Invalid share name (cannot contain /, \\, or spaces): {mount_config['share']}")
+        _validate_no_control_characters(mount_config["subdir"], "SMB mount subdirectory")
         if mount_config["subdir"] and not mount_config["subdir"].startswith("/"):
             raise ValueError(f"Subdirectory must start with /: {mount_config['subdir']}")
 
@@ -416,9 +435,13 @@ def validate_samba_share_specs(
         share_name = share_config["share_name"]
         if not share_name or "/" in share_name or "\\" in share_name or " " in share_name:
             raise ValueError(f"Invalid Samba share name (cannot contain /, \\, or spaces): {share_name}")
+        _validate_no_control_characters(share_name, "Samba share name")
 
         if not share_config["paths"]:
             raise ValueError(f"No paths specified for share: {share_name}")
+
+        if len(share_config["paths"]) != 1:
+            raise ValueError("Samba shares support exactly one path; create one --share per directory")
 
         for path in cast(list[str], share_config["paths"]):
             if not os.path.isabs(path):
@@ -427,6 +450,18 @@ def validate_samba_share_specs(
 
         if not share_config["users"]:
             raise ValueError(f"No users specified for share: {share_name}")
+
+        from lib.validators import validate_username
+
+        for user in cast(list[dict[str, str]], share_config["users"]):
+            username = user["username"]
+            password = user["password"]
+            if not validate_username(username):
+                raise ValueError(f"Invalid Samba username: {username}")
+            if not password:
+                raise ValueError(f"Samba password must not be empty for user: {username}")
+            _validate_no_control_characters(username, "Samba username")
+            _validate_no_control_characters(password, "Samba password")
 
 
 def validate_samba_share_credentials(config: "SetupConfig") -> None:

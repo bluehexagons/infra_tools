@@ -65,10 +65,9 @@ class TestParseShareSpec(unittest.TestCase):
         result = parse_share_spec(['write', 'docs', '/mnt/docs', 'admin:secret'])
         self.assertEqual(result['access_type'], 'write')
 
-    def test_multiple_paths_and_users(self):
-        result = parse_share_spec(['read', 's', '/a,/b', 'u1:p1,u2:p2'])
-        self.assertEqual(result['paths'], ['/a', '/b'])
-        self.assertEqual(len(result['users']), 2)
+    def test_multiple_paths_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'exactly one path'):
+            parse_share_spec(['read', 's', '/a,/b', 'u1:p1,u2:p2'])
 
     def test_invalid_access_type(self):
         with self.assertRaises(ValueError):

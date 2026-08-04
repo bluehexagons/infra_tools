@@ -268,8 +268,8 @@ def add_setup_arguments(
                        default=None if not for_remote else False,
                        help="Install and configure Samba for SMB file sharing")
     parser.add_argument("--share", dest="samba_shares", 
-                       action="append", nargs=4, metavar=("ACCESS_TYPE", "SHARE_NAME", "PATHS", "USERS"),
-                       help="Configure Samba share: access_type (read|write), share_name, comma-separated paths, comma-separated username:password pairs or usernames that resolve via --credential (can be used multiple times)")
+                       action="append", nargs=4, metavar=("ACCESS_TYPE", "SHARE_NAME", "PATH", "USERS"),
+                       help="Configure one Samba directory share: access_type (read|write), share_name, absolute path, comma-separated username:password pairs or usernames that resolve via --credential (can be used multiple times)")
     parser.add_argument("--credential", dest="share_credentials",
                         action="append", nargs=2, metavar=("USERNAME", "PASSWORD"),
                         help="Save a workspace credential and let --share/--mount-smb reference the username without inline passwords (can be used multiple times)")

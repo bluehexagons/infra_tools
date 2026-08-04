@@ -350,6 +350,14 @@ class TestValidateSmbMountSpecs(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Subdirectory must start with /: subdir"):
             validate_smb_mount_specs([['/mnt/share', '192.168.1.10', 'user:pass', 'docs', 'subdir']])
 
+    def test_control_characters_in_credentials_fail(self):
+        with self.assertRaisesRegex(ValueError, "SMB mount password must not contain control"):
+            validate_smb_mount_specs([['/mnt/share', '192.168.1.10', 'user:pass\nvalue', 'docs', '/']])
+
+    def test_empty_password_fails(self):
+        with self.assertRaisesRegex(ValueError, "credentials must include a non-empty"):
+            validate_smb_mount_specs([['/mnt/share', '192.168.1.10', 'user:', 'docs', '/']])
+
 
 class TestValidateSambaShareSpecs(unittest.TestCase):
     def test_none_passes(self):
@@ -369,6 +377,10 @@ class TestValidateSambaShareSpecs(unittest.TestCase):
     def test_missing_credential_fails(self):
         with self.assertRaisesRegex(ValueError, "Missing credential for share user: shareuser"):
             validate_samba_share_specs([['read', 'docs', '/mnt/docs', 'shareuser']])
+
+    def test_control_characters_in_share_name_fail(self):
+        with self.assertRaisesRegex(ValueError, "Samba share name must not contain control"):
+            validate_samba_share_specs([['read', 'docs\nother', '/mnt/docs', 'shareuser:secret']])
 
 
 class TestValidateWorkspaceDir(unittest.TestCase):

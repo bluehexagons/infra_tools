@@ -46,6 +46,19 @@ class TestRemoteSetupArgsFile(unittest.TestCase):
         self.assertEqual(config.machine_type, 'unprivileged')
         resolve.assert_called_once_with('auto')
 
+    def test_remote_config_validates_samba_share_paths(self):
+        args = SimpleNamespace(custom_steps=None, system_type='server_lite')
+        config = SetupConfig(
+            host='localhost',
+            username='root',
+            system_type='server_lite',
+            samba_shares=[['read', 'docs', '/srv/docs,/srv/media', 'shareuser:secret']],
+        )
+        with patch.object(remote_setup.SetupConfig, 'from_args', return_value=config), \
+             patch.object(remote_setup, 'resolve_machine_type', return_value='hardware'):
+            with self.assertRaisesRegex(ValueError, 'exactly one path'):
+                remote_setup.config_from_remote_args(args)
+
     def test_load_args_file_rejects_non_list_payload(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             args_path = os.path.join(tmpdir, "args.json")

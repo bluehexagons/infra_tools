@@ -274,14 +274,28 @@ or restart checks fail.
 
 | Flag | Description |
 |------|-------------|
-| `--samba` | Install and configure Samba |
-| `--share TYPE NAME PATHS USERS` | Configure a Samba share |
+| `--samba` | Install and harden Samba for authenticated SMB3 file sharing |
+| `--share TYPE NAME PATH USERS` | Configure one Samba directory share |
 | `--credential USERNAME PASSWORD` | Define a password for username-only share entries |
 | `--smbclient` | Install SMB/CIFS client |
 | `--mount-smb MOUNTPOINT IP CREDENTIALS SHARE SUBDIR` | Mount an SMB share persistently; `SUBDIR` may be `/` |
 | `--sync SOURCE DEST INTERVAL` | Configure rsync sync |
 | `--scrub DIR DBPATH REDUNDANCY FREQ` | Configure par2 integrity checking |
 | `--notify TYPE TARGET` | Configure notifications |
+
+Samba shares are authenticated only: infra_tools creates a Unix/Samba user for
+each declared user and grants access through a per-share group. `TYPE` is
+`read` or `write`, and `PATH` must be one absolute directory. Samba has one
+directory root per share, so use a separate `--share` for each directory rather
+than passing a comma-separated path list. The server disables NetBIOS, exposes
+only TCP 445, requires SMB3 signing and encryption, validates candidate
+configuration with `testparm` before reloading, and installs a fail2ban jail.
+
+`--mount-smb` creates a persistent systemd automount using a root-only
+credential file, SMB 3.0, and SMB encryption. Use `infra_tools.py credentials
+set USERNAME` and reference that username instead of placing a password in a
+command whenever possible; inline passwords are visible to local process
+inspectors.
 
 ## Maintenance and Utilities
 

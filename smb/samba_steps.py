@@ -8,6 +8,10 @@ from typing import Optional, Any
 from lib.config import SetupConfig
 from lib.mount_utils import is_path_under_mnt, get_mount_ancestor
 from lib.remote_utils import run, is_package_installed
+from lib.validation import validate_samba_share_specs
+
+
+SMB_CONF_PATH = "/etc/samba/smb.conf"
 
 
 def parse_share_credentials(
@@ -79,6 +83,8 @@ def parse_share_spec(
     users_str = share_spec[3]
     
     paths = [p.strip() for p in paths_str.split(',') if p.strip()]
+    if len(paths) > 1:
+        raise ValueError("Samba shares support exactly one path; create one --share per directory")
     
     users: list[dict[str, str]] = []
     for user_spec in users_str.split(','):
@@ -188,6 +194,10 @@ def _get_veto_dirs_for_share(share_path: str, config: SetupConfig) -> list[str]:
 
 
 def setup_samba_share(config: SetupConfig, share_spec: Optional[list[str]] = None, **_ : Any) -> None:
+    # Custom steps can invoke this function without going through the normal
+    # setup preflight, so validate before creating directories, users, or
+    # groups on the target.
+    validate_samba_share_specs([share_spec], config.share_credentials)
     share_config = parse_share_spec(
         share_spec,
         parse_share_credentials(config.share_credentials)
@@ -206,21 +216,15 @@ def setup_samba_share(config: SetupConfig, share_spec: Optional[list[str]] = Non
 
     primary_path = paths[0]
 
-    for path in paths:
-        if is_path_under_mnt(path):
-            mount_ancestor = get_mount_ancestor(path)
-            if not mount_ancestor:
-                raise RuntimeError(
-                    f"Share path {path} is under /mnt but no mounted filesystem found. "
-                    f"Is the drive mounted?"
-                )
-        os.makedirs(path, exist_ok=True)
-
-    if len(paths) > 1:
-        print(f"  Note: Multiple paths provided, configuring primary path {primary_path} in Samba")
-        print(f"  All paths will have permissions set: {', '.join(paths)}")
-    else:
-        print(f"  Ensured path exists: {primary_path}")
+    if is_path_under_mnt(primary_path):
+        mount_ancestor = get_mount_ancestor(primary_path)
+        if not mount_ancestor:
+            raise RuntimeError(
+                f"Share path {primary_path} is under /mnt but no mounted filesystem found. "
+                f"Is the drive mounted?"
+            )
+    os.makedirs(primary_path, exist_ok=True)
+    print(f"  Ensured path exists: {primary_path}")
 
     group_name = f"smb_{share_name}_{access_type}"
     safe_group = shlex.quote(group_name)
@@ -239,18 +243,17 @@ def setup_samba_share(config: SetupConfig, share_spec: Optional[list[str]] = Non
         run(f"usermod -aG {safe_group} {safe_username}")
         print(f"  Added {username} to group {group_name}")
 
-    for path in paths:
-        safe_path_iter = shlex.quote(path)
-        run(f"chgrp -R {safe_group} {safe_path_iter}")
+    safe_primary_path = shlex.quote(primary_path)
+    run(f"chgrp -R {safe_group} {safe_primary_path}")
 
-        if access_type == "write":
-            run(f"chmod -R 2775 {safe_path_iter}")
-        else:
-            run(f"chmod -R 2755 {safe_path_iter}")
+    if access_type == "write":
+        run(f"chmod -R 2775 {safe_primary_path}")
+    else:
+        run(f"chmod -R 2755 {safe_primary_path}")
 
-    print(f"  Set {'write' if access_type == 'write' else 'read-only'} permissions on {len(paths)} path(s)")
+    print(f"  Set {'write' if access_type == 'write' else 'read-only'} permissions on {primary_path}")
 
-    smb_conf = "/etc/samba/smb.conf"
+    smb_conf = SMB_CONF_PATH
     section_marker = f"[{share_name}_{access_type}]"
 
     share_lines = [
@@ -286,7 +289,7 @@ def setup_samba_share(config: SetupConfig, share_spec: Optional[list[str]] = Non
         share_lines.append("   delete veto files = no")
         print(f"  Hiding internal directories from share: {', '.join(veto_dirs)}")
 
-    desired_section = "\n" + "\n".join(share_lines) + "\n"
+    desired_section = "\n".join(share_lines) + "\n"
 
     if not os.path.exists(smb_conf):
         run(f"touch {smb_conf}")
@@ -297,33 +300,27 @@ def setup_samba_share(config: SetupConfig, share_spec: Optional[list[str]] = Non
     pattern = re.compile(r"(?ms)^\s*" + re.escape(section_marker) + r".*?(?=^\s*\[|\Z)")
 
     if not pattern.search(content):
-        with open(smb_conf, 'a') as f:
-            f.write(desired_section)
-        print(f"  Added share configuration: {share_name}_{access_type}")
+        desired_content = content.rstrip("\n") + "\n\n" + desired_section
+        action = f"Added share configuration: {share_name}_{access_type}"
     else:
-        new_content = pattern.sub(desired_section.strip() + "\n", content)
-        if new_content != content:
-            with open(smb_conf, 'w') as f:
-                f.write(new_content)
-            print(f"  Updated share configuration: {share_name}_{access_type}")
-        else:
-            print(f"  Share configuration already exists: {share_name}_{access_type}")
+        desired_content = pattern.sub(desired_section, content)
+        action = f"Updated share configuration: {share_name}_{access_type}"
 
-    result = run("testparm -s", check=False, capture_output=True)
-    if result.returncode != 0:
-        print("  ✗ Samba configuration has errors, skipping reload")
-        if result.stderr:
-            print(f"  Error: {result.stderr[:200]}")
-        print("  Fix the configuration and run 'systemctl reload smbd' manually")
+    if desired_content == content:
+        print(f"  Share configuration already exists: {share_name}_{access_type}")
         return
 
+    if not _write_validated_smb_config(smb_conf, content, desired_content):
+        return
+
+    print(f"  {action}")
     run("systemctl reload smbd")
     print(f"  ✓ Share configured: {share_name}_{access_type} -> {primary_path}")
 
 
 SAMBA_GLOBAL_HARDENED_SETTINGS: dict[str, str] = {
     # Pin to SMB3+ everywhere. SMB2 is allowed only by Vista/Server 2008.
-    # Modern Linux kernels, macOS, and Windows 7+ all speak SMB3.
+    # Current Linux kernels, macOS, and Windows 8+ all speak SMB3.
     "server min protocol": "SMB3",
     "client min protocol": "SMB3",
     # Mandate signing and encryption to prevent tampering / sniffing on
@@ -388,54 +385,83 @@ findtime = 600
 """
 
 
-def configure_samba_global_settings(config: SetupConfig) -> None:
-    smb_conf = "/etc/samba/smb.conf"
+def _write_validated_smb_config(
+    smb_conf: str,
+    previous_content: str,
+    desired_content: str,
+) -> bool:
+    """Write a Samba config candidate and restore it if testparm rejects it."""
 
-    settings = SAMBA_GLOBAL_HARDENED_SETTINGS
+    with open(smb_conf, "w") as file_obj:
+        file_obj.write(desired_content)
+
+    result = run(
+        f"testparm -s {shlex.quote(smb_conf)}",
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode == 0:
+        return True
+
+    with open(smb_conf, "w") as file_obj:
+        file_obj.write(previous_content)
+
+    print("  ✗ Samba configuration has errors; restored the previous configuration")
+    if result.stderr:
+        print(f"  Error: {result.stderr[:200]}")
+    return False
+
+
+def _render_hardened_global_settings(content: str) -> str:
+    """Update only the [global] section while preserving all share settings."""
+
+    section_pattern = re.compile(
+        r"(?ims)^(?P<header>[ \t]*\[global\][^\r\n]*)(?:\r?\n|$)"
+        r"(?P<body>.*?)(?=^[ \t]*\[[^\]\r\n]+\][^\r\n]*(?:\r?\n|$)|\Z)"
+    )
+    match = section_pattern.search(content)
+    hardened_lines = "".join(
+        f"   {key} = {value}\n"
+        for key, value in SAMBA_GLOBAL_HARDENED_SETTINGS.items()
+    )
+
+    if not match:
+        return "[global]\n" + hardened_lines + "\n" + content
+
+    body = match.group("body")
+    for key in SAMBA_GLOBAL_HARDENED_SETTINGS:
+        setting_pattern = re.compile(
+            r"(?im)^[ \t]*" + re.escape(key) + r"[ \t]*=[^\r\n]*(?:\r?\n|$)"
+        )
+        body = setting_pattern.sub("", body)
+
+    desired_section = match.group("header") + "\n" + hardened_lines + body
+    return content[:match.start()] + desired_section + content[match.end():]
+
+
+def configure_samba_global_settings(config: SetupConfig) -> None:
+    smb_conf = SMB_CONF_PATH
     
     if not os.path.exists(smb_conf):
-        run("touch /etc/samba/smb.conf")
+        run(f"touch {shlex.quote(smb_conf)}")
     
     with open(smb_conf, 'r') as f:
         content = f.read()
     
-    global_section_exists = "[global]" in content
-    
-    if not global_section_exists:
-        global_config = "[global]\n"
-        for key, value in settings.items():
-            global_config += f"   {key} = {value}\n"
-        
-        with open(smb_conf, 'w') as f:
-            f.write(global_config + "\n" + content)
-        
-        print("  ✓ Added global Samba configuration with security hardening")
-    else:
-        updated = False
-        for key, value in settings.items():
-            pattern = re.compile(r"^\s*" + re.escape(key) + r"\s*=.*$", re.MULTILINE)
-            if pattern.search(content):
-                new_content = pattern.sub(f"   {key} = {value}", content)
-                if new_content != content:
-                    content = new_content
-                    updated = True
-            else:
-                global_pattern = re.compile(r"(\[global\])", re.IGNORECASE)
-                content = global_pattern.sub(f"\\1\n   {key} = {value}", content, count=1)
-                updated = True
-        
-        if updated:
-            with open(smb_conf, 'w') as f:
-                f.write(content)
-            print("  ✓ Updated global Samba configuration with security hardening")
-        else:
-            print("  ✓ Global Samba configuration already up to date")
+    desired_content = _render_hardened_global_settings(content)
+    if desired_content == content:
+        print("  ✓ Global Samba configuration already up to date")
+        return
+
+    if not _write_validated_smb_config(smb_conf, content, desired_content):
+        return
+
+    run("systemctl reload smbd")
+    print("  ✓ Updated global Samba configuration with security hardening")
 
 
 
 def configure_samba_fail2ban(config: SetupConfig) -> None:
-    from lib.remote_utils import is_service_active
-
     jail_path = "/etc/fail2ban/jail.d/samba-auth.local"
     filter_path = "/etc/fail2ban/filter.d/samba-auth.conf"
 
@@ -454,11 +480,6 @@ def configure_samba_fail2ban(config: SetupConfig) -> None:
                 os.remove(path)
             except OSError:
                 pass
-
-    if os.path.exists(jail_path):
-        if is_service_active("fail2ban"):
-            print("  ✓ fail2ban for Samba already configured")
-            return
 
     if not is_package_installed("fail2ban"):
         os.environ["DEBIAN_FRONTEND"] = "noninteractive"

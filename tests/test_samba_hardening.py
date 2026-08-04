@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch, MagicMock
 
@@ -50,6 +51,66 @@ class TestSambaGlobalHardenedSettings(unittest.TestCase):
             samba_steps.SAMBA_GLOBAL_HARDENED_SETTINGS["log file"],
             "/var/log/samba/log.%m",
         )
+
+
+class TestConfigureSambaGlobalSettings(unittest.TestCase):
+    def test_only_rewrites_global_settings_and_reloads_smbd(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            smb_conf = os.path.join(tmpdir, "smb.conf")
+            original = """[GLOBAL]
+   server min protocol = SMB2
+   workgroup = LEGACY
+
+[archive]
+   server min protocol = NT1
+"""
+            with open(smb_conf, "w") as file_obj:
+                file_obj.write(original)
+
+            commands: list[str] = []
+
+            def fake_run(command: str, **_kwargs: object) -> MagicMock:
+                commands.append(command)
+                return MagicMock(returncode=0, stderr="")
+
+            with patch.object(samba_steps, "SMB_CONF_PATH", smb_conf), \
+                 patch.object(samba_steps, "run", side_effect=fake_run):
+                samba_steps.configure_samba_global_settings(_make_config())
+
+            with open(smb_conf) as file_obj:
+                configured = file_obj.read()
+
+        global_section, archive_section = configured.split("[archive]", 1)
+        self.assertIn("server min protocol = SMB3", global_section)
+        self.assertEqual(global_section.count("server min protocol"), 1)
+        self.assertIn("server min protocol = NT1", archive_section)
+        self.assertTrue(any(command.startswith("testparm -s ") for command in commands))
+        self.assertIn("systemctl reload smbd", commands)
+
+    def test_restores_previous_config_when_testparm_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            smb_conf = os.path.join(tmpdir, "smb.conf")
+            original = "[global]\n   workgroup = LEGACY\n"
+            with open(smb_conf, "w") as file_obj:
+                file_obj.write(original)
+
+            commands: list[str] = []
+
+            def fake_run(command: str, **_kwargs: object) -> MagicMock:
+                commands.append(command)
+                return MagicMock(
+                    returncode=1 if command.startswith("testparm -s ") else 0,
+                    stderr="bad option",
+                )
+
+            with patch.object(samba_steps, "SMB_CONF_PATH", smb_conf), \
+                 patch.object(samba_steps, "run", side_effect=fake_run):
+                samba_steps.configure_samba_global_settings(_make_config())
+
+            with open(smb_conf) as file_obj:
+                self.assertEqual(file_obj.read(), original)
+
+        self.assertNotIn("systemctl reload smbd", commands)
 
 
 class TestSambaFail2banFilter(unittest.TestCase):
@@ -180,6 +241,37 @@ class TestConfigureSambaFail2banLegacyCleanup(unittest.TestCase):
         self.assertIn("/etc/fail2ban/jail.d/samba-auth.local", written)
         self.assertNotIn("/etc/fail2ban/filter.d/samba.conf", written)
         self.assertNotIn("/etc/fail2ban/jail.d/samba.local", written)
+
+    def test_existing_jail_is_refreshed(self) -> None:
+        existing_paths = {"/etc/fail2ban/jail.d/samba-auth.local"}
+        written: dict[str, str] = {}
+
+        class _Writer:
+            def __init__(self, path: str) -> None:
+                self.path = path
+
+            def __enter__(self):  # type: ignore[no-untyped-def]
+                return self
+
+            def __exit__(self, *args: object) -> bool:
+                return False
+
+            def write(self, data: str) -> None:
+                written[self.path] = written.get(self.path, "") + data
+
+        def fake_open(path: str, mode: str = "r", *args: object, **kwargs: object) -> _Writer:
+            self.assertEqual(mode, "w")
+            return _Writer(path)
+
+        with patch.object(samba_steps, "run", return_value=MagicMock(returncode=0)), \
+             patch.object(samba_steps, "is_package_installed", return_value=True), \
+             patch.object(samba_steps.os.path, "exists", side_effect=existing_paths.__contains__), \
+             patch.object(samba_steps.os, "makedirs"), \
+             patch.object(samba_steps, "open", side_effect=fake_open, create=True):
+            samba_steps.configure_samba_fail2ban(_make_config())
+
+        self.assertIn("/etc/fail2ban/filter.d/samba-auth.conf", written)
+        self.assertIn("/etc/fail2ban/jail.d/samba-auth.local", written)
 
 
 class TestVetoFilesPattern(unittest.TestCase):
