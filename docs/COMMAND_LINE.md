@@ -10,12 +10,14 @@ Related pages:
 - [`NETWORKING.md`](./NETWORKING.md) for workspace network inventory
 - [`CICD.md`](./CICD.md) for webhook CI/CD setup
 - [`MACHINE_TYPES.md`](./MACHINE_TYPES.md) for machine type behavior
+- [`README.md`](./README.md) for the full documentation map
 
 ## Unified Entry Point
 
 ```bash
 infra_tools.py setup <system_type> <host> [username] [options]
 infra_tools.py patch <host> [username] [options]
+infra_tools.py shares <host> [username] [options]
 infra_tools.py recall <host> [username] [options]
 infra_tools.py reconstruct [--compact]
 infra_tools.py list [pattern] [--json]
