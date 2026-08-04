@@ -2,7 +2,9 @@
 
 Concise reference for the unified `infra_tools.py` CLI. The code help and
 `lib/arg_parser.py` remain the source of truth; this doc keeps the command
-surface and the non-obvious behaviors that are easy to forget.
+surface and the non-obvious behaviors that are easy to forget. Examples use
+the checkout script; substitute the installed `infra_tools` launcher when it
+is on `PATH`.
 
 Related pages:
 
@@ -32,6 +34,7 @@ infra_tools.py completions [options]
 infra_tools.py python-tools [options]
 infra_tools.py bootstrap [options]
 infra_tools.py self-setup [options]
+infra_tools.py agent doctor
 infra_tools.py maintenance github <audit|prune> [options]
 infra_tools.py shell
 infra_tools.py network ...
@@ -77,7 +80,6 @@ infra_tools.py proxmox ...
 | Flag | Description |
 |------|-------------|
 | `--rdp` / `--no-rdp` | Enable or disable XRDP |
-| `--audio` / `--no-audio` | Enable or disable audio setup |
 | `--desktop [xfce\|i3\|cinnamon\|lxqt]` | Desktop environment |
 | `--browser NAME` | Browser to install |
 | `--flatpak` | Install desktop apps via Flatpak |
@@ -240,22 +242,9 @@ HTTP traffic to HTTPS; `--cloudflare` instead marks tunnel traffic secure at
 the private nginx-to-server boundary.
 
 Admin access requires a hostname deployment and either `--ssl` or
-`--cloudflare`. Store its password separately, then reference the username:
-
-```bash
-infra_tools.py credentials set operator
-infra_tools.py setup server_lite 192.168.1.10 \
-  --antistatic-server lobby.example.com \
-  --antistatic-admin operator \
-  --ssl
-```
-
-Omitting the password prompts without exposing it in shell history or process
-arguments. `--credential operator PASSWORD` can set the same workspace
-credential during controlled non-interactive setup, but its value is visible in
-the invoking process arguments. Passwords are omitted from saved setup state,
-redacted from reconstructed commands, transferred in the mode-`0600` remote
-argument file, and installed as `/etc/antistatic/server.env` with mode `0600`.
+`--cloudflare`. Store its password separately, then reference the username.
+See [Antistatic services](./ANTISTATIC.md) for the complete workflow and
+credential-storage behavior.
 
 ## Gogs
 
@@ -285,39 +274,9 @@ or restart checks fail.
 | `--scrub DIR DBPATH REDUNDANCY FREQ` | Configure par2 integrity checking |
 | `--notify TYPE TARGET` | Configure notifications |
 
-Samba shares are authenticated only: infra_tools creates a Unix/Samba user for
-each declared user and grants access through a per-share group. `TYPE` is
-`read` or `write`, and `PATH` must be one absolute directory. Samba has one
-directory root per share, so use a separate `--share` for each directory rather
-than passing a comma-separated path list. The server disables NetBIOS, exposes
-only TCP 445, requires SMB3 signing and encryption, validates candidate
-configuration with `testparm` before reloading, and installs a fail2ban jail.
-
-See [Samba Shares](./SAMBA_SHARES.md) for the full guide, including initial
-setup, workspace credentials, access changes, removals, fast updates, and SMB
-client mounts.
-
-To update shares without running the full setup process, use the saved host's
-share-only fast path:
-
-```bash
-infra_tools shares fileserver \
-  --share write media /srv/media alice,bob \
-  --credential bob 'new-password'
-infra_tools shares fileserver --remove-share archive
-```
-
-Each `--share` adds a new share or replaces the saved share with the same name.
-Other saved shares remain unchanged; `--remove-share` removes one explicitly.
-The command reconciles share sections and group membership exactly, validates
-the complete Samba configuration, reloads Samba once, and skips package setup,
-firewall changes, fail2ban changes, and unrelated service cleanup.
-
-`--mount-smb` creates a persistent systemd automount using a root-only
-credential file, SMB 3.0, and SMB encryption. Use `infra_tools.py credentials
-set USERNAME` and reference that username instead of placing a password in a
-command whenever possible; inline passwords are visible to local process
-inspectors.
+Samba shares are authenticated and hardened; `TYPE` is `read` or `write`, and
+`PATH` is one absolute directory. See [Samba Shares](./SAMBA_SHARES.md) for
+credentials, access control, fast updates, removals, and SMB client mounts.
 
 ## Maintenance and Utilities
 
@@ -423,7 +382,7 @@ curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/insta
   --agent-suite terminal
 sudo python3 infra_tools.py self-setup --user "$USER"
 uv tool install --upgrade argcomplete
-python3 infra_tools.py completions
+infra_tools completions
 ```
 
 For a full Debian bootstrap or an immediate setup handoff:
@@ -438,7 +397,8 @@ curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/insta
 ```
 
 Everything after `--setup` is passed to `infra_tools setup`. The full test
-matrix, live Proxmox categories, and detailed bootstrap behavior remain in the
-code and `README.md`; this page is intentionally the concise command index.
+matrix and detailed bootstrap behavior are covered by
+[`OPERATIONS.md`](./OPERATIONS.md) and [`INSTALLATION.md`](./INSTALLATION.md);
+this page is intentionally the concise command index.
 For a local setup, the installer defaults an omitted setup username to the
 selected install user and uses `sudo` only for the privileged setup phase.

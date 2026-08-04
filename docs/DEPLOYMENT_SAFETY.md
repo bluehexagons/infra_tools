@@ -59,33 +59,17 @@ python3 infra_tools.py setup server_web <host> \
 
 ## Maintenance
 
-- `cleanup-maintenance.service` runs periodic cleanup tasks.
-- `cleanup-maintenance.timer` schedules the cleanup weekly.
-- `/etc/systemd/journald.conf.d/infra-tools.conf` caps journal storage at
-  `100M`.
-- `INFRA_TOOLS_ECOSYSTEM_AUTO_UPGRADE=1` re-enables automatic Node/Ruby/uv
-  package upgrades on systems where that risk is acceptable.
-- uv itself still updates on its scheduled run; the override controls uv-managed
-  tools, as well as global npm packages and gems.
-- Node runtime updates preserve exact global npm package versions unless the
-  ecosystem auto-upgrade policy is explicitly enabled.
-- Unattended APT and cleanup jobs never run `autoremove`.
-- Cleanup removes only disposable caches and exactly matched infra_tools temp
-  artifacts; it does not remove installed gem versions.
-- Restart checks fail safe when uptime or active-session detection is unavailable.
-- Security collection failures retain the previous cursor for retry, and storage
-  maintenance uses atomic state files and a persistent lock inode.
-- Node runtime retirement is owned by the Node updater after package migration;
-  generic cleanup never removes nvm runtimes.
-- Gogs release archives are checked for an executable, runnable binary before
-  activation, and failed post-update checks restore the previous release.
-- `INFRA_TOOLS_DEPENDENCY_MIN_AGE_DAYS=7` is the default freshness cutoff for
-  dependency-resolving installs that support it.
-- `--deploy-latest DOMAIN_OR_PATH GIT_URL` bypasses the freshness policy for a
-  specific deployment.
+Deployment hosts install the same managed cleanup, update, restart, and
+journaling controls described in [`MAINTENANCE.md`](./MAINTENANCE.md). The
+deployment-specific guarantees are:
 
-Recurring unit schedules and operational inspection commands are documented in
-[`MAINTENANCE.md`](./MAINTENANCE.md).
+- cleanup never runs `autoremove` or removes installed runtimes;
+- restart checks fail safe when uptime or active-session detection is
+  unavailable;
+- Gogs release activation validates the new binary and restores the previous
+  release after a failed post-update check; and
+- dependency-resolving installs use a seven-day freshness delay unless
+  `--deploy-latest DOMAIN_OR_PATH GIT_URL` explicitly opts out.
 
 ## Code References
 
