@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import shlex
 import re
-from typing import Optional, Any
+from typing import Any, Optional, cast
 
 from lib.config import SetupConfig
 from lib.mount_utils import is_path_under_mnt, get_mount_ancestor
@@ -12,6 +12,8 @@ from lib.validation import validate_samba_share_specs
 
 
 SMB_CONF_PATH = "/etc/samba/smb.conf"
+MANAGED_SHARES_BEGIN = "# BEGIN infra_tools managed Samba shares"
+MANAGED_SHARES_END = "# END infra_tools managed Samba shares"
 
 
 def parse_share_credentials(
@@ -131,14 +133,14 @@ def create_samba_user(username: str, password: str) -> None:
     result = run(f"pdbedit -L {safe_username}", check=False)
     if result.returncode != 0:
         run(
-            f"(echo {shlex.quote(password)}; echo {shlex.quote(password)}) | smbpasswd -a -s {safe_username}",
-            display_cmd=f"(echo [REDACTED]; echo [REDACTED]) | smbpasswd -a -s {safe_username}"
+            f"smbpasswd -a -s {safe_username}",
+            input_data=f"{password}\n{password}\n",
         )
         print(f"  Created Samba user: {username}")
     else:
         run(
-            f"(echo {shlex.quote(password)}; echo {shlex.quote(password)}) | smbpasswd -s {safe_username}",
-            display_cmd=f"(echo [REDACTED]; echo [REDACTED]) | smbpasswd -s {safe_username}"
+            f"smbpasswd -s {safe_username}",
+            input_data=f"{password}\n{password}\n",
         )
         print(f"  Updated Samba user password: {username}")
     
@@ -193,28 +195,16 @@ def _get_veto_dirs_for_share(share_path: str, config: SetupConfig) -> list[str]:
     return veto_dirs
 
 
-def setup_samba_share(config: SetupConfig, share_spec: Optional[list[str]] = None, **_ : Any) -> None:
-    # Custom steps can invoke this function without going through the normal
-    # setup preflight, so validate before creating directories, users, or
-    # groups on the target.
-    validate_samba_share_specs([share_spec], config.share_credentials)
-    share_config = parse_share_spec(
-        share_spec,
-        parse_share_credentials(config.share_credentials)
-    )
+def _prepare_samba_share(
+    config: SetupConfig,
+    share_config: dict[str, Any],
+) -> tuple[str, str]:
+    """Provision one share's users, group, path, and return its config section."""
 
-    share_name = share_config['share_name']
-    access_type = share_config['access_type']
-    paths = share_config['paths']
-    users = share_config['users']
-
-    if not paths:
-        raise ValueError(f"No paths specified for share: {share_name}")
-
-    if not users:
-        raise ValueError(f"No users specified for share: {share_name}")
-
-    primary_path = paths[0]
+    share_name = cast(str, share_config["share_name"])
+    access_type = cast(str, share_config["access_type"])
+    primary_path = cast(list[str], share_config["paths"])[0]
+    users = cast(list[dict[str, str]], share_config["users"])
 
     if is_path_under_mnt(primary_path):
         mount_ancestor = get_mount_ancestor(primary_path)
@@ -237,11 +227,12 @@ def setup_samba_share(config: SetupConfig, share_spec: Optional[list[str]] = Non
     for user_info in users:
         username = user_info['username']
         password = user_info['password']
-        safe_username = shlex.quote(username)
 
         create_samba_user(username, password)
-        run(f"usermod -aG {safe_group} {safe_username}")
-        print(f"  Added {username} to group {group_name}")
+
+    member_list = ",".join(user_info["username"] for user_info in users)
+    run(f"gpasswd -M {shlex.quote(member_list)} {safe_group}")
+    print(f"  Reconciled {len(users)} member(s) in group {group_name}")
 
     safe_primary_path = shlex.quote(primary_path)
     run(f"chgrp -R {safe_group} {safe_primary_path}")
@@ -253,7 +244,6 @@ def setup_samba_share(config: SetupConfig, share_spec: Optional[list[str]] = Non
 
     print(f"  Set {'write' if access_type == 'write' else 'read-only'} permissions on {primary_path}")
 
-    smb_conf = SMB_CONF_PATH
     section_marker = f"[{share_name}_{access_type}]"
 
     share_lines = [
@@ -289,33 +279,110 @@ def setup_samba_share(config: SetupConfig, share_spec: Optional[list[str]] = Non
         share_lines.append("   delete veto files = no")
         print(f"  Hiding internal directories from share: {', '.join(veto_dirs)}")
 
-    desired_section = "\n".join(share_lines) + "\n"
+    return group_name, "\n".join(share_lines) + "\n"
 
-    if not os.path.exists(smb_conf):
-        run(f"touch {smb_conf}")
 
-    with open(smb_conf, 'r') as f:
-        content = f.read()
+def _managed_share_group(section: str) -> Optional[str]:
+    """Return the managed group for an infra_tools-generated share section."""
 
-    pattern = re.compile(r"(?ms)^\s*" + re.escape(section_marker) + r".*?(?=^\s*\[|\Z)")
+    header_match = re.match(r"(?m)^[ \t]*\[([^\]\r\n]+)\]", section)
+    if not header_match:
+        return None
+    section_name = header_match.group(1)
+    expected_group = f"smb_{section_name}"
+    settings = dict(
+        (key.lower(), value.strip())
+        for key, value in re.findall(
+            r"(?m)^[ \t]*([^#;=\r\n]+?)[ \t]*=[ \t]*([^\r\n]*)$",
+            section,
+        )
+    )
+    if (
+        settings.get("valid users") == f"@{expected_group}"
+        and settings.get("force group") == expected_group
+    ):
+        return expected_group
+    return None
 
-    if not pattern.search(content):
-        desired_content = content.rstrip("\n") + "\n\n" + desired_section
-        action = f"Added share configuration: {share_name}_{access_type}"
+
+def _remove_managed_share_sections(content: str) -> tuple[str, set[str]]:
+    """Remove current and legacy infra_tools-managed share sections."""
+
+    managed_groups: set[str] = set()
+    block_pattern = re.compile(
+        r"(?ms)^[ \t]*" + re.escape(MANAGED_SHARES_BEGIN) + r"[ \t]*\r?\n"
+        r".*?^[ \t]*" + re.escape(MANAGED_SHARES_END) + r"[ \t]*(?:\r?\n|\Z)"
+    )
+    for block in block_pattern.findall(content):
+        for section in re.findall(r"(?ms)^[ \t]*\[[^\]\r\n]+\].*?(?=^[ \t]*\[|\Z)", block):
+            group_name = _managed_share_group(section)
+            if group_name:
+                managed_groups.add(group_name)
+    content = block_pattern.sub("", content)
+
+    section_pattern = re.compile(r"(?ms)^[ \t]*\[[^\]\r\n]+\].*?(?=^[ \t]*\[|\Z)")
+
+    def remove_legacy(match: re.Match[str]) -> str:
+        group_name = _managed_share_group(match.group(0))
+        if not group_name:
+            return match.group(0)
+        managed_groups.add(group_name)
+        return ""
+
+    return section_pattern.sub(remove_legacy, content).rstrip(), managed_groups
+
+
+def reconcile_samba_shares(config: SetupConfig, **_: Any) -> None:
+    """Make managed Samba shares exactly match ``config.samba_shares``."""
+
+    validate_samba_share_specs(config.samba_shares, config.share_credentials)
+    credentials = parse_share_credentials(config.share_credentials)
+    share_configs = [
+        parse_share_spec(share_spec, credentials)
+        for share_spec in config.samba_shares or []
+    ]
+
+    if not os.path.exists(SMB_CONF_PATH):
+        raise RuntimeError("Samba is not installed; run setup with --samba first")
+
+    desired_groups: set[str] = set()
+    sections: list[str] = []
+    for share_config in share_configs:
+        group_name, section = _prepare_samba_share(config, share_config)
+        desired_groups.add(group_name)
+        sections.append(section)
+
+    with open(SMB_CONF_PATH, "r", encoding="utf-8") as file_obj:
+        previous_content = file_obj.read()
+    unmanaged_content, previous_groups = _remove_managed_share_sections(previous_content)
+
+    managed_block = ""
+    if sections:
+        managed_block = (
+            f"{MANAGED_SHARES_BEGIN}\n"
+            + "\n".join(sections)
+            + f"{MANAGED_SHARES_END}\n"
+        )
+    desired_content = unmanaged_content
+    if managed_block:
+        desired_content += ("\n\n" if desired_content else "") + managed_block
+    elif desired_content:
+        desired_content += "\n"
+
+    if desired_content != previous_content:
+        if not _write_validated_smb_config(
+            SMB_CONF_PATH,
+            previous_content,
+            desired_content,
+        ):
+            raise RuntimeError("Samba share configuration validation failed")
+        run("systemctl reload smbd")
+        print(f"  ✓ Reconciled {len(sections)} Samba share(s)")
     else:
-        desired_content = pattern.sub(desired_section, content)
-        action = f"Updated share configuration: {share_name}_{access_type}"
+        print(f"  ✓ {len(sections)} Samba share(s) already up to date")
 
-    if desired_content == content:
-        print(f"  Share configuration already exists: {share_name}_{access_type}")
-        return
-
-    if not _write_validated_smb_config(smb_conf, content, desired_content):
-        return
-
-    print(f"  {action}")
-    run("systemctl reload smbd")
-    print(f"  ✓ Share configured: {share_name}_{access_type} -> {primary_path}")
+    for obsolete_group in sorted(previous_groups - desired_groups):
+        run(f"groupdel {shlex.quote(obsolete_group)}", check=False)
 
 
 SAMBA_GLOBAL_HARDENED_SETTINGS: dict[str, str] = {

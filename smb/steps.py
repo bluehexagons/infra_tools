@@ -7,7 +7,7 @@ from .samba_steps import (
     configure_samba_firewall,
     configure_samba_global_settings,
     configure_samba_fail2ban,
-    setup_samba_share,
+    reconcile_samba_shares,
 )
 
 from .smb_mount_steps import (
@@ -19,6 +19,6 @@ __all__ = [
     'configure_samba_firewall',
     'configure_samba_global_settings',
     'configure_samba_fail2ban',
-    'setup_samba_share',
+    'reconcile_samba_shares',
     'configure_smb_mount',
 ]

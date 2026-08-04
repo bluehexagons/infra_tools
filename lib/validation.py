@@ -433,9 +433,7 @@ def validate_samba_share_specs(
     for share_spec in samba_shares:
         share_config = parse_share_spec(share_spec, credentials)
         share_name = share_config["share_name"]
-        if not share_name or "/" in share_name or "\\" in share_name or " " in share_name:
-            raise ValueError(f"Invalid Samba share name (cannot contain /, \\, or spaces): {share_name}")
-        _validate_no_control_characters(share_name, "Samba share name")
+        validate_samba_share_name(share_name)
 
         if not share_config["paths"]:
             raise ValueError(f"No paths specified for share: {share_name}")
@@ -462,6 +460,23 @@ def validate_samba_share_specs(
                 raise ValueError(f"Samba password must not be empty for user: {username}")
             _validate_no_control_characters(username, "Samba username")
             _validate_no_control_characters(password, "Samba password")
+
+
+def validate_samba_share_name(share_name: str) -> None:
+    """Validate a Samba share name used in config sections and Unix groups."""
+
+    _validate_no_control_characters(share_name, "Samba share name")
+    if not share_name or "/" in share_name or "\\" in share_name or " " in share_name:
+        raise ValueError(
+            f"Invalid Samba share name (cannot contain /, \\, or spaces): {share_name}"
+        )
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", share_name):
+        raise ValueError(
+            "Invalid Samba share name (use only letters, numbers, dots, "
+            f"underscores, and hyphens): {share_name}"
+        )
+    if len(f"smb_{share_name}_write") > 32:
+        raise ValueError(f"Samba share name is too long for its Unix group: {share_name}")
 
 
 def validate_samba_share_credentials(config: "SetupConfig") -> None:

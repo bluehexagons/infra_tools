@@ -382,6 +382,18 @@ class TestValidateSambaShareSpecs(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Samba share name must not contain control"):
             validate_samba_share_specs([['read', 'docs\nother', '/mnt/docs', 'shareuser:secret']])
 
+    def test_config_syntax_in_share_name_fails(self):
+        with self.assertRaisesRegex(ValueError, "Invalid Samba share name"):
+            validate_samba_share_specs(
+                [["read", "docs]", "/mnt/docs", "shareuser:secret"]]
+            )
+
+    def test_share_name_that_exceeds_group_limit_fails(self):
+        with self.assertRaisesRegex(ValueError, "too long for its Unix group"):
+            validate_samba_share_specs(
+                [["read", "a" * 24, "/mnt/docs", "shareuser:secret"]]
+            )
+
 
 class TestValidateWorkspaceDir(unittest.TestCase):
     def test_existing_workspace_directory(self):

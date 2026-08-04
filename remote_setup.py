@@ -173,6 +173,15 @@ def _run_main() -> int:
     if not validate_username(config.username):
         print(f"Error: Invalid username: {config.username}")
         return 1
+
+    if config.custom_steps == "reconcile_samba_shares":
+        from smb.samba_steps import reconcile_samba_shares
+
+        detect_os()
+        print("Configuring Samba shares only...")
+        reconcile_samba_shares(config)
+        print("✓ Samba share update complete")
+        return 0
     
     print_setup_summary(config, f"Remote Setup ({config.system_type})")
     sys.stdout.flush()
@@ -351,7 +360,7 @@ def _run_main() -> int:
             configure_samba_firewall,
             configure_samba_global_settings,
             configure_samba_fail2ban,
-            setup_samba_share
+            reconcile_samba_shares
         )
         
         print("\n" + "=" * 60)
@@ -370,14 +379,10 @@ def _run_main() -> int:
         print("\n[4/4] Configuring fail2ban for Samba brute-force protection")
         configure_samba_fail2ban(config)
         
-        if config.samba_shares:
-            print("\n" + "=" * 60)
-            print(f"Configuring {len(config.samba_shares)} Samba share(s)...")
-            print("=" * 60)
-            
-            for i, share_spec in enumerate(config.samba_shares, 1):
-                print(f"\n[{i}/{len(config.samba_shares)}] Setting up share: {share_spec[1]}_{share_spec[0]}")
-                setup_samba_share(config, share_spec=share_spec)
+        print("\n" + "=" * 60)
+        print(f"Reconciling {len(config.samba_shares or [])} Samba share(s)...")
+        print("=" * 60)
+        reconcile_samba_shares(config)
         
         print("\n✓ Samba configuration complete")
     

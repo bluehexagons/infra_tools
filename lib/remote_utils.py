@@ -32,7 +32,15 @@ def generate_password(length: int = 16) -> str:
     return ''.join(secrets.choice(alphabet) for _ in range(length))
 
 
-def run(cmd: str, check: bool = True, cwd: Optional[str] = None, capture_output: bool = False, text: bool = True, display_cmd: Optional[str] = None) -> subprocess.CompletedProcess[str]:
+def run(
+    cmd: str,
+    check: bool = True,
+    cwd: Optional[str] = None,
+    capture_output: bool = False,
+    text: bool = True,
+    display_cmd: Optional[str] = None,
+    input_data: Optional[str] = None,
+) -> subprocess.CompletedProcess[str]:
     log_cmd = display_cmd if display_cmd is not None else cmd
     print(f"  Running: {log_cmd[:80]}..." if len(log_cmd) > 80 else f"  Running: {log_cmd}")
     sys.stdout.flush()
@@ -42,15 +50,15 @@ def run(cmd: str, check: bool = True, cwd: Optional[str] = None, capture_output:
         # CompletedProcess.args expects a sequence; provide a one-element list for consistency
         return subprocess.CompletedProcess(args=[cmd], returncode=0, stdout="", stderr="")
 
-    if _requires_shell(cmd):
-        result = subprocess.run(
-            ["/bin/bash", "-lc", cmd],
-            capture_output=capture_output,
-            text=text,
-            cwd=cwd,
-        )
-    else:
-        result = subprocess.run(shlex.split(cmd), capture_output=capture_output, text=text, cwd=cwd)
+    command = ["/bin/bash", "-lc", cmd] if _requires_shell(cmd) else shlex.split(cmd)
+    run_kwargs = {
+        "capture_output": capture_output,
+        "text": text,
+        "cwd": cwd,
+    }
+    if input_data is not None:
+        run_kwargs["input"] = input_data
+    result = subprocess.run(command, **run_kwargs)
     if check and result.returncode != 0:
         if getattr(result, 'stderr', None):
             print(f"    Warning: {result.stderr[:200]}")

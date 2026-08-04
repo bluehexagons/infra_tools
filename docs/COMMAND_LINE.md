@@ -291,6 +291,22 @@ than passing a comma-separated path list. The server disables NetBIOS, exposes
 only TCP 445, requires SMB3 signing and encryption, validates candidate
 configuration with `testparm` before reloading, and installs a fail2ban jail.
 
+To update shares without running the full setup process, use the saved host's
+share-only fast path:
+
+```bash
+infra_tools shares fileserver \
+  --share write media /srv/media alice,bob \
+  --credential bob 'new-password'
+infra_tools shares fileserver --remove-share archive
+```
+
+Each `--share` adds a new share or replaces the saved share with the same name.
+Other saved shares remain unchanged; `--remove-share` removes one explicitly.
+The command reconciles share sections and group membership exactly, validates
+the complete Samba configuration, reloads Samba once, and skips package setup,
+firewall changes, fail2ban changes, and unrelated service cleanup.
+
 `--mount-smb` creates a persistent systemd automount using a root-only
 credential file, SMB 3.0, and SMB encryption. Use `infra_tools.py credentials
 set USERNAME` and reference that username instead of placing a password in a

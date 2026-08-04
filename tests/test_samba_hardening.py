@@ -293,5 +293,103 @@ class TestVetoFilesPattern(unittest.TestCase):
         self.assertNotEqual(veto_pattern, "/.subdir/")
 
 
+class TestReconcileSambaShares(unittest.TestCase):
+    def _run_reconcile(
+        self,
+        original: str,
+        shares: list[list[str]] | None,
+    ) -> tuple[str, list[tuple[str, dict[str, object]]]]:
+        calls: list[tuple[str, dict[str, object]]] = []
+
+        def fake_run(command: str, **kwargs: object) -> MagicMock:
+            calls.append((command, kwargs))
+            missing = command.startswith(("id ", "pdbedit -L ", "getent group "))
+            return MagicMock(returncode=1 if missing else 0, stderr="")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            smb_conf = os.path.join(tmpdir, "smb.conf")
+            with open(smb_conf, "w", encoding="utf-8") as file_obj:
+                file_obj.write(original)
+            config = _make_config(samba_shares=shares)
+            with patch.object(samba_steps, "SMB_CONF_PATH", smb_conf), \
+                 patch.object(samba_steps, "run", side_effect=fake_run), \
+                 patch.object(samba_steps.os, "makedirs"):
+                samba_steps.reconcile_samba_shares(config)
+            with open(smb_conf, encoding="utf-8") as file_obj:
+                return file_obj.read(), calls
+
+    def test_access_change_replaces_legacy_section_and_group(self) -> None:
+        original = """[global]
+   workgroup = WORKGROUP
+
+[docs_read]
+   path = /srv/docs
+   valid users = @smb_docs_read
+   force group = smb_docs_read
+
+[manual]
+   path = /srv/manual
+"""
+        configured, calls = self._run_reconcile(
+            original,
+            [["write", "docs", "/srv/docs", "alice:secret"]],
+        )
+
+        self.assertNotIn("[docs_read]", configured)
+        self.assertIn("[docs_write]", configured)
+        self.assertIn("[manual]", configured)
+        self.assertIn(samba_steps.MANAGED_SHARES_BEGIN, configured)
+        commands = [command for command, _kwargs in calls]
+        self.assertIn("groupdel smb_docs_read", commands)
+        self.assertEqual(commands.count("systemctl reload smbd"), 1)
+
+    def test_membership_is_replaced_not_only_appended(self) -> None:
+        original = """[global]
+
+[docs_write]
+   path = /srv/docs
+   valid users = @smb_docs_write
+   force group = smb_docs_write
+"""
+        _configured, calls = self._run_reconcile(
+            original,
+            [["write", "docs", "/srv/docs", "bob:secret"]],
+        )
+
+        commands = [command for command, _kwargs in calls]
+        self.assertIn("gpasswd -M bob smb_docs_write", commands)
+
+    def test_empty_desired_state_removes_only_managed_shares(self) -> None:
+        original = """[global]
+
+[docs_write]
+   path = /srv/docs
+   valid users = @smb_docs_write
+   force group = smb_docs_write
+
+[manual]
+   path = /srv/manual
+"""
+        configured, calls = self._run_reconcile(original, None)
+
+        self.assertNotIn("[docs_write]", configured)
+        self.assertIn("[manual]", configured)
+        self.assertIn("groupdel smb_docs_write", [command for command, _ in calls])
+
+    def test_password_is_passed_over_stdin_not_in_command(self) -> None:
+        _configured, calls = self._run_reconcile(
+            "[global]\n",
+            [["read", "docs", "/srv/docs", "alice:very-secret"]],
+        )
+
+        self.assertFalse(any("very-secret" in command for command, _ in calls))
+        password_calls = [
+            kwargs
+            for command, kwargs in calls
+            if command.startswith("smbpasswd -a -s ")
+        ]
+        self.assertEqual(password_calls[0]["input_data"], "very-secret\nvery-secret\n")
+
+
 if __name__ == '__main__':
     unittest.main()
