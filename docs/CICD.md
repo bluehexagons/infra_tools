@@ -23,8 +23,8 @@ Core code paths:
 
 - `web/cicd_steps.py`
 - `web/service_tools/cicd_executor.py`
-- `web/config/webhook_cloudflare_setup.md`
-- `docs/COMMAND_LINE.md`
+- [`CLOUDFLARE.md`](./CLOUDFLARE.md) for tunnel setup and webhook ingress
+- [`COMMAND_LINE.md`](./COMMAND_LINE.md)
 
 What matters operationally:
 
@@ -63,5 +63,5 @@ and install the privileged helper. The helper validates target names and paths
 before allowing the deploy account to update an app server.
 
 If you need the full setup flow or command syntax, use
-[`docs/COMMAND_LINE.md`](./COMMAND_LINE.md) and
-[`web/config/webhook_cloudflare_setup.md`](../web/config/webhook_cloudflare_setup.md).
+[Command-line reference](./COMMAND_LINE.md) and
+[Cloudflare tunnels](./CLOUDFLARE.md).

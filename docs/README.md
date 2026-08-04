@@ -12,6 +12,7 @@ capabilities, and operating policies.
 | [Command-line reference](COMMAND_LINE.md) | Setup, patch, fast-update, and utility flags |
 | [Machine types](MACHINE_TYPES.md) | Debian bare metal, VM, LXC, OCI, and capability differences |
 | [Samba shares](SAMBA_SHARES.md) | Authenticated shares, credentials, access changes, removals, and SMB mounts |
+| [Storage operations](STORAGE_OPERATIONS.md) | Rsync mirrors, par2 protection, schedules, locks, and recovery |
 
 ## Operations and infrastructure
 
@@ -24,6 +25,7 @@ capabilities, and operating policies.
 | [Recurring maintenance](MAINTENANCE.md) | Timers, update policy, cleanup, and troubleshooting |
 | [Deployment safety](DEPLOYMENT_SAFETY.md) | Persistent state, backups, rollback, and deployment boundaries |
 | [Deployments and manifests](DEPLOYMENTS.md) | `--deploy`, `infra.json`, static sites, services, and runtime behavior |
+| [Cloudflare tunnels](CLOUDFLARE.md) | Tunnel preconfiguration, ingress refresh, firewall policy, and webhooks |
 
 ## Feature guides
 
@@ -33,6 +35,7 @@ capabilities, and operating policies.
 | [Antistatic services](ANTISTATIC.md) | Lobby server, report administration, STUN, and antistatic-db |
 | [XRDP](XRDP.md) | Desktop RDP architecture, compatibility, and troubleshooting |
 | [Shell completion](SHELL_COMPLETION.md) | Bash, Zsh, Fish, and system-wide completion |
+| [Notifications](NOTIFICATIONS.md) | Webhook and mailbox targets shared by maintenance and operations |
 
 ## Plans
 

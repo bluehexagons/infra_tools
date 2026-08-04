@@ -277,6 +277,9 @@ or restart checks fail.
 Samba shares are authenticated and hardened; `TYPE` is `read` or `write`, and
 `PATH` is one absolute directory. See [Samba Shares](./SAMBA_SHARES.md) for
 credentials, access control, fast updates, removals, and SMB client mounts.
+See [Storage operations](./STORAGE_OPERATIONS.md) for sync, parity, schedules,
+mount checks, and logs, and [Notifications](./NOTIFICATIONS.md) for delivery
+targets and failure behavior.
 
 ## Maintenance and Utilities
 
