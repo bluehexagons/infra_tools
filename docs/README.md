@@ -32,8 +32,10 @@ capabilities, and operating policies.
 | Guide | Use it for |
 | --- | --- |
 | [CI/CD webhook system](CICD.md) | Webhook jobs, build/app servers, and executor behavior |
+| [Gogs Git service](GOGS.md) | Self-hosted Git, SSH access, storage, and release updates |
 | [Antistatic services](ANTISTATIC.md) | Lobby server, report administration, STUN, and antistatic-db |
 | [XRDP](XRDP.md) | Desktop RDP architecture, compatibility, and troubleshooting |
+| [Workstations and desktop applications](WORKSTATIONS.md) | Desktop profiles, browsers, Flatpak, office tools, and verification |
 | [Shell completion](SHELL_COMPLETION.md) | Bash, Zsh, Fish, and system-wide completion |
 | [Notifications](NOTIFICATIONS.md) | Webhook and mailbox targets shared by maintenance and operations |
 

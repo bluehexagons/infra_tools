@@ -11,6 +11,7 @@ Related pages:
 - [`SYSADMIN.md`](./SYSADMIN.md) for remote host shortcuts
 - [`NETWORKING.md`](./NETWORKING.md) for workspace network inventory
 - [`CICD.md`](./CICD.md) for webhook CI/CD setup
+- [`WORKSTATIONS.md`](./WORKSTATIONS.md) for desktop profiles and application choices
 - [`MACHINE_TYPES.md`](./MACHINE_TYPES.md) for machine type behavior
 - [`README.md`](./README.md) for the full documentation map
 
@@ -247,6 +248,9 @@ See [Antistatic services](./ANTISTATIC.md) for the complete workflow and
 credential-storage behavior.
 
 ## Gogs
+
+See [Gogs Git service](./GOGS.md) for hostname and hostless modes, initial
+credentials, Git-over-SSH, data layout, and update recovery.
 
 Deploy a minimal self-hosted Git service with an optional hostname, port, and
 data directory:

@@ -1,7 +1,7 @@
 # CI/CD Webhook System
 
 Status: implemented. The service wiring and executor behavior now live in
-code, so this note stays short and points at the relevant pieces.
+code; this guide covers the setup handoff and the files operators edit.
 
 Use `--cicd` during `setup` or `patch` to install the webhook receiver and
 executor. Repository-specific scripts live in
@@ -18,6 +18,76 @@ After setup, edit the generated configuration and add a GitHub webhook. The
 secret is generated once and stored root-only at
 `/etc/infra_tools/cicd/webhook_secret`; the systemd environment file is
 `/etc/infra_tools/cicd/webhook.env`.
+
+## Build/app server topology
+
+The build server runs the webhook receiver and builds as the dedicated
+`webhook` user. An app server only needs nginx, rsync, and the restricted
+`deploy` account. The build server pushes artifacts over SSH; it does not need
+root access on the app server.
+
+Set up the app server first:
+
+```bash
+infra_tools setup server_web app.example.com deploy \
+  --app-server --ssl --ssl-email admin@example.com
+```
+
+Then set up the build server and name each target (repeat
+`--deploy-target` for multiple app servers):
+
+```bash
+infra_tools setup server_web build.example.com deploy \
+  --build-server --cicd --node --python \
+  --deploy-target app.example.com
+```
+
+The build setup creates the deploy key at
+`/var/lib/infra_tools/cicd/.ssh/deploy_key`. Copy its `.pub` file into
+`/home/deploy/.ssh/authorized_keys` on every app server. The setup also writes
+`/etc/infra_tools/cicd/deploy_targets.json` and scans each target into
+`/var/lib/infra_tools/cicd/known_hosts`; verify those host fingerprints before
+the first production deployment.
+
+The target entries default to the `deploy` user, SSH port 22, and `/var/www`.
+Edit the JSON only when a target needs a different port, base directory, or
+key path. The target name used by a repository must match its JSON key.
+
+## Repository configuration
+
+Edit `/etc/infra_tools/cicd/webhook_config.json` on the build server. Each
+repository entry selects accepted branches and scripts. A remote deployment
+uses `deploy_target` (a key from `deploy_targets.json`) and an optional
+`deploy_spec` (`domain` or `domain/path`):
+
+```json
+{
+  "repositories": [
+    {
+      "url": "https://github.com/example/site.git",
+      "branches": ["main"],
+      "deploy_target": "app.example.com",
+      "deploy_spec": "www.example.com/",
+      "scripts": {
+        "install": "scripts/install.sh",
+        "build": "scripts/build.sh",
+        "test": "scripts/test.sh",
+        "deploy": "scripts/deploy.sh"
+      }
+    }
+  ]
+}
+```
+
+`install`, `build`, and `test` run in a fresh, commit-pinned workspace as
+`webhook`. When `deploy_target` is present, artifacts are pushed with rsync,
+nginx configuration is refreshed, and the optional deploy script is streamed
+to the target directory. Without `deploy_target`, the optional deploy script
+runs locally on the build server. Use repository URLs without embedded
+credentials; the executor rejects credential-bearing URLs.
+
+After changing the JSON, the next signed push uses the new settings. A ping
+event only verifies webhook connectivity and does not build a repository.
 
 Core code paths:
 
@@ -56,6 +126,8 @@ Quick checks:
 sudo systemctl status webhook-receiver.service
 sudo journalctl -u webhook-receiver.service -f
 sudo journalctl -u cicd-executor.service -f
+sudo systemctl status cicd-executor.path
+curl -fsS http://127.0.0.1:8080/webhook/health
 ```
 
 Re-run `patch` on existing app servers to replace the older deploy sudo policy
