@@ -291,6 +291,10 @@ than passing a comma-separated path list. The server disables NetBIOS, exposes
 only TCP 445, requires SMB3 signing and encryption, validates candidate
 configuration with `testparm` before reloading, and installs a fail2ban jail.
 
+See [Samba Shares](./SAMBA_SHARES.md) for the full guide, including initial
+setup, workspace credentials, access changes, removals, fast updates, and SMB
+client mounts.
+
 To update shares without running the full setup process, use the saved host's
 share-only fast path:
 

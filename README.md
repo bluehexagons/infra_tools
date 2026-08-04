@@ -35,7 +35,7 @@ capability matrix and compatibility notes.
 
 - **Servers**: Security hardening, Nginx/SSL, Ruby/Node/Go, app deployment, game lobby server, and Gogs
 - **Workstations**: Desktop environments (XFCE, i3, LXQt), RDP, browsers, audio
-- **Storage**: Samba shares, rsync sync, par2 integrity verification
+- **Storage**: Samba shares, rsync sync, par2 integrity verification — see [Samba share documentation](./docs/SAMBA_SHARES.md)
 - **Security**: Firewall, SSH hardening, fail2ban, hardened OS auto-updates, weekly cleanup maintenance, journald size limits
 - **Deployments**: Single-service deploys plus repo-defined `infra.json` manifests for multi-component apps
 - **Agent workspaces**: Debian coding-tool suites, scoped config/credential transfer, and repository staging
@@ -82,7 +82,7 @@ commands.
 
 | Script | Description |
 |--------|-------------|
-| `infra_tools.py` | **Unified entry point** - Use `setup`, `patch`, `list`, `info`, `cmd`, `rm`, `deploy`, `recall`, `reconstruct`, `completions`, `python-tools`, `bootstrap`, `agent`, `credentials`, `maintenance`, `network`, `proxmox`, `shell`, or any [sysadmin shortcut](./docs/SYSADMIN.md) |
+| `infra_tools.py` | **Unified entry point** - Use `setup`, `patch`, `shares`, `list`, `info`, `cmd`, `rm`, `deploy`, `recall`, `reconstruct`, `completions`, `python-tools`, `bootstrap`, `agent`, `credentials`, `maintenance`, `network`, `proxmox`, `shell`, or any [sysadmin shortcut](./docs/SYSADMIN.md) |
 
 Use `infra_tools.py` for all system setup, saved-configuration management, patching, recall, reconstruction,
 local Python tooling, and shell-completion setup.
@@ -121,14 +121,10 @@ python3 infra_tools.py setup workstation_desktop 192.168.1.100 admin --desktop i
 ```
 
 ### NAS with Backup
-```bash
-python3 infra_tools.py setup server_lite 192.168.1.10 \
-  --samba \
-  --credential guest guest \
-  --share read media /mnt/data/media guest \
-  --sync /mnt/data/docs /mnt/backup daily \
-  --scrub /mnt/backup .pardatabase 5% weekly
-```
+
+See [Samba share documentation](./docs/SAMBA_SHARES.md) for authenticated
+shares, fast updates, credentials, and access-control examples. Combine the
+share setup with `--sync` and `--scrub` options when configuring backup jobs.
 
 ### Quick Setup: Proxmox Host to Agentic Coding VM
 
@@ -500,14 +496,6 @@ infra_tools.py setup server_lite 10.0.0.60 appuser \
 For the VM path, verify SSH access and, if enabled, RDP login after first boot.
 For the LXC path, basic provisioning and guest-management behavior are the main
 compatibility target; advanced desktop polish is more reliable on a VM.
-
-Use `infra_tools.py credentials set USERNAME` to enter passwords without exposing
-them in process arguments, then reference those users by username in `--share`
-or `--mount-smb`. The `USERS` field accepts a comma-separated list of `username`
-or `username:password` entries, and each bare username must have a matching saved
-credential. `--credential USERNAME PASSWORD` remains available for controlled
-non-interactive automation, but its password is visible in the invoking process
-arguments.
 
 ### Sysadmin Shortcuts
 
