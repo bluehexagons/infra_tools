@@ -332,6 +332,9 @@ infra_tools.py proxmox add <name> <address> [--user USER] [--key PATH]
 infra_tools.py proxmox probe <host>
 infra_tools.py proxmox probe-cluster <address> [--user USER] [--key PATH] [--tag TAG]
 infra_tools.py proxmox rolling-update <target> [<target> ...] [--dry-run] [--reboot-timeout SECONDS]
+infra_tools.py proxmox top <host> [<host> ...]
+infra_tools.py proxmox plan place [options]
+infra_tools.py proxmox plan rebalance [options]
 infra_tools.py proxmox ls <host>
 infra_tools.py proxmox status <host> <vmid>
 infra_tools.py proxmox start <host> <vmid>
@@ -344,6 +347,11 @@ infra_tools.py proxmox config <host> <vmid> [--pending]
 infra_tools.py proxmox reconfigure <host> <vmid> --set KEY=VALUE [--set ...]
 infra_tools.py proxmox modify <host> <vmid> [--cores N] [--memory N[M|G]]
 infra_tools.py proxmox resize-disk <host> <vmid> <volume> <size>
+infra_tools.py proxmox backups <host> <vmid>
+infra_tools.py proxmox backup <host> <vmid> [--storage POOL] [--mode MODE] [--compress FORMAT]
+infra_tools.py proxmox migrate <host> <vmid> <target> [--online] [--with-local-disks]
+infra_tools.py proxmox clean-disks <host> [--delete] [--yes] [--dry-run]
+infra_tools.py proxmox unlock <host> <vmid> [--dry-run]
 infra_tools.py proxmox notifications install-webhook <host> <url> [--send-test]
 infra_tools.py proxmox notifications test-webhook <host>
 infra_tools.py proxmox [shell]

@@ -95,6 +95,16 @@ python3 infra_tools.py proxmox resume pve1 101
 python3 infra_tools.py proxmox health pve1 101
 ```
 
+Show a summary for one or more nodes:
+
+```bash
+python3 infra_tools.py proxmox top pve1 pve2
+```
+
+The summary includes node CPU, memory, storage, and guest counts. It is a
+read-only health and capacity view; `probe` should be run first when a host's
+storage or bridge data has not been cached.
+
 Modify resources and configuration:
 
 ```bash
@@ -119,6 +129,73 @@ python3 infra_tools.py proxmox destroy pve1 101
 python3 infra_tools.py proxmox destroy pve1 101 -y
 ```
 
+## Placement, backups, and migration
+
+The placement planner ranks registered nodes without changing them:
+
+```bash
+python3 infra_tools.py proxmox plan place \
+  --cores 4 --memory 8192 --disk 40 \
+  --prefer-tag production --exclude pve3
+python3 infra_tools.py proxmox plan rebalance --limit 3
+```
+
+`plan rebalance` reports overloaded nodes and candidate destinations. It only
+migrates when `--apply VMID` is supplied; use `--dry-run` to preview the
+migration command and `--yes` to skip its confirmation prompt. `--to HOST`
+overrides the top-ranked destination. Online migration and local-disk transfer
+have the same storage and cluster prerequisites as the direct `migrate` command.
+
+List and create immediate `vzdump` backups:
+
+```bash
+python3 infra_tools.py proxmox backups pve1 101
+python3 infra_tools.py proxmox backup pve1 101 \
+  --storage backup --mode snapshot --compress zstd --dry-run
+```
+
+The backup command defaults to the first backup-capable storage pool, snapshot
+mode, and zstd compression. `suspend` and `stop` modes trade availability for
+stronger consistency where the guest workload requires it. Always verify that
+the selected storage has enough capacity and a retention policy outside
+infra_tools.
+
+Migrate a guest between registered cluster nodes:
+
+```bash
+python3 infra_tools.py proxmox migrate pve1 101 pve2 --dry-run
+python3 infra_tools.py proxmox migrate pve1 101 pve2 \
+  --online --with-local-disks
+```
+
+`--online` keeps a VM running and requires suitable shared or migrated storage.
+`--with-local-disks` copies local disks to target-node storage. Use the dry run
+first for production migrations.
+
+## Orphaned volumes and stuck locks
+
+List unreferenced guest volumes before deleting anything:
+
+```bash
+python3 infra_tools.py proxmox clean-disks pve1 --dry-run
+python3 infra_tools.py proxmox clean-disks pve1 --delete
+```
+
+`clean-disks` is list-only by default. `--delete` requires typing `yes` unless
+`--yes`/`-y` is supplied; treat it as destructive because an orphaned-volume
+check cannot infer whether an external workflow still needs a volume.
+
+After confirming that no backup, migration, or snapshot task is still active,
+clear a stale Proxmox management lock:
+
+```bash
+python3 infra_tools.py proxmox unlock pve1 101 --dry-run
+python3 infra_tools.py proxmox unlock pve1 101
+```
+
+The unlock operation only clears the guest lock; it does not repair a failed
+underlying task or roll back partial storage changes.
+
 ## Cluster and notifications
 
 ```bash
@@ -128,12 +205,16 @@ python3 infra_tools.py proxmox hosts
 python3 infra_tools.py proxmox rolling-update pve1 pve2 pve3
 python3 infra_tools.py proxmox notifications install-webhook \
   pve1 https://notify.example/hook --send-test
+python3 infra_tools.py proxmox notifications test-webhook pve1
 python3 infra_tools.py proxmox shell
 ```
 
 `probe-cluster` discovers nodes from Proxmox's configured names and seeds the
 host registry. `rolling-update` reuses saved setup commands and workspace
 credentials, validates every target first, and waits for required reboots.
+`notifications install-webhook` configures Proxmox's native notification
+matcher; repeat `--severity` to limit routing, and use `--dry-run` before
+writing the endpoint. Treat webhook URLs as sensitive values.
 
 ## Network planning
 
