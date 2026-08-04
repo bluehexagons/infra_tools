@@ -8,8 +8,8 @@ override the desktop, browser, or application choices with flags.
 
 | Profile | Adds by default |
 | --- | --- |
-| `workstation_desktop` | Desktop, CLI tools, browser, LibreOffice-style desktop apps, and Discord |
-| `pc_dev` | Desktop, browser, office apps, SMB client packages, Remmina, and Discord |
+| `workstation_desktop` | Desktop, CLI tools, browser, and Discord |
+| `pc_dev` | Desktop, browser, LibreOffice, SMB client packages, Remmina, and Discord |
 | `workstation_dev` | Desktop, browser, CLI tools, and Visual Studio Code |
 
 The default desktop is XFCE and the default browser is LibreWolf. A browser
