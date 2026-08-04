@@ -20,7 +20,7 @@ from web import dev_tools_steps
 
 
 class TestNodeSetup(unittest.TestCase):
-    @patch("web.dev_tools_steps.configure_auto_update_timer")
+    @patch("web.dev_tools_steps.configure_maintenance_timer")
     def test_configure_auto_update_node_disables_risky_auto_upgrades(self, mock_configure):
         config = SetupConfig(host="host", username="user", system_type="server_web", install_node=True)
         dev_tools_steps.configure_auto_update_node(config)
@@ -34,6 +34,7 @@ class TestNodeSetup(unittest.TestCase):
             check_name="Node.js",
             user="user",
             environment={ECOSYSTEM_AUTO_UPGRADE_ENV: "0"},
+            purpose="auto-update",
         )
 
     @patch("common.common_steps.open", new_callable=mock_open, read_data="")

@@ -184,6 +184,11 @@ def cleanup_all_infra_services(dry_run: bool = False) -> None:
         # Auto-restart service
         r"^auto-restart-if-needed\.service$",
         r"^auto-restart-if-needed\.timer$",
+        # Recurring security and cleanup maintenance
+        r"^security-monitor\.service$",
+        r"^security-monitor\.timer$",
+        r"^cleanup-maintenance\.service$",
+        r"^cleanup-maintenance\.timer$",
         # SMB mount units
         r"^mnt-.*\.mount$",
         # Antistatic lobby server

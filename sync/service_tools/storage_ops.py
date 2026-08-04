@@ -17,6 +17,8 @@ import os
 import io
 import json
 import fcntl
+import math
+import tempfile
 import time
 from datetime import datetime
 from typing import Optional
@@ -31,6 +33,7 @@ from lib.machine_state import load_setup_config
 from lib.mount_utils import get_mount_ancestor
 from lib.task_utils import needs_mount_check
 from lib.runtime_config import RuntimeConfig
+from lib.validation import validate_filesystem_path
 
 # Constants
 LOCK_FILE = "/run/lock/storage-ops.lock"
@@ -58,6 +61,7 @@ class OperationLock:
     
     def acquire(self, blocking: bool = False, timeout: float = 300.0) -> bool:
         """Acquire lock with optional blocking and timeout."""
+        validate_filesystem_path(self.lock_path, must_exist=False)
         # Ensure parent directory exists
         os.makedirs(os.path.dirname(self.lock_path), exist_ok=True)
         
@@ -95,15 +99,17 @@ class OperationLock:
             raise
     
     def release(self) -> None:
-        """Release lock and cleanup."""
+        """Release the lock while retaining its stable filesystem inode."""
         if self.acquired and self.lock_file:
             try:
                 fcntl.flock(self.lock_file.fileno(), fcntl.LOCK_UN)
-                self.lock_file.close()
-                os.unlink(self.lock_path)
             except (IOError, OSError):
                 pass
             finally:
+                try:
+                    self.lock_file.close()
+                except OSError:
+                    pass
                 self.acquired = False
                 self.lock_file = None
     
@@ -120,17 +126,40 @@ def load_last_run() -> dict:
     if os.path.exists(STATE_FILE):
         try:
             with open(STATE_FILE, 'r') as f:
-                return json.load(f)
+                state = json.load(f)
+                return state if isinstance(state, dict) else {}
         except (json.JSONDecodeError, IOError):
             pass
     return {}
 
 
 def save_last_run(state: dict) -> None:
-    """Save last run timestamps to state file."""
-    os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
-    with open(STATE_FILE, 'w') as f:
-        json.dump(state, f, indent=2)
+    """Save last run timestamps atomically."""
+    validate_filesystem_path(STATE_FILE, must_exist=False)
+    state_dir = os.path.dirname(STATE_FILE)
+    os.makedirs(state_dir, exist_ok=True)
+    temporary_path = ''
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode='w',
+            encoding='utf-8',
+            dir=state_dir,
+            prefix=f'.{os.path.basename(STATE_FILE)}.',
+            delete=False,
+        ) as handle:
+            temporary_path = handle.name
+            json.dump(state, handle, indent=2, sort_keys=True)
+            handle.write('\n')
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary_path, 0o600)
+        os.replace(temporary_path, STATE_FILE)
+    finally:
+        if temporary_path:
+            try:
+                os.unlink(temporary_path)
+            except FileNotFoundError:
+                pass
 
 
 def is_operation_due(last_run: dict, op_id: str, interval: str, first_run_default: bool = True) -> bool:
@@ -151,7 +180,14 @@ def is_operation_due(last_run: dict, op_id: str, interval: str, first_run_defaul
         return first_run_default
     
     interval_sec = FREQUENCY_SECONDS.get(interval, FREQUENCY_SECONDS["hourly"])
-    return (time.time() - last_time) >= interval_sec
+    try:
+        timestamp = float(last_time)
+    except (TypeError, ValueError, OverflowError):
+        return True
+    if not math.isfinite(timestamp):
+        return True
+    elapsed = time.time() - timestamp
+    return elapsed < 0 or elapsed >= interval_sec
 
 
 def resolve_scrub_database_path(directory: str, database: str) -> str:
@@ -314,6 +350,12 @@ def execute_storage_operations() -> dict:
     # Load last run state
     last_run = load_last_run()
     new_state = last_run.copy()
+    baseline_time = time.time()
+    for spec in config.scrub_specs:
+        if len(spec) == 4:
+            scrub_op_id = get_scrub_op_id(spec[0], spec[1])
+            if scrub_op_id not in last_run:
+                new_state[scrub_op_id] = baseline_time
     
     # Calculate total operations for progress tracking
     total_syncs = sum(1 for spec in config.sync_specs if len(spec) == 3 and is_operation_due(last_run, get_sync_op_id(spec[0], spec[1]), spec[2]))
@@ -355,6 +397,7 @@ def execute_storage_operations() -> dict:
         if len(spec) != 3:
             log_event(logger, "Invalid sync spec", level=ERROR, spec=spec)
             results["syncs"].append({"spec": spec, "success": False, "error": "Invalid spec"})
+            results["success"] = False
             continue
         
         source, destination, interval = spec
@@ -381,6 +424,7 @@ def execute_storage_operations() -> dict:
                 "error": error_msg,
                 "skipped": True
             })
+            results["success"] = False
             continue
         
         success, message = run_sync(source, destination, logger)
@@ -415,6 +459,7 @@ def execute_storage_operations() -> dict:
         if len(spec) != 4:
             log_event(logger, "Invalid scrub spec", level=ERROR, spec=spec)
             results["scrubs"].append({"spec": spec, "success": False, "error": "Invalid spec"})
+            results["success"] = False
             continue
         
         directory, database, redundancy, interval = spec
@@ -441,6 +486,7 @@ def execute_storage_operations() -> dict:
                 "error": error_msg,
                 "skipped": True
             })
+            results["success"] = False
             continue
         
         success, message = run_scrub(directory, resolved_database, redundancy, verify=True, logger=logger)
@@ -486,6 +532,7 @@ def execute_storage_operations() -> dict:
                 "error": error_msg,
                 "skipped": True
             })
+            results["success"] = False
             continue
         
         success, message = run_scrub(directory, resolved_database, redundancy, verify=False, logger=logger)

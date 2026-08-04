@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from common.common_steps import configure_auto_update_ruby as _configure_auto_update_ruby_common
-from lib.auto_update_systemd import configure_auto_update_timer
+from lib.maintenance_systemd import configure_maintenance_timer
 from lib.config import SetupConfig
 from lib.update_policy import ECOSYSTEM_AUTO_UPGRADE_ENV
 
@@ -13,7 +13,7 @@ def configure_auto_update_node(config: SetupConfig) -> None:
     user_home = f"/home/{config.username}"
     nvm_dir = f"{user_home}/.nvm"
     
-    configure_auto_update_timer(
+    configure_maintenance_timer(
         service_name="auto-update-node",
         service_desc="Auto-update Node.js via nvm",
         timer_desc="Auto-update Node.js weekly",
@@ -23,6 +23,7 @@ def configure_auto_update_node(config: SetupConfig) -> None:
         check_name="Node.js",
         user=config.username,
         environment={ECOSYSTEM_AUTO_UPGRADE_ENV: "0"},
+        purpose="auto-update",
     )
 
 

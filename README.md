@@ -42,7 +42,8 @@ capability matrix and compatibility notes.
 - **Sysadmin shortcuts**: mount, health, ssh, push/pull, df, fan, svc, logs, upgrade, reachable — see [docs/SYSADMIN.md](./docs/SYSADMIN.md)
 
 Background maintenance includes a `cleanup-maintenance` systemd timer that reclaims temporary files,
-stale infra_tools setup/deploy artifacts, old package-manager caches, and oversized journals.
+strictly named stale infra_tools setup/deploy artifacts, disposable package-manager caches, and oversized
+journals. It does not remove installed gem versions.
 Infra tools also installs a journald drop-in at `/etc/systemd/journald.conf.d/infra-tools.conf` to cap
 persistent and runtime journal usage at `100M`.
 
@@ -57,10 +58,17 @@ require the ecosystem opt-in.
 Dependency-resolving npm and uv installs default to `INFRA_TOOLS_DEPENDENCY_MIN_AGE_DAYS=7` so very new
 package releases are avoided where the package manager supports a freshness cutoff.
 
-All automatic update jobs use the same systemd provisioning path. Unit files are replaced atomically,
-wait for network-online, allow up to four hours for a run, and are checked for both enabled and active state
-after installation. Existing working timers are not removed before replacement units have loaded. The cleanup
-timer does not remove APT packages or nvm runtimes; each updater owns its own safe retirement decisions.
+Automatic updates, security monitoring, restart checks, and cleanup use the same systemd provisioning path.
+Unit files are replaced atomically, use per-job network and timeout policy, and are checked for both enabled
+and active state after installation. Existing working timers are not removed before replacement units have
+loaded. The cleanup timer does not remove APT packages or nvm runtimes; each updater owns its own safe
+retirement decisions. Restart checks defer when uptime or login-session state cannot be read. Security monitor
+collection failures retain the prior cursor so the missed window is retried.
+
+Storage maintenance writes scheduling state atomically and uses a persistent lock inode to prevent overlapping
+runs. A newly configured full scrub records its initial scheduling baseline, so the first expensive verification
+runs after its configured interval instead of remaining deferred indefinitely. Invalid specs and unavailable
+mounts make the run fail visibly and remain eligible for retry.
 
 ## CLI Entry Points
 
@@ -631,8 +639,8 @@ sudo python3 infra_tools.py self-setup --user "$USER"
 installed to `/usr/local/bin/infra_tools` for system-wide use and `~/.local/bin/infra_tools` for the
 target user. Shell completion is registered for both `infra_tools` and `infra_tools.py`.
 
-Bootstrap also installs `/etc/tmpfiles.d/infra_tools.conf`, which registers known infra_tools temp
-prefixes with `systemd-tmpfiles-clean` as an additional safety net alongside the cleanup-maintenance timer.
+Bootstrap retires the old `/etc/tmpfiles.d/infra_tools.conf`; its `e` entries did not remove the matched
+artifact itself. The cleanup-maintenance timer owns age-based artifact removal using strict full-name patterns.
 
 ## Shell Completion
 

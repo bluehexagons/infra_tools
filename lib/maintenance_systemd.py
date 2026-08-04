@@ -1,4 +1,4 @@
-"""Shared systemd provisioning for automatic update jobs."""
+"""Shared systemd provisioning for recurring maintenance jobs."""
 
 from __future__ import annotations
 
@@ -54,21 +54,25 @@ def _write_unit_atomically(path: str, content: str) -> None:
                 pass
 
 
-def configure_auto_update_timer(
+def configure_maintenance_timer(
     *,
     service_name: str,
     service_desc: str,
     timer_desc: str,
     script_path: str,
-    schedule: str,
+    schedule: Optional[str],
     check_name: str,
     check_path: Optional[str] = None,
     user: Optional[str] = None,
     environment: Optional[dict[str, str]] = None,
     randomized_delay: str = "30min",
     timeout: str = "4h",
+    on_boot_sec: Optional[str] = None,
+    persistent: bool = True,
+    network_online: bool = True,
+    purpose: str = "maintenance",
 ) -> bool:
-    """Install, enable, and verify a systemd timer for an update script.
+    """Install, enable, and verify a systemd timer for a maintenance script.
 
     Existing units are replaced atomically and remain enabled while their new
     definitions are staged. This avoids the maintenance gap caused by deleting
@@ -77,24 +81,30 @@ def configure_auto_update_timer(
     validate_service_name_uniqueness(service_name, [])
     validate_filesystem_path(script_path, must_exist=False)
     if not os.path.isabs(script_path):
-        raise ValueError(f"Update script path must be absolute: {script_path}")
+        raise ValueError(f"Maintenance script path must be absolute: {script_path}")
 
     for value, name in (
         (service_desc, "service description"),
         (timer_desc, "timer description"),
-        (schedule, "timer schedule"),
-        (check_name, "update name"),
+        (check_name, "maintenance name"),
         (randomized_delay, "randomized delay"),
         (timeout, "service timeout"),
+        (purpose, "maintenance purpose"),
     ):
         _validate_unit_value(value, name)
+    if schedule:
+        _validate_unit_value(schedule, "timer schedule")
+    if on_boot_sec:
+        _validate_unit_value(on_boot_sec, "boot delay")
+    if not schedule and not on_boot_sec:
+        raise ValueError("Maintenance timer requires a calendar or boot trigger")
 
     if check_path:
         validate_filesystem_path(check_path, must_exist=False)
         if not os.path.isabs(check_path):
-            raise ValueError(f"Update prerequisite path must be absolute: {check_path}")
+            raise ValueError(f"Maintenance prerequisite path must be absolute: {check_path}")
         if not os.path.exists(check_path):
-            print(f"  ℹ {check_name} not installed, skipping auto-update configuration")
+            print(f"  ℹ {check_name} not installed, skipping {purpose} configuration")
             return True
 
     user_line = ""
@@ -112,11 +122,11 @@ def configure_auto_update_timer(
 
     service_file = os.path.join(SYSTEMD_DIR, f"{service_name}.service")
     timer_file = os.path.join(SYSTEMD_DIR, f"{service_name}.timer")
+    network_lines = "Wants=network-online.target\nAfter=network-online.target\n" if network_online else ""
     service_content = f"""[Unit]
 Description={service_desc}
 Documentation=man:systemd.service(5)
-Wants=network-online.target
-After=network-online.target
+{network_lines}
 
 [Service]
 Type=oneshot
@@ -125,13 +135,19 @@ TimeoutStartSec={timeout}
 StandardOutput=journal
 StandardError=journal
 """
+    trigger_lines = ""
+    if on_boot_sec:
+        trigger_lines += f"OnBootSec={on_boot_sec}\n"
+    if schedule:
+        trigger_lines += f"OnCalendar={schedule}\n"
+    if persistent and schedule:
+        trigger_lines += "Persistent=true\n"
     timer_content = f"""[Unit]
 Description={timer_desc}
 Documentation=man:systemd.timer(5)
 
 [Timer]
-OnCalendar={schedule}
-Persistent=true
+{trigger_lines}AccuracySec=1min
 RandomizedDelaySec={randomized_delay}
 
 [Install]
@@ -144,24 +160,25 @@ WantedBy=timers.target
     timer_unit = f"{service_name}.timer"
     reload_result = run("systemctl daemon-reload", check=False)
     if reload_result.returncode != 0:
-        print(f"  ⚠ {check_name} auto-update units written but systemd could not reload")
+        print(f"  ⚠ {check_name} {purpose} units written but systemd could not reload")
         return False
 
     enable_result = run(f"systemctl enable {shlex.quote(timer_unit)}", check=False)
     if enable_result.returncode != 0:
-        print(f"  ⚠ {check_name} auto-update timer could not be enabled")
+        print(f"  ⚠ {check_name} {purpose} timer could not be enabled")
         return False
 
     start_result = run(f"systemctl start {shlex.quote(timer_unit)}", check=False)
     if start_result.returncode != 0:
-        print(f"  ⚠ {check_name} auto-update timer could not be started")
+        print(f"  ⚠ {check_name} {purpose} timer could not be started")
         return False
 
     enabled_result = run(f"systemctl is-enabled {shlex.quote(timer_unit)}", check=False)
     active_result = run(f"systemctl is-active {shlex.quote(timer_unit)}", check=False)
     if enabled_result.returncode != 0 or active_result.returncode != 0:
-        print(f"  ⚠ {check_name} auto-update timer failed post-install verification")
+        print(f"  ⚠ {check_name} {purpose} timer failed post-install verification")
         return False
 
-    print(f"  ✓ {check_name} auto-update configured ({schedule})")
+    trigger_summary = schedule or f"after boot: {on_boot_sec}"
+    print(f"  ✓ {check_name} {purpose} configured ({trigger_summary})")
     return True

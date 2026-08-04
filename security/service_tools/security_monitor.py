@@ -27,6 +27,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timedelta
 from logging import WARNING
 
@@ -34,6 +35,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../
 
 from lib.logging_utils import get_service_logger, log_event
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
+from lib.validation import validate_filesystem_path
 
 logger = get_service_logger('security_monitor', 'security', use_syslog=True)
 
@@ -59,30 +61,54 @@ _INFO_KEYS = ('privileged',)
 # State
 # ---------------------------------------------------------------------------
 
-def _load_state() -> dict:
+def _load_state() -> dict[str, object]:
     try:
         with open(_STATE_FILE) as f:
-            return json.load(f)
+            state = json.load(f)
     except (OSError, json.JSONDecodeError):
         return {}
+    return state if isinstance(state, dict) else {}
 
 
-def _save_state(state: dict) -> None:
-    os.makedirs(os.path.dirname(_STATE_FILE), exist_ok=True)
-    with open(_STATE_FILE, 'w') as f:
-        json.dump(state, f, indent=2)
+def _save_state(state: dict[str, object]) -> None:
+    """Persist the collection cursor without exposing a partial JSON file."""
+    validate_filesystem_path(_STATE_FILE, must_exist=False)
+    state_dir = os.path.dirname(_STATE_FILE)
+    os.makedirs(state_dir, exist_ok=True)
+    temporary_path = ''
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode='w',
+            encoding='utf-8',
+            dir=state_dir,
+            prefix=f'.{os.path.basename(_STATE_FILE)}.',
+            delete=False,
+        ) as handle:
+            temporary_path = handle.name
+            json.dump(state, handle, indent=2, sort_keys=True)
+            handle.write('\n')
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary_path, 0o600)
+        os.replace(temporary_path, _STATE_FILE)
+    finally:
+        if temporary_path:
+            try:
+                os.unlink(temporary_path)
+            except FileNotFoundError:
+                pass
 
 
 # ---------------------------------------------------------------------------
 # fail2ban
 # ---------------------------------------------------------------------------
 
-def _check_fail2ban(since: datetime) -> tuple[list[str], list[str]]:
-    """Return (ban_lines, unban_lines) logged after *since*."""
+def _check_fail2ban(since: datetime) -> tuple[list[str], list[str], str | None]:
+    """Return ban lines, unban lines, and any collection error."""
     bans: list[str] = []
     unbans: list[str] = []
     if not os.path.exists(_FAIL2BAN_LOG):
-        return bans, unbans
+        return bans, unbans, None
     try:
         with open(_FAIL2BAN_LOG) as f:
             for line in f:
@@ -101,17 +127,17 @@ def _check_fail2ban(since: datetime) -> tuple[list[str], list[str]]:
                     bans.append(entry)
                 else:
                     unbans.append(entry)
-    except OSError:
-        pass
-    return bans, unbans
+    except OSError as exc:
+        return bans, unbans, f'fail2ban log: {exc}'
+    return bans, unbans, None
 
 
 # ---------------------------------------------------------------------------
 # auditd
 # ---------------------------------------------------------------------------
 
-def _ausearch_has_events(key: str, since: datetime) -> bool:
-    """Return True if auditd recorded any events for *key* after *since*."""
+def _ausearch_has_events(key: str, since: datetime) -> tuple[bool, str | None]:
+    """Return whether auditd has matching events and any collection error."""
     since_date = since.strftime('%m/%d/%Y')
     since_time = since.strftime('%H:%M:%S')
     try:
@@ -119,31 +145,40 @@ def _ausearch_has_events(key: str, since: datetime) -> bool:
             ['ausearch', '--start', since_date, since_time, '-k', key],
             capture_output=True, text=True, check=False, timeout=15,
         )
-        return result.returncode == 0 and bool(result.stdout.strip())
-    except (subprocess.TimeoutExpired, OSError):
-        return False
+        if result.returncode == 0:
+            return bool(result.stdout.strip()), None
+        if result.returncode == 1:
+            return False, None
+        details = result.stderr.strip() or f'ausearch exited {result.returncode}'
+        return False, f'audit key {key}: {details}'
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return False, f'audit key {key}: {exc}'
 
 
-def _check_auditd(since: datetime) -> tuple[list[str], bool]:
-    """Return (triggered_keys, has_critical) for events after *since*."""
+def _check_auditd(since: datetime) -> tuple[list[str], bool, list[str]]:
+    """Return triggered keys, critical status, and collection errors."""
     if not shutil.which('ausearch'):
-        return [], False
+        return [], False, []
     triggered: list[str] = []
     has_critical = False
+    errors: list[str] = []
     for key in _CRITICAL_KEYS + _INFO_KEYS:
-        if _ausearch_has_events(key, since):
+        has_events, error = _ausearch_has_events(key, since)
+        if error:
+            errors.append(error)
+        if has_events:
             triggered.append(key)
             if key in _CRITICAL_KEYS:
                 has_critical = True
-    return triggered, has_critical
+    return triggered, has_critical, errors
 
 
 # ---------------------------------------------------------------------------
 # SSH failures
 # ---------------------------------------------------------------------------
 
-def _check_ssh_failures(since: datetime) -> int:
-    """Count SSH authentication failures from the journal after *since*."""
+def _check_ssh_failures(since: datetime) -> tuple[int, str | None]:
+    """Count SSH authentication failures and return any collection error."""
     since_str = since.strftime('%Y-%m-%d %H:%M:%S')
     try:
         result = subprocess.run(
@@ -152,14 +187,15 @@ def _check_ssh_failures(since: datetime) -> int:
             capture_output=True, text=True, check=False, timeout=15,
         )
         if result.returncode != 0:
-            return 0
+            details = result.stderr.strip() or f'journalctl exited {result.returncode}'
+            return 0, f'SSH journal: {details}'
         count = 0
         for line in result.stdout.splitlines():
             if 'Failed password' in line or 'Invalid user' in line:
                 count += 1
-        return count
-    except (subprocess.TimeoutExpired, OSError):
-        return 0
+        return count, None
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return 0, f'SSH journal: {exc}'
 
 
 # ---------------------------------------------------------------------------
@@ -180,15 +216,45 @@ def main() -> int:
 
     if 'last_run' in state:
         try:
-            since = datetime.fromisoformat(state['last_run'])
-        except ValueError:
+            last_run = state['last_run']
+            if not isinstance(last_run, str):
+                raise TypeError('last_run must be a string')
+            since = datetime.fromisoformat(last_run)
+            if since.tzinfo is not None:
+                since = since.astimezone().replace(tzinfo=None)
+        except (TypeError, ValueError):
             since = now - timedelta(minutes=15)
     else:
         since = now - timedelta(minutes=15)
+    if since > now:
+        since = now - timedelta(minutes=15)
 
-    bans, unbans = _check_fail2ban(since)
-    audit_keys, audit_critical = _check_auditd(since)
-    ssh_failures = _check_ssh_failures(since)
+    bans, unbans, fail2ban_error = _check_fail2ban(since)
+    audit_keys, audit_critical, audit_errors = _check_auditd(since)
+    ssh_failures, ssh_error = _check_ssh_failures(since)
+    collection_errors = [
+        error
+        for error in (fail2ban_error, *audit_errors, ssh_error)
+        if error
+    ]
+    if collection_errors:
+        details = '\n'.join(collection_errors)
+        log_event(
+            logger,
+            'Security event collection failed; retaining previous cursor',
+            level=WARNING,
+            errors=details,
+        )
+        send_notification_safe(
+            notification_configs,
+            subject='Error: security monitor collection failed',
+            job='security_monitor',
+            status='error',
+            message='One or more security event sources could not be read.',
+            details=details,
+            logger=logger,
+        )
+        return 1
 
     has_noteworthy = bans or audit_keys or ssh_failures >= _SSH_FAILURE_THRESHOLD
     if not has_noteworthy:

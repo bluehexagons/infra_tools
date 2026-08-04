@@ -51,7 +51,7 @@ class TestRubySetup(unittest.TestCase):
             check=False,
         )
 
-    @patch("common.common_steps.configure_auto_update_timer")
+    @patch("common.common_steps.configure_maintenance_timer")
     @patch("common.common_steps.shutil.which", return_value="/usr/bin/gem")
     def test_configure_auto_update_ruby_configures_gem_update_service(self, _which, mock_configure):
         config = SetupConfig(host="host", username="user", system_type="server_dev", install_ruby=True)
@@ -65,6 +65,7 @@ class TestRubySetup(unittest.TestCase):
             check_path="/usr/bin/gem",
             check_name="Ruby gems",
             environment={ECOSYSTEM_AUTO_UPGRADE_ENV: "0"},
+            purpose="auto-update",
         )
 
     def test_ruby_auto_update_step_uses_common_cleanup_implementation(self):

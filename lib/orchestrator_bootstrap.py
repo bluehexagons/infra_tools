@@ -10,8 +10,8 @@ import sys
 import tempfile
 from typing import Optional
 
-from lib.maintenance_defaults import INFRA_TMP_DIRS, INFRA_TMP_PREFIXES, STALE_INFRA_TMP_MAX_AGE_DAYS
 from lib.system_utils import get_current_username
+from lib.validation import validate_filesystem_path
 from lib.validators import validate_username
 
 BASE_PACKAGES = [
@@ -113,47 +113,19 @@ def resolve_bootstrap_user(requested_user: Optional[str]) -> tuple[str, str]:
     return username, home_dir
 
 
-def _build_tmpfiles_conf_content() -> str:
-    """Build the systemd-tmpfiles.d configuration content for infra_tools artifacts.
-
-    The generated conf ages out known infra_tools temp prefixes in each configured
-    temp directory after STALE_INFRA_TMP_MAX_AGE_DAYS days, complementing the
-    cleanup_maintenance script's own stale-artifact cleanup.
-    """
-    lines: list[str] = [
-        "# infra_tools temporary artifact aging",
-        "# Managed by infra_tools bootstrap -- do not edit by hand",
-        "#",
-        f"# Removes stale infra_tools temp artifacts after {STALE_INFRA_TMP_MAX_AGE_DAYS} days.",
-        "# Type  Path                              Mode  UID   GID   Age",
-    ]
-    for tmp_dir in INFRA_TMP_DIRS:
-        lines.append(f"#   directory: {tmp_dir}")
-        for prefix in INFRA_TMP_PREFIXES:
-            age = f"{STALE_INFRA_TMP_MAX_AGE_DAYS}d"
-            lines.append(f"e  {tmp_dir}/{prefix}*  -  -  -  {age}")
-    return "\n".join(lines) + "\n"
-
-
-def install_tmpfiles_conf(
+def retire_legacy_tmpfiles_conf(
     conf_path: str = TMPFILES_CONF_PATH,
-) -> None:
-    """Install a systemd-tmpfiles.d conf to auto-age infra_tools temp artifacts.
-
-    Requires root. The conf uses the ``e`` type to remove matching entries
-    (files and directories) in the configured temp directories once they exceed
-    the stale-artifact age threshold.
-    """
+) -> bool:
+    """Remove the ineffective legacy tmpfiles config from older bootstraps."""
+    validate_filesystem_path(conf_path, must_exist=False)
+    if not os.path.exists(conf_path):
+        return False
     if os.geteuid() != 0:
         raise PermissionError(
-            "Installing tmpfiles.d configuration requires root privileges."
+            "Removing the legacy tmpfiles.d configuration requires root privileges."
         )
-    content = _build_tmpfiles_conf_content()
-    conf_dir = os.path.dirname(conf_path)
-    os.makedirs(conf_dir, exist_ok=True)
-    with open(conf_path, "w", encoding="utf-8") as handle:
-        handle.write(content)
-    os.chmod(conf_path, 0o644)
+    os.unlink(conf_path)
+    return True
 
 
 def install_system_packages(shell: str) -> int:
@@ -241,11 +213,12 @@ def run_orchestrator_bootstrap(
         except (OSError, ValueError) as exc:
             print(f"Error: could not install system launcher in {SYSTEM_LAUNCHER_DIR}: {exc}")
             return 1
-        try:
-            install_tmpfiles_conf()
-            print(f"✓ Installed systemd tmpfiles.d config: {TMPFILES_CONF_PATH}")
-        except (OSError, PermissionError) as exc:
-            print(f"Warning: could not install tmpfiles.d config: {exc}")
+
+    try:
+        if retire_legacy_tmpfiles_conf():
+            print(f"✓ Removed legacy systemd tmpfiles.d config: {TMPFILES_CONF_PATH}")
+    except (OSError, PermissionError) as exc:
+        print(f"Warning: could not remove legacy tmpfiles.d config: {exc}")
 
     command = _resolve_self_command(script_path) + [
         "python-tools",

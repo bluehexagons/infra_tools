@@ -169,43 +169,32 @@ class TestInstallLauncher(unittest.TestCase):
                 )
 
 
-class TestInstallTmpfilesConf(unittest.TestCase):
-    def test_build_content_includes_all_prefixes_and_dirs(self):
-        from lib.maintenance_defaults import INFRA_TMP_DIRS, INFRA_TMP_PREFIXES
-        content = orchestrator_bootstrap._build_tmpfiles_conf_content()
-        for prefix in INFRA_TMP_PREFIXES:
-            self.assertIn(prefix, content)
-        for tmp_dir in INFRA_TMP_DIRS:
-            self.assertIn(tmp_dir, content)
-        self.assertIn("infra_tools", content)
-
-    def test_build_content_uses_correct_age(self):
-        from lib.maintenance_defaults import STALE_INFRA_TMP_MAX_AGE_DAYS
-        content = orchestrator_bootstrap._build_tmpfiles_conf_content()
-        self.assertIn(f"{STALE_INFRA_TMP_MAX_AGE_DAYS}d", content)
-
+class TestRetireLegacyTmpfilesConf(unittest.TestCase):
     @patch("lib.orchestrator_bootstrap.os.geteuid", return_value=0)
-    def test_install_creates_conf_file(self, _mock_geteuid):
+    def test_removes_existing_conf_file(self, _mock_geteuid):
         with tempfile.TemporaryDirectory() as tmp:
             conf_path = os.path.join(tmp, "infra_tools.conf")
-            orchestrator_bootstrap.install_tmpfiles_conf(conf_path=conf_path)
-            self.assertTrue(os.path.isfile(conf_path))
-            with open(conf_path, encoding="utf-8") as file_obj:
-                content = file_obj.read()
-            self.assertIn("infra_tools", content)
-            mode = os.stat(conf_path).st_mode & 0o777
-            self.assertEqual(mode, 0o644)
+            with open(conf_path, "w", encoding="utf-8") as file_obj:
+                file_obj.write("legacy")
+            self.assertTrue(orchestrator_bootstrap.retire_legacy_tmpfiles_conf(conf_path))
+            self.assertFalse(os.path.exists(conf_path))
+
+    def test_missing_conf_is_already_retired(self):
+        self.assertFalse(
+            orchestrator_bootstrap.retire_legacy_tmpfiles_conf("/missing/infra_tools.conf")
+        )
 
     @patch("lib.orchestrator_bootstrap.os.geteuid", return_value=1000)
-    def test_install_raises_without_root(self, _mock_geteuid):
-        with self.assertRaises(PermissionError):
-            orchestrator_bootstrap.install_tmpfiles_conf()
+    def test_retire_raises_without_root(self, _mock_geteuid):
+        with tempfile.NamedTemporaryFile() as file_obj:
+            with self.assertRaises(PermissionError):
+                orchestrator_bootstrap.retire_legacy_tmpfiles_conf(file_obj.name)
 
-    @patch("lib.orchestrator_bootstrap.install_tmpfiles_conf")
+    @patch("lib.orchestrator_bootstrap.retire_legacy_tmpfiles_conf", return_value=True)
     @patch("lib.orchestrator_bootstrap.install_launcher", return_value="/usr/local/bin/infra_tools")
     @patch("lib.orchestrator_bootstrap.subprocess.run")
     @patch("lib.orchestrator_bootstrap.os.geteuid", return_value=0)
-    def test_bootstrap_installs_tmpfiles_conf(
+    def test_bootstrap_retires_tmpfiles_conf(
         self, _mock_geteuid, mock_run, _mock_launcher, mock_tmpfiles
     ):
         mock_run.side_effect = [

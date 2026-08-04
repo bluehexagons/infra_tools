@@ -33,7 +33,8 @@ class TestCleanupMaintenance(unittest.TestCase):
             result = cleanup_maintenance.main()
         self.assertEqual(result, 0)
         mock_apt.assert_called_once()
-        self.assertEqual(mock_optional.call_count, 6)
+        self.assertEqual(mock_optional.call_count, 5)
+        self.assertFalse(any(call.args[2] == "gem cleanup" for call in mock_optional.call_args_list))
         # Stale infra tmp cleanup runs once per known temp directory (/tmp, /var/tmp).
         self.assertEqual(mock_tmp_cleanup.call_count, len(cleanup_maintenance.INFRA_TMP_DIRS))
         mock_low_space.assert_called_once()
@@ -44,7 +45,7 @@ class TestCleanupMaintenance(unittest.TestCase):
     @patch("common.service_tools.cleanup_maintenance.notify_if_storage_still_low")
     @patch("common.service_tools.cleanup_maintenance.cleanup_stale_infra_tmp_artifacts", return_value=[])
     @patch("common.service_tools.cleanup_maintenance.send_notification_safe")
-    @patch("common.service_tools.cleanup_maintenance.cleanup_optional_cache", side_effect=[None, "journal vacuum: failed", None, None, None, None])
+    @patch("common.service_tools.cleanup_maintenance.cleanup_optional_cache", side_effect=[None, "journal vacuum: failed", None, None, None])
     @patch("common.service_tools.cleanup_maintenance.cleanup_apt_cache", return_value=[])
     @patch("common.service_tools.cleanup_maintenance.load_notification_configs_from_state", return_value=["cfg"])
     def test_failure_notifies(
@@ -90,6 +91,12 @@ class TestCleanupHelpers(unittest.TestCase):
         self.assertEqual(failure, "journal vacuum: timed out after 600s")
         self.assertIn("journal vacuum timed out", "\n".join(logs.output))
 
+    @patch("common.service_tools.cleanup_maintenance.run_command", side_effect=OSError("missing"))
+    def test_run_cleanup_command_reports_os_error(self, _run_command):
+        failure = cleanup_maintenance.run_cleanup_command(["missing"], "optional cleanup")
+
+        self.assertEqual(failure, "optional cleanup: missing")
+
     @patch("common.service_tools.cleanup_maintenance.run_command")
     @patch("common.service_tools.cleanup_maintenance.shutil.which", return_value="/usr/bin/apt-get")
     def test_cleanup_apt_cache_uses_noninteractive_env(self, _which, mock_run_command):
@@ -129,9 +136,10 @@ class TestCleanupHelpers(unittest.TestCase):
             old_bundler_dir = os.path.join(tmp_dir, "bundler20240101-12345-abc123")
             fresh_file = os.path.join(tmp_dir, "infra_deploy_fresh")
             unrelated_file = os.path.join(tmp_dir, "unrelated")
+            misleading_file = os.path.join(tmp_dir, "bundler_project")
             os.mkdir(old_dir)
             os.mkdir(old_bundler_dir)
-            for path in (old_file, fresh_file, unrelated_file):
+            for path in (old_file, fresh_file, unrelated_file, misleading_file):
                 with open(path, "w", encoding="utf-8") as fh:
                     fh.write("x")
 
@@ -139,6 +147,7 @@ class TestCleanupHelpers(unittest.TestCase):
             os.utime(old_dir, (old_time, old_time))
             os.utime(old_bundler_dir, (old_time, old_time))
             os.utime(old_file, (old_time, old_time))
+            os.utime(misleading_file, (old_time, old_time))
 
             failures = cleanup_maintenance.cleanup_stale_infra_tmp_artifacts(
                 tmp_dir=tmp_dir,
@@ -151,6 +160,7 @@ class TestCleanupHelpers(unittest.TestCase):
             self.assertFalse(os.path.exists(old_file))
             self.assertTrue(os.path.exists(fresh_file))
             self.assertTrue(os.path.exists(unrelated_file))
+            self.assertTrue(os.path.exists(misleading_file))
 
     def test_cleanup_stale_infra_tmp_artifacts_reports_remove_failure(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

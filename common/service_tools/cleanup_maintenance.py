@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -18,14 +19,16 @@ from lib.maintenance_defaults import (
     APT_LOCK_OPTIONS,
     CLEANUP_COMMAND_TIMEOUT_SECONDS,
     INFRA_TMP_DIRS,
-    INFRA_TMP_PREFIXES,
+    INFRA_TMP_PATTERNS,
     JOURNAL_MAX_USE,
     STALE_INFRA_TMP_MAX_AGE_DAYS,
 )
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
+from lib.validation import validate_filesystem_path, validate_positive_integer
 
 
 logger = get_service_logger('cleanup_maintenance', 'common', use_syslog=True)
+_INFRA_TMP_RE = re.compile(rf"^(?:{'|'.join(INFRA_TMP_PATTERNS)})$")
 
 
 def run_command(
@@ -48,6 +51,10 @@ def run_cleanup_command(
     except subprocess.TimeoutExpired:
         details = f"timed out after {CLEANUP_COMMAND_TIMEOUT_SECONDS}s"
         log_event(logger, f"{action} timed out", level=WARNING, stderr=details)
+        return f"{action}: {details}"
+    except OSError as exc:
+        details = str(exc)
+        log_event(logger, f"{action} could not run", level=WARNING, stderr=details)
         return f"{action}: {details}"
 
     if result.returncode != 0:
@@ -100,6 +107,8 @@ def cleanup_stale_infra_tmp_artifacts(
     max_age_days: int = STALE_INFRA_TMP_MAX_AGE_DAYS,
 ) -> list[str]:
     """Remove stale infra_tools temp files/directories left by interrupted runs."""
+    validate_filesystem_path(tmp_dir, must_exist=False)
+    max_age_days = validate_positive_integer(str(max_age_days), "max age days")
     failures: list[str] = []
     try:
         names = os.listdir(tmp_dir)
@@ -119,7 +128,7 @@ def cleanup_stale_infra_tmp_artifacts(
     cutoff = time.time() - (max_age_days * 24 * 60 * 60)
     removed: list[str] = []
     for name in names:
-        if not name.startswith(INFRA_TMP_PREFIXES):
+        if not _INFRA_TMP_RE.fullmatch(name):
             continue
         path = os.path.join(tmp_dir, name)
         try:
@@ -233,7 +242,6 @@ def main() -> int:
         cleanup_optional_cache(["journalctl"], [f"--vacuum-size={JOURNAL_MAX_USE}"], "journal vacuum"),
         cleanup_optional_cache(["npm"], ["cache", "clean", "--force"], "npm cache cleanup"),
         cleanup_optional_cache(["pip3", "pip"], ["cache", "purge"], "pip cache cleanup"),
-        cleanup_optional_cache(["gem"], ["cleanup"], "gem cleanup"),
         cleanup_optional_cache(["uv"], ["cache", "clean"], "uv cache cleanup"),
     ):
         if failure:

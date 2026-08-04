@@ -158,7 +158,7 @@ class TestGenerateGogsConfig(unittest.TestCase):
 
 
 class TestConfigureAutoUpdateGogs(unittest.TestCase):
-    @patch("common.common_steps.configure_auto_update_timer")
+    @patch("common.common_steps.configure_maintenance_timer")
     def test_configures_gogs_auto_update_timer(self, mock_configure):
         config = SetupConfig(host="host", username="user", system_type="server_web", gogs=["git.example.com"])
         common_steps.configure_auto_update_gogs(config)
@@ -170,6 +170,7 @@ class TestConfigureAutoUpdateGogs(unittest.TestCase):
             schedule="Sun *-*-* 05:30:00",
             check_path="/usr/local/bin/gogs",
             check_name="Gogs",
+            purpose="auto-update",
         )
 
 

@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from logging import ERROR
 from typing import Any
@@ -19,6 +21,7 @@ from lib.logging_utils import get_service_logger, log_event
 from lib.machine_state import can_restart_system, load_setup_config
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
 from lib.plugin_registry import get_system_type_definition
+from lib.validation import validate_filesystem_path
 
 logger = get_service_logger('auto_restart_if_needed', 'common', use_syslog=True)
 
@@ -32,17 +35,17 @@ def check_restart_required() -> bool:
     return os.path.exists("/var/run/reboot-required")
 
 
-def get_uptime_seconds() -> float:
-    """Return system uptime in seconds."""
+def get_uptime_seconds() -> float | None:
+    """Return system uptime in seconds, or None when it cannot be read."""
     try:
         with open("/proc/uptime", "r", encoding="utf-8") as handle:
             return float(handle.read().split()[0])
     except (OSError, ValueError, IndexError):
-        return 0.0
+        return None
 
 
-def get_active_sessions() -> list[str]:
-    """Return active loginctl sessions."""
+def get_active_sessions() -> list[str] | None:
+    """Return active loginctl sessions, or None when they cannot be queried."""
     try:
         result = subprocess.run(
             ["loginctl", "list-sessions", "--no-legend"],
@@ -51,10 +54,28 @@ def get_active_sessions() -> list[str]:
             check=False,
         )
     except OSError:
-        return []
+        return None
     if result.returncode != 0:
-        return []
+        return None
     return [line for line in result.stdout.splitlines() if line.strip()]
+
+
+def _nonnegative_int(value: Any, default: int) -> int:
+    """Return a policy integer, falling back for invalid persisted values."""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    return max(0, parsed)
+
+
+def _timestamp(value: Any, default: float) -> float:
+    """Return a finite timestamp from persisted state."""
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    return parsed if math.isfinite(parsed) else default
 
 
 def load_restart_policy() -> dict[str, Any]:
@@ -71,8 +92,14 @@ def load_restart_policy() -> dict[str, Any]:
 
     return {
         "auto_restart": auto_restart,
-        "force_days": int(config.get("auto_restart_force_days", defaults.default_auto_restart_force_days if defaults else 7)),
-        "grace": int(config.get("auto_restart_grace", 5)),
+        "force_days": _nonnegative_int(
+            config.get(
+                "auto_restart_force_days",
+                defaults.default_auto_restart_force_days if defaults else 7,
+            ),
+            defaults.default_auto_restart_force_days if defaults else 7,
+        ),
+        "grace": _nonnegative_int(config.get("auto_restart_grace", 5), 5),
     }
 
 
@@ -88,13 +115,31 @@ def load_restart_state() -> dict[str, Any]:
 
 def save_restart_state(state: dict[str, Any]) -> None:
     """Save persistent auto-restart deferral state atomically."""
+    validate_filesystem_path(STATE_FILE, must_exist=False)
     state_dir = os.path.dirname(STATE_FILE)
     os.makedirs(state_dir, exist_ok=True)
-    tmp_file = f"{STATE_FILE}.tmp"
-    with open(tmp_file, "w", encoding="utf-8") as handle:
-        json.dump(state, handle, indent=2, sort_keys=True)
-        handle.write("\n")
-    os.replace(tmp_file, STATE_FILE)
+    temporary_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=state_dir,
+            prefix=f".{os.path.basename(STATE_FILE)}.",
+            delete=False,
+        ) as handle:
+            temporary_path = handle.name
+            json.dump(state, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary_path, 0o600)
+        os.replace(temporary_path, STATE_FILE)
+    finally:
+        if temporary_path:
+            try:
+                os.unlink(temporary_path)
+            except FileNotFoundError:
+                pass
 
 
 def clear_restart_state() -> None:
@@ -109,15 +154,16 @@ def clear_restart_state() -> None:
 
 def should_notify(state: dict[str, Any], now: float) -> bool:
     """Return true when a deferral notification should be sent."""
-    last_notified = float(state.get("last_notified", 0) or 0)
-    return now - last_notified >= NOTIFICATION_INTERVAL_SECONDS
+    last_notified = _timestamp(state.get("last_notified"), 0)
+    return last_notified > now or now - last_notified >= NOTIFICATION_INTERVAL_SECONDS
 
 
 def record_deferral(reason: str, notification_configs, details: str | None = None) -> None:
     """Record a deferred restart and notify at most once per day."""
     now = time.time()
     state = load_restart_state()
-    state.setdefault("first_required", now)
+    first_required = _timestamp(state.get("first_required"), now)
+    state["first_required"] = now if first_required > now else first_required
     if should_notify(state, now):
         send_notification_safe(
             notification_configs,
@@ -135,13 +181,15 @@ def record_deferral(reason: str, notification_configs, details: str | None = Non
 
 def force_deadline_reached(policy: dict[str, Any]) -> bool:
     """Return true when restart deferrals have exceeded the configured max."""
-    force_days = int(policy["force_days"])
+    force_days = _nonnegative_int(policy.get("force_days"), 0)
     if force_days <= 0:
         return False
     state = load_restart_state()
-    first_required_value = state.get("first_required")
-    first_required = float(first_required_value) if first_required_value is not None else time.time()
-    return time.time() - first_required >= force_days * 24 * 60 * 60
+    now = time.time()
+    first_required = _timestamp(state.get("first_required"), now)
+    if first_required > now:
+        first_required = now
+    return now - first_required >= force_days * 24 * 60 * 60
 
 
 def perform_restart(notification_configs, grace_minutes: int, forced: bool = False) -> int:
@@ -194,11 +242,17 @@ def main() -> int:
 
     policy = load_restart_policy()
     uptime = get_uptime_seconds()
-    if uptime and uptime < MIN_UPTIME_SECONDS:
+    if uptime is None:
+        record_deferral("system uptime could not be determined", notification_configs)
+        return 0
+    if uptime < MIN_UPTIME_SECONDS:
         record_deferral("system booted recently", notification_configs)
         return 0
 
     sessions = get_active_sessions()
+    if sessions is None:
+        record_deferral("active sessions could not be determined", notification_configs)
+        return 0
     forced = force_deadline_reached(policy)
     if not policy["auto_restart"] and not forced:
         record_deferral("automatic restarts are disabled", notification_configs)

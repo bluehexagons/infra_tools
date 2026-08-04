@@ -14,6 +14,35 @@ from common.service_tools import auto_restart_if_needed
 
 
 class TestAutoRestartIfNeeded(unittest.TestCase):
+    @patch("common.service_tools.auto_restart_if_needed.perform_restart")
+    @patch("common.service_tools.auto_restart_if_needed.record_deferral")
+    @patch("common.service_tools.auto_restart_if_needed.get_uptime_seconds", return_value=None)
+    @patch("common.service_tools.auto_restart_if_needed.can_restart_system", return_value=True)
+    @patch("common.service_tools.auto_restart_if_needed.load_restart_policy", return_value={"auto_restart": True, "force_days": 7, "grace": 5})
+    @patch("common.service_tools.auto_restart_if_needed.check_restart_required", return_value=True)
+    @patch("common.service_tools.auto_restart_if_needed.load_notification_configs_from_state", return_value=["cfg"])
+    def test_defers_when_uptime_cannot_be_read(
+        self, _load, _check, _policy, _can_restart, _uptime, mock_defer, mock_restart
+    ):
+        self.assertEqual(auto_restart_if_needed.main(), 0)
+        mock_defer.assert_called_once_with("system uptime could not be determined", ["cfg"])
+        mock_restart.assert_not_called()
+
+    @patch("common.service_tools.auto_restart_if_needed.perform_restart")
+    @patch("common.service_tools.auto_restart_if_needed.record_deferral")
+    @patch("common.service_tools.auto_restart_if_needed.get_active_sessions", return_value=None)
+    @patch("common.service_tools.auto_restart_if_needed.get_uptime_seconds", return_value=3600)
+    @patch("common.service_tools.auto_restart_if_needed.can_restart_system", return_value=True)
+    @patch("common.service_tools.auto_restart_if_needed.load_restart_policy", return_value={"auto_restart": True, "force_days": 7, "grace": 5})
+    @patch("common.service_tools.auto_restart_if_needed.check_restart_required", return_value=True)
+    @patch("common.service_tools.auto_restart_if_needed.load_notification_configs_from_state", return_value=["cfg"])
+    def test_defers_when_sessions_cannot_be_queried(
+        self, _load, _check, _policy, _can_restart, _uptime, _sessions, mock_defer, mock_restart
+    ):
+        self.assertEqual(auto_restart_if_needed.main(), 0)
+        mock_defer.assert_called_once_with("active sessions could not be determined", ["cfg"])
+        mock_restart.assert_not_called()
+
     @patch("common.service_tools.auto_restart_if_needed.save_restart_state")
     @patch("common.service_tools.auto_restart_if_needed.load_restart_state", return_value={})
     @patch("common.service_tools.auto_restart_if_needed.time.time", return_value=100000)
@@ -106,6 +135,25 @@ class TestRestartPolicy(unittest.TestCase):
         policy = auto_restart_if_needed.load_restart_policy()
         self.assertFalse(policy["auto_restart"])
         self.assertEqual(policy["force_days"], 7)
+
+    @patch(
+        "common.service_tools.auto_restart_if_needed.load_setup_config",
+        return_value={
+            "username": "u",
+            "system_type": "server_lite",
+            "auto_restart_force_days": "invalid",
+            "auto_restart_grace": -2,
+        },
+    )
+    def test_invalid_persisted_numbers_fall_back_safely(self, _load):
+        policy = auto_restart_if_needed.load_restart_policy()
+        self.assertEqual(policy["force_days"], 7)
+        self.assertEqual(policy["grace"], 0)
+
+    @patch("common.service_tools.auto_restart_if_needed.load_restart_state", return_value={"first_required": "invalid"})
+    @patch("common.service_tools.auto_restart_if_needed.time.time", return_value=1000)
+    def test_invalid_restart_timestamp_does_not_force(self, _time, _state):
+        self.assertFalse(auto_restart_if_needed.force_deadline_reached({"force_days": 7}))
 
 
 if __name__ == "__main__":

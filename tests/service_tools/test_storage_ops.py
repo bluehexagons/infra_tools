@@ -42,6 +42,19 @@ class TestOperationLock(unittest.TestCase):
         mock_file_open.return_value.close.assert_called_once()
         self.assertIsNone(lock.lock_file)
 
+    @patch("sync.service_tools.storage_ops.os.unlink")
+    @patch("sync.service_tools.storage_ops.fcntl.flock")
+    def test_release_keeps_stable_lock_file(self, mock_flock, mock_unlink):
+        lock = OperationLock("/run/lock/storage-ops.lock")
+        lock.lock_file = MagicMock()
+        lock.acquired = True
+
+        lock.release()
+
+        mock_flock.assert_called_once()
+        lock.lock_file = None
+        mock_unlink.assert_not_called()
+
 
 class TestValidateMountsForOperation(unittest.TestCase):
     @patch("sync.service_tools.storage_ops.get_mount_ancestor", return_value=None)
@@ -215,6 +228,10 @@ class TestIsOperationDue(unittest.TestCase):
         last_run = {"sync:/a:/b": time.time()}
         self.assertTrue(is_operation_due(last_run, "sync:/c:/d", "hourly"))
 
+    def test_invalid_or_future_timestamp_is_due(self):
+        self.assertTrue(is_operation_due({"op": "invalid"}, "op", "daily"))
+        self.assertTrue(is_operation_due({"op": time.time() + 3600}, "op", "daily"))
+
     def test_all_known_intervals(self):
         """All named intervals are recognized and have positive values."""
         for name, seconds in FREQUENCY_SECONDS.items():
@@ -264,6 +281,16 @@ class TestLoadLastRun(unittest.TestCase):
         finally:
             os.unlink(temp_path)
 
+    def test_returns_empty_dict_for_non_mapping_json(self):
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump([123], f)
+            temp_path = f.name
+        try:
+            with patch("sync.service_tools.storage_ops.STATE_FILE", temp_path):
+                self.assertEqual(load_last_run(), {})
+        finally:
+            os.unlink(temp_path)
+
 
 class TestSaveLastRun(unittest.TestCase):
     def test_saves_and_roundtrips(self):
@@ -276,6 +303,7 @@ class TestSaveLastRun(unittest.TestCase):
                 with open(state_path, 'r') as f:
                     loaded = json.load(f)
                 self.assertEqual(loaded, data)
+                self.assertEqual(os.stat(state_path).st_mode & 0o777, 0o600)
 
     def test_creates_parent_directories(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -349,6 +377,36 @@ class TestOpIdStability(unittest.TestCase):
 
 
 class TestParityCadence(unittest.TestCase):
+    @patch("sync.service_tools.storage_ops.send_operation_notification")
+    @patch("sync.service_tools.storage_ops.run_scrub", return_value=(True, "OK"))
+    @patch("sync.service_tools.storage_ops.validate_mounts_for_operation", return_value=(True, ""))
+    @patch("sync.service_tools.storage_ops.save_last_run")
+    @patch("sync.service_tools.storage_ops.load_last_run", return_value={})
+    @patch("sync.service_tools.storage_ops.parse_notification_args", return_value=[])
+    @patch("sync.service_tools.storage_ops.load_setup_config")
+    @patch("sync.service_tools.storage_ops.get_service_logger")
+    def test_first_run_establishes_full_scrub_baseline(
+        self, mock_logger, mock_load_config, _notif_args,
+        _load_last, mock_save_last, _validate, mock_run_scrub, _send_notif
+    ):
+        from sync.service_tools.storage_ops import execute_storage_operations
+
+        mock_logger.return_value = MagicMock()
+        mock_load_config.return_value = {
+            "username": "test",
+            "sync_specs": [],
+            "scrub_specs": [["/data", ".pardatabase", "5%", "weekly"]],
+            "notify_specs": [],
+        }
+
+        execute_storage_operations()
+
+        self.assertEqual(mock_run_scrub.call_count, 1)
+        self.assertFalse(mock_run_scrub.call_args.kwargs["verify"])
+        saved_state = mock_save_last.call_args.args[0]
+        self.assertIn("scrub:/data:.pardatabase", saved_state)
+        self.assertIn("parity:/data:.pardatabase", saved_state)
+
     @patch("sync.service_tools.storage_ops.send_operation_notification")
     @patch("sync.service_tools.storage_ops.run_scrub", return_value=(True, "OK"))
     @patch("sync.service_tools.storage_ops.validate_mounts_for_operation", return_value=(True, ""))
@@ -514,6 +572,7 @@ class TestOperationLogging(unittest.TestCase):
         log_calls = [call.args[1] for call in logger_mock.log.call_args_list]
         self.assertIn("Invalid sync spec | spec=['/src1', '/dst1']", log_calls)
         self.assertEqual(results["syncs"][0]["error"], "Invalid spec")
+        self.assertFalse(results["success"])
 
     @patch("sync.service_tools.storage_ops.send_operation_notification")
     @patch("sync.service_tools.storage_ops.run_sync")
@@ -546,6 +605,7 @@ class TestOperationLogging(unittest.TestCase):
             log_calls,
         )
         self.assertTrue(results["syncs"][0]["skipped"])
+        self.assertFalse(results["success"])
 
     @patch("sync.service_tools.storage_ops.send_operation_notification")
     @patch("sync.service_tools.storage_ops.run_scrub")
@@ -580,6 +640,7 @@ class TestOperationLogging(unittest.TestCase):
         self.assertIn("Skipping parity update | directory='/data' error='Mount /mnt/data not available'", log_calls)
         self.assertTrue(results["scrubs"][0]["skipped"])
         self.assertTrue(results["parity_updates"][0]["skipped"])
+        self.assertFalse(results["success"])
 
 
 class TestOperationNotifications(unittest.TestCase):

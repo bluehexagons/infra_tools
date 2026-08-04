@@ -18,7 +18,7 @@ this document focuses on what operators need to know.
 - Installs a weekly cleanup timer and caps journal growth on server-style
   setups.
 - Uses conservative package-update policy for Node, Ruby, and uv by default.
-- Installs auto-update unit files atomically and verifies that each timer is
+- Installs recurring maintenance unit files atomically and verifies that each timer is
   enabled and active without first deleting the working timer.
 
 ## Recovery Path
@@ -66,6 +66,11 @@ python3 infra_tools.py setup server_web <host> \
 - Node runtime updates preserve exact global npm package versions unless the
   ecosystem auto-upgrade policy is explicitly enabled.
 - Unattended APT and cleanup jobs never run `autoremove`.
+- Cleanup removes only disposable caches and exactly matched infra_tools temp
+  artifacts; it does not remove installed gem versions.
+- Restart checks fail safe when uptime or active-session detection is unavailable.
+- Security collection failures retain the previous cursor for retry, and storage
+  maintenance uses atomic state files and a persistent lock inode.
 - Node runtime retirement is owned by the Node updater after package migration;
   generic cleanup never removes nvm runtimes.
 - Gogs release archives are checked for an executable, runnable binary before
@@ -76,7 +81,7 @@ python3 infra_tools.py setup server_web <host> \
 ## Code References
 
 - `lib/deployment.py`
-- `lib/auto_update_systemd.py`
+- `lib/maintenance_systemd.py`
 - `deploy/deploy_steps.py`
 - `web/cicd_steps.py`
 - `common/service_tools/auto_update_apt.py`

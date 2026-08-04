@@ -10,7 +10,7 @@ import tempfile
 from typing import Optional
 
 from lib.apt_sources import disable_duplicate_vivaldi_source
-from lib.auto_update_systemd import configure_auto_update_timer
+from lib.maintenance_systemd import configure_maintenance_timer
 from lib.config import SetupConfig
 from lib.machine_state import can_manage_time_sync
 from lib.remote_utils import run, is_dry_run, is_package_installed, is_service_active, file_contains, install_package
@@ -558,7 +558,7 @@ def configure_auto_update_ruby(config: SetupConfig) -> None:
     """Configure automatic updates for global Ruby gems."""
     gem_path = shutil.which("gem") or "/usr/bin/gem"
 
-    configure_auto_update_timer(
+    configure_maintenance_timer(
         service_name="auto-update-ruby",
         service_desc="Auto-update global Ruby gems",
         timer_desc="Auto-update Ruby gems weekly",
@@ -567,6 +567,7 @@ def configure_auto_update_ruby(config: SetupConfig) -> None:
         check_path=gem_path,
         check_name="Ruby gems",
         environment={ECOSYSTEM_AUTO_UPGRADE_ENV: "0"},
+        purpose="auto-update",
     )
 
 
@@ -575,7 +576,7 @@ def configure_auto_update_uv(config: SetupConfig) -> None:
     user_home = f"/home/{config.username}"
     uv_path = f"{user_home}/.local/bin/uv"
 
-    configure_auto_update_timer(
+    configure_maintenance_timer(
         service_name="auto-update-uv",
         service_desc="Auto-update uv package manager",
         timer_desc="Auto-update uv weekly",
@@ -585,12 +586,13 @@ def configure_auto_update_uv(config: SetupConfig) -> None:
         check_name="uv",
         user=config.username,
         environment={ECOSYSTEM_AUTO_UPGRADE_ENV: "0"},
+        purpose="auto-update",
     )
 
 
 def configure_auto_update_gogs(config: SetupConfig) -> None:
     """Configure automatic updates for Gogs."""
-    configure_auto_update_timer(
+    configure_maintenance_timer(
         service_name="auto-update-gogs",
         service_desc="Auto-update Gogs service",
         timer_desc="Auto-update Gogs weekly",
@@ -598,6 +600,7 @@ def configure_auto_update_gogs(config: SetupConfig) -> None:
         schedule="Sun *-*-* 05:30:00",
         check_path="/usr/local/bin/gogs",
         check_name="Gogs",
+        purpose="auto-update",
     )
 
 

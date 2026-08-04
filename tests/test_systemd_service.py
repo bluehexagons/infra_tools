@@ -181,6 +181,32 @@ class TestCleanupFunctions(unittest.TestCase):
         ):
             self.assertIn(f"systemctl stop {unit}", run_commands)
 
+    @patch("lib.systemd_service.os.remove")
+    @patch("lib.systemd_service.run")
+    @patch(
+        "lib.systemd_service.os.listdir",
+        return_value=[
+            "security-monitor.service",
+            "security-monitor.timer",
+            "cleanup-maintenance.service",
+            "cleanup-maintenance.timer",
+        ],
+    )
+    @patch("lib.systemd_service.os.path.exists", return_value=True)
+    def test_cleanup_all_includes_recurring_maintenance_units(
+        self, _exists, _listdir, mock_run, _remove
+    ):
+        cleanup_all_infra_services()
+
+        run_commands = [args[0] for args, _ in mock_run.call_args_list]
+        for unit in (
+            "security-monitor.timer",
+            "cleanup-maintenance.timer",
+            "security-monitor.service",
+            "cleanup-maintenance.service",
+        ):
+            self.assertIn(f"systemctl stop {unit}", run_commands)
+
     @patch("lib.systemd_service.run")
     def test_cleanup_all_persists_rails_secret_before_removing_service(self, mock_run):
         with tempfile.TemporaryDirectory() as temp_dir:
