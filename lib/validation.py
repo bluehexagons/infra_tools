@@ -574,6 +574,12 @@ def validate_agent_repositories(repositories: Optional[list[str]]) -> None:
         if parsed.scheme:
             if parsed.scheme not in {"git", "http", "https", "ssh"} or not parsed.netloc:
                 raise ValueError(f"Invalid --repo git URL: {repository}")
+            if parsed.password is not None or (
+                parsed.scheme in {"http", "https"} and parsed.username is not None
+            ):
+                raise ValueError(
+                    "--repo URLs must not contain embedded credentials"
+                )
         elif not _GIT_SCP_URL_PATTERN.match(git_url):
             raise ValueError(
                 "--repo must be an https://, ssh://, git://, or git@host:path git URL"

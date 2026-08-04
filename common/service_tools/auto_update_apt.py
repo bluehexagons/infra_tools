@@ -25,7 +25,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../
 
 from lib.logging_utils import get_service_logger
 from lib.logging_utils import log_event
-from lib.apt_sources import disable_duplicate_vivaldi_source
 from lib.maintenance_defaults import APT_LOCK_OPTIONS
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
 
@@ -81,14 +80,6 @@ def main() -> int:
     """Main function to update APT packages."""
     log_event(logger, "Starting APT package update")
     notification_configs = load_notification_configs_from_state(logger)
-
-    try:
-        disabled_path = disable_duplicate_vivaldi_source()
-    except (OSError, ValueError) as e:
-        log_event(logger, "APT source cleanup failed", level=WARNING, error=str(e))
-    else:
-        if disabled_path:
-            log_event(logger, "Disabled duplicate Vivaldi APT source", path=disabled_path)
 
     if not update_package_lists():
         send_notification_safe(

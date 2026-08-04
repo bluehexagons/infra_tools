@@ -263,6 +263,8 @@ def prepare_agent_repositories(config: SetupConfig, target_dir: str) -> None:
     if not config.agent_repos:
         return
 
+    validate_agent_repositories(config.agent_repos)
+
     print(f"\n{'='*60}")
     print("Cloning agent repositories locally...")
     print(f"{'='*60}")

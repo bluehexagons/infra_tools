@@ -178,9 +178,10 @@ def cleanup_all_infra_services(dry_run: bool = False) -> None:
         r"^rails-.*\.service$",
         # Manifest-defined (infra.json) service components
         r"^app-.*\.service$",
-        # Auto-update timers
-        r"^auto-update-[a-z0-9_.@-]+\.service$",
-        r"^auto-update-[a-z0-9_.@-]+\.timer$",
+        # Auto-update units created by infra_tools. Keep this explicit so an
+        # unrelated unit with a similar name cannot be removed.
+        r"^auto-update-(?:apt|gogs|node|ruby|uv)\.service$",
+        r"^auto-update-(?:apt|gogs|node|ruby|uv)\.timer$",
         # Auto-restart service
         r"^auto-restart-if-needed\.service$",
         r"^auto-restart-if-needed\.timer$",

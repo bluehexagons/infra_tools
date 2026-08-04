@@ -22,6 +22,7 @@ from .common_steps import _run_as_login_user
 
 REMOTE_AGENT_PAYLOAD_DIR = "/opt/infra_tools/agent_payload"
 REMOTE_AGENT_REPOS_DIR = "/opt/infra_tools/agent_repos"
+AGENT_REPOS_CACHE_DIR = "/var/cache/infra_tools/agent_repos"
 AGENT_CODING_PACKAGES = (
     "build-essential",
     "cmake",
@@ -337,13 +338,54 @@ def _payload_path(*parts: str) -> str:
     return os.path.join(REMOTE_AGENT_PAYLOAD_DIR, *parts)
 
 
+def _reject_symlinked_agent_destination(path: str) -> None:
+    """Reject symlinks in an agent-owned destination path before writing."""
+    absolute_path = os.path.abspath(path)
+    current = os.path.sep
+    for component in absolute_path.split(os.path.sep):
+        if not component:
+            continue
+        current = os.path.join(current, component)
+        if os.path.lexists(current) and os.path.islink(current):
+            raise RuntimeError(f"Refusing symlinked agent destination: {current}")
+
+    if not os.path.isdir(absolute_path):
+        return
+
+    for root, directories, files in os.walk(absolute_path, followlinks=False):
+        for name in (*directories, *files):
+            candidate = os.path.join(root, name)
+            if os.path.islink(candidate):
+                raise RuntimeError(f"Refusing symlinked agent destination: {candidate}")
+
+
+def _ensure_agent_directory(path: str, mode: int = 0o700) -> None:
+    """Create a directory without accepting symlinked path components."""
+    absolute_path = os.path.abspath(path)
+    current = os.path.sep
+    for component in absolute_path.split(os.path.sep):
+        if not component:
+            continue
+        current = os.path.join(current, component)
+        if os.path.lexists(current):
+            if os.path.islink(current) or not os.path.isdir(current):
+                raise RuntimeError(f"Refusing unsafe agent destination: {current}")
+            continue
+        os.mkdir(current, mode)
+
+    _reject_symlinked_agent_destination(absolute_path)
+
+
 def _copy_payload_directory(config: SetupConfig, source: str, destination: str, label: str) -> None:
     if not os.path.isdir(source):
         print(f"  No {label} payload found")
         return
 
-    os.makedirs(destination, exist_ok=True)
+    _reject_symlinked_agent_destination(destination)
+    _ensure_agent_directory(destination)
+    _reject_symlinked_agent_destination(destination)
     shutil.copytree(source, destination, symlinks=True, dirs_exist_ok=True)
+    _reject_symlinked_agent_destination(destination)
     _chown_path(config, destination)
     print(f"  Copied {label} config")
 
@@ -353,8 +395,20 @@ def _copy_secret_file(config: SetupConfig, source: str, destination: str, label:
         print(f"  No {label} credential payload found")
         return False
 
-    os.makedirs(os.path.dirname(destination), mode=0o700, exist_ok=True)
-    shutil.copy2(source, destination)
+    destination_parent = os.path.dirname(destination)
+    _reject_symlinked_agent_destination(destination_parent)
+    _ensure_agent_directory(destination_parent)
+    _reject_symlinked_agent_destination(destination)
+
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+    file_descriptor = os.open(destination, flags, 0o600)
+    try:
+        with open(source, "rb") as source_file, os.fdopen(file_descriptor, "wb") as destination_file:
+            file_descriptor = -1
+            shutil.copyfileobj(source_file, destination_file)
+    finally:
+        if file_descriptor >= 0:
+            os.close(file_descriptor)
     os.chmod(destination, 0o600)
     _chown_path(config, destination)
     print(f"  Copied {label} credentials")
@@ -467,26 +521,56 @@ def copy_agent_tooling_payload(config: SetupConfig) -> None:
 
 
 def install_agent_repositories(config: SetupConfig) -> None:
-    """Copy uploaded working repositories into /home/USER/repos."""
+    """Cache uploaded repositories and copy them into /home/USER/repos."""
     if is_dry_run():
         print("  [DRY-RUN] Would copy uploaded repositories to the setup user's repos directory")
         return
 
-    if not os.path.isdir(REMOTE_AGENT_REPOS_DIR):
+    staged_repo_names: list[str] = []
+    if os.path.isdir(REMOTE_AGENT_REPOS_DIR):
+        _ensure_agent_directory(AGENT_REPOS_CACHE_DIR)
+        os.chmod(AGENT_REPOS_CACHE_DIR, 0o700)
+        for repo_name in sorted(os.listdir(REMOTE_AGENT_REPOS_DIR)):
+            source = os.path.join(REMOTE_AGENT_REPOS_DIR, repo_name)
+            if os.path.islink(source) or not os.path.isdir(source):
+                raise RuntimeError(f"Unsafe uploaded agent repository: {source}")
+
+            destination = os.path.join(AGENT_REPOS_CACHE_DIR, repo_name)
+            _reject_symlinked_agent_destination(destination)
+            if os.path.lexists(destination):
+                if not os.path.isdir(destination):
+                    raise RuntimeError(f"Unsafe agent repository cache path: {destination}")
+                shutil.rmtree(destination)
+            shutil.copytree(source, destination, symlinks=True)
+            os.chmod(destination, 0o700)
+            staged_repo_names.append(repo_name)
+
+    if staged_repo_names:
+        source_root = AGENT_REPOS_CACHE_DIR
+        repo_names = staged_repo_names
+    elif os.path.isdir(AGENT_REPOS_CACHE_DIR):
+        source_root = AGENT_REPOS_CACHE_DIR
+        repo_names = sorted(os.listdir(source_root))
+    elif os.path.isdir(REMOTE_AGENT_REPOS_DIR):
+        source_root = REMOTE_AGENT_REPOS_DIR
+        repo_names = sorted(os.listdir(source_root))
+    else:
         print("  No uploaded agent repositories found")
         return
 
     repos_dir = os.path.join(_user_home(config), "repos")
-    os.makedirs(repos_dir, exist_ok=True)
+    _reject_symlinked_agent_destination(repos_dir)
+    _ensure_agent_directory(repos_dir)
     _chown_path(config, repos_dir)
 
-    for repo_name in sorted(os.listdir(REMOTE_AGENT_REPOS_DIR)):
-        source = os.path.join(REMOTE_AGENT_REPOS_DIR, repo_name)
+    for repo_name in repo_names:
+        source = os.path.join(source_root, repo_name)
         if not os.path.isdir(source):
             continue
 
         destination = os.path.join(repos_dir, repo_name)
-        if os.path.exists(destination):
+        _reject_symlinked_agent_destination(destination)
+        if os.path.lexists(destination):
             print(f"  Skipping existing repository {destination} to avoid overwriting agent work")
             continue
 

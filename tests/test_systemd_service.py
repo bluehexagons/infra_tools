@@ -238,6 +238,21 @@ class TestCleanupFunctions(unittest.TestCase):
         mock_run.assert_not_called()
         mock_remove.assert_not_called()
 
+    @patch("lib.systemd_service.os.remove")
+    @patch("lib.systemd_service.run")
+    @patch(
+        "lib.systemd_service.os.listdir",
+        return_value=["auto-update-third-party.service", "auto-update-third-party.timer"],
+    )
+    @patch("lib.systemd_service.os.path.exists", return_value=True)
+    def test_cleanup_all_leaves_unrelated_auto_update_units(
+        self, _exists, _listdir, mock_run, mock_remove
+    ):
+        cleanup_all_infra_services()
+
+        mock_run.assert_not_called()
+        mock_remove.assert_not_called()
+
     @patch("time.sleep")
     @patch("lib.systemd_service.run")
     def test_create_rails_service_restores_persisted_secret(self, mock_run, _sleep):

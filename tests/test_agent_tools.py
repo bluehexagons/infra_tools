@@ -16,8 +16,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from common.agent_steps import (
     _download_verified_file,
     _latest_t3code_asset,
+    _copy_secret_file,
     _user_home,
     copy_agent_tooling_payload,
+    install_agent_repositories,
     install_claude,
     install_codex,
     install_opencode,
@@ -200,6 +202,63 @@ class TestAgentPayloadInstallation(unittest.TestCase):
             self.assertTrue(os.path.isfile(destination))
             self.assertEqual(os.stat(destination).st_mode & 0o777, 0o600)
             self.assertFalse(os.path.exists(payload_dir))
+
+    def test_secret_copy_rejects_symlinked_destination(self):
+        config = SetupConfig(
+            host='host',
+            username='agent',
+            system_type='server_dev',
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            source = os.path.join(directory, 'auth.json')
+            outside = os.path.join(directory, 'outside.json')
+            home = os.path.join(directory, 'home')
+            os.makedirs(home)
+            with open(source, 'w', encoding='utf-8') as file_obj:
+                file_obj.write('secret')
+            with open(outside, 'w', encoding='utf-8') as file_obj:
+                file_obj.write('untouched')
+            os.symlink(directory, os.path.join(home, '.codex'))
+
+            with self.assertRaisesRegex(RuntimeError, 'symlinked agent destination'):
+                _copy_secret_file(
+                    config,
+                    source,
+                    os.path.join(home, '.codex', 'auth.json'),
+                    'Codex',
+                )
+
+            with open(outside, encoding='utf-8') as file_obj:
+                self.assertEqual(file_obj.read(), 'untouched')
+
+    def test_uploaded_repository_cache_is_retained_and_root_only(self):
+        config = SetupConfig(
+            host='host',
+            username='agent',
+            system_type='server_dev',
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            staged = os.path.join(directory, 'staged')
+            cache = os.path.join(directory, 'cache', 'agent_repos')
+            home = os.path.join(directory, 'home')
+            source = os.path.join(staged, 'repo', '.git')
+            os.makedirs(source)
+            os.makedirs(home)
+            with open(os.path.join(source, 'config'), 'w', encoding='utf-8') as file_obj:
+                file_obj.write('[remote "origin"]\nurl = git@github.com:user/repo.git\n')
+
+            with (
+                patch('common.agent_steps.REMOTE_AGENT_REPOS_DIR', staged),
+                patch('common.agent_steps.AGENT_REPOS_CACHE_DIR', cache),
+                patch('common.agent_steps._user_home', return_value=home),
+                patch('common.agent_steps._chown_path'),
+            ):
+                install_agent_repositories(config)
+
+            self.assertTrue(os.path.exists(os.path.join(home, 'repos', 'repo', '.git', 'config')))
+            self.assertTrue(os.path.exists(os.path.join(cache, 'repo', '.git', 'config')))
+            self.assertEqual(os.stat(cache).st_mode & 0o777, 0o700)
+            self.assertTrue(os.path.isdir(staged))
 
     def test_payload_is_removed_when_copying_fails(self):
         config = SetupConfig(

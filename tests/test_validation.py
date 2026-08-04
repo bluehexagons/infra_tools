@@ -180,6 +180,18 @@ class TestValidateAgentRepositories(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid --repo git URL"):
             validate_agent_repositories([' https://github.com/user/repo.git'])
 
+    def test_http_urls_with_embedded_credentials_fail(self):
+        for url in (
+            'https://user:token@example.com/repo.git',
+            'http://token@example.com/repo.git',
+            'ssh://git:token@example.com/repo.git',
+        ):
+            with self.subTest(url=url), self.assertRaisesRegex(
+                ValueError,
+                "embedded credentials",
+            ):
+                validate_agent_repositories([url])
+
     def test_duplicate_repo_name_fails(self):
         with self.assertRaisesRegex(ValueError, "Duplicate --repo repository name: repo"):
             validate_agent_repositories([

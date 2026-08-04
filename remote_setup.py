@@ -16,7 +16,7 @@ from lib.display import print_setup_summary
 from lib.machine_state import resolve_machine_type, save_machine_state, save_setup_config
 from lib.notifications import send_setup_notification
 from lib.remote_utils import detect_os, set_dry_run
-from lib.validation import validate_samba_share_credentials
+from lib.validation import validate_agent_repositories, validate_samba_share_credentials
 from lib.validators import validate_username
 from lib.progress import progress_bar
 from lib.system_types import get_steps_for_system_type
@@ -126,6 +126,7 @@ def config_from_remote_args(args: argparse.Namespace) -> SetupConfig:
     
     config = SetupConfig.from_args(args, system_type)
     config.machine_type = resolve_machine_type(config.machine_type)
+    validate_agent_repositories(config.agent_repos)
     validate_samba_share_credentials(config)
     
     if system_type == "server_proxmox":

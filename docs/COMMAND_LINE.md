@@ -120,7 +120,7 @@ infra_tools.py setup workstation_dev 10.0.0.10 agentuser \
 | `--agent-suite full` | Install the desktop suite plus Node, Python, and Go tooling |
 | `--copy-config` | Stage selected local config for tools enabled by the same command |
 | `--copy-keys` | Stage selected local credentials for tools enabled by the same command |
-| `--repo GIT_URL` | Clone locally, upload with the setup bundle, and copy to `/home/USER/repos/NAME`; repeatable |
+| `--repo GIT_URL` | Clone locally, upload with the setup bundle, cache privately on the target, and copy to `/home/USER/repos/NAME`; repeatable |
 
 Codex CLI, Claude Code, OpenCode, and T3 Code are installed from their official
 distribution channels. infra_tools does not install these tools with npm. Any
@@ -140,10 +140,14 @@ Credential/config copy is intentionally tool-scoped:
 - T3 Code receives only a command wrapper and desktop entry; infra_tools does not copy T3 Code credentials.
 
 The root-only upload payload is removed after the selected config and credentials
-are copied. Repository caches are isolated by complete git URL. A requested
-repository that cannot be cloned stops setup instead of producing a successful
-VM without its workspace. Existing destinations on the VM are still skipped to
-avoid overwriting agent work on long-lived disposable VMs.
+are copied. Uploaded agent repositories are retained in a root-only target cache
+so repeated setup work does not expose private source to unrelated local users;
+the user-facing workspace is copied and owned by the setup user. Repository
+clones on the orchestration host are isolated by complete git URL. Agent
+repository URLs with embedded credentials are rejected. A requested repository
+that cannot be cloned stops setup instead of producing a successful VM without
+its workspace. Existing destinations on the VM are still skipped to avoid
+overwriting agent work on long-lived disposable VMs.
 
 On the configured VM, check the terminal suite without exposing credential
 contents:
