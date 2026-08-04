@@ -1,6 +1,8 @@
 # Shell Completion
 
-The unified `infra_tools` CLI supports tab completion for Bash, Zsh, and Fish.
+The unified `infra_tools` CLI supports full tab completion for Bash, Zsh, and
+Fish. `tcsh` is accepted as a compatibility choice but has no generated
+completion file; use Bash or Zsh for the complete command surface.
 
 ## Quick Setup
 

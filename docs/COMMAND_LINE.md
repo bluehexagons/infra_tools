@@ -208,7 +208,7 @@ Notes:
 | `--api-subdomain` | Deploy Rails API to `api.domain.com` |
 
 Repos can also ship `infra.json` manifests for multi-component deploys; see
-`README.md` for the current overview.
+[Deployments and manifests](./DEPLOYMENTS.md) for the schema and examples.
 
 ## CI/CD and Build / App Servers
 

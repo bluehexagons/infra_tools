@@ -23,6 +23,7 @@ capabilities, and operating policies.
 | [Network inventory](NETWORKING.md) | Network profiles and read-only Proxmox firewall planning |
 | [Recurring maintenance](MAINTENANCE.md) | Timers, update policy, cleanup, and troubleshooting |
 | [Deployment safety](DEPLOYMENT_SAFETY.md) | Persistent state, backups, rollback, and deployment boundaries |
+| [Deployments and manifests](DEPLOYMENTS.md) | `--deploy`, `infra.json`, static sites, services, and runtime behavior |
 
 ## Feature guides
 

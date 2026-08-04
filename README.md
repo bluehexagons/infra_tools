@@ -50,7 +50,7 @@ details.
 | Servers | Security hardening, Nginx/SSL, language runtimes, deployments, Gogs, and Antistatic | [CLI reference](docs/COMMAND_LINE.md), [Antistatic](docs/ANTISTATIC.md) |
 | Workstations | XFCE, i3, LXQt, RDP, browsers, and desktop tooling | [XRDP](docs/XRDP.md), [CLI reference](docs/COMMAND_LINE.md) |
 | Storage | Authenticated Samba shares, SMB mounts, rsync sync, and par2 verification | [Samba shares](docs/SAMBA_SHARES.md) |
-| Deployments | Single-service deployments and `infra.json` multi-component manifests | [Deployment safety](docs/DEPLOYMENT_SAFETY.md), [CI/CD](docs/CICD.md) |
+| Deployments | Single-service deployments and `infra.json` multi-component manifests | [Deployments](docs/DEPLOYMENTS.md), [Deployment safety](docs/DEPLOYMENT_SAFETY.md), [CI/CD](docs/CICD.md) |
 | Proxmox | Host discovery, VM/LXC provisioning, lifecycle, snapshots, and rolling updates | [Proxmox workflows](docs/PROXMOX.md) |
 | Networking | Workspace-backed inventory and read-only Proxmox firewall planning | [Networking](docs/NETWORKING.md) |
 | Sysadmin | SSH, transfers, health, services, logs, upgrades, and reachability | [Sysadmin shortcuts](docs/SYSADMIN.md) |

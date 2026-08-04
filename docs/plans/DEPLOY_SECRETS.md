@@ -13,7 +13,7 @@ The intended shape is simple:
 This remains a design note only. When implementation starts, the work should be
 built on top of the current deployment and manifest code paths:
 
-- `README.md`
+- `docs/DEPLOYMENTS.md`
 - `docs/DEPLOYMENT_SAFETY.md`
 - `lib/credentials.py`
 - `lib/deployment.py`
