@@ -201,26 +201,46 @@ stable -> 22.3 (-> v22.3.0) (default)
         self.assertIn("update_track='LTS'", joined)
 
     @patch("web.service_tools.auto_update_node.run_nvm_command")
-    def test_install_target_reinstalls_packages_with_freshness_cutoff(self, mock_run_nvm):
+    def test_install_target_preserves_exact_global_package_versions(self, mock_run_nvm):
         def run_command(args):
             if args[:6] == ["nvm", "exec", "v20.12.2", "npm", "list", "-g"]:
-                return subprocess.CompletedProcess(args=args, returncode=0, stdout='{"dependencies":{"pnpm":{},"typescript":{},"npm":{}}}', stderr="")
+                return subprocess.CompletedProcess(
+                    args=args,
+                    returncode=0,
+                    stdout='{"dependencies":{"pnpm":{"version":"9.1.0"},"typescript":{"version":"5.4.5"},"npm":{"version":"10.5.0"}}}',
+                    stderr="",
+                )
             return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
 
         mock_run_nvm.side_effect = run_command
 
-        with patch.dict(os.environ, {DEPENDENCY_MIN_AGE_DAYS_ENV: "2"}):
-            success, details = auto_update_node.install_target_version("lts", "v20.12.3", "v20.12.2")
+        success, details = auto_update_node.install_target_version("lts", "v20.12.3", "v20.12.2")
 
         self.assertTrue(success)
         self.assertIsNone(details)
         commands = [call_args.args[0] for call_args in mock_run_nvm.call_args_list]
         self.assertIn(["nvm", "alias", "default", "lts/*"], commands)
+        self.assertIn(["nvm", "install", "v20.12.3"], commands)
         reinstall_commands = [command for command in commands if command[:6] == ["nvm", "exec", "v20.12.3", "npm", "install", "-g"]]
-        self.assertEqual(len(reinstall_commands), 2)
-        self.assertTrue(all(any(arg.startswith("--before=") for arg in command) for command in reinstall_commands))
-        self.assertIn("pnpm", reinstall_commands[1])
-        self.assertIn("typescript", reinstall_commands[1])
+        self.assertEqual(len(reinstall_commands), 1)
+        self.assertIn("pnpm@9.1.0", reinstall_commands[0])
+        self.assertIn("typescript@5.4.5", reinstall_commands[0])
+        self.assertNotIn("npm@latest", reinstall_commands[0])
+
+    @patch("web.service_tools.auto_update_node.run_nvm_command")
+    def test_package_migration_fails_closed_when_version_metadata_is_missing(self, mock_run_nvm):
+        mock_run_nvm.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout='{"dependencies":{"typescript":{}}}',
+            stderr="",
+        )
+
+        success, details = auto_update_node.reinstall_global_packages("v20.12.2", "v20.12.3")
+
+        self.assertFalse(success)
+        self.assertIn("missing safe version metadata", details or "")
+        self.assertEqual(mock_run_nvm.call_count, 1)
 
     @patch("web.service_tools.auto_update_node.send_notification_safe")
     @patch("web.service_tools.auto_update_node.load_notification_configs_from_state", return_value=[])

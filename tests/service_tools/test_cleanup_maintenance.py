@@ -17,7 +17,6 @@ from common.service_tools import cleanup_maintenance
 
 class TestCleanupMaintenance(unittest.TestCase):
     @patch("common.service_tools.cleanup_maintenance.notify_if_storage_still_low")
-    @patch("common.service_tools.cleanup_maintenance.cleanup_old_node_versions", return_value=[])
     @patch("common.service_tools.cleanup_maintenance.cleanup_stale_infra_tmp_artifacts", return_value=[])
     @patch("common.service_tools.cleanup_maintenance.cleanup_optional_cache", return_value=None)
     @patch("common.service_tools.cleanup_maintenance.cleanup_apt_cache", return_value=[])
@@ -28,7 +27,6 @@ class TestCleanupMaintenance(unittest.TestCase):
         mock_apt,
         mock_optional,
         mock_tmp_cleanup,
-        mock_node_cleanup,
         mock_low_space,
     ):
         with self.assertLogs(cleanup_maintenance.logger, level="INFO") as logs:
@@ -38,14 +36,12 @@ class TestCleanupMaintenance(unittest.TestCase):
         self.assertEqual(mock_optional.call_count, 6)
         # Stale infra tmp cleanup runs once per known temp directory (/tmp, /var/tmp).
         self.assertEqual(mock_tmp_cleanup.call_count, len(cleanup_maintenance.INFRA_TMP_DIRS))
-        mock_node_cleanup.assert_called_once()
         mock_low_space.assert_called_once()
         joined = "\n".join(logs.output)
         self.assertIn("Starting cleanup maintenance", joined)
         self.assertIn("Cleanup maintenance completed successfully", joined)
 
     @patch("common.service_tools.cleanup_maintenance.notify_if_storage_still_low")
-    @patch("common.service_tools.cleanup_maintenance.cleanup_old_node_versions", return_value=[])
     @patch("common.service_tools.cleanup_maintenance.cleanup_stale_infra_tmp_artifacts", return_value=[])
     @patch("common.service_tools.cleanup_maintenance.send_notification_safe")
     @patch("common.service_tools.cleanup_maintenance.cleanup_optional_cache", side_effect=[None, "journal vacuum: failed", None, None, None, None])
@@ -58,7 +54,6 @@ class TestCleanupMaintenance(unittest.TestCase):
         _optional,
         mock_notify,
         _tmp_cleanup,
-        mock_node_cleanup,
         mock_low_space,
     ):
         result = cleanup_maintenance.main()
@@ -66,7 +61,6 @@ class TestCleanupMaintenance(unittest.TestCase):
         mock_notify.assert_called_once()
         self.assertIn("cleanup maintenance failed", mock_notify.call_args.kwargs["subject"])
         self.assertIn("journal vacuum: failed", mock_notify.call_args.kwargs["details"])
-        mock_node_cleanup.assert_called_once()
         mock_low_space.assert_called_once()
 
 
@@ -110,10 +104,6 @@ class TestCleanupHelpers(unittest.TestCase):
         self.assertEqual(first_call.kwargs["env"]["DEBIAN_FRONTEND"], "noninteractive")
         self.assertEqual(
             mock_run_command.call_args_list[1].args[0],
-            ["/usr/bin/apt-get", "autoremove", "-y", "-qq", "-o", "DPkg::Lock::Timeout=300"],
-        )
-        self.assertEqual(
-            mock_run_command.call_args_list[2].args[0],
             ["/usr/bin/apt-get", "clean", "-o", "DPkg::Lock::Timeout=300"],
         )
 
@@ -179,65 +169,6 @@ class TestCleanupHelpers(unittest.TestCase):
                 )
 
             self.assertEqual(failures, [f"{old_dir}: busy"])
-
-    @patch("common.service_tools.cleanup_maintenance.shutil.rmtree")
-    @patch("common.service_tools.cleanup_maintenance.os.listdir", return_value=["v18.20.0", "v20.12.2"])
-    @patch("common.service_tools.cleanup_maintenance.os.path.isdir", return_value=True)
-    @patch("common.service_tools.cleanup_maintenance.run_nvm_command")
-    @patch("common.service_tools.cleanup_maintenance.iter_nvm_dirs", return_value=[("alice", "/home/alice/.nvm")])
-    def test_cleanup_old_node_versions_removes_non_default_versions(
-        self,
-        _dirs,
-        mock_nvm,
-        _isdir,
-        _listdir,
-        mock_rmtree,
-    ):
-        mock_nvm.side_effect = [
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="v20.12.2\n", stderr=""),
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
-        ]
-
-        failures = cleanup_maintenance.cleanup_old_node_versions()
-
-        self.assertEqual(failures, [])
-        mock_rmtree.assert_called_once_with("/home/alice/.nvm/versions/node/v18.20.0")
-        self.assertEqual(mock_nvm.call_count, 2)
-
-    @patch("common.service_tools.cleanup_maintenance.run_nvm_command")
-    @patch("common.service_tools.cleanup_maintenance.iter_nvm_dirs", return_value=[("alice", "/home/alice/.nvm")])
-    def test_cleanup_old_node_versions_reports_default_version_timeout(
-        self,
-        _dirs,
-        mock_nvm,
-    ):
-        mock_nvm.side_effect = subprocess.TimeoutExpired(["nvm"], timeout=600)
-
-        failures = cleanup_maintenance.cleanup_old_node_versions()
-
-        self.assertEqual(failures, ["alice default: nvm version default timed out after 600s"])
-
-    @patch("common.service_tools.cleanup_maintenance.os.listdir", return_value=["v18.20.0", "v20.12.2"])
-    @patch("common.service_tools.cleanup_maintenance.os.path.isdir", return_value=True)
-    @patch("common.service_tools.cleanup_maintenance.shutil.rmtree")
-    @patch("common.service_tools.cleanup_maintenance.run_nvm_command")
-    @patch("common.service_tools.cleanup_maintenance.iter_nvm_dirs", return_value=[("alice", "/home/alice/.nvm")])
-    def test_cleanup_old_node_versions_reports_cache_timeout(
-        self,
-        _dirs,
-        mock_nvm,
-        _rmtree,
-        _isdir,
-        _listdir,
-    ):
-        mock_nvm.side_effect = [
-            subprocess.CompletedProcess(args=[], returncode=0, stdout="v20.12.2\n", stderr=""),
-            subprocess.TimeoutExpired(["nvm"], timeout=600),
-        ]
-
-        failures = cleanup_maintenance.cleanup_old_node_versions()
-
-        self.assertEqual(failures, ["alice cache: nvm cache clear timed out after 600s"])
 
     @patch("common.service_tools.cleanup_maintenance.send_notification_safe")
     @patch("common.service_tools.cleanup_maintenance.get_disk_usage_details", return_value={

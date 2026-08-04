@@ -2,83 +2,10 @@
 
 from __future__ import annotations
 
-import os
-from typing import Optional
-
 from common.common_steps import configure_auto_update_ruby as _configure_auto_update_ruby_common
+from lib.auto_update_systemd import configure_auto_update_timer
 from lib.config import SetupConfig
-from lib.remote_utils import run
-from lib.systemd_service import cleanup_service
 from lib.update_policy import ECOSYSTEM_AUTO_UPGRADE_ENV
-
-
-def _configure_auto_update_systemd(
-    service_name: str,
-    service_desc: str,
-    timer_desc: str,
-    script_name: str,
-    schedule: str,
-    check_path: str,
-    check_name: str,
-    user: Optional[str] = None,
-    environment: Optional[dict[str, str]] = None,
-) -> None:
-    """Helper to configure systemd service and timer for auto-updates."""
-    if not os.path.exists(check_path):
-        print(f"  ℹ {check_name} not installed, skipping auto-update configuration")
-        return
-
-    service_file = f"/etc/systemd/system/{service_name}.service"
-    timer_file = f"/etc/systemd/system/{service_name}.timer"
-
-    # Clean up any existing service/timer before creating new ones
-    cleanup_service(service_name)
-
-    script_path = f"/opt/infra_tools/web/service_tools/{script_name}"
-    
-    user_line = f"User={user}\n" if user else ""
-    environment_lines = ""
-    if environment:
-        environment_lines = "".join(
-            f'Environment="{name}={value}"\n'
-            for name, value in sorted(environment.items())
-        )
-    
-    service_content = f"""[Unit]
-Description={service_desc}
-Documentation=man:systemd.service(5)
-
-[Service]
-Type=oneshot
-{user_line}{environment_lines}ExecStart=/usr/bin/python3 {script_path}
-StandardOutput=journal
-StandardError=journal
-"""
-
-    with open(service_file, "w") as f:
-        f.write(service_content)
-
-    timer_content = f"""[Unit]
-Description={timer_desc}
-Documentation=man:systemd.timer(5)
-
-[Timer]
-OnCalendar={schedule}
-Persistent=true
-RandomizedDelaySec=30min
-
-[Install]
-WantedBy=timers.target
-"""
-
-    with open(timer_file, "w") as f:
-        f.write(timer_content)
-
-    run("systemctl daemon-reload")
-    run(f"systemctl enable {service_name}.timer")
-    run(f"systemctl start {service_name}.timer")
-
-    print(f"  ✓ {check_name} auto-update configured ({schedule})")
 
 
 def configure_auto_update_node(config: SetupConfig) -> None:
@@ -86,13 +13,13 @@ def configure_auto_update_node(config: SetupConfig) -> None:
     user_home = f"/home/{config.username}"
     nvm_dir = f"{user_home}/.nvm"
     
-    _configure_auto_update_systemd(
+    configure_auto_update_timer(
         service_name="auto-update-node",
         service_desc="Auto-update Node.js via nvm",
         timer_desc="Auto-update Node.js weekly",
-        script_name="auto_update_node.py",
+        script_path="/opt/infra_tools/web/service_tools/auto_update_node.py",
         schedule="Sun *-*-* 03:00:00",
-        check_path=nvm_dir,
+        check_path=f"{nvm_dir}/nvm.sh",
         check_name="Node.js",
         user=config.username,
         environment={ECOSYSTEM_AUTO_UPGRADE_ENV: "0"},

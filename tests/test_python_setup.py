@@ -48,7 +48,7 @@ class TestPythonFlag(unittest.TestCase):
     def test_install_or_update_uv_returns_true_in_dry_run(self, _is_dry_run):
         self.assertTrue(common_steps.install_or_update_uv(user_home="/home/user", username="user"))
 
-    @patch("common.common_steps._configure_auto_update_systemd")
+    @patch("common.common_steps.configure_auto_update_timer")
     def test_configure_auto_update_uv_disables_ecosystem_auto_upgrades(self, mock_configure):
         config = SetupConfig(host="host", username="user", system_type="server_dev", install_python=True)
         common_steps.configure_auto_update_uv(config)
@@ -56,7 +56,7 @@ class TestPythonFlag(unittest.TestCase):
             service_name="auto-update-uv",
             service_desc="Auto-update uv package manager",
             timer_desc="Auto-update uv weekly",
-            script_name="auto_update_uv.py",
+            script_path="/opt/infra_tools/common/service_tools/auto_update_uv.py",
             schedule="Sun *-*-* 05:00:00",
             check_path="/home/user/.local/bin/uv",
             check_name="uv",

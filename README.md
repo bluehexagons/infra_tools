@@ -42,17 +42,25 @@ capability matrix and compatibility notes.
 - **Sysadmin shortcuts**: mount, health, ssh, push/pull, df, fan, svc, logs, upgrade, reachable — see [docs/SYSADMIN.md](./docs/SYSADMIN.md)
 
 Background maintenance includes a `cleanup-maintenance` systemd timer that reclaims temporary files,
-stale infra_tools setup/deploy artifacts, unused APT packages, old package-manager caches, and oversized journals.
+stale infra_tools setup/deploy artifacts, old package-manager caches, and oversized journals.
 Infra tools also installs a journald drop-in at `/etc/systemd/journald.conf.d/infra-tools.conf` to cap
 persistent and runtime journal usage at `100M`.
 
 Automatic update policy is intentionally conservative for language ecosystems. APT updates still run
-automatically, but the updater refuses automated package removals. Node.js, Ruby, and uv timers no longer
+automatically, but the updater refuses automated package removals and replaces the distro APT timers to avoid
+competing upgrade jobs. Node.js, Ruby, and uv timers no longer
 auto-upgrade global npm packages, gems, or uv-managed tools unless `INFRA_TOOLS_ECOSYSTEM_AUTO_UPGRADE=1`
 is set for the service. Node.js defaults to the LTS track; if a non-LTS/latest Node.js track is already
-installed, the Node updater treats that as an explicit opt-in and keeps that track current too.
+installed, the Node updater treats that as an explicit opt-in and keeps that track current too. When Node.js
+itself changes, installed global packages are migrated at their existing versions; version upgrades still
+require the ecosystem opt-in.
 Dependency-resolving npm and uv installs default to `INFRA_TOOLS_DEPENDENCY_MIN_AGE_DAYS=7` so very new
 package releases are avoided where the package manager supports a freshness cutoff.
+
+All automatic update jobs use the same systemd provisioning path. Unit files are replaced atomically,
+wait for network-online, allow up to four hours for a run, and are checked for both enabled and active state
+after installation. Existing working timers are not removed before replacement units have loaded. The cleanup
+timer does not remove APT packages or nvm runtimes; each updater owns its own safe retirement decisions.
 
 ## CLI Entry Points
 

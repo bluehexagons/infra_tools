@@ -179,12 +179,8 @@ def cleanup_all_infra_services(dry_run: bool = False) -> None:
         # Manifest-defined (infra.json) service components
         r"^app-.*\.service$",
         # Auto-update timers
-        r"^auto-update-node\.service$",
-        r"^auto-update-node\.timer$",
-        r"^auto-update-apt\.service$",
-        r"^auto-update-apt\.timer$",
-        r"^auto-update-gogs\.service$",
-        r"^auto-update-gogs\.timer$",
+        r"^auto-update-[a-z0-9_.@-]+\.service$",
+        r"^auto-update-[a-z0-9_.@-]+\.timer$",
         # Auto-restart service
         r"^auto-restart-if-needed\.service$",
         r"^auto-restart-if-needed\.timer$",

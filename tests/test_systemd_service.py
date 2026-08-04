@@ -155,6 +155,32 @@ class TestCleanupFunctions(unittest.TestCase):
         self.assertIn("systemctl daemon-reload", run_commands)
         self.assertIn("systemctl reset-failed", run_commands)
 
+    @patch("lib.systemd_service.os.remove")
+    @patch("lib.systemd_service.run")
+    @patch(
+        "lib.systemd_service.os.listdir",
+        return_value=[
+            "auto-update-ruby.service",
+            "auto-update-ruby.timer",
+            "auto-update-uv.service",
+            "auto-update-uv.timer",
+        ],
+    )
+    @patch("lib.systemd_service.os.path.exists", return_value=True)
+    def test_cleanup_all_includes_every_language_update_timer(
+        self, _exists, _listdir, mock_run, _remove
+    ):
+        cleanup_all_infra_services()
+
+        run_commands = [args[0] for args, _ in mock_run.call_args_list]
+        for unit in (
+            "auto-update-ruby.timer",
+            "auto-update-uv.timer",
+            "auto-update-ruby.service",
+            "auto-update-uv.service",
+        ):
+            self.assertIn(f"systemctl stop {unit}", run_commands)
+
     @patch("lib.systemd_service.run")
     def test_cleanup_all_persists_rails_secret_before_removing_service(self, mock_run):
         with tempfile.TemporaryDirectory() as temp_dir:

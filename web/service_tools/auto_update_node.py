@@ -172,8 +172,8 @@ def set_default_lts_alias() -> bool:
     return log_subprocess_result(logger, "Set Node.js default alias to LTS", result, failure_level=ERROR)
 
 
-def get_global_package_names(source_version: str) -> tuple[bool, list[str], MaybeStr]:
-    """Return global package names installed under a Node.js version."""
+def get_global_package_specs(source_version: str) -> tuple[bool, list[str], MaybeStr]:
+    """Return exact global package specs installed under a Node.js version."""
     result = run_nvm_command([
         "nvm",
         "exec",
@@ -197,38 +197,44 @@ def get_global_package_names(source_version: str) -> tuple[bool, list[str], Mayb
     if not isinstance(dependencies, dict):
         return True, [], None
 
-    packages = sorted(name for name in dependencies if name != "npm")
-    return True, packages, None
+    package_specs: list[str] = []
+    missing_versions: list[str] = []
+    for name, metadata in dependencies.items():
+        if name == "npm":
+            continue
+        version = metadata.get("version") if isinstance(metadata, dict) else None
+        if not isinstance(name, str) or not isinstance(version, str) or not version.strip():
+            missing_versions.append(str(name))
+            continue
+        if any(character.isspace() or ord(character) < 32 for character in name + version):
+            missing_versions.append(name)
+            continue
+        package_specs.append(f"{name}@{version}")
+
+    if missing_versions:
+        return (
+            False,
+            [],
+            "Global npm packages missing safe version metadata: " + ", ".join(sorted(missing_versions)),
+        )
+    return True, sorted(package_specs), None
 
 
 def reinstall_global_packages(source_version: str, target_version: str) -> tuple[bool, MaybeStr]:
-    """Install latest allowed global packages on a newly installed Node.js version."""
-    package_listed, packages, package_error = get_global_package_names(source_version)
+    """Preserve exact global package versions across a Node.js update."""
+    package_listed, package_specs, package_error = get_global_package_specs(source_version)
     if not package_listed:
         return False, package_error
 
-    freshness_args = npm_freshness_args()
-    commands = [
-        (
-            f"Updated npm for Node.js {target_version}",
-            ["nvm", "exec", target_version, "npm", "install", "-g", "npm@latest"] + freshness_args,
-        )
-    ]
-    if packages:
-        commands.append((
-            f"Reinstalled global npm packages for Node.js {target_version}",
-            ["nvm", "exec", target_version, "npm", "install", "-g"] + packages + freshness_args,
-        ))
+    if not package_specs:
+        return True, None
 
-    failures: list[str] = []
-    for action, command in commands:
-        result = run_nvm_command(command)
-        if not log_subprocess_result(logger, action, result, failure_level=ERROR):
-            details = result.stderr.strip() or result.stdout.strip() or shlex.join(command)
-            failures.append(f"{action}: {details}")
-
-    if failures:
-        return False, "\n".join(failures)
+    command = ["nvm", "exec", target_version, "npm", "install", "-g"] + package_specs
+    action = f"Preserved global npm packages for Node.js {target_version}"
+    result = run_nvm_command(command)
+    if not log_subprocess_result(logger, action, result, failure_level=ERROR):
+        details = result.stderr.strip() or result.stdout.strip() or shlex.join(command)
+        return False, f"{action}: {details}"
     return True, None
 
 
@@ -238,8 +244,7 @@ def install_target_version(
     source_version: str = "",
 ) -> tuple[bool, MaybeStr]:
     """Install the latest Node.js version for a track and migrate global packages."""
-    install_arg = "node" if update_track == "latest" else "--lts"
-    result = run_nvm_command(["nvm", "install", install_arg])
+    result = run_nvm_command(["nvm", "install", target_version])
     action = "Installed latest Node.js version" if update_track == "latest" else "Installed latest Node.js LTS"
     if not log_subprocess_result(logger, action, result, failure_level=ERROR):
         details = result.stderr.strip() or result.stdout.strip() or action
@@ -299,30 +304,7 @@ def update_global_packages() -> tuple[bool, MaybeStr]:
     return True, None
 
 
-def update_symlinks():
-    """
-    Update symlinks in user's local bin directory.
-    
-    Note: For user installations, symlinks are not needed as nvm
-    adds the node bin directory to PATH via bashrc.
-    """
-    # User installations don't need global symlinks
-    # The user's PATH includes the nvm bin directory
-    pass
-
-
-def fix_permissions():
-    """
-    Fix permissions on nvm directory.
-    
-    Note: For user installations, permissions are already correct
-    since nvm is installed in the user's home directory.
-    """
-    # User installations already have correct permissions
-    pass
-
-
-def main():
+def main() -> int:
     """Main function to update Node.js."""
     log_event(logger, "Starting Node.js update check")
     
@@ -508,9 +490,6 @@ def main():
         )
         return 1
 
-    update_symlinks()
-    fix_permissions()
-    
     # Re-read the current version after any successful install so notifications reflect
     # the actual installed Node.js version rather than the pre-update version.
     post_update_version = get_current_version() or current_lts

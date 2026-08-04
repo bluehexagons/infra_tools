@@ -173,6 +173,13 @@ def install_or_update_gogs_release() -> tuple[str, bool]:
     run(f"rm -rf {shlex.quote(release_dir)}", check=False)
     run(f"tar -xzf {shlex.quote(archive_path)} -C {shlex.quote(extract_dir)}", check=True)
     run(f"mv {shlex.quote(extract_dir)}/gogs {shlex.quote(release_dir)}", check=True)
+    release_binary = f"{release_dir}/gogs"
+    run(f"test -x {shlex.quote(release_binary)}", check=True)
+    run(
+        f"runuser -u {shlex.quote(GOGS_GIT_USER)} -- {shlex.quote(release_binary)} --version",
+        check=True,
+        capture_output=True,
+    )
     run(f"ln -sfn {shlex.quote(release_dir)} {shlex.quote(GOGS_CURRENT_DIR)}", check=True)
     run(f"ln -sfn {shlex.quote(GOGS_CURRENT_DIR)}/gogs {shlex.quote(GOGS_BINARY_LINK)}", check=True)
     run(f"rm -f {shlex.quote(archive_path)}", check=False)

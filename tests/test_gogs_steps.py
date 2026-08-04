@@ -79,6 +79,42 @@ class TestFetchPreferredGogsRelease(unittest.TestCase):
         self.assertEqual(download_url, "https://example.com/v1.9.0.tgz")
 
 
+class TestInstallGogsRelease(unittest.TestCase):
+    @patch("web.gogs_steps.run")
+    @patch("web.gogs_steps.os.path.exists", return_value=False)
+    @patch("web.gogs_steps.read_installed_gogs_release", return_value="v1.2.3")
+    @patch(
+        "web.gogs_steps.fetch_preferred_gogs_release",
+        return_value=("v1.2.4", "https://example.com/gogs-v1.2.4.tar.gz"),
+    )
+    @patch("web.gogs_steps.detect_release_arch", return_value="amd64")
+    def test_validates_extracted_binary_before_activating_release(
+        self,
+        _arch,
+        _fetch,
+        _installed,
+        _exists,
+        mock_run,
+    ):
+        mock_run.return_value = SimpleNamespace(returncode=0, stdout="v1.2.4", stderr="")
+
+        tag_name, changed = gogs_steps.install_or_update_gogs_release()
+
+        self.assertEqual((tag_name, changed), ("v1.2.4", True))
+        calls = mock_run.call_args_list
+        version_index = next(
+            index for index, call in enumerate(calls) if call.args[0].endswith("/gogs --version")
+        )
+        activate_index = next(
+            index
+            for index, call in enumerate(calls)
+            if call.args[0].startswith("ln -sfn /opt/gogs/releases/v1.2.4 /opt/gogs/current")
+        )
+        self.assertLess(version_index, activate_index)
+        self.assertTrue(calls[version_index].kwargs["check"])
+        self.assertTrue(calls[version_index].kwargs["capture_output"])
+
+
 class TestGenerateGogsConfig(unittest.TestCase):
     def test_generate_app_ini_enables_external_ssh(self):
         config = SetupConfig(
@@ -122,7 +158,7 @@ class TestGenerateGogsConfig(unittest.TestCase):
 
 
 class TestConfigureAutoUpdateGogs(unittest.TestCase):
-    @patch("common.common_steps._configure_auto_update_systemd")
+    @patch("common.common_steps.configure_auto_update_timer")
     def test_configures_gogs_auto_update_timer(self, mock_configure):
         config = SetupConfig(host="host", username="user", system_type="server_web", gogs=["git.example.com"])
         common_steps.configure_auto_update_gogs(config)
@@ -130,7 +166,7 @@ class TestConfigureAutoUpdateGogs(unittest.TestCase):
             service_name="auto-update-gogs",
             service_desc="Auto-update Gogs service",
             timer_desc="Auto-update Gogs weekly",
-            script_name="auto_update_gogs.py",
+            script_path="/opt/infra_tools/common/service_tools/auto_update_gogs.py",
             schedule="Sun *-*-* 05:30:00",
             check_path="/usr/local/bin/gogs",
             check_name="Gogs",

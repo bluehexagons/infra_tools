@@ -88,6 +88,57 @@ class TestAutoUpdateGogs(unittest.TestCase):
         mock_notify.assert_called_once()
         self.assertIn("Gogs update failed", mock_notify.call_args.kwargs["subject"])
 
+    @patch("common.service_tools.auto_update_gogs.send_notification_safe")
+    @patch("common.service_tools.auto_update_gogs._rollback_gogs_release", return_value=True)
+    @patch("common.service_tools.auto_update_gogs._current_release_path", return_value="/opt/gogs/releases/v1.2.3")
+    @patch("common.service_tools.auto_update_gogs._run_command")
+    @patch("common.service_tools.auto_update_gogs._run_shell_command")
+    @patch("common.service_tools.auto_update_gogs.install_or_update_gogs_release", return_value=("v1.2.4", True))
+    @patch(
+        "common.service_tools.auto_update_gogs.read_gogs_state",
+        return_value={"tag_name": "v1.2.3", "config_path": "/srv/gogs/custom/conf/app.ini"},
+    )
+    @patch("common.service_tools.auto_update_gogs.os.path.exists", return_value=True)
+    @patch("common.service_tools.auto_update_gogs.load_notification_configs_from_state", return_value=["cfg"])
+    def test_rolls_back_when_post_update_command_fails(
+        self,
+        _configs,
+        _exists,
+        _state,
+        _install,
+        mock_shell,
+        mock_command,
+        _previous_release,
+        mock_rollback,
+        mock_notify,
+    ):
+        mock_shell.return_value = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="incompatible command"
+        )
+
+        result = auto_update_gogs.main()
+
+        self.assertEqual(result, 1)
+        mock_command.assert_not_called()
+        mock_rollback.assert_called_once_with("/opt/gogs/releases/v1.2.3")
+        self.assertIn("Previous release restored", mock_notify.call_args.kwargs["details"])
+
+    @patch("common.service_tools.auto_update_gogs._run_command")
+    @patch("common.service_tools.auto_update_gogs.os.path.exists", return_value=True)
+    def test_rollback_relinks_and_restarts_previous_release(self, _exists, mock_command):
+        mock_command.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+        rolled_back = auto_update_gogs._rollback_gogs_release("/opt/gogs/releases/v1.2.3")
+
+        self.assertTrue(rolled_back)
+        self.assertEqual(
+            [call.args[0] for call in mock_command.call_args_list],
+            [
+                ["ln", "-sfn", "/opt/gogs/releases/v1.2.3", "/opt/gogs/current"],
+                ["systemctl", "restart", "gogs"],
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 
+from lib.auto_update_systemd import configure_auto_update_timer
 from lib.config import SetupConfig
 from lib.maintenance_defaults import JOURNAL_MAX_USE
 from lib.machine_state import can_modify_kernel, is_container, is_hardware, is_vm
@@ -486,61 +487,27 @@ def configure_auto_updates(config: SetupConfig) -> None:
     - Automatically handles all configured repositories
     - Supports dependency additions while refusing automated package removals
     """
-    service_name = "auto-update-apt"
-    service_file = f"/etc/systemd/system/{service_name}.service"
-    timer_file = f"/etc/systemd/system/{service_name}.timer"
-
-    # Clean up any existing service/timer before creating new ones
-    cleanup_service(service_name)
-
     # Remove legacy unattended-upgrades config files from older setups
     _cleanup_legacy_unattended_upgrades()
 
-    # Stop and disable unattended-upgrades to prevent dpkg lock conflicts
-    # with our custom auto-update service.
-    run("systemctl stop unattended-upgrades", check=False)
-    run("systemctl disable unattended-upgrades", check=False)
+    # The distro timers can invoke unattended-upgrades even when its service is
+    # disabled, so retire every competing activator before enabling our job.
+    for unit in (
+        "unattended-upgrades.service",
+        "apt-daily.timer",
+        "apt-daily-upgrade.timer",
+    ):
+        run(f"systemctl stop {unit}", check=False)
+        run(f"systemctl disable {unit}", check=False)
 
-    script_path = "/opt/infra_tools/common/service_tools/auto_update_apt.py"
-
-    service_content = f"""[Unit]
-Description=Auto-update APT packages
-Documentation=man:systemd.service(5)
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/python3 {script_path}
-StandardOutput=journal
-StandardError=journal
-"""
-
-    with open(service_file, "w") as f:
-        f.write(service_content)
-
-    timer_content = """[Unit]
-Description=Auto-update APT packages (daily at 6 AM)
-Documentation=man:systemd.timer(5)
-
-[Timer]
-OnCalendar=*-*-* 06:00:00
-Persistent=true
-RandomizedDelaySec=30min
-
-[Install]
-WantedBy=timers.target
-"""
-
-    with open(timer_file, "w") as f:
-        f.write(timer_content)
-
-    result = run("systemctl daemon-reload", check=False)
-    if result.returncode != 0:
-        print("  ⚠ Automatic updates configured but systemd could not reload")
-        return
-    run("systemctl enable auto-update-apt.timer", check=False)
-    run("systemctl start auto-update-apt.timer", check=False)
-
-    print("  ✓ Automatic package updates enabled (daily at 6 AM)")
+    configure_auto_update_timer(
+        service_name="auto-update-apt",
+        service_desc="Auto-update APT packages",
+        timer_desc="Auto-update APT packages daily",
+        script_path="/opt/infra_tools/common/service_tools/auto_update_apt.py",
+        schedule="*-*-* 06:00:00",
+        check_name="APT packages",
+    )
 
 
 def configure_firewall_web(config: SetupConfig) -> None:

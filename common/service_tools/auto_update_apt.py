@@ -18,7 +18,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from logging import ERROR, WARNING
+from logging import ERROR
 
 # Add lib directory to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
@@ -77,15 +77,6 @@ def upgrade_packages() -> tuple[bool, str]:
     return True, output
 
 
-def autoremove_packages() -> None:
-    """Run apt-get autoremove to clean up unused packages."""
-    result = run_apt_command(['autoremove', '-y', '-qq'] + APT_LOCK_OPTIONS)
-    if result.returncode != 0:
-        log_event(logger, "apt-get autoremove failed", level=WARNING, stderr=result.stderr.strip())
-    else:
-        log_event(logger, "Unused packages removed")
-
-
 def main() -> int:
     """Main function to update APT packages."""
     log_event(logger, "Starting APT package update")
@@ -122,8 +113,6 @@ def main() -> int:
             logger=logger,
         )
         return 1
-
-    autoremove_packages()
 
     log_event(logger, "APT package update completed successfully")
     return 0
