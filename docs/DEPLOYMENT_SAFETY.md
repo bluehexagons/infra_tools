@@ -20,6 +20,8 @@ this document focuses on what operators need to know.
 - Uses conservative package-update policy for Node, Ruby, and uv by default.
 - Installs recurring maintenance unit files atomically and verifies that each timer is
   enabled and active without first deleting the working timer.
+- Applies a seven-day freshness delay to dependency resolution and GitHub release
+  selection unless the operator opts into a newer release.
 
 ## Recovery Path
 
@@ -63,6 +65,8 @@ python3 infra_tools.py setup server_web <host> \
   `100M`.
 - `INFRA_TOOLS_ECOSYSTEM_AUTO_UPGRADE=1` re-enables automatic Node/Ruby/uv
   package upgrades on systems where that risk is acceptable.
+- uv itself still updates on its scheduled run; the override controls uv-managed
+  tools, as well as global npm packages and gems.
 - Node runtime updates preserve exact global npm package versions unless the
   ecosystem auto-upgrade policy is explicitly enabled.
 - Unattended APT and cleanup jobs never run `autoremove`.
@@ -77,11 +81,17 @@ python3 infra_tools.py setup server_web <host> \
   activation, and failed post-update checks restore the previous release.
 - `INFRA_TOOLS_DEPENDENCY_MIN_AGE_DAYS=7` is the default freshness cutoff for
   dependency-resolving installs that support it.
+- `--deploy-latest DOMAIN_OR_PATH GIT_URL` bypasses the freshness policy for a
+  specific deployment.
+
+Recurring unit schedules and operational inspection commands are documented in
+[`MAINTENANCE.md`](./MAINTENANCE.md).
 
 ## Code References
 
 - `lib/deployment.py`
 - `lib/maintenance_systemd.py`
+- `lib/update_policy.py`
 - `deploy/deploy_steps.py`
 - `web/cicd_steps.py`
 - `common/service_tools/auto_update_apt.py`
@@ -97,5 +107,6 @@ python3 infra_tools.py setup server_web <host> \
 ## Related Docs
 
 - [CI/CD System](CICD.md)
+- [Recurring Maintenance](MAINTENANCE.md)
 - [Command-Line Reference](COMMAND_LINE.md)
 - [Machine Types](MACHINE_TYPES.md)

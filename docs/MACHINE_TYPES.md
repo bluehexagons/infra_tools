@@ -50,16 +50,18 @@ compatibility labels, but they are not part of the official support target.
 - **Flatpak**: Warns and falls back to apt
 
 ### VM/Privileged/Hardware
-- All features enabled
-- GPU-accelerated XRDP when available
-- Full system control
+- Kernel, firewall, swap, and time-sync controls are enabled where the runtime
+  exposes them
+- GPU-accelerated XRDP is available when the guest has GPU/DRI access
+- VM and hardware setups receive host-level AppArmor, auditd, and security
+  monitoring; privileged containers may inherit those controls from the host
 
 ## Default Resolution
 
 - Direct setup and patch flows default to `auto` and resolve the machine type
   on the target before setup steps run.
 - `auto` resolves to `hardware`, `vm`, or `unprivileged` for the officially
-  supported configurations.
+  supported configurations, and to `oci` when an OCI runtime is detected.
 - Hosted Proxmox provisioning defaults to a VM because the guest does not exist
   yet; use `--machine unprivileged` to provision an LXC instead.
 - `server_proxmox` also uses `auto` and normally resolves to `hardware` on the

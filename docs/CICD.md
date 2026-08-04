@@ -7,6 +7,18 @@ Use `--cicd` during `setup` or `patch` to install the webhook receiver and
 executor. Repository-specific scripts live in
 `/etc/infra_tools/cicd/webhook_config.json`.
 
+Example setup:
+
+```bash
+python3 infra_tools.py setup server_web ci.example.com deploy \
+  --cicd --ssl --ssl-email admin@example.com
+```
+
+After setup, edit the generated configuration and add a GitHub webhook. The
+secret is generated once and stored root-only at
+`/etc/infra_tools/cicd/webhook_secret`; the systemd environment file is
+`/etc/infra_tools/cicd/webhook.env`.
+
 Core code paths:
 
 - `web/cicd_steps.py`
@@ -33,6 +45,10 @@ What matters operationally:
 - build scripts run as the dedicated `webhook` user
 - `--build-server --node` and `--build-server --python` bootstrap the build
   toolchains for that user
+- the receiver writes one bounded job file and the path unit starts the
+  executor, so the receiver does not need systemd or polkit privileges
+- jobs are consumed after one attempt, including malformed or failed jobs, so
+  one bad payload cannot retrigger forever
 
 Quick checks:
 
@@ -42,10 +58,9 @@ sudo journalctl -u webhook-receiver.service -f
 sudo journalctl -u cicd-executor.service -f
 ```
 
-Failed and malformed queue entries are consumed after one attempt so a bad job
-cannot keep the systemd path unit in a restart loop. Re-run `patch` on existing
-app servers to replace the older deploy sudo policy and install the privileged
-helper.
+Re-run `patch` on existing app servers to replace the older deploy sudo policy
+and install the privileged helper. The helper validates target names and paths
+before allowing the deploy account to update an app server.
 
 If you need the full setup flow or command syntax, use
 [`docs/COMMAND_LINE.md`](./COMMAND_LINE.md) and

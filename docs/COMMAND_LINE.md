@@ -30,6 +30,7 @@ infra_tools.py completions [options]
 infra_tools.py python-tools [options]
 infra_tools.py bootstrap [options]
 infra_tools.py self-setup [options]
+infra_tools.py maintenance github <audit|prune> [options]
 infra_tools.py shell
 infra_tools.py network ...
 infra_tools.py proxmox ...
@@ -62,6 +63,8 @@ infra_tools.py proxmox ...
 | `--machine TYPE` | Machine type override; defaults to `auto` on the target |
 | `--name NAME` | Friendly name for the configuration |
 | `--tags TAG1,TAG2` | Comma-separated tags |
+| `--image SOURCE` | VM qcow2 URL or Proxmox storage reference; used with `--machine vm` |
+| `--steps STEP...` | Run an explicit space-separated step list with `custom_steps` |
 | `--dry-run` | Simulate execution |
 | `--auto-restart` / `--no-auto-restart` | Control normal automatic restarts |
 | `--auto-restart-force-days N` | Force restart after N days of deferrals |
@@ -89,6 +92,9 @@ infra_tools.py proxmox ...
 | `--node` | Install nvm + Node.js + PNPM |
 | `--go` | Install Go |
 | `--python` | Install Python aliases + uv |
+
+Selecting a language runtime also installs its managed update timer. See
+[`MAINTENANCE.md`](./MAINTENANCE.md) for schedules and update policy.
 
 ### Agent VM Flags
 
@@ -183,9 +189,11 @@ Notes:
 | Flag | Description |
 |------|-------------|
 | `--deploy DOMAIN GIT_URL` | Deploy a repository to a domain |
+| `--deploy-latest DOMAIN_OR_PATH GIT_URL` | Deploy while bypassing the release/dependency freshness policy |
 | `--deployment-lite` | Use cached/pre-uploaded repository files only |
 | `--deployment-full` | Pull fresh repositories and rebuild everything |
 | `--full-deploy` | Always rebuild deployments even if unchanged |
+| `--reset-migrations` | Rebuild a Rails database schema when migration history was squashed or reset |
 | `--ssl` | Enable Let's Encrypt SSL |
 | `--ssl-email EMAIL` | Email for SSL registration |
 | `--cloudflare` | Configure Cloudflare Tunnel |
@@ -194,13 +202,17 @@ Notes:
 Repos can also ship `infra.json` manifests for multi-component deploys; see
 `README.md` for the current overview.
 
-## Build / App Servers
+## CI/CD and Build / App Servers
 
 | Flag | Description |
 |------|-------------|
 | `--build-server` | Configure a build server that deploys to app servers |
 | `--app-server` | Configure an app server to receive deployments |
 | `--deploy-target HOST` | Target app server for deployments |
+| `--cicd` | Install the signed GitHub webhook receiver and isolated executor |
+
+See [`CICD.md`](./CICD.md) for webhook configuration, service units, and
+deployment-boundary behavior.
 
 ## Antistatic
 
@@ -239,6 +251,21 @@ the invoking process arguments. Passwords are omitted from saved setup state,
 redacted from reconstructed commands, transferred in the mode-`0600` remote
 argument file, and installed as `/etc/antistatic/server.env` with mode `0600`.
 
+## Gogs
+
+Deploy a minimal self-hosted Git service with an optional hostname, port, and
+data directory:
+
+```bash
+infra_tools.py setup server_web 192.168.1.10 \
+  --gogs git.example.com:3000 /var/lib/gogs \
+  --ssl --ssl-email admin@example.com
+```
+
+Use `--gogs :3000` for hostless direct mode. Gogs updates are validated before
+activation and can roll back to the previous release if post-update commands
+or restart checks fail.
+
 ## Storage And Data Movement
 
 | Flag | Description |
@@ -247,7 +274,7 @@ argument file, and installed as `/etc/antistatic/server.env` with mode `0600`.
 | `--share TYPE NAME PATHS USERS` | Configure a Samba share |
 | `--credential USERNAME PASSWORD` | Define a password for username-only share entries |
 | `--smbclient` | Install SMB/CIFS client |
-| `--mount-smb MOUNT IP CREDS SHARE` | Mount SMB share persistently |
+| `--mount-smb MOUNTPOINT IP CREDENTIALS SHARE SUBDIR` | Mount an SMB share persistently; `SUBDIR` may be `/` |
 | `--sync SOURCE DEST INTERVAL` | Configure rsync sync |
 | `--scrub DIR DBPATH REDUNDANCY FREQ` | Configure par2 integrity checking |
 | `--notify TYPE TARGET` | Configure notifications |
@@ -264,6 +291,23 @@ infra_tools.py maintenance github prune --root /home/loren/repos --delete-caches
 
 Defaults: keep 2 releases, delete expired artifacts, prune caches only when
 `--delete-caches` is set, and treat caches as stale after 90 days.
+
+Use `--dry-run` to inspect planned deletions. The command discovers repositories
+from the current directory by default, or from repeatable `--root` paths, and
+requires the local `gh` CLI to be authenticated.
+
+### Recurring Host Maintenance
+
+Security monitoring, package updates, ecosystem updates, restart checks, and
+cleanup are installed as systemd services and timers during setup. Inspect them
+with:
+
+```bash
+sudo systemctl list-timers --all '*auto-*' '*security-monitor*' '*cleanup-*'
+sudo journalctl -u cleanup-maintenance.service -n 100 --no-pager
+```
+
+See [`MAINTENANCE.md`](./MAINTENANCE.md) for schedules and policy controls.
 
 ### Network Inventory
 

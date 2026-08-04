@@ -17,7 +17,7 @@ python3 infra_tools.py setup server_web example.com admin --ruby --node --deploy
 python3 infra_tools.py setup server_dev 10.0.0.10 agentuser --agent-suite terminal --copy-config --repo https://github.com/user/my_codebase.git
 python3 infra_tools.py setup workstation_desktop 192.168.1.100 admin --desktop i3 --browser firefox
 python3 infra_tools.py patch example.com admin --ssl --deploy api.example.com https://github.com/user/api.git
-python3 infra_tools.py credentials set guest s3cret
+python3 infra_tools.py credentials set guest
 ```
 
 ## Supported Configurations
@@ -33,11 +33,13 @@ capability matrix and compatibility notes.
 
 ## What It Does
 
-- **Servers**: Security hardening, Nginx/SSL, Ruby/Node/Go, app deployment, game lobby server
+- **Servers**: Security hardening, Nginx/SSL, Ruby/Node/Go, app deployment, game lobby server, and Gogs
 - **Workstations**: Desktop environments (XFCE, i3, LXQt), RDP, browsers, audio
 - **Storage**: Samba shares, rsync sync, par2 integrity verification
 - **Security**: Firewall, SSH hardening, fail2ban, hardened OS auto-updates, weekly cleanup maintenance, journald size limits
 - **Deployments**: Single-service deploys plus repo-defined `infra.json` manifests for multi-component apps
+- **Agent workspaces**: Debian coding-tool suites, scoped config/credential transfer, and repository staging
+- **Proxmox orchestration**: Host discovery, VM/LXC provisioning, lifecycle management, snapshots, and rolling updates
 - **Network inventory**: workspace-backed network profiles and read-only Proxmox control-plane firewall planning — see [docs/NETWORKING.md](./docs/NETWORKING.md)
 - **Sysadmin shortcuts**: mount, health, ssh, push/pull, df, fan, svc, logs, upgrade, reachable — see [docs/SYSADMIN.md](./docs/SYSADMIN.md)
 
@@ -55,8 +57,10 @@ is set for the service. Node.js defaults to the LTS track; if a non-LTS/latest N
 installed, the Node updater treats that as an explicit opt-in and keeps that track current too. When Node.js
 itself changes, installed global packages are migrated at their existing versions; version upgrades still
 require the ecosystem opt-in.
-Dependency-resolving npm and uv installs default to `INFRA_TOOLS_DEPENDENCY_MIN_AGE_DAYS=7` so very new
-package releases are avoided where the package manager supports a freshness cutoff.
+Dependency-resolving npm and uv installs, plus GitHub release selection, default to
+`INFRA_TOOLS_DEPENDENCY_MIN_AGE_DAYS=7` so very new package releases are avoided where the package manager
+supports a freshness cutoff. Use `--deploy-latest DOMAIN_OR_PATH GIT_URL` when a deployment must bypass that
+freshness policy.
 
 Automatic updates, security monitoring, restart checks, and cleanup use the same systemd provisioning path.
 Unit files are replaced atomically, use per-job network and timeout policy, and are checked for both enabled
@@ -70,11 +74,15 @@ runs. A newly configured full scrub records its initial scheduling baseline, so 
 runs after its configured interval instead of remaining deferred indefinitely. Invalid specs and unavailable
 mounts make the run fail visibly and remain eligible for retry.
 
+See [`docs/MAINTENANCE.md`](./docs/MAINTENANCE.md) for installed timer
+schedules, update-policy overrides, cleanup ownership, and troubleshooting
+commands.
+
 ## CLI Entry Points
 
 | Script | Description |
 |--------|-------------|
-| `infra_tools.py` | **Unified entry point** - Use `setup`, `patch`, `list`, `info`, `cmd`, `rm`, `deploy`, `recall`, `reconstruct`, `completions`, `python-tools`, `bootstrap`, `agent`, `credentials`, `network`, `proxmox`, `shell`, or any [sysadmin shortcut](./docs/SYSADMIN.md) |
+| `infra_tools.py` | **Unified entry point** - Use `setup`, `patch`, `list`, `info`, `cmd`, `rm`, `deploy`, `recall`, `reconstruct`, `completions`, `python-tools`, `bootstrap`, `agent`, `credentials`, `maintenance`, `network`, `proxmox`, `shell`, or any [sysadmin shortcut](./docs/SYSADMIN.md) |
 
 Use `infra_tools.py` for all system setup, saved-configuration management, patching, recall, reconstruction,
 local Python tooling, and shell-completion setup.
