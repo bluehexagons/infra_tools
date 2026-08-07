@@ -54,6 +54,7 @@ python3 infra_tools.py setup workstation_dev 10.0.0.50 agent \
   --hosted pve1 --base debian --name agent-dev-01 \
   --cores 4 --memory 8G --storage root 40G \
   --desktop xfce --rdp --browser firefox \
+  --password "$RDP_PASSWORD" \
   --agent-suite terminal --copy-config \
   --repo https://github.com/user/my_codebase.git \
   --node --go --python
@@ -68,6 +69,10 @@ python3 infra_tools.py proxmox health pve1 100
 ```
 
 Replace `100` with the VMID returned by `proxmox ls`.
+
+`--rdp` requires `--password` for the non-root desktop account. Set
+`RDP_PASSWORD` in a secure secret source rather than placing a literal in
+shell history; the password is not persisted in saved setup state.
 
 ## Hosted web server VM
 

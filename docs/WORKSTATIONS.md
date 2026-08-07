@@ -22,7 +22,7 @@ Minimal developer workstation with RDP:
 
 ```bash
 infra_tools setup workstation_dev 10.0.0.25 alice \
-  --desktop xfce --browser firefox --rdp
+  --desktop xfce --browser firefox --rdp --password "$RDP_PASSWORD"
 ```
 
 PC with office and SMB tools:
@@ -75,6 +75,10 @@ hardens XRDP; the detailed session, TLS, and dynamic-resolution behavior is in
 [`XRDP.md`](./XRDP.md). `--dark` configures XFCE, LXQt, or Cinnamon themes;
 i3 receives an informational message because its theme is normally configured
 in the user's i3 setup.
+
+RDP logins use the setup user's Unix password, so `--rdp` requires a non-root
+`--password`. Prefer a secret-sourced environment variable such as
+`--password "$RDP_PASSWORD"`; passwords are not written to saved setup state.
 
 The `pc_dev` profile includes Remmina with RDP and VNC plugins. Other profiles
 can install it through the explicit custom step `install_remmina` when using

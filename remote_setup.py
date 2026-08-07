@@ -18,6 +18,7 @@ from lib.notifications import send_setup_notification
 from lib.remote_utils import detect_os, set_dry_run
 from lib.validation import (
     validate_agent_repositories,
+    validate_rdp_settings,
     validate_samba_share_credentials,
     validate_samba_share_specs,
     validate_smb_mount_specs,
@@ -135,6 +136,7 @@ def config_from_remote_args(args: argparse.Namespace) -> SetupConfig:
     validate_samba_share_specs(config.samba_shares, config.share_credentials)
     validate_samba_share_credentials(config)
     validate_smb_mount_specs(config.smb_mounts)
+    validate_rdp_settings(config)
     
     if system_type == "server_proxmox":
         config.username = "root"

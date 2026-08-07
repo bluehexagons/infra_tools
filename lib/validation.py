@@ -810,3 +810,23 @@ def validate_hosted_flags(config: Any) -> None:
             resolve_cloud_image(base)
     elif vm_image:
         raise ValueError("--image requires --machine vm")
+
+
+def validate_rdp_settings(config: Any) -> None:
+    """Validate credentials required for a usable xRDP login.
+
+    xRDP authenticates against the Unix account password. Hosted cloud images
+    are deliberately provisioned key-only, so accepting ``--rdp`` without a
+    password produces a desktop that can never be logged into.
+    """
+    if not getattr(config, "enable_rdp", False):
+        return
+
+    username = str(getattr(config, "username", "")).strip()
+    if username == "root":
+        raise ValueError("--rdp cannot be used with the root account")
+
+    password = getattr(config, "password", None)
+    if not isinstance(password, str) or not password.strip():
+        raise ValueError("--rdp requires --password for the desktop login account")
+    _validate_no_control_characters(password, "RDP password")
