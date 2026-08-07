@@ -65,6 +65,7 @@ from lib.reconstruct import run_reconstruct_command
 from lib.setup_common import (
     REMOTE_SCRIPT_PATH,
     _apply_hosted_proxmox_defaults,
+    register_proxmox_setup_host,
     run_remote_setup,
 )
 from lib.system_utils import get_current_username
@@ -975,6 +976,12 @@ def run_setup_command(args: argparse.Namespace) -> int:
     
     if returncode != 0:
         print(f"\n✗ Setup failed (exit code: {returncode})")
+        return 1
+
+    try:
+        register_proxmox_setup_host(config)
+    except ValueError as exc:
+        print(f"\n✗ Setup completed, but Proxmox host registration failed: {exc}")
         return 1
     
     print()

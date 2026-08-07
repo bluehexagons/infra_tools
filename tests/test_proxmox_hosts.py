@@ -133,6 +133,26 @@ class TestAddProxmoxHost(_WorkspaceFixture):
                 self.workspace,
             )
 
+    def test_add_duplicate_address_without_replace_raises(self) -> None:
+        add_proxmox_host(
+            ProxmoxHost(name="pve1", address="10.0.0.10"), self.workspace
+        )
+        with self.assertRaisesRegex(ValueError, "address.*already exists"):
+            add_proxmox_host(
+                ProxmoxHost(name="other", address="10.0.0.10"), self.workspace
+            )
+
+    def test_add_rejects_invalid_address_and_user(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Invalid Proxmox host address"):
+            add_proxmox_host(
+                ProxmoxHost(name="pve1", address="not a host"), self.workspace
+            )
+        with self.assertRaisesRegex(ValueError, "Invalid Proxmox SSH user"):
+            add_proxmox_host(
+                ProxmoxHost(name="pve1", address="10.0.0.10", user="bad user"),
+                self.workspace,
+            )
+
     def test_add_duplicate_with_replace_overwrites(self) -> None:
         add_proxmox_host(
             ProxmoxHost(name="pve1", address="10.0.0.10"), self.workspace

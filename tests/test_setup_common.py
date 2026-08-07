@@ -899,6 +899,27 @@ class TestHostedProvisioningDispatch(unittest.TestCase):
             [["root", "auto", "10G"], ["template", "auto"]],
         )
 
+    def test_server_proxmox_setup_registers_host(self):
+        from lib import setup_common
+
+        with tempfile.TemporaryDirectory() as workspace:
+            config = _make_config(
+                system_type="server_proxmox",
+                host="10.0.0.10",
+                ssh_key="/keys/proxmox",
+                friendly_name="pve1",
+            )
+
+            setup_common.register_proxmox_setup_host(config, workspace)
+
+            registered = setup_common.find_proxmox_host("pve1", workspace)
+
+        self.assertIsNotNone(registered)
+        assert registered is not None
+        self.assertEqual(registered.address, "10.0.0.10")
+        self.assertEqual(registered.user, "root")
+        self.assertEqual(registered.ssh_key, "/keys/proxmox")
+
 
 if __name__ == '__main__':
     unittest.main()

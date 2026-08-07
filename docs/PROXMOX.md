@@ -16,19 +16,20 @@ cd infra_tools
 git pull --ff-only
 ```
 
-Register and inspect the host:
+Set up, register, and inspect the host:
 
 ```bash
 python3 infra_tools.py setup server_proxmox 10.0.0.10 root \
   --key ~/.ssh/proxmox_ed25519 \
   --name pve1
 
-python3 infra_tools.py proxmox add pve1 10.0.0.10 \
-  --user root --key ~/.ssh/proxmox_ed25519
 python3 infra_tools.py proxmox probe pve1
 python3 infra_tools.py proxmox top pve1
 python3 infra_tools.py proxmox ls pve1
 ```
+
+Successful `server_proxmox` setup registers the host in the selected workspace;
+`--name` supplies the registry name and defaults to the host address when omitted.
 
 The public key must exist alongside the private key and root on the Proxmox
 host must accept it.
@@ -246,7 +247,7 @@ applying any control-plane lockdown.
 For a first rollout, validate one VM and one LXC compatibility path:
 
 ```bash
-infra_tools proxmox add pve1 10.0.0.10 --user root --key ~/.ssh/proxmox_ed25519
+infra_tools proxmox hosts
 infra_tools proxmox probe pve1
 
 infra_tools setup workstation_dev 10.0.0.50 devuser \

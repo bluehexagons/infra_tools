@@ -15,6 +15,8 @@ from dataclasses import asdict, dataclass, field
 from typing import Optional, cast
 
 from lib.types import JSONDict, JSONList
+from lib.validation import validate_filesystem_path
+from lib.validators import validate_host, validate_username
 from lib.workspace import ensure_workspace_dir, normalize_workspace_dir
 
 
@@ -208,7 +210,10 @@ def find_proxmox_host(
     needle = name_or_address.strip()
     needle_lc = needle.lower()
     for host in load_proxmox_hosts(workspace):
-        if host.name.lower() == needle_lc or host.address == needle:
+        if (
+            host.name.lower() == needle_lc
+            or host.address.lower().rstrip(".") == needle_lc.rstrip(".")
+        ):
             return host
     return None
 
@@ -239,6 +244,21 @@ def merge_proxmox_host(existing: ProxmoxHost, incoming: ProxmoxHost) -> ProxmoxH
     )
 
 
+def _validate_host_record(host: ProxmoxHost) -> None:
+    if not host.name or not host.name.strip():
+        raise ValueError("Proxmox host name is required")
+    if any(ord(char) < 32 or ord(char) == 127 for char in host.name):
+        raise ValueError("Proxmox host name must not contain control characters")
+    if not host.address or not host.address.strip():
+        raise ValueError("Proxmox host address is required")
+    if not validate_host(host.address):
+        raise ValueError(f"Invalid Proxmox host address: {host.address}")
+    if not validate_username(host.user):
+        raise ValueError(f"Invalid Proxmox SSH user: {host.user}")
+    if host.ssh_key:
+        validate_filesystem_path(host.ssh_key, must_exist=False)
+
+
 def add_proxmox_host(
     host: ProxmoxHost,
     workspace: Optional[str] = None,
@@ -249,23 +269,37 @@ def add_proxmox_host(
 
     Raises ValueError if the host already exists and ``replace`` is False.
     """
-    if not host.name or not host.name.strip():
-        raise ValueError("Proxmox host name is required")
-    if not host.address or not host.address.strip():
-        raise ValueError("Proxmox host address is required")
+    _validate_host_record(host)
 
     hosts = load_proxmox_hosts(workspace)
     name_lc = host.name.lower()
-    for i, existing in enumerate(hosts):
-        if existing.name.lower() == name_lc:
-            if not replace:
+    address_lc = host.address.lower().rstrip(".")
+    matching_indexes = [
+        index
+        for index, existing in enumerate(hosts)
+        if existing.name.lower() == name_lc
+        or existing.address.lower().rstrip(".") == address_lc
+    ]
+    if len(matching_indexes) > 1:
+        raise ValueError(
+            f"Proxmox host name or address matches multiple existing records"
+        )
+    matching_index = matching_indexes[0] if matching_indexes else None
+    if matching_index is not None:
+        existing = hosts[matching_index]
+        if not replace:
+            if existing.name.lower() == name_lc:
                 raise ValueError(
                     f"Proxmox host '{host.name}' already exists; "
                     f"use replace=True to update"
                 )
-            hosts[i] = host
-            save_proxmox_hosts(hosts, workspace)
-            return host
+            raise ValueError(
+                f"Proxmox host address '{host.address}' already exists as "
+                f"'{existing.name}'; use replace=True to update"
+            )
+        hosts[matching_index] = host
+        save_proxmox_hosts(hosts, workspace)
+        return host
     hosts.append(host)
     save_proxmox_hosts(hosts, workspace)
     return host
@@ -276,15 +310,16 @@ def sync_proxmox_host(
     workspace: Optional[str] = None,
 ) -> ProxmoxHost:
     """Insert or merge a host by matching either name or address."""
-    if not host.name or not host.name.strip():
-        raise ValueError("Proxmox host name is required")
-    if not host.address or not host.address.strip():
-        raise ValueError("Proxmox host address is required")
+    _validate_host_record(host)
 
     hosts = load_proxmox_hosts(workspace)
     name_lc = host.name.lower()
     for index, existing in enumerate(hosts):
-        if existing.name.lower() == name_lc or existing.address == host.address:
+        if (
+            existing.name.lower() == name_lc
+            or existing.address.lower().rstrip(".")
+            == host.address.lower().rstrip(".")
+        ):
             hosts[index] = merge_proxmox_host(existing, host)
             save_proxmox_hosts(hosts, workspace)
             return hosts[index]

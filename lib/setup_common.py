@@ -23,7 +23,7 @@ except ImportError:
 
 from lib.config import DEFAULT_MACHINE_TYPE, SetupConfig, _normalize_container_storage
 from lib.credentials import prepare_runtime_config, store_cli_credentials
-from lib.proxmox_hosts import find_proxmox_host
+from lib.proxmox_hosts import ProxmoxHost, find_proxmox_host, sync_proxmox_host
 from lib.validators import validate_host, validate_username
 from lib.validation import (
     validate_apt_packages,
@@ -576,6 +576,24 @@ def prepare_validated_runtime_config(
     return runtime_config
 
 
+def register_proxmox_setup_host(
+    config: SetupConfig,
+    workspace: Optional[str] = None,
+) -> None:
+    """Register a successfully configured ``server_proxmox`` host."""
+    if config.system_type != "server_proxmox" or config.dry_run:
+        return
+
+    host = ProxmoxHost(
+        name=config.friendly_name or config.host,
+        address=config.host,
+        user="root",
+        ssh_key=config.ssh_key,
+    )
+    registered = sync_proxmox_host(host, workspace)
+    print(f"Registered Proxmox host '{registered.name}' ({registered.address}).")
+
+
 def run_remote_setup(config: SetupConfig) -> int:
     is_local = config.host in ["localhost", "127.0.0.1"]
     
@@ -804,6 +822,12 @@ def setup_main(system_type: str, description: str, success_msg_fn: Callable[[Set
     
     if returncode != 0:
         print(f"\n✗ Setup failed (exit code: {returncode})")
+        return 1
+
+    try:
+        register_proxmox_setup_host(config, getattr(args, "workspace", None))
+    except ValueError as exc:
+        print(f"\n✗ Setup completed, but Proxmox host registration failed: {exc}")
         return 1
     
     print()
