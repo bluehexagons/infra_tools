@@ -24,6 +24,7 @@ System Types:
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import os
 import sys
@@ -38,6 +39,7 @@ except ImportError:
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from lib.arg_parser import add_setup_arguments
+from lib.agent_cli import add_agent_subparser, run_agent_command
 from lib.cache import get_cache_path_for_host, load_setup_command, merge_setup_configs, save_setup_command
 from lib.completions import run_completion_setup
 from lib.config import SetupConfig
@@ -63,6 +65,7 @@ from lib.reconstruct import run_reconstruct_command
 from lib.setup_common import (
     REMOTE_SCRIPT_PATH,
     _apply_hosted_proxmox_defaults,
+    register_proxmox_setup_host,
     run_remote_setup,
 )
 from lib.system_utils import get_current_username
@@ -70,11 +73,15 @@ from lib.types import Deployments, JSONDict, JSONList, StrList
 from lib.validators import validate_host, validate_username
 from lib.validation import (
     validate_apt_packages,
+    validate_agent_repositories,
+    validate_antistatic_settings,
     validate_deploy_specs,
     validate_deploy_targets,
     validate_gogs_settings,
     validate_hosted_flags,
+    validate_rdp_settings,
     validate_samba_share_credentials,
+    validate_samba_share_name,
     validate_samba_share_specs,
     validate_smb_mount_specs,
     validate_scrub_specs,
@@ -90,6 +97,7 @@ def _build_infra_tools_epilog() -> str:
     return f"""Available Commands:
     setup <type> <host> [args]   Run initial setup for a system type
     patch <host> [args]          Patch/update an existing system
+    shares <host> [args]         Reconcile Samba shares without full setup
     list [pattern]              List saved configurations
     info [pattern]              Show saved configuration details
     cmd [pattern]               Show reconstructed setup commands
@@ -100,6 +108,7 @@ def _build_infra_tools_epilog() -> str:
     completions                 Install shell completion for infra_tools.py
     python-tools                Install local Python aliases, uv, and completion
     bootstrap                   Install packages, launcher, and completions (alias: self-setup)
+    agent doctor               Check locally installed coding agents and credentials
     maintenance github ...      Audit/prune GitHub releases, artifacts, and caches
     network [subcommand]        Manage generic network inventory profiles
     proxmox [subcommand]        Manage Proxmox hosts and containers (interactive shell with no args)
@@ -127,6 +136,7 @@ System Types for setup:
 Examples:
   infra_tools.py setup server_web 192.168.1.100 admin --ssl
   infra_tools.py patch 192.168.1.100 --deploy api.example.com https://github.com/user/api.git
+  infra_tools.py shares 192.168.1.100 --share write media /srv/media alice,bob
   infra_tools.py list prod
   infra_tools.py deploy prod --yes
   infra_tools.py recall example.com admin
@@ -182,6 +192,42 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
         help="Username (defaults to current user)"
     )
     add_setup_arguments(patch_parser, allow_steps=True, include_host=False)
+
+    shares_parser = subparsers.add_parser(
+        "shares",
+        help="Quickly reconcile Samba shares on an existing system",
+    )
+    shares_parser.add_argument("host", help="Host with a saved setup configuration")
+    shares_parser.add_argument("username", nargs="?", default=None)
+    shares_parser.add_argument("-k", "--key", dest="ssh_key", help="SSH private key path")
+    shares_parser.add_argument(
+        "--share",
+        dest="samba_shares",
+        action="append",
+        nargs=4,
+        metavar=("ACCESS_TYPE", "SHARE_NAME", "PATH", "USERS"),
+        help="Add or replace a share by name; repeat as needed",
+    )
+    shares_parser.add_argument(
+        "--remove-share",
+        action="append",
+        default=[],
+        metavar="SHARE_NAME",
+        help="Remove a managed share by name; repeat as needed",
+    )
+    shares_parser.add_argument(
+        "--credential",
+        dest="share_credentials",
+        action="append",
+        nargs=2,
+        metavar=("USERNAME", "PASSWORD"),
+        help="Save or update a share user's workspace credential",
+    )
+    shares_parser.add_argument("--dry-run", action="store_true")
+    shares_parser.add_argument(
+        "--workspace",
+        help="Workspace root for saved setups, credentials, known_hosts, and history",
+    )
 
     list_parser = subparsers.add_parser(
         "list",
@@ -342,7 +388,11 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
 
     credentials_set_parser = credentials_subparsers.add_parser("set", help="Save or replace a credential")
     credentials_set_parser.add_argument("username", help="Credential username")
-    credentials_set_parser.add_argument("password", help="Credential password")
+    credentials_set_parser.add_argument(
+        "password",
+        nargs="?",
+        help="Credential password (omit to enter it without exposing it in process arguments)",
+    )
 
     credentials_subparsers.add_parser("list", help="List saved credential usernames")
 
@@ -353,6 +403,7 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
     add_proxmox_subparser(subparsers)
     add_maintenance_subparser(subparsers)
     add_sysadmin_subparsers(subparsers)
+    add_agent_subparser(subparsers)
 
     shell_parser = subparsers.add_parser(
         "shell",
@@ -550,6 +601,16 @@ def show_info(pattern: Optional[str] = None, *, compact: bool = False) -> int:
             features.append("Go")
         if args.get("install_python"):
             features.append("Python")
+        if args.get("install_gh"):
+            features.append("GitHub CLI")
+        if args.get("install_codex"):
+            features.append("Codex CLI")
+        if args.get("install_claude"):
+            features.append("Claude Code")
+        if args.get("install_opencode"):
+            features.append("OpenCode")
+        if args.get("install_t3code"):
+            features.append("T3 Code")
         if args.get("install_office"):
             features.append("Office")
         if args.get("use_flatpak"):
@@ -738,6 +799,7 @@ def _prepare_runtime_config_for_cli(config: SetupConfig) -> SetupConfig:
     runtime_config = prepare_runtime_config(config)
     validate_timezone_name(runtime_config.timezone)
     validate_apt_packages(runtime_config.apt_packages)
+    validate_agent_repositories(runtime_config.agent_repos)
     validate_notification_args(runtime_config.notify_specs)
     validate_ssl_email(runtime_config.ssl_email)
     validate_deploy_specs(runtime_config.deploy_specs)
@@ -750,7 +812,9 @@ def _prepare_runtime_config_for_cli(config: SetupConfig) -> SetupConfig:
         runtime_config.share_credentials,
     )
     validate_gogs_settings(runtime_config.gogs)
+    validate_antistatic_settings(runtime_config)
     validate_hosted_flags(runtime_config)
+    validate_rdp_settings(runtime_config)
     validate_samba_share_credentials(runtime_config)
     return runtime_config
 
@@ -913,6 +977,12 @@ def run_setup_command(args: argparse.Namespace) -> int:
     if returncode != 0:
         print(f"\n✗ Setup failed (exit code: {returncode})")
         return 1
+
+    try:
+        register_proxmox_setup_host(config)
+    except ValueError as exc:
+        print(f"\n✗ Setup completed, but Proxmox host registration failed: {exc}")
+        return 1
     
     print()
     print("=" * 60)
@@ -955,6 +1025,89 @@ def run_patch_command(args: argparse.Namespace) -> int:
     return _execute_patch_config(merged_config)
 
 
+def _apply_share_updates(config: SetupConfig, args: argparse.Namespace) -> None:
+    """Apply share CLI mutations to a cached configuration in place."""
+
+    remove_names = set(args.remove_share)
+    for share_name in remove_names:
+        validate_samba_share_name(share_name)
+
+    updated_by_name = {
+        share_spec[1]: list(share_spec)
+        for share_spec in config.samba_shares or []
+        if share_spec[1] not in remove_names
+    }
+    for share_spec in args.samba_shares or []:
+        updated_by_name[share_spec[1]] = list(share_spec)
+
+    config.samba_shares = list(updated_by_name.values()) or None
+    config.enable_samba = True
+    config.share_credentials = args.share_credentials
+    config.dry_run = args.dry_run
+    if args.username:
+        config.username = args.username
+    if args.ssh_key:
+        config.ssh_key = args.ssh_key
+
+
+def run_shares_command(args: argparse.Namespace) -> int:
+    """Reconcile only Samba shares without running the full setup lifecycle."""
+
+    cached_config = load_setup_command(args.host)
+    if not cached_config:
+        print(f"Error: No cached setup found for {args.host}")
+        return 1
+
+    try:
+        _apply_share_updates(cached_config, args)
+        if not validate_username(cached_config.username):
+            raise ValueError(f"Invalid username: {cached_config.username}")
+        share_config = SetupConfig(
+            host=cached_config.host,
+            username=cached_config.username,
+            system_type=cached_config.system_type,
+            machine_type=cached_config.machine_type,
+            ssh_key=cached_config.ssh_key,
+            dry_run=cached_config.dry_run,
+            enable_samba=True,
+            samba_shares=cached_config.samba_shares,
+            share_credentials=cached_config.share_credentials,
+            scrub_specs=cached_config.scrub_specs,
+        )
+        runtime_config = prepare_runtime_config(share_config)
+        validate_samba_share_specs(
+            runtime_config.samba_shares,
+            runtime_config.share_credentials,
+        )
+        validate_scrub_specs(runtime_config.scrub_specs)
+        validate_samba_share_credentials(runtime_config)
+    except ValueError as exc:
+        print(f"Error: {exc}")
+        return 1
+
+    runtime_config.custom_steps = "reconcile_samba_shares"
+    start_time = time.time()
+    if not cached_config.dry_run:
+        store_cli_credentials(cached_config)
+    returncode = run_remote_setup(runtime_config)
+    end_time = time.time()
+
+    if not cached_config.dry_run:
+        save_setup_command(
+            cached_config,
+            start_time,
+            end_time,
+            returncode == 0,
+            operation="shares",
+        )
+    if returncode != 0:
+        print(f"\n✗ Samba share update failed (exit code: {returncode})")
+        return 1
+
+    print(f"\n✓ Samba shares updated on {cached_config.host}")
+    return 0
+
+
 def main() -> int:
     """Main entry point for infra_tools."""
     parser, _setup_parser, _patch_parser = create_infra_tools_parser()
@@ -979,6 +1132,8 @@ def main() -> int:
         return run_setup_command(args)
     elif args.command == "patch":
         return run_patch_command(args)
+    elif args.command == "shares":
+        return run_shares_command(args)
     elif args.command in {"list", "ls"}:
         return list_configurations(args.pattern, json_output=getattr(args, "json", False))
     elif args.command == "info":
@@ -1025,6 +1180,8 @@ def main() -> int:
         return run_proxmox_command(args)
     elif args.command == "maintenance":
         return run_maintenance_command(args)
+    elif args.command == "agent":
+        return run_agent_command(args)
     elif args.command in {"mount", "umount", "health", "ssh", "push", "pull", "key", "df", "fan", "svc", "logs", "upgrade", "reachable"}:
         return run_sysadmin_command(args)
     elif args.command == "shell":
@@ -1032,7 +1189,10 @@ def main() -> int:
     elif args.command == "credentials":
         try:
             if args.credentials_command == "set":
-                set_workspace_credential(args.username, args.password)
+                password = args.password
+                if password is None:
+                    password = getpass.getpass(f"Password for {args.username}: ")
+                set_workspace_credential(args.username, password)
                 print(f"Saved credential for {args.username} in {get_workspace_dir()}")
                 return 0
             if args.credentials_command == "list":

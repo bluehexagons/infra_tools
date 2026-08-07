@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -12,16 +13,38 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib.arg_parser import create_setup_argument_parser
 from lib.config import SetupConfig
 from lib.display import print_setup_summary
-from lib.machine_state import save_machine_state, save_setup_config
+from lib.machine_state import resolve_machine_type, save_machine_state, save_setup_config
 from lib.notifications import send_setup_notification
 from lib.remote_utils import detect_os, set_dry_run
-from lib.validation import validate_samba_share_credentials
+from lib.validation import (
+    validate_agent_repositories,
+    validate_rdp_settings,
+    validate_samba_share_credentials,
+    validate_samba_share_specs,
+    validate_smb_mount_specs,
+)
 from lib.validators import validate_username
 from lib.progress import progress_bar
 from lib.system_types import get_steps_for_system_type
 from lib.systemd_service import cleanup_all_infra_services
 from typing import Optional
 from lib.types import Deployments 
+
+
+REMOTE_AGENT_PAYLOAD_DIR = "/opt/infra_tools/agent_payload"
+
+
+def _remove_agent_payload() -> None:
+    """Remove uploaded agent config and credentials after any setup outcome."""
+    if not os.path.isdir(REMOTE_AGENT_PAYLOAD_DIR):
+        return
+    try:
+        shutil.rmtree(REMOTE_AGENT_PAYLOAD_DIR)
+    except OSError as exc:
+        print(
+            f"Warning: Failed to remove agent payload {REMOTE_AGENT_PAYLOAD_DIR}: {exc}",
+            file=sys.stderr,
+        )
 
 
 def extract_repo_name(git_url: str) -> str:
@@ -108,7 +131,12 @@ def config_from_remote_args(args: argparse.Namespace) -> SetupConfig:
     args.host = "localhost"
     
     config = SetupConfig.from_args(args, system_type)
+    config.machine_type = resolve_machine_type(config.machine_type)
+    validate_agent_repositories(config.agent_repos)
+    validate_samba_share_specs(config.samba_shares, config.share_credentials)
     validate_samba_share_credentials(config)
+    validate_smb_mount_specs(config.smb_mounts)
+    validate_rdp_settings(config)
     
     if system_type == "server_proxmox":
         config.username = "root"
@@ -116,7 +144,7 @@ def config_from_remote_args(args: argparse.Namespace) -> SetupConfig:
     return config
 
 
-def main() -> int:
+def _run_main() -> int:
     parser = create_setup_argument_parser(
         description="Remote system setup",
         for_remote=True,
@@ -147,6 +175,15 @@ def main() -> int:
     if not validate_username(config.username):
         print(f"Error: Invalid username: {config.username}")
         return 1
+
+    if config.custom_steps == "reconcile_samba_shares":
+        from smb.samba_steps import reconcile_samba_shares
+
+        detect_os()
+        print("Configuring Samba shares only...")
+        reconcile_samba_shares(config)
+        print("✓ Samba share update complete")
+        return 0
     
     print_setup_summary(config, f"Remote Setup ({config.system_type})")
     sys.stdout.flush()
@@ -154,6 +191,13 @@ def main() -> int:
     detect_os()
     print("OS: Debian")
     sys.stdout.flush()
+
+    if config.antistatic_server or config.antistatic_db:
+        from game.antistatic_steps import preflight_antistatic_releases
+
+        print("Preflighting Antistatic releases...")
+        preflight_antistatic_releases(config)
+        sys.stdout.flush()
     
     # Save machine state for services to reference
     save_machine_state(
@@ -318,7 +362,7 @@ def main() -> int:
             configure_samba_firewall,
             configure_samba_global_settings,
             configure_samba_fail2ban,
-            setup_samba_share
+            reconcile_samba_shares
         )
         
         print("\n" + "=" * 60)
@@ -337,14 +381,10 @@ def main() -> int:
         print("\n[4/4] Configuring fail2ban for Samba brute-force protection")
         configure_samba_fail2ban(config)
         
-        if config.samba_shares:
-            print("\n" + "=" * 60)
-            print(f"Configuring {len(config.samba_shares)} Samba share(s)...")
-            print("=" * 60)
-            
-            for i, share_spec in enumerate(config.samba_shares, 1):
-                print(f"\n[{i}/{len(config.samba_shares)}] Setting up share: {share_spec[1]}_{share_spec[0]}")
-                setup_samba_share(config, share_spec=share_spec)
+        print("\n" + "=" * 60)
+        print(f"Reconciling {len(config.samba_shares or [])} Samba share(s)...")
+        print("=" * 60)
+        reconcile_samba_shares(config)
         
         print("\n✓ Samba configuration complete")
     
@@ -402,6 +442,13 @@ def main() -> int:
         )
     
     return 0
+
+
+def main() -> int:
+    try:
+        return _run_main()
+    finally:
+        _remove_agent_payload()
 
 
 if __name__ == "__main__":

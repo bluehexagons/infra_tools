@@ -9,8 +9,11 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
+from lib.config import SetupConfig
 from lib.validation import (
     validate_apt_packages,
+    validate_agent_repositories,
+    validate_antistatic_settings,
     validate_deploy_specs,
     validate_deploy_targets,
     validate_gogs_settings,
@@ -136,6 +139,67 @@ class TestValidateDeploySpecs(unittest.TestCase):
             validate_deploy_specs([['example.com,,other.example.com', 'https://github.com/user/repo.git']])
 
 
+class TestValidateAgentRepositories(unittest.TestCase):
+    def test_none_passes(self):
+        validate_agent_repositories(None)
+
+    def test_valid_urls_pass(self):
+        validate_agent_repositories([
+            'https://github.com/user/repo.git',
+            'ssh://git@github.com/user/repo-two.git',
+            'git@github.com:user/repo_three.git',
+        ])
+
+    def test_empty_url_fails(self):
+        with self.assertRaisesRegex(ValueError, "--repo requires a non-empty git URL"):
+            validate_agent_repositories([''])
+
+    def test_option_like_url_fails(self):
+        with self.assertRaisesRegex(ValueError, "Invalid --repo git URL"):
+            validate_agent_repositories(['--upload-pack=bad'])
+
+    def test_local_path_fails(self):
+        with self.assertRaisesRegex(ValueError, "--repo must be"):
+            validate_agent_repositories(['/tmp/repo'])
+
+    def test_unsafe_repo_name_fails(self):
+        with self.assertRaisesRegex(ValueError, "Invalid --repo repository name"):
+            validate_agent_repositories(['https://github.com/user/bad repo.git'])
+
+        for invalid in (
+            'https://github.com/user/.',
+            'https://github.com/user/..',
+        ):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(
+                ValueError,
+                "Invalid --repo repository name",
+            ):
+                validate_agent_repositories([invalid])
+
+    def test_surrounding_whitespace_fails(self):
+        with self.assertRaisesRegex(ValueError, "Invalid --repo git URL"):
+            validate_agent_repositories([' https://github.com/user/repo.git'])
+
+    def test_http_urls_with_embedded_credentials_fail(self):
+        for url in (
+            'https://user:token@example.com/repo.git',
+            'http://token@example.com/repo.git',
+            'ssh://git:token@example.com/repo.git',
+        ):
+            with self.subTest(url=url), self.assertRaisesRegex(
+                ValueError,
+                "embedded credentials",
+            ):
+                validate_agent_repositories([url])
+
+    def test_duplicate_repo_name_fails(self):
+        with self.assertRaisesRegex(ValueError, "Duplicate --repo repository name: repo"):
+            validate_agent_repositories([
+                'https://github.com/one/repo.git',
+                'git@github.com:two/repo.git',
+            ])
+
+
 class TestValidateGogsSettings(unittest.TestCase):
     def test_none_passes(self):
         validate_gogs_settings(None)
@@ -157,6 +221,82 @@ class TestValidateGogsSettings(unittest.TestCase):
     def test_relative_data_path_fails(self):
         with self.assertRaisesRegex(ValueError, "Gogs data path must be absolute: relative/path"):
             validate_gogs_settings(['git.example.com', 'relative/path'])
+
+
+class TestValidateAntistaticSettings(unittest.TestCase):
+    def _make_config(self, **kwargs):
+        defaults = {
+            "host": "host",
+            "username": "root",
+            "system_type": "server_lite",
+            "antistatic_server": "lobby.example.com",
+        }
+        defaults.update(kwargs)
+        return SetupConfig(**defaults)
+
+    def test_server_without_admin_passes(self):
+        validate_antistatic_settings(self._make_config())
+
+    def test_invalid_domain_fails(self):
+        with self.assertRaisesRegex(ValueError, "Invalid Antistatic server domain"):
+            validate_antistatic_settings(self._make_config(antistatic_server="bad domain"))
+
+    def test_invalid_port_fails(self):
+        with self.assertRaisesRegex(ValueError, "Invalid Antistatic server port"):
+            validate_antistatic_settings(
+                self._make_config(antistatic_server="lobby.example.com:nope")
+            )
+
+    def test_admin_requires_server(self):
+        with self.assertRaisesRegex(ValueError, "requires --antistatic-server"):
+            validate_antistatic_settings(
+                self._make_config(antistatic_server=None, antistatic_admin="operator")
+            )
+
+    def test_admin_disable_requires_server_spec_for_remote_cleanup(self):
+        with self.assertRaisesRegex(ValueError, "requires --antistatic-server"):
+            validate_antistatic_settings(
+                self._make_config(antistatic_server=None, antistatic_admin="")
+            )
+
+    def test_admin_requires_proxy_hostname(self):
+        with self.assertRaisesRegex(ValueError, "hostname-based reverse proxy"):
+            validate_antistatic_settings(
+                self._make_config(
+                    antistatic_server=":8080",
+                    antistatic_admin="operator",
+                    enable_ssl=True,
+                    share_credentials=[["operator", "secret1"]],
+                )
+            )
+
+    def test_admin_requires_tls_ingress(self):
+        with self.assertRaisesRegex(ValueError, "requires --ssl or --cloudflare"):
+            validate_antistatic_settings(
+                self._make_config(
+                    antistatic_admin="operator",
+                    share_credentials=[["operator", "secret1"]],
+                )
+            )
+
+    def test_admin_with_ssl_and_credential_passes(self):
+        validate_antistatic_settings(
+            self._make_config(
+                antistatic_admin="operator",
+                enable_ssl=True,
+                share_credentials=[["operator", "secret1"]],
+            )
+        )
+
+    def test_admin_password_rejects_control_characters(self):
+        with self.assertRaisesRegex(ValueError, "password must not contain control"):
+            validate_antistatic_settings(
+                self._make_config(
+                    antistatic_admin="operator",
+                    enable_ssl=True,
+                    share_credentials=[["operator", "secret\nvalue"]],
+                )
+            )
 
 
 class TestValidateSyncSpecs(unittest.TestCase):
@@ -198,6 +338,19 @@ class TestValidateSmbMountSpecs(unittest.TestCase):
     def test_valid_smb_mount_specs_pass(self):
         validate_smb_mount_specs([['/mnt/share', '192.168.1.10', 'user:pass', 'docs', '/sub']])
 
+    def test_smb_mountpoint_must_be_under_mnt(self):
+        with self.assertRaisesRegex(ValueError, "below /mnt"):
+            validate_smb_mount_specs([['/etc', '192.168.1.10', 'user:pass', 'docs', '/']])
+
+    def test_smb_mountpoint_must_be_normalized_and_unique(self):
+        with self.assertRaisesRegex(ValueError, "normalized"):
+            validate_smb_mount_specs([['/mnt/projects/..', '192.168.1.10', 'user:pass', 'docs', '/']])
+        with self.assertRaisesRegex(ValueError, "Duplicate SMB mountpoint"):
+            validate_smb_mount_specs([
+                ['/mnt/projects', '192.168.1.10', 'user:pass', 'docs', '/'],
+                ['/mnt/projects', '192.168.1.11', 'user:pass', 'archive', '/'],
+            ])
+
     def test_invalid_host_fails(self):
         with self.assertRaisesRegex(ValueError, "Invalid SMB mount host: bad host"):
             validate_smb_mount_specs([['/mnt/share', 'bad host', 'user:pass', 'docs', '/sub']])
@@ -209,6 +362,14 @@ class TestValidateSmbMountSpecs(unittest.TestCase):
     def test_invalid_subdir_fails(self):
         with self.assertRaisesRegex(ValueError, "Subdirectory must start with /: subdir"):
             validate_smb_mount_specs([['/mnt/share', '192.168.1.10', 'user:pass', 'docs', 'subdir']])
+
+    def test_control_characters_in_credentials_fail(self):
+        with self.assertRaisesRegex(ValueError, "SMB mount password must not contain control"):
+            validate_smb_mount_specs([['/mnt/share', '192.168.1.10', 'user:pass\nvalue', 'docs', '/']])
+
+    def test_empty_password_fails(self):
+        with self.assertRaisesRegex(ValueError, "credentials must include a non-empty"):
+            validate_smb_mount_specs([['/mnt/share', '192.168.1.10', 'user:', 'docs', '/']])
 
 
 class TestValidateSambaShareSpecs(unittest.TestCase):
@@ -226,9 +387,34 @@ class TestValidateSambaShareSpecs(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, r"Invalid Samba share name .*bad/share"):
             validate_samba_share_specs([['read', 'bad/share', '/mnt/docs', 'shareuser:secret']])
 
+    def test_duplicate_share_names_and_root_path_fail(self):
+        with self.assertRaisesRegex(ValueError, "Duplicate Samba share name"):
+            validate_samba_share_specs([
+                ['read', 'docs', '/srv/docs', 'shareuser:secret'],
+                ['write', 'docs', '/srv/docs-write', 'shareuser:secret'],
+            ])
+        with self.assertRaisesRegex(ValueError, "must not be the filesystem root"):
+            validate_samba_share_specs([['write', 'root', '/', 'shareuser:secret']])
+
     def test_missing_credential_fails(self):
         with self.assertRaisesRegex(ValueError, "Missing credential for share user: shareuser"):
             validate_samba_share_specs([['read', 'docs', '/mnt/docs', 'shareuser']])
+
+    def test_control_characters_in_share_name_fail(self):
+        with self.assertRaisesRegex(ValueError, "Samba share name must not contain control"):
+            validate_samba_share_specs([['read', 'docs\nother', '/mnt/docs', 'shareuser:secret']])
+
+    def test_config_syntax_in_share_name_fails(self):
+        with self.assertRaisesRegex(ValueError, "Invalid Samba share name"):
+            validate_samba_share_specs(
+                [["read", "docs]", "/mnt/docs", "shareuser:secret"]]
+            )
+
+    def test_share_name_that_exceeds_group_limit_fails(self):
+        with self.assertRaisesRegex(ValueError, "too long for its Unix group"):
+            validate_samba_share_specs(
+                [["read", "a" * 24, "/mnt/docs", "shareuser:secret"]]
+            )
 
 
 class TestValidateWorkspaceDir(unittest.TestCase):

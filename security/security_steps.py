@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import os
 
+from lib.maintenance_systemd import configure_maintenance_timer
 from lib.config import SetupConfig
 from lib.maintenance_defaults import JOURNAL_MAX_USE
 from lib.machine_state import can_modify_kernel, is_container, is_hardware, is_vm
 from lib.remote_utils import run
-from lib.systemd_service import cleanup_service
 
 _LEGACY_UNATTENDED_ORIGINS_FILE = "/etc/apt/apt.conf.d/52infra-tools-unattended-upgrades"
 _LEGACY_MANAGED_ORIGINS_FILE = "/etc/infra_tools/unattended_upgrades_origins.list"
@@ -206,11 +206,22 @@ def harden_kernel(config: SetupConfig) -> None:
         print("  ✓ Skipping kernel hardening (host kernel manages these settings)")
         return
 
-    kernel_hardening = """# Managed by infra_tools - kernel security hardening.
-# Network security
-net.ipv4.conf.default.rp_filter=1
+    rp_filter_hardening = """net.ipv4.conf.default.rp_filter=1
 net.ipv4.conf.all.rp_filter=1
-net.ipv4.tcp_syncookies=1
+"""
+    if config.system_type == "server_proxmox":
+        # A Proxmox host may route, NAT, or bridge traffic for guests. Strict
+        # reverse-path filtering drops valid asymmetric guest traffic, so keep
+        # the kernel's permissive default for this control-plane role.
+        rp_filter_hardening = """# Proxmox hosts may route, NAT, or bridge guest traffic.
+# Keep reverse-path filtering disabled to allow asymmetric guest paths.
+net.ipv4.conf.default.rp_filter=0
+net.ipv4.conf.all.rp_filter=0
+"""
+
+    kernel_hardening = f"""# Managed by infra_tools - kernel security hardening.
+# Network security
+{rp_filter_hardening}net.ipv4.tcp_syncookies=1
 net.ipv4.conf.all.accept_redirects=0
 net.ipv4.conf.default.accept_redirects=0
 net.ipv4.conf.all.secure_redirects=0
@@ -424,50 +435,17 @@ def configure_security_monitor(config: SetupConfig) -> None:
         print("  ✓ Skipping security monitor (not applicable to containers)")
         return
 
-    service_name = "security-monitor"
-    service_file = f"/etc/systemd/system/{service_name}.service"
-    timer_file = f"/etc/systemd/system/{service_name}.timer"
-
-    cleanup_service(service_name)
-
-    service_content = f"""[Unit]
-Description=Security event monitor
-Documentation=man:systemd.service(5)
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/python3 {_SECURITY_MONITOR_SCRIPT}
-StandardOutput=journal
-StandardError=journal
-"""
-
-    timer_content = """[Unit]
-Description=Security event monitor (every 15 minutes)
-Documentation=man:systemd.timer(5)
-
-[Timer]
-OnCalendar=*:0/15
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-"""
-
-    with open(service_file, "w") as f:
-        f.write(service_content)
-
-    with open(timer_file, "w") as f:
-        f.write(timer_content)
-
-    result = run("systemctl daemon-reload", check=False)
-    if result.returncode != 0:
-        print("  ⚠ Security monitor configured but systemd could not reload")
-        return
-
-    run("systemctl enable security-monitor.timer", check=False)
-    run("systemctl start security-monitor.timer", check=False)
-
-    print("  ✓ Security monitor enabled (every 15 min: fail2ban, auditd, SSH failures)")
+    configure_maintenance_timer(
+        service_name="security-monitor",
+        service_desc="Security event monitor",
+        timer_desc="Security event monitor (every 15 minutes)",
+        script_path=_SECURITY_MONITOR_SCRIPT,
+        schedule="*:0/15",
+        check_name="Security event monitor",
+        randomized_delay="2min",
+        timeout="10min",
+        purpose="monitor",
+    )
 
 
 def _cleanup_legacy_unattended_upgrades() -> None:
@@ -486,61 +464,28 @@ def configure_auto_updates(config: SetupConfig) -> None:
     - Automatically handles all configured repositories
     - Supports dependency additions while refusing automated package removals
     """
-    service_name = "auto-update-apt"
-    service_file = f"/etc/systemd/system/{service_name}.service"
-    timer_file = f"/etc/systemd/system/{service_name}.timer"
-
-    # Clean up any existing service/timer before creating new ones
-    cleanup_service(service_name)
-
     # Remove legacy unattended-upgrades config files from older setups
     _cleanup_legacy_unattended_upgrades()
 
-    # Stop and disable unattended-upgrades to prevent dpkg lock conflicts
-    # with our custom auto-update service.
-    run("systemctl stop unattended-upgrades", check=False)
-    run("systemctl disable unattended-upgrades", check=False)
+    # The distro timers can invoke unattended-upgrades even when its service is
+    # disabled, so retire every competing activator before enabling our job.
+    for unit in (
+        "unattended-upgrades.service",
+        "apt-daily.timer",
+        "apt-daily-upgrade.timer",
+    ):
+        run(f"systemctl stop {unit}", check=False)
+        run(f"systemctl disable {unit}", check=False)
 
-    script_path = "/opt/infra_tools/common/service_tools/auto_update_apt.py"
-
-    service_content = f"""[Unit]
-Description=Auto-update APT packages
-Documentation=man:systemd.service(5)
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/python3 {script_path}
-StandardOutput=journal
-StandardError=journal
-"""
-
-    with open(service_file, "w") as f:
-        f.write(service_content)
-
-    timer_content = """[Unit]
-Description=Auto-update APT packages (daily at 6 AM)
-Documentation=man:systemd.timer(5)
-
-[Timer]
-OnCalendar=*-*-* 06:00:00
-Persistent=true
-RandomizedDelaySec=30min
-
-[Install]
-WantedBy=timers.target
-"""
-
-    with open(timer_file, "w") as f:
-        f.write(timer_content)
-
-    result = run("systemctl daemon-reload", check=False)
-    if result.returncode != 0:
-        print("  ⚠ Automatic updates configured but systemd could not reload")
-        return
-    run("systemctl enable auto-update-apt.timer", check=False)
-    run("systemctl start auto-update-apt.timer", check=False)
-
-    print("  ✓ Automatic package updates enabled (daily at 6 AM)")
+    configure_maintenance_timer(
+        service_name="auto-update-apt",
+        service_desc="Auto-update APT packages",
+        timer_desc="Auto-update APT packages daily",
+        script_path="/opt/infra_tools/common/service_tools/auto_update_apt.py",
+        schedule="*-*-* 06:00:00",
+        check_name="APT packages",
+        purpose="auto-update",
+    )
 
 
 def configure_firewall_web(config: SetupConfig) -> None:
@@ -600,59 +545,23 @@ def configure_auto_restart(config: SetupConfig) -> None:
         print("  ✓ Skipping automatic restart service (container)")
         return
 
-    service_name = "auto-restart-if-needed"
-    service_file = f"/etc/systemd/system/{service_name}.service"
-    timer_file = f"/etc/systemd/system/{service_name}.timer"
-    
-    # Clean up any existing service/timer before creating new ones
-    cleanup_service(service_name)
-    
-    script_path = "/opt/infra_tools/common/service_tools/auto_restart_if_needed.py"
-    
-    service_content = f"""[Unit]
-Description=Auto-restart system if needed
-Documentation=man:systemd.service(5)
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/python3 {script_path}
-"""
-    
-    with open(service_file, "w") as f:
-        f.write(service_content)
-    
-    timer_content = """[Unit]
-Description=Auto-restart system if needed (daily at 2 AM)
-Documentation=man:systemd.timer(5)
-
-[Timer]
-OnBootSec=30min
-OnCalendar=*-*-* 02:00:00
-RandomizedDelaySec=10min
-
-[Install]
-WantedBy=timers.target
-"""
-    
-    with open(timer_file, "w") as f:
-        f.write(timer_content)
-    
-    run("systemctl daemon-reload")
-    run("systemctl enable auto-restart-if-needed.timer")
-    run("systemctl start auto-restart-if-needed.timer")
-    
-    print("  ✓ Automatic restart service configured (daily at 2 AM and 30 minutes after boot when needed)")
+    configure_maintenance_timer(
+        service_name="auto-restart-if-needed",
+        service_desc="Auto-restart system if needed",
+        timer_desc="Auto-restart system if needed (daily at 2 AM)",
+        script_path="/opt/infra_tools/common/service_tools/auto_restart_if_needed.py",
+        schedule="*-*-* 02:00:00",
+        on_boot_sec="30min",
+        check_name="Automatic restart",
+        randomized_delay="10min",
+        timeout="10min",
+        network_online=False,
+        purpose="check",
+    )
 
 
 def configure_cleanup_maintenance(config: SetupConfig) -> None:
     """Configure periodic cleanup for journals, temp files, and package caches."""
-    service_name = "cleanup-maintenance"
-    service_file = f"/etc/systemd/system/{service_name}.service"
-    timer_file = f"/etc/systemd/system/{service_name}.timer"
-    script_path = "/opt/infra_tools/common/service_tools/cleanup_maintenance.py"
-
-    cleanup_service(service_name)
-
     os.makedirs(_JOURNAL_CONF_DIR, exist_ok=True)
     with open(_JOURNAL_CONF_FILE, "w") as f:
         f.write(
@@ -662,53 +571,19 @@ RuntimeMaxUse={JOURNAL_MAX_USE}
 """
         )
 
-    service_content = f"""[Unit]
-Description=Cleanup temporary files and package caches
-Documentation=man:systemd.service(5)
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/python3 {script_path}
-StandardOutput=journal
-StandardError=journal
-"""
-
-    with open(service_file, "w") as f:
-        f.write(service_content)
-
-    timer_content = """[Unit]
-Description=Cleanup temporary files and package caches (weekly)
-Documentation=man:systemd.timer(5)
-
-[Timer]
-OnCalendar=Sun *-*-* 03:30:00
-Persistent=true
-RandomizedDelaySec=30min
-
-[Install]
-WantedBy=timers.target
-"""
-
-    with open(timer_file, "w") as f:
-        f.write(timer_content)
-
-    result = run("systemctl daemon-reload", check=False)
-    if result.returncode != 0:
-        print("  ⚠ Cleanup maintenance configured but systemd could not reload")
-        return
-
     journal_result = run("systemctl restart systemd-journald", check=False)
     if journal_result.returncode != 0:
-        print("  ⚠ Cleanup maintenance configured but journald could not be restarted")
+        print("  ⚠ Journal limits written but journald could not be restarted")
 
-    enable_result = run("systemctl enable cleanup-maintenance.timer", check=False)
-    if enable_result.returncode != 0:
-        print("  ⚠ Cleanup maintenance configured but timer could not be enabled")
-        return
-
-    start_result = run("systemctl start cleanup-maintenance.timer", check=False)
-    if start_result.returncode != 0:
-        print("  ⚠ Cleanup maintenance configured but timer could not be started")
-        return
-
-    print(f"  ✓ Cleanup maintenance enabled (weekly with {JOURNAL_MAX_USE} journal cap)")
+    configure_maintenance_timer(
+        service_name="cleanup-maintenance",
+        service_desc="Cleanup temporary files and package caches",
+        timer_desc="Cleanup temporary files and package caches (weekly)",
+        script_path="/opt/infra_tools/common/service_tools/cleanup_maintenance.py",
+        schedule="Sun *-*-* 03:30:00",
+        check_name="Cleanup maintenance",
+        randomized_delay="30min",
+        timeout="1h",
+        network_online=False,
+        purpose="job",
+    )

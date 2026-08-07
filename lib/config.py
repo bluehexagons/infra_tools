@@ -12,8 +12,9 @@ from lib.types import StrList, NestedStrList, JSONDict, MaybeStr
 
 SYSTEM_TYPES = get_system_type_names()
 
-MACHINE_TYPES = ["unprivileged", "vm", "privileged", "hardware", "oci"]
-DEFAULT_MACHINE_TYPE = "unprivileged"
+AUTO_MACHINE_TYPE = "auto"
+MACHINE_TYPES = [AUTO_MACHINE_TYPE, "unprivileged", "vm", "privileged", "hardware", "oci"]
+DEFAULT_MACHINE_TYPE = AUTO_MACHINE_TYPE
 
 DESKTOP_SYSTEMS = [
     system_type.name
@@ -26,20 +27,24 @@ CLI_SYSTEMS = [
     if system_type.include_cli_tools
 ]
 
+AGENT_SUITES = ("terminal", "desktop", "full")
+
 
 def _resolve_machine_type(
     args: argparse.Namespace,
     *,
-    system_default: Optional[str],
-    is_build_server: bool,
+    is_hosted: bool,
 ) -> str:
     explicit_machine_type = getattr(args, "machine_type", None)
     if explicit_machine_type:
         return explicit_machine_type
-    if is_build_server:
+
+    # Hosted setup creates a guest before remote setup runs, so it cannot use
+    # target-side detection. Keep the existing VM default for that path;
+    # callers can select an LXC explicitly with --machine unprivileged.
+    if is_hosted:
         return "vm"
-    if system_default:
-        return system_default
+
     return DEFAULT_MACHINE_TYPE
 
 
@@ -48,10 +53,8 @@ def _default_machine_type_for_setup(
     *,
     is_build_server: bool = False,
 ) -> str:
-    if is_build_server:
-        return "vm"
-    system_default = get_system_type_definition(system_type).default_machine_type
-    return system_default or DEFAULT_MACHINE_TYPE
+    del system_type, is_build_server
+    return DEFAULT_MACHINE_TYPE
 
 
 def _validate_non_negative_int(name: str, value: int) -> int:
@@ -68,6 +71,11 @@ def _optional_bool_arg(args: argparse.Namespace, name: str) -> Optional[bool]:
 def _optional_int_arg(args: argparse.Namespace, name: str) -> Optional[int]:
     value = getattr(args, name, None)
     return value if isinstance(value, int) else None
+
+
+def _optional_str_arg(args: argparse.Namespace, name: str) -> Optional[str]:
+    value = getattr(args, name, None)
+    return value if isinstance(value, str) else None
 
 
 def _normalize_container_storage(value: NestedStrList | list[str] | None) -> Optional[NestedStrList]:
@@ -181,6 +189,15 @@ class SetupConfig:
     install_go: bool = False
     install_node: bool = False
     install_python: bool = False
+    install_gh: bool = False
+    install_codex: bool = False
+    install_claude: bool = False
+    install_opencode: bool = False
+    install_t3code: bool = False
+    agent_suite: MaybeStr = None
+    copy_agent_keys: bool = False
+    copy_agent_config: bool = False
+    agent_repos: Optional[StrList] = None
     custom_steps: Optional[str] = None
     deploy_specs: Optional[NestedStrList] = None
     deployment_mode: str = "default"  # "default" (smart cache), "lite" (cached only), "full" (always fresh)
@@ -204,6 +221,7 @@ class SetupConfig:
     scrub_specs: Optional[NestedStrList] = None
     notify_specs: Optional[NestedStrList] = None
     antistatic_server: MaybeStr = None  # "DOMAIN[:port]" spec
+    antistatic_admin: MaybeStr = None  # Username; password stays in the credential store
     antistatic_db: MaybeStr = None  # "DOMAIN[:port]" spec
     gogs: Optional[StrList] = None  # ["DOMAIN[:port]", "DATA_PATH"?]
     auto_restart: bool = True
@@ -235,6 +253,35 @@ class SetupConfig:
         # the requested full redeploy.
         if self.deployment_mode == "full":
             self.full_deploy = True
+
+        if self.agent_suite:
+            if self.agent_suite not in AGENT_SUITES:
+                raise ValueError(
+                    f"agent_suite must be one of: {', '.join(AGENT_SUITES)}"
+                )
+            self.install_gh = True
+            self.install_codex = True
+            self.install_claude = True
+            self.install_opencode = True
+            if self.agent_suite in {"desktop", "full"}:
+                self.install_t3code = True
+            if self.agent_suite == "full":
+                self.install_node = True
+                self.install_python = True
+                self.install_go = True
+
+    def selected_agent_tools(self) -> StrList:
+        """Return selected coding agents in stable display/install order."""
+        tools: StrList = []
+        for name, enabled in (
+            ("codex", self.install_codex),
+            ("claude", self.install_claude),
+            ("opencode", self.install_opencode),
+            ("t3code", self.install_t3code),
+        ):
+            if enabled:
+                tools.append(name)
+        return tools
 
     def to_remote_args(self) -> StrList:
         """Generate command line arguments for remote execution."""
@@ -297,6 +344,31 @@ class SetupConfig:
         
         if self.install_python:
             args.append("--python")
+
+        if self.install_gh:
+            args.append("--gh")
+
+        if self.install_codex:
+            args.append("--codex")
+
+        if self.install_claude:
+            args.append("--claude")
+
+        if self.install_opencode:
+            args.append("--opencode")
+
+        if self.install_t3code:
+            args.append("--t3code")
+
+        if self.copy_agent_keys:
+            args.append("--copy-keys")
+
+        if self.copy_agent_config:
+            args.append("--copy-config")
+
+        if self.agent_repos:
+            for git_url in self.agent_repos:
+                args.append(f"--repo {shlex.quote(git_url)}")
         
         if self.custom_steps:
             args.append(f"--steps {shlex.quote(self.custom_steps)}")
@@ -382,6 +454,9 @@ class SetupConfig:
         
         if self.antistatic_server:
             args.append(f"--antistatic-server {shlex.quote(self.antistatic_server)}")
+
+        if self.antistatic_admin:
+            args.append(f"--antistatic-admin {shlex.quote(self.antistatic_admin)}")
 
         if self.antistatic_db:
             args.append(f"--antistatic-db {shlex.quote(self.antistatic_db)}")
@@ -483,6 +558,31 @@ class SetupConfig:
         
         if self.install_python:
             cmd_parts.append("--python")
+
+        if self.install_gh:
+            cmd_parts.append("--gh")
+
+        if self.install_codex:
+            cmd_parts.append("--codex")
+
+        if self.install_claude:
+            cmd_parts.append("--claude")
+
+        if self.install_opencode:
+            cmd_parts.append("--opencode")
+
+        if self.install_t3code:
+            cmd_parts.append("--t3code")
+
+        if self.copy_agent_keys:
+            cmd_parts.append("--copy-keys")
+
+        if self.copy_agent_config:
+            cmd_parts.append("--copy-config")
+
+        if self.agent_repos:
+            for git_url in self.agent_repos:
+                cmd_parts.append(f"--repo {shlex.quote(git_url)}")
         
         # Custom steps
         if self.custom_steps:
@@ -544,6 +644,9 @@ class SetupConfig:
         MIN_SHARE_FIELDS = SHARE_USERS_INDEX + 1
         required_share_credentials: StrList = []
         seen_share_credentials: set[str] = set()
+        if self.antistatic_admin:
+            required_share_credentials.append(self.antistatic_admin)
+            seen_share_credentials.add(self.antistatic_admin)
         redacted_share_specs: list[list[str]] = []
         if self.samba_shares:
             for share_spec in self.samba_shares:
@@ -607,6 +710,9 @@ class SetupConfig:
         # Antistatic lobby server
         if self.antistatic_server:
             cmd_parts.append(f"--antistatic-server {shlex.quote(self.antistatic_server)}")
+
+        if self.antistatic_admin:
+            cmd_parts.append(f"--antistatic-admin {shlex.quote(self.antistatic_admin)}")
 
         # Antistatic DB service
         if self.antistatic_db:
@@ -722,8 +828,7 @@ class SetupConfig:
         is_app_server = bool(getattr(args, 'is_app_server', False))
         machine_type = _resolve_machine_type(
             args,
-            system_default=system_type_definition.default_machine_type,
-            is_build_server=is_build_server,
+            is_hosted=bool(getattr(args, 'hosted_node', None)),
         )
         
         include_desktop = (
@@ -777,6 +882,15 @@ class SetupConfig:
             install_go=getattr(args, 'install_go', False),
             install_node=getattr(args, 'install_node', False),
             install_python=getattr(args, 'install_python', False),
+            install_gh=getattr(args, 'install_gh', False),
+            install_codex=getattr(args, 'install_codex', False),
+            install_claude=getattr(args, 'install_claude', False),
+            install_opencode=getattr(args, 'install_opencode', False),
+            install_t3code=getattr(args, 'install_t3code', False),
+            agent_suite=_optional_str_arg(args, 'agent_suite'),
+            copy_agent_keys=getattr(args, 'copy_agent_keys', False),
+            copy_agent_config=getattr(args, 'copy_agent_config', False),
+            agent_repos=getattr(args, 'agent_repos', None),
             custom_steps=getattr(args, 'custom_steps', None),
             deploy_specs=getattr(args, 'deploy_specs', None),
             deployment_mode=getattr(args, 'deployment_mode', 'default'),
@@ -800,6 +914,7 @@ class SetupConfig:
             scrub_specs=getattr(args, 'scrub_specs', None),
             notify_specs=getattr(args, 'notify_specs', None),
             antistatic_server=getattr(args, 'antistatic_server', None),
+            antistatic_admin=getattr(args, 'antistatic_admin', None),
             antistatic_db=getattr(args, 'antistatic_db', None),
             gogs=getattr(args, 'gogs', None),
             auto_restart=auto_restart,

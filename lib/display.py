@@ -62,7 +62,22 @@ def print_setup_summary(config: SetupConfig, description: Optional[str] = None) 
     
     if config.custom_steps:
         print(f"Steps: {config.custom_steps}")
-    
+
+    if config.install_gh:
+        print("GitHub CLI: Yes")
+    if config.agent_suite:
+        print(f"Agent suite: {config.agent_suite}")
+    if config.selected_agent_tools():
+        print(f"Agent tools: {', '.join(config.selected_agent_tools())}")
+    if config.copy_agent_config:
+        print("Agent config copy: Yes")
+    if config.copy_agent_keys:
+        print("Agent credential copy: Yes")
+    if config.agent_repos:
+        print(f"Agent repositories: {len(config.agent_repos)}")
+        for git_url in config.agent_repos:
+            print(f"  - {git_url}")
+
     if config.deploy_specs:
         print(f"Deployments: {len(config.deploy_specs)} repository(ies)")
         for location, git_url in config.deploy_specs:
@@ -111,6 +126,12 @@ def print_setup_summary(config: SetupConfig, description: Optional[str] = None) 
         print(f"Notifications: {len(config.notify_specs)} target(s)")
         for notify_type, target in config.notify_specs:
             print(f"  - {notify_type}: {target}")
+
+    if config.antistatic_server:
+        print(f"Antistatic server: {config.antistatic_server}")
+        print("  - Persistent reports: /var/lib/antistatic")
+        if config.antistatic_admin:
+            print(f"  - Admin user: {config.antistatic_admin}")
 
     if config.gogs:
         print(f"Gogs: {' '.join(config.gogs)}")

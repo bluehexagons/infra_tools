@@ -58,6 +58,7 @@ class TestConfigureSmbMountUnit(unittest.TestCase):
             with patch.object(smb_mount_steps, 'run', side_effect=fake_run), \
                  patch.object(smb_mount_steps, 'open', side_effect=fake_open, create=True), \
                  patch.object(smb_mount_steps, 'cleanup_systemd_unit'), \
+                 patch.object(smb_mount_steps, 'validate_smb_mount_specs'), \
                  patch.object(smb_mount_steps.os, 'makedirs', side_effect=fake_makedirs):
                 smb_mount_steps.configure_smb_mount(
                     config,
@@ -86,6 +87,77 @@ class TestConfigureSmbMountUnit(unittest.TestCase):
         # Credentials still contain the username/password lines.
         self.assertIn("username=svc", cred_body)
         self.assertIn("password=hunter2", cred_body)
+
+    def test_distinct_mountpoints_use_distinct_credential_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            etc_systemd = os.path.join(tmp, "etc-systemd")
+            creds_dir = os.path.join(tmp, "creds")
+            first_mountpoint = os.path.join(tmp, "a_b")
+            second_mountpoint = os.path.join(tmp, "a", "b")
+            os.makedirs(etc_systemd)
+            os.makedirs(creds_dir)
+
+            real_open = open
+            real_makedirs = os.makedirs
+            escaped_names = iter(("tmp-a_5fb", "tmp-a-b"))
+
+            def fake_open(path, mode="r", *args, **kwargs):
+                if path.startswith("/etc/systemd/system/"):
+                    return real_open(os.path.join(etc_systemd, os.path.basename(path)), mode, *args, **kwargs)
+                if path.startswith("/root/.smb/"):
+                    return real_open(os.path.join(creds_dir, os.path.basename(path)), mode, *args, **kwargs)
+                return real_open(path, mode, *args, **kwargs)
+
+            def fake_makedirs(path, *args, **kwargs):
+                if path == "/root/.smb":
+                    return real_makedirs(creds_dir, exist_ok=True)
+                return real_makedirs(path, *args, **kwargs)
+
+            def fake_run(command, **_kwargs):
+                result = MagicMock(returncode=0, stdout="")
+                if "systemd-escape" in command:
+                    result.stdout = next(escaped_names) + "\n"
+                return result
+
+            config = SetupConfig(host="h", username="alice", system_type="server_lite")
+            with patch.object(smb_mount_steps, "run", side_effect=fake_run), \
+                 patch.object(smb_mount_steps, "open", side_effect=fake_open, create=True), \
+                 patch.object(smb_mount_steps, "cleanup_systemd_unit"), \
+                 patch.object(smb_mount_steps, "validate_smb_mount_specs"), \
+                 patch.object(smb_mount_steps.os, "makedirs", side_effect=fake_makedirs):
+                smb_mount_steps.configure_smb_mount(
+                    config,
+                    mount_spec=[first_mountpoint, "192.168.1.10", "first:one", "docs", "/"],
+                )
+                smb_mount_steps.configure_smb_mount(
+                    config,
+                    mount_spec=[second_mountpoint, "192.168.1.11", "second:two", "docs", "/"],
+                )
+
+            credential_files = sorted(os.listdir(creds_dir))
+            self.assertEqual(
+                credential_files,
+                ["credentials-tmp-a-b", "credentials-tmp-a_5fb"],
+            )
+
+            with real_open(os.path.join(creds_dir, "credentials-tmp-a_5fb")) as file_obj:
+                self.assertIn("username=first", file_obj.read())
+            with real_open(os.path.join(creds_dir, "credentials-tmp-a-b")) as file_obj:
+                self.assertIn("username=second", file_obj.read())
+
+    def test_invalid_spec_is_rejected_before_filesystem_changes(self) -> None:
+        config = SetupConfig(host="h", username="alice", system_type="server_lite")
+
+        with patch.object(smb_mount_steps.os, "makedirs") as mock_makedirs, \
+             patch.object(smb_mount_steps, "run") as mock_run:
+            with self.assertRaisesRegex(ValueError, "control characters"):
+                smb_mount_steps.configure_smb_mount(
+                    config,
+                    mount_spec=["/mnt/share", "192.168.1.10", "svc:secret\nvalue", "docs", "/"],
+                )
+
+        mock_makedirs.assert_not_called()
+        mock_run.assert_not_called()
 
 
 if __name__ == '__main__':

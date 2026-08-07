@@ -7,6 +7,7 @@ import os
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional, cast
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from lib.plugin_registry import resolve_validator
@@ -19,6 +20,13 @@ def _resolve_plugin_validator(name: str) -> Callable[..., object]:
     """Resolve a plugin-owned validator or parser callable."""
 
     return resolve_validator(name)
+
+
+def _validate_no_control_characters(value: str, name: str) -> None:
+    """Reject values that could add lines to generated configuration files."""
+
+    if any(ord(char) < 32 or ord(char) == 127 for char in value):
+        raise ValueError(f"{name} must not contain control characters")
 
 
 def validate_filesystem_path(path: str, must_exist: bool = False, check_writable: bool = False) -> None:
@@ -34,6 +42,8 @@ def validate_filesystem_path(path: str, must_exist: bool = False, check_writable
     """
     if not path:
         raise ValueError("Path must be a non-empty string")
+
+    _validate_no_control_characters(path, "Path")
     
     # Basic path format validation
     try:
@@ -261,6 +271,44 @@ def validate_gogs_settings(gogs: Optional[list[str]]) -> None:
         validate_filesystem_path(data_path, must_exist=False)
 
 
+def validate_antistatic_settings(config: "SetupConfig") -> None:
+    """Validate antistatic-server deployment and optional admin settings."""
+    if not config.antistatic_server:
+        if config.antistatic_admin is not None:
+            raise ValueError("--antistatic-admin requires --antistatic-server")
+        return
+
+    from game.antistatic_steps import parse_antistatic_spec
+    from lib.validators import validate_host
+
+    domain, _port = parse_antistatic_spec(config.antistatic_server, strict=True)
+    if domain and not validate_host(domain):
+        raise ValueError(f"Invalid Antistatic server domain: {domain}")
+
+    if not config.antistatic_admin:
+        return
+    if not domain:
+        raise ValueError("--antistatic-admin requires a hostname-based reverse proxy deployment")
+    if not (config.enable_ssl or config.enable_cloudflare):
+        raise ValueError("--antistatic-admin requires --ssl or --cloudflare")
+
+    username = config.antistatic_admin
+    if username != username.strip() or ":" in username or "," in username:
+        raise ValueError(f"Invalid Antistatic admin username: {username}")
+    if any(ord(char) < 32 or ord(char) == 127 for char in username):
+        raise ValueError("Antistatic admin username must not contain control characters")
+
+    password = None
+    for credential in config.share_credentials or []:
+        if len(credential) == 2 and credential[0] == username:
+            password = credential[1]
+            break
+    if password is None:
+        raise ValueError(f"Missing credential for Antistatic admin: {username}")
+    if any(ord(char) < 32 or ord(char) == 127 for char in password):
+        raise ValueError("Antistatic admin password must not contain control characters")
+
+
 def validate_deploy_specs(deploy_specs: Optional[list[list[str]]]) -> None:
     """Validate deploy specs before setup or patch execution."""
 
@@ -341,13 +389,34 @@ def validate_smb_mount_specs(smb_mounts: Optional[list[list[str]]]) -> None:
         _resolve_plugin_validator("parse_smb_mount_spec"),
     )
 
+    mountpoints: set[str] = set()
     for mount_spec in smb_mounts:
         mount_config = parse_smb_mount_spec(mount_spec)
-        validate_filesystem_path(mount_config["mountpoint"], must_exist=False)
+        mountpoint = mount_config["mountpoint"]
+        validate_filesystem_path(mountpoint, must_exist=False)
+        normalized_mountpoint = os.path.normpath(mountpoint)
+        if normalized_mountpoint != mountpoint or not normalized_mountpoint.startswith("/mnt/"):
+            raise ValueError(
+                "SMB mountpoint must be a normalized directory below /mnt: "
+                f"{mountpoint}"
+            )
+        if normalized_mountpoint in mountpoints:
+            raise ValueError(f"Duplicate SMB mountpoint: {mountpoint}")
+        mountpoints.add(normalized_mountpoint)
         if not validate_host(mount_config["ip"]):
             raise ValueError(f"Invalid SMB mount host: {mount_config['ip']}")
-        if not mount_config["share"] or "/" in mount_config["share"] or "\\" in mount_config["share"] or " " in mount_config["share"]:
+        if not mount_config["username"] or not mount_config["password"]:
+            raise ValueError("SMB mount credentials must include a non-empty username and password")
+        _validate_no_control_characters(mount_config["username"], "SMB mount username")
+        _validate_no_control_characters(mount_config["password"], "SMB mount password")
+        if (
+            not mount_config["share"]
+            or "/" in mount_config["share"]
+            or "\\" in mount_config["share"]
+            or any(char.isspace() for char in mount_config["share"])
+        ):
             raise ValueError(f"Invalid share name (cannot contain /, \\, or spaces): {mount_config['share']}")
+        _validate_no_control_characters(mount_config["subdir"], "SMB mount subdirectory")
         if mount_config["subdir"] and not mount_config["subdir"].startswith("/"):
             raise ValueError(f"Subdirectory must start with /: {mount_config['subdir']}")
 
@@ -372,22 +441,59 @@ def validate_samba_share_specs(
 
     credentials = parse_share_credentials(share_credentials)
 
+    share_names: set[str] = set()
     for share_spec in samba_shares:
         share_config = parse_share_spec(share_spec, credentials)
         share_name = share_config["share_name"]
-        if not share_name or "/" in share_name or "\\" in share_name or " " in share_name:
-            raise ValueError(f"Invalid Samba share name (cannot contain /, \\, or spaces): {share_name}")
+        validate_samba_share_name(share_name)
+        if share_name in share_names:
+            raise ValueError(f"Duplicate Samba share name: {share_name}")
+        share_names.add(share_name)
 
         if not share_config["paths"]:
             raise ValueError(f"No paths specified for share: {share_name}")
 
+        if len(share_config["paths"]) != 1:
+            raise ValueError("Samba shares support exactly one path; create one --share per directory")
+
         for path in cast(list[str], share_config["paths"]):
             if not os.path.isabs(path):
                 raise ValueError(f"Share path must be absolute: {path}")
+            if os.path.normpath(path) == "/":
+                raise ValueError("Samba share path must not be the filesystem root")
             validate_filesystem_path(path, must_exist=False)
 
         if not share_config["users"]:
             raise ValueError(f"No users specified for share: {share_name}")
+
+        from lib.validators import validate_username
+
+        for user in cast(list[dict[str, str]], share_config["users"]):
+            username = user["username"]
+            password = user["password"]
+            if not validate_username(username):
+                raise ValueError(f"Invalid Samba username: {username}")
+            if not password:
+                raise ValueError(f"Samba password must not be empty for user: {username}")
+            _validate_no_control_characters(username, "Samba username")
+            _validate_no_control_characters(password, "Samba password")
+
+
+def validate_samba_share_name(share_name: str) -> None:
+    """Validate a Samba share name used in config sections and Unix groups."""
+
+    _validate_no_control_characters(share_name, "Samba share name")
+    if not share_name or "/" in share_name or "\\" in share_name or " " in share_name:
+        raise ValueError(
+            f"Invalid Samba share name (cannot contain /, \\, or spaces): {share_name}"
+        )
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", share_name):
+        raise ValueError(
+            "Invalid Samba share name (use only letters, numbers, dots, "
+            f"underscores, and hyphens): {share_name}"
+        )
+    if len(f"smb_{share_name}_write") > 32:
+        raise ValueError(f"Samba share name is too long for its Unix group: {share_name}")
 
 
 def validate_samba_share_credentials(config: "SetupConfig") -> None:
@@ -467,6 +573,8 @@ _MEMORY_PATTERN = re.compile(r'^\d+[KMGT]$', re.IGNORECASE)
 _PACKAGE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+.-]*$")
 _NETWORK_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 _NETWORK_PROVIDER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
+_GIT_SCP_URL_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+@[^:\s]+:.+$")
+_SAFE_REPO_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 def validate_memory_string(value: str, name: str = "memory") -> None:
@@ -498,6 +606,58 @@ def validate_package_name(value: str, name: str = "package") -> str:
         raise ValueError(f"Invalid {name} name: {value}")
 
     return normalized_value
+
+
+def _repo_name_from_git_url(git_url: str) -> str:
+    repo_name = git_url.rstrip('/').split('/')[-1]
+    if ':' in repo_name:
+        repo_name = repo_name.rsplit(':', 1)[-1]
+    if repo_name.endswith('.git'):
+        repo_name = repo_name[:-4]
+    return repo_name
+
+
+def validate_agent_repositories(repositories: Optional[list[str]]) -> None:
+    """Validate git URLs supplied through --repo for agent VM workspaces."""
+    if not repositories:
+        return
+
+    seen_repo_names: set[str] = set()
+    for repository in repositories:
+        if not isinstance(repository, str):
+            raise ValueError("--repo requires a git URL")
+
+        git_url = repository.strip()
+        if not git_url:
+            raise ValueError("--repo requires a non-empty git URL")
+        if git_url != repository:
+            raise ValueError(f"Invalid --repo git URL: {repository}")
+        if git_url.startswith('-'):
+            raise ValueError(f"Invalid --repo git URL: {repository}")
+        if any(ord(char) < 32 or ord(char) == 127 for char in git_url):
+            raise ValueError(f"Invalid --repo git URL: {repository}")
+
+        parsed = urlparse(git_url)
+        if parsed.scheme:
+            if parsed.scheme not in {"git", "http", "https", "ssh"} or not parsed.netloc:
+                raise ValueError(f"Invalid --repo git URL: {repository}")
+            if parsed.password is not None or (
+                parsed.scheme in {"http", "https"} and parsed.username is not None
+            ):
+                raise ValueError(
+                    "--repo URLs must not contain embedded credentials"
+                )
+        elif not _GIT_SCP_URL_PATTERN.match(git_url):
+            raise ValueError(
+                "--repo must be an https://, ssh://, git://, or git@host:path git URL"
+            )
+
+        repo_name = _repo_name_from_git_url(git_url)
+        if not repo_name or not _SAFE_REPO_NAME_PATTERN.match(repo_name):
+            raise ValueError(f"Invalid --repo repository name derived from URL: {repository}")
+        if repo_name in seen_repo_names:
+            raise ValueError(f"Duplicate --repo repository name: {repo_name}")
+        seen_repo_names.add(repo_name)
 
 
 def validate_network_name(value: str, name: str = "network name") -> str:
@@ -650,3 +810,23 @@ def validate_hosted_flags(config: Any) -> None:
             resolve_cloud_image(base)
     elif vm_image:
         raise ValueError("--image requires --machine vm")
+
+
+def validate_rdp_settings(config: Any) -> None:
+    """Validate credentials required for a usable xRDP login.
+
+    xRDP authenticates against the Unix account password. Hosted cloud images
+    are deliberately provisioned key-only, so accepting ``--rdp`` without a
+    password produces a desktop that can never be logged into.
+    """
+    if not getattr(config, "enable_rdp", False):
+        return
+
+    username = str(getattr(config, "username", "")).strip()
+    if username == "root":
+        raise ValueError("--rdp cannot be used with the root account")
+
+    password = getattr(config, "password", None)
+    if not isinstance(password, str) or not password.strip():
+        raise ValueError("--rdp requires --password for the desktop login account")
+    _validate_no_control_characters(password, "RDP password")

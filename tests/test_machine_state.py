@@ -11,6 +11,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import lib.machine_state as ms
+from lib.config import DEFAULT_MACHINE_TYPE
 
 
 class TestMachineStateHelpers(unittest.TestCase):
@@ -64,6 +65,36 @@ class TestMachineStateHelpers(unittest.TestCase):
             with self._patch_machine_type(mt):
                 self.assertTrue(ms.can_restart_system(), f"Expected can_restart_system=True for {mt}")
 
+    def test_auto_machine_type_resolves_from_runtime(self):
+        with self._patch_machine_type('auto'), \
+             patch.object(ms, 'detect_machine_type', return_value='vm'):
+            self.assertTrue(ms.is_vm())
+
+
+class TestMachineTypeDetection(unittest.TestCase):
+    def test_detects_lxc_as_unprivileged(self):
+        with patch.object(ms, '_systemd_detect_virt', return_value='lxc'):
+            self.assertEqual(ms.detect_machine_type(), 'unprivileged')
+
+    def test_detects_oci_containers(self):
+        with patch.object(ms, '_systemd_detect_virt', return_value='docker'):
+            self.assertEqual(ms.detect_machine_type(), 'oci')
+
+    def test_detects_virtual_machines(self):
+        with patch.object(ms, '_systemd_detect_virt', return_value='kvm'):
+            self.assertEqual(ms.detect_machine_type(), 'vm')
+
+    def test_falls_back_to_bare_metal(self):
+        with patch.object(ms, '_systemd_detect_virt', return_value='none'), \
+             patch.object(ms, '_read_text', return_value=None), \
+             patch.object(ms.os.path, 'exists', return_value=False):
+            self.assertEqual(ms.detect_machine_type(), 'hardware')
+
+    def test_fallback_detects_lxc_from_cgroup(self):
+        with patch.object(ms, '_systemd_detect_virt', return_value=None), \
+             patch.object(ms, '_read_text', side_effect=[None, '0::/lxc/100']):
+            self.assertEqual(ms.detect_machine_type(), 'unprivileged')
+
 
 class TestSaveLoadMachineState(unittest.TestCase):
     def test_save_and_load(self):
@@ -82,7 +113,7 @@ class TestSaveLoadMachineState(unittest.TestCase):
             state_file = os.path.join(tmpdir, 'nonexistent.json')
             with patch.object(ms, 'STATE_FILE', state_file):
                 state = ms.load_machine_state()
-                self.assertEqual(state['machine_type'], 'unprivileged')
+                self.assertEqual(state['machine_type'], DEFAULT_MACHINE_TYPE)
                 self.assertIsNone(state['system_type'])
 
     def test_load_corrupt_file_returns_defaults(self):
@@ -92,7 +123,7 @@ class TestSaveLoadMachineState(unittest.TestCase):
                 f.write('not valid json')
             with patch.object(ms, 'STATE_FILE', state_file):
                 state = ms.load_machine_state()
-                self.assertEqual(state['machine_type'], 'unprivileged')
+                self.assertEqual(state['machine_type'], DEFAULT_MACHINE_TYPE)
 
     def test_save_with_extra_data(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -158,7 +189,7 @@ class TestMachineStateValidation(unittest.TestCase):
             })
             with patch.object(ms, 'STATE_FILE', state_file):
                 state = ms.load_machine_state()
-                self.assertEqual(state['machine_type'], 'unprivileged')
+                self.assertEqual(state['machine_type'], DEFAULT_MACHINE_TYPE)
                 self.assertIsNone(state['username'])
 
     def test_unknown_machine_type_returns_defaults(self):
@@ -168,14 +199,14 @@ class TestMachineStateValidation(unittest.TestCase):
             })
             with patch.object(ms, 'STATE_FILE', state_file):
                 state = ms.load_machine_state()
-                self.assertEqual(state['machine_type'], 'unprivileged')
+                self.assertEqual(state['machine_type'], DEFAULT_MACHINE_TYPE)
 
     def test_json_list_instead_of_dict_returns_defaults(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             state_file = self._write_state(tmpdir, ["not", "a", "dict"])
             with patch.object(ms, 'STATE_FILE', state_file):
                 state = ms.load_machine_state()
-                self.assertEqual(state['machine_type'], 'unprivileged')
+                self.assertEqual(state['machine_type'], DEFAULT_MACHINE_TYPE)
 
     def test_null_machine_type_accepted(self):
         """machine_type=None is accepted (edge case for partial state)."""

@@ -10,6 +10,44 @@ from lib.config import SetupConfig
 from lib.remote_utils import run, install_package
 
 
+def _certificate_is_usable(cert_path: str, key_path: str, domains: StrList) -> bool:
+    """Return whether a certificate is current, matches its key, and covers every domain."""
+    quoted_cert = shlex.quote(cert_path)
+    quoted_key = shlex.quote(key_path)
+    current = run(
+        f"openssl x509 -checkend 86400 -noout -in {quoted_cert}",
+        check=False,
+        capture_output=True,
+    )
+    if current.returncode != 0:
+        return False
+    for domain in domains:
+        hostname = run(
+            f"openssl x509 -noout -checkhost {shlex.quote(domain)} -in {quoted_cert}",
+            check=False,
+            capture_output=True,
+        )
+        if hostname.returncode != 0:
+            return False
+    cert_digest = run(
+        f"openssl x509 -in {quoted_cert} -pubkey -noout | "
+        "openssl pkey -pubin -outform DER | openssl sha256",
+        check=False,
+        capture_output=True,
+    )
+    key_digest = run(
+        f"openssl pkey -in {quoted_key} -pubout -outform DER | openssl sha256",
+        check=False,
+        capture_output=True,
+    )
+    return (
+        cert_digest.returncode == 0
+        and key_digest.returncode == 0
+        and bool(cert_digest.stdout)
+        and cert_digest.stdout == key_digest.stdout
+    )
+
+
 def install_certbot(config: SetupConfig) -> None:
     print("Installing certbot...")
     run("apt-get update -qq", check=False)
@@ -28,9 +66,13 @@ def obtain_letsencrypt_certificate(domains: StrList, email: Optional[str] = None
         cert_name = domains[0]
     
     cert_path = f"/etc/letsencrypt/live/{cert_name}/fullchain.pem"
-    if os.path.exists(cert_path):
-        print(f"  Certificate '{cert_name}' already exists, skipping...")
+    key_path = f"/etc/letsencrypt/live/{cert_name}/privkey.pem"
+    complete_existing_certificate = os.path.exists(cert_path) and os.path.exists(key_path)
+    if complete_existing_certificate and _certificate_is_usable(cert_path, key_path, domains):
+        print(f"  Certificate '{cert_name}' already exists and is valid, skipping...")
         return True
+    if os.path.exists(cert_path) or os.path.exists(key_path):
+        print(f"  ⚠ Certificate '{cert_name}' is incomplete or invalid; requesting replacement")
     
     print(f"  Obtaining Let's Encrypt certificate for {len(domains)} domain(s): {', '.join(domains)}")
     
@@ -45,6 +87,8 @@ def obtain_letsencrypt_certificate(domains: StrList, email: Optional[str] = None
     ]
     
     cmd_parts.append(f"--cert-name {shlex.quote(cert_name)}")
+    if complete_existing_certificate:
+        cmd_parts.append("--force-renewal")
     
     for domain in domains:
         cmd_parts.append(f"-d {shlex.quote(domain)}")
@@ -59,8 +103,11 @@ def obtain_letsencrypt_certificate(domains: StrList, email: Optional[str] = None
     result = run(cmd, check=False)
     
     if result.returncode == 0:
-        print(f"  ✓ Certificate '{cert_name}' obtained")
-        return True
+        if _certificate_is_usable(cert_path, key_path, domains):
+            print(f"  ✓ Certificate '{cert_name}' obtained")
+            return True
+        print(f"  ⚠ Certificate '{cert_name}' failed post-issuance validation")
+        return False
     else:
         print(f"  ⚠ Failed to obtain certificate '{cert_name}'")
         return False
@@ -102,8 +149,10 @@ def create_domain_cert_links(domains: list[str], cert_name: str) -> None:
 def setup_certificate_renewal() -> None:
     print("  Setting up automatic certificate renewal...")
     
-    run("systemctl enable certbot.timer", check=False)
-    run("systemctl start certbot.timer", check=False)
+    enable_result = run("systemctl enable certbot.timer", check=False)
+    start_result = run("systemctl start certbot.timer", check=False)
+    if enable_result.returncode != 0 or start_result.returncode != 0:
+        raise RuntimeError("Failed to enable automatic certificate renewal")
     
     print("  ✓ Automatic renewal configured")
 
@@ -155,8 +204,7 @@ def setup_ssl_for_deployments(
     success = obtain_letsencrypt_certificate(domain_list, email, cert_name)
     
     if not success:
-        print("  ⚠ Failed to obtain certificate")
-        return
+        raise RuntimeError("Failed to obtain a trusted certificate for deployments")
     
     print(f"  Creating symbolic links for domain certificate references...")
     create_domain_cert_links(domain_list, cert_name)

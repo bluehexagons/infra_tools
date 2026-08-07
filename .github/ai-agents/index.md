@@ -17,6 +17,9 @@ Quick navigation for AI agents. **Start with QUICK_START.md**.
 | Topic | Location |
 |-------|----------|
 | Machine types | `docs/MACHINE_TYPES.md` |
+| Recurring maintenance | `docs/MAINTENANCE.md` |
+| Command reference | `docs/COMMAND_LINE.md` |
+| CI/CD safety | `docs/CICD.md` and `docs/DEPLOYMENT_SAFETY.md` |
 | XRDP issues | `docs/XRDP.md` |
 | Logging | `lib/logging_utils.py` |
 | Storage/sync | `sync/` module |

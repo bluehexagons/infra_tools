@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch, MagicMock
 
@@ -50,6 +51,66 @@ class TestSambaGlobalHardenedSettings(unittest.TestCase):
             samba_steps.SAMBA_GLOBAL_HARDENED_SETTINGS["log file"],
             "/var/log/samba/log.%m",
         )
+
+
+class TestConfigureSambaGlobalSettings(unittest.TestCase):
+    def test_only_rewrites_global_settings_and_reloads_smbd(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            smb_conf = os.path.join(tmpdir, "smb.conf")
+            original = """[GLOBAL]
+   server min protocol = SMB2
+   workgroup = LEGACY
+
+[archive]
+   server min protocol = NT1
+"""
+            with open(smb_conf, "w") as file_obj:
+                file_obj.write(original)
+
+            commands: list[str] = []
+
+            def fake_run(command: str, **_kwargs: object) -> MagicMock:
+                commands.append(command)
+                return MagicMock(returncode=0, stderr="")
+
+            with patch.object(samba_steps, "SMB_CONF_PATH", smb_conf), \
+                 patch.object(samba_steps, "run", side_effect=fake_run):
+                samba_steps.configure_samba_global_settings(_make_config())
+
+            with open(smb_conf) as file_obj:
+                configured = file_obj.read()
+
+        global_section, archive_section = configured.split("[archive]", 1)
+        self.assertIn("server min protocol = SMB3", global_section)
+        self.assertEqual(global_section.count("server min protocol"), 1)
+        self.assertIn("server min protocol = NT1", archive_section)
+        self.assertTrue(any(command.startswith("testparm -s ") for command in commands))
+        self.assertIn("systemctl reload smbd", commands)
+
+    def test_restores_previous_config_when_testparm_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            smb_conf = os.path.join(tmpdir, "smb.conf")
+            original = "[global]\n   workgroup = LEGACY\n"
+            with open(smb_conf, "w") as file_obj:
+                file_obj.write(original)
+
+            commands: list[str] = []
+
+            def fake_run(command: str, **_kwargs: object) -> MagicMock:
+                commands.append(command)
+                return MagicMock(
+                    returncode=1 if command.startswith("testparm -s ") else 0,
+                    stderr="bad option",
+                )
+
+            with patch.object(samba_steps, "SMB_CONF_PATH", smb_conf), \
+                 patch.object(samba_steps, "run", side_effect=fake_run):
+                samba_steps.configure_samba_global_settings(_make_config())
+
+            with open(smb_conf) as file_obj:
+                self.assertEqual(file_obj.read(), original)
+
+        self.assertNotIn("systemctl reload smbd", commands)
 
 
 class TestSambaFail2banFilter(unittest.TestCase):
@@ -181,6 +242,37 @@ class TestConfigureSambaFail2banLegacyCleanup(unittest.TestCase):
         self.assertNotIn("/etc/fail2ban/filter.d/samba.conf", written)
         self.assertNotIn("/etc/fail2ban/jail.d/samba.local", written)
 
+    def test_existing_jail_is_refreshed(self) -> None:
+        existing_paths = {"/etc/fail2ban/jail.d/samba-auth.local"}
+        written: dict[str, str] = {}
+
+        class _Writer:
+            def __init__(self, path: str) -> None:
+                self.path = path
+
+            def __enter__(self):  # type: ignore[no-untyped-def]
+                return self
+
+            def __exit__(self, *args: object) -> bool:
+                return False
+
+            def write(self, data: str) -> None:
+                written[self.path] = written.get(self.path, "") + data
+
+        def fake_open(path: str, mode: str = "r", *args: object, **kwargs: object) -> _Writer:
+            self.assertEqual(mode, "w")
+            return _Writer(path)
+
+        with patch.object(samba_steps, "run", return_value=MagicMock(returncode=0)), \
+             patch.object(samba_steps, "is_package_installed", return_value=True), \
+             patch.object(samba_steps.os.path, "exists", side_effect=existing_paths.__contains__), \
+             patch.object(samba_steps.os, "makedirs"), \
+             patch.object(samba_steps, "open", side_effect=fake_open, create=True):
+            samba_steps.configure_samba_fail2ban(_make_config())
+
+        self.assertIn("/etc/fail2ban/filter.d/samba-auth.conf", written)
+        self.assertIn("/etc/fail2ban/jail.d/samba-auth.local", written)
+
 
 class TestVetoFilesPattern(unittest.TestCase):
     """The veto-files config must use real on-disk directory names; an
@@ -199,6 +291,114 @@ class TestVetoFilesPattern(unittest.TestCase):
         veto_pattern = "/" + "/".join(veto_dirs) + "/"
         self.assertEqual(veto_pattern, "/subdir/")
         self.assertNotEqual(veto_pattern, "/.subdir/")
+
+
+class TestReconcileSambaShares(unittest.TestCase):
+    def _run_reconcile(
+        self,
+        original: str,
+        shares: list[list[str]] | None,
+    ) -> tuple[str, list[tuple[str, dict[str, object]]]]:
+        calls: list[tuple[str, dict[str, object]]] = []
+
+        def fake_run(command: str, **kwargs: object) -> MagicMock:
+            calls.append((command, kwargs))
+            missing = command.startswith(("id ", "pdbedit -L ", "getent group "))
+            return MagicMock(returncode=1 if missing else 0, stderr="")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            smb_conf = os.path.join(tmpdir, "smb.conf")
+            with open(smb_conf, "w", encoding="utf-8") as file_obj:
+                file_obj.write(original)
+            config = _make_config(samba_shares=shares)
+            with patch.object(samba_steps, "SMB_CONF_PATH", smb_conf), \
+                 patch.object(samba_steps, "run", side_effect=fake_run), \
+                 patch.object(samba_steps.os, "makedirs"):
+                samba_steps.reconcile_samba_shares(config)
+            with open(smb_conf, encoding="utf-8") as file_obj:
+                return file_obj.read(), calls
+
+    def test_access_change_replaces_legacy_section_and_group(self) -> None:
+        original = """[global]
+   workgroup = WORKGROUP
+
+[docs_read]
+   path = /srv/docs
+   valid users = @smb_docs_read
+   force group = smb_docs_read
+
+[manual]
+   path = /srv/manual
+"""
+        configured, calls = self._run_reconcile(
+            original,
+            [["write", "docs", "/srv/docs", "alice:secret"]],
+        )
+
+        self.assertNotIn("[docs_read]", configured)
+        self.assertIn("[docs_write]", configured)
+        self.assertIn("[manual]", configured)
+        self.assertIn(samba_steps.MANAGED_SHARES_BEGIN, configured)
+        commands = [command for command, _kwargs in calls]
+        self.assertIn("groupdel smb_docs_read", commands)
+        self.assertEqual(commands.count("systemctl reload smbd"), 1)
+
+    def test_membership_is_replaced_not_only_appended(self) -> None:
+        original = """[global]
+
+[docs_write]
+   path = /srv/docs
+   valid users = @smb_docs_write
+   force group = smb_docs_write
+"""
+        _configured, calls = self._run_reconcile(
+            original,
+            [["write", "docs", "/srv/docs", "bob:secret"]],
+        )
+
+        commands = [command for command, _kwargs in calls]
+        self.assertIn("gpasswd -M bob smb_docs_write", commands)
+
+    def test_empty_desired_state_removes_only_managed_shares(self) -> None:
+        original = """[global]
+
+[docs_write]
+   path = /srv/docs
+   valid users = @smb_docs_write
+   force group = smb_docs_write
+
+[manual]
+   path = /srv/manual
+"""
+        configured, calls = self._run_reconcile(original, None)
+
+        self.assertNotIn("[docs_write]", configured)
+        self.assertIn("[manual]", configured)
+        self.assertIn("groupdel smb_docs_write", [command for command, _ in calls])
+
+    def test_password_is_passed_over_stdin_not_in_command(self) -> None:
+        _configured, calls = self._run_reconcile(
+            "[global]\n",
+            [["read", "docs", "/srv/docs", "alice:very-secret"]],
+        )
+
+        self.assertFalse(any("very-secret" in command for command, _ in calls))
+        password_calls = [
+            kwargs
+            for command, kwargs in calls
+            if command.startswith("smbpasswd -a -s ")
+        ]
+        self.assertEqual(password_calls[0]["input_data"], "very-secret\nvery-secret\n")
+
+    def test_recursive_permission_changes_preserve_filesystem_root(self) -> None:
+        _configured, calls = self._run_reconcile(
+            "[global]\n",
+            [["write", "docs", "/srv/docs", "alice:very-secret"]],
+        )
+
+        commands = [command for command, _ in calls]
+        self.assertIn("chgrp -R --preserve-root smb_docs_write /srv/docs", commands)
+        self.assertIn("chmod -R --preserve-root 2775 /srv/docs", commands)
 
 
 if __name__ == '__main__':

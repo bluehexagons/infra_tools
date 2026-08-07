@@ -6,7 +6,7 @@
 from __future__ import annotations
 from lib.types import JSONDict, StrList
 from lib.config import SetupConfig
-from lib.machine_state import is_container, can_modify_kernel
+from lib.machine_state import can_modify_kernel
 
 def setup_feature(config: SetupConfig) -> None:
     """Standard setup step with machine type awareness."""

@@ -22,8 +22,9 @@ PLUGIN = PluginDefinition(
             description="Proxmox host server",
             order=70,
             default_auto_restart=False,
-            default_auto_restart_force_days=7,
-            default_machine_type="hardware",
+            # A hypervisor restart affects every guest. Operators must opt in
+            # to a forced deadline with --auto-restart-force-days.
+            default_auto_restart_force_days=0,
             step_builder="plugins.proxmox:build_server_proxmox_steps",
         ),
     ),

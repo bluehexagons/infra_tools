@@ -116,16 +116,56 @@ class TestHostedFlagParsing(unittest.TestCase):
         self.assertTrue(args.install_node)
         self.assertIsNone(args.hosted_node)
 
+    def test_agent_tool_flags(self):
+        args = self.parser.parse_args([
+            "10.0.0.50",
+            "--gh",
+            "--codex",
+            "--claude",
+            "--opencode",
+            "--t3code",
+            "--copy-keys",
+            "--copy-config",
+            "--repo", "https://github.com/user/one.git",
+            "--repo", "git@github.com:user/two.git",
+        ])
+        self.assertTrue(args.install_gh)
+        self.assertTrue(args.install_codex)
+        self.assertTrue(args.install_claude)
+        self.assertTrue(args.install_opencode)
+        self.assertTrue(args.install_t3code)
+        self.assertTrue(args.copy_agent_keys)
+        self.assertTrue(args.copy_agent_config)
+        self.assertEqual(args.agent_repos, [
+            "https://github.com/user/one.git",
+            "git@github.com:user/two.git",
+        ])
+
+    def test_agent_suite_flag(self):
+        args = self.parser.parse_args([
+            "10.0.0.50",
+            "--agent-suite",
+            "terminal",
+        ])
+        self.assertEqual(args.agent_suite, "terminal")
+
     def test_antistatic_flags(self):
         args = self.parser.parse_args([
             "10.0.0.50",
             "--antistatic-server",
             "lobby.example.com:9090",
+            "--antistatic-admin",
+            "operator",
             "--antistatic-db",
             "db.example.com:9091",
         ])
         self.assertEqual(args.antistatic_server, "lobby.example.com:9090")
+        self.assertEqual(args.antistatic_admin, "operator")
         self.assertEqual(args.antistatic_db, "db.example.com:9091")
+
+    def test_antistatic_admin_can_be_disabled(self):
+        args = self.parser.parse_args(["10.0.0.50", "--no-antistatic-admin"])
+        self.assertEqual(args.antistatic_admin, "")
 
     def test_gogs_flag_with_domain_only(self):
         args = self.parser.parse_args([
@@ -163,6 +203,28 @@ class TestHostedFlagsNotInRemoteParser(unittest.TestCase):
             "--system-type", "server_lite", "--username", "root"
         ])
         self.assertFalse(hasattr(args, 'container_memory'))
+
+    def test_agent_tool_flags_exist_remotely(self):
+        args = self.parser.parse_args([
+            "--system-type", "server_dev",
+            "--username", "agentuser",
+            "--gh",
+            "--codex",
+            "--claude",
+            "--opencode",
+            "--t3code",
+            "--copy-keys",
+            "--copy-config",
+            "--repo", "https://github.com/user/repo.git",
+        ])
+        self.assertTrue(args.install_gh)
+        self.assertTrue(args.install_codex)
+        self.assertTrue(args.install_claude)
+        self.assertTrue(args.install_opencode)
+        self.assertTrue(args.install_t3code)
+        self.assertTrue(args.copy_agent_keys)
+        self.assertTrue(args.copy_agent_config)
+        self.assertEqual(args.agent_repos, ["https://github.com/user/repo.git"])
 
 
 if __name__ == '__main__':

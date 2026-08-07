@@ -5,14 +5,18 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import game.antistatic_steps as antistatic_steps
+from lib.config import SetupConfig
 from game.antistatic_steps import (
     ANTISTATIC_BINARY,
+    ANTISTATIC_DATA_DIR,
     ANTISTATIC_DB_BINARY,
     ANTISTATIC_DB_DATA_DIR,
     ANTISTATIC_DB_PATH,
@@ -26,6 +30,8 @@ from game.antistatic_steps import (
     PROXY_LISTEN_HOST,
     TRUSTED_NGINX_PROXY_CIDRS,
     _antistatic_service_listen_options,
+    _configure_antistatic_environment,
+    _configure_nginx_proxy,
     _maybe_configure_antistatic_firewall,
     _download_antistatic_binary,
     _download_antistatic_db_binary,
@@ -34,6 +40,7 @@ from game.antistatic_steps import (
     _maybe_configure_direct_port_firewall,
     _maybe_configure_nginx_proxy,
     _remove_empty_domain_nginx_proxy,
+    _require_compatible_antistatic_release,
     generate_antistatic_db_service,
     generate_antistatic_nginx_config,
     generate_antistatic_service,
@@ -72,6 +79,14 @@ class TestParseAntistaticSpec(unittest.TestCase):
         domain, port = parse_antistatic_spec("8080")
         self.assertEqual(domain, "")
         self.assertEqual(port, 8080)
+
+    def test_strict_mode_rejects_invalid_port(self):
+        with self.assertRaisesRegex(ValueError, "Invalid Antistatic server port"):
+            parse_antistatic_spec("lobby.example.com:notaport", strict=True)
+
+    def test_strict_mode_rejects_out_of_range_port(self):
+        with self.assertRaisesRegex(ValueError, "between 1 and 65535"):
+            parse_antistatic_spec(":70000", strict=True)
 
 
 class TestParseAntistaticDbSpec(unittest.TestCase):
@@ -167,6 +182,16 @@ class TestGenerateAntistaticService(unittest.TestCase):
         self.assertIn("ProtectSystem=strict", content)
         self.assertIn("ProtectHome=yes", content)
 
+    def test_persistent_report_storage_and_health_check(self):
+        content = generate_antistatic_service(8080)
+        self.assertIn("StateDirectory=antistatic", content)
+        self.assertIn(f"WorkingDirectory={ANTISTATIC_DATA_DIR}", content)
+        self.assertIn(f"Environment=ANTISTATIC_DATA_DIR={ANTISTATIC_DATA_DIR}", content)
+        self.assertIn("EnvironmentFile=-/etc/antistatic/server.env", content)
+        self.assertIn("http://127.0.0.1:8080/health", content)
+        self.assertIn("TimeoutStopSec=40s", content)
+        self.assertIn("UMask=0077", content)
+
     def test_start_limit_burst(self):
         content = generate_antistatic_service(8080)
         self.assertIn("StartLimitBurst=3", content)
@@ -239,9 +264,37 @@ class TestGenerateAntistaticNginxConfig(unittest.TestCase):
 
     def test_forwarded_headers(self):
         config = self._make_config()
-        self.assertIn("X-Forwarded-For", config)
+        self.assertIn("proxy_set_header X-Forwarded-For $remote_addr;", config)
+        self.assertNotIn("$proxy_add_x_forwarded_for", config)
         self.assertIn("X-Forwarded-Proto", config)
         self.assertIn("X-Real-IP", config)
+
+    def test_http_redirects_to_https_by_default(self):
+        config = self._make_config()
+        self.assertIn("return 301 https://$host$request_uri;", config)
+
+    def test_cloudflare_http_proxy_marks_backend_request_secure(self):
+        with patch(
+            "lib.nginx_config.get_ssl_cert_path",
+            return_value=("/tmp/cert", "/tmp/key"),
+        ):
+            config = generate_antistatic_nginx_config(
+                "lobby.example.com",
+                8080,
+                enable_https_redirect=False,
+                forwarded_proto="https",
+                forwarded_client_ip="$http_cf_connecting_ip",
+                private_origin=True,
+            )
+        self.assertNotIn("return 301 https://$host$request_uri;", config)
+        self.assertIn("listen 127.0.0.1:80;", config)
+        self.assertIn("listen [::1]:443 ssl;", config)
+        self.assertNotIn("listen [::]:80;", config)
+        self.assertGreaterEqual(config.count("proxy_set_header X-Forwarded-Proto https;"), 2)
+        self.assertGreaterEqual(
+            config.count("proxy_set_header X-Forwarded-For $http_cf_connecting_ip;"),
+            2,
+        )
 
     def test_http2_enabled(self):
         config = self._make_config()
@@ -270,16 +323,162 @@ class TestAntistaticHostlessNginxHandling(unittest.TestCase):
     @patch("game.antistatic_steps._remove_empty_domain_nginx_proxy")
     @patch("game.antistatic_steps._configure_nginx_proxy")
     def test_hostless_config_skips_nginx_proxy(self, mock_configure, mock_remove):
-        _maybe_configure_nginx_proxy("", 8080, ANTISTATIC_SERVICE)
+        config = SimpleNamespace()
+        _maybe_configure_nginx_proxy(config, "", 8080, ANTISTATIC_SERVICE)
         mock_configure.assert_not_called()
         mock_remove.assert_called_once_with()
 
     @patch("game.antistatic_steps._remove_empty_domain_nginx_proxy")
     @patch("game.antistatic_steps._configure_nginx_proxy")
     def test_domain_config_uses_nginx_proxy(self, mock_configure, mock_remove):
-        _maybe_configure_nginx_proxy("lobby.example.com", 8080, ANTISTATIC_SERVICE)
-        mock_configure.assert_called_once_with("lobby.example.com", 8080)
+        config = SimpleNamespace()
+        _maybe_configure_nginx_proxy(config, "lobby.example.com", 8080, ANTISTATIC_SERVICE)
+        mock_configure.assert_called_once_with(config, "lobby.example.com", 8080)
         mock_remove.assert_not_called()
+
+
+class TestAntistaticAdminEnvironment(unittest.TestCase):
+    @patch("game.antistatic_steps.os.chown")
+    def test_writes_root_only_environment_file_with_escaped_values(self, mock_chown):
+        with tempfile.TemporaryDirectory() as tmpdir, patch.object(
+            antistatic_steps,
+            "ANTISTATIC_CONFIG_DIR",
+            tmpdir,
+        ), patch.object(
+            antistatic_steps,
+            "ANTISTATIC_ENV_FILE",
+            os.path.join(tmpdir, "server.env"),
+        ):
+            config = SetupConfig(
+                host="host",
+                username="root",
+                system_type="server_lite",
+                antistatic_admin="operator",
+                share_credentials=[["operator", 'secret "value" \\ end']],
+            )
+
+            _configure_antistatic_environment(config)
+
+            env_path = os.path.join(tmpdir, "server.env")
+            self.assertEqual(os.stat(env_path).st_mode & 0o777, 0o600)
+            with open(env_path, "r", encoding="utf-8") as file_obj:
+                content = file_obj.read()
+            self.assertIn('ANTISTATIC_ADMIN_USERNAME="operator"', content)
+            self.assertIn('ANTISTATIC_ADMIN_PASSWORD="secret \\"value\\" \\\\ end"', content)
+            mock_chown.assert_called_once_with(tmpdir, 0, 0)
+
+    def test_removes_environment_file_when_admin_is_disabled(self):
+        with tempfile.TemporaryDirectory() as tmpdir, patch.object(
+            antistatic_steps,
+            "ANTISTATIC_ENV_FILE",
+            os.path.join(tmpdir, "server.env"),
+        ):
+            env_path = os.path.join(tmpdir, "server.env")
+            with open(env_path, "w", encoding="utf-8") as file_obj:
+                file_obj.write("stale")
+            config = SetupConfig(host="host", username="root", system_type="server_lite")
+
+            _configure_antistatic_environment(config)
+
+            self.assertFalse(os.path.exists(env_path))
+
+
+class TestConfigureAntistaticNginx(unittest.TestCase):
+    @patch("web.ssl_steps.setup_certificate_renewal")
+    @patch("web.ssl_steps.obtain_letsencrypt_certificate", return_value=True)
+    @patch("web.ssl_steps.install_certbot")
+    @patch("lib.nginx_config.generate_self_signed_cert")
+    @patch("game.antistatic_steps.run")
+    @patch("game.antistatic_steps.os.path.exists", return_value=True)
+    def test_first_ssl_setup_regenerates_config_for_letsencrypt_certificate(
+        self,
+        _mock_exists,
+        mock_run,
+        _mock_self_signed,
+        _mock_install_certbot,
+        _mock_obtain_certificate,
+        _mock_renewal,
+    ):
+        mock_run.return_value = SimpleNamespace(returncode=0)
+        config = SimpleNamespace(enable_cloudflare=False, enable_ssl=True, ssl_email=None)
+
+        with patch(
+            "lib.nginx_config.get_ssl_cert_path",
+            side_effect=[
+                ("/etc/nginx/ssl/lobby.crt", "/etc/nginx/ssl/lobby.key"),
+                (
+                    "/etc/letsencrypt/live/lobby.example.com/fullchain.pem",
+                    "/etc/letsencrypt/live/lobby.example.com/privkey.pem",
+                ),
+            ],
+        ), patch("builtins.open", unittest.mock.mock_open()) as mock_file:
+            _configure_nginx_proxy(config, "lobby.example.com", 8080)
+
+        final_content = mock_file().write.call_args_list[-1].args[0]
+        self.assertIn("/etc/letsencrypt/live/lobby.example.com/fullchain.pem", final_content)
+        self.assertIn("return 301 https://$host$request_uri;", final_content)
+
+    @patch("lib.nginx_config.generate_self_signed_cert")
+    @patch("game.antistatic_steps.run")
+    @patch("game.antistatic_steps.os.path.exists", return_value=True)
+    def test_non_ssl_proxy_does_not_force_self_signed_https(
+        self,
+        _mock_exists,
+        mock_run,
+        _mock_self_signed,
+    ):
+        mock_run.return_value = SimpleNamespace(returncode=0)
+        config = SimpleNamespace(enable_cloudflare=False, enable_ssl=False, ssl_email=None)
+
+        with patch(
+            "lib.nginx_config.get_ssl_cert_path",
+            return_value=("/etc/nginx/ssl/lobby.crt", "/etc/nginx/ssl/lobby.key"),
+        ), patch("builtins.open", unittest.mock.mock_open()) as mock_file:
+            _configure_nginx_proxy(config, "lobby.example.com", 8080)
+
+        content = mock_file().write.call_args.args[0]
+        self.assertNotIn("return 301 https://$host$request_uri;", content)
+
+    @patch("web.ssl_steps.setup_certificate_renewal")
+    @patch("web.ssl_steps.obtain_letsencrypt_certificate", return_value=False)
+    @patch("web.ssl_steps.install_certbot")
+    @patch("lib.nginx_config.generate_self_signed_cert")
+    @patch("game.antistatic_steps.run")
+    @patch("game.antistatic_steps.os.path.exists", return_value=True)
+    def test_ssl_setup_fails_when_trusted_certificate_cannot_be_obtained(
+        self,
+        _mock_exists,
+        mock_run,
+        _mock_self_signed,
+        _mock_install_certbot,
+        _mock_obtain_certificate,
+        _mock_renewal,
+    ):
+        mock_run.return_value = SimpleNamespace(returncode=0)
+        config = SimpleNamespace(enable_cloudflare=False, enable_ssl=True, ssl_email=None)
+
+        with patch(
+            "lib.nginx_config.get_ssl_cert_path",
+            return_value=("/etc/nginx/ssl/lobby.crt", "/etc/nginx/ssl/lobby.key"),
+        ), patch("builtins.open", unittest.mock.mock_open()), self.assertRaisesRegex(
+            RuntimeError,
+            "Failed to obtain a trusted certificate",
+        ):
+            _configure_nginx_proxy(config, "lobby.example.com", 8080)
+
+
+class TestAntistaticReleaseCompatibility(unittest.TestCase):
+    def test_accepts_privacy_capable_release(self):
+        _require_compatible_antistatic_release("v0.10.0")
+        _require_compatible_antistatic_release("v1.0.0")
+
+    def test_rejects_older_release(self):
+        with self.assertRaisesRegex(RuntimeError, "v0.10.0 or newer is required"):
+            _require_compatible_antistatic_release("v0.9.2")
+
+    def test_rejects_invalid_release_tag(self):
+        with self.assertRaisesRegex(RuntimeError, "Invalid antistatic-server release tag"):
+            _require_compatible_antistatic_release("latest")
 
 
 class TestAntistaticDirectFirewallHandling(unittest.TestCase):
@@ -449,6 +648,7 @@ class TestAntistaticReleaseDownloads(unittest.TestCase):
         mock_run,
         mock_write_release,
     ):
+        mock_run.return_value = SimpleNamespace(returncode=0)
         tag_name = _download_antistatic_binary("amd64")
 
         self.assertEqual(tag_name, "v1.2.3")
@@ -467,6 +667,51 @@ class TestAntistaticReleaseDownloads(unittest.TestCase):
             ]
         )
         mock_write_release.assert_called_once_with("v1.2.3")
+
+    @patch("game.antistatic_steps._write_installed_antistatic_release")
+    @patch("lib.release_management.run")
+    @patch("lib.release_management.os.path.exists", return_value=False)
+    @patch("game.antistatic_steps._read_installed_antistatic_release", return_value="v0.10.0")
+    @patch(
+        "game.antistatic_steps._fetch_latest_antistatic_release",
+        return_value=("v0.10.1", "https://example.invalid/antistatic-server-linux-amd64"),
+    )
+    def test_download_failure_does_not_record_release_as_installed(
+        self,
+        _fetch_latest,
+        _read_installed,
+        _exists,
+        mock_run,
+        mock_write_release,
+    ):
+        mock_run.return_value = SimpleNamespace(returncode=1)
+
+        with self.assertRaisesRegex(RuntimeError, "Failed to download"):
+            _download_antistatic_binary("amd64")
+
+        mock_write_release.assert_not_called()
+
+    @patch("game.antistatic_steps._write_installed_antistatic_release")
+    @patch("lib.release_management.run")
+    @patch("lib.release_management.os.path.exists", return_value=True)
+    @patch("game.antistatic_steps._read_installed_antistatic_release", return_value="v0.9.2")
+    @patch(
+        "game.antistatic_steps._fetch_latest_antistatic_release",
+        return_value=("v0.9.2", "https://example.invalid/antistatic-server-linux-amd64"),
+    )
+    def test_incompatible_release_is_rejected_before_install(
+        self,
+        _fetch_latest,
+        _read_installed,
+        _exists,
+        mock_run,
+        mock_write_release,
+    ):
+        with self.assertRaisesRegex(RuntimeError, "v0.10.0 or newer is required"):
+            _download_antistatic_binary("amd64")
+
+        mock_run.assert_not_called()
+        mock_write_release.assert_not_called()
 
     @patch("game.antistatic_steps._write_installed_antistatic_release")
     @patch("lib.release_management.run")
@@ -559,6 +804,7 @@ class TestAntistaticDbReleaseDownloads(unittest.TestCase):
         mock_run,
         mock_write_release,
     ):
+        mock_run.return_value = SimpleNamespace(returncode=0)
         tag_name = _download_antistatic_db_binary("amd64")
 
         self.assertEqual(tag_name, "v0.1.0")

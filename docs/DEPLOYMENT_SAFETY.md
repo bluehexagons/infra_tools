@@ -13,9 +13,17 @@ this document focuses on what operators need to know.
 - Supports `--reset-migrations` for squashed or reset migration histories.
 - Keeps persistent Rails state under `.infra_tools_shared` so redeployments do
   not discard data.
+- Manifest service components get dedicated runtime users and per-component
+  writable state under `.infra_tools_shared/<app>/<component>`.
 - Installs a weekly cleanup timer and caps journal growth on server-style
   setups.
 - Uses conservative package-update policy for Node, Ruby, and uv by default.
+- Installs recurring maintenance unit files atomically and verifies that each timer is
+  enabled and active without first deleting the working timer.
+- Validates Nginx hardening and default-site changes before reload, restoring
+  the exact previous configuration when validation fails.
+- Applies a seven-day freshness delay to dependency resolution and GitHub release
+  selection unless the operator opts into a newer release.
 
 ## Recovery Path
 
@@ -53,18 +61,23 @@ python3 infra_tools.py setup server_web <host> \
 
 ## Maintenance
 
-- `cleanup-maintenance.service` runs periodic cleanup tasks.
-- `cleanup-maintenance.timer` schedules the cleanup weekly.
-- `/etc/systemd/journald.conf.d/infra-tools.conf` caps journal storage at
-  `100M`.
-- `INFRA_TOOLS_ECOSYSTEM_AUTO_UPGRADE=1` re-enables automatic Node/Ruby/uv
-  package upgrades on systems where that risk is acceptable.
-- `INFRA_TOOLS_DEPENDENCY_MIN_AGE_DAYS=7` is the default freshness cutoff for
-  dependency-resolving installs that support it.
+Deployment hosts install the same managed cleanup, update, restart, and
+journaling controls described in [`MAINTENANCE.md`](./MAINTENANCE.md). The
+deployment-specific guarantees are:
+
+- cleanup never runs `autoremove` or removes installed runtimes;
+- restart checks fail safe when uptime or active-session detection is
+  unavailable;
+- Gogs release activation validates the new binary and restores the previous
+  release after a failed post-update check; and
+- dependency-resolving installs use a seven-day freshness delay unless
+  `--deploy-latest DOMAIN_OR_PATH GIT_URL` explicitly opts out.
 
 ## Code References
 
 - `lib/deployment.py`
+- `lib/maintenance_systemd.py`
+- `lib/update_policy.py`
 - `deploy/deploy_steps.py`
 - `web/cicd_steps.py`
 - `common/service_tools/auto_update_apt.py`
@@ -80,5 +93,6 @@ python3 infra_tools.py setup server_web <host> \
 ## Related Docs
 
 - [CI/CD System](CICD.md)
+- [Recurring Maintenance](MAINTENANCE.md)
 - [Command-Line Reference](COMMAND_LINE.md)
 - [Machine Types](MACHINE_TYPES.md)

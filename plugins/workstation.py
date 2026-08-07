@@ -21,7 +21,6 @@ PLUGIN = PluginDefinition(
             name="workstation_desktop",
             description="Desktop workstation with GUI",
             order=10,
-            default_machine_type="vm",
             include_desktop=True,
             include_cli_tools=True,
             include_desktop_apps=True,
@@ -32,7 +31,6 @@ PLUGIN = PluginDefinition(
             name="pc_dev",
             description="PC development environment",
             order=20,
-            default_machine_type="vm",
             include_desktop=True,
             include_cli_tools=True,
             include_pc_dev_apps=True,
@@ -45,7 +43,6 @@ PLUGIN = PluginDefinition(
             name="workstation_dev",
             description="Developer workstation",
             order=30,
-            default_machine_type="vm",
             include_desktop=True,
             include_cli_tools=True,
             include_workstation_dev_apps=True,
@@ -60,6 +57,7 @@ def build_workstation_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
     """Build workstation-oriented setup steps from plugin-owned capability helpers."""
 
     from plugins.common import (
+        extend_agent_steps,
         extend_package_steps,
         extend_runtime_steps,
         get_cli_steps,
@@ -97,6 +95,7 @@ def build_workstation_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
     extend_desktop_app_steps(config, steps)
     extend_desktop_browser_and_office_steps(config, steps)
     extend_package_steps(config, steps)
+    extend_agent_steps(config, steps)
     extend_cicd_steps(config, steps)
     extend_app_server_steps(config, steps)
     extend_build_server_steps(config, steps)

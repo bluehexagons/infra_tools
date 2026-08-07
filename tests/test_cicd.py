@@ -195,6 +195,8 @@ class TestCICDSteps(unittest.TestCase):
         written_service = ''.join(call.args[0] for call in mock_service_file().write.call_args_list)
         self.assertIn('Environment=HOME=/var/lib/infra_tools/cicd', written_service)
         self.assertIn('Environment=INFRA_TOOLS_WORKSPACE=/var/lib/infra_tools/cicd', written_service)
+        self.assertIn('ReadWritePaths=/var/lib/infra_tools/cicd/jobs', written_service)
+        self.assertNotIn('ReadWritePaths=/var/lib/infra_tools/cicd\n', written_service)
     
     @patch('web.cicd_steps.cleanup_service')
     @patch('web.cicd_steps.run')
@@ -256,6 +258,8 @@ class TestCICDSteps(unittest.TestCase):
         
         # Should write nginx config
         mock_file.assert_called_once()
+        written_config = ''.join(call.args[0] for call in mock_file().write.call_args_list)
+        self.assertIn('client_max_body_size 1m;', written_config)
         
         # Should test nginx config
         test_calls = [call for call in mock_run.call_args_list if 'nginx -t' in str(call)]
@@ -385,6 +389,33 @@ class TestAppServerSteps(unittest.TestCase):
         create_deploy_user(mock_config)
         
         self.assertGreater(mock_run.call_count, 1)
+
+    @patch('web.app_server_steps.os.path.isfile', return_value=True)
+    @patch('web.app_server_steps.os.makedirs')
+    @patch('web.app_server_steps.shutil.copyfile')
+    @patch('web.app_server_steps.os.chown')
+    @patch('web.app_server_steps.os.chmod')
+    @patch('web.app_server_steps.run')
+    def test_deploy_sudoers_exposes_only_validating_helper(
+        self,
+        mock_run,
+        _mock_chmod,
+        _mock_chown,
+        _mock_copy,
+        _mock_makedirs,
+        _mock_isfile,
+    ):
+        from web.app_server_steps import configure_deploy_sudoers
+
+        mock_run.return_value = MagicMock(returncode=0)
+        with patch('builtins.open', mock_open()) as mock_file:
+            configure_deploy_sudoers(MagicMock())
+
+        written_sudoers = ''.join(call.args[0] for call in mock_file().write.call_args_list)
+        self.assertIn('/usr/local/sbin/infra-tools-deploy-admin *', written_sudoers)
+        self.assertNotIn('/usr/bin/rm', written_sudoers)
+        self.assertNotIn('/usr/bin/mkdir', written_sudoers)
+        self.assertNotIn('/usr/bin/touch', written_sudoers)
 
 
 class TestBuildServerSteps(unittest.TestCase):
@@ -669,16 +700,17 @@ class TestExecutorStructuredLogging(unittest.TestCase):
         self.assertEqual(result, {})
         self.assertIn("Configuration file not found | config_file=", "\n".join(logs.output))
 
-    @patch("web.service_tools.cicd_executor.os.path.exists", return_value=False)
+    @patch("web.service_tools.cicd_executor.os.path.lexists", return_value=False)
     @patch("web.service_tools.cicd_executor.subprocess.run")
     def test_clone_or_update_repo_logs_clone_and_success(self, mock_run, _mock_exists):
+        commit_sha = "a" * 40
         mock_run.side_effect = [
             subprocess.CompletedProcess(args=["git", "clone"], returncode=0, stdout="", stderr=""),
             subprocess.CompletedProcess(args=["git", "fetch"], returncode=0, stdout="", stderr=""),
-            subprocess.CompletedProcess(args=["git", "reset"], returncode=0, stdout="", stderr=""),
-            subprocess.CompletedProcess(args=["git", "clean"], returncode=0, stdout="", stderr=""),
+            subprocess.CompletedProcess(args=["git", "cat-file"], returncode=0, stdout="", stderr=""),
+            subprocess.CompletedProcess(args=["git", "merge-base"], returncode=0, stdout="", stderr=""),
             subprocess.CompletedProcess(args=["git", "checkout"], returncode=0, stdout="", stderr=""),
-            subprocess.CompletedProcess(args=["git", "pull"], returncode=0, stdout="", stderr=""),
+            subprocess.CompletedProcess(args=["git", "clean"], returncode=0, stdout="", stderr=""),
         ]
 
         with self.assertLogs(cicd_executor.logger, level="INFO") as logs:
@@ -686,13 +718,17 @@ class TestExecutorStructuredLogging(unittest.TestCase):
                 "https://github.com/org/repo.git",
                 "/tmp/repo",
                 "refs/heads/main",
+                commit_sha,
             )
 
         self.assertTrue(result)
+        clone_command = mock_run.call_args_list[0].args[0]
+        self.assertIn('core.hooksPath=/dev/null', clone_command)
+        self.assertIn('--no-checkout', clone_command)
         output = "\n".join(logs.output)
-        self.assertIn("Cloning repository | repo_url='https://github.com/org/repo.git'", output)
-        self.assertIn("Checking out branch | branch='main' repo_url='https://github.com/org/repo.git'", output)
-        self.assertIn("Repository updated successfully | branch='main' repo_url='https://github.com/org/repo.git'", output)
+        self.assertIn("Creating fresh repository clone | repo_url='https://github.com/org/repo.git'", output)
+        self.assertIn("Checking out authenticated commit | branch='main' commit_sha='aaaaaaaa' repo_url='https://github.com/org/repo.git'", output)
+        self.assertIn("Repository checkout prepared | branch='main' commit_sha='aaaaaaaa' repo_url='https://github.com/org/repo.git'", output)
 
     @patch("web.service_tools.cicd_executor.subprocess.run", return_value=subprocess.CompletedProcess(args=["/bin/bash"], returncode=0, stdout="", stderr=""))
     @patch("web.service_tools.cicd_executor.get_build_home", return_value="/var/lib/infra_tools/cicd")
@@ -764,7 +800,7 @@ class TestExecutorStructuredLogging(unittest.TestCase):
         job_data = {
             "repo_url": "https://github.com/org/repo.git",
             "ref": "refs/heads/main",
-            "commit_sha": "abcdef123456",
+            "commit_sha": "abcdef1234567890abcdef1234567890abcdef12",
             "pusher": "alice",
         }
 
@@ -927,7 +963,8 @@ class TestCleanupStaleWorkspaces(unittest.TestCase):
         from web.service_tools.cicd_executor import cleanup_stale_workspaces
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            active_ws = os.path.join(tmpdir, 'my-repo')
+            active_name = cicd_executor.get_workspace_name('https://github.com/org/my-repo.git')
+            active_ws = os.path.join(tmpdir, active_name)
             os.makedirs(active_ws)
 
             config = {'repositories': [{'url': 'https://github.com/org/my-repo.git'}]}
@@ -943,7 +980,8 @@ class TestCleanupStaleWorkspaces(unittest.TestCase):
         from web.service_tools.cicd_executor import cleanup_stale_workspaces
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            active_ws = os.path.join(tmpdir, 'active-repo')
+            active_name = cicd_executor.get_workspace_name('https://github.com/org/active-repo.git')
+            active_ws = os.path.join(tmpdir, active_name)
             stale_ws = os.path.join(tmpdir, 'stale-repo')
             os.makedirs(active_ws)
             os.makedirs(stale_ws)

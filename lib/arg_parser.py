@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 
 
-from lib.config import MACHINE_TYPES, DEFAULT_MACHINE_TYPE
+from lib.config import AGENT_SUITES, MACHINE_TYPES
 from lib.plugin_registry import get_system_type_names
 
 
@@ -76,9 +76,8 @@ def add_setup_arguments(
     parser.add_argument("--machine", dest="machine_type",
                        choices=MACHINE_TYPES,
                        default=None,
-                       help="Machine type override. Defaults are system-specific: "
-                            "VM for workstation_desktop/workstation_dev/pc_dev/server_web "
-                            "and build-server flows; otherwise unprivileged (LXC).")
+                       help="Machine type override. Defaults to auto-detection "
+                            "on the target; hosted Proxmox setup defaults to a VM.")
     
     if not for_remote:
         parser.add_argument("--name", dest="friendly_name", help="Friendly name for this configuration")
@@ -169,9 +168,47 @@ def add_setup_arguments(
                        default=None if not for_remote else False,
                        help="Install nvm + latest Node.JS + PNPM + update NPM")
     parser.add_argument("--python", dest="install_python",
+                        action=argparse.BooleanOptionalAction if not for_remote else "store_true",
+                        default=None if not for_remote else False,
+                        help="Install Python tooling (python aliases and uv). For shell autocompletion, use the local completions installer script.")
+
+    # Agent VM tooling
+    parser.add_argument("--gh", dest="install_gh",
                        action=argparse.BooleanOptionalAction if not for_remote else "store_true",
                        default=None if not for_remote else False,
-                       help="Install Python tooling (python aliases and uv). For shell autocompletion, use the local completions installer script.")
+                       help="Install the GitHub CLI for agent workflows")
+    parser.add_argument("--codex", dest="install_codex",
+                       action=argparse.BooleanOptionalAction if not for_remote else "store_true",
+                       default=None if not for_remote else False,
+                       help="Install Codex CLI with OpenAI's official installer")
+    parser.add_argument("--claude", dest="install_claude",
+                       action=argparse.BooleanOptionalAction if not for_remote else "store_true",
+                       default=None if not for_remote else False,
+                       help="Install Claude Code with Anthropic's official installer")
+    parser.add_argument("--opencode", dest="install_opencode",
+                       action=argparse.BooleanOptionalAction if not for_remote else "store_true",
+                       default=None if not for_remote else False,
+                       help="Install OpenCode with its official installer")
+    parser.add_argument("--t3code", dest="install_t3code",
+                       action=argparse.BooleanOptionalAction if not for_remote else "store_true",
+                       default=None if not for_remote else False,
+                       help="Install the official T3 Code AppImage and desktop launcher (x86_64 only)")
+    parser.add_argument("--agent-suite", choices=AGENT_SUITES,
+                       help="Agent preset: terminal adds Codex, Claude Code, OpenCode, GitHub CLI, "
+                            "and common tools; desktop also adds T3 Code; full also adds Node, "
+                            "Python, and Go")
+    parser.add_argument("--copy-keys", dest="copy_agent_keys",
+                       action=argparse.BooleanOptionalAction if not for_remote else "store_true",
+                       default=None if not for_remote else False,
+                       help="Copy credentials for selected agent tools when available locally")
+    parser.add_argument("--copy-config", dest="copy_agent_config",
+                       action=argparse.BooleanOptionalAction if not for_remote else "store_true",
+                       default=None if not for_remote else False,
+                       help="Copy non-secret config for selected agent tools when available locally")
+    parser.add_argument("--repo", dest="agent_repos",
+                       action="append",
+                       metavar="GIT_URL",
+                       help="Clone a git repository locally and upload it to /home/USER/repos on the target; repeat as needed")
     
     # Deployment options
     parser.add_argument("--deploy", dest="deploy_specs",
@@ -231,8 +268,8 @@ def add_setup_arguments(
                        default=None if not for_remote else False,
                        help="Install and configure Samba for SMB file sharing")
     parser.add_argument("--share", dest="samba_shares", 
-                       action="append", nargs=4, metavar=("ACCESS_TYPE", "SHARE_NAME", "PATHS", "USERS"),
-                       help="Configure Samba share: access_type (read|write), share_name, comma-separated paths, comma-separated username:password pairs or usernames that resolve via --credential (can be used multiple times)")
+                       action="append", nargs=4, metavar=("ACCESS_TYPE", "SHARE_NAME", "PATH", "USERS"),
+                       help="Configure one Samba directory share: access_type (read|write), share_name, absolute path, comma-separated username:password pairs or usernames that resolve via --credential (can be used multiple times)")
     parser.add_argument("--credential", dest="share_credentials",
                         action="append", nargs=2, metavar=("USERNAME", "PASSWORD"),
                         help="Save a workspace credential and let --share/--mount-smb reference the username without inline passwords (can be used multiple times)")
@@ -248,23 +285,39 @@ def add_setup_arguments(
     
     parser.add_argument("--sync", dest="sync_specs", 
                        action="append", nargs=3, metavar=("SOURCE", "DESTINATION", "INTERVAL"),
-                       help="Configure directory synchronization: source_path, destination_path, interval (hourly|daily|weekly|monthly). Uses rsync with systemd timer (can be used multiple times)")
+                       help="Configure directory synchronization: source_path, destination_path, interval (hourly|daily|weekly|biweekly|monthly|bimonthly). Uses rsync with systemd timer (can be used multiple times)")
     
     parser.add_argument("--scrub", dest="scrub_specs",
                        action="append", nargs=4, metavar=("DIRECTORY", "DATABASE_PATH", "REDUNDANCY", "FREQUENCY"),
-                       help="Configure data integrity checking: /path/to/directory, relative/or/absolute/path/to/.pardatabase, redundancy%%, frequency (hourly|daily|weekly|monthly). Uses par2 with systemd timer (can be used multiple times)")
+                       help="Configure data integrity checking: /path/to/directory, relative/or/absolute/path/to/.pardatabase, redundancy%%, frequency (hourly|daily|weekly|biweekly|monthly|bimonthly). Uses par2 with systemd timer (can be used multiple times)")
     
     parser.add_argument("--notify", dest="notify_specs",
                        action="append", nargs=2, metavar=("TYPE", "TARGET"),
                        help="Configure notification target: TYPE (webhook|mailbox), TARGET (URL for webhook or email for mailbox). Sends alerts for important events (errors, warnings, successes). Can be used multiple times for multiple targets.")
     
     parser.add_argument("--antistatic-server", dest="antistatic_server",
-                       metavar="[DOMAIN][:PORT]",
-                       help="Deploy the antistatic lobby server behind nginx. "
+                        metavar="[DOMAIN][:PORT]",
+                        help="Deploy the antistatic lobby server behind nginx. "
                             "DOMAIN is the optional public hostname; PORT is the internal listen port "
                             f"(default: 8080). Hostless specs like :8080 listen directly without nginx. "
-                            "The built-in STUN responder uses direct public UDP 3478 even when Cloudflare tunnel "
-                            "support is enabled.")
+                             "The built-in STUN responder uses direct public UDP 3478 even when Cloudflare tunnel "
+                             "support is enabled.")
+
+    antistatic_admin_group = parser.add_mutually_exclusive_group()
+    antistatic_admin_group.add_argument(
+        "--antistatic-admin",
+        dest="antistatic_admin",
+        metavar="USERNAME",
+        help="Enable the HTTPS-only antistatic-server admin interface. Resolve the password "
+             "from --credential USERNAME PASSWORD or the workspace credential store.",
+    )
+    antistatic_admin_group.add_argument(
+        "--no-antistatic-admin",
+        dest="antistatic_admin",
+        action="store_const",
+        const="",
+        help="Disable the antistatic-server admin interface and remove its remote credentials.",
+    )
 
     parser.add_argument("--antistatic-db", dest="antistatic_db",
                        metavar="[DOMAIN][:PORT]",

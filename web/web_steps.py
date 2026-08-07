@@ -31,6 +31,9 @@ def configure_nginx_security(config: SetupConfig) -> None:
         print("  ✓ nginx security already configured")
         return
     
+    with open(nginx_conf, "r", encoding="utf-8") as file_obj:
+        previous_content = file_obj.read()
+
     if not os.path.exists("/etc/nginx/nginx.conf.bak"):
         run("cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.bak")
     
@@ -39,8 +42,17 @@ def configure_nginx_security(config: SetupConfig) -> None:
     with open(template_path, 'r', encoding='utf-8') as f:
         nginx_security_conf = f.read()
     
-    with open(nginx_conf, "w") as f:
+    with open(nginx_conf, "w", encoding="utf-8") as f:
         f.write(nginx_security_conf)
+
+    result = run("nginx -t", check=False)
+    if result.returncode != 0:
+        with open(nginx_conf, "w", encoding="utf-8") as file_obj:
+            file_obj.write(previous_content)
+        print("  ⚠ nginx security configuration test failed; restored the previous configuration")
+        return
+
+    run("systemctl reload nginx")
     
     print("  ✓ nginx security configuration applied")
 
@@ -80,9 +92,12 @@ def create_hello_world_site(config: SetupConfig) -> None:
 
 def configure_default_site(config: SetupConfig) -> None:
     site_conf = "/etc/nginx/sites-available/default"
-    
+    enabled_link = "/etc/nginx/sites-enabled/default"
+    previous_content: str | None = None
     if os.path.exists(site_conf):
-        if file_contains(site_conf, "Hello World"):
+        with open(site_conf, "r", encoding="utf-8") as file_obj:
+            previous_content = file_obj.read()
+        if "Hello World" in previous_content:
             print("  ✓ Default site already configured")
             return
     
@@ -91,16 +106,21 @@ def configure_default_site(config: SetupConfig) -> None:
     with open(template_path, 'r', encoding='utf-8') as f:
         default_site = f.read()
     
-    with open(site_conf, "w") as f:
+    with open(site_conf, "w", encoding="utf-8") as f:
         f.write(default_site)
     
-    run("ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default", check=False)
+    run(f"ln -sf {site_conf} {enabled_link}", check=False)
     
     result = run("nginx -t", check=False)
     if result.returncode != 0:
-        print("  ⚠ nginx configuration test failed, reverting...")
-        if os.path.exists("/etc/nginx/nginx.conf.bak"):
-            run("cp /etc/nginx/nginx.conf.bak /etc/nginx/nginx.conf")
+        if previous_content is None:
+            if os.path.lexists(enabled_link):
+                os.unlink(enabled_link)
+            os.remove(site_conf)
+        else:
+            with open(site_conf, "w", encoding="utf-8") as file_obj:
+                file_obj.write(previous_content)
+        print("  ⚠ nginx default-site configuration test failed; restored the previous site")
         return
     
     run("systemctl reload nginx")

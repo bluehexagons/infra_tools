@@ -28,7 +28,6 @@ PLUGIN = PluginDefinition(
             name="server_web",
             description="Web server",
             order=50,
-            default_machine_type="vm",
             include_cli_tools=True,
             include_web_server=True,
             include_web_firewall=True,
@@ -74,6 +73,7 @@ def build_server_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
 
     from plugins.common import (
         extend_package_steps,
+        extend_agent_steps,
         extend_runtime_steps,
         get_cli_steps,
         get_common_steps,
@@ -102,6 +102,7 @@ def build_server_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
 
     extend_runtime_steps(config, steps)
     extend_package_steps(config, steps)
+    extend_agent_steps(config, steps)
     extend_cicd_steps(config, steps)
     extend_app_server_steps(config, steps)
     extend_build_server_steps(config, steps)

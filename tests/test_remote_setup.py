@@ -6,11 +6,13 @@ import os
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import mock_open, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import remote_setup
+from lib.config import SetupConfig
 
 
 class TestRemoteSetupArgsFile(unittest.TestCase):
@@ -27,6 +29,35 @@ class TestRemoteSetupArgsFile(unittest.TestCase):
                 ["--system-type", "server_lite", "--credential", "mediauser", "supersecret", "--dry-run"],
             )
             self.assertFalse(os.path.exists(args_path))
+
+    def test_remote_config_resolves_auto_machine_type(self):
+        args = SimpleNamespace(custom_steps=None, system_type='server_lite')
+        config = SetupConfig(
+            host='localhost',
+            username='root',
+            system_type='server_lite',
+            machine_type='auto',
+        )
+        with patch.object(remote_setup.SetupConfig, 'from_args', return_value=config), \
+             patch.object(remote_setup, 'resolve_machine_type', return_value='unprivileged') as resolve:
+            resolved = remote_setup.config_from_remote_args(args)
+
+        self.assertIs(resolved, config)
+        self.assertEqual(config.machine_type, 'unprivileged')
+        resolve.assert_called_once_with('auto')
+
+    def test_remote_config_validates_samba_share_paths(self):
+        args = SimpleNamespace(custom_steps=None, system_type='server_lite')
+        config = SetupConfig(
+            host='localhost',
+            username='root',
+            system_type='server_lite',
+            samba_shares=[['read', 'docs', '/srv/docs,/srv/media', 'shareuser:secret']],
+        )
+        with patch.object(remote_setup.SetupConfig, 'from_args', return_value=config), \
+             patch.object(remote_setup, 'resolve_machine_type', return_value='hardware'):
+            with self.assertRaisesRegex(ValueError, 'exactly one path'):
+                remote_setup.config_from_remote_args(args)
 
     def test_load_args_file_rejects_non_list_payload(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -73,6 +104,19 @@ class TestRepositorySourcePath(unittest.TestCase):
             )
 
         self.assertIsNone(result)
+
+
+class TestAgentPayloadCleanup(unittest.TestCase):
+    def test_main_removes_agent_payload_after_setup_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            payload_dir = os.path.join(directory, "agent_payload")
+            os.makedirs(payload_dir)
+            with patch.object(remote_setup, "REMOTE_AGENT_PAYLOAD_DIR", payload_dir), \
+                 patch.object(remote_setup, "_run_main", side_effect=RuntimeError("failed")):
+                with self.assertRaisesRegex(RuntimeError, "failed"):
+                    remote_setup.main()
+
+            self.assertFalse(os.path.exists(payload_dir))
 
 
 if __name__ == "__main__":

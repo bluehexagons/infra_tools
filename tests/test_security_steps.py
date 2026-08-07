@@ -14,10 +14,12 @@ from lib.config import SetupConfig
 from lib.maintenance_defaults import JOURNAL_MAX_USE
 from lib.system_types import get_steps_for_system_type
 from security.security_steps import (
+    configure_auto_restart,
     configure_auto_updates,
     configure_cleanup_maintenance,
     configure_fail2ban,
     configure_firewall,
+    configure_security_monitor,
     harden_kernel,
     harden_ssh,
 )
@@ -109,6 +111,21 @@ class TestHardenKernel(unittest.TestCase):
         captured["ok"] = True
         self.assertTrue(captured["ok"])
 
+    @patch("security.security_steps.can_modify_kernel", return_value=True)
+    @patch("security.security_steps.run")
+    @patch("security.security_steps.open", new_callable=mock_open)
+    @patch("security.security_steps.os.path.exists", return_value=False)
+    def test_proxmox_preserves_asymmetric_guest_networking(
+        self, _exists, mock_file, mock_run, _ckm
+    ):
+        mock_run.return_value = SimpleNamespace(returncode=0)
+        harden_kernel(SetupConfig(username="u", host="h", system_type="server_proxmox"))
+
+        written = "".join(call.args[0] for call in mock_file().write.call_args_list)
+        self.assertIn("net.ipv4.conf.default.rp_filter=0", written)
+        self.assertIn("net.ipv4.conf.all.rp_filter=0", written)
+        self.assertNotIn("net.ipv4.conf.all.rp_filter=1", written)
+
 
 class TestConfigureFail2Ban(unittest.TestCase):
     @patch("security.security_steps.is_container", return_value=False)
@@ -162,50 +179,27 @@ class TestConfigureFirewall(unittest.TestCase):
 
 
 class TestConfigureAutoUpdates(unittest.TestCase):
+    @patch("security.security_steps.configure_maintenance_timer")
     @patch("security.security_steps.run")
-    @patch("security.security_steps.cleanup_service")
-    @patch("security.security_steps.open", new_callable=mock_open)
     @patch("security.security_steps.os.path.exists", return_value=False)
-    def test_creates_systemd_service_and_timer(self, _exists, mock_file, _cleanup, mock_run):
+    def test_configures_shared_systemd_timer(self, _exists, mock_run, mock_configure):
         mock_run.return_value = SimpleNamespace(returncode=0)
         configure_auto_updates(SetupConfig(username="u", host="h", system_type="server_lite"))
 
-        opened_paths = [args[0] for args, _ in mock_file.call_args_list]
-        self.assertIn("/etc/systemd/system/auto-update-apt.service", opened_paths)
-        self.assertIn("/etc/systemd/system/auto-update-apt.timer", opened_paths)
+        mock_configure.assert_called_once_with(
+            service_name="auto-update-apt",
+            service_desc="Auto-update APT packages",
+            timer_desc="Auto-update APT packages daily",
+            script_path="/opt/infra_tools/common/service_tools/auto_update_apt.py",
+            schedule="*-*-* 06:00:00",
+            check_name="APT packages",
+            purpose="auto-update",
+        )
 
+    @patch("security.security_steps.configure_maintenance_timer")
     @patch("security.security_steps.run")
-    @patch("security.security_steps.cleanup_service")
-    @patch("security.security_steps.open", new_callable=mock_open)
-    @patch("security.security_steps.os.path.exists", return_value=False)
-    def test_enables_and_starts_timer(self, _exists, mock_file, _cleanup, mock_run):
-        mock_run.return_value = SimpleNamespace(returncode=0)
-        configure_auto_updates(SetupConfig(username="u", host="h", system_type="server_lite"))
-
-        run_commands = [args[0] for args, _ in mock_run.call_args_list]
-        self.assertIn("systemctl daemon-reload", run_commands)
-        self.assertIn("systemctl enable auto-update-apt.timer", run_commands)
-        self.assertIn("systemctl start auto-update-apt.timer", run_commands)
-
-    @patch("security.security_steps.run")
-    @patch("security.security_steps.cleanup_service")
-    @patch("security.security_steps.open", new_callable=mock_open)
-    @patch("security.security_steps.os.path.exists", return_value=False)
-    def test_service_references_auto_update_apt_script(self, _exists, mock_file, _cleanup, mock_run):
-        mock_run.return_value = SimpleNamespace(returncode=0)
-        configure_auto_updates(SetupConfig(username="u", host="h", system_type="server_lite"))
-
-        written_text = "".join(call.args[0] for call in mock_file().write.call_args_list)
-        self.assertIn("/opt/infra_tools/common/service_tools/auto_update_apt.py", written_text)
-        # No hardcoded origins should be present
-        self.assertNotIn("distro_id", written_text)
-        self.assertNotIn("distro_codename", written_text)
-
-    @patch("security.security_steps.run")
-    @patch("security.security_steps.cleanup_service")
-    @patch("security.security_steps.open", new_callable=mock_open)
     @patch("security.security_steps.os.path.exists", return_value=True)
-    def test_cleans_up_legacy_unattended_upgrades(self, mock_exists, mock_file, _cleanup, mock_run):
+    def test_cleans_up_legacy_unattended_upgrades(self, _exists, mock_run, _configure):
         mock_run.return_value = SimpleNamespace(returncode=0)
         removed_paths = []
         with patch("security.security_steps.os.remove", side_effect=lambda p: removed_paths.append(p)):
@@ -213,97 +207,89 @@ class TestConfigureAutoUpdates(unittest.TestCase):
         self.assertIn("/etc/apt/apt.conf.d/52infra-tools-unattended-upgrades", removed_paths)
         self.assertIn("/etc/infra_tools/unattended_upgrades_origins.list", removed_paths)
 
+    @patch("security.security_steps.configure_maintenance_timer")
     @patch("security.security_steps.run")
-    @patch("security.security_steps.cleanup_service")
-    @patch("security.security_steps.open", new_callable=mock_open)
     @patch("security.security_steps.os.path.exists", return_value=False)
-    def test_stops_and_disables_unattended_upgrades(self, _exists, mock_file, _cleanup, mock_run):
+    def test_stops_and_disables_competing_apt_timers(self, _exists, mock_run, _configure):
         mock_run.return_value = SimpleNamespace(returncode=0)
         configure_auto_updates(SetupConfig(username="u", host="h", system_type="server_lite"))
 
         run_commands = [args[0] for args, _ in mock_run.call_args_list]
-        self.assertIn("systemctl stop unattended-upgrades", run_commands)
-        self.assertIn("systemctl disable unattended-upgrades", run_commands)
+        for unit in (
+            "unattended-upgrades.service",
+            "apt-daily.timer",
+            "apt-daily-upgrade.timer",
+        ):
+            self.assertIn(f"systemctl stop {unit}", run_commands)
+            self.assertIn(f"systemctl disable {unit}", run_commands)
 
 
-class TestConfigureCleanupMaintenance(unittest.TestCase):
+class TestConfigureMaintenanceTimers(unittest.TestCase):
+    @patch("security.security_steps.configure_maintenance_timer")
+    @patch("security.security_steps.is_hardware", return_value=False)
+    @patch("security.security_steps.is_vm", return_value=True)
+    def test_security_monitor_uses_shared_timer(self, _vm, _hardware, mock_configure):
+        configure_security_monitor(SetupConfig(username="u", host="h", system_type="server_lite"))
+
+        mock_configure.assert_called_once_with(
+            service_name="security-monitor",
+            service_desc="Security event monitor",
+            timer_desc="Security event monitor (every 15 minutes)",
+            script_path="/opt/infra_tools/security/service_tools/security_monitor.py",
+            schedule="*:0/15",
+            check_name="Security event monitor",
+            randomized_delay="2min",
+            timeout="10min",
+            purpose="monitor",
+        )
+
+    @patch("security.security_steps.configure_maintenance_timer")
+    @patch("security.security_steps.can_modify_kernel", return_value=True)
+    def test_auto_restart_uses_shared_timer(self, _kernel, mock_configure):
+        configure_auto_restart(SetupConfig(username="u", host="h", system_type="server_lite"))
+
+        mock_configure.assert_called_once_with(
+            service_name="auto-restart-if-needed",
+            service_desc="Auto-restart system if needed",
+            timer_desc="Auto-restart system if needed (daily at 2 AM)",
+            script_path="/opt/infra_tools/common/service_tools/auto_restart_if_needed.py",
+            schedule="*-*-* 02:00:00",
+            on_boot_sec="30min",
+            check_name="Automatic restart",
+            randomized_delay="10min",
+            timeout="10min",
+            network_online=False,
+            purpose="check",
+        )
+
+    @patch("security.security_steps.configure_maintenance_timer")
     @patch("security.security_steps.run")
-    @patch("security.security_steps.cleanup_service")
     @patch("security.security_steps.open", new_callable=mock_open)
     @patch("security.security_steps.os.makedirs")
-    def test_creates_service_timer_and_journal_limit(self, mock_makedirs, mock_file, _cleanup, mock_run):
+    def test_cleanup_sets_journal_limit_and_uses_shared_timer(
+        self, mock_makedirs, mock_file, mock_run, mock_configure
+    ):
         mock_run.return_value = SimpleNamespace(returncode=0)
         configure_cleanup_maintenance(SetupConfig(username="u", host="h", system_type="server_lite"))
 
         mock_makedirs.assert_called_once_with("/etc/systemd/journald.conf.d", exist_ok=True)
-        opened_paths = [args[0] for args, _ in mock_file.call_args_list]
-        self.assertIn("/etc/systemd/journald.conf.d/infra-tools.conf", opened_paths)
-        self.assertIn("/etc/systemd/system/cleanup-maintenance.service", opened_paths)
-        self.assertIn("/etc/systemd/system/cleanup-maintenance.timer", opened_paths)
-
-    @patch("security.security_steps.run")
-    @patch("security.security_steps.cleanup_service")
-    @patch("security.security_steps.open", new_callable=mock_open)
-    @patch("security.security_steps.os.makedirs")
-    def test_enables_timer_and_restarts_journald(self, _makedirs, mock_file, _cleanup, mock_run):
-        mock_run.return_value = SimpleNamespace(returncode=0)
-        configure_cleanup_maintenance(SetupConfig(username="u", host="h", system_type="server_lite"))
-
-        run_commands = [args[0] for args, _ in mock_run.call_args_list]
-        self.assertIn("systemctl daemon-reload", run_commands)
-        self.assertIn("systemctl restart systemd-journald", run_commands)
-        self.assertIn("systemctl enable cleanup-maintenance.timer", run_commands)
-        self.assertIn("systemctl start cleanup-maintenance.timer", run_commands)
-
-    @patch("security.security_steps.run")
-    @patch("security.security_steps.cleanup_service")
-    @patch("security.security_steps.open", new_callable=mock_open)
-    @patch("security.security_steps.os.makedirs")
-    def test_service_references_cleanup_script_and_100m_journal_limit(self, _makedirs, mock_file, _cleanup, mock_run):
-        mock_run.return_value = SimpleNamespace(returncode=0)
-        configure_cleanup_maintenance(SetupConfig(username="u", host="h", system_type="server_lite"))
-
+        mock_file.assert_called_once_with("/etc/systemd/journald.conf.d/infra-tools.conf", "w")
         written_text = "".join(call.args[0] for call in mock_file().write.call_args_list)
-        self.assertIn("/opt/infra_tools/common/service_tools/cleanup_maintenance.py", written_text)
-        self.assertIn("OnCalendar=Sun *-*-* 03:30:00", written_text)
         self.assertIn(f"SystemMaxUse={JOURNAL_MAX_USE}", written_text)
         self.assertIn(f"RuntimeMaxUse={JOURNAL_MAX_USE}", written_text)
-
-    @patch("security.security_steps.run")
-    @patch("security.security_steps.cleanup_service")
-    @patch("security.security_steps.open", new_callable=mock_open)
-    @patch("security.security_steps.os.makedirs")
-    def test_warns_when_timer_enable_fails(self, _makedirs, mock_file, _cleanup, mock_run):
-        mock_run.side_effect = [
-            SimpleNamespace(returncode=0),
-            SimpleNamespace(returncode=0),
-            SimpleNamespace(returncode=1),
-        ]
-        with patch("builtins.print") as mock_print:
-            configure_cleanup_maintenance(SetupConfig(username="u", host="h", system_type="server_lite"))
-
-        run_commands = [args[0] for args, _ in mock_run.call_args_list]
-        self.assertIn("systemctl enable cleanup-maintenance.timer", run_commands)
-        self.assertNotIn("systemctl start cleanup-maintenance.timer", run_commands)
-        mock_print.assert_any_call("  ⚠ Cleanup maintenance configured but timer could not be enabled")
-
-    @patch("security.security_steps.run")
-    @patch("security.security_steps.cleanup_service")
-    @patch("security.security_steps.open", new_callable=mock_open)
-    @patch("security.security_steps.os.makedirs")
-    def test_warns_when_timer_start_fails(self, _makedirs, mock_file, _cleanup, mock_run):
-        mock_run.side_effect = [
-            SimpleNamespace(returncode=0),
-            SimpleNamespace(returncode=0),
-            SimpleNamespace(returncode=0),
-            SimpleNamespace(returncode=1),
-        ]
-        with patch("builtins.print") as mock_print:
-            configure_cleanup_maintenance(SetupConfig(username="u", host="h", system_type="server_lite"))
-
-        run_commands = [args[0] for args, _ in mock_run.call_args_list]
-        self.assertIn("systemctl start cleanup-maintenance.timer", run_commands)
-        mock_print.assert_any_call("  ⚠ Cleanup maintenance configured but timer could not be started")
+        mock_run.assert_called_once_with("systemctl restart systemd-journald", check=False)
+        mock_configure.assert_called_once_with(
+            service_name="cleanup-maintenance",
+            service_desc="Cleanup temporary files and package caches",
+            timer_desc="Cleanup temporary files and package caches (weekly)",
+            script_path="/opt/infra_tools/common/service_tools/cleanup_maintenance.py",
+            schedule="Sun *-*-* 03:30:00",
+            check_name="Cleanup maintenance",
+            randomized_delay="30min",
+            timeout="1h",
+            network_online=False,
+            purpose="job",
+        )
 
 
 class TestCleanupMaintenanceStepWiring(unittest.TestCase):

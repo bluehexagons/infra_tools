@@ -9,7 +9,9 @@ The infra_tools XRDP setup is optimized for:
 - **Security** - TLS encryption, group-based access control
 - **Stability** - XFCE desktop environment with RDP-compatible configuration
 - **Simplicity** - No audio support (removed to reduce complexity)
-- **VM-first behavior** - tuned for Proxmox/hosted VMs, with LXC kept as basic compatibility support
+- **Machine-aware support** - direct setup defaults to `--machine auto` and
+  supports Debian bare metal, Debian VMs on Proxmox or a VPS, and unprivileged
+  Debian LXC containers on Proxmox
 
 ## Architecture
 
@@ -100,11 +102,14 @@ EndSection
 - **4K virtual screen** - Supports up to 3840x2160 resolution
 - **DPMS/Screensaver disabled** - Prevents X server from managing display state
 
-### VM-first expectations
+### Machine-aware expectations
 
-- **Best experience:** hosted or local VMs, where the XRDP path is the main target
-- **Compatibility mode:** unprivileged/container guests, where basic XRDP access is supported but advanced polish is not guaranteed
-- **Tradeoff:** infra_tools now favors the most stable shared XRDP configuration instead of carrying extra LXC-specific resize workarounds
+- **Best experience:** VMs, where the XRDP path has the broadest access to
+  desktop and kernel capabilities
+- **Supported container path:** unprivileged Proxmox LXC guests support basic
+  XRDP access, although advanced display polish may be limited by the host
+- **Detection:** `auto` resolves the target profile before setup steps run; use
+  `--machine unprivileged` when provisioning a hosted LXC before it exists
 
 ### Network Optimization
 

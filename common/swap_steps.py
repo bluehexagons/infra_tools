@@ -23,7 +23,17 @@ def get_free_disk_mb() -> int:
         return 0
 
 def configure_swap(config: SetupConfig) -> None:
-    """Configure swap file if not present."""
+    """Configure a swap file when the host owns its root filesystem.
+
+    Proxmox manages swap as part of its storage layout.  In particular, a
+    generic file is not a safe fallback on ZFS-backed installations, where a
+    dedicated zvol is required.  Leave existing Proxmox swap untouched and
+    require an operator to provision any missing swap through Proxmox-aware
+    storage tooling.
+    """
+    if config.system_type == "server_proxmox":
+        print("  ✓ Skipping swap-file setup (Proxmox storage manages swap)")
+        return
     
     if not can_manage_swap():
         print("  ✓ Skipping swap configuration (managed by container host)")

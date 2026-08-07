@@ -16,6 +16,8 @@ from lib.logging_utils import get_service_logger, log_event
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
 from web.gogs_steps import (
     GOGS_BINARY_LINK,
+    GOGS_CURRENT_DIR,
+    GOGS_RELEASES_DIR,
     GOGS_SERVICE,
     build_gogs_admin_command,
     install_or_update_gogs_release,
@@ -42,6 +44,48 @@ def _derive_data_path(config_path: str) -> str | None:
     return None
 
 
+def _current_release_path() -> str | None:
+    """Return the active versioned release directory when one is installed."""
+    current_binary = os.path.join(GOGS_CURRENT_DIR, "gogs")
+    if not os.path.exists(current_binary):
+        return None
+    release_path = os.path.realpath(GOGS_CURRENT_DIR)
+    releases_root = os.path.realpath(GOGS_RELEASES_DIR)
+    try:
+        if os.path.commonpath((release_path, releases_root)) != releases_root:
+            return None
+    except ValueError:
+        return None
+    return release_path
+
+
+def _rollback_gogs_release(previous_release: str | None) -> bool:
+    """Restore the previous release symlink and restart Gogs."""
+    if not previous_release or not os.path.exists(os.path.join(previous_release, "gogs")):
+        log_event(logger, "Gogs rollback unavailable", level=ERROR)
+        return False
+
+    link_result = _run_command(["ln", "-sfn", previous_release, GOGS_CURRENT_DIR])
+    if link_result.returncode != 0:
+        details = link_result.stderr.strip() or link_result.stdout.strip() or "ln failed"
+        log_event(logger, "Gogs rollback symlink failed", level=ERROR, stderr=details)
+        return False
+
+    restart_result = _run_command(["systemctl", "restart", GOGS_SERVICE])
+    if restart_result.returncode != 0:
+        details = restart_result.stderr.strip() or restart_result.stdout.strip() or "systemctl restart failed"
+        log_event(logger, "Gogs rollback restart failed", level=ERROR, stderr=details)
+        return False
+
+    log_event(logger, "Rolled Gogs back to previous release", release_path=previous_release)
+    return True
+
+
+def _details_with_rollback(details: str, rolled_back: bool) -> str:
+    rollback_status = "Previous release restored." if rolled_back else "Previous release could not be restored."
+    return f"{details}\n{rollback_status}"
+
+
 def main() -> int:
     """Update Gogs to the preferred upstream release when installed."""
     notification_configs = load_notification_configs_from_state(logger)
@@ -57,6 +101,7 @@ def main() -> int:
         log_event(logger, "Gogs binary not found, skipping update")
         return 0
 
+    previous_release = _current_release_path()
     log_event(logger, "Starting Gogs update check", current_version=installed_tag or "unknown")
     try:
         target_tag, changed = install_or_update_gogs_release()
@@ -88,6 +133,7 @@ def main() -> int:
         data_path = _derive_data_path(config_path)
     if not data_path:
         details = f"Missing Gogs data path for config {config_path}"
+        rolled_back = _rollback_gogs_release(previous_release)
         log_event(logger, "Gogs state update failed", level=ERROR, stderr=details)
         send_notification_safe(
             notification_configs,
@@ -95,12 +141,10 @@ def main() -> int:
             job="auto_update_gogs",
             status="error",
             message="Updated Gogs but could not persist updated install state",
-            details=details,
+            details=_details_with_rollback(details, rolled_back),
             logger=logger,
         )
         return 1
-    write_gogs_state(target_tag, data_path, config_path)
-
     for admin_args, label in (
         (["admin", "rewrite-authorized-keys"], "authorized_keys"),
         (["admin", "resync-hooks"], "repository hooks"),
@@ -108,6 +152,7 @@ def main() -> int:
         result = _run_shell_command(build_gogs_admin_command(admin_args, config_path))
         if result.returncode != 0:
             details = result.stderr.strip() or result.stdout.strip() or f"Failed to refresh {label}"
+            rolled_back = _rollback_gogs_release(previous_release)
             log_event(logger, "Gogs post-update command failed", level=ERROR, step=label, stderr=details)
             send_notification_safe(
                 notification_configs,
@@ -115,7 +160,7 @@ def main() -> int:
                 job="auto_update_gogs",
                 status="error",
                 message=f"Failed to refresh Gogs {label} after updating",
-                details=details,
+                details=_details_with_rollback(details, rolled_back),
                 logger=logger,
             )
             return 1
@@ -123,6 +168,7 @@ def main() -> int:
     restart_result = _run_command(["systemctl", "restart", GOGS_SERVICE])
     if restart_result.returncode != 0:
         details = restart_result.stderr.strip() or restart_result.stdout.strip() or "systemctl restart failed"
+        rolled_back = _rollback_gogs_release(previous_release)
         log_event(logger, "Gogs service restart failed", level=ERROR, stderr=details)
         send_notification_safe(
             notification_configs,
@@ -130,7 +176,24 @@ def main() -> int:
             job="auto_update_gogs",
             status="error",
             message="Updated Gogs but failed to restart the service",
-            details=details,
+            details=_details_with_rollback(details, rolled_back),
+            logger=logger,
+        )
+        return 1
+
+    try:
+        write_gogs_state(target_tag, data_path, config_path)
+    except (OSError, ValueError) as exc:
+        details = str(exc)
+        rolled_back = _rollback_gogs_release(previous_release)
+        log_event(logger, "Gogs state update failed", level=ERROR, stderr=details)
+        send_notification_safe(
+            notification_configs,
+            subject="Error: Gogs update failed",
+            job="auto_update_gogs",
+            status="error",
+            message="Updated Gogs but could not persist updated install state",
+            details=_details_with_rollback(details, rolled_back),
             logger=logger,
         )
         return 1

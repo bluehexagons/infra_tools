@@ -4,7 +4,7 @@
 Provides helpers for:
 - Listing guests (``pct list`` + ``qm list``).
 - Querying status, config, and uptime for a single guest.
-- Starting and stopping guests.
+- Starting, pausing, resuming, and stopping guests.
 - Destroying guests (caller is expected to handle confirmation).
 - Health-checking a guest (status + ping + optional SSH probe).
 - Reconfiguring guests (CPU, memory, arbitrary ``pct``/``qm`` options).
@@ -354,6 +354,42 @@ def stop_container(
         raise ProxmoxManageError(
             f"{cmd} failed on {host.address}: "
             f"{(result.stderr or '').strip() or 'unknown error'}"
+        )
+
+
+def suspend_guest(host: ProxmoxHost, vmid: int) -> None:
+    """Pause a running guest, using ``pct suspend`` or ``qm suspend``."""
+    guest_type, current = _get_guest_status(host, vmid)
+    if guest_type == "vm" and current in {"paused", "suspended"}:
+        return
+    if current == "stopped":
+        raise ProxmoxManageError(
+            f"Guest {vmid} is stopped; start it before pausing it."
+        )
+    cmd = f"qm suspend {int(vmid)}" if guest_type == "vm" else f"pct suspend {int(vmid)}"
+    result = _run_on_host(host, cmd)
+    if result.returncode != 0:
+        raise ProxmoxManageError(
+            f"{cmd} failed on {host.address}: "
+            f"{(result.stderr or result.stdout or '').strip() or 'unknown error'}"
+        )
+
+
+def resume_guest(host: ProxmoxHost, vmid: int) -> None:
+    """Resume a paused guest, using ``pct resume`` or ``qm resume``."""
+    guest_type, current = _get_guest_status(host, vmid)
+    if guest_type == "vm" and current == "running":
+        return
+    if current == "stopped":
+        raise ProxmoxManageError(
+            f"Guest {vmid} is stopped; use the start command instead."
+        )
+    cmd = f"qm resume {int(vmid)}" if guest_type == "vm" else f"pct resume {int(vmid)}"
+    result = _run_on_host(host, cmd)
+    if result.returncode != 0:
+        raise ProxmoxManageError(
+            f"{cmd} failed on {host.address}: "
+            f"{(result.stderr or result.stdout or '').strip() or 'unknown error'}"
         )
 
 

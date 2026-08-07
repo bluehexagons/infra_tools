@@ -33,14 +33,17 @@ python3 -m py_compile file.py
 ## Machine Type Awareness
 
 ```python
-from lib.machine_state import can_modify_kernel, can_manage_swap
+from lib.machine_state import can_modify_kernel
 
 if not can_modify_kernel():
     print("  ✓ Skipping (container)")
     return
 ```
 
-**Types:** `unprivileged` (LXC), `vm`, `privileged`, `hardware`, `oci` (Docker/Podman)
+**Types:** `auto` (default), `unprivileged` (LXC), `vm`, `hardware`, plus the
+explicit compatibility labels `privileged` and `oci` (Docker/Podman). Official
+support targets Debian bare metal, Debian VMs, and unprivileged Debian LXC on
+Proxmox.
 
 See `docs/MACHINE_TYPES.md` for capability matrix.
 

@@ -48,7 +48,7 @@ class TestPythonFlag(unittest.TestCase):
     def test_install_or_update_uv_returns_true_in_dry_run(self, _is_dry_run):
         self.assertTrue(common_steps.install_or_update_uv(user_home="/home/user", username="user"))
 
-    @patch("common.common_steps._configure_auto_update_systemd")
+    @patch("common.common_steps.configure_maintenance_timer")
     def test_configure_auto_update_uv_disables_ecosystem_auto_upgrades(self, mock_configure):
         config = SetupConfig(host="host", username="user", system_type="server_dev", install_python=True)
         common_steps.configure_auto_update_uv(config)
@@ -56,16 +56,53 @@ class TestPythonFlag(unittest.TestCase):
             service_name="auto-update-uv",
             service_desc="Auto-update uv package manager",
             timer_desc="Auto-update uv weekly",
-            script_name="auto_update_uv.py",
+            script_path="/opt/infra_tools/common/service_tools/auto_update_uv.py",
             schedule="Sun *-*-* 05:00:00",
             check_path="/home/user/.local/bin/uv",
             check_name="uv",
             user="user",
             environment={ECOSYSTEM_AUTO_UPGRADE_ENV: "0"},
+            purpose="auto-update",
         )
 
 
 class TestSetupAdminPython(unittest.TestCase):
+    @patch("lib.python_setup.run_completion_setup")
+    @patch("lib.python_setup.install_launcher", side_effect=OSError("read-only"))
+    @patch("lib.python_setup.os.path.expanduser", return_value="/tmp/testuser")
+    @patch("lib.python_setup.os.makedirs")
+    @patch("lib.python_setup.subprocess.run")
+    @patch("lib.python_setup.install_or_update_uv", return_value=True)
+    @patch("lib.python_setup.validate_username", return_value=True)
+    @patch("lib.python_setup.get_current_username", return_value="admin")
+    @patch(
+        "lib.python_setup.shutil.which",
+        side_effect=["/usr/bin/python3", "/usr/bin/python"],
+    )
+    def test_user_launcher_failure_fails_setup(
+        self,
+        _which,
+        _current_username,
+        _validate_username,
+        _install_uv,
+        mock_subprocess_run,
+        _mock_makedirs,
+        _expanduser,
+        _install_launcher,
+        mock_completion,
+    ):
+        mock_subprocess_run.return_value = argparse.Namespace(
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+        result = python_setup.run_local_python_setup(
+            "bash",
+            script_path="/tmp/infra_tools.py",
+        )
+        self.assertEqual(result, 1)
+        mock_completion.assert_not_called()
+
     @patch("lib.python_setup.run_completion_setup", return_value=0)
     @patch("lib.python_setup.os.path.expanduser", return_value="/tmp/testuser")
     @patch("lib.python_setup.os.symlink")

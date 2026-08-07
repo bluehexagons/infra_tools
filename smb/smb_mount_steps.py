@@ -8,6 +8,7 @@ from typing import Any, Optional
 from lib.config import SetupConfig
 from lib.remote_utils import run
 from lib.systemd_service import cleanup_systemd_unit
+from lib.validation import validate_smb_mount_specs
 
 
 def parse_smb_mount_spec(mount_spec: Optional[list[str]]) -> dict[str, Any]:
@@ -51,6 +52,9 @@ def configure_smb_mount(config: SetupConfig, mount_spec: Optional[list[str]] = N
         config: SetupConfig object
         mount_spec: [mountpoint, ip, credentials, share, subdir]
     """
+    # Custom steps can call this directly, so apply the same complete
+    # preflight used by the normal setup flow before changing the filesystem.
+    validate_smb_mount_specs([mount_spec])
     mount_config = parse_smb_mount_spec(mount_spec)
     
     mountpoint = mount_config['mountpoint']
@@ -60,20 +64,25 @@ def configure_smb_mount(config: SetupConfig, mount_spec: Optional[list[str]] = N
     share = mount_config['share']
     subdir = mount_config['subdir']
     
+    result = run(f"systemd-escape -p {shlex.quote(mountpoint)}", capture_output=True, text=True)
+    escaped_mountpoint = result.stdout.strip()
+    if not escaped_mountpoint or "/" in escaped_mountpoint:
+        raise RuntimeError(f"Unable to derive a safe systemd unit name for mountpoint: {mountpoint}")
+
+    unit_name = f"{escaped_mountpoint}.mount"
+    unit_path = f"/etc/systemd/system/{unit_name}"
+
     os.makedirs(mountpoint, exist_ok=True)
     run(f"chown {shlex.quote(config.username)}:{shlex.quote(config.username)} {shlex.quote(mountpoint)}")
-    
+
     credentials_dir = "/root/.smb"
     os.makedirs(credentials_dir, exist_ok=True)
     run(f"chmod 700 {shlex.quote(credentials_dir)}")
-    
-    result = run(f"systemd-escape -p {shlex.quote(mountpoint)}", capture_output=True, text=True)
-    escaped_mountpoint = result.stdout.strip()
-    unit_name = f"{escaped_mountpoint}.mount"
-    unit_path = f"/etc/systemd/system/{unit_name}"
-    
-    safe_mountpoint = mountpoint.replace('/', '_').strip('_')
-    creds_file = f"{credentials_dir}/credentials-{safe_mountpoint}"
+
+    # Use the already collision-resistant systemd-escaped mount name. The old
+    # slash-to-underscore conversion made /mnt/a_b and /mnt/a/b share one
+    # credential file and could silently point a mount at the wrong server.
+    creds_file = f"{credentials_dir}/credentials-{escaped_mountpoint}"
     
     creds_content = f"""username={username}
 password={password}
@@ -83,13 +92,6 @@ password={password}
         f.write(creds_content)
     run(f"chown root:root {shlex.quote(creds_file)}")
     run(f"chmod 600 {shlex.quote(creds_file)}")
-    
-    if not ip.replace('.', '').replace(':', '').isalnum():
-        raise ValueError(f"Invalid IP address format: {ip}")
-    if '/' in share or '\\' in share or ' ' in share:
-        raise ValueError(f"Invalid share name (cannot contain /, \\, or spaces): {share}")
-    if subdir and not subdir.startswith('/'):
-        raise ValueError(f"Subdirectory must start with /: {subdir}")
     
     unc_path = f"//{ip}/{share}{subdir}"
     
@@ -128,5 +130,4 @@ WantedBy=multi-user.target
         print(f"  ✓ SMB mount configured and mounted: {mountpoint} → {unc_path}")
     else:
         print(f"  ✓ SMB mount configured: {mountpoint} → {unc_path} (will mount at boot)")
-
 

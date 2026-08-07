@@ -20,7 +20,7 @@ PLUGIN = PluginDefinition(
         "configure_samba_firewall",
         "configure_samba_global_settings",
         "configure_samba_fail2ban",
-        "setup_samba_share",
+        "reconcile_samba_shares",
         "configure_smb_mount",
     ),
     custom_step_provider="plugins.smb:get_custom_step_functions",
@@ -43,7 +43,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         configure_samba_global_settings,
         configure_smb_mount,
         install_samba,
-        setup_samba_share,
+        reconcile_samba_shares,
     )
 
     return {
@@ -51,7 +51,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "configure_samba_firewall": configure_samba_firewall,
         "configure_samba_global_settings": configure_samba_global_settings,
         "configure_samba_fail2ban": configure_samba_fail2ban,
-        "setup_samba_share": setup_samba_share,
+        "reconcile_samba_shares": reconcile_samba_shares,
         "configure_smb_mount": configure_smb_mount,
     }
 

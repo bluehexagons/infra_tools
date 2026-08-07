@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import hashlib
 import os
 import sys
 import tempfile
@@ -261,16 +262,62 @@ class TestRunRemoteSetupArgumentSecurity(unittest.TestCase):
         remote_command = mock_build_ssh.call_args.kwargs["remote_command"]
         self.assertIn("rm -rf /opt/infra_tools && mkdir -p /opt/infra_tools", remote_command)
         self.assertLess(remote_command.index("rm -rf"), remote_command.index("tar xzf -"))
+        self.assertIn("chmod 0755 /opt/infra_tools", remote_command)
+        self.assertLess(
+            remote_command.index("tar xzf -"),
+            remote_command.index("chmod 0755 /opt/infra_tools"),
+        )
+
+    def test_local_install_dir_is_traversable_after_copy(self):
+        from lib import setup_common
+
+        config = _make_config(host="localhost")
+        process = MagicMock()
+        process.stdout = io.StringIO("")
+        process.wait.return_value = 0
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            install_dir = os.path.join(temp_dir, "infra_tools")
+            with patch.object(setup_common, "REMOTE_INSTALL_DIR", install_dir), \
+                 patch.object(setup_common, "copy_project_files"), \
+                 patch.object(setup_common.os, "geteuid", return_value=0), \
+                 patch("subprocess.Popen", return_value=process):
+                result = setup_common.run_remote_setup(config)
+
+            self.assertEqual(result, 0)
+            self.assertEqual(os.stat(install_dir).st_mode & 0o777, 0o755)
 
 
 class TestCloneRepository(unittest.TestCase):
+    def test_repository_name_cannot_escape_work_directory(self):
+        from lib import setup_common
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            work_dir = os.path.join(tmpdir, "work")
+            os.makedirs(work_dir)
+            sentinel = os.path.join(tmpdir, "sentinel")
+            with open(sentinel, "w", encoding="utf-8") as file_obj:
+                file_obj.write("keep")
+
+            for git_url in (
+                "https://git.example.com/.",
+                "https://git.example.com/..",
+            ):
+                with self.subTest(git_url=git_url):
+                    self.assertIsNone(setup_common.clone_repository(git_url, work_dir))
+
+            with open(sentinel, encoding="utf-8") as file_obj:
+                self.assertEqual(file_obj.read(), "keep")
+
     def test_existing_cache_is_cleaned_after_reset(self):
         from lib import setup_common
 
         with tempfile.TemporaryDirectory() as tmpdir:
             cache_dir = os.path.join(tmpdir, "cache")
             work_dir = os.path.join(tmpdir, "work")
-            cache_repo = os.path.join(cache_dir, "repo")
+            git_url = "https://git.example.com/repo.git"
+            cache_digest = hashlib.sha256(git_url.encode("utf-8")).hexdigest()[:16]
+            cache_repo = os.path.join(cache_dir, f"repo-{cache_digest}")
             os.makedirs(cache_repo)
             os.makedirs(work_dir)
             with open(os.path.join(cache_repo, "index.html"), "w", encoding="utf-8") as file_obj:
@@ -286,7 +333,7 @@ class TestCloneRepository(unittest.TestCase):
             with patch("subprocess.run", side_effect=run_results) as mock_run, \
                  patch("lib.deploy_utils.get_git_commit_hash", return_value="abc123"):
                 result = setup_common.clone_repository(
-                    "https://git.example.com/repo.git",
+                    git_url,
                     work_dir,
                     cache_dir=cache_dir,
                 )
@@ -299,6 +346,35 @@ class TestCloneRepository(unittest.TestCase):
             commands.index(["git", "-C", cache_repo, "reset", "--hard", "origin/main"]),
             commands.index(["git", "-C", cache_repo, "clean", "-fdx"]),
         )
+
+    def test_cache_path_distinguishes_same_named_repositories(self):
+        from lib.setup_common import _repository_cache_path
+
+        first = _repository_cache_path(
+            "/cache",
+            "https://github.com/one/repo.git",
+            "repo",
+        )
+        second = _repository_cache_path(
+            "/cache",
+            "https://github.com/two/repo.git",
+            "repo",
+        )
+
+        self.assertNotEqual(first, second)
+        self.assertTrue(first.startswith("/cache/repo-"))
+        self.assertTrue(second.startswith("/cache/repo-"))
+
+    def test_requested_agent_repository_clone_failure_is_fatal(self):
+        from lib import setup_common
+
+        config = _make_config(
+            agent_repos=["https://github.com/user/missing.git"],
+        )
+        with tempfile.TemporaryDirectory() as target_dir, \
+             patch.object(setup_common, "clone_repository", return_value=None):
+            with self.assertRaisesRegex(RuntimeError, "requested agent repository"):
+                setup_common.prepare_agent_repositories(config, target_dir)
 
 
 class TestSetupMainValidation(unittest.TestCase):
@@ -733,8 +809,33 @@ class TestHostedProvisioningDispatch(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(config.hosted_node, "10.0.0.1")
         self.assertEqual(config.hosted_key, "/keys/proxmox")
+        self.assertEqual(config.ssh_key, "/keys/proxmox")
         self.assertEqual(config.container_storage, [["root", "local-lvm", "10G"]])
         mock_provision_vm.assert_called_once_with(config, image=config.vm_image)
+
+    def test_hosted_setup_preserves_explicit_guest_ssh_key(self):
+        from lib import setup_common
+
+        with tempfile.TemporaryDirectory() as workspace:
+            add_proxmox_host(
+                ProxmoxHost(
+                    name="pve1",
+                    address="10.0.0.1",
+                    ssh_key="/keys/proxmox",
+                ),
+                workspace,
+            )
+            config = _make_config(
+                hosted_node="pve1",
+                hosted_key=None,
+                ssh_key="/keys/agent-vm",
+                container_storage=[["root", "10G"]],
+            )
+
+            setup_common._apply_hosted_proxmox_defaults(config, workspace)
+
+        self.assertEqual(config.hosted_key, "/keys/proxmox")
+        self.assertEqual(config.ssh_key, "/keys/agent-vm")
 
     @patch("builtins.print")
     def test_hosted_lxc_setup_expands_saved_template_storage(self, _mock_print):
@@ -797,6 +898,27 @@ class TestHostedProvisioningDispatch(unittest.TestCase):
             config.container_storage,
             [["root", "auto", "10G"], ["template", "auto"]],
         )
+
+    def test_server_proxmox_setup_registers_host(self):
+        from lib import setup_common
+
+        with tempfile.TemporaryDirectory() as workspace:
+            config = _make_config(
+                system_type="server_proxmox",
+                host="10.0.0.10",
+                ssh_key="/keys/proxmox",
+                friendly_name="pve1",
+            )
+
+            setup_common.register_proxmox_setup_host(config, workspace)
+
+            registered = setup_common.find_proxmox_host("pve1", workspace)
+
+        self.assertIsNotNone(registered)
+        assert registered is not None
+        self.assertEqual(registered.address, "10.0.0.10")
+        self.assertEqual(registered.user, "root")
+        self.assertEqual(registered.ssh_key, "/keys/proxmox")
 
 
 if __name__ == '__main__':

@@ -140,11 +140,14 @@ class TestWorkspaceCli(unittest.TestCase):
             "example.com",
             "--antistatic-server",
             "lobby.example.com:9090",
+            "--antistatic-admin",
+            "operator",
             "--antistatic-db",
             "db.example.com:9091",
         ])
         self.assertEqual(args.command, "setup")
         self.assertEqual(args.antistatic_server, "lobby.example.com:9090")
+        self.assertEqual(args.antistatic_admin, "operator")
         self.assertEqual(args.antistatic_db, "db.example.com:9091")
 
     def test_infra_tools_setup_parser_accepts_gogs_flag(self):
@@ -198,6 +201,47 @@ class TestWorkspaceCli(unittest.TestCase):
 
         self.assertEqual(result, 1)
         mock_print.assert_called_with("Error: Credential username must not contain ':'")
+
+    @patch("builtins.print")
+    @patch("infra_tools.getpass.getpass", return_value="secret")
+    @patch("infra_tools.set_workspace_credential")
+    def test_infra_tools_credentials_set_prompts_when_password_is_omitted(
+        self,
+        mock_set_credential,
+        mock_getpass,
+        _mock_print,
+    ):
+        parser = unittest.mock.MagicMock()
+        args = unittest.mock.MagicMock()
+        args.command = "credentials"
+        args.credentials_command = "set"
+        args.username = "operator"
+        args.password = None
+        args.workspace = None
+        parser.parse_args.return_value = args
+
+        with patch(
+            "infra_tools.create_infra_tools_parser",
+            return_value=(parser, unittest.mock.MagicMock(), unittest.mock.MagicMock()),
+        ):
+            result = infra_tools.main()
+
+        self.assertEqual(result, 0)
+        mock_getpass.assert_called_once_with("Password for operator: ")
+        mock_set_credential.assert_called_once_with("operator", "secret")
+
+    def test_unified_runtime_validation_rejects_antistatic_admin_without_tls(self):
+        config = SetupConfig(
+            host="example.com",
+            username="testuser",
+            system_type="server_lite",
+            antistatic_server="lobby.example.com",
+            antistatic_admin="operator",
+            share_credentials=[["operator", "secret"]],
+        )
+
+        with self.assertRaisesRegex(ValueError, "requires --ssl or --cloudflare"):
+            infra_tools._prepare_runtime_config_for_cli(config)
 
     @patch("builtins.print")
     @patch("infra_tools.validate_workspace_dir", side_effect=ValueError("bad workspace"))

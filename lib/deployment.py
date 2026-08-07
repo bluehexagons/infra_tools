@@ -682,7 +682,7 @@ class DeploymentOrchestrator:
         }
     
     # ------------------------------------------------------------------
-    # infra.json manifest deploys (see docs/plans/PROJECT_MANIFEST.md)
+    # infra.json manifest deploys
     # ------------------------------------------------------------------
 
     @staticmethod

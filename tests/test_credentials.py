@@ -98,6 +98,35 @@ class TestWorkspaceCredentials(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Missing credential for SMB mount user: mountuser"):
                 prepare_runtime_config(config, tmpdir)
 
+    def test_prepare_runtime_config_resolves_antistatic_admin_credential(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            set_workspace_credential("operator", "secret1", tmpdir)
+            config = SetupConfig(
+                host="host",
+                username="user",
+                system_type="server_lite",
+                antistatic_server="lobby.example.com",
+                antistatic_admin="operator",
+            )
+
+            runtime_config = prepare_runtime_config(config, tmpdir)
+
+            self.assertIsNone(config.share_credentials)
+            self.assertEqual(runtime_config.share_credentials, [["operator", "secret1"]])
+
+    def test_prepare_runtime_config_rejects_missing_antistatic_admin_credential(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = SetupConfig(
+                host="host",
+                username="user",
+                system_type="server_lite",
+                antistatic_server="lobby.example.com",
+                antistatic_admin="operator",
+            )
+
+            with self.assertRaisesRegex(ValueError, "Missing credential for Antistatic admin: operator"):
+                prepare_runtime_config(config, tmpdir)
+
     def test_set_workspace_credential_rejects_separator_username(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with self.assertRaisesRegex(ValueError, "Credential username must not contain ':'"):

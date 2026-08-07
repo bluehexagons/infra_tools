@@ -60,6 +60,15 @@ class TestSetupConfigToDict(unittest.TestCase):
         d = config.to_dict()
         self.assertNotIn('share_credentials', d)
 
+    def test_to_dict_keeps_antistatic_admin_username_without_password(self):
+        config = self._make_config(
+            antistatic_admin='operator',
+            share_credentials=[['operator', 'secret1']],
+        )
+        d = config.to_dict()
+        self.assertEqual(d['antistatic_admin'], 'operator')
+        self.assertNotIn('share_credentials', d)
+
     def test_to_dict_redacts_inline_share_passwords(self):
         config = self._make_config(samba_shares=[['read', 'share', '/mnt/data', 'user1:secret1,user2']])
         d = config.to_dict()
@@ -136,12 +145,56 @@ class TestSetupConfigToRemoteArgs(unittest.TestCase):
         args = config.to_remote_args()
         self.assertIn('--python', args)
 
+    def test_agent_tool_flags(self):
+        config = self._make_config(
+            install_gh=True,
+            install_codex=True,
+            install_claude=True,
+            install_opencode=True,
+            install_t3code=True,
+            copy_agent_keys=True,
+            copy_agent_config=True,
+            agent_repos=['https://github.com/user/my_codebase.git'],
+        )
+        args_str = ' '.join(config.to_remote_args())
+        self.assertIn('--gh', args_str)
+        self.assertIn('--codex', args_str)
+        self.assertIn('--claude', args_str)
+        self.assertIn('--opencode', args_str)
+        self.assertIn('--t3code', args_str)
+        self.assertIn('--copy-keys', args_str)
+        self.assertIn('--copy-config', args_str)
+        self.assertIn('--repo https://github.com/user/my_codebase.git', args_str)
+
     def test_deploy_specs(self):
         config = self._make_config(deploy_specs=[['example.com/', 'https://github.com/user/repo.git']])
         args = config.to_remote_args()
         args_str = ' '.join(args)
         # Default deployment mode doesn't add a flag; lite and full modes use --deployment-lite/--deployment-full
         self.assertIn('--deploy', args_str)
+
+    def test_terminal_agent_suite_selects_cli_agents_and_gh(self):
+        config = self._make_config(agent_suite='terminal')
+        self.assertTrue(config.install_gh)
+        self.assertEqual(
+            config.selected_agent_tools(),
+            ['codex', 'claude', 'opencode'],
+        )
+        self.assertFalse(config.install_t3code)
+
+    def test_full_agent_suite_selects_runtimes_and_t3code(self):
+        config = self._make_config(agent_suite='full')
+        self.assertEqual(
+            config.selected_agent_tools(),
+            ['codex', 'claude', 'opencode', 't3code'],
+        )
+        self.assertTrue(config.install_node)
+        self.assertTrue(config.install_python)
+        self.assertTrue(config.install_go)
+
+    def test_invalid_agent_suite_fails(self):
+        with self.assertRaisesRegex(ValueError, 'agent_suite must be one of'):
+            self._make_config(agent_suite='everything')
 
     def test_deployment_mode_flags(self):
         deploy_specs = [['example.com/', 'https://github.com/user/repo.git']]
@@ -207,6 +260,16 @@ class TestSetupConfigToRemoteArgs(unittest.TestCase):
         args_str = ' '.join(args)
         self.assertIn('--antistatic-db db.example.com:8081', args_str)
 
+    def test_antistatic_admin(self):
+        config = self._make_config(
+            antistatic_server='lobby.example.com:8080',
+            antistatic_admin='operator',
+            share_credentials=[['operator', 'secret1']],
+        )
+        args_str = ' '.join(config.to_remote_args())
+        self.assertIn('--antistatic-admin operator', args_str)
+        self.assertIn('--credential operator secret1', args_str)
+
     def test_gogs(self):
         config = self._make_config(gogs=['git.example.com:3000', '/srv/gogs'])
         args = config.to_remote_args()
@@ -268,15 +331,20 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
         parts = config.to_setup_command()
         self.assertTrue(any('--machine' in p for p in parts))
 
-    def test_lxc_machine_type_included_when_system_default_is_vm(self):
+    def test_lxc_machine_type_is_explicit(self):
         config = self._make_config(system_type='server_web', machine_type='unprivileged')
         parts = config.to_setup_command()
         self.assertIn('--machine unprivileged', parts)
 
-    def test_vm_machine_type_omitted_when_system_default_is_vm(self):
-        config = self._make_config(system_type='server_web', machine_type='vm')
+    def test_auto_machine_type_is_omitted_from_setup_command(self):
+        config = self._make_config(system_type='server_web', machine_type='auto')
         parts = config.to_setup_command()
         self.assertFalse(any('--machine' in p for p in parts))
+
+    def test_vm_machine_type_is_explicit_when_auto_is_the_default(self):
+        config = self._make_config(system_type='server_web', machine_type='vm')
+        parts = config.to_setup_command()
+        self.assertIn('--machine vm', parts)
 
     def test_password_not_included(self):
         config = self._make_config(password='secret')
@@ -292,6 +360,17 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
         parts = config.to_setup_command()
         cmd = ' '.join(parts)
         self.assertIn('--credential user1 [REDACTED]', cmd)
+        self.assertNotIn('secret1', cmd)
+
+    def test_antistatic_admin_password_is_redacted(self):
+        config = self._make_config(
+            antistatic_server='lobby.example.com',
+            antistatic_admin='operator',
+            share_credentials=[['operator', 'secret1']],
+        )
+        cmd = ' '.join(config.to_setup_command())
+        self.assertIn('--antistatic-admin operator', cmd)
+        self.assertIn('--credential operator [REDACTED]', cmd)
         self.assertNotIn('secret1', cmd)
 
     def test_share_credentials_omitted_for_inline_share_passwords(self):
@@ -332,6 +411,28 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
         config = self._make_config(install_python=True)
         parts = config.to_setup_command()
         self.assertIn('--python', parts)
+
+    def test_agent_tool_flags_included(self):
+        config = self._make_config(
+            install_gh=True,
+            install_codex=True,
+            install_claude=True,
+            install_opencode=True,
+            install_t3code=True,
+            copy_agent_keys=True,
+            copy_agent_config=True,
+            agent_repos=['git@github.com:user/my_codebase.git'],
+        )
+        parts = config.to_setup_command()
+        cmd = ' '.join(parts)
+        self.assertIn('--gh', parts)
+        self.assertIn('--codex', parts)
+        self.assertIn('--claude', parts)
+        self.assertIn('--opencode', parts)
+        self.assertIn('--t3code', parts)
+        self.assertIn('--copy-keys', parts)
+        self.assertIn('--copy-config', parts)
+        self.assertIn('--repo git@github.com:user/my_codebase.git', cmd)
 
     def test_smb_mount_password_redacted(self):
         config = self._make_config(
@@ -392,6 +493,7 @@ class TestSetupConfigFromArgs(unittest.TestCase):
             scrub_specs=None,
             notify_specs=None,
             antistatic_server=None,
+            antistatic_admin=None,
             antistatic_db=None,
             gogs=None,
             hosted_node=None,
@@ -405,9 +507,9 @@ class TestSetupConfigFromArgs(unittest.TestCase):
         defaults.update(overrides)
         return Namespace(**defaults)
 
-    def test_workstation_defaults_come_from_registry(self):
+    def test_workstation_defaults_to_auto_detection(self):
         config = SetupConfig.from_args(self._make_args(), 'workstation_desktop')
-        self.assertEqual(config.machine_type, 'vm')
+        self.assertEqual(config.machine_type, 'auto')
         self.assertFalse(config.enable_rdp)
         self.assertTrue(config.include_desktop)
         self.assertTrue(config.include_cli_tools)
@@ -421,21 +523,43 @@ class TestSetupConfigFromArgs(unittest.TestCase):
 
     def test_pc_dev_defaults_include_office_and_smbclient(self):
         config = SetupConfig.from_args(self._make_args(), 'pc_dev')
-        self.assertEqual(config.machine_type, 'vm')
+        self.assertEqual(config.machine_type, 'auto')
         self.assertTrue(config.install_office)
         self.assertTrue(config.enable_smbclient)
         self.assertTrue(config.include_pc_dev_apps)
 
-    def test_server_web_defaults_to_vm(self):
+    def test_server_web_defaults_to_auto_detection(self):
         config = SetupConfig.from_args(self._make_args(), 'server_web')
-        self.assertEqual(config.machine_type, 'vm')
+        self.assertEqual(config.machine_type, 'auto')
 
-    def test_build_server_defaults_to_vm(self):
+    def test_server_dev_defaults_to_auto_detection(self):
+        config = SetupConfig.from_args(self._make_args(), 'server_dev')
+        self.assertEqual(config.machine_type, 'auto')
+
+    def test_server_lite_defaults_to_auto_detection(self):
+        config = SetupConfig.from_args(self._make_args(), 'server_lite')
+        self.assertEqual(config.machine_type, 'auto')
+
+    def test_custom_steps_defaults_to_auto_detection(self):
+        config = SetupConfig.from_args(
+            self._make_args(custom_steps='configure_swap'),
+            'custom_steps',
+        )
+        self.assertEqual(config.machine_type, 'auto')
+
+    def test_build_server_defaults_to_auto_detection(self):
         config = SetupConfig.from_args(
             self._make_args(is_build_server=True),
             'server_lite',
         )
         self.assertTrue(config.is_build_server)
+        self.assertEqual(config.machine_type, 'auto')
+
+    def test_hosted_setup_defaults_to_vm_for_guest_provisioning(self):
+        config = SetupConfig.from_args(
+            self._make_args(hosted_node='pve1'),
+            'server_web',
+        )
         self.assertEqual(config.machine_type, 'vm')
 
     def test_explicit_machine_type_overrides_vm_default(self):
@@ -452,6 +576,13 @@ class TestSetupConfigFromArgs(unittest.TestCase):
         )
         self.assertEqual(config.antistatic_db, 'db.example.com')
 
+    def test_antistatic_admin_from_args(self):
+        config = SetupConfig.from_args(
+            self._make_args(antistatic_server='lobby.example.com', antistatic_admin='operator'),
+            'server_web',
+        )
+        self.assertEqual(config.antistatic_admin, 'operator')
+
     def test_gogs_from_args(self):
         config = SetupConfig.from_args(
             self._make_args(gogs=['git.example.com:3000', '/srv/gogs']),
@@ -459,10 +590,11 @@ class TestSetupConfigFromArgs(unittest.TestCase):
         )
         self.assertEqual(config.gogs, ['git.example.com:3000', '/srv/gogs'])
 
-    def test_server_proxmox_defaults_defer_restart_with_force_deadline(self):
+    def test_server_proxmox_defaults_defer_restarts_without_a_force_deadline(self):
         config = SetupConfig.from_args(self._make_args(), 'server_proxmox')
+        self.assertEqual(config.machine_type, 'auto')
         self.assertFalse(config.auto_restart)
-        self.assertEqual(config.auto_restart_force_days, 7)
+        self.assertEqual(config.auto_restart_force_days, 0)
         self.assertEqual(config.auto_restart_grace, 5)
         self.assertFalse(config.include_cli_tools)
         self.assertFalse(config.include_desktop)
@@ -474,7 +606,7 @@ class TestSetupConfigFromArgs(unittest.TestCase):
             {'username': 'root'},
         )
         self.assertFalse(config.auto_restart)
-        self.assertEqual(config.auto_restart_force_days, 7)
+        self.assertEqual(config.auto_restart_force_days, 0)
 
     def test_from_dict_maps_legacy_no_restart(self):
         config = SetupConfig.from_dict(

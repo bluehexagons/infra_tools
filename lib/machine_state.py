@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import subprocess
 from typing import Optional, Any
 
-from lib.config import DEFAULT_MACHINE_TYPE, MACHINE_TYPES
+from lib.config import AUTO_MACHINE_TYPE, DEFAULT_MACHINE_TYPE, MACHINE_TYPES
 from lib.plugin_registry import get_system_type_names
 
 
@@ -19,6 +21,90 @@ _MACHINE_STATE_REQUIRED_KEYS = ("machine_type", "system_type", "username")
 _SETUP_CONFIG_REQUIRED_KEYS = ("username", "system_type")
 STATE_FILE = os.path.join(STATE_DIR, "machine.json")
 SETUP_CONFIG_FILE = os.path.join(STATE_DIR, "setup.json")
+
+_LXC_VIRTUALIZATIONS = {"lxc", "lxc-libvirt", "openvz", "systemd-nspawn"}
+_OCI_VIRTUALIZATIONS = {"docker", "podman", "rkt", "oci"}
+
+
+def _systemd_detect_virt() -> Optional[str]:
+    """Return the virtualization identifier reported by systemd, if any."""
+    detector = shutil.which("systemd-detect-virt")
+    if not detector:
+        return None
+
+    try:
+        result = subprocess.run(
+            [detector],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+    if result.returncode != 0:
+        return None
+    value = result.stdout.strip().lower()
+    return value or None
+
+
+def _read_text(paths: tuple[str, ...]) -> Optional[str]:
+    for path in paths:
+        try:
+            with open(path, "r", encoding="utf-8") as file_obj:
+                value = file_obj.read().strip().lower()
+        except OSError:
+            continue
+        if value:
+            return value
+    return None
+
+
+def detect_machine_type() -> str:
+    """Guess the supported machine profile from the local runtime environment."""
+    virtualization = _systemd_detect_virt()
+    if virtualization in _LXC_VIRTUALIZATIONS:
+        return "unprivileged"
+    if virtualization in _OCI_VIRTUALIZATIONS:
+        return "oci"
+    if virtualization and virtualization != "none":
+        return "vm"
+
+    container_marker = _read_text(("/run/systemd/container",))
+    if container_marker in _LXC_VIRTUALIZATIONS:
+        return "unprivileged"
+    if container_marker:
+        return "oci"
+
+    if os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv"):
+        return "oci"
+
+    cgroup = _read_text(("/proc/1/cgroup",)) or ""
+    if any(marker in cgroup for marker in _LXC_VIRTUALIZATIONS):
+        return "unprivileged"
+    if any(marker in cgroup for marker in _OCI_VIRTUALIZATIONS):
+        return "oci"
+
+    product_name = _read_text(("/sys/class/dmi/id/product_name",)) or ""
+    if any(
+        marker in product_name
+        for marker in ("qemu", "kvm", "vmware", "virtualbox", "microsoft", "xen", "virtual")
+    ):
+        return "vm"
+
+    cpuinfo = _read_text(("/proc/cpuinfo",)) or ""
+    if "hypervisor" in cpuinfo:
+        return "vm"
+
+    return "hardware"
+
+
+def resolve_machine_type(machine_type: Optional[str]) -> str:
+    """Resolve ``auto`` to the machine profile detected on this host."""
+    if machine_type in (None, AUTO_MACHINE_TYPE):
+        return detect_machine_type()
+    return machine_type
 
 
 def save_machine_state(
@@ -94,7 +180,7 @@ def load_machine_state() -> dict[str, Any]:
 def get_machine_type() -> str:
     """Get the machine type from stored state."""
     state = load_machine_state()
-    return state.get("machine_type", DEFAULT_MACHINE_TYPE)
+    return resolve_machine_type(state.get("machine_type", DEFAULT_MACHINE_TYPE))
 
 
 def is_unprivileged() -> bool:

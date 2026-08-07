@@ -5,8 +5,8 @@ built and served. When present, the ``--deploy`` / ``DeploymentOrchestrator``
 path uses it as the source of truth, overriding ``detect_project_type()``. When
 absent, behavior is unchanged (fully backward compatible).
 
-This module is phase 1 of ``docs/plans/PROJECT_MANIFEST.md``: parsing,
-dataclasses, and strict validation only. Orchestrator wiring lands in phase 2.
+This module provides repo-side manifest parsing, dataclasses, and strict
+validation for ``infra.json`` deploys.
 """
 
 from __future__ import annotations

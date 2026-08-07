@@ -69,7 +69,8 @@ def run_local_python_setup(
             launcher_path = install_launcher(script_path, target_dir=local_bin)
             print(f"✓ Installed user launcher: {launcher_path}")
         except (OSError, ValueError) as exc:
-            print(f"Warning: could not install user launcher in {local_bin}: {exc}")
+            print(f"Error: could not install user launcher in {local_bin}: {exc}")
+            return 1
 
     old_path = os.environ.get("PATH", "")
     os.environ["PATH"] = os.pathsep.join([local_bin, old_path]) if old_path else local_bin
