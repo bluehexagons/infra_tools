@@ -134,7 +134,7 @@ class TestRestartPolicy(unittest.TestCase):
     def test_uses_proxmox_defaults(self, _load):
         policy = auto_restart_if_needed.load_restart_policy()
         self.assertFalse(policy["auto_restart"])
-        self.assertEqual(policy["force_days"], 7)
+        self.assertEqual(policy["force_days"], 0)
 
     @patch(
         "common.service_tools.auto_restart_if_needed.load_setup_config",

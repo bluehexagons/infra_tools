@@ -206,11 +206,22 @@ def harden_kernel(config: SetupConfig) -> None:
         print("  ✓ Skipping kernel hardening (host kernel manages these settings)")
         return
 
-    kernel_hardening = """# Managed by infra_tools - kernel security hardening.
-# Network security
-net.ipv4.conf.default.rp_filter=1
+    rp_filter_hardening = """net.ipv4.conf.default.rp_filter=1
 net.ipv4.conf.all.rp_filter=1
-net.ipv4.tcp_syncookies=1
+"""
+    if config.system_type == "server_proxmox":
+        # A Proxmox host may route, NAT, or bridge traffic for guests. Strict
+        # reverse-path filtering drops valid asymmetric guest traffic, so keep
+        # the kernel's permissive default for this control-plane role.
+        rp_filter_hardening = """# Proxmox hosts may route, NAT, or bridge guest traffic.
+# Keep reverse-path filtering disabled to allow asymmetric guest paths.
+net.ipv4.conf.default.rp_filter=0
+net.ipv4.conf.all.rp_filter=0
+"""
+
+    kernel_hardening = f"""# Managed by infra_tools - kernel security hardening.
+# Network security
+{rp_filter_hardening}net.ipv4.tcp_syncookies=1
 net.ipv4.conf.all.accept_redirects=0
 net.ipv4.conf.default.accept_redirects=0
 net.ipv4.conf.all.secure_redirects=0

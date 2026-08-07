@@ -79,8 +79,10 @@ For saved configurations, prefer `infra_tools deploy <name-or-host>` or
 <name-or-host>` prints an explicit override when the saved configuration is not
 using the new `auto` default.
 
-Proxmox host setup normally resolves to `hardware`, with normal automatic
-restarts disabled by default and a 7-day forced restart deadline.
+Proxmox host setup normally resolves to `hardware`, with automatic restarts
+and forced restart deadlines disabled by default. It continues to report a
+pending restart; set `--auto-restart` or a nonzero
+`--auto-restart-force-days` only after planning guest downtime.
 
 ## Usage
 

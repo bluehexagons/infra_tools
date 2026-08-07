@@ -590,11 +590,11 @@ class TestSetupConfigFromArgs(unittest.TestCase):
         )
         self.assertEqual(config.gogs, ['git.example.com:3000', '/srv/gogs'])
 
-    def test_server_proxmox_defaults_defer_restart_with_force_deadline(self):
+    def test_server_proxmox_defaults_defer_restarts_without_a_force_deadline(self):
         config = SetupConfig.from_args(self._make_args(), 'server_proxmox')
         self.assertEqual(config.machine_type, 'auto')
         self.assertFalse(config.auto_restart)
-        self.assertEqual(config.auto_restart_force_days, 7)
+        self.assertEqual(config.auto_restart_force_days, 0)
         self.assertEqual(config.auto_restart_grace, 5)
         self.assertFalse(config.include_cli_tools)
         self.assertFalse(config.include_desktop)
@@ -606,7 +606,7 @@ class TestSetupConfigFromArgs(unittest.TestCase):
             {'username': 'root'},
         )
         self.assertFalse(config.auto_restart)
-        self.assertEqual(config.auto_restart_force_days, 7)
+        self.assertEqual(config.auto_restart_force_days, 0)
 
     def test_from_dict_maps_legacy_no_restart(self):
         config = SetupConfig.from_dict(

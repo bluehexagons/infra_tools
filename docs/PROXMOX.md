@@ -33,6 +33,20 @@ python3 infra_tools.py proxmox ls pve1
 The public key must exist alongside the private key and root on the Proxmox
 host must accept it.
 
+## Host-safety defaults
+
+The `server_proxmox` flow deliberately leaves firewall policy to Proxmox and
+does not create a generic `/swapfile`: Proxmox storage (especially ZFS) must
+own its swap layout. It retains the host's permissive reverse-path filtering
+because strict filtering can drop valid routed, NATed, or bridged guest
+traffic. Configure host/guest firewall rules through the Proxmox firewall
+workflow after confirming management-network access.
+
+Automatic host restarts and forced restart deadlines are disabled by default.
+The setup reports pending restarts, but schedule any hypervisor reboot around
+guest downtime (or opt in explicitly with `--auto-restart` or
+`--auto-restart-force-days`).
+
 Create a Debian VM with XFCE, RDP, Firefox, and coding tools:
 
 ```bash

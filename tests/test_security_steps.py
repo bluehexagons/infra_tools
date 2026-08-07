@@ -111,6 +111,21 @@ class TestHardenKernel(unittest.TestCase):
         captured["ok"] = True
         self.assertTrue(captured["ok"])
 
+    @patch("security.security_steps.can_modify_kernel", return_value=True)
+    @patch("security.security_steps.run")
+    @patch("security.security_steps.open", new_callable=mock_open)
+    @patch("security.security_steps.os.path.exists", return_value=False)
+    def test_proxmox_preserves_asymmetric_guest_networking(
+        self, _exists, mock_file, mock_run, _ckm
+    ):
+        mock_run.return_value = SimpleNamespace(returncode=0)
+        harden_kernel(SetupConfig(username="u", host="h", system_type="server_proxmox"))
+
+        written = "".join(call.args[0] for call in mock_file().write.call_args_list)
+        self.assertIn("net.ipv4.conf.default.rp_filter=0", written)
+        self.assertIn("net.ipv4.conf.all.rp_filter=0", written)
+        self.assertNotIn("net.ipv4.conf.all.rp_filter=1", written)
+
 
 class TestConfigureFail2Ban(unittest.TestCase):
     @patch("security.security_steps.is_container", return_value=False)
