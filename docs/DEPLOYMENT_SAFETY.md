@@ -20,6 +20,8 @@ this document focuses on what operators need to know.
 - Uses conservative package-update policy for Node, Ruby, and uv by default.
 - Installs recurring maintenance unit files atomically and verifies that each timer is
   enabled and active without first deleting the working timer.
+- Validates Nginx hardening and default-site changes before reload, restoring
+  the exact previous configuration when validation fails.
 - Applies a seven-day freshness delay to dependency resolution and GitHub release
   selection unless the operator opts into a newer release.
 
