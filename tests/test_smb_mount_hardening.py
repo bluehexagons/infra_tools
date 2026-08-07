@@ -58,6 +58,7 @@ class TestConfigureSmbMountUnit(unittest.TestCase):
             with patch.object(smb_mount_steps, 'run', side_effect=fake_run), \
                  patch.object(smb_mount_steps, 'open', side_effect=fake_open, create=True), \
                  patch.object(smb_mount_steps, 'cleanup_systemd_unit'), \
+                 patch.object(smb_mount_steps, 'validate_smb_mount_specs'), \
                  patch.object(smb_mount_steps.os, 'makedirs', side_effect=fake_makedirs):
                 smb_mount_steps.configure_smb_mount(
                     config,
@@ -122,6 +123,7 @@ class TestConfigureSmbMountUnit(unittest.TestCase):
             with patch.object(smb_mount_steps, "run", side_effect=fake_run), \
                  patch.object(smb_mount_steps, "open", side_effect=fake_open, create=True), \
                  patch.object(smb_mount_steps, "cleanup_systemd_unit"), \
+                 patch.object(smb_mount_steps, "validate_smb_mount_specs"), \
                  patch.object(smb_mount_steps.os, "makedirs", side_effect=fake_makedirs):
                 smb_mount_steps.configure_smb_mount(
                     config,

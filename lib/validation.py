@@ -389,9 +389,20 @@ def validate_smb_mount_specs(smb_mounts: Optional[list[list[str]]]) -> None:
         _resolve_plugin_validator("parse_smb_mount_spec"),
     )
 
+    mountpoints: set[str] = set()
     for mount_spec in smb_mounts:
         mount_config = parse_smb_mount_spec(mount_spec)
-        validate_filesystem_path(mount_config["mountpoint"], must_exist=False)
+        mountpoint = mount_config["mountpoint"]
+        validate_filesystem_path(mountpoint, must_exist=False)
+        normalized_mountpoint = os.path.normpath(mountpoint)
+        if normalized_mountpoint != mountpoint or not normalized_mountpoint.startswith("/mnt/"):
+            raise ValueError(
+                "SMB mountpoint must be a normalized directory below /mnt: "
+                f"{mountpoint}"
+            )
+        if normalized_mountpoint in mountpoints:
+            raise ValueError(f"Duplicate SMB mountpoint: {mountpoint}")
+        mountpoints.add(normalized_mountpoint)
         if not validate_host(mount_config["ip"]):
             raise ValueError(f"Invalid SMB mount host: {mount_config['ip']}")
         if not mount_config["username"] or not mount_config["password"]:
@@ -430,10 +441,14 @@ def validate_samba_share_specs(
 
     credentials = parse_share_credentials(share_credentials)
 
+    share_names: set[str] = set()
     for share_spec in samba_shares:
         share_config = parse_share_spec(share_spec, credentials)
         share_name = share_config["share_name"]
         validate_samba_share_name(share_name)
+        if share_name in share_names:
+            raise ValueError(f"Duplicate Samba share name: {share_name}")
+        share_names.add(share_name)
 
         if not share_config["paths"]:
             raise ValueError(f"No paths specified for share: {share_name}")
@@ -444,6 +459,8 @@ def validate_samba_share_specs(
         for path in cast(list[str], share_config["paths"]):
             if not os.path.isabs(path):
                 raise ValueError(f"Share path must be absolute: {path}")
+            if os.path.normpath(path) == "/":
+                raise ValueError("Samba share path must not be the filesystem root")
             validate_filesystem_path(path, must_exist=False)
 
         if not share_config["users"]:

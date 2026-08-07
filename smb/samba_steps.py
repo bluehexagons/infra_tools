@@ -235,12 +235,12 @@ def _prepare_samba_share(
     print(f"  Reconciled {len(users)} member(s) in group {group_name}")
 
     safe_primary_path = shlex.quote(primary_path)
-    run(f"chgrp -R {safe_group} {safe_primary_path}")
+    run(f"chgrp -R --preserve-root {safe_group} {safe_primary_path}")
 
     if access_type == "write":
-        run(f"chmod -R 2775 {safe_primary_path}")
+        run(f"chmod -R --preserve-root 2775 {safe_primary_path}")
     else:
-        run(f"chmod -R 2755 {safe_primary_path}")
+        run(f"chmod -R --preserve-root 2755 {safe_primary_path}")
 
     print(f"  Set {'write' if access_type == 'write' else 'read-only'} permissions on {primary_path}")
 

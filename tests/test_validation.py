@@ -338,6 +338,19 @@ class TestValidateSmbMountSpecs(unittest.TestCase):
     def test_valid_smb_mount_specs_pass(self):
         validate_smb_mount_specs([['/mnt/share', '192.168.1.10', 'user:pass', 'docs', '/sub']])
 
+    def test_smb_mountpoint_must_be_under_mnt(self):
+        with self.assertRaisesRegex(ValueError, "below /mnt"):
+            validate_smb_mount_specs([['/etc', '192.168.1.10', 'user:pass', 'docs', '/']])
+
+    def test_smb_mountpoint_must_be_normalized_and_unique(self):
+        with self.assertRaisesRegex(ValueError, "normalized"):
+            validate_smb_mount_specs([['/mnt/projects/..', '192.168.1.10', 'user:pass', 'docs', '/']])
+        with self.assertRaisesRegex(ValueError, "Duplicate SMB mountpoint"):
+            validate_smb_mount_specs([
+                ['/mnt/projects', '192.168.1.10', 'user:pass', 'docs', '/'],
+                ['/mnt/projects', '192.168.1.11', 'user:pass', 'archive', '/'],
+            ])
+
     def test_invalid_host_fails(self):
         with self.assertRaisesRegex(ValueError, "Invalid SMB mount host: bad host"):
             validate_smb_mount_specs([['/mnt/share', 'bad host', 'user:pass', 'docs', '/sub']])
@@ -373,6 +386,15 @@ class TestValidateSambaShareSpecs(unittest.TestCase):
     def test_invalid_share_name_fails(self):
         with self.assertRaisesRegex(ValueError, r"Invalid Samba share name .*bad/share"):
             validate_samba_share_specs([['read', 'bad/share', '/mnt/docs', 'shareuser:secret']])
+
+    def test_duplicate_share_names_and_root_path_fail(self):
+        with self.assertRaisesRegex(ValueError, "Duplicate Samba share name"):
+            validate_samba_share_specs([
+                ['read', 'docs', '/srv/docs', 'shareuser:secret'],
+                ['write', 'docs', '/srv/docs-write', 'shareuser:secret'],
+            ])
+        with self.assertRaisesRegex(ValueError, "must not be the filesystem root"):
+            validate_samba_share_specs([['write', 'root', '/', 'shareuser:secret']])
 
     def test_missing_credential_fails(self):
         with self.assertRaisesRegex(ValueError, "Missing credential for share user: shareuser"):

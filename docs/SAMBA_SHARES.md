@@ -14,8 +14,9 @@ more users:
 ```
 
 `ACCESS_TYPE` is `read` or `write`. Share names may contain letters, numbers,
-dots, underscores, and hyphens. A share has exactly one directory root; use a
-separate `--share` option for each directory.
+dots, underscores, and hyphens, and must be unique in a command. A share has
+exactly one directory root (never `/`); use a separate `--share` option for
+each directory.
 
 The server creates a Unix user and Samba password for every declared user, then
 uses a per-share Unix group. The share's group membership and configuration are
@@ -210,6 +211,10 @@ python3 infra_tools.py setup workstation_desktop client admin \
 The mount `CREDENTIALS` field follows the same rule as share users: use a bare
 username backed by the workspace credential store, or an inline
 `username:password` only in controlled automation.
+
+Managed SMB mountpoints must be distinct, normalized directories below `/mnt`
+(for example, `/mnt/projects`). This prevents a mount configuration from
+changing ownership of an operating-system path.
 
 ## Troubleshooting
 

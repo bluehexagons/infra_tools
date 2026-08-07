@@ -390,6 +390,16 @@ class TestReconcileSambaShares(unittest.TestCase):
         ]
         self.assertEqual(password_calls[0]["input_data"], "very-secret\nvery-secret\n")
 
+    def test_recursive_permission_changes_preserve_filesystem_root(self) -> None:
+        _configured, calls = self._run_reconcile(
+            "[global]\n",
+            [["write", "docs", "/srv/docs", "alice:very-secret"]],
+        )
+
+        commands = [command for command, _ in calls]
+        self.assertIn("chgrp -R --preserve-root smb_docs_write /srv/docs", commands)
+        self.assertIn("chmod -R --preserve-root 2775 /srv/docs", commands)
+
 
 if __name__ == '__main__':
     unittest.main()
