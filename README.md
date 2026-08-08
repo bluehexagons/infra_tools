@@ -113,17 +113,29 @@ infra_tools proxmox health pve1 101
 Use the [documentation index](docs/README.md) for the complete command and
 feature map.
 
+## Project direction
+
+The [project roadmap](docs/plans/ROADMAP.md) prioritizes transactional setup and
+deployment, manifest-backed secrets and CI/CD, drift detection, and tested
+recovery workflows before expanding platform and provider support. The
+[architectural risk review](docs/plans/ARCHITECTURAL_RISK_REVIEW_2026-08-07.md)
+records the implementation risks driving that order.
+
 ## Development checks
 
 Run the default test suite from a checkout:
 
 ```bash
-python3 -m unittest discover -s tests
+make check
 ./run_tests.py --suite smoke
 ```
 
-Expensive live tests are opt-in. See [Saved configuration operations](docs/OPERATIONS.md)
-for test selectors and [Proxmox workflows](docs/PROXMOX.md) for live-host notes.
+Continuous integration runs the suite on the minimum supported Python 3.10,
+an intermediate Python 3.12, and the current stable Python 3.14. Expensive live
+tests remain opt-in.
+
+See [Saved configuration operations](docs/OPERATIONS.md) for test selectors and
+[Proxmox workflows](docs/PROXMOX.md) for live-host notes.
 
 ## Repository documentation
 

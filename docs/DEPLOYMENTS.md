@@ -47,7 +47,9 @@ unique within the file.
 It must not be absolute or escape the repository. `build` may be one command,
 an array of commands, or omitted when the checked-in output is ready to serve.
 Build commands run from the repository root, and `env` values are available to
-those commands only. Do not put secrets in a committed manifest.
+those commands only. Environment variable names must be shell identifiers: a
+letter or underscore followed by letters, digits, or underscores. Do not put
+secrets in a committed manifest.
 
 ### Static site plus API service
 
@@ -119,9 +121,9 @@ a warning after retries but does not abort an otherwise successful deployment.
 ## Validation and troubleshooting
 
 Manifest validation is strict: unknown fields, duplicate names, invalid domains,
-unsafe paths, unsupported versions, invalid ports, and malformed service
-templates are rejected. Check the remote deployment output and inspect the
-generated service when a component does not start:
+unsafe paths, unsupported versions, invalid ports, invalid environment variable
+names, and malformed service templates are rejected. Check the remote deployment
+output and inspect the generated service when a component does not start:
 
 ```bash
 sudo systemctl status app-<deployment>-<component>.service

@@ -198,6 +198,21 @@ class TestRejects(unittest.TestCase):
     def test_env_value_not_string(self):
         self._assert_rejected(_manifest(_static(env={"K": 1})), "must be a string")
 
+    def test_env_name_with_shell_syntax_rejected(self):
+        self._assert_rejected(
+            _manifest(_static(env={"SAFE; touch /tmp/unsafe": "1"})),
+            "env variable",
+        )
+
+    def test_env_name_starting_with_digit_rejected(self):
+        self._assert_rejected(_manifest(_static(env={"1INVALID": "1"})), "env variable")
+
+    def test_env_name_with_underscore_accepted(self):
+        component = parse_manifest(
+            _manifest(_static(env={"_PRIVATE_VALUE_2": "1"}))
+        ).components[0]
+        self.assertEqual(component.env, {"_PRIVATE_VALUE_2": "1"})
+
     def test_build_empty_string(self):
         self._assert_rejected(_manifest(_static(build="  ")), "non-empty")
 

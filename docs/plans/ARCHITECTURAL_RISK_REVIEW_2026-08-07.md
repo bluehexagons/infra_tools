@@ -1,6 +1,7 @@
 # Architectural Risk Review (2026-08-07)
 
-Status: documented. This is a focused design/operability risk document (not code changes).
+Status: active roadmap input. This is a focused design/operability risk
+document; implementation priorities are tracked in [the project roadmap](ROADMAP.md).
 
 ## Scope
 
@@ -139,3 +140,11 @@ Validation was performed by static evidence checks (no behavior-altering actions
 4. Introduce manifest env key validation (identifier allow-list) and command-escaping consistency before shell injection points.
 5. Make setup teardown transaction-like (snapshot, apply, rollback marker) so cleanup failures are reversible.
 6. Convert all persistent JSON writes to atomic temp-file write + `os.replace`, and tighten behavior on corrupted state to surface explicit remediation steps.
+
+## Resolution updates
+
+- **2026-08-08 — ARCH-07 resolved:** manifest environment variable names are
+  now validated as shell identifiers before deployment command assembly. Keep
+  this validation at the manifest boundary when the build executor is refactored.
+- The remaining findings are intentionally sequenced in
+  [Transactional execution and reconciliation](TRANSACTIONAL_EXECUTION.md).

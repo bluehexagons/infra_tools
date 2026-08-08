@@ -571,6 +571,7 @@ def validate_positive_integer(value: str, name: str = "value") -> int:
 
 _MEMORY_PATTERN = re.compile(r'^\d+[KMGT]$', re.IGNORECASE)
 _PACKAGE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+.-]*$")
+_ENVIRONMENT_VARIABLE_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _NETWORK_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 _NETWORK_PROVIDER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
 _GIT_SCP_URL_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+@[^:\s]+:.+$")
@@ -606,6 +607,20 @@ def validate_package_name(value: str, name: str = "package") -> str:
         raise ValueError(f"Invalid {name} name: {value}")
 
     return normalized_value
+
+
+def validate_environment_variable_name(
+    value: str,
+    name: str = "environment variable",
+) -> str:
+    """Validate a shell environment variable name without normalizing it."""
+
+    if not isinstance(value, str) or not _ENVIRONMENT_VARIABLE_NAME_PATTERN.fullmatch(value):
+        raise ValueError(
+            f"Invalid {name} name {value!r}; expected a letter or underscore "
+            "followed by letters, digits, or underscores"
+        )
+    return value
 
 
 def _repo_name_from_git_url(git_url: str) -> str:

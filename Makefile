@@ -1,10 +1,11 @@
 # Makefile for infra_tools development tasks
-.PHONY: test test-verbose help clean compile
+.PHONY: check test test-verbose help clean compile
 
 # Default target
 help:
 	@echo "infra_tools development tasks:"
 	@echo ""
+	@echo "  make check             Run compile checks and the default test suite"
 	@echo "  make test              Run all tests (concise output, shows failures only)"
 	@echo "  make test-verbose      Run all tests with full verbose output"
 	@echo "  make test TEST=name    Run specific test file (e.g., TEST=test_scrub_par2)"
@@ -13,10 +14,14 @@ help:
 	@echo "  make help              Show this help message"
 	@echo ""
 	@echo "Examples:"
+	@echo "  make check                   # Run the same checks as CI"
 	@echo "  make test                    # Concise output, shows summary only"
 	@echo "  make test-verbose            # Full test names and all output"
 	@echo "  make test TEST=test_scrub_par2"
 	@echo "  make test TEST=service_tools/test_storage_ops"
+
+# Run the same checks as continuous integration.
+check: compile test
 
 # Run tests (all or specific if TEST variable is set)
 test:
@@ -33,10 +38,9 @@ test-verbose:
 # Check all Python files compile
 compile:
 	@echo "Checking Python compilation..."
-	@find . -name "*.py" -not -path "./.git/*" -not -path "./__pycache__/*" -not -path "*/__pycache__/*" | \
-		while read file; do \
-			python3 -m py_compile "$$file" 2>&1 && echo "✓ $$file" || echo "✗ $$file"; \
-		done | grep "✗" || echo "All Python files compile successfully"
+	@find . -name "*.py" -not -path "./.git/*" -not -path "*/__pycache__/*" \
+		-not -path "*.egg-info/*" -print0 | xargs -0 python3 -m py_compile
+	@echo "All Python files compile successfully"
 
 # Clean Python cache files
 clean:

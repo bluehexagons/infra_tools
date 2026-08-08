@@ -43,8 +43,11 @@ capabilities, and operating policies.
 
 Design and future-work notes live under [`plans/`](plans/):
 
+- [Prioritized project roadmap](plans/ROADMAP.md)
+- [Transactional execution and reconciliation](plans/TRANSACTIONAL_EXECUTION.md)
 - [CI/CD manifest reuse](plans/CICD_MANIFEST_REUSE.md)
 - [Deploy secrets and optional components](plans/DEPLOY_SECRETS.md)
+- [Architectural risk review](plans/ARCHITECTURAL_RISK_REVIEW_2026-08-07.md)
 
 ## Documentation conventions
 

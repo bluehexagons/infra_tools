@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from lib.types import StrDict, StrList
+from lib.validation import validate_environment_variable_name
 from lib.validators import validate_host
 
 MANIFEST_FILENAME = "infra.json"
@@ -323,6 +324,7 @@ def _parse_env(value: object, where: str) -> StrDict:
         raise ValueError(f"{where}: env must be an object of string values")
     env: StrDict = {}
     for key, val in value.items():
+        validate_environment_variable_name(key, name=f"{where} env variable")
         if not isinstance(val, str):
             raise ValueError(f"{where}: env value for {key!r} must be a string")
         env[key] = val
