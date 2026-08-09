@@ -48,6 +48,7 @@ Design and future-work notes live under [`plans/`](plans/):
 - [CI/CD manifest reuse](plans/CICD_MANIFEST_REUSE.md)
 - [Deploy secrets and optional components](plans/DEPLOY_SECRETS.md)
 - [Architectural risk review](plans/ARCHITECTURAL_RISK_REVIEW_2026-08-07.md)
+- [Proxmox setup and maintenance audit](plans/PROXMOX_MAINTENANCE_AUDIT_2026-08-09.md)
 
 ## Documentation conventions
 

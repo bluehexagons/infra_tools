@@ -61,11 +61,33 @@ class TestHardenSSH(unittest.TestCase):
     @patch("security.security_steps.os.makedirs")
     @patch("security.security_steps.open", new_callable=mock_open)
     @patch("security.security_steps.os.path.exists", return_value=False)
-    def test_skips_reload_when_validation_fails(self, _exists, _file, _md, mock_run):
+    @patch("security.security_steps.os.remove")
+    def test_removes_new_dropin_when_validation_fails(
+        self, mock_remove, _exists, _file, _md, mock_run
+    ):
         mock_run.return_value = SimpleNamespace(returncode=1)
         harden_ssh(SetupConfig(username="u", host="h", system_type="server_lite"))
         run_commands = [args[0] for args, _ in mock_run.call_args_list]
         self.assertIn("sshd -t", run_commands)
+        self.assertFalse(any(cmd.startswith("systemctl reload sshd") for cmd in run_commands))
+        mock_remove.assert_called_once_with(
+            "/etc/ssh/sshd_config.d/99-infra-tools-hardening.conf"
+        )
+
+    @patch("security.security_steps.run")
+    @patch("security.security_steps.os.makedirs")
+    @patch("security.security_steps.open", new_callable=mock_open, read_data="previous\n")
+    @patch("security.security_steps.os.path.exists", return_value=True)
+    def test_restores_existing_dropin_when_validation_fails(
+        self, _exists, mock_file, _md, mock_run
+    ):
+        mock_run.return_value = SimpleNamespace(returncode=1)
+
+        harden_ssh(SetupConfig(username="u", host="h", system_type="server_lite"))
+
+        writes = [call.args[0] for call in mock_file().write.call_args_list]
+        self.assertEqual(writes[-1], "previous\n")
+        run_commands = [args[0] for args, _ in mock_run.call_args_list]
         self.assertFalse(any(cmd.startswith("systemctl reload sshd") for cmd in run_commands))
 
 
@@ -223,6 +245,16 @@ class TestConfigureAutoUpdates(unittest.TestCase):
             self.assertIn(f"systemctl stop {unit}", run_commands)
             self.assertIn(f"systemctl disable {unit}", run_commands)
 
+    @patch("security.security_steps.configure_maintenance_timer", return_value=False)
+    @patch("security.security_steps.run")
+    @patch("security.security_steps.os.path.exists", return_value=False)
+    def test_retains_distro_timers_when_replacement_is_not_verified(
+        self, _exists, mock_run, _configure
+    ):
+        configure_auto_updates(SetupConfig(username="u", host="h", system_type="server_lite"))
+
+        mock_run.assert_not_called()
+
 
 class TestConfigureMaintenanceTimers(unittest.TestCase):
     @patch("security.security_steps.configure_maintenance_timer")
@@ -302,6 +334,11 @@ class TestCleanupMaintenanceStepWiring(unittest.TestCase):
         config = SetupConfig(username="u", host="h", system_type="server_proxmox")
         step_names = [name for name, _ in get_steps_for_system_type(config)]
         self.assertIn("Configuring cleanup maintenance service", step_names)
+
+    def test_server_proxmox_includes_security_monitor_step(self):
+        config = SetupConfig(username="u", host="h", system_type="server_proxmox")
+        step_names = [name for name, _ in get_steps_for_system_type(config)]
+        self.assertIn("Configuring security event monitor", step_names)
 
 
 if __name__ == "__main__":

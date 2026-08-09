@@ -10,9 +10,9 @@ many hosts running the same job at the same instant.
 
 | Unit | Schedule | Scope |
 |------|----------|-------|
-| `security-monitor.timer` | Every 15 minutes | VM and bare-metal setups |
+| `security-monitor.timer` | Every 15 minutes | VM, bare-metal, and Proxmox host setups |
 | `auto-update-apt.timer` | Daily at 06:00 | Security-enabled setups |
-| `auto-restart-if-needed.timer` | Daily at 02:00 and 30 minutes after boot | Kernel-capable machines when automatic restart is enabled |
+| `auto-restart-if-needed.timer` | Daily at 02:00 and 30 minutes after boot | Kernel-capable machines; saved policy chooses restart or deferral |
 | `auto-update-node.timer` | Sunday at 03:00 | Setups with Node.js/nvm |
 | `auto-update-ruby.timer` | Sunday at 04:00 | Setups with Ruby and `gem` |
 | `auto-update-uv.timer` | Sunday at 05:00 | Setups with Python and uv |
@@ -36,7 +36,8 @@ sudo journalctl -u auto-update-apt.service -n 100 --no-pager
 
 APT uses the infra_tools updater instead of competing distro unattended-upgrade
 timers. It runs `apt-get update` and a non-removing distribution upgrade; it
-does not run `autoremove` or automatically remove packages.
+does not run `autoremove` or automatically remove packages. The distro timers
+are disabled only after the replacement timer is enabled, started, and verified.
 
 Node.js, Ruby, and uv use a conservative default policy:
 

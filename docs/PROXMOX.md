@@ -48,6 +48,23 @@ The setup reports pending restarts, but schedule any hypervisor reboot around
 guest downtime (or opt in explicitly with `--auto-restart` or
 `--auto-restart-force-days`).
 
+The default setup installs these recurring host-maintenance timers:
+
+- `security-monitor.timer` checks fail2ban and SSH events every 15 minutes and
+  sends findings when notification targets are configured.
+- `auto-update-apt.timer` applies non-removing distribution upgrades daily at
+  06:00; Debian's competing APT timers are retired only after this replacement
+  is verified active.
+- `auto-restart-if-needed.timer` checks daily at 02:00 and after boot, but the
+  default Proxmox policy records and reports a deferral instead of rebooting.
+- `cleanup-maintenance.timer` cleans bounded caches, journals, and
+  infra_tools-owned temporary artifacts each Sunday.
+
+Inspect these jobs with the commands in [Recurring Maintenance](MAINTENANCE.md).
+The timers do not currently validate Proxmox quorum, guest evacuation, storage
+health, or backup recoverability; those larger improvements are tracked in the
+[Proxmox maintenance audit plan](plans/PROXMOX_MAINTENANCE_AUDIT_2026-08-09.md).
+
 Create a Debian VM with XFCE, RDP, Firefox, and coding tools:
 
 ```bash

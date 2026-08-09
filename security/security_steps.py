@@ -176,12 +176,14 @@ AllowGroups remoteusers
 
     os.makedirs(_SSHD_DROPIN_DIR, exist_ok=True)
 
+    existing: str | None = None
     if os.path.exists(_SSHD_DROPIN_FILE):
         try:
             with open(_SSHD_DROPIN_FILE, "r") as f:
                 existing = f.read()
-        except OSError:
-            existing = None
+        except OSError as exc:
+            print(f"  ⚠ Could not read existing SSH hardening drop-in; leaving it unchanged: {exc}")
+            return
         if existing == hardening_content:
             print("  ✓ SSH already hardened")
             return
@@ -193,7 +195,16 @@ AllowGroups remoteusers
     # access if a future change introduces a typo.
     validate = run("sshd -t", check=False)
     if validate.returncode != 0:
-        print("  ⚠ sshd -t failed after hardening drop-in; leaving previous config active")
+        try:
+            if existing is None:
+                os.remove(_SSHD_DROPIN_FILE)
+            else:
+                with open(_SSHD_DROPIN_FILE, "w") as f:
+                    f.write(existing)
+        except OSError as exc:
+            print(f"  ⚠ Failed to restore the previous SSH hardening drop-in: {exc}")
+            raise
+        print("  ⚠ sshd -t failed after hardening drop-in; restored previous configuration")
         return
 
     run("systemctl reload sshd || systemctl reload ssh", check=False)
@@ -467,17 +478,7 @@ def configure_auto_updates(config: SetupConfig) -> None:
     # Remove legacy unattended-upgrades config files from older setups
     _cleanup_legacy_unattended_upgrades()
 
-    # The distro timers can invoke unattended-upgrades even when its service is
-    # disabled, so retire every competing activator before enabling our job.
-    for unit in (
-        "unattended-upgrades.service",
-        "apt-daily.timer",
-        "apt-daily-upgrade.timer",
-    ):
-        run(f"systemctl stop {unit}", check=False)
-        run(f"systemctl disable {unit}", check=False)
-
-    configure_maintenance_timer(
+    configured = configure_maintenance_timer(
         service_name="auto-update-apt",
         service_desc="Auto-update APT packages",
         timer_desc="Auto-update APT packages daily",
@@ -486,6 +487,20 @@ def configure_auto_updates(config: SetupConfig) -> None:
         check_name="APT packages",
         purpose="auto-update",
     )
+    if not configured:
+        print("  ⚠ Replacement APT update timer was not verified; retaining distro APT timers")
+        return
+
+    # The distro timers can invoke unattended-upgrades even when its service is
+    # disabled. Retire those competing activators only after the replacement is
+    # active so a failed setup cannot leave the host without automatic updates.
+    for unit in (
+        "unattended-upgrades.service",
+        "apt-daily.timer",
+        "apt-daily-upgrade.timer",
+    ):
+        run(f"systemctl stop {unit}", check=False)
+        run(f"systemctl disable {unit}", check=False)
 
 
 def configure_firewall_web(config: SetupConfig) -> None:

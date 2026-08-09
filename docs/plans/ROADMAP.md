@@ -110,6 +110,10 @@ Start with services, managed files, packages, and deployments. Avoid promising
 a universal package-level diff until the existing setup steps expose enough
 structured state.
 
+The Proxmox-specific facts, update preflights, and storage checks for this layer
+are detailed in the
+[Proxmox setup and maintenance audit](PROXMOX_MAINTENANCE_AUDIT_2026-08-09.md).
+
 ## P2: Recovery as a first-class workflow
 
 Backup creation without tested restoration is incomplete. Build operator-facing
@@ -121,6 +125,9 @@ recovery commands for the assets the project already manages:
 - documented destructive confirmations and dry runs for every restore path.
 
 Restore verification should be designed before adding more backup backends.
+The Proxmox discovery, retention, verification-job, and isolated-restore slice
+is scoped in the
+[Proxmox setup and maintenance audit](PROXMOX_MAINTENANCE_AUDIT_2026-08-09.md).
 
 ## P2: Safe network apply and rollback
 
