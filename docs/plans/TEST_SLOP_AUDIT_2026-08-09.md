@@ -53,6 +53,20 @@ state, or surrounding failure-path test. The three operation-log no-op tests
 were the only cases where a passing implementation could do nothing useful
 and still satisfy the test.
 
+## Additional follow-up passes
+
+Three more scans were performed after the operation-log cleanup:
+
+- An AST duplicate-body scan found no duplicate test bodies across modules.
+- A tautology scan found no assertions comparing a value with itself or merely
+  repeating setup constants.
+- A mock-only and comment scan found only dispatch, idempotency, safety, and
+  exact command-contract tests; no further pure no-op tests remained.
+
+These passes produced no additional safe removals. The remaining small tests
+are intentionally narrow boundary or acceptance checks, especially in the
+validation, security, and generated-configuration suites.
+
 ## Verification
 
 - Run the full unittest discovery command after edits.
