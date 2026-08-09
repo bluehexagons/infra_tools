@@ -20,6 +20,24 @@ class TestSecurityMonitor(unittest.TestCase):
     @patch("security.service_tools.security_monitor.send_notification_safe")
     @patch("security.service_tools.security_monitor._check_ssh_failures", return_value=(0, None))
     @patch("security.service_tools.security_monitor._check_auditd", return_value=([], False, []))
+    @patch("security.service_tools.security_monitor._check_fail2ban", return_value=([], [], None))
+    @patch("security.service_tools.security_monitor._load_state", return_value={})
+    @patch("security.service_tools.security_monitor.load_notification_configs_from_state", return_value=[])
+    def test_collects_and_advances_cursor_without_notification_targets(
+        self, _configs, _state, mock_fail2ban, mock_audit, mock_ssh, mock_notify, mock_save
+    ):
+        self.assertEqual(security_monitor.main(), 0)
+
+        mock_fail2ban.assert_called_once()
+        mock_audit.assert_called_once()
+        mock_ssh.assert_called_once()
+        mock_notify.assert_not_called()
+        mock_save.assert_called_once()
+
+    @patch("security.service_tools.security_monitor._save_state")
+    @patch("security.service_tools.security_monitor.send_notification_safe")
+    @patch("security.service_tools.security_monitor._check_ssh_failures", return_value=(0, None))
+    @patch("security.service_tools.security_monitor._check_auditd", return_value=([], False, []))
     @patch("security.service_tools.security_monitor._check_fail2ban")
     @patch("security.service_tools.security_monitor._load_state")
     @patch("security.service_tools.security_monitor.load_notification_configs_from_state", return_value=["cfg"])

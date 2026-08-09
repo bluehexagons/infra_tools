@@ -184,9 +184,10 @@ def main() -> int:
 
     notification_configs = load_notification_configs_from_state(logger)
     if not notification_configs:
-        log_event(logger, "No notification targets configured, skipping")
-        _save_state({'last_run': datetime.now().isoformat()})
-        return 0
+        log_event(
+            logger,
+            "No notification targets configured; security events will be logged locally",
+        )
 
     state = _load_state()
     now = datetime.now()

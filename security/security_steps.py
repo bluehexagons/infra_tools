@@ -446,7 +446,7 @@ def configure_security_monitor(config: SetupConfig) -> None:
         print("  ✓ Skipping security monitor (not applicable to containers)")
         return
 
-    configure_maintenance_timer(
+    configured = configure_maintenance_timer(
         service_name="security-monitor",
         service_desc="Security event monitor",
         timer_desc="Security event monitor (every 15 minutes)",
@@ -457,6 +457,8 @@ def configure_security_monitor(config: SetupConfig) -> None:
         timeout="10min",
         purpose="monitor",
     )
+    if not configured:
+        raise RuntimeError("Security event monitor timer failed verification")
 
 
 def _cleanup_legacy_unattended_upgrades() -> None:
@@ -489,7 +491,7 @@ def configure_auto_updates(config: SetupConfig) -> None:
     )
     if not configured:
         print("  ⚠ Replacement APT update timer was not verified; retaining distro APT timers")
-        return
+        raise RuntimeError("APT update timer failed verification")
 
     # The distro timers can invoke unattended-upgrades even when its service is
     # disabled. Retire those competing activators only after the replacement is
@@ -560,7 +562,7 @@ def configure_auto_restart(config: SetupConfig) -> None:
         print("  ✓ Skipping automatic restart service (container)")
         return
 
-    configure_maintenance_timer(
+    configured = configure_maintenance_timer(
         service_name="auto-restart-if-needed",
         service_desc="Auto-restart system if needed",
         timer_desc="Auto-restart system if needed (daily at 2 AM)",
@@ -573,6 +575,8 @@ def configure_auto_restart(config: SetupConfig) -> None:
         network_online=False,
         purpose="check",
     )
+    if not configured:
+        raise RuntimeError("Automatic restart timer failed verification")
 
 
 def configure_cleanup_maintenance(config: SetupConfig) -> None:
@@ -590,7 +594,7 @@ RuntimeMaxUse={JOURNAL_MAX_USE}
     if journal_result.returncode != 0:
         print("  ⚠ Journal limits written but journald could not be restarted")
 
-    configure_maintenance_timer(
+    configured = configure_maintenance_timer(
         service_name="cleanup-maintenance",
         service_desc="Cleanup temporary files and package caches",
         timer_desc="Cleanup temporary files and package caches (weekly)",
@@ -602,3 +606,5 @@ RuntimeMaxUse={JOURNAL_MAX_USE}
         network_online=False,
         purpose="job",
     )
+    if not configured:
+        raise RuntimeError("Cleanup maintenance timer failed verification")

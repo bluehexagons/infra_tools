@@ -32,6 +32,11 @@ sudo systemctl list-timers --all '*auto-*' '*security-monitor*' '*cleanup-*'
 sudo journalctl -u auto-update-apt.service -n 100 --no-pager
 ```
 
+Required host timers are verified during setup. Failure to reload, enable,
+start, or confirm the security-monitor, APT-update, cleanup, or restart timer
+stops setup. When the replacement APT timer cannot be verified, Debian's
+existing APT timers remain enabled.
+
 ## Update Policy
 
 APT uses the infra_tools updater instead of competing distro unattended-upgrade
@@ -49,6 +54,14 @@ Node.js, Ruby, and uv use a conservative default policy:
   when ecosystem upgrades are enabled.
 - Gogs validates a downloaded release before activation and rolls back the
   previous release when post-update commands or restart fail.
+
+GitHub CLI is installed from its APT repository and therefore follows the APT
+job. The `terminal` agent suite's Codex CLI, Claude Code, and OpenCode installs
+do not currently have infra_tools-managed update timers; setup also skips their
+installer when the command is already present. Use `infra_tools agent doctor`
+to record their observed paths and versions, then update them deliberately
+using their supported vendor workflow. A versioned, verified update design is
+tracked in the [CLI-only agent host audit](plans/AGENT_CLI_MAINTENANCE_AUDIT_2026-08-09.md).
 
 Set `INFRA_TOOLS_ECOSYSTEM_AUTO_UPGRADE=1` in the relevant service environment
 to allow global npm packages, gems, and uv-managed tools to advance. The default
@@ -79,6 +92,8 @@ or unavailable mounts fail visibly so the next scheduled run can retry them.
 - `--auto-restart-grace N` sets the warning period before a restart.
 - Notification targets configured with `--notify` receive important maintenance
   failures and successes where the service supports notifications.
+- Security monitoring always collects and logs locally. Without `--notify`, it
+  does not send events off-host.
 
 The implementation is shared by `lib/maintenance_systemd.py`,
 `lib/update_policy.py`, `common/service_tools/cleanup_maintenance.py`, and the

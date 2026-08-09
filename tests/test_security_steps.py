@@ -251,12 +251,24 @@ class TestConfigureAutoUpdates(unittest.TestCase):
     def test_retains_distro_timers_when_replacement_is_not_verified(
         self, _exists, mock_run, _configure
     ):
-        configure_auto_updates(SetupConfig(username="u", host="h", system_type="server_lite"))
+        with self.assertRaisesRegex(RuntimeError, "APT update timer failed verification"):
+            configure_auto_updates(SetupConfig(username="u", host="h", system_type="server_lite"))
 
         mock_run.assert_not_called()
 
 
 class TestConfigureMaintenanceTimers(unittest.TestCase):
+    @patch("security.security_steps.configure_maintenance_timer", return_value=False)
+    @patch("security.security_steps.is_hardware", return_value=False)
+    @patch("security.security_steps.is_vm", return_value=True)
+    def test_security_monitor_verification_failure_stops_setup(
+        self, _vm, _hardware, _configure
+    ):
+        with self.assertRaisesRegex(RuntimeError, "monitor timer failed verification"):
+            configure_security_monitor(
+                SetupConfig(username="u", host="h", system_type="server_lite")
+            )
+
     @patch("security.security_steps.configure_maintenance_timer")
     @patch("security.security_steps.is_hardware", return_value=False)
     @patch("security.security_steps.is_vm", return_value=True)
@@ -294,6 +306,14 @@ class TestConfigureMaintenanceTimers(unittest.TestCase):
             purpose="check",
         )
 
+    @patch("security.security_steps.configure_maintenance_timer", return_value=False)
+    @patch("security.security_steps.can_modify_kernel", return_value=True)
+    def test_auto_restart_verification_failure_stops_setup(self, _kernel, _configure):
+        with self.assertRaisesRegex(RuntimeError, "restart timer failed verification"):
+            configure_auto_restart(
+                SetupConfig(username="u", host="h", system_type="server_lite")
+            )
+
     @patch("security.security_steps.configure_maintenance_timer")
     @patch("security.security_steps.run")
     @patch("security.security_steps.open", new_callable=mock_open)
@@ -322,6 +342,19 @@ class TestConfigureMaintenanceTimers(unittest.TestCase):
             network_online=False,
             purpose="job",
         )
+
+    @patch("security.security_steps.configure_maintenance_timer", return_value=False)
+    @patch("security.security_steps.run")
+    @patch("security.security_steps.open", new_callable=mock_open)
+    @patch("security.security_steps.os.makedirs")
+    def test_cleanup_verification_failure_stops_setup(
+        self, _makedirs, _file, mock_run, _configure
+    ):
+        mock_run.return_value = SimpleNamespace(returncode=0)
+        with self.assertRaisesRegex(RuntimeError, "Cleanup maintenance timer failed verification"):
+            configure_cleanup_maintenance(
+                SetupConfig(username="u", host="h", system_type="server_lite")
+            )
 
 
 class TestCleanupMaintenanceStepWiring(unittest.TestCase):

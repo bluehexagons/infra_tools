@@ -105,10 +105,12 @@ Selecting a language runtime also installs its managed update timer. See
 
 These flags prepare a Debian VM for agentic coding. They work with any setup
 type; `workstation_dev` is recommended when the agent needs a desktop/browser,
-and `server_dev` is useful for terminal-only guests.
+and `server_dev` is the recommended terminal-only profile. `server_lite` omits
+the standard firewall and generic CLI bundle, so use it only when that lighter
+profile is intentional.
 
 ```bash
-infra_tools.py setup workstation_dev 10.0.0.10 agentuser \
+infra_tools.py setup server_dev 10.0.0.10 agentuser \
   --agent-suite terminal --copy-config \
   --repo https://github.com/user/my_codebase.git
 ```
@@ -165,7 +167,16 @@ infra_tools agent doctor --tool codex --tool claude --json
 
 The default doctor check requires GitHub CLI, Codex CLI, Claude Code, and
 OpenCode. Missing credential files are reported as sign-in reminders but do not
-make an otherwise installed tool unhealthy.
+make an otherwise installed tool unhealthy. GitHub CLI and the Debian utility
+baseline receive normal APT updates. Codex CLI, Claude Code, and OpenCode do not
+currently have infra_tools-managed update timers, and rerunning setup skips an
+already available command. See the [agent-host maintenance audit](./plans/AGENT_CLI_MAINTENANCE_AUDIT_2026-08-09.md)
+for the planned versioned update and audit workflow.
+
+The normal restart policy can force a reboot after seven days of active-session
+deferrals. For a host running long unattended agent tasks, use both
+`--no-auto-restart` and `--auto-restart-force-days 0` if automatic restarts must
+be fully disabled, then manage pending security reboots explicitly.
 
 ### Hosted Proxmox Flags
 
@@ -401,7 +412,7 @@ python3 -m unittest discover -s tests
 curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
 curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
   sh -s -- \
-  --setup server_lite localhost "$USER" \
+  --setup server_dev localhost "$USER" \
   --machine hardware \
   --agent-suite terminal
 sudo python3 infra_tools.py self-setup --user "$USER"

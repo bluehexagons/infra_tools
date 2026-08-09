@@ -57,10 +57,14 @@ The installer can hand off immediately to a normal setup command:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
   sh -s -- \
-  --setup server_lite localhost "$USER" \
+  --setup server_dev localhost "$USER" \
   --machine hardware \
   --agent-suite terminal
 ```
+
+`server_dev` is the recommended CLI-only agent profile because it includes the
+standard firewall and CLI tools. `server_lite` intentionally omits those parts
+of the profile.
 
 For a remote Proxmox host, pass the target setup after `--setup`:
 

@@ -33,7 +33,7 @@ Examples:
   curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
     sudo sh -s -- --user "$USER"
   curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
-    sh -s -- --setup server_lite localhost "$USER" --machine hardware --agent-suite terminal
+    sh -s -- --setup server_dev localhost "$USER" --machine hardware --agent-suite terminal
   curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
     sudo sh -s -- --user "$USER" --setup server_proxmox 10.0.0.10 root --key /home/me/.ssh/id_ed25519
 EOF

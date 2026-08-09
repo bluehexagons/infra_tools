@@ -114,6 +114,13 @@ The Proxmox-specific facts, update preflights, and storage checks for this layer
 are detailed in the
 [Proxmox setup and maintenance audit](PROXMOX_MAINTENANCE_AUDIT_2026-08-09.md).
 
+The CLI-only coding-host slice is detailed in the
+[agent host and maintenance audit](AGENT_CLI_MAINTENANCE_AUDIT_2026-08-09.md).
+Its P1 work adds verified/versioned agent-tool updates, workload-aware restart
+holds and maintenance windows, and agent/timer health to the same audit surface.
+It should reuse the transactional execution and observed-state contracts rather
+than introduce agent-specific apply machinery.
+
 ## P2: Recovery as a first-class workflow
 
 Backup creation without tested restoration is incomplete. Build operator-facing
