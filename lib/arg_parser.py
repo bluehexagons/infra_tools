@@ -122,6 +122,65 @@ def add_setup_arguments(
                        action=argparse.BooleanOptionalAction, 
                        default=None if not for_remote else False,
                        help="Enable RDP/XRDP setup" + ("" if for_remote else " (default: disabled)"))
+    parser.add_argument(
+        "--rdp-bind-address",
+        default="0.0.0.0",
+        metavar="IP",
+        help="IP address XRDP listens on (default: 0.0.0.0)",
+    )
+    parser.add_argument(
+        "--rdp-source",
+        dest="rdp_allowed_sources",
+        action="append",
+        metavar="IP_OR_CIDR",
+        help="Allow RDP only from this IP or CIDR; repeat as needed. "
+             "Without this flag, RDP remains globally reachable through UFW.",
+    )
+    parser.add_argument(
+        "--rdp-clipboard",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Allow RDP clipboard redirection (default: enabled)",
+    )
+    parser.add_argument(
+        "--rdp-drive-redirection",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Allow RDP drive, printer, and device redirection (default: disabled)",
+    )
+    parser.add_argument(
+        "--rdp-audio",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Allow RDP audio redirection (default: disabled)",
+    )
+    parser.add_argument(
+        "--rdp-max-sessions",
+        type=int,
+        default=10,
+        metavar="N",
+        help="Maximum concurrent XRDP sessions (default: 10)",
+    )
+    parser.add_argument(
+        "--rdp-kill-disconnected",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="End disconnected sessions after --rdp-disconnected-timeout",
+    )
+    parser.add_argument(
+        "--rdp-disconnected-timeout",
+        type=int,
+        default=0,
+        metavar="SECONDS",
+        help="Seconds to retain disconnected sessions; requires --rdp-kill-disconnected",
+    )
+    parser.add_argument(
+        "--rdp-idle-timeout",
+        type=int,
+        default=0,
+        metavar="SECONDS",
+        help="Seconds before disconnecting an idle session; 0 disables (default: 0)",
+    )
     parser.add_argument("--desktop", choices=["xfce", "i3", "cinnamon", "lxqt"], 
                        default="xfce" if for_remote else None,
                        help="Desktop environment to install (default: xfce)")

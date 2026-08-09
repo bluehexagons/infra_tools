@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import os
+import re
+import shlex
 
 from lib.maintenance_systemd import configure_maintenance_timer
 from lib.config import SetupConfig
 from lib.maintenance_defaults import JOURNAL_MAX_USE
 from lib.machine_state import can_modify_kernel, is_container, is_hardware, is_vm
 from lib.remote_utils import run
+from lib.validation import validate_network_ip_or_cidr
 
 _LEGACY_UNATTENDED_ORIGINS_FILE = "/etc/apt/apt.conf.d/52infra-tools-unattended-upgrades"
 _LEGACY_MANAGED_ORIGINS_FILE = "/etc/infra_tools/unattended_upgrades_origins.list"
@@ -25,6 +28,8 @@ _FAILLOCK_CONF = "/etc/security/faillock.conf"
 _PAM_FAILLOCK_PROFILE = "/usr/share/pam-configs/faillock-infra-tools"
 _ISSUE_BANNER = "Authorized access only. All activity is monitored and logged.\n"
 _SECURITY_MONITOR_SCRIPT = "/opt/infra_tools/security/service_tools/security_monitor.py"
+_RDP_RULE_COMMENT_PREFIX = "infra_tools RDP"
+_UFW_NUMBERED_RULE_RE = re.compile(r"^\[\s*(\d+)\]")
 
 
 def create_remoteusers_group(config: SetupConfig) -> None:
@@ -43,15 +48,88 @@ def create_remoteusers_group(config: SetupConfig) -> None:
         print("  ✓ remoteusers group already exists with root user")
 
 
+def _rdp_firewall_rules(config: SetupConfig) -> list[tuple[str, str]]:
+    """Return validated UFW comment/command pairs for the requested RDP policy."""
+    sources = [
+        validate_network_ip_or_cidr(source, "RDP source")
+        for source in config.rdp_allowed_sources or []
+    ]
+    if not sources:
+        comment = f"{_RDP_RULE_COMMENT_PREFIX} global"
+        return [(comment, f"ufw limit 3389/tcp comment {shlex.quote(comment)}")]
+
+    rules: list[tuple[str, str]] = []
+    for source in sources:
+        comment = f"{_RDP_RULE_COMMENT_PREFIX} source {source}"
+        rules.append(
+            (
+                comment,
+                "ufw limit from "
+                f"{shlex.quote(source)} to any port 3389 proto tcp "
+                f"comment {shlex.quote(comment)}",
+            )
+        )
+    return rules
+
+
+def _remove_stale_managed_rdp_rules(desired_comments: set[str]) -> None:
+    """Remove obsolete comment-tagged RDP rules in descending UFW order."""
+    result = run("ufw status numbered", check=False, capture_output=True)
+    stdout = getattr(result, "stdout", None)
+    if result.returncode != 0 or not isinstance(stdout, str):
+        return
+
+    stale_rule_numbers: list[int] = []
+    for line in stdout.splitlines():
+        if "#" not in line:
+            continue
+        comment = line.split("#", 1)[1].strip()
+        if not comment.startswith(_RDP_RULE_COMMENT_PREFIX):
+            continue
+        if comment in desired_comments:
+            continue
+        match = _UFW_NUMBERED_RULE_RE.match(line.strip())
+        if match:
+            stale_rule_numbers.append(int(match.group(1)))
+
+    for rule_number in sorted(stale_rule_numbers, reverse=True):
+        run(f"ufw --force delete {rule_number}", check=False)
+
+
+def _configure_rdp_firewall(config: SetupConfig) -> None:
+    """Apply RDP rules without removing broad access before replacements exist."""
+    rules = _rdp_firewall_rules(config)
+    has_restricted_sources = bool(config.rdp_allowed_sources)
+
+    if not has_restricted_sources:
+        # A legacy untagged limit rule is indistinguishable from the desired
+        # global rule to UFW. Replace it so future reruns can reconcile by tag.
+        run("ufw delete allow 3389/tcp", check=False)
+        run("ufw delete limit 3389/tcp", check=False)
+
+    for _comment, command in rules:
+        result = run(command, check=False)
+        if result.returncode != 0:
+            if not has_restricted_sources:
+                # Preserve the pre-existing reachability contract if tagging
+                # the replacement global rule unexpectedly fails.
+                run("ufw limit 3389/tcp", check=False)
+            raise RuntimeError("Failed to install the requested RDP firewall rule")
+
+    if has_restricted_sources:
+        # Replacements are active before broad legacy access is removed.
+        run("ufw delete allow 3389/tcp", check=False)
+        run("ufw delete limit 3389/tcp", check=False)
+
+    _remove_stale_managed_rdp_rules({comment for comment, _command in rules})
+
+
 def configure_firewall(config: SetupConfig) -> None:
     result = run("ufw status 2>/dev/null | grep -q 'Status: active'", check=False)
     if result.returncode == 0:
         print("  ✓ Firewall already configured")
         if config.enable_rdp:
-            # Ensure RDP is rate-limited even if ufw was already active from a
-            # prior run that used `ufw allow 3389/tcp`.
-            run("ufw delete allow 3389/tcp", check=False)
-            run("ufw limit 3389/tcp", check=False)
+            _configure_rdp_firewall(config)
         return
 
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
@@ -60,9 +138,7 @@ def configure_firewall(config: SetupConfig) -> None:
     run("ufw default allow outgoing", check=False)
     run("ufw limit ssh", check=False)
     if config.enable_rdp:
-        # `limit` rate-limits brute-force attempts at the firewall layer in
-        # addition to fail2ban (defence in depth).
-        run("ufw limit 3389/tcp", check=False)
+        _configure_rdp_firewall(config)
     
     result = run("ufw --force enable", check=False)
     if result.returncode != 0:
@@ -73,7 +149,10 @@ def configure_firewall(config: SetupConfig) -> None:
         return
 
     if config.enable_rdp:
-        print("  ✓ Firewall configured (SSH and RDP rate-limited)")
+        if config.rdp_allowed_sources:
+            print("  ✓ Firewall configured (SSH rate-limited; RDP source-restricted)")
+        else:
+            print("  ✓ Firewall configured (SSH and global RDP rate-limited)")
     else:
         print("  ✓ Firewall configured (SSH rate-limited)")
 

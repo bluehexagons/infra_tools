@@ -190,14 +190,113 @@ class TestConfigureFirewall(unittest.TestCase):
     @patch("security.security_steps.is_container", return_value=False)
     @patch("security.security_steps.run")
     def test_rate_limits_ssh_and_rdp_when_rdp_enabled(self, mock_run, _ic):
-        mock_run.return_value = SimpleNamespace(returncode=1)  # ufw not yet active
+        def run_side_effect(command, **_kwargs):
+            if command.startswith("ufw status 2>"):
+                return SimpleNamespace(returncode=1, stdout="")
+            return SimpleNamespace(returncode=0, stdout="")
+
+        mock_run.side_effect = run_side_effect
         cfg = SetupConfig(username="u", host="h", system_type="workstation_dev")
         cfg.enable_rdp = True
         configure_firewall(cfg)
         run_commands = [args[0] for args, _ in mock_run.call_args_list]
         self.assertIn("ufw limit ssh", run_commands)
-        self.assertIn("ufw limit 3389/tcp", run_commands)
+        self.assertIn(
+            "ufw limit 3389/tcp comment 'infra_tools RDP global'",
+            run_commands,
+        )
         self.assertNotIn("ufw allow 3389/tcp", run_commands)
+
+    @patch("security.security_steps.is_container", return_value=False)
+    @patch("security.security_steps.run")
+    def test_installs_restricted_rules_before_removing_global_access(self, mock_run, _ic):
+        def run_side_effect(command, **_kwargs):
+            if command.startswith("ufw status 2>"):
+                return SimpleNamespace(returncode=0, stdout="")
+            return SimpleNamespace(returncode=0, stdout="")
+
+        mock_run.side_effect = run_side_effect
+        config = SetupConfig(
+            username="u",
+            host="h",
+            system_type="workstation_dev",
+            enable_rdp=True,
+            rdp_allowed_sources=["10.0.0.1/24", "2001:db8::10"],
+        )
+
+        configure_firewall(config)
+
+        commands = [args[0] for args, _ in mock_run.call_args_list]
+        first_source_rule = commands.index(
+            "ufw limit from 10.0.0.0/24 to any port 3389 proto tcp "
+            "comment 'infra_tools RDP source 10.0.0.0/24'"
+        )
+        delete_global_rule = commands.index("ufw delete limit 3389/tcp")
+        self.assertLess(first_source_rule, delete_global_rule)
+        self.assertIn(
+            "ufw limit from 2001:db8::10 to any port 3389 proto tcp "
+            "comment 'infra_tools RDP source 2001:db8::10'",
+            commands,
+        )
+
+    @patch("security.security_steps.is_container", return_value=False)
+    @patch("security.security_steps.run")
+    def test_removes_only_stale_tagged_rdp_rules(self, mock_run, _ic):
+        status_output = """Status: active
+[ 1] 22/tcp LIMIT IN Anywhere
+[ 2] 3389/tcp LIMIT IN 10.0.0.0/24 # infra_tools RDP source 10.0.0.0/24
+[ 3] 3389/tcp LIMIT IN 192.168.0.0/16 # operator rule
+[ 4] 3389/tcp LIMIT IN 172.16.0.0/12 # infra_tools RDP source 172.16.0.0/12
+"""
+
+        def run_side_effect(command, **_kwargs):
+            if command.startswith("ufw status 2>"):
+                return SimpleNamespace(returncode=0, stdout="")
+            if command == "ufw status numbered":
+                return SimpleNamespace(returncode=0, stdout=status_output)
+            return SimpleNamespace(returncode=0, stdout="")
+
+        mock_run.side_effect = run_side_effect
+        config = SetupConfig(
+            username="u",
+            host="h",
+            system_type="workstation_dev",
+            enable_rdp=True,
+            rdp_allowed_sources=["10.0.0.0/24"],
+        )
+
+        configure_firewall(config)
+
+        commands = [args[0] for args, _ in mock_run.call_args_list]
+        self.assertIn("ufw --force delete 4", commands)
+        self.assertNotIn("ufw --force delete 2", commands)
+        self.assertNotIn("ufw --force delete 3", commands)
+
+    @patch("security.security_steps.is_container", return_value=False)
+    @patch("security.security_steps.run")
+    def test_keeps_global_access_if_restricted_rule_install_fails(self, mock_run, _ic):
+        def run_side_effect(command, **_kwargs):
+            if command.startswith("ufw status 2>"):
+                return SimpleNamespace(returncode=0, stdout="")
+            if command.startswith("ufw limit from"):
+                return SimpleNamespace(returncode=1, stdout="")
+            return SimpleNamespace(returncode=0, stdout="")
+
+        mock_run.side_effect = run_side_effect
+        config = SetupConfig(
+            username="u",
+            host="h",
+            system_type="workstation_dev",
+            enable_rdp=True,
+            rdp_allowed_sources=["10.0.0.0/24"],
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "requested RDP firewall rule"):
+            configure_firewall(config)
+
+        commands = [args[0] for args, _ in mock_run.call_args_list]
+        self.assertNotIn("ufw delete allow 3389/tcp", commands)
+        self.assertNotIn("ufw delete limit 3389/tcp", commands)
 
 
 class TestConfigureAutoUpdates(unittest.TestCase):

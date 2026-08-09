@@ -828,13 +828,27 @@ def validate_hosted_flags(config: Any) -> None:
 
 
 def validate_rdp_settings(config: Any) -> None:
-    """Validate credentials required for a usable xRDP login.
+    """Validate credentials and network policy required for xRDP.
 
     xRDP authenticates against the Unix account password. Hosted cloud images
     are deliberately provisioned key-only, so accepting ``--rdp`` without a
     password produces a desktop that can never be logged into.
     """
     if not getattr(config, "enable_rdp", False):
+        has_rdp_policy = bool(getattr(config, "rdp_allowed_sources", None)) or any(
+            (
+                getattr(config, "rdp_bind_address", "0.0.0.0") != "0.0.0.0",
+                not bool(getattr(config, "rdp_clipboard", True)),
+                bool(getattr(config, "rdp_drive_redirection", False)),
+                bool(getattr(config, "rdp_audio", False)),
+                getattr(config, "rdp_max_sessions", 10) != 10,
+                bool(getattr(config, "rdp_kill_disconnected", False)),
+                getattr(config, "rdp_disconnected_timeout", 0) != 0,
+                getattr(config, "rdp_idle_timeout", 0) != 0,
+            )
+        )
+        if has_rdp_policy:
+            raise ValueError("RDP policy options require --rdp")
         return
 
     username = str(getattr(config, "username", "")).strip()
@@ -845,3 +859,42 @@ def validate_rdp_settings(config: Any) -> None:
     if not isinstance(password, str) or not password.strip():
         raise ValueError("--rdp requires --password for the desktop login account")
     _validate_no_control_characters(password, "RDP password")
+
+    bind_address = getattr(config, "rdp_bind_address", "0.0.0.0")
+    if not isinstance(bind_address, str):
+        raise ValueError("--rdp-bind-address requires an IP address")
+    validate_network_ip(bind_address, "RDP bind address")
+
+    normalized_sources: set[str] = set()
+    for source in getattr(config, "rdp_allowed_sources", None) or []:
+        if not isinstance(source, str):
+            raise ValueError("--rdp-source requires an IP address or CIDR")
+        normalized = validate_network_ip_or_cidr(source, "RDP source")
+        if normalized in normalized_sources:
+            raise ValueError(f"Duplicate RDP source: {normalized}")
+        normalized_sources.add(normalized)
+
+    max_sessions = getattr(config, "rdp_max_sessions", 10)
+    if not isinstance(max_sessions, int) or isinstance(max_sessions, bool):
+        raise ValueError("--rdp-max-sessions requires an integer")
+    if not 1 <= max_sessions <= 100:
+        raise ValueError("--rdp-max-sessions must be between 1 and 100")
+
+    disconnected_timeout = getattr(config, "rdp_disconnected_timeout", 0)
+    idle_timeout = getattr(config, "rdp_idle_timeout", 0)
+    for name, value in (
+        ("--rdp-disconnected-timeout", disconnected_timeout),
+        ("--rdp-idle-timeout", idle_timeout),
+    ):
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise ValueError(f"{name} must be a non-negative integer")
+
+    kill_disconnected = bool(getattr(config, "rdp_kill_disconnected", False))
+    if kill_disconnected and disconnected_timeout == 0:
+        raise ValueError(
+            "--rdp-kill-disconnected requires a positive --rdp-disconnected-timeout"
+        )
+    if not kill_disconnected and disconnected_timeout != 0:
+        raise ValueError(
+            "--rdp-disconnected-timeout requires --rdp-kill-disconnected"
+        )

@@ -176,6 +176,15 @@ class SetupConfig:
     friendly_name: MaybeStr = None
     tags: Optional[StrList] = None
     enable_rdp: bool = False
+    rdp_bind_address: str = "0.0.0.0"
+    rdp_allowed_sources: Optional[StrList] = None
+    rdp_clipboard: bool = True
+    rdp_drive_redirection: bool = False
+    rdp_audio: bool = False
+    rdp_max_sessions: int = 10
+    rdp_kill_disconnected: bool = False
+    rdp_disconnected_timeout: int = 0
+    rdp_idle_timeout: int = 0
     desktop: str = "xfce"
     browser: Optional[str] = "librewolf"  # Primary browser, or first from browsers list
     browsers: Optional[StrList] = None  # List of browsers to install
@@ -302,6 +311,22 @@ class SetupConfig:
         
         if self.enable_rdp:
             args.append("--rdp")
+            args.append(f"--rdp-bind-address {shlex.quote(self.rdp_bind_address)}")
+            for source in self.rdp_allowed_sources or []:
+                args.append(f"--rdp-source {shlex.quote(source)}")
+            if not self.rdp_clipboard:
+                args.append("--no-rdp-clipboard")
+            if self.rdp_drive_redirection:
+                args.append("--rdp-drive-redirection")
+            if self.rdp_audio:
+                args.append("--rdp-audio")
+            args.append(f"--rdp-max-sessions {self.rdp_max_sessions}")
+            if self.rdp_kill_disconnected:
+                args.append("--rdp-kill-disconnected")
+            args.append(
+                f"--rdp-disconnected-timeout {self.rdp_disconnected_timeout}"
+            )
+            args.append(f"--rdp-idle-timeout {self.rdp_idle_timeout}")
         
         if self.desktop:
             args.append(f"--desktop {shlex.quote(self.desktop)}")
@@ -518,6 +543,28 @@ class SetupConfig:
         # Desktop/workstation flags
         if self.enable_rdp:
             cmd_parts.append("--rdp")
+            if self.rdp_bind_address != "0.0.0.0":
+                cmd_parts.append(
+                    f"--rdp-bind-address {shlex.quote(self.rdp_bind_address)}"
+                )
+            for source in self.rdp_allowed_sources or []:
+                cmd_parts.append(f"--rdp-source {shlex.quote(source)}")
+            if not self.rdp_clipboard:
+                cmd_parts.append("--no-rdp-clipboard")
+            if self.rdp_drive_redirection:
+                cmd_parts.append("--rdp-drive-redirection")
+            if self.rdp_audio:
+                cmd_parts.append("--rdp-audio")
+            if self.rdp_max_sessions != 10:
+                cmd_parts.append(f"--rdp-max-sessions {self.rdp_max_sessions}")
+            if self.rdp_kill_disconnected:
+                cmd_parts.append("--rdp-kill-disconnected")
+            if self.rdp_disconnected_timeout != 0:
+                cmd_parts.append(
+                    f"--rdp-disconnected-timeout {self.rdp_disconnected_timeout}"
+                )
+            if self.rdp_idle_timeout != 0:
+                cmd_parts.append(f"--rdp-idle-timeout {self.rdp_idle_timeout}")
         
         if self.desktop and self.desktop != "xfce":
             cmd_parts.append(f"--desktop {shlex.quote(self.desktop)}")
@@ -870,6 +917,15 @@ class SetupConfig:
             friendly_name=getattr(args, 'friendly_name', None),
             tags=tags,
             enable_rdp=enable_rdp,
+            rdp_bind_address=getattr(args, 'rdp_bind_address', '0.0.0.0'),
+            rdp_allowed_sources=getattr(args, 'rdp_allowed_sources', None),
+            rdp_clipboard=getattr(args, 'rdp_clipboard', True),
+            rdp_drive_redirection=getattr(args, 'rdp_drive_redirection', False),
+            rdp_audio=getattr(args, 'rdp_audio', False),
+            rdp_max_sessions=getattr(args, 'rdp_max_sessions', 10),
+            rdp_kill_disconnected=getattr(args, 'rdp_kill_disconnected', False),
+            rdp_disconnected_timeout=getattr(args, 'rdp_disconnected_timeout', 0),
+            rdp_idle_timeout=getattr(args, 'rdp_idle_timeout', 0),
             desktop=desktop,
             browser=browser,
             browsers=browsers,

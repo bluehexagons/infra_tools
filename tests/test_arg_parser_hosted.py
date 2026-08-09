@@ -149,6 +149,31 @@ class TestHostedFlagParsing(unittest.TestCase):
         ])
         self.assertEqual(args.agent_suite, "terminal")
 
+    def test_rdp_policy_flags(self):
+        args = self.parser.parse_args([
+            "10.0.0.50",
+            "--rdp",
+            "--rdp-bind-address", "10.0.0.50",
+            "--rdp-source", "10.0.0.0/24",
+            "--rdp-source", "2001:db8::/64",
+            "--no-rdp-clipboard",
+            "--rdp-drive-redirection",
+            "--rdp-audio",
+            "--rdp-max-sessions", "2",
+            "--rdp-kill-disconnected",
+            "--rdp-disconnected-timeout", "86400",
+            "--rdp-idle-timeout", "14400",
+        ])
+        self.assertEqual(args.rdp_bind_address, "10.0.0.50")
+        self.assertEqual(args.rdp_allowed_sources, ["10.0.0.0/24", "2001:db8::/64"])
+        self.assertFalse(args.rdp_clipboard)
+        self.assertTrue(args.rdp_drive_redirection)
+        self.assertTrue(args.rdp_audio)
+        self.assertEqual(args.rdp_max_sessions, 2)
+        self.assertTrue(args.rdp_kill_disconnected)
+        self.assertEqual(args.rdp_disconnected_timeout, 86400)
+        self.assertEqual(args.rdp_idle_timeout, 14400)
+
     def test_antistatic_flags(self):
         args = self.parser.parse_args([
             "10.0.0.50",

@@ -22,7 +22,8 @@ Minimal developer workstation with RDP:
 
 ```bash
 infra_tools setup workstation_dev 10.0.0.25 alice \
-  --desktop xfce --browser firefox --rdp --password "$RDP_PASSWORD"
+  --desktop xfce --browser firefox --rdp --password "$RDP_PASSWORD" \
+  --rdp-source 10.0.0.0/24
 ```
 
 RDP-capable agentic coding workstation:
@@ -30,6 +31,7 @@ RDP-capable agentic coding workstation:
 ```bash
 infra_tools setup workstation_dev 10.0.0.25 agent \
   --desktop xfce --rdp --password "$RDP_PASSWORD" \
+  --rdp-source 10.0.0.0/24 \
   --agent-suite terminal --copy-config \
   --repo https://github.com/user/project.git
 ```
@@ -97,6 +99,24 @@ RDP logins use the setup user's Unix password, so `--rdp` requires a non-root
 `--password`. Prefer a secret-sourced environment variable such as
 `--password "$RDP_PASSWORD"`; passwords are not written to saved setup state.
 Legacy state containing this field is sanitized when it is loaded.
+
+Use repeatable `--rdp-source IP_OR_CIDR` flags to restrict UFW ingress to the
+trusted LAN, management network, or VPN clients that should connect. Without
+one, RDP remains globally rate-limited for backward compatibility. XRDP binds
+all IPv4 interfaces by default; `--rdp-bind-address IP` narrows the listener to
+one target-side address. Clipboard remains enabled for coding workflows, while
+drive/device, printer, audio, RemoteApp, and video redirection are disabled.
+Use `--no-rdp-clipboard`, `--rdp-drive-redirection`, or `--rdp-audio` to change
+the explicitly managed channel policy.
+
+XRDP permits ten sessions and retains disconnected sessions indefinitely by
+default. A single-user host can set a smaller `--rdp-max-sessions`; abandoned
+sessions can be bounded only by explicitly pairing `--rdp-kill-disconnected`
+with a positive `--rdp-disconnected-timeout SECONDS`. `--rdp-idle-timeout`
+disconnects an idle client but does not itself end the session. Ending a
+disconnected session also ends agents running only inside that graphical
+session, so keep durable work in `tmux` or a supervised service before enabling
+cleanup.
 
 The `pc_dev` profile includes Remmina with RDP and VNC plugins. Other profiles
 can install it through the explicit custom step `install_remmina` when using

@@ -1,9 +1,10 @@
 # RDP Desktop Agent Host and Maintenance Audit (2026-08-09)
 
-Status: active follow-up plan. The password-persistence, managed X.Org
-configuration, and unsupported session-cleanup findings were addressed with
-this document. Network/TLS policy, workload-aware maintenance, configuration
-compatibility, and live desktop verification require larger design work.
+Status: active follow-up plan. Password persistence, managed X.Org deployment,
+unsupported session cleanup, RDP source/bind policy, and channel defaults have
+been addressed. Native session lifecycle controls are now saved and validated.
+Certificate lifecycle, workload-aware maintenance, configuration compatibility,
+and live desktop verification remain larger work.
 
 ## Scope and recommended baseline
 
@@ -17,6 +18,7 @@ The recommended baseline is:
 ```bash
 infra_tools setup workstation_dev 10.0.0.25 agent \
   --desktop xfce --rdp --password "$RDP_PASSWORD" \
+  --rdp-source 10.0.0.0/24 \
   --agent-suite terminal --copy-config \
   --repo https://github.com/user/project.git
 ```
@@ -87,44 +89,68 @@ settings are the supported basis for future session lifecycle policy. Upstream
 documents these controls in its
 [sesman configuration](https://github.com/neutrinolabs/xrdp/blob/devel/sesman/sesman.ini.in).
 
+### RDA-04: RDP exposure and data-transfer policy were implicit
+
+XRDP listened on every IPv4 interface, UFW admitted globally rate-limited port
+3389 traffic, and the generated configuration did not contain an enforceable
+channel allowlist. Operators could not save or replay a narrower policy.
+
+Setup now accepts a validated `--rdp-bind-address` and repeatable validated
+`--rdp-source` IP/CIDR values. UFW installs replacement source rules before
+removing broad access, comment-tags managed rules, and removes stale managed
+entries without touching operator rules. An omitted source deliberately keeps
+the historical global rule rather than silently breaking existing access.
+
+The coding-host channel baseline keeps dynamic virtual channels and clipboard,
+while drive/device, printer, audio, RemoteApp, and video redirection are denied.
+Clipboard, drive/device, and audio policy are explicit saved CLI settings.
+
+### RDA-05: Session lifecycle could not be bounded safely
+
+The managed session configuration fixed `MaxSessions=10` and otherwise relied
+on implicit XRDP defaults. Operators could neither reduce concurrency nor
+configure supported idle/disconnected behavior without editing a file that the
+next setup run replaced.
+
+Saved, validated settings now render `MaxSessions`, `KillDisconnected`,
+`DisconnectedTimeLimit`, and `IdleTimeLimit`. Defaults preserve reconnectable
+sessions. Destructive disconnected-session cleanup requires an explicit boolean
+and positive retention interval, and the setup preview shows the effective
+limits. This bounds abandoned sessions without a username-wide process killer.
+
 ## Larger follow-up work
 
-### P1: Explicit RDP exposure, TLS identity, and channel policy
+### P1: RDP TLS identity, health, and safe network apply
 
-**Risk:** XRDP listens on all interfaces and the workstation firewall permits
-port 3389 from any source. TLS is required, but setup relies on the distro's
-default certificate paths and does not verify certificate identity, expiry, or
-client trust. Clipboard and other RDP channels are broadly enabled, which is a
-meaningful data-transfer boundary for hosts containing source and credentials.
+**Risk:** explicit listener, source, and channel controls now exist, but the
+backward-compatible no-source default remains globally reachable. TLS relies on
+the distro's default certificate paths and setup does not verify certificate
+identity, expiry, client trust, or rotation. Firewall changes are ordered to
+preserve access on rule-install failure, but do not yet have a preview,
+connectivity probe, or timed rollback.
 
-Add saved, validated policy for:
+Complete this area with:
 
-1. allowed RDP source CIDRs or an explicit VPN/private-network-only mode;
-2. bind address and firewall reconciliation rather than an unconditional global
-   rule;
-3. operator-provided or automatically enrolled certificate/key paths, file
+1. an explicit VPN/private-network-only preset and migration guidance away
+   from the compatibility global rule;
+2. operator-provided or automatically enrolled certificate/key paths, file
    permissions, expiry monitoring, and rotation;
-4. clipboard, drive, printer, audio, and device-redirection controls with a
-   practical coding-host default; and
-5. post-apply probes that confirm TLS-only negotiation and the effective UFW
+3. post-apply probes that confirm TLS-only negotiation and the effective UFW
    and fail2ban rules without exposing credentials.
 
 Do not silently narrow an existing host's access during a rerun. This work
 needs a preview, connectivity check, and timed rollback aligned with the
 roadmap's safe-network-apply contract.
 
-### P1: Session lifecycle and workload-aware restart policy
+### P1: Workload-aware restart and session warning policy
 
-**Risk:** the generated session policy allows ten sessions and leaves idle and
-disconnected cleanup at XRDP defaults. Native reconnection is useful for agent
-work, so a short disconnect timeout would be destructive; unlimited abandoned
-sessions can also consume resources. Independently, the host restart policy
-can override all active-session deferrals after seven days.
+**Risk:** session limits and native lifecycle controls are now explicit, but a
+configured cleanup deadline cannot distinguish abandoned desktops from useful
+agents running inside them. Independently, the host restart policy can override
+all active-session deferrals after seven days.
 
-Define one saved maintenance/session policy covering:
+Extend the saved maintenance/session policy with:
 
-- maximum sessions and reconnect behavior for single-user versus shared hosts;
-- separately configurable idle-disconnect and disconnected-session retention;
 - warnings and a drain/hold marker visible both inside RDP and over SSH;
 - detection of active agent, editor, terminal multiplexer, build, and repository
   mutation workloads without reading source or prompts; and

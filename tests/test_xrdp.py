@@ -1,6 +1,7 @@
 """Tests for XRDP configuration functions."""
 
 from __future__ import annotations
+from pathlib import Path
 import unittest
 from unittest.mock import Mock, patch
 
@@ -8,6 +9,7 @@ from lib.config import SetupConfig
 from desktop.xrdp_steps import (
     _ensure_user_in_group,
     _generate_sesman_ini,
+    _generate_xrdp_ini,
     _generate_xorg_conf,
     harden_xrdp,
     install_xrdp,
@@ -17,10 +19,17 @@ from desktop.desktop_environment_steps import configure_xfce_for_rdp
 
 class TestGenerateSesmanIni(unittest.TestCase):
     """Test sesman.ini generation."""
+
+    def setUp(self):
+        self.config = SetupConfig(
+            host="agent-vm",
+            username="agent",
+            system_type="workstation_dev",
+        )
     
     def test_generates_valid_ini_format(self):
         """sesman.ini should have proper INI sections."""
-        result = _generate_sesman_ini()
+        result = _generate_sesman_ini(self.config)
         
         # Check required sections exist
         self.assertIn("[Globals]", result)
@@ -31,7 +40,7 @@ class TestGenerateSesmanIni(unittest.TestCase):
         
     def test_uses_xorg_backend_only(self):
         """Should use Xorg backend, not Xvnc."""
-        result = _generate_sesman_ini()
+        result = _generate_sesman_ini(self.config)
         
         # Xorg section should exist
         self.assertIn("[Xorg]", result)
@@ -43,18 +52,100 @@ class TestGenerateSesmanIni(unittest.TestCase):
         self.assertNotIn("Xvnc", result)
         
     def test_does_not_include_unsupported_end_session_command(self):
-        result = _generate_sesman_ini()
+        result = _generate_sesman_ini(self.config)
 
         self.assertNotIn("EndSessionCommand", result)
         
     def test_security_settings(self):
         """Should include security restrictions."""
-        result = _generate_sesman_ini()
+        result = _generate_sesman_ini(self.config)
         
         # Security settings
         self.assertIn("AllowRootLogin=false", result)
         self.assertIn("TerminalServerUsers=remoteusers", result)
         self.assertIn("AlwaysGroupCheck=true", result)
+
+    def test_renders_native_session_lifecycle_policy(self):
+        self.config.rdp_max_sessions = 2
+        self.config.rdp_kill_disconnected = True
+        self.config.rdp_disconnected_timeout = 86400
+        self.config.rdp_idle_timeout = 14400
+
+        result = _generate_sesman_ini(self.config)
+
+        self.assertIn("MaxSessions=2", result)
+        self.assertIn("KillDisconnected=true", result)
+        self.assertIn("DisconnectedTimeLimit=86400", result)
+        self.assertIn("IdleTimeLimit=14400", result)
+
+
+class TestGenerateXrdpIni(unittest.TestCase):
+    def test_project_template_renders_without_policy_placeholders(self):
+        template_path = (
+            Path(__file__).resolve().parents[1]
+            / "desktop"
+            / "config"
+            / "xrdp.ini.template"
+        )
+        config = SetupConfig(
+            host="agent-vm",
+            username="agent",
+            system_type="workstation_dev",
+        )
+
+        rendered = _generate_xrdp_ini(config, template_path.read_text(encoding="utf-8"))
+
+        self.assertNotIn("{RDP_", rendered)
+        self.assertIn("[Channels]", rendered)
+        self.assertIn("drdynvc=true", rendered)
+        self.assertIn("rdpdr=false", rendered)
+        self.assertIn("rail=false", rendered)
+        self.assertIn("xrdpvr=false", rendered)
+        self.assertNotIn("channel_code", rendered)
+
+    def test_renders_listener_and_secure_coding_channel_defaults(self):
+        template = (
+            "address={RDP_BIND_ADDRESS}\n"
+            "rdpdr={RDP_DRIVE_REDIRECTION}\n"
+            "rdpsnd={RDP_AUDIO}\n"
+            "cliprdr={RDP_CLIPBOARD}\n"
+        )
+        config = SetupConfig(
+            host="agent-vm",
+            username="agent",
+            system_type="workstation_dev",
+        )
+
+        rendered = _generate_xrdp_ini(config, template)
+
+        self.assertIn("address=0.0.0.0", rendered)
+        self.assertIn("rdpdr=false", rendered)
+        self.assertIn("rdpsnd=false", rendered)
+        self.assertIn("cliprdr=true", rendered)
+
+    def test_renders_explicit_channel_policy(self):
+        template = (
+            "address={RDP_BIND_ADDRESS}\n"
+            "rdpdr={RDP_DRIVE_REDIRECTION}\n"
+            "rdpsnd={RDP_AUDIO}\n"
+            "cliprdr={RDP_CLIPBOARD}\n"
+        )
+        config = SetupConfig(
+            host="agent-vm",
+            username="agent",
+            system_type="workstation_dev",
+            rdp_bind_address="10.0.0.25",
+            rdp_clipboard=False,
+            rdp_drive_redirection=True,
+            rdp_audio=True,
+        )
+
+        rendered = _generate_xrdp_ini(config, template)
+
+        self.assertIn("address=10.0.0.25", rendered)
+        self.assertIn("rdpdr=true", rendered)
+        self.assertIn("rdpsnd=true", rendered)
+        self.assertIn("cliprdr=false", rendered)
 
 
 class TestEnsureUserInGroup(unittest.TestCase):

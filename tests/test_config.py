@@ -23,6 +23,15 @@ class TestSetupConfigDefaults(unittest.TestCase):
         self.assertEqual(config.machine_type, DEFAULT_MACHINE_TYPE)
         self.assertEqual(config.timezone, 'UTC')
         self.assertFalse(config.enable_rdp)
+        self.assertEqual(config.rdp_bind_address, '0.0.0.0')
+        self.assertIsNone(config.rdp_allowed_sources)
+        self.assertTrue(config.rdp_clipboard)
+        self.assertFalse(config.rdp_drive_redirection)
+        self.assertFalse(config.rdp_audio)
+        self.assertEqual(config.rdp_max_sessions, 10)
+        self.assertFalse(config.rdp_kill_disconnected)
+        self.assertEqual(config.rdp_disconnected_timeout, 0)
+        self.assertEqual(config.rdp_idle_timeout, 0)
         self.assertFalse(config.dry_run)
         self.assertEqual(config.desktop, 'xfce')
 
@@ -127,6 +136,32 @@ class TestSetupConfigToRemoteArgs(unittest.TestCase):
         config = self._make_config(enable_rdp=True)
         args = config.to_remote_args()
         self.assertIn('--rdp', args)
+        self.assertIn('--rdp-bind-address 0.0.0.0', args)
+
+    def test_rdp_policy_args(self):
+        config = self._make_config(
+            enable_rdp=True,
+            rdp_bind_address='10.0.0.25',
+            rdp_allowed_sources=['10.0.0.0/24', '2001:db8::/64'],
+            rdp_clipboard=False,
+            rdp_drive_redirection=True,
+            rdp_audio=True,
+            rdp_max_sessions=2,
+            rdp_kill_disconnected=True,
+            rdp_disconnected_timeout=86400,
+            rdp_idle_timeout=14400,
+        )
+        args = config.to_remote_args()
+        self.assertIn('--rdp-bind-address 10.0.0.25', args)
+        self.assertIn('--rdp-source 10.0.0.0/24', args)
+        self.assertIn('--rdp-source 2001:db8::/64', args)
+        self.assertIn('--no-rdp-clipboard', args)
+        self.assertIn('--rdp-drive-redirection', args)
+        self.assertIn('--rdp-audio', args)
+        self.assertIn('--rdp-max-sessions 2', args)
+        self.assertIn('--rdp-kill-disconnected', args)
+        self.assertIn('--rdp-disconnected-timeout 86400', args)
+        self.assertIn('--rdp-idle-timeout 14400', args)
 
     def test_browser_single(self):
         config = self._make_config(browser='firefox', browsers=None)
@@ -357,6 +392,26 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
         cmd = ' '.join(parts)
         self.assertNotIn('secret', cmd)
 
+    def test_rdp_policy_included(self):
+        config = self._make_config(
+            enable_rdp=True,
+            rdp_bind_address='10.0.0.25',
+            rdp_allowed_sources=['10.0.0.0/24'],
+            rdp_clipboard=False,
+            rdp_max_sessions=2,
+            rdp_kill_disconnected=True,
+            rdp_disconnected_timeout=86400,
+            rdp_idle_timeout=14400,
+        )
+        cmd = ' '.join(config.to_setup_command())
+        self.assertIn('--rdp-bind-address 10.0.0.25', cmd)
+        self.assertIn('--rdp-source 10.0.0.0/24', cmd)
+        self.assertIn('--no-rdp-clipboard', cmd)
+        self.assertIn('--rdp-max-sessions 2', cmd)
+        self.assertIn('--rdp-kill-disconnected', cmd)
+        self.assertIn('--rdp-disconnected-timeout 86400', cmd)
+        self.assertIn('--rdp-idle-timeout 14400', cmd)
+
     def test_share_credentials_redacted_for_username_only_shares(self):
         config = self._make_config(
             share_credentials=[['user1', 'secret1']],
@@ -461,6 +516,15 @@ class TestSetupConfigFromArgs(unittest.TestCase):
             browser=None,
             install_office=None,
             enable_rdp=None,
+            rdp_bind_address='0.0.0.0',
+            rdp_allowed_sources=None,
+            rdp_clipboard=True,
+            rdp_drive_redirection=False,
+            rdp_audio=False,
+            rdp_max_sessions=10,
+            rdp_kill_disconnected=False,
+            rdp_disconnected_timeout=0,
+            rdp_idle_timeout=0,
             smb_mounts=None,
             enable_smbclient=None,
             auto_restart=None,
@@ -525,6 +589,32 @@ class TestSetupConfigFromArgs(unittest.TestCase):
         config = SetupConfig.from_args(self._make_args(enable_rdp=True), 'workstation_desktop')
         self.assertTrue(config.enable_rdp)
         self.assertTrue(config.include_desktop)
+
+    def test_workstation_rdp_policy_from_args(self):
+        config = SetupConfig.from_args(
+            self._make_args(
+                enable_rdp=True,
+                rdp_bind_address='10.0.0.25',
+                rdp_allowed_sources=['10.0.0.0/24'],
+                rdp_clipboard=False,
+                rdp_drive_redirection=True,
+                rdp_audio=True,
+                rdp_max_sessions=2,
+                rdp_kill_disconnected=True,
+                rdp_disconnected_timeout=86400,
+                rdp_idle_timeout=14400,
+            ),
+            'workstation_dev',
+        )
+        self.assertEqual(config.rdp_bind_address, '10.0.0.25')
+        self.assertEqual(config.rdp_allowed_sources, ['10.0.0.0/24'])
+        self.assertFalse(config.rdp_clipboard)
+        self.assertTrue(config.rdp_drive_redirection)
+        self.assertTrue(config.rdp_audio)
+        self.assertEqual(config.rdp_max_sessions, 2)
+        self.assertTrue(config.rdp_kill_disconnected)
+        self.assertEqual(config.rdp_disconnected_timeout, 86400)
+        self.assertEqual(config.rdp_idle_timeout, 14400)
 
     def test_pc_dev_defaults_include_office_and_smbclient(self):
         config = SetupConfig.from_args(self._make_args(), 'pc_dev')

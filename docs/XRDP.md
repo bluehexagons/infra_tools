@@ -53,6 +53,13 @@ custom end-session process killer; session retention should be configured with
 XRDP's supported `Policy`, `KillDisconnected`, `DisconnectedTimeLimit`, and
 `IdleTimeLimit` settings.
 
+The corresponding saved controls are `--rdp-max-sessions`,
+`--rdp-kill-disconnected`, `--rdp-disconnected-timeout SECONDS`, and
+`--rdp-idle-timeout SECONDS`. Defaults preserve ten reconnectable sessions with
+no idle disconnect or automatic cleanup. Cleanup requires both the boolean flag
+and a positive retention interval so an isolated timeout cannot silently kill
+work. These values are seconds, matching XRDP's native configuration.
+
 **Note:** The session is tuned to let xorgxrdp own display changes. infra_tools no longer disables `xfsettingsd` outright; instead it removes stale display overrides and power-management settings that interfere with RANDR-driven resizes.
 
 ## Configuration Details
@@ -130,15 +137,42 @@ tcp_nodelay=true
 tcp_keepalive=true
 ```
 
+### Listener, firewall, and channel policy
+
+XRDP listens on `0.0.0.0` by default for compatibility. Bind it to one local
+address with `--rdp-bind-address IP`, and use repeatable
+`--rdp-source IP_OR_CIDR` flags to limit UFW ingress. For example:
+
+```bash
+infra_tools setup workstation_dev 10.0.0.25 agent \
+  --rdp --password "$RDP_PASSWORD" \
+  --rdp-bind-address 10.0.0.25 \
+  --rdp-source 10.0.0.0/24 \
+  --rdp-source 100.64.0.0/10
+```
+
+The firewall adds replacement source rules before removing global or stale
+infra_tools-managed RDP rules. Rules carry `infra_tools RDP` comments so reruns
+can reconcile them without deleting operator-owned UFW entries. Omitting all
+sources retains globally rate-limited port 3389 access for backward
+compatibility; a trusted LAN, management, or VPN source is recommended.
+
+The default `[Channels]` policy keeps `drdynvc` for dynamic resizing and
+`cliprdr` for coding clipboard workflows. It blocks `rdpdr`, `rdpsnd`, `rail`,
+and `xrdpvr`, covering drive/device and printer transfer, audio, RemoteApp, and
+video redirection. Clipboard can be disabled with `--no-rdp-clipboard`; drive
+and audio redirection require `--rdp-drive-redirection` and `--rdp-audio`.
+
 ## Known Issues
 
 ### Security and exposure boundary
 
-The current profile listens on all interfaces and permits port 3389 through
-UFW. TLS is mandatory and login is restricted to `remoteusers`, but certificate
-identity/rotation, source-CIDR restrictions, and clipboard/device channel
-policy are not yet managed. Keep RDP on a trusted private network or VPN. The
-larger policy and audit work is tracked in the
+The compatibility default listens on all IPv4 interfaces and permits globally
+rate-limited port 3389 access unless `--rdp-bind-address` and `--rdp-source`
+narrow it. TLS is mandatory and login is restricted to `remoteusers`, but
+certificate identity, trust, expiry monitoring, and rotation are not yet
+managed. Keep RDP on a trusted private network or VPN. The remaining policy and
+audit work is tracked in the
 [RDP desktop agent audit](plans/DESKTOP_AGENT_MAINTENANCE_AUDIT_2026-08-09.md).
 
 ### Issue: Session Freezes on Window Resize

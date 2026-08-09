@@ -82,6 +82,15 @@ infra_tools.py proxmox ...
 | Flag | Description |
 |------|-------------|
 | `--rdp` / `--no-rdp` | Enable or disable XRDP |
+| `--rdp-bind-address IP` | Bind XRDP to one local IP; defaults to all IPv4 interfaces (`0.0.0.0`) |
+| `--rdp-source IP_OR_CIDR` | Restrict UFW RDP ingress to a source; repeatable |
+| `--rdp-clipboard` / `--no-rdp-clipboard` | Control clipboard redirection; enabled by default |
+| `--rdp-drive-redirection` / `--no-rdp-drive-redirection` | Control drive, printer, and device redirection; disabled by default |
+| `--rdp-audio` / `--no-rdp-audio` | Control audio redirection; disabled by default |
+| `--rdp-max-sessions N` | Bound concurrent XRDP sessions; defaults to 10 |
+| `--rdp-kill-disconnected` / `--no-rdp-kill-disconnected` | End disconnected sessions after the configured retention period |
+| `--rdp-disconnected-timeout SECONDS` | Retention before ending a disconnected session; requires cleanup to be enabled |
+| `--rdp-idle-timeout SECONDS` | Disconnect an idle session after this interval; 0 disables |
 | `--desktop [xfce\|i3\|cinnamon\|lxqt]` | Desktop environment |
 | `--browser NAME` | Browser to install |
 | `--flatpak` | Install desktop apps via Flatpak |
@@ -89,6 +98,15 @@ infra_tools.py proxmox ...
 | `--apt-install PACKAGE` | Install a package via apt |
 | `--flatpak-install PACKAGE` | Install a package via Flatpak |
 | `--dark` | Configure dark theme |
+
+Without `--rdp-source`, enabling RDP preserves the historical globally
+rate-limited UFW rule. Prefer one or more management, VPN, or trusted LAN CIDRs.
+On rerun, infra_tools installs the requested source rules before removing the
+old broad rule and reconciles only its own comment-tagged RDP rules.
+Disconnected sessions are retained indefinitely by default so a transient RDP
+disconnect does not destroy agent work. A positive disconnected timeout is
+accepted only with `--rdp-kill-disconnected`, making destructive cleanup an
+explicit paired choice.
 
 ### Development Flags
 

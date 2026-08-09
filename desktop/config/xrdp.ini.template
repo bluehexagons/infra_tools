@@ -45,11 +45,9 @@ ls_logo_y_pos=50
 autorun=
 use_fastpath=both
 new_cursors=true
-; Allow session reconnection
+; Allow session reconnection and the explicitly listed channels below
 allow_channels=true
 allow_multimon=true
-; Disable channel restrictions for better compatibility with Remmina
-channel_code=1
 ; Optimize for LAN performance (suitable for Remmina on local network)
 max_idle_time=0
 max_disc_time=0
@@ -57,8 +55,8 @@ max_disc_time=0
 ; Fork a separate process per session for stability
 fork=true
 
-; Address to listen on (0.0.0.0 = all interfaces)
-address=0.0.0.0
+; Address to listen on (managed by --rdp-bind-address)
+address={RDP_BIND_ADDRESS}
 port=3389
 
 [Logging]
@@ -66,6 +64,17 @@ LogFile=xrdp.log
 LogLevel=INFO
 EnableSyslog=true
 SyslogLevel=INFO
+
+[Channels]
+; Dynamic virtual channels remain enabled for resize support. The coding-host
+; baseline permits clipboard transfer, but blocks drive/device, printer,
+; audio, RemoteApp, and video redirection unless explicitly requested.
+rdpdr={RDP_DRIVE_REDIRECTION}
+rdpsnd={RDP_AUDIO}
+drdynvc=true
+cliprdr={RDP_CLIPBOARD}
+rail=false
+xrdpvr=false
 
 ; Session types
 [Xorg]

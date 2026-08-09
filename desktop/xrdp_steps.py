@@ -9,7 +9,7 @@ from lib.machine_state import has_gpu_access
 from lib.remote_utils import is_service_active, run, is_package_installed
 
 
-def _generate_sesman_ini() -> str:
+def _generate_sesman_ini(config: SetupConfig) -> str:
     """Generate complete sesman.ini content.
     
     Uses Xorg+xorgxrdp backend exclusively for the most stable resize behaviour.
@@ -23,7 +23,7 @@ def _generate_sesman_ini() -> str:
     # Only Xorg backend - Xvnc disabled due to resize issues
     # Xorg+xorgxrdp: proper RANDR events, dynamic resize works correctly
     # Xvnc: doesn't emit RRScreenChangeNotify -> desktop freezes on resize
-    return '''[Globals]
+    return f'''[Globals]
 EnableUserWindowManager=true
 UserWindowManager=startwm.sh
 DefaultWindowManager=startwm.sh
@@ -37,7 +37,10 @@ AlwaysGroupCheck=true
 
 [Sessions]
 X11DisplayOffset=10
-MaxSessions=10
+MaxSessions={config.rdp_max_sessions}
+KillDisconnected={str(config.rdp_kill_disconnected).lower()}
+DisconnectedTimeLimit={config.rdp_disconnected_timeout}
+IdleTimeLimit={config.rdp_idle_timeout}
 Policy=Default
 
 [Logging]
@@ -122,6 +125,23 @@ Section "Screen"
     EndSubSection
 EndSection
 '''
+
+
+def _generate_xrdp_ini(config: SetupConfig, template: str) -> str:
+    """Render validated XRDP listener and channel policy into its template."""
+    from lib.validation import validate_network_ip
+
+    bind_address = validate_network_ip(config.rdp_bind_address, "RDP bind address")
+    replacements = {
+        "{RDP_BIND_ADDRESS}": bind_address,
+        "{RDP_CLIPBOARD}": str(config.rdp_clipboard).lower(),
+        "{RDP_DRIVE_REDIRECTION}": str(config.rdp_drive_redirection).lower(),
+        "{RDP_AUDIO}": str(config.rdp_audio).lower(),
+    }
+    rendered = template
+    for placeholder, value in replacements.items():
+        rendered = rendered.replace(placeholder, value)
+    return rendered
 
 
 def _ensure_user_in_group(username: str, group: str) -> bool:
@@ -238,7 +258,7 @@ needs_root_rights=no
     
     # Generate the managed sesman.ini.
     try:
-        sesman_content = _generate_sesman_ini()
+        sesman_content = _generate_sesman_ini(config)
         with open(sesman_config, "w") as f:
             f.write(sesman_content)
         print("  ✓ Session manager configuration deployed")
@@ -254,7 +274,7 @@ needs_root_rights=no
     xrdp_template_path = os.path.join(config_template_dir, 'xrdp.ini.template')
     try:
         with open(xrdp_template_path, 'r', encoding='utf-8') as f:
-            xrdp_content = f.read()
+            xrdp_content = _generate_xrdp_ini(config, f.read())
         with open(xrdp_config, "w") as f:
             f.write(xrdp_content)
         print("  ✓ xRDP configuration deployed")
