@@ -249,8 +249,10 @@ def can_restart_system() -> bool:
 def save_setup_config(config_dict: dict[str, Any]) -> None:
     """Save the setup configuration to the target system for later recall."""
     os.makedirs(STATE_DIR, exist_ok=True)
-    
-    write_json_atomic(SETUP_CONFIG_FILE, config_dict)
+
+    sanitized_config = dict(config_dict)
+    sanitized_config.pop("password", None)
+    write_json_atomic(SETUP_CONFIG_FILE, sanitized_config)
 
 
 def _validate_setup_config(config: Any) -> Optional[str]:
@@ -287,6 +289,13 @@ def load_setup_config() -> Optional[dict[str, Any]]:
     except (json.JSONDecodeError, OSError) as e:
         print(f"Warning: Failed to load setup configuration: {e}")
         return None
+
+    if isinstance(config, dict) and "password" in config:
+        del config["password"]
+        try:
+            write_json_atomic(SETUP_CONFIG_FILE, config)
+        except OSError as exc:
+            print(f"Warning: Failed to remove password from saved setup configuration: {exc}")
 
     error = _validate_setup_config(config)
     if error:

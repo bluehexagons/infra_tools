@@ -25,6 +25,23 @@ infra_tools setup workstation_dev 10.0.0.25 alice \
   --desktop xfce --browser firefox --rdp --password "$RDP_PASSWORD"
 ```
 
+RDP-capable agentic coding workstation:
+
+```bash
+infra_tools setup workstation_dev 10.0.0.25 agent \
+  --desktop xfce --rdp --password "$RDP_PASSWORD" \
+  --agent-suite terminal --copy-config \
+  --repo https://github.com/user/project.git
+```
+
+This adds the terminal agent suite to the browser and Visual Studio Code
+profile. Agent updates are deliberate rather than automatic; host APT,
+security, cleanup, and restart maintenance still runs as described in
+[`MAINTENANCE.md`](./MAINTENANCE.md). The default restart policy may force a
+restart after seven days of active-session deferrals, so long-running hosts
+should use `--no-auto-restart --auto-restart-force-days 0` and manage pending
+reboots explicitly.
+
 PC with office and SMB tools:
 
 ```bash
@@ -79,6 +96,7 @@ in the user's i3 setup.
 RDP logins use the setup user's Unix password, so `--rdp` requires a non-root
 `--password`. Prefer a secret-sourced environment variable such as
 `--password "$RDP_PASSWORD"`; passwords are not written to saved setup state.
+Legacy state containing this field is sanitized when it is loaded.
 
 The `pc_dev` profile includes Remmina with RDP and VNC plugins. Other profiles
 can install it through the explicit custom step `install_remmina` when using
@@ -98,3 +116,7 @@ For remote sessions, test XRDP separately and use the log checks in
 [`XRDP.md`](./XRDP.md). Machine capability differences, including Flatpak
 fallbacks and software rendering in containers, are documented in
 [`MACHINE_TYPES.md`](./MACHINE_TYPES.md).
+
+The remaining RDP exposure, certificate, session-lifecycle, maintenance, and
+live-test work is tracked in the
+[RDP desktop agent audit](plans/DESKTOP_AGENT_MAINTENANCE_AUDIT_2026-08-09.md).

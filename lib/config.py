@@ -737,6 +737,7 @@ class SetupConfig:
         data = asdict(self)
         data.pop('host', None)
         data.pop('system_type', None)
+        data.pop('password', None)
         data.pop('share_credentials', None)
         data.pop('deploy_latest', None)
         data['samba_shares'] = _strip_passwords_from_samba_shares(self.samba_shares)

@@ -31,17 +31,27 @@ We use **Xorg with xorgxrdp driver** exclusively, not Xvnc:
 | `Xwrapper.config` | X server permissions | `/etc/X11/Xwrapper.config` |
 | `startwm.sh` | Session startup script | `~/startwm.sh` |
 
+infra_tools backs up the first observed copies of the system configuration
+files with a `.bak` suffix and then deploys its managed configuration on each
+run. In particular, the package-provided X.Org file is replaced so the settings
+below are actually applied.
+
 ### Session Startup Script
 
 Located at `~/startwm.sh`, this script:
 
 1. Sets XRDP-specific environment variables:
    - `XRDP_SESSION=1` - Indicates RDP session to applications
-   - `XFCE_DISABLE_DISPLAY_MANAGEMENT=1` - Prevents XFCE from managing displays
+   - `XRDP_SOCKET=/tmp/xrdp` - Identifies the XRDP socket location
 
 2. Disables X screen saver and DPMS via `xset` commands
 
 3. Launches the desktop environment through dbus-launch
+
+XRDP owns session teardown and reconnection. infra_tools does not install a
+custom end-session process killer; session retention should be configured with
+XRDP's supported `Policy`, `KillDisconnected`, `DisconnectedTimeLimit`, and
+`IdleTimeLimit` settings.
 
 **Note:** The session is tuned to let xorgxrdp own display changes. infra_tools no longer disables `xfsettingsd` outright; instead it removes stale display overrides and power-management settings that interfere with RANDR-driven resizes.
 
@@ -121,6 +131,15 @@ tcp_keepalive=true
 ```
 
 ## Known Issues
+
+### Security and exposure boundary
+
+The current profile listens on all interfaces and permits port 3389 through
+UFW. TLS is mandatory and login is restricted to `remoteusers`, but certificate
+identity/rotation, source-CIDR restrictions, and clipboard/device channel
+policy are not yet managed. Keep RDP on a trusted private network or VPN. The
+larger policy and audit work is tracked in the
+[RDP desktop agent audit](plans/DESKTOP_AGENT_MAINTENANCE_AUDIT_2026-08-09.md).
 
 ### Issue: Session Freezes on Window Resize
 
@@ -377,5 +396,4 @@ xrandr --output default --mode 1920x1080
 
 - `desktop/xrdp_steps.py` - XRDP setup implementation
 - `desktop/desktop_environment_steps.py` - XFCE RDP configuration
-- `desktop/service_tools/xrdp_session_cleanup.py` - Session cleanup
 - `tests/test_xrdp.py` - XRDP configuration tests

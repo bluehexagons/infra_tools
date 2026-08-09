@@ -121,6 +121,12 @@ holds and maintenance windows, and agent/timer health to the same audit surface.
 It should reuse the transactional execution and observed-state contracts rather
 than introduce agent-specific apply machinery.
 
+The RDP-capable coding-desktop slice is detailed in the
+[RDP desktop agent audit](DESKTOP_AGENT_MAINTENANCE_AUDIT_2026-08-09.md). It
+adds RDP exposure and certificate policy, supported session lifecycle,
+version-aware configuration, and live desktop smoke tests to those shared
+contracts.
+
 ## P2: Recovery as a first-class workflow
 
 Backup creation without tested restoration is incomplete. Build operator-facing

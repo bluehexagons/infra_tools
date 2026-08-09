@@ -60,6 +60,11 @@ class TestSetupConfigToDict(unittest.TestCase):
         d = config.to_dict()
         self.assertNotIn('share_credentials', d)
 
+    def test_to_dict_excludes_login_password(self):
+        config = self._make_config(password='supersecret')
+
+        self.assertNotIn('password', config.to_dict())
+
     def test_to_dict_keeps_antistatic_admin_username_without_password(self):
         config = self._make_config(
             antistatic_admin='operator',

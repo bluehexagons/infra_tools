@@ -5,7 +5,13 @@ import unittest
 from unittest.mock import Mock, patch
 
 from lib.config import SetupConfig
-from desktop.xrdp_steps import _ensure_user_in_group, _generate_sesman_ini, install_xrdp, harden_xrdp
+from desktop.xrdp_steps import (
+    _ensure_user_in_group,
+    _generate_sesman_ini,
+    _generate_xorg_conf,
+    harden_xrdp,
+    install_xrdp,
+)
 from desktop.desktop_environment_steps import configure_xfce_for_rdp
 
 
@@ -14,14 +20,7 @@ class TestGenerateSesmanIni(unittest.TestCase):
     
     def test_generates_valid_ini_format(self):
         """sesman.ini should have proper INI sections."""
-        config = SetupConfig(
-            host="test.example.com",
-            username="testuser",
-            system_type="workstation_dev"
-        )
-        cleanup_path = "/opt/cleanup.py"
-        
-        result = _generate_sesman_ini(config, cleanup_path)
+        result = _generate_sesman_ini()
         
         # Check required sections exist
         self.assertIn("[Globals]", result)
@@ -32,14 +31,7 @@ class TestGenerateSesmanIni(unittest.TestCase):
         
     def test_uses_xorg_backend_only(self):
         """Should use Xorg backend, not Xvnc."""
-        config = SetupConfig(
-            host="test.example.com",
-            username="testuser",
-            system_type="workstation_dev"
-        )
-        cleanup_path = "/opt/cleanup.py"
-        
-        result = _generate_sesman_ini(config, cleanup_path)
+        result = _generate_sesman_ini()
         
         # Xorg section should exist
         self.assertIn("[Xorg]", result)
@@ -50,29 +42,14 @@ class TestGenerateSesmanIni(unittest.TestCase):
         self.assertNotIn("[Xvnc]", result)
         self.assertNotIn("Xvnc", result)
         
-    def test_includes_cleanup_script_path(self):
-        """EndSessionCommand should reference cleanup script."""
-        config = SetupConfig(
-            host="test.example.com",
-            username="testuser",
-            system_type="workstation_dev"
-        )
-        cleanup_path = "/custom/path/cleanup.py"
-        
-        result = _generate_sesman_ini(config, cleanup_path)
-        
-        self.assertIn(f"EndSessionCommand={cleanup_path}", result)
+    def test_does_not_include_unsupported_end_session_command(self):
+        result = _generate_sesman_ini()
+
+        self.assertNotIn("EndSessionCommand", result)
         
     def test_security_settings(self):
         """Should include security restrictions."""
-        config = SetupConfig(
-            host="test.example.com",
-            username="testuser",
-            system_type="workstation_dev"
-        )
-        cleanup_path = "/opt/cleanup.py"
-        
-        result = _generate_sesman_ini(config, cleanup_path)
+        result = _generate_sesman_ini()
         
         # Security settings
         self.assertIn("AllowRootLogin=false", result)
@@ -223,13 +200,12 @@ class TestInstallXrdp(unittest.TestCase):
     @patch('desktop.xrdp_steps.is_service_active')
     def test_creates_xorg_conf_with_correct_settings(self, mock_is_active, mock_gpu, mock_open_func, mock_makedirs, mock_exists, mock_run):
         """X.Org config should have correct driver and screen size."""
-        # Mock that xorg.conf doesn't exist yet
         def exists_side_effect(path):
-            if path == "/etc/X11/xrdp/xorg.conf":
+            if path == "/etc/X11/xrdp/xorg.conf.bak":
                 return False
             return True
+
         mock_exists.side_effect = exists_side_effect
-        
         mock_is_active.return_value = True
         mock_gpu.return_value = False
         mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
@@ -256,6 +232,18 @@ class TestInstallXrdp(unittest.TestCase):
         
         # Check for virtual screen size (updated for 4K support)
         self.assertIn('Virtual 3840 2160', combined_content)
+
+        self.assertIn(
+            'cp /etc/X11/xrdp/xorg.conf /etc/X11/xrdp/xorg.conf.bak',
+            [call.args[0] for call in mock_run.call_args_list],
+        )
+
+    def test_generated_xorg_conf_has_managed_resize_settings(self):
+        content = _generate_xorg_conf()
+
+        self.assertIn('Driver "xrdpdev"', content)
+        self.assertIn('Option "UseGlamor" "false"', content)
+        self.assertIn('Virtual 3840 2160', content)
 
     @patch('desktop.xrdp_steps.run')
     @patch('desktop.xrdp_steps.os.path.exists')

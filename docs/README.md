@@ -50,6 +50,7 @@ Design and future-work notes live under [`plans/`](plans/):
 - [Architectural risk review](plans/ARCHITECTURAL_RISK_REVIEW_2026-08-07.md)
 - [Proxmox setup and maintenance audit](plans/PROXMOX_MAINTENANCE_AUDIT_2026-08-09.md)
 - [CLI-only agent host and maintenance audit](plans/AGENT_CLI_MAINTENANCE_AUDIT_2026-08-09.md)
+- [RDP desktop agent host and maintenance audit](plans/DESKTOP_AGENT_MAINTENANCE_AUDIT_2026-08-09.md)
 
 ## Documentation conventions
 

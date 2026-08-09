@@ -9,7 +9,7 @@ from lib.machine_state import has_gpu_access
 from lib.remote_utils import is_service_active, run, is_package_installed
 
 
-def _generate_sesman_ini(config: SetupConfig, cleanup_script_path: str) -> str:
+def _generate_sesman_ini() -> str:
     """Generate complete sesman.ini content.
     
     Uses Xorg+xorgxrdp backend exclusively for the most stable resize behaviour.
@@ -23,7 +23,7 @@ def _generate_sesman_ini(config: SetupConfig, cleanup_script_path: str) -> str:
     # Only Xorg backend - Xvnc disabled due to resize issues
     # Xorg+xorgxrdp: proper RANDR events, dynamic resize works correctly
     # Xvnc: doesn't emit RRScreenChangeNotify -> desktop freezes on resize
-    return f'''[Globals]
+    return '''[Globals]
 EnableUserWindowManager=true
 UserWindowManager=startwm.sh
 DefaultWindowManager=startwm.sh
@@ -39,7 +39,6 @@ AlwaysGroupCheck=true
 X11DisplayOffset=10
 MaxSessions=10
 Policy=Default
-EndSessionCommand={cleanup_script_path}
 
 [Logging]
 LogFile=/var/log/xrdp-sesman.log
@@ -56,6 +55,72 @@ param=-nolisten
 param=tcp
 param=-logfile
 param=.xorgxrdp.%s.log
+'''
+
+
+def _generate_xorg_conf() -> str:
+    """Generate the managed xorgxrdp configuration."""
+    return '''Section "ServerLayout"
+    Identifier "X11 Server"
+    Screen "Screen (xrdpdev)"
+    InputDevice "xrdpMouse" "CorePointer"
+    InputDevice "xrdpKeyboard" "CoreKeyboard"
+EndSection
+
+Section "ServerFlags"
+    Option "DontVTSwitch" "on"
+    Option "AutoAddDevices" "off"
+    Option "AutoAddGPU" "off"
+    # Disable screen saver and DPMS to prevent display management conflicts
+    Option "StandbyTime" "0"
+    Option "SuspendTime" "0"
+    Option "OffTime" "0"
+    Option "BlankTime" "0"
+EndSection
+
+Section "Module"
+    Load "fb"
+    Load "glamoregl"
+    Load "xorgxrdp"
+EndSection
+
+Section "InputDevice"
+    Identifier "xrdpKeyboard"
+    Driver "xrdpkeyb"
+EndSection
+
+Section "InputDevice"
+    Identifier "xrdpMouse"
+    Driver "xrdpmouse"
+EndSection
+
+Section "Monitor"
+    Identifier "Monitor"
+    HorizSync 30-80
+    VertRefresh 50-75
+EndSection
+
+Section "Device"
+    Identifier "Video Card (xrdpdev)"
+    Driver "xrdpdev"
+    # Disable glamor acceleration for the most stable XRDP resize behaviour
+    Option "UseGlamor" "false"
+    # Software cursor prevents cursor-related resize issues
+    Option "SWCursor" "true"
+EndSection
+
+Section "Screen"
+    Identifier "Screen (xrdpdev)"
+    Device "Video Card (xrdpdev)"
+    Monitor "Monitor"
+    DefaultDepth 24
+    SubSection "Display"
+        Depth 24
+        # Virtual screen size to support dynamic resizing (up to 4K: 3840x2160)
+        # Supports 4K and common ultrawide resolutions
+        Virtual 3840 2160
+    EndSubSection
+EndSection
 '''
 
 
@@ -101,7 +166,6 @@ def _refresh_services(*services: str, reload_running_services: bool = True) -> N
 def install_xrdp(config: SetupConfig) -> None:
     safe_username = shlex.quote(config.username)
     xsession_path = f"/home/{config.username}/startwm.sh"
-    cleanup_script_path = "/opt/infra_tools/desktop/service_tools/xrdp_session_cleanup.py"
     sesman_config = "/etc/xrdp/sesman.ini"
     xrdp_config = "/etc/xrdp/xrdp.ini"
     
@@ -172,9 +236,9 @@ needs_root_rights=no
     if os.path.exists(sesman_config) and not os.path.exists(f"{sesman_config}.bak"):
         run(f"cp {sesman_config} {sesman_config}.bak")
     
-    # Generate sesman.ini based on machine type
+    # Generate the managed sesman.ini.
     try:
-        sesman_content = _generate_sesman_ini(config, cleanup_script_path)
+        sesman_content = _generate_sesman_ini()
         with open(sesman_config, "w") as f:
             f.write(sesman_content)
         print("  ✓ Session manager configuration deployed")
@@ -206,75 +270,13 @@ needs_root_rights=no
     # stable across VM-first desktops and compatibility guests.
     # Large virtual screen supports up to 4K+ resolutions for dynamic resizing.
     xorg_conf_path = "/etc/X11/xrdp/xorg.conf"
-    if not os.path.exists(xorg_conf_path):
-        xorg_conf_dir = os.path.dirname(xorg_conf_path)
-        os.makedirs(xorg_conf_dir, exist_ok=True)
-        
-        xorg_conf_content = '''Section "ServerLayout"
-    Identifier "X11 Server"
-    Screen "Screen (xrdpdev)"
-    InputDevice "xrdpMouse" "CorePointer"
-    InputDevice "xrdpKeyboard" "CoreKeyboard"
-EndSection
-
-Section "ServerFlags"
-    Option "DontVTSwitch" "on"
-    Option "AutoAddDevices" "off"
-    Option "AutoAddGPU" "off"
-    # Disable screen saver and DPMS to prevent display management conflicts
-    Option "StandbyTime" "0"
-    Option "SuspendTime" "0"
-    Option "OffTime" "0"
-    Option "BlankTime" "0"
-EndSection
-
-Section "Module"
-    Load "fb"
-    Load "glamoregl"
-    Load "xorgxrdp"
-EndSection
-
-Section "InputDevice"
-    Identifier "xrdpKeyboard"
-    Driver "xrdpkeyb"
-EndSection
-
-Section "InputDevice"
-    Identifier "xrdpMouse"
-    Driver "xrdpmouse"
-EndSection
-
-Section "Monitor"
-    Identifier "Monitor"
-    HorizSync 30-80
-    VertRefresh 50-75
-EndSection
-
-Section "Device"
-    Identifier "Video Card (xrdpdev)"
-    Driver "xrdpdev"
-    # Disable glamor acceleration for the most stable XRDP resize behaviour
-    Option "UseGlamor" "false"
-    # Software cursor prevents cursor-related resize issues
-    Option "SWCursor" "true"
-EndSection
-
-Section "Screen"
-    Identifier "Screen (xrdpdev)"
-    Device "Video Card (xrdpdev)"
-    Monitor "Monitor"
-    DefaultDepth 24
-    SubSection "Display"
-        Depth 24
-        # Virtual screen size to support dynamic resizing (up to 4K: 3840x2160)
-        # Supports 4K and common ultrawide resolutions
-        Virtual 3840 2160
-    EndSubSection
-EndSection
-'''
-        with open(xorg_conf_path, "w") as f:
-            f.write(xorg_conf_content)
-        print("  ✓ xorgxrdp configuration created")
+    xorg_conf_dir = os.path.dirname(xorg_conf_path)
+    os.makedirs(xorg_conf_dir, exist_ok=True)
+    if os.path.exists(xorg_conf_path) and not os.path.exists(f"{xorg_conf_path}.bak"):
+        run(f"cp {xorg_conf_path} {xorg_conf_path}.bak")
+    with open(xorg_conf_path, "w") as f:
+        f.write(_generate_xorg_conf())
+    print("  ✓ xorgxrdp configuration deployed")
     
     run("systemctl enable xrdp")
     _refresh_services("xrdp-sesman", "xrdp")
@@ -297,7 +299,7 @@ EndSection
     run(f"chmod +x {shlex.quote(xsession_path)}")
     run(f"chown {safe_username}:{safe_username} {shlex.quote(xsession_path)}")
 
-    print("  ✓ xRDP configured with session cleanup")
+    print("  ✓ xRDP configured")
 
 
 def harden_xrdp(config: SetupConfig) -> None:

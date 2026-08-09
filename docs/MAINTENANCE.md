@@ -64,6 +64,9 @@ rollback after a broken update, and a private audit record. Setup still skips
 an installer when its command is already present. Version pins and stronger
 publisher verification remain tracked in the
 [CLI-only agent host audit](plans/AGENT_CLI_MAINTENANCE_AUDIT_2026-08-09.md).
+RDP desktop hosts add network, certificate, session-lifecycle, and GUI update
+concerns tracked in the
+[RDP desktop agent audit](plans/DESKTOP_AGENT_MAINTENANCE_AUDIT_2026-08-09.md).
 
 Set `INFRA_TOOLS_ECOSYSTEM_AUTO_UPGRADE=1` in the relevant service environment
 to allow global npm packages, gems, and uv-managed tools to advance. The default

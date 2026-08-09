@@ -147,6 +147,38 @@ class TestSaveLoadSetupConfig(unittest.TestCase):
                 assert loaded is not None
                 self.assertEqual(loaded['timezone'], 'UTC')
 
+    def test_save_setup_config_excludes_password(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_file = os.path.join(tmpdir, 'setup.json')
+            with patch.object(ms, 'STATE_DIR', tmpdir), \
+                 patch.object(ms, 'SETUP_CONFIG_FILE', config_file):
+                ms.save_setup_config({
+                    'username': 'test',
+                    'system_type': 'workstation_dev',
+                    'password': 'supersecret',
+                })
+
+                loaded = ms.load_setup_config()
+
+            assert loaded is not None
+            self.assertNotIn('password', loaded)
+
+    def test_load_setup_config_removes_legacy_password_from_disk(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_file = os.path.join(tmpdir, 'setup.json')
+            ms.write_json_atomic(config_file, {
+                'username': 'test',
+                'system_type': 'workstation_dev',
+                'password': 'supersecret',
+            })
+            with patch.object(ms, 'SETUP_CONFIG_FILE', config_file):
+                loaded = ms.load_setup_config()
+
+            assert loaded is not None
+            self.assertNotIn('password', loaded)
+            with open(config_file, encoding='utf-8') as file_obj:
+                self.assertNotIn('supersecret', file_obj.read())
+
     def test_load_missing_setup_config(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             config_file = os.path.join(tmpdir, 'no_such.json')
