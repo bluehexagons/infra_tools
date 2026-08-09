@@ -21,6 +21,7 @@ coverage.
 | --- | --- | --- |
 | `test_arg_parser_hosted.py`: default-`None` tests for hosted node, key, memory, and storage | cut | The parser declarations already establish ordinary optional-argument defaults; the surviving hosted-command and remote-parser tests prove the meaningful CLI boundary. |
 | `test_progress.py:test_custom_width` | cut | It passed `width=40` but only checked `50%`, duplicating `test_half_progress`; it never proved the width behavior. |
+| `test_operation_log.py`: `test_log_metric`, `test_log_context_public`, `test_set_to_none` | cut | They only checked that calls did not raise; they asserted neither logged output nor changed state. |
 | `test_proxmox_summary.py` formatting presence tests | undecided | Some are single-substring smoke checks, but the summary is user-facing CLI output. |
 | `test_ruby_setup.py` existing-install and step-wiring tests | undecided | They are mock-heavy, but idempotency and system-profile wiring may be important contracts. |
 
@@ -45,11 +46,20 @@ The Ruby existing-install and step-wiring tests remain. The first protects
 idempotency and the second protects profile selection, both of which can fail
 without changing the mocked command shape.
 
+The second pass also reviewed every test with no direct assertion. The
+remaining cases either intentionally verify that valid input is accepted, or
+assert behavior indirectly through a `unittest` result, mock call, filesystem
+state, or surrounding failure-path test. The three operation-log no-op tests
+were the only cases where a passing implementation could do nothing useful
+and still satisfy the test.
+
 ## Verification
 
 - Run the full unittest discovery command after edits.
 - Run `git diff --check` and inspect the final diff.
 - Targeted parser/progress/config check: 115 tests, passing.
-- Full discovery: 1,895 tests ran, 1 skipped, all passing.
+- Full discovery before this second pass: 1,895 tests ran, 1 skipped, all
+  passing; after the additional three removals: 1,892 ran, 1 skipped, all
+  passing.
 - Commit and push the audit changes only after the working tree and test suite
   support the decisions above.

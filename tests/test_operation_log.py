@@ -14,7 +14,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from lib.operation_log import (
     OperationLogger,
     OperationLoggerManager,
-    set_operation_logger_manager,
 )
 
 
@@ -79,12 +78,6 @@ class TestOperationLogger(unittest.TestCase):
             logger.log_warning('disk space low')
             self.assertEqual(logger.status, 'running')
 
-    def test_log_metric(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            logger = self._make_logger(tmpdir)
-            logger.log_metric('files_processed', 42, unit='files')
-            # No exception = success
-
     def test_complete(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             logger = self._make_logger(tmpdir)
@@ -104,13 +97,6 @@ class TestOperationLogger(unittest.TestCase):
             self.assertEqual(summary['operation_id'], logger.operation_id)
             self.assertEqual(summary['status'], 'running')
             self.assertIn('elapsed_time_seconds', summary)
-
-    def test_log_context_public(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            logger = self._make_logger(tmpdir)
-            logger.log_context('custom_event', {'key': 'value'})
-            # Should not raise
-
 
 class TestOperationLoggerManager(unittest.TestCase):
     def test_create_logger(self):
@@ -172,12 +158,6 @@ class TestOperationLoggerManager(unittest.TestCase):
             cleaned = manager.cleanup_old_logs(days_to_keep=30)
             self.assertEqual(cleaned, 0)
             self.assertTrue(os.path.exists(recent_log))
-
-
-class TestSetOperationLoggerManager(unittest.TestCase):
-    def test_set_to_none(self):
-        set_operation_logger_manager(None)
-        # Should not raise
 
 
 if __name__ == '__main__':
