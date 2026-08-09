@@ -2,10 +2,11 @@
 
 Status: active follow-up plan. Password persistence, managed X.Org deployment,
 unsupported session cleanup, RDP source/bind policy, channel defaults, and the
-Proxmox emulated-display profile have been addressed. Native session lifecycle
-controls are now saved and validated. Certificate lifecycle, workload-aware
-maintenance, configuration compatibility, physical-GPU acceleration, and live
-desktop verification remain larger work.
+Proxmox emulated-display profile, and TLS pair/expiry monitoring have been
+addressed. Native session lifecycle controls are now saved and validated.
+Trusted certificate enrollment/rotation, workload-aware maintenance,
+configuration compatibility, physical-GPU acceleration, and live desktop
+verification remain larger work.
 
 ## Scope and recommended baseline
 
@@ -41,7 +42,7 @@ On a Debian VM or bare-metal target, the baseline inherits:
 
 | Unit | Behavior | Desktop-agent effect |
 | --- | --- | --- |
-| `security-monitor.timer` | Reads fail2ban, auditd, and SSH events every 15 minutes | XRDP bans are visible through fail2ban events, but there is no RDP-specific session or certificate health check |
+| `security-monitor.timer` | Reads fail2ban, auditd, SSH events, and configured XRDP TLS health every 15 minutes | Reports certificate/key failure, 30-day expiry, recovery, and fingerprint rotation on state changes |
 | `auto-update-apt.timer` | Runs a daily non-removing distribution upgrade | Updates XRDP, X.Org, the browser/VS Code when APT-managed, GitHub CLI, and Debian coding tools |
 | `cleanup-maintenance.timer` | Cleans bounded root caches, journals, and strictly named stale temp artifacts weekly | Does not comprehensively manage the desktop user's browser, editor, Flatpak, or agent caches |
 | `auto-restart-if-needed.timer` | Checks daily and after boot for `/var/run/reboot-required` | Defers for login sessions until the force deadline, then can restart despite an active RDP or agent workload |
@@ -135,23 +136,42 @@ DRM group privileges. The existing VirtIO SCSI single root disk now enables
 its supported per-disk I/O thread. Unit tests cover profile selection, emitted
 `qm` options, and the absence of GPU-group grants.
 
+### RDA-07: XRDP TLS material could fail silently
+
+The managed configuration required TLS but left `certificate` and `key_file`
+blank, implicitly relying on XRDP's distro defaults. Setup granted `ssl-cert`
+group membership but did not prove that the files existed, matched, remained
+private, were readable by the daemon, or had not expired. The recurring
+security monitor did not inspect them.
+
+The managed paths are now explicit. Setup validates the certificate/key pair
+before managed service configuration, stops XRDP fail-closed, and refuses an
+unusable or expired pair. The existing 15-minute security monitor checks
+syntax, match, expiry, key permissions, and daemon readability. It stores only
+status and the public fingerprint, reports failures, 30-day expiry, recovery,
+and rotation when state changes, suppresses repeat notifications for the same
+issue, and continues returning failure while the pair remains unusable. Unit
+tests cover path parsing, expiry, mismatch, permissions, missing files, setup
+refusal, and notification state transitions.
+
 ## Larger follow-up work
 
 ### P1: RDP TLS identity, health, and safe network apply
 
-**Risk:** explicit listener, source, and channel controls now exist, but the
-backward-compatible no-source default remains globally reachable. TLS relies on
-the distro's default certificate paths and setup does not verify certificate
-identity, expiry, client trust, or rotation. Firewall changes are ordered to
-preserve access on rule-install failure, but do not yet have a preview,
-connectivity probe, or timed rollback.
+**Risk:** explicit listener, source, channel, and TLS health controls now exist,
+but the backward-compatible no-source default remains globally reachable. The
+distro certificate is usually self-signed; setup still does not establish a
+client-trusted identity or enroll and rotate an operator certificate. Firewall
+changes are ordered to preserve access on rule-install failure, but do not yet
+have a preview, connectivity probe, or timed rollback.
 
 Complete this area with:
 
 1. an explicit VPN/private-network-only preset and migration guidance away
    from the compatibility global rule;
-2. operator-provided or automatically enrolled certificate/key paths, file
-   permissions, expiry monitoring, and rotation;
+2. operator-provided or automatically enrolled certificate/key paths, trust
+   distribution, renewal, and transactional rotation (pair permissions and
+   expiry monitoring are now enforced);
 3. post-apply probes that confirm TLS-only negotiation and the effective UFW
    and fail2ban rules without exposing credentials.
 
@@ -254,6 +274,8 @@ separate display paths.
   that a legacy state file is sanitized on read.
 - XRDP rendering tests cover package-preexisting X.Org configuration and reject
   unsupported directives.
+- Certificate tests cover missing, expired, mismatched, overexposed, and
+  daemon-unreadable TLS material plus alert suppression, recovery, and rotation.
 - Network-policy tests cover source validation, rule reconciliation, preview,
   and rollback without risking the active management path.
 - Restart tests include connected and disconnected RDP sessions, `tmux`, active

@@ -22,8 +22,8 @@ security_layer=tls
 crypt_level=high
 ssl_protocols=TLSv1.2, TLSv1.3
 tls_ciphers=HIGH:!aNULL:!eNULL:!EXPORT:!DES:!MD5:!PSK:!RC4
-certificate=
-key_file=
+certificate=/etc/xrdp/cert.pem
+key_file=/etc/xrdp/key.pem
 
 ; Color depth and display settings
 max_bpp=32

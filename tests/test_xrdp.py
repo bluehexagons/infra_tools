@@ -11,10 +11,12 @@ from desktop.xrdp_steps import (
     _generate_sesman_ini,
     _generate_xrdp_ini,
     _generate_xorg_conf,
+    _validate_xrdp_tls_certificate,
     harden_xrdp,
     install_xrdp,
 )
 from desktop.desktop_environment_steps import configure_xfce_for_rdp
+from lib.xrdp_certificate import XrdpCertificateHealth
 
 
 class TestGenerateSesmanIni(unittest.TestCase):
@@ -101,6 +103,8 @@ class TestGenerateXrdpIni(unittest.TestCase):
         self.assertIn("rdpdr=false", rendered)
         self.assertIn("rail=false", rendered)
         self.assertIn("xrdpvr=false", rendered)
+        self.assertIn("certificate=/etc/xrdp/cert.pem", rendered)
+        self.assertIn("key_file=/etc/xrdp/key.pem", rendered)
         self.assertNotIn("channel_code", rendered)
 
     def test_renders_listener_and_secure_coding_channel_defaults(self):
@@ -190,8 +194,45 @@ class TestEnsureUserInGroup(unittest.TestCase):
         self.assertFalse(result)
 
 
+class TestValidateXrdpTlsCertificate(unittest.TestCase):
+    @patch("desktop.xrdp_steps.inspect_xrdp_certificate_pair")
+    def test_accepts_healthy_or_expiring_pair(self, mock_inspect):
+        mock_inspect.return_value = XrdpCertificateHealth(
+            "warning",
+            "/etc/xrdp/cert.pem",
+            "/etc/xrdp/key.pem",
+            ("certificate expires soon",),
+        )
+
+        _validate_xrdp_tls_certificate()
+
+    @patch("desktop.xrdp_steps.run")
+    @patch("desktop.xrdp_steps.inspect_xrdp_certificate_pair")
+    def test_rejects_unusable_pair(self, mock_inspect, mock_run):
+        mock_inspect.return_value = XrdpCertificateHealth(
+            "error",
+            "/etc/xrdp/cert.pem",
+            "/etc/xrdp/key.pem",
+            ("private key is unreadable",),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "certificate validation failed"):
+            _validate_xrdp_tls_certificate()
+
+        mock_run.assert_called_once_with(
+            "systemctl stop xrdp xrdp-sesman", check=False
+        )
+
+
 class TestInstallXrdp(unittest.TestCase):
     """Test XRDP installation and configuration."""
+
+    def setUp(self):
+        certificate_patcher = patch(
+            "desktop.xrdp_steps._validate_xrdp_tls_certificate"
+        )
+        self.addCleanup(certificate_patcher.stop)
+        certificate_patcher.start()
     
     @patch('desktop.xrdp_steps.run')
     @patch('desktop.xrdp_steps.os.path.exists')

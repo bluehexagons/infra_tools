@@ -10,7 +10,7 @@ many hosts running the same job at the same instant.
 
 | Unit | Schedule | Scope |
 |------|----------|-------|
-| `security-monitor.timer` | Every 15 minutes | VM, bare-metal, and Proxmox host setups |
+| `security-monitor.timer` | Every 15 minutes | VM, bare-metal, and Proxmox host security events; XRDP certificate health when configured |
 | `auto-update-apt.timer` | Daily at 06:00 | Security-enabled setups |
 | `auto-restart-if-needed.timer` | Daily at 02:00 and 30 minutes after boot | Kernel-capable machines; saved policy chooses restart or deferral |
 | `auto-update-node.timer` | Sunday at 03:00 | Setups with Node.js/nvm |
@@ -100,6 +100,14 @@ or unavailable mounts fail visibly so the next scheduled run can retry them.
 - Security monitoring always collects and logs locally. Without `--notify`, it
   does not send events off-host.
 
+On XRDP hosts, the security monitor validates certificate/key syntax, match,
+expiry, private-key permissions, and daemon readability. It notifies only when
+health changes (including recovery or certificate fingerprint rotation), while
+an unusable pair keeps the service result failed until repaired. The warning
+window is 30 days. The monitor never logs or records private-key contents.
+
 The implementation is shared by `lib/maintenance_systemd.py`,
-`lib/update_policy.py`, `common/service_tools/cleanup_maintenance.py`, and the
-service-specific updater scripts.
+`lib/update_policy.py`, `lib/xrdp_certificate.py`,
+`common/service_tools/cleanup_maintenance.py`,
+`security/service_tools/security_monitor.py`, and the service-specific updater
+scripts.

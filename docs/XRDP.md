@@ -62,6 +62,41 @@ work. These values are seconds, matching XRDP's native configuration.
 
 **Note:** The session is tuned to let xorgxrdp own display changes. infra_tools no longer disables `xfsettingsd` outright; instead it removes stale display overrides and power-management settings that interfere with RANDR-driven resizes.
 
+### TLS certificate health
+
+The managed configuration explicitly uses `/etc/xrdp/cert.pem` and
+`/etc/xrdp/key.pem`, which are also XRDP's upstream default paths. Before the
+managed service configuration is activated, setup verifies that both are
+regular files, the private key is not exposed beyond owner access plus group
+read, OpenSSL can parse the certificate, the key matches the certificate, the
+certificate has not expired, and the `xrdp` daemon user can read both files. An
+unusable pair stops setup before service configuration and stops XRDP
+fail-closed; expiry within 30 days is a warning.
+
+The existing `security-monitor.timer` repeats these checks every 15 minutes.
+It reports a new error, upcoming expiry, recovery, or fingerprint change once
+when the state changes. An invalid, expired, mismatched, overexposed, or
+daemon-unreadable pair keeps the service check in a failed state until repaired,
+without sending the same notification every 15 minutes. State contains only
+health text and the public certificate fingerprint, never private-key content.
+
+Inspect the effective identity and daemon access without displaying the private
+key:
+
+```bash
+sudo openssl x509 -in /etc/xrdp/cert.pem \
+  -noout -subject -issuer -dates -fingerprint -sha256
+sudo runuser -u xrdp -- test -r /etc/xrdp/cert.pem
+sudo runuser -u xrdp -- test -r /etc/xrdp/key.pem
+sudo systemctl start security-monitor.service
+sudo systemctl status security-monitor.service --no-pager
+```
+
+The distro certificate is normally self-signed. Pair validity and expiry
+monitoring prevent silent TLS breakage, but do not make that identity trusted
+by RDP clients. Operator-supplied certificates, automated enrollment/rotation,
+and trust distribution remain planned transactional work.
+
 ## Configuration Details
 
 ### Xwrapper.config
@@ -186,10 +221,10 @@ and audio redirection require `--rdp-drive-redirection` and `--rdp-audio`.
 
 The compatibility default listens on all IPv4 interfaces and permits globally
 rate-limited port 3389 access unless `--rdp-bind-address` and `--rdp-source`
-narrow it. TLS is mandatory and login is restricted to `remoteusers`, but
-certificate identity, trust, expiry monitoring, and rotation are not yet
-managed. Keep RDP on a trusted private network or VPN. The remaining policy and
-audit work is tracked in the
+narrow it. TLS is mandatory, login is restricted to `remoteusers`, and
+certificate pair/expiry health is monitored. Certificate identity, client
+trust, enrollment, and rotation are not yet managed. Keep RDP on a trusted
+private network or VPN. The remaining policy and audit work is tracked in the
 [RDP desktop agent audit](plans/DESKTOP_AGENT_MAINTENANCE_AUDIT_2026-08-09.md).
 
 ### Issue: Session Freezes on Window Resize

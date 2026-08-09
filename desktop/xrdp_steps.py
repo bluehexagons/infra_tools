@@ -6,6 +6,11 @@ import shlex
 
 from lib.config import SetupConfig
 from lib.remote_utils import is_service_active, run, is_package_installed
+from lib.xrdp_certificate import (
+    DEFAULT_XRDP_CERTIFICATE,
+    DEFAULT_XRDP_PRIVATE_KEY,
+    inspect_xrdp_certificate_pair,
+)
 
 
 def _generate_sesman_ini(config: SetupConfig) -> str:
@@ -182,6 +187,21 @@ def _refresh_services(*services: str, reload_running_services: bool = True) -> N
         run(f"systemctl start {inactive_list}", check=False)
 
 
+def _validate_xrdp_tls_certificate() -> None:
+    """Refuse to activate XRDP with an unusable TLS certificate/key pair."""
+    health = inspect_xrdp_certificate_pair(
+        DEFAULT_XRDP_CERTIFICATE,
+        DEFAULT_XRDP_PRIVATE_KEY,
+    )
+    for detail in health.details:
+        prefix = "⚠" if health.status == "warning" else "✗"
+        print(f"  {prefix} {detail}")
+    if health.status == "error":
+        run("systemctl stop xrdp xrdp-sesman", check=False)
+        raise RuntimeError("XRDP TLS certificate validation failed")
+    print("  ✓ XRDP TLS certificate and private key validated")
+
+
 def install_xrdp(config: SetupConfig) -> None:
     safe_username = shlex.quote(config.username)
     xsession_path = f"/home/{config.username}/startwm.sh"
@@ -244,6 +264,7 @@ needs_root_rights=no
     run("systemctl enable xrdp-sesman", check=False)
     
     _ensure_user_in_group("xrdp", "ssl-cert")
+    _validate_xrdp_tls_certificate()
     
     # Generate sesman.ini with Xorg backend only
     if os.path.exists(sesman_config) and not os.path.exists(f"{sesman_config}.bak"):

@@ -13,9 +13,14 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 from security.service_tools import security_monitor
+from lib.xrdp_certificate import XrdpCertificateHealth
 
 
 class TestSecurityMonitor(unittest.TestCase):
+    @patch(
+        "security.service_tools.security_monitor.inspect_xrdp_certificate",
+        return_value=XrdpCertificateHealth("not_configured", "", ""),
+    )
     @patch("security.service_tools.security_monitor._save_state")
     @patch("security.service_tools.security_monitor.send_notification_safe")
     @patch("security.service_tools.security_monitor._check_ssh_failures", return_value=(0, None))
@@ -24,7 +29,8 @@ class TestSecurityMonitor(unittest.TestCase):
     @patch("security.service_tools.security_monitor._load_state", return_value={})
     @patch("security.service_tools.security_monitor.load_notification_configs_from_state", return_value=[])
     def test_collects_and_advances_cursor_without_notification_targets(
-        self, _configs, _state, mock_fail2ban, mock_audit, mock_ssh, mock_notify, mock_save
+        self, _configs, _state, mock_fail2ban, mock_audit, mock_ssh, mock_notify, mock_save,
+        _certificate,
     ):
         self.assertEqual(security_monitor.main(), 0)
 
@@ -34,6 +40,10 @@ class TestSecurityMonitor(unittest.TestCase):
         mock_notify.assert_not_called()
         mock_save.assert_called_once()
 
+    @patch(
+        "security.service_tools.security_monitor.inspect_xrdp_certificate",
+        return_value=XrdpCertificateHealth("not_configured", "", ""),
+    )
     @patch("security.service_tools.security_monitor._save_state")
     @patch("security.service_tools.security_monitor.send_notification_safe")
     @patch("security.service_tools.security_monitor._check_ssh_failures", return_value=(0, None))
@@ -42,7 +52,8 @@ class TestSecurityMonitor(unittest.TestCase):
     @patch("security.service_tools.security_monitor._load_state")
     @patch("security.service_tools.security_monitor.load_notification_configs_from_state", return_value=["cfg"])
     def test_future_cursor_is_clamped_to_recent_window(
-        self, _configs, mock_state, mock_fail2ban, _audit, _ssh, mock_notify, mock_save
+        self, _configs, mock_state, mock_fail2ban, _audit, _ssh, mock_notify, mock_save,
+        _certificate,
     ):
         mock_state.return_value = {"last_run": (datetime.now() + timedelta(days=1)).isoformat()}
         mock_fail2ban.return_value = ([], [], None)
@@ -55,6 +66,10 @@ class TestSecurityMonitor(unittest.TestCase):
         mock_notify.assert_not_called()
         mock_save.assert_called_once()
 
+    @patch(
+        "security.service_tools.security_monitor.inspect_xrdp_certificate",
+        return_value=XrdpCertificateHealth("not_configured", "", ""),
+    )
     @patch("security.service_tools.security_monitor._save_state")
     @patch("security.service_tools.security_monitor.send_notification_safe")
     @patch("security.service_tools.security_monitor._check_ssh_failures", return_value=(0, "SSH journal: denied"))
@@ -63,13 +78,43 @@ class TestSecurityMonitor(unittest.TestCase):
     @patch("security.service_tools.security_monitor._load_state", return_value={})
     @patch("security.service_tools.security_monitor.load_notification_configs_from_state", return_value=["cfg"])
     def test_collection_failure_retains_cursor_and_returns_failure(
-        self, _configs, _state, _fail2ban, _audit, _ssh, mock_notify, mock_save
+        self, _configs, _state, _fail2ban, _audit, _ssh, mock_notify, mock_save,
+        _certificate,
     ):
         self.assertEqual(security_monitor.main(), 1)
 
         mock_save.assert_not_called()
         self.assertEqual(mock_notify.call_args.kwargs["status"], "error")
         self.assertIn("SSH journal: denied", mock_notify.call_args.kwargs["details"])
+
+    @patch(
+        "security.service_tools.security_monitor.inspect_xrdp_certificate",
+        return_value=XrdpCertificateHealth(
+            "error",
+            "/etc/xrdp/cert.pem",
+            "/etc/xrdp/key.pem",
+            ("XRDP private key is unreadable",),
+            "aabbcc",
+        ),
+    )
+    @patch("security.service_tools.security_monitor._save_state")
+    @patch("security.service_tools.security_monitor.send_notification_safe")
+    @patch("security.service_tools.security_monitor._check_ssh_failures", return_value=(0, None))
+    @patch("security.service_tools.security_monitor._check_auditd", return_value=([], False, []))
+    @patch("security.service_tools.security_monitor._check_fail2ban", return_value=([], [], None))
+    @patch("security.service_tools.security_monitor._load_state", return_value={})
+    @patch("security.service_tools.security_monitor.load_notification_configs_from_state", return_value=["cfg"])
+    def test_new_certificate_failure_is_reported_and_persisted(
+        self, _configs, _state, _fail2ban, _audit, _ssh, mock_notify, mock_save,
+        _certificate,
+    ):
+        self.assertEqual(security_monitor.main(), 1)
+
+        self.assertEqual(mock_notify.call_args.kwargs["status"], "error")
+        self.assertIn("private key is unreadable", mock_notify.call_args.kwargs["details"])
+        saved_state = mock_save.call_args.args[0]
+        self.assertEqual(saved_state["rdp_certificate_status"], "error")
+        self.assertEqual(saved_state["rdp_certificate_fingerprint"], "aabbcc")
 
     @patch("security.service_tools.security_monitor.subprocess.run")
     def test_ausearch_no_matches_is_not_a_collection_error(self, mock_run):
@@ -90,6 +135,69 @@ class TestSecurityMonitor(unittest.TestCase):
                     {"last_run": "2026-08-04T00:00:00"},
                 )
                 self.assertEqual(os.stat(state_path).st_mode & 0o777, 0o600)
+
+    def test_certificate_issue_notifies_only_on_change(self):
+        health = XrdpCertificateHealth(
+            "error",
+            "/etc/xrdp/cert.pem",
+            "/etc/xrdp/key.pem",
+            ("XRDP certificate and private key do not match",),
+            "aabbcc",
+        )
+
+        event = security_monitor._certificate_health_event({}, health)
+        repeated = security_monitor._certificate_health_event(
+            {"rdp_certificate_issue": health.issue or ""}, health
+        )
+        replaced_but_still_broken = security_monitor._certificate_health_event(
+            {
+                "rdp_certificate_issue": health.issue or "",
+                "rdp_certificate_fingerprint": "different",
+            },
+            health,
+        )
+
+        self.assertIsNotNone(event)
+        assert event is not None
+        self.assertEqual(event[0], "error")
+        self.assertIsNone(repeated)
+        self.assertIsNotNone(replaced_but_still_broken)
+
+    def test_certificate_recovery_and_rotation_are_reported(self):
+        healthy = XrdpCertificateHealth(
+            "ok",
+            "/etc/xrdp/cert.pem",
+            "/etc/xrdp/key.pem",
+            fingerprint="new",
+        )
+
+        recovered = security_monitor._certificate_health_event(
+            {"rdp_certificate_issue": "expired"}, healthy
+        )
+        rotated = security_monitor._certificate_health_event(
+            {"rdp_certificate_fingerprint": "old"}, healthy
+        )
+
+        assert recovered is not None
+        assert rotated is not None
+        self.assertIn("recovered", recovered[1])
+        self.assertIn("changed", rotated[1])
+
+    def test_next_state_persists_certificate_health(self):
+        now = datetime(2026, 8, 9, 12, 0, 0)
+        health = XrdpCertificateHealth(
+            "warning",
+            "/etc/xrdp/cert.pem",
+            "/etc/xrdp/key.pem",
+            ("expires soon",),
+            "aabbcc",
+        )
+
+        state = security_monitor._next_state(now, health)
+
+        self.assertEqual(state["rdp_certificate_status"], "warning")
+        self.assertEqual(state["rdp_certificate_issue"], "expires soon")
+        self.assertEqual(state["rdp_certificate_fingerprint"], "aabbcc")
 
 
 if __name__ == "__main__":

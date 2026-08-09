@@ -9,11 +9,12 @@ Event sources (where installed):
   - fail2ban: ban/unban events from /var/log/fail2ban.log
   - auditd: identity, sudoers, SSH config, module, and privileged-exec events
   - SSH: failed authentication attempts from the system journal
+  - XRDP: TLS certificate/key validity, expiry, permissions, and readability
 
 Severity rules:
   error   — auditd detected writes to identity/sudoers/SSH-config files or
-             kernel module loads (potential system compromise indicators)
-  warning — fail2ban banned an IP address
+             kernel module loads, or XRDP TLS material is unusable
+  warning — fail2ban banned an IP address, or the XRDP certificate expires soon
   info    — SSH auth failures at or above the reporting threshold (default: 5)
 
 Logs to: /var/log/infra_tools/security/security_monitor.log
@@ -28,7 +29,7 @@ import shutil
 import subprocess
 import sys
 from datetime import datetime, timedelta
-from logging import WARNING
+from logging import ERROR, WARNING
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
@@ -36,6 +37,7 @@ from lib.logging_utils import get_service_logger, log_event
 from lib.atomic_io import write_json_atomic
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
 from lib.validation import validate_filesystem_path
+from lib.xrdp_certificate import XrdpCertificateHealth, inspect_xrdp_certificate
 
 logger = get_service_logger('security_monitor', 'security', use_syslog=True)
 
@@ -176,6 +178,68 @@ def _check_ssh_failures(since: datetime) -> tuple[int, str | None]:
 
 
 # ---------------------------------------------------------------------------
+# XRDP certificate health
+# ---------------------------------------------------------------------------
+
+def _certificate_health_event(
+    state: dict[str, object],
+    health: XrdpCertificateHealth,
+) -> tuple[str, str, str] | None:
+    """Return a notification event only when certificate health changes."""
+    previous_issue = state.get("rdp_certificate_issue")
+    if not isinstance(previous_issue, str):
+        previous_issue = ""
+    previous_fingerprint = state.get("rdp_certificate_fingerprint")
+    if not isinstance(previous_fingerprint, str):
+        previous_fingerprint = ""
+
+    current_issue = health.issue or ""
+    if current_issue:
+        fingerprint_unchanged = (
+            not previous_fingerprint
+            or not health.fingerprint
+            or previous_fingerprint == health.fingerprint
+        )
+        if current_issue == previous_issue and fingerprint_unchanged:
+            return None
+        return (
+            health.status,
+            f"XRDP TLS certificate {health.status}",
+            current_issue,
+        )
+
+    if health.status == "ok" and previous_issue:
+        return (
+            "info",
+            "XRDP TLS certificate recovered",
+            f"Certificate health is now valid: {health.certificate_path}",
+        )
+
+    if (
+        health.status == "ok"
+        and previous_fingerprint
+        and health.fingerprint
+        and previous_fingerprint != health.fingerprint
+    ):
+        return (
+            "info",
+            "XRDP TLS certificate changed",
+            f"Certificate fingerprint changed: {health.certificate_path}",
+        )
+    return None
+
+
+def _next_state(now: datetime, health: XrdpCertificateHealth) -> dict[str, object]:
+    """Build persisted collection and certificate state."""
+    next_state: dict[str, object] = {"last_run": now.isoformat()}
+    if health.status != "not_configured":
+        next_state["rdp_certificate_status"] = health.status
+        next_state["rdp_certificate_issue"] = health.issue or ""
+        next_state["rdp_certificate_fingerprint"] = health.fingerprint or ""
+    return next_state
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -210,6 +274,7 @@ def main() -> int:
     bans, unbans, fail2ban_error = _check_fail2ban(since)
     audit_keys, audit_critical, audit_errors = _check_auditd(since)
     ssh_failures, ssh_error = _check_ssh_failures(since)
+    certificate_health = inspect_xrdp_certificate()
     collection_errors = [
         error
         for error in (fail2ban_error, *audit_errors, ssh_error)
@@ -234,19 +299,36 @@ def main() -> int:
         )
         return 1
 
-    has_noteworthy = bans or audit_keys or ssh_failures >= _SSH_FAILURE_THRESHOLD
+    certificate_event = _certificate_health_event(state, certificate_health)
+    certificate_failed = certificate_health.status == "error"
+    has_noteworthy = (
+        bans
+        or audit_keys
+        or ssh_failures >= _SSH_FAILURE_THRESHOLD
+        or certificate_event is not None
+    )
     if not has_noteworthy:
+        if certificate_failed:
+            log_event(
+                logger,
+                "XRDP TLS certificate remains unhealthy",
+                level=ERROR,
+                errors=certificate_health.issue or "unknown certificate error",
+            )
+            _save_state(_next_state(now, certificate_health))
+            return 1
         log_event(logger, "No noteworthy security events")
-        _save_state({'last_run': now.isoformat()})
+        _save_state(_next_state(now, certificate_health))
         return 0
 
     # Determine notification severity.
     # Info-only audit keys (e.g. 'privileged') do not raise to warning —
     # they cover routine admin actions like sudo.
     critical_audit_keys = [k for k in audit_keys if k in _CRITICAL_KEYS]
-    if audit_critical:
+    certificate_status = certificate_event[0] if certificate_event else "info"
+    if audit_critical or certificate_status == "error":
         status = 'error'
-    elif bans or critical_audit_keys:
+    elif bans or critical_audit_keys or certificate_status == "warning":
         status = 'warning'
     else:
         status = 'info'
@@ -263,6 +345,8 @@ def main() -> int:
         detail_parts.append(f"Audit events: {', '.join(audit_keys)}")
     if ssh_failures >= _SSH_FAILURE_THRESHOLD:
         detail_parts.append(f"SSH auth failures: {ssh_failures}")
+    if certificate_event:
+        detail_parts.append(certificate_event[2])
 
     details = '\n'.join(detail_parts)
 
@@ -274,6 +358,8 @@ def main() -> int:
         summary_parts.append(f"audit: {', '.join(audit_keys)}")
     if ssh_failures >= _SSH_FAILURE_THRESHOLD:
         summary_parts.append(f"{ssh_failures} SSH failures")
+    if certificate_event:
+        summary_parts.append(certificate_event[1])
 
     subject = f"Security events: {', '.join(summary_parts)}"
     since_str = since.strftime('%Y-%m-%d %H:%M:%S')
@@ -290,8 +376,8 @@ def main() -> int:
 
     log_event(logger, "Security monitor check complete",
               status=status, events=', '.join(summary_parts))
-    _save_state({'last_run': now.isoformat()})
-    return 0
+    _save_state(_next_state(now, certificate_health))
+    return 1 if certificate_failed else 0
 
 
 if __name__ == '__main__':
