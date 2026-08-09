@@ -6,6 +6,8 @@ import os
 import subprocess
 from typing import Optional
 
+from lib.atomic_io import write_json_atomic
+
 
 def parse_deploy_spec(deploy_spec: str) -> tuple[Optional[str], str]:
     """Parse deployment spec into (domain, path). Returns (None, path) for local paths."""
@@ -137,8 +139,7 @@ def save_deployment_metadata(deployment_path: str, git_url: str, commit_hash: Op
     metadata_path = get_deployment_metadata_path(deployment_path)
     
     try:
-        with open(metadata_path, 'w') as f:
-            json.dump(metadata, f, indent=2)
+        write_json_atomic(metadata_path, metadata)
     except OSError as e:
         print(f"  ⚠ Warning: Could not save deployment metadata: {e}")
 
@@ -189,4 +190,3 @@ def should_redeploy(deployment_path: str, git_url: str, new_commit_hash: Optiona
         return True
     
     return False
-

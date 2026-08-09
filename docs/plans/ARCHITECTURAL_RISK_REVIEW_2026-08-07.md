@@ -88,17 +88,25 @@ Each finding lists: severity, evidence, validation outcome, and direct follow-up
 - **Impact**
   - Partial outages are possible on failed setup runs; cleanup becomes user-facing operational debt until rerun success.
 
-### ARCH-06: State/cache file writes are best-effort and non-atomic
+### ARCH-06: State/cache file writes were best-effort and non-atomic (resolved)
 
 **Severity: Medium**
 
 - **Evidence**
-  - `lib/machine_state.py:128-129`, `lib/cache.py:76-79`, `lib/cache.py:112-114`, and `web/service_tools/webhook_manager.py:46-48` write JSON directly via `open(..., "w")` without temp-file+rename.
-  - `lib/machine_state.py:165-170` and `lib/cache.py:168-170` swallow JSON/OSError and fall back to defaults/default config.
+  - The shared `lib.atomic_io.write_json_atomic()` now protects all project
+    JSON state/configuration writes, including machine/setup state,
+    caches/history, webhook configuration and jobs, deployment/release
+    metadata, host/network inventories, Cloudflare state, deploy-target config,
+    remote argument files, security/maintenance cursors, and Gogs admin
+    credentials.
+  - Readers such as `lib.machine_state.py:165-170` and `lib.cache.py:129-140`
+    still swallow decode/I/O errors and fall back to defaults or omission.
 - **Validation**
   - Confirmed by direct line inspection of write and fallback paths.
 - **Impact**
-  - Crash/interruption during write can leave corrupted state; recovery by fallback silently hides corruption and increases debugging latency.
+  - The partial-write risk is closed for JSON state/configuration, but corrupted
+    state can still be hidden by permissive readers and lacks schema-versioned
+    remediation.
 
 ### ARCH-07: Manifest/build env assembly did not validate variable names (resolved)
 
@@ -138,7 +146,9 @@ Validation was performed by static evidence checks (no behavior-altering actions
 2. Add import-time fault isolation for plugin/validator discovery (cache and quarantine malformed plugin modules).
 3. Replace `accept-new` in production deploy paths with managed known-host bootstrapping and `yes/no` policy enforcement.
 4. Make setup teardown transaction-like (snapshot, apply, rollback marker) so cleanup failures are reversible.
-5. Convert all persistent JSON writes to atomic temp-file write + `os.replace`, and tighten behavior on corrupted state to surface explicit remediation steps.
+5. Tighten corrupted-state behavior with schema versions and explicit
+   remediation; audit remaining non-JSON configuration writes for the same
+   atomic and permission guarantees.
 6. Keep repository-script execution as an explicit trust boundary while the
    direct and webhook deployment engines converge.
 
@@ -151,9 +161,14 @@ Validation was performed by static evidence checks (no behavior-altering actions
   failed result, setup still removes managed services before running steps,
   manifest deploy still removes the active tree before building, manifest
   health failures still warn without failing, the shared SSH builders still
-  use `accept-new`, plugin discovery still imports every built-in plugin
-  eagerly, and the named state/cache files still use direct JSON writes.
-- ARCH-01, ARCH-03, ARCH-05, ARCH-06, and ARCH-08 are sequenced in
+  use `accept-new`, and plugin discovery still imports every built-in plugin
+  eagerly. The first atomic persistence slice landed, but corrupt-state
+  handling remains permissive.
+- **2026-08-09 — ARCH-06 resolved:** introduced the shared writer and migrated
+  all JSON state/configuration paths, including secret-bearing files with mode
+  `0600`. Tests cover complete writes, replacement failure preservation, and
+  permissions. Corrupt-state remediation remains tracked under ARCH-08.
+- ARCH-01, ARCH-03, ARCH-05, and ARCH-08 are sequenced in
   [Transactional execution and reconciliation](TRANSACTIONAL_EXECUTION.md).
   ARCH-02 remains a P3 startup-isolation task in [the roadmap](ROADMAP.md), and
   ARCH-04 is a trust-boundary requirement for

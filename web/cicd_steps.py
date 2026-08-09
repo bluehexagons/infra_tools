@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import os
 import secrets
-import json
 
+from lib.atomic_io import write_json_atomic, write_text_atomic
 from lib.config import SetupConfig
 from lib.remote_utils import run, is_package_installed
 from lib.systemd_service import cleanup_service
@@ -96,10 +96,7 @@ def generate_webhook_secret(config: SetupConfig) -> str:
     
     secret = secrets.token_urlsafe(32)
     
-    with open(secret_file, 'w') as f:
-        f.write(secret)
-    
-    os.chmod(secret_file, 0o600)
+    write_text_atomic(secret_file, secret, mode=0o600)
     run("chown root:root /etc/infra_tools/cicd/webhook_secret")
     
     _create_env_file(env_file, secret)
@@ -112,11 +109,11 @@ def generate_webhook_secret(config: SetupConfig) -> str:
 
 def _create_env_file(env_file: str, secret: str) -> None:
     """Create environment file for systemd service with restricted permissions."""
-    with open(env_file, 'w') as f:
-        f.write(f"WEBHOOK_SECRET={secret}\n")
-        f.write("WEBHOOK_PORT=8765\n")
-    
-    os.chmod(env_file, 0o600)
+    write_text_atomic(
+        env_file,
+        f"WEBHOOK_SECRET={secret}\nWEBHOOK_PORT=8765\n",
+        mode=0o600,
+    )
     run(f"chown root:root {env_file}")
 
 
@@ -144,10 +141,7 @@ def create_default_webhook_config(config: SetupConfig) -> None:
         ]
     }
     
-    with open(config_file, 'w') as f:
-        json.dump(default_config, f, indent=2)
-    
-    os.chmod(config_file, 0o644)
+    write_json_atomic(config_file, default_config, mode=0o644)
     
     print("  ✓ Created default webhook configuration")
     print(f"  ℹ Edit configuration: {config_file}")

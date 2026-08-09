@@ -9,6 +9,7 @@ import shutil
 import subprocess
 from typing import Optional, Any
 
+from lib.atomic_io import write_json_atomic
 from lib.config import AUTO_MACHINE_TYPE, DEFAULT_MACHINE_TYPE, MACHINE_TYPES
 from lib.plugin_registry import get_system_type_names
 
@@ -125,8 +126,7 @@ def save_machine_state(
     if extra_data:
         state.update(extra_data)
     
-    with open(STATE_FILE, 'w') as f:
-        json.dump(state, f, indent=2)
+    write_json_atomic(STATE_FILE, state)
 
 
 def _default_machine_state() -> dict[str, Any]:
@@ -250,8 +250,7 @@ def save_setup_config(config_dict: dict[str, Any]) -> None:
     """Save the setup configuration to the target system for later recall."""
     os.makedirs(STATE_DIR, exist_ok=True)
     
-    with open(SETUP_CONFIG_FILE, 'w') as f:
-        json.dump(config_dict, f, indent=2)
+    write_json_atomic(SETUP_CONFIG_FILE, config_dict)
 
 
 def _validate_setup_config(config: Any) -> Optional[str]:

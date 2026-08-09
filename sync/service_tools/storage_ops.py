@@ -18,7 +18,6 @@ import io
 import json
 import fcntl
 import math
-import tempfile
 import time
 from datetime import datetime
 from typing import Optional
@@ -28,6 +27,7 @@ from logging import ERROR, WARNING
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
 from lib.logging_utils import get_service_logger, log_event
+from lib.atomic_io import write_json_atomic
 from lib.notifications import send_notification, parse_notification_args
 from lib.machine_state import load_setup_config
 from lib.mount_utils import get_mount_ancestor
@@ -136,30 +136,7 @@ def load_last_run() -> dict:
 def save_last_run(state: dict) -> None:
     """Save last run timestamps atomically."""
     validate_filesystem_path(STATE_FILE, must_exist=False)
-    state_dir = os.path.dirname(STATE_FILE)
-    os.makedirs(state_dir, exist_ok=True)
-    temporary_path = ''
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode='w',
-            encoding='utf-8',
-            dir=state_dir,
-            prefix=f'.{os.path.basename(STATE_FILE)}.',
-            delete=False,
-        ) as handle:
-            temporary_path = handle.name
-            json.dump(state, handle, indent=2, sort_keys=True)
-            handle.write('\n')
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.chmod(temporary_path, 0o600)
-        os.replace(temporary_path, STATE_FILE)
-    finally:
-        if temporary_path:
-            try:
-                os.unlink(temporary_path)
-            except FileNotFoundError:
-                pass
+    write_json_atomic(STATE_FILE, state, mode=0o600, sort_keys=True)
 
 
 def is_operation_due(last_run: dict, op_id: str, interval: str, first_run_default: bool = True) -> bool:

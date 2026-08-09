@@ -27,13 +27,13 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 from datetime import datetime, timedelta
 from logging import WARNING
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
 from lib.logging_utils import get_service_logger, log_event
+from lib.atomic_io import write_json_atomic
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
 from lib.validation import validate_filesystem_path
 
@@ -73,30 +73,7 @@ def _load_state() -> dict[str, object]:
 def _save_state(state: dict[str, object]) -> None:
     """Persist the collection cursor without exposing a partial JSON file."""
     validate_filesystem_path(_STATE_FILE, must_exist=False)
-    state_dir = os.path.dirname(_STATE_FILE)
-    os.makedirs(state_dir, exist_ok=True)
-    temporary_path = ''
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode='w',
-            encoding='utf-8',
-            dir=state_dir,
-            prefix=f'.{os.path.basename(_STATE_FILE)}.',
-            delete=False,
-        ) as handle:
-            temporary_path = handle.name
-            json.dump(state, handle, indent=2, sort_keys=True)
-            handle.write('\n')
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.chmod(temporary_path, 0o600)
-        os.replace(temporary_path, _STATE_FILE)
-    finally:
-        if temporary_path:
-            try:
-                os.unlink(temporary_path)
-            except FileNotFoundError:
-                pass
+    write_json_atomic(_STATE_FILE, state, mode=0o600, sort_keys=True)
 
 
 # ---------------------------------------------------------------------------

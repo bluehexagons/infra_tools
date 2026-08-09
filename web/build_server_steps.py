@@ -7,6 +7,7 @@ import json
 import shlex
 
 from common.common_steps import install_node_for_user, install_or_update_uv
+from lib.atomic_io import write_json_atomic
 from lib.config import SetupConfig
 from lib.remote_utils import run, is_package_installed
 from lib.workspace import get_known_hosts_path
@@ -65,10 +66,7 @@ def configure_deploy_targets(config: SetupConfig) -> None:
             "ssh_key": "/var/lib/infra_tools/cicd/.ssh/deploy_key",
         }
     
-    with open(targets_file, 'w') as f:
-        json.dump(existing_targets, f, indent=2)
-    
-    os.chmod(targets_file, 0o644)
+    write_json_atomic(targets_file, existing_targets, mode=0o644)
     
     print(f"  ✓ Configured {len(config.deploy_targets)} deploy target(s)")
     for target in config.deploy_targets:

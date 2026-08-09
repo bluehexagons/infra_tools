@@ -23,6 +23,8 @@ import subprocess
 import argparse
 from typing import Optional
 
+from lib.atomic_io import write_json_atomic
+
 try:
     import argcomplete
 except ImportError:
@@ -43,9 +45,7 @@ def load_config() -> dict:
 
 def save_config(config: dict) -> None:
     """Save webhook configuration."""
-    os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
-    with open(CONFIG_FILE, 'w') as f:
-        json.dump(config, f, indent=2)
+    write_json_atomic(CONFIG_FILE, config)
     
     print(f"Configuration saved to {CONFIG_FILE}")
 

@@ -14,6 +14,7 @@ import os
 from dataclasses import asdict, dataclass, field
 from typing import Optional, cast
 
+from lib.atomic_io import write_json_atomic
 from lib.types import JSONDict, JSONList
 from lib.validation import validate_filesystem_path
 from lib.validators import validate_host, validate_username
@@ -191,15 +192,7 @@ def save_proxmox_hosts(
     ensure_workspace_dir(workspace)
     path = get_proxmox_hosts_path(workspace)
     payload = [host.to_dict() for host in hosts]
-    tmp_path = path + ".tmp"
-    with open(tmp_path, "w", encoding="utf-8") as fh:
-        json.dump(payload, fh, indent=2, sort_keys=True)
-        fh.write("\n")
-    os.replace(tmp_path, path)
-    try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
+    write_json_atomic(path, payload, mode=0o600, sort_keys=True)
     return path
 
 

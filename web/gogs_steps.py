@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import os
 import secrets
 import shlex
 from typing import Any, Mapping
 
+from lib.atomic_io import write_json_atomic, write_text_atomic
 from lib.config import SetupConfig
 from lib.nginx_config import SSL_CIPHERS, SSL_PROTOCOLS, generate_self_signed_cert, get_ssl_cert_path
 from lib.release_management import (
@@ -241,12 +241,7 @@ def _load_or_create_gogs_secret_key() -> str:
         return value
 
     value = secrets.token_hex(32)
-    state_dir = os.path.dirname(GOGS_SECRET_KEY_FILE)
-    os.makedirs(state_dir, exist_ok=True)
-    with open(GOGS_SECRET_KEY_FILE, "w", encoding="utf-8") as file_obj:
-        file_obj.write(value)
-        file_obj.write("\n")
-    os.chmod(GOGS_SECRET_KEY_FILE, 0o600)
+    write_text_atomic(GOGS_SECRET_KEY_FILE, f"{value}\n")
     return value
 
 
@@ -499,12 +494,12 @@ def _gogs_admin_user_exists(config_path: str, username: str, data_path: str) -> 
 
 
 def _write_admin_credentials(username: str, password: str) -> None:
-    state_dir = os.path.dirname(GOGS_ADMIN_CREDENTIALS_FILE)
-    os.makedirs(state_dir, exist_ok=True)
-    with open(GOGS_ADMIN_CREDENTIALS_FILE, "w", encoding="utf-8") as file_obj:
-        json.dump({"username": username, "password": password}, file_obj, indent=2, sort_keys=True)
-        file_obj.write("\n")
-    os.chmod(GOGS_ADMIN_CREDENTIALS_FILE, 0o600)
+    write_json_atomic(
+        GOGS_ADMIN_CREDENTIALS_FILE,
+        {"username": username, "password": password},
+        mode=0o600,
+        sort_keys=True,
+    )
 
 
 def _ensure_gogs_admin_account(config: SetupConfig, config_path: str, data_path: str) -> None:

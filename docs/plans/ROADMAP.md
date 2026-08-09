@@ -33,8 +33,8 @@ The ordering remains justified by the current implementation:
 - full setup removes existing managed services before replacement steps run;
 - manifest deployment stops services and deletes the current tree before the
   replacement build, while exhausted health checks only warn;
-- persistent machine state, caches, and webhook configuration still include
-  non-atomic writes and permissive corrupt-state fallback; and
+- persistent JSON state/configuration now uses the shared atomic writer, but
+  corrupt-state readers still fall back permissively; and
 - privileged shared SSH command builders still accept first-seen host keys.
 
 The manifest environment-key injection finding is resolved. CI now tests
@@ -48,8 +48,8 @@ The best next work packets are:
    best-effort contracts.
 2. Decide whether to redesign or remove the currently unused
    `lib/transaction.py` framework; do not build a parallel transaction layer.
-3. Introduce one shared atomic JSON writer and migrate machine/setup state
-   first, then caches and webhook configuration.
+3. Replace permissive corrupt-state fallbacks with schema/version checks and
+   actionable remediation, then define durable operation markers.
 4. Stage manifest releases and make health-check failure block activation and
    restore the previous release.
 5. Replace automatic SSH first-use trust with explicit enrollment before
@@ -155,9 +155,8 @@ security, package, service, and networking behavior.
 
 Small, well-contained fixes should not wait for a larger phase. Good follow-ups
 include plugin import fault isolation, consistent `--json` support for
-read-only commands, and a local package-install smoke test. Atomic state writes
-have moved into the first P0 delivery slice because durable recovery markers
-depend on them.
+read-only commands, a local package-install smoke test, and auditing remaining
+non-JSON configuration writes for atomic replacement and permissions.
 
 ## Deliberately deferred
 

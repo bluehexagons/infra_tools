@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import io
-import json
 import os
 import pwd
 import shlex
@@ -21,6 +20,7 @@ try:
 except ImportError:
     argcomplete = None
 
+from lib.atomic_io import write_json_atomic
 from lib.config import DEFAULT_MACHINE_TYPE, SetupConfig, _normalize_container_storage
 from lib.credentials import prepare_runtime_config, store_cli_credentials
 from lib.proxmox_hosts import ProxmoxHost, find_proxmox_host, sync_proxmox_host
@@ -463,10 +463,7 @@ def _expand_remote_args(remote_args: list[str]) -> list[str]:
 def _write_remote_args_file(build_dir: str, remote_arg_tokens: list[str]) -> str:
     """Persist runtime argv tokens outside the process table."""
     args_path = os.path.join(build_dir, REMOTE_ARGS_FILENAME)
-    with open(args_path, "w", encoding="utf-8") as file_obj:
-        json.dump(remote_arg_tokens, file_obj)
-        file_obj.write("\n")
-    os.chmod(args_path, 0o600)
+    write_json_atomic(args_path, remote_arg_tokens, mode=0o600, indent=None)
     return args_path
 
 

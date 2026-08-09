@@ -5,8 +5,8 @@ from __future__ import annotations
 import copy
 import json
 import os
-import tempfile
 
+from lib.atomic_io import write_json_atomic
 from lib.config import SetupConfig
 from lib.workspace import ensure_workspace_dir, get_credentials_path
 
@@ -91,7 +91,7 @@ def load_workspace_credentials(workspace: str | None = None) -> dict[str, str]:
 
 def save_workspace_credentials(credentials: dict[str, str], workspace: str | None = None) -> None:
     """Persist workspace credentials using the REVIEW_1 JSON layout."""
-    workspace_dir = ensure_workspace_dir(workspace)
+    ensure_workspace_dir(workspace)
     credentials_path = get_credentials_path(workspace)
     normalized_credentials = {
         _normalize_credential_username(username): _normalize_credential_password(password)
@@ -105,27 +105,7 @@ def save_workspace_credentials(credentials: dict[str, str], workspace: str | Non
         },
     }
 
-    old_umask = os.umask(0o177)
-    try:
-        fd, temp_path = tempfile.mkstemp(
-            dir=workspace_dir,
-            prefix=".credentials-",
-            suffix=".json",
-            text=True,
-        )
-    finally:
-        os.umask(old_umask)
-
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as file_obj:
-            json.dump(payload, file_obj, indent=2, sort_keys=True)
-            file_obj.write("\n")
-        os.chmod(temp_path, 0o600)
-        os.replace(temp_path, credentials_path)
-        os.chmod(credentials_path, 0o600)
-    finally:
-        if os.path.exists(temp_path):
-            os.unlink(temp_path)
+    write_json_atomic(credentials_path, payload, mode=0o600, sort_keys=True)
 
 
 def set_workspace_credential(username: str, password: str, workspace: str | None = None) -> None:

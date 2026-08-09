@@ -24,9 +24,13 @@ ARCH-08 from the [architectural risk review](ARCHITECTURAL_RISK_REVIEW_2026-08-0
   active deployment tree before building its replacement.
 - Manifest health polling prints a warning after exhaustion and deployment is
   still recorded as successful.
-- Machine state, setup config, caches, and webhook configuration still contain
-  direct JSON writes; atomic writers exist elsewhere but are duplicated and
-  are not a shared persistence contract.
+- A shared `lib.atomic_io.write_json_atomic()` now protects machine/setup state,
+  caches/history, webhook and deploy-target configuration, deployment/release
+  metadata, host/network inventories, Cloudflare state, remote argument files,
+  and Gogs admin credentials. Its tests cover replacement interruption and
+  restrictive permissions.
+- Readers still fall back on corrupt JSON in several paths; schema versions and
+  actionable remediation remain open work.
 - All shared SSH/SCP/rsync builders still use
   `StrictHostKeyChecking=accept-new`.
 
@@ -72,9 +76,12 @@ verification-based installers and probes intentionally inspect failed results.
 
 ## Phase 2: Atomic persistent state
 
-Create one shared atomic JSON writer using a same-directory temporary file,
-flush and `fsync`, restrictive mode, and `os.replace`. Move workspace caches,
-machine state, operation history, and webhook configuration to it.
+The first implementation slice (2026-08-09) created one shared atomic JSON
+writer using a same-directory temporary file, flush and `fsync`, restrictive
+mode, and `os.replace`, then migrated workspace caches, machine/setup state,
+operation history, webhook/deploy configuration, release metadata, host/network
+inventories, Cloudflare state, remote argument files, and Gogs credentials to
+it.
 
 Readers should distinguish:
 
@@ -83,7 +90,9 @@ Readers should distinguish:
 - unsupported schema versions, which should fail without overwriting data.
 
 State schemas should gain an explicit version when the next incompatible
-change is required.
+change is required. Replace permissive corrupt-state fallbacks with an error
+that names the file and remediation, while retaining defaults only for missing
+state where they are valid.
 
 ## Phase 3: Staged service reconciliation
 
@@ -145,10 +154,10 @@ use mode, but automated privileged paths should not enable it by default.
 
 ## Recommended first delivery slice
 
-Land the caller inventory and transaction-framework decision first. Then add a
-single shared atomic JSON writer and migrate machine state plus setup config as
-the first low-coupling implementation. This establishes crash-safe persistence
-for the operation markers needed by later setup and deployment rollback work.
+The atomic persistence slice is complete. The next delivery should land the
+`remote_utils.run()` caller inventory and transaction-framework decision, then
+use the shared writer for durable operation markers and add fault-injection
+tests around setup/deployment interruption.
 
 ## Non-goals
 

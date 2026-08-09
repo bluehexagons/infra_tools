@@ -11,6 +11,7 @@ from dataclasses import asdict
 from typing import Optional, Any
 
 from lib.config import SetupConfig
+from lib.atomic_io import write_json_atomic
 from lib.workspace import get_history_dir, get_setup_cache_dir
 
 
@@ -73,10 +74,7 @@ def _write_history_entry(
     if config.tags:
         history_data["tags"] = config.tags
 
-    with open(history_path, "w", encoding="utf-8") as f:
-        json.dump(history_data, f, indent=2)
-        f.write("\n")
-    os.chmod(history_path, 0o600)
+    write_json_atomic(history_path, history_data)
 
 
 def save_setup_command(
@@ -109,9 +107,7 @@ def save_setup_command(
     if success is not None:
         cache_data["last_success"] = success
     
-    with open(cache_path, "w", encoding="utf-8") as f:
-        json.dump(cache_data, f, indent=2)
-        f.write("\n")
+    write_json_atomic(cache_path, cache_data)
 
     if start_time is not None and end_time is not None and success is not None:
         _write_history_entry(

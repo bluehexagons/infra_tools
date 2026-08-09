@@ -118,10 +118,9 @@ class TestCICDSteps(unittest.TestCase):
     
     @patch('web.cicd_steps.os.path.exists')
     @patch('web.cicd_steps.secrets.token_urlsafe')
-    @patch('builtins.open', new_callable=mock_open)
-    @patch('web.cicd_steps.os.chmod')
+    @patch('web.cicd_steps.write_text_atomic')
     @patch('web.cicd_steps.run')
-    def test_generate_webhook_secret_new(self, mock_run, mock_chmod, mock_file, mock_token, mock_exists):
+    def test_generate_webhook_secret_new(self, mock_run, mock_write_text, mock_token, mock_exists):
         """Test that we generate a new webhook secret."""
         mock_exists.return_value = False
         mock_token.return_value = "test-secret-token"
@@ -131,14 +130,13 @@ class TestCICDSteps(unittest.TestCase):
         
         self.assertEqual(secret, "test-secret-token")
         mock_token.assert_called_once_with(32)
-        self.assertEqual(mock_file.call_count, 2)
-        self.assertEqual(mock_chmod.call_count, 2)
+        self.assertEqual(mock_write_text.call_count, 2)
     
     @patch('web.cicd_steps.os.path.exists')
-    @patch('web.cicd_steps.os.chmod')
     @patch('builtins.open', new_callable=mock_open, read_data="existing-secret")
+    @patch('web.cicd_steps.write_text_atomic')
     @patch('web.cicd_steps.run')
-    def test_generate_webhook_secret_existing(self, mock_run, mock_file, mock_chmod, mock_exists):
+    def test_generate_webhook_secret_existing(self, mock_run, mock_write_text, mock_file, mock_exists):
         """Test that we reuse existing webhook secret."""
         def exists_side_effect(path):
             return path.endswith('webhook_secret')
@@ -150,21 +148,18 @@ class TestCICDSteps(unittest.TestCase):
         self.assertEqual(secret, "existing-secret")
     
     @patch('web.cicd_steps.os.path.exists')
-    @patch('builtins.open', new_callable=mock_open)
-    @patch('web.cicd_steps.json.dump')
-    @patch('web.cicd_steps.os.chmod')
-    def test_create_default_webhook_config(self, mock_chmod, mock_json_dump, mock_file, mock_exists):
+    @patch('web.cicd_steps.write_json_atomic')
+    def test_create_default_webhook_config(self, mock_write_json, mock_exists):
         """Test that we create default webhook configuration."""
         mock_exists.return_value = False
         mock_config = MagicMock()
         
         create_default_webhook_config(mock_config)
         
-        mock_file.assert_called_once()
-        mock_json_dump.assert_called_once()
+        mock_write_json.assert_called_once()
         
         # Check that config has repositories key
-        config_data = mock_json_dump.call_args[0][0]
+        config_data = mock_write_json.call_args[0][1]
         self.assertIn('repositories', config_data)
         self.assertIsInstance(config_data['repositories'], list)
     
@@ -469,10 +464,8 @@ class TestBuildServerSteps(unittest.TestCase):
     
     @patch('web.build_server_steps.os.path.exists')
     @patch('web.build_server_steps.os.makedirs')
-    @patch('web.build_server_steps.os.chmod')
-    @patch('builtins.open', new_callable=mock_open)
-    @patch('web.build_server_steps.json.dump')
-    def test_configure_deploy_targets(self, mock_json_dump, mock_file, mock_chmod, mock_makedirs, mock_exists):
+    @patch('web.build_server_steps.write_json_atomic')
+    def test_configure_deploy_targets(self, mock_write_json, mock_makedirs, mock_exists):
         """Test that we configure deploy targets."""
         mock_exists.return_value = False
         mock_config = MagicMock()
@@ -481,8 +474,8 @@ class TestBuildServerSteps(unittest.TestCase):
         from web.build_server_steps import configure_deploy_targets
         configure_deploy_targets(mock_config)
         
-        mock_json_dump.assert_called_once()
-        config_data = mock_json_dump.call_args[0][0]
+        mock_write_json.assert_called_once()
+        config_data = mock_write_json.call_args[0][1]
         self.assertIn('app1.example.com', config_data)
         self.assertIn('app2.example.com', config_data)
 

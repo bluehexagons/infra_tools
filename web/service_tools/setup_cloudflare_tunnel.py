@@ -21,6 +21,7 @@ from typing import Optional, Any
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
 from lib.types import StrDict, JSONDict
+from lib.atomic_io import write_json_atomic
 
 
 CONFIG_DIR = "/etc/cloudflared"
@@ -151,10 +152,7 @@ def create_tunnel(tunnel_name: str) -> dict[str, Any]:
     with open(credentials_file, 'r') as src:
         credentials_data = json.load(src)
     
-    with open(dest_credentials, 'w') as dst:
-        json.dump(credentials_data, dst, indent=2)
-    
-    os.chmod(dest_credentials, 0o600)
+    write_json_atomic(dest_credentials, credentials_data, mode=0o600)
     
     print(f"✓ Tunnel created: {tunnel_name} (ID: {tunnel_id})")
     
@@ -232,10 +230,7 @@ def save_state(tunnel: JSONDict, sites: list[StrDict]):
     
     os.makedirs(CONFIG_DIR, mode=0o755, exist_ok=True)
     
-    with open(STATE_FILE, 'w') as f:
-        json.dump(state, f, indent=2)
-    
-    os.chmod(STATE_FILE, 0o600)
+    write_json_atomic(STATE_FILE, state, mode=0o600)
 
 
 def load_state() -> Optional[dict[str, Any]]:

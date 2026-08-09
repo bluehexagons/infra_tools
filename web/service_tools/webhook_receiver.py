@@ -30,6 +30,7 @@ from typing import Optional
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
 from lib.logging_utils import get_service_logger, log_event
+from lib.atomic_io import write_json_atomic
 from web.service_tools.cicd_security import (
     MAX_WEBHOOK_PAYLOAD_BYTES,
     get_workspace_name,
@@ -126,10 +127,7 @@ def trigger_cicd_job(repo_url: str, ref: str, commit_sha: str, pusher: str) -> b
             f"{timestamp}_{safe_repo_name}_{safe_commit_sha[:12]}_{nonce}.json",
         )
         # Atomic write so the path activator never sees a half-written file.
-        tmp_file = job_file + ".tmp"
-        with open(tmp_file, 'w') as f:
-            json.dump(job_data, f, indent=2)
-        os.replace(tmp_file, job_file)
+        write_json_atomic(job_file, job_data)
         
         log_event(
             logger,

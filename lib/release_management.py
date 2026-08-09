@@ -8,6 +8,7 @@ import shlex
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from lib.atomic_io import write_json_atomic
 from lib.remote_utils import run
 from lib.update_policy import order_preferred_github_releases
 
@@ -158,14 +159,7 @@ def load_json_state(
 
 def write_json_state(path: str, payload: Mapping[str, Any], *, mode: int | None = None) -> None:
     """Persist a JSON state mapping."""
-    state_dir = os.path.dirname(path)
-    if state_dir:
-        os.makedirs(state_dir, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as file_obj:
-        json.dump(payload, file_obj, indent=2, sort_keys=True)
-        file_obj.write("\n")
-    if mode is not None:
-        os.chmod(path, mode)
+    write_json_atomic(path, payload, mode=mode or 0o600, sort_keys=True)
 
 
 def install_binary_release(

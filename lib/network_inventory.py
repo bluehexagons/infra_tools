@@ -7,6 +7,7 @@ import os
 from dataclasses import asdict, dataclass, field
 from typing import Optional, Union, cast
 
+from lib.atomic_io import write_json_atomic
 from lib.types import JSONDict
 from lib.validation import (
     validate_network_cidr,
@@ -184,15 +185,7 @@ def save_network_profiles(
         validate_network_profile(profile)
     path = get_network_inventory_path(workspace)
     payload = {"profiles": [profile.to_dict() for profile in profiles]}
-    tmp_path = path + ".tmp"
-    with open(tmp_path, "w", encoding="utf-8") as file_obj:
-        json.dump(payload, file_obj, indent=2, sort_keys=True)
-        file_obj.write("\n")
-    os.replace(tmp_path, path)
-    try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
+    write_json_atomic(path, payload, mode=0o600, sort_keys=True)
     return path
 
 
