@@ -36,6 +36,7 @@ infra_tools.py python-tools [options]
 infra_tools.py bootstrap [options]
 infra_tools.py self-setup [options]
 infra_tools.py agent doctor
+infra_tools.py agent update [options]
 infra_tools.py maintenance github <audit|prune> [options]
 infra_tools.py shell
 infra_tools.py network ...
@@ -118,7 +119,7 @@ infra_tools.py setup server_dev 10.0.0.10 agentuser \
 | Flag | Description |
 |------|-------------|
 | `--gh` | Install GitHub CLI from GitHub's Debian apt repository |
-| `--codex` | Install Codex CLI with [OpenAI's official installer](https://github.com/openai/codex#installation) |
+| `--codex` | Install Codex CLI with [OpenAI's official installer](https://learn.chatgpt.com/docs/codex/cli) |
 | `--claude` | Install Claude Code with [Anthropic's native installer](https://code.claude.com/docs/en/installation) |
 | `--opencode` | Install OpenCode with its [official installer](https://opencode.ai/docs/) |
 | `--t3code` | Install the verified [official T3 Code](https://github.com/pingdotgg/t3code) x86_64 AppImage, command, and desktop entry |
@@ -163,15 +164,35 @@ contents:
 infra_tools agent doctor
 infra_tools agent doctor --tool t3code
 infra_tools agent doctor --tool codex --tool claude --json
+infra_tools agent update --dry-run
+infra_tools agent update --tool codex --tool claude
+infra_tools agent update --json
 ```
 
 The default doctor check requires GitHub CLI, Codex CLI, Claude Code, and
 OpenCode. Missing credential files are reported as sign-in reminders but do not
 make an otherwise installed tool unhealthy. GitHub CLI and the Debian utility
-baseline receive normal APT updates. Codex CLI, Claude Code, and OpenCode do not
-currently have infra_tools-managed update timers, and rerunning setup skips an
-already available command. See the [agent-host maintenance audit](./plans/AGENT_CLI_MAINTENANCE_AUDIT_2026-08-09.md)
-for the planned versioned update and audit workflow.
+baseline receive normal APT updates.
+
+`agent update` deliberately updates the three user-installed terminal agents;
+it is never run by an automatic host timer. The command uses each vendor's
+supported path: OpenAI's standalone installer for Codex, `claude update`, and
+`opencode upgrade`. It refuses executables resolved outside the current user's
+home so package-manager installations remain under their package manager.
+Before changing a tool it checks `--version` and `--help`, retains the previous
+executable, writes an atomic `in_progress` record, and repeats both checks after
+the vendor updater exits. A changed or unusable executable is rolled back when
+the update fails. Non-secret results are stored with mode `0600` in
+`~/.local/state/infra_tools/agent-tools.json`; one prior executable per tool is
+retained in the adjacent `agent-backups` directory. Codex installer bytes are
+downloaded before execution with a size limit and their observed SHA-256 is
+recorded, but upstream does not publish a pinned digest through this installer
+contract, so the hash is audit evidence rather than independent publisher
+verification.
+
+Rerunning setup still skips an already available command. See the
+[agent-host maintenance audit](./plans/AGENT_CLI_MAINTENANCE_AUDIT_2026-08-09.md)
+for remaining version-pin, trust, and audit work.
 
 The normal restart policy can force a reboot after seven days of active-session
 deferrals. For a host running long unattended agent tasks, use both

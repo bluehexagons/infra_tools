@@ -1,19 +1,37 @@
-"""Local agentic coding tool diagnostics."""
+"""Local agentic coding tool diagnostics and lifecycle management."""
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
 import subprocess
+import tempfile
+import urllib.request
+from datetime import datetime, timezone
 from typing import Optional
 
+from lib.atomic_io import write_json_atomic
 from lib.types import JSONDict, StrList
+from lib.validation import validate_filesystem_path, validate_package_name
 
 
 AGENT_DOCTOR_TOOLS = ("gh", "codex", "claude", "opencode", "t3code")
 DEFAULT_DOCTOR_TOOLS = ("gh", "codex", "claude", "opencode")
+AGENT_UPDATE_TOOLS = ("codex", "claude", "opencode")
+DEFAULT_UPDATE_TOOLS = AGENT_UPDATE_TOOLS
+
+_AGENT_STATE_RELATIVE = os.path.join(
+    ".local",
+    "state",
+    "infra_tools",
+    "agent-tools.json",
+)
+_CODEX_INSTALLER_URL = "https://chatgpt.com/codex/install.sh"
+_MAX_INSTALLER_BYTES = 4 * 1024 * 1024
+_UPDATE_TIMEOUT_SECONDS = 600
 
 _CREDENTIAL_PATHS = {
     "gh": ".config/gh/hosts.yml",
@@ -42,6 +60,27 @@ def add_agent_subparser(subparsers: argparse._SubParsersAction) -> None:
         help="Tool to require; repeat as needed (default: terminal suite)",
     )
     doctor.add_argument(
+        "--json",
+        action="store_true",
+        help="Output machine-readable JSON",
+    )
+    update = commands.add_parser(
+        "update",
+        help="Deliberately update user-installed terminal agents",
+    )
+    update.add_argument(
+        "--tool",
+        dest="agent_update_tools",
+        action="append",
+        choices=AGENT_UPDATE_TOOLS,
+        help="Tool to update; repeat as needed (default: all terminal agents)",
+    )
+    update.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show the selected update mechanisms without changing tools",
+    )
+    update.add_argument(
         "--json",
         action="store_true",
         help="Output machine-readable JSON",
@@ -76,6 +115,329 @@ def _tool_version(tool: str, path: str) -> Optional[str]:
     return output.splitlines()[0] if output else None
 
 
+def _tool_smoke_test(path: str) -> bool:
+    try:
+        result = subprocess.run(
+            [path, "--help"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0 and bool((result.stdout or result.stderr).strip())
+
+
+def _validate_update_tools(tools: StrList) -> None:
+    for tool in dict.fromkeys(tools):
+        validate_package_name(tool, name="agent tool")
+        if tool not in AGENT_UPDATE_TOOLS:
+            raise ValueError(f"Unsupported agent update tool: {tool}")
+
+
+def _state_path(home: str) -> str:
+    path = os.path.join(home, _AGENT_STATE_RELATIVE)
+    validate_filesystem_path(path, must_exist=False)
+    return path
+
+
+def _load_update_state(path: str) -> JSONDict:
+    if not os.path.exists(path):
+        return {"schema_version": 1, "tools": {}}
+    try:
+        with open(path, encoding="utf-8") as file_obj:
+            value = json.load(file_obj)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Cannot read agent update state: {path}") from exc
+    if (
+        not isinstance(value, dict)
+        or value.get("schema_version") != 1
+        or not isinstance(value.get("tools"), dict)
+    ):
+        raise RuntimeError(f"Unsupported agent update state: {path}")
+    return value
+
+
+def _save_update_state(path: str, state: JSONDict) -> None:
+    parent = os.path.dirname(path)
+    os.makedirs(parent, mode=0o700, exist_ok=True)
+    os.chmod(parent, 0o700)
+    write_json_atomic(path, state, mode=0o600, sort_keys=True)
+
+
+def _within_home(path: str, home: str) -> bool:
+    try:
+        resolved_home = os.path.realpath(home)
+        return os.path.commonpath((os.path.realpath(path), resolved_home)) == resolved_home
+    except ValueError:
+        return False
+
+
+def _backup_executable(tool: str, path: str, home: str) -> str:
+    backup_dir = os.path.join(
+        home,
+        ".local",
+        "state",
+        "infra_tools",
+        "agent-backups",
+    )
+    validate_filesystem_path(backup_dir, must_exist=False)
+    os.makedirs(backup_dir, mode=0o700, exist_ok=True)
+    os.chmod(backup_dir, 0o700)
+    backup_path = os.path.join(backup_dir, f"{tool}.previous")
+    descriptor, temporary_path = tempfile.mkstemp(
+        dir=backup_dir,
+        prefix=f".{tool}-",
+    )
+    os.close(descriptor)
+    try:
+        shutil.copy2(os.path.realpath(path), temporary_path)
+        with open(temporary_path, "rb") as file_obj:
+            os.fsync(file_obj.fileno())
+        os.replace(temporary_path, backup_path)
+    finally:
+        try:
+            os.unlink(temporary_path)
+        except FileNotFoundError:
+            pass
+    return backup_path
+
+
+def _restore_executable(path: str, backup_path: str) -> bool:
+    parent = os.path.dirname(path)
+    try:
+        descriptor, temporary_path = tempfile.mkstemp(
+            dir=parent,
+            prefix=".infra-tools-rollback-",
+        )
+        os.close(descriptor)
+        os.unlink(temporary_path)
+        try:
+            os.symlink(backup_path, temporary_path)
+            os.replace(temporary_path, path)
+        finally:
+            try:
+                os.unlink(temporary_path)
+            except FileNotFoundError:
+                pass
+    except OSError:
+        return False
+    return True
+
+
+def _download_codex_installer(directory: str) -> tuple[str, str]:
+    request = urllib.request.Request(
+        _CODEX_INSTALLER_URL,
+        headers={"User-Agent": "infra-tools-agent-updater/1"},
+    )
+    descriptor, installer_path = tempfile.mkstemp(
+        dir=directory,
+        prefix=".codex-installer-",
+        suffix=".sh",
+    )
+    digest = hashlib.sha256()
+    size = 0
+    try:
+        with os.fdopen(descriptor, "wb") as file_obj:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                while True:
+                    chunk = response.read(64 * 1024)
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    if size > _MAX_INSTALLER_BYTES:
+                        raise RuntimeError("Codex installer exceeds the size limit")
+                    digest.update(chunk)
+                    file_obj.write(chunk)
+            file_obj.flush()
+            os.fsync(file_obj.fileno())
+        if size == 0:
+            raise RuntimeError("Codex installer download was empty")
+        os.chmod(installer_path, 0o600)
+        return installer_path, digest.hexdigest()
+    except (OSError, RuntimeError):
+        try:
+            os.unlink(installer_path)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def _invoke_agent_update(tool: str, path: str, home: str) -> JSONDict:
+    environment = os.environ.copy()
+    environment["HOME"] = home
+    environment["PATH"] = os.pathsep.join(
+        (
+            os.path.join(home, ".local", "bin"),
+            os.path.join(home, ".opencode", "bin"),
+            environment.get("PATH", ""),
+        )
+    )
+    installer_path: Optional[str] = None
+    installer_sha256: Optional[str] = None
+    if tool == "codex":
+        installer_path, installer_sha256 = _download_codex_installer(
+            os.path.dirname(_state_path(home)),
+        )
+        command = ["/bin/sh", installer_path]
+        method = _CODEX_INSTALLER_URL
+    elif tool == "claude":
+        command = [path, "update"]
+        method = "claude update"
+    else:
+        command = [path, "upgrade"]
+        method = "opencode upgrade"
+
+    try:
+        result = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=_UPDATE_TIMEOUT_SECONDS,
+            env=environment,
+            cwd=home,
+        )
+        return {
+            "returncode": result.returncode,
+            "method": method,
+            "installer_sha256": installer_sha256,
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "returncode": None,
+            "method": method,
+            "installer_sha256": installer_sha256,
+            "failure": "timeout",
+        }
+    except OSError:
+        return {
+            "returncode": None,
+            "method": method,
+            "installer_sha256": installer_sha256,
+            "failure": "execution_error",
+        }
+    finally:
+        if installer_path:
+            try:
+                os.unlink(installer_path)
+            except FileNotFoundError:
+                pass
+
+
+def _update_method(tool: str) -> str:
+    if tool == "codex":
+        return _CODEX_INSTALLER_URL
+    return f"{tool} {'update' if tool == 'claude' else 'upgrade'}"
+
+
+def update_agent_tools(
+    tools: StrList,
+    *,
+    home: Optional[str] = None,
+    dry_run: bool = False,
+) -> list[JSONDict]:
+    """Update user-installed agents and persist non-secret verification records."""
+    _validate_update_tools(tools)
+    user_home = os.path.abspath(home or os.path.expanduser("~"))
+    validate_filesystem_path(user_home, must_exist=True)
+    state_path = _state_path(user_home)
+    state = _load_update_state(state_path) if not dry_run else None
+    results: list[JSONDict] = []
+
+    for tool in dict.fromkeys(tools):
+        path = _tool_path(tool, user_home)
+        before_version = _tool_version(tool, path) if path else None
+        record: JSONDict = {
+            "tool": tool,
+            "path": path,
+            "method": _update_method(tool),
+            "before_version": before_version,
+            "after_version": before_version,
+            "status": "planned" if dry_run else "failed",
+            "rollback": False,
+        }
+        if not path:
+            record["failure"] = "not_installed"
+            record["status"] = "failed"
+            results.append(record)
+            continue
+        if not _within_home(path, user_home):
+            record["failure"] = "not_user_managed"
+            record["status"] = "failed"
+            results.append(record)
+            continue
+        if not before_version or not _tool_smoke_test(path):
+            record["failure"] = "pre_update_verification"
+            record["status"] = "failed"
+            results.append(record)
+            continue
+        if dry_run:
+            results.append(record)
+            continue
+
+        assert state is not None
+        attempted_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        record["attempted_at"] = attempted_at
+        try:
+            backup_path = _backup_executable(tool, path, user_home)
+        except OSError:
+            record["failure"] = "backup_error"
+            state["tools"][tool] = record
+            _save_update_state(state_path, state)
+            results.append(record)
+            continue
+        record["backup_path"] = backup_path
+        state["tools"][tool] = {**record, "status": "in_progress"}
+        _save_update_state(state_path, state)
+
+        try:
+            invocation = _invoke_agent_update(tool, path, user_home)
+        except (OSError, RuntimeError):
+            invocation = {
+                "returncode": None,
+                "method": _update_method(tool),
+                "installer_sha256": None,
+                "failure": "download_error",
+            }
+        record.update(invocation)
+        current_path = _tool_path(tool, user_home)
+        after_version = _tool_version(tool, current_path) if current_path else None
+        smoke_ok = bool(current_path and _tool_smoke_test(current_path))
+        record["path"] = current_path
+        record["after_version"] = after_version
+
+        if invocation.get("returncode") == 0 and after_version and smoke_ok:
+            record["status"] = "updated" if after_version != before_version else "current"
+        else:
+            record["status"] = "failed"
+            if "failure" not in record:
+                record["failure"] = (
+                    "updater_exit" if invocation.get("returncode") != 0 else "post_update_verification"
+                )
+            if after_version != before_version or not smoke_ok:
+                restored = _restore_executable(path, backup_path)
+                restored_version = _tool_version(tool, path) if restored else None
+                restored_smoke = restored and _tool_smoke_test(path)
+                record["rollback"] = bool(
+                    restored
+                    and restored_version == before_version
+                    and restored_smoke
+                )
+                if restored:
+                    record["path"] = path
+                    record["after_version"] = restored_version
+                if restored and not record["rollback"]:
+                    record["rollback_failure"] = "verification"
+
+        state["tools"][tool] = record
+        _save_update_state(state_path, state)
+        results.append(record)
+
+    return results
+
+
 def inspect_agent_tools(tools: StrList, home: Optional[str] = None) -> list[JSONDict]:
     """Return non-secret installation and credential status for selected tools."""
     user_home = home or os.path.expanduser("~")
@@ -100,8 +462,40 @@ def inspect_agent_tools(tools: StrList, home: Optional[str] = None) -> list[JSON
 
 def run_agent_command(args: argparse.Namespace) -> int:
     """Run a local agent-tool command."""
+    if args.agent_command == "update":
+        selected = list(args.agent_update_tools or DEFAULT_UPDATE_TOOLS)
+        try:
+            results = update_agent_tools(selected, dry_run=args.dry_run)
+        except (OSError, RuntimeError, ValueError) as exc:
+            print(f"Error: {exc}")
+            return 1
+        if args.json:
+            print(json.dumps(results, indent=2))
+        else:
+            heading = "Agent update plan" if args.dry_run else "Agent update result"
+            print(heading)
+            for result in results:
+                tool = str(result["tool"])
+                status = str(result["status"])
+                if status == "planned":
+                    print(f"  • {tool}: {result['method']} ({result['before_version']})")
+                elif status in ("updated", "current"):
+                    print(
+                        f"  ✓ {tool}: {status} "
+                        f"({result['before_version']} → {result['after_version']})"
+                    )
+                else:
+                    detail = str(result.get("failure", "unknown_error"))
+                    if result.get("returncode") is not None:
+                        detail += f" (exit {result['returncode']})"
+                    rollback = "; rollback restored" if result.get("rollback") else ""
+                    if result.get("rollback_failure"):
+                        rollback = "; rollback verification failed"
+                    print(f"  ✗ {tool}: {detail}{rollback}")
+        return 0 if all(result["status"] in ("planned", "updated", "current") for result in results) else 1
+
     if args.agent_command != "doctor":
-        print("Error: agent command required (doctor)")
+        print("Error: agent command required (doctor or update)")
         return 1
 
     selected = list(args.agent_doctor_tools or DEFAULT_DOCTOR_TOOLS)

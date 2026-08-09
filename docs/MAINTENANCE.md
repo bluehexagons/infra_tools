@@ -56,12 +56,14 @@ Node.js, Ruby, and uv use a conservative default policy:
   previous release when post-update commands or restart fail.
 
 GitHub CLI is installed from its APT repository and therefore follows the APT
-job. The `terminal` agent suite's Codex CLI, Claude Code, and OpenCode installs
-do not currently have infra_tools-managed update timers; setup also skips their
-installer when the command is already present. Use `infra_tools agent doctor`
-to record their observed paths and versions, then update them deliberately
-using their supported vendor workflow. A versioned, verified update design is
-tracked in the [CLI-only agent host audit](plans/AGENT_CLI_MAINTENANCE_AUDIT_2026-08-09.md).
+job. The `terminal` agent suite's Codex CLI, Claude Code, and OpenCode remain
+outside recurring root maintenance. Run `infra_tools agent update --dry-run`
+and then `infra_tools agent update` as the setup user for a deliberate vendor
+update with before/after verification, a retained prior executable, automatic
+rollback after a broken update, and a private audit record. Setup still skips
+an installer when its command is already present. Version pins and stronger
+publisher verification remain tracked in the
+[CLI-only agent host audit](plans/AGENT_CLI_MAINTENANCE_AUDIT_2026-08-09.md).
 
 Set `INFRA_TOOLS_ECOSYSTEM_AUTO_UPGRADE=1` in the relevant service environment
 to allow global npm packages, gems, and uv-managed tools to advance. The default

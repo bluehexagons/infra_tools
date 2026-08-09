@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import io
+import json
 import os
 import sys
 import tempfile
@@ -25,7 +26,8 @@ from common.agent_steps import (
     install_opencode,
     install_t3code,
 )
-from lib.agent_cli import inspect_agent_tools, run_agent_command
+from lib.agent_cli import inspect_agent_tools, run_agent_command, update_agent_tools
+from lib.agent_cli import _download_codex_installer, _invoke_agent_update
 from lib.config import SetupConfig
 
 
@@ -171,6 +173,197 @@ class TestAgentDoctor(unittest.TestCase):
             }
         ]):
             self.assertEqual(run_agent_command(args), 1)
+
+
+class TestAgentUpdate(unittest.TestCase):
+    @staticmethod
+    def _write_tool(path: str, version: str, *, healthy: bool = True) -> None:
+        with open(path, 'w', encoding='utf-8') as file_obj:
+            file_obj.write(
+                '#!/bin/sh\n'
+                f'if [ "$1" = "--version" ]; then echo "{version}"; exit 0; fi\n'
+                f'if [ "$1" = "--help" ]; then echo "help"; exit {0 if healthy else 1}; fi\n'
+                'exit 0\n'
+            )
+        os.chmod(path, 0o755)
+
+    def test_dry_run_reports_method_without_updating_or_writing_state(self):
+        with tempfile.TemporaryDirectory() as home:
+            bin_dir = os.path.join(home, '.local', 'bin')
+            os.makedirs(bin_dir)
+            codex_path = os.path.join(bin_dir, 'codex')
+            self._write_tool(codex_path, 'codex 1.0.0')
+
+            with patch('lib.agent_cli._invoke_agent_update') as updater:
+                result = update_agent_tools(['codex'], home=home, dry_run=True)
+
+            updater.assert_not_called()
+            self.assertEqual(result[0]['status'], 'planned')
+            self.assertEqual(result[0]['before_version'], 'codex 1.0.0')
+            self.assertFalse(os.path.exists(os.path.join(
+                home,
+                '.local',
+                'state',
+                'infra_tools',
+                'agent-tools.json',
+            )))
+
+    def test_successful_update_records_verified_versions_and_private_state(self):
+        with tempfile.TemporaryDirectory() as home:
+            bin_dir = os.path.join(home, '.local', 'bin')
+            os.makedirs(bin_dir)
+            claude_path = os.path.join(bin_dir, 'claude')
+            self._write_tool(claude_path, 'claude 1.0.0')
+
+            def update(_tool, path, _home):
+                self._write_tool(path, 'claude 2.0.0')
+                return {
+                    'returncode': 0,
+                    'method': 'claude update',
+                    'installer_sha256': None,
+                }
+
+            with patch('lib.agent_cli._invoke_agent_update', side_effect=update):
+                result = update_agent_tools(['claude'], home=home)
+
+            state_path = os.path.join(
+                home,
+                '.local',
+                'state',
+                'infra_tools',
+                'agent-tools.json',
+            )
+            with open(state_path, encoding='utf-8') as file_obj:
+                state = json.load(file_obj)
+            self.assertEqual(result[0]['status'], 'updated')
+            self.assertEqual(result[0]['after_version'], 'claude 2.0.0')
+            self.assertEqual(state['tools']['claude']['status'], 'updated')
+            self.assertEqual(os.stat(state_path).st_mode & 0o777, 0o600)
+
+    def test_interrupted_update_leaves_visible_in_progress_state(self):
+        with tempfile.TemporaryDirectory() as home:
+            bin_dir = os.path.join(home, '.local', 'bin')
+            os.makedirs(bin_dir)
+            codex_path = os.path.join(bin_dir, 'codex')
+            self._write_tool(codex_path, 'codex 1.0.0')
+
+            with patch('lib.agent_cli._invoke_agent_update', side_effect=KeyboardInterrupt):
+                with self.assertRaises(KeyboardInterrupt):
+                    update_agent_tools(['codex'], home=home)
+
+            state_path = os.path.join(
+                home,
+                '.local',
+                'state',
+                'infra_tools',
+                'agent-tools.json',
+            )
+            with open(state_path, encoding='utf-8') as file_obj:
+                state = json.load(file_obj)
+            self.assertEqual(state['tools']['codex']['status'], 'in_progress')
+
+    def test_failed_post_update_smoke_test_restores_previous_executable(self):
+        with tempfile.TemporaryDirectory() as home:
+            bin_dir = os.path.join(home, '.local', 'bin')
+            os.makedirs(bin_dir)
+            opencode_path = os.path.join(bin_dir, 'opencode')
+            self._write_tool(opencode_path, 'opencode 1.0.0')
+
+            def broken_update(_tool, path, _home):
+                self._write_tool(path, 'opencode 2.0.0', healthy=False)
+                return {
+                    'returncode': 0,
+                    'method': 'opencode upgrade',
+                    'installer_sha256': None,
+                }
+
+            with patch('lib.agent_cli._invoke_agent_update', side_effect=broken_update):
+                result = update_agent_tools(['opencode'], home=home)
+
+            self.assertEqual(result[0]['status'], 'failed')
+            self.assertEqual(result[0]['failure'], 'post_update_verification')
+            self.assertTrue(result[0]['rollback'])
+            self.assertEqual(result[0]['after_version'], 'opencode 1.0.0')
+            self.assertTrue(os.path.islink(opencode_path))
+
+    def test_system_managed_executable_is_not_mutated(self):
+        with tempfile.TemporaryDirectory() as home:
+            with (
+                patch('lib.agent_cli._tool_path', return_value='/usr/bin/claude'),
+                patch('lib.agent_cli._tool_version', return_value='claude 1.0.0'),
+                patch('lib.agent_cli._invoke_agent_update') as updater,
+            ):
+                result = update_agent_tools(['claude'], home=home)
+
+            updater.assert_not_called()
+            self.assertEqual(result[0]['failure'], 'not_user_managed')
+
+    def test_corrupt_state_stops_before_mutating_tools(self):
+        with tempfile.TemporaryDirectory() as home:
+            bin_dir = os.path.join(home, '.local', 'bin')
+            state_dir = os.path.join(home, '.local', 'state', 'infra_tools')
+            os.makedirs(bin_dir)
+            os.makedirs(state_dir)
+            self._write_tool(os.path.join(bin_dir, 'codex'), 'codex 1.0.0')
+            with open(os.path.join(state_dir, 'agent-tools.json'), 'w', encoding='utf-8') as file_obj:
+                file_obj.write('not-json')
+
+            with patch('lib.agent_cli._invoke_agent_update') as updater:
+                with self.assertRaisesRegex(RuntimeError, 'Cannot read agent update state'):
+                    update_agent_tools(['codex'], home=home)
+
+            updater.assert_not_called()
+
+    def test_codex_installer_download_records_digest_and_private_mode(self):
+        payload = b'#!/bin/sh\necho installer\n'
+        with tempfile.TemporaryDirectory() as directory:
+            with patch('lib.agent_cli.urllib.request.urlopen', return_value=io.BytesIO(payload)):
+                path, digest = _download_codex_installer(directory)
+            try:
+                with open(path, 'rb') as file_obj:
+                    self.assertEqual(file_obj.read(), payload)
+                self.assertEqual(digest, hashlib.sha256(payload).hexdigest())
+                self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+            finally:
+                os.unlink(path)
+
+    def test_codex_installer_download_enforces_size_limit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch('lib.agent_cli._MAX_INSTALLER_BYTES', 3),
+                patch('lib.agent_cli.urllib.request.urlopen', return_value=io.BytesIO(b'1234')),
+            ):
+                with self.assertRaisesRegex(RuntimeError, 'size limit'):
+                    _download_codex_installer(directory)
+            self.assertEqual(os.listdir(directory), [])
+
+    def test_interrupted_codex_download_removes_partial_installer(self):
+        class InterruptedResponse(io.BytesIO):
+            def read(self, size: int = -1) -> bytes:
+                if self.tell() > 0:
+                    raise OSError('connection reset')
+                return super().read(1)
+
+        with tempfile.TemporaryDirectory() as directory:
+            response = InterruptedResponse(b'partial')
+            with patch('lib.agent_cli.urllib.request.urlopen', return_value=response):
+                with self.assertRaisesRegex(OSError, 'connection reset'):
+                    _download_codex_installer(directory)
+            self.assertEqual(os.listdir(directory), [])
+
+    def test_native_updaters_use_vendor_subcommands_without_a_shell(self):
+        completed = type('Completed', (), {'returncode': 0})()
+        cases = (
+            ('claude', ['/home/agent/.local/bin/claude', 'update']),
+            ('opencode', ['/home/agent/.opencode/bin/opencode', 'upgrade']),
+        )
+        for tool, expected in cases:
+            with self.subTest(tool=tool):
+                with patch('lib.agent_cli.subprocess.run', return_value=completed) as runner:
+                    result = _invoke_agent_update(tool, expected[0], '/home/agent')
+                self.assertEqual(runner.call_args.args[0], expected)
+                self.assertNotIn('shell', runner.call_args.kwargs)
+                self.assertEqual(result['returncode'], 0)
 
 
 class TestAgentPayloadInstallation(unittest.TestCase):

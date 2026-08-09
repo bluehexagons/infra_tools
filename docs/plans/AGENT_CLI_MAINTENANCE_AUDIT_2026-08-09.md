@@ -1,8 +1,9 @@
 # CLI-Only Agent Host and Maintenance Audit (2026-08-09)
 
 Status: active follow-up plan. Small correctness and documentation fixes from
-this audit landed with the document. Tool lifecycle, workload-aware restarts,
-and fleet observability require larger design work.
+this audit landed with the document. The first explicit tool-update slice has
+also landed; version policy, workload-aware restarts, and fleet observability
+still require larger design work.
 
 ## Scope and recommended baseline
 
@@ -40,11 +41,13 @@ inherits these host jobs:
 | `cleanup-maintenance.timer` | Cleans bounded journals, APT caches, selected command caches, and strictly named stale temp artifacts weekly | Root execution does not comprehensively manage every setup user's tool cache |
 | `auto-restart-if-needed.timer` | Checks daily and after boot for `/var/run/reboot-required` | Defers for active login sessions until the force deadline, then may restart despite active work |
 
-The terminal suite does **not** install a managed updater for Codex CLI, Claude
-Code, or OpenCode. Their setup functions skip installation whenever the command
-is already found. `infra_tools agent doctor` reports presence, path, version,
-and credential-file presence, but it does not determine freshness or timer
-health.
+The terminal suite does **not** install an automatic updater for Codex CLI,
+Claude Code, or OpenCode. Their setup functions skip installation whenever the
+command is already found. `infra_tools agent update` now provides an explicit
+per-user update with pre/post smoke checks, an atomic non-secret audit record,
+and automatic executable rollback when verification fails. `infra_tools agent
+doctor` reports presence, path, version, and credential-file presence, but it
+does not yet determine freshness or timer health.
 
 Container capability checks may skip firewall, fail2ban, kernel, auditd,
 AppArmor, security-monitor, and restart behavior. See the machine-type matrix
@@ -101,6 +104,28 @@ Build one lifecycle contract for every agent tool:
 Tool-specific implementation must follow each vendor's supported distribution
 and update contract; do not assume one install method or version syntax works
 across all four agents.
+
+Progress delivered in the first lifecycle slice:
+
+- `infra_tools agent update` and `--dry-run` select Codex CLI, Claude Code, and
+  OpenCode independently and use their documented vendor update mechanisms;
+- only executables resolved under the current user's home are eligible, keeping
+  APT and other system package installations outside this workflow;
+- the previous executable is retained, `--version` and `--help` run before and
+  after the update, and a changed/broken result triggers automatic rollback;
+- a mode-`0600`, atomically written record preserves the method, observed
+  versions, time, result, exit code, rollback outcome, and the downloaded Codex
+  installer's SHA-256 without storing updater output; and
+- an `in_progress` state is persisted before invoking the vendor updater so an
+  interrupted operation is visible instead of looking successful.
+
+Remaining lifecycle scope is still P1: saved channels and exact-version pins,
+publisher-signature or pinned-digest verification where vendors expose it,
+artifact-level staging rather than executable-only rollback, T3 Code updates,
+notifications, and integration of desired-versus-observed versions into the
+read-only audit surface. The Codex standalone installer currently documents a
+fixed HTTPS update endpoint but no pinned publisher digest; its recorded hash
+is therefore evidence of fetched bytes, not an independent trust anchor.
 
 ### P1: Agent-aware restart and maintenance windows
 
