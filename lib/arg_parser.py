@@ -133,6 +133,8 @@ def add_setup_arguments(
                            help="SSH user for Proxmox node (default: root)")
         parser.add_argument("--hosted-key", dest="hosted_key",
                            help="SSH key for Proxmox node (default: SSH config)")
+        parser.add_argument("--bridge", dest="hosted_bridge",
+                           help="Proxmox bridge for the hosted guest (default: host default route)")
         parser.add_argument("--memory", dest="container_memory",
                            help="Hosted guest memory (e.g. 2G, 512M)")
         parser.add_argument("--storage", dest="container_storage",

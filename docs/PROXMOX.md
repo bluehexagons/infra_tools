@@ -34,6 +34,12 @@ Successful `server_proxmox` setup registers the host in the selected workspace;
 The public key must exist alongside the private key and root on the Proxmox
 host must accept it.
 
+Hosted VM setup uses the same private key's `.pub` file for cloud-init. If the
+Proxmox node key and guest key differ, pass `--hosted-key` for the node and
+`--key` for the guest. Hosted VM image downloads and cloud-init snippets are
+placed through Proxmox storage APIs, so the selected node must have active
+`iso` and `snippets` storage content types.
+
 ## Host-safety defaults
 
 The `server_proxmox` flow deliberately leaves firewall policy to Proxmox and
@@ -159,6 +165,8 @@ python3 infra_tools.py setup server_web 10.0.0.50 admin \
 or the shorthand `--storage root AMOUNT`, which uses cached host defaults or
 Proxmox auto-detection. `--storage template` uses the saved/default template
 pool.
+The guest bridge defaults to the bridge carrying the Proxmox host's default
+route; use `--bridge NAME` when the host has multiple routed bridge networks.
 
 ## Guest lifecycle
 

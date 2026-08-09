@@ -96,6 +96,32 @@ class TestAutoDetectBridge(unittest.TestCase):
         self.assertEqual(result, "vmbr0")
 
     @patch("lib.proxmox_guest._ssh_run")
+    def test_prefers_bridge_carrying_default_route(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(stdout="vmbr0\nvmbr1\n", returncode=0),
+            MagicMock(stdout="vmbr1\n", returncode=0),
+        ]
+        result = auto_detect_bridge("10.0.0.1", "root", dry_run=False)
+        self.assertEqual(result, "vmbr1")
+
+    @patch("lib.proxmox_guest._ssh_run")
+    def test_honors_explicit_preferred_bridge(self, mock_run):
+        mock_run.return_value = MagicMock(stdout="vmbr0\nvmbr1\n", returncode=0)
+        result = auto_detect_bridge(
+            "10.0.0.1", "root", dry_run=False, preferred_bridge="vmbr1"
+        )
+        self.assertEqual(result, "vmbr1")
+
+    @patch("lib.proxmox_guest._ssh_run")
+    def test_rejects_default_route_on_non_bridge(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(stdout="vmbr0\n", returncode=0),
+            MagicMock(stdout="eno1\n", returncode=0),
+        ]
+        with self.assertRaisesRegex(Exception, "not a Proxmox bridge"):
+            auto_detect_bridge("10.0.0.1", "root", dry_run=False)
+
+    @patch("lib.proxmox_guest._ssh_run")
     def test_no_bridge_raises(self, mock_run):
         mock_run.return_value = MagicMock(stdout="", returncode=0)
         with self.assertRaises(Exception):
@@ -299,7 +325,10 @@ class TestAutoDetectBridge(unittest.TestCase):
 
     @patch("lib.proxmox_guest._ssh_run")
     def test_prefers_vmbr0(self, mock_run):
-        mock_run.return_value = MagicMock(stdout="vmbr1\nvmbr0\nvmbr2\n", returncode=0)
+        mock_run.side_effect = [
+            MagicMock(stdout="vmbr1\nvmbr0\nvmbr2\n", returncode=0),
+            MagicMock(stdout="", returncode=0),
+        ]
         self.assertEqual(auto_detect_bridge("10.0.0.1"), "vmbr0")
 
 

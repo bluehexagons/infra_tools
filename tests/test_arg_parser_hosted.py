@@ -37,6 +37,12 @@ class TestHostedFlagParsing(unittest.TestCase):
         ])
         self.assertEqual(args.hosted_key, "/path/to/key")
 
+    def test_hosted_bridge(self):
+        args = self.parser.parse_args([
+            "10.0.0.50", "--hosted", "10.0.0.1", "--bridge", "vmbr20"
+        ])
+        self.assertEqual(args.hosted_bridge, "vmbr20")
+
     def test_memory_flag(self):
         args = self.parser.parse_args([
             "10.0.0.50", "--memory", "2G"

@@ -140,8 +140,9 @@ def auto_detect_bridge(
     user: str = "root",
     hosted_key: Optional[str] = None,
     dry_run: bool = False,
+    preferred_bridge: Optional[str] = None,
 ) -> str:
-    """Auto-detect the network bridge on the Proxmox host."""
+    """Auto-detect the guest bridge, preferring the host's default route."""
     opts = _ssh_opts(hosted_key)
     bridges = _list_proxmox_bridges(node_ip, user, opts, dry_run=dry_run)
 
@@ -150,7 +151,27 @@ def auto_detect_bridge(
             "No vmbr* network bridge found on the Proxmox host"
         )
 
-    bridge = bridges[0]
+    if preferred_bridge:
+        if preferred_bridge not in bridges:
+            raise ProvisionError(
+                f"Configured bridge '{preferred_bridge}' was not found on the Proxmox host"
+            )
+        bridge = preferred_bridge
+    else:
+        route_result = _ssh_run(
+            node_ip,
+            user,
+            opts,
+            "ip route show default | awk '{for (i=1; i<=NF; i++) if ($i == \"dev\") {print $(i+1); exit}}'",
+            dry_run=dry_run,
+        )
+        route_bridge = (route_result.stdout or "").strip()
+        if route_bridge and route_bridge not in bridges:
+            raise ProvisionError(
+                f"Default route uses '{route_bridge}', which is not a Proxmox bridge; "
+                "specify --bridge explicitly"
+            )
+        bridge = route_bridge or bridges[0]
     print(f"  ✓ Detected bridge: {bridge}")
     return bridge
 
@@ -379,7 +400,7 @@ def _resolve_storage_pool(
 
     if dry_run:
         print("  [DRY-RUN] Would resolve storage pool")
-        return "local-lvm"
+        return "local" if content_filter in {"iso", "snippets"} else "local-lvm"
 
     if result.returncode != 0:
         raise ProvisionError(

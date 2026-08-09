@@ -941,9 +941,36 @@ def validate_hosted_flags(config: Any) -> None:
     if config.container_cores < 1:
         raise ValueError("--cores must be at least 1")
 
+    hosted_bridge = getattr(config, "hosted_bridge", None)
+    if hosted_bridge and not re.fullmatch(r"vmbr[0-9]+", hosted_bridge):
+        raise ValueError("--bridge must be a Proxmox bridge name such as vmbr0")
+
     machine_type = getattr(config, "machine_type", None)
     vm_image = getattr(config, "vm_image", None)
     if machine_type == "vm":
+        ssh_key = getattr(config, "ssh_key", None)
+        if not ssh_key:
+            raise ValueError(
+                "Hosted VM provisioning requires --key PATH with a matching PATH.pub"
+            )
+        pubkey_path = f"{ssh_key}.pub"
+        if not os.path.isfile(pubkey_path) or os.path.getsize(pubkey_path) <= 0:
+            raise ValueError(
+                f"Hosted VM provisioning requires a readable SSH public key: {pubkey_path}"
+            )
+
+        if not getattr(config, "static_ipv4", None):
+            try:
+                target_ip = ipaddress.ip_address(str(getattr(config, "host", "")))
+            except ValueError as exc:
+                raise ValueError(
+                    "Hosted VM provisioning requires a literal IPv4 target or --ip"
+                ) from exc
+            if target_ip.version != 4:
+                raise ValueError(
+                    "Hosted VM provisioning currently requires an IPv4 target for the SSH handoff"
+                )
+
         from lib.cloud_images import parse_image_argument, resolve_cloud_image
         for spec in storage_specs:
             if spec[0] == "template":

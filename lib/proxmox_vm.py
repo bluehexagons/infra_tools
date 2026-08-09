@@ -134,8 +134,21 @@ def check_vm_exists(
         if cfg.returncode != 0:
             continue
         if f"ip={target_ip}/" in (cfg.stdout or "") or f"ip={target_ip}," in (cfg.stdout or ""):
-            print(f"  ✓ VM {vmid} already exists with IP {target_ip}")
-            return True
+            status = _ssh_run(node_ip, user, ssh_opts, f"qm status {vmid}", dry_run=False)
+            probe = _ssh_run(
+                node_ip,
+                user,
+                ssh_opts,
+                f"timeout 3 bash -c '</dev/tcp/{shlex.quote(target_ip)}/22' && echo READY",
+                dry_run=False,
+            )
+            if status.returncode == 0 and "status: running" in (status.stdout or "") and "READY" in (probe.stdout or ""):
+                print(f"  ✓ VM {vmid} already exists and is reachable at IP {target_ip}")
+                return True
+            raise ProvisionError(
+                f"VM {vmid} is configured with IP {target_ip} but is not reachable on SSH; "
+                "remove or repair it before retrying provisioning"
+            )
     return False
 
 
@@ -175,6 +188,7 @@ def _resolve_image(
 
 def _download_image_to_host(
     image: _ResolvedImage,
+    storage_pool: str,
     node_ip: str,
     user: str,
     ssh_opts: StrList,
@@ -184,14 +198,37 @@ def _download_image_to_host(
     """Fetch ``image`` onto the Proxmox node; return the absolute remote path."""
     if not image.url or not image.filename:
         raise ProvisionError("Internal error: download requested without URL")
-    remote_dir = "/var/lib/vz/template/iso"
-    remote_path = f"{remote_dir}/{image.filename}"
+    image_ref = f"{storage_pool}:iso/{image.filename}"
+    if dry_run:
+        remote_path = f"/var/lib/vz/template/iso/{image.filename}"
+    else:
+        path_result = _ssh_run(
+            node_ip,
+            user,
+            ssh_opts,
+            f"pvesm path {shlex.quote(image_ref)}",
+            dry_run=False,
+        )
+        remote_path = (path_result.stdout or "").strip()
+        if path_result.returncode != 0 or not remote_path or not remote_path.startswith("/"):
+            raise ProvisionError(
+                f"Could not resolve image storage path for {image_ref}: "
+                f"{(path_result.stderr or path_result.stdout or '').strip() or 'pvesm path failed'}"
+            )
+    remote_dir = remote_path.rsplit("/", 1)[0]
 
     if dry_run:
         print(f"  [DRY-RUN] Would download {image.url} → {remote_path}")
         return remote_path
 
-    _ssh_run(node_ip, user, ssh_opts, f"mkdir -p {shlex.quote(remote_dir)}")
+    mkdir_result = _ssh_run(
+        node_ip, user, ssh_opts, f"mkdir -p {shlex.quote(remote_dir)}"
+    )
+    if mkdir_result.returncode != 0:
+        raise ProvisionError(
+            f"Failed to prepare image storage path on {node_ip}: "
+            f"{(mkdir_result.stderr or mkdir_result.stdout or '').strip() or 'mkdir failed'}"
+        )
     fetch = (
         f"if [ ! -f {shlex.quote(remote_path)} ]; then "
         f"wget -q --show-progress -O {shlex.quote(remote_path)}.part "
@@ -206,7 +243,6 @@ def _download_image_to_host(
             f"Failed to download cloud image on {node_ip}: "
             f"{(result.stderr or result.stdout or '').strip() or 'unknown error'}"
         )
-
     if image.sha512:
         check = (
             f"echo {shlex.quote(image.sha512 + '  ' + remote_path)} "
@@ -272,6 +308,7 @@ def _render_user_data(
 def _upload_user_data(
     user_data: str,
     hostname: str,
+    storage_pool: str,
     node_ip: str,
     user: str,
     ssh_opts: StrList,
@@ -279,13 +316,34 @@ def _upload_user_data(
     dry_run: bool,
 ) -> Optional[str]:
     """Write the rendered user-data to a snippet on the node and return its path."""
+    filename = f"infra_tools-{hostname}.yaml"
+    snippet_ref = f"{storage_pool}:snippets/{filename}"
     if dry_run:
         return "/var/lib/vz/snippets/infra_tools-userdata.dryrun.yaml"
 
     rendered = user_data.replace("__HOSTNAME__", hostname)
-    snippets_dir = "/var/lib/vz/snippets"
-    _ssh_run(node_ip, user, ssh_opts, f"mkdir -p {shlex.quote(snippets_dir)}")
-    remote_path = f"{snippets_dir}/infra_tools-{hostname}.yaml"
+    path_result = _ssh_run(
+        node_ip,
+        user,
+        ssh_opts,
+        f"pvesm path {shlex.quote(snippet_ref)}",
+        dry_run=False,
+    )
+    remote_path = (path_result.stdout or "").strip()
+    if path_result.returncode != 0 or not remote_path or not remote_path.startswith("/"):
+        raise ProvisionError(
+            f"Could not resolve snippet storage path for {snippet_ref}: "
+            f"{(path_result.stderr or path_result.stdout or '').strip() or 'pvesm path failed'}"
+        )
+    snippets_dir = remote_path.rsplit("/", 1)[0]
+    mkdir_result = _ssh_run(
+        node_ip, user, ssh_opts, f"mkdir -p {shlex.quote(snippets_dir)}"
+    )
+    if mkdir_result.returncode != 0:
+        raise ProvisionError(
+            f"Failed to prepare snippet storage path on {node_ip}: "
+            f"{(mkdir_result.stderr or mkdir_result.stdout or '').strip() or 'mkdir failed'}"
+        )
     write_cmd = ["ssh"] + ssh_opts + [
         f"{user}@{node_ip}",
         f"cat > {shlex.quote(remote_path)}",
@@ -299,6 +357,24 @@ def _upload_user_data(
             f"{proc.stderr.strip() or 'unknown error'}"
         )
     return remote_path
+
+
+def _destroy_vm_best_effort(
+    vmid: int,
+    node_ip: str,
+    user: str,
+    ssh_opts: StrList,
+) -> None:
+    """Remove a VM created by this run after a failed provisioning attempt."""
+    print(f"  ⚠ Cleaning up partially provisioned VM {vmid}")
+    _ssh_run(node_ip, user, ssh_opts, f"qm stop {vmid} --skiplock 1", dry_run=False)
+    _ssh_run(
+        node_ip,
+        user,
+        ssh_opts,
+        f"qm destroy {vmid} --purge 1 --skiplock 1",
+        dry_run=False,
+    )
 
 
 def _create_vm(
@@ -317,6 +393,7 @@ def _create_vm(
     nameservers: StrList,
     hostname: str,
     user_data_path: Optional[str],
+    user_data_ref: Optional[str],
     graphical_console: bool,
     node_ip: str,
     user: str,
@@ -324,7 +401,7 @@ def _create_vm(
     dry_run: bool = False,
     ipv6_cidr: Optional[str] = None,
     gateway6: Optional[str] = None,
-) -> None:
+) -> bool:
     """Build, populate, and start the VM on ``node_ip``."""
     ipconfig_parts = [
         f"ip={target_ip}/{cidr_prefix}",
@@ -353,11 +430,8 @@ def _create_vm(
         f"--nameserver {shlex.quote(' '.join(nameservers))}",
         "--onboot 1",
     ]
-    if user_data_path:
-        # Snippets always live on `local` storage on a single-node default; the
-        # path-based form keeps us out of guessing the snippet storage name.
-        snippet_volume = f"local:snippets/{user_data_path.rsplit('/', 1)[-1]}"
-        create_parts.append(f"--cicustom user={shlex.quote(snippet_volume)}")
+    if user_data_ref:
+        create_parts.append(f"--cicustom user={shlex.quote(user_data_ref)}")
 
     create_cmd = " ".join(create_parts)
     result = _ssh_run(node_ip, user, ssh_opts, create_cmd, dry_run=dry_run)
@@ -366,6 +440,7 @@ def _create_vm(
             f"qm create {vmid} failed: "
             f"{(result.stderr or result.stdout or '').strip() or 'unknown error'}"
         )
+    created = True
 
     # Attach the disk: prefer importing the qcow2; otherwise reference the
     # pre-uploaded storage volume directly.
@@ -376,6 +451,8 @@ def _create_vm(
         )
         imported = _ssh_run(node_ip, user, ssh_opts, import_cmd, dry_run=dry_run)
         if imported.returncode != 0:
+            if not dry_run and created:
+                _destroy_vm_best_effort(vmid, node_ip, user, ssh_opts)
             raise ProvisionError(
                 f"qm importdisk for VM {vmid} failed: "
                 f"{(imported.stderr or imported.stdout or '').strip() or 'unknown error'}"
@@ -387,6 +464,8 @@ def _create_vm(
         # import-from copy it into the root pool during set.
         disk_volume = f"{root_pool}:0,import-from={storage_ref}"
     else:
+        if not dry_run and created:
+            _destroy_vm_best_effort(vmid, node_ip, user, ssh_opts)
         raise ProvisionError("No image source available to attach to VM disk")
 
     set_cmd = (
@@ -397,6 +476,8 @@ def _create_vm(
     )
     set_result = _ssh_run(node_ip, user, ssh_opts, set_cmd, dry_run=dry_run)
     if set_result.returncode != 0:
+        if not dry_run and created:
+            _destroy_vm_best_effort(vmid, node_ip, user, ssh_opts)
         raise ProvisionError(
             f"qm set for VM {vmid} failed: "
             f"{(set_result.stderr or set_result.stdout or '').strip() or 'unknown error'}"
@@ -405,8 +486,8 @@ def _create_vm(
     resize_cmd = f"qm resize {vmid} scsi0 {disk_size_gib}G"
     resize_result = _ssh_run(node_ip, user, ssh_opts, resize_cmd, dry_run=dry_run)
     if resize_result.returncode != 0 and "shrink" not in (resize_result.stderr or "").lower():
-        # `qm resize` errors out if the new size is smaller than the imported
-        # image; surface as a friendlier message.
+        if not dry_run and created:
+            _destroy_vm_best_effort(vmid, node_ip, user, ssh_opts)
         raise ProvisionError(
             f"qm resize for VM {vmid} failed: "
             f"{(resize_result.stderr or resize_result.stdout or '').strip() or 'unknown error'}"
@@ -416,12 +497,15 @@ def _create_vm(
         node_ip, user, ssh_opts, f"qm start {vmid}", dry_run=dry_run
     )
     if start_result.returncode != 0:
+        if not dry_run and created:
+            _destroy_vm_best_effort(vmid, node_ip, user, ssh_opts)
         raise ProvisionError(
             f"qm start {vmid} failed: "
             f"{(start_result.stderr or start_result.stdout or '').strip() or 'unknown error'}"
         )
 
     print(f"  ✓ VM {vmid} created and started ({hostname}, {target_ip})")
+    return True
 
 
 def _wait_for_guest_agent(
@@ -533,7 +617,12 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
 
     print(f"  Hostname: {hostname}")
 
-    bridge = auto_detect_bridge(node_ip, user, config.hosted_key)
+    bridge = auto_detect_bridge(
+        node_ip,
+        user,
+        config.hosted_key,
+        preferred_bridge=getattr(config, "hosted_bridge", None),
+    )
     gateway = config.network_gateway4 or _get_host_gateway(node_ip, user, ssh_opts)
     nameservers = config.network_dns or _get_host_nameservers(node_ip, user, ssh_opts)
     cidr_prefix = (
@@ -545,17 +634,26 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
     root_pool = _resolve_storage_pool(
         root_pool_arg, node_ip, user, ssh_opts, "images"
     )
+    snippet_pool = _resolve_storage_pool(
+        "auto", node_ip, user, ssh_opts, "snippets"
+    )
 
     if resolved.url:
+        image_pool = _resolve_storage_pool(
+            "auto", node_ip, user, ssh_opts, "iso"
+        )
         image_remote_path = _download_image_to_host(
-            resolved, node_ip, user, ssh_opts, dry_run=dry_run
+            resolved, image_pool, node_ip, user, ssh_opts, dry_run=dry_run
         )
         storage_ref: Optional[str] = None
     else:
         image_remote_path = None
         storage_ref = resolved.storage_ref
-        if storage_ref and not is_local_image_ref(storage_ref):
-            raise ProvisionError(f"Invalid --image storage ref: {storage_ref}")
+        if storage_ref:
+            if not is_local_image_ref(storage_ref) or ":iso/" not in storage_ref:
+                raise ProvisionError(
+                    f"Invalid --image storage ref: {storage_ref}; expected STORAGE:iso/FILE"
+                )
 
     pub_path = _resolve_public_key_path(config.ssh_key)
     pubkey_contents: Optional[str] = None
@@ -576,35 +674,47 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
         username=config.username, pubkey_contents=pubkey_contents,
     )
     user_data_path = _upload_user_data(
-        user_data, hostname, node_ip, user, ssh_opts, dry_run=dry_run
+        user_data, hostname, snippet_pool, node_ip, user, ssh_opts, dry_run=dry_run
     )
-
-    vmid = _get_next_vmid(node_ip, user, ssh_opts)
+    user_data_ref = f"{snippet_pool}:snippets/infra_tools-{hostname}.yaml"
+    vm_started = False
 
     try:
-        _create_vm(
-            vmid=vmid,
-            target_ip=target_ip,
-            image_remote_path=image_remote_path,
-            storage_ref=storage_ref,
-            memory_mb=memory_mb,
-            cores=config.container_cores,
-            root_pool=root_pool,
-            disk_size_gib=disk_size_gib,
-            cidr_prefix=cidr_prefix,
-            bridge=bridge,
-            gateway=gateway,
-            nameservers=nameservers,
-            hostname=hostname,
-            user_data_path=user_data_path,
-            graphical_console=_needs_graphical_console(config),
-            node_ip=node_ip,
-            user=user,
-            ssh_opts=ssh_opts,
-            dry_run=dry_run,
-            ipv6_cidr=config.static_ipv6,
-            gateway6=config.network_gateway6,
-        )
+        vmid = _get_next_vmid(node_ip, user, ssh_opts)
+        create_kwargs = {
+            "vmid": vmid,
+            "target_ip": target_ip,
+            "image_remote_path": image_remote_path,
+            "storage_ref": storage_ref,
+            "memory_mb": memory_mb,
+            "cores": config.container_cores,
+            "root_pool": root_pool,
+            "disk_size_gib": disk_size_gib,
+            "cidr_prefix": cidr_prefix,
+            "bridge": bridge,
+            "gateway": gateway,
+            "nameservers": nameservers,
+            "hostname": hostname,
+            "user_data_path": user_data_path,
+            "user_data_ref": user_data_ref,
+            "graphical_console": _needs_graphical_console(config),
+            "node_ip": node_ip,
+            "user": user,
+            "ssh_opts": ssh_opts,
+            "dry_run": dry_run,
+            "ipv6_cidr": config.static_ipv6,
+            "gateway6": config.network_gateway6,
+        }
+        try:
+            _create_vm(**create_kwargs)
+        except ProvisionError as exc:
+            if "already exists" not in str(exc).lower():
+                raise
+            print(f"  ⚠ VMID {vmid} was allocated concurrently; retrying with a new VMID")
+            vmid = _get_next_vmid(node_ip, user, ssh_opts)
+            create_kwargs["vmid"] = vmid
+            _create_vm(**create_kwargs)
+        vm_started = True
         _wait_for_guest_agent(
             vmid,
             node_ip,
@@ -616,6 +726,10 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
         _wait_for_guest_ssh(
             target_ip, node_ip, user, ssh_opts, timeout=300, dry_run=dry_run
         )
+    except Exception:
+        if vm_started and not dry_run:
+            _destroy_vm_best_effort(vmid, node_ip, user, ssh_opts)
+        raise
     finally:
         # Best-effort cleanup of the snippet now that cloud-init has consumed it.
         if user_data_path and not dry_run:

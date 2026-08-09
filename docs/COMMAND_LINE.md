@@ -252,6 +252,7 @@ be fully disabled, then manage pending security reboots explicitly.
 | `--hosted HOST` | Proxmox node or registered host name |
 | `--hosted-user USER` | SSH user for the Proxmox node |
 | `--hosted-key PATH` | SSH key for the Proxmox node |
+| `--bridge NAME` | Proxmox bridge for the hosted guest; defaults to the host's default-route bridge |
 | `--memory SIZE` | Guest memory |
 | `--storage root POOL AMOUNT` | Required root storage spec |
 | `--storage root AMOUNT` | Root storage shorthand using saved defaults or `auto` |
@@ -264,6 +265,8 @@ Notes:
 
 - `--storage` is repeatable.
 - `root` storage is required when `--hosted` is used.
+- Hosted VMs require `--key PATH` and a readable matching `PATH.pub`; this key is installed by cloud-init for the SSH handoff.
+- Hosted VM targets must be literal IPv4 addresses unless `--ip` supplies the guest address.
 - `template` storage is LXC-only.
 - Direct setup defaults to `--machine auto`, which detects Debian bare metal,
   VMs, and Proxmox LXC containers on the target.

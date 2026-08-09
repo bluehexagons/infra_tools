@@ -511,6 +511,10 @@ def _apply_hosted_proxmox_defaults(
             config.hosted_key = host.ssh_key
         if not config.ssh_key and host.ssh_key:
             config.ssh_key = host.ssh_key
+        if not config.hosted_bridge:
+            config.hosted_bridge = host.default_bridge or (
+                host.facts.default_bridge if host.facts else None
+            )
 
     storage_specs = _normalize_container_storage(config.container_storage)
     if not storage_specs:

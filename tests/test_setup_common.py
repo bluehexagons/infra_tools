@@ -797,6 +797,7 @@ class TestHostedProvisioningDispatch(unittest.TestCase):
                  patch.object(setup_common, "validate_host", return_value=True), \
                  patch.object(setup_common, "validate_username", return_value=True), \
                  patch.object(setup_common, "prepare_runtime_config", return_value=config), \
+                 patch.object(setup_common, "validate_hosted_flags"), \
                  patch.object(setup_common, "validate_samba_share_credentials"), \
                  patch.object(setup_common, "print_setup_summary"), \
                  patch.object(setup_common, "store_cli_credentials"), \
@@ -810,6 +811,7 @@ class TestHostedProvisioningDispatch(unittest.TestCase):
         self.assertEqual(config.hosted_node, "10.0.0.1")
         self.assertEqual(config.hosted_key, "/keys/proxmox")
         self.assertEqual(config.ssh_key, "/keys/proxmox")
+        self.assertEqual(config.hosted_bridge, "vmbr0")
         self.assertEqual(config.container_storage, [["root", "local-lvm", "10G"]])
         mock_provision_vm.assert_called_once_with(config, image=config.vm_image)
 

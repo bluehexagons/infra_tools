@@ -110,6 +110,7 @@ class TestVMHardwareProfile(unittest.TestCase):
             nameservers=["10.0.0.1"],
             hostname="agent-vm",
             user_data_path=None,
+            user_data_ref="nfs-store:snippets/infra_tools-agent-vm.yaml",
             graphical_console=True,
             node_ip="10.0.0.10",
             user="root",
@@ -121,10 +122,50 @@ class TestVMHardwareProfile(unittest.TestCase):
         commands = [call.args[3] for call in mock_run.call_args_list]
         self.assertIn("--serial0 socket", commands[0])
         self.assertIn("--vga virtio", commands[0])
+        self.assertIn(
+            "--cicustom user=nfs-store:snippets/infra_tools-agent-vm.yaml",
+            commands[0],
+        )
         self.assertIn("--scsihw virtio-scsi-single", commands[0])
         self.assertIn("ip6=2001:db8::50/64", commands[0])
         self.assertIn("gw6=2001:db8::1", commands[0])
         self.assertIn("--scsi0 local-lvm:vm-101-disk-0,iothread=1", commands[2])
+
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_partial_vm_is_destroyed_when_import_fails(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=1, stdout="", stderr="import failed"),
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout="", stderr=""),
+        ]
+        with self.assertRaises(ProvisionError):
+            _create_vm(
+                vmid=101,
+                target_ip="10.0.0.50",
+                image_remote_path="/var/lib/vz/template/iso/debian.qcow2",
+                storage_ref=None,
+                memory_mb=2048,
+                cores=2,
+                root_pool="local-lvm",
+                disk_size_gib=20,
+                cidr_prefix="24",
+                bridge="vmbr0",
+                gateway="10.0.0.1",
+                nameservers=["10.0.0.1"],
+                hostname="agent-vm",
+                user_data_path=None,
+                user_data_ref=None,
+                graphical_console=False,
+                node_ip="10.0.0.10",
+                user="root",
+                ssh_opts=[],
+            )
+        commands = [call.args[3] for call in mock_run.call_args_list]
+        self.assertEqual(commands[-2:], [
+            "qm stop 101 --skiplock 1",
+            "qm destroy 101 --purge 1 --skiplock 1",
+        ])
 
 
 class TestCheckVMExists(unittest.TestCase):
@@ -136,6 +177,8 @@ class TestCheckVMExists(unittest.TestCase):
             MagicMock(returncode=0, stdout="VMID NAME STATUS\n100 a running\n101 b running\n"),
             MagicMock(returncode=0, stdout="net0: virtio,bridge=vmbr0\nipconfig0: ip=10.0.0.1/24,gw=10.0.0.254\n"),
             MagicMock(returncode=0, stdout="ipconfig0: ip=10.0.0.50/24,gw=10.0.0.254\n"),
+            MagicMock(returncode=0, stdout="status: running\n"),
+            MagicMock(returncode=0, stdout="READY\n"),
         ]
         self.assertTrue(check_vm_exists("10.0.0.1", "10.0.0.50", "root", []))
 
@@ -146,6 +189,17 @@ class TestCheckVMExists(unittest.TestCase):
             MagicMock(returncode=0, stdout="ipconfig0: ip=10.0.0.99/24,gw=10.0.0.254\n"),
         ]
         self.assertFalse(check_vm_exists("10.0.0.1", "10.0.0.50", "root", []))
+
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_unreachable_match_is_not_silently_reused(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="VMID NAME STATUS\n101 b running\n"),
+            MagicMock(returncode=0, stdout="ipconfig0: ip=10.0.0.50/24,gw=10.0.0.254\n"),
+            MagicMock(returncode=0, stdout="status: stopped\n"),
+            MagicMock(returncode=1, stdout=""),
+        ]
+        with self.assertRaisesRegex(ProvisionError, "not reachable"):
+            check_vm_exists("10.0.0.1", "10.0.0.50", "root", [])
 
     @patch("lib.proxmox_vm._ssh_run")
     def test_dry_run_returns_false_without_calls(self, mock_run):

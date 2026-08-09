@@ -116,6 +116,11 @@ python3 infra_tools.py setup server_web 10.0.0.50 \
 
 Use `--machine unprivileged` to stay on the LXC path.
 
+Hosted VMs require `--key PATH` with a readable matching `PATH.pub` so
+cloud-init can install the guest SSH key. `--hosted-key` controls only SSH
+access to the Proxmox node. The target must be a literal IPv4 address unless
+`--ip` supplies the guest address.
+
 For raw Proxmox addresses, storage shorthand falls back to `auto`. For
 registered hosts, shorthand uses the saved/probed storage defaults first.
 
@@ -131,8 +136,9 @@ By default, the curated Debian cloud-image catalog
 ```
 
 Refresh the catalog with `python3 scripts/update_cloud_images.py`. Add
-`--pin-snapshot` to lock entries to a specific upstream snapshot directory and
-record its SHA-512.
+`--pin-snapshot` to refresh entries to a specific upstream snapshot directory
+and record its SHA-512. The checked-in catalog is pinned and verified by
+default.
 
 ## State Persistence
 

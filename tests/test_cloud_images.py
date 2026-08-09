@@ -21,6 +21,8 @@ class TestResolveCloudImage(unittest.TestCase):
         entry = resolve_cloud_image("debian")
         self.assertEqual(entry["codename"], "bookworm")
         self.assertTrue(entry["url"].startswith("https://cloud.debian.org/"))
+        self.assertRegex(entry["snapshot"], r"^\d{8}-\d{3,4}$")
+        self.assertRegex(entry["sha512"], r"^[0-9a-f]{128}$")
 
     def test_case_insensitive(self):
         self.assertEqual(

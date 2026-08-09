@@ -42,26 +42,26 @@ CLOUD_IMAGES: dict[str, CloudImage] = {
     "debian": {
         "codename": "bookworm",
         "version": "12",
-        "snapshot": "latest",
-        "filename": "debian-12-genericcloud-amd64.qcow2",
-        "url": "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2",
-        "sha512": "",
+        "snapshot": "20260806-2562",
+        "filename": "debian-12-genericcloud-amd64-20260806-2562.qcow2",
+        "url": "https://cloud.debian.org/images/cloud/bookworm/20260806-2562/debian-12-genericcloud-amd64-20260806-2562.qcow2",
+        "sha512": "3622c990108a044ed411652f8741e77c5822c365114d7b940206b243f8fb617b8586792df4cdb7afba1b71d1a09289d8ed632124688f2c8352cb08190a1e9868",
     },
     "debian-12": {
         "codename": "bookworm",
         "version": "12",
-        "snapshot": "latest",
-        "filename": "debian-12-genericcloud-amd64.qcow2",
-        "url": "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2",
-        "sha512": "",
+        "snapshot": "20260806-2562",
+        "filename": "debian-12-genericcloud-amd64-20260806-2562.qcow2",
+        "url": "https://cloud.debian.org/images/cloud/bookworm/20260806-2562/debian-12-genericcloud-amd64-20260806-2562.qcow2",
+        "sha512": "3622c990108a044ed411652f8741e77c5822c365114d7b940206b243f8fb617b8586792df4cdb7afba1b71d1a09289d8ed632124688f2c8352cb08190a1e9868",
     },
     "debian-13": {
         "codename": "trixie",
         "version": "13",
-        "snapshot": "latest",
-        "filename": "debian-13-genericcloud-amd64.qcow2",
-        "url": "https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2",
-        "sha512": "",
+        "snapshot": "20260803-2559",
+        "filename": "debian-13-genericcloud-amd64-20260803-2559.qcow2",
+        "url": "https://cloud.debian.org/images/cloud/trixie/20260803-2559/debian-13-genericcloud-amd64-20260803-2559.qcow2",
+        "sha512": "769562604ecaac26b661167891ef922f71f4d87d50a11423fc04e51444fda0d882c87996dd1181170d233627f4728e6722db2695c0ef753dad762c4ac4ed32e1",
     },
 }
 # END CLOUD_IMAGES
@@ -91,7 +91,7 @@ def cloud_image_local_filename(image: CloudImage) -> str:
 
 
 def is_local_image_ref(ref: str) -> bool:
-    """True when ``ref`` looks like a Proxmox storage reference (``storage:iso/...``)."""
+    """True when ``ref`` is a Proxmox ISO storage reference."""
     if not ref:
         return False
     if ":" not in ref:
@@ -99,7 +99,7 @@ def is_local_image_ref(ref: str) -> bool:
     head, _, tail = ref.partition(":")
     if not head or not tail:
         return False
-    return "/" in tail
+    return tail.startswith("iso/") and len(tail) > len("iso/")
 
 
 def parse_image_argument(value: Optional[str]) -> tuple[Optional[str], Optional[str]]:

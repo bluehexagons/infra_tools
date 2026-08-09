@@ -247,6 +247,7 @@ class SetupConfig:
     hosted_node: MaybeStr = None
     hosted_user: str = "root"
     hosted_key: MaybeStr = None
+    hosted_bridge: MaybeStr = None
     container_memory: MaybeStr = None
     container_storage: Optional[NestedStrList] = None  # [[type, pool, amount?], ...]
     container_cores: int = 1
@@ -1036,6 +1037,7 @@ class SetupConfig:
             hosted_node=getattr(args, 'hosted_node', None),
             hosted_user=getattr(args, 'hosted_user', 'root'),
             hosted_key=getattr(args, 'hosted_key', None),
+            hosted_bridge=getattr(args, 'hosted_bridge', None),
             container_memory=getattr(args, 'container_memory', None),
             container_storage=_normalize_container_storage(getattr(args, 'container_storage', None)),
             container_cores=getattr(args, 'container_cores', 1),

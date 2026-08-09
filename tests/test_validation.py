@@ -558,6 +558,10 @@ class TestValidateAptPackages(unittest.TestCase):
 class _MockConfig:
     """Minimal mock for SetupConfig used by validate_hosted_flags."""
     def __init__(self, **kwargs):
+        self.host = kwargs.get('host', '10.0.0.50')
+        self.machine_type = kwargs.get('machine_type')
+        self.ssh_key = kwargs.get('ssh_key')
+        self.static_ipv4 = kwargs.get('static_ipv4')
         self.hosted_node = kwargs.get('hosted_node')
         self.container_memory = kwargs.get('container_memory')
         self.container_storage = kwargs.get('container_storage')
@@ -577,6 +581,45 @@ class TestValidateHostedFlags(unittest.TestCase):
             container_cores=2,
         )
         validate_hosted_flags(config)  # should not raise
+
+    def test_hosted_vm_requires_guest_public_key(self):
+        config = _MockConfig(
+            machine_type='vm',
+            hosted_node='10.0.0.1',
+            container_memory='2G',
+            container_storage=[['root', 'auto', '10G']],
+        )
+        with self.assertRaisesRegex(ValueError, r'requires --key'):
+            validate_hosted_flags(config)
+
+    def test_hosted_vm_rejects_hostname_target_without_static_ip(self):
+        config = _MockConfig(
+            host='vm.example.com',
+            machine_type='vm',
+            ssh_key='/tmp/does-not-matter',
+            hosted_node='10.0.0.1',
+            container_memory='2G',
+            container_storage=[['root', 'auto', '10G']],
+        )
+        with tempfile.NamedTemporaryFile(suffix='.pub') as pubkey:
+            pubkey.write(b'ssh-ed25519 AAAA test\n')
+            pubkey.flush()
+            config.ssh_key = pubkey.name[:-4]
+            with self.assertRaisesRegex(ValueError, r'literal IPv4'):
+                validate_hosted_flags(config)
+
+    def test_hosted_vm_accepts_key_and_ipv4_target(self):
+        config = _MockConfig(
+            machine_type='vm',
+            hosted_node='10.0.0.1',
+            container_memory='2G',
+            container_storage=[['root', 'auto', '10G']],
+        )
+        with tempfile.NamedTemporaryFile(suffix='.pub') as pubkey:
+            pubkey.write(b'ssh-ed25519 AAAA test\n')
+            pubkey.flush()
+            config.ssh_key = pubkey.name[:-4]
+            validate_hosted_flags(config)
 
     def test_missing_memory(self):
         config = _MockConfig(
