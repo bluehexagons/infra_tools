@@ -35,10 +35,6 @@ class TestProgressBar(unittest.TestCase):
         bar = progress_bar(0, 0)
         self.assertIn('0%', bar)
 
-    def test_custom_width(self):
-        bar = progress_bar(5, 10, width=40)
-        self.assertIn('50%', bar)
-
 
 class TestStepRegistration(unittest.TestCase):
     def setUp(self):

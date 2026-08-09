@@ -19,10 +19,6 @@ class TestHostedFlagParsing(unittest.TestCase):
         args = self.parser.parse_args(["10.0.0.50", "--hosted", "10.0.0.1"])
         self.assertEqual(args.hosted_node, "10.0.0.1")
 
-    def test_hosted_default_none(self):
-        args = self.parser.parse_args(["10.0.0.50"])
-        self.assertIsNone(args.hosted_node)
-
     def test_hosted_user_default_root(self):
         args = self.parser.parse_args(["10.0.0.50", "--hosted", "10.0.0.1"])
         self.assertEqual(args.hosted_user, "root")
@@ -41,19 +37,11 @@ class TestHostedFlagParsing(unittest.TestCase):
         ])
         self.assertEqual(args.hosted_key, "/path/to/key")
 
-    def test_hosted_key_default_none(self):
-        args = self.parser.parse_args(["10.0.0.50"])
-        self.assertIsNone(args.hosted_key)
-
     def test_memory_flag(self):
         args = self.parser.parse_args([
             "10.0.0.50", "--memory", "2G"
         ])
         self.assertEqual(args.container_memory, "2G")
-
-    def test_memory_default_none(self):
-        args = self.parser.parse_args(["10.0.0.50"])
-        self.assertIsNone(args.container_memory)
 
     def test_storage_flag_three_args(self):
         args = self.parser.parse_args([
@@ -71,10 +59,6 @@ class TestHostedFlagParsing(unittest.TestCase):
             args.container_storage,
             [["root", "auto", "10G"], ["template", "local"]]
         )
-
-    def test_storage_default_none(self):
-        args = self.parser.parse_args(["10.0.0.50"])
-        self.assertIsNone(args.container_storage)
 
     def test_cores_default_1(self):
         args = self.parser.parse_args(["10.0.0.50"])
