@@ -48,6 +48,21 @@ def print_setup_summary(config: SetupConfig, description: Optional[str] = None) 
         print(f"User: {config.username}")
     
     print(f"Timezone: {config.timezone}")
+
+    if config.system_hostname:
+        print(f"System hostname: {config.system_hostname}")
+    if config.static_ipv4:
+        print(f"Static IPv4: {config.static_ipv4}")
+    if config.static_ipv6:
+        print(f"Static IPv6: {config.static_ipv6}")
+    if config.network_gateway4:
+        print(f"IPv4 gateway: {config.network_gateway4}")
+    if config.network_gateway6:
+        print(f"IPv6 gateway: {config.network_gateway6}")
+    if config.network_dns:
+        print(f"DNS servers: {', '.join(config.network_dns)}")
+    if config.network_interface:
+        print(f"Network interface: {config.network_interface}")
     
     if config.enable_rdp:
         print("RDP: Yes")

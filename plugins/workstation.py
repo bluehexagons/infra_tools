@@ -77,7 +77,7 @@ def build_workstation_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
         get_web_server_steps,
     )
 
-    steps: list[tuple[str, StepFunc]] = list(get_common_steps())
+    steps: list[tuple[str, StepFunc]] = list(get_common_steps(config))
 
     if config.include_web_firewall:
         steps.extend(get_web_firewall_steps())
@@ -99,5 +99,5 @@ def build_workstation_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
     extend_cicd_steps(config, steps)
     extend_app_server_steps(config, steps)
     extend_build_server_steps(config, steps)
-    steps.extend(get_final_steps())
+    steps.extend(get_final_steps(config))
     return steps

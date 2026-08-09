@@ -574,6 +574,8 @@ _PACKAGE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+.-]*$")
 _ENVIRONMENT_VARIABLE_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _NETWORK_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 _NETWORK_PROVIDER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
+_NETWORK_INTERFACE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,14}$")
+_HOSTNAME_LABEL_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
 _GIT_SCP_URL_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+@[^:\s]+:.+$")
 _SAFE_REPO_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
@@ -703,6 +705,136 @@ def validate_network_ip(value: str, name: str = "network address") -> str:
         return str(ipaddress.ip_address(value))
     except ValueError as exc:
         raise ValueError(f"Invalid {name}: {value}") from exc
+
+
+def validate_system_hostname(value: str) -> str:
+    """Validate a static system hostname or fully qualified domain name."""
+
+    normalized = value.strip()
+    if not normalized or normalized != value or len(normalized) > 63:
+        raise ValueError(f"Invalid system hostname: {value}")
+    _validate_no_control_characters(normalized, "System hostname")
+    if normalized.endswith("."):
+        raise ValueError("System hostname must not end with a dot")
+    if any(not _HOSTNAME_LABEL_PATTERN.fullmatch(label) for label in normalized.split(".")):
+        raise ValueError(f"Invalid system hostname: {value}")
+    return normalized
+
+
+def validate_network_interface_name(value: str) -> str:
+    """Validate a Linux network interface name used in generated config."""
+
+    normalized = value.strip()
+    if normalized != value or not _NETWORK_INTERFACE_PATTERN.fullmatch(normalized):
+        raise ValueError(f"Invalid network interface: {value}")
+    return normalized
+
+
+def _validate_static_interface(value: str, version: int, flag: str) -> ipaddress.IPv4Interface | ipaddress.IPv6Interface:
+    if "/" not in value:
+        raise ValueError(f"{flag} requires CIDR notation with a prefix length")
+    try:
+        interface = ipaddress.ip_interface(value)
+    except ValueError as exc:
+        raise ValueError(f"Invalid {flag} address: {value}") from exc
+    if interface.version != version:
+        family = "IPv4" if version == 4 else "IPv6"
+        raise ValueError(f"{flag} requires an {family} address")
+    if interface.ip.is_unspecified or interface.ip.is_multicast:
+        raise ValueError(f"Invalid {flag} address: {value}")
+    if (
+        version == 4
+        and interface.network.prefixlen < 31
+        and interface.ip in {interface.network.network_address, interface.network.broadcast_address}
+    ):
+        raise ValueError(f"{flag} must be a usable host address: {value}")
+    return interface
+
+
+def validate_network_setup_settings(config: Any) -> None:
+    """Validate hostname and persistent static network setup options."""
+
+    hostname = getattr(config, "system_hostname", None)
+    ipv4_value = getattr(config, "static_ipv4", None)
+    ipv6_value = getattr(config, "static_ipv6", None)
+    gateway4_value = getattr(config, "network_gateway4", None)
+    gateway6_value = getattr(config, "network_gateway6", None)
+    dns_values = getattr(config, "network_dns", None) or []
+    interface_name = getattr(config, "network_interface", None)
+
+    if hostname:
+        validate_system_hostname(hostname)
+
+    network_requested = any(
+        (ipv4_value, ipv6_value, gateway4_value, gateway6_value, dns_values, interface_name)
+    )
+    if getattr(config, "system_type", None) == "server_proxmox" and (hostname or network_requested):
+        raise ValueError(
+            "--hostname and static network options are not supported for server_proxmox; "
+            "changing Proxmox node identity or bridge networking requires a node-specific plan"
+        )
+
+    ipv4_interface = _validate_static_interface(ipv4_value, 4, "--ip") if ipv4_value else None
+    ipv6_interface = _validate_static_interface(ipv6_value, 6, "--ipv6") if ipv6_value else None
+
+    if gateway4_value:
+        if not ipv4_interface:
+            raise ValueError("--gateway requires --ip")
+        try:
+            gateway4 = ipaddress.ip_address(gateway4_value)
+        except ValueError as exc:
+            raise ValueError(f"Invalid IPv4 gateway: {gateway4_value}") from exc
+        if gateway4.version != 4 or gateway4.is_unspecified or gateway4.is_multicast:
+            raise ValueError(f"Invalid IPv4 gateway: {gateway4_value}")
+
+    if gateway6_value:
+        if not ipv6_interface:
+            raise ValueError("--gateway6 requires --ipv6")
+        try:
+            gateway6 = ipaddress.ip_address(gateway6_value)
+        except ValueError as exc:
+            raise ValueError(f"Invalid IPv6 gateway: {gateway6_value}") from exc
+        if gateway6.version != 6 or gateway6.is_unspecified or gateway6.is_multicast:
+            raise ValueError(f"Invalid IPv6 gateway: {gateway6_value}")
+
+    if not ipv4_interface and not ipv6_interface and (dns_values or interface_name):
+        raise ValueError("A network DNS or interface option requires --ip or --ipv6")
+
+    normalized_dns: set[str] = set()
+    for dns_value in dns_values:
+        try:
+            dns_address = ipaddress.ip_address(dns_value)
+        except ValueError as exc:
+            raise ValueError(f"Invalid DNS server address: {dns_value}") from exc
+        if dns_address.is_unspecified or dns_address.is_multicast:
+            raise ValueError(f"Invalid DNS server address: {dns_value}")
+        normalized = str(dns_address)
+        if normalized in normalized_dns:
+            raise ValueError(f"Duplicate DNS server address: {normalized}")
+        normalized_dns.add(normalized)
+
+    if interface_name:
+        validate_network_interface_name(interface_name)
+
+    if getattr(config, "hosted_node", None) and (ipv4_interface or ipv6_interface):
+        try:
+            setup_host = ipaddress.ip_address(str(getattr(config, "host", "")))
+        except ValueError:
+            if not ipv4_interface:
+                raise ValueError(
+                    "Hosted provisioning requires a literal IPv4 setup host or --ip"
+                )
+            return
+        if setup_host.version == 6 and not ipv4_interface:
+            raise ValueError(
+                "Hosted provisioning currently requires an IPv4 target for the SSH handoff"
+            )
+        configured = ipv4_interface if setup_host.version == 4 else ipv6_interface
+        if configured is None or configured.ip != setup_host:
+            raise ValueError(
+                "For hosted provisioning, the literal setup host must match the address "
+                "provided by --ip or --ipv6"
+            )
 
 
 def validate_network_cidr(value: str, name: str = "network CIDR") -> str:

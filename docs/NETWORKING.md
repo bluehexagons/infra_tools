@@ -1,4 +1,32 @@
-# Network Inventory and Proxmox Firewall Planning
+# Static Host Networking, Inventory, and Proxmox Firewall Planning
+
+## Static Host Configuration
+
+The shared `setup` and `patch` options can persist a hostname and static
+dual-stack network configuration on Debian targets:
+
+```bash
+infra_tools.py setup server_lite 10.20.0.15 admin \
+  --hostname storage-01 \
+  --ip 10.20.0.15/24 --gateway 10.20.0.1 \
+  --ipv6 2001:db8:20::15/64 --gateway6 2001:db8:20::1 \
+  --dns 10.20.0.53 --dns 2001:db8:20::53
+```
+
+Both address flags require a prefix length. `--dns` is repeatable, and
+`--network-interface` overrides default-route interface detection. The setup
+supports active NetworkManager, systemd-networkd, and ifupdown installations.
+It disables future cloud-init network regeneration when cloud-init is present.
+
+Direct remote setup stages persistent configuration without bouncing the live
+interface, which prevents a mid-run SSH disconnect. Activate it with a planned
+reboot or explicit interface restart after reviewing the generated settings.
+Hosted Proxmox guests receive the requested addressing during provisioning and
+therefore boot with it already active. Proxmox host (`server_proxmox`) identity
+and bridge changes remain outside this generic workflow because they require
+cluster-aware planning.
+
+## Inventory and Firewall Planning
 
 The `network` command manages a workspace-backed, provider-neutral network
 inventory and can generate a read-only Proxmox control-plane firewall plan from

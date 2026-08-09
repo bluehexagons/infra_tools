@@ -460,10 +460,14 @@ class TestCreateContainerInjectsPubkey(unittest.TestCase):
             user="root",
             ssh_opts=[],
             ssh_pubkey_remote_path="/tmp/infra_tools_pubkey.abc",
+            ipv6_cidr="2001:db8::51/64",
+            gateway6="2001:db8::1",
         )
         pct_cmd = mock_run.call_args_list[0].args[3]
         self.assertIn("--ssh-public-keys", pct_cmd)
         self.assertIn("/tmp/infra_tools_pubkey.abc", pct_cmd)
+        self.assertIn("ip6=2001:db8::51/64", pct_cmd)
+        self.assertIn("gw6=2001:db8::1", pct_cmd)
         self.assertIn("--start 1", pct_cmd)
 
     @patch("lib.proxmox_node._ssh_run")

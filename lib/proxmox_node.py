@@ -7,6 +7,7 @@ Designed to be called locally before remote_setup runs against the container.
 
 from __future__ import annotations
 
+import ipaddress
 import re
 import subprocess
 import shlex
@@ -360,9 +361,23 @@ def _create_container(
     privileged: bool = False,
     dry_run: bool = False,
     ssh_pubkey_remote_path: Optional[str] = None,
+    ipv6_cidr: Optional[str] = None,
+    gateway6: Optional[str] = None,
 ) -> None:
     """Create and start the LXC container on the Proxmox host."""
     unprivileged = "0" if privileged else "1"
+
+    network_parts = [
+        "name=eth0",
+        f"bridge={bridge}",
+        f"ip={target_ip}/{cidr_prefix}",
+        f"gw={gateway}",
+    ]
+    if ipv6_cidr:
+        network_parts.append(f"ip6={ipv6_cidr}")
+        if gateway6:
+            network_parts.append(f"gw6={gateway6}")
+    network_parts.append("type=veth")
 
     cmd_parts = [
         f"pct create {vmid} {shlex.quote(template_path)}",
@@ -370,11 +385,7 @@ def _create_container(
         f"--memory {shlex.quote(memory)}",
         f"--cores {cores}",
         f"--rootfs {shlex.quote(root_pool)}:{shlex.quote(storage_amount)}",
-        (
-            f"--net0 name=eth0,bridge={shlex.quote(bridge)},"
-            f"ip={shlex.quote(target_ip)}/{shlex.quote(cidr_prefix)},"
-            f"gw={shlex.quote(gateway)},type=veth"
-        ),
+        f"--net0 {shlex.quote(','.join(network_parts))}",
         f"--nameserver {shlex.quote(' '.join(nameservers))}",
         f"--unprivileged {unprivileged}",
         "--onboot 1",
@@ -421,12 +432,15 @@ def provision_container(config: SetupConfig) -> None:
     memory = cast(str, config.container_memory)
     storage_specs = cast(NestedStrList, config.container_storage)
     user: str = config.hosted_user
-    target_ip: str = config.host
+    static_ipv4 = ipaddress.ip_interface(config.static_ipv4) if config.static_ipv4 else None
+    target_ip = str(static_ipv4.ip) if static_ipv4 else config.host
     ssh_opts = _ssh_opts(config.hosted_key)
     dry_run = config.dry_run
 
     if dry_run:
-        hostname = _build_container_hostname(target_ip, config.friendly_name)
+        hostname = config.system_hostname or _build_container_hostname(
+            target_ip, config.friendly_name
+        )
         root_spec = _get_storage_spec(storage_specs, "root")
         template_spec = _get_storage_spec(storage_specs, "template")
         privileged = config.machine_type == "privileged"
@@ -434,6 +448,14 @@ def provision_container(config: SetupConfig) -> None:
         print("[DRY RUN] Would provision LXC container:")
         print(f"  Proxmox node: {node_ip}")
         print(f"  Target IP: {target_ip}")
+        if config.static_ipv6:
+            print(f"  Static IPv6: {config.static_ipv6}")
+        if config.network_gateway4:
+            print(f"  IPv4 gateway: {config.network_gateway4}")
+        if config.network_gateway6:
+            print(f"  IPv6 gateway: {config.network_gateway6}")
+        if config.network_dns:
+            print(f"  DNS servers: {', '.join(config.network_dns)}")
         print(f"  Hostname: {hostname}")
         print(f"  Memory: {memory}")
         print(f"  Cores: {config.container_cores}")
@@ -456,7 +478,9 @@ def provision_container(config: SetupConfig) -> None:
         )
 
     # Resolve hostname
-    hostname = _build_container_hostname(target_ip, config.friendly_name)
+    hostname = config.system_hostname or _build_container_hostname(
+        target_ip, config.friendly_name
+    )
     print(f"  Hostname: {hostname}")
 
     # Auto-detect bridge
@@ -465,8 +489,8 @@ def provision_container(config: SetupConfig) -> None:
     )
 
     # Detect gateway and nameservers
-    gateway = _get_host_gateway(node_ip, user, ssh_opts)
-    nameservers = _get_host_nameservers(node_ip, user, ssh_opts)
+    gateway = config.network_gateway4 or _get_host_gateway(node_ip, user, ssh_opts)
+    nameservers = config.network_dns or _get_host_nameservers(node_ip, user, ssh_opts)
 
     root_spec = _get_storage_spec(storage_specs, "root")
     if not root_spec:
@@ -500,8 +524,12 @@ def provision_container(config: SetupConfig) -> None:
         config.container_base, template_storage, node_ip, user, ssh_opts
     )
 
-    cidr_prefix = _get_bridge_prefix_length(
-        node_ip, user, ssh_opts, bridge, dry_run=dry_run
+    cidr_prefix = (
+        str(static_ipv4.network.prefixlen)
+        if static_ipv4
+        else _get_bridge_prefix_length(
+            node_ip, user, ssh_opts, bridge, dry_run=dry_run
+        )
     )
 
     # Get next VMID
@@ -547,6 +575,8 @@ def provision_container(config: SetupConfig) -> None:
             privileged=privileged,
             dry_run=dry_run,
             ssh_pubkey_remote_path=remote_pubkey_path,
+            ipv6_cidr=config.static_ipv6,
+            gateway6=config.network_gateway6,
         )
 
         # Wait for sshd in the container to come up before handing off to remote_setup.

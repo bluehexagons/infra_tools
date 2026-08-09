@@ -26,6 +26,7 @@ from .common_steps import (
 )
 
 from .swap_steps import configure_swap
+from .network_steps import configure_static_network, configure_system_hostname
 
 __all__ = [
     'update_and_upgrade_packages',
@@ -49,4 +50,6 @@ __all__ = [
     'configure_swap',
     'install_apt_packages',
     'install_flatpak_packages',
+    'configure_static_network',
+    'configure_system_hostname',
 ]

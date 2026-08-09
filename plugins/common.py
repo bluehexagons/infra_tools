@@ -34,6 +34,8 @@ PLUGIN = PluginDefinition(
         "ensure_sudo_installed",
         "configure_locale",
         "configure_ipv4_preference",
+        "configure_system_hostname",
+        "configure_static_network",
         "setup_user",
         "copy_ssh_keys_to_user",
         "generate_ssh_key",
@@ -51,12 +53,13 @@ PLUGIN = PluginDefinition(
 )
 
 
-def get_common_steps() -> list[tuple[str, StepFunc]]:
+def get_common_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
     """Return the shared foundation steps for built-in setup flows."""
 
     from common.steps import (
         configure_ipv4_preference,
         configure_locale,
+        configure_system_hostname,
         configure_swap,
         configure_time_sync,
         copy_ssh_keys_to_user,
@@ -67,7 +70,7 @@ def get_common_steps() -> list[tuple[str, StepFunc]]:
     )
     from security.steps import create_remoteusers_group
 
-    return [
+    steps: list[tuple[str, StepFunc]] = [
         ("Updating and upgrading packages", update_and_upgrade_packages),
         ("Ensuring sudo is installed", ensure_sudo_installed),
         ("Configuring UTF-8 locale", configure_locale),
@@ -79,6 +82,9 @@ def get_common_steps() -> list[tuple[str, StepFunc]]:
         ("Configuring time synchronization", configure_time_sync),
         ("Configuring swap", configure_swap),
     ]
+    if config.system_hostname:
+        steps.insert(4, ("Configuring system hostname", configure_system_hostname))
+    return steps
 
 
 def get_cli_steps() -> list[tuple[str, StepFunc]]:
@@ -89,12 +95,16 @@ def get_cli_steps() -> list[tuple[str, StepFunc]]:
     return [("Installing CLI tools", install_cli_tools)]
 
 
-def get_final_steps() -> list[tuple[str, StepFunc]]:
+def get_final_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
     """Return the standard final verification steps for built-in setup flows."""
 
-    from common.steps import check_restart_required
+    from common.steps import check_restart_required, configure_static_network
 
-    return [("Checking if restart required", check_restart_required)]
+    steps: list[tuple[str, StepFunc]] = []
+    if config.static_ipv4 or config.static_ipv6:
+        steps.append(("Staging static network configuration", configure_static_network))
+    steps.append(("Checking if restart required", check_restart_required))
+    return steps
 
 
 def extend_runtime_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -> None:
@@ -187,6 +197,8 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         configure_auto_update_uv,
         configure_ipv4_preference,
         configure_locale,
+        configure_static_network,
+        configure_system_hostname,
         configure_swap,
         configure_time_sync,
         copy_ssh_keys_to_user,
@@ -232,6 +244,8 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "ensure_sudo_installed": ensure_sudo_installed,
         "configure_locale": configure_locale,
         "configure_ipv4_preference": configure_ipv4_preference,
+        "configure_system_hostname": configure_system_hostname,
+        "configure_static_network": configure_static_network,
         "setup_user": setup_user,
         "copy_ssh_keys_to_user": copy_ssh_keys_to_user,
         "generate_ssh_key": generate_ssh_key,

@@ -23,6 +23,7 @@ The flow is:
 
 from __future__ import annotations
 
+import ipaddress
 import shlex
 import subprocess
 import time
@@ -321,8 +322,19 @@ def _create_vm(
     user: str,
     ssh_opts: StrList,
     dry_run: bool = False,
+    ipv6_cidr: Optional[str] = None,
+    gateway6: Optional[str] = None,
 ) -> None:
     """Build, populate, and start the VM on ``node_ip``."""
+    ipconfig_parts = [
+        f"ip={target_ip}/{cidr_prefix}",
+        f"gw={gateway}",
+    ]
+    if ipv6_cidr:
+        ipconfig_parts.append(f"ip6={ipv6_cidr}")
+        if gateway6:
+            ipconfig_parts.append(f"gw6={gateway6}")
+
     create_parts = [
         f"qm create {vmid}",
         f"--name {shlex.quote(hostname)}",
@@ -337,7 +349,7 @@ def _create_vm(
         (
             f"--net0 virtio,bridge={shlex.quote(bridge)}"
         ),
-        f"--ipconfig0 ip={shlex.quote(target_ip)}/{shlex.quote(cidr_prefix)},gw={shlex.quote(gateway)}",
+        f"--ipconfig0 {shlex.quote(','.join(ipconfig_parts))}",
         f"--nameserver {shlex.quote(' '.join(nameservers))}",
         "--onboot 1",
     ]
@@ -461,7 +473,8 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
     memory_str = cast(str, config.container_memory)
     storage_specs = cast(NestedStrList, config.container_storage)
     user: str = config.hosted_user
-    target_ip: str = config.host
+    static_ipv4 = ipaddress.ip_interface(config.static_ipv4) if config.static_ipv4 else None
+    target_ip = str(static_ipv4.ip) if static_ipv4 else config.host
     ssh_opts = _ssh_opts(config.hosted_key)
     dry_run = config.dry_run
 
@@ -477,7 +490,7 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
     memory_mb = _parse_memory_mb(memory_str)
     disk_size_gib = _parse_disk_size_gib(disk_amount)
 
-    hostname = _build_guest_hostname(
+    hostname = config.system_hostname or _build_guest_hostname(
         target_ip,
         config.friendly_name,
         default_prefix="vm",
@@ -489,6 +502,14 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
         print("[DRY RUN] Would provision Proxmox VM:")
         print(f"  Proxmox node: {node_ip}")
         print(f"  Target IP: {target_ip}")
+        if config.static_ipv6:
+            print(f"  Static IPv6: {config.static_ipv6}")
+        if config.network_gateway4:
+            print(f"  IPv4 gateway: {config.network_gateway4}")
+        if config.network_gateway6:
+            print(f"  IPv6 gateway: {config.network_gateway6}")
+        if config.network_dns:
+            print(f"  DNS servers: {', '.join(config.network_dns)}")
         print(f"  Hostname: {hostname}")
         print(f"  Memory: {memory_mb} MiB")
         print(f"  Cores: {config.container_cores}")
@@ -513,9 +534,13 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
     print(f"  Hostname: {hostname}")
 
     bridge = auto_detect_bridge(node_ip, user, config.hosted_key)
-    gateway = _get_host_gateway(node_ip, user, ssh_opts)
-    nameservers = _get_host_nameservers(node_ip, user, ssh_opts)
-    cidr_prefix = _get_bridge_prefix_length(node_ip, user, ssh_opts, bridge)
+    gateway = config.network_gateway4 or _get_host_gateway(node_ip, user, ssh_opts)
+    nameservers = config.network_dns or _get_host_nameservers(node_ip, user, ssh_opts)
+    cidr_prefix = (
+        str(static_ipv4.network.prefixlen)
+        if static_ipv4
+        else _get_bridge_prefix_length(node_ip, user, ssh_opts, bridge)
+    )
 
     root_pool = _resolve_storage_pool(
         root_pool_arg, node_ip, user, ssh_opts, "images"
@@ -577,6 +602,8 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
             user=user,
             ssh_opts=ssh_opts,
             dry_run=dry_run,
+            ipv6_cidr=config.static_ipv6,
+            gateway6=config.network_gateway6,
         )
         _wait_for_guest_agent(
             vmid,

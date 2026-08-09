@@ -114,12 +114,16 @@ class TestVMHardwareProfile(unittest.TestCase):
             node_ip="10.0.0.10",
             user="root",
             ssh_opts=[],
+            ipv6_cidr="2001:db8::50/64",
+            gateway6="2001:db8::1",
         )
 
         commands = [call.args[3] for call in mock_run.call_args_list]
         self.assertIn("--serial0 socket", commands[0])
         self.assertIn("--vga virtio", commands[0])
         self.assertIn("--scsihw virtio-scsi-single", commands[0])
+        self.assertIn("ip6=2001:db8::50/64", commands[0])
+        self.assertIn("gw6=2001:db8::1", commands[0])
         self.assertIn("--scsi0 local-lvm:vm-101-disk-0,iothread=1", commands[2])
 
 

@@ -173,6 +173,13 @@ class SetupConfig:
     password: MaybeStr = None
     ssh_key: MaybeStr = None
     timezone: str = "UTC"
+    system_hostname: MaybeStr = None
+    static_ipv4: MaybeStr = None
+    static_ipv6: MaybeStr = None
+    network_gateway4: MaybeStr = None
+    network_gateway6: MaybeStr = None
+    network_dns: Optional[StrList] = None
+    network_interface: MaybeStr = None
     friendly_name: MaybeStr = None
     tags: Optional[StrList] = None
     enable_rdp: bool = False
@@ -305,6 +312,27 @@ class SetupConfig:
         
         if self.timezone:
             args.append(f"--timezone {shlex.quote(self.timezone)}")
+
+        if self.system_hostname:
+            args.append(f"--hostname {shlex.quote(self.system_hostname)}")
+
+        if self.static_ipv4:
+            args.append(f"--ip {shlex.quote(self.static_ipv4)}")
+
+        if self.static_ipv6:
+            args.append(f"--ipv6 {shlex.quote(self.static_ipv6)}")
+
+        if self.network_gateway4:
+            args.append(f"--gateway {shlex.quote(self.network_gateway4)}")
+
+        if self.network_gateway6:
+            args.append(f"--gateway6 {shlex.quote(self.network_gateway6)}")
+
+        for dns_server in self.network_dns or []:
+            args.append(f"--dns {shlex.quote(dns_server)}")
+
+        if self.network_interface:
+            args.append(f"--network-interface {shlex.quote(self.network_interface)}")
         
         if self.friendly_name:
             args.append(f"--name {shlex.quote(self.friendly_name)}")
@@ -524,6 +552,27 @@ class SetupConfig:
         # Timezone
         if self.timezone and self.timezone != "UTC":
             cmd_parts.append(f"-t {shlex.quote(self.timezone)}")
+
+        if self.system_hostname:
+            cmd_parts.append(f"--hostname {shlex.quote(self.system_hostname)}")
+
+        if self.static_ipv4:
+            cmd_parts.append(f"--ip {shlex.quote(self.static_ipv4)}")
+
+        if self.static_ipv6:
+            cmd_parts.append(f"--ipv6 {shlex.quote(self.static_ipv6)}")
+
+        if self.network_gateway4:
+            cmd_parts.append(f"--gateway {shlex.quote(self.network_gateway4)}")
+
+        if self.network_gateway6:
+            cmd_parts.append(f"--gateway6 {shlex.quote(self.network_gateway6)}")
+
+        for dns_server in self.network_dns or []:
+            cmd_parts.append(f"--dns {shlex.quote(dns_server)}")
+
+        if self.network_interface:
+            cmd_parts.append(f"--network-interface {shlex.quote(self.network_interface)}")
         
         # Machine type (if not the current setup default for this flow)
         default_machine_type = _default_machine_type_for_setup(
@@ -914,6 +963,13 @@ class SetupConfig:
             password=getattr(args, 'password', None),
             ssh_key=getattr(args, 'ssh_key', None),
             timezone=timezone,
+            system_hostname=getattr(args, 'system_hostname', None),
+            static_ipv4=getattr(args, 'static_ipv4', None),
+            static_ipv6=getattr(args, 'static_ipv6', None),
+            network_gateway4=getattr(args, 'network_gateway4', None),
+            network_gateway6=getattr(args, 'network_gateway6', None),
+            network_dns=getattr(args, 'network_dns', None),
+            network_interface=getattr(args, 'network_interface', None),
             friendly_name=getattr(args, 'friendly_name', None),
             tags=tags,
             enable_rdp=enable_rdp,

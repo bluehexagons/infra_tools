@@ -73,6 +73,49 @@ def add_setup_arguments(
     
     parser.add_argument("-p", "--password", help="User password")
     parser.add_argument("-t", "--timezone", help="Timezone (defaults to UTC)")
+    parser.add_argument(
+        "--hostname",
+        dest="system_hostname",
+        metavar="NAME",
+        help="Set the target system hostname",
+    )
+    parser.add_argument(
+        "--ip",
+        dest="static_ipv4",
+        metavar="ADDRESS/PREFIX",
+        help="Configure a static IPv4 address in CIDR notation (for example, 192.168.1.10/24)",
+    )
+    parser.add_argument(
+        "--ipv6",
+        dest="static_ipv6",
+        metavar="ADDRESS/PREFIX",
+        help="Configure a static IPv6 address in CIDR notation",
+    )
+    parser.add_argument(
+        "--gateway",
+        dest="network_gateway4",
+        metavar="IP",
+        help="IPv4 default gateway; requires --ip",
+    )
+    parser.add_argument(
+        "--gateway6",
+        dest="network_gateway6",
+        metavar="IP",
+        help="IPv6 default gateway; requires --ipv6",
+    )
+    parser.add_argument(
+        "--dns",
+        dest="network_dns",
+        action="append",
+        metavar="IP",
+        help="DNS server address; repeat for multiple IPv4 or IPv6 servers",
+    )
+    parser.add_argument(
+        "--network-interface",
+        dest="network_interface",
+        metavar="INTERFACE",
+        help="Interface to configure (default: interface carrying the default route)",
+    )
     parser.add_argument("--machine", dest="machine_type",
                        choices=MACHINE_TYPES,
                        default=None,

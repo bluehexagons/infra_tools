@@ -66,6 +66,13 @@ infra_tools.py proxmox ...
 | `-k, --key PATH` | SSH private key |
 | `-p, --password PASS` | SSH password |
 | `-t, --timezone TZ` | Timezone |
+| `--hostname NAME` | Set the target system hostname; distinct from the saved `--name` label |
+| `--ip ADDRESS/PREFIX` | Stage a persistent static IPv4 address; CIDR prefix is required |
+| `--ipv6 ADDRESS/PREFIX` | Stage a persistent static IPv6 address; CIDR prefix is required |
+| `--gateway IP` | IPv4 default gateway; requires `--ip` |
+| `--gateway6 IP` | IPv6 default gateway; requires `--ipv6` |
+| `--dns IP` | DNS server; repeatable and accepts IPv4 or IPv6 addresses |
+| `--network-interface NAME` | Interface to configure; defaults to the interface carrying the default route |
 | `--workspace PATH` | Workspace root for config, credentials, known_hosts, and history |
 | `--machine TYPE` | Machine type override; defaults to `auto` on the target |
 | `--name NAME` | Friendly name for the configuration |
@@ -98,6 +105,27 @@ infra_tools.py proxmox ...
 | `--apt-install PACKAGE` | Install a package via apt |
 | `--flatpak-install PACKAGE` | Install a package via Flatpak |
 | `--dark` | Configure dark theme |
+
+Static address configuration is validated before any remote work begins. It
+supports NetworkManager, systemd-networkd, and ifupdown on Debian. To avoid
+cutting off an in-progress SSH setup, direct-host configuration is persisted
+but not activated live; reboot or deliberately restart the interface after
+reviewing the staged configuration. For hosted Proxmox VMs and LXCs, the same
+values are also supplied to cloud-init or `pct` during provisioning, so the
+guest starts on the requested address. Existing ifupdown files changed for the
+selected interface receive a one-time `.infra-tools.bak` copy.
+
+```bash
+infra_tools.py setup server_lite 192.168.1.50 admin \
+  --hostname app-01 \
+  --ip 192.168.1.50/24 --gateway 192.168.1.1 \
+  --dns 1.1.1.1 --dns 1.0.0.1 \
+  --network-interface eth0
+```
+
+`--hostname` and these static network flags are intentionally rejected for
+`server_proxmox`: changing a Proxmox node name or bridge address can affect
+cluster identity and requires a node-specific migration plan.
 
 Without `--rdp-source`, enabling RDP preserves the historical globally
 rate-limited UFW rule. Prefer one or more management, VPN, or trusted LAN CIDRs.
@@ -242,6 +270,9 @@ Notes:
 - Hosted Proxmox setup defaults to a VM because it is creating a new guest;
   use `--machine unprivileged` for an LXC.
 - `--machine unprivileged` keeps an existing or intentional LXC path.
+- `--ip`, `--ipv6`, gateway, DNS, and `--hostname` override the values that
+  hosted guest provisioning would otherwise derive from the Proxmox node and
+  positional target address.
 
 ## Deployment Flags
 

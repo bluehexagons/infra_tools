@@ -79,6 +79,7 @@ from lib.validation import (
     validate_deploy_targets,
     validate_gogs_settings,
     validate_hosted_flags,
+    validate_network_setup_settings,
     validate_rdp_settings,
     validate_samba_share_credentials,
     validate_samba_share_name,
@@ -814,6 +815,7 @@ def _prepare_runtime_config_for_cli(config: SetupConfig) -> SetupConfig:
     validate_gogs_settings(runtime_config.gogs)
     validate_antistatic_settings(runtime_config)
     validate_hosted_flags(runtime_config)
+    validate_network_setup_settings(runtime_config)
     validate_rdp_settings(runtime_config)
     validate_samba_share_credentials(runtime_config)
     return runtime_config
