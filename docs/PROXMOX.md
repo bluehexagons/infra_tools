@@ -142,6 +142,19 @@ The summary includes node CPU, memory, storage, and guest counts. It is a
 read-only health and capacity view; `probe` should be run first when a host's
 storage or bridge data has not been cached.
 
+Run a maintenance-safety audit before planned work:
+
+```bash
+python3 infra_tools.py proxmox audit pve1 pve2
+python3 infra_tools.py proxmox audit pve1 --json
+```
+
+The audit checks core Proxmox services, quorum on clustered nodes, active tasks,
+configured storage, at least 4 GiB of free root space, guest locks, running
+guests, and whether a reboot is pending. Text output distinguishes general
+health from reboot safety; JSON output is intended for automation. The command
+is read-only and exits nonzero when a health check fails.
+
 Modify resources and configuration:
 
 ```bash
@@ -239,6 +252,7 @@ underlying task or roll back partial storage changes.
 python3 infra_tools.py proxmox probe-cluster 10.0.0.10 \
   --key ~/.ssh/proxmox_ed25519 --tag prod
 python3 infra_tools.py proxmox hosts
+python3 infra_tools.py proxmox audit pve1 pve2 pve3
 python3 infra_tools.py proxmox rolling-update pve1 pve2 pve3
 python3 infra_tools.py proxmox notifications install-webhook \
   pve1 https://notify.example/hook --send-test
@@ -248,7 +262,10 @@ python3 infra_tools.py proxmox shell
 
 `probe-cluster` discovers nodes from Proxmox's configured names and seeds the
 host registry. `rolling-update` reuses saved setup commands and workspace
-credentials, validates every target first, and waits for required reboots.
+credentials. It audits every target before changing any node, repeats the audit
+after each update and reboot, and advances only after verification. An automatic
+reboot is refused while guests are running or locked; the remaining nodes are
+then skipped so the operator can migrate or stop workloads deliberately.
 `notifications install-webhook` configures Proxmox's native notification
 matcher; repeat `--severity` to limit routing, and use `--dry-run` before
 writing the endpoint. Treat webhook URLs as sensitive values.

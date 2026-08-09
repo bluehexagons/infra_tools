@@ -9,6 +9,8 @@ from typing import Optional
 
 from lib.cache import load_setup_command
 from lib.config import SetupConfig
+from lib.proxmox_hosts import ProxmoxHost
+from lib.proxmox_maintenance import ProxmoxMaintenanceReport, collect_maintenance_report
 from lib.setup_common import prepare_validated_runtime_config
 from lib.ssh_utils import build_ssh_command
 from lib.workspace import set_workspace_dir
@@ -69,8 +71,20 @@ def _wait_for_ssh_state(
     return _ssh_available(config) == available
 
 
-def _remote_reboot_required(config: SetupConfig) -> bool:
-    return _ssh_result(config, "test -f /var/run/reboot-required").returncode == 0
+def _maintenance_report(target: str, config: SetupConfig) -> ProxmoxMaintenanceReport:
+    """Collect the shared Proxmox safety report for a saved setup target."""
+    return collect_maintenance_report(
+        ProxmoxHost(
+            name=target,
+            address=config.host,
+            user="root",
+            ssh_key=config.ssh_key,
+        )
+    )
+
+
+def _maintenance_errors(report: ProxmoxMaintenanceReport) -> str:
+    return "; ".join(report.errors) or "unknown maintenance preflight failure"
 
 
 def _reboot_and_wait(config: SetupConfig, timeout: int) -> None:
@@ -150,6 +164,16 @@ def run_cluster_update(
                 )
             )
             continue
+        if config.system_type != "server_proxmox":
+            results.append(
+                ClusterUpdateResult(
+                    target=target,
+                    host=config.host,
+                    status="failed",
+                    details="Saved setup is not a server_proxmox configuration",
+                )
+            )
+            continue
 
         config.dry_run = dry_run
         try:
@@ -161,6 +185,32 @@ def run_cluster_update(
                     host=config.host,
                     status="failed",
                     details=str(exc),
+                )
+            )
+            continue
+
+        maintenance = _maintenance_report(target, config)
+        if not maintenance.healthy:
+            results.append(
+                ClusterUpdateResult(
+                    target=target,
+                    host=config.host,
+                    status="failed",
+                    details=f"Maintenance preflight failed: {_maintenance_errors(maintenance)}",
+                )
+            )
+            continue
+        if maintenance.reboot_required and not maintenance.reboot_safe:
+            results.append(
+                ClusterUpdateResult(
+                    target=target,
+                    host=config.host,
+                    status="failed",
+                    reboot_required=True,
+                    details=(
+                        "Maintenance preflight found a pending reboot blocked by "
+                        + "; ".join(maintenance.reboot_blockers())
+                    ),
                 )
             )
             continue
@@ -200,11 +250,42 @@ def run_cluster_update(
             result.details = "Dry run only"
             continue
 
-        reboot_required = _remote_reboot_required(config)
+        maintenance = _maintenance_report(target, config)
+        if not maintenance.healthy:
+            result.status = "failed"
+            result.details = f"Post-update audit failed: {_maintenance_errors(maintenance)}"
+            for skipped_target, skipped_config in prepared[index + 1 :]:
+                results.append(
+                    ClusterUpdateResult(
+                        target=skipped_target,
+                        host=skipped_config.host,
+                        status="skipped",
+                        details=f"Skipped after failure on {target}",
+                    )
+                )
+            _print_summary(results)
+            return 1
+
+        reboot_required = maintenance.reboot_required is True
         result.reboot_required = reboot_required
         if not reboot_required:
             result.details = "No reboot required"
             continue
+
+        if not maintenance.reboot_safe:
+            result.status = "failed"
+            result.details = "Reboot blocked: " + "; ".join(maintenance.reboot_blockers())
+            for skipped_target, skipped_config in prepared[index + 1 :]:
+                results.append(
+                    ClusterUpdateResult(
+                        target=skipped_target,
+                        host=skipped_config.host,
+                        status="skipped",
+                        details=f"Skipped after blocked reboot on {target}",
+                    )
+                )
+            _print_summary(results)
+            return 1
 
         try:
             _reboot_and_wait(config, reboot_timeout)
@@ -224,7 +305,25 @@ def run_cluster_update(
             return 1
 
         result.rebooted = True
-        result.details = "Rebooted and reconnected"
+        maintenance = _maintenance_report(target, config)
+        if not maintenance.healthy or maintenance.reboot_required:
+            result.status = "failed"
+            details = list(maintenance.errors)
+            if maintenance.reboot_required:
+                details.append("reboot-required marker remains after reboot")
+            result.details = "Post-reboot audit failed: " + "; ".join(details)
+            for skipped_target, skipped_config in prepared[index + 1 :]:
+                results.append(
+                    ClusterUpdateResult(
+                        target=skipped_target,
+                        host=skipped_config.host,
+                        status="skipped",
+                        details=f"Skipped after failure on {target}",
+                    )
+                )
+            _print_summary(results)
+            return 1
+        result.details = "Rebooted, reconnected, and verified"
 
     _print_summary(results)
     return 0

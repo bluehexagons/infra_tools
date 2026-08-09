@@ -8,6 +8,7 @@ the management surface can grow independently of the setup/patch flow.
 from __future__ import annotations
 
 import argparse
+import json
 from dataclasses import replace
 from typing import Optional
 
@@ -15,6 +16,10 @@ from lib.cluster_update import run_cluster_update
 from lib.proxmox_backup import BackupInfo, ProxmoxBackupError, create_backup, list_backups
 from lib.proxmox_guest import probe_proxmox_cluster, probe_proxmox_host
 from lib.proxmox_migrate import ProxmoxMigrateError, migrate_guest
+from lib.proxmox_maintenance import (
+    collect_maintenance_report,
+    format_maintenance_report,
+)
 from lib.proxmox_storage import OrphanedVolume, ProxmoxStorageError, delete_volume, list_orphaned_volumes
 from lib.proxmox_placement import (
     PlacementRequest,
@@ -305,6 +310,22 @@ def add_proxmox_subparser(subparsers: argparse._SubParsersAction) -> argparse.Ar
         help="Registered host name(s) or address(es)",
     )
     top.set_defaults(_handler=_cmd_top)
+
+    audit = sub.add_parser(
+        "audit",
+        help="Run read-only maintenance and reboot-safety checks on nodes",
+    )
+    audit.add_argument(
+        "hosts",
+        nargs="+",
+        help="Registered host name(s) or address(es)",
+    )
+    audit.add_argument(
+        "--json",
+        action="store_true",
+        help="Print a stable JSON report",
+    )
+    audit.set_defaults(_handler=_cmd_audit)
 
     plan = sub.add_parser(
         "plan",
@@ -1000,6 +1021,21 @@ def _cmd_top(args: argparse.Namespace, workspace: Optional[str]) -> int:
         if len(args.hosts) > 1:
             print()
     return 1 if any_error else 0
+
+
+def _cmd_audit(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    reports = [
+        collect_maintenance_report(_resolve_host(name, workspace))
+        for name in args.hosts
+    ]
+    if args.json:
+        print(json.dumps([report.to_dict() for report in reports], indent=2, sort_keys=True))
+    else:
+        for index, report in enumerate(reports):
+            if index:
+                print()
+            print(format_maintenance_report(report))
+    return 0 if all(report.healthy for report in reports) else 1
 
 
 def _cmd_plan_missing(args: argparse.Namespace, workspace: Optional[str]) -> int:

@@ -335,6 +335,7 @@ one control-plane address before it will produce a non-error plan.
 infra_tools.py proxmox add <name> <address> [--user USER] [--key PATH]
 infra_tools.py proxmox probe <host>
 infra_tools.py proxmox probe-cluster <address> [--user USER] [--key PATH] [--tag TAG]
+infra_tools.py proxmox audit <host> [<host> ...] [--json]
 infra_tools.py proxmox rolling-update <target> [<target> ...] [--dry-run] [--reboot-timeout SECONDS]
 infra_tools.py proxmox top <host> [<host> ...]
 infra_tools.py proxmox plan place [options]
@@ -361,9 +362,17 @@ infra_tools.py proxmox notifications test-webhook <host>
 infra_tools.py proxmox [shell]
 ```
 
-`probe` caches bridge, gateway, DNS, and storage recommendations. `rolling-update`
-uses saved setup commands and workspace credentials. Mutating subcommands accept
-`--dry-run` where supported.
+`probe` caches bridge, gateway, DNS, and storage recommendations. `audit` is
+read-only and checks core Proxmox services, cluster quorum, active tasks,
+configured storage, root free space, guest locks, running guests, and the reboot
+marker. It exits nonzero when the host is not healthy and supports stable JSON
+output for automation.
+
+`rolling-update` uses saved setup commands and workspace credentials. It audits
+all targets before making changes, audits each node again after its update and
+reboot, and stops before an automatic reboot if that node still has running or
+locked guests. Mutating subcommands accept `--dry-run` where supported; a rolling
+update dry run still performs the read-only preflight audits.
 
 ### Interactive Shell
 

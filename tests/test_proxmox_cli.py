@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import json
 import os
 import subprocess
 import sys
@@ -22,6 +23,7 @@ from lib.proxmox_hosts import (
     add_proxmox_host,
     load_proxmox_hosts,
 )
+from lib.proxmox_maintenance import ProxmoxMaintenanceReport
 
 
 def _make_parser() -> argparse.ArgumentParser:
@@ -294,6 +296,51 @@ class TestProxmoxCliContainerOps(_CliFixture):
         rc, out = self._run("status", "missing", "100")
         self.assertEqual(rc, 1)
         self.assertIn("No registered Proxmox host", out)
+
+
+class TestProxmoxCliAudit(_CliFixture):
+    def setUp(self) -> None:
+        super().setUp()
+        add_proxmox_host(
+            ProxmoxHost(name="pve1", address="10.0.0.10"), self.workspace
+        )
+
+    @patch("lib.proxmox_cli.collect_maintenance_report")
+    def test_audit_prints_human_report(self, mock_collect) -> None:
+        mock_collect.return_value = ProxmoxMaintenanceReport(
+            host_name="pve1",
+            address="10.0.0.10",
+            node_name="pve1",
+            clustered=False,
+            reboot_required=False,
+        )
+
+        rc, out = self._run("audit", "pve1")
+
+        self.assertEqual(rc, 0)
+        self.assertIn("Proxmox maintenance audit", out)
+        self.assertIn("HEALTHY", out)
+        self.assertIn("READY", out)
+
+    @patch("lib.proxmox_cli.collect_maintenance_report")
+    def test_audit_json_is_machine_readable_and_fails_when_unhealthy(
+        self, mock_collect
+    ) -> None:
+        mock_collect.return_value = ProxmoxMaintenanceReport(
+            host_name="pve1",
+            address="10.0.0.10",
+            node_name="pve1",
+            clustered=True,
+            quorate=False,
+            errors=["Cluster is not quorate"],
+        )
+
+        rc, out = self._run("audit", "pve1", "--json")
+
+        self.assertEqual(rc, 1)
+        payload = json.loads(out)
+        self.assertFalse(payload[0]["healthy"])
+        self.assertEqual(payload[0]["errors"], ["Cluster is not quorate"])
 
 
 class TestProxmoxPlanRebalanceApply(_CliFixture):

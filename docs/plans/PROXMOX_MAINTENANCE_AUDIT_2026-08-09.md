@@ -4,6 +4,20 @@ Status: active follow-up plan. Small reliability fixes from this audit landed
 with the document; the remaining work needs explicit design and live-cluster
 validation.
 
+## Progress
+
+- 2026-08-09: added a read-only `proxmox audit` command with text and JSON
+  results for core service state, quorum, active tasks, configured storage, root
+  free space, guest state and locks, and pending reboots.
+- 2026-08-09: made `rolling-update` run that audit before any changes, after
+  each node update, and after reconnecting from a reboot. Automatic reboot now
+  stops when guests are running or locked, and later nodes remain untouched.
+
+These are the first P1 safety controls, not completion of either P1 item below.
+Repository suitability, HA/Ceph health, guest evacuation policy, storage-type
+specific checks, and durable transaction records still require larger work and
+live-cluster validation.
+
 ## Scope and current behavior
 
 The review traced `server_proxmox` from plugin step selection through the
@@ -51,9 +65,10 @@ changes.
 ### P1: Proxmox-aware update orchestration
 
 Current daily APT maintenance is node-local and repository-agnostic. The
-separate rolling-update command replays the saved setup, inherits the
-cleanup-first service gap tracked by `ARCH-05`, and reboots whenever required;
-it does not establish cluster health or guest-placement safety.
+separate rolling-update command replays the saved setup and inherits the
+cleanup-first service gap tracked by `ARCH-05`. It now establishes basic node
+health and refuses to reboot a node with running or locked guests, but it does
+not evaluate HA/Ceph policy or evacuate workloads.
 
 Design a dedicated update transaction that:
 
@@ -76,7 +91,7 @@ The generic cleanup job checks only root-filesystem usage. The security monitor
 checks host authentication events, but neither evaluates the resources most
 likely to threaten guest availability.
 
-Add a read-only Proxmox maintenance audit covering:
+Extend the initial read-only Proxmox maintenance audit to cover:
 
 - quorum, node membership, HA state, and stuck/failed tasks;
 - `pveproxy`, `pvedaemon`, `pvestatd`, `pve-cluster`, corosync, and scheduler
