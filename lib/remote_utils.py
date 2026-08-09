@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import secrets
 import shlex
 import string
@@ -14,6 +15,60 @@ from lib.validation import validate_package_name
 
 
 _dry_run = False
+
+
+_SECRET_ASSIGNMENT_RE = re.compile(
+    r"(?i)(?P<key>\b[A-Za-z_][A-Za-z0-9_-]*)(?P<separator>\s*=\s*)"
+    r"(?P<value>[^\s;&|]+)"
+)
+_SECRET_OPTION_RE = re.compile(
+    r"(?i)(?<![A-Za-z0-9_-])(--?(?:password|passwd|secret|token|api[-_]?key|private[-_]?key|"
+    r"credentials?)(?:=|\s+))([^\s;&|]+)"
+)
+_SECRET_KEY_MARKERS = (
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "api_key",
+    "api-key",
+    "private_key",
+    "private-key",
+    "credential",
+)
+
+
+def _redact_command(value: str) -> str:
+    """Redact common secret assignments and command-line option values."""
+    def replace_assignment(match: re.Match[str]) -> str:
+        key = match.group("key")
+        if not any(marker in key.lower() for marker in _SECRET_KEY_MARKERS):
+            return match.group(0)
+        return f"{key}{match.group('separator')}<redacted>"
+
+    redacted = _SECRET_ASSIGNMENT_RE.sub(replace_assignment, value)
+    return _SECRET_OPTION_RE.sub(r"\1<redacted>", redacted)
+
+
+class CommandExecutionError(RuntimeError):
+    """Raised when a required command exits unsuccessfully."""
+
+    def __init__(
+        self,
+        command: str,
+        returncode: int,
+        stderr: Optional[str] = None,
+        *,
+        result: Optional[subprocess.CompletedProcess[str]] = None,
+    ) -> None:
+        self.command = _redact_command(command)
+        self.returncode = returncode
+        self.stderr = _redact_command(stderr) if stderr else stderr
+        self.result = result
+        message = f"Command failed with exit code {returncode}: {self.command}"
+        if self.stderr:
+            message += f"\n{self.stderr[:500]}"
+        super().__init__(message)
 
 
 def set_dry_run(enabled: bool) -> None:
@@ -41,7 +96,7 @@ def run(
     display_cmd: Optional[str] = None,
     input_data: Optional[str] = None,
 ) -> subprocess.CompletedProcess[str]:
-    log_cmd = display_cmd if display_cmd is not None else cmd
+    log_cmd = _redact_command(display_cmd if display_cmd is not None else cmd)
     print(f"  Running: {log_cmd[:80]}..." if len(log_cmd) > 80 else f"  Running: {log_cmd}")
     sys.stdout.flush()
     
@@ -61,8 +116,15 @@ def run(
     result = subprocess.run(command, **run_kwargs)
     if check and result.returncode != 0:
         if getattr(result, 'stderr', None):
-            print(f"    Warning: {result.stderr[:200]}")
+            warning = _redact_command(result.stderr) if isinstance(result.stderr, str) else result.stderr
+            print(f"    Warning: {warning[:200]}")
             sys.stdout.flush()
+        raise CommandExecutionError(
+            log_cmd,
+            result.returncode,
+            result.stderr if isinstance(result.stderr, str) else None,
+            result=result,
+        )
     return result
 
 

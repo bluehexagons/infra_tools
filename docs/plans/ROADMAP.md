@@ -28,8 +28,8 @@ Priorities are ordered by these principles:
 
 The ordering remains justified by the current implementation:
 
-- required command failures can still be reduced to warnings by
-  `remote_utils.run()`;
+- required command failures now raise from `remote_utils.run(check=True)`;
+  caller classification and recovery orchestration remain incomplete;
 - full setup removes existing managed services before replacement steps run;
 - manifest deployment stops services and deletes the current tree before the
   replacement build, while exhausted health checks only warn;
@@ -45,7 +45,7 @@ work.
 The best next work packets are:
 
 1. Complete the `remote_utils.run()` caller inventory and define strict versus
-   best-effort contracts.
+   best-effort contracts (the strict helper slice is now landed).
 2. Decide whether to redesign or remove the currently unused
    `lib/transaction.py` framework; do not build a parallel transaction layer.
 3. Replace permissive corrupt-state fallbacks with schema/version checks and

@@ -25,19 +25,29 @@ Primary evidence sources were:
 
 Each finding lists: severity, evidence, validation outcome, and direct follow-up impact.
 
-### ARCH-01: Non-failing execution helper (`remote_utils.run`)
+### ARCH-01: Ambiguous execution helper (`remote_utils.run`) (resolved)
 
 **Severity: High**
 
 - **Evidence**
-  - `lib/remote_utils.py:62-66` calls `subprocess.run(...)` and does **not** raise on non-zero status when `check=True`; it only prints a warning.
-  - Same pattern is then widely used by callers that expect the helper to enforce failures.
-  - `install_with_verify()` intentionally invokes `run(install_cmd, check=False)` at `lib/remote_utils.py:131`, which is consistent with a soft-fail helper model, but then this behavior is also applied in other paths where callers rely on return code.
+  - The helper has hundreds of callers, including required setup commands and
+    probes that intentionally inspect a non-zero result.
+  - Before the execution-contract slice, `check=True` only printed a warning;
+    required failures therefore looked like successful setup steps.
+  - `install_with_verify()` and other probes intentionally use
+    `check=False` and inspect the returned result.
 - **Validation**
-  - Confirmed by line-level inspection that `check` only toggles warning behavior and never raises.
+  - Confirmed by tests that `check=True` now raises the project-specific
+    `CommandExecutionError` with the display command, exit code, and bounded
+    stderr, while `check=False` returns the failed `CompletedProcess`.
+  - The first caller audit migrated result-inspecting database, release-fetch,
+    and host-metric paths to explicit `check=False`; the remaining inventory is
+    still tracked in the transactional execution plan.
 - **Impact**
-  - Command failures can continue through orchestrations and produce partially-applied state.  
-  - Inconsistent local recovery logic makes operational behavior hard to reason about.
+  - The helper now stops required command chains by default, while preserving
+    explicit best-effort behavior for probes and optional operations.
+  - Remaining partial-apply and recovery risks are tracked under ARCH-03,
+    ARCH-05, and ARCH-08 rather than hidden by a warning-only helper.
 
 ### ARCH-02: Plugin discovery is eager and import-coupled to startup
 
@@ -157,8 +167,8 @@ Validation was performed by static evidence checks (no behavior-altering actions
 - **2026-08-08 — ARCH-07 resolved:** manifest environment variable names are
   now validated as shell identifiers before deployment command assembly. Keep
   this validation at the manifest boundary when the build executor is refactored.
-- **2026-08-09 — open findings reverified:** `run(check=True)` still returns a
-  failed result, setup still removes managed services before running steps,
+- **2026-08-09 — open findings reverified:** setup still removes managed
+  services before running steps,
   manifest deploy still removes the active tree before building, manifest
   health failures still warn without failing, the shared SSH builders still
   use `accept-new`, and plugin discovery still imports every built-in plugin
@@ -168,6 +178,12 @@ Validation was performed by static evidence checks (no behavior-altering actions
   all JSON state/configuration paths, including secret-bearing files with mode
   `0600`. Tests cover complete writes, replacement failure preservation, and
   permissions. Corrupt-state remediation remains tracked under ARCH-08.
+- **2026-08-09 — ARCH-01 resolved:** `remote_utils.run(check=True)` now raises
+  `CommandExecutionError` on non-zero exit, with bounded diagnostics, while
+  `check=False` remains an explicit result-returning contract. Tests cover both
+  paths, and common secret assignment/option values are redacted from command
+  output and exception text. Caller inventory and a complete secret-display
+  audit remain follow-up work.
 - ARCH-01, ARCH-03, ARCH-05, and ARCH-08 are sequenced in
   [Transactional execution and reconciliation](TRANSACTIONAL_EXECUTION.md).
   ARCH-02 remains a P3 startup-isolation task in [the roadmap](ROADMAP.md), and

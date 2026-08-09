@@ -27,6 +27,7 @@ def fetch_github_releases(repo: str, *, per_page: int = 20) -> list[Mapping[str,
     api_url = f"https://api.github.com/repos/{repo}/releases?per_page={per_page}"
     result = run(
         f"curl -sf {shlex.quote(api_url)}",
+        check=False,
         capture_output=True,
         display_cmd=f"curl -sf https://api.github.com/repos/{repo}/releases?per_page={per_page}",
     )

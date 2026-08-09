@@ -13,6 +13,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.remote_utils import (
+    CommandExecutionError,
     set_dry_run,
     is_dry_run,
     generate_password,
@@ -81,6 +82,48 @@ class TestRunCommandDispatch(unittest.TestCase):
             text=True,
             cwd=None,
         )
+
+    @patch("lib.remote_utils.subprocess.run")
+    def test_check_true_raises_for_failed_command(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=["false"], returncode=17, stderr="permission denied"
+        )
+
+        with self.assertRaises(CommandExecutionError) as raised:
+            run("false", display_cmd="false (sanitized)")
+
+        error = raised.exception
+        self.assertEqual(error.command, "false (sanitized)")
+        self.assertEqual(error.returncode, 17)
+        self.assertEqual(error.stderr, "permission denied")
+        self.assertIs(error.result, mock_run.return_value)
+
+    @patch("lib.remote_utils.subprocess.run")
+    def test_check_false_returns_failed_result(self, mock_run):
+        failed = subprocess.CompletedProcess(args=["false"], returncode=17, stderr="failed")
+        mock_run.return_value = failed
+
+        result = run("false", check=False)
+
+        self.assertIs(result, failed)
+
+    @patch("lib.remote_utils.subprocess.run")
+    def test_failure_diagnostics_redact_secret_values(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=["deploy"],
+            returncode=1,
+            stderr="SECRET_KEY_BASE=stderr-secret --token cli-secret",
+        )
+
+        with self.assertRaises(CommandExecutionError) as raised:
+            run("deploy SECRET_KEY_BASE=command-secret --password option-secret")
+
+        message = str(raised.exception)
+        self.assertNotIn("command-secret", message)
+        self.assertNotIn("option-secret", message)
+        self.assertNotIn("stderr-secret", message)
+        self.assertNotIn("cli-secret", message)
+        self.assertIn("SECRET_KEY_BASE=<redacted>", message)
 
 
 class TestRemoteValidateUsername(unittest.TestCase):

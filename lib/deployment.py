@@ -1047,7 +1047,7 @@ class DeploymentOrchestrator:
             
             # Load current schema structure
             # Note: DISABLE_DATABASE_ENVIRONMENT_CHECK=1 allows schema:load to run in production
-            result = run(f"cd {shlex.quote(project_path)} && {env_vars} DISABLE_DATABASE_ENVIRONMENT_CHECK=1 bundle exec rake db:schema:load", capture_output=True)
+            result = run(f"cd {shlex.quote(project_path)} && {env_vars} DISABLE_DATABASE_ENVIRONMENT_CHECK=1 bundle exec rake db:schema:load", check=False, capture_output=True)
             if result.returncode != 0:
                 print(f"  ✗ Schema load failed with exit code {result.returncode}")
                 if result.stderr:
@@ -1060,7 +1060,7 @@ class DeploymentOrchestrator:
             
             # Run any migrations that are newer than the schema
             print("  Running any new migrations...")
-            result = run(f"cd {shlex.quote(project_path)} && {env_vars} bundle exec rake db:migrate", capture_output=True)
+            result = run(f"cd {shlex.quote(project_path)} && {env_vars} bundle exec rake db:migrate", check=False, capture_output=True)
             if result.returncode != 0:
                 print(f"  ✗ Migration failed with exit code {result.returncode}")
                 if result.stderr:
@@ -1073,7 +1073,7 @@ class DeploymentOrchestrator:
         else:
             # Normal migration path
             print("  Running database migrations...")
-            result = run(f"cd {shlex.quote(project_path)} && {env_vars} bundle exec rake db:migrate", capture_output=True)
+            result = run(f"cd {shlex.quote(project_path)} && {env_vars} bundle exec rake db:migrate", check=False, capture_output=True)
             
             if result.returncode != 0:
                 error_output = result.stderr if result.stderr else result.stdout
@@ -1133,7 +1133,7 @@ class DeploymentOrchestrator:
                 else:
                     seed_cmd = f"cd {shlex.quote(project_path)} && {env_vars} bundle exec rake db:seed"
                 
-                seed_result = run(seed_cmd, capture_output=True)
+                seed_result = run(seed_cmd, check=False, capture_output=True)
                 if seed_result.stdout:
                     print(seed_result.stdout)
             else:
@@ -1147,7 +1147,7 @@ class DeploymentOrchestrator:
                     else:
                         seed_cmd = f"cd {shlex.quote(project_path)} && {env_vars} bundle exec rake db:seed"
                     
-                    seed_result = run(seed_cmd, capture_output=True)
+                    seed_result = run(seed_cmd, check=False, capture_output=True)
                     if seed_result.stdout:
                         print(seed_result.stdout)
                 else:

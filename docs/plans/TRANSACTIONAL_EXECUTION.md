@@ -18,7 +18,9 @@ ARCH-08 from the [architectural risk review](ARCHITECTURAL_RISK_REVIEW_2026-08-0
 
 ## Verified implementation baseline (2026-08-09)
 
-- `lib.remote_utils.run(check=True)` warns and returns on non-zero status.
+- `lib.remote_utils.run(check=True)` now raises `CommandExecutionError` with a
+  bounded stderr diagnostic; callers that intentionally inspect failure use
+  explicit `check=False`.
 - `remote_setup.py` removes all managed services before executing setup steps.
 - `DeploymentOrchestrator.deploy_manifest()` stops services and deletes the
   active deployment tree before building its replacement.
@@ -73,6 +75,13 @@ Migration requirements:
 
 Do not change the helper and assume all callers want strict behavior. Existing
 verification-based installers and probes intentionally inspect failed results.
+
+The first execution-contract slice landed on 2026-08-09: strict failures now
+raise, best-effort failures remain inspectable, and result-inspecting database,
+release-fetch, and host-metric callers explicitly request `check=False`. The
+helper also redacts common secret assignment and option values from command
+output and exception text. The full caller classification and complete
+secret-display audit remain open.
 
 ## Phase 2: Atomic persistent state
 
@@ -154,10 +163,11 @@ use mode, but automated privileged paths should not enable it by default.
 
 ## Recommended first delivery slice
 
-The atomic persistence slice is complete. The next delivery should land the
-`remote_utils.run()` caller inventory and transaction-framework decision, then
-use the shared writer for durable operation markers and add fault-injection
-tests around setup/deployment interruption.
+The atomic persistence and initial execution-contract slices are complete. The
+next delivery should finish the `remote_utils.run()` caller inventory and
+transaction-framework decision, then use the shared writer for durable
+operation markers and add fault-injection tests around setup/deployment
+interruption.
 
 ## Non-goals
 
