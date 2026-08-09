@@ -1,9 +1,9 @@
 # CI/CD Manifest Reuse
 
-Status: planned, P1 after deploy secrets and transactional activation. This is
-the follow-up project for teaching the webhook
-CI/CD path to consume `infra.json` instead of only the server-side webhook
-scripts.
+Status: verified as needed, P1 after deploy secrets and transactional
+activation. As of 2026-08-09, the webhook CI/CD path still consumes its
+server-side repository/script configuration and does not load `infra.json`.
+This is the follow-up project for teaching that path to use the shared manifest.
 
 Why it is separate:
 

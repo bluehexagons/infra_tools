@@ -24,6 +24,37 @@ Priorities are ordered by these principles:
 5. New providers and platforms should reuse these guarantees rather than add
    parallel execution models.
 
+## Verification snapshot (2026-08-09)
+
+The ordering remains justified by the current implementation:
+
+- required command failures can still be reduced to warnings by
+  `remote_utils.run()`;
+- full setup removes existing managed services before replacement steps run;
+- manifest deployment stops services and deletes the current tree before the
+  replacement build, while exhausted health checks only warn;
+- persistent machine state, caches, and webhook configuration still include
+  non-atomic writes and permissive corrupt-state fallback; and
+- privileged shared SSH command builders still accept first-seen host keys.
+
+The manifest environment-key injection finding is resolved. CI now tests
+Python 3.10, 3.12, and 3.14, and `make compile` propagates compilation failures.
+Those completed items should remain regression coverage, not active roadmap
+work.
+
+The best next work packets are:
+
+1. Complete the `remote_utils.run()` caller inventory and define strict versus
+   best-effort contracts.
+2. Decide whether to redesign or remove the currently unused
+   `lib/transaction.py` framework; do not build a parallel transaction layer.
+3. Introduce one shared atomic JSON writer and migrate machine/setup state
+   first, then caches and webhook configuration.
+4. Stage manifest releases and make health-check failure block activation and
+   restore the previous release.
+5. Replace automatic SSH first-use trust with explicit enrollment before
+   privileged setup/deploy operations.
+
 ## P0: Transactional execution and state
 
 The first priority is resolving the execution and partial-apply risks captured
@@ -122,16 +153,11 @@ security, package, service, and networking behavior.
 
 ## Small improvements to land continuously
 
-Small, well-contained fixes should not wait for a larger phase. The initial
-roadmap update includes:
-
-- explicit CI coverage for Python 3.10, 3.12, and 3.14;
-- a compile check that propagates failures correctly; and
-- strict shell environment-variable name validation for manifest build env.
-
-Good follow-ups include atomic workspace/cache writes, plugin import fault
-isolation, consistent `--json` support for read-only commands, and a local
-package-install smoke test.
+Small, well-contained fixes should not wait for a larger phase. Good follow-ups
+include plugin import fault isolation, consistent `--json` support for
+read-only commands, and a local package-install smoke test. Atomic state writes
+have moved into the first P0 delivery slice because durable recovery markers
+depend on them.
 
 ## Deliberately deferred
 

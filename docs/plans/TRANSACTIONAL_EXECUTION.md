@@ -1,6 +1,6 @@
 # Transactional Execution and Reconciliation
 
-Status: proposed, highest priority.
+Status: verified and ready to implement; highest priority.
 
 This plan turns setup and deployment from a sequence of mostly independent
 commands into an operation with explicit preparation, activation, verification,
@@ -15,6 +15,41 @@ ARCH-08 from the [architectural risk review](ARCHITECTURAL_RISK_REVIEW_2026-08-0
 - Use the same validation result for planning and post-apply verification.
 - Keep best-effort maintenance operations possible, but make that choice
   explicit at each call site.
+
+## Verified implementation baseline (2026-08-09)
+
+- `lib.remote_utils.run(check=True)` warns and returns on non-zero status.
+- `remote_setup.py` removes all managed services before executing setup steps.
+- `DeploymentOrchestrator.deploy_manifest()` stops services and deletes the
+  active deployment tree before building its replacement.
+- Manifest health polling prints a warning after exhaustion and deployment is
+  still recorded as successful.
+- Machine state, setup config, caches, and webhook configuration still contain
+  direct JSON writes; atomic writers exist elsewhere but are duplicated and
+  are not a shared persistence contract.
+- All shared SSH/SCP/rsync builders still use
+  `StrictHostKeyChecking=accept-new`.
+
+There is also an existing `lib/transaction.py` and `lib/operation_log.py` pair,
+but production apply paths do not use the transaction manager. Its state is
+in-memory, `execute()` does not trigger rollback, and continue-on-error can
+report success after a failed step. It must be deliberately redesigned and
+adopted or removed; this project should not introduce a second competing
+transaction abstraction.
+
+## Phase 0: Contract and primitive convergence
+
+Before changing broad execution behavior:
+
+1. Inventory and classify every `remote_utils.run()` caller as required,
+   optional, probe, or cleanup, including its current return-code handling.
+2. Decide the fate of `lib/transaction.py` and `lib/operation_log.py` against
+   the interruption-recovery requirements below. Remove unused pieces that do
+   not fit the chosen design.
+3. Define the durable operation-marker schema, ownership, location, and
+   recovery behavior before wiring setup or deploy to it.
+4. Add fault-injection tests at the orchestration boundary, not only unit tests
+   of transaction primitives.
 
 ## Phase 1: Execution contracts
 
@@ -78,6 +113,11 @@ files cannot always reverse a schema change. Record the migration boundary,
 create and verify backups before migration, and clearly report when application
 rollback also requires database restoration.
 
+For manifest deployments, replace the current stop/delete/build sequence with
+staging under an immutable release path. A declared health check must exhaust
+its retry policy by raising a deployment failure, restoring the previous
+service/unit and release pointer, and recording whether rollback succeeded.
+
 ## Phase 5: Managed SSH trust
 
 Separate host-key enrollment from privileged operations. Enrollment should
@@ -102,6 +142,13 @@ use mode, but automated privileged paths should not enable it by default.
   behavior through explicit APIs and tests.
 - Hosted VM, unprivileged LXC, and direct Debian setup paths have regression
   coverage for the new phases.
+
+## Recommended first delivery slice
+
+Land the caller inventory and transaction-framework decision first. Then add a
+single shared atomic JSON writer and migrate machine state plus setup config as
+the first low-coupling implementation. This establishes crash-safe persistence
+for the operation markers needed by later setup and deployment rollback work.
 
 ## Non-goals
 

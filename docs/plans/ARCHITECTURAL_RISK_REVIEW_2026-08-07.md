@@ -100,7 +100,7 @@ Each finding lists: severity, evidence, validation outcome, and direct follow-up
 - **Impact**
   - Crash/interruption during write can leave corrupted state; recovery by fallback silently hides corruption and increases debugging latency.
 
-### ARCH-07: Manifest/build env assembly does not validate variable names
+### ARCH-07: Manifest/build env assembly did not validate variable names (resolved)
 
 **Severity: Medium**
 
@@ -137,14 +137,24 @@ Validation was performed by static evidence checks (no behavior-altering actions
 1. Make execution helper semantics explicit (`run` should either raise or return a structured failure contract; avoid ambiguous `check=True` behavior).
 2. Add import-time fault isolation for plugin/validator discovery (cache and quarantine malformed plugin modules).
 3. Replace `accept-new` in production deploy paths with managed known-host bootstrapping and `yes/no` policy enforcement.
-4. Introduce manifest env key validation (identifier allow-list) and command-escaping consistency before shell injection points.
-5. Make setup teardown transaction-like (snapshot, apply, rollback marker) so cleanup failures are reversible.
-6. Convert all persistent JSON writes to atomic temp-file write + `os.replace`, and tighten behavior on corrupted state to surface explicit remediation steps.
+4. Make setup teardown transaction-like (snapshot, apply, rollback marker) so cleanup failures are reversible.
+5. Convert all persistent JSON writes to atomic temp-file write + `os.replace`, and tighten behavior on corrupted state to surface explicit remediation steps.
+6. Keep repository-script execution as an explicit trust boundary while the
+   direct and webhook deployment engines converge.
 
 ## Resolution updates
 
 - **2026-08-08 — ARCH-07 resolved:** manifest environment variable names are
   now validated as shell identifiers before deployment command assembly. Keep
   this validation at the manifest boundary when the build executor is refactored.
-- The remaining findings are intentionally sequenced in
+- **2026-08-09 — open findings reverified:** `run(check=True)` still returns a
+  failed result, setup still removes managed services before running steps,
+  manifest deploy still removes the active tree before building, manifest
+  health failures still warn without failing, the shared SSH builders still
+  use `accept-new`, plugin discovery still imports every built-in plugin
+  eagerly, and the named state/cache files still use direct JSON writes.
+- ARCH-01, ARCH-03, ARCH-05, ARCH-06, and ARCH-08 are sequenced in
   [Transactional execution and reconciliation](TRANSACTIONAL_EXECUTION.md).
+  ARCH-02 remains a P3 startup-isolation task in [the roadmap](ROADMAP.md), and
+  ARCH-04 is a trust-boundary requirement for
+  [CI/CD manifest reuse](CICD_MANIFEST_REUSE.md).

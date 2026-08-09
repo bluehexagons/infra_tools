@@ -1,6 +1,9 @@
 # Deploy Secrets & Optional Components
 
-Status: planned, P1 after the transactional execution foundation.
+Status: verified as needed, P1 after the transactional execution foundation.
+As of 2026-08-09, manifest components support literal build environment values
+and an `env_file` path, but they do not declare secret references, secret-gated
+optional components, or rotation relationships.
 
 The intended shape is simple:
 
@@ -30,6 +33,11 @@ build output, or world-readable deployment staging.
 Start with the existing workspace credential store, but keep resolution behind
 an interface that can later support SOPS/age or a remote secret manager. Do not
 make an external service mandatory for the first implementation.
+
+The existing credential store is currently shaped around named login
+credentials. Do not overload that schema with arbitrary deploy secrets; reuse
+its atomic file/permission techniques behind a separate versioned secret-store
+schema and provider interface.
 
 The deployment engine should write a root-owned or service-owned environment
 file atomically, set mode `0600`, and pass only its path to systemd. Build-time
