@@ -34,7 +34,7 @@ compatibility labels, but they are not part of the official support target.
 
 | Capability | unprivileged | vm | privileged | hardware | oci |
 |------------|--------------|-----|------------|----------|-----|
-| GPU/DRI access | ❌ | ✅ | ✅ | ✅ | ❌ |
+| GPU/DRI device access | Explicit passthrough only | Device-dependent | Explicit passthrough only | Device-dependent | Explicit passthrough only |
 | Kernel parameters | ❌ | ✅ | ✅ | ✅ | ❌ |
 | Firewall (UFW) | ❌ | ✅ | ✅ | ✅ | ❌ |
 | Swap configuration | ❌ | ✅ | ✅ | ✅ | ❌ |
@@ -46,13 +46,14 @@ compatibility labels, but they are not part of the official support target.
 ### Unprivileged/OCI Containers
 - **Skipped**: Swap, kernel hardening (sysctl), time sync, fail2ban
 - **Attempted with graceful failure**: Firewall (UFW), auto-updates
-- **XRDP**: Software rendering mode (no GPU access)
+- **XRDP**: Managed software-rendering mode
 - **Flatpak**: Warns and falls back to apt
 
 ### VM/Privileged/Hardware
 - Kernel, firewall, swap, and time-sync controls are enabled where the runtime
   exposes them
-- GPU-accelerated XRDP is available when the guest has GPU/DRI access
+- XRDP uses the managed software-rendered xrdpdev path on every machine type;
+  an emulated VM display is not treated as GPU acceleration
 - VM and hardware setups receive host-level AppArmor, auditd, and security
   monitoring; privileged containers may inherit those controls from the host
 

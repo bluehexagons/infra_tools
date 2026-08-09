@@ -92,6 +92,45 @@ Replace `100` with the VMID returned by `proxmox ls`.
 `RDP_PASSWORD` in a secure secret source rather than placing a literal in
 shell history; the password is not persisted in saved setup state.
 
+## Graphical VM hardware baseline
+
+Hosted VMs that include a desktop or enable RDP are created with both a
+VirtIO-GPU display and a serial socket. The VirtIO device supplies a usable
+Proxmox noVNC recovery console; the serial socket remains available for boot
+diagnostics. Server-only VMs retain `vga: serial0` to avoid an unused emulated
+display. Existing desktop VMs created with a serial-only display can be shut
+down and changed with `qm set VMID --vga virtio` on the Proxmox node.
+
+The emulated display does **not** accelerate an XRDP session. xorgxrdp creates
+its own resizable X.Org display with the `xrdpdev` driver, and infra_tools keeps
+that path software-rendered for compatibility. Accordingly, setup does not add
+the desktop user to `video` or `render` merely because the target is a VM.
+
+The resulting Proxmox baseline is:
+
+| Setting | infra_tools default | Rationale / alternative |
+| --- | --- | --- |
+| Display | VirtIO-GPU for desktop/RDP; serial-only for servers | VirtIO-GPU is a recovery console, not XRDP acceleration. QXL/SPICE and `virtio-gl` add no benefit to this RDP path. |
+| Serial | `serial0: socket` | Retains low-level diagnostics alongside the graphical console. |
+| CPU | `host` | Best performance on one node or a CPU-homogeneous cluster. Use a compatible `x86-64-v*` model when cross-generation live migration matters. |
+| Machine/firmware | Proxmox defaults | Q35/OVMF are not required for an emulated display or XRDP; prefer them when PCIe GPU passthrough requires them. |
+| Disk controller | VirtIO SCSI single with `iothread=1` on the root disk | Uses the per-disk I/O thread supported by the selected controller. Enable discard/SSD flags only when the backing storage policy supports them. |
+| Network | VirtIO | Lowest-overhead normal Linux guest path. Multiqueue is normally unnecessary for interactive RDP traffic. |
+| Guest agent | Enabled and installed | Supports clean lifecycle and guest inspection from Proxmox. |
+| Memory | Fixed requested allocation | Start around 8 GiB for the documented coding desktop and size for browsers, editors, builds, and agents; do not rely on aggressive overcommit for interactive latency. |
+
+These choices follow Proxmox's documented VirtIO network and VirtIO-SCSI
+performance guidance and its warning that `host` CPU trades migration
+portability for host feature exposure. Proxmox also documents that selecting a
+serial display disables VGA output. See the current
+[Proxmox VE administration guide](https://pve.proxmox.com/pve-docs/pve-admin-guide.pdf).
+
+Physical GPU passthrough is a different profile. It needs host IOMMU/device
+isolation, usually Q35/OVMF, explicit guest drivers, and separate xorgxrdp
+glamor compatibility testing. It is not enabled by the default RDP setup; the
+larger validation work is tracked in the
+[RDP desktop agent audit](plans/DESKTOP_AGENT_MAINTENANCE_AUDIT_2026-08-09.md).
+
 ## Hosted web server VM
 
 ```bash

@@ -95,6 +95,12 @@ hardens XRDP; the detailed session, TLS, and dynamic-resolution behavior is in
 i3 receives an informational message because its theme is normally configured
 in the user's i3 setup.
 
+When a workstation is provisioned as a hosted Proxmox VM, it receives a
+VirtIO-GPU recovery/noVNC console plus a serial socket. XRDP still uses its own
+software-rendered xorgxrdp display, so changing the Proxmox emulated graphics
+card does not accelerate the remote session. The complete host-side settings
+and CPU/migration tradeoffs are in [`PROXMOX.md`](./PROXMOX.md).
+
 RDP logins use the setup user's Unix password, so `--rdp` requires a non-root
 `--password`. Prefer a secret-sourced environment variable such as
 `--password "$RDP_PASSWORD"`; passwords are not written to saved setup state.

@@ -12,7 +12,8 @@ The flow is:
 2. Download the qcow2 onto the Proxmox node, verify SHA-512 when known.
 3. Allocate the next VMID, detect the bridge / gateway / nameservers (reused
    helpers from :mod:`lib.proxmox_node`).
-4. ``qm create`` with serial console + virtio-scsi.
+4. ``qm create`` with a recovery console + virtio-scsi. Desktop/RDP guests
+   receive VirtIO-GPU for noVNC; server guests retain the serial console.
 5. ``qm importdisk`` (or ``--import-from``) the qcow2 into the root storage,
    attach as ``scsi0``, set boot order, attach a cloud-init drive.
 6. Cloud-init: user/SSH key/IP from infra_tools, then resize to the requested
@@ -97,6 +98,11 @@ def _parse_disk_size_gib(value: str) -> int:
     if gib < 1:
         raise ProvisionError(f"VM disk must be at least 1G (got {value!r})")
     return gib
+
+
+def _needs_graphical_console(config: SetupConfig) -> bool:
+    """Return whether a hosted VM needs a Proxmox graphical console."""
+    return config.include_desktop or config.enable_rdp
 
 
 def check_vm_exists(
@@ -310,6 +316,7 @@ def _create_vm(
     nameservers: StrList,
     hostname: str,
     user_data_path: Optional[str],
+    graphical_console: bool,
     node_ip: str,
     user: str,
     ssh_opts: StrList,
@@ -325,7 +332,7 @@ def _create_vm(
         "--ostype l26",
         "--scsihw virtio-scsi-single",
         "--serial0 socket",
-        "--vga serial0",
+        "--vga virtio" if graphical_console else "--vga serial0",
         "--agent enabled=1",
         (
             f"--net0 virtio,bridge={shlex.quote(bridge)}"
@@ -372,7 +379,7 @@ def _create_vm(
 
     set_cmd = (
         f"qm set {vmid} "
-        f"--scsi0 {shlex.quote(disk_volume)} "
+        f"--scsi0 {shlex.quote(disk_volume)},iothread=1 "
         f"--ide2 {shlex.quote(root_pool)}:cloudinit "
         f"--boot order=scsi0"
     )
@@ -485,6 +492,10 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
         print(f"  Hostname: {hostname}")
         print(f"  Memory: {memory_mb} MiB")
         print(f"  Cores: {config.container_cores}")
+        print(
+            "  Console: "
+            + ("VirtIO-GPU + serial" if _needs_graphical_console(config) else "serial")
+        )
         print(f"  Root storage: {root_pool_arg} ({disk_size_gib}G)")
         if catalog_entry:
             print(f"  Image (catalog): {catalog_entry['codename']} {catalog_entry['snapshot']} → {catalog_entry['filename']}")
@@ -561,6 +572,7 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
             nameservers=nameservers,
             hostname=hostname,
             user_data_path=user_data_path,
+            graphical_console=_needs_graphical_console(config),
             node_ip=node_ip,
             user=user,
             ssh_opts=ssh_opts,

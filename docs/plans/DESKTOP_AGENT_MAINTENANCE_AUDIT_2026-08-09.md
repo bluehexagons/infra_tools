@@ -1,10 +1,11 @@
 # RDP Desktop Agent Host and Maintenance Audit (2026-08-09)
 
 Status: active follow-up plan. Password persistence, managed X.Org deployment,
-unsupported session cleanup, RDP source/bind policy, and channel defaults have
-been addressed. Native session lifecycle controls are now saved and validated.
-Certificate lifecycle, workload-aware maintenance, configuration compatibility,
-and live desktop verification remain larger work.
+unsupported session cleanup, RDP source/bind policy, channel defaults, and the
+Proxmox emulated-display profile have been addressed. Native session lifecycle
+controls are now saved and validated. Certificate lifecycle, workload-aware
+maintenance, configuration compatibility, physical-GPU acceleration, and live
+desktop verification remain larger work.
 
 ## Scope and recommended baseline
 
@@ -118,6 +119,22 @@ sessions. Destructive disconnected-session cleanup requires an explicit boolean
 and positive retention interval, and the setup preview shows the effective
 limits. This bounds abandoned sessions without a username-wide process killer.
 
+### RDA-06: Proxmox desktop VMs had no graphical recovery console
+
+Hosted VMs were created with `serial0` as both their serial device and display,
+including desktop/RDP profiles. Proxmox therefore disabled VGA output and its
+noVNC console showed only the serial terminal. At the same time, guest setup
+treated the `vm` machine label as proof of GPU/DRI access and granted the
+desktop user `video` and `render`, although the managed xorgxrdp configuration
+uses `xrdpdev`, `AutoAddGPU=off`, and `UseGlamor=false`.
+
+Desktop or RDP hosted VMs now receive VirtIO-GPU for the Proxmox recovery
+console while retaining the serial socket; server-only VMs remain serial-only.
+The XRDP session remains software-rendered and no longer receives unrelated
+DRM group privileges. The existing VirtIO SCSI single root disk now enables
+its supported per-disk I/O thread. Unit tests cover profile selection, emitted
+`qm` options, and the absence of GPU-group grants.
+
 ## Larger follow-up work
 
 ### P1: RDP TLS identity, health, and safe network apply
@@ -215,6 +232,21 @@ Flatpak repositories; otherwise pin an upstream version, verify a publisher
 digest/signature, retain non-secret install evidence, and add explicit update
 and rollback behavior. Fold GUI version health into the same audit surface as
 agent tools instead of adding another updater timer per application.
+
+### P2: Physical-GPU passthrough and xorgxrdp acceleration profile
+
+**Risk:** VirtIO-GPU improves only the Proxmox console. Enabling xorgxrdp
+glamor against a passed-through physical GPU changes the host isolation,
+firmware, guest driver, device-permission, and session stability boundary. The
+current software renderer must not silently switch based on the broad `vm`
+machine label or the presence of an emulated DRM node.
+
+If hardware acceleration becomes necessary, design an explicit opt-in profile
+that validates IOMMU isolation and Proxmox Q35/OVMF/hostpci settings, restricts
+DRM group access to the intended user, verifies the xorgxrdp build and driver
+allowlist, benchmarks software versus glamor, and rolls back on login, resize,
+or reconnect failure. Cover both noVNC recovery and RDP because they use
+separate display paths.
 
 ## Validation requirements
 

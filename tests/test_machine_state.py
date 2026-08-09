@@ -45,7 +45,6 @@ class TestMachineStateHelpers(unittest.TestCase):
             self.assertTrue(ms.can_manage_swap())
             self.assertTrue(ms.can_manage_firewall())
             self.assertTrue(ms.can_manage_time_sync())
-            self.assertTrue(ms.has_gpu_access())
 
     def test_is_privileged(self):
         with self._patch_machine_type('privileged'):

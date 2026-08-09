@@ -11,6 +11,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.proxmox_vm import (
     ProvisionError,
+    _create_vm,
+    _needs_graphical_console,
     _parse_disk_size_gib,
     _parse_memory_mb,
     _render_user_data,
@@ -77,6 +79,48 @@ class TestRenderUserData(unittest.TestCase):
         out = _render_user_data(username="root", pubkey_contents=None)
         self.assertNotIn("ssh_authorized_keys", out)
         self.assertIn("qemu-guest-agent", out)
+
+
+class TestVMHardwareProfile(unittest.TestCase):
+    def test_desktop_and_rdp_profiles_need_graphical_console(self):
+        desktop = MagicMock(include_desktop=True, enable_rdp=False)
+        rdp = MagicMock(include_desktop=False, enable_rdp=True)
+        server = MagicMock(include_desktop=False, enable_rdp=False)
+
+        self.assertTrue(_needs_graphical_console(desktop))
+        self.assertTrue(_needs_graphical_console(rdp))
+        self.assertFalse(_needs_graphical_console(server))
+
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_graphical_vm_uses_virtio_gpu_and_disk_iothread(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        _create_vm(
+            vmid=101,
+            target_ip="10.0.0.50",
+            image_remote_path="/var/lib/vz/template/iso/debian.qcow2",
+            storage_ref=None,
+            memory_mb=8192,
+            cores=4,
+            root_pool="local-lvm",
+            disk_size_gib=40,
+            cidr_prefix="24",
+            bridge="vmbr0",
+            gateway="10.0.0.1",
+            nameservers=["10.0.0.1"],
+            hostname="agent-vm",
+            user_data_path=None,
+            graphical_console=True,
+            node_ip="10.0.0.10",
+            user="root",
+            ssh_opts=[],
+        )
+
+        commands = [call.args[3] for call in mock_run.call_args_list]
+        self.assertIn("--serial0 socket", commands[0])
+        self.assertIn("--vga virtio", commands[0])
+        self.assertIn("--scsihw virtio-scsi-single", commands[0])
+        self.assertIn("--scsi0 local-lvm:vm-101-disk-0,iothread=1", commands[2])
 
 
 class TestCheckVMExists(unittest.TestCase):

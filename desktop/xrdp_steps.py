@@ -5,7 +5,6 @@ import os
 import shlex
 
 from lib.config import SetupConfig
-from lib.machine_state import has_gpu_access
 from lib.remote_utils import is_service_active, run, is_package_installed
 
 
@@ -245,12 +244,6 @@ needs_root_rights=no
     run("systemctl enable xrdp-sesman", check=False)
     
     _ensure_user_in_group("xrdp", "ssl-cert")
-    
-    # Xorg requires proper user group access for desktop session
-    if has_gpu_access():
-        run(f"getent group video && usermod -aG video {safe_username}", check=False)
-        run(f"getent group render && usermod -aG render {safe_username}", check=False)
-        print("  ✓ User added to video/render groups")
     
     # Generate sesman.ini with Xorg backend only
     if os.path.exists(sesman_config) and not os.path.exists(f"{sesman_config}.bak"):

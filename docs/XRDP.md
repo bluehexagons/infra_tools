@@ -119,10 +119,27 @@ EndSection
 - **4K virtual screen** - Supports up to 3840x2160 resolution
 - **DPMS/Screensaver disabled** - Prevents X server from managing display state
 
+### Proxmox emulated graphics
+
+For a hosted desktop VM, infra_tools asks Proxmox for VirtIO-GPU and keeps the
+serial socket. VirtIO-GPU makes the Proxmox noVNC console useful for recovery,
+but it is not the display transported over RDP. xrdp starts a separate X.Org
+server with `Driver "xrdpdev"`; `AutoAddGPU=off` prevents the console adapter
+from being attached to that session, and `UseGlamor=false` keeps the supported
+default on the software-rendered path.
+
+VM detection is therefore not treated as proof of usable GPU acceleration, and
+XRDP setup does not grant the login user `video` or `render` group membership.
+The upstream [xorgxrdp configuration](https://github.com/neutrinolabs/xorgxrdp/blob/devel/xrdpdev/xorg.conf)
+also separates the xrdpdev display from automatically added GPUs; its current
+glamor allowlist targets selected physical DRM drivers rather than VirtIO-GPU.
+Physical GPU passthrough and glamor remain an explicit, separately tested
+profile rather than a VM-mode optimization.
+
 ### Machine-aware expectations
 
-- **Best experience:** VMs, where the XRDP path has the broadest access to
-  desktop and kernel capabilities
+- **Best experience:** VMs, where the XRDP path has full system and desktop
+  capabilities without relying on the Proxmox display adapter
 - **Supported container path:** unprivileged Proxmox LXC guests support basic
   XRDP access, although advanced display polish may be limited by the host
 - **Detection:** `auto` resolves the target profile before setup steps run; use
@@ -365,7 +382,9 @@ If freeze happens predictably:
 
 ### Experimental: Enable Glamor
 
-**Warning:** May cause crashes, but worth testing:
+**Warning:** This requires a supported physical DRM device and xorgxrdp build;
+an emulated Proxmox VirtIO-GPU is not sufficient. It may cause crashes and is
+not part of the managed profile:
 
 Edit `/etc/X11/xrdp/xorg.conf`:
 ```ini

@@ -213,11 +213,6 @@ def is_hardware() -> bool:
     return get_machine_type() == "hardware"
 
 
-def has_gpu_access() -> bool:
-    """Check if GPU/DRI access is available."""
-    return get_machine_type() in ("vm", "privileged", "hardware")
-
-
 def can_modify_kernel() -> bool:
     """Check if kernel parameters can be modified."""
     return get_machine_type() in ("vm", "privileged", "hardware")
