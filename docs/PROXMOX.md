@@ -128,6 +128,7 @@ The resulting Proxmox baseline is:
 | Disk controller | VirtIO SCSI single with `iothread=1` on the root disk | Uses the per-disk I/O thread supported by the selected controller. Enable discard/SSD flags only when the backing storage policy supports them. |
 | Network | VirtIO | Lowest-overhead normal Linux guest path. Multiqueue is normally unnecessary for interactive RDP traffic. |
 | Guest agent | Enabled and installed | Supports clean lifecycle and guest inspection from Proxmox. |
+| Entropy | VirtIO RNG backed by `/dev/urandom` | Gives Linux guests a reliable entropy source during early boot and key generation. |
 | Memory | Fixed requested allocation with VirtIO balloon device enabled | Start around 8 GiB for the documented coding desktop and size for browsers, editors, builds, and agents. Use `--balloon-min SIZE` below `--memory` only when dynamic reclamation is intentional. |
 
 These choices follow Proxmox's documented VirtIO network and VirtIO-SCSI
@@ -138,7 +139,11 @@ ensures Linux loads `virtio_balloon`. Keeping the balloon minimum equal to the
 maximum preserves fixed allocation while allowing Proxmox to collect detailed
 guest memory information. A lower minimum lets Proxmox reclaim memory under
 host pressure, which can force guest swapping or out-of-memory handling; size
-it for the VM's working set rather than treating it as free overcommit. See the current
+it for the VM's working set rather than treating it as free overcommit. Imported
+images retain the native format selected by the destination storage backend,
+and provisioning rejects a requested disk smaller than the source image. The
+cloud-init snippet is detached from the VM before its temporary file is
+removed, preventing a stale `cicustom` reference. See the current
 [Proxmox VE administration guide](https://pve.proxmox.com/pve-docs/pve-admin-guide.pdf).
 
 Physical GPU passthrough is a different profile. It needs host IOMMU/device

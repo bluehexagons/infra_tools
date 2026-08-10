@@ -430,7 +430,8 @@ def _create_vm(
         "--scsihw virtio-scsi-single",
         "--serial0 socket",
         "--vga virtio" if graphical_console else "--vga serial0",
-        "--agent enabled=1",
+        "--agent enabled=1,freeze-fs-on-backup=1",
+        "--rng0 source=/dev/urandom",
         (
             f"--net0 virtio,bridge={shlex.quote(bridge)}"
         ),
@@ -453,9 +454,12 @@ def _create_vm(
     # Attach the disk: prefer importing the qcow2; otherwise reference the
     # pre-uploaded storage volume directly.
     if image_remote_path:
+        # Let Proxmox choose the target's native image format. Block-backed
+        # pools such as LVM-thin only support raw volumes, while directory
+        # pools commonly use qcow2.
         import_cmd = (
             f"qm importdisk {vmid} {shlex.quote(image_remote_path)} "
-            f"{shlex.quote(root_pool)} --format qcow2"
+            f"{shlex.quote(root_pool)}"
         )
         imported = _ssh_run(node_ip, user, ssh_opts, import_cmd, dry_run=dry_run)
         if imported.returncode != 0:
@@ -493,12 +497,12 @@ def _create_vm(
 
     resize_cmd = f"qm resize {vmid} scsi0 {disk_size_gib}G"
     resize_result = _ssh_run(node_ip, user, ssh_opts, resize_cmd, dry_run=dry_run)
-    if resize_result.returncode != 0 and "shrink" not in (resize_result.stderr or "").lower():
+    if resize_result.returncode != 0:
         if not dry_run and created:
             _destroy_vm_best_effort(vmid, node_ip, user, ssh_opts)
         raise ProvisionError(
             f"qm resize for VM {vmid} failed: "
-            f"{(resize_result.stderr or resize_result.stdout or '').strip() or 'unknown error'}"
+            f"{(resize_result.stderr or resize_result.stdout or '').strip() or 'the requested disk may be smaller than the image'}"
         )
 
     start_result = _ssh_run(
@@ -695,6 +699,7 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
     )
     user_data_ref = f"{snippet_pool}:snippets/infra_tools-{hostname}.yaml"
     vm_started = False
+    provision_complete = False
 
     try:
         vmid = _get_next_vmid(node_ip, user, ssh_opts)
@@ -744,18 +749,43 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
         _wait_for_guest_ssh(
             target_ip, node_ip, user, ssh_opts, timeout=300, dry_run=dry_run
         )
+        provision_complete = True
     except Exception:
         if vm_started and not dry_run:
             _destroy_vm_best_effort(vmid, node_ip, user, ssh_opts)
         raise
     finally:
-        # Best-effort cleanup of the snippet now that cloud-init has consumed it.
+        # Detach custom cloud-init before deleting its snippet. Leaving a
+        # cicustom reference to a removed file breaks later cloud-init updates,
+        # migration, and some clone workflows.
         if user_data_path and not dry_run:
-            _ssh_run(
-                node_ip, user, ssh_opts,
-                f"rm -f {shlex.quote(user_data_path)}",
-                dry_run=False,
-            )
+            if provision_complete:
+                detach_result = _ssh_run(
+                    node_ip,
+                    user,
+                    ssh_opts,
+                    f"qm set {vmid} --delete cicustom",
+                    dry_run=False,
+                )
+                if detach_result.returncode != 0:
+                    print(
+                        "  ⚠ Could not detach the cloud-init snippet reference; "
+                        f"preserving {user_data_path}"
+                    )
+                else:
+                    _ssh_run(
+                        node_ip, user, ssh_opts,
+                        f"rm -f {shlex.quote(user_data_path)}",
+                        dry_run=False,
+                    )
+            else:
+                # Failed provisioning destroys the partial VM, so the snippet
+                # is no longer referenced.
+                _ssh_run(
+                    node_ip, user, ssh_opts,
+                    f"rm -f {shlex.quote(user_data_path)}",
+                    dry_run=False,
+                )
             # Tiny grace period so qemu-guest-agent / cloud-init finish flushing
             # before subsequent setup steps log in.
             time.sleep(2)

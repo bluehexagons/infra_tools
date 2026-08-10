@@ -125,12 +125,15 @@ class TestVMHardwareProfile(unittest.TestCase):
         commands = [call.args[3] for call in mock_run.call_args_list]
         self.assertIn("--serial0 socket", commands[0])
         self.assertIn("--vga virtio", commands[0])
+        self.assertIn("--agent enabled=1,freeze-fs-on-backup=1", commands[0])
+        self.assertIn("--rng0 source=/dev/urandom", commands[0])
         self.assertIn(
             "--cicustom user=nfs-store:snippets/infra_tools-agent-vm.yaml",
             commands[0],
         )
         self.assertIn("--scsihw virtio-scsi-single", commands[0])
         self.assertIn("--memory 8192 --balloon 4096", commands[0])
+        self.assertNotIn("--format qcow2", commands[1])
         self.assertIn("ip6=2001:db8::50/64", commands[0])
         self.assertIn("gw6=2001:db8::1", commands[0])
         self.assertIn("--scsi0 local-lvm:vm-101-disk-0,iothread=1", commands[2])
@@ -154,6 +157,45 @@ class TestVMHardwareProfile(unittest.TestCase):
                 cores=2,
                 root_pool="local-lvm",
                 disk_size_gib=20,
+                cidr_prefix="24",
+                bridge="vmbr0",
+                gateway="10.0.0.1",
+                nameservers=["10.0.0.1"],
+                hostname="agent-vm",
+                user_data_path=None,
+                user_data_ref=None,
+                graphical_console=False,
+                node_ip="10.0.0.10",
+                user="root",
+                ssh_opts=[],
+            )
+        commands = [call.args[3] for call in mock_run.call_args_list]
+        self.assertEqual(commands[-2:], [
+            "qm stop 101 --skiplock 1",
+            "qm destroy 101 --purge 1 --skiplock 1",
+        ])
+
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_resize_failure_destroys_partial_vm(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=1, stdout="", stderr="cannot shrink disk"),
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout="", stderr=""),
+        ]
+        with self.assertRaisesRegex(ProvisionError, "cannot shrink disk"):
+            _create_vm(
+                vmid=101,
+                target_ip="10.0.0.50",
+                image_remote_path="/var/lib/vz/template/iso/debian.qcow2",
+                storage_ref=None,
+                memory_mb=2048,
+                balloon_min_mb=2048,
+                cores=2,
+                root_pool="local-lvm",
+                disk_size_gib=1,
                 cidr_prefix="24",
                 bridge="vmbr0",
                 gateway="10.0.0.1",
