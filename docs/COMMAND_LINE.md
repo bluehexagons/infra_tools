@@ -1,10 +1,10 @@
 # Command-Line Reference
 
-Concise reference for the unified `infra_tools.py` CLI. The code help and
+Concise reference for the installed `infra_tools` CLI. The code help and
 `lib/arg_parser.py` remain the source of truth; this doc keeps the command
-surface and the non-obvious behaviors that are easy to forget. Examples use
-the checkout script; substitute the installed `infra_tools` launcher when it
-is on `PATH`.
+surface and the non-obvious behaviors that are easy to forget. Install the
+managed launcher first; direct Python entry scripts remain available for
+development and recovery.
 
 Related pages:
 
@@ -18,29 +18,31 @@ Related pages:
 ## Unified Entry Point
 
 ```bash
-infra_tools.py setup <system_type> <host> [username] [options]
-infra_tools.py patch <host> [username] [options]
-infra_tools.py shares <host> [username] [options]
-infra_tools.py recall <host> [username] [options]
-infra_tools.py reconstruct [--compact]
-infra_tools.py list [pattern] [--json]
-infra_tools.py info [pattern] [--compact]
-infra_tools.py cmd [pattern]
-infra_tools.py rm <pattern>
-infra_tools.py deploy <pattern> [--yes]
-infra_tools.py credentials set <username> [password]
-infra_tools.py credentials list
-infra_tools.py credentials remove <username>
-infra_tools.py completions [options]
-infra_tools.py python-tools [options]
-infra_tools.py bootstrap [options]
-infra_tools.py self-setup [options]
-infra_tools.py agent doctor
-infra_tools.py agent update [options]
-infra_tools.py maintenance github <audit|prune> [options]
-infra_tools.py shell
-infra_tools.py network ...
-infra_tools.py proxmox ...
+infra_tools setup <system_type> <host> [username] [options]
+infra_tools patch <host> [username] [options]
+infra_tools shares <host> [username] [options]
+infra_tools recall <host> [username] [options]
+infra_tools reconstruct [--compact]
+infra_tools list [pattern] [--json]
+infra_tools info [pattern] [--compact]
+infra_tools cmd [pattern]
+infra_tools rm <pattern>
+infra_tools deploy <pattern> [--yes]
+infra_tools credentials set <username> [password]
+infra_tools credentials list
+infra_tools credentials remove <username>
+infra_tools completions [options]
+infra_tools python-tools [options]
+infra_tools bootstrap [options]
+infra_tools self-setup [options]
+infra_tools channel [CHANNEL]
+infra_tools upgrade
+infra_tools agent doctor
+infra_tools agent update [options]
+infra_tools maintenance github <audit|prune> [options]
+infra_tools shell
+infra_tools network ...
+infra_tools proxmox ...
 ```
 
 ## Setup At A Glance
@@ -116,7 +118,7 @@ guest starts on the requested address. Existing ifupdown files changed for the
 selected interface receive a one-time `.infra-tools.bak` copy.
 
 ```bash
-infra_tools.py setup server_lite 192.168.1.50 admin \
+infra_tools setup server_lite 192.168.1.50 admin \
   --hostname app-01 \
   --ip 192.168.1.50/24 --gateway 192.168.1.1 \
   --dns 1.1.1.1 --dns 1.0.0.1 \
@@ -157,7 +159,7 @@ the standard firewall and generic CLI bundle, so use it only when that lighter
 profile is intentional.
 
 ```bash
-infra_tools.py setup server_dev 10.0.0.10 agentuser \
+infra_tools setup server_dev 10.0.0.10 agentuser \
   --agent-suite terminal --copy-config \
   --repo https://github.com/user/my_codebase.git
 ```
@@ -340,7 +342,7 @@ Deploy a minimal self-hosted Git service with an optional hostname, port, and
 data directory:
 
 ```bash
-infra_tools.py setup server_web 192.168.1.10 \
+infra_tools setup server_web 192.168.1.10 \
   --gogs git.example.com:3000 /var/lib/gogs \
   --ssl --ssl-email admin@example.com
 ```
@@ -374,9 +376,9 @@ targets and failure behavior.
 ### GitHub Maintenance
 
 ```bash
-infra_tools.py maintenance github audit --root /home/loren/repos
-infra_tools.py maintenance github prune --root /home/loren/repos --yes
-infra_tools.py maintenance github prune --root /home/loren/repos --delete-caches --yes
+infra_tools maintenance github audit --root /home/loren/repos
+infra_tools maintenance github prune --root /home/loren/repos --yes
+infra_tools maintenance github prune --root /home/loren/repos --delete-caches --yes
 ```
 
 Defaults: keep 2 releases, delete expired artifacts, prune caches only when
@@ -402,12 +404,12 @@ See [`MAINTENANCE.md`](./MAINTENANCE.md) for schedules and policy controls.
 ### Network Inventory
 
 ```bash
-infra_tools.py network list
-infra_tools.py network init <profile> [--management CIDR] [--control-plane CIDR] [--guest-network CIDR]
-infra_tools.py network add-host <profile> <name> <address> [--provider NAME] [--role ROLE]
-infra_tools.py network import-proxmox <profile> [--host NAME] [--tag TAG]
-infra_tools.py network import-proxmox-guests <profile> [--host NAME] [--tag TAG]
-infra_tools.py network plan-proxmox <profile> [--proxmox] [--json]
+infra_tools network list
+infra_tools network init <profile> [--management CIDR] [--control-plane CIDR] [--guest-network CIDR]
+infra_tools network add-host <profile> <name> <address> [--provider NAME] [--role ROLE]
+infra_tools network import-proxmox <profile> [--host NAME] [--tag TAG]
+infra_tools network import-proxmox-guests <profile> [--host NAME] [--tag TAG]
+infra_tools network plan-proxmox <profile> [--proxmox] [--json]
 ```
 
 `plan-proxmox` is read-only and requires at least one management source and
@@ -416,34 +418,34 @@ one control-plane address before it will produce a non-error plan.
 ### Proxmox Management
 
 ```bash
-infra_tools.py proxmox add <name> <address> [--user USER] [--key PATH]
-infra_tools.py proxmox probe <host>
-infra_tools.py proxmox probe-cluster <address> [--user USER] [--key PATH] [--tag TAG]
-infra_tools.py proxmox audit <host> [<host> ...] [--json]
-infra_tools.py proxmox rolling-update <target> [<target> ...] [--dry-run] [--reboot-timeout SECONDS]
-infra_tools.py proxmox top <host> [<host> ...]
-infra_tools.py proxmox plan place [options]
-infra_tools.py proxmox plan rebalance [options]
-infra_tools.py proxmox ls <host>
-infra_tools.py proxmox status <host> <vmid>
-infra_tools.py proxmox start <host> <vmid>
-infra_tools.py proxmox pause <host> <vmid>  # alias: suspend
-infra_tools.py proxmox resume <host> <vmid>
-infra_tools.py proxmox stop <host> <vmid> [--force]
-infra_tools.py proxmox destroy <host> <vmid> [-y] [--force]
-infra_tools.py proxmox health <host> <vmid> [--no-ssh]
-infra_tools.py proxmox config <host> <vmid> [--pending]
-infra_tools.py proxmox reconfigure <host> <vmid> --set KEY=VALUE [--set ...]
-infra_tools.py proxmox modify <host> <vmid> [--cores N] [--memory N[M|G]]
-infra_tools.py proxmox resize-disk <host> <vmid> <volume> <size>
-infra_tools.py proxmox backups <host> <vmid>
-infra_tools.py proxmox backup <host> <vmid> [--storage POOL] [--mode MODE] [--compress FORMAT]
-infra_tools.py proxmox migrate <host> <vmid> <target> [--online] [--with-local-disks]
-infra_tools.py proxmox clean-disks <host> [--delete] [--yes] [--dry-run]
-infra_tools.py proxmox unlock <host> <vmid> [--dry-run]
-infra_tools.py proxmox notifications install-webhook <host> <url> [--send-test]
-infra_tools.py proxmox notifications test-webhook <host>
-infra_tools.py proxmox [shell]
+infra_tools proxmox add <name> <address> [--user USER] [--key PATH]
+infra_tools proxmox probe <host>
+infra_tools proxmox probe-cluster <address> [--user USER] [--key PATH] [--tag TAG]
+infra_tools proxmox audit <host> [<host> ...] [--json]
+infra_tools proxmox rolling-update <target> [<target> ...] [--dry-run] [--reboot-timeout SECONDS]
+infra_tools proxmox top <host> [<host> ...]
+infra_tools proxmox plan place [options]
+infra_tools proxmox plan rebalance [options]
+infra_tools proxmox ls <host>
+infra_tools proxmox status <host> <vmid>
+infra_tools proxmox start <host> <vmid>
+infra_tools proxmox pause <host> <vmid>  # alias: suspend
+infra_tools proxmox resume <host> <vmid>
+infra_tools proxmox stop <host> <vmid> [--force]
+infra_tools proxmox destroy <host> <vmid> [-y] [--force]
+infra_tools proxmox health <host> <vmid> [--no-ssh]
+infra_tools proxmox config <host> <vmid> [--pending]
+infra_tools proxmox reconfigure <host> <vmid> --set KEY=VALUE [--set ...]
+infra_tools proxmox modify <host> <vmid> [--cores N] [--memory N[M|G]]
+infra_tools proxmox resize-disk <host> <vmid> <volume> <size>
+infra_tools proxmox backups <host> <vmid>
+infra_tools proxmox backup <host> <vmid> [--storage POOL] [--mode MODE] [--compress FORMAT]
+infra_tools proxmox migrate <host> <vmid> <target> [--online] [--with-local-disks]
+infra_tools proxmox clean-disks <host> [--delete] [--yes] [--dry-run]
+infra_tools proxmox unlock <host> <vmid> [--dry-run]
+infra_tools proxmox notifications install-webhook <host> <url> [--send-test]
+infra_tools proxmox notifications test-webhook <host>
+infra_tools proxmox [shell]
 ```
 
 `probe` caches bridge, gateway, DNS, and storage recommendations. `audit` is
@@ -460,7 +462,7 @@ update dry run still performs the read-only preflight audits.
 
 ### Interactive Shell
 
-`infra_tools.py shell` opens a REPL for saved configurations. The shell loads
+`infra_tools shell` opens a REPL for saved configurations. The shell loads
 `~/.infra_toolsrc` on startup and persists history at
 `~/.local/share/infra_tools/shell_history`.
 
@@ -488,7 +490,6 @@ curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/insta
   --setup server_dev localhost "$USER" \
   --machine hardware \
   --agent-suite terminal
-sudo python3 infra_tools.py self-setup --user "$USER"
 uv tool install --upgrade argcomplete
 infra_tools completions
 ```

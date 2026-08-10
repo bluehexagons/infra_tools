@@ -9,7 +9,7 @@ run as root.
 - Python 3.10 or newer on the orchestration host
 - Debian on the target
 - SSH root access to a remote target, or root privileges for local setup
-- A current checkout when running from source
+- Git access to the infra_tools repository
 
 Official machine profiles are Debian bare metal, Debian VMs, and unprivileged
 Debian LXC on Proxmox. See [Machine types](MACHINE_TYPES.md) for the complete
@@ -17,8 +17,8 @@ capability matrix.
 
 ## Install for the current user
 
-The installer downloads the source, installs prerequisites, and creates a
-user-scoped launcher. Privileged actions request `sudo` only when needed:
+The installer clones a local Git worktree, installs prerequisites, and creates
+a user-scoped launcher. Privileged actions request `sudo` only when needed:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
@@ -42,15 +42,19 @@ curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/insta
   sudo sh -s -- --user "$USER"
 ```
 
-From an existing checkout, the same bootstrap flow is:
+The installed repository is kept locally so its channel can be changed without
+reinstalling the launcher. The default channel is `dev`, which tracks `main`
+while this managed installation workflow is being introduced. Select the
+latest tagged release explicitly when desired:
 
 ```bash
-sudo python3 infra_tools.py self-setup --user "$USER"
+infra_tools channel stable
 ```
 
-`self-setup` is an alias for `bootstrap`. It installs the local launcher and
-completion, and can install the system packages needed by the orchestration
-host. Afterward, use `infra_tools <command> ...` from any directory.
+The source directory is printed by the installer. It defaults to
+`~/.local/share/infra_tools` for a user install and `/opt/infra_tools` for a
+root install. Use `infra_tools channel` to inspect the active channel and
+commit.
 
 The installer can hand off immediately to a normal setup command:
 
@@ -77,22 +81,55 @@ curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/insta
 ```
 
 The installer preserves the previous source tree as a timestamped backup when
-updating. A failed bootstrap restores the previous source.
+reinstalling. A failed bootstrap restores the previous source. Existing local
+changes in a managed worktree must be committed or stashed before reinstalling.
+
+## Channels and upgrades
+
+Channels are resolved from the local repository's `origin` remote:
+
+| Channel | Meaning |
+| --- | --- |
+| `stable` | Highest `vMAJOR.MINOR.PATCH` release tag |
+| `dev` | `main` branch; equivalent to `branch-main` |
+| `v<version>` | Exact version tag, such as `v1.2.3` |
+| `branch-<branch>` | Any existing branch, including `branch-feature/example` |
+| `commit-<hash>` | An exact Git commit hash |
+
+Switch channels with:
+
+```bash
+infra_tools channel dev
+infra_tools channel v1.2.3
+infra_tools channel branch-feature/example
+infra_tools channel commit-0123456789abcdef
+```
+
+Run the upgrade command without a host to fetch and install the newest commit
+available on the selected channel:
+
+```bash
+infra_tools upgrade
+```
+
+`infra_tools upgrade` refuses to overwrite local worktree changes. The existing
+remote-host form remains available when hosts are supplied, for example
+`infra_tools upgrade web1 web2`.
 
 ## First setup commands
 
 ```bash
 # Web server with a deployment
-python3 infra_tools.py setup server_web example.com admin \
+infra_tools setup server_web example.com admin \
   --ruby --node --ssl --ssl-email admin@example.com \
   --deploy example.com https://github.com/user/repo.git
 
 # Developer workstation
-python3 infra_tools.py setup workstation_desktop 192.168.1.100 admin \
+infra_tools setup workstation_desktop 192.168.1.100 admin \
   --desktop i3 --browser firefox
 
 # Patch an existing saved host
-python3 infra_tools.py patch example.com admin --ssl
+infra_tools patch example.com admin --ssl
 ```
 
 Use the [Command-line reference](COMMAND_LINE.md) for all setup and patch
@@ -104,16 +141,16 @@ Workspace state defaults to `~/.config/infra_tools`. Set an isolated workspace
 for a project or test environment:
 
 ```bash
-python3 infra_tools.py --workspace /srv/infra-tools-workspace list
+infra_tools --workspace /srv/infra-tools-workspace list
 ```
 
 Workspace credentials are stored separately with restrictive permissions. Enter
 passwords interactively whenever possible:
 
 ```bash
-python3 infra_tools.py credentials set alice
-python3 infra_tools.py credentials list
-python3 infra_tools.py credentials remove alice
+infra_tools credentials set alice
+infra_tools credentials list
+infra_tools credentials remove alice
 ```
 
 Passwords are excluded from saved setup state and reconstructed commands.
@@ -132,12 +169,15 @@ For manual Bash, Zsh, Fish, or system-wide installation, see
 
 ## Updating the source
 
-From a checkout, update before setup work:
+The installed launcher manages source updates:
 
 ```bash
-git pull --ff-only
-sudo python3 infra_tools.py self-setup --user "$USER"
+infra_tools upgrade
 ```
+
+For development or recovery, the Python entry script still works directly from
+a checkout (for example, `python3 infra_tools.py setup ...`), but that path does
+not replace the managed installed launcher.
 
 Saved configurations can be inspected with `infra_tools info`; use `patch` or
 feature-specific fast paths for targeted changes.

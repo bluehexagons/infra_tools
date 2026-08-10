@@ -41,6 +41,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib.arg_parser import add_setup_arguments
 from lib.agent_cli import add_agent_subparser, run_agent_command
 from lib.cache import get_cache_path_for_host, load_setup_command, merge_setup_configs, save_setup_command
+from lib.channel_manager import (
+    ChannelError,
+    get_channel_info,
+    managed_repository_path,
+    switch_channel,
+    upgrade_channel,
+)
 from lib.completions import run_completion_setup
 from lib.config import SetupConfig
 from lib.credentials import (
@@ -109,6 +116,8 @@ def _build_infra_tools_epilog() -> str:
     completions                 Install shell completion for infra_tools.py
     python-tools                Install local Python aliases, uv, and completion
     bootstrap                   Install packages, launcher, and completions (alias: self-setup)
+    channel [CHANNEL]           Show or switch the installed source channel
+    upgrade                     Upgrade the installed source on its selected channel
     agent doctor|update        Check or deliberately update local coding agents
     maintenance github ...      Audit/prune GitHub releases, artifacts, and caches
     network [subcommand]        Manage generic network inventory profiles
@@ -149,6 +158,50 @@ Examples:
 
 def _current_command_name() -> str:
     return os.path.basename(sys.argv[0]) or "infra_tools.py"
+
+
+def _managed_repository() -> str:
+    return managed_repository_path(__file__)
+
+
+def run_channel_command(args: argparse.Namespace) -> int:
+    """Show or switch the channel selected for the installed worktree."""
+
+    try:
+        repository = _managed_repository()
+        if args.channel_name is None:
+            info = get_channel_info(repository)
+            if info.get("managed"):
+                print(f"Channel: {info['channel']}")
+            else:
+                print("Channel: unmanaged checkout")
+            print(f"Commit: {str(info['commit'])[:12]}")
+            if info.get("branch"):
+                print(f"Branch: {info['branch']}")
+            return 0
+
+        info = switch_channel(repository, args.channel_name)
+        print(f"Switched to channel {info['channel']} at {str(info['commit'])[:12]}")
+        return 0
+    except (ChannelError, ValueError, OSError) as exc:
+        print(f"Error: {exc}")
+        return 1
+
+
+def run_tool_upgrade_command(args: argparse.Namespace | None = None) -> int:
+    """Upgrade the installed source to the latest commit on its channel."""
+
+    del args
+    try:
+        info = upgrade_channel(_managed_repository())
+        if info.get("updated"):
+            print(f"Upgraded {info['channel']} to {str(info['commit'])[:12]}")
+        else:
+            print(f"infra_tools is already up to date on {info['channel']} ({str(info['commit'])[:12]})")
+        return 0
+    except (ChannelError, ValueError, OSError) as exc:
+        print(f"Error: {exc}")
+        return 1
 
 
 def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.ArgumentParser, argparse.ArgumentParser]:
@@ -374,6 +427,20 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
         "--skip-system-packages",
         action="store_true",
         help="Skip apt package installation and only configure infra_tools for the target user",
+    )
+
+    channel_parser = subparsers.add_parser(
+        "channel",
+        help="Show or switch the installed source channel",
+        description=(
+            "Select the Git source used by the installed launcher. Channels are "
+            "stable, dev, v<version>, branch-<branch>, or commit-<hash>."
+        ),
+    )
+    channel_parser.add_argument(
+        "channel_name",
+        nargs="?",
+        help="Channel to select; omit to show the current channel",
     )
 
     credentials_parser = subparsers.add_parser(
@@ -1176,6 +1243,13 @@ def main() -> int:
             requested_user=args.bootstrap_user,
             skip_system_packages=args.skip_system_packages,
         )
+    elif args.command == "channel":
+        return run_channel_command(args)
+    elif args.command == "upgrade" and not getattr(args, "hosts", None):
+        if getattr(args, "check", False):
+            print("Error: --check requires at least one remote host")
+            return 1
+        return run_tool_upgrade_command(args)
     elif args.command == "network":
         return run_network_command(args)
     elif args.command == "proxmox":

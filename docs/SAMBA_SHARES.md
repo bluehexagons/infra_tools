@@ -29,7 +29,7 @@ The full setup installs and hardens Samba, configures the firewall and
 fail2ban, and creates the requested shares:
 
 ```bash
-python3 infra_tools.py setup server_lite fileserver admin \
+infra_tools setup server_lite fileserver admin \
   --samba \
   --share read documents /srv/documents alice,bob \
   --share write dropbox /srv/dropbox alice,carol
@@ -43,7 +43,7 @@ a data drive is missing.
 For a NAS with storage maintenance, combine shares with sync and scrub jobs:
 
 ```bash
-python3 infra_tools.py setup server_lite fileserver admin \
+infra_tools setup server_lite fileserver admin \
   --samba \
   --share read media /srv/media guest \
   --sync /srv/documents /srv/backup daily \
@@ -56,10 +56,10 @@ The safest workflow stores passwords in the mode-0600 workspace credential
 store, without putting them in shell history or process arguments:
 
 ```bash
-python3 infra_tools.py credentials set alice
-python3 infra_tools.py credentials set bob
+infra_tools credentials set alice
+infra_tools credentials set bob
 
-python3 infra_tools.py setup server_lite fileserver admin \
+infra_tools setup server_lite fileserver admin \
   --samba \
   --share write documents /srv/documents alice,bob
 ```
@@ -70,7 +70,7 @@ credential. Inline `username:password` values are supported for controlled
 automation, but the password is visible to local process inspectors:
 
 ```bash
-python3 infra_tools.py setup server_lite fileserver admin \
+infra_tools setup server_lite fileserver admin \
   --samba \
   --share read public /srv/public guest:temporary-password
 ```
@@ -79,7 +79,7 @@ python3 infra_tools.py setup server_lite fileserver admin \
 part of a command. Use it only when the invoking environment is trusted:
 
 ```bash
-python3 infra_tools.py setup server_lite fileserver admin \
+infra_tools setup server_lite fileserver admin \
   --samba \
   --credential alice 'correct horse battery staple' \
   --share write documents /srv/documents alice
@@ -97,11 +97,11 @@ setgid directory permissions so new files inherit the share group:
 
 ```bash
 # Read-only reference material
-python3 infra_tools.py setup server_lite fileserver admin \
+infra_tools setup server_lite fileserver admin \
   --samba --share read reference /srv/reference alice,bob
 
 # Collaborative directory
-python3 infra_tools.py setup server_lite fileserver admin \
+infra_tools setup server_lite fileserver admin \
   --samba --share write projects /srv/projects alice,bob
 ```
 
@@ -203,8 +203,8 @@ For persistent client mounts managed by infra_tools, use `--mount-smb` on the
 client setup. It creates a root-only credential file and a systemd automount:
 
 ```bash
-python3 infra_tools.py credentials set alice
-python3 infra_tools.py setup workstation_desktop client admin \
+infra_tools credentials set alice
+infra_tools setup workstation_desktop client admin \
   --mount-smb /mnt/projects fileserver alice projects_write /
 ```
 

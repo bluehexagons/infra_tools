@@ -3,23 +3,29 @@
 set -eu
 
 REPOSITORY="bluehexagons/infra_tools"
-REF="${INFRA_TOOLS_REF:-main}"
+REPOSITORY_URL="${INFRA_TOOLS_REPOSITORY_URL:-https://github.com/$REPOSITORY.git}"
+CHANNEL="${INFRA_TOOLS_CHANNEL:-dev}"
+CHANNEL_SET=0
+if [ "${INFRA_TOOLS_CHANNEL+x}" = "x" ]; then
+    CHANNEL_SET=1
+fi
 INSTALL_DIR=""
 TARGET_USER=""
 SHELL_NAME=""
 RUN_SETUP=0
-ARCHIVE_URL="${INFRA_TOOLS_ARCHIVE_URL:-}"
 
 usage() {
     cat <<'EOF'
-Install or update infra_tools from GitHub.
+Install or update infra_tools from a managed Git worktree.
 
 Usage:
   install.sh [options]
   install.sh [options] --setup SYSTEM_TYPE HOST [USERNAME] [SETUP_OPTIONS...]
 
 Options:
-  --ref REF            Git branch, tag, or commit to install (default: main)
+  --channel CHANNEL     stable, dev, v[version], branch-[branch], or commit-[hash]
+                        (default: dev for the current development release)
+  --ref REF             Compatibility alias for --channel; bare refs are branches
   --install-dir PATH   Source destination (default: /opt/infra_tools as root,
                        otherwise ~/.local/share/infra_tools)
   --user USER          User receiving local tools and completions
@@ -29,6 +35,8 @@ Options:
 
 Examples:
   curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
+  curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
+    sh -s -- --channel stable
   wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
   curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
     sudo sh -s -- --user "$USER"
@@ -54,11 +62,89 @@ run_privileged() {
     sudo "$@"
 }
 
+normalize_ref() {
+    case "$1" in
+        main) CHANNEL=dev ;;
+        stable|dev|v*|branch-*|commit-*) CHANNEL=$1 ;;
+        *) CHANNEL="branch-$1" ;;
+    esac
+}
+
+validate_channel() {
+    case "$CHANNEL" in
+        stable|dev) ;;
+        v[0-9]*)
+            case "$CHANNEL" in
+                *[!A-Za-z0-9.+-]*|v) fail "invalid --channel value: $CHANNEL" ;;
+            esac
+            ;;
+        branch-*)
+            branch=${CHANNEL#branch-}
+            [ -n "$branch" ] || fail "invalid --channel value: $CHANNEL"
+            case "$branch" in
+                *[!A-Za-z0-9._/-]*|.*|*/|*..*|*//*|*@\{*)
+                    fail "invalid branch channel: $CHANNEL"
+                    ;;
+            esac
+            ;;
+        commit-*)
+            commit=${CHANNEL#commit-}
+            [ -n "$commit" ] || fail "invalid --channel value: $CHANNEL"
+            case "$commit" in
+                *[!A-Fa-f0-9]*) fail "invalid commit channel: $CHANNEL" ;;
+            esac
+            ;;
+        *) fail "invalid --channel value: $CHANNEL" ;;
+    esac
+}
+
+resolve_channel_ref() {
+    case "$CHANNEL" in
+        stable)
+            TARGET_REF=$(git -C "$STAGED_DIR" tag --list 'v[0-9]*' | awk '/^v[0-9]+\.[0-9]+\.[0-9]+$/ { print }' | sort -V | tail -n 1)
+            [ -n "$TARGET_REF" ] || fail "no versioned release tags are available for stable"
+            TARGET_REF="refs/tags/$TARGET_REF"
+            ;;
+        dev) TARGET_REF=refs/remotes/origin/main ;;
+        v*) TARGET_REF="refs/tags/$CHANNEL" ;;
+        branch-*) TARGET_REF="refs/remotes/origin/${CHANNEL#branch-}" ;;
+        commit-*) TARGET_REF=${CHANNEL#commit-} ;;
+    esac
+
+    if ! git -C "$STAGED_DIR" rev-parse --verify --quiet "$TARGET_REF^{commit}" >/dev/null; then
+        fail "channel does not exist in the repository: $CHANNEL"
+    fi
+}
+
+write_channel_state() {
+    state_dir="$INSTALL_DIR/.infra_tools"
+    mkdir -p "$state_dir"
+    commit=$(git -C "$INSTALL_DIR" rev-parse --verify HEAD)
+    state_path="$state_dir/channel.json"
+    temporary_state="$state_path.new.$$"
+    printf '{\n  "channel": "%s",\n  "commit": "%s"\n}\n' \
+        "$CHANNEL" "$commit" > "$temporary_state"
+    chmod 600 "$temporary_state"
+    mv "$temporary_state" "$state_path"
+}
+
+if [ -n "${INFRA_TOOLS_REF:-}" ] && [ "${INFRA_TOOLS_CHANNEL+x}" != "x" ]; then
+    normalize_ref "$INFRA_TOOLS_REF"
+    CHANNEL_SET=1
+fi
+
 while [ "$#" -gt 0 ]; do
     case "$1" in
+        --channel)
+            [ "$#" -ge 2 ] || fail "--channel requires a value"
+            CHANNEL=$2
+            CHANNEL_SET=1
+            shift 2
+            ;;
         --ref)
             [ "$#" -ge 2 ] || fail "--ref requires a value"
-            REF=$2
+            normalize_ref "$2"
+            CHANNEL_SET=1
             shift 2
             ;;
         --install-dir)
@@ -91,11 +177,7 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
-case "$REF" in
-    ""|/*|*".."*|*[!A-Za-z0-9._/-]*)
-        fail "invalid --ref value: $REF"
-        ;;
-esac
+validate_channel
 
 if [ "$RUN_SETUP" -eq 1 ] && [ "$#" -lt 2 ]; then
     fail "--setup requires at least SYSTEM_TYPE and HOST"
@@ -165,7 +247,7 @@ if [ "$RUN_SETUP" -eq 1 ]; then
 fi
 
 missing_prerequisite=0
-for command_name in python3 git ssh rsync tar; do
+for command_name in python3 git ssh rsync; do
     if ! command -v "$command_name" >/dev/null 2>&1; then
         missing_prerequisite=1
     fi
@@ -179,7 +261,23 @@ if [ "$missing_prerequisite" -eq 1 ]; then
     printf '%s\n' "Installing bootstrap prerequisites..."
     run_privileged env DEBIAN_FRONTEND=noninteractive apt-get update -qq
     run_privileged env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-        ca-certificates curl git openssh-client python3 rsync tar
+        ca-certificates git openssh-client python3 rsync
+fi
+
+if [ "$CHANNEL_SET" -eq 0 ] && [ -f "$INSTALL_DIR/.infra_tools/channel.json" ]; then
+    existing_channel=$(python3 -c \
+        'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8")).get("channel", ""))' \
+        "$INSTALL_DIR/.infra_tools/channel.json" 2>/dev/null || true)
+    if [ -n "$existing_channel" ]; then
+        CHANNEL=$existing_channel
+        validate_channel
+    fi
+fi
+
+if [ -e "$INSTALL_DIR" ] && [ -d "$INSTALL_DIR/.git" ]; then
+    if [ -n "$(git -C "$INSTALL_DIR" status --porcelain)" ]; then
+        fail "existing install has local changes; commit or stash them before reinstalling"
+    fi
 fi
 
 TEMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/infra_tools_install.XXXXXX")
@@ -189,40 +287,22 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 
-ARCHIVE_PATH="$TEMP_DIR/infra_tools.tar.gz"
-if [ -n "${INFRA_TOOLS_ARCHIVE_FILE:-}" ]; then
-    cp "$INFRA_TOOLS_ARCHIVE_FILE" "$ARCHIVE_PATH"
-else
-    if [ -z "$ARCHIVE_URL" ]; then
-        ARCHIVE_URL="https://codeload.github.com/$REPOSITORY/tar.gz/$REF"
-    fi
-    printf 'Downloading infra_tools (%s)...\n' "$REF"
-    if command -v curl >/dev/null 2>&1; then
-        curl -fL --retry 3 --connect-timeout 20 "$ARCHIVE_URL" -o "$ARCHIVE_PATH"
-    else
-        wget -q --tries=3 --timeout=20 -O "$ARCHIVE_PATH" "$ARCHIVE_URL"
-    fi
-fi
-
-if ! tar -tzf "$ARCHIVE_PATH" | while IFS= read -r archive_entry; do
-    case "$archive_entry" in
-        /*|../*|*/../*) exit 1 ;;
-    esac
-done; then
-    fail "downloaded archive contains an unsafe path"
-fi
-
-TOP_LEVEL=$(tar -tzf "$ARCHIVE_PATH" | sed -n '1{s,/.*,,;p;}')
-[ -n "$TOP_LEVEL" ] || fail "downloaded archive is empty"
-tar -xzf "$ARCHIVE_PATH" -C "$TEMP_DIR"
-EXTRACTED_DIR="$TEMP_DIR/$TOP_LEVEL"
-[ -f "$EXTRACTED_DIR/infra_tools.py" ] || fail "downloaded archive does not contain infra_tools.py"
-
 INSTALL_PARENT=$(dirname "$INSTALL_DIR")
 mkdir -p "$INSTALL_PARENT"
 STAGED_DIR="${INSTALL_DIR}.new.$$"
 [ ! -e "$STAGED_DIR" ] || fail "staging path already exists: $STAGED_DIR"
-mv "$EXTRACTED_DIR" "$STAGED_DIR"
+
+printf 'Cloning infra_tools repository (%s)...\n' "$CHANNEL"
+if ! git clone "$REPOSITORY_URL" "$STAGED_DIR"; then
+    fail "could not clone repository: $REPOSITORY_URL"
+fi
+if ! git -C "$STAGED_DIR" fetch --prune --tags origin; then
+    fail "could not fetch repository refs"
+fi
+resolve_channel_ref
+if ! git -C "$STAGED_DIR" checkout --detach "$TARGET_REF" >/dev/null; then
+    fail "could not check out channel: $CHANNEL"
+fi
 
 BACKUP_DIR=""
 rollback_install() {
@@ -255,6 +335,26 @@ if [ -n "$BACKUP_DIR" ] && [ -d "$BACKUP_DIR/state" ]; then
         fail "could not preserve existing infra_tools state"
     fi
 fi
+if [ -n "$BACKUP_DIR" ] && [ -d "$BACKUP_DIR/.infra_tools" ]; then
+    if ! cp -a "$BACKUP_DIR/.infra_tools" "$INSTALL_DIR/.infra_tools"; then
+        rollback_install
+        fail "could not preserve existing channel state"
+    fi
+fi
+write_channel_state
+
+if [ "$(id -u)" -eq 0 ] && [ "$TARGET_USER" != "root" ]; then
+    TARGET_UID=$(getent passwd "$TARGET_USER" | awk -F: 'NR == 1 { print $3 }')
+    TARGET_GID=$(getent passwd "$TARGET_USER" | awk -F: 'NR == 1 { print $4 }')
+    if [ -z "$TARGET_UID" ] || [ -z "$TARGET_GID" ]; then
+        rollback_install
+        fail "could not determine target user ownership"
+    fi
+    if ! chown -R "$TARGET_UID:$TARGET_GID" "$INSTALL_DIR"; then
+        rollback_install
+        fail "could not assign the managed repository to $TARGET_USER"
+    fi
+fi
 
 printf 'Installing infra_tools for %s...\n' "$TARGET_USER"
 if [ "$(id -u)" -eq 0 ]; then
@@ -283,6 +383,7 @@ fi
 
 printf '\ninfra_tools installed successfully.\n'
 printf '  Source: %s\n' "$INSTALL_DIR"
+printf '  Channel: %s\n' "$CHANNEL"
 printf '  Command: %s\n' "$USER_LAUNCHER"
 if [ -n "$BACKUP_DIR" ]; then
     printf '  Previous source backup: %s\n' "$BACKUP_DIR"

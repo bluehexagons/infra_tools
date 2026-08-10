@@ -6,7 +6,6 @@ import glob
 import json
 import os
 import subprocess
-import tarfile
 import tempfile
 import textwrap
 import unittest
@@ -22,7 +21,7 @@ class TestInstallScript(unittest.TestCase):
         directory: str,
     ) -> tuple[str, str, dict[str, str]]:
         fake_home = os.path.join(directory, "home")
-        source_root = os.path.join(directory, "archive", "infra_tools-test")
+        source_root = os.path.join(directory, "source", "infra_tools-test")
         fake_bin = os.path.join(directory, "bin")
         log_path = os.path.join(directory, "calls.jsonl")
         os.makedirs(fake_home)
@@ -51,6 +50,28 @@ class TestInstallScript(unittest.TestCase):
                     os.chmod(launcher, 0o755)
                 """
             ))
+
+        git_environment = os.environ.copy()
+        git_environment.update({
+            "GIT_AUTHOR_NAME": "infra_tools tests",
+            "GIT_AUTHOR_EMAIL": "tests@example.invalid",
+            "GIT_COMMITTER_NAME": "infra_tools tests",
+            "GIT_COMMITTER_EMAIL": "tests@example.invalid",
+        })
+        for git_args in [
+            ["git", "init", "--initial-branch=main", source_root],
+            ["git", "-C", source_root, "add", "infra_tools.py"],
+            ["git", "-C", source_root, "commit", "-m", "fixture"],
+            ["git", "-C", source_root, "tag", "v1.0.0"],
+        ]:
+            result = subprocess.run(
+                git_args,
+                check=False,
+                capture_output=True,
+                text=True,
+                env=git_environment,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
 
         getent_path = os.path.join(fake_bin, "getent")
         with open(getent_path, "w", encoding="utf-8") as file_obj:
@@ -87,13 +108,9 @@ class TestInstallScript(unittest.TestCase):
             )
         os.chmod(sudo_path, 0o755)
 
-        archive_path = os.path.join(directory, "fixture.tar.gz")
-        with tarfile.open(archive_path, "w:gz") as archive:
-            archive.add(source_root, arcname="infra_tools-test")
-
         environment = os.environ.copy()
         environment["PATH"] = os.pathsep.join((fake_bin, environment.get("PATH", "")))
-        environment["INFRA_TOOLS_ARCHIVE_FILE"] = archive_path
+        environment["INFRA_TOOLS_REPOSITORY_URL"] = source_root
         environment["INFRA_TOOLS_TEST_LOG"] = log_path
         return fake_home, log_path, environment
 
@@ -122,6 +139,9 @@ class TestInstallScript(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue(os.path.isfile(os.path.join(install_dir, "infra_tools.py")))
+            self.assertTrue(os.path.isdir(os.path.join(install_dir, ".git")))
+            with open(os.path.join(install_dir, ".infra_tools", "channel.json"), encoding="utf-8") as file_obj:
+                self.assertEqual(json.load(file_obj)["channel"], "dev")
             self.assertTrue(os.access(
                 os.path.join(fake_home, ".local", "bin", "infra_tools"),
                 os.X_OK,
@@ -166,6 +186,7 @@ class TestInstallScript(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue(os.path.isfile(os.path.join(install_dir, "infra_tools.py")))
+            self.assertTrue(os.path.isdir(os.path.join(install_dir, ".git")))
             self.assertTrue(os.access(
                 os.path.join(fake_home, ".local", "bin", "infra_tools"),
                 os.X_OK,
@@ -218,7 +239,40 @@ class TestInstallScript(unittest.TestCase):
             self.assertTrue(os.path.isfile(
                 os.path.join(install_dir, "state", "setup.json")
             ))
+            self.assertTrue(os.path.isdir(os.path.join(install_dir, ".git")))
             self.assertEqual(os.stat(backups[0]).st_mode & 0o777, 0o700)
+
+    def test_channel_option_checks_out_release_tag(self):
+        with tempfile.TemporaryDirectory() as directory:
+            _home, _log_path, environment = self._create_fixture(directory)
+            install_dir = os.path.join(directory, "installed")
+            result = subprocess.run(
+                [
+                    "sh",
+                    INSTALL_SCRIPT,
+                    "--install-dir",
+                    install_dir,
+                    "--channel",
+                    "stable",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            with open(os.path.join(install_dir, ".infra_tools", "channel.json"), encoding="utf-8") as file_obj:
+                self.assertEqual(json.load(file_obj)["channel"], "stable")
+            self.assertEqual(
+                subprocess.run(
+                    ["git", "-C", install_dir, "describe", "--tags", "--exact-match"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip(),
+                "v1.0.0",
+            )
 
     def test_bootstrap_failure_restores_previous_source(self):
         with tempfile.TemporaryDirectory() as directory:

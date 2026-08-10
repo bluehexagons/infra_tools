@@ -67,6 +67,58 @@ def validate_filesystem_path(path: str, must_exist: bool = False, check_writable
                 raise ValueError(f"Parent directory is not writable: {parent}")
 
 
+_CHANNEL_VERSION_PATTERN = re.compile(
+    r"^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+    r"(?:[-+][0-9A-Za-z.-]+)?$"
+)
+_CHANNEL_BRANCH_PATTERN = re.compile(r"^[A-Za-z0-9_](?:[A-Za-z0-9._/-]*[A-Za-z0-9_])?$")
+_CHANNEL_COMMIT_PATTERN = re.compile(r"^[0-9A-Fa-f]{4,64}$")
+
+
+def validate_channel(channel: str) -> str:
+    """Validate and return an infra_tools release channel selector."""
+
+    if not isinstance(channel, str) or not channel:
+        raise ValueError("Channel must be a non-empty string")
+    _validate_no_control_characters(channel, "Channel")
+
+    if channel in {"stable", "dev"}:
+        return channel
+
+    if channel.startswith("v"):
+        if not _CHANNEL_VERSION_PATTERN.fullmatch(channel):
+            raise ValueError(
+                "Version channels must use a semantic version such as v1.2.3"
+            )
+        return channel
+
+    if channel.startswith("branch-"):
+        branch = channel.removeprefix("branch-")
+        if (
+            not _CHANNEL_BRANCH_PATTERN.fullmatch(branch)
+            or branch.startswith(".")
+            or branch.endswith(".")
+            or ".." in branch
+            or "//" in branch
+            or "@{" in branch
+        ):
+            raise ValueError(f"Invalid branch channel: {channel}")
+        return channel
+
+    if channel.startswith("commit-"):
+        commit = channel.removeprefix("commit-")
+        if not _CHANNEL_COMMIT_PATTERN.fullmatch(commit):
+            raise ValueError(
+                "Commit channels must contain a hexadecimal commit hash"
+            )
+        return channel
+
+    raise ValueError(
+        "Unknown channel; use stable, dev, v<version>, branch-<branch>, "
+        "or commit-<hash>"
+    )
+
+
 def validate_database_path(db_path: str) -> None:
     """Validate database path for parity file storage.
     

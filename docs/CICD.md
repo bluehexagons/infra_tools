@@ -10,7 +10,7 @@ executor. Repository-specific scripts live in
 Example setup:
 
 ```bash
-python3 infra_tools.py setup server_web ci.example.com deploy \
+infra_tools setup server_web ci.example.com deploy \
   --cicd --ssl --ssl-email admin@example.com
 ```
 

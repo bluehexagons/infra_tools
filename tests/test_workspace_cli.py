@@ -132,6 +132,18 @@ class TestWorkspaceCli(unittest.TestCase):
         self.assertEqual(args.shell, "zsh")
         self.assertTrue(args.skip_system_packages)
 
+    def test_infra_tools_parser_accepts_channel_selectors(self):
+        parser, _setup_parser, _patch_parser = infra_tools.create_infra_tools_parser()
+        args = parser.parse_args(["channel", "branch-feature/example"])
+        self.assertEqual(args.command, "channel")
+        self.assertEqual(args.channel_name, "branch-feature/example")
+
+    def test_infra_tools_upgrade_without_hosts_is_tool_upgrade(self):
+        parser, _setup_parser, _patch_parser = infra_tools.create_infra_tools_parser()
+        args = parser.parse_args(["upgrade"])
+        self.assertEqual(args.command, "upgrade")
+        self.assertEqual(args.hosts, [])
+
     def test_infra_tools_setup_parser_accepts_antistatic_flags(self):
         parser, _setup_parser, _patch_parser = infra_tools.create_infra_tools_parser()
         args = parser.parse_args([

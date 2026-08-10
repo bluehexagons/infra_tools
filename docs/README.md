@@ -55,7 +55,8 @@ Design and future-work notes live under [`plans/`](plans/):
 ## Documentation conventions
 
 Markdown is the source format so the guides render directly on GitHub and in
-local repository tools. Examples use `infra_tools` after installation and
-`python3 infra_tools.py` when showing a checkout or bootstrap workflow; the two
-forms invoke the same CLI. Examples use placeholder hosts and
+local repository tools. Examples use the installed `infra_tools` launcher.
+The main Python entry scripts also work directly from a checkout for
+development and recovery, but that is not the normal installation path.
+Examples use placeholder hosts and
 credentials—never copy real secrets into documentation.

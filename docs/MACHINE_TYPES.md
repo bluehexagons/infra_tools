@@ -89,17 +89,17 @@ pending restart; set `--auto-restart` or a nonzero
 
 ```bash
 # Auto-detect the target (the normal direct-setup path)
-python3 infra_tools.py setup workstation_dev 192.168.1.10
+infra_tools setup workstation_dev 192.168.1.10
 
 # Force an officially supported Proxmox LXC profile
-python3 infra_tools.py setup workstation_dev 192.168.1.10 --machine unprivileged
+infra_tools setup workstation_dev 192.168.1.10 --machine unprivileged
 
 # Explicit machine types when needed
-python3 infra_tools.py setup workstation_dev 192.168.1.10 --machine privileged
-python3 infra_tools.py setup server_web 192.168.1.20 --machine hardware
+infra_tools setup workstation_dev 192.168.1.10 --machine privileged
+infra_tools setup server_web 192.168.1.20 --machine hardware
 
 # OCI container (limited features)
-python3 infra_tools.py setup server_lite 192.168.1.30 --machine oci
+infra_tools setup server_lite 192.168.1.30 --machine oci
 ```
 
 ## Provisioning a Proxmox VM
@@ -108,7 +108,7 @@ Hosted flows default to VMs when you use `--hosted`, so you can provision a VM
 via `qm` + cloud-init without adding `--machine vm`:
 
 ```bash
-python3 infra_tools.py setup server_web 10.0.0.50 \
+infra_tools setup server_web 10.0.0.50 \
     --hosted proxmox.lan \
     --memory 4G --cores 2 \
     --storage root local-lvm 32G

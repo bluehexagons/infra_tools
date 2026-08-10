@@ -13,7 +13,7 @@ Install the current-user launcher:
 curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
 ```
 
-Then run a setup command from a checkout or through the installed launcher:
+Then run setup commands through the installed launcher:
 
 ```bash
 infra_tools setup server_web example.com admin \
@@ -22,8 +22,10 @@ infra_tools setup server_web example.com admin \
 ```
 
 The [installation guide](docs/INSTALLATION.md) covers bootstrap, requirements,
-credentials, workspaces, and shell completion. The [documentation index](docs/README.md)
-organizes detailed feature and operations guides.
+credentials, workspaces, channels, upgrades, and shell completion. The
+[documentation index](docs/README.md) organizes detailed feature and operations
+guides. The Python entry scripts remain usable directly from a checkout for
+development and recovery.
 
 Contributors should also read the [AI agent guidance](.github/ai-agents/README.md)
 before changing the project.

@@ -6,26 +6,25 @@ Debian VMs or unprivileged LXCs, and manage guest lifecycle operations.
 
 ## Quick setup: Proxmox host to coding VM
 
-Start from a current checkout on a trusted Linux orchestration machine. The
-Proxmox host does not need a checkout; setup uploads the current source to
+Install infra_tools on a trusted Linux orchestration machine first. The
+Proxmox host does not need a checkout; setup uploads the installed source to
 `/opt/infra_tools`.
 
 ```bash
-git clone https://github.com/bluehexagons/infra_tools.git
-cd infra_tools
-git pull --ff-only
+curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
+infra_tools channel
 ```
 
 Set up, register, and inspect the host:
 
 ```bash
-python3 infra_tools.py setup server_proxmox 10.0.0.10 root \
+infra_tools setup server_proxmox 10.0.0.10 root \
   --key ~/.ssh/proxmox_ed25519 \
   --name pve1
 
-python3 infra_tools.py proxmox probe pve1
-python3 infra_tools.py proxmox top pve1
-python3 infra_tools.py proxmox ls pve1
+infra_tools proxmox probe pve1
+infra_tools proxmox top pve1
+infra_tools proxmox ls pve1
 ```
 
 Successful `server_proxmox` setup registers the host in the selected workspace;
@@ -74,7 +73,7 @@ health, or backup recoverability; those larger improvements are tracked in the
 Create a Debian VM with XFCE, RDP, Firefox, and coding tools:
 
 ```bash
-python3 infra_tools.py setup workstation_dev 10.0.0.50 agent \
+infra_tools setup workstation_dev 10.0.0.50 agent \
   --hosted pve1 --base debian --name agent-dev-01 \
   --cores 4 --memory 8G --storage root 40G \
   --desktop xfce --rdp --browser firefox \
@@ -87,9 +86,9 @@ python3 infra_tools.py setup workstation_dev 10.0.0.50 agent \
 Find the assigned VMID and inspect it:
 
 ```bash
-python3 infra_tools.py proxmox ls pve1
-python3 infra_tools.py proxmox config pve1 100
-python3 infra_tools.py proxmox health pve1 100
+infra_tools proxmox ls pve1
+infra_tools proxmox config pve1 100
+infra_tools proxmox health pve1 100
 ```
 
 Replace `100` with the VMID returned by `proxmox ls`.
@@ -140,7 +139,7 @@ larger validation work is tracked in the
 ## Hosted web server VM
 
 ```bash
-python3 infra_tools.py setup server_web 10.0.0.50 admin \
+infra_tools setup server_web 10.0.0.50 admin \
   --hosted pve1 --memory 4G --storage root 32G --cores 2 \
   --base debian --name web-01-vm --ruby --node \
   --ssl --ssl-email admin@example.com \
@@ -153,7 +152,7 @@ Use `--machine unprivileged` explicitly for an LXC and include template
 storage:
 
 ```bash
-python3 infra_tools.py setup server_web 10.0.0.50 admin \
+infra_tools setup server_web 10.0.0.50 admin \
   --machine unprivileged --hosted pve1 \
   --memory 4G --cores 2 --storage root 20G --storage template \
   --base debian --name web-01-lxc --ruby --node \
@@ -171,18 +170,18 @@ route; use `--bridge NAME` when the host has multiple routed bridge networks.
 ## Guest lifecycle
 
 ```bash
-python3 infra_tools.py proxmox status pve1 101
-python3 infra_tools.py proxmox start pve1 101
-python3 infra_tools.py proxmox stop pve1 101
-python3 infra_tools.py proxmox pause pve1 101
-python3 infra_tools.py proxmox resume pve1 101
-python3 infra_tools.py proxmox health pve1 101
+infra_tools proxmox status pve1 101
+infra_tools proxmox start pve1 101
+infra_tools proxmox stop pve1 101
+infra_tools proxmox pause pve1 101
+infra_tools proxmox resume pve1 101
+infra_tools proxmox health pve1 101
 ```
 
 Show a summary for one or more nodes:
 
 ```bash
-python3 infra_tools.py proxmox top pve1 pve2
+infra_tools proxmox top pve1 pve2
 ```
 
 The summary includes node CPU, memory, storage, and guest counts. It is a
@@ -192,8 +191,8 @@ storage or bridge data has not been cached.
 Run a maintenance-safety audit before planned work:
 
 ```bash
-python3 infra_tools.py proxmox audit pve1 pve2
-python3 infra_tools.py proxmox audit pve1 --json
+infra_tools proxmox audit pve1 pve2
+infra_tools proxmox audit pve1 --json
 ```
 
 The audit checks core Proxmox services, quorum on clustered nodes, active tasks,
@@ -205,25 +204,25 @@ is read-only and exits nonzero when a health check fails.
 Modify resources and configuration:
 
 ```bash
-python3 infra_tools.py proxmox modify pve1 101 --cores 4 --memory 8G
-python3 infra_tools.py proxmox reconfigure pve1 101 --set hostname=newbox
-python3 infra_tools.py proxmox resize-disk pve1 101 rootfs 40G
+infra_tools proxmox modify pve1 101 --cores 4 --memory 8G
+infra_tools proxmox reconfigure pve1 101 --set hostname=newbox
+infra_tools proxmox resize-disk pve1 101 rootfs 40G
 ```
 
 Snapshots and rollback:
 
 ```bash
-python3 infra_tools.py proxmox snapshots pve1 101
-python3 infra_tools.py proxmox snapshot pve1 101 pre-upgrade --description "before kernel update"
-python3 infra_tools.py proxmox rollback pve1 101 pre-upgrade
-python3 infra_tools.py proxmox delsnapshot pve1 101 pre-upgrade
+infra_tools proxmox snapshots pve1 101
+infra_tools proxmox snapshot pve1 101 pre-upgrade --description "before kernel update"
+infra_tools proxmox rollback pve1 101 pre-upgrade
+infra_tools proxmox delsnapshot pve1 101 pre-upgrade
 ```
 
 `destroy` is permanent and asks for confirmation:
 
 ```bash
-python3 infra_tools.py proxmox destroy pve1 101
-python3 infra_tools.py proxmox destroy pve1 101 -y
+infra_tools proxmox destroy pve1 101
+infra_tools proxmox destroy pve1 101 -y
 ```
 
 ## Placement, backups, and migration
@@ -231,10 +230,10 @@ python3 infra_tools.py proxmox destroy pve1 101 -y
 The placement planner ranks registered nodes without changing them:
 
 ```bash
-python3 infra_tools.py proxmox plan place \
+infra_tools proxmox plan place \
   --cores 4 --memory 8192 --disk 40 \
   --prefer-tag production --exclude pve3
-python3 infra_tools.py proxmox plan rebalance --limit 3
+infra_tools proxmox plan rebalance --limit 3
 ```
 
 `plan rebalance` reports overloaded nodes and candidate destinations. It only
@@ -246,8 +245,8 @@ have the same storage and cluster prerequisites as the direct `migrate` command.
 List and create immediate `vzdump` backups:
 
 ```bash
-python3 infra_tools.py proxmox backups pve1 101
-python3 infra_tools.py proxmox backup pve1 101 \
+infra_tools proxmox backups pve1 101
+infra_tools proxmox backup pve1 101 \
   --storage backup --mode snapshot --compress zstd --dry-run
 ```
 
@@ -260,8 +259,8 @@ infra_tools.
 Migrate a guest between registered cluster nodes:
 
 ```bash
-python3 infra_tools.py proxmox migrate pve1 101 pve2 --dry-run
-python3 infra_tools.py proxmox migrate pve1 101 pve2 \
+infra_tools proxmox migrate pve1 101 pve2 --dry-run
+infra_tools proxmox migrate pve1 101 pve2 \
   --online --with-local-disks
 ```
 
@@ -274,8 +273,8 @@ first for production migrations.
 List unreferenced guest volumes before deleting anything:
 
 ```bash
-python3 infra_tools.py proxmox clean-disks pve1 --dry-run
-python3 infra_tools.py proxmox clean-disks pve1 --delete
+infra_tools proxmox clean-disks pve1 --dry-run
+infra_tools proxmox clean-disks pve1 --delete
 ```
 
 `clean-disks` is list-only by default. `--delete` requires typing `yes` unless
@@ -286,8 +285,8 @@ After confirming that no backup, migration, or snapshot task is still active,
 clear a stale Proxmox management lock:
 
 ```bash
-python3 infra_tools.py proxmox unlock pve1 101 --dry-run
-python3 infra_tools.py proxmox unlock pve1 101
+infra_tools proxmox unlock pve1 101 --dry-run
+infra_tools proxmox unlock pve1 101
 ```
 
 The unlock operation only clears the guest lock; it does not repair a failed
@@ -296,15 +295,15 @@ underlying task or roll back partial storage changes.
 ## Cluster and notifications
 
 ```bash
-python3 infra_tools.py proxmox probe-cluster 10.0.0.10 \
+infra_tools proxmox probe-cluster 10.0.0.10 \
   --key ~/.ssh/proxmox_ed25519 --tag prod
-python3 infra_tools.py proxmox hosts
-python3 infra_tools.py proxmox audit pve1 pve2 pve3
-python3 infra_tools.py proxmox rolling-update pve1 pve2 pve3
-python3 infra_tools.py proxmox notifications install-webhook \
+infra_tools proxmox hosts
+infra_tools proxmox audit pve1 pve2 pve3
+infra_tools proxmox rolling-update pve1 pve2 pve3
+infra_tools proxmox notifications install-webhook \
   pve1 https://notify.example/hook --send-test
-python3 infra_tools.py proxmox notifications test-webhook pve1
-python3 infra_tools.py proxmox shell
+infra_tools proxmox notifications test-webhook pve1
+infra_tools proxmox shell
 ```
 
 `probe-cluster` discovers nodes from Proxmox's configured names and seeds the

@@ -287,20 +287,23 @@ def _add_logs_parser(sub: argparse._SubParsersAction) -> None:
 def _add_upgrade_parser(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser(
         "upgrade",
-        help="Run apt upgrade on one or more remote hosts",
+        help="Upgrade infra_tools, or run apt upgrade on remote hosts",
         description=(
-            "Run apt-get update && apt-get upgrade on each host in parallel, "
-            "then report which hosts need a reboot."
+            "With no hosts, upgrade the installed infra_tools source on its selected "
+            "channel. With one or more hosts, run apt-get update && apt-get upgrade "
+            "on each host in parallel, then report which hosts need a reboot."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
+            "  infra_tools upgrade\n"
+            "\n"
             "Examples:\n"
-            "  infra_tools.py upgrade myserver\n"
-            "  infra_tools.py upgrade web1 web2 db1\n"
-            "  infra_tools.py upgrade web1 --check"
+            "  infra_tools upgrade myserver\n"
+            "  infra_tools upgrade web1 web2 db1\n"
+            "  infra_tools upgrade web1 --check"
         ),
     )
-    p.add_argument("hosts", nargs="+", help="Remote hosts (IP or hostname)")
+    p.add_argument("hosts", nargs="*", help="Remote hosts (IP or hostname)")
     p.add_argument("--username", "-u", help="SSH username (overrides saved config)")
     p.add_argument("--key", "-i", dest="ssh_key", help="SSH identity file")
     p.add_argument("--check", action="store_true", help="Only report pending upgrade counts, do not upgrade")
