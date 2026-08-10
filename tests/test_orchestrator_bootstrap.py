@@ -33,15 +33,19 @@ class TestResolveBootstrapUser(unittest.TestCase):
 
 
 class TestInstallSystemPackages(unittest.TestCase):
+    @patch("lib.orchestrator_bootstrap.ensure_debian_package_sources")
     @patch("lib.orchestrator_bootstrap.subprocess.run")
     @patch("lib.orchestrator_bootstrap.os.geteuid", return_value=0)
-    def test_installs_bash_completion_for_bash(self, _mock_geteuid, mock_run):
+    def test_checks_debian_sources_before_apt_update(
+        self, _mock_geteuid, mock_run, mock_sources
+    ):
         mock_run.side_effect = [
             unittest.mock.MagicMock(returncode=0, stdout="", stderr=""),
             unittest.mock.MagicMock(returncode=0, stdout="", stderr=""),
         ]
         result = orchestrator_bootstrap.install_system_packages("bash")
         self.assertEqual(result, 0)
+        mock_sources.assert_called_once_with()
         install_args = mock_run.call_args_list[1].args[0]
         self.assertIn("bash-completion", install_args)
         self.assertIn("openssh-client", install_args)

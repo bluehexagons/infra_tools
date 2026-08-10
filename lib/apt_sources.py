@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import shutil
 import tempfile
@@ -17,8 +18,11 @@ from lib.validation import validate_debian_codename, validate_filesystem_path
 OFFICIAL_DEBIAN_MIRROR = "https://deb.debian.org/debian"
 OFFICIAL_DEBIAN_SECURITY_MIRROR = "https://security.debian.org/debian-security"
 DEBIAN_ARCHIVE_KEYRING = "/usr/share/keyrings/debian-archive-keyring.gpg"
+DEBIAN_ARCHIVE_KEYRING_PGP = "/usr/share/keyrings/debian-archive-keyring.pgp"
 MANAGED_SOURCE_FILENAME = "infra_tools-debian.sources"
 MANAGED_SOURCE_MARKER = "# Managed by infra_tools"
+_DEFAULT_DEBIAN_ARCHIVE_KEYRING = DEBIAN_ARCHIVE_KEYRING
+_DEBIAN_COMPONENT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+.-]*$")
 
 
 @dataclass(frozen=True)
@@ -40,6 +44,25 @@ class AptSourceStatus:
     cdrom_sources: tuple[str, ...]
     has_official_base: bool
     has_official_security: bool
+
+
+def _find_debian_archive_keyring() -> Optional[str]:
+    """Return the installed Debian archive keyring path.
+
+    Debian 13 keeps the historical ``.gpg`` name as a compatibility symlink
+    to the canonical ``.pgp`` keyring. Prefer the canonical path while
+    retaining the old path for older Debian releases and tests that provide a
+    temporary keyring.
+    """
+
+    candidates = []
+    if DEBIAN_ARCHIVE_KEYRING != _DEFAULT_DEBIAN_ARCHIVE_KEYRING:
+        candidates.append(DEBIAN_ARCHIVE_KEYRING)
+    candidates.extend((DEBIAN_ARCHIVE_KEYRING_PGP, DEBIAN_ARCHIVE_KEYRING))
+    for path in dict.fromkeys(candidates):
+        if os.path.isfile(path):
+            return path
+    return None
 
 
 def get_debian_codename(os_release_path: str = "/etc/os-release") -> str:
@@ -253,6 +276,85 @@ def inspect_apt_sources(
     )
 
 
+def _is_stale_official_entry(entry: AptSourceEntry, codename: str) -> bool:
+    """Return whether an official Debian entry targets another release."""
+
+    if _is_official_base_uri(entry.uri):
+        allowed_suites = {
+            codename,
+            f"{codename}-backports",
+            f"{codename}-proposed-updates",
+            f"{codename}-updates",
+        }
+        return entry.suite not in allowed_suites
+    if _is_official_security_uri(entry.uri):
+        return entry.suite != f"{codename}-security"
+    return False
+
+
+def _components_for_managed_sources(entries: tuple[AptSourceEntry, ...]) -> tuple[str, ...]:
+    """Preserve useful Debian components when creating a managed source."""
+
+    components: list[str] = []
+    seen: set[str] = set()
+    for entry in entries:
+        if not (
+            _is_official_base_uri(entry.uri)
+            or _is_official_security_uri(entry.uri)
+            or _is_cdrom_uri(entry.uri)
+        ):
+            continue
+        for component in entry.components:
+            if not _DEBIAN_COMPONENT_PATTERN.fullmatch(component):
+                continue
+            normalized = component.lower()
+            if normalized not in seen:
+                seen.add(normalized)
+                components.append(component)
+    if "main" not in seen:
+        components.insert(0, "main")
+    return tuple(components)
+
+
+def _disable_stale_official_sources(apt_dir: str, codename: str) -> list[str]:
+    """Comment active official Debian entries for older or alias suites."""
+
+    changed_paths: list[str] = []
+    for path in _source_files(apt_dir):
+        with open(path, encoding="utf-8") as file_obj:
+            content = file_obj.read()
+
+        if path.endswith(".sources"):
+            output: list[str] = []
+            changed = False
+            for stanza in _deb822_stanzas(content):
+                entries = _parse_deb822_stanza(stanza, path)
+                if any(_is_stale_official_entry(entry, codename) for entry in entries):
+                    output.extend(_comment_lines(stanza))
+                    changed = True
+                else:
+                    output.extend(stanza)
+                output.append("\n")
+            new_content = "".join(output)
+        else:
+            changed = False
+            output = []
+            for line in content.splitlines(keepends=True):
+                entry = _parse_one_line_source(line, path)
+                if entry is not None and _is_stale_official_entry(entry, codename):
+                    output.append(f"# Disabled by infra_tools: {line}")
+                    changed = True
+                else:
+                    output.append(line)
+            new_content = "".join(output)
+
+        if changed and new_content != content:
+            _backup_file(path)
+            _write_text_atomically(path, new_content)
+            changed_paths.append(path)
+    return changed_paths
+
+
 def _backup_file(path: str) -> None:
     backup_path = f"{path}.infra_tools.bak"
     if not os.path.exists(backup_path):
@@ -333,22 +435,29 @@ def _managed_source_path(apt_dir: str) -> str:
     return os.path.join(apt_dir, "sources.list.d", MANAGED_SOURCE_FILENAME)
 
 
-def _ensure_managed_sources(apt_dir: str, codename: str) -> bool:
+def _ensure_managed_sources(
+    apt_dir: str,
+    codename: str,
+    components: tuple[str, ...],
+) -> bool:
     source_dir = os.path.join(apt_dir, "sources.list.d")
     os.makedirs(source_dir, mode=0o755, exist_ok=True)
     path = _managed_source_path(apt_dir)
-    keyring = DEBIAN_ARCHIVE_KEYRING
+    keyring = _find_debian_archive_keyring()
+    if keyring is None:
+        raise RuntimeError("Debian archive keyring is unavailable")
+    component_text = " ".join(components)
     content = f"""{MANAGED_SOURCE_MARKER}. Do not edit; rerun infra_tools after a Debian release change.
 Types: deb
 URIs: {OFFICIAL_DEBIAN_MIRROR}
 Suites: {codename} {codename}-updates
-Components: main
+Components: {component_text}
 Signed-By: {keyring}
 
 Types: deb
 URIs: {OFFICIAL_DEBIAN_SECURITY_MIRROR}
 Suites: {codename}-security
-Components: main
+Components: {component_text}
 Signed-By: {keyring}
 """
 
@@ -378,17 +487,21 @@ def ensure_debian_package_sources(
         return None
 
     codename = get_debian_codename(os_release_path)
-    if not os.path.isfile(DEBIAN_ARCHIVE_KEYRING):
+    if _find_debian_archive_keyring() is None:
         raise RuntimeError(
-            "Debian archive keyring is missing at "
-            f"{DEBIAN_ARCHIVE_KEYRING}; install debian-archive-keyring before continuing"
+            "Debian archive keyring is missing; expected "
+            f"{DEBIAN_ARCHIVE_KEYRING_PGP} or {DEBIAN_ARCHIVE_KEYRING}. "
+            "Install debian-archive-keyring before continuing"
         )
 
+    initial_status = inspect_apt_sources(codename, apt_dir)
+    components = _components_for_managed_sources(initial_status.entries)
     disabled_paths = _disable_cdrom_sources(apt_dir)
+    stale_paths = _disable_stale_official_sources(apt_dir, codename)
     status = inspect_apt_sources(codename, apt_dir)
     added_managed_sources = False
     if not status.has_official_base or not status.has_official_security:
-        added_managed_sources = _ensure_managed_sources(apt_dir, codename)
+        added_managed_sources = _ensure_managed_sources(apt_dir, codename, components)
         status = inspect_apt_sources(codename, apt_dir)
 
     if status.cdrom_sources:
@@ -403,6 +516,8 @@ def ensure_debian_package_sources(
 
     if disabled_paths:
         print("  ✓ Disabled CD-ROM-only APT sources")
+    if stale_paths:
+        print("  ✓ Disabled stale official Debian APT sources")
     if added_managed_sources:
         print(f"  ✓ Added official Debian {codename} APT sources")
     else:

@@ -313,7 +313,10 @@ set -eu
 codename=$1
 apt_dir=/etc/apt
 source_dir="$apt_dir/sources.list.d"
-keyring=/usr/share/keyrings/debian-archive-keyring.gpg
+keyring=/usr/share/keyrings/debian-archive-keyring.pgp
+if [ ! -r "$keyring" ]; then
+    keyring=/usr/share/keyrings/debian-archive-keyring.gpg
+fi
 managed_path="$source_dir/infra_tools-debian.sources"
 
 [ -r "$keyring" ] || {
@@ -334,7 +337,11 @@ done
 
 for source_path in "$source_dir"/*.sources; do
     [ -f "$source_path" ] || continue
-    if grep -Eq '^[[:space:]]*URIs?:[[:space:]]*cdrom:' "$source_path"; then
+    if awk '
+        /^[[:space:]]*#/ { next }
+        /(^|[[:space:]])cdrom:/ { found=1; exit }
+        END { exit found ? 0 : 1 }
+    ' "$source_path"; then
         backup_path="$source_path.infra_tools.bak"
         [ -e "$backup_path" ] || cp -p "$source_path" "$backup_path"
         sed -i 's/^/# Disabled by infra_tools: /' "$source_path"
@@ -347,13 +354,13 @@ cat > "$temporary_path" <<SOURCE
 Types: deb
 URIs: https://deb.debian.org/debian
 Suites: $codename $codename-updates
-Components: main
+Components: main non-free-firmware
 Signed-By: $keyring
 
 Types: deb
 URIs: https://security.debian.org/debian-security
 Suites: $codename-security
-Components: main
+Components: main non-free-firmware
 Signed-By: $keyring
 SOURCE
 chmod 0644 "$temporary_path"

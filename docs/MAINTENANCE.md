@@ -41,7 +41,9 @@ existing APT timers remain enabled.
 
 APT uses the infra_tools updater instead of competing distro unattended-upgrade
 timers. It runs `apt-get update` and a non-removing distribution upgrade; it
-does not run `autoremove` or automatically remove packages. The distro timers
+does not run `autoremove` or automatically remove packages. Before each
+scheduled update, infra_tools repairs CD-ROM-only entries and stale official
+Debian suites using the installed release codename. The distro timers
 are disabled only after the replacement timer is enabled, started, and verified.
 
 Node.js, Ruby, and uv use a conservative default policy:

@@ -47,8 +47,9 @@ class TestAutoUpdateApt(unittest.TestCase):
         self.assertIn("APT upgrade failed", mock_notify.call_args.kwargs["subject"])
         self.assertEqual("dependency error", mock_notify.call_args.kwargs["details"])
 
+    @patch("common.service_tools.auto_update_apt.ensure_debian_package_sources")
     @patch("common.service_tools.auto_update_apt.run_apt_command")
-    def test_update_package_lists_logs_structured_error(self, mock_run):
+    def test_update_package_lists_logs_structured_error(self, mock_run, _mock_sources):
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=1, stdout="", stderr="mirror offline"
         )
@@ -58,6 +59,19 @@ class TestAutoUpdateApt(unittest.TestCase):
 
         self.assertFalse(ok)
         self.assertIn("apt-get update failed | stderr='mirror offline'", "\n".join(logs.output))
+
+    @patch(
+        "common.service_tools.auto_update_apt.ensure_debian_package_sources",
+        side_effect=RuntimeError("stale Debian source"),
+    )
+    @patch("common.service_tools.auto_update_apt.run_apt_command")
+    def test_source_preflight_failure_skips_apt_update(self, mock_run, _mock_sources):
+        with self.assertLogs(auto_update_apt.logger, level="ERROR") as logs:
+            ok = auto_update_apt.update_package_lists()
+
+        self.assertFalse(ok)
+        mock_run.assert_not_called()
+        self.assertIn("Debian APT source preflight failed", "\n".join(logs.output))
 
 
 class TestRunAptCommand(unittest.TestCase):
@@ -106,8 +120,9 @@ class TestUpgradePackages(unittest.TestCase):
         args = mock_run.call_args[0][0]
         self.assertIn("DPkg::Lock::Timeout=300", args)
 
+    @patch("common.service_tools.auto_update_apt.ensure_debian_package_sources")
     @patch("common.service_tools.auto_update_apt.run_apt_command")
-    def test_update_uses_lock_timeout(self, mock_run):
+    def test_update_uses_lock_timeout(self, mock_run, _mock_sources):
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0, stdout="", stderr=""
         )

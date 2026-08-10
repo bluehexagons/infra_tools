@@ -10,6 +10,7 @@ import sys
 import tempfile
 from typing import Optional
 
+from lib.apt_sources import ensure_debian_package_sources
 from lib.system_utils import get_current_username
 from lib.validation import validate_filesystem_path
 from lib.validators import validate_username
@@ -141,6 +142,12 @@ def install_system_packages(shell: str) -> int:
     packages = list(BASE_PACKAGES)
     if shell == "bash":
         packages.append("bash-completion")
+
+    try:
+        ensure_debian_package_sources()
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(f"Error: could not prepare Debian APT sources: {exc}")
+        return 1
 
     print("Installing orchestration host packages...")
     apt_environment = os.environ.copy()

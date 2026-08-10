@@ -100,6 +100,86 @@ class TestAptSources(unittest.TestCase):
         finally:
             shutil.rmtree(root)
 
+    def test_disables_stale_official_suites_before_adding_current_sources(self):
+        root, apt_dir = self._layout(
+            os_release="ID=debian\nVERSION_CODENAME=trixie\n",
+            sources_list=(
+                "deb https://deb.debian.org/debian bookworm main non-free-firmware\n"
+                "deb https://security.debian.org/debian-security bookworm-security "
+                "main non-free-firmware\n"
+            ),
+        )
+        try:
+            import lib.apt_sources as apt_sources
+
+            keyring = os.path.join(root, "usr", "share", "keyrings", "debian-archive-keyring.gpg")
+            with open(keyring, "wb") as file_obj:
+                file_obj.write(b"test keyring")
+            original_keyring = apt_sources.DEBIAN_ARCHIVE_KEYRING
+            apt_sources.DEBIAN_ARCHIVE_KEYRING = keyring
+            try:
+                status = ensure_debian_package_sources(apt_dir, os.path.join(root, "etc", "os-release"))
+            finally:
+                apt_sources.DEBIAN_ARCHIVE_KEYRING = original_keyring
+
+            self.assertIsNotNone(status)
+            assert status is not None
+            self.assertTrue(status.has_official_base)
+            self.assertTrue(status.has_official_security)
+            self.assertEqual(
+                {entry.suite for entry in status.entries},
+                {"trixie", "trixie-updates", "trixie-security"},
+            )
+            with open(os.path.join(apt_dir, "sources.list"), encoding="utf-8") as file_obj:
+                content = file_obj.read()
+            self.assertIn("# Disabled by infra_tools: deb https://deb.debian.org/debian bookworm", content)
+            self.assertTrue(os.path.isfile(os.path.join(apt_dir, "sources.list.infra_tools.bak")))
+            managed_path = os.path.join(apt_dir, "sources.list.d", MANAGED_SOURCE_FILENAME)
+            with open(managed_path, encoding="utf-8") as file_obj:
+                managed_content = file_obj.read()
+            self.assertIn("Components: main non-free-firmware", managed_content)
+        finally:
+            shutil.rmtree(root)
+
+    def test_disables_cdrom_uri_on_deb822_continuation_line(self):
+        root, apt_dir = self._layout(
+            os_release="ID=debian\nVERSION_CODENAME=trixie\n",
+            sources_list=(
+                "deb https://deb.debian.org/debian trixie main\n"
+                "deb https://security.debian.org/debian-security trixie-security main\n"
+            ),
+        )
+        try:
+            import lib.apt_sources as apt_sources
+
+            keyring = os.path.join(root, "usr", "share", "keyrings", "debian-archive-keyring.gpg")
+            with open(keyring, "wb") as file_obj:
+                file_obj.write(b"test keyring")
+            sources_path = os.path.join(apt_dir, "sources.list.d", "offline.sources")
+            with open(sources_path, "w", encoding="utf-8") as file_obj:
+                file_obj.write(
+                    "Types: deb\n"
+                    "URIs: https://deb.debian.org/debian\n"
+                    " cdrom:[Debian]/\n"
+                    "Suites: trixie\n"
+                    "Components: main\n"
+                )
+            original_keyring = apt_sources.DEBIAN_ARCHIVE_KEYRING
+            apt_sources.DEBIAN_ARCHIVE_KEYRING = keyring
+            try:
+                status = ensure_debian_package_sources(apt_dir, os.path.join(root, "etc", "os-release"))
+            finally:
+                apt_sources.DEBIAN_ARCHIVE_KEYRING = original_keyring
+
+            self.assertIsNotNone(status)
+            assert status is not None
+            self.assertFalse(status.cdrom_sources)
+            with open(sources_path, encoding="utf-8") as file_obj:
+                content = file_obj.read()
+            self.assertIn("# Disabled by infra_tools:  cdrom:[Debian]/", content)
+        finally:
+            shutil.rmtree(root)
+
     def test_rejects_non_debian_source_repair(self):
         root, apt_dir = self._layout(os_release="ID=ubuntu\nVERSION_CODENAME=noble\n")
         try:

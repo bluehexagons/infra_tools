@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../
 
 from lib.logging_utils import get_service_logger
 from lib.logging_utils import log_event
+from lib.apt_sources import ensure_debian_package_sources
 from lib.maintenance_defaults import APT_LOCK_OPTIONS
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
 
@@ -51,6 +52,17 @@ def run_apt_command(args: list[str]) -> subprocess.CompletedProcess[str]:
 
 def update_package_lists() -> bool:
     """Run apt-get update to refresh package lists."""
+    try:
+        ensure_debian_package_sources()
+    except (OSError, RuntimeError, ValueError) as exc:
+        log_event(
+            logger,
+            "Debian APT source preflight failed",
+            level=ERROR,
+            stderr=str(exc),
+        )
+        return False
+
     result = run_apt_command(['update', '-qq'] + APT_LOCK_OPTIONS)
     if result.returncode != 0:
         log_event(logger, "apt-get update failed", level=ERROR, stderr=result.stderr.strip())
