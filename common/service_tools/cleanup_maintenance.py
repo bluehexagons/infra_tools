@@ -18,18 +18,23 @@ from lib.logging_utils import get_service_logger, log_event
 from lib.maintenance_defaults import (
     APT_LOCK_OPTIONS,
     CLEANUP_COMMAND_TIMEOUT_SECONDS,
+    CRASH_REPORT_DIRS,
+    CRASH_REPORT_PATTERNS,
     INFRA_TMP_DIRS,
     INFRA_TMP_PATTERNS,
     JOURNAL_MAX_AGE,
     JOURNAL_MAX_USE,
+    STALE_CRASH_REPORT_MAX_AGE_DAYS,
     STALE_INFRA_TMP_MAX_AGE_DAYS,
 )
+from lib.machine_state import is_container
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
 from lib.validation import validate_filesystem_path, validate_positive_integer
 
 
 logger = get_service_logger('cleanup_maintenance', 'common', use_syslog=True)
 _INFRA_TMP_RE = re.compile(rf"^(?:{'|'.join(INFRA_TMP_PATTERNS)})$")
+_CRASH_REPORT_RE = re.compile(rf"^(?:{'|'.join(CRASH_REPORT_PATTERNS)})$")
 
 
 def run_command(
@@ -88,8 +93,8 @@ def cleanup_apt_cache() -> list[str]:
     return failures
 
 
-def cleanup_unused_packages() -> str | None:
-    """Purge packages APT marks unused.
+def cleanup_unused_packages() -> list[str]:
+    """Purge packages APT marks unused and residual package configuration.
 
     APT's configured kernel-retention policy protects kernels it considers
     required.
@@ -97,23 +102,33 @@ def cleanup_unused_packages() -> str | None:
     apt_get = shutil.which("apt-get")
     if not apt_get:
         log_event(logger, "apt-get not found, skipping unused package cleanup")
-        return None
+        return []
 
     env = os.environ.copy()
     env["DEBIAN_FRONTEND"] = "noninteractive"
-    return run_cleanup_command(
-        [apt_get, "autoremove", "--purge", "-y", "-qq"] + APT_LOCK_OPTIONS,
-        "APT unused package cleanup",
-        env=env,
-    )
+    failures: list[str] = []
+    for command, action in (
+        (
+            [apt_get, "autoremove", "--purge", "-y", "-qq"] + APT_LOCK_OPTIONS,
+            "APT unused package cleanup",
+        ),
+        (
+            [apt_get, "purge", "-y", "-qq", "~c"] + APT_LOCK_OPTIONS,
+            "APT residual configuration cleanup",
+        ),
+    ):
+        failure = run_cleanup_command(command, action, env=env)
+        if failure:
+            failures.append(failure)
+    return failures
 
 
-def cleanup_optional_cache(
+def run_optional_cleanup(
     executable_names: list[str],
     args: list[str],
     action: str,
 ) -> str | None:
-    """Run an optional cache cleanup command when its executable is installed."""
+    """Run an optional cleanup command when its executable is installed."""
     for executable_name in executable_names:
         executable_path = shutil.which(executable_name)
         if executable_path:
@@ -121,6 +136,76 @@ def cleanup_optional_cache(
 
     log_event(logger, f"{action} not available, skipping")
     return None
+
+
+def cleanup_filesystem_free_space() -> str | None:
+    """Return unused blocks to storage on hosts that own their filesystems."""
+    if is_container():
+        log_event(logger, "Skipping filesystem trim inside container")
+        return None
+
+    return run_optional_cleanup(
+        ["fstrim"],
+        ["--all", "--verbose", "--quiet-unsupported"],
+        "filesystem trim",
+    )
+
+
+def cleanup_stale_crash_reports(
+    crash_dir: str = "/var/crash",
+    max_age_days: int = STALE_CRASH_REPORT_MAX_AGE_DAYS,
+) -> list[str]:
+    """Remove recognized regular crash-report files after the retention window."""
+    validate_filesystem_path(crash_dir, must_exist=False)
+    max_age_days = validate_positive_integer(str(max_age_days), "max age days")
+    try:
+        entries = list(os.scandir(crash_dir))
+    except FileNotFoundError:
+        return []
+    except OSError as exc:
+        details = str(exc)
+        log_event(
+            logger,
+            "Failed to list crash reports",
+            level=WARNING,
+            crash_dir=crash_dir,
+            error=details,
+        )
+        return [f"crash report cleanup: {details}"]
+
+    cutoff = time.time() - (max_age_days * 24 * 60 * 60)
+    failures: list[str] = []
+    removed_count = 0
+    for entry in entries:
+        if not _CRASH_REPORT_RE.fullmatch(entry.name):
+            continue
+        try:
+            if not entry.is_file(follow_symlinks=False):
+                continue
+            if entry.stat(follow_symlinks=False).st_mtime > cutoff:
+                continue
+            os.unlink(entry.path)
+            removed_count += 1
+        except OSError as exc:
+            details = str(exc)
+            log_event(
+                logger,
+                "Failed to remove stale crash report",
+                level=WARNING,
+                path=entry.path,
+                error=details,
+            )
+            failures.append(f"{entry.path}: {details}")
+
+    if removed_count:
+        log_event(
+            logger,
+            "Removed stale crash reports",
+            crash_dir=crash_dir,
+            max_age_days=max_age_days,
+            removed_count=removed_count,
+        )
+    return failures
 
 
 def cleanup_stale_infra_tmp_artifacts(
@@ -257,13 +342,14 @@ def main() -> int:
     notification_configs = load_notification_configs_from_state(logger)
 
     failures = cleanup_apt_cache()
-    package_failure = cleanup_unused_packages()
-    if package_failure:
-        failures.append(package_failure)
+    failures.extend(cleanup_unused_packages())
+    trim_failure = cleanup_filesystem_free_space()
+    if trim_failure:
+        failures.append(trim_failure)
 
     for failure in (
-        cleanup_optional_cache(["systemd-tmpfiles"], ["--clean"], "systemd tmpfiles cleanup"),
-        cleanup_optional_cache(
+        run_optional_cleanup(["systemd-tmpfiles"], ["--clean"], "systemd tmpfiles cleanup"),
+        run_optional_cleanup(
             ["journalctl"],
             [
                 "--rotate",
@@ -272,10 +358,10 @@ def main() -> int:
             ],
             "journal rotation and vacuum",
         ),
-        cleanup_optional_cache(["logrotate"], ["/etc/logrotate.conf"], "log rotation"),
-        cleanup_optional_cache(["npm"], ["cache", "clean", "--force"], "npm cache cleanup"),
-        cleanup_optional_cache(["pip3", "pip"], ["cache", "purge"], "pip cache cleanup"),
-        cleanup_optional_cache(["uv"], ["cache", "clean"], "uv cache cleanup"),
+        run_optional_cleanup(["logrotate"], ["/etc/logrotate.conf"], "log rotation"),
+        run_optional_cleanup(["npm"], ["cache", "clean", "--force"], "npm cache cleanup"),
+        run_optional_cleanup(["pip3", "pip"], ["cache", "purge"], "pip cache cleanup"),
+        run_optional_cleanup(["uv"], ["cache", "clean"], "uv cache cleanup"),
     ):
         if failure:
             failures.append(failure)
@@ -283,6 +369,8 @@ def main() -> int:
     for tmp_dir in INFRA_TMP_DIRS:
         log_tmp_usage(tmp_dir)
         failures.extend(cleanup_stale_infra_tmp_artifacts(tmp_dir=tmp_dir))
+    for crash_dir in CRASH_REPORT_DIRS:
+        failures.extend(cleanup_stale_crash_reports(crash_dir=crash_dir))
     notify_if_storage_still_low(notification_configs)
 
     if failures:

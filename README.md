@@ -104,7 +104,9 @@ encryption, TCP 445 only, and validated configuration reloads. See the
 Automatic APT updates remain enabled, while language ecosystem upgrades and
 release selection use conservative freshness and opt-in policies. Cleanup uses
 bounded cache, log, journal, and temporary-artifact policies and purges packages
-APT marks unused, including superseded kernels. See the
+APT marks unused, including superseded kernels. It expires recognized crash
+reports and returns unused filesystem blocks to supported physical, virtual,
+and Proxmox storage. See the
 [recurring maintenance guide](docs/MAINTENANCE.md).
 
 ### Targeted updates

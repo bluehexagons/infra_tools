@@ -79,14 +79,22 @@ the deployment freshness policy for that repository.
 
 `cleanup-maintenance` removes disposable APT caches, rotates journals before
 enforcing both the `100M` size ceiling and a 30-day age ceiling, invokes the
-system logrotate policy, and removes only exact infra_tools-owned temporary
-artifact names older than seven days in `/tmp` and `/var/tmp`.
+system logrotate policy, removes recognized crash-report files older than 30
+days, and removes only exact infra_tools-owned temporary artifact names older
+than seven days in `/tmp` and `/var/tmp`.
 
 The cleanup job also runs noninteractive `apt-get autoremove --purge` wherever
 APT is available. This removes packages APT has marked as unused, including
 superseded kernel packages, while APT's configured kernel-retention policy
-protects kernels it considers required. Cleanup never removes installed gem or
-nvm runtime versions or arbitrary files.
+protects kernels it considers required. It also purges configuration remnants
+for packages that were already removed. On physical machines, VMs, and Proxmox
+hosts, weekly filesystem TRIM returns unused blocks to storage when discard is
+supported; containers skip this host-level operation.
+
+Cleanup never removes installed gem or nvm runtime versions, Proxmox backups,
+templates, ISOs, guest volumes, container/image stores, crash-report
+directories, or arbitrary files. Proxmox boot entries and pinned kernels remain
+under APT and `proxmox-boot-tool` retention policy.
 
 Storage synchronization and scrub jobs write scheduling state atomically and
 use a persistent lock inode to prevent overlapping runs. Invalid specifications

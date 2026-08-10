@@ -17,9 +17,11 @@ from common.service_tools import cleanup_maintenance
 
 class TestCleanupMaintenance(unittest.TestCase):
     @patch("common.service_tools.cleanup_maintenance.notify_if_storage_still_low")
+    @patch("common.service_tools.cleanup_maintenance.cleanup_stale_crash_reports", return_value=[])
     @patch("common.service_tools.cleanup_maintenance.cleanup_stale_infra_tmp_artifacts", return_value=[])
-    @patch("common.service_tools.cleanup_maintenance.cleanup_optional_cache", return_value=None)
-    @patch("common.service_tools.cleanup_maintenance.cleanup_unused_packages", return_value=None)
+    @patch("common.service_tools.cleanup_maintenance.run_optional_cleanup", return_value=None)
+    @patch("common.service_tools.cleanup_maintenance.cleanup_filesystem_free_space", return_value=None)
+    @patch("common.service_tools.cleanup_maintenance.cleanup_unused_packages", return_value=[])
     @patch("common.service_tools.cleanup_maintenance.cleanup_apt_cache", return_value=[])
     @patch("common.service_tools.cleanup_maintenance.load_notification_configs_from_state", return_value=[])
     def test_successful_cleanup_returns_zero(
@@ -27,8 +29,10 @@ class TestCleanupMaintenance(unittest.TestCase):
         _configs,
         mock_apt,
         mock_unused_packages,
+        mock_trim,
         mock_optional,
         mock_tmp_cleanup,
+        mock_crash_cleanup,
         mock_low_space,
     ):
         with self.assertLogs(cleanup_maintenance.logger, level="INFO") as logs:
@@ -36,23 +40,30 @@ class TestCleanupMaintenance(unittest.TestCase):
         self.assertEqual(result, 0)
         mock_apt.assert_called_once()
         mock_unused_packages.assert_called_once()
+        mock_trim.assert_called_once()
         self.assertEqual(mock_optional.call_count, 6)
         self.assertFalse(any(call.args[2] == "gem cleanup" for call in mock_optional.call_args_list))
         # Stale infra tmp cleanup runs once per known temp directory (/tmp, /var/tmp).
         self.assertEqual(mock_tmp_cleanup.call_count, len(cleanup_maintenance.INFRA_TMP_DIRS))
+        self.assertEqual(
+            mock_crash_cleanup.call_count,
+            len(cleanup_maintenance.CRASH_REPORT_DIRS),
+        )
         mock_low_space.assert_called_once()
         joined = "\n".join(logs.output)
         self.assertIn("Starting cleanup maintenance", joined)
         self.assertIn("Cleanup maintenance completed successfully", joined)
 
     @patch("common.service_tools.cleanup_maintenance.notify_if_storage_still_low")
+    @patch("common.service_tools.cleanup_maintenance.cleanup_stale_crash_reports", return_value=[])
     @patch("common.service_tools.cleanup_maintenance.cleanup_stale_infra_tmp_artifacts", return_value=[])
     @patch("common.service_tools.cleanup_maintenance.send_notification_safe")
     @patch(
-        "common.service_tools.cleanup_maintenance.cleanup_optional_cache",
+        "common.service_tools.cleanup_maintenance.run_optional_cleanup",
         side_effect=[None, "journal vacuum: failed", None, None, None, None],
     )
-    @patch("common.service_tools.cleanup_maintenance.cleanup_unused_packages", return_value=None)
+    @patch("common.service_tools.cleanup_maintenance.cleanup_filesystem_free_space", return_value=None)
+    @patch("common.service_tools.cleanup_maintenance.cleanup_unused_packages", return_value=[])
     @patch("common.service_tools.cleanup_maintenance.cleanup_apt_cache", return_value=[])
     @patch("common.service_tools.cleanup_maintenance.load_notification_configs_from_state", return_value=["cfg"])
     def test_failure_notifies(
@@ -60,9 +71,11 @@ class TestCleanupMaintenance(unittest.TestCase):
         _configs,
         _apt,
         _unused_packages,
+        _trim,
         _optional,
         mock_notify,
         _tmp_cleanup,
+        _crash_cleanup,
         mock_low_space,
     ):
         result = cleanup_maintenance.main()
@@ -134,8 +147,9 @@ class TestCleanupHelpers(unittest.TestCase):
     ):
         result = cleanup_maintenance.cleanup_unused_packages()
 
-        self.assertIsNone(result)
-        mock_cleanup.assert_called_once_with(
+        self.assertEqual(result, [])
+        self.assertEqual(mock_cleanup.call_count, 2)
+        mock_cleanup.assert_any_call(
             [
                 "/usr/bin/apt-get",
                 "autoremove",
@@ -146,6 +160,19 @@ class TestCleanupHelpers(unittest.TestCase):
                 "DPkg::Lock::Timeout=300",
             ],
             "APT unused package cleanup",
+            env=mock_cleanup.call_args.kwargs["env"],
+        )
+        mock_cleanup.assert_any_call(
+            [
+                "/usr/bin/apt-get",
+                "purge",
+                "-y",
+                "-qq",
+                "~c",
+                "-o",
+                "DPkg::Lock::Timeout=300",
+            ],
+            "APT residual configuration cleanup",
             env=mock_cleanup.call_args.kwargs["env"],
         )
         self.assertEqual(
@@ -159,7 +186,7 @@ class TestCleanupHelpers(unittest.TestCase):
         return_value="/usr/bin/journalctl",
     )
     def test_journal_cleanup_rotates_and_enforces_age_and_size(self, _which, mock_cleanup):
-        cleanup_maintenance.cleanup_optional_cache(
+        cleanup_maintenance.run_optional_cleanup(
             ["journalctl"],
             [
                 "--rotate",
@@ -184,8 +211,8 @@ class TestCleanupHelpers(unittest.TestCase):
         "common.service_tools.cleanup_maintenance.shutil.which",
         side_effect=[None, "/usr/bin/pip"],
     )
-    def test_cleanup_optional_cache_uses_first_available_executable(self, _which, mock_cleanup):
-        result = cleanup_maintenance.cleanup_optional_cache(
+    def test_run_optional_cleanup_uses_first_available_executable(self, _which, mock_cleanup):
+        result = cleanup_maintenance.run_optional_cleanup(
             ["pip3", "pip"],
             ["cache", "purge"],
             "pip cache cleanup",
@@ -196,6 +223,80 @@ class TestCleanupHelpers(unittest.TestCase):
             ["/usr/bin/pip", "cache", "purge"],
             "pip cache cleanup",
         )
+
+    @patch("common.service_tools.cleanup_maintenance.run_optional_cleanup", return_value=None)
+    @patch("common.service_tools.cleanup_maintenance.is_container", return_value=False)
+    def test_cleanup_filesystem_free_space_trims_host(self, _is_container, mock_optional):
+        result = cleanup_maintenance.cleanup_filesystem_free_space()
+
+        self.assertIsNone(result)
+        mock_optional.assert_called_once_with(
+            ["fstrim"],
+            ["--all", "--verbose", "--quiet-unsupported"],
+            "filesystem trim",
+        )
+
+    @patch("common.service_tools.cleanup_maintenance.run_optional_cleanup")
+    @patch("common.service_tools.cleanup_maintenance.is_container", return_value=True)
+    def test_cleanup_filesystem_free_space_skips_container(
+        self,
+        _is_container,
+        mock_optional,
+    ):
+        result = cleanup_maintenance.cleanup_filesystem_free_space()
+
+        self.assertIsNone(result)
+        mock_optional.assert_not_called()
+
+    def test_cleanup_stale_crash_reports_removes_only_old_recognized_files(self):
+        with tempfile.TemporaryDirectory() as crash_dir:
+            old_core = os.path.join(crash_dir, "core.python.1000.boot.123.zst")
+            old_apport = os.path.join(crash_dir, "_usr_bin_python3.1000.crash")
+            fresh_core = os.path.join(crash_dir, "core.fresh.1000.boot.456.zst")
+            unrelated = os.path.join(crash_dir, "operator-note.txt")
+            old_directory = os.path.join(crash_dir, "core.directory")
+            old_symlink = os.path.join(crash_dir, "core.symlink")
+            for path in (old_core, old_apport, fresh_core, unrelated):
+                with open(path, "w", encoding="utf-8") as file_obj:
+                    file_obj.write("x")
+            os.mkdir(old_directory)
+            os.symlink(old_core, old_symlink)
+
+            old_time = time.time() - (31 * 24 * 60 * 60)
+            for path in (old_core, old_apport, unrelated, old_directory):
+                os.utime(path, (old_time, old_time))
+
+            failures = cleanup_maintenance.cleanup_stale_crash_reports(
+                crash_dir=crash_dir,
+                max_age_days=30,
+            )
+
+            self.assertEqual(failures, [])
+            self.assertFalse(os.path.exists(old_core))
+            self.assertFalse(os.path.exists(old_apport))
+            self.assertTrue(os.path.exists(fresh_core))
+            self.assertTrue(os.path.exists(unrelated))
+            self.assertTrue(os.path.isdir(old_directory))
+            self.assertTrue(os.path.islink(old_symlink))
+
+    def test_cleanup_stale_crash_reports_reports_remove_failure(self):
+        with tempfile.TemporaryDirectory() as crash_dir:
+            old_core = os.path.join(crash_dir, "core.python.1000.boot.123.zst")
+            with open(old_core, "w", encoding="utf-8") as file_obj:
+                file_obj.write("x")
+            old_time = time.time() - (31 * 24 * 60 * 60)
+            os.utime(old_core, (old_time, old_time))
+
+            with patch(
+                "common.service_tools.cleanup_maintenance.os.unlink",
+                side_effect=OSError("busy"),
+            ):
+                failures = cleanup_maintenance.cleanup_stale_crash_reports(
+                    crash_dir=crash_dir,
+                    max_age_days=30,
+                )
+
+            self.assertEqual(failures, [f"{old_core}: busy"])
 
     def test_cleanup_stale_infra_tmp_artifacts_removes_only_old_owned_paths(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

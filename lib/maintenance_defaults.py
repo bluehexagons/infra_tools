@@ -4,6 +4,12 @@ from __future__ import annotations
 
 JOURNAL_MAX_USE = "100M"
 JOURNAL_MAX_AGE = "30d"
+STALE_CRASH_REPORT_MAX_AGE_DAYS = 30
+CRASH_REPORT_DIRS = ("/var/crash", "/var/lib/systemd/coredump")
+CRASH_REPORT_PATTERNS = (
+    r"core\..+",
+    r".+\.(?:crash|upload|uploaded)",
+)
 
 # Wait up to 5 minutes for apt/dpkg locks to be released before failing.
 APT_LOCK_OPTIONS = [
