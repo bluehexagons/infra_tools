@@ -19,14 +19,14 @@ class TestCleanupMaintenance(unittest.TestCase):
     @patch("common.service_tools.cleanup_maintenance.notify_if_storage_still_low")
     @patch("common.service_tools.cleanup_maintenance.cleanup_stale_infra_tmp_artifacts", return_value=[])
     @patch("common.service_tools.cleanup_maintenance.cleanup_optional_cache", return_value=None)
-    @patch("common.service_tools.cleanup_maintenance.cleanup_vm_packages", return_value=None)
+    @patch("common.service_tools.cleanup_maintenance.cleanup_unused_packages", return_value=None)
     @patch("common.service_tools.cleanup_maintenance.cleanup_apt_cache", return_value=[])
     @patch("common.service_tools.cleanup_maintenance.load_notification_configs_from_state", return_value=[])
     def test_successful_cleanup_returns_zero(
         self,
         _configs,
         mock_apt,
-        mock_vm_packages,
+        mock_unused_packages,
         mock_optional,
         mock_tmp_cleanup,
         mock_low_space,
@@ -35,7 +35,7 @@ class TestCleanupMaintenance(unittest.TestCase):
             result = cleanup_maintenance.main()
         self.assertEqual(result, 0)
         mock_apt.assert_called_once()
-        mock_vm_packages.assert_called_once()
+        mock_unused_packages.assert_called_once()
         self.assertEqual(mock_optional.call_count, 6)
         self.assertFalse(any(call.args[2] == "gem cleanup" for call in mock_optional.call_args_list))
         # Stale infra tmp cleanup runs once per known temp directory (/tmp, /var/tmp).
@@ -52,14 +52,14 @@ class TestCleanupMaintenance(unittest.TestCase):
         "common.service_tools.cleanup_maintenance.cleanup_optional_cache",
         side_effect=[None, "journal vacuum: failed", None, None, None, None],
     )
-    @patch("common.service_tools.cleanup_maintenance.cleanup_vm_packages", return_value=None)
+    @patch("common.service_tools.cleanup_maintenance.cleanup_unused_packages", return_value=None)
     @patch("common.service_tools.cleanup_maintenance.cleanup_apt_cache", return_value=[])
     @patch("common.service_tools.cleanup_maintenance.load_notification_configs_from_state", return_value=["cfg"])
     def test_failure_notifies(
         self,
         _configs,
         _apt,
-        _vm_packages,
+        _unused_packages,
         _optional,
         mock_notify,
         _tmp_cleanup,
@@ -127,14 +127,12 @@ class TestCleanupHelpers(unittest.TestCase):
 
     @patch("common.service_tools.cleanup_maintenance.run_cleanup_command", return_value=None)
     @patch("common.service_tools.cleanup_maintenance.shutil.which", return_value="/usr/bin/apt-get")
-    @patch("common.service_tools.cleanup_maintenance.is_vm", return_value=True)
-    def test_cleanup_vm_packages_autoremoves_with_purge(
+    def test_cleanup_unused_packages_autoremoves_with_purge(
         self,
-        _is_vm,
         _which,
         mock_cleanup,
     ):
-        result = cleanup_maintenance.cleanup_vm_packages()
+        result = cleanup_maintenance.cleanup_unused_packages()
 
         self.assertIsNone(result)
         mock_cleanup.assert_called_once_with(
@@ -147,21 +145,13 @@ class TestCleanupHelpers(unittest.TestCase):
                 "-o",
                 "DPkg::Lock::Timeout=300",
             ],
-            "VM unused package cleanup",
+            "APT unused package cleanup",
             env=mock_cleanup.call_args.kwargs["env"],
         )
         self.assertEqual(
             mock_cleanup.call_args.kwargs["env"]["DEBIAN_FRONTEND"],
             "noninteractive",
         )
-
-    @patch("common.service_tools.cleanup_maintenance.shutil.which")
-    @patch("common.service_tools.cleanup_maintenance.is_vm", return_value=False)
-    def test_cleanup_vm_packages_skips_non_vm(self, _is_vm, mock_which):
-        result = cleanup_maintenance.cleanup_vm_packages()
-
-        self.assertIsNone(result)
-        mock_which.assert_not_called()
 
     @patch("common.service_tools.cleanup_maintenance.run_cleanup_command", return_value=None)
     @patch(

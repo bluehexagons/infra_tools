@@ -103,9 +103,9 @@ encryption, TCP 445 only, and validated configuration reloads. See the
 
 Automatic APT updates remain enabled, while language ecosystem upgrades and
 release selection use conservative freshness and opt-in policies. Cleanup uses
-bounded cache, log, journal, and temporary-artifact policies; VMs additionally
-purge packages APT marks unused, including superseded kernels. See
-[Recurring maintenance](docs/MAINTENANCE.md).
+bounded cache, log, journal, and temporary-artifact policies and purges packages
+APT marks unused, including superseded kernels. See the
+[recurring maintenance guide](docs/MAINTENANCE.md).
 
 ### Targeted updates
 

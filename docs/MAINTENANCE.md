@@ -82,12 +82,11 @@ enforcing both the `100M` size ceiling and a 30-day age ceiling, invokes the
 system logrotate policy, and removes only exact infra_tools-owned temporary
 artifact names older than seven days in `/tmp` and `/var/tmp`.
 
-On VMs only, the cleanup job also runs noninteractive
-`apt-get autoremove --purge`. This removes packages APT has marked as unused,
-including superseded kernel packages, while APT's configured kernel-retention
-policy protects kernels it considers required. Physical hosts, Proxmox
-hypervisors, and containers do not receive scheduled package removal. Cleanup
-never removes installed gem or nvm runtime versions or arbitrary files.
+The cleanup job also runs noninteractive `apt-get autoremove --purge` wherever
+APT is available. This removes packages APT has marked as unused, including
+superseded kernel packages, while APT's configured kernel-retention policy
+protects kernels it considers required. Cleanup never removes installed gem or
+nvm runtime versions or arbitrary files.
 
 Storage synchronization and scrub jobs write scheduling state atomically and
 use a persistent lock inode to prevent overlapping runs. Invalid specifications
