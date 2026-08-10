@@ -281,11 +281,12 @@ class TestRunRemoteSetupArgumentSecurity(unittest.TestCase):
             with patch.object(setup_common, "REMOTE_INSTALL_DIR", install_dir), \
                  patch.object(setup_common, "copy_project_files"), \
                  patch.object(setup_common.os, "geteuid", return_value=0), \
-                 patch("subprocess.Popen", return_value=process):
+                 patch("subprocess.Popen", return_value=process) as mock_popen:
                 result = setup_common.run_remote_setup(config)
 
             self.assertEqual(result, 0)
             self.assertEqual(os.stat(install_dir).st_mode & 0o777, 0o755)
+            self.assertEqual(mock_popen.call_args.kwargs["env"]["PYTHONUNBUFFERED"], "1")
 
     def test_local_setup_preserves_managed_git_worktree(self):
         from lib import setup_common

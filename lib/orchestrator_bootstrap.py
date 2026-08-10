@@ -149,40 +149,50 @@ def install_system_packages(shell: str) -> int:
         print(f"Error: could not prepare Debian APT sources: {exc}")
         return 1
 
-    print("Installing orchestration host packages...")
+    print(
+        "Refreshing package lists (APT may wait for another package operation)...",
+        flush=True,
+    )
     apt_environment = os.environ.copy()
     apt_environment["DEBIAN_FRONTEND"] = "noninteractive"
     update_result = subprocess.run(
-        ["apt-get", "-o", "DPkg::Lock::Timeout=120", "update", "-qq"],
-        capture_output=True,
-        text=True,
+        [
+            "apt-get",
+            "-o",
+            "DPkg::Lock::Timeout=120",
+            "-o",
+            "Dpkg::Use-Pty=0",
+            "update",
+            "-q",
+        ],
         env=apt_environment,
+        check=False,
     )
     if update_result.returncode != 0:
-        output = "\n".join(part for part in [update_result.stdout.strip(), update_result.stderr.strip()] if part)
-        print(f"Error: failed to update package lists.{f' Output: {output}' if output else ''}")
+        print("Error: failed to update package lists; see the APT output above.")
         return 1
 
+    print("Installing orchestration host packages...", flush=True)
     install_result = subprocess.run(
         [
             "apt-get",
             "-o",
             "DPkg::Lock::Timeout=120",
+            "-o",
+            "Dpkg::Use-Pty=0",
             "install",
             "-y",
-            "-qq",
+            "-q",
             *packages,
         ],
-        capture_output=True,
-        text=True,
         env=apt_environment,
+        check=False,
     )
     if install_result.returncode != 0:
-        output = "\n".join(part for part in [install_result.stdout.strip(), install_result.stderr.strip()] if part)
-        print(f"Error: failed to install required packages.{f' Output: {output}' if output else ''}")
+        print("Error: failed to install required packages; see the APT output above.")
         return 1
 
-    print(f"✓ Installed system packages: {', '.join(packages)}")
+    print(f"✓ Installed system packages: {', '.join(packages)}", flush=True)
     return 0
 
 

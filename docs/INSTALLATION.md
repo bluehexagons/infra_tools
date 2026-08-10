@@ -173,6 +173,14 @@ update` before installing packages. Existing `non-free-firmware` components
 are preserved. Existing source files are backed up, and an unmanaged
 `infra_tools-debian.sources` file is not overwritten.
 
+The installer and local setup print APT progress directly. The first run may
+pause briefly while another package operation releases the APT lock (the
+wait is bounded), but it should continue to show package-list or package
+installation output. Keep the terminal open until the installer reports its
+completion message. If a previously started installer was interrupted, rerun
+the same command after checking that no other `apt` or `dpkg` process is still
+active.
+
 If this step fails, fix network, DNS, proxy, or mirror access and rerun the
 same installer command. Do not work around a failed package-list update by
 leaving a CD-ROM as the only source.

@@ -51,6 +51,11 @@ class TestInstallSystemPackages(unittest.TestCase):
         self.assertIn("openssh-client", install_args)
         self.assertIn("rsync", install_args)
         self.assertIn("tar", install_args)
+        update_args = mock_run.call_args_list[0].args[0]
+        self.assertIn("Dpkg::Use-Pty=0", update_args)
+        self.assertIn("-q", update_args)
+        self.assertNotIn("-qq", update_args)
+        self.assertNotIn("capture_output", mock_run.call_args_list[0].kwargs)
 
 
 class TestRunOrchestratorBootstrap(unittest.TestCase):

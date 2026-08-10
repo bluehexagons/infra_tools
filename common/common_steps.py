@@ -39,9 +39,9 @@ def set_user_password(username: str, password: str) -> bool:
 def update_and_upgrade_packages(config: SetupConfig) -> None:
     check_debian_package_sources(config)
 
-    print("  Updating package lists...")
+    print("  Updating package lists (APT may wait for another package operation)...")
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    update_result = run("apt-get update -qq", check=False, capture_output=True)
+    update_result = run("apt-get -o DPkg::Lock::Timeout=120 -o Dpkg::Use-Pty=0 update -q", check=False)
     if update_result.returncode != 0:
         details = getattr(update_result, "stderr", "") or "check network connectivity and APT sources"
         raise RuntimeError(f"APT package list update failed: {str(details).strip()[:300]}")

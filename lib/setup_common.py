@@ -694,6 +694,10 @@ def run_remote_setup(config: SetupConfig) -> int:
             
             env = os.environ.copy()
             env["LC_ALL"] = "C"
+            # The child writes through a pipe so setup progress is relayed by
+            # this process. Disable Python buffering to keep APT and setup
+            # status visible during long-running local installs.
+            env["PYTHONUNBUFFERED"] = "1"
             
             try:
                 process = subprocess.Popen(

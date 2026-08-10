@@ -32,7 +32,10 @@ class TestUpdateAndUpgradePackages(unittest.TestCase):
         update_and_upgrade_packages(SetupConfig(host="testhost", username="testuser", system_type="server_lite"))
 
         mock_check_sources.assert_called_once()
-        self.assertEqual(order[0], "apt-get update -qq")
+        self.assertEqual(
+            order[0],
+            "apt-get -o DPkg::Lock::Timeout=120 -o Dpkg::Use-Pty=0 update -q",
+        )
         self.assertEqual(order[1], "apt-get upgrade -y -qq")
         self.assertEqual(order[2], "apt-get autoremove -y -qq")
 

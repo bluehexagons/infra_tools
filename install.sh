@@ -392,9 +392,16 @@ EOF
 if [ "$missing_prerequisite" -eq 1 ]; then
     command -v apt-get >/dev/null 2>&1 || fail "automatic prerequisite installation requires apt-get"
     ensure_debian_bootstrap_sources
+    printf '%s\n' "Refreshing package lists (APT may wait for another package operation)..."
+    run_privileged env DEBIAN_FRONTEND=noninteractive apt-get \
+        -o DPkg::Lock::Timeout=120 \
+        -o Dpkg::Use-Pty=0 \
+        update -q
     printf '%s\n' "Installing bootstrap prerequisites..."
-    run_privileged env DEBIAN_FRONTEND=noninteractive apt-get update -qq
-    run_privileged env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+    run_privileged env DEBIAN_FRONTEND=noninteractive apt-get \
+        -o DPkg::Lock::Timeout=120 \
+        -o Dpkg::Use-Pty=0 \
+        install -y -q \
         ca-certificates git openssh-client python3 rsync
 fi
 
