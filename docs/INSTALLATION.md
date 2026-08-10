@@ -7,11 +7,11 @@ the same machine immediately.
 Debian is the only officially supported distribution. Ubuntu and Linux Mint are
 recognized as best-effort Debian-compatible hosts.
 
-The network-piped installer needs either `wget` or `curl`. The examples below
-use `wget --timeout=20 --tries=2 -O-`, which is commonly present on minimal
-Debian systems. If only `curl` is installed, replace it with
-`curl --fail --location --connect-timeout 15 --max-time 120`. If neither is
-available, install one first with:
+The installer needs either `wget` or `curl`. The examples below use wget,
+which is commonly present on minimal Debian systems. If only `curl` is
+installed, replace the wget download with
+`curl --fail --location --connect-timeout 15 --max-time 120 -o "$installer_script" URL`.
+If neither command is available, install one first with:
 
 ```bash
 sudo apt-get update && sudo apt-get install -y wget ca-certificates
@@ -19,10 +19,10 @@ sudo apt-get update && sudo apt-get install -y wget ca-certificates
 
 The fetch command leaves DNS and connection diagnostics visible and limits
 retries, so a VM with no network path fails clearly instead of appearing idle.
-For commands using `sudo`, run `sudo -v` separately first so its password
-prompt is visible before pasting the installer command. Once a piped command is
-submitted, its standard input carries the downloaded script; pressing Enter
-again cannot advance a stalled download.
+Privileged examples download to a temporary file before invoking `sudo`. This
+keeps the terminal attached to the password prompt and installer output, and
+the cleanup command removes the file afterward. If the download fails, stop
+before running the `sudo sh` line.
 
 ## Choose an installation path
 
@@ -42,8 +42,11 @@ The installer uses `sudo` for packages when needed. To install the source in
 `/opt/infra_tools` and expose a system launcher instead, use:
 
 ```bash
-wget --timeout=20 --tries=2 -O- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
-  sudo sh -s -- --user "$USER"
+installer_script="$(mktemp)" && \
+  wget --timeout=20 --tries=2 -O "$installer_script" \
+    https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh && \
+  sudo sh "$installer_script" --user "$USER"; \
+rm -f "$installer_script"
 ```
 
 ### Set up a minimal Debian control plane
@@ -52,9 +55,12 @@ This installs common administrator and Linux tools, the terminal agent suite,
 and configures the local machine to manage other VMs and containers:
 
 ```bash
-wget --timeout=20 --tries=2 -O- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
-  sudo sh -s -- --user "$USER" \
-  --local-setup control_plane --agent-suite terminal
+installer_script="$(mktemp)" && \
+  wget --timeout=20 --tries=2 -O "$installer_script" \
+    https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh && \
+  sudo sh "$installer_script" --user "$USER" \
+    --local-setup control_plane --agent-suite terminal; \
+rm -f "$installer_script"
 ```
 
 ### Set up a Debian GNOME desktop control plane
@@ -64,11 +70,14 @@ available for local logins, adds XFCE for RDP sessions, enables RDP, and
 installs the desktop agent suite:
 
 ```bash
-wget --timeout=20 --tries=2 -O- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
-  sudo sh -s -- --user "$USER" \
-  --local-setup workstation_dev --control-plane \
-  --agent-suite desktop --desktop xfce \
-  --rdp --rdp-existing-password
+installer_script="$(mktemp)" && \
+  wget --timeout=20 --tries=2 -O "$installer_script" \
+    https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh && \
+  sudo sh "$installer_script" --user "$USER" \
+    --local-setup workstation_dev --control-plane \
+    --agent-suite desktop --desktop xfce \
+    --rdp --rdp-existing-password; \
+rm -f "$installer_script"
 ```
 
 This expects `$USER` to be an existing non-root account with an unlocked

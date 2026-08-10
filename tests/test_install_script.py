@@ -401,6 +401,9 @@ class TestInstallScript(unittest.TestCase):
         self.assertEqual(help_result.returncode, 0)
         self.assertIn("--setup", help_result.stdout)
         self.assertIn("--timeout=20 --tries=2 -O-", help_result.stdout)
+        self.assertIn('mktemp', help_result.stdout)
+        self.assertIn('-O "$installer_script"', help_result.stdout)
+        self.assertNotIn('|\n    sudo sh -s', help_result.stdout)
         self.assertNotIn("wget -qO-", help_result.stdout)
 
 

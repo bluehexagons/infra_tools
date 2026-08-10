@@ -19,8 +19,12 @@ command is available, install one first with `sudo apt-get update && sudo apt-ge
 
 The download commands intentionally leave connection diagnostics visible and
 bound retries so a DNS or network failure is not mistaken for a stalled
-installer. For commands using `sudo`, authenticate in a separate prompt first
-with `sudo -v`, then paste the installer command.
+installer. The privileged examples download to a temporary file before
+starting `sudo`, so password prompts and installer output remain connected to
+the terminal; the file is removed when the command finishes. For those
+examples, replace the `wget ... -O "$installer_script"` line with
+`curl --fail --location --connect-timeout 15 --max-time 120 -o "$installer_script" URL`
+when using curl.
 
 Install the launcher and choose a setup later:
 
@@ -31,19 +35,25 @@ wget --timeout=20 --tries=2 -O- https://raw.githubusercontent.com/bluehexagons/i
 Set up a minimal Debian control plane immediately:
 
 ```bash
-wget --timeout=20 --tries=2 -O- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
-  sudo sh -s -- --user "$USER" \
-  --local-setup control_plane --agent-suite terminal
+installer_script="$(mktemp)" && \
+  wget --timeout=20 --tries=2 -O "$installer_script" \
+    https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh && \
+  sudo sh "$installer_script" --user "$USER" \
+    --local-setup control_plane --agent-suite terminal; \
+rm -f "$installer_script"
 ```
 
 Set up a standard Debian GNOME desktop as a graphical control plane. This keeps
 GNOME for local logins, uses XFCE for RDP, and installs the desktop agent suite:
 
 ```bash
-wget --timeout=20 --tries=2 -O- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
-  sudo sh -s -- --user "$USER" \
-  --local-setup workstation_dev --control-plane --agent-suite desktop \
-  --desktop xfce --rdp --rdp-existing-password
+installer_script="$(mktemp)" && \
+  wget --timeout=20 --tries=2 -O "$installer_script" \
+    https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh && \
+  sudo sh "$installer_script" --user "$USER" \
+    --local-setup workstation_dev --control-plane --agent-suite desktop \
+    --desktop xfce --rdp --rdp-existing-password; \
+rm -f "$installer_script"
 ```
 
 After installation, use `infra_tools setup ...` for remote hosts and
