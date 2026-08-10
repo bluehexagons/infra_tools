@@ -1,10 +1,8 @@
 # Command-Line Reference
 
-Concise reference for the installed `infra_tools` CLI. The code help and
-`lib/arg_parser.py` remain the source of truth; this doc keeps the command
-surface and the non-obvious behaviors that are easy to forget. Install the
-managed launcher first; direct Python entry scripts remain available for
-development and recovery.
+Reference for the installed `infra_tools` CLI. The code help and
+`lib/arg_parser.py` are the source of truth; this page summarizes the command
+surface and behaviors that are easy to miss.
 
 Related pages:
 
@@ -15,7 +13,7 @@ Related pages:
 - [`MACHINE_TYPES.md`](./MACHINE_TYPES.md) for machine type behavior
 - [`README.md`](./README.md) for the full documentation map
 
-## Unified Entry Point
+## Commands
 
 ```bash
 infra_tools setup <system_type> <host> [username] [options]
@@ -45,7 +43,7 @@ infra_tools network ...
 infra_tools proxmox ...
 ```
 
-## Setup At A Glance
+## Setup at a glance
 
 ### System Types
 
@@ -132,10 +130,10 @@ infra_tools setup server_lite 192.168.1.50 admin \
 `server_proxmox`: changing a Proxmox node name or bridge address can affect
 cluster identity and requires a node-specific migration plan.
 
-Without `--rdp-source`, enabling RDP preserves the historical globally
-rate-limited UFW rule. Prefer one or more management, VPN, or trusted LAN CIDRs.
-On rerun, infra_tools installs the requested source rules before removing the
-old broad rule and reconciles only its own comment-tagged RDP rules.
+Without `--rdp-source`, enabling RDP keeps a globally rate-limited UFW rule.
+Prefer one or more management, VPN, or trusted LAN CIDRs. On rerun,
+infra_tools installs the requested source rules before removing the broad rule
+and reconciles only its own comment-tagged RDP rules.
 Disconnected sessions are retained indefinitely by default so a transient RDP
 disconnect does not destroy agent work. A positive disconnected timeout is
 accepted only with `--rdp-kill-disconnected`, making destructive cleanup an
@@ -158,14 +156,13 @@ the local desktop installer path.
 Selecting a language runtime also installs its managed update timer. See
 [`MAINTENANCE.md`](./MAINTENANCE.md) for schedules and update policy.
 
-### Agent VM Flags
+### Agent host flags
 
 These flags prepare a Debian VM or local control plane for agentic coding. They
 work with any setup type; `workstation_dev` is recommended when the agent needs
 a desktop/browser, and `control_plane` is the recommended terminal-only
-profile. `server_lite` omits
-the standard firewall and generic CLI bundle, so use it only when that lighter
-profile is intentional.
+profile. `server_lite` omits the standard firewall and generic CLI bundle, so
+use it only when that lighter profile is intentional.
 
 ```bash
 infra_tools setup server_dev 10.0.0.10 agentuser \
@@ -265,9 +262,9 @@ recorded, but upstream does not publish a pinned digest through this installer
 contract, so the hash is audit evidence rather than independent publisher
 verification.
 
-Rerunning setup still skips an already available command. See the
-[agent-host maintenance audit](./plans/AGENT_CLI_MAINTENANCE_AUDIT_2026-08-09.md)
-for remaining version-pin, trust, and audit work.
+Rerunning setup skips an already available command. Use
+`infra_tools agent update` when you want to update the user-installed terminal
+agents.
 
 The normal restart policy can force a reboot after seven days of active-session
 deferrals. For a host running long unattended agent tasks, use both
@@ -338,8 +335,8 @@ deployment-boundary behavior.
 
 ## Antistatic
 
-`--antistatic-server` and `--antistatic-db` deploy the release binaries
-maintained in code. Hostname-based specs are reverse-proxied through nginx;
+`--antistatic-server` and `--antistatic-db` deploy the managed release binaries.
+Hostname-based specs are reverse-proxied through Nginx;
 hostless specs such as `:8080` or `:8081` listen directly on the target port.
 
 | Flag | Description |
@@ -378,7 +375,7 @@ Use `--gogs :3000` for hostless direct mode. Gogs updates are validated before
 activation and can roll back to the previous release if post-update commands
 or restart checks fail.
 
-## Storage And Data Movement
+## Storage and data movement
 
 | Flag | Description |
 |------|-------------|
@@ -506,11 +503,11 @@ See [`SYSADMIN.md`](./SYSADMIN.md) for the host shortcut commands (`mount`,
 `health`, `ssh`, `push`, `pull`, `df`, `fan`, `svc`, `logs`, `upgrade`,
 `reachable`, `key`).
 
-## Testing And Bootstrap
+## Testing and bootstrap
 
-The supported installation and local control-plane commands are in the
-[installation guide](./INSTALLATION.md). Use the following only when working
-from a checkout or refreshing completion manually:
+The [installation guide](./INSTALLATION.md) covers supported installation and
+local control-plane commands. Use the following when working from a checkout
+or refreshing completion manually:
 
 ```bash
 python3 -m unittest discover -s tests
@@ -520,5 +517,4 @@ infra_tools completions --shell bash
 ```
 
 The full test matrix and detailed bootstrap behavior are covered by
-[`OPERATIONS.md`](./OPERATIONS.md); this page is intentionally the concise
-command index.
+[`OPERATIONS.md`](./OPERATIONS.md).

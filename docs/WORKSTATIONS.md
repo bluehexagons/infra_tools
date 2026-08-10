@@ -152,14 +152,13 @@ an existing desktop account, `--rdp-existing-password` reuses the password
 already configured for that account without exposing it in process arguments.
 It cannot be combined with `--password`, cannot be used for a remote target,
 and does not set or change the account password. Passwords are not written to
-saved setup state. Legacy state containing this field is sanitized when it is
-loaded.
+saved setup state. State containing this field is sanitized when it is loaded.
 
 Use repeatable `--rdp-source IP_OR_CIDR` flags to restrict UFW ingress to the
 trusted LAN, management network, or VPN clients that should connect. Without
-one, RDP remains globally rate-limited for backward compatibility. XRDP binds
-all IPv4 interfaces by default; `--rdp-bind-address IP` narrows the listener to
-one target-side address. Clipboard remains enabled for coding workflows, while
+one, RDP remains globally rate-limited. XRDP binds all IPv4 interfaces by
+default; `--rdp-bind-address IP` narrows the listener to one target-side
+address. Clipboard remains enabled for coding workflows, while
 drive/device, printer, audio, RemoteApp, and video redirection are disabled.
 Use `--no-rdp-clipboard`, `--rdp-drive-redirection`, or `--rdp-audio` to change
 the explicitly managed channel policy.
@@ -191,7 +190,3 @@ For remote sessions, test XRDP separately and use the log checks in
 [`XRDP.md`](./XRDP.md). Machine capability differences, including Flatpak
 fallbacks and software rendering in containers, are documented in
 [`MACHINE_TYPES.md`](./MACHINE_TYPES.md).
-
-The remaining RDP exposure, certificate, session-lifecycle, maintenance, and
-live-test work is tracked in the
-[RDP desktop agent audit](plans/DESKTOP_AGENT_MAINTENANCE_AUDIT_2026-08-09.md).

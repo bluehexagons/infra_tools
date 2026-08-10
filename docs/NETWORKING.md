@@ -1,4 +1,7 @@
-# Static Host Networking, Inventory, and Proxmox Firewall Planning
+# Networking
+
+Static host configuration, network inventory, and read-only Proxmox firewall
+planning.
 
 ## Static Host Configuration
 
@@ -32,23 +35,16 @@ The `network` command manages a workspace-backed, provider-neutral network
 inventory and can generate a read-only Proxmox control-plane firewall plan from
 that inventory.
 
-## Current Scope
+## Scope
 
-Implemented today:
+The inventory can create and inspect named profiles; track management sources,
+control-plane addresses, guest networks, subnets, VLANs, and hosts; import
+registered Proxmox nodes and guest networks; and render an abstract or concrete
+Proxmox firewall plan for review.
 
-- create and inspect named network profiles
-- track management sources, control-plane addresses, guest networks, subnets,
-  VLAN-tagged subnets, and hosts
-- import registered Proxmox nodes into a profile
-- import guest networks discovered from registered Proxmox hosts
-- generate an abstract Proxmox lockdown plan or render concrete Proxmox
-  firewall snippets for review
-
-Not implemented yet:
-
-- remote `apply` or `rollback`
-- switch, router, or cloud provider adapters
-- live discovery beyond the current Proxmox registry and guest config import
+It does not apply or roll back firewall changes, integrate with switches,
+routers, or cloud providers, or discover infrastructure beyond the Proxmox
+registry and guest configuration import.
 
 Inventory is stored at `<workspace>/network_inventory.json` with mode `0600`.
 Like other workspace-scoped features, pass `--workspace PATH` after `network`
@@ -100,7 +96,7 @@ infra_tools network plan-proxmox homelab --proxmox
 | `infra_tools network plan-proxmox <profile> --proxmox` | Render concrete Proxmox firewall artifacts for review |
 | `infra_tools network plan-proxmox <profile> --json` | Emit machine-readable JSON |
 
-## Safety Model
+## Safety model
 
 `plan-proxmox` is intentionally read-only. It never writes remote files or talks
 to the Proxmox firewall API.

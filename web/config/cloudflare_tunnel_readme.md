@@ -1,78 +1,72 @@
-# Cloudflare Tunnel Configuration
+# Cloudflare Tunnel setup
 
-This directory is preconfigured for cloudflared setup.
+When a host is configured with `--cloudflare`, infra_tools installs
+`setup-cloudflare-tunnel` and prepares the Nginx origin for Cloudflare Tunnel.
 
-## Automated Setup
+## Automated setup
 
-Run the automated setup script to configure your Cloudflare tunnel:
+Run the helper on the configured host:
 
 ```bash
 sudo setup-cloudflare-tunnel
 ```
 
-This script will:
-1. Install cloudflared (if not installed)
-2. Guide you through Cloudflare authentication
-3. Create a tunnel
-4. Discover configured sites from nginx
-5. Generate config.yml automatically
-6. Install and start the tunnel service
+It installs `cloudflared` when needed, authenticates with Cloudflare, creates
+or reuses a tunnel, discovers enabled Nginx sites, writes the tunnel
+configuration, and can install and enable the systemd service.
 
-When the server is configured with `--cloudflare`, generated nginx site configs
-serve origin HTTP directly instead of redirecting HTTP to HTTPS. This keeps
-cloudflared's `http://localhost:80` origin service from entering a redirect
-loop while Cloudflare still serves public HTTPS at the edge. Proxied app
-backends also receive `X-Forwarded-Proto: https` so frameworks such as Rails do
-not issue their own HTTPS redirects.
+The helper stores configuration and tunnel credentials under
+`/etc/cloudflared`. Its state file is
+`/etc/cloudflared/tunnel-state.json`; rerun the helper after adding or removing
+an Nginx site to refresh ingress rules.
 
-## Manual Configuration
+## Manual setup
 
-If you prefer manual setup or need to customize:
+1. Install `cloudflared` using the [Cloudflare installation guide](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/).
+2. Authenticate and create a tunnel:
 
-1. Install cloudflared:
-   ```
-   wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
-   sudo dpkg -i cloudflared-linux-amd64.deb
-   ```
-
-2. Authenticate with Cloudflare:
-   ```
+   ```bash
    cloudflared tunnel login
-   ```
-
-3. Create a tunnel:
-   ```
    cloudflared tunnel create <tunnel-name>
    ```
 
-4. Create config.yml in this directory with your tunnel configuration.
+3. Write `/etc/cloudflared/config.yml`:
 
-5. Install and start the tunnel service:
+   ```yaml
+   tunnel: <tunnel-id>
+   credentials-file: /etc/cloudflared/<tunnel-id>.json
+
+   ingress:
+     - hostname: example.com
+       service: http://localhost:80
+     - hostname: api.example.com
+       service: http://localhost:80
+     - service: http_status:404
    ```
-   cloudflared service install
-   systemctl start cloudflared
-   systemctl enable cloudflared
+
+4. Install and start the service:
+
+   ```bash
+   sudo cloudflared service install
+   sudo systemctl enable --now cloudflared
    ```
 
-## Configuration Template
+Keep the `http_status:404` rule last. Add DNS records for each hostname in
+Cloudflare Zero Trust/DNS and point them at the tunnel.
 
-The config.yml should look like:
+## Origin behavior
 
-```yaml
-tunnel: <tunnel-id>
-credentials-file: /etc/cloudflared/<tunnel-id>.json
+With `--cloudflare`, generated Nginx sites serve the tunnel origin over local
+HTTP instead of redirecting it to HTTPS. Applications still receive
+`X-Forwarded-Proto: https`, so they generate secure public URLs correctly.
 
-ingress:
-  - hostname: example.com
-    service: http://localhost:80
-  - hostname: api.example.com
-    service: http://localhost:80
-  - service: http_status:404
+Verify the tunnel and generated routes with:
+
+```bash
+sudo systemctl status cloudflared --no-pager
+sudo journalctl -u cloudflared -n 100 --no-pager
+sudo sed -n '1,160p' /etc/cloudflared/config.yml
 ```
 
-## State File
-
-The automated setup script saves its state to `/etc/cloudflared/tunnel-state.json`.
-This allows you to re-run the script to update the configuration when you add new sites.
-
-For more information: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/
+Cloudflare Tunnel does not proxy UDP. Services such as Antistatic STUN still
+need their direct public UDP port and any required direct TCP port.

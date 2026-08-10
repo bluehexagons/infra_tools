@@ -63,12 +63,7 @@ outside recurring root maintenance. Run `infra_tools agent update --dry-run`
 and then `infra_tools agent update` as the setup user for a deliberate vendor
 update with before/after verification, a retained prior executable, automatic
 rollback after a broken update, and a private audit record. Setup still skips
-an installer when its command is already present. Version pins and stronger
-publisher verification remain tracked in the
-[CLI-only agent host audit](plans/AGENT_CLI_MAINTENANCE_AUDIT_2026-08-09.md).
-RDP desktop hosts add network, certificate, session-lifecycle, and GUI update
-concerns tracked in the
-[RDP desktop agent audit](plans/DESKTOP_AGENT_MAINTENANCE_AUDIT_2026-08-09.md).
+an installer when its command is already present.
 
 Set `INFRA_TOOLS_ECOSYSTEM_AUTO_UPGRADE=1` in the relevant service environment
 to allow global npm packages, gems, and uv-managed tools to advance. The default
@@ -107,9 +102,3 @@ expiry, private-key permissions, and daemon readability. It notifies only when
 health changes (including recovery or certificate fingerprint rotation), while
 an unusable pair keeps the service result failed until repaired. The warning
 window is 30 days. The monitor never logs or records private-key contents.
-
-The implementation is shared by `lib/maintenance_systemd.py`,
-`lib/update_policy.py`, `lib/xrdp_certificate.py`,
-`common/service_tools/cleanup_maintenance.py`,
-`security/service_tools/security_monitor.py`, and the service-specific updater
-scripts.

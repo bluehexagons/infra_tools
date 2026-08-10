@@ -30,8 +30,8 @@ infra_tools proxmox ls pve1
 Successful `server_proxmox` setup registers the host in the selected workspace;
 `--name` supplies the registry name and defaults to the host address when omitted.
 
-The public key must exist alongside the private key and root on the Proxmox
-host must accept it.
+The matching `.pub` file must sit beside the private key, and the Proxmox
+`root` account must accept that key.
 
 Hosted VM setup uses the same private key's `.pub` file for cloud-init. If the
 Proxmox node key and guest key differ, pass `--hosted-key` for the node and
@@ -67,8 +67,9 @@ The default setup installs these recurring host-maintenance timers:
 
 Inspect these jobs with the commands in [Recurring Maintenance](MAINTENANCE.md).
 The timers do not currently validate Proxmox quorum, guest evacuation, storage
-health, or backup recoverability; those larger improvements are tracked in the
-[Proxmox maintenance audit plan](plans/PROXMOX_MAINTENANCE_AUDIT_2026-08-09.md).
+health, or backup recoverability. Run the Proxmox audit before planned
+maintenance and verify backups through your normal retention and restore
+process.
 
 Create a Debian VM with XFCE, RDP, Firefox, and coding tools:
 
@@ -132,9 +133,7 @@ serial display disables VGA output. See the current
 
 Physical GPU passthrough is a different profile. It needs host IOMMU/device
 isolation, usually Q35/OVMF, explicit guest drivers, and separate xorgxrdp
-glamor compatibility testing. It is not enabled by the default RDP setup; the
-larger validation work is tracked in the
-[RDP desktop agent audit](plans/DESKTOP_AGENT_MAINTENANCE_AUDIT_2026-08-09.md).
+glamor compatibility testing. It is not enabled by the default RDP setup.
 
 ## Hosted web server VM
 

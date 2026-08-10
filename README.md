@@ -1,9 +1,9 @@
 # infra_tools
 
 Automated setup and operations for Debian control planes, servers, workstations,
-and Proxmox guests. infra_tools applies repeatable, machine-aware configuration over SSH,
-stores redacted setup state in a workspace, and provides targeted operations
-for hosts that are already configured.
+and Proxmox guests. infra_tools applies repeatable, machine-aware configuration
+over SSH, stores redacted setup state in a workspace, and provides targeted
+operations for hosts that are already configured.
 
 ## Start here
 
@@ -134,14 +134,6 @@ infra_tools proxmox health pve1 101
 Use the [documentation index](docs/README.md) for the complete command and
 feature map.
 
-## Project direction
-
-The [project roadmap](docs/plans/ROADMAP.md) prioritizes transactional setup and
-deployment, manifest-backed secrets and CI/CD, drift detection, and tested
-recovery workflows before expanding platform and provider support. The
-[architectural risk review](docs/plans/ARCHITECTURAL_RISK_REVIEW_2026-08-07.md)
-records the implementation risks driving that order.
-
 ## Development checks
 
 Run the default test suite from a checkout:
@@ -157,12 +149,6 @@ tests remain opt-in.
 
 See [Saved configuration operations](docs/OPERATIONS.md) for test selectors and
 [Proxmox workflows](docs/PROXMOX.md) for live-host notes.
-
-## Repository documentation
-
-Markdown is the source format for docs and plans so content renders directly on
-GitHub and in local repository tooling. The docs index is the navigation hub;
-future design notes belong under [`docs/plans/`](docs/plans/).
 
 ## License
 

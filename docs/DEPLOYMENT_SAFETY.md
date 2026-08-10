@@ -1,10 +1,9 @@
 # Deployment Safety Reference
 
-This is the short reference for safety behavior that is already enforced by
-code. The detailed implementation lives in the deployment and service modules;
-this document focuses on what operators need to know.
+This reference summarizes the deployment safety behavior operators need to
+know.
 
-## What infra_tools Does Automatically
+## Automatic safeguards
 
 - Creates timestamped database backups before Rails migrations when an existing
   production database is present and migrations are pending.
@@ -18,8 +17,8 @@ this document focuses on what operators need to know.
 - Installs a weekly cleanup timer and caps journal growth on server-style
   setups.
 - Uses conservative package-update policy for Node, Ruby, and uv by default.
-- Installs recurring maintenance unit files atomically and verifies that each timer is
-  enabled and active without first deleting the working timer.
+- Installs recurring maintenance unit files atomically and verifies that each
+  timer is enabled and active without first deleting the working timer.
 - Validates Nginx hardening and default-site changes before reload, restoring
   the exact previous configuration when validation fails.
 - Applies a seven-day freshness delay to dependency resolution and GitHub release
@@ -73,24 +72,7 @@ deployment-specific guarantees are:
 - dependency-resolving installs use a seven-day freshness delay unless
   `--deploy-latest DOMAIN_OR_PATH GIT_URL` explicitly opts out.
 
-## Code References
-
-- `lib/deployment.py`
-- `lib/maintenance_systemd.py`
-- `lib/update_policy.py`
-- `deploy/deploy_steps.py`
-- `web/cicd_steps.py`
-- `common/service_tools/auto_update_apt.py`
-- `common/service_tools/auto_update_gogs.py`
-- `common/service_tools/auto_update_ruby.py`
-- `common/service_tools/auto_update_uv.py`
-- `common/service_tools/auto_restart_if_needed.py`
-- `security/security_steps.py`
-- `tests/test_deployment_backup.py`
-- `tests/test_security_steps.py`
-- `tests/test_update_policy.py`
-
-## Related Docs
+## Related guides
 
 - [CI/CD System](CICD.md)
 - [Recurring Maintenance](MAINTENANCE.md)

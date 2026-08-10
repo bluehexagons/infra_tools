@@ -1,8 +1,7 @@
 # infra_tools documentation
 
-This directory contains detailed guides for infra_tools. Start with the
-[root README](../README.md) for the project overview, installation summary,
-capabilities, and operating policies.
+Use the [root README](../README.md) for the project overview. This index links
+to the detailed setup and operations guides.
 
 ## Start here
 
@@ -39,24 +38,14 @@ capabilities, and operating policies.
 | [Shell completion](SHELL_COMPLETION.md) | Bash, Zsh, Fish, and system-wide completion |
 | [Notifications](NOTIFICATIONS.md) | Webhook and mailbox targets shared by maintenance and operations |
 
-## Plans
+## Design notes
 
-Design and future-work notes live under [`plans/`](plans/):
-
-- [Prioritized project roadmap](plans/ROADMAP.md)
-- [Transactional execution and reconciliation](plans/TRANSACTIONAL_EXECUTION.md)
-- [CI/CD manifest reuse](plans/CICD_MANIFEST_REUSE.md)
-- [Deploy secrets and optional components](plans/DEPLOY_SECRETS.md)
-- [Architectural risk review](plans/ARCHITECTURAL_RISK_REVIEW_2026-08-07.md)
-- [Proxmox setup and maintenance audit](plans/PROXMOX_MAINTENANCE_AUDIT_2026-08-09.md)
-- [CLI-only agent host and maintenance audit](plans/AGENT_CLI_MAINTENANCE_AUDIT_2026-08-09.md)
-- [RDP desktop agent host and maintenance audit](plans/DESKTOP_AGENT_MAINTENANCE_AUDIT_2026-08-09.md)
+Implementation plans and audit records live under [`plans/`](plans/). They are
+development references, not operator instructions. Start with the
+[project roadmap](plans/ROADMAP.md).
 
 ## Documentation conventions
 
 Markdown is the source format so the guides render directly on GitHub and in
-local repository tools. Examples use the installed `infra_tools` launcher.
-The main Python entry scripts also work directly from a checkout for
-development and recovery, but that is not the normal installation path.
-Examples use placeholder hosts and
-credentials—never copy real secrets into documentation.
+local repository tools. Examples use the installed `infra_tools` launcher and
+placeholder hosts and credentials. Never copy real secrets into documentation.

@@ -1,63 +1,62 @@
-# Cloudflare Tunnel Configuration for Webhook
+# Expose the CI/CD webhook through Cloudflare Tunnel
 
-To expose the webhook endpoint over your Cloudflare tunnel, add the following ingress rule to your tunnel configuration:
+Configure the server with `--cicd` and `--cloudflare` first. The webhook
+receiver listens on `127.0.0.1:8765`; Nginx exposes it at
+`/webhook/health` and forwards the public request to that local receiver.
 
-## Configuration
+## Tunnel ingress
 
-Edit `/etc/cloudflared/config.yml` and add:
+Edit `/etc/cloudflared/config.yml` and add the webhook rule before the
+catch-all rule:
 
 ```yaml
 ingress:
-  # Webhook endpoint (add this before catch-all rule)
-  - hostname: webhook.yourdomain.com
+  - hostname: webhook.example.com
     service: http://localhost:8080
-    
-  # ... other ingress rules ...
-  
-  # Catch-all rule (must be last)
+
+  # Other routes go here.
   - service: http_status:404
 ```
 
-## DNS Configuration
+Create a proxied CNAME in Cloudflare DNS:
 
-Create a DNS record in Cloudflare:
+| Field | Value |
+| --- | --- |
+| Type | `CNAME` |
+| Name | `webhook` |
+| Target | `<tunnel-id>.cfargotunnel.com` |
+| Proxy status | Proxied |
 
-- Type: CNAME
-- Name: webhook
-- Target: <your-tunnel-id>.cfargotunnel.com
-- Proxy status: Proxied (orange cloud)
+Restart or reload `cloudflared` after changing its configuration.
 
-## GitHub Webhook Configuration
+## GitHub webhook
 
-1. Go to your repository settings on GitHub
-2. Navigate to: Settings → Webhooks → Add webhook
-3. Configure:
-   - Payload URL: `https://webhook.yourdomain.com/webhook`
-   - Content type: `application/json`
-   - Secret: Use the secret from `/etc/infra_tools/cicd/webhook_secret`
-   - SSL verification: Enable SSL verification
-   - Events: Select "Just the push event" or customize
-   - Active: ✓ Enabled
+In the repository's GitHub settings, add a webhook with:
 
-## Testing
+| Field | Value |
+| --- | --- |
+| Payload URL | `https://webhook.example.com/webhook` |
+| Content type | `application/json` |
+| Secret | Contents of `/etc/infra_tools/cicd/webhook_secret` |
+| SSL verification | Enabled |
+| Events | Push, or the events required by the repository |
+| Active | Enabled |
 
-After configuration, GitHub will send a ping event. Check:
+The receiver verifies the HMAC-SHA256 signature and accepts only configured
+repositories and branches.
+
+## Verify the path
+
+Check the receiver directly, through Nginx, and through the service journal:
 
 ```bash
-# Check webhook receiver logs
+curl -fsS http://127.0.0.1:8765/health
+curl -fsS http://127.0.0.1:8080/webhook/health
+sudo systemctl status webhook-receiver.service --no-pager
 sudo journalctl -u webhook-receiver.service -f
-
-# Check webhook receiver status
-sudo systemctl status webhook-receiver.service
-
-# Test health endpoint
-curl http://localhost:8765/health
 ```
 
-## Security Notes
+GitHub's ping event confirms connectivity. It does not build a repository.
 
-- The webhook receiver only listens on localhost (127.0.0.1)
-- All external access must go through nginx reverse proxy
-- Nginx rate limiting: 10 requests per minute per IP
-- HMAC-SHA256 signature verification for all webhooks
-- Dedicated 'webhook' user with limited permissions
+The receiver is localhost-only, Nginx applies rate limiting, and builds run as
+the dedicated `webhook` user. Treat the webhook secret and URL as credentials.

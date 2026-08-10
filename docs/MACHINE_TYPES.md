@@ -75,8 +75,8 @@ compatibility labels, but they are not part of the official support target.
 ## Existing Saved Configurations
 
 Saved configurations retain their explicit machine type. New commands use
-`auto`, while an older saved `vm`, `hardware`, or `unprivileged` selection is
-preserved when patching or deploying. This avoids changing the behavior of
+`auto`, while an existing saved `vm`, `hardware`, or `unprivileged` selection
+is preserved when patching or deploying. This avoids changing the behavior of
 existing hosts unexpectedly.
 
 For saved configurations, prefer `infra_tools deploy <name-or-host>` or

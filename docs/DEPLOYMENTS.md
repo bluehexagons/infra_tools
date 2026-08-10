@@ -1,10 +1,10 @@
 # Deployments and manifests
 
 `infra_tools` deploys a repository with `--deploy DOMAIN GIT_URL`. A repository
-can use the legacy project-type detection, or place an `infra.json` file at its
+can use automatic project-type detection, or place an `infra.json` file at its
 root to describe one or more static sites and services explicitly. The manifest
-is validated before deployment; an invalid file stops the deployment rather
-than falling back to heuristic detection.
+is validated before deployment; an invalid file stops deployment instead of
+falling back to automatic detection.
 
 ## Basic deployment
 
@@ -15,7 +15,7 @@ infra_tools setup server_web web.example.com deploy \
 ```
 
 Without a manifest, the repository is classified as Rails, Node, static, or
-unknown using the legacy detection rules. Use [`DEPLOYMENT_SAFETY.md`](./DEPLOYMENT_SAFETY.md)
+unknown by the automatic detection rules. Use [`DEPLOYMENT_SAFETY.md`](./DEPLOYMENT_SAFETY.md)
 for backup, persistent-state, rollback, and update-policy behavior.
 
 ## Manifest shape
@@ -106,8 +106,8 @@ a warning after retries but does not abort an otherwise successful deployment.
 
 ## Runtime and update behavior
 
-- Manifest deployments build every component on each deployment; incremental
-  manifest redeploys are not implemented.
+- Manifest deployments build every component on each deployment; they do not
+  use incremental builds.
 - Existing release files are replaced only after services are stopped. Static
   files are owned by the deployment user.
 - Each service receives a dedicated system user and persistent writable state

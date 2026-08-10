@@ -1,8 +1,5 @@
 # CI/CD Webhook System
 
-Status: implemented. The service wiring and executor behavior now live in
-code; this guide covers the setup handoff and the files operators edit.
-
 Use `--cicd` during `setup` or `patch` to install the webhook receiver and
 executor. Repository-specific scripts live in
 `/etc/infra_tools/cicd/webhook_config.json`.
@@ -19,7 +16,7 @@ secret is generated once and stored root-only at
 `/etc/infra_tools/cicd/webhook_secret`; the systemd environment file is
 `/etc/infra_tools/cicd/webhook.env`.
 
-## Build/app server topology
+## Build and app server topology
 
 The build server runs the webhook receiver and builds as the dedicated
 `webhook` user. An app server only needs nginx, rsync, and the restricted
@@ -89,16 +86,10 @@ credentials; the executor rejects credential-bearing URLs.
 After changing the JSON, the next signed push uses the new settings. A ping
 event only verifies webhook connectivity and does not build a repository.
 
-Core code paths:
+## Security and execution boundaries
 
-- `web/cicd_steps.py`
-- `web/service_tools/cicd_executor.py`
-- [`CLOUDFLARE.md`](./CLOUDFLARE.md) for tunnel setup and webhook ingress
-- [`COMMAND_LINE.md`](./COMMAND_LINE.md)
-
-What matters operationally:
-
-- the receiver is localhost-only behind nginx and Cloudflare tunnel
+- the receiver is localhost-only behind Nginx; expose it through Cloudflare
+  Tunnel when that option is configured
 - webhook signatures are verified with the stored secret
 - webhook bodies are capped at 1 MiB and push fields are validated before queueing
 - the executor uses a fresh clone with Git hooks disabled, then checks out the
@@ -130,9 +121,9 @@ sudo systemctl status cicd-executor.path
 curl -fsS http://127.0.0.1:8080/webhook/health
 ```
 
-Re-run `patch` on existing app servers to replace the older deploy sudo policy
-and install the privileged helper. The helper validates target names and paths
-before allowing the deploy account to update an app server.
+Run `patch` on existing app servers to apply the deploy sudo policy and install
+the privileged helper. The helper validates target names and paths before
+allowing the deploy account to update an app server.
 
 If you need the full setup flow or command syntax, use
 [Command-line reference](./COMMAND_LINE.md) and

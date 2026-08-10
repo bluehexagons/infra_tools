@@ -7,7 +7,7 @@ the same machine immediately.
 Debian is the only officially supported distribution. Ubuntu and Linux Mint are
 recognized as best-effort Debian-compatible hosts.
 
-## Choose one starting command
+## Choose an installation path
 
 Run these commands in a terminal as the local account that should own the
 installation. Replace `$USER` only when installing for a different existing
@@ -95,7 +95,7 @@ run. Local setup preflight still needs root, so use `sudo`; the dry run
 validates arguments and prints the steps without changing the target:
 
 ```bash
-sudo infra_tools setup workstation_dev localhost "$USER" \
+sudo "$(command -v infra_tools)" setup workstation_dev localhost "$USER" \
   --control-plane --agent-suite desktop --desktop xfce --rdp \
   --rdp-existing-password --dry-run
 ```
@@ -199,14 +199,12 @@ infra_tools credentials remove admin
 
 Passwords are excluded from saved setup state and reconstructed commands.
 
-## More detail and recovery
+## Related guides
 
 - [Command-line reference](COMMAND_LINE.md) — all setup flags and system types
 - [Workstations](WORKSTATIONS.md) — desktop profiles, browsers, and agents
 - [XRDP](XRDP.md) — RDP sessions and firewall behavior
 - [Machine types](MACHINE_TYPES.md) — Debian VMs, bare metal, and containers
 
-Direct Python entry scripts still work from a checkout for development and
-recovery, but the managed installer and `infra_tools` launcher are the normal
-supported workflow. Review [`install.sh`](../install.sh) before running a
-network-piped installer on a privileged machine.
+Review [`install.sh`](../install.sh) before running a network-piped installer
+on a privileged machine.
