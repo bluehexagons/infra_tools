@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .common_steps import (
+    check_debian_package_sources,
     update_and_upgrade_packages,
     ensure_sudo_installed,
     configure_locale,
@@ -30,6 +31,7 @@ from .swap_steps import configure_swap
 from .network_steps import configure_static_network, configure_system_hostname
 
 __all__ = [
+    'check_debian_package_sources',
     'update_and_upgrade_packages',
     'ensure_sudo_installed',
     'configure_locale',

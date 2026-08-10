@@ -289,8 +289,97 @@ if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
     missing_prerequisite=1
 fi
 
+ensure_debian_bootstrap_sources() {
+    if [ "$distro_id" != "debian" ]; then
+        return
+    fi
+
+    distro_codename=$(sed -n 's/^VERSION_CODENAME=//p' /etc/os-release | sed 's/^"//; s/"$//' | head -n 1)
+    case "$distro_codename" in
+        [a-z]*)
+            case "$distro_codename" in
+                *[!a-z0-9-]*) fail "invalid Debian release codename: $distro_codename" ;;
+            esac
+            ;;
+        *) fail "could not determine Debian release codename" ;;
+    esac
+
+    # A minimal install may have only a CD/DVD source and may not yet have
+    # Python available, so repair the bootstrap source configuration in POSIX
+    # shell before attempting to install the installer's prerequisites.
+    run_privileged sh -s -- "$distro_codename" <<'EOF'
+set -eu
+
+codename=$1
+apt_dir=/etc/apt
+source_dir="$apt_dir/sources.list.d"
+keyring=/usr/share/keyrings/debian-archive-keyring.gpg
+managed_path="$source_dir/infra_tools-debian.sources"
+
+[ -r "$keyring" ] || {
+    printf '%s\n' "infra_tools installer: Debian archive keyring is missing at $keyring" >&2
+    exit 1
+}
+
+mkdir -p "$source_dir"
+
+for source_path in "$apt_dir/sources.list" "$source_dir"/*.list; do
+    [ -f "$source_path" ] || continue
+    if grep -Eq '^[[:space:]]*deb[[:space:]]+(\[[^]]*\][[:space:]]+)?cdrom:' "$source_path"; then
+        backup_path="$source_path.infra_tools.bak"
+        [ -e "$backup_path" ] || cp -p "$source_path" "$backup_path"
+        sed -i -E 's/^([[:space:]]*deb[[:space:]]+(\[[^]]*\][[:space:]]+)?cdrom:)/# Disabled by infra_tools: \1/' "$source_path"
+    fi
+done
+
+for source_path in "$source_dir"/*.sources; do
+    [ -f "$source_path" ] || continue
+    if grep -Eq '^[[:space:]]*URIs?:[[:space:]]*cdrom:' "$source_path"; then
+        backup_path="$source_path.infra_tools.bak"
+        [ -e "$backup_path" ] || cp -p "$source_path" "$backup_path"
+        sed -i 's/^/# Disabled by infra_tools: /' "$source_path"
+    fi
+done
+
+temporary_path="$managed_path.new.$$"
+cat > "$temporary_path" <<SOURCE
+# Managed by infra_tools. Do not edit; rerun infra_tools after a Debian release change.
+Types: deb
+URIs: https://deb.debian.org/debian
+Suites: $codename $codename-updates
+Components: main
+Signed-By: $keyring
+
+Types: deb
+URIs: https://security.debian.org/debian-security
+Suites: $codename-security
+Components: main
+Signed-By: $keyring
+SOURCE
+chmod 0644 "$temporary_path"
+
+if [ -e "$managed_path" ]; then
+    grep -q '^# Managed by infra_tools' "$managed_path" || {
+        rm -f "$temporary_path"
+        printf '%s\n' "infra_tools installer: refusing to overwrite unmanaged APT source $managed_path" >&2
+        exit 1
+    }
+    if cmp -s "$temporary_path" "$managed_path"; then
+        rm -f "$temporary_path"
+    else
+        backup_path="$managed_path.infra_tools.bak"
+        [ -e "$backup_path" ] || cp -p "$managed_path" "$backup_path"
+        mv "$temporary_path" "$managed_path"
+    fi
+else
+    mv "$temporary_path" "$managed_path"
+fi
+EOF
+}
+
 if [ "$missing_prerequisite" -eq 1 ]; then
     command -v apt-get >/dev/null 2>&1 || fail "automatic prerequisite installation requires apt-get"
+    ensure_debian_bootstrap_sources
     printf '%s\n' "Installing bootstrap prerequisites..."
     run_privileged env DEBIAN_FRONTEND=noninteractive apt-get update -qq
     run_privileged env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \

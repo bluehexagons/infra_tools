@@ -10,6 +10,7 @@ import tempfile
 from typing import Optional
 
 from lib.maintenance_systemd import configure_maintenance_timer
+from lib.apt_sources import ensure_debian_package_sources
 from lib.config import SetupConfig
 from lib.machine_state import can_manage_time_sync
 from lib.remote_utils import run, is_dry_run, is_package_installed, is_service_active, file_contains, install_package
@@ -30,14 +31,29 @@ def set_user_password(username: str, password: str) -> bool:
 
 
 def update_and_upgrade_packages(config: SetupConfig) -> None:
+    check_debian_package_sources(config)
+
     print("  Updating package lists...")
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    run("apt-get update -qq")
+    update_result = run("apt-get update -qq", check=False, capture_output=True)
+    if update_result.returncode != 0:
+        details = getattr(update_result, "stderr", "") or "check network connectivity and APT sources"
+        raise RuntimeError(f"APT package list update failed: {str(details).strip()[:300]}")
     print("  Upgrading packages...")
     run("apt-get upgrade -y -qq")
     run("apt-get autoremove -y -qq")
     
     print("  ✓ System packages updated and upgraded")
+
+
+def check_debian_package_sources(config: SetupConfig) -> None:
+    """Check and repair Debian APT sources before package operations."""
+
+    del config
+    if is_dry_run():
+        print("  [DRY-RUN] Would verify Debian APT sources and archive keyring")
+        return
+    ensure_debian_package_sources()
 
 
 def ensure_sudo_installed(config: SetupConfig) -> None:

@@ -15,6 +15,15 @@ Ubuntu and Linux Mint are recognized as Debian-compatible best-effort hosts;
 Debian is the only officially-supported distribution. The setup uses APT
 package names shared by current Debian, Ubuntu, and Mint releases.
 
+Before installing packages on Debian, infra_tools checks the installed release
+codename and archive keyring, comments out active CD-ROM-only APT entries, and
+ensures that the current Debian and security suites use the official
+`deb.debian.org` and `security.debian.org` mirrors. It then requires a
+successful `apt-get update`. This handles the common
+minimal/offline installer state where the installation media is still the only
+configured source. The security profile also installs the managed APT update
+timer so package security updates continue after setup.
+
 Official machine profiles are Debian bare metal, Debian VMs, and unprivileged
 Debian LXC on Proxmox. See [Machine types](MACHINE_TYPES.md) for the complete
 capability matrix.

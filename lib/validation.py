@@ -663,6 +663,17 @@ def validate_package_name(value: str, name: str = "package") -> str:
     return normalized_value
 
 
+_DEBIAN_CODENAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
+
+
+def validate_debian_codename(value: str) -> str:
+    """Validate a Debian release codename used in APT source suites."""
+
+    if not isinstance(value, str) or not _DEBIAN_CODENAME_PATTERN.fullmatch(value):
+        raise ValueError(f"Invalid Debian release codename: {value}")
+    return value
+
+
 def validate_environment_variable_name(
     value: str,
     name: str = "environment variable",
