@@ -33,11 +33,16 @@ python3 -m py_compile file.py
 ## Machine Type Awareness
 
 ```python
+from __future__ import annotations
+
+from lib.config import SetupConfig
 from lib.machine_state import can_modify_kernel
 
-if not can_modify_kernel():
-    print("  ✓ Skipping (container)")
-    return
+def setup_feature(config: SetupConfig) -> None:
+    if not can_modify_kernel():
+        print("  ✓ Skipping (container)")
+        return
+    # Implementation
 ```
 
 **Types:** `auto` (default), `unprivileged` (LXC), `vm`, `hardware`, plus the

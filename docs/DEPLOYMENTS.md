@@ -125,10 +125,12 @@ unsafe paths, unsupported versions, invalid ports, invalid environment variable
 names, and malformed service templates are rejected. Check the remote deployment
 output and inspect the generated service when a component does not start:
 
-```bash
+```text
 sudo systemctl status app-<deployment>-<component>.service
 sudo journalctl -u app-<deployment>-<component>.service -n 100 --no-pager
 ```
+
+Replace `<deployment>` and `<component>` with the generated service name.
 
 For Nginx and deployment rollback behavior, see
 [`DEPLOYMENT_SAFETY.md`](./DEPLOYMENT_SAFETY.md). For webhook-triggered builds,

@@ -27,10 +27,11 @@ an Nginx site to refresh ingress rules.
 
    ```bash
    cloudflared tunnel login
-   cloudflared tunnel create <tunnel-name>
+   cloudflared tunnel create infra-tools
    ```
 
-3. Write `/etc/cloudflared/config.yml`:
+3. Replace `<tunnel-id>` below with the ID returned by `cloudflared tunnel create`.
+   Write the result to `/etc/cloudflared/config.yml`:
 
    ```yaml
    tunnel: <tunnel-id>

@@ -26,16 +26,18 @@ know.
 
 ## Recovery Path
 
+Replace the angle-bracket placeholders in these command templates with values for the target application and host.
+
 Backups live at:
 
-```bash
+```text
 /var/www/.infra_tools_shared/<app_name>/backups/
 ```
 
 Restore the latest backup by stopping the service, copying the database back,
 and starting the service again:
 
-```bash
+```text
 sudo systemctl stop rails-<app_name>.service
 sudo cp /var/www/.infra_tools_shared/<app_name>/backups/<backup_file> \
        /var/www/.infra_tools_shared/<app_name>/db/production.sqlite3
@@ -44,7 +46,7 @@ sudo systemctl start rails-<app_name>.service
 
 If seeds are safe to run manually, use the runtime user from the service unit:
 
-```bash
+```text
 cd /var/www/<app_directory>
 APP_USER=$(systemctl show -p User --value rails-<app_name>.service)
 sudo -u "$APP_USER" RAILS_ENV=production bundle exec rake db:seed
@@ -52,7 +54,7 @@ sudo -u "$APP_USER" RAILS_ENV=production bundle exec rake db:seed
 
 For a squashed or reset migration history, rerun with:
 
-```bash
+```text
 infra_tools setup server_web <host> \
   --deploy <deploy-spec> <git-url> \
   --reset-migrations

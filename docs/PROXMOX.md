@@ -334,11 +334,12 @@ infra_tools setup workstation_dev 10.0.0.50 devuser \
   --name dev-01-vm --rdp
 
 infra_tools proxmox ls pve1
-infra_tools proxmox health pve1 <vmid>
-infra_tools proxmox snapshot pve1 <vmid> pre-modify
-infra_tools proxmox modify pve1 <vmid> --cores 6 --memory 12G
-infra_tools proxmox stop pve1 <vmid>
-infra_tools proxmox start pve1 <vmid>
+VMID=100  # replace with the VMID returned by `infra_tools proxmox ls`
+infra_tools proxmox health pve1 "$VMID"
+infra_tools proxmox snapshot pve1 "$VMID" pre-modify
+infra_tools proxmox modify pve1 "$VMID" --cores 6 --memory 12G
+infra_tools proxmox stop pve1 "$VMID"
+infra_tools proxmox start pve1 "$VMID"
 
 infra_tools setup server_lite 10.0.0.60 appuser \
   --machine unprivileged --hosted pve1 \

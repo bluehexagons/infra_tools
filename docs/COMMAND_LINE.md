@@ -15,7 +15,7 @@ Related pages:
 
 ## Commands
 
-```bash
+```text
 infra_tools setup <system_type> <host> [username] [options]
 infra_tools patch <host> [username] [options]
 infra_tools shares <host> [username] [options]
@@ -37,7 +37,7 @@ infra_tools channel [CHANNEL]
 infra_tools upgrade
 infra_tools agent doctor
 infra_tools agent update [options]
-infra_tools maintenance github <audit|prune> [options]
+infra_tools maintenance github [--root PATH] <audit|prune> [options]
 infra_tools shell
 infra_tools network ...
 infra_tools proxmox ...
@@ -400,9 +400,9 @@ targets and failure behavior.
 ### GitHub Maintenance
 
 ```bash
-infra_tools maintenance github audit --root /home/loren/repos
-infra_tools maintenance github prune --root /home/loren/repos --yes
-infra_tools maintenance github prune --root /home/loren/repos --delete-caches --yes
+infra_tools maintenance github --root /home/loren/repos audit
+infra_tools maintenance github --root /home/loren/repos prune --yes
+infra_tools maintenance github --root /home/loren/repos prune --delete-caches --yes
 ```
 
 Defaults: keep 2 releases, delete expired artifacts, prune caches only when
@@ -427,7 +427,7 @@ See [`MAINTENANCE.md`](./MAINTENANCE.md) for schedules and policy controls.
 
 ### Network Inventory
 
-```bash
+```text
 infra_tools network list
 infra_tools network init <profile> [--management CIDR] [--control-plane CIDR] [--guest-network CIDR]
 infra_tools network add-host <profile> <name> <address> [--provider NAME] [--role ROLE]
@@ -441,7 +441,7 @@ one control-plane address before it will produce a non-error plan.
 
 ### Proxmox Management
 
-```bash
+```text
 infra_tools proxmox add <name> <address> [--user USER] [--key PATH]
 infra_tools proxmox probe <host>
 infra_tools proxmox probe-cluster <address> [--user USER] [--key PATH] [--tag TAG]
