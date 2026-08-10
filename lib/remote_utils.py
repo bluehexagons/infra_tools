@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import pwd
 import re
 import secrets
 import shlex
@@ -256,6 +257,14 @@ def user_exists(username: str) -> bool:
         capture_output=True,
     )
     return result.returncode == 0
+
+
+def get_user_home(username: str) -> str:
+    """Return the home directory recorded for an existing Unix account."""
+    try:
+        return pwd.getpwnam(username).pw_dir
+    except KeyError as exc:
+        raise RuntimeError(f"Target user does not exist: {username}") from exc
 
 
 def file_contains(filepath: str, content: str) -> bool:

@@ -15,7 +15,7 @@ from lib.config import SetupConfig
 from lib.display import print_setup_summary
 from lib.machine_state import resolve_machine_type, save_machine_state, save_setup_config
 from lib.notifications import send_setup_notification
-from lib.remote_utils import detect_os, set_dry_run
+from lib.remote_utils import detect_os, is_dry_run, set_dry_run
 from lib.validation import (
     validate_agent_repositories,
     validate_network_setup_settings,
@@ -29,7 +29,7 @@ from lib.progress import progress_bar
 from lib.system_types import get_steps_for_system_type
 from lib.systemd_service import cleanup_all_infra_services
 from typing import Optional
-from lib.types import Deployments 
+from lib.types import Deployments, StepFunc
 
 
 REMOTE_AGENT_PAYLOAD_DIR = "/opt/infra_tools/agent_payload"
@@ -37,6 +37,8 @@ REMOTE_AGENT_PAYLOAD_DIR = "/opt/infra_tools/agent_payload"
 
 def _remove_agent_payload() -> None:
     """Remove uploaded agent config and credentials after any setup outcome."""
+    if is_dry_run():
+        return
     if not os.path.isdir(REMOTE_AGENT_PAYLOAD_DIR):
         return
     try:
@@ -121,6 +123,14 @@ def _resolve_cli_args(argv: list[str]) -> list[str]:
     return _load_args_file(parsed.args_file) + remaining
 
 
+def _print_dry_run_plan(steps: list[tuple[str, StepFunc]]) -> None:
+    """Print the setup plan without invoking mutating step functions."""
+    print("\nSetup plan:")
+    for index, (name, _function) in enumerate(steps, 1):
+        print(f"  {index:02d}. {name}")
+    print("\n[DRY-RUN] No setup steps were executed and no target files were changed.")
+
+
 def config_from_remote_args(args: argparse.Namespace) -> SetupConfig:
     if args.custom_steps:
         system_type = "custom_steps"
@@ -158,8 +168,8 @@ def _run_main() -> int:
     if args.deploy_latest:
         os.environ["INFRA_TOOLS_DEPENDENCY_MIN_AGE_DAYS"] = "0"
 
+    set_dry_run(bool(args.dry_run))
     if args.dry_run:
-        set_dry_run(True)
         print("=" * 60)
         print("DRY-RUN MODE ENABLED")
         print("=" * 60)
@@ -183,6 +193,9 @@ def _run_main() -> int:
 
         detect_os()
         print("Configuring Samba shares only...")
+        if args.dry_run:
+            print("[DRY-RUN] Would reconcile Samba shares")
+            return 0
         reconcile_samba_shares(config)
         print("✓ Samba share update complete")
         return 0
@@ -234,6 +247,13 @@ def _run_main() -> int:
     sys.stdout.flush()
 
     steps = get_steps_for_system_type(config)
+
+    if args.dry_run:
+        _print_dry_run_plan(steps)
+        print("\n" + "=" * 60)
+        print("✓ Remote setup dry-run complete!")
+        print("=" * 60)
+        return 0
     
     setup_errors: list[str] = []
     

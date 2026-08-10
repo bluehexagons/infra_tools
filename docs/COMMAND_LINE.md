@@ -83,7 +83,7 @@ infra_tools proxmox ...
 | `--tags TAG1,TAG2` | Comma-separated tags |
 | `--image SOURCE` | VM qcow2 URL or Proxmox storage reference; used with `--machine vm` |
 | `--steps STEP...` | Run an explicit space-separated step list with `custom_steps` |
-| `--dry-run` | Simulate execution |
+| `--dry-run` | Validate the setup and print its step plan without executing commands or changing target files |
 | `--auto-restart` / `--no-auto-restart` | Control normal automatic restarts |
 | `--auto-restart-force-days N` | Force restart after N days of deferrals |
 | `--auto-restart-grace N` | Warning period before an automatic restart |
@@ -140,6 +140,11 @@ Disconnected sessions are retained indefinitely by default so a transient RDP
 disconnect does not destroy agent work. A positive disconnected timeout is
 accepted only with `--rdp-kill-disconnected`, making destructive cleanup an
 explicit paired choice.
+
+Setup `--dry-run` validates the requested profile and prints the complete step
+plan without invoking setup functions, running target commands, or writing
+target files. This makes it safe to use before a first live run, including for
+the local desktop installer path.
 
 ### Development Flags
 

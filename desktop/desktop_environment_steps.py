@@ -5,11 +5,21 @@ import os
 import shlex
 
 from lib.config import SetupConfig
-from lib.remote_utils import run, is_package_installed, file_contains, install_package
+from lib.remote_utils import (
+    get_user_home,
+    install_package,
+    is_dry_run,
+    is_package_installed,
+    run,
+)
 
 
 def install_desktop(config: SetupConfig) -> None:
     """Install a desktop environment (XFCE, i3, Cinnamon, or LXQt)."""
+    if is_dry_run():
+        print(f"  [DRY-RUN] Would install the {config.desktop.upper()} desktop")
+        return
+
     if config.desktop == "xfce":
         package = "xfce4"
         install_cmd = "apt-get install -y -qq xfce4 xfce4-goodies"
@@ -31,7 +41,11 @@ def install_desktop(config: SetupConfig) -> None:
         print(f"  ✓ {config.desktop.upper()} desktop already installed")
         return
     
-    install_package(f"{config.desktop.upper()} desktop", package, install_cmd)
+    if not install_package(f"{config.desktop.upper()} desktop", package, install_cmd):
+        raise RuntimeError(
+            f"{config.desktop.upper()} desktop installation failed; "
+            "check APT sources and package-manager output"
+        )
 
 
 def configure_xfce_for_rdp(config: SetupConfig) -> None:
@@ -47,9 +61,13 @@ def configure_xfce_for_rdp(config: SetupConfig) -> None:
     """
     if config.desktop != "xfce":
         return
+
+    if is_dry_run():
+        print("  [DRY-RUN] Would configure XFCE for RDP compatibility")
+        return
     
     safe_username = shlex.quote(config.username)
-    home_dir = f"/home/{config.username}"
+    home_dir = get_user_home(config.username)
     autostart_dir = f"{home_dir}/.config/autostart"
     xfce_config_dir = f"{home_dir}/.config/xfce4/xfconf/xfce-perchannel-xml"
     
@@ -176,9 +194,13 @@ def configure_dark_theme(config: SetupConfig) -> None:
     """
     if not config.dark_theme:
         return
+
+    if is_dry_run():
+        print(f"  [DRY-RUN] Would configure {config.desktop.upper()} dark theme")
+        return
     
     safe_username = shlex.quote(config.username)
-    home_dir = f"/home/{config.username}"
+    home_dir = get_user_home(config.username)
     
     if config.desktop == "xfce":
         xfce_config_dir = f"{home_dir}/.config/xfce4/xfconf/xfce-perchannel-xml"

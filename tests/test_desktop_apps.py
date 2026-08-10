@@ -40,6 +40,14 @@ class TestDesktopApps(unittest.TestCase):
 
 
 class TestBrowserSteps(unittest.TestCase):
+    def setUp(self):
+        home_patcher = patch(
+            "desktop.browser_steps.get_user_home",
+            return_value="/home/testuser",
+        )
+        self.addCleanup(home_patcher.stop)
+        home_patcher.start()
+
     @patch("desktop.browser_steps.run")
     @patch("desktop.browser_steps.os.makedirs")
     @patch("desktop.browser_steps.os.path.exists")

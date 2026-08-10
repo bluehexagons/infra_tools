@@ -5,7 +5,13 @@ import os
 import shlex
 
 from lib.config import SetupConfig
-from lib.remote_utils import is_service_active, run, is_package_installed
+from lib.remote_utils import (
+    get_user_home,
+    is_dry_run,
+    is_package_installed,
+    is_service_active,
+    run,
+)
 from lib.xrdp_certificate import (
     DEFAULT_XRDP_CERTIFICATE,
     DEFAULT_XRDP_PRIVATE_KEY,
@@ -203,8 +209,12 @@ def _validate_xrdp_tls_certificate() -> None:
 
 
 def install_xrdp(config: SetupConfig) -> None:
+    if is_dry_run():
+        print("  [DRY-RUN] Would install and configure xRDP")
+        return
+
     safe_username = shlex.quote(config.username)
-    xsession_path = f"/home/{config.username}/startwm.sh"
+    xsession_path = os.path.join(get_user_home(config.username), "startwm.sh")
     sesman_config = "/etc/xrdp/sesman.ini"
     xrdp_config = "/etc/xrdp/xrdp.ini"
     
@@ -220,9 +230,31 @@ def install_xrdp(config: SetupConfig) -> None:
         session_cmd = "xfce4-session"
     
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    run("apt-get install -y -qq xrdp xorgxrdp dbus-x11 x11-xserver-utils x11-utils", check=False)
-    if is_package_installed("xrdp"):
-        print("  ✓ xRDP packages installed (Xorg+xorgxrdp backend for dynamic resolution)")
+    required_packages = (
+        "xrdp",
+        "xorgxrdp",
+        "dbus-x11",
+        "x11-xserver-utils",
+        "x11-utils",
+    )
+    install_result = run(
+        "apt-get install -y -qq " + " ".join(required_packages),
+        check=False,
+    )
+    if install_result.returncode != 0:
+        raise RuntimeError(
+            "xRDP package installation failed; check APT sources and package-manager output"
+        )
+
+    missing_packages = [
+        package for package in required_packages if not is_package_installed(package)
+    ]
+    if missing_packages:
+        raise RuntimeError(
+            "xRDP package installation was incomplete: "
+            + ", ".join(missing_packages)
+        )
+    print("  ✓ xRDP packages installed (Xorg+xorgxrdp backend for dynamic resolution)")
 
     # Configure Xwrapper to allow XRDP sessions to start X server
     # This is critical for preventing session freezes and startup issues

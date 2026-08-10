@@ -7,15 +7,53 @@ import sys
 import tempfile
 import unittest
 from types import SimpleNamespace
-from unittest.mock import mock_open, patch
+from unittest.mock import MagicMock, mock_open, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import remote_setup
 from lib.config import SetupConfig
+from lib.remote_utils import set_dry_run
 
 
 class TestRemoteSetupArgsFile(unittest.TestCase):
+    def test_dry_run_prints_plan_without_invoking_setup_steps(self):
+        self.addCleanup(lambda: set_dry_run(False))
+        args = SimpleNamespace(
+            deploy_latest=False,
+            dry_run=True,
+            custom_steps=None,
+            system_type="server_lite",
+        )
+        config = SetupConfig(
+            host="localhost",
+            username="root",
+            system_type="server_lite",
+            dry_run=True,
+        )
+        step = MagicMock()
+
+        with patch.object(
+            remote_setup, "create_setup_argument_parser"
+        ) as create_parser, patch.object(
+            remote_setup, "config_from_remote_args", return_value=config
+        ), patch.object(
+            remote_setup, "detect_os", return_value="Debian"
+        ), patch.object(
+            remote_setup, "print_setup_summary"
+        ), patch.object(
+            remote_setup, "cleanup_all_infra_services"
+        ) as cleanup, patch.object(
+            remote_setup,
+            "get_steps_for_system_type",
+            return_value=[("Mutating step", step)],
+        ):
+            create_parser.return_value.parse_args.return_value = args
+            self.assertEqual(remote_setup._run_main(), 0)
+
+        step.assert_not_called()
+        cleanup.assert_called_once_with(dry_run=True)
+
     def test_resolve_cli_args_loads_and_removes_args_file(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             args_path = os.path.join(tmpdir, "args.json")

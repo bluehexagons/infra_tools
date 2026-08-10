@@ -15,7 +15,7 @@ from desktop.xrdp_steps import (
     harden_xrdp,
     install_xrdp,
 )
-from desktop.desktop_environment_steps import configure_xfce_for_rdp
+from desktop.desktop_environment_steps import configure_xfce_for_rdp, install_desktop
 from lib.xrdp_certificate import XrdpCertificateHealth
 
 
@@ -233,7 +233,33 @@ class TestInstallXrdp(unittest.TestCase):
         )
         self.addCleanup(certificate_patcher.stop)
         certificate_patcher.start()
-    
+        package_patcher = patch(
+            "desktop.xrdp_steps.is_package_installed",
+            return_value=True,
+        )
+        self.addCleanup(package_patcher.stop)
+        package_patcher.start()
+        home_patcher = patch(
+            "desktop.xrdp_steps.get_user_home",
+            return_value="/home/testuser",
+        )
+        self.addCleanup(home_patcher.stop)
+        home_patcher.start()
+
+    @patch("desktop.xrdp_steps.run")
+    def test_fails_when_xrdp_package_install_fails(self, mock_run):
+        mock_run.return_value = Mock(returncode=100, stdout="", stderr="apt failed")
+        config = SetupConfig(
+            host="test.example.com",
+            username="testuser",
+            system_type="workstation_dev",
+            desktop="xfce",
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "xRDP package installation failed"):
+            install_xrdp(config)
+
+
     @patch('desktop.xrdp_steps.run')
     @patch('desktop.xrdp_steps.os.path.exists')
     @patch('desktop.xrdp_steps.os.makedirs')
@@ -445,6 +471,21 @@ class TestInstallXrdp(unittest.TestCase):
         self.assertNotIn("systemctl restart xrdp", run_commands)
 
 
+class TestInstallDesktop(unittest.TestCase):
+    @patch("desktop.desktop_environment_steps.install_package", return_value=False)
+    @patch("desktop.desktop_environment_steps.is_package_installed", return_value=False)
+    def test_fails_when_desktop_package_install_fails(self, _mock_installed, _mock_install):
+        config = SetupConfig(
+            host="test.example.com",
+            username="testuser",
+            system_type="workstation_dev",
+            desktop="xfce",
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "desktop installation failed"):
+            install_desktop(config)
+
+
 class TestHardenXrdp(unittest.TestCase):
     """Test XRDP hardening."""
     
@@ -549,6 +590,14 @@ class TestHardenXrdp(unittest.TestCase):
 
 class TestConfigureXfceForRdp(unittest.TestCase):
     """Test XFCE RDP compatibility configuration."""
+
+    def setUp(self):
+        home_patcher = patch(
+            "desktop.desktop_environment_steps.get_user_home",
+            return_value="/home/testuser",
+        )
+        self.addCleanup(home_patcher.stop)
+        home_patcher.start()
     
     @patch('desktop.desktop_environment_steps.run')
     @patch('desktop.desktop_environment_steps.os.makedirs')

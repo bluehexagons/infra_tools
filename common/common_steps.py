@@ -13,16 +13,22 @@ from lib.maintenance_systemd import configure_maintenance_timer
 from lib.apt_sources import ensure_debian_package_sources
 from lib.config import SetupConfig
 from lib.machine_state import can_manage_time_sync
-from lib.remote_utils import run, is_dry_run, is_package_installed, is_service_active, file_contains, install_package
+from lib.remote_utils import (
+    file_contains,
+    install_package,
+    is_dry_run,
+    is_package_installed,
+    run,
+)
 from lib.update_policy import ECOSYSTEM_AUTO_UPGRADE_ENV, npm_freshness_args
 
 
 def set_user_password(username: str, password: str) -> bool:
-    process = subprocess.run(
-        ["chpasswd"],
-        input=f"{username}:{password}\n",
-        text=True,
-        capture_output=True
+    process = run(
+        "chpasswd",
+        check=False,
+        capture_output=True,
+        input_data=f"{username}:{password}\n",
     )
     if process.returncode != 0:
         print(f"  Warning: Failed to set password: {process.stderr}")
@@ -66,6 +72,10 @@ def configure_ipv4_preference(config: SetupConfig) -> None:
     gai_conf = "/etc/gai.conf"
     marker = "precedence ::ffff:0:0/96  100"
 
+    if is_dry_run():
+        print("  [DRY-RUN] Would configure IPv4 preference in /etc/gai.conf")
+        return
+
     if os.path.exists(gai_conf):
         with open(gai_conf, "r") as f:
             content = f.read()
@@ -87,6 +97,10 @@ def configure_locale(config: SetupConfig) -> None:
     
     if locale_configured():
         print("  ✓ UTF-8 locale already configured")
+        return
+
+    if is_dry_run():
+        print("  [DRY-RUN] Would configure the UTF-8 locale")
         return
     
     install_package("locales", "locales", "apt-get install -y -qq locales")
@@ -357,6 +371,10 @@ def _user_tool_paths(user_home: str) -> list[str]:
 
 def _ensure_nvm_shell_init(username: str, user_home: str) -> None:
     """Add nvm initialization to the user's .bashrc when missing."""
+    if is_dry_run():
+        print("  [DRY-RUN] Would update the user's nvm shell initialization")
+        return
+
     bashrc_path = f"{user_home}/.bashrc"
     nvm_init = '''
 export NVM_DIR="$HOME/.nvm"
@@ -384,6 +402,10 @@ export NVM_DIR="$HOME/.nvm"
 
 
 def install_go(config: SetupConfig) -> None:
+    if is_dry_run():
+        print("  [DRY-RUN] Would install Go")
+        return
+
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get install -y -qq curl wget")
     result = run("curl -s https://go.dev/VERSION?m=text | head -1", check=False, capture_output=True)
@@ -430,6 +452,10 @@ def install_go(config: SetupConfig) -> None:
 
 def install_node_for_user(username: str, user_home: str) -> None:
     """Install nvm-managed Node.js for a specific login/build user."""
+    if is_dry_run():
+        print("  [DRY-RUN] Would install Node.js for the setup user")
+        return
+
     nvm_dir = f"{user_home}/.nvm"
     safe_nvm_dir = shlex.quote(nvm_dir)
     nvm_sh = os.path.join(nvm_dir, "nvm.sh")
@@ -597,6 +623,10 @@ def install_or_update_uv(user_home: str, username: Optional[str] = None) -> bool
 
 def install_python(config: SetupConfig) -> None:
     """Install Python tooling (aliases and uv)."""
+    if is_dry_run():
+        print("  [DRY-RUN] Would install Python tooling")
+        return
+
     user_home = f"/home/{config.username}"
 
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"

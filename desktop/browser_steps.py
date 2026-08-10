@@ -8,7 +8,13 @@ import subprocess
 
 from lib.config import SetupConfig
 from lib.machine_state import is_container
-from lib.remote_utils import run, is_package_installed, file_contains
+from lib.remote_utils import (
+    file_contains,
+    get_user_home,
+    is_dry_run,
+    is_package_installed,
+    run,
+)
 
 
 FLATPAK_REMOTE = "flathub"
@@ -218,8 +224,13 @@ def configure_default_browser(config: SetupConfig) -> None:
     if not config.browser:
         return
 
+    if is_dry_run():
+        print(f"  [DRY-RUN] Would set {config.browser} as the default browser")
+        return
+
     safe_username = shlex.quote(config.username)
-    mimeapps_path = f"/home/{config.username}/.config/mimeapps.list"
+    home_dir = get_user_home(config.username)
+    mimeapps_path = os.path.join(home_dir, ".config", "mimeapps.list")
     
     browser_desktops: dict[str, Optional[str]] = {
         "brave": "brave-browser.desktop",
@@ -240,11 +251,13 @@ def configure_default_browser(config: SetupConfig) -> None:
             print("  ✓ Default browser already set")
             return
     
-    user_apps_dir = f"/home/{config.username}/.local/share/applications"
+    user_apps_dir = os.path.join(home_dir, ".local", "share", "applications")
     os.makedirs(user_apps_dir, exist_ok=True)
-    run(f"chown -R {safe_username}:{safe_username} /home/{config.username}/.local")
+    local_dir = os.path.join(home_dir, ".local")
+    run(f"chown -R {safe_username}:{safe_username} {shlex.quote(local_dir)}")
     
-    os.makedirs(f"/home/{config.username}/.config", exist_ok=True)
+    config_dir = os.path.join(home_dir, ".config")
+    os.makedirs(config_dir, exist_ok=True)
     
     mimeapps_content = f"""[Default Applications]
 x-scheme-handler/http={desktop_file}
@@ -256,7 +269,7 @@ application/xhtml+xml={desktop_file}
     with open(mimeapps_path, "w") as f:
         f.write(mimeapps_content)
     
-    run(f"chown -R {safe_username}:{safe_username} /home/{config.username}/.config")
+    run(f"chown -R {safe_username}:{safe_username} {shlex.quote(config_dir)}")
     
     run(f"xdg-mime default {desktop_file} x-scheme-handler/http", check=False)
     run(f"xdg-mime default {desktop_file} x-scheme-handler/https", check=False)

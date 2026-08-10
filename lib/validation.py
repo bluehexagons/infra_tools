@@ -6,6 +6,7 @@ import ipaddress
 import os
 import pwd
 import re
+import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional, cast
 from urllib.parse import urlparse
@@ -1095,6 +1096,27 @@ def validate_rdp_settings(config: Any) -> None:
             raise ValueError(
                 "--rdp-existing-password requires an existing local desktop account"
             ) from exc
+
+        try:
+            password_status = subprocess.run(
+                ["passwd", "-S", username],
+                capture_output=True,
+                text=True,
+                env={**os.environ, "LC_ALL": "C"},
+            )
+        except OSError as exc:
+            raise ValueError(
+                "--rdp-existing-password could not inspect the account password status"
+            ) from exc
+        status_fields = (password_status.stdout or "").split()
+        if password_status.returncode != 0 or len(status_fields) < 2:
+            raise ValueError(
+                "--rdp-existing-password could not inspect the account password status"
+            )
+        if status_fields[1] != "P":
+            raise ValueError(
+                "--rdp-existing-password requires an existing account with an unlocked password"
+            )
     else:
         if not isinstance(password, str) or not password.strip():
             raise ValueError("--rdp requires --password for the desktop login account")

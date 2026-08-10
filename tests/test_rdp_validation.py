@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -45,7 +46,54 @@ class TestValidateRdpSettings(unittest.TestCase):
             rdp_existing_password=True,
         )
 
-        with patch("lib.validation.pwd.getpwnam", return_value=object()):
+        with patch("lib.validation.pwd.getpwnam", return_value=object()), \
+             patch(
+                 "lib.validation.subprocess.run",
+                 return_value=SimpleNamespace(
+                     returncode=0,
+                     stdout="agent P 2026-01-01\n",
+                 ),
+             ):
+            validate_rdp_settings(config)
+
+    def test_rdp_existing_password_rejects_locked_account(self) -> None:
+        config = SetupConfig(
+            host="localhost",
+            username="agent",
+            system_type="workstation_dev",
+            enable_rdp=True,
+            rdp_existing_password=True,
+        )
+
+        with patch("lib.validation.pwd.getpwnam", return_value=object()), \
+             patch(
+                 "lib.validation.subprocess.run",
+                 return_value=SimpleNamespace(
+                     returncode=0,
+                     stdout="agent L 2026-01-01\n",
+                 ),
+             ), \
+             self.assertRaisesRegex(ValueError, "unlocked password"):
+            validate_rdp_settings(config)
+
+    def test_rdp_existing_password_rejects_passwordless_account(self) -> None:
+        config = SetupConfig(
+            host="localhost",
+            username="agent",
+            system_type="workstation_dev",
+            enable_rdp=True,
+            rdp_existing_password=True,
+        )
+
+        with patch("lib.validation.pwd.getpwnam", return_value=object()), \
+             patch(
+                 "lib.validation.subprocess.run",
+                 return_value=SimpleNamespace(
+                     returncode=0,
+                     stdout="agent NP 2026-01-01\n",
+                 ),
+             ), \
+             self.assertRaisesRegex(ValueError, "unlocked password"):
             validate_rdp_settings(config)
 
     def test_rdp_existing_password_rejects_missing_local_account(self) -> None:

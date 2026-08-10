@@ -10,7 +10,7 @@ from lib.maintenance_systemd import configure_maintenance_timer
 from lib.config import SetupConfig
 from lib.maintenance_defaults import JOURNAL_MAX_USE
 from lib.machine_state import can_modify_kernel, is_container, is_hardware, is_vm
-from lib.remote_utils import run
+from lib.remote_utils import is_dry_run, run
 from lib.validation import validate_network_ip_or_cidr
 
 _LEGACY_UNATTENDED_ORIGINS_FILE = "/etc/apt/apt.conf.d/52infra-tools-unattended-upgrades"
@@ -158,6 +158,10 @@ def configure_firewall(config: SetupConfig) -> None:
 
 
 def configure_fail2ban(config: SetupConfig) -> None:
+    if is_dry_run():
+        print("  [DRY-RUN] Would configure fail2ban jails")
+        return
+
     if is_container():
         print("  ✓ Skipping fail2ban configuration (limited functionality in containers)")
         return
@@ -253,6 +257,10 @@ LoginGraceTime 30
 AllowGroups remoteusers
 """
 
+    if is_dry_run():
+        print("  [DRY-RUN] Would apply the managed SSH hardening drop-in")
+        return
+
     os.makedirs(_SSHD_DROPIN_DIR, exist_ok=True)
 
     existing: str | None = None
@@ -292,6 +300,10 @@ AllowGroups remoteusers
 
 
 def harden_kernel(config: SetupConfig) -> None:
+    if is_dry_run():
+        print("  [DRY-RUN] Would apply kernel hardening parameters")
+        return
+
     if not can_modify_kernel():
         print("  ✓ Skipping kernel hardening (host kernel manages these settings)")
         return
@@ -364,6 +376,10 @@ kernel.core_uses_pid=1
 
 
 def configure_login_banners(config: SetupConfig) -> None:
+    if is_dry_run():
+        print("  [DRY-RUN] Would configure login banners")
+        return
+
     changed = False
     for path in ("/etc/issue", "/etc/issue.net"):
         try:
@@ -404,6 +420,10 @@ def configure_apparmor(config: SetupConfig) -> None:
 
 
 def configure_auditd(config: SetupConfig) -> None:
+    if is_dry_run():
+        print("  [DRY-RUN] Would configure auditd rules")
+        return
+
     if not (is_vm() or is_hardware()):
         print("  ✓ Skipping auditd (not applicable to containers)")
         return
@@ -466,6 +486,10 @@ def configure_auditd(config: SetupConfig) -> None:
 
 
 def configure_pam_lockout(config: SetupConfig) -> None:
+    if is_dry_run():
+        print("  [DRY-RUN] Would configure PAM account lockout")
+        return
+
     if not (is_vm() or is_hardware()):
         print("  ✓ Skipping PAM lockout (not applicable to containers)")
         return
@@ -556,6 +580,10 @@ def configure_auto_updates(config: SetupConfig) -> None:
     - Automatically handles all configured repositories
     - Supports dependency additions while refusing automated package removals
     """
+    if is_dry_run():
+        print("  [DRY-RUN] Would configure automatic package updates")
+        return
+
     # Remove legacy unattended-upgrades config files from older setups
     _cleanup_legacy_unattended_upgrades()
 
@@ -660,6 +688,10 @@ def configure_auto_restart(config: SetupConfig) -> None:
 
 def configure_cleanup_maintenance(config: SetupConfig) -> None:
     """Configure periodic cleanup for journals, temp files, and package caches."""
+    if is_dry_run():
+        print("  [DRY-RUN] Would configure cleanup maintenance")
+        return
+
     os.makedirs(_JOURNAL_CONF_DIR, exist_ok=True)
     with open(_JOURNAL_CONF_FILE, "w") as f:
         f.write(

@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -17,6 +18,7 @@ from lib.remote_utils import (
     set_dry_run,
     is_dry_run,
     generate_password,
+    get_user_home,
     run,
     file_contains,
     detect_os,
@@ -186,6 +188,7 @@ class TestFileContains(unittest.TestCase):
         finally:
             os.unlink(path)
 
+
     def test_file_not_found(self):
         self.assertFalse(file_contains('/nonexistent/file/xyz', 'content'))
 
@@ -197,6 +200,19 @@ class TestFileContains(unittest.TestCase):
             self.assertFalse(file_contains(path, 'anything'))
         finally:
             os.unlink(path)
+
+
+class TestUserHome(unittest.TestCase):
+    @patch("lib.remote_utils.pwd.getpwnam")
+    def test_returns_home_recorded_for_account(self, mock_getpwnam):
+        mock_getpwnam.return_value = SimpleNamespace(pw_dir="/srv/users/agent")
+
+        self.assertEqual(get_user_home("agent"), "/srv/users/agent")
+
+    @patch("lib.remote_utils.pwd.getpwnam", side_effect=KeyError("agent"))
+    def test_rejects_missing_account(self, _mock_getpwnam):
+        with self.assertRaisesRegex(RuntimeError, "Target user does not exist"):
+            get_user_home("agent")
 
 
 if __name__ == '__main__':

@@ -8,7 +8,7 @@ import shlex
 import tempfile
 from typing import Optional
 
-from lib.remote_utils import run
+from lib.remote_utils import is_dry_run, run
 from lib.systemd_service import SYSTEMD_DIR
 from lib.validation import validate_filesystem_path, validate_service_name_uniqueness
 from lib.validators import validate_username
@@ -153,6 +153,10 @@ RandomizedDelaySec={randomized_delay}
 [Install]
 WantedBy=timers.target
 """
+
+    if is_dry_run():
+        print(f"  [DRY-RUN] Would configure {check_name} {purpose} timer")
+        return True
 
     _write_unit_atomically(service_file, service_content)
     _write_unit_atomically(timer_file, timer_content)
