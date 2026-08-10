@@ -624,6 +624,12 @@ def validate_positive_integer(value: str, name: str = "value") -> int:
 
 
 _MEMORY_PATTERN = re.compile(r'^\d+[KMGT]$', re.IGNORECASE)
+_MEMORY_UNIT_TO_KIB = {
+    "K": 1,
+    "M": 1024,
+    "G": 1024 * 1024,
+    "T": 1024 * 1024 * 1024,
+}
 _PACKAGE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+.-]*$")
 _ENVIRONMENT_VARIABLE_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _NETWORK_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
@@ -651,6 +657,15 @@ def validate_memory_string(value: str, name: str = "memory") -> None:
         raise ValueError(
             f"Invalid {name} value '{value}' (e.g. 2G, 512M, 1T)"
         )
+
+
+def _memory_string_kib(value: str, name: str) -> int:
+    """Validate a size string and return its value in KiB."""
+    validate_memory_string(value, name)
+    amount = int(value[:-1])
+    if amount <= 0:
+        raise ValueError(f"{name} must be positive")
+    return amount * _MEMORY_UNIT_TO_KIB[value[-1].upper()]
 
 
 def validate_package_name(value: str, name: str = "package") -> str:
@@ -940,7 +955,10 @@ def validate_hosted_flags(config: Any) -> None:
     Raises:
         ValueError: If required flags are missing or invalid
     """
+    balloon_min = getattr(config, "vm_balloon_min", None)
     if not config.hosted_node:
+        if balloon_min:
+            raise ValueError("--balloon-min requires --hosted")
         return
 
     from lib.validators import validate_host
@@ -995,7 +1013,7 @@ def validate_hosted_flags(config: Any) -> None:
     if not root_seen:
         raise ValueError("--storage root POOL AMOUNT is required when --hosted is specified")
 
-    validate_memory_string(config.container_memory, "--memory")
+    memory_kib = _memory_string_kib(config.container_memory, "--memory")
 
     for spec in storage_specs:
         if spec[0] != "root":
@@ -1013,6 +1031,10 @@ def validate_hosted_flags(config: Any) -> None:
     machine_type = getattr(config, "machine_type", None)
     vm_image = getattr(config, "vm_image", None)
     if machine_type == "vm":
+        if balloon_min:
+            balloon_kib = _memory_string_kib(balloon_min, "--balloon-min")
+            if balloon_kib > memory_kib:
+                raise ValueError("--balloon-min cannot exceed --memory")
         ssh_key = getattr(config, "ssh_key", None)
         if not ssh_key:
             raise ValueError(
@@ -1047,8 +1069,11 @@ def validate_hosted_flags(config: Any) -> None:
         else:
             base = getattr(config, "container_base", None) or "debian"
             resolve_cloud_image(base)
-    elif vm_image:
-        raise ValueError("--image requires --machine vm")
+    else:
+        if balloon_min:
+            raise ValueError("--balloon-min requires --machine vm")
+        if vm_image:
+            raise ValueError("--image requires --machine vm")
 
 
 def validate_rdp_settings(config: Any) -> None:

@@ -66,6 +66,8 @@ class TestRenderUserData(unittest.TestCase):
         self.assertIn("ssh-ed25519 AAAA test", out)
         self.assertIn("packages:", out)
         self.assertIn("qemu-guest-agent", out)
+        self.assertIn("virtio_balloon", out)
+        self.assertIn("infra-tools-virtio-balloon.conf", out)
         self.assertIn("systemctl enable --now qemu-guest-agent", out)
 
     def test_creates_non_root_user(self):
@@ -101,6 +103,7 @@ class TestVMHardwareProfile(unittest.TestCase):
             image_remote_path="/var/lib/vz/template/iso/debian.qcow2",
             storage_ref=None,
             memory_mb=8192,
+            balloon_min_mb=4096,
             cores=4,
             root_pool="local-lvm",
             disk_size_gib=40,
@@ -127,6 +130,7 @@ class TestVMHardwareProfile(unittest.TestCase):
             commands[0],
         )
         self.assertIn("--scsihw virtio-scsi-single", commands[0])
+        self.assertIn("--memory 8192 --balloon 4096", commands[0])
         self.assertIn("ip6=2001:db8::50/64", commands[0])
         self.assertIn("gw6=2001:db8::1", commands[0])
         self.assertIn("--scsi0 local-lvm:vm-101-disk-0,iothread=1", commands[2])
@@ -146,6 +150,7 @@ class TestVMHardwareProfile(unittest.TestCase):
                 image_remote_path="/var/lib/vz/template/iso/debian.qcow2",
                 storage_ref=None,
                 memory_mb=2048,
+                balloon_min_mb=2048,
                 cores=2,
                 root_pool="local-lvm",
                 disk_size_gib=20,

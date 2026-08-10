@@ -756,6 +756,7 @@ class TestSetupConfigHostedFields(unittest.TestCase):
         self.assertEqual(config.hosted_user, 'root')
         self.assertIsNone(config.hosted_key)
         self.assertIsNone(config.container_memory)
+        self.assertIsNone(config.vm_balloon_min)
         self.assertIsNone(config.container_storage)
         self.assertEqual(config.container_cores, 1)
         self.assertEqual(config.container_base, 'debian')
@@ -766,6 +767,7 @@ class TestSetupConfigHostedFields(unittest.TestCase):
             hosted_user='admin',
             hosted_key='/path/to/key',
             container_memory='2G',
+            vm_balloon_min='1G',
             container_storage=[['root', 'auto', '10G'], ['template', 'local']],
             container_cores=4,
             container_base='ubuntu',
@@ -774,6 +776,7 @@ class TestSetupConfigHostedFields(unittest.TestCase):
         self.assertEqual(config.hosted_user, 'admin')
         self.assertEqual(config.hosted_key, '/path/to/key')
         self.assertEqual(config.container_memory, '2G')
+        self.assertEqual(config.vm_balloon_min, '1G')
         self.assertEqual(config.container_storage, [['root', 'auto', '10G'], ['template', 'local']])
         self.assertEqual(config.container_cores, 4)
         self.assertEqual(config.container_base, 'ubuntu')
@@ -782,11 +785,13 @@ class TestSetupConfigHostedFields(unittest.TestCase):
         config = self._make_config(
             hosted_node='10.0.0.1',
             container_memory='2G',
+            vm_balloon_min='1G',
             container_storage=[['root', 'auto', '10G'], ['template', 'local']],
         )
         d = config.to_dict()
         self.assertEqual(d['hosted_node'], '10.0.0.1')
         self.assertEqual(d['container_memory'], '2G')
+        self.assertEqual(d['vm_balloon_min'], '1G')
         self.assertEqual(d['container_storage'], [['root', 'auto', '10G'], ['template', 'local']])
 
     def test_from_dict_restores_hosted_fields(self):
@@ -794,6 +799,7 @@ class TestSetupConfigHostedFields(unittest.TestCase):
             'username': 'testuser',
             'hosted_node': '10.0.0.1',
             'container_memory': '4G',
+            'vm_balloon_min': '2G',
             'container_storage': [['template', 'local'], ['root', 'auto', '5G']],
             'container_cores': 8,
             'container_base': 'fedora',
@@ -801,6 +807,7 @@ class TestSetupConfigHostedFields(unittest.TestCase):
         config = SetupConfig.from_dict('target', 'server_web', data)
         self.assertEqual(config.hosted_node, '10.0.0.1')
         self.assertEqual(config.container_memory, '4G')
+        self.assertEqual(config.vm_balloon_min, '2G')
         self.assertEqual(config.container_storage, [['template', 'local'], ['root', 'auto', '5G']])
         self.assertEqual(config.container_cores, 8)
         self.assertEqual(config.container_base, 'fedora')

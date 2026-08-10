@@ -142,6 +142,12 @@ def add_setup_arguments(
                            help="Proxmox bridge for the hosted guest (default: host default route)")
         parser.add_argument("--memory", dest="container_memory",
                            help="Hosted guest memory (e.g. 2G, 512M)")
+        parser.add_argument(
+            "--balloon-min",
+            dest="vm_balloon_min",
+            metavar="SIZE",
+            help="Hosted VM balloon minimum (e.g. 2G); defaults to --memory for fixed allocation",
+        )
         parser.add_argument("--storage", dest="container_storage",
                            action="append", nargs="+", metavar="STORAGE",
                            help="Hosted guest storage spec: root POOL AMOUNT, or template POOL for LXC only; repeat as needed")

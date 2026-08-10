@@ -250,6 +250,7 @@ class SetupConfig:
     hosted_key: MaybeStr = None
     hosted_bridge: MaybeStr = None
     container_memory: MaybeStr = None
+    vm_balloon_min: MaybeStr = None
     container_storage: Optional[NestedStrList] = None  # [[type, pool, amount?], ...]
     container_cores: int = 1
     container_base: str = "debian"
@@ -1059,6 +1060,7 @@ class SetupConfig:
             hosted_key=getattr(args, 'hosted_key', None),
             hosted_bridge=getattr(args, 'hosted_bridge', None),
             container_memory=getattr(args, 'container_memory', None),
+            vm_balloon_min=getattr(args, 'vm_balloon_min', None),
             container_storage=_normalize_container_storage(getattr(args, 'container_storage', None)),
             container_cores=getattr(args, 'container_cores', 1),
             container_base=getattr(args, 'container_base', 'debian'),

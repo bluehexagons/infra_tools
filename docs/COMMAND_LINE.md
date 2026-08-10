@@ -280,6 +280,7 @@ be fully disabled, then manage pending security reboots explicitly.
 | `--hosted-key PATH` | SSH key for the Proxmox node |
 | `--bridge NAME` | Proxmox bridge for the hosted guest; defaults to the host's default-route bridge |
 | `--memory SIZE` | Guest memory |
+| `--balloon-min SIZE` | VM-only minimum memory for dynamic ballooning; defaults to `--memory` |
 | `--storage root POOL AMOUNT` | Required root storage spec |
 | `--storage root AMOUNT` | Root storage shorthand using saved defaults or `auto` |
 | `--storage template POOL` | LXC template storage spec |
@@ -292,6 +293,9 @@ Notes:
 - `--storage` is repeatable.
 - `root` storage is required when `--hosted` is used.
 - Hosted VMs require `--key PATH` and a readable matching `PATH.pub`; this key is installed by cloud-init for the SSH handoff.
+- Hosted VMs keep fixed memory by default while retaining the VirtIO balloon
+  device for guest-memory telemetry. Set `--balloon-min` below `--memory` to
+  opt into dynamic ballooning; the minimum cannot exceed the maximum.
 - Hosted VM targets must be literal IPv4 addresses unless `--ip` supplies the guest address.
 - `template` storage is LXC-only.
 - Direct setup defaults to `--machine auto`, which detects Debian bare metal,

@@ -49,6 +49,12 @@ class TestHostedFlagParsing(unittest.TestCase):
         ])
         self.assertEqual(args.container_memory, "2G")
 
+    def test_balloon_min_flag(self):
+        args = self.parser.parse_args([
+            "10.0.0.50", "--balloon-min", "1G"
+        ])
+        self.assertEqual(args.vm_balloon_min, "1G")
+
     def test_storage_flag_three_args(self):
         args = self.parser.parse_args([
             "10.0.0.50", "--storage", "root", "auto", "10G"
@@ -226,6 +232,12 @@ class TestHostedFlagsNotInRemoteParser(unittest.TestCase):
             "--system-type", "server_lite", "--username", "root"
         ])
         self.assertFalse(hasattr(args, 'container_memory'))
+
+    def test_no_balloon_min_flag(self):
+        args = self.parser.parse_args([
+            "--system-type", "server_lite", "--username", "root"
+        ])
+        self.assertFalse(hasattr(args, 'vm_balloon_min'))
 
     def test_agent_tool_flags_exist_remotely(self):
         args = self.parser.parse_args([

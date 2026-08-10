@@ -278,6 +278,11 @@ def _render_user_data(
         "package_update: true",
         "packages:",
         "  - qemu-guest-agent",
+        "write_files:",
+        "  - path: /etc/modules-load.d/infra-tools-virtio-balloon.conf",
+        "    permissions: '0644'",
+        "    content: |",
+        "      virtio_balloon",
         "users:",
         "  - name: root",
         "    lock_passwd: false",
@@ -299,6 +304,7 @@ def _render_user_data(
     lines.append("ssh_pwauth: false")
     lines.extend([
         "runcmd:",
+        "  - modprobe virtio_balloon",
         "  - systemctl enable --now qemu-guest-agent",
     ])
     lines.append("")
@@ -384,6 +390,7 @@ def _create_vm(
     image_remote_path: Optional[str],
     storage_ref: Optional[str],
     memory_mb: int,
+    balloon_min_mb: int,
     cores: int,
     root_pool: str,
     disk_size_gib: int,
@@ -416,6 +423,7 @@ def _create_vm(
         f"qm create {vmid}",
         f"--name {shlex.quote(hostname)}",
         f"--memory {memory_mb}",
+        f"--balloon {balloon_min_mb}",
         f"--cores {cores}",
         "--cpu host",
         "--ostype l26",
@@ -572,6 +580,11 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
     root_pool_arg, disk_amount = root_spec[1], root_spec[2]
 
     memory_mb = _parse_memory_mb(memory_str)
+    balloon_min_mb = (
+        _parse_memory_mb(config.vm_balloon_min)
+        if config.vm_balloon_min
+        else memory_mb
+    )
     disk_size_gib = _parse_disk_size_gib(disk_amount)
 
     hostname = config.system_hostname or _build_guest_hostname(
@@ -596,6 +609,10 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
             print(f"  DNS servers: {', '.join(config.network_dns)}")
         print(f"  Hostname: {hostname}")
         print(f"  Memory: {memory_mb} MiB")
+        if balloon_min_mb < memory_mb:
+            print(f"  Balloon minimum: {balloon_min_mb} MiB (dynamic)")
+        else:
+            print(f"  Balloon minimum: {balloon_min_mb} MiB (fixed allocation)")
         print(f"  Cores: {config.container_cores}")
         print(
             "  Console: "
@@ -687,6 +704,7 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
             "image_remote_path": image_remote_path,
             "storage_ref": storage_ref,
             "memory_mb": memory_mb,
+            "balloon_min_mb": balloon_min_mb,
             "cores": config.container_cores,
             "root_pool": root_pool,
             "disk_size_gib": disk_size_gib,

@@ -564,6 +564,7 @@ class _MockConfig:
         self.static_ipv4 = kwargs.get('static_ipv4')
         self.hosted_node = kwargs.get('hosted_node')
         self.container_memory = kwargs.get('container_memory')
+        self.vm_balloon_min = kwargs.get('vm_balloon_min')
         self.container_storage = kwargs.get('container_storage')
         self.container_cores = kwargs.get('container_cores', 1)
 
@@ -658,6 +659,33 @@ class TestValidateHostedFlags(unittest.TestCase):
             container_storage=[['root', 'auto', '10G']],
         )
         with self.assertRaises(ValueError):
+            validate_hosted_flags(config)
+
+    def test_balloon_min_must_not_exceed_vm_memory(self):
+        config = _MockConfig(
+            machine_type='vm',
+            hosted_node='10.0.0.1',
+            container_memory='2G',
+            vm_balloon_min='3G',
+            container_storage=[['root', 'auto', '10G']],
+        )
+        with self.assertRaisesRegex(ValueError, r'cannot exceed --memory'):
+            validate_hosted_flags(config)
+
+    def test_balloon_min_is_vm_only(self):
+        config = _MockConfig(
+            machine_type='unprivileged',
+            hosted_node='10.0.0.1',
+            container_memory='2G',
+            vm_balloon_min='1G',
+            container_storage=[['root', 'auto', '10G']],
+        )
+        with self.assertRaisesRegex(ValueError, r'requires --machine vm'):
+            validate_hosted_flags(config)
+
+    def test_balloon_min_requires_hosted_provisioning(self):
+        config = _MockConfig(hosted_node=None, vm_balloon_min='1G')
+        with self.assertRaisesRegex(ValueError, r'requires --hosted'):
             validate_hosted_flags(config)
 
     def test_invalid_hosted_node_host(self):

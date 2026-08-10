@@ -128,12 +128,17 @@ The resulting Proxmox baseline is:
 | Disk controller | VirtIO SCSI single with `iothread=1` on the root disk | Uses the per-disk I/O thread supported by the selected controller. Enable discard/SSD flags only when the backing storage policy supports them. |
 | Network | VirtIO | Lowest-overhead normal Linux guest path. Multiqueue is normally unnecessary for interactive RDP traffic. |
 | Guest agent | Enabled and installed | Supports clean lifecycle and guest inspection from Proxmox. |
-| Memory | Fixed requested allocation | Start around 8 GiB for the documented coding desktop and size for browsers, editors, builds, and agents; do not rely on aggressive overcommit for interactive latency. |
+| Memory | Fixed requested allocation with VirtIO balloon device enabled | Start around 8 GiB for the documented coding desktop and size for browsers, editors, builds, and agents. Use `--balloon-min SIZE` below `--memory` only when dynamic reclamation is intentional. |
 
 These choices follow Proxmox's documented VirtIO network and VirtIO-SCSI
 performance guidance and its warning that `host` CPU trades migration
 portability for host feature exposure. Proxmox also documents that selecting a
-serial display disables VGA output. See the current
+serial display disables VGA output. Cloud-init installs the guest agent and
+ensures Linux loads `virtio_balloon`. Keeping the balloon minimum equal to the
+maximum preserves fixed allocation while allowing Proxmox to collect detailed
+guest memory information. A lower minimum lets Proxmox reclaim memory under
+host pressure, which can force guest swapping or out-of-memory handling; size
+it for the VM's working set rather than treating it as free overcommit. See the current
 [Proxmox VE administration guide](https://pve.proxmox.com/pve-docs/pve-admin-guide.pdf).
 
 Physical GPU passthrough is a different profile. It needs host IOMMU/device
@@ -210,8 +215,13 @@ Modify resources and configuration:
 ```bash
 infra_tools proxmox modify pve1 101 --cores 4 --memory 8G
 infra_tools proxmox reconfigure pve1 101 --set hostname=newbox
+infra_tools proxmox reconfigure pve1 101 --set balloon=4096
 infra_tools proxmox resize-disk pve1 101 rootfs 40G
 ```
+
+For an existing VM, Proxmox stores `memory` and `balloon` in MiB. Keep
+`balloon` no greater than `memory`; setting both to the same value disables
+dynamic reclamation without removing the balloon device.
 
 Snapshots and rollback:
 
