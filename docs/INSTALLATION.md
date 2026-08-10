@@ -8,13 +8,21 @@ Debian is the only officially supported distribution. Ubuntu and Linux Mint are
 recognized as best-effort Debian-compatible hosts.
 
 The network-piped installer needs either `wget` or `curl`. The examples below
-use `wget -qO-`, which is commonly present on minimal Debian systems. If only
-`curl` is installed, replace `wget -qO-` with `curl -fsSL`. If neither is
+use `wget --timeout=20 --tries=2 -O-`, which is commonly present on minimal
+Debian systems. If only `curl` is installed, replace it with
+`curl --fail --location --connect-timeout 15 --max-time 120`. If neither is
 available, install one first with:
 
 ```bash
 sudo apt-get update && sudo apt-get install -y wget ca-certificates
 ```
+
+The fetch command leaves DNS and connection diagnostics visible and limits
+retries, so a VM with no network path fails clearly instead of appearing idle.
+For commands using `sudo`, run `sudo -v` separately first so its password
+prompt is visible before pasting the installer command. Once a piped command is
+submitted, its standard input carries the downloaded script; pressing Enter
+again cannot advance a stalled download.
 
 ## Choose an installation path
 
@@ -27,14 +35,14 @@ account.
 Use this when you want to choose the first setup later:
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
+wget --timeout=20 --tries=2 -O- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
 ```
 
 The installer uses `sudo` for packages when needed. To install the source in
 `/opt/infra_tools` and expose a system launcher instead, use:
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
+wget --timeout=20 --tries=2 -O- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
   sudo sh -s -- --user "$USER"
 ```
 
@@ -44,7 +52,7 @@ This installs common administrator and Linux tools, the terminal agent suite,
 and configures the local machine to manage other VMs and containers:
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
+wget --timeout=20 --tries=2 -O- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
   sudo sh -s -- --user "$USER" \
   --local-setup control_plane --agent-suite terminal
 ```
@@ -56,7 +64,7 @@ available for local logins, adds XFCE for RDP sessions, enables RDP, and
 installs the desktop agent suite:
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
+wget --timeout=20 --tries=2 -O- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
   sudo sh -s -- --user "$USER" \
   --local-setup workstation_dev --control-plane \
   --agent-suite desktop --desktop xfce \

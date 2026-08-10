@@ -8,7 +8,7 @@ To use a Debian desktop as the local control plane, combine the workstation
 profile with `--control-plane`:
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
+wget --timeout=20 --tries=2 -O- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
   sudo sh -s -- --user "$USER" \
   --local-setup workstation_dev --control-plane --agent-suite desktop \
   --desktop xfce --rdp --rdp-existing-password

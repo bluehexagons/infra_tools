@@ -174,7 +174,7 @@ For the local machine, the installer can select the control-plane profile and
 run it immediately:
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
+wget --timeout=20 --tries=2 -O- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
   sudo sh -s -- --user "$USER" --local-setup control_plane --agent-suite terminal
 ```
 
@@ -182,7 +182,7 @@ For a standard Debian GNOME desktop, keep GNOME for local logins, add XFCE
 for XRDP sessions, and install the graphical agent suite with:
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
+wget --timeout=20 --tries=2 -O- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
   sudo sh -s -- --user "$USER" \
   --local-setup workstation_dev --control-plane --agent-suite desktop \
   --desktop xfce --rdp --rdp-existing-password

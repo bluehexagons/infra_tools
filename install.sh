@@ -39,21 +39,21 @@ Options:
 
 Examples:
   Fetch with either wget or curl:
-  wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
-  curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
-  wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
+  wget --timeout=20 --tries=2 -O- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
+  curl --fail --location --connect-timeout 15 --max-time 120 https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
+  wget --timeout=20 --tries=2 -O- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
     sh -s -- --channel stable
-  wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
-  wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
+  wget --timeout=20 --tries=2 -O- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
+  wget --timeout=20 --tries=2 -O- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
     sudo sh -s -- --user "$USER"
-  wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
+  wget --timeout=20 --tries=2 -O- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
     sh -s -- --setup server_dev localhost "$USER" --machine hardware --agent-suite terminal
-  wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
+  wget --timeout=20 --tries=2 -O- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
     sudo sh -s -- --user "$USER" --local-setup control_plane --agent-suite terminal
-  wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
+  wget --timeout=20 --tries=2 -O- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
     sudo sh -s -- --user "$USER" --local-setup workstation_dev --control-plane \
       --agent-suite desktop --desktop xfce --rdp --rdp-existing-password
-  wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
+  wget --timeout=20 --tries=2 -O- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
     sudo sh -s -- --user "$USER" --setup server_proxmox 10.0.0.10 root --key /home/me/.ssh/id_ed25519
 EOF
 }

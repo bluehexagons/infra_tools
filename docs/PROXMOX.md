@@ -11,7 +11,7 @@ Proxmox host does not need a checkout; setup uploads the installed source to
 `/opt/infra_tools`.
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
+wget --timeout=20 --tries=2 -O- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
 infra_tools channel
 ```
 

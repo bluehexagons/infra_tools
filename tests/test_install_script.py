@@ -400,6 +400,8 @@ class TestInstallScript(unittest.TestCase):
         )
         self.assertEqual(help_result.returncode, 0)
         self.assertIn("--setup", help_result.stdout)
+        self.assertIn("--timeout=20 --tries=2 -O-", help_result.stdout)
+        self.assertNotIn("wget -qO-", help_result.stdout)
 
 
 if __name__ == "__main__":
