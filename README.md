@@ -106,7 +106,8 @@ release selection use conservative freshness and opt-in policies. Cleanup uses
 bounded cache, log, journal, and temporary-artifact policies and purges packages
 APT marks unused, including superseded kernels. It expires recognized crash
 reports and returns unused filesystem blocks to supported physical, virtual,
-and Proxmox storage. See the
+and Proxmox storage, then checks block and inode pressure across local mounts.
+See the
 [recurring maintenance guide](docs/MAINTENANCE.md).
 
 ### Targeted updates

@@ -10,6 +10,8 @@ CRASH_REPORT_PATTERNS = (
     r"core\..+",
     r".+\.(?:crash|upload|uploaded)",
 )
+STORAGE_WARNING_PERCENT = 80
+STORAGE_CRITICAL_PERCENT = 90
 
 # Wait up to 5 minutes for apt/dpkg locks to be released before failing.
 APT_LOCK_OPTIONS = [

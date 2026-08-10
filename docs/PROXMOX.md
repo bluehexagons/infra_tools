@@ -63,9 +63,11 @@ The default setup installs these recurring host-maintenance timers:
 - `auto-restart-if-needed.timer` checks daily at 02:00 and after boot, but the
   default Proxmox policy records and reports a deferral instead of rebooting.
 - `cleanup-maintenance.timer` removes unused APT packages and residual package
-  configuration, cleans bounded caches, journals, old crash reports, and
-  infra_tools-owned temporary artifacts, and issues filesystem TRIM each
-  Sunday. It does not prune backups, templates, ISOs, guest volumes, or
+  configuration, audits `dpkg` consistency, cleans bounded caches, journals,
+  old crash reports, and infra_tools-owned temporary artifacts, and ensures
+  filesystem TRIM through the native timer or a cleanup fallback each Sunday.
+  Post-cleanup checks cover block and inode pressure on distinct local storage
+  mounts. The job does not prune backups, templates, ISOs, guest volumes, or
   directly modify `proxmox-boot-tool` kernel selections.
 
 Inspect these jobs with the commands in [Recurring Maintenance](MAINTENANCE.md).

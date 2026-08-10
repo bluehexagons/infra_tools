@@ -87,14 +87,23 @@ The cleanup job also runs noninteractive `apt-get autoremove --purge` wherever
 APT is available. This removes packages APT has marked as unused, including
 superseded kernel packages, while APT's configured kernel-retention policy
 protects kernels it considers required. It also purges configuration remnants
-for packages that were already removed. On physical machines, VMs, and Proxmox
-hosts, weekly filesystem TRIM returns unused blocks to storage when discard is
-supported; containers skip this host-level operation.
+for packages that were already removed, then audits `dpkg` state and reports
+incomplete or inconsistent packages without attempting an automatic repair. On
+physical machines, VMs, and Proxmox hosts, cleanup returns unused blocks to
+storage after deletion when discard is supported. It defers to an active native
+`fstrim.timer` instead of running a duplicate trim; containers skip this
+host-level operation.
 
 Cleanup never removes installed gem or nvm runtime versions, Proxmox backups,
 templates, ISOs, guest volumes, container/image stores, crash-report
 directories, or arbitrary files. Proxmox boot entries and pinned kernels remain
 under APT and `proxmox-boot-tool` retention policy.
+
+After cleanup, capacity checks cover each distinct real local filesystem rather
+than only `/`. Both block usage and inode usage trigger warnings at 80% and
+errors at 90%, so a separate Proxmox storage mount cannot fill silently while
+the root filesystem remains healthy. Network and FUSE mounts are excluded to
+avoid blocking maintenance on unavailable remote storage.
 
 Storage synchronization and scrub jobs write scheduling state atomically and
 use a persistent lock inode to prevent overlapping runs. Invalid specifications

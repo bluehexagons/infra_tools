@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Clean up temporary files, journals, and package caches."""
+"""Run bounded system cleanup and post-cleanup capacity checks."""
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -26,15 +27,28 @@ from lib.maintenance_defaults import (
     JOURNAL_MAX_USE,
     STALE_CRASH_REPORT_MAX_AGE_DAYS,
     STALE_INFRA_TMP_MAX_AGE_DAYS,
+    STORAGE_CRITICAL_PERCENT,
+    STORAGE_WARNING_PERCENT,
 )
 from lib.machine_state import is_container
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
+from lib.types import JSONDict
 from lib.validation import validate_filesystem_path, validate_positive_integer
 
 
 logger = get_service_logger('cleanup_maintenance', 'common', use_syslog=True)
 _INFRA_TMP_RE = re.compile(rf"^(?:{'|'.join(INFRA_TMP_PATTERNS)})$")
 _CRASH_REPORT_RE = re.compile(rf"^(?:{'|'.join(CRASH_REPORT_PATTERNS)})$")
+_REMOTE_FILESYSTEM_TYPES = {
+    "9p",
+    "ceph",
+    "cifs",
+    "glusterfs",
+    "nfs",
+    "nfs4",
+    "smb3",
+    "sshfs",
+}
 
 
 def run_command(
@@ -123,6 +137,34 @@ def cleanup_unused_packages() -> list[str]:
     return failures
 
 
+def audit_package_database() -> str | None:
+    """Report incomplete or inconsistent dpkg package state without repairing it."""
+    dpkg = shutil.which("dpkg")
+    if not dpkg:
+        log_event(logger, "dpkg not found, skipping package database audit")
+        return None
+
+    try:
+        result = run_command([dpkg, "--audit"], timeout=60)
+    except subprocess.TimeoutExpired:
+        details = "timed out after 60s"
+        log_event(logger, "Package database audit timed out", level=WARNING, error=details)
+        return f"package database audit: {details}"
+    except OSError as exc:
+        details = str(exc)
+        log_event(logger, "Package database audit could not run", level=WARNING, error=details)
+        return f"package database audit: {details}"
+
+    details = result.stdout.strip() or result.stderr.strip()
+    if result.returncode != 0 or details:
+        details = details or f"dpkg exited {result.returncode}"
+        log_event(logger, "Package database audit found issues", level=WARNING, error=details)
+        return f"package database audit: {details}"
+
+    log_event(logger, "Package database audit completed", level=INFO)
+    return None
+
+
 def run_optional_cleanup(
     executable_names: list[str],
     args: list[str],
@@ -143,6 +185,25 @@ def cleanup_filesystem_free_space() -> str | None:
     if is_container():
         log_event(logger, "Skipping filesystem trim inside container")
         return None
+
+    systemctl = shutil.which("systemctl")
+    if systemctl:
+        try:
+            timer_status = run_command(
+                [systemctl, "is-active", "--quiet", "fstrim.timer"],
+                timeout=10,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            log_event(
+                logger,
+                "Could not inspect native filesystem trim timer",
+                level=WARNING,
+                error=str(exc),
+            )
+        else:
+            if timer_status.returncode == 0:
+                log_event(logger, "Native filesystem trim timer is active, skipping fallback trim")
+                return None
 
     return run_optional_cleanup(
         ["fstrim"],
@@ -297,33 +358,169 @@ def log_tmp_usage(tmp_dir: str = "/tmp") -> None:
         )
 
 
+def discover_local_mount_points() -> list[str]:
+    """Return validated real filesystem mount points, falling back to root."""
+    findmnt = shutil.which("findmnt")
+    if not findmnt:
+        log_event(logger, "findmnt not found, checking root filesystem only")
+        return ["/"]
+
+    try:
+        result = run_command(
+            [findmnt, "--json", "--real", "--output", "TARGET,FSTYPE"],
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        log_event(
+            logger,
+            "Could not discover local filesystems, checking root only",
+            level=WARNING,
+            error=str(exc),
+        )
+        return ["/"]
+
+    if result.returncode != 0:
+        details = result.stderr.strip() or f"findmnt exited {result.returncode}"
+        log_event(
+            logger,
+            "Could not discover local filesystems, checking root only",
+            level=WARNING,
+            error=details,
+        )
+        return ["/"]
+
+    try:
+        document: JSONDict = json.loads(result.stdout)
+    except (json.JSONDecodeError, TypeError):
+        log_event(
+            logger,
+            "Could not parse local filesystem inventory, checking root only",
+            level=WARNING,
+        )
+        return ["/"]
+    if not isinstance(document, dict):
+        log_event(
+            logger,
+            "Invalid local filesystem inventory, checking root only",
+            level=WARNING,
+        )
+        return ["/"]
+
+    targets: set[str] = {"/"}
+
+    def collect_targets(nodes: object) -> None:
+        if not isinstance(nodes, list):
+            return
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            target = node.get("target")
+            filesystem_type = node.get("fstype")
+            is_remote = (
+                isinstance(filesystem_type, str)
+                and (
+                    filesystem_type in _REMOTE_FILESYSTEM_TYPES
+                    or filesystem_type.startswith("fuse.")
+                )
+            )
+            if isinstance(target, str) and os.path.isabs(target) and not is_remote:
+                try:
+                    validate_filesystem_path(target, must_exist=True)
+                except ValueError:
+                    log_event(
+                        logger,
+                        "Skipping invalid filesystem mount point",
+                        level=WARNING,
+                        target=target,
+                    )
+                else:
+                    targets.add(target)
+            collect_targets(node.get("children"))
+
+    collect_targets(document.get("filesystems"))
+    return sorted(targets, key=lambda target: (target != "/", target.count("/"), target))
+
+
+def collect_local_storage_usage() -> dict[str, dict[str, int]]:
+    """Collect block and inode usage once per real local filesystem."""
+    usage_by_mount: dict[str, dict[str, int]] = {}
+    seen_filesystems: set[tuple[int, int, int, int]] = set()
+    for mount_point in discover_local_mount_points():
+        usage = get_disk_usage_details(mount_point)
+        if usage.get("total_mb", 0) <= 0:
+            continue
+        try:
+            stat_result = os.stat(mount_point)
+            filesystem_stats = os.statvfs(mount_point)
+        except OSError as exc:
+            log_event(
+                logger,
+                "Could not inspect local filesystem usage",
+                level=WARNING,
+                mount_point=mount_point,
+                error=str(exc),
+            )
+            continue
+
+        inode_total = filesystem_stats.f_files
+        inode_used = max(0, inode_total - filesystem_stats.f_ffree)
+        usage["inode_usage_percent"] = (
+            int((inode_used / inode_total) * 100) if inode_total > 0 else 0
+        )
+        signature = (
+            stat_result.st_dev,
+            usage.get("total_mb", 0),
+            usage.get("used_mb", 0),
+            usage.get("free_mb", 0),
+        )
+        if signature in seen_filesystems:
+            continue
+        seen_filesystems.add(signature)
+        usage_by_mount[mount_point] = usage
+    return usage_by_mount
+
+
 def notify_if_storage_still_low(notification_configs) -> None:
-    """Notify when the root filesystem remains crowded after cleanup."""
-    usage = get_disk_usage_details("/")
-    usage_percent = usage.get("usage_percent", 0)
-    if usage_percent < 80:
+    """Notify when any local filesystem remains crowded after cleanup."""
+    usage_by_mount = collect_local_storage_usage()
+    crowded = {
+        mount_point: usage
+        for mount_point, usage in usage_by_mount.items()
+        if usage.get("usage_percent", 0) >= STORAGE_WARNING_PERCENT
+        or usage.get("inode_usage_percent", 0) >= STORAGE_WARNING_PERCENT
+    }
+    if not crowded:
         return
 
-    status = "error" if usage_percent >= 90 else "warning"
+    critical = any(
+        usage.get("usage_percent", 0) >= STORAGE_CRITICAL_PERCENT
+        or usage.get("inode_usage_percent", 0) >= STORAGE_CRITICAL_PERCENT
+        for usage in crowded.values()
+    )
+    status = "error" if critical else "warning"
     subject = (
         "Error: storage still low after cleanup"
         if status == "error"
         else "Warning: storage still low after cleanup"
     )
-    message = f"Root filesystem usage remains at {usage_percent}% after cleanup"
-    details = (
-        f"Total: {usage.get('total_mb', 0)} MB\n"
-        f"Used: {usage.get('used_mb', 0)} MB\n"
-        f"Free: {usage.get('free_mb', 0)} MB\n"
-        f"Usage: {usage_percent}%"
+    message = (
+        f"{len(crowded)} local filesystem(s) remain above storage thresholds after cleanup"
     )
+    detail_lines = []
+    for mount_point, usage in crowded.items():
+        detail_lines.append(
+            f"{mount_point}: space={usage.get('usage_percent', 0)}%, "
+            f"inodes={usage.get('inode_usage_percent', 0)}%, "
+            f"free={usage.get('free_mb', 0)} MB, total={usage.get('total_mb', 0)} MB"
+        )
+    details = "\n".join(detail_lines)
 
     log_event(
         logger,
         "Storage remains low after cleanup",
         level=ERROR if status == "error" else WARNING,
-        usage_percent=usage_percent,
-        free_mb=usage.get("free_mb", 0),
+        affected_mounts=len(crowded),
+        critical=critical,
     )
     send_notification_safe(
         notification_configs,
@@ -343,9 +540,9 @@ def main() -> int:
 
     failures = cleanup_apt_cache()
     failures.extend(cleanup_unused_packages())
-    trim_failure = cleanup_filesystem_free_space()
-    if trim_failure:
-        failures.append(trim_failure)
+    package_audit_failure = audit_package_database()
+    if package_audit_failure:
+        failures.append(package_audit_failure)
 
     for failure in (
         run_optional_cleanup(["systemd-tmpfiles"], ["--clean"], "systemd tmpfiles cleanup"),
@@ -371,6 +568,9 @@ def main() -> int:
         failures.extend(cleanup_stale_infra_tmp_artifacts(tmp_dir=tmp_dir))
     for crash_dir in CRASH_REPORT_DIRS:
         failures.extend(cleanup_stale_crash_reports(crash_dir=crash_dir))
+    trim_failure = cleanup_filesystem_free_space()
+    if trim_failure:
+        failures.append(trim_failure)
     notify_if_storage_still_low(notification_configs)
 
     if failures:

@@ -8,7 +8,8 @@ import sys
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
@@ -21,6 +22,7 @@ class TestCleanupMaintenance(unittest.TestCase):
     @patch("common.service_tools.cleanup_maintenance.cleanup_stale_infra_tmp_artifacts", return_value=[])
     @patch("common.service_tools.cleanup_maintenance.run_optional_cleanup", return_value=None)
     @patch("common.service_tools.cleanup_maintenance.cleanup_filesystem_free_space", return_value=None)
+    @patch("common.service_tools.cleanup_maintenance.audit_package_database", return_value=None)
     @patch("common.service_tools.cleanup_maintenance.cleanup_unused_packages", return_value=[])
     @patch("common.service_tools.cleanup_maintenance.cleanup_apt_cache", return_value=[])
     @patch("common.service_tools.cleanup_maintenance.load_notification_configs_from_state", return_value=[])
@@ -29,17 +31,23 @@ class TestCleanupMaintenance(unittest.TestCase):
         _configs,
         mock_apt,
         mock_unused_packages,
+        mock_package_audit,
         mock_trim,
         mock_optional,
         mock_tmp_cleanup,
         mock_crash_cleanup,
         mock_low_space,
     ):
+        call_order = Mock()
+        call_order.attach_mock(mock_crash_cleanup, "crash_cleanup")
+        call_order.attach_mock(mock_trim, "trim")
+        call_order.attach_mock(mock_low_space, "storage_check")
         with self.assertLogs(cleanup_maintenance.logger, level="INFO") as logs:
             result = cleanup_maintenance.main()
         self.assertEqual(result, 0)
         mock_apt.assert_called_once()
         mock_unused_packages.assert_called_once()
+        mock_package_audit.assert_called_once()
         mock_trim.assert_called_once()
         self.assertEqual(mock_optional.call_count, 6)
         self.assertFalse(any(call.args[2] == "gem cleanup" for call in mock_optional.call_args_list))
@@ -50,6 +58,12 @@ class TestCleanupMaintenance(unittest.TestCase):
             len(cleanup_maintenance.CRASH_REPORT_DIRS),
         )
         mock_low_space.assert_called_once()
+        ordered_names = [call[0] for call in call_order.mock_calls]
+        self.assertLess(
+            max(index for index, name in enumerate(ordered_names) if name == "crash_cleanup"),
+            ordered_names.index("trim"),
+        )
+        self.assertLess(ordered_names.index("trim"), ordered_names.index("storage_check"))
         joined = "\n".join(logs.output)
         self.assertIn("Starting cleanup maintenance", joined)
         self.assertIn("Cleanup maintenance completed successfully", joined)
@@ -63,6 +77,7 @@ class TestCleanupMaintenance(unittest.TestCase):
         side_effect=[None, "journal vacuum: failed", None, None, None, None],
     )
     @patch("common.service_tools.cleanup_maintenance.cleanup_filesystem_free_space", return_value=None)
+    @patch("common.service_tools.cleanup_maintenance.audit_package_database", return_value=None)
     @patch("common.service_tools.cleanup_maintenance.cleanup_unused_packages", return_value=[])
     @patch("common.service_tools.cleanup_maintenance.cleanup_apt_cache", return_value=[])
     @patch("common.service_tools.cleanup_maintenance.load_notification_configs_from_state", return_value=["cfg"])
@@ -71,6 +86,7 @@ class TestCleanupMaintenance(unittest.TestCase):
         _configs,
         _apt,
         _unused_packages,
+        _package_audit,
         _trim,
         _optional,
         mock_notify,
@@ -180,6 +196,44 @@ class TestCleanupHelpers(unittest.TestCase):
             "noninteractive",
         )
 
+    @patch("common.service_tools.cleanup_maintenance.run_command")
+    @patch(
+        "common.service_tools.cleanup_maintenance.shutil.which",
+        return_value="/usr/bin/dpkg",
+    )
+    def test_audit_package_database_accepts_clean_state(self, _which, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+        failure = cleanup_maintenance.audit_package_database()
+
+        self.assertIsNone(failure)
+        mock_run.assert_called_once_with(["/usr/bin/dpkg", "--audit"], timeout=60)
+
+    @patch("common.service_tools.cleanup_maintenance.run_command")
+    @patch(
+        "common.service_tools.cleanup_maintenance.shutil.which",
+        return_value="/usr/bin/dpkg",
+    )
+    def test_audit_package_database_reports_dpkg_findings(self, _which, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="package is only half configured",
+            stderr="",
+        )
+
+        failure = cleanup_maintenance.audit_package_database()
+
+        self.assertEqual(
+            failure,
+            "package database audit: package is only half configured",
+        )
+
     @patch("common.service_tools.cleanup_maintenance.run_cleanup_command", return_value=None)
     @patch(
         "common.service_tools.cleanup_maintenance.shutil.which",
@@ -225,8 +279,14 @@ class TestCleanupHelpers(unittest.TestCase):
         )
 
     @patch("common.service_tools.cleanup_maintenance.run_optional_cleanup", return_value=None)
+    @patch("common.service_tools.cleanup_maintenance.shutil.which", return_value=None)
     @patch("common.service_tools.cleanup_maintenance.is_container", return_value=False)
-    def test_cleanup_filesystem_free_space_trims_host(self, _is_container, mock_optional):
+    def test_cleanup_filesystem_free_space_trims_host(
+        self,
+        _is_container,
+        _which,
+        mock_optional,
+    ):
         result = cleanup_maintenance.cleanup_filesystem_free_space()
 
         self.assertIsNone(result)
@@ -235,6 +295,36 @@ class TestCleanupHelpers(unittest.TestCase):
             ["--all", "--verbose", "--quiet-unsupported"],
             "filesystem trim",
         )
+
+    @patch("common.service_tools.cleanup_maintenance.run_optional_cleanup")
+    @patch("common.service_tools.cleanup_maintenance.run_command")
+    @patch(
+        "common.service_tools.cleanup_maintenance.shutil.which",
+        return_value="/usr/bin/systemctl",
+    )
+    @patch("common.service_tools.cleanup_maintenance.is_container", return_value=False)
+    def test_cleanup_filesystem_free_space_defers_to_native_timer(
+        self,
+        _is_container,
+        _which,
+        mock_run,
+        mock_optional,
+    ):
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+        result = cleanup_maintenance.cleanup_filesystem_free_space()
+
+        self.assertIsNone(result)
+        mock_run.assert_called_once_with(
+            ["/usr/bin/systemctl", "is-active", "--quiet", "fstrim.timer"],
+            timeout=10,
+        )
+        mock_optional.assert_not_called()
 
     @patch("common.service_tools.cleanup_maintenance.run_optional_cleanup")
     @patch("common.service_tools.cleanup_maintenance.is_container", return_value=True)
@@ -349,27 +439,154 @@ class TestCleanupHelpers(unittest.TestCase):
 
             self.assertEqual(failures, [f"{old_dir}: busy"])
 
+    @patch("common.service_tools.cleanup_maintenance.validate_filesystem_path")
+    @patch("common.service_tools.cleanup_maintenance.run_command")
+    @patch(
+        "common.service_tools.cleanup_maintenance.shutil.which",
+        return_value="/usr/bin/findmnt",
+    )
+    def test_discover_local_mount_points_flattens_tree_and_skips_remote(
+        self,
+        _which,
+        mock_run,
+        _validate_path,
+    ):
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=(
+                '{"filesystems": [{"target": "/", "fstype": "ext4", '
+                '"children": [{"target": "/srv/data", "fstype": "xfs"}, '
+                '{"target": "/mnt/nfs", "fstype": "nfs4"}, '
+                '{"target": "/mnt/ssh", "fstype": "fuse.sshfs"}]}]}'
+            ),
+            stderr="",
+        )
+
+        mounts = cleanup_maintenance.discover_local_mount_points()
+
+        self.assertEqual(mounts, ["/", "/srv/data"])
+        mock_run.assert_called_once_with(
+            [
+                "/usr/bin/findmnt",
+                "--json",
+                "--real",
+                "--output",
+                "TARGET,FSTYPE",
+            ],
+            timeout=30,
+        )
+
+    @patch("common.service_tools.cleanup_maintenance.run_command")
+    @patch(
+        "common.service_tools.cleanup_maintenance.shutil.which",
+        return_value="/usr/bin/findmnt",
+    )
+    def test_discover_local_mount_points_falls_back_on_invalid_json(
+        self,
+        _which,
+        mock_run,
+    ):
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="not json",
+            stderr="",
+        )
+
+        mounts = cleanup_maintenance.discover_local_mount_points()
+
+        self.assertEqual(mounts, ["/"])
+
+    @patch("common.service_tools.cleanup_maintenance.os.statvfs")
+    @patch("common.service_tools.cleanup_maintenance.os.stat")
+    @patch("common.service_tools.cleanup_maintenance.get_disk_usage_details")
+    @patch(
+        "common.service_tools.cleanup_maintenance.discover_local_mount_points",
+        return_value=["/", "/bind", "/srv/data"],
+    )
+    def test_collect_local_storage_usage_deduplicates_bind_mounts_and_counts_inodes(
+        self,
+        _discover,
+        mock_disk_usage,
+        mock_stat,
+        mock_statvfs,
+    ):
+        root_usage = {
+            "total_mb": 1000,
+            "used_mb": 500,
+            "free_mb": 500,
+            "usage_percent": 50,
+        }
+        data_usage = {
+            "total_mb": 2000,
+            "used_mb": 1500,
+            "free_mb": 500,
+            "usage_percent": 75,
+        }
+        mock_disk_usage.side_effect = [root_usage.copy(), root_usage.copy(), data_usage]
+        mock_stat.side_effect = [
+            SimpleNamespace(st_dev=1),
+            SimpleNamespace(st_dev=1),
+            SimpleNamespace(st_dev=2),
+        ]
+        mock_statvfs.side_effect = [
+            SimpleNamespace(f_files=100, f_ffree=5),
+            SimpleNamespace(f_files=100, f_ffree=5),
+            SimpleNamespace(f_files=200, f_ffree=100),
+        ]
+
+        usage = cleanup_maintenance.collect_local_storage_usage()
+
+        self.assertEqual(set(usage), {"/", "/srv/data"})
+        self.assertEqual(usage["/"]["inode_usage_percent"], 95)
+        self.assertEqual(usage["/srv/data"]["inode_usage_percent"], 50)
+
     @patch("common.service_tools.cleanup_maintenance.send_notification_safe")
-    @patch("common.service_tools.cleanup_maintenance.get_disk_usage_details", return_value={
-        "total_mb": 1000,
-        "used_mb": 920,
-        "free_mb": 80,
-        "usage_percent": 92,
-    })
-    def test_low_space_notification_sends_warning(self, _usage, mock_notify):
+    @patch("common.service_tools.cleanup_maintenance.collect_local_storage_usage")
+    def test_low_space_notification_reports_space_and_inode_pressure(
+        self,
+        mock_usage,
+        mock_notify,
+    ):
+        mock_usage.return_value = {
+            "/": {
+                "total_mb": 1000,
+                "used_mb": 920,
+                "free_mb": 80,
+                "usage_percent": 92,
+                "inode_usage_percent": 40,
+            },
+            "/var/lib/vz": {
+                "total_mb": 2000,
+                "used_mb": 1400,
+                "free_mb": 600,
+                "usage_percent": 70,
+                "inode_usage_percent": 85,
+            },
+        }
+
         cleanup_maintenance.notify_if_storage_still_low(["cfg"])
 
         mock_notify.assert_called_once()
         self.assertIn("storage still low after cleanup", mock_notify.call_args.kwargs["subject"].lower())
         self.assertEqual(mock_notify.call_args.kwargs["status"], "error")
+        self.assertIn("/var/lib/vz", mock_notify.call_args.kwargs["details"])
+        self.assertIn("inodes=85%", mock_notify.call_args.kwargs["details"])
 
     @patch("common.service_tools.cleanup_maintenance.send_notification_safe")
-    @patch("common.service_tools.cleanup_maintenance.get_disk_usage_details", return_value={
-        "total_mb": 1000,
-        "used_mb": 700,
-        "free_mb": 300,
-        "usage_percent": 70,
-    })
+    @patch(
+        "common.service_tools.cleanup_maintenance.collect_local_storage_usage",
+        return_value={
+            "/": {
+                "total_mb": 1000,
+                "used_mb": 700,
+                "free_mb": 300,
+                "usage_percent": 70,
+                "inode_usage_percent": 20,
+            },
+        },
+    )
     def test_low_space_notification_skips_when_usage_is_ok(self, _usage, mock_notify):
         cleanup_maintenance.notify_if_storage_still_low([])
 
