@@ -20,9 +20,11 @@ from lib.maintenance_defaults import (
     CLEANUP_COMMAND_TIMEOUT_SECONDS,
     INFRA_TMP_DIRS,
     INFRA_TMP_PATTERNS,
+    JOURNAL_MAX_AGE,
     JOURNAL_MAX_USE,
     STALE_INFRA_TMP_MAX_AGE_DAYS,
 )
+from lib.machine_state import is_vm
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
 from lib.validation import validate_filesystem_path, validate_positive_integer
 
@@ -85,6 +87,31 @@ def cleanup_apt_cache() -> list[str]:
         if failure:
             failures.append(failure)
     return failures
+
+
+def cleanup_vm_packages() -> str | None:
+    """Purge packages APT marks unused on virtual machines.
+
+    APT's configured kernel-retention policy protects kernels it considers
+    required. Limiting this to VMs keeps physical hosts and hypervisors on the
+    existing operator-managed package-retention policy.
+    """
+    if not is_vm():
+        log_event(logger, "Skipping VM package cleanup on non-VM machine")
+        return None
+
+    apt_get = shutil.which("apt-get")
+    if not apt_get:
+        log_event(logger, "apt-get not found, skipping VM package cleanup")
+        return None
+
+    env = os.environ.copy()
+    env["DEBIAN_FRONTEND"] = "noninteractive"
+    return run_cleanup_command(
+        [apt_get, "autoremove", "--purge", "-y", "-qq"] + APT_LOCK_OPTIONS,
+        "VM unused package cleanup",
+        env=env,
+    )
 
 
 def cleanup_optional_cache(
@@ -236,10 +263,22 @@ def main() -> int:
     notification_configs = load_notification_configs_from_state(logger)
 
     failures = cleanup_apt_cache()
+    vm_package_failure = cleanup_vm_packages()
+    if vm_package_failure:
+        failures.append(vm_package_failure)
 
     for failure in (
         cleanup_optional_cache(["systemd-tmpfiles"], ["--clean"], "systemd tmpfiles cleanup"),
-        cleanup_optional_cache(["journalctl"], [f"--vacuum-size={JOURNAL_MAX_USE}"], "journal vacuum"),
+        cleanup_optional_cache(
+            ["journalctl"],
+            [
+                "--rotate",
+                f"--vacuum-size={JOURNAL_MAX_USE}",
+                f"--vacuum-time={JOURNAL_MAX_AGE}",
+            ],
+            "journal rotation and vacuum",
+        ),
+        cleanup_optional_cache(["logrotate"], ["/etc/logrotate.conf"], "log rotation"),
         cleanup_optional_cache(["npm"], ["cache", "clean", "--force"], "npm cache cleanup"),
         cleanup_optional_cache(["pip3", "pip"], ["cache", "purge"], "pip cache cleanup"),
         cleanup_optional_cache(["uv"], ["cache", "clean"], "uv cache cleanup"),

@@ -66,7 +66,10 @@ Deployment hosts install the same managed cleanup, update, restart, and
 journaling controls described in [`MAINTENANCE.md`](./MAINTENANCE.md). The
 deployment-specific guarantees are:
 
-- cleanup never runs `autoremove` or removes installed runtimes;
+- cleanup runs APT `autoremove --purge` only on VMs to retire unused packages
+  such as superseded kernels; physical hosts, hypervisors, and containers keep
+  operator-managed package retention, and cleanup never removes installed
+  language runtimes;
 - restart checks fail safe when uptime or active-session detection is
   unavailable;
 - Gogs release activation validates the new binary and restores the previous

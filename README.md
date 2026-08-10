@@ -102,9 +102,10 @@ encryption, TCP 445 only, and validated configuration reloads. See the
 ### Conservative maintenance
 
 Automatic APT updates remain enabled, while language ecosystem upgrades and
-release selection use conservative freshness and opt-in policies. Cleanup
-removes only owned, strictly named temporary artifacts and oversized journals.
-See [Recurring maintenance](docs/MAINTENANCE.md).
+release selection use conservative freshness and opt-in policies. Cleanup uses
+bounded cache, log, journal, and temporary-artifact policies; VMs additionally
+purge packages APT marks unused, including superseded kernels. See
+[Recurring maintenance](docs/MAINTENANCE.md).
 
 ### Targeted updates
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 JOURNAL_MAX_USE = "100M"
+JOURNAL_MAX_AGE = "30d"
 
 # Wait up to 5 minutes for apt/dpkg locks to be released before failing.
 APT_LOCK_OPTIONS = [
