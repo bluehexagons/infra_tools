@@ -26,11 +26,14 @@ from security.security_steps import (
 
 
 class TestHardenSSH(unittest.TestCase):
+    @patch("security.security_steps.shutil.which", return_value="/usr/sbin/sshd")
     @patch("security.security_steps.run")
     @patch("security.security_steps.os.makedirs")
     @patch("security.security_steps.open", new_callable=mock_open)
     @patch("security.security_steps.os.path.exists", return_value=False)
-    def test_writes_dropin_with_hardening_directives(self, _exists, mock_file, _md, mock_run):
+    def test_writes_dropin_with_hardening_directives(
+        self, _exists, mock_file, _md, mock_run, _which
+    ):
         mock_run.return_value = SimpleNamespace(returncode=0)
         harden_ssh(SetupConfig(username="u", host="h", system_type="server_lite"))
 
@@ -46,40 +49,43 @@ class TestHardenSSH(unittest.TestCase):
         ):
             self.assertIn(directive, written)
 
+    @patch("security.security_steps.shutil.which", return_value="/usr/sbin/sshd")
     @patch("security.security_steps.run")
     @patch("security.security_steps.os.makedirs")
     @patch("security.security_steps.open", new_callable=mock_open)
     @patch("security.security_steps.os.path.exists", return_value=False)
-    def test_validates_sshd_before_reload(self, _exists, _file, _md, mock_run):
+    def test_validates_sshd_before_reload(self, _exists, _file, _md, mock_run, _which):
         mock_run.return_value = SimpleNamespace(returncode=0)
         harden_ssh(SetupConfig(username="u", host="h", system_type="server_lite"))
         run_commands = [args[0] for args, _ in mock_run.call_args_list]
-        self.assertIn("sshd -t", run_commands)
+        self.assertIn("/usr/sbin/sshd -t", run_commands)
         self.assertTrue(any(cmd.startswith("systemctl reload sshd") for cmd in run_commands))
 
+    @patch("security.security_steps.shutil.which", return_value="/usr/sbin/sshd")
     @patch("security.security_steps.run")
     @patch("security.security_steps.os.makedirs")
     @patch("security.security_steps.open", new_callable=mock_open)
     @patch("security.security_steps.os.path.exists", return_value=False)
     @patch("security.security_steps.os.remove")
     def test_removes_new_dropin_when_validation_fails(
-        self, mock_remove, _exists, _file, _md, mock_run
+        self, mock_remove, _exists, _file, _md, mock_run, _which
     ):
         mock_run.return_value = SimpleNamespace(returncode=1)
         harden_ssh(SetupConfig(username="u", host="h", system_type="server_lite"))
         run_commands = [args[0] for args, _ in mock_run.call_args_list]
-        self.assertIn("sshd -t", run_commands)
+        self.assertIn("/usr/sbin/sshd -t", run_commands)
         self.assertFalse(any(cmd.startswith("systemctl reload sshd") for cmd in run_commands))
         mock_remove.assert_called_once_with(
             "/etc/ssh/sshd_config.d/99-infra-tools-hardening.conf"
         )
 
+    @patch("security.security_steps.shutil.which", return_value="/usr/sbin/sshd")
     @patch("security.security_steps.run")
     @patch("security.security_steps.os.makedirs")
     @patch("security.security_steps.open", new_callable=mock_open, read_data="previous\n")
     @patch("security.security_steps.os.path.exists", return_value=True)
     def test_restores_existing_dropin_when_validation_fails(
-        self, _exists, mock_file, _md, mock_run
+        self, _exists, mock_file, _md, mock_run, _which
     ):
         mock_run.return_value = SimpleNamespace(returncode=1)
 
@@ -89,6 +95,12 @@ class TestHardenSSH(unittest.TestCase):
         self.assertEqual(writes[-1], "previous\n")
         run_commands = [args[0] for args, _ in mock_run.call_args_list]
         self.assertFalse(any(cmd.startswith("systemctl reload sshd") for cmd in run_commands))
+
+    @patch("security.security_steps.shutil.which", return_value=None)
+    @patch("security.security_steps.run")
+    def test_skips_when_sshd_is_not_installed(self, mock_run, _which):
+        harden_ssh(SetupConfig(username="u", host="h", system_type="server_lite"))
+        mock_run.assert_not_called()
 
 
 class TestHardenKernel(unittest.TestCase):

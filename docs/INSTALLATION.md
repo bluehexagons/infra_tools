@@ -119,6 +119,8 @@ sudo "$(command -v infra_tools)" setup workstation_dev localhost "$USER" \
 
 For the all-in-one commands above, the installer runs this local setup after
 installing the launcher, so a separate setup command is not required.
+SSH hardening is applied when `openssh-server` is present; an outbound-only
+control plane without `sshd` reports a skip instead of failing the setup.
 
 ## Install and configure a remote host
 
@@ -179,7 +181,10 @@ If a minimal or offline Debian installation has only installation media
 configured, infra_tools creates a managed source file and runs `apt-get
 update` before installing packages. Existing `non-free-firmware` components
 are preserved. Existing source files are backed up, and an unmanaged
-`infra_tools-debian.sources` file is not overwritten.
+`infra_tools-debian.sources` file is not overwritten. Existing current Debian
+base and security entries are reused; the managed file is limited to any
+missing suite, and a redundant managed file from an older installer run is
+removed.
 
 The installer and local setup print APT progress directly. The first run may
 pause briefly while another package operation releases the APT lock (the

@@ -180,6 +180,74 @@ class TestAptSources(unittest.TestCase):
         finally:
             shutil.rmtree(root)
 
+    def test_removes_redundant_managed_source_when_official_sources_exist(self):
+        root, apt_dir = self._layout(
+            os_release="ID=debian\nVERSION_CODENAME=trixie\n",
+            sources_list=(
+                "deb https://deb.debian.org/debian trixie main\n"
+                "deb https://security.debian.org/debian-security trixie-security main\n"
+            ),
+        )
+        try:
+            import lib.apt_sources as apt_sources
+
+            keyring = os.path.join(root, "usr", "share", "keyrings", "debian-archive-keyring.gpg")
+            with open(keyring, "wb") as file_obj:
+                file_obj.write(b"test keyring")
+            managed_path = os.path.join(apt_dir, "sources.list.d", MANAGED_SOURCE_FILENAME)
+            with open(managed_path, "w", encoding="utf-8") as file_obj:
+                file_obj.write(
+                    "# Managed by infra_tools. Do not edit\n"
+                    "Types: deb\nURIs: https://deb.debian.org/debian\n"
+                    "Suites: trixie\nComponents: main\n"
+                )
+
+            original_keyring = apt_sources.DEBIAN_ARCHIVE_KEYRING
+            apt_sources.DEBIAN_ARCHIVE_KEYRING = keyring
+            try:
+                status = ensure_debian_package_sources(
+                    apt_dir,
+                    os.path.join(root, "etc", "os-release"),
+                )
+            finally:
+                apt_sources.DEBIAN_ARCHIVE_KEYRING = original_keyring
+
+            self.assertIsNotNone(status)
+            self.assertFalse(os.path.exists(managed_path))
+            self.assertTrue(os.path.isfile(f"{managed_path}.infra_tools.bak"))
+        finally:
+            shutil.rmtree(root)
+
+    def test_managed_source_only_contains_missing_official_suite(self):
+        root, apt_dir = self._layout(
+            os_release="ID=debian\nVERSION_CODENAME=trixie\n",
+            sources_list="deb https://deb.debian.org/debian trixie main\n",
+        )
+        try:
+            import lib.apt_sources as apt_sources
+
+            keyring = os.path.join(root, "usr", "share", "keyrings", "debian-archive-keyring.gpg")
+            with open(keyring, "wb") as file_obj:
+                file_obj.write(b"test keyring")
+            original_keyring = apt_sources.DEBIAN_ARCHIVE_KEYRING
+            apt_sources.DEBIAN_ARCHIVE_KEYRING = keyring
+            try:
+                status = ensure_debian_package_sources(
+                    apt_dir,
+                    os.path.join(root, "etc", "os-release"),
+                )
+            finally:
+                apt_sources.DEBIAN_ARCHIVE_KEYRING = original_keyring
+
+            self.assertIsNotNone(status)
+            managed_path = os.path.join(apt_dir, "sources.list.d", MANAGED_SOURCE_FILENAME)
+            with open(managed_path, encoding="utf-8") as file_obj:
+                managed_content = file_obj.read()
+            self.assertNotIn("Suites: trixie trixie-updates", managed_content)
+            self.assertIn("Suites: trixie-security", managed_content)
+        finally:
+            shutil.rmtree(root)
+
     def test_rejects_non_debian_source_repair(self):
         root, apt_dir = self._layout(os_release="ID=ubuntu\nVERSION_CODENAME=noble\n")
         try:

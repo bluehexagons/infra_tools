@@ -205,6 +205,7 @@ done
 
 validate_channel
 validate_host_os
+printf '%s\n' "infra_tools installer: host validated; checking prerequisites and package sources..."
 
 if [ "$RUN_SETUP" -eq 1 ] && [ "$LOCAL_SETUP_REQUESTED" -eq 0 ] && [ "$#" -lt 2 ]; then
     fail "--setup requires at least SYSTEM_TYPE and HOST"
@@ -353,14 +354,62 @@ for source_path in "$source_dir"/*.sources; do
     fi
 done
 
+has_current_base=0
+has_current_security=0
+for source_path in "$apt_dir/sources.list" "$source_dir"/*.list; do
+    [ -f "$source_path" ] || continue
+    [ "$source_path" = "$managed_path" ] && continue
+    if grep -Eq "^[[:space:]]*deb[[:space:]]+(\\[[^]]*\\][[:space:]]+)?https?://deb[.]debian[.]org/debian/?([[:space:]]|$)" "$source_path" \
+        && grep -Eq "^[[:space:]]*deb.*[[:space:]]${codename}([[:space:]]|$)" "$source_path"; then
+        has_current_base=1
+    fi
+    if grep -Eq "^[[:space:]]*deb[[:space:]]+(\\[[^]]*\\][[:space:]]+)?https?://security[.]debian[.]org/debian-security/?([[:space:]]|$)" "$source_path" \
+        && grep -Eq "^[[:space:]]*deb.*[[:space:]]${codename}-security([[:space:]]|$)" "$source_path"; then
+        has_current_security=1
+    fi
+done
+
+for source_path in "$source_dir"/*.sources; do
+    [ -f "$source_path" ] || continue
+    [ "$source_path" = "$managed_path" ] && continue
+    if grep -Eq '^[[:space:]]*URIs:[[:space:]]*https?://deb[.]debian[.]org/debian/?([[:space:]]|$)' "$source_path" \
+        && grep -Eq "^[[:space:]]*Suites:.*([[:space:]]|^)${codename}([[:space:]]|$)" "$source_path"; then
+        has_current_base=1
+    fi
+    if grep -Eq '^[[:space:]]*URIs:[[:space:]]*https?://security[.]debian[.]org/debian-security/?([[:space:]]|$)' "$source_path" \
+        && grep -Eq "^[[:space:]]*Suites:.*([[:space:]]|^)${codename}-security([[:space:]]|$)" "$source_path"; then
+        has_current_security=1
+    fi
+done
+
+if [ "$has_current_base" -eq 1 ] && [ "$has_current_security" -eq 1 ]; then
+    if [ -e "$managed_path" ]; then
+        grep -q '^# Managed by infra_tools' "$managed_path" || {
+            printf '%s\n' "infra_tools installer: refusing to remove unmanaged APT source $managed_path" >&2
+            exit 1
+        }
+        backup_path="$managed_path.infra_tools.bak"
+        [ -e "$backup_path" ] || cp -p "$managed_path" "$backup_path"
+        rm -f "$managed_path"
+        printf '%s\n' "Removed redundant infra_tools APT source; existing Debian sources already cover $codename."
+    fi
+    exit 0
+fi
+
 temporary_path="$managed_path.new.$$"
-cat > "$temporary_path" <<SOURCE
-# Managed by infra_tools. Do not edit; rerun infra_tools after a Debian release change.
+printf '%s\n' '# Managed by infra_tools. Do not edit; rerun infra_tools after a Debian release change.' > "$temporary_path"
+if [ "$has_current_base" -eq 0 ]; then
+    cat >> "$temporary_path" <<SOURCE
+
 Types: deb
 URIs: https://deb.debian.org/debian
 Suites: $codename $codename-updates
 Components: main non-free-firmware
 Signed-By: $keyring
+SOURCE
+fi
+if [ "$has_current_security" -eq 0 ]; then
+    cat >> "$temporary_path" <<SOURCE
 
 Types: deb
 URIs: https://security.debian.org/debian-security
@@ -368,6 +417,7 @@ Suites: $codename-security
 Components: main non-free-firmware
 Signed-By: $keyring
 SOURCE
+fi
 chmod 0644 "$temporary_path"
 
 if [ -e "$managed_path" ]; then

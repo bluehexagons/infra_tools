@@ -439,6 +439,9 @@ def _ensure_managed_sources(
     apt_dir: str,
     codename: str,
     components: tuple[str, ...],
+    *,
+    include_base: bool = True,
+    include_security: bool = True,
 ) -> bool:
     source_dir = os.path.join(apt_dir, "sources.list.d")
     os.makedirs(source_dir, mode=0o755, exist_ok=True)
@@ -447,19 +450,26 @@ def _ensure_managed_sources(
     if keyring is None:
         raise RuntimeError("Debian archive keyring is unavailable")
     component_text = " ".join(components)
-    content = f"""{MANAGED_SOURCE_MARKER}. Do not edit; rerun infra_tools after a Debian release change.
-Types: deb
+    stanzas = [
+        f"{MANAGED_SOURCE_MARKER}. Do not edit; rerun infra_tools after a Debian release change."
+    ]
+    if include_base:
+        stanzas.append(
+            f"""Types: deb
 URIs: {OFFICIAL_DEBIAN_MIRROR}
 Suites: {codename} {codename}-updates
 Components: {component_text}
-Signed-By: {keyring}
-
-Types: deb
+Signed-By: {keyring}"""
+        )
+    if include_security:
+        stanzas.append(
+            f"""Types: deb
 URIs: {OFFICIAL_DEBIAN_SECURITY_MIRROR}
 Suites: {codename}-security
 Components: {component_text}
-Signed-By: {keyring}
-"""
+Signed-By: {keyring}"""
+        )
+    content = "\n\n".join(stanzas) + "\n"
 
     if os.path.exists(path):
         with open(path, encoding="utf-8") as file_obj:
@@ -472,6 +482,44 @@ Signed-By: {keyring}
             return False
         _backup_file(path)
     _write_text_atomically(path, content)
+    return True
+
+
+def _remove_redundant_managed_source(
+    apt_dir: str,
+    status: AptSourceStatus,
+) -> bool:
+    """Remove our source file when other official sources already cover both suites."""
+
+    path = _managed_source_path(apt_dir)
+    if not os.path.isfile(path):
+        return False
+    try:
+        with open(path, encoding="utf-8") as file_obj:
+            managed_content = file_obj.read()
+    except OSError:
+        return False
+    if MANAGED_SOURCE_MARKER not in managed_content:
+        return False
+
+    other_entries = tuple(entry for entry in status.entries if entry.path != path)
+    has_base = any(
+        _is_official_base_uri(entry.uri)
+        and entry.suite == status.codename
+        and "main" in {component.lower() for component in entry.components}
+        for entry in other_entries
+    )
+    has_security = any(
+        _is_official_security_uri(entry.uri)
+        and entry.suite == f"{status.codename}-security"
+        and "main" in {component.lower() for component in entry.components}
+        for entry in other_entries
+    )
+    if not (has_base and has_security):
+        return False
+
+    _backup_file(path)
+    os.unlink(path)
     return True
 
 
@@ -499,9 +547,21 @@ def ensure_debian_package_sources(
     disabled_paths = _disable_cdrom_sources(apt_dir)
     stale_paths = _disable_stale_official_sources(apt_dir, codename)
     status = inspect_apt_sources(codename, apt_dir)
+    removed_redundant_managed_source = _remove_redundant_managed_source(
+        apt_dir,
+        status,
+    )
+    if removed_redundant_managed_source:
+        status = inspect_apt_sources(codename, apt_dir)
     added_managed_sources = False
     if not status.has_official_base or not status.has_official_security:
-        added_managed_sources = _ensure_managed_sources(apt_dir, codename, components)
+        added_managed_sources = _ensure_managed_sources(
+            apt_dir,
+            codename,
+            components,
+            include_base=not status.has_official_base,
+            include_security=not status.has_official_security,
+        )
         status = inspect_apt_sources(codename, apt_dir)
 
     if status.cdrom_sources:
@@ -518,6 +578,8 @@ def ensure_debian_package_sources(
         print("  ✓ Disabled CD-ROM-only APT sources")
     if stale_paths:
         print("  ✓ Disabled stale official Debian APT sources")
+    if removed_redundant_managed_source:
+        print("  ✓ Removed redundant infra_tools Debian APT source")
     if added_managed_sources:
         print(f"  ✓ Added official Debian {codename} APT sources")
     else:

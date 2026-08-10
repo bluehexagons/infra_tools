@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import shutil
 
 from lib.maintenance_systemd import configure_maintenance_timer
 from lib.config import SetupConfig
@@ -261,6 +262,16 @@ AllowGroups remoteusers
         print("  [DRY-RUN] Would apply the managed SSH hardening drop-in")
         return
 
+    sshd_path = shutil.which("sshd")
+    if sshd_path is None:
+        for candidate in ("/usr/sbin/sshd", "/usr/lib/openssh/sshd"):
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                sshd_path = candidate
+                break
+    if sshd_path is None:
+        print("  ✓ Skipping SSH hardening (openssh-server is not installed)")
+        return
+
     os.makedirs(_SSHD_DROPIN_DIR, exist_ok=True)
 
     existing: str | None = None
@@ -280,7 +291,7 @@ AllowGroups remoteusers
 
     # Validate the resulting config before reloading so we do not lock out
     # access if a future change introduces a typo.
-    validate = run("sshd -t", check=False)
+    validate = run(f"{shlex.quote(sshd_path)} -t", check=False)
     if validate.returncode != 0:
         try:
             if existing is None:
