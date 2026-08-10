@@ -93,6 +93,7 @@ infra_tools proxmox ...
 | Flag | Description |
 |------|-------------|
 | `--rdp` / `--no-rdp` | Enable or disable XRDP |
+| `--rdp-existing-password` | Local setup only: reuse the existing password of an existing non-root desktop account without putting it in process arguments |
 | `--rdp-bind-address IP` | Bind XRDP to one local IP; defaults to all IPv4 interfaces (`0.0.0.0`) |
 | `--rdp-source IP_OR_CIDR` | Restrict UFW RDP ingress to a source; repeatable |
 | `--rdp-clipboard` / `--no-rdp-clipboard` | Control clipboard redirection; enabled by default |
@@ -173,6 +174,16 @@ run it immediately:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
   sudo sh -s -- --user "$USER" --local-setup control_plane --agent-suite terminal
+```
+
+For a standard Debian GNOME desktop, keep GNOME for local logins, add XFCE
+for XRDP sessions, and install the graphical agent suite with:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
+  sudo sh -s -- --user "$USER" \
+  --local-setup workstation_dev --control-plane --agent-suite desktop \
+  --desktop xfce --rdp --rdp-existing-password
 ```
 
 | Flag | Description |

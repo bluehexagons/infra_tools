@@ -203,6 +203,12 @@ infra_tools setup workstation_dev 10.0.0.25 agent \
   --rdp-source 100.64.0.0/10
 ```
 
+For a local setup of an already-existing desktop account, use
+`--rdp-existing-password` with `--rdp` instead of `--password`; it reuses the
+account's existing Unix password without exposing it in process arguments.
+That option is rejected for remote targets and for accounts that do not yet
+exist.
+
 The firewall adds replacement source rules before removing global or stale
 infra_tools-managed RDP rules. Rules carry `infra_tools RDP` comments so reruns
 can reconcile them without deleting operator-owned UFW entries. Omitting all

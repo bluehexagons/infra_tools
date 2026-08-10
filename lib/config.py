@@ -183,6 +183,7 @@ class SetupConfig:
     friendly_name: MaybeStr = None
     tags: Optional[StrList] = None
     enable_rdp: bool = False
+    rdp_existing_password: bool = False
     rdp_bind_address: str = "0.0.0.0"
     rdp_allowed_sources: Optional[StrList] = None
     rdp_clipboard: bool = True
@@ -343,6 +344,8 @@ class SetupConfig:
         
         if self.enable_rdp:
             args.append("--rdp")
+            if self.rdp_existing_password:
+                args.append("--rdp-existing-password")
             args.append(f"--rdp-bind-address {shlex.quote(self.rdp_bind_address)}")
             for source in self.rdp_allowed_sources or []:
                 args.append(f"--rdp-source {shlex.quote(source)}")
@@ -603,6 +606,8 @@ class SetupConfig:
         # Desktop/workstation flags
         if self.enable_rdp:
             cmd_parts.append("--rdp")
+            if self.rdp_existing_password:
+                cmd_parts.append("--rdp-existing-password")
             if self.rdp_bind_address != "0.0.0.0":
                 cmd_parts.append(
                     f"--rdp-bind-address {shlex.quote(self.rdp_bind_address)}"
@@ -988,6 +993,7 @@ class SetupConfig:
             friendly_name=getattr(args, 'friendly_name', None),
             tags=tags,
             enable_rdp=enable_rdp,
+            rdp_existing_password=getattr(args, 'rdp_existing_password', False),
             rdp_bind_address=getattr(args, 'rdp_bind_address', '0.0.0.0'),
             rdp_allowed_sources=getattr(args, 'rdp_allowed_sources', None),
             rdp_clipboard=getattr(args, 'rdp_clipboard', True),

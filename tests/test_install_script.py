@@ -269,6 +269,8 @@ class TestInstallScript(unittest.TestCase):
                     "desktop",
                     "--desktop",
                     "xfce",
+                    "--rdp",
+                    "--rdp-existing-password",
                     "--dry-run",
                 ],
                 check=False,
@@ -292,6 +294,8 @@ class TestInstallScript(unittest.TestCase):
                     "desktop",
                     "--desktop",
                     "xfce",
+                    "--rdp",
+                    "--rdp-existing-password",
                     "--dry-run",
                 ],
             )

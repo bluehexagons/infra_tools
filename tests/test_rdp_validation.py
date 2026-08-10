@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -33,6 +34,56 @@ class TestValidateRdpSettings(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(ValueError, "--rdp requires --password"):
+            validate_rdp_settings(config)
+
+    def test_rdp_existing_password_accepts_existing_local_account(self) -> None:
+        config = SetupConfig(
+            host="localhost",
+            username="agent",
+            system_type="workstation_dev",
+            enable_rdp=True,
+            rdp_existing_password=True,
+        )
+
+        with patch("lib.validation.pwd.getpwnam", return_value=object()):
+            validate_rdp_settings(config)
+
+    def test_rdp_existing_password_rejects_missing_local_account(self) -> None:
+        config = SetupConfig(
+            host="localhost",
+            username="agent",
+            system_type="workstation_dev",
+            enable_rdp=True,
+            rdp_existing_password=True,
+        )
+
+        with patch("lib.validation.pwd.getpwnam", side_effect=KeyError("agent")):
+            with self.assertRaisesRegex(ValueError, "existing local desktop account"):
+                validate_rdp_settings(config)
+
+    def test_rdp_existing_password_is_local_only(self) -> None:
+        config = SetupConfig(
+            host="agent-vm",
+            username="agent",
+            system_type="workstation_dev",
+            enable_rdp=True,
+            rdp_existing_password=True,
+        )
+
+        with self.assertRaisesRegex(ValueError, "local setup target"):
+            validate_rdp_settings(config)
+
+    def test_rdp_existing_password_cannot_be_combined_with_password(self) -> None:
+        config = SetupConfig(
+            host="localhost",
+            username="agent",
+            system_type="workstation_dev",
+            enable_rdp=True,
+            rdp_existing_password=True,
+            password="secret",
+        )
+
+        with self.assertRaisesRegex(ValueError, "cannot be combined"):
             validate_rdp_settings(config)
 
     def test_rdp_accepts_a_non_root_user_with_password(self) -> None:

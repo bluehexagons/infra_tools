@@ -201,22 +201,26 @@ def _run_main() -> int:
         preflight_antistatic_releases(config)
         sys.stdout.flush()
     
-    # Save machine state for services to reference
-    save_machine_state(
-        machine_type=config.machine_type,
-        system_type=config.system_type,
-        username=config.username
-    )
+    # Save machine state and setup configuration only after a real setup.
+    # Keep the preflight state-free so dry-run planning does not overwrite the
+    # target's remembered setup before any steps have executed.
     print(f"Machine type: {config.machine_type}")
     sys.stdout.flush()
-    
-    # Save setup configuration for later recall
-    try:
-        config_dict = config.to_dict()
-        config_dict['system_type'] = config.system_type
-        save_setup_config(config_dict)
-    except OSError as e:
-        print(f"Warning: Failed to save setup configuration: {e}", file=sys.stderr)
+
+    if not args.dry_run:
+        save_machine_state(
+            machine_type=config.machine_type,
+            system_type=config.system_type,
+            username=config.username
+        )
+
+        # Save setup configuration for later recall
+        try:
+            config_dict = config.to_dict()
+            config_dict['system_type'] = config.system_type
+            save_setup_config(config_dict)
+        except OSError as e:
+            print(f"Warning: Failed to save setup configuration: {e}", file=sys.stderr)
     
     # Clean up all previously deployed services to ensure clean state.
     # This treats the current deployment command as the desired baseline.

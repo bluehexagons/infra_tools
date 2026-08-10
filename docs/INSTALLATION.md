@@ -108,23 +108,34 @@ Add `--copy-config`, `--copy-keys`, or repeat `--repo GIT_URL` when the control
 plane should receive selected agent configuration, credentials, or local agent
 repositories. These options are deliberately opt-in.
 
-For a standard Debian desktop, add the control-plane tools to the desktop
-developer profile. This keeps the existing graphical desktop and adds the same
-administration bundle plus the desktop agent tools:
+For a standard Debian desktop installed with the Debian installer's default
+GNOME desktop, use the following complete control-plane example. It keeps GNOME
+available for local console logins, adds XFCE as the XRDP session desktop, and
+installs the desktop agent suite (Codex CLI, Claude Code, OpenCode, GitHub CLI,
+common coding tools, and T3 Code where supported):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
   sudo sh -s -- --user "$USER" \
   --local-setup workstation_dev --control-plane \
-  --agent-suite desktop --desktop xfce
+  --agent-suite desktop --desktop xfce \
+  --rdp --rdp-existing-password
 ```
 
 Use `--agent-suite terminal` on a headless host, `desktop` when a graphical
 agent is wanted, or `full` when Node.js, Python tooling, and Go are also needed.
 The example selects XFCE explicitly; use `--desktop i3`, `--desktop cinnamon`,
-or `--desktop lxqt` when another supported session is preferred. Add `--rdp`
-and a trusted `--rdp-source` only when remote graphical login is required; RDP
-also requires a non-root setup user's password.
+or `--desktop lxqt` when another supported session is preferred. The
+`--rdp-existing-password` option is local-only: it reuses the password already
+set for the existing `--user`, does not place a secret in the command line, and
+does not create or reset that password. For a new account or any remote target,
+provide `--password` through a secure secret source instead. Add one or more
+trusted `--rdp-source IP_OR_CIDR` options when the address range is known; this
+is preferable to exposing RDP to every interface.
+
+The setup does not select a new display manager or change the GNOME session.
+After the first reboot, the local console continues to use the existing GNOME
+login, while RDP connections start the separately installed XFCE session.
 
 The equivalent explicit form remains available when more control is needed:
 

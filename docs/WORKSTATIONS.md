@@ -11,12 +11,14 @@ profile with `--control-plane`:
 curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
   sudo sh -s -- --user "$USER" \
   --local-setup workstation_dev --control-plane --agent-suite desktop \
-  --desktop xfce
+  --desktop xfce --rdp --rdp-existing-password
 ```
 
 This keeps the graphical workstation setup while adding the SSH, rsync,
 diagnostic, terminal, and package-management tools used to administer other
-VMs and containers. Use `--agent-suite terminal` if no graphical agents are
+VMs and containers. It assumes the standard Debian GNOME desktop and existing
+local account password: GNOME remains the console desktop, while XFCE is used
+for XRDP sessions. Use `--agent-suite terminal` if no graphical agents are
 needed, or `full` for the additional language runtimes.
 
 ## Profiles
@@ -117,10 +119,15 @@ software-rendered xorgxrdp display, so changing the Proxmox emulated graphics
 card does not accelerate the remote session. The complete host-side settings
 and CPU/migration tradeoffs are in [`PROXMOX.md`](./PROXMOX.md).
 
-RDP logins use the setup user's Unix password, so `--rdp` requires a non-root
-`--password`. Prefer a secret-sourced environment variable such as
-`--password "$RDP_PASSWORD"`; passwords are not written to saved setup state.
-Legacy state containing this field is sanitized when it is loaded.
+RDP logins use the setup user's Unix password. Remote setups and setups that
+create a user require a non-root `--password`; prefer a secret-sourced
+environment variable such as `--password "$RDP_PASSWORD"`. For local setup of
+an existing desktop account, `--rdp-existing-password` reuses the password
+already configured for that account without exposing it in process arguments.
+It cannot be combined with `--password`, cannot be used for a remote target,
+and does not set or change the account password. Passwords are not written to
+saved setup state. Legacy state containing this field is sanitized when it is
+loaded.
 
 Use repeatable `--rdp-source IP_OR_CIDR` flags to restrict UFW ingress to the
 trusted LAN, management network, or VPN clients that should connect. Without

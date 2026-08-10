@@ -173,6 +173,11 @@ def add_setup_arguments(
                        default=None if not for_remote else False,
                        help="Enable RDP/XRDP setup" + ("" if for_remote else " (default: disabled)"))
     parser.add_argument(
+        "--rdp-existing-password",
+        action="store_true",
+        help="For a local setup, use the existing password of the existing desktop account without exposing it on the command line",
+    )
+    parser.add_argument(
         "--rdp-bind-address",
         default="0.0.0.0",
         metavar="IP",
@@ -233,7 +238,7 @@ def add_setup_arguments(
     )
     parser.add_argument("--desktop", choices=["xfce", "i3", "cinnamon", "lxqt"], 
                        default="xfce" if for_remote else None,
-                       help="Desktop environment to install (default: xfce)")
+                       help="Desktop environment to install for setup/RDP sessions (default: xfce; an existing local GNOME desktop is left unchanged)")
     parser.add_argument("--browser", dest="browsers", 
                        action="append",
                        choices=["brave", "firefox", "browsh", "helium", "lynx", "librewolf"], 

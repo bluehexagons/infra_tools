@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 import os
+import pwd
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional, cast
@@ -1053,10 +1054,14 @@ def validate_rdp_settings(config: Any) -> None:
     """Validate credentials and network policy required for xRDP.
 
     xRDP authenticates against the Unix account password. Hosted cloud images
-    are deliberately provisioned key-only, so accepting ``--rdp`` without a
-    password produces a desktop that can never be logged into.
+    are deliberately provisioned key-only, so remote or newly-created desktop
+    accounts must receive a password. A local setup may explicitly reuse the
+    password of an already-existing account.
     """
+    use_existing_password = bool(getattr(config, "rdp_existing_password", False))
     if not getattr(config, "enable_rdp", False):
+        if use_existing_password:
+            raise ValueError("--rdp-existing-password requires --rdp")
         has_rdp_policy = bool(getattr(config, "rdp_allowed_sources", None)) or any(
             (
                 getattr(config, "rdp_bind_address", "0.0.0.0") != "0.0.0.0",
@@ -1078,9 +1083,22 @@ def validate_rdp_settings(config: Any) -> None:
         raise ValueError("--rdp cannot be used with the root account")
 
     password = getattr(config, "password", None)
-    if not isinstance(password, str) or not password.strip():
-        raise ValueError("--rdp requires --password for the desktop login account")
-    _validate_no_control_characters(password, "RDP password")
+    if use_existing_password:
+        local_hosts = {"localhost", "127.0.0.1", "::1"}
+        if str(getattr(config, "host", "")).strip().lower() not in local_hosts:
+            raise ValueError("--rdp-existing-password requires a local setup target")
+        if password is not None:
+            raise ValueError("--rdp-existing-password cannot be combined with --password")
+        try:
+            pwd.getpwnam(username)
+        except KeyError as exc:
+            raise ValueError(
+                "--rdp-existing-password requires an existing local desktop account"
+            ) from exc
+    else:
+        if not isinstance(password, str) or not password.strip():
+            raise ValueError("--rdp requires --password for the desktop login account")
+        _validate_no_control_characters(password, "RDP password")
 
     bind_address = getattr(config, "rdp_bind_address", "0.0.0.0")
     if not isinstance(bind_address, str):

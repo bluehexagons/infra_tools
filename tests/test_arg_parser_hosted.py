@@ -164,6 +164,14 @@ class TestHostedFlagParsing(unittest.TestCase):
         self.assertEqual(args.rdp_disconnected_timeout, 86400)
         self.assertEqual(args.rdp_idle_timeout, 14400)
 
+    def test_rdp_existing_password_flag(self):
+        args = self.parser.parse_args([
+            "10.0.0.50",
+            "--rdp",
+            "--rdp-existing-password",
+        ])
+        self.assertTrue(args.rdp_existing_password)
+
     def test_antistatic_flags(self):
         args = self.parser.parse_args([
             "10.0.0.50",

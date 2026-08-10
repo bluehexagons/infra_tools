@@ -21,12 +21,15 @@ infra_tools setup server_web example.com admin \
   --deploy example.com https://github.com/user/repo.git
 ```
 
-To turn the local Debian machine into a control plane for managing other VMs
-and containers, use the installer handoff:
+To turn a standard Debian GNOME desktop into a control plane for managing other
+VMs and containers, keep GNOME for local logins, add XFCE for RDP, and install
+the desktop agent suite with the installer handoff:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
-  sudo sh -s -- --user "$USER" --local-setup control_plane --agent-suite terminal
+  sudo sh -s -- --user "$USER" \
+  --local-setup workstation_dev --control-plane --agent-suite desktop \
+  --desktop xfce --rdp --rdp-existing-password
 ```
 
 The [installation guide](docs/INSTALLATION.md) covers bootstrap, requirements,

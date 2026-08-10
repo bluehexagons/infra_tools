@@ -23,6 +23,7 @@ class TestSetupConfigDefaults(unittest.TestCase):
         self.assertEqual(config.machine_type, DEFAULT_MACHINE_TYPE)
         self.assertEqual(config.timezone, 'UTC')
         self.assertFalse(config.enable_rdp)
+        self.assertFalse(config.rdp_existing_password)
         self.assertEqual(config.rdp_bind_address, '0.0.0.0')
         self.assertIsNone(config.rdp_allowed_sources)
         self.assertTrue(config.rdp_clipboard)
@@ -137,6 +138,11 @@ class TestSetupConfigToRemoteArgs(unittest.TestCase):
         args = config.to_remote_args()
         self.assertIn('--rdp', args)
         self.assertIn('--rdp-bind-address 0.0.0.0', args)
+
+    def test_rdp_existing_password_flag(self):
+        config = self._make_config(enable_rdp=True, rdp_existing_password=True)
+        args = config.to_remote_args()
+        self.assertIn('--rdp-existing-password', args)
 
     def test_rdp_policy_args(self):
         config = self._make_config(
@@ -412,6 +418,16 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
         self.assertIn('--rdp-disconnected-timeout 86400', cmd)
         self.assertIn('--rdp-idle-timeout 14400', cmd)
 
+    def test_rdp_existing_password_is_included_without_a_secret(self):
+        config = self._make_config(
+            enable_rdp=True,
+            rdp_existing_password=True,
+            password=None,
+        )
+        cmd = ' '.join(config.to_setup_command())
+        self.assertIn('--rdp-existing-password', cmd)
+        self.assertNotIn('--password', cmd)
+
     def test_share_credentials_redacted_for_username_only_shares(self):
         config = self._make_config(
             share_credentials=[['user1', 'secret1']],
@@ -590,6 +606,13 @@ class TestSetupConfigFromArgs(unittest.TestCase):
         config = SetupConfig.from_args(self._make_args(enable_rdp=True), 'workstation_desktop')
         self.assertTrue(config.enable_rdp)
         self.assertTrue(config.include_desktop)
+
+    def test_workstation_rdp_can_reuse_existing_local_password(self):
+        config = SetupConfig.from_args(
+            self._make_args(enable_rdp=True, rdp_existing_password=True),
+            'workstation_desktop',
+        )
+        self.assertTrue(config.rdp_existing_password)
 
     def test_workstation_rdp_policy_from_args(self):
         config = SetupConfig.from_args(
