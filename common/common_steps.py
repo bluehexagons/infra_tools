@@ -209,6 +209,72 @@ def install_cli_tools(config: SetupConfig) -> None:
         print("  ⚠ Some CLI tools may not have installed correctly")
 
 
+CONTROL_PLANE_PACKAGES = (
+    "acl",
+    "bash-completion",
+    "bc",
+    "btop",
+    "ca-certificates",
+    "dnsutils",
+    "fd-find",
+    "file",
+    "findutils",
+    "fzf",
+    "git-lfs",
+    "iproute2",
+    "iputils-ping",
+    "jq",
+    "less",
+    "lsof",
+    "netcat-openbsd",
+    "neovim",
+    "openssh-client",
+    "procps",
+    "psmisc",
+    "ripgrep",
+    "rsync",
+    "shellcheck",
+    "tmux",
+    "tree",
+    "unzip",
+    "wget",
+    "zip",
+)
+
+
+def install_control_plane_tools(config: SetupConfig) -> None:
+    """Install common Debian administrator and Linux control-plane tools."""
+    if is_dry_run():
+        print(
+            "  [DRY-RUN] Would install control-plane tools: "
+            f"{', '.join(CONTROL_PLANE_PACKAGES)}"
+        )
+        return
+
+    missing = [
+        package
+        for package in CONTROL_PLANE_PACKAGES
+        if not is_package_installed(package)
+    ]
+    if not missing:
+        print("  ✓ Control-plane administrator tools already installed")
+        return
+
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
+    package_args = " ".join(shlex.quote(package) for package in missing)
+    result = run(f"apt-get install -y -qq {package_args}", check=False)
+    remaining = [
+        package
+        for package in missing
+        if not is_package_installed(package)
+    ]
+    if result.returncode != 0 or remaining:
+        failed = ", ".join(remaining or missing)
+        raise RuntimeError(f"Control-plane tool installation failed: {failed}")
+
+    print(f"  ✓ Installed control-plane tools: {', '.join(missing)}")
+
+
 def check_restart_required(config: SetupConfig) -> None:
     needs_restart = False
     

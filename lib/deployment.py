@@ -1091,7 +1091,7 @@ class DeploymentOrchestrator:
                     print(f"    • The database schema is out of sync with migration history")
                     print(f"\n  To fix this, redeploy with the --reset-migrations flag:")
                     print(
-                        "    python3 infra_tools.py setup server_web <host> "
+                        "    infra_tools setup server_web <host> "
                         "--deploy <deploy-spec> <git-url> --reset-migrations"
                     )
                     print(f"\n  ⚠ WARNING: --reset-migrations will:")

@@ -255,6 +255,7 @@ class SetupConfig:
     vm_image: MaybeStr = None  # http(s) URL or 'storage:iso/file.qcow2'
     include_desktop: bool = False
     include_cli_tools: bool = False
+    include_control_plane_tools: bool = False
     include_desktop_apps: bool = False
     include_workstation_dev_apps: bool = False
     include_pc_dev_apps: bool = False
@@ -307,6 +308,8 @@ class SetupConfig:
         args.append(f"--system-type {shlex.quote(self.system_type)}")
         args.append(f"--username {shlex.quote(self.username)}")
         args.append(f"--machine {shlex.quote(self.machine_type)}")
+        if self.include_control_plane_tools:
+            args.append("--control-plane")
         
         if self.password:
             args.append(f"--password {shlex.quote(self.password)}")
@@ -534,7 +537,7 @@ class SetupConfig:
         Returns a list of command parts that can be joined with spaces or newlines.
         """
         cmd_parts: StrList = [
-            f"python3 infra_tools.py setup {shlex.quote(self.system_type)}",
+            f"infra_tools setup {shlex.quote(self.system_type)}",
             self.host,
         ]
         
@@ -582,6 +585,13 @@ class SetupConfig:
         )
         if self.machine_type != default_machine_type:
             cmd_parts.append(f"--machine {shlex.quote(self.machine_type)}")
+
+        system_type_defaults = get_system_type_definition(self.system_type)
+        if (
+            self.include_control_plane_tools
+            and not system_type_defaults.include_control_plane_tools
+        ):
+            cmd_parts.append("--control-plane")
         
         # Name and tags
         if self.friendly_name:
@@ -934,6 +944,10 @@ class SetupConfig:
             or enable_rdp
         )
         include_cli_tools = system_type_definition.include_cli_tools
+        include_control_plane_tools = (
+            system_type_definition.include_control_plane_tools
+            or bool(getattr(args, 'control_plane', False))
+        )
         include_desktop_apps = system_type_definition.include_desktop_apps
         include_workstation_dev_apps = system_type_definition.include_workstation_dev_apps
         include_pc_dev_apps = system_type_definition.include_pc_dev_apps
@@ -1045,6 +1059,7 @@ class SetupConfig:
             vm_image=getattr(args, 'vm_image', None),
             include_desktop=include_desktop,
             include_cli_tools=include_cli_tools,
+            include_control_plane_tools=include_control_plane_tools,
             include_desktop_apps=include_desktop_apps,
             include_workstation_dev_apps=include_workstation_dev_apps,
             include_pc_dev_apps=include_pc_dev_apps,

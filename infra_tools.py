@@ -7,11 +7,12 @@ This script provides a unified interface to all infra_tools functionality,
 combining setup and patch operations into a single command-line tool.
 
 Usage:
-    infra_tools.py setup <system_type> <host> [options]
-    infra_tools.py patch <host> [options]
-    infra_tools.py --help
+    infra_tools setup <system_type> <host> [options]
+    infra_tools patch <host> [options]
+    infra_tools --help
 
 System Types:
+    control_plane         Infrastructure control plane setup
     workstation_desktop  Desktop workstation setup
     pc_dev              PC development environment
     workstation_dev     Developer workstation setup
@@ -113,7 +114,7 @@ def _build_infra_tools_epilog() -> str:
     deploy <pattern>            Redeploy saved configurations
     recall <host> [username]    Fetch or reconstruct a remote setup command
     reconstruct                 Analyze this host and emit a setup summary
-    completions                 Install shell completion for infra_tools.py
+    completions                 Install shell completion for infra_tools
     python-tools                Install local Python aliases, uv, and completion
     bootstrap                   Install packages, launcher, and completions (alias: self-setup)
     channel [CHANNEL]           Show or switch the installed source channel
@@ -144,14 +145,14 @@ System Types for setup:
 {format_system_type_help()}
 
 Examples:
-  infra_tools.py setup server_web 192.168.1.100 admin --ssl
-  infra_tools.py patch 192.168.1.100 --deploy api.example.com https://github.com/user/api.git
-  infra_tools.py shares 192.168.1.100 --share write media /srv/media alice,bob
-  infra_tools.py list prod
-  infra_tools.py deploy prod --yes
-  infra_tools.py recall example.com admin
-  infra_tools.py completions --shell zsh
-  sudo python3 infra_tools.py self-setup --user admin
+  infra_tools setup server_web 192.168.1.100 admin --ssl
+  infra_tools patch 192.168.1.100 --deploy api.example.com https://github.com/user/api.git
+  infra_tools shares 192.168.1.100 --share write media /srv/media alice,bob
+  infra_tools list prod
+  infra_tools deploy prod --yes
+  infra_tools recall example.com admin
+  infra_tools completions --shell zsh
+  sudo infra_tools self-setup --user admin
   infra_tools list prod    # after self-setup, the launcher is on PATH
  """
 
@@ -207,7 +208,7 @@ def run_tool_upgrade_command(args: argparse.Namespace | None = None) -> int:
 def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.ArgumentParser, argparse.ArgumentParser]:
     """Create the main argument parser for infra_tools."""
     parser = argparse.ArgumentParser(
-        prog="infra_tools.py",
+        prog="infra_tools",
         description="Unified infrastructure setup and management tool",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=_build_infra_tools_epilog()
@@ -224,7 +225,7 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
         "setup",
         help="Run initial setup for a system type",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="Run 'infra_tools.py setup --help' for full options"
+        epilog="Run 'infra_tools setup --help' for full options"
     )
     add_setup_arguments(setup_parser, allow_steps=True, include_system_type=True)
     
@@ -233,7 +234,7 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
         "patch",
         help="Patch/update an existing system",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="Run 'infra_tools.py patch --help' for full options"
+        epilog="Run 'infra_tools patch --help' for full options"
     )
     patch_parser.add_argument(
         "host",
@@ -369,7 +370,7 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
 
     completions_parser = subparsers.add_parser(
         "completions",
-        help="Install shell completion for infra_tools.py",
+        help="Install shell completion for infra_tools",
     )
     completions_parser.add_argument(
         "--shell",
@@ -1082,7 +1083,7 @@ def run_patch_command(args: argparse.Namespace) -> int:
     cached_config = load_setup_command(args.host)
     if not cached_config:
         print(f"Error: No cached setup found for {args.host}")
-        print(f"Please run the initial setup first using 'infra_tools.py setup <system_type> {args.host}'")
+        print(f"Please run the initial setup first using 'infra_tools setup <system_type> {args.host}'")
         return 1
     
     new_config = SetupConfig.from_args(args, cached_config.system_type)

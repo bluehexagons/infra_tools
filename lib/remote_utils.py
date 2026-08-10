@@ -146,17 +146,41 @@ def _requires_shell(cmd: str) -> bool:
     return any(token in stripped for token in shell_metacharacters)
 
 
-def detect_os() -> None:
+SUPPORTED_OS_IDS = {"debian", "ubuntu", "linuxmint"}
+
+
+def read_os_release(path: str = "/etc/os-release") -> dict[str, str]:
+    """Read the small KEY=VALUE format used by Linux ``os-release`` files."""
+    values: dict[str, str] = {}
+    with open(path, encoding="utf-8") as file_obj:
+        for line in file_obj:
+            key, separator, value = line.partition("=")
+            if not separator or not key or key.strip() != key:
+                continue
+            values[key] = value.strip().strip('"').strip("'")
+    return values
+
+
+def detect_os() -> str:
     try:
-        with open("/etc/os-release") as f:
-            content = f.read().lower()
+        release = read_os_release()
     except FileNotFoundError:
         print("Error: Cannot detect OS - /etc/os-release not found")
         sys.exit(1)
 
-    if "debian" not in content:
-        print("Error: Unsupported OS (only Debian is supported)")
+    distro_id = release.get("ID", "").lower()
+    if distro_id not in SUPPORTED_OS_IDS:
+        print(
+            "Error: Unsupported OS (Debian is officially supported; "
+            "Ubuntu and Linux Mint are best-effort)"
+        )
         sys.exit(1)
+
+    return {
+        "debian": "Debian",
+        "ubuntu": "Ubuntu (Debian-compatible)",
+        "linuxmint": "Linux Mint (Ubuntu/Debian-compatible)",
+    }[distro_id]
 
 
 def is_package_installed(package: str) -> bool:

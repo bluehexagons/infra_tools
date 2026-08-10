@@ -338,7 +338,7 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
     def test_basic_command(self):
         config = self._make_config()
         parts = config.to_setup_command()
-        self.assertIn('python3 infra_tools.py setup server_lite', parts[0])
+        self.assertIn('infra_tools setup server_lite', parts[0])
         self.assertIn('testhost', parts)
 
     def test_includes_username(self):
@@ -531,6 +531,7 @@ class TestSetupConfigFromArgs(unittest.TestCase):
             auto_restart_force_days=None,
             auto_restart_grace=None,
             machine_type=None,
+            control_plane=False,
             password=None,
             ssh_key=None,
             friendly_name=None,
@@ -634,6 +635,14 @@ class TestSetupConfigFromArgs(unittest.TestCase):
     def test_server_lite_defaults_to_auto_detection(self):
         config = SetupConfig.from_args(self._make_args(), 'server_lite')
         self.assertEqual(config.machine_type, 'auto')
+
+    def test_control_plane_flag_enables_administrator_tools(self):
+        config = SetupConfig.from_args(
+            self._make_args(control_plane=True),
+            'workstation_dev',
+        )
+        self.assertTrue(config.include_control_plane_tools)
+        self.assertTrue(config.include_desktop)
 
     def test_custom_steps_defaults_to_auto_detection(self):
         config = SetupConfig.from_args(

@@ -4,6 +4,20 @@ The workstation system types build a Debian desktop from the same
 machine-aware setup pipeline used for servers. Choose a profile first, then
 override the desktop, browser, or application choices with flags.
 
+To use a Debian desktop as the local control plane, combine the workstation
+profile with `--control-plane`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
+  sudo sh -s -- --user "$USER" \
+  --local-setup workstation_dev --control-plane --agent-suite desktop
+```
+
+This keeps the graphical workstation setup while adding the SSH, rsync,
+diagnostic, terminal, and package-management tools used to administer other
+VMs and containers. Use `--agent-suite terminal` if no graphical agents are
+needed, or `full` for the additional language runtimes.
+
 ## Profiles
 
 | Profile | Adds by default |

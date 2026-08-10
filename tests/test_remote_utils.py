@@ -19,6 +19,7 @@ from lib.remote_utils import (
     generate_password,
     run,
     file_contains,
+    detect_os,
 )
 from lib.validators import validate_username
 
@@ -132,6 +133,25 @@ class TestRemoteValidateUsername(unittest.TestCase):
 
     def test_invalid(self):
         self.assertFalse(validate_username('Admin'))
+
+
+class TestDetectOS(unittest.TestCase):
+    @patch("lib.remote_utils.read_os_release", return_value={"ID": "debian"})
+    def test_accepts_debian(self, _mock_read):
+        self.assertEqual(detect_os(), "Debian")
+
+    @patch("lib.remote_utils.read_os_release", return_value={"ID": "ubuntu"})
+    def test_accepts_ubuntu_as_best_effort(self, _mock_read):
+        self.assertIn("Ubuntu", detect_os())
+
+    @patch("lib.remote_utils.read_os_release", return_value={"ID": "linuxmint"})
+    def test_accepts_linux_mint_as_best_effort(self, _mock_read):
+        self.assertIn("Linux Mint", detect_os())
+
+    @patch("lib.remote_utils.read_os_release", return_value={"ID": "fedora"})
+    def test_rejects_other_distributions(self, _mock_read):
+        with self.assertRaises(SystemExit):
+            detect_os()
 
 
 class TestGeneratePassword(unittest.TestCase):

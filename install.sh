@@ -13,6 +13,7 @@ INSTALL_DIR=""
 TARGET_USER=""
 SHELL_NAME=""
 RUN_SETUP=0
+LOCAL_SETUP_REQUESTED=0
 
 usage() {
     cat <<'EOF'
@@ -21,6 +22,7 @@ Install or update infra_tools from a managed Git worktree.
 Usage:
   install.sh [options]
   install.sh [options] --setup SYSTEM_TYPE HOST [USERNAME] [SETUP_OPTIONS...]
+  install.sh [options] --local-setup SYSTEM_TYPE [SETUP_OPTIONS...]
 
 Options:
   --channel CHANNEL     stable, dev, v[version], branch-[branch], or commit-[hash]
@@ -31,6 +33,8 @@ Options:
   --user USER          User receiving local tools and completions
   --shell SHELL        bash, zsh, fish, or tcsh (default: target user's shell)
   --setup ...          Run `infra_tools setup ...` after installation
+  --local-setup TYPE   Run `infra_tools setup TYPE localhost USER` after installation
+                       (the target user comes from --user or the invoking user)
   -h, --help           Show this help
 
 Examples:
@@ -42,6 +46,8 @@ Examples:
     sudo sh -s -- --user "$USER"
   curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
     sh -s -- --setup server_dev localhost "$USER" --machine hardware --agent-suite terminal
+  curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
+    sudo sh -s -- --user "$USER" --local-setup control_plane --agent-suite terminal
   curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
     sudo sh -s -- --user "$USER" --setup server_proxmox 10.0.0.10 root --key /home/me/.ssh/id_ed25519
 EOF
@@ -95,6 +101,15 @@ validate_channel() {
             esac
             ;;
         *) fail "invalid --channel value: $CHANNEL" ;;
+    esac
+}
+
+validate_host_os() {
+    [ -r /etc/os-release ] || fail "cannot detect host distribution: /etc/os-release is missing"
+    distro_id=$(sed -n 's/^ID=//p' /etc/os-release | sed 's/^"//; s/"$//' | head -n 1)
+    case "$distro_id" in
+        debian|ubuntu|linuxmint) ;;
+        *) fail "unsupported host distribution: ${distro_id:-unknown}; Debian is officially supported (Ubuntu and Linux Mint are best-effort)" ;;
     esac
 }
 
@@ -167,6 +182,12 @@ while [ "$#" -gt 0 ]; do
             shift
             break
             ;;
+        --local-setup)
+            RUN_SETUP=1
+            LOCAL_SETUP_REQUESTED=1
+            shift
+            break
+            ;;
         -h|--help)
             usage
             exit 0
@@ -178,9 +199,13 @@ while [ "$#" -gt 0 ]; do
 done
 
 validate_channel
+validate_host_os
 
-if [ "$RUN_SETUP" -eq 1 ] && [ "$#" -lt 2 ]; then
+if [ "$RUN_SETUP" -eq 1 ] && [ "$LOCAL_SETUP_REQUESTED" -eq 0 ] && [ "$#" -lt 2 ]; then
     fail "--setup requires at least SYSTEM_TYPE and HOST"
+fi
+if [ "$LOCAL_SETUP_REQUESTED" -eq 1 ] && [ "$#" -lt 1 ]; then
+    fail "--local-setup requires SYSTEM_TYPE"
 fi
 
 CURRENT_USER=$(id -un)
@@ -225,7 +250,15 @@ case "$SHELL_NAME" in
 esac
 
 LOCAL_SETUP=0
-if [ "$RUN_SETUP" -eq 1 ]; then
+if [ "$LOCAL_SETUP_REQUESTED" -eq 1 ]; then
+    SETUP_SYSTEM_TYPE=$1
+    shift
+    set -- "$SETUP_SYSTEM_TYPE" localhost "$TARGET_USER" "$@"
+    LOCAL_SETUP=1
+    if [ "$(id -u)" -ne 0 ]; then
+        command -v sudo >/dev/null 2>&1 || fail "local setup requires sudo; install sudo or rerun the installer with sudo"
+    fi
+elif [ "$RUN_SETUP" -eq 1 ]; then
     case "$2" in
         localhost|127.0.0.1|::1) LOCAL_SETUP=1 ;;
     esac

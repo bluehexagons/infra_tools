@@ -121,6 +121,11 @@ def add_setup_arguments(
                        default=None,
                        help="Machine type override. Defaults to auto-detection "
                             "on the target; hosted Proxmox setup defaults to a VM.")
+    parser.add_argument(
+        "--control-plane",
+        action="store_true",
+        help="Install common administrator and Linux control-plane tools in addition to the selected profile",
+    )
     
     if not for_remote:
         parser.add_argument("--name", dest="friendly_name", help="Friendly name for this configuration")

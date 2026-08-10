@@ -190,8 +190,8 @@ def _run_main() -> int:
     print_setup_summary(config, f"Remote Setup ({config.system_type})")
     sys.stdout.flush()
 
-    detect_os()
-    print("OS: Debian")
+    detected_os = detect_os()
+    print(f"OS: {detected_os}")
     sys.stdout.flush()
 
     if config.antistatic_server or config.antistatic_db:

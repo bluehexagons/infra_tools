@@ -41,6 +41,7 @@ PLUGIN = PluginDefinition(
         "generate_ssh_key",
         "configure_time_sync",
         "install_cli_tools",
+        "install_control_plane_tools",
         "check_restart_required",
         "configure_auto_update_ruby",
         "configure_auto_update_gogs",
@@ -93,6 +94,19 @@ def get_cli_steps() -> list[tuple[str, StepFunc]]:
     from common.steps import install_cli_tools
 
     return [("Installing CLI tools", install_cli_tools)]
+
+
+def extend_control_plane_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -> None:
+    """Append the administrator-tool bundle for infrastructure control hosts."""
+
+    if not config.include_control_plane_tools:
+        return
+
+    from common.steps import install_control_plane_tools
+
+    steps.append(
+        ("Installing control-plane administrator tools", install_control_plane_tools)
+    )
 
 
 def get_final_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
@@ -206,6 +220,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         generate_ssh_key,
         install_apt_packages,
         install_cli_tools,
+        install_control_plane_tools,
         install_flatpak_packages,
         install_go,
         install_mail_utils,
@@ -251,6 +266,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "generate_ssh_key": generate_ssh_key,
         "configure_time_sync": configure_time_sync,
         "install_cli_tools": install_cli_tools,
+        "install_control_plane_tools": install_control_plane_tools,
         "check_restart_required": check_restart_required,
         "configure_auto_update_ruby": configure_auto_update_ruby,
         "configure_auto_update_gogs": configure_auto_update_gogs,

@@ -23,6 +23,11 @@ class TestWorkspaceCli(unittest.TestCase):
         args = parser.parse_args(["example.com", "--workspace", "/tmp/workspace"])
         self.assertEqual(args.workspace, "/tmp/workspace")
 
+    def test_setup_parser_accepts_control_plane_flag(self):
+        parser = create_setup_argument_parser("test")
+        args = parser.parse_args(["localhost", "--control-plane"])
+        self.assertTrue(args.control_plane)
+
     def test_infra_tools_parser_accepts_credentials_command(self):
         parser, _setup_parser, _patch_parser = infra_tools.create_infra_tools_parser()
         args = parser.parse_args(["credentials", "--workspace", "/tmp/workspace", "list"])
@@ -184,7 +189,7 @@ class TestWorkspaceCli(unittest.TestCase):
 
         command = infra_tools.reconstruct_command(config)
 
-        self.assertIn("python3 infra_tools.py setup server_lite", command)
+        self.assertIn("infra_tools setup server_lite", command)
         self.assertNotIn("setup_server_lite.py", command)
 
     @patch("builtins.print")

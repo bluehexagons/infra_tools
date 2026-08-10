@@ -287,6 +287,31 @@ class TestRunRemoteSetupArgumentSecurity(unittest.TestCase):
             self.assertEqual(result, 0)
             self.assertEqual(os.stat(install_dir).st_mode & 0o777, 0o755)
 
+    def test_local_setup_preserves_managed_git_worktree(self):
+        from lib import setup_common
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            managed_dir = os.path.join(temp_dir, "infra_tools")
+            os.makedirs(os.path.join(managed_dir, ".git"))
+            with open(os.path.join(managed_dir, "keep-me"), "w", encoding="utf-8") as file_obj:
+                file_obj.write("managed")
+
+            build_dir = os.path.join(temp_dir, "build")
+            os.makedirs(os.path.join(build_dir, "deployments"))
+            with open(os.path.join(build_dir, "deployments", "repo"), "w", encoding="utf-8") as file_obj:
+                file_obj.write("payload")
+            with open(os.path.join(build_dir, setup_common.REMOTE_ARGS_FILENAME), "w", encoding="utf-8") as file_obj:
+                file_obj.write("[]")
+
+            with patch.object(setup_common, "SCRIPT_DIR", os.path.join(managed_dir, "lib")), \
+                 patch.object(setup_common, "REMOTE_INSTALL_DIR", managed_dir):
+                setup_common._activate_local_runtime(build_dir)
+
+            self.assertTrue(os.path.isdir(os.path.join(managed_dir, ".git")))
+            self.assertTrue(os.path.isfile(os.path.join(managed_dir, "keep-me")))
+            self.assertTrue(os.path.isfile(os.path.join(managed_dir, "deployments", "repo")))
+            self.assertTrue(os.path.isfile(os.path.join(managed_dir, setup_common.REMOTE_ARGS_FILENAME)))
+
 
 class TestCloneRepository(unittest.TestCase):
     def test_repository_name_cannot_escape_work_directory(self):

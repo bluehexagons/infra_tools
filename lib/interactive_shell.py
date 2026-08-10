@@ -437,6 +437,7 @@ class InteractiveShell:
             "workstation_desktop",
             "server_web",
             "server_lite",
+            "control_plane",
         ]
         system_options = [
             (
@@ -478,6 +479,10 @@ class InteractiveShell:
             friendly_name=friendly_name,
             tags=tags,
         )
+
+        if system_type == "control_plane":
+            config.include_cli_tools = True
+            config.include_control_plane_tools = True
 
         if system_type in {"workstation_dev", "workstation_desktop"}:
             desktop_default = template.desktop if template else "xfce"

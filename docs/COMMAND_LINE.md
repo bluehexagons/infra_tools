@@ -51,6 +51,7 @@ infra_tools proxmox ...
 
 | Type | Description |
 |------|-------------|
+| `control_plane` | Debian infrastructure control plane with administrator tools |
 | `workstation_desktop` | Desktop workstation with GUI |
 | `workstation_dev` | Developer workstation |
 | `pc_dev` | PC development environment |
@@ -77,6 +78,7 @@ infra_tools proxmox ...
 | `--network-interface NAME` | Interface to configure; defaults to the interface carrying the default route |
 | `--workspace PATH` | Workspace root for config, credentials, known_hosts, and history |
 | `--machine TYPE` | Machine type override; defaults to `auto` on the target |
+| `--control-plane` | Add the common administrator/Linux tool bundle to any profile |
 | `--name NAME` | Friendly name for the configuration |
 | `--tags TAG1,TAG2` | Comma-separated tags |
 | `--image SOURCE` | VM qcow2 URL or Proxmox storage reference; used with `--machine vm` |
@@ -152,9 +154,10 @@ Selecting a language runtime also installs its managed update timer. See
 
 ### Agent VM Flags
 
-These flags prepare a Debian VM for agentic coding. They work with any setup
-type; `workstation_dev` is recommended when the agent needs a desktop/browser,
-and `server_dev` is the recommended terminal-only profile. `server_lite` omits
+These flags prepare a Debian VM or local control plane for agentic coding. They
+work with any setup type; `workstation_dev` is recommended when the agent needs
+a desktop/browser, and `control_plane` is the recommended terminal-only
+profile. `server_lite` omits
 the standard firewall and generic CLI bundle, so use it only when that lighter
 profile is intentional.
 
@@ -162,6 +165,14 @@ profile is intentional.
 infra_tools setup server_dev 10.0.0.10 agentuser \
   --agent-suite terminal --copy-config \
   --repo https://github.com/user/my_codebase.git
+```
+
+For the local machine, the installer can select the control-plane profile and
+run it immediately:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
+  sudo sh -s -- --user "$USER" --local-setup control_plane --agent-suite terminal
 ```
 
 | Flag | Description |

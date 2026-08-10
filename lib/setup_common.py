@@ -240,6 +240,47 @@ def copy_project_files(dest_dir: str) -> None:
                 shutil.copy2(src, dst)
 
 
+def _is_managed_local_install(install_dir: str) -> bool:
+    """Return whether local setup would otherwise overwrite its managed source tree."""
+    project_root = os.path.normpath(os.path.join(SCRIPT_DIR, ".."))
+    try:
+        return os.path.samefile(project_root, install_dir) and os.path.isdir(
+            os.path.join(install_dir, ".git")
+        )
+    except FileNotFoundError:
+        return False
+
+
+def _activate_local_runtime(build_dir: str) -> None:
+    """Stage local setup payloads without destroying a managed Git worktree."""
+    if not _is_managed_local_install(REMOTE_INSTALL_DIR):
+        if os.path.exists(REMOTE_INSTALL_DIR):
+            shutil.rmtree(REMOTE_INSTALL_DIR)
+        shutil.copytree(build_dir, REMOTE_INSTALL_DIR, symlinks=True)
+        os.chmod(REMOTE_INSTALL_DIR, 0o755)
+        return
+
+    for item in (
+        "deployments",
+        AGENT_REPOS_DIRNAME,
+        AGENT_PAYLOAD_DIRNAME,
+        REMOTE_ARGS_FILENAME,
+    ):
+        destination = os.path.join(REMOTE_INSTALL_DIR, item)
+        if os.path.isdir(destination) and not os.path.islink(destination):
+            shutil.rmtree(destination)
+        elif os.path.exists(destination):
+            os.unlink(destination)
+
+        source = os.path.join(build_dir, item)
+        if os.path.isdir(source):
+            shutil.copytree(source, destination, symlinks=True)
+        elif os.path.exists(source):
+            shutil.copy2(source, destination)
+
+    os.chmod(REMOTE_INSTALL_DIR, 0o755)
+
+
 def prepare_deployments(config: SetupConfig, target_dir: str) -> None:
     if not config.deploy_specs:
         return
@@ -598,7 +639,7 @@ def register_proxmox_setup_host(
 
 
 def run_remote_setup(config: SetupConfig) -> int:
-    is_local = config.host in ["localhost", "127.0.0.1"]
+    is_local = config.host in {"localhost", "127.0.0.1", "::1"}
     
     if is_local and os.geteuid() != 0:
         print("Error: Local setup requires root privileges. Please run with sudo.")
@@ -649,10 +690,7 @@ def run_remote_setup(config: SetupConfig) -> int:
             print("Running setup locally...")
             print(f"{'='*60}")
             
-            if os.path.exists(REMOTE_INSTALL_DIR):
-                shutil.rmtree(REMOTE_INSTALL_DIR)
-            shutil.copytree(build_dir, REMOTE_INSTALL_DIR, symlinks=True)
-            os.chmod(REMOTE_INSTALL_DIR, 0o755)
+            _activate_local_runtime(build_dir)
             
             env = os.environ.copy()
             env["LC_ALL"] = "C"

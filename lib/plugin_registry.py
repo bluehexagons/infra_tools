@@ -28,6 +28,7 @@ class SystemTypeDefinition:
     order: int
     include_desktop: bool = False
     include_cli_tools: bool = False
+    include_control_plane_tools: bool = False
     include_desktop_apps: bool = False
     include_workstation_dev_apps: bool = False
     include_pc_dev_apps: bool = False

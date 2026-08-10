@@ -14,6 +14,10 @@ infra_tools officially supports Debian in these configurations:
 - **Proxmox LXC**: an unprivileged Debian LXC container, detected as
   `unprivileged`.
 
+The setup preflight also accepts Ubuntu and Linux Mint as Debian-compatible
+best-effort distributions. Distribution-specific behavior outside the shared
+APT and systemd interfaces is not part of the official support guarantee.
+
 The detection is deliberately conservative. Use an explicit `--machine` value
 when the runtime cannot identify itself reliably or when an existing setup has
 a special requirement. OCI containers and privileged LXCs remain recognized

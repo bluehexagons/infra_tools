@@ -1,7 +1,7 @@
 # infra_tools
 
-Automated setup and operations for Debian servers, workstations, and Proxmox
-guests. infra_tools applies repeatable, machine-aware configuration over SSH,
+Automated setup and operations for Debian control planes, servers, workstations,
+and Proxmox guests. infra_tools applies repeatable, machine-aware configuration over SSH,
 stores redacted setup state in a workspace, and provides targeted operations
 for hosts that are already configured.
 
@@ -21,6 +21,14 @@ infra_tools setup server_web example.com admin \
   --deploy example.com https://github.com/user/repo.git
 ```
 
+To turn the local Debian machine into a control plane for managing other VMs
+and containers, use the installer handoff:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
+  sudo sh -s -- --user "$USER" --local-setup control_plane --agent-suite terminal
+```
+
 The [installation guide](docs/INSTALLATION.md) covers bootstrap, requirements,
 credentials, workspaces, channels, upgrades, and shell completion. The
 [documentation index](docs/README.md) organizes detailed feature and operations
@@ -38,6 +46,10 @@ infra_tools officially supports Debian on:
 - virtual machines, including Proxmox VMs; and
 - unprivileged Debian LXC containers on Proxmox.
 
+The installer and setup preflight also recognize Ubuntu and Linux Mint as
+best-effort Debian-compatible environments. Debian remains the only officially
+supported distribution.
+
 The normal direct setup path uses `--machine auto`. Hosted Proxmox setup
 defaults to a VM; select `--machine unprivileged` for the supported LXC path.
 See [Machine types](docs/MACHINE_TYPES.md) for capability and compatibility
@@ -49,6 +61,7 @@ details.
 | --- | --- | --- |
 | Setup and CLI | Unified `setup`, `patch`, `shares`, saved-host operations, and utility commands | [Command-line reference](docs/COMMAND_LINE.md) |
 | Installation | User/system bootstrap, orchestration host prerequisites, and completion | [Installation](docs/INSTALLATION.md) |
+| Control planes | Local VM/container administration tools, SSH/rsync, diagnostics, and optional coding agents | [Installation](docs/INSTALLATION.md), [Workstations](docs/WORKSTATIONS.md) |
 | Servers | Security hardening, Nginx/SSL, Cloudflare tunnels, language runtimes, deployments, Gogs, and Antistatic | [CLI reference](docs/COMMAND_LINE.md), [Gogs](docs/GOGS.md), [Cloudflare tunnels](docs/CLOUDFLARE.md), [Antistatic](docs/ANTISTATIC.md) |
 | Workstations | XFCE, i3, LXQt, RDP, browsers, and desktop tooling | [Workstations](docs/WORKSTATIONS.md), [XRDP](docs/XRDP.md), [CLI reference](docs/COMMAND_LINE.md) |
 | Storage | Authenticated Samba shares, SMB mounts, rsync sync, par2 verification, and recurring operations | [Samba shares](docs/SAMBA_SHARES.md), [Storage operations](docs/STORAGE_OPERATIONS.md) |

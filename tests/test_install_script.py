@@ -212,6 +212,45 @@ class TestInstallScript(unittest.TestCase):
             self.assertIn("python3", sudo_call)
             self.assertIn("setup server_lite localhost testuser", sudo_call)
 
+    def test_local_setup_option_supplies_localhost_and_user(self):
+        with tempfile.TemporaryDirectory() as directory:
+            _fake_home, log_path, environment = self._create_fixture(directory)
+            environment["INFRA_TOOLS_TEST_NON_ROOT"] = "1"
+            install_dir = os.path.join(directory, "installed")
+            result = subprocess.run(
+                [
+                    "sh",
+                    INSTALL_SCRIPT,
+                    "--install-dir",
+                    install_dir,
+                    "--local-setup",
+                    "control_plane",
+                    "--agent-suite",
+                    "terminal",
+                    "--dry-run",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            with open(log_path, encoding="utf-8") as file_obj:
+                calls = [json.loads(line) for line in file_obj]
+            self.assertEqual(
+                calls[1],
+                [
+                    "setup",
+                    "control_plane",
+                    "localhost",
+                    "testuser",
+                    "--agent-suite",
+                    "terminal",
+                    "--dry-run",
+                ],
+            )
+
     def test_update_keeps_previous_source_backup(self):
         with tempfile.TemporaryDirectory() as directory:
             _home, _log_path, environment = self._create_fixture(directory)

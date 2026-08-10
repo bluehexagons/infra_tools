@@ -57,6 +57,7 @@ SystemType = Literal[
     "workstation_desktop",
     "pc_dev", 
     "workstation_dev",
+    "control_plane",
     "server_dev",
     "server_web",
     "server_lite",

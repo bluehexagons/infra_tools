@@ -18,6 +18,14 @@ PLUGIN = PluginDefinition(
     dependencies=("common", "core", "security", "web"),
     system_types=(
         SystemTypeDefinition(
+            name="control_plane",
+            description="Infrastructure control plane",
+            order=35,
+            include_cli_tools=True,
+            include_control_plane_tools=True,
+            step_builder="plugins.server:build_server_steps",
+        ),
+        SystemTypeDefinition(
             name="server_dev",
             description="Development server",
             order=40,
@@ -74,6 +82,7 @@ def build_server_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
     from plugins.common import (
         extend_package_steps,
         extend_agent_steps,
+        extend_control_plane_steps,
         extend_runtime_steps,
         get_cli_steps,
         get_common_steps,
@@ -100,6 +109,7 @@ def build_server_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
     if config.include_cli_tools:
         steps.extend(get_cli_steps())
 
+    extend_control_plane_steps(config, steps)
     extend_runtime_steps(config, steps)
     extend_package_steps(config, steps)
     extend_agent_steps(config, steps)

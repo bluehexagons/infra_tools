@@ -1,8 +1,8 @@
 # Installation and bootstrap
 
 infra_tools runs from a Debian orchestration host and configures Debian target
-systems over SSH. It can also configure the local host with `localhost` when
-run as root.
+systems over SSH. The piped installer can also hand off to a local setup,
+turning the machine into a control plane for other VMs and containers.
 
 ## Requirements
 
@@ -10,6 +10,10 @@ run as root.
 - Debian on the target
 - SSH root access to a remote target, or root privileges for local setup
 - Git access to the infra_tools repository
+
+Ubuntu and Linux Mint are recognized as Debian-compatible best-effort hosts;
+Debian is the only officially-supported distribution. The setup uses APT
+package names shared by current Debian, Ubuntu, and Mint releases.
 
 Official machine profiles are Debian bare metal, Debian VMs, and unprivileged
 Debian LXC on Proxmox. See [Machine types](MACHINE_TYPES.md) for the complete
@@ -69,6 +73,54 @@ curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/insta
 `server_dev` is the recommended CLI-only agent profile because it includes the
 standard firewall and CLI tools. `server_lite` intentionally omits those parts
 of the profile.
+
+## Local control-plane setup
+
+Use `--local-setup` when the setup target is the same machine running the
+installer. It supplies `localhost` and the selected `--user` automatically,
+then runs the setup after the managed source and launcher are installed. The
+managed Git worktree is preserved, so later `infra_tools channel` and
+`infra_tools upgrade` commands continue to work.
+
+The `control_plane` profile is intended for a minimal Debian server. It adds
+common administrator and Linux tools such as SSH, rsync, tmux, Neovim, jq,
+network diagnostics, ripgrep, fd, fzf, ShellCheck, and package/file utilities:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
+  sudo sh -s -- --user "$USER" \
+  --local-setup control_plane --agent-suite terminal
+```
+
+Add `--copy-config`, `--copy-keys`, or repeat `--repo GIT_URL` when the control
+plane should receive selected agent configuration, credentials, or local agent
+repositories. These options are deliberately opt-in.
+
+For a standard Debian desktop, add the control-plane tools to the desktop
+developer profile. This keeps the existing graphical desktop and adds the same
+administration bundle plus the desktop agent tools:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
+  sudo sh -s -- --user "$USER" \
+  --local-setup workstation_dev --control-plane \
+  --agent-suite desktop --desktop xfce
+```
+
+Use `--agent-suite terminal` on a headless host, `desktop` when a graphical
+agent is wanted, or `full` when Node.js, Python tooling, and Go are also needed.
+On an already graphical desktop, `--desktop` may be omitted. Add `--rdp` and a
+trusted `--rdp-source` only when remote graphical login is required; RDP also
+requires a non-root setup user's password.
+
+The equivalent explicit form remains available when more control is needed:
+
+```bash
+sudo infra_tools setup control_plane localhost "$USER" --agent-suite terminal
+```
+
+Direct Python entry scripts remain a development and recovery fallback; the
+installed launcher and installer handoff are the supported workflow.
 
 For a remote Proxmox host, pass the target setup after `--setup`:
 

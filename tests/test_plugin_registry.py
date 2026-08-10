@@ -30,6 +30,7 @@ class TestPluginRegistry(unittest.TestCase):
                 "workstation_desktop",
                 "pc_dev",
                 "workstation_dev",
+                "control_plane",
                 "server_dev",
                 "server_web",
                 "server_lite",
@@ -87,6 +88,30 @@ class TestPluginRegistry(unittest.TestCase):
         self.assertTrue(system_type.default_enable_smbclient)
         self.assertEqual(system_type.default_browser, "librewolf")
         self.assertIsNotNone(system_type.step_builder)
+
+    def test_control_plane_profile_adds_administrator_tools(self):
+        config = SetupConfig(
+            host="localhost",
+            username="user",
+            system_type="control_plane",
+            include_cli_tools=True,
+            include_control_plane_tools=True,
+        )
+        step_names = [name for name, _ in get_steps_for_system_type(config)]
+        self.assertIn("Installing CLI tools", step_names)
+        self.assertIn("Installing control-plane administrator tools", step_names)
+
+    def test_control_plane_flag_extends_desktop_profile(self):
+        config = SetupConfig(
+            host="localhost",
+            username="user",
+            system_type="workstation_dev",
+            include_desktop=True,
+            include_cli_tools=True,
+            include_control_plane_tools=True,
+        )
+        step_names = [name for name, _ in get_steps_for_system_type(config)]
+        self.assertIn("Installing control-plane administrator tools", step_names)
 
     def test_custom_step_builder_is_plugin_registered(self):
         config = SetupConfig(
