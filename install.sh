@@ -73,6 +73,18 @@ run_privileged() {
     sudo "$@"
 }
 
+run_with_progress() {
+    "$@" &
+    command_pid=$!
+    while kill -0 "$command_pid" 2>/dev/null; do
+        sleep 10
+        if kill -0 "$command_pid" 2>/dev/null; then
+            printf '%s\n' "  Package operation is still running; waiting for APT or the network..."
+        fi
+    done
+    wait "$command_pid"
+}
+
 normalize_ref() {
     case "$1" in
         main) CHANNEL=dev ;;
@@ -443,12 +455,12 @@ if [ "$missing_prerequisite" -eq 1 ]; then
     command -v apt-get >/dev/null 2>&1 || fail "automatic prerequisite installation requires apt-get"
     ensure_debian_bootstrap_sources
     printf '%s\n' "Refreshing package lists (APT may wait for another package operation)..."
-    run_privileged env DEBIAN_FRONTEND=noninteractive apt-get \
+    run_with_progress run_privileged env DEBIAN_FRONTEND=noninteractive apt-get \
         -o DPkg::Lock::Timeout=120 \
         -o Dpkg::Use-Pty=0 \
         update -q
     printf '%s\n' "Installing bootstrap prerequisites..."
-    run_privileged env DEBIAN_FRONTEND=noninteractive apt-get \
+    run_with_progress run_privileged env DEBIAN_FRONTEND=noninteractive apt-get \
         -o DPkg::Lock::Timeout=120 \
         -o Dpkg::Use-Pty=0 \
         install -y -q \

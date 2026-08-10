@@ -34,28 +34,25 @@ class TestResolveBootstrapUser(unittest.TestCase):
 
 class TestInstallSystemPackages(unittest.TestCase):
     @patch("lib.orchestrator_bootstrap.ensure_debian_package_sources")
-    @patch("lib.orchestrator_bootstrap.subprocess.run")
+    @patch("lib.orchestrator_bootstrap._run_apt_command")
     @patch("lib.orchestrator_bootstrap.os.geteuid", return_value=0)
     def test_checks_debian_sources_before_apt_update(
-        self, _mock_geteuid, mock_run, mock_sources
+        self, _mock_geteuid, mock_run_apt, mock_sources
     ):
-        mock_run.side_effect = [
-            unittest.mock.MagicMock(returncode=0, stdout="", stderr=""),
-            unittest.mock.MagicMock(returncode=0, stdout="", stderr=""),
-        ]
+        mock_run_apt.side_effect = [0, 0]
         result = orchestrator_bootstrap.install_system_packages("bash")
         self.assertEqual(result, 0)
         mock_sources.assert_called_once_with()
-        install_args = mock_run.call_args_list[1].args[0]
+        install_args = mock_run_apt.call_args_list[1].args[0]
         self.assertIn("bash-completion", install_args)
         self.assertIn("openssh-client", install_args)
         self.assertIn("rsync", install_args)
         self.assertIn("tar", install_args)
-        update_args = mock_run.call_args_list[0].args[0]
+        update_args = mock_run_apt.call_args_list[0].args[0]
         self.assertIn("Dpkg::Use-Pty=0", update_args)
         self.assertIn("-q", update_args)
         self.assertNotIn("-qq", update_args)
-        self.assertNotIn("capture_output", mock_run.call_args_list[0].kwargs)
+        self.assertEqual(mock_run_apt.call_args_list[0].args[2], "APT package-list update")
 
 
 class TestRunOrchestratorBootstrap(unittest.TestCase):
@@ -202,9 +199,10 @@ class TestRetireLegacyTmpfilesConf(unittest.TestCase):
     @patch("lib.orchestrator_bootstrap.retire_legacy_tmpfiles_conf", return_value=True)
     @patch("lib.orchestrator_bootstrap.install_launcher", return_value="/usr/local/bin/infra_tools")
     @patch("lib.orchestrator_bootstrap.subprocess.run")
+    @patch("lib.orchestrator_bootstrap._run_apt_command", return_value=0)
     @patch("lib.orchestrator_bootstrap.os.geteuid", return_value=0)
     def test_bootstrap_retires_tmpfiles_conf(
-        self, _mock_geteuid, mock_run, _mock_launcher, mock_tmpfiles
+        self, _mock_geteuid, _mock_run_apt, mock_run, _mock_launcher, mock_tmpfiles
     ):
         mock_run.side_effect = [
             unittest.mock.MagicMock(returncode=0, stdout="", stderr=""),

@@ -31,6 +31,21 @@ SYSTEM_LAUNCHER_DIR = "/usr/local/bin"
 TMPFILES_CONF_PATH = "/etc/tmpfiles.d/infra_tools.conf"
 
 
+def _run_apt_command(command: list[str], env: dict[str, str], phase: str) -> int:
+    """Run APT with inherited output and periodic progress while it waits."""
+
+    process = subprocess.Popen(command, env=env)
+    while process.poll() is None:
+        try:
+            process.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            print(
+                f"{phase} is still running; waiting for APT or the network...",
+                flush=True,
+            )
+    return process.returncode
+
+
 def _resolve_project_script(script_path: str) -> str:
     """Return an absolute path to infra_tools.py for use inside the launcher."""
     resolved = script_path
@@ -155,40 +170,42 @@ def install_system_packages(shell: str) -> int:
     )
     apt_environment = os.environ.copy()
     apt_environment["DEBIAN_FRONTEND"] = "noninteractive"
-    update_result = subprocess.run(
-        [
-            "apt-get",
-            "-o",
-            "DPkg::Lock::Timeout=120",
-            "-o",
-            "Dpkg::Use-Pty=0",
-            "update",
-            "-q",
-        ],
-        env=apt_environment,
-        check=False,
+    update_command = [
+        "apt-get",
+        "-o",
+        "DPkg::Lock::Timeout=120",
+        "-o",
+        "Dpkg::Use-Pty=0",
+        "update",
+        "-q",
+    ]
+    update_returncode = _run_apt_command(
+        update_command,
+        apt_environment,
+        "APT package-list update",
     )
-    if update_result.returncode != 0:
+    if update_returncode != 0:
         print("Error: failed to update package lists; see the APT output above.")
         return 1
 
     print("Installing orchestration host packages...", flush=True)
-    install_result = subprocess.run(
-        [
-            "apt-get",
-            "-o",
-            "DPkg::Lock::Timeout=120",
-            "-o",
-            "Dpkg::Use-Pty=0",
-            "install",
-            "-y",
-            "-q",
-            *packages,
-        ],
-        env=apt_environment,
-        check=False,
+    install_command = [
+        "apt-get",
+        "-o",
+        "DPkg::Lock::Timeout=120",
+        "-o",
+        "Dpkg::Use-Pty=0",
+        "install",
+        "-y",
+        "-q",
+        *packages,
+    ]
+    install_returncode = _run_apt_command(
+        install_command,
+        apt_environment,
+        "APT package installation",
     )
-    if install_result.returncode != 0:
+    if install_returncode != 0:
         print("Error: failed to install required packages; see the APT output above.")
         return 1
 
