@@ -7,6 +7,15 @@ the same machine immediately.
 Debian is the only officially supported distribution. Ubuntu and Linux Mint are
 recognized as best-effort Debian-compatible hosts.
 
+The network-piped installer needs either `wget` or `curl`. The examples below
+use `wget -qO-`, which is commonly present on minimal Debian systems. If only
+`curl` is installed, replace `wget -qO-` with `curl -fsSL`. If neither is
+available, install one first with:
+
+```bash
+sudo apt-get update && sudo apt-get install -y wget ca-certificates
+```
+
 ## Choose an installation path
 
 Run these commands in a terminal as the local account that should own the
@@ -18,14 +27,14 @@ account.
 Use this when you want to choose the first setup later:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
+wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
 ```
 
 The installer uses `sudo` for packages when needed. To install the source in
 `/opt/infra_tools` and expose a system launcher instead, use:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
+wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
   sudo sh -s -- --user "$USER"
 ```
 
@@ -35,7 +44,7 @@ This installs common administrator and Linux tools, the terminal agent suite,
 and configures the local machine to manage other VMs and containers:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
+wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
   sudo sh -s -- --user "$USER" \
   --local-setup control_plane --agent-suite terminal
 ```
@@ -47,7 +56,7 @@ available for local logins, adds XFCE for RDP sessions, enables RDP, and
 installs the desktop agent suite:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
+wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
   sudo sh -s -- --user "$USER" \
   --local-setup workstation_dev --control-plane \
   --agent-suite desktop --desktop xfce \

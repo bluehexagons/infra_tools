@@ -38,20 +38,22 @@ Options:
   -h, --help           Show this help
 
 Examples:
+  Fetch with either wget or curl:
+  wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
   curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
-  curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
+  wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
     sh -s -- --channel stable
   wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
-  curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
+  wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
     sudo sh -s -- --user "$USER"
-  curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
+  wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
     sh -s -- --setup server_dev localhost "$USER" --machine hardware --agent-suite terminal
-  curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
+  wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
     sudo sh -s -- --user "$USER" --local-setup control_plane --agent-suite terminal
-  curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
+  wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
     sudo sh -s -- --user "$USER" --local-setup workstation_dev --control-plane \
       --agent-suite desktop --desktop xfce --rdp --rdp-existing-password
-  curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
+  wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
     sudo sh -s -- --user "$USER" --setup server_proxmox 10.0.0.10 root --key /home/me/.ssh/id_ed25519
 EOF
 }

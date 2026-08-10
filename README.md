@@ -11,16 +11,21 @@ The supported workflow starts with the installer. It keeps the repository
 locally, installs the managed `infra_tools` launcher, and lets you switch
 channels or upgrade later. Choose the path that matches the machine.
 
+The installer needs either `wget` or `curl` to fetch itself. The examples use
+`wget`, which is commonly available on minimal Debian systems; if only `curl`
+is installed, replace `wget -qO-` with `curl -fsSL`. If neither command is
+available, install one first with `sudo apt-get update && sudo apt-get install -y wget ca-certificates`.
+
 Install the launcher and choose a setup later:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
+wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
 ```
 
 Set up a minimal Debian control plane immediately:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
+wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
   sudo sh -s -- --user "$USER" \
   --local-setup control_plane --agent-suite terminal
 ```
@@ -29,7 +34,7 @@ Set up a standard Debian GNOME desktop as a graphical control plane. This keeps
 GNOME for local logins, uses XFCE for RDP, and installs the desktop agent suite:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
+wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
   sudo sh -s -- --user "$USER" \
   --local-setup workstation_dev --control-plane --agent-suite desktop \
   --desktop xfce --rdp --rdp-existing-password
