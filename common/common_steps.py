@@ -215,7 +215,7 @@ CONTROL_PLANE_PACKAGES = (
     "bc",
     "btop",
     "ca-certificates",
-    "dnsutils",
+    "bind9-dnsutils",
     "fd-find",
     "file",
     "findutils",

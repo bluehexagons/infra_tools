@@ -10,7 +10,8 @@ profile with `--control-plane`:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
   sudo sh -s -- --user "$USER" \
-  --local-setup workstation_dev --control-plane --agent-suite desktop
+  --local-setup workstation_dev --control-plane --agent-suite desktop \
+  --desktop xfce
 ```
 
 This keeps the graphical workstation setup while adding the SSH, rsync,
@@ -26,9 +27,10 @@ needed, or `full` for the additional language runtimes.
 | `pc_dev` | Desktop, browser, LibreOffice, SMB client packages, Remmina, and Discord |
 | `workstation_dev` | Desktop, browser, CLI tools, and Visual Studio Code |
 
-The default desktop is XFCE and the default browser is LibreWolf. A browser
-selected with `--browser` becomes the default for the setup user; repeat the
-flag to install more than one browser.
+The default desktop is XFCE and the default browser is LibreWolf. The local
+control-plane example selects XFCE explicitly. A browser selected with
+`--browser` becomes the default for the setup user; repeat the flag to install
+more than one browser.
 
 ## Common setups
 

@@ -109,9 +109,10 @@ curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/insta
 
 Use `--agent-suite terminal` on a headless host, `desktop` when a graphical
 agent is wanted, or `full` when Node.js, Python tooling, and Go are also needed.
-On an already graphical desktop, `--desktop` may be omitted. Add `--rdp` and a
-trusted `--rdp-source` only when remote graphical login is required; RDP also
-requires a non-root setup user's password.
+The example selects XFCE explicitly; use `--desktop i3`, `--desktop cinnamon`,
+or `--desktop lxqt` when another supported session is preferred. Add `--rdp`
+and a trusted `--rdp-source` only when remote graphical login is required; RDP
+also requires a non-root setup user's password.
 
 The equivalent explicit form remains available when more control is needed:
 

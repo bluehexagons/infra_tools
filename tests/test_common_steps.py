@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from common.common_steps import update_and_upgrade_packages
+from common.common_steps import CONTROL_PLANE_PACKAGES, update_and_upgrade_packages
 from lib.config import SetupConfig
 
 
@@ -29,6 +29,12 @@ class TestUpdateAndUpgradePackages(unittest.TestCase):
         self.assertEqual(order[0], "apt-get update -qq")
         self.assertEqual(order[1], "apt-get upgrade -y -qq")
         self.assertEqual(order[2], "apt-get autoremove -y -qq")
+
+
+class TestControlPlanePackages(unittest.TestCase):
+    def test_uses_debian_trixie_dns_package_name(self):
+        self.assertIn("bind9-dnsutils", CONTROL_PLANE_PACKAGES)
+        self.assertNotIn("dnsutils", CONTROL_PLANE_PACKAGES)
 
 
 if __name__ == "__main__":
