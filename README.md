@@ -7,23 +7,26 @@ for hosts that are already configured.
 
 ## Start here
 
-Install the current-user launcher:
+The supported workflow starts with the installer. It keeps the repository
+locally, installs the managed `infra_tools` launcher, and lets you switch
+channels or upgrade later. Choose the path that matches the machine.
+
+Install the launcher and choose a setup later:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
 ```
 
-Then run setup commands through the installed launcher:
+Set up a minimal Debian control plane immediately:
 
 ```bash
-infra_tools setup server_web example.com admin \
-  --ruby --node --ssl --ssl-email admin@example.com \
-  --deploy example.com https://github.com/user/repo.git
+curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
+  sudo sh -s -- --user "$USER" \
+  --local-setup control_plane --agent-suite terminal
 ```
 
-To turn a standard Debian GNOME desktop into a control plane for managing other
-VMs and containers, keep GNOME for local logins, add XFCE for RDP, and install
-the desktop agent suite with the installer handoff:
+Set up a standard Debian GNOME desktop as a graphical control plane. This keeps
+GNOME for local logins, uses XFCE for RDP, and installs the desktop agent suite:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
@@ -32,11 +35,11 @@ curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/insta
   --desktop xfce --rdp --rdp-existing-password
 ```
 
-The [installation guide](docs/INSTALLATION.md) covers bootstrap, requirements,
-credentials, workspaces, channels, upgrades, and shell completion. The
-[documentation index](docs/README.md) organizes detailed feature and operations
-guides. The Python entry scripts remain usable directly from a checkout for
-development and recovery.
+After installation, use `infra_tools setup ...` for remote hosts and
+`infra_tools upgrade` to update the selected channel. See the concise
+[installation guide](docs/INSTALLATION.md) for prerequisites, verification,
+channels, credentials, RDP, and recovery. The [documentation index](docs/README.md)
+organizes detailed feature and operations guides.
 
 Contributors should also read the [AI agent guidance](.github/ai-agents/README.md)
 before changing the project.

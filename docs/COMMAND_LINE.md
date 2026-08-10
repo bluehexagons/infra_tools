@@ -508,33 +508,17 @@ See [`SYSADMIN.md`](./SYSADMIN.md) for the host shortcut commands (`mount`,
 
 ## Testing And Bootstrap
 
+The supported installation and local control-plane commands are in the
+[installation guide](./INSTALLATION.md). Use the following only when working
+from a checkout or refreshing completion manually:
+
 ```bash
 python3 -m unittest discover -s tests
 ./run_tests.py --suite smoke
-curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
-curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
-  sh -s -- \
-  --setup server_dev localhost "$USER" \
-  --machine hardware \
-  --agent-suite terminal
 uv tool install --upgrade argcomplete
-infra_tools completions
+infra_tools completions --shell bash
 ```
 
-For a full Debian bootstrap or an immediate setup handoff:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
-  sudo sh -s -- --user "$USER"
-
-curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
-  sudo sh -s -- --user "$USER" \
-  --setup server_proxmox 10.0.0.10 root --key "$HOME/.ssh/proxmox_ed25519"
-```
-
-Everything after `--setup` is passed to `infra_tools setup`. The full test
-matrix and detailed bootstrap behavior are covered by
-[`OPERATIONS.md`](./OPERATIONS.md) and [`INSTALLATION.md`](./INSTALLATION.md);
-this page is intentionally the concise command index.
-For a local setup, the installer defaults an omitted setup username to the
-selected install user and uses `sudo` only for the privileged setup phase.
+The full test matrix and detailed bootstrap behavior are covered by
+[`OPERATIONS.md`](./OPERATIONS.md); this page is intentionally the concise
+command index.

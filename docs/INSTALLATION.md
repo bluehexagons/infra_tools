@@ -1,102 +1,38 @@
-# Installation and bootstrap
+# Install infra_tools
 
-infra_tools runs from a Debian orchestration host and configures Debian target
-systems over SSH. The piped installer can also hand off to a local setup,
-turning the machine into a control plane for other VMs and containers.
+Use the installer on the machine that will manage your hosts. It keeps a local
+Git worktree, installs the managed `infra_tools` launcher, and can configure
+the same machine immediately.
 
-## Requirements
+Debian is the only officially supported distribution. Ubuntu and Linux Mint are
+recognized as best-effort Debian-compatible hosts.
 
-- Python 3.10 or newer on the orchestration host
-- Debian on the target
-- SSH root access to a remote target, or root privileges for local setup
-- Git access to the infra_tools repository
+## Choose one starting command
 
-Ubuntu and Linux Mint are recognized as Debian-compatible best-effort hosts;
-Debian is the only officially-supported distribution. The setup uses APT
-package names shared by current Debian, Ubuntu, and Mint releases.
+Run these commands in a terminal as the local account that should own the
+installation. Replace `$USER` only when installing for a different existing
+account.
 
-Before installing packages on Debian, infra_tools checks the installed release
-codename and archive keyring, comments out active CD-ROM-only APT entries,
-disables stale official Debian suites, and ensures that the current Debian and
-security suites use the official `deb.debian.org` and `security.debian.org`
-mirrors. It then requires a successful `apt-get update`. This happens before
-bootstrap, setup, and recurring APT maintenance, handling the common
-minimal/offline installer state where the installation media is still the only
-configured source. Existing Debian components such as `non-free-firmware` are
-preserved when a managed source file is created. The security profile also
-installs the managed APT update timer so package security updates continue
-after setup.
+### Install the launcher only
 
-Official machine profiles are Debian bare metal, Debian VMs, and unprivileged
-Debian LXC on Proxmox. See [Machine types](MACHINE_TYPES.md) for the complete
-capability matrix.
-
-## Install for the current user
-
-The installer clones a local Git worktree, installs prerequisites, and creates
-a user-scoped launcher. Privileged actions request `sudo` only when needed:
+Use this when you want to choose the first setup later:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
 ```
 
-The equivalent `wget` command is:
-
-```bash
-wget -qO- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
-```
-
-Review [`install.sh`](../install.sh) before running a network-piped installer,
-especially on a privileged machine.
-
-## Install a system launcher
-
-For a system-wide source tree and `/usr/local/bin/infra_tools` launcher:
+The installer uses `sudo` for packages when needed. To install the source in
+`/opt/infra_tools` and expose a system launcher instead, use:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
   sudo sh -s -- --user "$USER"
 ```
 
-The installed repository is kept locally so its channel can be changed without
-reinstalling the launcher. The default channel is `dev`, which tracks `main`
-while this managed installation workflow is being introduced. Select the
-latest tagged release explicitly when desired:
+### Set up a minimal Debian control plane
 
-```bash
-infra_tools channel stable
-```
-
-The source directory is printed by the installer. It defaults to
-`~/.local/share/infra_tools` for a user install and `/opt/infra_tools` for a
-root install. Use `infra_tools channel` to inspect the active channel and
-commit.
-
-The installer can hand off immediately to a normal setup command:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
-  sh -s -- \
-  --setup server_dev localhost "$USER" \
-  --machine hardware \
-  --agent-suite terminal
-```
-
-`server_dev` is the recommended CLI-only agent profile because it includes the
-standard firewall and CLI tools. `server_lite` intentionally omits those parts
-of the profile.
-
-## Local control-plane setup
-
-Use `--local-setup` when the setup target is the same machine running the
-installer. It supplies `localhost` and the selected `--user` automatically,
-then runs the setup after the managed source and launcher are installed. The
-managed Git worktree is preserved, so later `infra_tools channel` and
-`infra_tools upgrade` commands continue to work.
-
-The `control_plane` profile is intended for a minimal Debian server. It adds
-common administrator and Linux tools such as SSH, rsync, tmux, Neovim, jq,
-network diagnostics, ripgrep, fd, fzf, ShellCheck, and package/file utilities:
+This installs common administrator and Linux tools, the terminal agent suite,
+and configures the local machine to manage other VMs and containers:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
@@ -104,15 +40,11 @@ curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/insta
   --local-setup control_plane --agent-suite terminal
 ```
 
-Add `--copy-config`, `--copy-keys`, or repeat `--repo GIT_URL` when the control
-plane should receive selected agent configuration, credentials, or local agent
-repositories. These options are deliberately opt-in.
+### Set up a Debian GNOME desktop control plane
 
-For a standard Debian desktop installed with the Debian installer's default
-GNOME desktop, use the following complete control-plane example. It keeps GNOME
-available for local console logins, adds XFCE as the XRDP session desktop, and
-installs the desktop agent suite (Codex CLI, Claude Code, OpenCode, GitHub CLI,
-common coding tools, and T3 Code where supported):
+Use this for a standard Debian desktop that already has GNOME. It leaves GNOME
+available for local logins, adds XFCE for RDP sessions, enables RDP, and
+installs the desktop agent suite:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
@@ -122,138 +54,159 @@ curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/insta
   --rdp --rdp-existing-password
 ```
 
-Use `--agent-suite terminal` on a headless host, `desktop` when a graphical
-agent is wanted, or `full` when Node.js, Python tooling, and Go are also needed.
-The example selects XFCE explicitly; use `--desktop i3`, `--desktop cinnamon`,
-or `--desktop lxqt` when another supported session is preferred. The
-`--rdp-existing-password` option is local-only: it reuses the password already
-set for the existing `--user`, does not place a secret in the command line, and
-does not create or reset that password. For a new account or any remote target,
-provide `--password` through a secure secret source instead. Add one or more
-trusted `--rdp-source IP_OR_CIDR` options when the address range is known; this
-is preferable to exposing RDP to every interface.
+This expects `$USER` to be an existing non-root account with an unlocked
+password. `--rdp-existing-password` reuses that password without putting it in
+the command line; it does not create or reset an account password. Add a
+trusted network restriction when you know the management range, for example:
 
-The setup does not select a new display manager or change the GNOME session.
-After the first reboot, the local console continues to use the existing GNOME
-login, while RDP connections start the separately installed XFCE session.
-
-The equivalent explicit form remains available when more control is needed:
-
-```bash
-sudo infra_tools setup control_plane localhost "$USER" --agent-suite terminal
+```text
+--rdp-source 192.168.1.0/24
 ```
 
-Direct Python entry scripts remain a development and recovery fallback; the
-installed launcher and installer handoff are the supported workflow.
+Without `--rdp-source`, RDP is available on all local interfaces with the
+configured rate-limited firewall rule. See [XRDP](XRDP.md) for connection and
+firewall details.
 
-For a remote Proxmox host, pass the target setup after `--setup`:
+Use `--agent-suite terminal` on a headless host, `desktop` for graphical agent
+tools, or `full` when Node.js, Python, and Go tooling are also wanted. Append
+`--copy-config`, `--copy-keys`, or `--repo GIT_URL` when the control plane
+should receive selected agent settings, credentials, or repositories; these
+options are intentionally opt-in.
+
+## Verify the installation
+
+Start a new login shell if necessary, then run:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | \
-  sudo sh -s -- --user "$USER" \
-  --setup server_proxmox 10.0.0.10 root \
-  --key "$HOME/.ssh/proxmox_ed25519" \
-  --name pve1
+command -v infra_tools
+infra_tools channel
+infra_tools --help
 ```
 
-The installer preserves the previous source tree as a timestamped backup when
-reinstalling. A failed bootstrap restores the previous source. Existing local
-changes in a managed worktree must be committed or stashed before reinstalling.
+If the command is not found in a user installation, add its directory for the
+current shell and start a new login shell later:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Before applying a setup for the first time, validate its profile with a dry
+run. Local setup preflight still needs root, so use `sudo`; the dry run
+validates arguments and prints the steps without changing the target:
+
+```bash
+sudo infra_tools setup workstation_dev localhost "$USER" \
+  --control-plane --agent-suite desktop --desktop xfce --rdp \
+  --rdp-existing-password --dry-run
+```
+
+For the all-in-one commands above, the installer runs this local setup after
+installing the launcher, so a separate setup command is not required.
+
+## Install and configure a remote host
+
+Install the launcher on the control plane first, then run setup through the
+installed command. The remote account must be reachable over SSH and have the
+privileges required by the selected profile:
+
+```bash
+infra_tools setup server_web example.com admin \
+  --ruby --node --ssl --ssl-email admin@example.com
+```
+
+For agentic coding targets, use the [headless terminal example](WORKSTATIONS.md#headless-agentic-coding-host)
+when no desktop or RDP is wanted, or the [desktop/RDP example](WORKSTATIONS.md#desktop-agentic-coding-workstation-with-rdp)
+for graphical work. For a Proxmox node, start with [Proxmox workflows](PROXMOX.md).
 
 ## Channels and upgrades
 
-Channels are resolved from the local repository's `origin` remote:
+The installer downloads the repository into a managed local worktree. The
+launcher stays installed while the worktree's channel changes:
 
-| Channel | Meaning |
+| Channel | Selects |
 | --- | --- |
-| `stable` | Highest `vMAJOR.MINOR.PATCH` release tag |
-| `dev` | `main` branch; equivalent to `branch-main` |
-| `v<version>` | Exact version tag, such as `v1.2.3` |
-| `branch-<branch>` | Any existing branch, including `branch-feature/example` |
-| `commit-<hash>` | An exact Git commit hash |
+| `stable` | Latest `vMAJOR.MINOR.PATCH` release tag |
+| `dev` | `main` branch |
+| `v<version>` | One release tag, such as `v1.2.3` |
+| `branch-<branch>` | Any existing branch |
+| `commit-<hash>` | One exact commit |
 
-Switch channels with:
+Inspect or change the selected channel:
 
 ```bash
+infra_tools channel
+infra_tools channel stable
 infra_tools channel dev
-infra_tools channel v1.2.3
-infra_tools channel branch-feature/example
-infra_tools channel commit-0123456789abcdef
 ```
 
-Run the upgrade command without a host to fetch and install the newest commit
-available on the selected channel:
+Update the local installation to the newest commit on its selected channel:
 
 ```bash
 infra_tools upgrade
 ```
 
-`infra_tools upgrade` refuses to overwrite local worktree changes. The existing
-remote-host form remains available when hosts are supplied, for example
-`infra_tools upgrade web1 web2`.
+The default installer channel is `dev`, which tracks `main`. Use `stable` when
+you want the latest versioned release. `upgrade` refuses to overwrite local
+worktree changes; commit or stash changes before reinstalling or upgrading.
 
-## First setup commands
+## Debian package sources
+
+The installer and setup need network access to APT. On Debian, they check the
+release codename and archive keyring, disable active CD-ROM-only entries, and
+ensure the current release uses the official mirrors:
+
+- `https://deb.debian.org/debian` for the base and updates suites;
+- `https://security.debian.org/debian-security` for security updates.
+
+If a minimal or offline Debian installation has only installation media
+configured, infra_tools creates a managed source file and runs `apt-get
+update` before installing packages. Existing `non-free-firmware` components
+are preserved. Existing source files are backed up, and an unmanaged
+`infra_tools-debian.sources` file is not overwritten.
+
+If this step fails, fix network, DNS, proxy, or mirror access and rerun the
+same installer command. Do not work around a failed package-list update by
+leaving a CD-ROM as the only source.
+
+## Optional local tools
+
+The installer already bootstraps the launcher and shell completion. For a
+manual completion refresh or another shell:
 
 ```bash
-# Web server with a deployment
-infra_tools setup server_web example.com admin \
-  --ruby --node --ssl --ssl-email admin@example.com \
-  --deploy example.com https://github.com/user/repo.git
-
-# Developer workstation
-infra_tools setup workstation_desktop 192.168.1.100 admin \
-  --desktop i3 --browser firefox
-
-# Patch an existing saved host
-infra_tools patch example.com admin --ssl
+infra_tools completions --shell bash
+infra_tools completions --shell zsh
 ```
 
-Use the [Command-line reference](COMMAND_LINE.md) for all setup and patch
-flags. See [Samba shares](SAMBA_SHARES.md) for storage-specific setup.
+See [Shell completion](SHELL_COMPLETION.md) for system-wide and Fish setup.
 
 ## Workspace and credentials
 
-Workspace state defaults to `~/.config/infra_tools`. Set an isolated workspace
-for a project or test environment:
+Saved host state defaults to `~/.config/infra_tools`. Use another workspace
+when separating projects or test environments:
 
 ```bash
 infra_tools --workspace /srv/infra-tools-workspace list
 ```
 
-Workspace credentials are stored separately with restrictive permissions. Enter
-passwords interactively whenever possible:
+Store remote credentials separately and prefer interactive entry:
 
 ```bash
-infra_tools credentials set alice
+infra_tools credentials set admin
 infra_tools credentials list
-infra_tools credentials remove alice
+infra_tools credentials remove admin
 ```
 
 Passwords are excluded from saved setup state and reconstructed commands.
 
-## Shell completion
+## More detail and recovery
 
-Install `argcomplete` and register completion for the unified launcher:
+- [Command-line reference](COMMAND_LINE.md) — all setup flags and system types
+- [Workstations](WORKSTATIONS.md) — desktop profiles, browsers, and agents
+- [XRDP](XRDP.md) — RDP sessions and firewall behavior
+- [Machine types](MACHINE_TYPES.md) — Debian VMs, bare metal, and containers
 
-```bash
-uv tool install --upgrade argcomplete
-infra_tools completions
-```
-
-For manual Bash, Zsh, Fish, or system-wide installation, see
-[Shell completion](SHELL_COMPLETION.md).
-
-## Updating the source
-
-The installed launcher manages source updates:
-
-```bash
-infra_tools upgrade
-```
-
-For development or recovery, the Python entry script still works directly from
-a checkout (for example, `python3 infra_tools.py setup ...`), but that path does
-not replace the managed installed launcher.
-
-Saved configurations can be inspected with `infra_tools info`; use `patch` or
-feature-specific fast paths for targeted changes.
+Direct Python entry scripts still work from a checkout for development and
+recovery, but the managed installer and `infra_tools` launcher are the normal
+supported workflow. Review [`install.sh`](../install.sh) before running a
+network-piped installer on a privileged machine.

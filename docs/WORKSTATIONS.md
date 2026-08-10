@@ -36,6 +36,50 @@ more than one browser.
 
 ## Common setups
 
+### Headless agentic coding host
+
+For a Debian VM or server that should run coding agents from SSH or a terminal,
+without a desktop or RDP, use the control-plane profile. Add only the language
+runtimes your projects need:
+
+```bash
+infra_tools setup control_plane 10.0.0.24 agent \
+  --agent-suite terminal --node --python --go \
+  --copy-config --repo https://github.com/user/project.git
+```
+
+This installs the terminal agent suite (GitHub CLI, Codex CLI, Claude Code,
+and OpenCode), administrator tools, and the selected runtimes. Remove
+`--copy-config` or `--repo` when those inputs are not needed. Use `tmux` for
+long-running agent sessions over SSH.
+
+### Desktop agentic coding workstation with RDP
+
+For a graphical Debian workstation, keep the default desktop profile, select
+XFCE for the RDP session, and restrict RDP to the management network:
+
+```bash
+infra_tools setup workstation_dev 10.0.0.25 agent \
+  --control-plane --desktop xfce --rdp \
+  --password "$RDP_PASSWORD" --rdp-source 10.0.0.0/24 \
+  --agent-suite desktop --copy-config \
+  --repo https://github.com/user/project.git
+```
+
+This adds the desktop agent suite, browser, Visual Studio Code, administrator
+tools, and the selected repository. The RDP password is the target Unix
+account's password; provide it through a secret-sourced environment variable,
+not a literal value in shell history. For a local Debian GNOME machine, use
+the [installer handoff](INSTALLATION.md#choose-one-starting-command), which
+keeps GNOME for console logins and uses XFCE for RDP.
+
+Agent updates are deliberate rather than automatic; host APT, security,
+cleanup, and restart maintenance still runs as described in
+[`MAINTENANCE.md`](./MAINTENANCE.md). The default restart policy may force a
+restart after seven days of active-session deferrals, so long-running hosts
+should use `--no-auto-restart --auto-restart-force-days 0` and manage pending
+reboots explicitly.
+
 Minimal developer workstation with RDP:
 
 ```bash
@@ -43,24 +87,6 @@ infra_tools setup workstation_dev 10.0.0.25 alice \
   --desktop xfce --browser firefox --rdp --password "$RDP_PASSWORD" \
   --rdp-source 10.0.0.0/24
 ```
-
-RDP-capable agentic coding workstation:
-
-```bash
-infra_tools setup workstation_dev 10.0.0.25 agent \
-  --desktop xfce --rdp --password "$RDP_PASSWORD" \
-  --rdp-source 10.0.0.0/24 \
-  --agent-suite terminal --copy-config \
-  --repo https://github.com/user/project.git
-```
-
-This adds the terminal agent suite to the browser and Visual Studio Code
-profile. Agent updates are deliberate rather than automatic; host APT,
-security, cleanup, and restart maintenance still runs as described in
-[`MAINTENANCE.md`](./MAINTENANCE.md). The default restart policy may force a
-restart after seven days of active-session deferrals, so long-running hosts
-should use `--no-auto-restart --auto-restart-force-days 0` and manage pending
-reboots explicitly.
 
 PC with office and SMB tools:
 
