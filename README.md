@@ -161,8 +161,11 @@ make check
 ./run_tests.py --suite smoke
 ```
 
-Continuous integration runs the suite on Python 3.13, the interpreter shipped
-by Debian Trixie. Expensive live tests remain opt-in.
+Routine continuous integration runs the suite in Debian Trixie on Python 3.13,
+the interpreter shipped by that release. Version-tagged releases additionally
+run the suite on the minimum supported Python version (3.10) and the latest
+Python 3 version in the release policy (3.14). Expensive live tests remain
+opt-in.
 
 See [Saved configuration operations](docs/OPERATIONS.md) for test selectors and
 [Proxmox workflows](docs/PROXMOX.md) for live-host notes.
