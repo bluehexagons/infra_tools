@@ -44,6 +44,24 @@ infra_tools network ...
 infra_tools proxmox ...
 ```
 
+### Bootstrap and self-setup flags
+
+`bootstrap` and its `self-setup` alias prepare the local orchestration host.
+When that host is a Proxmox VM, install and activate the guest agent with:
+
+```bash
+sudo infra_tools self-setup --qemu-guest-agent
+```
+
+| Flag | Description |
+|------|-------------|
+| `--qemu-guest-agent` | Install `qemu-guest-agent`, then start and enable its systemd service; requires root and cannot be combined with `--skip-system-packages` |
+
+The same option is available on `install.sh`; place it before
+`--setup` or `--local-setup` so the installer forwards it to its internal
+self-setup step. It is intended for a Debian VM running the orchestration
+tools, not for an LXC container.
+
 ## Setup at a glance
 
 ### System Types

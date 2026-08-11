@@ -59,6 +59,26 @@ sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup control_pla
 rm -f "$HOME/.infra_tools-install.sh"
 ```
 
+If the orchestration machine is itself a Proxmox VM, add
+`--qemu-guest-agent` before `--local-setup`. The installer then installs the
+guest-agent package and starts and enables its systemd service during
+self-setup:
+
+```bash
+wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
+sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --qemu-guest-agent --local-setup control_plane --agent-suite terminal
+rm -f "$HOME/.infra_tools-install.sh"
+```
+
+For an already installed orchestration host, run the equivalent command:
+
+```bash
+sudo infra_tools self-setup --qemu-guest-agent
+```
+
+Use this on a VM only; the QEMU guest agent is not applicable to an LXC
+container. `--qemu-guest-agent` requires root and system-package installation.
+
 ### Set up a Debian GNOME desktop control plane
 
 Use this for a standard Debian desktop that already has GNOME. It leaves GNOME

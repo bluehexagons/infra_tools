@@ -13,6 +13,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from lib import orchestrator_bootstrap
+import infra_tools
 
 
 class TestResolveBootstrapUser(unittest.TestCase):
@@ -54,8 +55,76 @@ class TestInstallSystemPackages(unittest.TestCase):
         self.assertNotIn("-qq", update_args)
         self.assertEqual(mock_run_apt.call_args_list[0].args[2], "APT package-list update")
 
+    @patch("lib.orchestrator_bootstrap.subprocess.run")
+    @patch("lib.orchestrator_bootstrap.ensure_debian_package_sources")
+    @patch("lib.orchestrator_bootstrap._run_apt_command")
+    @patch("lib.orchestrator_bootstrap.os.geteuid", return_value=0)
+    def test_qemu_guest_agent_is_installed_started_and_enabled(
+        self,
+        _mock_geteuid,
+        mock_run_apt,
+        _mock_sources,
+        mock_run,
+    ):
+        mock_run_apt.side_effect = [0, 0]
+        mock_run.return_value = unittest.mock.MagicMock(returncode=0)
+
+        result = orchestrator_bootstrap.install_system_packages(
+            "zsh",
+            install_qemu_guest_agent=True,
+        )
+
+        self.assertEqual(result, 0)
+        install_args = mock_run_apt.call_args_list[1].args[0]
+        self.assertIn("qemu-guest-agent", install_args)
+        mock_run.assert_called_once_with(
+            ["systemctl", "enable", "--now", "qemu-guest-agent"],
+            check=False,
+        )
+
+    @patch("lib.orchestrator_bootstrap.subprocess.run")
+    @patch("lib.orchestrator_bootstrap.ensure_debian_package_sources")
+    @patch("lib.orchestrator_bootstrap._run_apt_command")
+    @patch("lib.orchestrator_bootstrap.os.geteuid", return_value=0)
+    def test_qemu_guest_agent_service_failure_fails_bootstrap_package_phase(
+        self,
+        _mock_geteuid,
+        mock_run_apt,
+        _mock_sources,
+        mock_run,
+    ):
+        mock_run_apt.side_effect = [0, 0]
+        mock_run.return_value = unittest.mock.MagicMock(returncode=1)
+
+        result = orchestrator_bootstrap.install_system_packages(
+            "zsh",
+            install_qemu_guest_agent=True,
+        )
+
+        self.assertEqual(result, 1)
+
 
 class TestRunOrchestratorBootstrap(unittest.TestCase):
+    def test_qemu_guest_agent_requires_system_package_installation(self):
+        with patch("lib.orchestrator_bootstrap.resolve_bootstrap_user", return_value=("admin", "/home/admin")), \
+             patch("lib.orchestrator_bootstrap.install_system_packages") as mock_install:
+            result = orchestrator_bootstrap.run_orchestrator_bootstrap(
+                script_path="infra_tools.py",
+                shell="bash",
+                requested_user="admin",
+                skip_system_packages=True,
+                install_qemu_guest_agent=True,
+            )
+
+        self.assertEqual(result, 1)
+        mock_install.assert_not_called()
+
+    def test_self_setup_parser_accepts_qemu_guest_agent_flag(self):
+        parser, _setup_parser, _patch_parser = infra_tools.create_infra_tools_parser()
+        args = parser.parse_args(["self-setup", "--qemu-guest-agent"])
+        self.assertEqual(args.command, "self-setup")
+        self.assertTrue(args.qemu_guest_agent)
+
     @patch(
         "lib.orchestrator_bootstrap.install_launcher",
         side_effect=OSError("read-only"),

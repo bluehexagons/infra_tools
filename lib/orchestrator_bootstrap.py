@@ -29,6 +29,8 @@ BASE_PACKAGES = [
 LAUNCHER_NAME = "infra_tools"
 SYSTEM_LAUNCHER_DIR = "/usr/local/bin"
 TMPFILES_CONF_PATH = "/etc/tmpfiles.d/infra_tools.conf"
+QEMU_GUEST_AGENT_PACKAGE = "qemu-guest-agent"
+QEMU_GUEST_AGENT_SERVICE = "qemu-guest-agent"
 
 
 def _run_apt_command(command: list[str], env: dict[str, str], phase: str) -> int:
@@ -144,7 +146,11 @@ def retire_legacy_tmpfiles_conf(
     return True
 
 
-def install_system_packages(shell: str) -> int:
+def install_system_packages(
+    shell: str,
+    *,
+    install_qemu_guest_agent: bool = False,
+) -> int:
     """Install local system packages needed to operate infra_tools."""
     if os.geteuid() != 0:
         print("Error: System package installation requires root privileges. Re-run with sudo or use --skip-system-packages.")
@@ -157,6 +163,8 @@ def install_system_packages(shell: str) -> int:
     packages = list(BASE_PACKAGES)
     if shell == "bash":
         packages.append("bash-completion")
+    if install_qemu_guest_agent:
+        packages.append(QEMU_GUEST_AGENT_PACKAGE)
 
     try:
         ensure_debian_package_sources()
@@ -210,6 +218,18 @@ def install_system_packages(shell: str) -> int:
         return 1
 
     print(f"✓ Installed system packages: {', '.join(packages)}", flush=True)
+
+    if install_qemu_guest_agent:
+        print("Starting and enabling qemu-guest-agent...", flush=True)
+        service_result = subprocess.run(
+            ["systemctl", "enable", "--now", QEMU_GUEST_AGENT_SERVICE],
+            check=False,
+        )
+        if service_result.returncode != 0:
+            print("Error: failed to start and enable qemu-guest-agent.")
+            return 1
+        print("✓ qemu-guest-agent is started and enabled", flush=True)
+
     return 0
 
 
@@ -227,6 +247,7 @@ def run_orchestrator_bootstrap(
     shell: str,
     requested_user: Optional[str],
     skip_system_packages: bool = False,
+    install_qemu_guest_agent: bool = False,
 ) -> int:
     """Bootstrap a local orchestration host for infra_tools administration."""
     try:
@@ -235,10 +256,20 @@ def run_orchestrator_bootstrap(
         print(f"Error: {exc}")
         return 1
 
+    if install_qemu_guest_agent and skip_system_packages:
+        print(
+            "Error: --qemu-guest-agent requires system package installation; "
+            "remove --skip-system-packages."
+        )
+        return 1
+
     print(f"Bootstrapping orchestration host for {username}...")
 
     if not skip_system_packages:
-        result = install_system_packages(shell)
+        result = install_system_packages(
+            shell,
+            install_qemu_guest_agent=install_qemu_guest_agent,
+        )
         if result != 0:
             return result
         try:

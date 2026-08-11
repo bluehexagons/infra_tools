@@ -17,6 +17,17 @@ rm -f "$HOME/.infra_tools-install.sh"
 infra_tools channel
 ```
 
+If the orchestration machine is itself a Proxmox VM, install and activate its
+guest agent during local self-setup:
+
+```bash
+sudo infra_tools self-setup --qemu-guest-agent
+```
+
+The option installs `qemu-guest-agent` and runs
+`systemctl enable --now qemu-guest-agent`. Hosted VMs created by infra_tools
+already receive the same package and service configuration through cloud-init.
+
 Set up, register, and inspect the host:
 
 ```bash

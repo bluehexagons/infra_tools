@@ -181,6 +181,30 @@ class TestInstallScript(unittest.TestCase):
                 os.X_OK,
             ))
 
+    def test_qemu_guest_agent_flag_is_forwarded_to_bootstrap(self):
+        with tempfile.TemporaryDirectory() as directory:
+            _fake_home, log_path, environment = self._create_fixture(directory)
+            environment["INFRA_TOOLS_TEST_ROOT"] = "1"
+            install_dir = os.path.join(directory, "installed")
+            result = subprocess.run(
+                [
+                    "sh",
+                    INSTALL_SCRIPT,
+                    "--install-dir",
+                    install_dir,
+                    "--qemu-guest-agent",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            with open(log_path, encoding="utf-8") as file_obj:
+                calls = [json.loads(line) for line in file_obj]
+            self.assertEqual(calls[0][-1], "--qemu-guest-agent")
+
     def test_local_setup_elevates_and_defaults_to_install_user(self):
         with tempfile.TemporaryDirectory() as directory:
             fake_home, log_path, environment = self._create_fixture(directory)
@@ -427,6 +451,7 @@ class TestInstallScript(unittest.TestCase):
         )
         self.assertEqual(help_result.returncode, 0)
         self.assertIn("--setup", help_result.stdout)
+        self.assertIn("--qemu-guest-agent", help_result.stdout)
         self.assertIn('--timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh"', help_result.stdout)
         self.assertIn('-O "$HOME/.infra_tools-install.sh"', help_result.stdout)
         self.assertNotIn("|", help_result.stdout)

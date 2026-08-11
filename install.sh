@@ -14,6 +14,7 @@ TARGET_USER=""
 SHELL_NAME=""
 RUN_SETUP=0
 LOCAL_SETUP_REQUESTED=0
+INSTALL_QEMU_GUEST_AGENT=0
 
 usage() {
     cat <<'EOF'
@@ -32,6 +33,8 @@ Options:
                        otherwise ~/.local/share/infra_tools)
   --user USER          User receiving local tools and completions
   --shell SHELL        bash, zsh, fish, or tcsh (default: target user's shell)
+  --qemu-guest-agent   Install, start, and enable Proxmox's qemu-guest-agent
+                       during self-setup (must appear before --setup/--local-setup)
   --setup ...          Run `infra_tools setup ...` after installation
   --local-setup TYPE   Run `infra_tools setup TYPE localhost USER` after installation
                        (the target user comes from --user or the invoking user)
@@ -45,6 +48,10 @@ Examples:
   Download with wget and run a privileged setup:
   wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
   sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup control_plane --agent-suite terminal
+  rm -f "$HOME/.infra_tools-install.sh"
+  Add qemu-guest-agent when the orchestration host is a Proxmox VM by placing
+  --qemu-guest-agent before --local-setup:
+  sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --qemu-guest-agent --local-setup control_plane
   rm -f "$HOME/.infra_tools-install.sh"
   Download with curl instead by replacing the wget command with:
   curl --fail --location --connect-timeout 15 --max-time 120 -o "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
@@ -76,6 +83,14 @@ run_with_progress() {
         fi
     done
     wait "$command_pid"
+}
+
+run_bootstrap() {
+    if [ "$INSTALL_QEMU_GUEST_AGENT" -eq 1 ]; then
+        "$@" --qemu-guest-agent
+    else
+        "$@"
+    fi
 }
 
 normalize_ref() {
@@ -187,6 +202,10 @@ while [ "$#" -gt 0 ]; do
             SHELL_NAME=$2
             shift 2
             ;;
+        --qemu-guest-agent)
+            INSTALL_QEMU_GUEST_AGENT=1
+            shift
+            ;;
         --setup)
             RUN_SETUP=1
             shift
@@ -233,6 +252,9 @@ if ! id "$TARGET_USER" >/dev/null 2>&1; then
 fi
 if [ "$(id -u)" -ne 0 ] && [ "$TARGET_USER" != "$CURRENT_USER" ]; then
     fail "installing for another user requires root"
+fi
+if [ "$INSTALL_QEMU_GUEST_AGENT" -eq 1 ] && [ "$(id -u)" -ne 0 ]; then
+    fail "--qemu-guest-agent requires root; rerun the installer with sudo"
 fi
 
 TARGET_HOME=$(getent passwd "$TARGET_USER" | awk -F: 'NR == 1 { print $6 }')
@@ -554,14 +576,14 @@ fi
 
 printf 'Installing infra_tools for %s...\n' "$TARGET_USER"
 if [ "$(id -u)" -eq 0 ]; then
-    if ! HOME="$TARGET_HOME" python3 "$INSTALL_DIR/infra_tools.py" bootstrap \
+    if ! run_bootstrap env HOME="$TARGET_HOME" python3 "$INSTALL_DIR/infra_tools.py" bootstrap \
         --shell "$SHELL_NAME" \
         --user "$TARGET_USER"; then
         rollback_install
         exit 1
     fi
 else
-    if ! HOME=$TARGET_HOME USER=$TARGET_USER python3 "$INSTALL_DIR/infra_tools.py" bootstrap \
+    if ! run_bootstrap env HOME="$TARGET_HOME" USER="$TARGET_USER" python3 "$INSTALL_DIR/infra_tools.py" bootstrap \
         --shell "$SHELL_NAME" \
         --user "$TARGET_USER" \
         --skip-system-packages; then

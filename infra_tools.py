@@ -154,7 +154,7 @@ Examples:
   infra_tools deploy prod --yes
   infra_tools recall example.com admin
   infra_tools completions --shell zsh
-  sudo infra_tools self-setup --user admin
+  sudo infra_tools self-setup --user admin [--qemu-guest-agent]
   infra_tools list prod    # after self-setup, the launcher is on PATH
  """
 
@@ -430,6 +430,11 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
         "--skip-system-packages",
         action="store_true",
         help="Skip apt package installation and only configure infra_tools for the target user",
+    )
+    bootstrap_parser.add_argument(
+        "--qemu-guest-agent",
+        action="store_true",
+        help="Install, start, and enable Proxmox's qemu-guest-agent (requires root)",
     )
 
     channel_parser = subparsers.add_parser(
@@ -1246,6 +1251,7 @@ def main() -> int:
             shell=args.shell,
             requested_user=args.bootstrap_user,
             skip_system_packages=args.skip_system_packages,
+            install_qemu_guest_agent=args.qemu_guest_agent,
         )
     elif args.command == "channel":
         return run_channel_command(args)
