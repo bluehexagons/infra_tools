@@ -8,6 +8,7 @@ to the detailed setup and operations guides.
 | Guide | Use it for |
 | --- | --- |
 | [Installation and bootstrap](INSTALLATION.md) | Installing the launcher, preparing an orchestration host, shell completion, and requirements |
+| [Local system maintenance](LOCAL_MAINTENANCE.md) | Focused package, desktop, browser, hostname, IP, and DNS changes |
 | [Command-line reference](COMMAND_LINE.md) | Setup, patch, targeted updates, and utility flags |
 | [Machine types](MACHINE_TYPES.md) | Debian bare metal, VM, LXC, OCI, and capability differences |
 | [Samba shares](SAMBA_SHARES.md) | Authenticated shares, credentials, access changes, removals, and SMB mounts |
