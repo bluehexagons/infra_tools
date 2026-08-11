@@ -59,8 +59,8 @@ Node.js, Ruby, and uv use a conservative default policy:
 
 GitHub CLI is installed from its APT repository and therefore follows the APT
 job. The `terminal` agent suite's Codex CLI, Claude Code, and OpenCode remain
-outside recurring root maintenance. Run `infra_tools agent update --dry-run`
-and then `infra_tools agent update` as the setup user for a deliberate vendor
+outside recurring root maintenance. Run `infra-tools agent update --dry-run`
+and then `infra-tools agent update` as the setup user for a deliberate vendor
 update with before/after verification, a retained prior executable, automatic
 rollback after a broken update, and a private audit record. Setup still skips
 an installer when its command is already present.

@@ -43,7 +43,7 @@ without a desktop or RDP, use the control-plane profile. Add only the language
 runtimes your projects need:
 
 ```bash
-infra_tools setup control_plane 10.0.0.24 agent \
+infra-tools setup control_plane 10.0.0.24 agent \
   --agent-suite terminal --node --python --go \
   --copy-config --repo https://github.com/user/project.git
 ```
@@ -59,7 +59,7 @@ For a graphical Debian workstation, keep the default desktop profile, select
 XFCE for the RDP session, and restrict RDP to the management network:
 
 ```bash
-infra_tools setup workstation_dev 10.0.0.25 agent \
+infra-tools setup workstation_dev 10.0.0.25 agent \
   --control-plane --desktop xfce --rdp \
   --password "$RDP_PASSWORD" --rdp-source 10.0.0.0/24 \
   --gh --codex --copy-config \
@@ -86,7 +86,7 @@ reboots explicitly.
 Minimal developer workstation with RDP:
 
 ```bash
-infra_tools setup workstation_dev 10.0.0.25 alice \
+infra-tools setup workstation_dev 10.0.0.25 alice \
   --desktop xfce --browser firefox --rdp --password "$RDP_PASSWORD" \
   --rdp-source 10.0.0.0/24
 ```
@@ -94,14 +94,14 @@ infra_tools setup workstation_dev 10.0.0.25 alice \
 PC with office and SMB tools:
 
 ```bash
-infra_tools setup pc_dev 10.0.0.26 alice \
+infra-tools setup pc_dev 10.0.0.26 alice \
   --desktop cinnamon --office --browser brave
 ```
 
 Install several browsers and use a dark theme:
 
 ```bash
-infra_tools setup workstation_desktop 10.0.0.27 alice \
+infra-tools setup workstation_desktop 10.0.0.27 alice \
   --browser librewolf --browser firefox --dark
 ```
 

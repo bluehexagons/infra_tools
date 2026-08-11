@@ -137,7 +137,10 @@ def install_agent_coding_tools(config: SetupConfig) -> None:
         destination = os.path.join(local_bin, alias)
         if os.path.exists(system_command) and not os.path.lexists(destination):
             os.symlink(system_command, destination)
-    infra_tools_launcher = os.path.join(local_bin, "infra_tools")
+    legacy_launcher = os.path.join(local_bin, "infra_tools")
+    if os.path.islink(legacy_launcher) or os.path.isfile(legacy_launcher):
+        os.unlink(legacy_launcher)
+    infra_tools_launcher = os.path.join(local_bin, "infra-tools")
     if not os.path.lexists(infra_tools_launcher):
         with open(infra_tools_launcher, "w", encoding="utf-8") as file_obj:
             file_obj.write(

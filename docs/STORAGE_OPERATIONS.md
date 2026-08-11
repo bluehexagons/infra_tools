@@ -7,7 +7,7 @@ the machine configuration and run together through the root-owned
 ## Configure a mirror and parity protection
 
 ```bash
-infra_tools setup server_lite fileserver admin \
+infra-tools setup server_lite fileserver admin \
   --sync /srv/data /mnt/backup/data daily \
   --scrub /srv/data .pardatabase 10% weekly \
   --notify mailbox ops@example.com
@@ -69,12 +69,12 @@ enforced by the orchestrator.
 Use the normal saved-configuration flow to change storage specifications:
 
 ```bash
-infra_tools patch fileserver admin \
+infra-tools patch fileserver admin \
   --sync /srv/data /mnt/backup/data weekly
-infra_tools deploy fileserver
+infra-tools deploy fileserver
 ```
 
-Review the saved configuration with `infra_tools info fileserver` before
+Review the saved configuration with `infra-tools info fileserver` before
 changing a production mirror. Existing storage state and logs are retained;
 the next service run uses the saved specification set.
 

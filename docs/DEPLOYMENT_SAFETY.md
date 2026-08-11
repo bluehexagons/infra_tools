@@ -55,7 +55,7 @@ sudo -u "$APP_USER" RAILS_ENV=production bundle exec rake db:seed
 For a squashed or reset migration history, rerun with:
 
 ```text
-infra_tools setup server_web <host> \
+infra-tools setup server_web <host> \
   --deploy <deploy-spec> <git-url> \
   --reset-migrations
 ```

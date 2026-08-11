@@ -18,7 +18,7 @@ INSTALL_QEMU_GUEST_AGENT=0
 
 usage() {
     cat <<'EOF'
-Install or update infra_tools from a managed Git worktree.
+Install or update infra-tools from a managed Git worktree.
 
 Usage:
   install.sh [options]
@@ -35,8 +35,8 @@ Options:
   --shell SHELL        bash, zsh, fish, or tcsh (default: target user's shell)
   --qemu-guest-agent   Install, start, and enable Proxmox's qemu-guest-agent
                        during self-setup (must appear before --setup/--local-setup)
-  --setup ...          Run `infra_tools setup ...` after installation
-  --local-setup TYPE   Run `infra_tools setup TYPE localhost USER` after installation
+  --setup ...          Run `infra-tools setup ...` after installation
+  --local-setup TYPE   Run `infra-tools setup TYPE localhost USER` after installation
                        (the target user comes from --user or the invoking user)
   -h, --help           Show this help
 
@@ -59,7 +59,7 @@ EOF
 }
 
 fail() {
-    printf 'infra_tools installer: %s\n' "$*" >&2
+    printf 'infra-tools installer: %s\n' "$*" >&2
     exit 1
 }
 
@@ -229,7 +229,7 @@ done
 
 validate_channel
 validate_host_os
-printf '%s\n' "infra_tools installer: host validated; checking prerequisites and package sources..."
+printf '%s\n' "infra-tools installer: host validated; checking prerequisites and package sources..."
 
 if [ "$RUN_SETUP" -eq 1 ] && [ "$LOCAL_SETUP_REQUESTED" -eq 0 ] && [ "$#" -lt 2 ]; then
     fail "--setup requires at least SYSTEM_TYPE and HOST"
@@ -353,7 +353,7 @@ fi
 managed_path="$source_dir/infra_tools-debian.sources"
 
 [ -r "$keyring" ] || {
-    printf '%s\n' "infra_tools installer: Debian archive keyring is missing at $keyring" >&2
+    printf '%s\n' "infra-tools installer: Debian archive keyring is missing at $keyring" >&2
     exit 1
 }
 
@@ -412,7 +412,7 @@ done
 if [ "$has_current_base" -eq 1 ] && [ "$has_current_security" -eq 1 ]; then
     if [ -e "$managed_path" ]; then
         grep -q '^# Managed by infra_tools' "$managed_path" || {
-            printf '%s\n' "infra_tools installer: refusing to remove unmanaged APT source $managed_path" >&2
+            printf '%s\n' "infra-tools installer: refusing to remove unmanaged APT source $managed_path" >&2
             exit 1
         }
         backup_path="$managed_path.infra_tools.bak"
@@ -450,7 +450,7 @@ chmod 0644 "$temporary_path"
 if [ -e "$managed_path" ]; then
     grep -q '^# Managed by infra_tools' "$managed_path" || {
         rm -f "$temporary_path"
-        printf '%s\n' "infra_tools installer: refusing to overwrite unmanaged APT source $managed_path" >&2
+        printf '%s\n' "infra-tools installer: refusing to overwrite unmanaged APT source $managed_path" >&2
         exit 1
     }
     if cmp -s "$temporary_path" "$managed_path"; then
@@ -574,7 +574,7 @@ if [ "$(id -u)" -eq 0 ] && [ "$TARGET_USER" != "root" ]; then
     fi
 fi
 
-printf 'Installing infra_tools for %s...\n' "$TARGET_USER"
+printf 'Installing infra-tools for %s...\n' "$TARGET_USER"
 if [ "$(id -u)" -eq 0 ]; then
     if ! run_bootstrap env HOME="$TARGET_HOME" python3 "$INSTALL_DIR/infra_tools.py" bootstrap \
         --shell "$SHELL_NAME" \
@@ -592,7 +592,7 @@ else
     fi
 fi
 
-USER_LAUNCHER="$TARGET_HOME/.local/bin/infra_tools"
+USER_LAUNCHER="$TARGET_HOME/.local/bin/infra-tools"
 if [ ! -x "$USER_LAUNCHER" ]; then
     rollback_install
     fail "bootstrap completed without creating $USER_LAUNCHER"
@@ -601,7 +601,7 @@ if [ -n "$BACKUP_DIR" ] && [ -d "$BACKUP_DIR" ]; then
     chmod 700 "$BACKUP_DIR"
 fi
 
-printf '\ninfra_tools installed successfully.\n'
+printf '\ninfra-tools installed successfully.\n'
 printf '  Source: %s\n' "$INSTALL_DIR"
 printf '  Channel: %s\n' "$CHANNEL"
 printf '  Command: %s\n' "$USER_LAUNCHER"

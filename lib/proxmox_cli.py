@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI surface for ``infra_tools.py proxmox`` subcommands.
+"""CLI surface for ``infra-tools proxmox`` subcommands.
 
 Splits parser construction and command dispatch out of ``infra_tools.py`` so
 the management surface can grow independently of the setup/patch flow.
@@ -687,7 +687,7 @@ def _resolve_host(target: str, workspace: Optional[str]) -> ProxmoxHost:
     if not host:
         raise ValueError(
             f"No registered Proxmox host matching '{target}'. "
-            f"Use 'infra_tools.py proxmox add' first."
+            f"Use 'infra-tools proxmox add' first."
         )
     return host
 
@@ -1039,7 +1039,7 @@ def _cmd_audit(args: argparse.Namespace, workspace: Optional[str]) -> int:
 
 
 def _cmd_plan_missing(args: argparse.Namespace, workspace: Optional[str]) -> int:
-    print("Usage: infra_tools.py proxmox plan {place,rebalance} [...]")
+    print("Usage: infra-tools proxmox plan {place,rebalance} [...]")
     return 1
 
 

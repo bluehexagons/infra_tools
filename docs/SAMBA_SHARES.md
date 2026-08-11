@@ -1,6 +1,6 @@
 # Samba Shares
 
-infra_tools configures authenticated Samba 4 file shares on Debian systems.
+infra-tools configures authenticated Samba 4 file shares on Debian systems.
 This document covers initial setup, credentials, access changes, fast updates,
 removals, and related SMB client mounts.
 
@@ -29,7 +29,7 @@ The full setup installs and hardens Samba, configures the firewall and
 fail2ban, and creates the requested shares:
 
 ```bash
-infra_tools setup server_lite fileserver admin \
+infra-tools setup server_lite fileserver admin \
   --samba \
   --share read documents /srv/documents alice,bob \
   --share write dropbox /srv/dropbox alice,carol
@@ -43,7 +43,7 @@ a data drive is missing.
 For a NAS with storage maintenance, combine shares with sync and scrub jobs:
 
 ```bash
-infra_tools setup server_lite fileserver admin \
+infra-tools setup server_lite fileserver admin \
   --samba \
   --share read media /srv/media guest \
   --sync /srv/documents /srv/backup daily \
@@ -56,10 +56,10 @@ The safest workflow stores passwords in the mode-0600 workspace credential
 store, without putting them in shell history or process arguments:
 
 ```bash
-infra_tools credentials set alice
-infra_tools credentials set bob
+infra-tools credentials set alice
+infra-tools credentials set bob
 
-infra_tools setup server_lite fileserver admin \
+infra-tools setup server_lite fileserver admin \
   --samba \
   --share write documents /srv/documents alice,bob
 ```
@@ -70,7 +70,7 @@ credential. Inline `username:password` values are supported for controlled
 automation, but the password is visible to local process inspectors:
 
 ```bash
-infra_tools setup server_lite fileserver admin \
+infra-tools setup server_lite fileserver admin \
   --samba \
   --share read public /srv/public guest:temporary-password
 ```
@@ -79,7 +79,7 @@ infra_tools setup server_lite fileserver admin \
 part of a command. Use it only when the invoking environment is trusted:
 
 ```bash
-infra_tools setup server_lite fileserver admin \
+infra-tools setup server_lite fileserver admin \
   --samba \
   --credential alice 'correct horse battery staple' \
   --share write documents /srv/documents alice
@@ -97,11 +97,11 @@ setgid directory permissions so new files inherit the share group:
 
 ```bash
 # Read-only reference material
-infra_tools setup server_lite fileserver admin \
+infra-tools setup server_lite fileserver admin \
   --samba --share read reference /srv/reference alice,bob
 
 # Collaborative directory
-infra_tools setup server_lite fileserver admin \
+infra-tools setup server_lite fileserver admin \
   --samba --share write projects /srv/projects alice,bob
 ```
 
@@ -117,7 +117,7 @@ full setup lifecycle. The host must have a saved setup configuration:
 
 ```bash
 # Add a new share while preserving the other saved shares
-infra_tools shares fileserver \
+infra-tools shares fileserver \
   --share read archive /srv/archive alice
 ```
 
@@ -126,7 +126,7 @@ complete desired user list when changing membership:
 
 ```bash
 # Add carol and remove bob from the documents share
-infra_tools shares fileserver \
+infra-tools shares fileserver \
   --share write documents /srv/documents alice,carol
 ```
 
@@ -134,14 +134,14 @@ Change access mode or path with the same operation:
 
 ```bash
 # Convert documents from read-only to collaborative write access
-infra_tools shares fileserver \
+infra-tools shares fileserver \
   --share write documents /srv/documents alice,carol
 ```
 
 Update a user's workspace password while updating a share:
 
 ```bash
-infra_tools shares fileserver \
+infra-tools shares fileserver \
   --credential carol 'new-password' \
   --share write documents /srv/documents alice,carol
 ```
@@ -150,14 +150,14 @@ Remove a share by logical name. Its managed Samba section and access group are
 removed; unrelated hand-written sections remain untouched:
 
 ```bash
-infra_tools shares fileserver --remove-share archive
+infra-tools shares fileserver --remove-share archive
 ```
 
 Multiple changes can be combined. Each requested share is reconciled and Samba
 is reloaded once after the complete candidate configuration passes `testparm`:
 
 ```bash
-infra_tools shares fileserver \
+infra-tools shares fileserver \
   --share write documents /srv/documents alice,carol \
   --share read photos /srv/photos bob \
   --remove-share old-media
@@ -167,7 +167,7 @@ Use `--dry-run` to validate and display the remote operation without making a
 connection or changing the saved configuration:
 
 ```bash
-infra_tools shares fileserver \
+infra-tools shares fileserver \
   --share read photos /srv/photos bob \
   --dry-run
 ```
@@ -203,8 +203,8 @@ For persistent client mounts managed by infra_tools, use `--mount-smb` on the
 client setup. It creates a root-only credential file and a systemd automount:
 
 ```bash
-infra_tools credentials set alice
-infra_tools setup workstation_desktop client admin \
+infra-tools credentials set alice
+infra-tools setup workstation_desktop client admin \
   --mount-smb /mnt/projects fileserver alice projects_write /
 ```
 
@@ -232,6 +232,6 @@ with `--samba`. If a username-only share fails validation, create or update its
 workspace credential first:
 
 ```bash
-infra_tools credentials set alice
-infra_tools shares fileserver --share read documents /srv/documents alice
+infra-tools credentials set alice
+infra-tools shares fileserver --share read documents /srv/documents alice
 ```

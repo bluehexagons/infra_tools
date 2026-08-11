@@ -6,7 +6,7 @@ Debian VMs or unprivileged LXCs, and manage guest lifecycle operations.
 
 ## Quick setup: Proxmox host to coding VM
 
-Install infra_tools on a trusted Linux orchestration machine first. The
+Install infra-tools on a trusted Linux orchestration machine first. The
 Proxmox host does not need a checkout; setup uploads the installed source to
 `/opt/infra_tools`.
 
@@ -14,14 +14,14 @@ Proxmox host does not need a checkout; setup uploads the installed source to
 wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
 sh "$HOME/.infra_tools-install.sh"
 rm -f "$HOME/.infra_tools-install.sh"
-infra_tools channel
+infra-tools channel
 ```
 
 If the orchestration machine is itself a Proxmox VM, install and activate its
 guest agent during local self-setup:
 
 ```bash
-sudo infra_tools self-setup --qemu-guest-agent
+sudo infra-tools self-setup --qemu-guest-agent
 ```
 
 The option installs `qemu-guest-agent` and runs
@@ -31,13 +31,13 @@ already receive the same package and service configuration through cloud-init.
 Set up, register, and inspect the host:
 
 ```bash
-infra_tools setup server_proxmox 10.0.0.10 root \
+infra-tools setup server_proxmox 10.0.0.10 root \
   --key ~/.ssh/proxmox_ed25519 \
   --name pve1
 
-infra_tools proxmox probe pve1
-infra_tools proxmox top pve1
-infra_tools proxmox ls pve1
+infra-tools proxmox probe pve1
+infra-tools proxmox top pve1
+infra-tools proxmox ls pve1
 ```
 
 Successful `server_proxmox` setup registers the host in the selected workspace;
@@ -92,7 +92,7 @@ process.
 Create a Debian VM with XFCE, RDP, Firefox, and coding tools:
 
 ```bash
-infra_tools setup workstation_dev 10.0.0.50 agent \
+infra-tools setup workstation_dev 10.0.0.50 agent \
   --hosted pve1 --base debian --name agent-dev-01 \
   --cores 4 --memory 8G --storage root 40G \
   --desktop xfce --rdp --browser firefox \
@@ -105,9 +105,9 @@ infra_tools setup workstation_dev 10.0.0.50 agent \
 Find the assigned VMID and inspect it:
 
 ```bash
-infra_tools proxmox ls pve1
-infra_tools proxmox config pve1 100
-infra_tools proxmox health pve1 100
+infra-tools proxmox ls pve1
+infra-tools proxmox config pve1 100
+infra-tools proxmox health pve1 100
 ```
 
 Replace `100` with the VMID returned by `proxmox ls`.
@@ -166,7 +166,7 @@ glamor compatibility testing. It is not enabled by the default RDP setup.
 ## Hosted web server VM
 
 ```bash
-infra_tools setup server_web 10.0.0.50 admin \
+infra-tools setup server_web 10.0.0.50 admin \
   --hosted pve1 --memory 4G --storage root 32G --cores 2 \
   --base debian --name web-01-vm --ruby --node \
   --ssl --ssl-email admin@example.com \
@@ -179,7 +179,7 @@ Use `--machine unprivileged` explicitly for an LXC and include template
 storage:
 
 ```bash
-infra_tools setup server_web 10.0.0.50 admin \
+infra-tools setup server_web 10.0.0.50 admin \
   --machine unprivileged --hosted pve1 \
   --memory 4G --cores 2 --storage root 20G --storage template \
   --base debian --name web-01-lxc --ruby --node \
@@ -197,18 +197,18 @@ route; use `--bridge NAME` when the host has multiple routed bridge networks.
 ## Guest lifecycle
 
 ```bash
-infra_tools proxmox status pve1 101
-infra_tools proxmox start pve1 101
-infra_tools proxmox stop pve1 101
-infra_tools proxmox pause pve1 101
-infra_tools proxmox resume pve1 101
-infra_tools proxmox health pve1 101
+infra-tools proxmox status pve1 101
+infra-tools proxmox start pve1 101
+infra-tools proxmox stop pve1 101
+infra-tools proxmox pause pve1 101
+infra-tools proxmox resume pve1 101
+infra-tools proxmox health pve1 101
 ```
 
 Show a summary for one or more nodes:
 
 ```bash
-infra_tools proxmox top pve1 pve2
+infra-tools proxmox top pve1 pve2
 ```
 
 The summary includes node CPU, memory, storage, and guest counts. It is a
@@ -218,8 +218,8 @@ storage or bridge data has not been cached.
 Run a maintenance-safety audit before planned work:
 
 ```bash
-infra_tools proxmox audit pve1 pve2
-infra_tools proxmox audit pve1 --json
+infra-tools proxmox audit pve1 pve2
+infra-tools proxmox audit pve1 --json
 ```
 
 The audit checks core Proxmox services, quorum on clustered nodes, active tasks,
@@ -231,10 +231,10 @@ is read-only and exits nonzero when a health check fails.
 Modify resources and configuration:
 
 ```bash
-infra_tools proxmox modify pve1 101 --cores 4 --memory 8G
-infra_tools proxmox reconfigure pve1 101 --set hostname=newbox
-infra_tools proxmox reconfigure pve1 101 --set balloon=4096
-infra_tools proxmox resize-disk pve1 101 rootfs 40G
+infra-tools proxmox modify pve1 101 --cores 4 --memory 8G
+infra-tools proxmox reconfigure pve1 101 --set hostname=newbox
+infra-tools proxmox reconfigure pve1 101 --set balloon=4096
+infra-tools proxmox resize-disk pve1 101 rootfs 40G
 ```
 
 For an existing VM, Proxmox stores `memory` and `balloon` in MiB. Keep
@@ -244,17 +244,17 @@ dynamic reclamation without removing the balloon device.
 Snapshots and rollback:
 
 ```bash
-infra_tools proxmox snapshots pve1 101
-infra_tools proxmox snapshot pve1 101 pre-upgrade --description "before kernel update"
-infra_tools proxmox rollback pve1 101 pre-upgrade
-infra_tools proxmox delsnapshot pve1 101 pre-upgrade
+infra-tools proxmox snapshots pve1 101
+infra-tools proxmox snapshot pve1 101 pre-upgrade --description "before kernel update"
+infra-tools proxmox rollback pve1 101 pre-upgrade
+infra-tools proxmox delsnapshot pve1 101 pre-upgrade
 ```
 
 `destroy` is permanent and asks for confirmation:
 
 ```bash
-infra_tools proxmox destroy pve1 101
-infra_tools proxmox destroy pve1 101 -y
+infra-tools proxmox destroy pve1 101
+infra-tools proxmox destroy pve1 101 -y
 ```
 
 ## Placement, backups, and migration
@@ -262,10 +262,10 @@ infra_tools proxmox destroy pve1 101 -y
 The placement planner ranks registered nodes without changing them:
 
 ```bash
-infra_tools proxmox plan place \
+infra-tools proxmox plan place \
   --cores 4 --memory 8192 --disk 40 \
   --prefer-tag production --exclude pve3
-infra_tools proxmox plan rebalance --limit 3
+infra-tools proxmox plan rebalance --limit 3
 ```
 
 `plan rebalance` reports overloaded nodes and candidate destinations. It only
@@ -277,8 +277,8 @@ have the same storage and cluster prerequisites as the direct `migrate` command.
 List and create immediate `vzdump` backups:
 
 ```bash
-infra_tools proxmox backups pve1 101
-infra_tools proxmox backup pve1 101 \
+infra-tools proxmox backups pve1 101
+infra-tools proxmox backup pve1 101 \
   --storage backup --mode snapshot --compress zstd --dry-run
 ```
 
@@ -291,8 +291,8 @@ infra_tools.
 Migrate a guest between registered cluster nodes:
 
 ```bash
-infra_tools proxmox migrate pve1 101 pve2 --dry-run
-infra_tools proxmox migrate pve1 101 pve2 \
+infra-tools proxmox migrate pve1 101 pve2 --dry-run
+infra-tools proxmox migrate pve1 101 pve2 \
   --online --with-local-disks
 ```
 
@@ -305,8 +305,8 @@ first for production migrations.
 List unreferenced guest volumes before deleting anything:
 
 ```bash
-infra_tools proxmox clean-disks pve1 --dry-run
-infra_tools proxmox clean-disks pve1 --delete
+infra-tools proxmox clean-disks pve1 --dry-run
+infra-tools proxmox clean-disks pve1 --delete
 ```
 
 `clean-disks` is list-only by default. `--delete` requires typing `yes` unless
@@ -317,8 +317,8 @@ After confirming that no backup, migration, or snapshot task is still active,
 clear a stale Proxmox management lock:
 
 ```bash
-infra_tools proxmox unlock pve1 101 --dry-run
-infra_tools proxmox unlock pve1 101
+infra-tools proxmox unlock pve1 101 --dry-run
+infra-tools proxmox unlock pve1 101
 ```
 
 The unlock operation only clears the guest lock; it does not repair a failed
@@ -327,15 +327,15 @@ underlying task or roll back partial storage changes.
 ## Cluster and notifications
 
 ```bash
-infra_tools proxmox probe-cluster 10.0.0.10 \
+infra-tools proxmox probe-cluster 10.0.0.10 \
   --key ~/.ssh/proxmox_ed25519 --tag prod
-infra_tools proxmox hosts
-infra_tools proxmox audit pve1 pve2 pve3
-infra_tools proxmox rolling-update pve1 pve2 pve3
-infra_tools proxmox notifications install-webhook \
+infra-tools proxmox hosts
+infra-tools proxmox audit pve1 pve2 pve3
+infra-tools proxmox rolling-update pve1 pve2 pve3
+infra-tools proxmox notifications install-webhook \
   pve1 https://notify.example/hook --send-test
-infra_tools proxmox notifications test-webhook pve1
-infra_tools proxmox shell
+infra-tools proxmox notifications test-webhook pve1
+infra-tools proxmox shell
 ```
 
 `probe-cluster` discovers nodes from Proxmox's configured names and seeds the
@@ -359,22 +359,22 @@ applying any control-plane lockdown.
 For a first rollout, validate one VM and one LXC compatibility path:
 
 ```bash
-infra_tools proxmox hosts
-infra_tools proxmox probe pve1
+infra-tools proxmox hosts
+infra-tools proxmox probe pve1
 
-infra_tools setup workstation_dev 10.0.0.50 devuser \
+infra-tools setup workstation_dev 10.0.0.50 devuser \
   --hosted pve1 --memory 8G --storage root 40G --cores 4 \
   --name dev-01-vm --rdp
 
-infra_tools proxmox ls pve1
-VMID=100  # replace with the VMID returned by `infra_tools proxmox ls`
-infra_tools proxmox health pve1 "$VMID"
-infra_tools proxmox snapshot pve1 "$VMID" pre-modify
-infra_tools proxmox modify pve1 "$VMID" --cores 6 --memory 12G
-infra_tools proxmox stop pve1 "$VMID"
-infra_tools proxmox start pve1 "$VMID"
+infra-tools proxmox ls pve1
+VMID=100  # replace with the VMID returned by `infra-tools proxmox ls`
+infra-tools proxmox health pve1 "$VMID"
+infra-tools proxmox snapshot pve1 "$VMID" pre-modify
+infra-tools proxmox modify pve1 "$VMID" --cores 6 --memory 12G
+infra-tools proxmox stop pve1 "$VMID"
+infra-tools proxmox start pve1 "$VMID"
 
-infra_tools setup server_lite 10.0.0.60 appuser \
+infra-tools setup server_lite 10.0.0.60 appuser \
   --machine unprivileged --hosted pve1 \
   --memory 2G --storage root 10G --storage template
 ```

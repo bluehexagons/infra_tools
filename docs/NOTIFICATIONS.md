@@ -7,7 +7,7 @@ targets with repeatable `--notify TYPE TARGET` options.
 ## Configure targets
 
 ```bash
-infra_tools setup server_lite fileserver admin \
+infra-tools setup server_lite fileserver admin \
   --notify webhook https://hooks.example.net/infra \
   --notify mailbox ops@example.com
 ```
@@ -53,10 +53,10 @@ Targets are validated before setup or patch runs. Invalid schemes, malformed
 mailbox addresses, empty targets, and unknown types fail early:
 
 ```bash
-infra_tools patch fileserver admin \
+infra-tools patch fileserver admin \
   --notify webhook https://hooks.example.net/infra
 ```
 
-Use `infra_tools info HOST` to confirm that notification configuration is part
-of the saved host state. Use `infra_tools cmd HOST` to inspect the reconstructed
+Use `infra-tools info HOST` to confirm that notification configuration is part
+of the saved host state. Use `infra-tools cmd HOST` to inspect the reconstructed
 command, remembering that notification endpoints may be sensitive.

@@ -65,7 +65,7 @@ See `docs/MACHINE_TYPES.md` for capability matrix.
 
 ## Setup boundaries and composition
 
-`infra_tools setup` validates configuration and delegates target-side work to
+`infra-tools setup` validates configuration and delegates target-side work to
 `remote_setup.py`. The target step list comes from the plugin registry and
 `plugins/*` step builders. `bootstrap`/`self-setup` is the local orchestration
 host flow implemented in `lib/orchestrator_bootstrap.py`; `install.sh` invokes

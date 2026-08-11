@@ -7,7 +7,7 @@ published through Nginx or directly on a host port.
 ## Lobby server behind Nginx and SSL
 
 ```bash
-infra_tools setup server_lite 192.168.1.10 \
+infra-tools setup server_lite 192.168.1.10 \
   --antistatic-server lobby.example.com \
   --ssl --ssl-email admin@example.com
 ```
@@ -20,7 +20,7 @@ restart behavior.
 Use `--cloudflare` when the hostname is published through a Cloudflare tunnel:
 
 ```bash
-infra_tools setup server_web 192.168.1.10 \
+infra-tools setup server_web 192.168.1.10 \
   --antistatic-server lobby.example.com \
   --cloudflare
 ```
@@ -33,7 +33,7 @@ Plaintext admin requests are rejected.
 The default internal port is 8080. Specify another port after the hostname:
 
 ```bash
-infra_tools setup server_web 192.168.1.10 \
+infra-tools setup server_web 192.168.1.10 \
   --antistatic-server lobby.example.com:9090 \
   --ssl --ssl-email admin@example.com
 ```
@@ -43,7 +43,7 @@ infra_tools setup server_web 192.168.1.10 \
 Use `:PORT` to listen directly without an Nginx virtual host:
 
 ```bash
-infra_tools setup server_lite 192.168.1.10 \
+infra-tools setup server_lite 192.168.1.10 \
   --antistatic-server :8080
 ```
 
@@ -56,8 +56,8 @@ reachable on UDP 3478.
 Store the admin password interactively, then reference the username:
 
 ```bash
-infra_tools credentials set antistatic-admin
-infra_tools setup server_lite 192.168.1.10 \
+infra-tools credentials set antistatic-admin
+infra-tools setup server_lite 192.168.1.10 \
   --antistatic-server lobby.example.com \
   --antistatic-admin antistatic-admin \
   --ssl --ssl-email admin@example.com
@@ -66,7 +66,7 @@ infra_tools setup server_lite 192.168.1.10 \
 Disable the interface and remove its remote credential with:
 
 ```bash
-infra_tools setup server_lite 192.168.1.10 \
+infra-tools setup server_lite 192.168.1.10 \
   --antistatic-server lobby.example.com \
   --no-antistatic-admin \
   --ssl --ssl-email admin@example.com
@@ -80,7 +80,7 @@ root-only environment file.
 Deploy the database service behind Nginx:
 
 ```bash
-infra_tools setup server_web 192.168.1.10 \
+infra-tools setup server_web 192.168.1.10 \
   --antistatic-db db.example.com \
   --ssl --ssl-email admin@example.com
 ```
@@ -88,7 +88,7 @@ infra_tools setup server_web 192.168.1.10 \
 Use `:8081` for direct hostless mode:
 
 ```bash
-infra_tools setup server_lite 192.168.1.10 \
+infra-tools setup server_lite 192.168.1.10 \
   --antistatic-db :8081
 ```
 

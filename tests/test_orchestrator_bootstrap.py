@@ -147,7 +147,7 @@ class TestRunOrchestratorBootstrap(unittest.TestCase):
         )
         self.assertEqual(result, 1)
 
-    @patch("lib.orchestrator_bootstrap.install_launcher", return_value="/usr/local/bin/infra_tools")
+    @patch("lib.orchestrator_bootstrap.install_launcher", return_value="/usr/local/bin/infra-tools")
     @patch("lib.orchestrator_bootstrap.resolve_bootstrap_user", return_value=("admin", "/home/admin"))
     @patch("lib.orchestrator_bootstrap.install_system_packages", return_value=0)
     @patch("lib.orchestrator_bootstrap.get_current_username", return_value="root")
@@ -208,13 +208,31 @@ class TestInstallLauncher(unittest.TestCase):
             launcher = orchestrator_bootstrap.install_launcher(
                 project_script, target_dir=target_dir
             )
-            self.assertEqual(launcher, os.path.join(target_dir, "infra_tools"))
+            self.assertEqual(launcher, os.path.join(target_dir, "infra-tools"))
             self.assertTrue(os.access(launcher, os.X_OK))
             with open(launcher, encoding="utf-8") as file_obj:
                 content = file_obj.read()
             self.assertIn("#!/bin/sh", content)
             self.assertIn(project_script, content)
             self.assertIn("exec python3", content)
+
+    def test_install_launcher_removes_legacy_launcher(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project_script = os.path.join(tmp, "infra_tools.py")
+            with open(project_script, "w", encoding="utf-8") as handle:
+                handle.write("# fake script\n")
+            target_dir = os.path.join(tmp, "bin")
+            os.makedirs(target_dir)
+            legacy_launcher = os.path.join(target_dir, "infra_tools")
+            with open(legacy_launcher, "w", encoding="utf-8") as handle:
+                handle.write("#!/bin/sh\nexit 1\n")
+
+            launcher = orchestrator_bootstrap.install_launcher(
+                project_script, target_dir=target_dir
+            )
+
+            self.assertEqual(launcher, os.path.join(target_dir, "infra-tools"))
+            self.assertFalse(os.path.lexists(legacy_launcher))
 
     def test_install_launcher_safely_quotes_project_path(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -266,7 +284,7 @@ class TestRetireLegacyTmpfilesConf(unittest.TestCase):
                 orchestrator_bootstrap.retire_legacy_tmpfiles_conf(file_obj.name)
 
     @patch("lib.orchestrator_bootstrap.retire_legacy_tmpfiles_conf", return_value=True)
-    @patch("lib.orchestrator_bootstrap.install_launcher", return_value="/usr/local/bin/infra_tools")
+    @patch("lib.orchestrator_bootstrap.install_launcher", return_value="/usr/local/bin/infra-tools")
     @patch("lib.orchestrator_bootstrap.subprocess.run")
     @patch("lib.orchestrator_bootstrap._run_apt_command", return_value=0)
     @patch("lib.orchestrator_bootstrap.os.geteuid", return_value=0)

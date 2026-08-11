@@ -1,6 +1,6 @@
 # Deployments and manifests
 
-`infra_tools` deploys a repository with `--deploy DOMAIN GIT_URL`. A repository
+`infra-tools` deploys a repository with `--deploy DOMAIN GIT_URL`. A repository
 can use automatic project-type detection, or place an `infra.json` file at its
 root to describe one or more static sites and services explicitly. The manifest
 is validated before deployment; an invalid file stops deployment instead of
@@ -9,7 +9,7 @@ falling back to automatic detection.
 ## Basic deployment
 
 ```bash
-infra_tools setup server_web web.example.com deploy \
+infra-tools setup server_web web.example.com deploy \
   --ruby --node --ssl --ssl-email admin@example.com \
   --deploy web.example.com https://github.com/example/web.git
 ```
@@ -114,8 +114,8 @@ a warning after retries but does not abort an otherwise successful deployment.
   under `/var/www/.infra_tools_shared/<app>/<component>`.
 - Service state remains outside the release directory, so replacing a release
   does not remove component data.
-- `infra_tools patch HOST --deploy ...` reruns the saved deployment with the
-  same manifest-aware path. Use `infra_tools deploy PATTERN` to rerun saved
+- `infra-tools patch HOST --deploy ...` reruns the saved deployment with the
+  same manifest-aware path. Use `infra-tools deploy PATTERN` to rerun saved
   configurations.
 
 ## Validation and troubleshooting

@@ -330,7 +330,7 @@ class TestWorkspacePrompt(unittest.TestCase):
             input_func=lambda _p: (_ for _ in ()).throw(EOFError()),
             output_func=lambda _: None,
         )
-        self.assertEqual(shell._make_prompt(), "infra_tools> ")
+        self.assertEqual(shell._make_prompt(), "infra-tools> ")
 
     def test_workspace_prompt_shows_basename(self) -> None:
         shell = InteractiveShell(
@@ -344,7 +344,7 @@ class TestWorkspacePrompt(unittest.TestCase):
     def test_workspace_prompt_after_set(self) -> None:
         shell, _ = _make_shell([])
         shell.state.workspace = "/workspaces/prod"
-        self.assertEqual(shell._make_prompt(), "infra_tools[prod]> ")
+        self.assertEqual(shell._make_prompt(), "infra-tools[prod]> ")
 
 
 class TestRenameCommand(unittest.TestCase):

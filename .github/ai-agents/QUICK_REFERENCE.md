@@ -66,7 +66,7 @@ def setup_kernel_feature(config: SetupConfig) -> None:
 
 ```bash
 python3 -m py_compile file.py
-python3 infra_tools.py setup server_web test.com --dry-run
+infra-tools setup server_web test.com --dry-run
 python3 -m unittest discover -s tests
 ```
 

@@ -5,7 +5,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-INFRA_TOOLS_COMMAND = "infra_tools.py"
+INFRA_TOOLS_COMMAND = "infra-tools"
 
 
 def detect_shell() -> str:
@@ -51,7 +51,7 @@ def _find_register_argcomplete() -> str | None:
 
 
 def setup_bash_completions(command_name: str = INFRA_TOOLS_COMMAND, global_install: bool = False) -> bool:
-    """Setup bash completions for infra_tools."""
+    """Setup bash completions for infra-tools."""
     register_cmd = _find_register_argcomplete()
     if register_cmd is None:
         print("Error: register-python-argcomplete not found in PATH")
@@ -91,7 +91,7 @@ def setup_bash_completions(command_name: str = INFRA_TOOLS_COMMAND, global_insta
                 return True
 
         lines = [
-            "# infra_tools shell completions",
+            "# infra-tools shell completions",
             f'eval "$(register-python-argcomplete {command_name})"',
         ]
         with open(config_file, "a", encoding="utf-8") as handle:
@@ -106,7 +106,7 @@ def setup_bash_completions(command_name: str = INFRA_TOOLS_COMMAND, global_insta
 
 
 def setup_zsh_completions(command_name: str = INFRA_TOOLS_COMMAND, global_install: bool = False) -> bool:
-    """Setup zsh completions for infra_tools."""
+    """Setup zsh completions for infra-tools."""
     register_cmd = _find_register_argcomplete()
     if register_cmd is None:
         print("Error: register-python-argcomplete not found in PATH")
@@ -161,7 +161,7 @@ def setup_zsh_completions(command_name: str = INFRA_TOOLS_COMMAND, global_instal
                 return True
 
         lines = [
-            "# infra_tools shell completions",
+            "# infra-tools shell completions",
             f'eval "$(register-python-argcomplete {command_name})"',
         ]
         with open(config_file, "a", encoding="utf-8") as handle:
@@ -176,7 +176,7 @@ def setup_zsh_completions(command_name: str = INFRA_TOOLS_COMMAND, global_instal
 
 
 def setup_fish_completions(command_name: str = INFRA_TOOLS_COMMAND, global_install: bool = False) -> bool:
-    """Setup fish completions for infra_tools."""
+    """Setup fish completions for infra-tools."""
     del global_install
 
     register_cmd = _find_register_argcomplete()
@@ -210,7 +210,7 @@ def setup_fish_completions(command_name: str = INFRA_TOOLS_COMMAND, global_insta
 
 
 def setup_tcsh_completions(command_name: str = INFRA_TOOLS_COMMAND, global_install: bool = False) -> bool:
-    """Setup tcsh completions for infra_tools."""
+    """Setup tcsh completions for infra-tools."""
     del command_name, global_install
     print("Note: tcsh completion support is limited.")
     print("Consider using bash or zsh for full tab completion support.")
@@ -218,7 +218,7 @@ def setup_tcsh_completions(command_name: str = INFRA_TOOLS_COMMAND, global_insta
 
 
 def run_completion_setup(shell: str, global_install: bool, command_name: str = INFRA_TOOLS_COMMAND) -> int:
-    """Install shell completion for the main infra_tools CLI."""
+    """Install shell completion for the main infra-tools CLI."""
     if shell == "auto":
         shell = detect_shell()
         print(f"Detected shell: {shell}")

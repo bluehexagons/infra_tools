@@ -31,7 +31,7 @@ Mount a remote directory using sshfs. The local mountpoint is created
 automatically if it does not exist.
 
 ```
-infra_tools mount <host>:<remote_path> <local_path> [options]
+infra-tools mount <host>:<remote_path> <local_path> [options]
 ```
 
 | Option | Description |
@@ -44,9 +44,9 @@ infra_tools mount <host>:<remote_path> <local_path> [options]
 | `-p, --port N` | SSH port |
 
 ```bash
-infra_tools mount myserver:/var/log /mnt/myserver-logs
-infra_tools mount myserver:/srv/data /mnt/data --ro
-infra_tools mount 10.0.0.10:/home/admin /mnt/admin -u admin -i ~/.ssh/id_ed25519
+infra-tools mount myserver:/var/log /mnt/myserver-logs
+infra-tools mount myserver:/srv/data /mnt/data --ro
+infra-tools mount 10.0.0.10:/home/admin /mnt/admin -u admin -i ~/.ssh/id_ed25519
 ```
 
 Mounts use `reconnect` and `ServerAliveInterval=30` so short network
@@ -59,12 +59,12 @@ interruptions recover automatically.
 Unmount an sshfs mount by local path or by host name.
 
 ```
-infra_tools umount <local_path|hostname>
+infra-tools umount <local_path|hostname>
 ```
 
 ```bash
-infra_tools umount /mnt/myserver-logs   # by local path
-infra_tools umount myserver             # by host name (finds the mount automatically)
+infra-tools umount /mnt/myserver-logs   # by local path
+infra-tools umount myserver             # by host name (finds the mount automatically)
 ```
 
 When given a host name, `findmnt` is used to locate the mount point. If more
@@ -85,7 +85,7 @@ SSH into a host and print a structured health summary:
 - Reboot-required status
 
 ```
-infra_tools health <host> [options]
+infra-tools health <host> [options]
 ```
 
 | Option | Description |
@@ -95,8 +95,8 @@ infra_tools health <host> [options]
 | `-i, --key PATH` | SSH identity file (overrides saved config) |
 
 ```bash
-infra_tools health myserver
-infra_tools health 10.0.0.10 -u admin
+infra-tools health myserver
+infra-tools health 10.0.0.10 -u admin
 ```
 
 Each section degrades gracefully — if a command is unavailable on the remote
@@ -111,7 +111,7 @@ Open an interactive SSH session using credentials from the saved infra_tools
 config for the host. Adds `ControlMaster=auto` for connection reuse.
 
 ```
-infra_tools ssh <host> [options] [-- <remote_command>]
+infra-tools ssh <host> [options] [-- <remote_command>]
 ```
 
 | Option | Description |
@@ -123,9 +123,9 @@ infra_tools ssh <host> [options] [-- <remote_command>]
 | `-- cmd ...` | Run a remote command instead of opening a shell |
 
 ```bash
-infra_tools ssh myserver
-infra_tools ssh myserver -- journalctl -f
-infra_tools ssh myserver -- systemctl status nginx
+infra-tools ssh myserver
+infra-tools ssh myserver -- journalctl -f
+infra-tools ssh myserver -- systemctl status nginx
 ```
 
 Uses `execvp` to replace the current process, so the terminal is fully
@@ -138,7 +138,7 @@ interactive (signals, terminal size, etc. all work correctly).
 Sync a local file or directory to a remote host using rsync over SSH.
 
 ```
-infra_tools push <local_path> <host>:<remote_path> [options]
+infra-tools push <local_path> <host>:<remote_path> [options]
 ```
 
 | Option | Description |
@@ -152,9 +152,9 @@ infra_tools push <local_path> <host>:<remote_path> [options]
 | `-p, --port N` | SSH port |
 
 ```bash
-infra_tools push ./dist myserver:/var/www/app
-infra_tools push ./data myserver:/backup/data --dry-run
-infra_tools push ./data myserver:/backup/data --delete
+infra-tools push ./dist myserver:/var/www/app
+infra-tools push ./data myserver:/backup/data --dry-run
+infra-tools push ./data myserver:/backup/data --delete
 ```
 
 When `--delete` is specified without `--dry-run`, a confirmation prompt is
@@ -167,7 +167,7 @@ shown before proceeding.
 Sync a remote file or directory to local using rsync over SSH.
 
 ```
-infra_tools pull <host>:<remote_path> [<local_path>] [options]
+infra-tools pull <host>:<remote_path> [<local_path>] [options]
 ```
 
 | Option | Description |
@@ -180,9 +180,9 @@ infra_tools pull <host>:<remote_path> [<local_path>] [options]
 | `-p, --port N` | SSH port |
 
 ```bash
-infra_tools pull myserver:/var/log ./logs
-infra_tools pull myserver:/srv/data          # saves to ./data
-infra_tools pull myserver:/var/log --dry-run
+infra-tools pull myserver:/var/log ./logs
+infra-tools pull myserver:/srv/data          # saves to ./data
+infra-tools pull myserver:/var/log --dry-run
 ```
 
 ---
@@ -194,7 +194,7 @@ Idempotent — skips if the key is already present. Creates the `.ssh` directory
 and `authorized_keys` file with correct permissions if needed.
 
 ```
-infra_tools key push <host> [options]
+infra-tools key push <host> [options]
 ```
 
 | Option | Description |
@@ -205,9 +205,9 @@ infra_tools key push <host> [options]
 | `-i, --key PATH` | SSH key to authenticate with |
 
 ```bash
-infra_tools key push myserver
-infra_tools key push myserver --pubkey ~/.ssh/id_rsa.pub
-infra_tools key push 10.0.0.10 -u admin -i ~/.ssh/bootstrap_key
+infra-tools key push myserver
+infra-tools key push myserver --pubkey ~/.ssh/id_rsa.pub
+infra-tools key push 10.0.0.10 -u admin -i ~/.ssh/bootstrap_key
 ```
 
 ---
@@ -218,7 +218,7 @@ Run `df -h` on one or more remote hosts in parallel and print a combined table
 sorted by percent used. Entries above 85% are prefixed with `[!]`.
 
 ```
-infra_tools df <host> [<host2> ...] [options]
+infra-tools df <host> [<host2> ...] [options]
 ```
 
 | Option | Description |
@@ -228,9 +228,9 @@ infra_tools df <host> [<host2> ...] [options]
 | `-i, --key PATH` | SSH identity file |
 
 ```bash
-infra_tools df myserver
-infra_tools df web1 web2 db1
-infra_tools df web1 web2 -u admin
+infra-tools df myserver
+infra-tools df web1 web2 db1
+infra-tools df web1 web2 -u admin
 ```
 
 Hosts that cannot be reached are reported as warnings and omitted from the table.
@@ -243,7 +243,7 @@ Run a shell command on multiple hosts concurrently, printing each host's output
 in a labeled block followed by a pass/fail summary.
 
 ```
-infra_tools fan <host> [<host2> ...] [options] -- <command>
+infra-tools fan <host> [<host2> ...] [options] -- <command>
 ```
 
 | Option | Description |
@@ -254,9 +254,9 @@ infra_tools fan <host> [<host2> ...] [options] -- <command>
 | `-i, --key PATH` | SSH identity file |
 
 ```bash
-infra_tools fan web1 web2 -- uptime
-infra_tools fan web1 web2 db1 -- systemctl restart myapp
-infra_tools fan web1 web2 -u deploy -- git -C /srv/app pull
+infra-tools fan web1 web2 -- uptime
+infra-tools fan web1 web2 db1 -- systemctl restart myapp
+infra-tools fan web1 web2 -u deploy -- git -C /srv/app pull
 ```
 
 All hosts run concurrently. Output is serialized per host after all results are
@@ -269,7 +269,7 @@ collected, sorted by hostname for stable output.
 Manage a systemd service on a remote host. Defaults to `status`.
 
 ```
-infra_tools svc <host> <unit> [action] [options]
+infra-tools svc <host> <unit> [action] [options]
 ```
 
 | Argument | Description |
@@ -284,10 +284,10 @@ infra_tools svc <host> <unit> [action] [options]
 | `-i, --key PATH` | SSH identity file |
 
 ```bash
-infra_tools svc myserver nginx              # show status
-infra_tools svc myserver nginx restart      # restart and show status
-infra_tools svc myserver myapp.service stop
-infra_tools svc myserver nginx enable
+infra-tools svc myserver nginx              # show status
+infra-tools svc myserver nginx restart      # restart and show status
+infra-tools svc myserver myapp.service stop
+infra-tools svc myserver nginx enable
 ```
 
 Mutating actions (`restart`, `start`, `stop`, `enable`, `disable`, `reload`)
@@ -300,7 +300,7 @@ use `sudo` and display a status readout afterward.
 Show recent journal entries for a systemd unit, or follow live output.
 
 ```
-infra_tools logs <host> <unit> [options]
+infra-tools logs <host> <unit> [options]
 ```
 
 | Option | Description |
@@ -311,9 +311,9 @@ infra_tools logs <host> <unit> [options]
 | `-i, --key PATH` | SSH identity file |
 
 ```bash
-infra_tools logs myserver nginx
-infra_tools logs myserver myapp -f
-infra_tools logs myserver nginx -n 200
+infra-tools logs myserver nginx
+infra-tools logs myserver myapp -f
+infra-tools logs myserver nginx -n 200
 ```
 
 Uses `execvp` so `-f` gives a true live stream with correct terminal behavior.
@@ -322,12 +322,12 @@ Uses `execvp` so `-f` gives a true live stream with correct terminal behavior.
 
 ## upgrade
 
-With no host arguments, update the installed infra_tools worktree on its
+With no host arguments, update the installed infra-tools worktree on its
 selected channel. With one or more hosts, run `apt-get update && apt-get
 upgrade` on those hosts in parallel and report which require a reboot.
 
 ```bash
-infra_tools upgrade
+infra-tools upgrade
 ```
 
 The installed-source form refuses to overwrite local worktree changes. See
@@ -336,7 +336,7 @@ The installed-source form refuses to overwrite local worktree changes. See
 ### Remote host upgrade
 
 ```
-infra_tools upgrade <host> [<host2> ...] [options]
+infra-tools upgrade <host> [<host2> ...] [options]
 ```
 
 | Option | Description |
@@ -347,9 +347,9 @@ infra_tools upgrade <host> [<host2> ...] [options]
 | `-i, --key PATH` | SSH identity file |
 
 ```bash
-infra_tools upgrade myserver
-infra_tools upgrade web1 web2 db1
-infra_tools upgrade web1 web2 --check     # show pending counts only
+infra-tools upgrade myserver
+infra-tools upgrade web1 web2 db1
+infra-tools upgrade web1 web2 --check     # show pending counts only
 ```
 
 Requires `sudo` access on the remote host. Hosts that fail are reported and do
@@ -363,7 +363,7 @@ Probe hosts via SSH and print a latency table. Hosts that do not respond within
 5 seconds are marked unreachable.
 
 ```
-infra_tools reachable [<hosts>] [options]
+infra-tools reachable [<hosts>] [options]
 ```
 
 | Option | Description |
@@ -374,10 +374,10 @@ infra_tools reachable [<hosts>] [options]
 | `-i, --key PATH` | SSH identity file |
 
 ```bash
-infra_tools reachable                      # probe all saved hosts
-infra_tools reachable '*.example.com'      # glob filter on saved hosts
-infra_tools reachable --pattern 'web*'
-infra_tools reachable web1 web2 db1        # explicit host list
+infra-tools reachable                      # probe all saved hosts
+infra-tools reachable '*.example.com'      # glob filter on saved hosts
+infra-tools reachable --pattern 'web*'
+infra-tools reachable web1 web2 db1        # explicit host list
 ```
 
 All probes run concurrently. The summary line lists any unreachable hosts by

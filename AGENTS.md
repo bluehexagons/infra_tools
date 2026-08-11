@@ -49,7 +49,7 @@ sh -n install.sh
 git diff --check
 
 # Dry run test
-python3 infra_tools.py setup server_web test.com --dry-run
+infra-tools setup server_web test.com --dry-run
 
 # Run tests
 python3 -m unittest discover -s tests
@@ -74,7 +74,7 @@ python3 -m unittest discover -s tests
 
 ## Setup Boundaries
 
-- `infra_tools setup` parses and validates a user-facing configuration, then
+- `infra-tools setup` parses and validates a user-facing configuration, then
   uploads or stages the source for `remote_setup.py`.
 - `remote_setup.py` executes target-side setup steps selected by the plugin
   registry; it is the boundary for remote system mutations.

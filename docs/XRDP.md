@@ -1,6 +1,6 @@
 # XRDP configuration and troubleshooting
 
-`infra_tools` configures XRDP for secure, reconnectable desktop sessions with
+`infra-tools` configures XRDP for secure, reconnectable desktop sessions with
 dynamic resolution. The supported path uses Xorg with `xorgxrdp`; it does not
 use Xvnc or a Proxmox emulated display as the RDP display.
 
@@ -27,7 +27,7 @@ support. Use the CLI flags below to change the managed channel policy.
 For a remote target, provide the Unix account password through a secret source:
 
 ```bash
-infra_tools setup workstation_dev 10.0.0.25 agent \
+infra-tools setup workstation_dev 10.0.0.25 agent \
   --desktop xfce --rdp --password "$RDP_PASSWORD" \
   --rdp-source 10.0.0.0/24
 ```
@@ -36,7 +36,7 @@ For local setup of an existing non-root desktop account, reuse its password
 without placing it in process arguments:
 
 ```bash
-sudo "$(command -v infra_tools)" setup workstation_dev localhost "$USER" \
+sudo "$(command -v infra-tools)" setup workstation_dev localhost "$USER" \
   --control-plane --desktop xfce --rdp --rdp-existing-password
 ```
 

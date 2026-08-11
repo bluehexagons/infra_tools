@@ -7,12 +7,12 @@ configurations without requiring a new setup command line each time.
 ## Inspect saved hosts
 
 ```bash
-infra_tools list
-infra_tools list production
-infra_tools info production
-infra_tools list --json
-infra_tools info --compact
-infra_tools cmd production
+infra-tools list
+infra-tools list production
+infra-tools info production
+infra-tools list --json
+infra-tools info --compact
+infra-tools cmd production
 ```
 
 `list` filters by host, friendly name, or tag. `info` shows configuration and
@@ -24,15 +24,15 @@ last-run status. `cmd` reconstructs a safe, redacted setup command.
 remote setup flow:
 
 ```bash
-infra_tools patch production --ssl --ssl-email admin@example.com
-infra_tools patch production --deploy api.example.com https://github.com/user/api.git
+infra-tools patch production --ssl --ssl-email admin@example.com
+infra-tools patch production --deploy api.example.com https://github.com/user/api.git
 ```
 
 Use `deploy` to rerun saved configurations:
 
 ```bash
-infra_tools deploy production
-infra_tools deploy production --yes
+infra-tools deploy production
+infra-tools deploy production --yes
 ```
 
 Some capabilities have narrower fast paths. Use
@@ -42,9 +42,9 @@ without running unrelated setup work.
 ## Recall and reconstruction
 
 ```bash
-infra_tools recall example.com admin
-infra_tools recall example.com admin --key ~/.ssh/id_ed25519
-infra_tools reconstruct
+infra-tools recall example.com admin
+infra-tools recall example.com admin --key ~/.ssh/id_ed25519
+infra-tools reconstruct
 ```
 
 `reconstruct` analyzes the current host; `recall` targets a remote host.
@@ -55,14 +55,14 @@ Removal affects workspace metadata only; it does not uninstall software from a
 target:
 
 ```bash
-infra_tools rm old-server
-infra_tools rm old-server --yes
+infra-tools rm old-server
+infra-tools rm old-server --yes
 ```
 
 ## Interactive shell
 
 ```bash
-infra_tools shell
+infra-tools shell
 ```
 
 Useful commands include `list`, `info`, `cmd`, `new`, `setup`, `deploy`, `rm`,

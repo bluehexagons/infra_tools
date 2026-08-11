@@ -84,7 +84,7 @@ class InteractiveShell:
         """Drive the REPL until the user quits or input ends."""
         self._load_readline_history()
         self._run_init_file()
-        self._output("infra_tools shell — type 'help' for commands.")
+        self._output("infra-tools shell — type 'help' for commands.")
         try:
             return self._run_loop()
         finally:
@@ -130,8 +130,8 @@ class InteractiveShell:
     def _make_prompt(self) -> str:
         if self.state.workspace:
             label = Path(self.state.workspace).name or self.state.workspace
-            return f"infra_tools[{label}]> "
-        return "infra_tools> "
+            return f"infra-tools[{label}]> "
+        return "infra-tools> "
 
     def _run_init_file(self, init_file: Optional[Path] = None) -> None:
         path = init_file if init_file is not None else _INIT_FILE

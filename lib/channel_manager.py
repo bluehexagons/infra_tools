@@ -1,4 +1,4 @@
-"""Manage the Git worktree used by an installed infra_tools launcher."""
+"""Manage the Git worktree used by an installed infra-tools launcher."""
 
 from __future__ import annotations
 

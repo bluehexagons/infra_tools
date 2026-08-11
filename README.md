@@ -8,7 +8,7 @@ operations for hosts that are already configured.
 ## Start here
 
 The supported workflow starts with the installer. It keeps the repository
-locally, installs the managed `infra_tools` launcher, and lets you switch
+locally, installs the managed `infra-tools` launcher, and lets you switch
 channels or upgrade later. Choose the path that matches the machine.
 
 The installer needs either `wget` or `curl` to fetch itself. The examples use
@@ -50,8 +50,8 @@ sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup workstation
 rm -f "$HOME/.infra_tools-install.sh"
 ```
 
-After installation, use `infra_tools setup ...` for remote hosts and
-`infra_tools upgrade` to update the selected channel. See the concise
+After installation, use `infra-tools setup ...` for remote hosts and
+`infra-tools upgrade` to update the selected channel. See the concise
 [installation guide](docs/INSTALLATION.md) for prerequisites, verification,
 channels, credentials, RDP, and recovery. The [documentation index](docs/README.md)
 organizes detailed feature and operations guides.
@@ -128,7 +128,7 @@ See the
 ### Targeted updates
 
 Use `patch` for general saved-configuration changes. Use a feature-specific
-fast path when available—for example, `infra_tools shares HOST` updates Samba
+fast path when available—for example, `infra-tools shares HOST` updates Samba
 users, access, paths, and share declarations without running unrelated setup
 work. See [Saved configuration operations](docs/OPERATIONS.md).
 
@@ -136,18 +136,18 @@ work. See [Saved configuration operations](docs/OPERATIONS.md).
 
 ```bash
 # Inspect a saved host
-infra_tools list
-infra_tools info example.com
+infra-tools list
+infra-tools info example.com
 
 # Apply a targeted general patch
-infra_tools patch example.com admin --ssl
+infra-tools patch example.com admin --ssl
 
 # Update Samba shares only
-infra_tools shares fileserver \
+infra-tools shares fileserver \
   --share write documents /srv/documents alice,bob
 
 # Manage a Proxmox guest
-infra_tools proxmox health pve1 101
+infra-tools proxmox health pve1 101
 ```
 
 Use the [documentation index](docs/README.md) for the complete command and

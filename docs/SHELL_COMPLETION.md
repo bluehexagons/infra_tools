@@ -1,6 +1,6 @@
 # Shell Completion
 
-The unified `infra_tools` CLI supports full tab completion for Bash, Zsh, and
+The unified `infra-tools` CLI supports full tab completion for Bash, Zsh, and
 Fish. `tcsh` is accepted as a compatibility choice but has no generated
 completion file; use Bash or Zsh for the complete command surface.
 
@@ -8,7 +8,7 @@ completion file; use Bash or Zsh for the complete command surface.
 
 ```bash
 uv tool install --upgrade argcomplete
-infra_tools completions
+infra-tools completions
 ```
 
 This installs completion for the consolidated launcher, including `setup`,
@@ -20,23 +20,23 @@ This installs completion for the consolidated launcher, including `setup`,
 ### Bash
 
 ```bash
-eval "$(register-python-argcomplete infra_tools)"
+eval "$(register-python-argcomplete infra-tools)"
 ```
 
 ### Zsh
 
 ```bash
-eval "$(register-python-argcomplete infra_tools)"
+eval "$(register-python-argcomplete infra-tools)"
 ```
 
 ### Fish
 
 ```bash
-register-python-argcomplete --shell fish infra_tools > ~/.config/fish/completions/infra_tools.fish
+register-python-argcomplete --shell fish infra-tools > ~/.config/fish/completions/infra-tools.fish
 ```
 
 ## System-wide Installation
 
 ```bash
-sudo infra_tools completions --global --shell bash
+sudo infra-tools completions --global --shell bash
 ```

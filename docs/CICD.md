@@ -7,7 +7,7 @@ executor. Repository-specific scripts live in
 Example setup:
 
 ```bash
-infra_tools setup server_web ci.example.com deploy \
+infra-tools setup server_web ci.example.com deploy \
   --cicd --ssl --ssl-email admin@example.com
 ```
 
@@ -26,7 +26,7 @@ root access on the app server.
 Set up the app server first:
 
 ```bash
-infra_tools setup server_web app.example.com deploy \
+infra-tools setup server_web app.example.com deploy \
   --app-server --ssl --ssl-email admin@example.com
 ```
 
@@ -34,7 +34,7 @@ Then set up the build server and name each target (repeat
 `--deploy-target` for multiple app servers):
 
 ```bash
-infra_tools setup server_web build.example.com deploy \
+infra-tools setup server_web build.example.com deploy \
   --build-server --cicd --node --python \
   --deploy-target app.example.com
 ```

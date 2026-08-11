@@ -56,7 +56,7 @@ def reconstruct_remote_config(
             timeout=10,
         )
         if check_result.returncode != 0:
-            print("Note: infra_tools not found on remote host. Installing...", file=sys.stderr)
+            print("Note: infra-tools not found on remote host. Installing...", file=sys.stderr)
             build_dir = tempfile.mkdtemp(prefix="infra_recall_")
             try:
                 copy_project_files(build_dir)
@@ -78,7 +78,7 @@ def reconstruct_remote_config(
                 )
                 install_process.communicate(input=tar_data, timeout=60)
                 if install_process.returncode != 0:
-                    print("Failed to install infra_tools on remote host", file=sys.stderr)
+                    print("Failed to install infra-tools on remote host", file=sys.stderr)
                     return None
             finally:
                 if os.path.exists(build_dir):

@@ -7,7 +7,7 @@ a tunnel by itself.
 ## Prepare a host
 
 ```bash
-infra_tools setup server_web example.com deploy \
+infra-tools setup server_web example.com deploy \
   --cloudflare \
   --deploy example.com https://github.com/example/site.git
 ```

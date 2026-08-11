@@ -19,8 +19,8 @@ def _get_entrypoint_metadata(operation: str) -> dict[str, str]:
     """Return user-facing CLI metadata stored with workspace state."""
 
     return {
-        "script": "infra_tools.py",
-        "command": f"infra_tools.py {operation}",
+        "script": "infra-tools",
+        "command": f"infra-tools {operation}",
     }
 
 

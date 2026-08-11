@@ -202,11 +202,11 @@ def _resolve_share_credentials(config: SetupConfig, credential_map: dict[str, st
             if username == config.antistatic_admin:
                 raise ValueError(
                     f"Missing credential for Antistatic admin: {username}. "
-                    "Run infra_tools.py credentials set USERNAME to enter it securely"
+                    "Run infra-tools credentials set USERNAME to enter it securely"
                 )
             raise ValueError(
                 f"Missing credential for share user: {username}. "
-                "Run infra_tools.py credentials set USERNAME or use --credential USERNAME PASSWORD"
+                "Run infra-tools credentials set USERNAME or use --credential USERNAME PASSWORD"
             )
         if username not in seen_usernames:
             seen_usernames.add(username)
@@ -231,7 +231,7 @@ def _resolve_named_smb_mounts(
             if password is None:
                 raise ValueError(
                     f"Missing credential for SMB mount user: {username}. "
-                    "Run infra_tools.py credentials set USERNAME or use --credential USERNAME PASSWORD"
+                    "Run infra-tools credentials set USERNAME or use --credential USERNAME PASSWORD"
                 )
             resolved_spec[2] = f"{username}:{password}"
         resolved_mounts.append(resolved_spec)

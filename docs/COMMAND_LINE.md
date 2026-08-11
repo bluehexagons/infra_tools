@@ -1,6 +1,6 @@
 # Command-Line Reference
 
-Reference for the installed `infra_tools` CLI. The code help and
+Reference for the installed `infra-tools` CLI. The code help and
 `lib/arg_parser.py` are the source of truth; this page summarizes the command
 surface and behaviors that are easy to miss.
 
@@ -16,32 +16,32 @@ Related pages:
 ## Commands
 
 ```text
-infra_tools setup <system_type> <host> [username] [options]
-infra_tools patch <host> [username] [options]
-infra_tools shares <host> [username] [options]
-infra_tools recall <host> [username] [options]
-infra_tools reconstruct [--compact]
-infra_tools list [pattern] [--json]
-infra_tools info [pattern] [--compact]
-infra_tools cmd [pattern]
-infra_tools rm <pattern>
-infra_tools deploy <pattern> [--yes]
-infra_tools credentials set <username> [password]
-infra_tools credentials list
-infra_tools credentials remove <username>
-infra_tools completions [options]
-infra_tools python-tools [options]
-infra_tools bootstrap [options]
-infra_tools self-setup [options]
-infra_tools local [subcommand]
-infra_tools channel [CHANNEL]
-infra_tools upgrade
-infra_tools agent doctor
-infra_tools agent update [options]
-infra_tools maintenance github [--root PATH] <audit|prune> [options]
-infra_tools shell
-infra_tools network ...
-infra_tools proxmox ...
+infra-tools setup <system_type> <host> [username] [options]
+infra-tools patch <host> [username] [options]
+infra-tools shares <host> [username] [options]
+infra-tools recall <host> [username] [options]
+infra-tools reconstruct [--compact]
+infra-tools list [pattern] [--json]
+infra-tools info [pattern] [--compact]
+infra-tools cmd [pattern]
+infra-tools rm <pattern>
+infra-tools deploy <pattern> [--yes]
+infra-tools credentials set <username> [password]
+infra-tools credentials list
+infra-tools credentials remove <username>
+infra-tools completions [options]
+infra-tools python-tools [options]
+infra-tools bootstrap [options]
+infra-tools self-setup [options]
+infra-tools local [subcommand]
+infra-tools channel [CHANNEL]
+infra-tools upgrade
+infra-tools agent doctor
+infra-tools agent update [options]
+infra-tools maintenance github [--root PATH] <audit|prune> [options]
+infra-tools shell
+infra-tools network ...
+infra-tools proxmox ...
 ```
 
 ### Bootstrap and self-setup flags
@@ -50,7 +50,7 @@ infra_tools proxmox ...
 When that host is a Proxmox VM, install and activate the guest agent with:
 
 ```bash
-sudo infra_tools self-setup --qemu-guest-agent
+sudo infra-tools self-setup --qemu-guest-agent
 ```
 
 | Flag | Description |
@@ -138,7 +138,7 @@ guest starts on the requested address. Existing ifupdown files changed for the
 selected interface receive a one-time `.infra-tools.bak` copy.
 
 ```bash
-infra_tools setup server_lite 192.168.1.50 admin \
+infra-tools setup server_lite 192.168.1.50 admin \
   --hostname app-01 \
   --ip 192.168.1.50/24 --gateway 192.168.1.1 \
   --dns 1.1.1.1 --dns 1.0.0.1 \
@@ -151,7 +151,7 @@ cluster identity and requires a node-specific migration plan.
 
 Without `--rdp-source`, enabling RDP keeps a globally rate-limited UFW rule.
 Prefer one or more management, VPN, or trusted LAN CIDRs. On rerun,
-infra_tools installs the requested source rules before removing the broad rule
+infra-tools installs the requested source rules before removing the broad rule
 and reconciles only its own comment-tagged RDP rules.
 Disconnected sessions are retained indefinitely by default so a transient RDP
 disconnect does not destroy agent work. A positive disconnected timeout is
@@ -184,7 +184,7 @@ profile. `server_lite` omits the standard firewall and generic CLI bundle, so
 use it only when that lighter profile is intentional.
 
 ```bash
-infra_tools setup server_dev 10.0.0.10 agentuser \
+infra-tools setup server_dev 10.0.0.10 agentuser \
   --agent-suite terminal --copy-config \
   --repo https://github.com/user/my_codebase.git
 ```
@@ -260,12 +260,12 @@ On the configured VM, check the terminal suite without exposing credential
 contents:
 
 ```bash
-infra_tools agent doctor
-infra_tools agent doctor --tool t3code
-infra_tools agent doctor --tool codex --tool claude --json
-infra_tools agent update --dry-run
-infra_tools agent update --tool codex --tool claude
-infra_tools agent update --json
+infra-tools agent doctor
+infra-tools agent doctor --tool t3code
+infra-tools agent doctor --tool codex --tool claude --json
+infra-tools agent update --dry-run
+infra-tools agent update --tool codex --tool claude
+infra-tools agent update --json
 ```
 
 The default doctor check requires GitHub CLI, Codex CLI, Claude Code, and
@@ -290,7 +290,7 @@ contract, so the hash is audit evidence rather than independent publisher
 verification.
 
 Rerunning setup skips an already available command. Use
-`infra_tools agent update` when you want to update the user-installed terminal
+`infra-tools agent update` when you want to update the user-installed terminal
 agents.
 
 The normal restart policy can force a reboot after seven days of active-session
@@ -397,7 +397,7 @@ Deploy a minimal self-hosted Git service with an optional hostname, port, and
 data directory:
 
 ```bash
-infra_tools setup server_web 192.168.1.10 \
+infra-tools setup server_web 192.168.1.10 \
   --gogs git.example.com:3000 /var/lib/gogs \
   --ssl --ssl-email admin@example.com
 ```
@@ -431,9 +431,9 @@ targets and failure behavior.
 ### GitHub Maintenance
 
 ```bash
-infra_tools maintenance github --root /home/loren/repos audit
-infra_tools maintenance github --root /home/loren/repos prune --yes
-infra_tools maintenance github --root /home/loren/repos prune --delete-caches --yes
+infra-tools maintenance github --root /home/loren/repos audit
+infra-tools maintenance github --root /home/loren/repos prune --yes
+infra-tools maintenance github --root /home/loren/repos prune --delete-caches --yes
 ```
 
 Defaults: keep 2 releases, delete expired artifacts, prune caches only when
@@ -459,12 +459,12 @@ See [`MAINTENANCE.md`](./MAINTENANCE.md) for schedules and policy controls.
 ### Network Inventory
 
 ```text
-infra_tools network list
-infra_tools network init <profile> [--management CIDR] [--control-plane CIDR] [--guest-network CIDR]
-infra_tools network add-host <profile> <name> <address> [--provider NAME] [--role ROLE]
-infra_tools network import-proxmox <profile> [--host NAME] [--tag TAG]
-infra_tools network import-proxmox-guests <profile> [--host NAME] [--tag TAG]
-infra_tools network plan-proxmox <profile> [--proxmox] [--json]
+infra-tools network list
+infra-tools network init <profile> [--management CIDR] [--control-plane CIDR] [--guest-network CIDR]
+infra-tools network add-host <profile> <name> <address> [--provider NAME] [--role ROLE]
+infra-tools network import-proxmox <profile> [--host NAME] [--tag TAG]
+infra-tools network import-proxmox-guests <profile> [--host NAME] [--tag TAG]
+infra-tools network plan-proxmox <profile> [--proxmox] [--json]
 ```
 
 `plan-proxmox` is read-only and requires at least one management source and
@@ -473,34 +473,34 @@ one control-plane address before it will produce a non-error plan.
 ### Proxmox Management
 
 ```text
-infra_tools proxmox add <name> <address> [--user USER] [--key PATH]
-infra_tools proxmox probe <host>
-infra_tools proxmox probe-cluster <address> [--user USER] [--key PATH] [--tag TAG]
-infra_tools proxmox audit <host> [<host> ...] [--json]
-infra_tools proxmox rolling-update <target> [<target> ...] [--dry-run] [--reboot-timeout SECONDS]
-infra_tools proxmox top <host> [<host> ...]
-infra_tools proxmox plan place [options]
-infra_tools proxmox plan rebalance [options]
-infra_tools proxmox ls <host>
-infra_tools proxmox status <host> <vmid>
-infra_tools proxmox start <host> <vmid>
-infra_tools proxmox pause <host> <vmid>  # alias: suspend
-infra_tools proxmox resume <host> <vmid>
-infra_tools proxmox stop <host> <vmid> [--force]
-infra_tools proxmox destroy <host> <vmid> [-y] [--force]
-infra_tools proxmox health <host> <vmid> [--no-ssh]
-infra_tools proxmox config <host> <vmid> [--pending]
-infra_tools proxmox reconfigure <host> <vmid> --set KEY=VALUE [--set ...]
-infra_tools proxmox modify <host> <vmid> [--cores N] [--memory N[M|G]]
-infra_tools proxmox resize-disk <host> <vmid> <volume> <size>
-infra_tools proxmox backups <host> <vmid>
-infra_tools proxmox backup <host> <vmid> [--storage POOL] [--mode MODE] [--compress FORMAT]
-infra_tools proxmox migrate <host> <vmid> <target> [--online] [--with-local-disks]
-infra_tools proxmox clean-disks <host> [--delete] [--yes] [--dry-run]
-infra_tools proxmox unlock <host> <vmid> [--dry-run]
-infra_tools proxmox notifications install-webhook <host> <url> [--send-test]
-infra_tools proxmox notifications test-webhook <host>
-infra_tools proxmox [shell]
+infra-tools proxmox add <name> <address> [--user USER] [--key PATH]
+infra-tools proxmox probe <host>
+infra-tools proxmox probe-cluster <address> [--user USER] [--key PATH] [--tag TAG]
+infra-tools proxmox audit <host> [<host> ...] [--json]
+infra-tools proxmox rolling-update <target> [<target> ...] [--dry-run] [--reboot-timeout SECONDS]
+infra-tools proxmox top <host> [<host> ...]
+infra-tools proxmox plan place [options]
+infra-tools proxmox plan rebalance [options]
+infra-tools proxmox ls <host>
+infra-tools proxmox status <host> <vmid>
+infra-tools proxmox start <host> <vmid>
+infra-tools proxmox pause <host> <vmid>  # alias: suspend
+infra-tools proxmox resume <host> <vmid>
+infra-tools proxmox stop <host> <vmid> [--force]
+infra-tools proxmox destroy <host> <vmid> [-y] [--force]
+infra-tools proxmox health <host> <vmid> [--no-ssh]
+infra-tools proxmox config <host> <vmid> [--pending]
+infra-tools proxmox reconfigure <host> <vmid> --set KEY=VALUE [--set ...]
+infra-tools proxmox modify <host> <vmid> [--cores N] [--memory N[M|G]]
+infra-tools proxmox resize-disk <host> <vmid> <volume> <size>
+infra-tools proxmox backups <host> <vmid>
+infra-tools proxmox backup <host> <vmid> [--storage POOL] [--mode MODE] [--compress FORMAT]
+infra-tools proxmox migrate <host> <vmid> <target> [--online] [--with-local-disks]
+infra-tools proxmox clean-disks <host> [--delete] [--yes] [--dry-run]
+infra-tools proxmox unlock <host> <vmid> [--dry-run]
+infra-tools proxmox notifications install-webhook <host> <url> [--send-test]
+infra-tools proxmox notifications test-webhook <host>
+infra-tools proxmox [shell]
 ```
 
 `probe` caches bridge, gateway, DNS, and storage recommendations. `audit` is
@@ -517,7 +517,7 @@ update dry run still performs the read-only preflight audits.
 
 ### Interactive Shell
 
-`infra_tools shell` opens a REPL for saved configurations. The shell loads
+`infra-tools shell` opens a REPL for saved configurations. The shell loads
 `~/.infra_toolsrc` on startup and persists history at
 `~/.local/share/infra_tools/shell_history`.
 
@@ -544,7 +544,7 @@ or refreshing completion manually:
 python3 -m unittest discover -s tests
 ./run_tests.py --suite smoke
 uv tool install --upgrade argcomplete
-infra_tools completions --shell bash
+infra-tools completions --shell bash
 ```
 
 The full test matrix and detailed bootstrap behavior are covered by

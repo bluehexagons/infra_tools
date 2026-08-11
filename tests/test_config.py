@@ -344,7 +344,7 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
     def test_basic_command(self):
         config = self._make_config()
         parts = config.to_setup_command()
-        self.assertIn('infra_tools setup server_lite', parts[0])
+        self.assertIn('infra-tools setup server_lite', parts[0])
         self.assertIn('testhost', parts)
 
     def test_includes_username(self):
@@ -365,12 +365,12 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
     def test_non_default_timezone(self):
         config = self._make_config(timezone='America/New_York')
         parts = config.to_setup_command()
-        self.assertTrue(any('-t' in p for p in parts))
+        self.assertTrue(any(p.startswith('-t ') for p in parts))
 
     def test_default_timezone_omitted(self):
         config = self._make_config(timezone='UTC')
         parts = config.to_setup_command()
-        self.assertFalse(any('-t' in p for p in parts))
+        self.assertFalse(any(p.startswith('-t ') for p in parts))
 
     def test_non_default_machine_type(self):
         config = self._make_config(machine_type='hardware')

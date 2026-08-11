@@ -136,11 +136,9 @@ class TestSetupAdminPython(unittest.TestCase):
         argcomplete_cmd = mock_subprocess_run.call_args.args[0]
         self.assertEqual(argcomplete_cmd[:5], ["/tmp/testuser/.local/bin/uv", "tool", "install", "--upgrade", "argcomplete"])
         self.assertIn("--exclude-newer", argcomplete_cmd)
-        mock_run_completion_setup.assert_has_calls([
-            call(shell="bash", global_install=False, command_name="infra_tools.py"),
-            call(shell="bash", global_install=False, command_name="infra_tools"),
-        ])
-        self.assertEqual(mock_run_completion_setup.call_count, 2)
+        mock_run_completion_setup.assert_called_once_with(
+            shell="bash", global_install=False, command_name="infra-tools"
+        )
 
     @patch("lib.python_setup.validate_username", return_value=False)
     @patch("lib.python_setup.get_current_username", return_value="invalid user")

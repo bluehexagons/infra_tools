@@ -9,7 +9,7 @@ The shared `setup` and `patch` options can persist a hostname and static
 dual-stack network configuration on Debian targets:
 
 ```bash
-infra_tools setup server_lite 10.20.0.15 admin \
+infra-tools setup server_lite 10.20.0.15 admin \
   --hostname storage-01 \
   --ip 10.20.0.15/24 --gateway 10.20.0.1 \
   --ipv6 2001:db8:20::15/64 --gateway6 2001:db8:20::1 \
@@ -59,42 +59,42 @@ to isolate data for a project or environment.
 
 ```bash
 # Create a profile
-infra_tools network init homelab \
+infra-tools network init homelab \
   --management 192.168.1.0/24 \
   --control-plane 10.0.0.10 \
   --guest-network 10.0.10.0/24
 
 # Add metadata manually when needed
-infra_tools network add-host homelab pve1 10.0.0.10 \
+infra-tools network add-host homelab pve1 10.0.0.10 \
   --provider proxmox \
   --role control-plane \
   --role proxmox
 
 # Or import from the saved Proxmox host registry
-infra_tools network import-proxmox homelab --tag prod
-infra_tools network import-proxmox-guests homelab --tag prod
+infra-tools network import-proxmox homelab --tag prod
+infra-tools network import-proxmox-guests homelab --tag prod
 
 # Review the abstract plan
-infra_tools network plan-proxmox homelab
+infra-tools network plan-proxmox homelab
 
 # Render the matching Proxmox snippets without applying them
-infra_tools network plan-proxmox homelab --proxmox
+infra-tools network plan-proxmox homelab --proxmox
 ```
 
 ## Commands
 
 | Command | Purpose |
 |---------|---------|
-| `infra_tools network list` | List saved network profiles |
-| `infra_tools network show <profile>` | Show one profile in text form |
-| `infra_tools network show <profile> --json` | Dump one profile as JSON |
-| `infra_tools network init <profile> [...]` | Create a profile with management, control-plane, guest-network, subnet, or VLAN entries |
-| `infra_tools network add-host <profile> <name> <address> [...]` | Add a tagged host record to a profile |
-| `infra_tools network import-proxmox <profile> [...]` | Import registered Proxmox nodes into the profile |
-| `infra_tools network import-proxmox-guests <profile> [...]` | Import guest networks from registered Proxmox hosts |
-| `infra_tools network plan-proxmox <profile>` | Print the abstract read-only lockdown plan |
-| `infra_tools network plan-proxmox <profile> --proxmox` | Render concrete Proxmox firewall artifacts for review |
-| `infra_tools network plan-proxmox <profile> --json` | Emit machine-readable JSON |
+| `infra-tools network list` | List saved network profiles |
+| `infra-tools network show <profile>` | Show one profile in text form |
+| `infra-tools network show <profile> --json` | Dump one profile as JSON |
+| `infra-tools network init <profile> [...]` | Create a profile with management, control-plane, guest-network, subnet, or VLAN entries |
+| `infra-tools network add-host <profile> <name> <address> [...]` | Add a tagged host record to a profile |
+| `infra-tools network import-proxmox <profile> [...]` | Import registered Proxmox nodes into the profile |
+| `infra-tools network import-proxmox-guests <profile> [...]` | Import guest networks from registered Proxmox hosts |
+| `infra-tools network plan-proxmox <profile>` | Print the abstract read-only lockdown plan |
+| `infra-tools network plan-proxmox <profile> --proxmox` | Render concrete Proxmox firewall artifacts for review |
+| `infra-tools network plan-proxmox <profile> --json` | Emit machine-readable JSON |
 
 ## Safety model
 

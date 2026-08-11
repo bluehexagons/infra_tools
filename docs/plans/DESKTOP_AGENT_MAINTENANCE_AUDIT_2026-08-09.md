@@ -18,7 +18,7 @@ systemd maintenance.
 The recommended baseline is:
 
 ```bash
-infra_tools setup workstation_dev 10.0.0.25 agent \
+infra-tools setup workstation_dev 10.0.0.25 agent \
   --desktop xfce --rdp --password "$RDP_PASSWORD" \
   --rdp-source 10.0.0.0/24 \
   --agent-suite terminal --copy-config \
@@ -49,7 +49,7 @@ On a Debian VM or bare-metal target, the baseline inherits:
 
 `--agent-suite full`, `--node`, or `--python` also add the user-scoped Node.js
 and uv update timers. Codex CLI, Claude Code, and OpenCode updates remain an
-explicit `infra_tools agent update` action; T3 Code has no managed update path.
+explicit `infra-tools agent update` action; T3 Code has no managed update path.
 See the [CLI-only agent audit](AGENT_CLI_MAINTENANCE_AUDIT_2026-08-09.md) for
 the shared agent-tool lifecycle work.
 

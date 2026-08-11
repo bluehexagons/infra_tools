@@ -189,7 +189,7 @@ class TestWorkspaceCli(unittest.TestCase):
 
         command = infra_tools.reconstruct_command(config)
 
-        self.assertIn("infra_tools setup server_lite", command)
+        self.assertIn("infra-tools setup server_lite", command)
         self.assertNotIn("setup_server_lite.py", command)
 
     @patch("builtins.print")

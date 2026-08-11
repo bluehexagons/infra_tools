@@ -1,7 +1,7 @@
 # Install infra_tools
 
 Use the installer on the machine that will manage your hosts. It keeps a local
-Git worktree, installs the managed `infra_tools` launcher, and can configure
+Git worktree, installs the managed `infra-tools` launcher, and can configure
 the same machine immediately.
 
 Debian is the only officially supported distribution. Ubuntu and Linux Mint are
@@ -73,7 +73,7 @@ rm -f "$HOME/.infra_tools-install.sh"
 For an already installed orchestration host, run the equivalent command:
 
 ```bash
-sudo infra_tools self-setup --qemu-guest-agent
+sudo infra-tools self-setup --qemu-guest-agent
 ```
 
 Use this on a VM only; the QEMU guest agent is not applicable to an LXC
@@ -117,10 +117,15 @@ these options are intentionally opt-in.
 Start a new login shell if necessary, then run:
 
 ```bash
-command -v infra_tools
-infra_tools channel
-infra_tools --help
+command -v infra-tools
+infra-tools channel
+infra-tools --help
 ```
+
+The installed command is `infra-tools`; `infra_tools` is no longer supported.
+Rerunning bootstrap removes a regular-file or symlink launcher named
+`infra_tools` from the configured system or user launcher directory before
+installing the new command.
 
 If the command is not found in a user installation, add its directory for the
 current shell and start a new login shell later:
@@ -134,7 +139,7 @@ run. Local setup preflight still needs root, so use `sudo`; the dry run
 validates arguments and prints the steps without changing the target:
 
 ```bash
-sudo "$(command -v infra_tools)" setup workstation_dev localhost "$USER" \
+sudo "$(command -v infra-tools)" setup workstation_dev localhost "$USER" \
   --control-plane --gh --codex --desktop xfce --rdp \
   --rdp-existing-password --dry-run
 ```
@@ -151,7 +156,7 @@ installed command. The remote account must be reachable over SSH and have the
 privileges required by the selected profile:
 
 ```bash
-infra_tools setup server_web example.com admin \
+infra-tools setup server_web example.com admin \
   --ruby --node --ssl --ssl-email admin@example.com
 ```
 
@@ -175,15 +180,15 @@ launcher stays installed while the worktree's channel changes:
 Inspect or change the selected channel:
 
 ```bash
-infra_tools channel
-infra_tools channel stable
-infra_tools channel dev
+infra-tools channel
+infra-tools channel stable
+infra-tools channel dev
 ```
 
 Update the local installation to the newest commit on its selected channel:
 
 ```bash
-infra_tools upgrade
+infra-tools upgrade
 ```
 
 The default installer channel is `dev`, which tracks `main`. Use `stable` when
@@ -226,8 +231,8 @@ The installer already bootstraps the launcher and shell completion. For a
 manual completion refresh or another shell:
 
 ```bash
-infra_tools completions --shell bash
-infra_tools completions --shell zsh
+infra-tools completions --shell bash
+infra-tools completions --shell zsh
 ```
 
 See [Shell completion](SHELL_COMPLETION.md) for system-wide and Fish setup.
@@ -238,15 +243,15 @@ Saved host state defaults to `~/.config/infra_tools`. Use another workspace
 when separating projects or test environments:
 
 ```bash
-infra_tools --workspace /srv/infra-tools-workspace list
+infra-tools --workspace /srv/infra-tools-workspace list
 ```
 
 Store remote credentials separately and prefer interactive entry:
 
 ```bash
-infra_tools credentials set admin
-infra_tools credentials list
-infra_tools credentials remove admin
+infra-tools credentials set admin
+infra-tools credentials list
+infra-tools credentials remove admin
 ```
 
 Passwords are excluded from saved setup state and reconstructed commands.

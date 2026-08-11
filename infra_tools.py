@@ -7,9 +7,9 @@ This script provides a unified interface to all infra_tools functionality,
 combining setup and patch operations into a single command-line tool.
 
 Usage:
-    infra_tools setup <system_type> <host> [options]
-    infra_tools patch <host> [options]
-    infra_tools --help
+    infra-tools setup <system_type> <host> [options]
+    infra-tools patch <host> [options]
+    infra-tools --help
 
 System Types:
     control_plane         Infrastructure control plane setup
@@ -62,7 +62,7 @@ from lib.github_maintenance import add_maintenance_subparser, run_maintenance_co
 from lib.display import print_name_and_tags, print_setup_summary, print_success_header
 from lib.interactive_shell import run_interactive_shell
 from lib.notifications import validate_notification_args
-from lib.orchestrator_bootstrap import run_orchestrator_bootstrap
+from lib.orchestrator_bootstrap import LAUNCHER_NAME, run_orchestrator_bootstrap
 from lib.plugin_registry import format_system_type_help, get_system_type_names
 from lib.network_cli import add_network_subparser, run_network_command
 from lib.local_cli import add_local_subparser, run_local_command
@@ -115,7 +115,7 @@ def _build_infra_tools_epilog() -> str:
     deploy <pattern>            Redeploy saved configurations
     recall <host> [username]    Fetch or reconstruct a remote setup command
     reconstruct                 Analyze this host and emit a setup summary
-    completions                 Install shell completion for infra_tools
+    completions                 Install shell completion for infra-tools
     python-tools                Install local Python aliases, uv, and completion
     bootstrap                   Install packages, launcher, and completions (alias: self-setup)
     channel [CHANNEL]           Show or switch the installed source channel
@@ -147,20 +147,20 @@ System Types for setup:
 {format_system_type_help()}
 
 Examples:
-  infra_tools setup server_web 192.168.1.100 admin --ssl
-  infra_tools patch 192.168.1.100 --deploy api.example.com https://github.com/user/api.git
-  infra_tools shares 192.168.1.100 --share write media /srv/media alice,bob
-  infra_tools list prod
-  infra_tools deploy prod --yes
-  infra_tools recall example.com admin
-  infra_tools completions --shell zsh
-  sudo infra_tools self-setup --user admin [--qemu-guest-agent]
-  infra_tools list prod    # after self-setup, the launcher is on PATH
+  infra-tools setup server_web 192.168.1.100 admin --ssl
+  infra-tools patch 192.168.1.100 --deploy api.example.com https://github.com/user/api.git
+  infra-tools shares 192.168.1.100 --share write media /srv/media alice,bob
+  infra-tools list prod
+  infra-tools deploy prod --yes
+  infra-tools recall example.com admin
+  infra-tools completions --shell zsh
+  sudo infra-tools self-setup --user admin [--qemu-guest-agent]
+  infra-tools list prod    # after self-setup, the launcher is on PATH
  """
 
 
 def _current_command_name() -> str:
-    return os.path.basename(sys.argv[0]) or "infra_tools.py"
+    return LAUNCHER_NAME
 
 
 def _managed_repository() -> str:
@@ -200,7 +200,7 @@ def run_tool_upgrade_command(args: argparse.Namespace | None = None) -> int:
         if info.get("updated"):
             print(f"Upgraded {info['channel']} to {str(info['commit'])[:12]}")
         else:
-            print(f"infra_tools is already up to date on {info['channel']} ({str(info['commit'])[:12]})")
+            print(f"infra-tools is already up to date on {info['channel']} ({str(info['commit'])[:12]})")
         return 0
     except (ChannelError, ValueError, OSError) as exc:
         print(f"Error: {exc}")
@@ -210,7 +210,7 @@ def run_tool_upgrade_command(args: argparse.Namespace | None = None) -> int:
 def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.ArgumentParser, argparse.ArgumentParser]:
     """Create the main argument parser for infra_tools."""
     parser = argparse.ArgumentParser(
-        prog="infra_tools",
+        prog=LAUNCHER_NAME,
         description="Unified infrastructure setup and management tool",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=_build_infra_tools_epilog()
@@ -227,7 +227,7 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
         "setup",
         help="Run initial setup for a system type",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="Run 'infra_tools setup --help' for full options"
+        epilog="Run 'infra-tools setup --help' for full options"
     )
     add_setup_arguments(setup_parser, allow_steps=True, include_system_type=True)
     
@@ -236,7 +236,7 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
         "patch",
         help="Patch/update an existing system",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="Run 'infra_tools patch --help' for full options"
+        epilog="Run 'infra-tools patch --help' for full options"
     )
     patch_parser.add_argument(
         "host",
@@ -372,7 +372,7 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
 
     completions_parser = subparsers.add_parser(
         "completions",
-        help="Install shell completion for infra_tools",
+        help="Install shell completion for infra-tools",
     )
     completions_parser.add_argument(
         "--shell",
@@ -413,7 +413,7 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
     bootstrap_parser = subparsers.add_parser(
         "bootstrap",
         aliases=["self-setup"],
-        help="Install local packages, launcher, and completions for infra_tools",
+        help="Install local packages, launcher, and completions for infra-tools",
     )
     bootstrap_parser.add_argument(
         "--shell",
@@ -429,7 +429,7 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
     bootstrap_parser.add_argument(
         "--skip-system-packages",
         action="store_true",
-        help="Skip apt package installation and only configure infra_tools for the target user",
+        help="Skip apt package installation and only configure infra-tools for the target user",
     )
     bootstrap_parser.add_argument(
         "--qemu-guest-agent",
@@ -484,7 +484,7 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
 
     shell_parser = subparsers.add_parser(
         "shell",
-        help="Start the interactive infra_tools REPL",
+        help="Start the interactive infra-tools REPL",
     )
     shell_parser.add_argument(
         "--workspace",
@@ -1091,7 +1091,7 @@ def run_patch_command(args: argparse.Namespace) -> int:
     cached_config = load_setup_command(args.host)
     if not cached_config:
         print(f"Error: No cached setup found for {args.host}")
-        print(f"Please run the initial setup first using 'infra_tools setup <system_type> {args.host}'")
+        print(f"Please run the initial setup first using 'infra-tools setup <system_type> {args.host}'")
         return 1
     
     new_config = SetupConfig.from_args(args, cached_config.system_type)
@@ -1187,7 +1187,7 @@ def run_shares_command(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
-    """Main entry point for infra_tools."""
+    """Main entry point for infra-tools."""
     parser, _setup_parser, _patch_parser = create_infra_tools_parser()
 
     if argcomplete:

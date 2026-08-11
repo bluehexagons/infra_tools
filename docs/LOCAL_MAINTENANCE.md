@@ -1,7 +1,7 @@
 # Local system maintenance
 
 Use the `local` command for focused changes to the Debian machine where
-`infra_tools` is installed. These commands reuse the same package, desktop,
+`infra-tools` is installed. These commands reuse the same package, desktop,
 browser, hostname, and network steps used by full setup, but do not rebuild
 the whole workstation or control-plane profile.
 
@@ -9,8 +9,8 @@ Mutating local commands require root, so run them with `sudo`. Use
 `--dry-run` before a change when the command supports it:
 
 ```bash
-sudo infra_tools local --help
-sudo infra_tools local install --dry-run btop ripgrep
+sudo infra-tools local --help
+sudo infra-tools local install --dry-run btop ripgrep
 ```
 
 ## Packages and system updates
@@ -19,13 +19,13 @@ Refresh Debian package metadata, upgrade installed packages, and remove
 packages APT no longer needs:
 
 ```bash
-sudo infra_tools local update
+sudo infra-tools local update
 ```
 
 Install one or more Debian packages without running the rest of setup:
 
 ```bash
-sudo infra_tools local install neovim tmux jq
+sudo infra-tools local install neovim tmux jq
 ```
 
 Package names are validated before APT runs. The command uses the same
@@ -36,7 +36,7 @@ For larger changes that also need a language runtime, security policy, or
 maintenance timer, use the normal local setup flags instead:
 
 ```bash
-sudo infra_tools setup workstation_dev localhost "$USER" \
+sudo infra-tools setup workstation_dev localhost "$USER" \
   --node --python --go --dry-run
 ```
 
@@ -45,8 +45,8 @@ sudo infra_tools setup workstation_dev localhost "$USER" \
 Install an additional supported desktop environment directly:
 
 ```bash
-sudo infra_tools local desktop xfce
-sudo infra_tools local desktop cinnamon --dark
+sudo infra-tools local desktop xfce
+sudo infra-tools local desktop cinnamon --dark
 ```
 
 Supported environments are `xfce`, `i3`, `cinnamon`, and `lxqt`. This command
@@ -60,7 +60,7 @@ configuration, and firewall rules—use a workstation setup with `--rdp` rather
 than the focused desktop command:
 
 ```bash
-sudo infra_tools setup workstation_dev localhost "$USER" \
+sudo infra-tools setup workstation_dev localhost "$USER" \
   --desktop xfce --rdp --rdp-existing-password
 ```
 
@@ -69,8 +69,8 @@ sudo infra_tools setup workstation_dev localhost "$USER" \
 Install a supported browser without repeating desktop setup:
 
 ```bash
-sudo infra_tools local browser firefox
-sudo infra_tools local browser librewolf --flatpak --no-default
+sudo infra-tools local browser firefox
+sudo infra-tools local browser librewolf --flatpak --no-default
 ```
 
 The default behavior configures the browser for the local desktop user. Use
@@ -81,7 +81,7 @@ For bundled applications such as LibreOffice, VS Code, Discord, or Remmina,
 use the workstation profile's existing flags and inspect the plan first:
 
 ```bash
-sudo infra_tools setup workstation_dev localhost "$USER" \
+sudo infra-tools setup workstation_dev localhost "$USER" \
   --office --browser firefox --dry-run
 ```
 
@@ -90,19 +90,19 @@ sudo infra_tools setup workstation_dev localhost "$USER" \
 Set the persistent hostname without rerunning the full setup:
 
 ```bash
-sudo infra_tools local hostname workstation-01
+sudo infra-tools local hostname workstation-01
 ```
 
 View current interface addresses:
 
 ```bash
-infra_tools local ip
+infra-tools local ip
 ```
 
 Stage a static IPv4 address, gateway, and DNS servers:
 
 ```bash
-sudo infra_tools local ip 192.168.1.50/24 \
+sudo infra-tools local ip 192.168.1.50/24 \
   --gateway 192.168.1.1 \
   --dns 1.1.1.1 --dns 1.0.0.1 \
   --interface enp1s0
@@ -111,7 +111,7 @@ sudo infra_tools local ip 192.168.1.50/24 \
 Use `local network` for a dual-stack configuration:
 
 ```bash
-sudo infra_tools local network \
+sudo infra-tools local network \
   --ip 192.168.1.50/24 --gateway 192.168.1.1 \
   --ipv6 2001:db8:1::50/64 --gateway6 2001:db8:1::1 \
   --dns 1.1.1.1 --dns 2606:4700:4700::1111 \
@@ -135,25 +135,25 @@ The focused commands complement, rather than replace, the existing local
 tools:
 
 ```bash
-# Install or refresh the infra_tools launcher and its base dependencies.
-sudo infra_tools bootstrap
+# Install or refresh the infra-tools launcher and its base dependencies.
+sudo infra-tools bootstrap
 
 # Install Python aliases, uv, and shell completion support.
-infra_tools python-tools
+infra-tools python-tools
 
 # Refresh shell completion files.
-infra_tools completions --shell bash
+infra-tools completions --shell bash
 
 # Inspect and deliberately update user-installed coding agents.
-infra_tools agent doctor
-infra_tools agent update --dry-run
+infra-tools agent doctor
+infra-tools agent update --dry-run
 
-# Inspect or change the infra_tools source channel, then update it.
-infra_tools channel
-infra_tools upgrade
+# Inspect or change the infra-tools source channel, then update it.
+infra-tools channel
+infra-tools upgrade
 ```
 
-Use `infra_tools setup ... localhost ...` when several changes should be
+Use `infra-tools setup ... localhost ...` when several changes should be
 coordinated, when a profile's security and maintenance steps are needed, or
 when the operation is part of a saved configuration. Use the focused `local`
 commands for small, independent maintenance tasks.

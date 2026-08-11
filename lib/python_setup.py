@@ -14,7 +14,7 @@ from lib.validators import validate_username
 
 def run_local_python_setup(
     shell: str,
-    command_name: str = "infra_tools.py",
+    command_name: str = LAUNCHER_NAME,
     script_path: str | None = None,
 ) -> int:
     """Install local Python tooling and CLI completions for the current user."""
@@ -76,14 +76,11 @@ def run_local_python_setup(
     os.environ["PATH"] = os.pathsep.join([local_bin, old_path]) if old_path else local_bin
     try:
         result = run_completion_setup(shell=shell, global_install=False, command_name=command_name)
-        if result == 0 and command_name != LAUNCHER_NAME:
-            # Also register completions for the short `infra_tools` launcher name.
-            result = run_completion_setup(shell=shell, global_install=False, command_name=LAUNCHER_NAME)
     finally:
         os.environ["PATH"] = old_path
 
     if result != 0:
         return result
 
-    print("✓ Local infra_tools Python install complete.")
+    print("✓ Local infra-tools Python install complete.")
     return 0

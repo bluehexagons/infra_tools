@@ -15,7 +15,7 @@ systemd jobs.
 The recommended CLI-only profile is now:
 
 ```bash
-infra_tools setup server_dev 10.0.0.10 agent \
+infra-tools setup server_dev 10.0.0.10 agent \
   --agent-suite terminal --copy-config \
   --repo https://github.com/user/project.git
 ```
@@ -43,9 +43,9 @@ inherits these host jobs:
 
 The terminal suite does **not** install an automatic updater for Codex CLI,
 Claude Code, or OpenCode. Their setup functions skip installation whenever the
-command is already found. `infra_tools agent update` now provides an explicit
+command is already found. `infra-tools agent update` now provides an explicit
 per-user update with pre/post smoke checks, an atomic non-secret audit record,
-and automatic executable rollback when verification fails. `infra_tools agent
+and automatic executable rollback when verification fails. `infra-tools agent
 doctor` reports presence, path, version, and credential-file presence, but it
 does not yet determine freshness or timer health.
 
@@ -97,7 +97,7 @@ Build one lifecycle contract for every agent tool:
 3. record installed source, version, digest, and install time without secrets;
 4. stage an upgrade, run `--version` and a minimal non-authenticated smoke test,
    then atomically activate it with the previous binary retained for rollback;
-5. add an explicit `infra_tools agent update` plan/apply flow rather than
+5. add an explicit `infra-tools agent update` plan/apply flow rather than
    silently changing tools during unrelated host maintenance; and
 6. define notification and rollback behavior for failed upgrades.
 
@@ -107,7 +107,7 @@ across all four agents.
 
 Progress delivered in the first lifecycle slice:
 
-- `infra_tools agent update` and `--dry-run` select Codex CLI, Claude Code, and
+- `infra-tools agent update` and `--dry-run` select Codex CLI, Claude Code, and
   OpenCode independently and use their documented vendor update mechanisms;
 - only executables resolved under the current user's home are eligible, keeping
   APT and other system package installations outside this workflow;

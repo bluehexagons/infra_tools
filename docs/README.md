@@ -48,5 +48,5 @@ development references, not operator instructions. Start with the
 ## Documentation conventions
 
 Markdown is the source format so the guides render directly on GitHub and in
-local repository tools. Examples use the installed `infra_tools` launcher and
+local repository tools. Examples use the installed `infra-tools` launcher and
 placeholder hosts and credentials. Never copy real secrets into documentation.

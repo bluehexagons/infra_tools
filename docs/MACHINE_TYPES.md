@@ -79,8 +79,8 @@ Saved configurations retain their explicit machine type. New commands use
 is preserved when patching or deploying. This avoids changing the behavior of
 existing hosts unexpectedly.
 
-For saved configurations, prefer `infra_tools deploy <name-or-host>` or
-`infra_tools patch <host>` over retyping old commands. `infra_tools cmd
+For saved configurations, prefer `infra-tools deploy <name-or-host>` or
+`infra-tools patch <host>` over retyping old commands. `infra-tools cmd
 <name-or-host>` prints an explicit override when the saved configuration is not
 using the new `auto` default.
 
@@ -93,17 +93,17 @@ pending restart; set `--auto-restart` or a nonzero
 
 ```bash
 # Auto-detect the target (the normal direct-setup path)
-infra_tools setup workstation_dev 192.168.1.10
+infra-tools setup workstation_dev 192.168.1.10
 
 # Force an officially supported Proxmox LXC profile
-infra_tools setup workstation_dev 192.168.1.10 --machine unprivileged
+infra-tools setup workstation_dev 192.168.1.10 --machine unprivileged
 
 # Explicit machine types when needed
-infra_tools setup workstation_dev 192.168.1.10 --machine privileged
-infra_tools setup server_web 192.168.1.20 --machine hardware
+infra-tools setup workstation_dev 192.168.1.10 --machine privileged
+infra-tools setup server_web 192.168.1.20 --machine hardware
 
 # OCI container (limited features)
-infra_tools setup server_lite 192.168.1.30 --machine oci
+infra-tools setup server_lite 192.168.1.30 --machine oci
 ```
 
 ## Provisioning a Proxmox VM
@@ -112,7 +112,7 @@ Hosted flows default to VMs when you use `--hosted`, so you can provision a VM
 via `qm` + cloud-init without adding `--machine vm`:
 
 ```bash
-infra_tools setup server_web 10.0.0.50 \
+infra-tools setup server_web 10.0.0.50 \
     --hosted proxmox.lan \
     --memory 4G --cores 2 \
     --storage root local-lvm 32G

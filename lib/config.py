@@ -541,7 +541,7 @@ class SetupConfig:
         Returns a list of command parts that can be joined with spaces or newlines.
         """
         cmd_parts: StrList = [
-            f"infra_tools setup {shlex.quote(self.system_type)}",
+            f"infra-tools setup {shlex.quote(self.system_type)}",
             self.host,
         ]
         

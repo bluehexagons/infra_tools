@@ -44,7 +44,7 @@ class TestInstallScript(unittest.TestCase):
                         raise SystemExit(7)
                     launcher_dir = os.path.join(os.environ["HOME"], ".local", "bin")
                     os.makedirs(launcher_dir, exist_ok=True)
-                    launcher = os.path.join(launcher_dir, "infra_tools")
+                    launcher = os.path.join(launcher_dir, "infra-tools")
                     with open(launcher, "w", encoding="utf-8") as output:
                         output.write("#!/bin/sh\\nexit 0\\n")
                     os.chmod(launcher, 0o755)
@@ -151,7 +151,7 @@ class TestInstallScript(unittest.TestCase):
             with open(os.path.join(install_dir, ".infra_tools", "channel.json"), encoding="utf-8") as file_obj:
                 self.assertEqual(json.load(file_obj)["channel"], "dev")
             self.assertTrue(os.access(
-                os.path.join(fake_home, ".local", "bin", "infra_tools"),
+                os.path.join(fake_home, ".local", "bin", "infra-tools"),
                 os.X_OK,
             ))
             with open(log_path, encoding="utf-8") as file_obj:
@@ -177,7 +177,7 @@ class TestInstallScript(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue(os.access(
-                os.path.join(fake_home, ".local", "bin", "infra_tools"),
+                os.path.join(fake_home, ".local", "bin", "infra-tools"),
                 os.X_OK,
             ))
 
@@ -239,7 +239,7 @@ class TestInstallScript(unittest.TestCase):
             self.assertTrue(os.path.isfile(os.path.join(install_dir, "infra_tools.py")))
             self.assertTrue(os.path.isdir(os.path.join(install_dir, ".git")))
             self.assertTrue(os.access(
-                os.path.join(fake_home, ".local", "bin", "infra_tools"),
+                os.path.join(fake_home, ".local", "bin", "infra-tools"),
                 os.X_OK,
             ))
             with open(log_path, encoding="utf-8") as file_obj:

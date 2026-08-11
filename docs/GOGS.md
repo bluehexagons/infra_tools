@@ -11,7 +11,7 @@ Hostname mode is the usual choice. Gogs listens on localhost and nginx serves
 the public URL:
 
 ```bash
-infra_tools setup server_web git.example.com deploy \
+infra-tools setup server_web git.example.com deploy \
   --gogs git.example.com:3000 /var/lib/gogs \
   --ssl --ssl-email admin@example.com
 ```
@@ -24,7 +24,7 @@ For a lab or private-network service, omit the hostname and expose Gogs
 directly on its port:
 
 ```bash
-infra_tools setup server_web 192.168.1.10 deploy \
+infra-tools setup server_web 192.168.1.10 deploy \
   --gogs :3000 /srv/gogs-data
 ```
 
