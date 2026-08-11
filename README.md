@@ -41,11 +41,12 @@ rm -f "$HOME/.infra_tools-install.sh"
 ```
 
 Set up a standard Debian GNOME desktop as a graphical control plane. This keeps
-GNOME for local logins, uses XFCE for RDP, and installs the desktop agent suite:
+GNOME for local logins, uses XFCE for RDP, and installs the selected agent tools
+(GitHub CLI and Codex CLI in this example):
 
 ```bash
 wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
-sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup workstation_dev --control-plane --agent-suite desktop --desktop xfce --rdp --rdp-existing-password
+sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup workstation_dev --control-plane --gh --codex --desktop xfce --rdp --rdp-existing-password
 rm -f "$HOME/.infra_tools-install.sh"
 ```
 

@@ -202,7 +202,7 @@ def install_codex(config: SetupConfig) -> None:
         config,
         command="codex",
         label="Codex CLI",
-        installer="curl -fsSL https://chatgpt.com/codex/install.sh | sh",
+        installer="curl -fsSL https://chatgpt.com/codex/install.sh | env CODEX_NON_INTERACTIVE=1 sh",
     )
 
 

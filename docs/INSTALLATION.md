@@ -63,11 +63,11 @@ rm -f "$HOME/.infra_tools-install.sh"
 
 Use this for a standard Debian desktop that already has GNOME. It leaves GNOME
 available for local logins, adds XFCE for RDP sessions, enables RDP, and
-installs the desktop agent suite:
+installs the selected agent tools (GitHub CLI and Codex CLI in this example):
 
 ```bash
 wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
-sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup workstation_dev --control-plane --agent-suite desktop --desktop xfce --rdp --rdp-existing-password
+sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup workstation_dev --control-plane --gh --codex --desktop xfce --rdp --rdp-existing-password
 rm -f "$HOME/.infra_tools-install.sh"
 ```
 
@@ -84,11 +84,13 @@ Without `--rdp-source`, RDP is available on all local interfaces with the
 configured rate-limited firewall rule. See [XRDP](XRDP.md) for connection and
 firewall details.
 
-Use `--agent-suite terminal` on a headless host, `desktop` for graphical agent
-tools, or `full` when Node.js, Python, and Go tooling are also wanted. Append
-`--copy-config`, `--copy-keys`, or `--repo GIT_URL` when the control plane
-should receive selected agent settings, credentials, or repositories; these
-options are intentionally opt-in.
+Use `--agent-suite terminal` on a headless host, `desktop` for the complete
+graphical agent bundle, or `full` when Node.js, Python, and Go tooling are also
+wanted. For a selective graphical setup, omit `--agent-suite` and choose any
+combination of `--gh`, `--codex`, `--claude`, `--opencode`, and `--t3code`.
+Append `--copy-config`, `--copy-keys`, or `--repo GIT_URL` when the control
+plane should receive selected agent settings, credentials, or repositories;
+these options are intentionally opt-in.
 
 ## Verify the installation
 
@@ -113,7 +115,7 @@ validates arguments and prints the steps without changing the target:
 
 ```bash
 sudo "$(command -v infra_tools)" setup workstation_dev localhost "$USER" \
-  --control-plane --agent-suite desktop --desktop xfce --rdp \
+  --control-plane --gh --codex --desktop xfce --rdp \
   --rdp-existing-password --dry-run
 ```
 

@@ -33,6 +33,7 @@ infra_tools completions [options]
 infra_tools python-tools [options]
 infra_tools bootstrap [options]
 infra_tools self-setup [options]
+infra_tools local [subcommand]
 infra_tools channel [CHANNEL]
 infra_tools upgrade
 infra_tools agent doctor
@@ -180,11 +181,12 @@ rm -f "$HOME/.infra_tools-install.sh"
 ```
 
 For a standard Debian GNOME desktop, keep GNOME for local logins, add XFCE
-for XRDP sessions, and install the graphical agent suite with:
+for XRDP sessions, and install only the selected graphical agent tools (GitHub
+CLI and Codex CLI in this example):
 
 ```bash
 wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
-sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup workstation_dev --control-plane --agent-suite desktop --desktop xfce --rdp --rdp-existing-password
+sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup workstation_dev --control-plane --gh --codex --desktop xfce --rdp --rdp-existing-password
 rm -f "$HOME/.infra_tools-install.sh"
 ```
 
@@ -202,8 +204,15 @@ rm -f "$HOME/.infra_tools-install.sh"
 | `--copy-keys` | Stage selected local credentials for tools enabled by the same command |
 | `--repo GIT_URL` | Clone locally, upload with the setup bundle, cache privately on the target, and copy to `/home/USER/repos/NAME`; repeatable |
 
+Agent tools can be selected individually with `--gh`, `--codex`, `--claude`,
+`--opencode`, and `--t3code`; use any combination that fits the workstation.
+The `--agent-suite` presets remain available when the complete terminal,
+desktop, or full bundle is wanted.
+
 Codex CLI, Claude Code, OpenCode, and T3 Code are installed from their official
-distribution channels. infra_tools does not install these tools with npm. Any
+distribution channels. The Codex installer runs with `CODEX_NON_INTERACTIVE=1`,
+so setup does not prompt to start Codex or remove a conflicting installation.
+infra_tools does not install these tools with npm. Any
 selected agent also installs a baseline containing build tools, CMake, Ninja,
 Git LFS, ripgrep, fd, fzf, jq, bat, tmux, direnv, and ShellCheck.
 

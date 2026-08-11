@@ -47,7 +47,7 @@ class TestOfficialAgentInstallers(unittest.TestCase):
 
         commands = [call.kwargs['installer'] for call in installer.call_args_list]
         self.assertEqual(commands, [
-            'curl -fsSL https://chatgpt.com/codex/install.sh | sh',
+            'curl -fsSL https://chatgpt.com/codex/install.sh | env CODEX_NON_INTERACTIVE=1 sh',
             'curl -fsSL https://claude.ai/install.sh | bash',
             'curl -fsSL https://opencode.ai/install | bash',
         ])

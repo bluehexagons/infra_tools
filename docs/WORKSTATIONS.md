@@ -5,11 +5,12 @@ machine-aware setup pipeline used for servers. Choose a profile first, then
 override the desktop, browser, or application choices with flags.
 
 To use a Debian desktop as the local control plane, combine the workstation
-profile with `--control-plane`:
+profile with `--control-plane` and select the agent tools you need (GitHub CLI
+and Codex CLI in this example):
 
 ```bash
 wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
-sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup workstation_dev --control-plane --agent-suite desktop --desktop xfce --rdp --rdp-existing-password
+sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup workstation_dev --control-plane --gh --codex --desktop xfce --rdp --rdp-existing-password
 rm -f "$HOME/.infra_tools-install.sh"
 ```
 
@@ -61,12 +62,15 @@ XFCE for the RDP session, and restrict RDP to the management network:
 infra_tools setup workstation_dev 10.0.0.25 agent \
   --control-plane --desktop xfce --rdp \
   --password "$RDP_PASSWORD" --rdp-source 10.0.0.0/24 \
-  --agent-suite desktop --copy-config \
+  --gh --codex --copy-config \
   --repo https://github.com/user/project.git
 ```
 
-This adds the desktop agent suite, browser, Visual Studio Code, administrator
-tools, and the selected repository. The RDP password is the target Unix
+This adds the selected agent tools, browser, Visual Studio Code, administrator
+tools, and the selected repository. Replace `--gh --codex` with any combination
+of `--gh`, `--codex`, `--claude`, `--opencode`, and `--t3code`; use an
+`--agent-suite` preset when the complete bundle is wanted. The RDP password is
+the target Unix
 account's password; provide it through a secret-sourced environment variable,
 not a literal value in shell history. For a local Debian GNOME machine, use
 the [installer handoff](INSTALLATION.md#choose-one-starting-command), which
