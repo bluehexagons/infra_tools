@@ -222,12 +222,13 @@ class TestResolveTemplateName(unittest.TestCase):
         pveam_available = MagicMock(
             stdout="system/debian-11-standard_11.7-1_amd64.tar.zst\n"
                    "system/debian-12-standard_12.0-1_amd64.tar.zst\n"
+                   "system/debian-13-standard_13.1-2_amd64.tar.zst\n"
                    "system/ubuntu-22.04-standard_22.04-1_amd64.tar.zst\n",
             returncode=0
         )
         mock_run.return_value = pveam_available
         result = _resolve_template_name("debian", "local", "10.0.0.1", "root", [])
-        self.assertIn("debian-12-standard", result)
+        self.assertIn("debian-13-standard", result)
 
     @patch("lib.proxmox_node._ssh_run")
     def test_ubuntu_passthrough(self, mock_run):
@@ -239,6 +240,17 @@ class TestResolveTemplateName(unittest.TestCase):
         mock_run.return_value = pveam_available
         result = _resolve_template_name("ubuntu", "local", "10.0.0.1", "root", [])
         self.assertIn("ubuntu-24.04", result)
+
+    @patch("lib.proxmox_node._ssh_run")
+    def test_dry_run_uses_unversioned_template_placeholder(self, mock_run):
+        result = _resolve_template_name(
+            "debian", "local", "10.0.0.1", "root", [], dry_run=True
+        )
+        self.assertEqual(
+            result,
+            "/var/lib/vz/template/cache/debian-standard_latest_amd64.tar.zst",
+        )
+        mock_run.assert_called_once()
 
     @patch("lib.proxmox_node._ssh_run")
     def test_no_match_checks_downloaded(self, mock_run):
@@ -373,6 +385,7 @@ class TestParsePveamAvailable(unittest.TestCase):
             "section          template\n"
             "system           debian-11-standard_11.7-1_amd64.tar.zst\n"
             "system           debian-12-standard_12.7-1_amd64.tar.zst\n"
+            "system           debian-13-standard_13.1-2_amd64.tar.zst\n"
             "system           ubuntu-24.04-standard_24.04-1_amd64.tar.zst\n"
             "turnkeylinux     debian-12-turnkey-wordpress_18.0-1_amd64.tar.gz\n"
         )
@@ -380,6 +393,7 @@ class TestParsePveamAvailable(unittest.TestCase):
         # Must include both standard debian images, but NOT turnkey-wordpress.
         self.assertIn("debian-11-standard_11.7-1_amd64.tar.zst", debian)
         self.assertIn("debian-12-standard_12.7-1_amd64.tar.zst", debian)
+        self.assertIn("debian-13-standard_13.1-2_amd64.tar.zst", debian)
         for entry in debian:
             self.assertNotIn("turnkey", entry)
 

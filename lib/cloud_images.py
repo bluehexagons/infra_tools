@@ -37,15 +37,17 @@ DEFAULT_DEBIAN_BASE = "debian"
 # overwrites the dictionary literal below; preserve the ``# BEGIN/END
 # CLOUD_IMAGES`` markers.
 
+# The unversioned Debian alias follows current stable; numbered aliases remain
+# available when a specific release is required.
 # BEGIN CLOUD_IMAGES
 CLOUD_IMAGES: dict[str, CloudImage] = {
     "debian": {
-        "codename": "bookworm",
-        "version": "12",
-        "snapshot": "20260806-2562",
-        "filename": "debian-12-genericcloud-amd64-20260806-2562.qcow2",
-        "url": "https://cloud.debian.org/images/cloud/bookworm/20260806-2562/debian-12-genericcloud-amd64-20260806-2562.qcow2",
-        "sha512": "3622c990108a044ed411652f8741e77c5822c365114d7b940206b243f8fb617b8586792df4cdb7afba1b71d1a09289d8ed632124688f2c8352cb08190a1e9868",
+        "codename": "trixie",
+        "version": "13",
+        "snapshot": "20260803-2559",
+        "filename": "debian-13-genericcloud-amd64-20260803-2559.qcow2",
+        "url": "https://cloud.debian.org/images/cloud/trixie/20260803-2559/debian-13-genericcloud-amd64-20260803-2559.qcow2",
+        "sha512": "769562604ecaac26b661167891ef922f71f4d87d50a11423fc04e51444fda0d882c87996dd1181170d233627f4728e6722db2695c0ef753dad762c4ac4ed32e1",
     },
     "debian-12": {
         "codename": "bookworm",

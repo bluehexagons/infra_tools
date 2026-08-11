@@ -133,7 +133,7 @@ By default, the curated Debian cloud-image catalog
 
 ```bash
 # Direct URL
-... --image https://cloud.debian.org/.../debian-12-genericcloud-amd64.qcow2
+... --image https://cloud.debian.org/.../debian-13-genericcloud-amd64.qcow2
 
 # Pre-uploaded image on the Proxmox node
 ... --image local:iso/my-debian.qcow2

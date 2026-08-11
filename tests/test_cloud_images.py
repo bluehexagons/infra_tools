@@ -19,7 +19,9 @@ from lib.cloud_images import (
 class TestResolveCloudImage(unittest.TestCase):
     def test_default_debian(self):
         entry = resolve_cloud_image("debian")
-        self.assertEqual(entry["codename"], "bookworm")
+        self.assertEqual(entry["codename"], "trixie")
+        self.assertEqual(entry["version"], "13")
+        self.assertEqual(entry, CLOUD_IMAGES["debian-13"])
         self.assertTrue(entry["url"].startswith("https://cloud.debian.org/"))
         self.assertRegex(entry["snapshot"], r"^\d{8}-\d{3,4}$")
         self.assertRegex(entry["sha512"], r"^[0-9a-f]{128}$")
@@ -29,13 +31,14 @@ class TestResolveCloudImage(unittest.TestCase):
             resolve_cloud_image("Debian-12")["codename"],
             CLOUD_IMAGES["debian-12"]["codename"],
         )
+        self.assertEqual(resolve_cloud_image("Debian-13"), resolve_cloud_image("debian"))
 
     def test_unknown_raises(self):
         with self.assertRaises(ValueError):
             resolve_cloud_image("ubuntu")
 
     def test_empty_falls_back_to_default(self):
-        self.assertEqual(resolve_cloud_image("")["codename"], "bookworm")
+        self.assertEqual(resolve_cloud_image("")["codename"], "trixie")
 
 
 class TestParseImageArgument(unittest.TestCase):

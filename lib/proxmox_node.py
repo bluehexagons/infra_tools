@@ -167,12 +167,12 @@ def _parse_pveam_available(stdout: str, system: str) -> StrList:
 
     pveam available emits whitespace-separated columns like:
         section          template_name
-        system           debian-12-standard_12.7-1_amd64.tar.zst
+        system           debian-13-standard_13.1-2_amd64.tar.zst
         system           ubuntu-24.04-standard_24.04-1_amd64.tar.zst
 
     Older or differently-formatted output may use `section/template`. We accept either.
     The match requires `<system>-<digits>` so `--base debian` doesn't pull in
-    `debian-12-turnkey-*` images by accident.
+    `debian-13-turnkey-*` images by accident.
     """
     system_lc = system.lower()
     pattern = re.compile(rf'^{re.escape(system_lc)}-\d')
@@ -226,7 +226,8 @@ def _resolve_template_name(
     _ssh_run(node_ip, user, ssh_opts, "pveam update", dry_run=dry_run)
 
     if dry_run:
-        return f"/var/lib/vz/template/cache/{base_arg}-12-standard_12.0-1_amd64.tar.zst"
+        print(f"  [DRY-RUN] Would select the latest {base_arg} LXC template")
+        return f"/var/lib/vz/template/cache/{base_arg}-standard_latest_amd64.tar.zst"
 
     # List available templates
     result = _ssh_run(
