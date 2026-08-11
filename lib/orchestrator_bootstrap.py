@@ -291,6 +291,12 @@ def run_orchestrator_bootstrap(
         except (OSError, ValueError) as exc:
             print(f"Error: could not install system launcher in {SYSTEM_LAUNCHER_DIR}: {exc}")
             return 1
+    else:
+        try:
+            if retire_legacy_launcher(SYSTEM_LAUNCHER_DIR):
+                print(f"✓ Removed legacy system launcher: {SYSTEM_LAUNCHER_DIR}/{LEGACY_LAUNCHER_NAME}")
+        except OSError as exc:
+            print(f"Warning: could not remove legacy system launcher: {exc}")
 
     try:
         if retire_legacy_tmpfiles_conf():

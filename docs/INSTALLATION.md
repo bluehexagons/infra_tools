@@ -125,7 +125,9 @@ infra-tools --help
 The installed command is `infra-tools`; `infra_tools` is no longer supported.
 Rerunning bootstrap removes a regular-file or symlink launcher named
 `infra_tools` from the configured system or user launcher directory before
-installing the new command.
+installing the new command. Self-setup also removes generated shell completion
+registrations and files for `infra_tools` and `infra_tools.py` while installing
+the `infra-tools` completion for the configured shell.
 
 If the command is not found in a user installation, add its directory for the
 current shell and start a new login shell later:

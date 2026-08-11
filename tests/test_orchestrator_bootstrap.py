@@ -177,10 +177,12 @@ class TestRunOrchestratorBootstrap(unittest.TestCase):
 
     @patch("lib.orchestrator_bootstrap.resolve_bootstrap_user", return_value=("admin", "/home/admin"))
     @patch("lib.orchestrator_bootstrap.get_current_username", return_value="admin")
+    @patch("lib.orchestrator_bootstrap.retire_legacy_launcher", return_value=True)
     @patch("lib.orchestrator_bootstrap.subprocess.run")
     def test_can_skip_system_packages_for_current_user(
         self,
         mock_run,
+        mock_retire_legacy_launcher,
         _mock_current_username,
         _mock_resolve_user,
     ):
@@ -196,6 +198,7 @@ class TestRunOrchestratorBootstrap(unittest.TestCase):
         self.assertIn("python-tools", command)
         self.assertEqual(command[-4:-2], ["--shell", "zsh"])
         self.assertEqual(command[-2], "--script-path")
+        mock_retire_legacy_launcher.assert_called_once_with("/usr/local/bin")
 
 
 class TestInstallLauncher(unittest.TestCase):
