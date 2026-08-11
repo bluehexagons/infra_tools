@@ -2,6 +2,9 @@
 
 Quick navigation for AI agents. **Start with QUICK_START.md**.
 
+The root `AGENTS.md` is the short repository-wide entry point loaded by the
+agent environment; these pages provide the detailed reference.
+
 ## Quick Start
 
 - **[QUICK_START.md](./QUICK_START.md)** — Essential pattern, quick commands, critical rules (recommended first)

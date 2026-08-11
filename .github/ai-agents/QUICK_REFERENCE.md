@@ -21,6 +21,15 @@ from lib.types import (
 | Machine State | `lib/machine_state.py` |
 | Validation | `lib/validation.py` |
 | Arguments | `lib/arg_parser.py` |
+| Bootstrap | `lib/orchestrator_bootstrap.py`, `install.sh` |
+
+## Validation
+
+- Use `lib.validation` for filesystem paths, package names, network values,
+  setup configuration, and other structured inputs.
+- Use `lib.validators` for hostnames, IP addresses, and usernames.
+- Validate at the CLI or setup boundary before invoking remote or system
+  mutations.
 
 ## Machine State Helpers
 
@@ -40,7 +49,13 @@ from lib.machine_state import (
 ## Setup Step Template
 
 ```python
-def setup_feature(config: SetupConfig) -> None:
+from __future__ import annotations
+
+from lib.config import SetupConfig
+from lib.machine_state import can_modify_kernel
+
+def setup_kernel_feature(config: SetupConfig) -> None:
+    del config
     if not can_modify_kernel():
         print("  ✓ Skipping (container)")
         return
@@ -69,3 +84,10 @@ python3 -m unittest discover -s tests
 | `deploy/` | App deployment |
 
 See README.md for testing guidelines.
+
+## Setup composition
+
+Setup types are registered by `PluginDefinition` objects in `plugins/`.
+Composition plugins expose `step_builder` functions; capability plugins expose
+shared step extensions or custom steps. Prefer extending the owning plugin
+builder over adding a second dispatch path.
