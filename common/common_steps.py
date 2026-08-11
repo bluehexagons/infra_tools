@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import platform
 import shlex
 import shutil
 import subprocess
@@ -21,6 +22,27 @@ from lib.remote_utils import (
     run,
 )
 from lib.update_policy import ECOSYSTEM_AUTO_UPGRADE_ENV, npm_freshness_args
+
+
+NVM_VERSION = "v0.40.6"
+_GO_ARCH_BY_MACHINE = {
+    "x86_64": "amd64",
+    "amd64": "amd64",
+    "aarch64": "arm64",
+    "arm64": "arm64",
+    "armv6l": "armv6l",
+    "armv7l": "armv6l",
+    "ppc64le": "ppc64le",
+    "s390x": "s390x",
+    "riscv64": "riscv64",
+    "loongarch64": "loong64",
+}
+
+
+def _go_release_arch(machine: Optional[str] = None) -> Optional[str]:
+    """Return the Go download architecture for a Linux machine name."""
+    machine_name = (machine or platform.machine()).strip().lower()
+    return _GO_ARCH_BY_MACHINE.get(machine_name)
 
 
 def set_user_password(username: str, password: str) -> bool:
@@ -436,7 +458,12 @@ def install_go(config: SetupConfig) -> None:
         else:
             print("  ⚠ Existing Go binary could not report a version; reinstalling")
     
-    go_archive = f"{go_version}.linux-amd64.tar.gz"
+    go_arch = _go_release_arch()
+    if go_arch is None:
+        print(f"  ⚠ Unsupported Go architecture: {platform.machine()}; skipping")
+        return
+
+    go_archive = f"{go_version}.linux-{go_arch}.tar.gz"
     run(f"wget -q https://go.dev/dl/{go_archive} -O /tmp/{go_archive}")
     run("rm -rf /usr/local/go")
     run(f"tar -C /usr/local -xzf /tmp/{go_archive}")
@@ -481,15 +508,13 @@ def install_node_for_user(username: str, user_home: str) -> None:
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get install -y -qq curl")
 
-    nvm_version = "v0.39.7"
-    
     # Install nvm as the user, explicitly setting NVM_DIR to avoid picking up
     # any system-wide NVM_DIR (e.g. /opt/nvm) from the environment
     result = _run_as_login_user(
         username,
         user_home,
         f"export NVM_DIR={safe_nvm_dir} && "
-        f"curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/{nvm_version}/install.sh | bash",
+        f"curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/{NVM_VERSION}/install.sh | bash",
         check=False
     )
     _chown_existing_paths(username, _user_tool_paths(user_home))

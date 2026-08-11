@@ -16,10 +16,19 @@ from lib.update_policy import order_preferred_github_releases
 def detect_release_arch() -> str:
     """Return the GitHub release architecture suffix for this machine."""
     result = run("uname -m", capture_output=True)
-    arch = result.stdout.strip() if result.stdout else "x86_64"
-    if arch in ("aarch64", "arm64"):
-        return "arm64"
-    return "amd64"
+    arch = (result.stdout or "").strip()
+    if not arch:
+        raise RuntimeError("Could not detect release architecture")
+    arch_map = {
+        "x86_64": "amd64",
+        "amd64": "amd64",
+        "aarch64": "arm64",
+        "arm64": "arm64",
+    }
+    try:
+        return arch_map[arch]
+    except KeyError as exc:
+        raise RuntimeError(f"Unsupported release architecture: {arch}") from exc
 
 
 def fetch_github_releases(repo: str, *, per_page: int = 20) -> list[Mapping[str, Any]]:

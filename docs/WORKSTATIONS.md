@@ -118,7 +118,9 @@ Supported `--browser` values are `brave`, `firefox`, `librewolf`, `helium`,
 - Firefox uses `firefox-esr` through apt, or the Flathub build with Flatpak;
   setup also downloads the uBlock Origin extension package to `/tmp`.
 - Helium is downloaded from its upstream GitHub release for amd64 or arm64.
-- Browsh installs Firefox as a dependency and provides a terminal browser.
+- Browsh installs Firefox as a dependency, resolves the newest stable release
+  with a Debian package for the target architecture, and provides a terminal
+  browser.
 - Lynx installs the Debian terminal browser and does not become a graphical
   default.
 

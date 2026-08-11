@@ -67,6 +67,7 @@ class TestNodeSetup(unittest.TestCase):
         self.assertEqual(len(npm_commands), 2)
         self.assertTrue(all("--before=" in command for command in npm_commands))
         self.assertTrue(all("HOME=/home/user USER=user LOGNAME=user" in command for command in npm_commands))
+        self.assertTrue(any("nvm-sh/nvm/v0.40.6/install.sh" in command for command in commands))
 
     @patch("common.common_steps.open", new_callable=mock_open, read_data='export NVM_DIR="$HOME/.nvm"\n')
     @patch("common.common_steps.os.path.exists")

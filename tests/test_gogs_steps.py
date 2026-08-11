@@ -37,6 +37,12 @@ class TestParseGogsSpec(unittest.TestCase):
 
 class TestFetchPreferredGogsRelease(unittest.TestCase):
     @patch("lib.release_management.run")
+    def test_unknown_release_architecture_is_rejected(self, mock_run):
+        mock_run.return_value = SimpleNamespace(returncode=0, stdout="riscv64\n", stderr="")
+        with self.assertRaisesRegex(RuntimeError, "Unsupported release architecture: riscv64"):
+            gogs_steps.detect_release_arch()
+
+    @patch("lib.release_management.run")
     def test_prefers_aged_release_when_available(self, mock_run):
         # Dates are relative to now so the test stays stable over time: the
         # newest release is within the 7-day min-age window (too fresh) and

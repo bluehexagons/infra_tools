@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Optional
 import os
 import shlex
+import shutil
 import subprocess
 
 from lib.config import SetupConfig
@@ -15,11 +16,50 @@ from lib.remote_utils import (
     is_package_installed,
     run,
 )
+from lib.release_management import fetch_latest_github_release_asset
 
 
 FLATPAK_REMOTE = "flathub"
 _apt_update_done = False
 HELIUM_RELEASE_API = "https://api.github.com/repos/imputnet/helium-linux/releases/latest"
+BROWSH_GITHUB_REPO = "browsh-org/browsh"
+_BROWSH_ARCH_BY_DPKG = {
+    "amd64": "amd64",
+    "arm64": "arm64",
+    "armel": "armv6",
+    "armhf": "armv7",
+    "i386": "386",
+}
+
+
+def _browsh_architecture() -> str:
+    """Return the Browsh release architecture for the target Debian system."""
+    result = run("dpkg --print-architecture", check=False, capture_output=True)
+    dpkg_arch = (result.stdout or "").strip()
+    try:
+        return _BROWSH_ARCH_BY_DPKG[dpkg_arch]
+    except KeyError as exc:
+        raise RuntimeError(f"Unsupported Browsh architecture: {dpkg_arch or 'unknown'}") from exc
+
+
+def _browsh_asset_matches(tag_name: str, asset_name: str, arch: str) -> bool:
+    """Return whether a release asset is the Debian package for ``arch``."""
+    version = tag_name.removeprefix("v")
+    return asset_name == f"browsh_{version}_linux_{arch}.deb"
+
+
+def _resolve_browsh_deb() -> tuple[str, str]:
+    """Return the newest stable Browsh release with a matching Debian asset."""
+    arch = _browsh_architecture()
+    return fetch_latest_github_release_asset(
+        BROWSH_GITHUB_REPO,
+        asset_matches=lambda tag_name, asset_name: _browsh_asset_matches(
+            tag_name, asset_name, arch
+        ),
+        missing_asset_description=(
+            f"No stable Browsh Debian package found for architecture '{arch}'"
+        ),
+    )
 
 
 def is_flatpak_app_installed(app_id: str) -> bool:
@@ -182,16 +222,28 @@ def install_single_browser(browser: str, use_flatpak: bool) -> None:
         _install_helium_browser()
     
     elif browser == "browsh":
+        if is_package_installed("browsh") or shutil.which("browsh"):
+            print("  ✓ Browsh already installed")
+            return
+
         print("  Installing Browsh (requires Firefox)...")
         if not (is_package_installed("firefox") or is_package_installed("firefox-esr")):
             print("  Installing Firefox (required for Browsh)...")
             run("apt-get install -y -qq firefox-esr", check=False)
         
-        if not os.path.exists("/usr/local/bin/browsh"):
-            run("wget -qO /tmp/browsh.deb https://github.com/browsh-org/browsh/releases/download/v1.8.0/browsh_1.8.0_linux_amd64.deb", check=False)
-            run("apt-get install -y -qq /tmp/browsh.deb", check=False)
-            run("rm -f /tmp/browsh.deb", check=False)
-        if os.path.exists("/usr/local/bin/browsh"):
+        try:
+            tag_name, browsh_url = _resolve_browsh_deb()
+        except RuntimeError as exc:
+            print(f"  ✗ Failed to resolve current Browsh release: {exc}")
+            return
+        run(
+            f"wget -qO /tmp/browsh.deb {shlex.quote(browsh_url)}",
+            check=False,
+            display_cmd=f"wget -qO /tmp/browsh.deb <Browsh {tag_name} release URL>",
+        )
+        run("apt-get install -y -qq /tmp/browsh.deb", check=False)
+        run("rm -f /tmp/browsh.deb", check=False)
+        if is_package_installed("browsh") or shutil.which("browsh"):
             print("  ✓ Browsh installed")
     
     elif browser == "lynx":
