@@ -161,9 +161,8 @@ make check
 ./run_tests.py --suite smoke
 ```
 
-Continuous integration runs the suite on the minimum supported Python 3.10,
-an intermediate Python 3.12, and the current stable Python 3.14. Expensive live
-tests remain opt-in.
+Continuous integration runs the suite on Python 3.13, the interpreter shipped
+by Debian Trixie. Expensive live tests remain opt-in.
 
 See [Saved configuration operations](docs/OPERATIONS.md) for test selectors and
 [Proxmox workflows](docs/PROXMOX.md) for live-host notes.

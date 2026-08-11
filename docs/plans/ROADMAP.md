@@ -38,7 +38,8 @@ The ordering remains justified by the current implementation:
 - privileged shared SSH command builders still accept first-seen host keys.
 
 The manifest environment-key injection finding is resolved. CI now tests
-Python 3.10, 3.12, and 3.14, and `make compile` propagates compilation failures.
+Python 3.13, the interpreter shipped by Debian Trixie, and `make compile`
+propagates compilation failures.
 Those completed items should remain regression coverage, not active roadmap
 work.
 
