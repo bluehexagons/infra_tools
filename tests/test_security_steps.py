@@ -465,13 +465,27 @@ class TestConfigureMaintenanceTimers(unittest.TestCase):
         self.assertIn(f"SystemMaxUse={JOURNAL_MAX_USE}", written_text)
         self.assertIn(f"RuntimeMaxUse={JOURNAL_MAX_USE}", written_text)
         mock_run.assert_called_once_with("systemctl restart systemd-journald", check=False)
-        mock_configure.assert_called_once_with(
+        self.assertEqual(mock_configure.call_count, 2)
+        mock_configure.assert_any_call(
             service_name="cleanup-maintenance",
             service_desc="Cleanup temporary files and package caches",
             timer_desc="Cleanup temporary files and package caches (weekly)",
             script_path="/opt/infra_tools/common/service_tools/cleanup_maintenance.py",
             schedule="Sun *-*-* 03:30:00",
             check_name="Cleanup maintenance",
+            randomized_delay="30min",
+            timeout="1h",
+            network_online=False,
+            purpose="job",
+        )
+        mock_configure.assert_any_call(
+            service_name="user-cache-maintenance",
+            service_desc="Prune configured user developer-tool caches",
+            timer_desc="Prune configured user developer-tool caches (weekly)",
+            script_path="/opt/infra_tools/common/service_tools/user_cache_maintenance.py",
+            schedule="Mon *-*-* 03:00:00",
+            check_name="User cache maintenance",
+            user="u",
             randomized_delay="30min",
             timeout="1h",
             network_online=False,
@@ -490,6 +504,44 @@ class TestConfigureMaintenanceTimers(unittest.TestCase):
             configure_cleanup_maintenance(
                 SetupConfig(username="u", host="h", system_type="server_lite")
             )
+
+    @patch(
+        "security.security_steps.configure_maintenance_timer",
+        side_effect=[True, False],
+    )
+    @patch("security.security_steps.run")
+    @patch("security.security_steps.open", new_callable=mock_open)
+    @patch("security.security_steps.os.makedirs")
+    def test_user_cache_verification_failure_stops_setup(
+        self, _makedirs, _file, mock_run, _configure
+    ):
+        mock_run.return_value = SimpleNamespace(returncode=0)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "User cache maintenance timer failed verification",
+        ):
+            configure_cleanup_maintenance(
+                SetupConfig(username="u", host="h", system_type="server_lite")
+            )
+
+    @patch("security.security_steps.configure_maintenance_timer")
+    @patch("security.security_steps.run")
+    @patch("security.security_steps.open", new_callable=mock_open)
+    @patch("security.security_steps.os.makedirs")
+    def test_root_setup_skips_user_cache_timer(
+        self, _makedirs, _file, mock_run, mock_configure
+    ):
+        mock_run.return_value = SimpleNamespace(returncode=0)
+
+        configure_cleanup_maintenance(
+            SetupConfig(username="root", host="h", system_type="server_proxmox")
+        )
+
+        self.assertEqual(mock_configure.call_count, 1)
+        self.assertEqual(
+            mock_configure.call_args.kwargs["service_name"],
+            "cleanup-maintenance",
+        )
 
 
 class TestCleanupMaintenanceStepWiring(unittest.TestCase):

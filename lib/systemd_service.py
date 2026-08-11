@@ -190,6 +190,8 @@ def cleanup_all_infra_services(dry_run: bool = False) -> None:
         r"^security-monitor\.timer$",
         r"^cleanup-maintenance\.service$",
         r"^cleanup-maintenance\.timer$",
+        r"^user-cache-maintenance\.service$",
+        r"^user-cache-maintenance\.timer$",
         # SMB mount units
         r"^mnt-.*\.mount$",
         # Antistatic lobby server

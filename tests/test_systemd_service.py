@@ -190,6 +190,8 @@ class TestCleanupFunctions(unittest.TestCase):
             "security-monitor.timer",
             "cleanup-maintenance.service",
             "cleanup-maintenance.timer",
+            "user-cache-maintenance.service",
+            "user-cache-maintenance.timer",
         ],
     )
     @patch("lib.systemd_service.os.path.exists", return_value=True)
@@ -202,8 +204,10 @@ class TestCleanupFunctions(unittest.TestCase):
         for unit in (
             "security-monitor.timer",
             "cleanup-maintenance.timer",
+            "user-cache-maintenance.timer",
             "security-monitor.service",
             "cleanup-maintenance.service",
+            "user-cache-maintenance.service",
         ):
             self.assertIn(f"systemctl stop {unit}", run_commands)
 

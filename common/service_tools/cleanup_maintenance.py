@@ -556,9 +556,6 @@ def main() -> int:
             "journal rotation and vacuum",
         ),
         run_optional_cleanup(["logrotate"], ["/etc/logrotate.conf"], "log rotation"),
-        run_optional_cleanup(["npm"], ["cache", "clean", "--force"], "npm cache cleanup"),
-        run_optional_cleanup(["pip3", "pip"], ["cache", "purge"], "pip cache cleanup"),
-        run_optional_cleanup(["uv"], ["cache", "clean"], "uv cache cleanup"),
     ):
         if failure:
             failures.append(failure)

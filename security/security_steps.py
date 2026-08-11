@@ -712,7 +712,7 @@ def configure_auto_restart(config: SetupConfig) -> None:
 
 
 def configure_cleanup_maintenance(config: SetupConfig) -> None:
-    """Configure periodic cleanup for journals, temp files, and package caches."""
+    """Configure separate system and user-scoped recurring cleanup jobs."""
     if is_dry_run():
         print("  [DRY-RUN] Would configure cleanup maintenance")
         return
@@ -744,3 +744,23 @@ RuntimeMaxUse={JOURNAL_MAX_USE}
     )
     if not configured:
         raise RuntimeError("Cleanup maintenance timer failed verification")
+
+    if config.username == "root":
+        print("  ℹ User cache maintenance skipped for the root account")
+        return
+
+    user_cache_configured = configure_maintenance_timer(
+        service_name="user-cache-maintenance",
+        service_desc="Prune configured user developer-tool caches",
+        timer_desc="Prune configured user developer-tool caches (weekly)",
+        script_path="/opt/infra_tools/common/service_tools/user_cache_maintenance.py",
+        schedule="Mon *-*-* 03:00:00",
+        check_name="User cache maintenance",
+        user=config.username,
+        randomized_delay="30min",
+        timeout="1h",
+        network_online=False,
+        purpose="job",
+    )
+    if not user_cache_configured:
+        raise RuntimeError("User cache maintenance timer failed verification")

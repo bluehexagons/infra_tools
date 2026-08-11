@@ -17,7 +17,8 @@ many hosts running the same job at the same instant.
 | `auto-update-ruby.timer` | Sunday at 04:00 | Setups with Ruby and `gem` |
 | `auto-update-uv.timer` | Sunday at 05:00 | Setups with Python and uv |
 | `auto-update-gogs.timer` | Sunday at 05:30 | Setups with Gogs |
-| `cleanup-maintenance.timer` | Sunday at 03:30 | Server-style setups |
+| `cleanup-maintenance.timer` | Sunday at 03:30 | Security-enabled setups |
+| `user-cache-maintenance.timer` | Monday at 03:00 | Security-enabled setups with a non-root setup user |
 
 Container capabilities are respected. OCI containers cannot restart the system,
 and security monitoring, auditd, AppArmor, and kernel-level setup are skipped
@@ -28,14 +29,14 @@ Inspect a job and its recent output with:
 
 ```bash
 sudo systemctl status auto-update-apt.timer
-sudo systemctl list-timers --all '*auto-*' '*security-monitor*' '*cleanup-*'
+sudo systemctl list-timers --all '*auto-*' '*security-monitor*' '*cache-maintenance*'
 sudo journalctl -u auto-update-apt.service -n 100 --no-pager
 ```
 
 Required host timers are verified during setup. Failure to reload, enable,
-start, or confirm the security-monitor, APT-update, cleanup, or restart timer
-stops setup. When the replacement APT timer cannot be verified, Debian's
-existing APT timers remain enabled.
+start, or confirm the security-monitor, APT-update, cleanup, user-cache, or
+restart timer stops setup. When the replacement APT timer cannot be verified,
+Debian's existing APT timers remain enabled.
 
 ## Update Policy
 
@@ -59,8 +60,9 @@ Node.js, Ruby, and uv use a conservative default policy:
 
 GitHub CLI is installed from its APT repository and therefore follows the APT
 job. The `terminal` agent suite's Codex CLI, Claude Code, and OpenCode remain
-outside recurring root maintenance. Run `infra-tools agent update --dry-run`
-and then `infra-tools agent update` as the setup user for a deliberate vendor
+outside recurring root updates; their rebuildable caches are covered by the
+separate user maintenance job. Run `infra-tools agent update --dry-run` and
+then `infra-tools agent update` as the setup user for a deliberate vendor
 update with before/after verification, a retained prior executable, automatic
 rollback after a broken update, and a private audit record. Setup still skips
 an installer when its command is already present.
@@ -93,6 +95,31 @@ physical machines, VMs, and Proxmox hosts, cleanup returns unused blocks to
 storage after deletion when discard is supported. It defers to an active native
 `fstrim.timer` instead of running a duplicate trim; containers skip this
 host-level operation.
+
+`user-cache-maintenance` runs as the configured non-root account instead of
+root, after the weekly runtime-update window. It inventories tool-reported
+cache paths before acting and applies these bounded policies:
+
+- npm runs its supported verification and garbage collection, then uses a
+  forced clean only if the cache still exceeds 2 GiB;
+- pip purges only above 2 GiB, uv runs its supported prune operation, and Go
+  cleans build and module caches only above 2 GiB and 5 GiB respectively; and
+- OpenCode and Codex cleanup is restricted to rebuildable cache directories.
+  The OpenCode cache limit is 2 GiB and the Codex cache limit is 1 GiB; either
+  cache may also be removed after 90 days without activity. Codex temporary
+  entries older than seven days are removed individually.
+
+Agent cache cleanup is deferred while the matching tool is running. Symbolic
+links and paths outside the configured user's home are never followed or
+removed. OpenCode data under `.local/share/opencode` and Codex sessions,
+memories, credentials, packages, and plugins are persistent state and are not
+cleanup targets. Root-only setups retain system cleanup but intentionally skip
+the user-cache timer. Preview the user job without changing files with:
+
+```bash
+sudo -u USER /usr/bin/python3 \
+  /opt/infra_tools/common/service_tools/user_cache_maintenance.py --dry-run
+```
 
 Cleanup never removes installed gem or nvm runtime versions, Proxmox backups,
 templates, ISOs, guest volumes, container/image stores, crash-report

@@ -44,7 +44,8 @@ On a Debian VM or bare-metal target, the baseline inherits:
 | --- | --- | --- |
 | `security-monitor.timer` | Reads fail2ban, auditd, SSH events, and configured XRDP TLS health every 15 minutes | Reports certificate/key failure, 30-day expiry, recovery, and fingerprint rotation on state changes |
 | `auto-update-apt.timer` | Runs a daily non-removing distribution upgrade | Updates XRDP, X.Org, the browser/VS Code when APT-managed, GitHub CLI, and Debian coding tools |
-| `cleanup-maintenance.timer` | Cleans bounded root caches, journals, and strictly named stale temp artifacts weekly | Does not comprehensively manage the desktop user's browser, editor, Flatpak, or agent caches |
+| `cleanup-maintenance.timer` | Cleans bounded root caches, journals, and strictly named stale temp artifacts weekly | Leaves user-owned tool data to the configured-account maintenance job |
+| `user-cache-maintenance.timer` | Inventories and prunes bounded developer-tool caches weekly as the configured non-root user | Covers npm, pip, uv, Go, OpenCode cache data, Codex cache data, and stale Codex temporary entries; browser, editor, and Flatpak caches remain outside its allowlist |
 | `auto-restart-if-needed.timer` | Checks daily and after boot for `/var/run/reboot-required` | Defers for login sessions until the force deadline, then can restart despite an active RDP or agent workload |
 
 `--agent-suite full`, `--node`, or `--python` also add the user-scoped Node.js

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from lib.types import BYTES_PER_GB
+
 JOURNAL_MAX_USE = "100M"
 JOURNAL_MAX_AGE = "30d"
 STALE_CRASH_REPORT_MAX_AGE_DAYS = 30
@@ -20,6 +22,18 @@ APT_LOCK_OPTIONS = [
 
 # Individual cleanup commands should never block the whole maintenance run forever.
 CLEANUP_COMMAND_TIMEOUT_SECONDS = 600
+
+# User-scoped cache maintenance runs independently from privileged host
+# cleanup. Pruning commands run every week, while full cache eviction is
+# reserved for these bounded size/age thresholds.
+NPM_CACHE_MAX_BYTES = 2 * BYTES_PER_GB
+PIP_CACHE_MAX_BYTES = 2 * BYTES_PER_GB
+GO_BUILD_CACHE_MAX_BYTES = 2 * BYTES_PER_GB
+GO_MODULE_CACHE_MAX_BYTES = 5 * BYTES_PER_GB
+OPENCODE_CACHE_MAX_BYTES = 2 * BYTES_PER_GB
+CODEX_CACHE_MAX_BYTES = BYTES_PER_GB
+STALE_USER_TOOL_CACHE_MAX_AGE_DAYS = 90
+STALE_USER_TOOL_TMP_MAX_AGE_DAYS = 7
 
 # Remove infra_tools-owned temp artifacts after a week. These are normally
 # cleaned up by finally blocks, but interrupted setup/deploy/provision runs can

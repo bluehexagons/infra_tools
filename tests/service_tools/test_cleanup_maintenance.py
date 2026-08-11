@@ -49,7 +49,7 @@ class TestCleanupMaintenance(unittest.TestCase):
         mock_unused_packages.assert_called_once()
         mock_package_audit.assert_called_once()
         mock_trim.assert_called_once()
-        self.assertEqual(mock_optional.call_count, 6)
+        self.assertEqual(mock_optional.call_count, 3)
         self.assertFalse(any(call.args[2] == "gem cleanup" for call in mock_optional.call_args_list))
         # Stale infra tmp cleanup runs once per known temp directory (/tmp, /var/tmp).
         self.assertEqual(mock_tmp_cleanup.call_count, len(cleanup_maintenance.INFRA_TMP_DIRS))
@@ -74,7 +74,7 @@ class TestCleanupMaintenance(unittest.TestCase):
     @patch("common.service_tools.cleanup_maintenance.send_notification_safe")
     @patch(
         "common.service_tools.cleanup_maintenance.run_optional_cleanup",
-        side_effect=[None, "journal vacuum: failed", None, None, None, None],
+        side_effect=[None, "journal vacuum: failed", None],
     )
     @patch("common.service_tools.cleanup_maintenance.cleanup_filesystem_free_space", return_value=None)
     @patch("common.service_tools.cleanup_maintenance.audit_package_database", return_value=None)

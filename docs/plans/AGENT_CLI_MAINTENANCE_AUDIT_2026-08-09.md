@@ -38,7 +38,8 @@ inherits these host jobs:
 | --- | --- | --- |
 | `security-monitor.timer` | Reads fail2ban, auditd, and SSH events every 15 minutes | Events are logged locally even without `--notify`; configured targets also receive noteworthy events and collection failures |
 | `auto-update-apt.timer` | Runs a daily non-removing distribution upgrade | Updates GitHub CLI and the Debian coding-tool baseline through APT |
-| `cleanup-maintenance.timer` | Cleans bounded journals, APT caches, selected command caches, and strictly named stale temp artifacts weekly | Root execution does not comprehensively manage every setup user's tool cache |
+| `cleanup-maintenance.timer` | Cleans bounded journals, APT caches, and strictly named stale temp artifacts weekly | Root-only system cleanup no longer invokes user package-manager commands against the wrong home |
+| `user-cache-maintenance.timer` | Inventories and prunes bounded developer-tool caches weekly as the configured non-root user | Covers npm, pip, uv, Go, OpenCode cache data, Codex cache data, and stale Codex temporary entries while preserving persistent agent state |
 | `auto-restart-if-needed.timer` | Checks daily and after boot for `/var/run/reboot-required` | Defers for active login sessions until the force deadline, then may restart despite active work |
 
 The terminal suite does **not** install an automatic updater for Codex CLI,
@@ -174,16 +175,23 @@ The audit must distinguish `warning` (for example, sign-in still required) from
 
 **Risk:** uploaded repositories are intentionally retained in a root-only cache
 without retention or size policy. Copied credentials persist until a user or
-vendor tool rotates/removes them. Weekly cleanup runs as root, so npm, pip, uv,
-and agent-specific caches under the setup user's home are not comprehensively
-bounded.
+vendor tool rotates/removes them.
 
 Add explicit inventory and cleanup commands with dry-run output. Cache policy
 should support maximum age/size and preserve the only available repository copy.
 Credential work should report age and permissions, never secret contents, and
-defer revocation/rotation to an explicit operator action. User-cache cleanup
-should run under the configured account with per-tool allowlists and avoid
-active workspaces.
+defer revocation/rotation to an explicit operator action.
+
+The first user-cache lifecycle slice is complete. A weekly timer now runs as
+the configured non-root account, inventories paths reported by npm, pip, uv,
+and Go, and uses supported per-tool cleanup commands with conservative size
+limits. OpenCode and Codex handling is limited to allowlisted rebuildable cache
+and temporary paths, defers while the matching tool is active, rejects links
+and paths outside the user's home, and never targets repository, credential,
+session, memory, package, plugin, or OpenCode application-state directories.
+The script also exposes direct `--dry-run` output. Repository retention,
+credential inventory, operator-configurable limits, and a unified CLI audit
+surface remain follow-up work.
 
 ### P2: Maintenance unit privilege separation
 
@@ -197,6 +205,11 @@ read-only paths, private temporary directories, restricted address families,
 and bounded writable paths only after tests prove the required APT, journal,
 audit, notification, and state operations still work. Keep the broad APT job
 separate from user-scoped agent-tool maintenance.
+
+User-tool cache work is now split into its own configured-account service; the
+root cleanup service no longer runs npm, pip, or uv commands. Capability-based
+systemd sandboxing for the maintenance units remains outstanding and still
+needs the real-VM validation described above.
 
 ## Existing roadmap dependencies
 
@@ -212,7 +225,7 @@ separate from user-scoped agent-tool maintenance.
 - Unit tests cover no-notification local monitoring and every required timer
   verification failure.
 - A Debian VM smoke test verifies the canonical `server_dev` terminal suite,
-  firewall access, all four host timers, and `agent doctor` as the setup user.
+  firewall access, all five host timers, and `agent doctor` as the setup user.
 - Upgrade tests cover interrupted download, bad digest/signature, failed smoke
   test, and rollback for each supported agent tool.
 - Restart tests include active SSH, `tmux`, and agent processes plus force-deadline
