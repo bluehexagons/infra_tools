@@ -9,8 +9,8 @@ recognized as best-effort Debian-compatible hosts.
 
 The installer needs either `wget` or `curl`. The examples below use wget,
 which is commonly present on minimal Debian systems. If only `curl` is
-installed, replace the wget download with
-`curl --fail --location --connect-timeout 15 --max-time 120 -o "$installer_script" URL`.
+installed, replace the download command with
+`curl --fail --location --connect-timeout 15 --max-time 120 -o "$HOME/.infra_tools-install.sh" URL`.
 If neither command is available, install one first with:
 
 ```bash
@@ -19,10 +19,9 @@ sudo apt-get update && sudo apt-get install -y wget ca-certificates
 
 The fetch command leaves DNS and connection diagnostics visible and limits
 retries, so a VM with no network path fails clearly instead of appearing idle.
-Privileged examples download to a temporary file before invoking `sudo`. This
-keeps the terminal attached to the password prompt and installer output, and
-the cleanup command removes the file afterward. If the download fails, stop
-before running the `sudo sh` line.
+Every example downloads to a user-owned file before invoking the installer.
+Run each command in order and confirm the download succeeds before running the
+installer command; remove the file afterward.
 
 ## Choose an installation path
 
@@ -35,18 +34,18 @@ account.
 Use this when you want to choose the first setup later:
 
 ```bash
-wget --timeout=20 --tries=2 -O- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
+wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
+sh "$HOME/.infra_tools-install.sh"
+rm -f "$HOME/.infra_tools-install.sh"
 ```
 
 The installer uses `sudo` for packages when needed. To install the source in
 `/opt/infra_tools` and expose a system launcher instead, use:
 
 ```bash
-installer_script="$(mktemp)" && \
-  wget --timeout=20 --tries=2 -O "$installer_script" \
-    https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh && \
-  sudo sh "$installer_script" --user "$USER"; \
-rm -f "$installer_script"
+wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
+sudo sh "$HOME/.infra_tools-install.sh" --user "$USER"
+rm -f "$HOME/.infra_tools-install.sh"
 ```
 
 ### Set up a minimal Debian control plane
@@ -55,12 +54,9 @@ This installs common administrator and Linux tools, the terminal agent suite,
 and configures the local machine to manage other VMs and containers:
 
 ```bash
-installer_script="$(mktemp)" && \
-  wget --timeout=20 --tries=2 -O "$installer_script" \
-    https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh && \
-  sudo sh "$installer_script" --user "$USER" \
-    --local-setup control_plane --agent-suite terminal; \
-rm -f "$installer_script"
+wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
+sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup control_plane --agent-suite terminal
+rm -f "$HOME/.infra_tools-install.sh"
 ```
 
 ### Set up a Debian GNOME desktop control plane
@@ -70,14 +66,9 @@ available for local logins, adds XFCE for RDP sessions, enables RDP, and
 installs the desktop agent suite:
 
 ```bash
-installer_script="$(mktemp)" && \
-  wget --timeout=20 --tries=2 -O "$installer_script" \
-    https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh && \
-  sudo sh "$installer_script" --user "$USER" \
-    --local-setup workstation_dev --control-plane \
-    --agent-suite desktop --desktop xfce \
-    --rdp --rdp-existing-password; \
-rm -f "$installer_script"
+wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
+sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup workstation_dev --control-plane --agent-suite desktop --desktop xfce --rdp --rdp-existing-password
+rm -f "$HOME/.infra_tools-install.sh"
 ```
 
 This expects `$USER` to be an existing non-root account with an unlocked

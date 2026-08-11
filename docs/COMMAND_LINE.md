@@ -174,25 +174,18 @@ For the local machine, the installer can select the control-plane profile and
 run it immediately:
 
 ```bash
-installer_script="$(mktemp)" && \
-  wget --timeout=20 --tries=2 -O "$installer_script" \
-    https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh && \
-  sudo sh "$installer_script" --user "$USER" \
-    --local-setup control_plane --agent-suite terminal; \
-rm -f "$installer_script"
+wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
+sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup control_plane --agent-suite terminal
+rm -f "$HOME/.infra_tools-install.sh"
 ```
 
 For a standard Debian GNOME desktop, keep GNOME for local logins, add XFCE
 for XRDP sessions, and install the graphical agent suite with:
 
 ```bash
-installer_script="$(mktemp)" && \
-  wget --timeout=20 --tries=2 -O "$installer_script" \
-    https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh && \
-  sudo sh "$installer_script" --user "$USER" \
-    --local-setup workstation_dev --control-plane --agent-suite desktop \
-    --desktop xfce --rdp --rdp-existing-password; \
-rm -f "$installer_script"
+wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
+sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup workstation_dev --control-plane --agent-suite desktop --desktop xfce --rdp --rdp-existing-password
+rm -f "$HOME/.infra_tools-install.sh"
 ```
 
 | Flag | Description |

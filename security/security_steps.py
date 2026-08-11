@@ -272,7 +272,14 @@ AllowGroups remoteusers
         print("  ✓ Skipping SSH hardening (openssh-server is not installed)")
         return
 
-    os.makedirs(_SSHD_DROPIN_DIR, exist_ok=True)
+    try:
+        os.makedirs(_SSHD_DROPIN_DIR, exist_ok=True)
+    except OSError as exc:
+        print(
+            "  ⚠ Skipping SSH hardening (cannot access "
+            f"{_SSHD_DROPIN_DIR}: {exc})"
+        )
+        return
 
     existing: str | None = None
     if os.path.exists(_SSHD_DROPIN_FILE):
@@ -286,8 +293,15 @@ AllowGroups remoteusers
             print("  ✓ SSH already hardened")
             return
 
-    with open(_SSHD_DROPIN_FILE, "w") as f:
-        f.write(hardening_content)
+    try:
+        with open(_SSHD_DROPIN_FILE, "w") as f:
+            f.write(hardening_content)
+    except OSError as exc:
+        print(
+            "  ⚠ Skipping SSH hardening (cannot write "
+            f"{_SSHD_DROPIN_FILE}: {exc})"
+        )
+        return
 
     # Validate the resulting config before reloading so we do not lock out
     # access if a future change introduces a typo.
@@ -301,7 +315,7 @@ AllowGroups remoteusers
                     f.write(existing)
         except OSError as exc:
             print(f"  ⚠ Failed to restore the previous SSH hardening drop-in: {exc}")
-            raise
+            return
         print("  ⚠ sshd -t failed after hardening drop-in; restored previous configuration")
         return
 

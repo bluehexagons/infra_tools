@@ -102,6 +102,30 @@ class TestHardenSSH(unittest.TestCase):
         harden_ssh(SetupConfig(username="u", host="h", system_type="server_lite"))
         mock_run.assert_not_called()
 
+    @patch("security.security_steps.shutil.which", return_value="/usr/sbin/sshd")
+    @patch("security.security_steps.run")
+    @patch(
+        "security.security_steps.os.makedirs",
+        side_effect=PermissionError(13, "Permission denied"),
+    )
+    def test_skips_when_dropin_directory_is_not_writable(self, _md, mock_run, _which):
+        harden_ssh(SetupConfig(username="u", host="h", system_type="server_lite"))
+        mock_run.assert_not_called()
+
+    @patch("security.security_steps.shutil.which", return_value="/usr/sbin/sshd")
+    @patch("security.security_steps.run")
+    @patch("security.security_steps.os.makedirs")
+    @patch(
+        "security.security_steps.open",
+        side_effect=PermissionError(13, "Permission denied"),
+    )
+    @patch("security.security_steps.os.path.exists", return_value=False)
+    def test_skips_when_dropin_file_is_not_writable(
+        self, _exists, _file, _md, mock_run, _which
+    ):
+        harden_ssh(SetupConfig(username="u", host="h", system_type="server_lite"))
+        mock_run.assert_not_called()
+
 
 class TestHardenKernel(unittest.TestCase):
     @patch("security.security_steps.can_modify_kernel", return_value=True)

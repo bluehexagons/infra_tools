@@ -12,48 +12,41 @@ locally, installs the managed `infra_tools` launcher, and lets you switch
 channels or upgrade later. Choose the path that matches the machine.
 
 The installer needs either `wget` or `curl` to fetch itself. The examples use
-`wget`, which is commonly available on minimal Debian systems; if only `curl`
-is installed, replace `wget --timeout=20 --tries=2 -O-` with
-`curl --fail --location --connect-timeout 15 --max-time 120`. If neither
-command is available, install one first with `sudo apt-get update && sudo apt-get install -y wget ca-certificates`.
+`wget`, which is commonly available on minimal Debian systems. If only `curl`
+is installed, replace the download command with
+`curl --fail --location --connect-timeout 15 --max-time 120 -o "$HOME/.infra_tools-install.sh" URL`.
+If neither command is available, install one first with `sudo apt-get update && sudo apt-get install -y wget ca-certificates`.
 
 The download commands intentionally leave connection diagnostics visible and
 bound retries so a DNS or network failure is not mistaken for a stalled
-installer. The privileged examples download to a temporary file before
-starting `sudo`, so password prompts and installer output remain connected to
-the terminal; the file is removed when the command finishes. For those
-examples, replace the `wget ... -O "$installer_script"` line with
-`curl --fail --location --connect-timeout 15 --max-time 120 -o "$installer_script" URL`
-when using curl.
+installer. Every example downloads to a user-owned file before running the
+installer, keeping password prompts and output connected to the terminal. Run
+each command in order, confirm the download succeeds, and remove the file when
+the installer finishes.
 
 Install the launcher and choose a setup later:
 
 ```bash
-wget --timeout=20 --tries=2 -O- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
+wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
+sh "$HOME/.infra_tools-install.sh"
+rm -f "$HOME/.infra_tools-install.sh"
 ```
 
 Set up a minimal Debian control plane immediately:
 
 ```bash
-installer_script="$(mktemp)" && \
-  wget --timeout=20 --tries=2 -O "$installer_script" \
-    https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh && \
-  sudo sh "$installer_script" --user "$USER" \
-    --local-setup control_plane --agent-suite terminal; \
-rm -f "$installer_script"
+wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
+sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup control_plane --agent-suite terminal
+rm -f "$HOME/.infra_tools-install.sh"
 ```
 
 Set up a standard Debian GNOME desktop as a graphical control plane. This keeps
 GNOME for local logins, uses XFCE for RDP, and installs the desktop agent suite:
 
 ```bash
-installer_script="$(mktemp)" && \
-  wget --timeout=20 --tries=2 -O "$installer_script" \
-    https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh && \
-  sudo sh "$installer_script" --user "$USER" \
-    --local-setup workstation_dev --control-plane --agent-suite desktop \
-    --desktop xfce --rdp --rdp-existing-password; \
-rm -f "$installer_script"
+wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
+sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup workstation_dev --control-plane --agent-suite desktop --desktop xfce --rdp --rdp-existing-password
+rm -f "$HOME/.infra_tools-install.sh"
 ```
 
 After installation, use `infra_tools setup ...` for remote hosts and

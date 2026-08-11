@@ -38,33 +38,16 @@ Options:
   -h, --help           Show this help
 
 Examples:
-  Fetch with either wget or curl:
-  wget --timeout=20 --tries=2 -O- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
-  curl --fail --location --connect-timeout 15 --max-time 120 https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh | sh
-  wget --timeout=20 --tries=2 -O- https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh |
-    sh -s -- --channel stable
-  # Download privileged installs first so sudo keeps terminal input and output.
-  installer_script=$(mktemp) && \
-    wget --timeout=20 --tries=2 -O "$installer_script" \
-      https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh && \
-    sudo sh "$installer_script" --user "$USER"
-  rm -f "$installer_script"
-  installer_script=$(mktemp) && \
-    wget --timeout=20 --tries=2 -O "$installer_script" \
-      https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh && \
-    sudo sh "$installer_script" --user "$USER" --local-setup control_plane --agent-suite terminal
-  rm -f "$installer_script"
-  installer_script=$(mktemp) && \
-    wget --timeout=20 --tries=2 -O "$installer_script" \
-      https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh && \
-    sudo sh "$installer_script" --user "$USER" --local-setup workstation_dev --control-plane \
-      --agent-suite desktop --desktop xfce --rdp --rdp-existing-password
-  rm -f "$installer_script"
-  installer_script=$(mktemp) && \
-    wget --timeout=20 --tries=2 -O "$installer_script" \
-      https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh && \
-    sudo sh "$installer_script" --user "$USER" --setup server_proxmox 10.0.0.10 root --key /home/me/.ssh/id_ed25519
-  rm -f "$installer_script"
+  Download with wget, then run the script (run each line in order):
+  wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
+  sh "$HOME/.infra_tools-install.sh"
+  rm -f "$HOME/.infra_tools-install.sh"
+  Download with wget and run a privileged setup:
+  wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
+  sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup control_plane --agent-suite terminal
+  rm -f "$HOME/.infra_tools-install.sh"
+  Download with curl instead by replacing the wget command with:
+  curl --fail --location --connect-timeout 15 --max-time 120 -o "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
 EOF
 }
 
