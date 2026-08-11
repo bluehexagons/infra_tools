@@ -127,7 +127,9 @@ def run_tool_command(
         )
     )
     return subprocess.run(
-        ["/bin/bash", "-lc", "; ".join(shell_parts)],
+        # Do not use a login shell here. Unattended maintenance must not depend
+        # on, execute, or have its output polluted by interactive profile files.
+        ["/bin/bash", "-c", "; ".join(shell_parts)],
         capture_output=True,
         text=True,
         cwd=context.home,
@@ -243,24 +245,24 @@ def cache_usage(path: str) -> CacheUsage:
     if not os.path.exists(path):
         return CacheUsage(0, None)
 
-    def inspect(current_path: str) -> CacheUsage:
+    size_bytes = 0
+    newest_mtime: float | None = None
+    pending_paths = [path]
+    while pending_paths:
+        current_path = pending_paths.pop()
         stat_result = os.lstat(current_path)
         if os.path.islink(current_path):
-            return CacheUsage(0, None)
+            continue
+        if newest_mtime is None or stat_result.st_mtime > newest_mtime:
+            newest_mtime = stat_result.st_mtime
         if not os.path.isdir(current_path):
-            return CacheUsage(stat_result.st_size, stat_result.st_mtime)
+            size_bytes += stat_result.st_size
+            continue
 
-        size_bytes = 0
-        newest_mtime = stat_result.st_mtime
         with os.scandir(current_path) as entries:
-            for entry in entries:
-                usage = inspect(entry.path)
-                size_bytes += usage.size_bytes
-                if usage.newest_mtime is not None:
-                    newest_mtime = max(newest_mtime, usage.newest_mtime)
-        return CacheUsage(size_bytes, newest_mtime)
+            pending_paths.extend(entry.path for entry in entries)
 
-    return inspect(path)
+    return CacheUsage(size_bytes, newest_mtime)
 
 
 def inventory_cache(

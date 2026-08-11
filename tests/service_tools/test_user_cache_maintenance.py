@@ -34,6 +34,25 @@ class TestUserCacheHelpers(unittest.TestCase):
             self.assertEqual(usage.size_bytes, 4)
             self.assertIsNotNone(usage.newest_mtime)
 
+    def test_cache_usage_handles_deep_directory_trees(self):
+        with tempfile.TemporaryDirectory() as home:
+            current_dir = home
+            for _ in range(150):
+                current_dir = os.path.join(current_dir, "d")
+                os.mkdir(current_dir)
+            with open(os.path.join(current_dir, "data"), "w", encoding="utf-8") as handle:
+                handle.write("data")
+
+            original_recursion_limit = sys.getrecursionlimit()
+            try:
+                sys.setrecursionlimit(100)
+                usage = user_cache_maintenance.cache_usage(home)
+            finally:
+                sys.setrecursionlimit(original_recursion_limit)
+
+            self.assertEqual(usage.size_bytes, 4)
+            self.assertIsNotNone(usage.newest_mtime)
+
     def test_managed_path_must_remain_inside_home(self):
         with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as outside:
             context = self._context(home)
@@ -68,7 +87,7 @@ class TestUserCacheHelpers(unittest.TestCase):
         )
 
         command = mock_run.call_args.args[0]
-        self.assertEqual(command[:2], ["/bin/bash", "-lc"])
+        self.assertEqual(command[:2], ["/bin/bash", "-c"])
         self.assertIn("export NVM_DIR=/home/agent/.nvm", command[2])
         self.assertIn('"$NVM_DIR/nvm.sh"', command[2])
         self.assertIn("exec npm cache verify", command[2])

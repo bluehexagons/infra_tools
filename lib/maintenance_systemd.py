@@ -172,9 +172,13 @@ WantedBy=timers.target
         print(f"  ⚠ {check_name} {purpose} timer could not be enabled")
         return False
 
-    start_result = run(f"systemctl start {shlex.quote(timer_unit)}", check=False)
-    if start_result.returncode != 0:
-        print(f"  ⚠ {check_name} {purpose} timer could not be started")
+    # ``start`` is a no-op for an already-active timer, so it can leave the
+    # previous trigger calculation in place after a unit update. Restarting is
+    # also valid for a newly installed timer and guarantees that reruns apply
+    # the replacement schedule immediately.
+    restart_result = run(f"systemctl restart {shlex.quote(timer_unit)}", check=False)
+    if restart_result.returncode != 0:
+        print(f"  ⚠ {check_name} {purpose} timer could not be restarted")
         return False
 
     enabled_result = run(f"systemctl is-enabled {shlex.quote(timer_unit)}", check=False)

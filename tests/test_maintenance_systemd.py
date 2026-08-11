@@ -52,7 +52,7 @@ class TestConfigureMaintenanceTimer(unittest.TestCase):
             [
                 "systemctl daemon-reload",
                 "systemctl enable auto-update-test.timer",
-                "systemctl start auto-update-test.timer",
+                "systemctl restart auto-update-test.timer",
                 "systemctl is-enabled auto-update-test.timer",
                 "systemctl is-active auto-update-test.timer",
             ],

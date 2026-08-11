@@ -1,10 +1,11 @@
 # Recurring Maintenance
 
 Setup flows install recurring jobs as managed systemd units. The jobs are
-enabled and started after their unit files are written, and replacement units
-are staged atomically so an existing working timer is not removed before its
-replacement is ready. Randomized delays are used where appropriate to avoid
-many hosts running the same job at the same instant.
+enabled and restarted after their unit files are written, so rerunning setup
+immediately applies a changed schedule. Replacement units are staged atomically
+so an existing working timer is not removed before its replacement is ready.
+Randomized delays are used where appropriate to avoid many hosts running the
+same job at the same instant.
 
 ## Installed Jobs
 
@@ -98,7 +99,9 @@ host-level operation.
 
 `user-cache-maintenance` runs as the configured non-root account instead of
 root, after the weekly runtime-update window. It inventories tool-reported
-cache paths before acting and applies these bounded policies:
+cache paths before acting. Tool commands receive the account's home-scoped
+environment without loading interactive login profiles, and apply these
+bounded policies:
 
 - npm runs its supported verification and garbage collection, then uses a
   forced clean only if the cache still exceeds 2 GiB;
