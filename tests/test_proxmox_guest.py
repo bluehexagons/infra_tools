@@ -83,6 +83,10 @@ class TestProbeProxmoxHost(unittest.TestCase):
         self.assertEqual(facts.gateway, "10.0.0.1")
         self.assertEqual(facts.nameservers, ["1.1.1.1", "8.8.8.8"])
         self.assertEqual(facts.bridges, ["vmbr0", "vmbr1"])
+        self.assertIn(
+            "ip -o link show type bridge",
+            mock_run.call_args_list[0].args[3],
+        )
         self.assertEqual(
             {pool.name: pool.content for pool in facts.storage_pools},
             {

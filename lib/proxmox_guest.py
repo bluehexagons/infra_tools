@@ -110,12 +110,12 @@ def _list_proxmox_bridges(
     ssh_opts: StrList,
     dry_run: bool = False,
 ) -> StrList:
-    """Return available vmbr* bridges on the Proxmox host."""
+    """Return available Linux bridge interfaces on the Proxmox host."""
     result = _ssh_run(
         node_ip,
         user,
         ssh_opts,
-        "ip -o link show | awk -F': ' '{print $2}' | grep '^vmbr' | sort -u",
+        "ip -o link show type bridge | awk -F': ' '{print $2}' | cut -d@ -f1 | sort -u",
         dry_run=dry_run,
     )
 
@@ -148,7 +148,7 @@ def auto_detect_bridge(
 
     if not bridges:
         raise ProvisionError(
-            "No vmbr* network bridge found on the Proxmox host"
+            "No Linux network bridge found on the Proxmox host"
         )
 
     if preferred_bridge:

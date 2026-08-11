@@ -14,7 +14,7 @@ The flow is:
    helpers from :mod:`lib.proxmox_node`).
 4. ``qm create`` with a recovery console + virtio-scsi. Desktop/RDP guests
    receive VirtIO-GPU for noVNC; server guests retain the serial console.
-5. ``qm importdisk`` (or ``--import-from``) the qcow2 into the root storage,
+5. ``qm disk import`` (or ``--import-from``) the qcow2 into the root storage,
    attach as ``scsi0``, set boot order, attach a cloud-init drive.
 6. Cloud-init: user/SSH key/IP from infra_tools, then resize to the requested
    size and ``qm start``.
@@ -430,7 +430,7 @@ def _create_vm(
         "--scsihw virtio-scsi-single",
         "--serial0 socket",
         "--vga virtio" if graphical_console else "--vga serial0",
-        "--agent enabled=1,freeze-fs-on-backup=1",
+        "--agent enabled=1,freeze-fs=1",
         "--rng0 source=/dev/urandom",
         (
             f"--net0 virtio,bridge={shlex.quote(bridge)}"
@@ -458,7 +458,7 @@ def _create_vm(
         # pools such as LVM-thin only support raw volumes, while directory
         # pools commonly use qcow2.
         import_cmd = (
-            f"qm importdisk {vmid} {shlex.quote(image_remote_path)} "
+            f"qm disk import {vmid} {shlex.quote(image_remote_path)} "
             f"{shlex.quote(root_pool)}"
         )
         imported = _ssh_run(node_ip, user, ssh_opts, import_cmd, dry_run=dry_run)
@@ -466,7 +466,7 @@ def _create_vm(
             if not dry_run and created:
                 _destroy_vm_best_effort(vmid, node_ip, user, ssh_opts)
             raise ProvisionError(
-                f"qm importdisk for VM {vmid} failed: "
+                f"qm disk import for VM {vmid} failed: "
                 f"{(imported.stderr or imported.stdout or '').strip() or 'unknown error'}"
             )
         # Proxmox names the imported volume {pool}:vm-{vmid}-disk-0.

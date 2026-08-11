@@ -125,7 +125,7 @@ class TestVMHardwareProfile(unittest.TestCase):
         commands = [call.args[3] for call in mock_run.call_args_list]
         self.assertIn("--serial0 socket", commands[0])
         self.assertIn("--vga virtio", commands[0])
-        self.assertIn("--agent enabled=1,freeze-fs-on-backup=1", commands[0])
+        self.assertIn("--agent enabled=1,freeze-fs=1", commands[0])
         self.assertIn("--rng0 source=/dev/urandom", commands[0])
         self.assertIn(
             "--cicustom user=nfs-store:snippets/infra_tools-agent-vm.yaml",
@@ -133,7 +133,10 @@ class TestVMHardwareProfile(unittest.TestCase):
         )
         self.assertIn("--scsihw virtio-scsi-single", commands[0])
         self.assertIn("--memory 8192 --balloon 4096", commands[0])
-        self.assertNotIn("--format qcow2", commands[1])
+        self.assertEqual(
+            commands[1],
+            "qm disk import 101 /var/lib/vz/template/iso/debian.qcow2 local-lvm",
+        )
         self.assertIn("ip6=2001:db8::50/64", commands[0])
         self.assertIn("gw6=2001:db8::1", commands[0])
         self.assertIn("--scsi0 local-lvm:vm-101-disk-0,iothread=1", commands[2])

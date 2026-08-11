@@ -4,6 +4,11 @@ infra_tools can register Proxmox hosts, cache their capabilities, provision
 Debian VMs or unprivileged LXCs, and manage guest lifecycle operations.
 [Machine types](MACHINE_TYPES.md) explains the guest capability differences.
 
+These workflows target Proxmox VE 9.2 and use its current `qm` and `pct`
+interfaces. Bridge discovery identifies Linux bridge interfaces by type, so
+explicitly named Proxmox SDN bridges are supported alongside conventional
+`vmbr*` bridges.
+
 ## Quick setup: Proxmox host to coding VM
 
 Install infra-tools on a trusted Linux orchestration machine first. The

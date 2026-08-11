@@ -105,6 +105,17 @@ class TestAutoDetectBridge(unittest.TestCase):
         self.assertEqual(result, "vmbr1")
 
     @patch("lib.proxmox_guest._ssh_run")
+    def test_discovers_named_sdn_bridge(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(stdout="sdn-public\nvmbr0\n", returncode=0),
+            MagicMock(stdout="sdn-public\n", returncode=0),
+        ]
+
+        result = auto_detect_bridge("10.0.0.1", "root", dry_run=False)
+
+        self.assertEqual(result, "sdn-public")
+
+    @patch("lib.proxmox_guest._ssh_run")
     def test_honors_explicit_preferred_bridge(self, mock_run):
         mock_run.return_value = MagicMock(stdout="vmbr0\nvmbr1\n", returncode=0)
         result = auto_detect_bridge(
