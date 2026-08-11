@@ -94,6 +94,12 @@ class TestMachineTypeDetection(unittest.TestCase):
              patch.object(ms, '_read_text', side_effect=[None, '0::/lxc/100']):
             self.assertEqual(ms.detect_machine_type(), 'unprivileged')
 
+    def test_fallback_detects_oci_from_container_marker(self):
+        with patch.object(ms, '_systemd_detect_virt', return_value=None), \
+             patch.object(ms, '_read_text', side_effect=[None, None]), \
+             patch.object(ms.os.path, 'exists', side_effect=[True, False]):
+            self.assertEqual(ms.detect_machine_type(), 'oci')
+
 
 class TestSaveLoadMachineState(unittest.TestCase):
     def test_save_and_load(self):

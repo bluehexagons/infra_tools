@@ -554,7 +554,9 @@ fi
 
 printf 'Installing infra_tools for %s...\n' "$TARGET_USER"
 if [ "$(id -u)" -eq 0 ]; then
-    if ! python3 "$INSTALL_DIR/infra_tools.py" bootstrap --shell "$SHELL_NAME" --user "$TARGET_USER"; then
+    if ! HOME="$TARGET_HOME" python3 "$INSTALL_DIR/infra_tools.py" bootstrap \
+        --shell "$SHELL_NAME" \
+        --user "$TARGET_USER"; then
         rollback_install
         exit 1
     fi

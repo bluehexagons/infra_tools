@@ -78,13 +78,13 @@ def detect_machine_type() -> str:
     if container_marker:
         return "oci"
 
-    if os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv"):
-        return "oci"
-
     cgroup = _read_text(("/proc/1/cgroup",)) or ""
     if any(marker in cgroup for marker in _LXC_VIRTUALIZATIONS):
         return "unprivileged"
     if any(marker in cgroup for marker in _OCI_VIRTUALIZATIONS):
+        return "oci"
+
+    if os.path.exists("/.dockerenv") or os.path.exists("/run/.containerenv"):
         return "oci"
 
     product_name = _read_text(("/sys/class/dmi/id/product_name",)) or ""

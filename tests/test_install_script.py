@@ -85,6 +85,14 @@ class TestInstallScript(unittest.TestCase):
         with open(id_path, "w", encoding="utf-8") as file_obj:
             file_obj.write(
                 "#!/bin/sh\n"
+                'if [ "${INFRA_TOOLS_TEST_ROOT:-0}" = "1" ]; then\n'
+                '    case "$1" in\n'
+                '        -un) printf "root\\n" ;;\n'
+                '        -u) printf "0\\n" ;;\n'
+                '        *) exec /usr/bin/id "$@" ;;\n'
+                '    esac\n'
+                '    exit 0\n'
+                "fi\n"
                 'if [ "${INFRA_TOOLS_TEST_NON_ROOT:-0}" = "1" ]; then\n'
                 '    case "$1" in\n'
                 '        -un) printf "testuser\\n" ;;\n'
@@ -153,6 +161,25 @@ class TestInstallScript(unittest.TestCase):
                 calls[1],
                 ["setup", "server_dev", "10.0.0.50", "agent", "--dry-run"],
             )
+
+    def test_root_install_uses_target_home_for_launcher(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fake_home, _log_path, environment = self._create_fixture(directory)
+            environment["INFRA_TOOLS_TEST_ROOT"] = "1"
+            install_dir = os.path.join(directory, "installed")
+            result = subprocess.run(
+                ["sh", INSTALL_SCRIPT, "--install-dir", install_dir],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=environment,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(os.access(
+                os.path.join(fake_home, ".local", "bin", "infra_tools"),
+                os.X_OK,
+            ))
 
     def test_local_setup_elevates_and_defaults_to_install_user(self):
         with tempfile.TemporaryDirectory() as directory:
