@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import textwrap
 import unittest
@@ -121,15 +122,30 @@ class TestInstallScript(unittest.TestCase):
         with open(sed_path, "w", encoding="utf-8") as file_obj:
             file_obj.write(
                 "#!/bin/sh\n"
-                'case "$*" in\n'
-                '    */etc/os-release) printf "%s\\n" "${INFRA_TOOLS_TEST_OS_ID:-debian}" ;;\n'
-                '    *) exec /usr/bin/sed "$@" ;;\n'
-                "esac\n"
+                'if [ "$#" -eq 3 ] && [ "$1" = "-n" ] && [ "$2" = "s/^ID=//p" ] && [ "$3" = "/etc/os-release" ]; then\n'
+                '    printf "%s\\n" "${INFRA_TOOLS_TEST_OS_ID:-debian}"\n'
+                "    exit 0\n"
+                "fi\n"
+                'exec /usr/bin/sed "$@"\n'
             )
         os.chmod(sed_path, 0o755)
 
+        command_bin = os.path.join(directory, "command-bin")
+        os.makedirs(command_bin)
+        for command_name in ("ssh", "rsync", "curl"):
+            command_path = os.path.join(command_bin, command_name)
+            with open(command_path, "w", encoding="utf-8") as file_obj:
+                file_obj.write("#!/bin/sh\nexit 0\n")
+            os.chmod(command_path, 0o755)
+        os.symlink(sys.executable, os.path.join(command_bin, "python3"))
+        os.symlink(shutil.which("git"), os.path.join(command_bin, "git"))
+
         environment = os.environ.copy()
-        environment["PATH"] = os.pathsep.join((fake_bin, environment.get("PATH", "")))
+        environment["PATH"] = os.pathsep.join((
+            fake_bin,
+            command_bin,
+            environment.get("PATH", ""),
+        ))
         environment["INFRA_TOOLS_REPOSITORY_URL"] = source_root
         environment["INFRA_TOOLS_TEST_LOG"] = log_path
         return fake_home, log_path, environment
