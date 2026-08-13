@@ -5,6 +5,7 @@ from __future__ import annotations
 import glob
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -116,6 +117,17 @@ class TestInstallScript(unittest.TestCase):
             )
         os.chmod(sudo_path, 0o755)
 
+        sed_path = os.path.join(fake_bin, "sed")
+        with open(sed_path, "w", encoding="utf-8") as file_obj:
+            file_obj.write(
+                "#!/bin/sh\n"
+                'case "$*" in\n'
+                '    */etc/os-release) printf "%s\\n" "${INFRA_TOOLS_TEST_OS_ID:-debian}" ;;\n'
+                '    *) exec /usr/bin/sed "$@" ;;\n'
+                "esac\n"
+            )
+        os.chmod(sed_path, 0o755)
+
         environment = os.environ.copy()
         environment["PATH"] = os.pathsep.join((fake_bin, environment.get("PATH", "")))
         environment["INFRA_TOOLS_REPOSITORY_URL"] = source_root
@@ -180,6 +192,57 @@ class TestInstallScript(unittest.TestCase):
                 os.path.join(fake_home, ".local", "bin", "infra-tools"),
                 os.X_OK,
             ))
+
+    def test_unsupported_host_prompts_and_skips_system_package_installation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fake_home, log_path, environment = self._create_fixture(directory)
+            environment["INFRA_TOOLS_TEST_ROOT"] = "1"
+            environment["INFRA_TOOLS_TEST_OS_ID"] = "cachyos"
+            install_dir = os.path.join(directory, "installed")
+            result = subprocess.run(
+                [
+                    "sh",
+                    INSTALL_SCRIPT,
+                    "--install-dir",
+                    install_dir,
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                input="y\n",
+                env=environment,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Continue installing the remote-management tools anyway? [y/N]", result.stdout)
+            with open(log_path, encoding="utf-8") as file_obj:
+                calls = [json.loads(line) for line in file_obj]
+            self.assertIn("--skip-system-packages", calls[0])
+
+    def test_unsupported_host_fails_when_controller_commands_are_missing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            _fake_home, _log_path, environment = self._create_fixture(directory)
+            environment["INFRA_TOOLS_TEST_ROOT"] = "1"
+            environment["INFRA_TOOLS_TEST_OS_ID"] = "cachyos"
+            minimal_bin = os.path.join(directory, "minimal-bin")
+            os.makedirs(minimal_bin)
+            for command_name in ("sh", "head", "awk", "basename"):
+                os.symlink(shutil.which(command_name), os.path.join(minimal_bin, command_name))
+            environment["PATH"] = os.pathsep.join((environment["PATH"].split(os.pathsep)[0], minimal_bin))
+
+            result = subprocess.run(
+                ["sh", INSTALL_SCRIPT, "--install-dir", os.path.join(directory, "installed")],
+                check=False,
+                capture_output=True,
+                text=True,
+                input="y\n",
+                env=environment,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("missing required controller commands", result.stderr)
+            self.assertIn("python3", result.stderr)
+            self.assertIn("rsync", result.stderr)
 
     def test_qemu_guest_agent_flag_is_forwarded_to_bootstrap(self):
         with tempfile.TemporaryDirectory() as directory:

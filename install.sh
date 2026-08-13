@@ -15,6 +15,8 @@ SHELL_NAME=""
 RUN_SETUP=0
 LOCAL_SETUP_REQUESTED=0
 INSTALL_QEMU_GUEST_AGENT=0
+HOST_OS_SUPPORTED=1
+HOST_OS_ID=""
 
 usage() {
     cat <<'EOF'
@@ -63,6 +65,22 @@ fail() {
     exit 1
 }
 
+confirm_unsupported_host() {
+    printf '%s\n' "Warning: unsupported host distribution detected: ${HOST_OS_ID:-unknown}."
+    printf '%s\n' "Debian is officially supported; Ubuntu and Linux Mint are best-effort."
+    printf '%s' "Continue installing the remote-management tools anyway? [y/N] "
+    response=""
+    if [ -t 0 ] && [ -r /dev/tty ]; then
+        IFS= read -r response < /dev/tty || true
+    else
+        IFS= read -r response || true
+    fi
+    case "$response" in
+        y|Y|yes|Yes|YES) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 run_privileged() {
     if [ "$(id -u)" -eq 0 ]; then
         "$@"
@@ -86,6 +104,16 @@ run_with_progress() {
 }
 
 run_bootstrap() {
+    bootstrap_has_skip=0
+    for bootstrap_arg in "$@"; do
+        if [ "$bootstrap_arg" = "--skip-system-packages" ]; then
+            bootstrap_has_skip=1
+            break
+        fi
+    done
+    if [ "$HOST_OS_SUPPORTED" -eq 0 ] && [ "$bootstrap_has_skip" -eq 0 ]; then
+        set -- "$@" --skip-system-packages
+    fi
     if [ "$INSTALL_QEMU_GUEST_AGENT" -eq 1 ]; then
         "$@" --qemu-guest-agent
     else
@@ -131,10 +159,15 @@ validate_channel() {
 
 validate_host_os() {
     [ -r /etc/os-release ] || fail "cannot detect host distribution: /etc/os-release is missing"
-    distro_id=$(sed -n 's/^ID=//p' /etc/os-release | sed 's/^"//; s/"$//' | head -n 1)
-    case "$distro_id" in
+    HOST_OS_ID=$(sed -n 's/^ID=//p' /etc/os-release | sed 's/^"//; s/"$//' | head -n 1)
+    case "$HOST_OS_ID" in
         debian|ubuntu|linuxmint) ;;
-        *) fail "unsupported host distribution: ${distro_id:-unknown}; Debian is officially supported (Ubuntu and Linux Mint are best-effort)" ;;
+        *)
+            HOST_OS_SUPPORTED=0
+            if ! confirm_unsupported_host; then
+                fail "unsupported host confirmation declined"
+            fi
+            ;;
     esac
 }
 
@@ -312,18 +345,34 @@ elif [ "$RUN_SETUP" -eq 1 ]; then
     fi
 fi
 
+if [ "$HOST_OS_SUPPORTED" -eq 0 ] && [ "$INSTALL_QEMU_GUEST_AGENT" -eq 1 ]; then
+    fail "--qemu-guest-agent requires the Debian package setup path; install the launcher without this option on an unsupported host"
+fi
+if [ "$HOST_OS_SUPPORTED" -eq 0 ] && [ "$LOCAL_SETUP" -eq 1 ]; then
+    fail "local setup is not supported on an unsupported host; install the launcher and use remote setup instead"
+fi
+
 missing_prerequisite=0
+missing_prerequisites=""
 for command_name in python3 git ssh rsync; do
     if ! command -v "$command_name" >/dev/null 2>&1; then
         missing_prerequisite=1
+        if [ -n "$missing_prerequisites" ]; then
+            missing_prerequisites="$missing_prerequisites, "
+        fi
+        missing_prerequisites="$missing_prerequisites$command_name"
     fi
 done
 if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
     missing_prerequisite=1
+    if [ -n "$missing_prerequisites" ]; then
+        missing_prerequisites="$missing_prerequisites, "
+    fi
+    missing_prerequisites="${missing_prerequisites}curl or wget"
 fi
 
 ensure_debian_bootstrap_sources() {
-    if [ "$distro_id" != "debian" ]; then
+    if [ "$HOST_OS_ID" != "debian" ]; then
         return
     fi
 
@@ -466,7 +515,11 @@ fi
 EOF
 }
 
-if [ "$missing_prerequisite" -eq 1 ]; then
+if [ "$HOST_OS_SUPPORTED" -eq 0 ] && [ "$missing_prerequisite" -eq 1 ]; then
+    fail "unsupported host is missing required controller commands: $missing_prerequisites; install them manually and rerun the installer"
+fi
+
+if [ "$HOST_OS_SUPPORTED" -eq 1 ] && [ "$missing_prerequisite" -eq 1 ]; then
     command -v apt-get >/dev/null 2>&1 || fail "automatic prerequisite installation requires apt-get"
     ensure_debian_bootstrap_sources
     printf '%s\n' "Refreshing package lists (APT may wait for another package operation)..."

@@ -105,6 +105,20 @@ class TestInstallSystemPackages(unittest.TestCase):
 
 
 class TestRunOrchestratorBootstrap(unittest.TestCase):
+    @patch("infra_tools.confirm_unsupported_environment", return_value=False)
+    @patch("infra_tools.run_orchestrator_bootstrap")
+    def test_bootstrap_refuses_unsupported_host_without_confirmation(
+        self,
+        mock_bootstrap,
+        mock_confirm,
+    ):
+        with patch.object(sys, "argv", ["infra-tools", "bootstrap"]):
+            result = infra_tools.main()
+
+        self.assertEqual(result, 1)
+        mock_confirm.assert_called_once_with("local bootstrap")
+        mock_bootstrap.assert_not_called()
+
     def test_qemu_guest_agent_requires_system_package_installation(self):
         with patch("lib.orchestrator_bootstrap.resolve_bootstrap_user", return_value=("admin", "/home/admin")), \
              patch("lib.orchestrator_bootstrap.install_system_packages") as mock_install:

@@ -47,6 +47,10 @@ infra-tools proxmox ...
 ### Bootstrap and self-setup flags
 
 `bootstrap` and its `self-setup` alias prepare the local orchestration host.
+On an unsupported host, bootstrap asks for `[y/N]` confirmation before any
+local system-package operation. Use `--skip-system-packages` after manually
+installing the controller prerequisites when the host uses a non-APT package
+manager.
 When that host is a Proxmox VM, install and activate the guest agent with:
 
 ```bash

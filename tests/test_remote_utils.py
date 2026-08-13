@@ -22,6 +22,7 @@ from lib.remote_utils import (
     run,
     file_contains,
     detect_os,
+    confirm_unsupported_environment,
 )
 from lib.validators import validate_username
 
@@ -154,6 +155,38 @@ class TestDetectOS(unittest.TestCase):
     def test_rejects_other_distributions(self, _mock_read):
         with self.assertRaises(SystemExit):
             detect_os()
+
+
+class TestUnsupportedEnvironmentConfirmation(unittest.TestCase):
+    @patch("lib.remote_utils.read_os_release", return_value={"ID": "cachyos"})
+    def test_accepts_explicit_confirmation_for_unsupported_host(self, _mock_read):
+        self.assertTrue(
+            confirm_unsupported_environment(
+                "local bootstrap",
+                input_fn=lambda _prompt: "y",
+            )
+        )
+
+    @patch("lib.remote_utils.read_os_release", return_value={"ID": "cachyos"})
+    def test_defaults_to_refusing_unsupported_host(self, _mock_read):
+        self.assertFalse(
+            confirm_unsupported_environment(
+                "local maintenance",
+                input_fn=lambda _prompt: "n",
+            )
+        )
+
+    @patch("lib.remote_utils.read_os_release", return_value={"ID": "debian"})
+    def test_does_not_prompt_on_supported_host(self, _mock_read):
+        def fail_if_prompted(_prompt: str) -> str:
+            raise AssertionError("supported hosts should not prompt")
+
+        self.assertTrue(
+            confirm_unsupported_environment(
+                "local bootstrap",
+                input_fn=fail_if_prompted,
+            )
+        )
 
 
 class TestGeneratePassword(unittest.TestCase):

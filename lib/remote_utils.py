@@ -162,6 +162,50 @@ def read_os_release(path: str = "/etc/os-release") -> dict[str, str]:
     return values
 
 
+def get_os_id(path: str = "/etc/os-release") -> str:
+    """Return a normalized distribution ID, or an empty string if unknown."""
+
+    try:
+        release = read_os_release(path)
+    except OSError:
+        return ""
+    return release.get("ID", "").lower()
+
+
+def confirm_unsupported_environment(
+    operation: str,
+    *,
+    input_fn: Optional[Callable[[str], str]] = None,
+) -> bool:
+    """Ask before a local operation runs on an unsupported distribution."""
+
+    distro_id = get_os_id()
+    if distro_id in SUPPORTED_OS_IDS:
+        return True
+
+    display_id = distro_id or "unknown"
+    print(
+        f"Warning: {operation} is running on unsupported host distribution "
+        f"'{display_id}'."
+    )
+    print(
+        "Debian is officially supported; Ubuntu and Linux Mint are "
+        "best-effort. Other distributions may lack compatible package tools."
+    )
+    prompt = f"Continue with {operation} anyway? [y/N] "
+    try:
+        response = (input_fn or input)(prompt)
+    except (EOFError, KeyboardInterrupt):
+        print("\nCancelled.")
+        return False
+
+    if response.strip().lower() in {"y", "yes"}:
+        return True
+
+    print("Cancelled.")
+    return False
+
+
 def detect_os() -> str:
     try:
         release = read_os_release()

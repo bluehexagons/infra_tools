@@ -71,6 +71,7 @@ from lib.sysadmin_cli import add_sysadmin_subparsers, run_sysadmin_command
 from lib.python_setup import run_local_python_setup
 from lib.recall import run_recall_command
 from lib.reconstruct import run_reconstruct_command
+from lib.remote_utils import confirm_unsupported_environment
 from lib.setup_common import (
     REMOTE_SCRIPT_PATH,
     _apply_hosted_proxmox_defaults,
@@ -161,6 +162,12 @@ Examples:
 
 def _current_command_name() -> str:
     return LAUNCHER_NAME
+
+
+def _is_local_host(host: str) -> bool:
+    """Return whether a command targets this orchestration host."""
+
+    return host in {"localhost", "127.0.0.1", "::1"}
 
 
 def _managed_repository() -> str:
@@ -429,7 +436,7 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
     bootstrap_parser.add_argument(
         "--skip-system-packages",
         action="store_true",
-        help="Skip apt package installation and only configure infra-tools for the target user",
+        help="Skip local system-package installation and only configure infra-tools for the target user",
     )
     bootstrap_parser.add_argument(
         "--qemu-guest-agent",
@@ -1206,6 +1213,10 @@ def main() -> int:
         parser.print_help()
         return 0
     
+    if args.command in {"setup", "patch", "shares"} and _is_local_host(args.host):
+        if not confirm_unsupported_environment(f"{args.command} on the local host"):
+            return 1
+
     if args.command == "setup":
         return run_setup_command(args)
     elif args.command == "patch":
@@ -1246,6 +1257,8 @@ def main() -> int:
             script_path=getattr(args, "script_path", None) or sys.argv[0],
         )
     elif args.command in {"bootstrap", "self-setup"}:
+        if not args.skip_system_packages and not confirm_unsupported_environment("local bootstrap"):
+            return 1
         return run_orchestrator_bootstrap(
             script_path=sys.argv[0],
             shell=args.shell,
@@ -1263,6 +1276,8 @@ def main() -> int:
     elif args.command == "network":
         return run_network_command(args)
     elif args.command == "local":
+        if not confirm_unsupported_environment("local maintenance"):
+            return 1
         return run_local_command(args)
     elif args.command == "proxmox":
         return run_proxmox_command(args)

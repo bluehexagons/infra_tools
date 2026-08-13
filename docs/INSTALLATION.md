@@ -7,6 +7,32 @@ the same machine immediately.
 Debian is the only officially supported distribution. Ubuntu and Linux Mint are
 recognized as best-effort Debian-compatible hosts.
 
+## Unsupported orchestration hosts
+
+The installer can also install the remote-management launcher on another Linux
+distribution, such as CachyOS, but this remains outside the support guarantee.
+It asks for an explicit `[y/N]` confirmation, does not attempt to install APT
+packages, and requires these controller commands to already be available:
+
+- `python3`
+- `git`
+- `ssh`
+- `rsync`
+- `curl` or `wget`
+
+Install the equivalent packages with the host distribution's package manager
+before rerunning the installer. For example, on CachyOS, the equivalent setup
+is approximately:
+
+```bash
+sudo pacman -Syu --needed python git openssh rsync curl ca-certificates tar
+```
+
+The installer skips local system-package bootstrap on unsupported hosts. Do not
+use `--local-setup` or `--qemu-guest-agent` there; install the launcher and use
+remote-management commands such as `setup`, `patch`, `ssh`, `push`, and `pull`.
+Remote setup profiles and target-side package operations remain Debian-oriented.
+
 The installer needs either `wget` or `curl`. The examples below use wget,
 which is commonly present on minimal Debian systems. If only `curl` is
 installed, replace the download command with
