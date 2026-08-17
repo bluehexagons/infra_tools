@@ -121,8 +121,7 @@ def _resolve_network_interface(configured: MaybeStr) -> str:
 
 
 def _command_available(command: str) -> bool:
-    result = run(f"command -v {shlex.quote(command)}", check=False, capture_output=True)
-    return result.returncode == 0
+    return shutil.which(command) is not None
 
 
 def _service_active(service: str) -> bool:

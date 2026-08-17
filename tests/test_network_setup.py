@@ -239,6 +239,16 @@ class TestNetworkSetupValidation(unittest.TestCase):
 
 
 class TestNetworkConfigRendering(unittest.TestCase):
+    @patch("common.network_steps.shutil.which", return_value="/usr/bin/nmcli")
+    def test_command_available_uses_executable_lookup(self, mock_which: MagicMock):
+        self.assertTrue(network_steps._command_available("nmcli"))
+        mock_which.assert_called_once_with("nmcli")
+
+    @patch("common.network_steps.shutil.which", return_value=None)
+    def test_command_available_handles_missing_executable(self, mock_which: MagicMock):
+        self.assertFalse(network_steps._command_available("nmcli"))
+        mock_which.assert_called_once_with("nmcli")
+
     def test_networkd_dual_stack_render(self):
         rendered = network_steps._render_networkd_config(
             _config(
