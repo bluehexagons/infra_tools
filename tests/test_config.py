@@ -771,6 +771,7 @@ class TestSetupConfigHostedFields(unittest.TestCase):
             container_storage=[['root', 'auto', '10G'], ['template', 'local']],
             container_cores=4,
             container_base='ubuntu',
+            vm_image_storage='fast-files',
         )
         self.assertEqual(config.hosted_node, '10.0.0.1')
         self.assertEqual(config.hosted_user, 'admin')
@@ -780,6 +781,7 @@ class TestSetupConfigHostedFields(unittest.TestCase):
         self.assertEqual(config.container_storage, [['root', 'auto', '10G'], ['template', 'local']])
         self.assertEqual(config.container_cores, 4)
         self.assertEqual(config.container_base, 'ubuntu')
+        self.assertEqual(config.vm_image_storage, 'fast-files')
 
     def test_to_dict_includes_hosted_fields(self):
         config = self._make_config(
@@ -787,12 +789,14 @@ class TestSetupConfigHostedFields(unittest.TestCase):
             container_memory='2G',
             vm_balloon_min='1G',
             container_storage=[['root', 'auto', '10G'], ['template', 'local']],
+            vm_image_storage='fast-files',
         )
         d = config.to_dict()
         self.assertEqual(d['hosted_node'], '10.0.0.1')
         self.assertEqual(d['container_memory'], '2G')
         self.assertEqual(d['vm_balloon_min'], '1G')
         self.assertEqual(d['container_storage'], [['root', 'auto', '10G'], ['template', 'local']])
+        self.assertEqual(d['vm_image_storage'], 'fast-files')
 
     def test_from_dict_restores_hosted_fields(self):
         data = {
@@ -803,6 +807,7 @@ class TestSetupConfigHostedFields(unittest.TestCase):
             'container_storage': [['template', 'local'], ['root', 'auto', '5G']],
             'container_cores': 8,
             'container_base': 'fedora',
+            'vm_image_storage': 'fast-files',
         }
         config = SetupConfig.from_dict('target', 'server_web', data)
         self.assertEqual(config.hosted_node, '10.0.0.1')
@@ -811,6 +816,7 @@ class TestSetupConfigHostedFields(unittest.TestCase):
         self.assertEqual(config.container_storage, [['template', 'local'], ['root', 'auto', '5G']])
         self.assertEqual(config.container_cores, 8)
         self.assertEqual(config.container_base, 'fedora')
+        self.assertEqual(config.vm_image_storage, 'fast-files')
 
     def test_hosted_fields_not_in_remote_args(self):
         config = self._make_config(
@@ -836,6 +842,7 @@ class TestSetupConfigHostedFields(unittest.TestCase):
             container_storage=[['root', 'auto', '10G'], ['template', 'local']],
             container_cores=4,
             container_base='ubuntu',
+            vm_image_storage='fast-files',
             static_ipv4='10.0.0.50/24',
         )
         parts = config.to_setup_command()
@@ -848,6 +855,7 @@ class TestSetupConfigHostedFields(unittest.TestCase):
         self.assertIn('--balloon-min 1G', cmd)
         self.assertIn('--storage root auto 10G', cmd)
         self.assertIn('--storage template local', cmd)
+        self.assertIn('--image-storage fast-files', cmd)
         self.assertIn('--cores 4', cmd)
         self.assertIn('--base ubuntu', cmd)
         self.assertNotIn('--ip', cmd)

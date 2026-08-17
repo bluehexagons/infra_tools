@@ -256,7 +256,8 @@ class SetupConfig:
     container_storage: Optional[NestedStrList] = None  # [[type, pool, amount?], ...]
     container_cores: int = 1
     container_base: str = "debian"
-    vm_image: MaybeStr = None  # http(s) URL or 'storage:iso/file.qcow2'
+    vm_image: MaybeStr = None  # http(s) URL or 'storage:import/file.qcow2'
+    vm_image_storage: MaybeStr = None  # Storage for downloaded VM image sources
     include_desktop: bool = False
     include_cli_tools: bool = False
     include_control_plane_tools: bool = False
@@ -592,6 +593,10 @@ class SetupConfig:
                 cmd_parts.append(f"--base {shlex.quote(self.container_base)}")
             if self.vm_image:
                 cmd_parts.append(f"--image {shlex.quote(self.vm_image)}")
+            if self.vm_image_storage:
+                cmd_parts.append(
+                    f"--image-storage {shlex.quote(self.vm_image_storage)}"
+                )
         
         # Password is intentionally not included in the command line for security reasons.
         # If a password is required, it should be provided interactively or via a secure
@@ -1121,6 +1126,7 @@ class SetupConfig:
             container_cores=getattr(args, 'container_cores', 1),
             container_base=getattr(args, 'container_base', 'debian'),
             vm_image=getattr(args, 'vm_image', None),
+            vm_image_storage=getattr(args, 'vm_image_storage', None),
             include_desktop=include_desktop,
             include_cli_tools=include_cli_tools,
             include_control_plane_tools=include_control_plane_tools,

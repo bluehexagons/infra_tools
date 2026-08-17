@@ -8,7 +8,7 @@ target is an LXC container or a VM.
 The flow is:
 
 1. Resolve the cloud image (curated catalog, explicit URL, or pre-uploaded
-   ``storage:iso/...`` reference).
+   ``storage:import/...`` / ``storage:iso/...`` reference).
 2. Download the qcow2 onto the Proxmox node, verify SHA-512 when known.
 3. Allocate the next VMID, detect the bridge / gateway / nameservers (reused
    helpers from :mod:`lib.proxmox_node`).
@@ -24,6 +24,7 @@ The flow is:
 from __future__ import annotations
 
 import ipaddress
+import os
 import shlex
 import subprocess
 import time
@@ -188,9 +189,59 @@ def _resolve_image(
     )
 
 
+def _iso_staging_filename(filename: str) -> str:
+    """Return a Proxmox-compatible ISO-content name for a qcow2 source."""
+    stem, _suffix = os.path.splitext(filename)
+    return f"{stem}.img"
+
+
+def _resolve_image_storage(
+    pool_arg: Optional[str],
+    node_ip: str,
+    user: str,
+    ssh_opts: StrList,
+    *,
+    dry_run: bool,
+) -> tuple[str, str]:
+    """Choose storage and content type for a downloaded VM image.
+
+    Proxmox VE's file-based ``import`` content type is the native home for
+    qcow2 sources.  Older or more restricted nodes may only expose ``iso``;
+    in that case the source is staged with a valid ``.img`` volume name and
+    still imported by content detection from its qcow2 data.
+    """
+    requested_pool = pool_arg or "auto"
+    for content_type in ("import", "iso"):
+        try:
+            pool = _resolve_storage_pool(
+                requested_pool,
+                node_ip,
+                user,
+                ssh_opts,
+                content_type,
+                dry_run=dry_run,
+                strict_content=True,
+            )
+        except ProvisionError:
+            continue
+        print(f"  ✓ Image source storage: {pool} ({content_type})")
+        return pool, content_type
+
+    if requested_pool == "auto":
+        raise ProvisionError(
+            "No active Proxmox storage supports VM image import; enable the "
+            "'import' or 'iso' content type, or specify --image-storage STORAGE"
+        )
+    raise ProvisionError(
+        f"Storage pool '{requested_pool}' does not support 'import' or 'iso' "
+        "content; choose a file-based storage with --image-storage STORAGE"
+    )
+
+
 def _download_image_to_host(
     image: _ResolvedImage,
     storage_pool: str,
+    storage_content: str,
     node_ip: str,
     user: str,
     ssh_opts: StrList,
@@ -200,9 +251,23 @@ def _download_image_to_host(
     """Fetch ``image`` onto the Proxmox node; return the absolute remote path."""
     if not image.url or not image.filename:
         raise ProvisionError("Internal error: download requested without URL")
-    image_ref = f"{storage_pool}:iso/{image.filename}"
+    if storage_content not in {"import", "iso"}:
+        raise ProvisionError(
+            f"Unsupported VM image storage content type: {storage_content}"
+        )
+    staged_filename = (
+        image.filename
+        if storage_content == "import"
+        else _iso_staging_filename(image.filename)
+    )
+    image_ref = f"{storage_pool}:{storage_content}/{staged_filename}"
     if dry_run:
-        remote_path = f"/var/lib/vz/template/iso/{image.filename}"
+        remote_dir = (
+            "/var/lib/vz/import"
+            if storage_content == "import"
+            else "/var/lib/vz/template/iso"
+        )
+        remote_path = f"{remote_dir}/{staged_filename}"
     else:
         path_result = _ssh_run(
             node_ip,
@@ -486,7 +551,7 @@ def _create_vm(
         # Proxmox names the imported volume {pool}:vm-{vmid}-disk-0.
         disk_volume = f"{root_pool}:vm-{vmid}-disk-0"
     elif storage_ref:
-        # Caller has uploaded a qcow2 to e.g. local:iso/foo.qcow2; let qm
+        # Caller has uploaded a qcow2 to e.g. local:import/foo.qcow2; let qm
         # import-from copy it into the root pool during set.
         disk_volume = f"{root_pool}:0,import-from={storage_ref}"
     else:
@@ -573,7 +638,7 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
     Args:
         config: SetupConfig with hosted_node, container_memory, container_storage, etc.
         image: Optional override; either an http(s) URL or a Proxmox storage
-            reference like ``local:iso/foo.qcow2``.
+            reference like ``local:import/foo.qcow2``.
 
     Raises:
         VMAlreadyExists: if a VM with the target IP already exists on the node.
@@ -663,6 +728,11 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
             print(f"  Image (storage ref): {resolved.storage_ref}")
         else:
             print(f"  Image (URL): {resolved.url}")
+        if not resolved.storage_ref:
+            print(
+                "  Image source storage: "
+                f"{config.vm_image_storage or 'auto (import, then iso fallback)'}"
+            )
         return
 
     print(f"  Hostname: {hostname}")
@@ -711,20 +781,31 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
     )
 
     if resolved.url:
-        image_pool = _resolve_storage_pool(
-            "auto", node_ip, user, ssh_opts, "iso"
+        image_pool, image_content = _resolve_image_storage(
+            config.vm_image_storage,
+            node_ip,
+            user,
+            ssh_opts,
+            dry_run=dry_run,
         )
         image_remote_path = _download_image_to_host(
-            resolved, image_pool, node_ip, user, ssh_opts, dry_run=dry_run
+            resolved,
+            image_pool,
+            image_content,
+            node_ip,
+            user,
+            ssh_opts,
+            dry_run=dry_run,
         )
         storage_ref: Optional[str] = None
     else:
         image_remote_path = None
         storage_ref = resolved.storage_ref
         if storage_ref:
-            if not is_local_image_ref(storage_ref) or ":iso/" not in storage_ref:
+            if not is_local_image_ref(storage_ref):
                 raise ProvisionError(
-                    f"Invalid --image storage ref: {storage_ref}; expected STORAGE:iso/FILE"
+                    f"Invalid --image storage ref: {storage_ref}; expected "
+                    "STORAGE:import/FILE or STORAGE:iso/FILE"
                 )
 
     user_data = _render_user_data(

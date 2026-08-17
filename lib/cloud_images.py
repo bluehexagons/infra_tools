@@ -88,12 +88,12 @@ def list_cloud_images() -> list[tuple[str, CloudImage]]:
 
 
 def cloud_image_local_filename(image: CloudImage) -> str:
-    """Return the on-host filename used after download into the ISO storage."""
+    """Return the on-host filename used after download into image storage."""
     return image["filename"]
 
 
 def is_local_image_ref(ref: str) -> bool:
-    """True when ``ref`` is a Proxmox ISO storage reference."""
+    """True when ``ref`` is a Proxmox ISO or import storage reference."""
     if not ref:
         return False
     if ":" not in ref:
@@ -101,14 +101,18 @@ def is_local_image_ref(ref: str) -> bool:
     head, _, tail = ref.partition(":")
     if not head or not tail:
         return False
-    return tail.startswith("iso/") and len(tail) > len("iso/")
+    return any(
+        tail.startswith(prefix) and len(tail) > len(prefix)
+        for prefix in ("iso/", "import/")
+    )
 
 
 def parse_image_argument(value: Optional[str]) -> tuple[Optional[str], Optional[str]]:
     """Split ``--image`` into ``(url, storage_ref)``.
 
     Returns a ``(url, None)`` tuple when ``value`` is an http(s) URL, a
-    ``(None, storage_ref)`` tuple when it looks like ``storage:iso/foo.qcow2``,
+    ``(None, storage_ref)`` tuple when it looks like ``storage:import/foo.qcow2``
+    or ``storage:iso/foo.img``,
     or ``(None, None)`` when ``value`` is empty.
     """
     if not value:
@@ -117,9 +121,18 @@ def parse_image_argument(value: Optional[str]) -> tuple[Optional[str], Optional[
     if stripped.startswith("http://") or stripped.startswith("https://"):
         return stripped, None
     if is_local_image_ref(stripped):
+        _, _, volume = stripped.partition(":")
+        content_type, _, filename = volume.partition("/")
+        if content_type == "iso" and filename.lower().endswith((".qcow", ".qcow2")):
+            raise ValueError(
+                f"Invalid --image storage reference: {stripped!r}. "
+                "qcow2 images require the Proxmox 'import' content type; "
+                "use STORAGE:import/FILE or provide the image URL with "
+                "--image-storage STORAGE."
+            )
         return None, stripped
     raise ValueError(
         f"Invalid --image value: {value!r}. "
         "Expected an http(s) URL or a Proxmox storage reference like "
-        "'local:iso/foo.qcow2'."
+        "'local:import/foo.qcow2'."
     )

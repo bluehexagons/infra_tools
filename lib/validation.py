@@ -635,6 +635,7 @@ _ENVIRONMENT_VARIABLE_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _NETWORK_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 _NETWORK_PROVIDER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
 _NETWORK_INTERFACE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,14}$")
+_PROXMOX_STORAGE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _HOSTNAME_LABEL_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
 _GIT_SCP_URL_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+@[^:\s]+:.+$")
 _SAFE_REPO_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -656,6 +657,19 @@ def validate_memory_string(value: str, name: str = "memory") -> None:
     if not _MEMORY_PATTERN.match(value):
         raise ValueError(
             f"Invalid {name} value '{value}' (e.g. 2G, 512M, 1T)"
+        )
+
+
+def validate_proxmox_storage_name(
+    value: str,
+    name: str = "--image-storage",
+) -> None:
+    """Validate a Proxmox storage ID before it enters a remote command."""
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{name} must be a non-empty storage ID")
+    if not _PROXMOX_STORAGE_NAME_PATTERN.fullmatch(value):
+        raise ValueError(
+            f"Invalid {name} storage ID '{value}'; use letters, numbers, '.', '_' or '-'"
         )
 
 
@@ -996,9 +1010,12 @@ def validate_hosted_flags(config: Any) -> None:
         ValueError: If required flags are missing or invalid
     """
     balloon_min = getattr(config, "vm_balloon_min", None)
+    image_storage = getattr(config, "vm_image_storage", None)
     if not config.hosted_node:
         if balloon_min:
             raise ValueError("--balloon-min requires --provision-on")
+        if image_storage:
+            raise ValueError("--image-storage requires --provision-on")
         return
 
     from lib.validators import validate_host
@@ -1071,6 +1088,8 @@ def validate_hosted_flags(config: Any) -> None:
     machine_type = getattr(config, "machine_type", None)
     vm_image = getattr(config, "vm_image", None)
     if machine_type == "vm":
+        if image_storage:
+            validate_proxmox_storage_name(image_storage)
         if balloon_min:
             balloon_kib = _memory_string_kib(balloon_min, "--balloon-min")
             if balloon_kib > memory_kib:
@@ -1132,7 +1151,12 @@ def validate_hosted_flags(config: Any) -> None:
                     "--storage template is not used for VMs; use --image instead"
                 )
         if vm_image:
-            parse_image_argument(vm_image)
+            _image_url, image_storage_ref = parse_image_argument(vm_image)
+            if image_storage and image_storage_ref:
+                raise ValueError(
+                    "--image-storage applies to downloaded VM images; omit it "
+                    "when --image is already a Proxmox storage reference"
+                )
         else:
             base = getattr(config, "container_base", None) or "debian"
             resolve_cloud_image(base)
@@ -1141,6 +1165,8 @@ def validate_hosted_flags(config: Any) -> None:
             raise ValueError("--balloon-min requires --machine vm")
         if vm_image:
             raise ValueError("--image requires --machine vm")
+        if image_storage:
+            raise ValueError("--image-storage requires --machine vm")
 
 
 def validate_rdp_settings(config: Any) -> None:

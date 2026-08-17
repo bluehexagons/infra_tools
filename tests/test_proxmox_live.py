@@ -19,7 +19,7 @@ To run it manually::
     python3 -m unittest tests.test_proxmox_live
 
     # Optional for VM runs: use a pre-uploaded qcow2 or explicit URL
-    PROXMOX_TEST_IMAGE=local:iso/debian-13-genericcloud-amd64.qcow2
+    PROXMOX_TEST_IMAGE=local:import/debian-13-genericcloud-amd64.qcow2
 
     # LXC compatibility path
     INFRA_TOOLS_RUN_LIVE_PROXMOX=1 \

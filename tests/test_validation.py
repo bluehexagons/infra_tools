@@ -568,6 +568,8 @@ class _MockConfig:
         self.vm_balloon_min = kwargs.get('vm_balloon_min')
         self.container_storage = kwargs.get('container_storage')
         self.container_cores = kwargs.get('container_cores', 1)
+        self.vm_image = kwargs.get('vm_image')
+        self.vm_image_storage = kwargs.get('vm_image_storage')
 
 
 class TestValidateHostedFlags(unittest.TestCase):
@@ -638,6 +640,29 @@ class TestValidateHostedFlags(unittest.TestCase):
             with open(config.ssh_key + '.pub', 'w', encoding='utf-8') as pubkey:
                 pubkey.write('ssh-ed25519 AAAA test\n')
             with self.assertRaisesRegex(ValueError, r'readable SSH private key'):
+                validate_hosted_flags(config)
+
+    def test_image_storage_requires_hosted_provisioning(self):
+        config = _MockConfig(hosted_node=None, vm_image_storage='local')
+        with self.assertRaisesRegex(ValueError, r'requires --provision-on'):
+            validate_hosted_flags(config)
+
+    def test_image_storage_cannot_override_image_storage_reference(self):
+        config = _MockConfig(
+            machine_type='vm',
+            hosted_node='10.0.0.1',
+            container_memory='2G',
+            container_storage=[['root', 'auto', '10G']],
+            vm_image='local:import/debian.qcow2',
+            vm_image_storage='local',
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            config.ssh_key = os.path.join(tmp, 'id_test')
+            with open(config.ssh_key, 'w', encoding='utf-8') as private_key:
+                private_key.write('private')
+            with open(config.ssh_key + '.pub', 'w', encoding='utf-8') as pubkey:
+                pubkey.write('ssh-ed25519 AAAA test\n')
+            with self.assertRaisesRegex(ValueError, r'applies to downloaded'):
                 validate_hosted_flags(config)
 
     def test_missing_memory(self):

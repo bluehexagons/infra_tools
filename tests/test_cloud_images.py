@@ -50,9 +50,17 @@ class TestParseImageArgument(unittest.TestCase):
 
     def test_storage_ref(self):
         self.assertEqual(
-            parse_image_argument("local:iso/foo.qcow2"),
-            (None, "local:iso/foo.qcow2"),
+            parse_image_argument("local:iso/foo.img"),
+            (None, "local:iso/foo.img"),
         )
+        self.assertEqual(
+            parse_image_argument("local:import/foo.qcow2"),
+            (None, "local:import/foo.qcow2"),
+        )
+
+    def test_qcow2_iso_ref_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, r"import.*content type"):
+            parse_image_argument("local:iso/foo.qcow2")
 
     def test_empty(self):
         self.assertEqual(parse_image_argument(""), (None, None))
@@ -67,8 +75,9 @@ class TestParseImageArgument(unittest.TestCase):
 
 class TestIsLocalImageRef(unittest.TestCase):
     def test_valid(self):
-        self.assertTrue(is_local_image_ref("local:iso/foo.qcow2"))
-        self.assertTrue(is_local_image_ref("nfs-store:iso/x/y.qcow2"))
+        self.assertTrue(is_local_image_ref("local:iso/foo.img"))
+        self.assertTrue(is_local_image_ref("nfs-store:iso/x/y.img"))
+        self.assertTrue(is_local_image_ref("local:import/foo.qcow2"))
 
     def test_invalid(self):
         self.assertFalse(is_local_image_ref(""))

@@ -83,6 +83,8 @@ def _storage_pool_supports_content(
     user: str,
     ssh_opts: StrList,
     dry_run: bool = False,
+    *,
+    strict: bool = False,
 ) -> bool:
     result = _ssh_run(
         node_ip, user, ssh_opts,
@@ -94,6 +96,8 @@ def _storage_pool_supports_content(
         return True
 
     if result.returncode != 0:
+        if strict:
+            return False
         fallback_result = _ssh_run(
             node_ip, user, ssh_opts,
             "pvesm status",
@@ -479,12 +483,20 @@ def _resolve_storage_pool(
     ssh_opts: StrList,
     content_filter: str,
     dry_run: bool = False,
+    *,
+    strict_content: bool = False,
 ) -> str:
     """Resolve a storage pool name."""
     if pool_arg != "auto":
         print(f"  ✓ Using storage pool: {pool_arg}")
         if not _storage_pool_supports_content(
-            pool_arg, content_filter, node_ip, user, ssh_opts, dry_run=dry_run
+            pool_arg,
+            content_filter,
+            node_ip,
+            user,
+            ssh_opts,
+            dry_run=dry_run,
+            strict=strict_content,
         ):
             raise ProvisionError(
                 f"Storage pool '{pool_arg}' does not support content type '{content_filter}'"
@@ -499,7 +511,11 @@ def _resolve_storage_pool(
 
     if dry_run:
         print("  [DRY-RUN] Would resolve storage pool")
-        return "local" if content_filter in {"iso", "snippets"} else "local-lvm"
+        return (
+            "local"
+            if content_filter in {"import", "iso", "snippets"}
+            else "local-lvm"
+        )
 
     if result.returncode != 0:
         raise ProvisionError(

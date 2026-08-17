@@ -56,8 +56,10 @@ optional: infra_tools first uses a matching key associated with the registered
 Proxmox host, then the local `~/.ssh/id_ed25519`, `id_ecdsa`, or `id_rsa` key.
 If the Proxmox node key and guest key differ, pass `--provision-key` for the
 node and `--key` for the guest. VM image downloads and cloud-init snippets are
-placed through Proxmox storage APIs, so the selected node must have active
-`iso` and `snippets` storage content types.
+placed through Proxmox storage APIs. By default, image staging prefers an
+active file-based storage with `import` content and falls back to `iso` content;
+use `--image-storage STORAGE` to choose the source storage explicitly. The
+selected node must also have active `snippets` content for cloud-init data.
 
 ## Host-safety defaults
 
@@ -101,7 +103,7 @@ Create a Debian VM with XFCE, RDP, Firefox, and coding tools:
 ```bash
 infra-tools setup workstation_dev 10.0.0.50 agent \
   --provision-on pve1 --base debian --name agent-dev-01 \
-  --cores 4 --memory 8G --storage root 40G \
+  --cores 4 --memory 8G --storage root 40G --image-storage local \
   --desktop xfce --rdp --browser firefox \
   --password "$RDP_PASSWORD" \
   --agent-suite terminal --copy-config \

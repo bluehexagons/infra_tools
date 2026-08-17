@@ -747,7 +747,7 @@ class TestHostedProvisioningDispatch(unittest.TestCase):
             hosted_node="10.0.0.1",
             container_memory="2G",
             container_storage=[["root", "local-lvm", "10G"]],
-            vm_image="local:iso/debian-12-generic-amd64.qcow2",
+            vm_image="local:import/debian-12-generic-amd64.qcow2",
         )
 
         with patch.object(setup_common, "create_argument_parser", return_value=parser), \
@@ -863,7 +863,7 @@ class TestHostedProvisioningDispatch(unittest.TestCase):
                 hosted_key=None,
                 container_memory="2G",
                 container_storage=[["root", "10G"]],
-                vm_image="local:iso/debian-12-generic-amd64.qcow2",
+                vm_image="local:import/debian-12-generic-amd64.qcow2",
             )
 
             with patch.object(setup_common, "create_argument_parser", return_value=parser), \

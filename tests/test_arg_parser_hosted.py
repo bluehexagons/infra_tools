@@ -92,6 +92,12 @@ class TestHostedFlagParsing(unittest.TestCase):
         ])
         self.assertEqual(args.container_base, "ubuntu")
 
+    def test_image_storage_flag(self):
+        args = self.parser.parse_args([
+            "10.0.0.50", "--image-storage", "fast-files"
+        ])
+        self.assertEqual(args.vm_image_storage, "fast-files")
+
     def test_full_hosted_command(self):
         args = self.parser.parse_args([
             "10.0.0.50", "--provision-on", "10.0.0.1",

@@ -138,7 +138,10 @@ By default, the curated Debian cloud-image catalog
 ... --image https://cloud.debian.org/.../debian-13-genericcloud-amd64.qcow2
 
 # Pre-uploaded image on the Proxmox node
-... --image local:iso/my-debian.qcow2
+... --image local:import/my-debian.qcow2
+
+# Downloaded image staged on a specific Proxmox storage
+... --image-storage local
 ```
 
 Refresh the catalog with `python3 scripts/update_cloud_images.py`. Add

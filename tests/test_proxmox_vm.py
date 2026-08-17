@@ -10,14 +10,132 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.proxmox_vm import (
+    _ResolvedImage,
     ProvisionError,
     _create_vm,
+    _download_image_to_host,
+    _resolve_image_storage,
+    _iso_staging_filename,
     _needs_graphical_console,
     _parse_disk_size_gib,
     _parse_memory_mb,
     _render_user_data,
     check_vm_exists,
 )
+
+
+class TestImageStorage(unittest.TestCase):
+    def test_iso_staging_uses_img_suffix(self):
+        self.assertEqual(
+            _iso_staging_filename("debian-13-genericcloud.qcow2"),
+            "debian-13-genericcloud.img",
+        )
+
+    @patch("lib.proxmox_vm._resolve_storage_pool")
+    def test_image_storage_prefers_import_content(self, mock_resolve):
+        mock_resolve.return_value = "fast-files"
+
+        result = _resolve_image_storage(
+            "fast-files", "10.0.0.10", "root", [], dry_run=False
+        )
+
+        self.assertEqual(result, ("fast-files", "import"))
+        mock_resolve.assert_called_once_with(
+            "fast-files",
+            "10.0.0.10",
+            "root",
+            [],
+            "import",
+            dry_run=False,
+            strict_content=True,
+        )
+
+    @patch("lib.proxmox_vm._resolve_storage_pool")
+    def test_image_storage_falls_back_to_iso_content(self, mock_resolve):
+        mock_resolve.side_effect = [
+            ProvisionError("import unavailable"),
+            "local",
+        ]
+
+        result = _resolve_image_storage(
+            "local", "10.0.0.10", "root", [], dry_run=False
+        )
+
+        self.assertEqual(result, ("local", "iso"))
+
+    def test_download_dry_run_uses_import_volume_name(self):
+        image = _ResolvedImage(
+            url="https://example.com/debian.qcow2",
+            sha512=None,
+            filename="debian.qcow2",
+            storage_ref=None,
+        )
+
+        path = _download_image_to_host(
+            image,
+            "local",
+            "import",
+            "10.0.0.10",
+            "root",
+            [],
+            dry_run=True,
+        )
+
+        self.assertEqual(path, "/var/lib/vz/import/debian.qcow2")
+
+    def test_download_dry_run_uses_iso_compatible_img_name(self):
+        image = _ResolvedImage(
+            url="https://example.com/debian.qcow2",
+            sha512=None,
+            filename="debian.qcow2",
+            storage_ref=None,
+        )
+
+        path = _download_image_to_host(
+            image,
+            "local",
+            "iso",
+            "10.0.0.10",
+            "root",
+            [],
+            dry_run=True,
+        )
+
+        self.assertEqual(path, "/var/lib/vz/template/iso/debian.img")
+
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_download_resolves_iso_with_compatible_volume_name(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(
+                returncode=0,
+                stdout="/var/lib/vz/template/iso/debian.img\n",
+                stderr="",
+            ),
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout="", stderr=""),
+        ]
+        image = _ResolvedImage(
+            url="https://example.com/debian.qcow2",
+            sha512=None,
+            filename="debian.qcow2",
+            storage_ref=None,
+        )
+
+        path = _download_image_to_host(
+            image,
+            "local",
+            "iso",
+            "10.0.0.10",
+            "root",
+            [],
+            dry_run=False,
+        )
+
+        self.assertEqual(path, "/var/lib/vz/template/iso/debian.img")
+        self.assertIn(
+            "pvesm path local:iso/debian.img",
+            mock_run.call_args_list[0].args[3],
+        )
 
 
 class TestParseMemory(unittest.TestCase):
@@ -114,7 +232,7 @@ class TestVMHardwareProfile(unittest.TestCase):
         _create_vm(
             vmid=101,
             target_ip="10.0.0.50",
-            image_remote_path="/var/lib/vz/template/iso/debian.qcow2",
+            image_remote_path="/var/lib/vz/import/debian.qcow2",
             storage_ref=None,
             memory_mb=8192,
             balloon_min_mb=4096,
@@ -149,7 +267,7 @@ class TestVMHardwareProfile(unittest.TestCase):
         self.assertIn("--memory 8192 --balloon 4096", commands[0])
         self.assertEqual(
             commands[1],
-            "qm disk import 101 /var/lib/vz/template/iso/debian.qcow2 local-lvm",
+            "qm disk import 101 /var/lib/vz/import/debian.qcow2 local-lvm",
         )
         self.assertIn("ip6=2001:db8::50/64", commands[0])
         self.assertIn("gw6=2001:db8::1", commands[0])
@@ -167,7 +285,7 @@ class TestVMHardwareProfile(unittest.TestCase):
             _create_vm(
                 vmid=101,
                 target_ip="10.0.0.50",
-                image_remote_path="/var/lib/vz/template/iso/debian.qcow2",
+                image_remote_path="/var/lib/vz/import/debian.qcow2",
                 storage_ref=None,
                 memory_mb=2048,
                 balloon_min_mb=2048,
@@ -206,7 +324,7 @@ class TestVMHardwareProfile(unittest.TestCase):
             _create_vm(
                 vmid=101,
                 target_ip="10.0.0.50",
-                image_remote_path="/var/lib/vz/template/iso/debian.qcow2",
+                image_remote_path="/var/lib/vz/import/debian.qcow2",
                 storage_ref=None,
                 memory_mb=2048,
                 balloon_min_mb=2048,

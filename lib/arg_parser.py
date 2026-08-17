@@ -213,9 +213,19 @@ def add_setup_arguments(
             metavar="SOURCE",
             help=(
                 "VM cloud image override: http(s) URL to a qcow2, or a Proxmox "
-                "storage reference like 'local:iso/foo.qcow2'. Used by VM "
+                "storage reference like 'local:import/foo.qcow2'. Used by VM "
                 "provisioning. Defaults to the curated Debian catalog "
                 "(lib/cloud_images.py)."
+            ),
+        )
+        parser.add_argument(
+            "--image-storage",
+            dest="vm_image_storage",
+            default=None,
+            metavar="STORAGE",
+            help=(
+                "Storage for downloaded VM images; prefers the 'import' content "
+                "type and falls back to 'iso' (default: auto-detect)"
             ),
         )
     else:
