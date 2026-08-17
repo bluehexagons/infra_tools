@@ -180,6 +180,7 @@ class SetupConfig:
     network_gateway6: MaybeStr = None
     network_dns: Optional[StrList] = None
     network_interface: MaybeStr = None
+    activate_network: bool = False
     friendly_name: MaybeStr = None
     tags: Optional[StrList] = None
     enable_rdp: bool = False
@@ -339,6 +340,9 @@ class SetupConfig:
 
         if self.network_interface:
             args.append(f"--network-interface {shlex.quote(self.network_interface)}")
+
+        if self.activate_network:
+            args.append("--activate-network")
         
         if self.friendly_name:
             args.append(f"--name {shlex.quote(self.friendly_name)}")
@@ -581,6 +585,9 @@ class SetupConfig:
 
         if self.network_interface:
             cmd_parts.append(f"--network-interface {shlex.quote(self.network_interface)}")
+
+        if self.activate_network:
+            cmd_parts.append("--activate-network")
         
         # Machine type (if not the current setup default for this flow)
         default_machine_type = _default_machine_type_for_setup(
@@ -991,6 +998,7 @@ class SetupConfig:
             network_gateway6=getattr(args, 'network_gateway6', None),
             network_dns=getattr(args, 'network_dns', None),
             network_interface=getattr(args, 'network_interface', None),
+            activate_network=getattr(args, 'activate_network', False),
             friendly_name=getattr(args, 'friendly_name', None),
             tags=tags,
             enable_rdp=enable_rdp,

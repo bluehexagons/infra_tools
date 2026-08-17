@@ -23,6 +23,7 @@ except ImportError:
 from lib.atomic_io import write_json_atomic
 from lib.config import DEFAULT_MACHINE_TYPE, SetupConfig, _normalize_container_storage
 from lib.credentials import prepare_runtime_config, store_cli_credentials
+from lib.network_transition import finish_network_transition
 from lib.proxmox_hosts import ProxmoxHost, find_proxmox_host, sync_proxmox_host
 from lib.validators import validate_host, validate_username
 from lib.validation import (
@@ -46,7 +47,7 @@ from lib.validation import (
     validate_workspace_dir,
 )
 from lib.system_utils import get_current_username
-from lib.cache import save_setup_command
+from lib.cache import get_cache_path_for_host, save_setup_command
 from lib.arg_parser import create_setup_argument_parser
 from lib.display import print_setup_summary
 from lib.notifications import validate_notification_args
@@ -638,6 +639,41 @@ def register_proxmox_setup_host(
     print(f"Registered Proxmox host '{registered.name}' ({registered.address}).")
 
 
+def adopt_verified_network_host(
+    config: SetupConfig,
+    runtime_config: SetupConfig,
+    previous_host: str,
+) -> Optional[str]:
+    """Move saved setup identity to the controller-verified network address."""
+
+    if runtime_config.activate_network and not runtime_config.dry_run:
+        config.activate_network = False
+    if runtime_config.host == previous_host:
+        return None
+    config.host = runtime_config.host
+    return previous_host
+
+
+def remove_replaced_setup_cache(previous_host: Optional[str], current_host: str) -> None:
+    """Remove the obsolete cache key after the replacement host was saved."""
+
+    if not previous_host:
+        return
+    previous_path = get_cache_path_for_host(previous_host)
+    current_path = get_cache_path_for_host(current_host)
+    if previous_path == current_path:
+        return
+    try:
+        os.unlink(previous_path)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        print(
+            f"Warning: new host configuration was saved, but the old cache "
+            f"could not be removed: {exc}"
+        )
+
+
 def run_remote_setup(config: SetupConfig) -> int:
     is_local = config.host in {"localhost", "127.0.0.1", "::1"}
     
@@ -682,6 +718,8 @@ def run_remote_setup(config: SetupConfig) -> int:
             else:
                 print(f"  Upload files to {config.host}:{REMOTE_INSTALL_DIR}")
                 print(f"  Run: {shlex.join(command_tokens)}")
+            if config.activate_network:
+                print("  Verify SSH on every requested address, then persist the network change")
             print("=" * 60)
             return 0
 
@@ -714,10 +752,10 @@ def run_remote_setup(config: SetupConfig) -> int:
                     for line in process.stdout:
                         print(line, end='', flush=True)
                     
-                return process.wait()
+                return finish_network_transition(config, process.wait())
             except Exception as e:
                 print(f"Error running local setup: {e}")
-                return 1
+                return finish_network_transition(config, 1)
         else:
             tar_data = create_tar_from_dir(build_dir)
             
@@ -765,10 +803,10 @@ def run_remote_setup(config: SetupConfig) -> int:
                     for line in io.TextIOWrapper(process.stdout, encoding='utf-8'):
                         print(line, end='', flush=True)
 
-                return process.wait()
+                return finish_network_transition(config, process.wait())
             except Exception as e:
                 print(f"Error running remote setup: {e}")
-                return 1
+                return finish_network_transition(config, 1)
 
     finally:
         if os.path.exists(build_dir):
@@ -855,15 +893,26 @@ def setup_main(system_type: str, description: str, success_msg_fn: Callable[[Set
         store_cli_credentials(config)
         save_setup_command(config, operation="setup")
     
+    previous_host = config.host
+    replaced_cache_host: Optional[str] = None
     start_time = time.time()
     returncode = 1
     try:
         returncode = run_remote_setup(runtime_config)
+        if returncode == 0:
+            replaced_cache_host = adopt_verified_network_host(
+                config,
+                runtime_config,
+                previous_host,
+            )
     finally:
         end_time = time.time()
         success = (returncode == 0)
         if not config.dry_run:
             save_setup_command(config, start_time, end_time, success, operation="setup")
+
+    if replaced_cache_host:
+        remove_replaced_setup_cache(replaced_cache_host, config.host)
     
     if returncode != 0:
         print(f"\n✗ Setup failed (exit code: {returncode})")

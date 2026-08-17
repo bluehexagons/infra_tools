@@ -841,6 +841,7 @@ def validate_network_setup_settings(config: Any) -> None:
     gateway6_value = getattr(config, "network_gateway6", None)
     dns_values = getattr(config, "network_dns", None) or []
     interface_name = getattr(config, "network_interface", None)
+    activate_network = bool(getattr(config, "activate_network", False))
 
     if hostname:
         validate_system_hostname(hostname)
@@ -856,6 +857,9 @@ def validate_network_setup_settings(config: Any) -> None:
 
     ipv4_interface = _validate_static_interface(ipv4_value, 4, "--ip") if ipv4_value else None
     ipv6_interface = _validate_static_interface(ipv6_value, 6, "--ipv6") if ipv6_value else None
+
+    if activate_network and not (ipv4_interface or ipv6_interface):
+        raise ValueError("--activate-network requires --ip or --ipv6")
 
     if gateway4_value:
         if not ipv4_interface:
@@ -911,9 +915,12 @@ def validate_network_setup_settings(config: Any) -> None:
             )
         configured = ipv4_interface if setup_host.version == 4 else ipv6_interface
         if configured is None or configured.ip != setup_host:
+            if activate_network:
+                return
             raise ValueError(
                 "For hosted provisioning, the literal setup host must match the address "
-                "provided by --ip or --ipv6"
+                "provided by --ip or --ipv6 unless --activate-network is used for an "
+                "existing guest"
             )
 
 

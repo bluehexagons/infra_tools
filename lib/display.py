@@ -63,6 +63,8 @@ def print_setup_summary(config: SetupConfig, description: Optional[str] = None) 
         print(f"DNS servers: {', '.join(config.network_dns)}")
     if config.network_interface:
         print(f"Network interface: {config.network_interface}")
+    if config.activate_network:
+        print("Network activation: SSH-verified live handoff enabled")
     
     if config.enable_rdp:
         print("RDP: Yes")

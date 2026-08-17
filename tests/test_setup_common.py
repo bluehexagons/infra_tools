@@ -268,6 +268,52 @@ class TestRunRemoteSetupArgumentSecurity(unittest.TestCase):
             remote_command.index("chmod 0755 /opt/infra_tools"),
         )
 
+    def test_remote_setup_finishes_verified_network_transition_after_ssh_exits(self):
+        from lib import setup_common
+
+        config = _make_config(
+            host="192.168.10.20",
+            static_ipv4="192.168.10.21/24",
+            activate_network=True,
+        )
+        process = MagicMock()
+        process.stdin = io.BytesIO()
+        process.stdout = io.BytesIO(b"")
+        process.wait.return_value = 0
+
+        with patch.object(setup_common, "copy_project_files"), \
+             patch.object(setup_common, "build_ssh_command", return_value=["ssh"]), \
+             patch.object(setup_common, "finish_network_transition", return_value=0) as mock_finish, \
+             patch("subprocess.Popen", return_value=process):
+            result = setup_common.run_remote_setup(config)
+
+        self.assertEqual(result, 0)
+        mock_finish.assert_called_once_with(config, 0)
+
+    def test_adopts_only_a_controller_verified_replacement_host(self):
+        from lib import setup_common
+
+        saved_config = _make_config(
+            host="192.168.10.20",
+            static_ipv4="192.168.10.21/24",
+            activate_network=True,
+        )
+        runtime_config = _make_config(
+            host="192.168.10.21",
+            static_ipv4="192.168.10.21/24",
+            activate_network=True,
+        )
+
+        previous = setup_common.adopt_verified_network_host(
+            saved_config,
+            runtime_config,
+            "192.168.10.20",
+        )
+
+        self.assertEqual(previous, "192.168.10.20")
+        self.assertEqual(saved_config.host, "192.168.10.21")
+        self.assertFalse(saved_config.activate_network)
+
     def test_local_install_dir_is_traversable_after_copy(self):
         from lib import setup_common
 

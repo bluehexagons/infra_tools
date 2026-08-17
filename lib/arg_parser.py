@@ -116,6 +116,14 @@ def add_setup_arguments(
         metavar="INTERFACE",
         help="Interface to configure (default: interface carrying the default route)",
     )
+    parser.add_argument(
+        "--activate-network",
+        action="store_true",
+        help=(
+            "Safely activate requested addresses during setup, verify SSH on each "
+            "new address, and persist only after verification"
+        ),
+    )
     parser.add_argument("--machine", dest="machine_type",
                        choices=MACHINE_TYPES,
                        default=None,

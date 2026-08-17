@@ -75,7 +75,9 @@ from lib.remote_utils import confirm_unsupported_environment
 from lib.setup_common import (
     REMOTE_SCRIPT_PATH,
     _apply_hosted_proxmox_defaults,
+    adopt_verified_network_host,
     register_proxmox_setup_host,
+    remove_replaced_setup_cache,
     run_remote_setup,
 )
 from lib.system_utils import get_current_username
@@ -827,17 +829,28 @@ def _execute_patch_config(config: SetupConfig) -> int:
         print(f"Error: {exc}")
         return 1
 
+    previous_host = config.host
+    replaced_cache_host: Optional[str] = None
     start_time = time.time()
     returncode = 1
     try:
         if not config.dry_run:
             store_cli_credentials(config)
         returncode = run_remote_setup(runtime_config)
+        if returncode == 0:
+            replaced_cache_host = adopt_verified_network_host(
+                config,
+                runtime_config,
+                previous_host,
+            )
     finally:
         end_time = time.time()
         success = returncode == 0
         if not config.dry_run:
             save_setup_command(config, start_time, end_time, success, operation="patch")
+
+    if replaced_cache_host:
+        remove_replaced_setup_cache(replaced_cache_host, config.host)
 
     if returncode != 0:
         print(f"\n✗ Patch failed (exit code: {returncode})")
@@ -1049,15 +1062,26 @@ def run_setup_command(args: argparse.Namespace) -> int:
         print(f"Error: Remote setup script not found: {REMOTE_SCRIPT_PATH}")
         return 1
     
+    previous_host = config.host
+    replaced_cache_host: Optional[str] = None
     start_time = time.time()
     returncode = 1
     try:
         returncode = run_remote_setup(runtime_config)
+        if returncode == 0:
+            replaced_cache_host = adopt_verified_network_host(
+                config,
+                runtime_config,
+                previous_host,
+            )
     finally:
         end_time = time.time()
         success = (returncode == 0)
         if not config.dry_run:
             save_setup_command(config, start_time, end_time, success, operation="setup")
+
+    if replaced_cache_host:
+        remove_replaced_setup_cache(replaced_cache_host, config.host)
     
     if returncode != 0:
         print(f"\n✗ Setup failed (exit code: {returncode})")

@@ -62,6 +62,24 @@ class TestNetworkSetupCLI(unittest.TestCase):
         self.assertIn("--ip 192.168.10.20/24", config.to_setup_command())
         self.assertEqual(config.to_dict()["network_interface"], "enp1s0")
 
+    def test_parses_and_serializes_live_network_activation(self):
+        parser, _setup_parser, _patch_parser = create_infra_tools_parser()
+        args = parser.parse_args(
+            [
+                "patch",
+                "192.168.10.20",
+                "admin",
+                "--ip",
+                "192.168.10.21/24",
+                "--activate-network",
+            ]
+        )
+        config = SetupConfig.from_args(args, "server_lite")
+
+        self.assertTrue(config.activate_network)
+        self.assertIn("--activate-network", config.to_remote_args())
+        self.assertIn("--activate-network", config.to_setup_command())
+
 
 class TestNetworkSetupValidation(unittest.TestCase):
     def test_accepts_dual_stack_settings(self):
@@ -111,6 +129,19 @@ class TestNetworkSetupValidation(unittest.TestCase):
                     static_ipv4="192.168.10.21/24",
                 )
             )
+
+    def test_live_activation_allows_existing_hosted_guest_address_change(self):
+        validate_network_setup_settings(
+            _config(
+                hosted_node="192.168.10.2",
+                static_ipv4="192.168.10.21/24",
+                activate_network=True,
+            )
+        )
+
+    def test_live_activation_requires_an_address(self):
+        with self.assertRaisesRegex(ValueError, "requires --ip or --ipv6"):
+            validate_network_setup_settings(_config(activate_network=True))
 
 
 class TestNetworkConfigRendering(unittest.TestCase):
@@ -207,6 +238,104 @@ class TestHostnameStep(unittest.TestCase):
         network_steps.configure_system_hostname(_config(system_hostname="app-01"))
         mock_run.assert_called_once_with("hostnamectl set-hostname app-01")
         mock_write.assert_called_once()
+
+
+class TestLiveNetworkTransition(unittest.TestCase):
+    @patch("common.network_steps.run")
+    @patch("common.network_steps._select_policy_table", return_value=20000)
+    @patch("common.network_steps._active_interface_addresses")
+    def test_prepare_adds_new_address_without_removing_current_address(
+        self,
+        mock_active: MagicMock,
+        _mock_table: MagicMock,
+        mock_run: MagicMock,
+    ):
+        mock_active.return_value = {"192.168.10.20"}
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pending_path = os.path.join(temp_dir, "transition.json")
+            with patch.object(network_steps, "NETWORK_TRANSITION_PATH", pending_path):
+                network_steps._prepare_live_network_transition(
+                    _config(
+                        static_ipv4="192.168.10.21/24",
+                        network_gateway4="192.168.10.1",
+                        activate_network=True,
+                    ),
+                    "eth0",
+                    "networkd",
+                )
+
+            self.assertTrue(os.path.exists(pending_path))
+
+        commands = [call.args[0] for call in mock_run.call_args_list]
+        self.assertIn("ip -4 address add 192.168.10.21/24 dev eth0", commands)
+        self.assertTrue(any("route replace table 20000 default" in command for command in commands))
+        self.assertFalse(any("address del" in command for command in commands))
+
+    @patch("common.network_steps._persist_static_network")
+    def test_commit_persists_only_after_pending_transition_is_loaded(self, mock_persist):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pending_path = os.path.join(temp_dir, "transition.json")
+            network_steps.write_json_atomic(
+                pending_path,
+                {
+                    "version": 1,
+                    "backend": "networkd",
+                    "interface": "eth0",
+                    "static_ipv4": "192.168.10.21/24",
+                    "static_ipv6": None,
+                    "gateway4": "192.168.10.1",
+                    "gateway6": None,
+                    "dns": ["1.1.1.1"],
+                    "added_addresses": ["192.168.10.21/24"],
+                    "policy_tables": {"4": 20000},
+                },
+            )
+            with patch.object(network_steps, "NETWORK_TRANSITION_PATH", pending_path), \
+                 patch.object(network_steps, "_reject_managed_bridge"):
+                network_steps.commit_network_transition()
+
+            self.assertFalse(os.path.exists(pending_path))
+            mock_persist.assert_called_once()
+            persisted_config, interface, backend = mock_persist.call_args.args
+            self.assertEqual(persisted_config.static_ipv4, "192.168.10.21/24")
+            self.assertEqual((interface, backend), ("eth0", "networkd"))
+
+    @patch("common.network_steps.run")
+    def test_abort_removes_only_temporary_transition_state(self, mock_run):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pending_path = os.path.join(temp_dir, "transition.json")
+            network_steps.write_json_atomic(
+                pending_path,
+                {
+                    "version": 1,
+                    "backend": "networkd",
+                    "interface": "eth0",
+                    "static_ipv4": "192.168.10.21/24",
+                    "static_ipv6": None,
+                    "gateway4": "192.168.10.1",
+                    "gateway6": None,
+                    "dns": [],
+                    "added_addresses": ["192.168.10.21/24"],
+                    "policy_tables": {"4": 20000},
+                },
+            )
+            with patch.object(network_steps, "NETWORK_TRANSITION_PATH", pending_path):
+                network_steps.abort_network_transition()
+
+            self.assertFalse(os.path.exists(pending_path))
+
+        commands = [call.args[0] for call in mock_run.call_args_list]
+        self.assertIn(
+            "ip -4 rule del priority 20000 from 192.168.10.21/32 table 20000",
+            commands,
+        )
+        self.assertIn("ip -4 route flush table 20000", commands)
+        self.assertIn("ip -4 address del 192.168.10.21/24 dev eth0", commands)
+
+    @patch("common.network_steps.os.path.isdir", return_value=True)
+    def test_rejects_generic_changes_to_proxmox_style_bridge(self, _mock_isdir):
+        with self.assertRaisesRegex(RuntimeError, "topology-aware"):
+            network_steps._reject_managed_bridge("vmbr0")
 
 
 if __name__ == "__main__":

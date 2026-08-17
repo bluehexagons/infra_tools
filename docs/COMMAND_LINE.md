@@ -97,6 +97,7 @@ tools, not for an LXC container.
 | `--gateway6 IP` | IPv6 default gateway; requires `--ipv6` |
 | `--dns IP` | DNS server; repeatable and accepts IPv4 or IPv6 addresses |
 | `--network-interface NAME` | Interface to configure; defaults to the interface carrying the default route |
+| `--activate-network` | Safely make requested addresses live, verify SSH on each address, then persist the configuration |
 | `--workspace PATH` | Workspace root for config, credentials, known_hosts, and history |
 | `--machine TYPE` | Machine type override; defaults to `auto` on the target |
 | `--control-plane` | Add the common administrator/Linux tool bundle to any profile |
@@ -132,14 +133,21 @@ tools, not for an LXC container.
 | `--flatpak-install PACKAGE` | Install a package via Flatpak |
 | `--dark` | Configure dark theme |
 
-Static address configuration is validated before any remote work begins. It
-supports NetworkManager, systemd-networkd, and ifupdown on Debian. To avoid
-cutting off an in-progress SSH setup, direct-host configuration is persisted
-but not activated live; reboot or deliberately restart the interface after
-reviewing the staged configuration. For hosted Proxmox VMs and LXCs, the same
-values are also supplied to cloud-init or `pct` during provisioning, so the
-guest starts on the requested address. Existing ifupdown files changed for the
-selected interface receive a one-time `.infra-tools.bak` copy.
+Static address configuration is validated before any remote work begins and
+supports NetworkManager, systemd-networkd, and ifupdown on Debian. Without
+`--activate-network`, direct-host configuration is persisted but not activated
+live; reboot or deliberately restart the interface after reviewing it.
+
+`--activate-network` uses a two-phase handoff for an existing host. The remote
+setup temporarily adds the requested addresses without removing the address
+carrying its SSH connection. After that setup process exits, the controller
+connects to every requested address, persists the new backend configuration
+through the verified address, and verifies SSH again. A failed first check
+removes the temporary addresses through the old connection. On success, the
+saved setup moves to the new IPv4 address (or IPv6 when no IPv4 was requested).
+The old address remains live only until reboot; it is absent from the new
+persistent configuration. Existing ifupdown files changed for the selected
+interface receive a one-time `.infra-tools.bak` copy.
 
 ```bash
 infra-tools setup server_lite 192.168.1.50 admin \
@@ -147,11 +155,22 @@ infra-tools setup server_lite 192.168.1.50 admin \
   --ip 192.168.1.50/24 --gateway 192.168.1.1 \
   --dns 1.1.1.1 --dns 1.0.0.1 \
   --network-interface eth0
+
+# Reassign an existing saved host without interrupting the setup SSH session
+infra-tools patch 192.168.1.50 admin \
+  --ip 192.168.1.60/24 --gateway 192.168.1.1 \
+  --dns 1.1.1.1 --network-interface eth0 --activate-network
 ```
 
 `--hostname` and these static network flags are intentionally rejected for
 `server_proxmox`: changing a Proxmox node name or bridge address can affect
-cluster identity and requires a node-specific migration plan.
+cluster identity and requires a node-specific migration plan. The runtime also
+refuses a generic change when the selected interface is a Linux bridge, even
+if the host was given another setup type. Existing Proxmox VM and LXC guests
+can use the same `patch ... --activate-network` handoff as other Debian hosts;
+the handoff preflights and updates `qm ipconfig0` or `pct net0` while preserving
+the guest's other network fields, then checks guest SSH once more. New hosted
+guests still receive their initial address from cloud-init or `pct`.
 
 Without `--rdp-source`, enabling RDP keeps a globally rate-limited UFW rule.
 Prefer one or more management, VPN, or trusted LAN CIDRs. On rerun,

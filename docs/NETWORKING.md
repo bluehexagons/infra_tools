@@ -24,10 +24,41 @@ It disables future cloud-init network regeneration when cloud-init is present.
 Direct remote setup stages persistent configuration without bouncing the live
 interface, which prevents a mid-run SSH disconnect. Activate it with a planned
 reboot or explicit interface restart after reviewing the generated settings.
-Hosted Proxmox guests receive the requested addressing during provisioning and
-therefore boot with it already active. Proxmox host (`server_proxmox`) identity
-and bridge changes remain outside this generic workflow because they require
-cluster-aware planning.
+
+For an existing host that must move immediately, add `--activate-network` to a
+saved-host patch:
+
+```bash
+infra-tools patch 10.20.0.15 admin \
+  --ip 10.20.0.25/24 --gateway 10.20.0.1 \
+  --dns 10.20.0.53 --network-interface eth0 \
+  --activate-network
+```
+
+This is a two-phase handoff. The target adds the new address as a temporary
+secondary address and uses source-specific routing for its requested gateway,
+without removing the address used by the active SSH setup. The controller then
+requires SSH to succeed on every requested IPv4/IPv6 address before it writes
+the persistent backend configuration, and checks SSH again afterward. If the
+first check fails, it removes the temporary additions through the old address
+and leaves persistence unchanged. A successful handoff moves the saved host
+record to the new address. The old live address remains available until reboot,
+when the verified persistent configuration becomes the sole assignment.
+
+Hosted Proxmox guests receive their initial addressing during provisioning and
+therefore boot with it active. Existing Proxmox VMs and LXCs can use the same
+verified patch handoff as physical hosts and non-Proxmox VMs, including when a
+saved hosted configuration still contains its Proxmox metadata. Before guest
+persistence, the controller identifies exactly one matching VM or LXC on the
+saved Proxmox node. It then updates `qm ipconfig0` or `pct net0` after guest SSH
+is verified, preserving the existing bridge, firewall, MAC, device type, and
+unchanged address-family fields. It checks guest SSH again after the Proxmox
+update and restores the previous Proxmox value if that final check fails.
+
+Proxmox host (`server_proxmox`) identity and bridge changes remain outside this
+generic workflow because they require cluster-aware planning. Generic setup
+also refuses a selected Linux bridge at runtime to avoid erasing Proxmox
+bridge ports or other topology settings from ifupdown configuration.
 
 ## Inventory and Firewall Planning
 
