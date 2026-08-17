@@ -923,10 +923,15 @@ _CACHED_PROVISIONING_FIELDS = (
 )
 
 
-def _provisioning_changes_requested(args: argparse.Namespace) -> bool:
-    """Return whether this invocation explicitly changes the guest shape."""
+def _provisioning_changes_requested(
+    config: SetupConfig,
+    cached_config: SetupConfig,
+    args: argparse.Namespace,
+) -> bool:
+    """Return whether explicit guest-shape arguments differ from local state."""
     return any(
         getattr(args, field, None) is not None
+        and getattr(config, field) != getattr(cached_config, field)
         for field in _PROVISIONING_CHANGE_ARGS
     )
 
@@ -936,7 +941,7 @@ def _reuse_cached_provisioning_metadata(
     args: argparse.Namespace,
 ) -> bool:
     """Hydrate an existing guest from local state and skip Proxmox discovery."""
-    if not config.hosted_node or _provisioning_changes_requested(args):
+    if not config.hosted_node:
         return False
 
     cache_target = config.host
@@ -950,6 +955,8 @@ def _reuse_cached_provisioning_metadata(
 
     cached_config = load_setup_command(cache_target)
     if cached_config is None or not cached_config.hosted_node:
+        return False
+    if _provisioning_changes_requested(config, cached_config, args):
         return False
 
     for field in _CACHED_PROVISIONING_FIELDS:

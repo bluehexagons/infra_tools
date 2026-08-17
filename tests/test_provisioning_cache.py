@@ -68,22 +68,58 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
 
     def test_explicit_guest_shape_change_requires_proxmox(self) -> None:
         current = _config(container_memory="8G")
+        cached = _config(container_memory="4G")
 
-        with patch("infra_tools.load_setup_command") as mock_load:
+        with patch("infra_tools.load_setup_command", return_value=cached) as mock_load:
             reused = infra_tools._reuse_cached_provisioning_metadata(
                 current,
                 _args(container_memory="8G"),
             )
 
         self.assertFalse(reused)
-        mock_load.assert_not_called()
+        mock_load.assert_called_once_with("10.0.0.50")
 
         self.assertTrue(
-            infra_tools._provisioning_changes_requested(_args(container_cores=1))
+            infra_tools._provisioning_changes_requested(
+                _config(container_cores=2),
+                _config(container_cores=1),
+                _args(container_cores=2),
+            )
         )
         self.assertTrue(
-            infra_tools._provisioning_changes_requested(_args(container_base="debian"))
+            infra_tools._provisioning_changes_requested(
+                _config(container_base="ubuntu"),
+                _config(container_base="debian"),
+                _args(container_base="ubuntu"),
+            )
         )
+
+    def test_reuses_metadata_when_explicit_guest_shape_matches(self) -> None:
+        current = _config(
+            container_memory="4G",
+            container_storage=[["root", "local-lvm", "32G"]],
+            container_cores=4,
+            container_base="debian",
+        )
+        cached = _config(
+            hosted_node="10.0.0.10",
+            container_memory="4G",
+            container_storage=[["root", "local-lvm", "32G"]],
+            container_cores=4,
+            container_base="debian",
+        )
+        args = _args(
+            container_memory="4G",
+            container_storage=[["root", "local-lvm", "32G"]],
+            container_cores=4,
+            container_base="debian",
+        )
+
+        with patch("infra_tools.load_setup_command", return_value=cached):
+            reused = infra_tools._reuse_cached_provisioning_metadata(current, args)
+
+        self.assertTrue(reused)
+        self.assertEqual(current.hosted_node, "10.0.0.10")
 
     def test_missing_local_metadata_requires_proxmox(self) -> None:
         with patch("infra_tools.load_setup_command", return_value=None):
