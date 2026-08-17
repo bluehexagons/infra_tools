@@ -426,6 +426,7 @@ class TestInstallXrdp(unittest.TestCase):
 
         self.assertIn('Driver "xrdpdev"', content)
         self.assertIn('Option "UseGlamor" "false"', content)
+        self.assertIn('Modes "640x480" "800x600" "1024x768"', content)
         self.assertIn('Virtual 3840 2160', content)
 
     @patch('desktop.xrdp_steps.run')

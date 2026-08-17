@@ -132,6 +132,8 @@ Section "Screen"
     DefaultDepth 24
     SubSection "Display"
         Depth 24
+        # xrdpdev requires a usable mode before it can create the screen.
+        Modes "640x480" "800x600" "1024x768" "1280x720" "1280x1024" "1600x900" "1920x1080"
         # Virtual screen size to support dynamic resizing (up to 4K: 3840x2160)
         # Supports 4K and common ultrawide resolutions
         Virtual 3840 2160
