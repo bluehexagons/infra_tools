@@ -96,7 +96,7 @@ In addition to the common fields (`name`, `type`, `domain`, `path`, `build`, and
 - `env_file`: absolute server path, or a path using deploy-time templates;
 - `health`: optional URL path polled on `127.0.0.1:port` after startup; and
 - `systemd_unit`: optional repository-relative unit template. Without it,
-  infra_tools writes a hardened managed unit.
+  infra-tools writes a hardened managed unit.
 
 Supported templates include `{{release_dir}}`, `{{base_dir}}`, `{{name}}`,
 `{{service_name}}`, `{{domain}}`, `{{path}}`, `{{web_user}}`, `{{web_group}}`,

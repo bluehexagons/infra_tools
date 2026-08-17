@@ -180,6 +180,32 @@ def _add_key_parser(sub: argparse._SubParsersAction) -> None:
     p.set_defaults(_sysadmin_cmd="key")
 
 
+def _add_ssh_key_parser(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser(
+        "ssh-key",
+        help="Enroll and inspect workspace SSH host keys",
+        description=(
+            "Enroll a remote host key into the workspace known_hosts file after "
+            "displaying its fingerprint for operator verification."
+        ),
+    )
+    key_sub = p.add_subparsers(dest="ssh_key_command", help="SSH host-key command")
+    enroll = key_sub.add_parser(
+        "enroll",
+        help="Enroll a host key after verification",
+        epilog="Example:\n  infra-tools ssh-key enroll myserver",
+    )
+    enroll.add_argument("host", help="Remote host (IP or hostname)")
+    enroll.add_argument("--port", "-p", type=int, default=22, help="SSH port")
+    enroll.add_argument(
+        "--yes",
+        action="store_true",
+        help="Trust the displayed fingerprint without prompting",
+    )
+    enroll.set_defaults(_sysadmin_cmd="ssh_key_enroll")
+    p.set_defaults(_sysadmin_cmd="ssh_key")
+
+
 # ---------------------------------------------------------------------------
 # Public registration
 # ---------------------------------------------------------------------------
@@ -349,6 +375,7 @@ def add_sysadmin_subparsers(subparsers: argparse._SubParsersAction) -> None:
     _add_push_parser(subparsers)
     _add_pull_parser(subparsers)
     _add_key_parser(subparsers)
+    _add_ssh_key_parser(subparsers)
     _add_df_parser(subparsers)
     _add_fan_parser(subparsers)
     _add_svc_parser(subparsers)
@@ -429,6 +456,10 @@ def run_sysadmin_command(args: argparse.Namespace) -> int:
             ssh_key=getattr(args, "ssh_key", None),
             pubkey_path=args.pubkey,
         )
+
+    if cmd == "ssh_key_enroll":
+        from lib.ssh_enrollment import enroll_host_key
+        return enroll_host_key(args.host, port=args.port, assume_yes=args.yes)
 
     if cmd == "key":
         import sys

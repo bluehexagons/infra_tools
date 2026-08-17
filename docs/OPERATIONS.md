@@ -1,6 +1,6 @@
 # Saved configuration operations
 
-infra_tools stores setup arguments, host metadata, credentials, run status, and
+infra-tools stores setup arguments, host metadata, credentials, run status, and
 history under the active workspace. These commands operate on saved
 configurations without requiring a new setup command line each time.
 

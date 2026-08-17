@@ -42,6 +42,7 @@ infra-tools maintenance github [--root PATH] <audit|prune> [options]
 infra-tools shell
 infra-tools network ...
 infra-tools proxmox ...
+infra-tools ssh-key enroll <host> [--port PORT] [--yes]
 ```
 
 ### Bootstrap and self-setup flags
@@ -262,7 +263,7 @@ desktop, or full bundle is wanted.
 Codex CLI, Claude Code, OpenCode, and T3 Code are installed from their official
 distribution channels. The Codex installer runs with `CODEX_NON_INTERACTIVE=1`,
 so setup does not prompt to start Codex or remove a conflicting installation.
-infra_tools does not install these tools with npm. Any
+infra-tools does not install these tools with npm. Any
 selected agent also installs a baseline containing build tools, CMake, Ninja,
 Git LFS, ripgrep, fd, fzf, jq, bat, tmux, direnv, and ShellCheck.
 
@@ -276,7 +277,7 @@ Credential/config copy is intentionally tool-scoped:
 - `--claude --copy-keys` copies `~/.claude/.credentials.json` when present.
 - `--opencode --copy-config` copies `~/.config/opencode`, including global agents, skills, commands, plugins, and config files.
 - `--opencode --copy-keys` copies `~/.local/share/opencode/auth.json` when present.
-- T3 Code receives only a command wrapper and desktop entry; infra_tools does not copy T3 Code credentials.
+- T3 Code receives only a command wrapper and desktop entry; infra-tools does not copy T3 Code credentials.
 
 The root-only upload payload is removed after the selected config and credentials
 are copied. Uploaded agent repositories are retained in a root-only target cache
@@ -571,6 +572,16 @@ Useful shell commands:
 See [`SYSADMIN.md`](./SYSADMIN.md) for the host shortcut commands (`mount`,
 `health`, `ssh`, `push`, `pull`, `df`, `fan`, `svc`, `logs`, `upgrade`,
 `reachable`, `key`).
+
+Before using SSH setup, deployment, or administration commands for a new host,
+enroll its host key and verify the displayed fingerprint independently:
+
+```bash
+infra-tools ssh-key enroll example.com
+```
+
+SSH commands use strict checking against the workspace `known_hosts` file and
+will refuse a host that has not been explicitly enrolled.
 
 ## Testing and bootstrap
 

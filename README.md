@@ -1,7 +1,7 @@
-# infra_tools
+# infra-tools
 
 Automated setup and operations for Debian control planes, servers, workstations,
-and Proxmox guests. infra_tools applies repeatable, machine-aware configuration
+and Proxmox guests. infra-tools applies repeatable, machine-aware configuration
 over SSH, stores redacted setup state in a workspace, and provides targeted
 operations for hosts that are already configured.
 
@@ -61,7 +61,7 @@ before changing the project.
 
 ## Supported targets
 
-infra_tools officially supports Debian on:
+infra-tools officially supports Debian on:
 
 - bare-metal systems;
 - virtual machines, including Proxmox VMs; and

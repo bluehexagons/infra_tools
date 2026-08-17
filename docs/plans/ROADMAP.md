@@ -2,7 +2,7 @@
 
 Status: active planning guidance.
 
-This roadmap is intentionally opinionated. `infra_tools` already supports a
+This roadmap is intentionally opinionated. `infra-tools` already supports a
 wide range of setup and operations tasks; the next releases should complete
 the safety and recovery loops around those tasks before adding more operating
 systems, desktop applications, or service-specific installers.
@@ -122,8 +122,8 @@ scripts may remain an escape hatch, but they should not be the primary model.
 `--dry-run` is useful, but it is not a desired-versus-observed state diff. Add
 a read-only planning layer before expanding mutation features:
 
-- `infra_tools plan HOST` reports proposed changes and unavailable facts;
-- `infra_tools audit PATTERN` checks saved hosts without changing them;
+- `infra-tools plan HOST` reports proposed changes and unavailable facts;
+- `infra-tools audit PATTERN` checks saved hosts without changing them;
 - plans use stable change categories and meaningful exit codes;
 - text output remains human-friendly while JSON output is consistent enough
   for CI and external tooling; and

@@ -66,7 +66,7 @@ class TestSshUtils(unittest.TestCase):
                 "-o",
                 "UserKnownHostsFile=/tmp/workspace/known_hosts",
                 "-o",
-                "StrictHostKeyChecking=accept-new",
+                "StrictHostKeyChecking=yes",
                 "-o",
                 "BatchMode=yes",
                 "-o",
@@ -114,7 +114,7 @@ class TestSshUtils(unittest.TestCase):
                 "-o",
                 "UserKnownHostsFile=/tmp/workspace/known_hosts",
                 "-o",
-                "StrictHostKeyChecking=accept-new",
+                "StrictHostKeyChecking=yes",
                 "-o",
                 "BatchMode=yes",
                 "-o",
@@ -132,6 +132,7 @@ class TestSshUtils(unittest.TestCase):
         self.assertIn("'/tmp/key file'", transport)
         self.assertIn("-p 2222", transport)
         self.assertIn("UserKnownHostsFile=/tmp/workspace/known_hosts", transport)
+        self.assertIn("StrictHostKeyChecking=yes", transport)
 
 
 if __name__ == "__main__":

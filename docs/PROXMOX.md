@@ -1,6 +1,6 @@
 # Proxmox workflows
 
-infra_tools can register Proxmox hosts, cache their capabilities, provision
+infra-tools can register Proxmox hosts, cache their capabilities, provision
 Debian VMs or unprivileged LXCs, and manage guest lifecycle operations.
 [Machine types](MACHINE_TYPES.md) explains the guest capability differences.
 
@@ -52,7 +52,7 @@ The matching `.pub` file must sit beside the private key, and the Proxmox
 `root` account must accept that key.
 
 VM provisioning uses an SSH identity's `.pub` file for cloud-init. `--key` is
-optional: infra_tools first uses a matching key associated with the registered
+optional: infra-tools first uses a matching key associated with the registered
 Proxmox host, then the local `~/.ssh/id_ed25519`, `id_ecdsa`, or `id_rsa` key.
 If the Proxmox node key and guest key differ, pass `--provision-key` for the
 node and `--key` for the guest. VM image downloads and cloud-init snippets are
@@ -86,7 +86,7 @@ The default setup installs these recurring host-maintenance timers:
   default Proxmox policy records and reports a deferral instead of rebooting.
 - `cleanup-maintenance.timer` removes unused APT packages and residual package
   configuration, audits `dpkg` consistency, cleans bounded caches, journals,
-  old crash reports, and infra_tools-owned temporary artifacts, and ensures
+  old crash reports, and infra-tools-owned temporary artifacts, and ensures
   filesystem TRIM through the native timer or a cleanup fallback each Sunday.
   Post-cleanup checks cover block and inode pressure on distinct local storage
   mounts. The job does not prune backups, templates, ISOs, guest volumes, or
@@ -135,13 +135,13 @@ display. Existing desktop VMs created with a serial-only display can be shut
 down and changed with `qm set VMID --vga virtio` on the Proxmox node.
 
 The emulated display does **not** accelerate an XRDP session. xorgxrdp creates
-its own resizable X.Org display with the `xrdpdev` driver, and infra_tools keeps
+its own resizable X.Org display with the `xrdpdev` driver, and infra-tools keeps
 that path software-rendered for compatibility. Accordingly, setup does not add
 the desktop user to `video` or `render` merely because the target is a VM.
 
 The resulting Proxmox baseline is:
 
-| Setting | infra_tools default | Rationale / alternative |
+| Setting | infra-tools default | Rationale / alternative |
 | --- | --- | --- |
 | Display | VirtIO-GPU for desktop/RDP; serial-only for servers | VirtIO-GPU is a recovery console, not XRDP acceleration. QXL/SPICE and `virtio-gl` add no benefit to this RDP path. |
 | Serial | `serial0: socket` | Retains low-level diagnostics alongside the graphical console. |
@@ -308,7 +308,7 @@ The backup command defaults to the first backup-capable storage pool, snapshot
 mode, and zstd compression. `suspend` and `stop` modes trade availability for
 stronger consistency where the guest workload requires it. Always verify that
 the selected storage has enough capacity and a retention policy outside
-infra_tools.
+infra-tools.
 
 Migrate a guest between registered cluster nodes:
 

@@ -24,7 +24,7 @@ class ProvisionError(Exception):
 def _ssh_opts(hosted_key: Optional[str] = None) -> StrList:
     """Build SSH options list for Proxmox node connections."""
     opts = [
-        "-o", "StrictHostKeyChecking=accept-new",
+        "-o", "StrictHostKeyChecking=yes",
         "-o", "ConnectTimeout=30",
         "-o", "ServerAliveInterval=30",
     ]

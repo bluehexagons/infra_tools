@@ -78,7 +78,7 @@ def build_ssh_command(
         command.extend(["-p", str(port)])
 
     command.extend(["-o", f"UserKnownHostsFile={get_workspace_known_hosts_path()}"])
-    command.extend(["-o", "StrictHostKeyChecking=accept-new"])
+    command.extend(["-o", "StrictHostKeyChecking=yes"])
     if batch_mode is True:
         command.extend(["-o", "BatchMode=yes"])
     elif batch_mode is False:
@@ -120,7 +120,7 @@ def build_scp_command(
         command.extend(["-P", str(port)])
 
     command.extend(["-o", f"UserKnownHostsFile={get_workspace_known_hosts_path()}"])
-    command.extend(["-o", "StrictHostKeyChecking=accept-new"])
+    command.extend(["-o", "StrictHostKeyChecking=yes"])
     if batch_mode is True:
         command.extend(["-o", "BatchMode=yes"])
     elif batch_mode is False:
@@ -147,7 +147,7 @@ def build_rsync_ssh_transport(
     if port is not None:
         ssh_command.extend(["-p", str(port)])
     ssh_command.extend(["-o", f"UserKnownHostsFile={get_workspace_known_hosts_path()}"])
-    ssh_command.extend(["-o", "StrictHostKeyChecking=accept-new"])
+    ssh_command.extend(["-o", "StrictHostKeyChecking=yes"])
     if batch_mode:
         ssh_command.extend(["-o", "BatchMode=yes"])
     if connect_timeout is not None:

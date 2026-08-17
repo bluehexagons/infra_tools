@@ -1,7 +1,7 @@
 # Sysadmin Convenience Commands
 
 Quick-access commands for daily server administration tasks. All commands
-inherit SSH credentials (username, key, port) from the saved infra_tools
+inherit SSH credentials (username, key, port) from the saved infra-tools
 configuration for the host when available, so you rarely need to pass them
 explicitly.
 
@@ -107,7 +107,7 @@ host (e.g. `journalctl` on a non-systemd system), that section prints
 
 ## ssh
 
-Open an interactive SSH session using credentials from the saved infra_tools
+Open an interactive SSH session using credentials from the saved infra-tools
 config for the host. Adds `ControlMaster=auto` for connection reuse.
 
 ```

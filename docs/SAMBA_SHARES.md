@@ -199,7 +199,7 @@ sudo mount -t cifs //fileserver/projects_write /mnt/projects \
   -o username=alice,vers=3.0,seal
 ```
 
-For persistent client mounts managed by infra_tools, use `--mount-smb` on the
+For persistent client mounts managed by infra-tools, use `--mount-smb` on the
 client setup. It creates a root-only credential file and a systemd automount:
 
 ```bash

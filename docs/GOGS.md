@@ -16,7 +16,7 @@ infra-tools setup server_web git.example.com deploy \
   --ssl --ssl-email admin@example.com
 ```
 
-With `--ssl`, infra_tools obtains and renews a Let's Encrypt certificate. With
+With `--ssl`, infra-tools obtains and renews a Let's Encrypt certificate. With
 `--cloudflare`, the nginx-to-Gogs connection remains private and the tunnel
 serves the hostname; public HTTP/HTTPS firewall ports are not opened.
 

@@ -1,4 +1,4 @@
-# infra_tools documentation
+# infra-tools documentation
 
 Use the [root README](../README.md) for the project overview. This index links
 to the detailed setup and operations guides.

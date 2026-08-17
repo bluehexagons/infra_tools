@@ -39,7 +39,7 @@ def _build_sshfs_options(
     known_hosts = get_workspace_known_hosts_path()
     ssh_opts = [
         f"UserKnownHostsFile={known_hosts}",
-        "StrictHostKeyChecking=accept-new",
+        "StrictHostKeyChecking=yes",
         "ServerAliveInterval=30",
         "ServerAliveCountMax=3",
     ]

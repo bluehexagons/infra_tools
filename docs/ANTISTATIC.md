@@ -1,6 +1,6 @@
 # Antistatic services
 
-infra_tools can deploy the Antistatic lobby server and antistatic-db on a
+infra-tools can deploy the Antistatic lobby server and antistatic-db on a
 Debian web or lightweight server. Services run under systemd and can be
 published through Nginx or directly on a host port.
 

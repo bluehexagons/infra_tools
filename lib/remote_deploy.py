@@ -100,10 +100,8 @@ def push_artifact(
 ) -> bool:
     """Push artifact directory to remote server using rsync.
     
-    Security Note: Uses StrictHostKeyChecking=accept-new which accepts new host keys
-    without verification on first connection. This is vulnerable to MITM attacks during
-    first connection. For production, consider using ssh-keyscan during setup to
-    populate known_hosts, or manually verify host keys before first deployment.
+    Security Note: Uses the workspace known_hosts file with strict host-key
+    checking. Enroll and independently verify the target key before deployment.
     """
     target = get_deploy_target(target_host)
     if not target:

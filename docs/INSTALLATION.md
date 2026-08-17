@@ -1,4 +1,4 @@
-# Install infra_tools
+# Install infra-tools
 
 Use the installer on the machine that will manage your hosts. It keeps a local
 Git worktree, installs the managed `infra-tools` launcher, and can configure
@@ -148,7 +148,8 @@ infra-tools channel
 infra-tools --help
 ```
 
-The installed command is `infra-tools`; `infra_tools` is no longer supported.
+The installed command is `infra-tools`; the legacy `infra_tools` command is no
+longer supported.
 Rerunning bootstrap removes a regular-file or symlink launcher named
 `infra_tools` from the configured system or user launcher directory before
 installing the new command. Self-setup also removes generated shell completion
@@ -233,7 +234,7 @@ ensure the current release uses the official mirrors:
 - `https://security.debian.org/debian-security` for security updates.
 
 If a minimal or offline Debian installation has only installation media
-configured, infra_tools creates a managed source file and runs `apt-get
+configured, infra-tools creates a managed source file and runs `apt-get
 update` before installing packages. Existing `non-free-firmware` components
 are preserved. Existing source files are backed up, and an unmanaged
 `infra_tools-debian.sources` file is not overwritten. Existing current Debian

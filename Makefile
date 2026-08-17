@@ -1,5 +1,5 @@
 # Makefile for infra_tools development tasks
-.PHONY: check test test-verbose help clean compile
+.PHONY: check test test-verbose help clean compile docs-check package-check
 
 # Default target
 help:
@@ -10,6 +10,8 @@ help:
 	@echo "  make test-verbose      Run all tests with full verbose output"
 	@echo "  make test TEST=name    Run specific test file (e.g., TEST=test_scrub_par2)"
 	@echo "  make compile           Check all Python files compile"
+	@echo "  make docs-check        Check documented CLI entry points"
+	@echo "  make package-check     Check package launcher metadata"
 	@echo "  make clean             Remove Python cache files"
 	@echo "  make help              Show this help message"
 	@echo ""
@@ -21,7 +23,13 @@ help:
 	@echo "  make test TEST=service_tools/test_storage_ops"
 
 # Run the same checks as continuous integration.
-check: compile test
+check: compile docs-check package-check test
+
+docs-check:
+	@python3 scripts/check_cli_docs.py
+
+package-check:
+	@python3 scripts/check_package_metadata.py
 
 # Run tests (all or specific if TEST variable is set)
 test:
