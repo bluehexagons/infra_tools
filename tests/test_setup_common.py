@@ -869,6 +869,7 @@ class TestHostedProvisioningDispatch(unittest.TestCase):
             with patch.object(setup_common, "create_argument_parser", return_value=parser), \
                  patch.object(setup_common, "validate_host", return_value=True), \
                  patch.object(setup_common, "validate_username", return_value=True), \
+                 patch.object(setup_common, "resolve_guest_ssh_key", return_value=None), \
                  patch.object(setup_common, "prepare_runtime_config", return_value=config), \
                  patch.object(setup_common, "validate_hosted_flags"), \
                  patch.object(setup_common, "validate_samba_share_credentials"), \
@@ -887,6 +888,63 @@ class TestHostedProvisioningDispatch(unittest.TestCase):
         self.assertEqual(config.hosted_bridge, "vmbr0")
         self.assertEqual(config.container_storage, [["root", "local-lvm", "10G"]])
         mock_provision_vm.assert_called_once_with(config, image=config.vm_image)
+
+    def test_hosted_vm_setup_uses_implicit_guest_ssh_key(self):
+        from lib import setup_common
+
+        config = _make_config(
+            host="10.0.0.50",
+            machine_type="vm",
+            hosted_node="10.0.0.1",
+            hosted_key=None,
+            container_memory="2G",
+            container_storage=[["root", "local-lvm", "10G"]],
+        )
+
+        with patch.object(
+            setup_common,
+            "resolve_guest_ssh_key",
+            return_value="/home/test/.ssh/id_ed25519",
+        ) as mock_resolve:
+            setup_common._apply_hosted_proxmox_defaults(config, None)
+
+        self.assertEqual(config.ssh_key, "/home/test/.ssh/id_ed25519")
+        self.assertIsNone(config.hosted_key)
+        mock_resolve.assert_called_once_with(
+            None,
+            home=setup_common._local_user_home(),
+        )
+
+    def test_registered_host_key_can_be_used_for_guest(self):
+        from lib import setup_common
+
+        with tempfile.TemporaryDirectory() as workspace:
+            add_proxmox_host(
+                ProxmoxHost(
+                    name="pve1",
+                    address="10.0.0.1",
+                    ssh_key="/keys/proxmox",
+                ),
+                workspace,
+            )
+            config = _make_config(
+                host="10.0.0.50",
+                hosted_node="pve1",
+                container_storage=[["root", "10G"]],
+            )
+
+            with patch.object(
+                setup_common,
+                "resolve_guest_ssh_key",
+                return_value=None,
+            ) as mock_resolve:
+                setup_common._apply_hosted_proxmox_defaults(config, workspace)
+
+        self.assertEqual(config.ssh_key, "/keys/proxmox")
+        mock_resolve.assert_called_once_with(
+            "/keys/proxmox",
+            home=setup_common._local_user_home(),
+        )
 
     def test_hosted_setup_preserves_explicit_guest_ssh_key(self):
         from lib import setup_common

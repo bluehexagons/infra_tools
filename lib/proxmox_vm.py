@@ -273,6 +273,18 @@ def _render_user_data(
     Creates ``username`` (with sudo NOPASSWD) and installs the SSH key. The
     rest of infra_tools' setup runs over SSH afterward, so we keep this short.
     """
+    normalized_pubkey = pubkey_contents.strip() if pubkey_contents else None
+    if normalized_pubkey and any(
+        ord(char) < 32 or ord(char) == 127 for char in normalized_pubkey
+    ):
+        raise ProvisionError(
+            "SSH public key must be a single line without control characters"
+        )
+    pubkey_yaml = (
+        "'" + normalized_pubkey.replace("'", "''") + "'"
+        if normalized_pubkey
+        else None
+    )
     lines = [
         "#cloud-config",
         f"hostname: __HOSTNAME__",
@@ -289,9 +301,9 @@ def _render_user_data(
         "  - name: root",
         "    lock_passwd: false",
     ]
-    if pubkey_contents:
+    if pubkey_yaml:
         lines.append("    ssh_authorized_keys:")
-        lines.append(f"      - {pubkey_contents.strip()}")
+        lines.append(f"      - {pubkey_yaml}")
     if username and username != "root":
         lines.extend([
             f"  - name: {username}",
@@ -300,9 +312,9 @@ def _render_user_data(
             "    shell: /bin/bash",
             "    lock_passwd: false",
         ])
-        if pubkey_contents:
+        if pubkey_yaml:
             lines.append("    ssh_authorized_keys:")
-            lines.append(f"      - {pubkey_contents.strip()}")
+            lines.append(f"      - {pubkey_yaml}")
     lines.append("ssh_pwauth: false")
     lines.extend([
         "runcmd:",
@@ -603,6 +615,20 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
 
     resolved, catalog_entry = _resolve_image(config, image)
 
+    pub_path = _resolve_public_key_path(config.ssh_key) if not dry_run else None
+    pubkey_contents: Optional[str] = None
+    if not dry_run:
+        if not pub_path:
+            raise ProvisionError(
+                "VM provisioning requires a readable SSH private key with a matching .pub file"
+            )
+        try:
+            with open(pub_path, "r", encoding="utf-8") as fh:
+                pubkey_contents = fh.read().strip()
+        except OSError as exc:
+            raise ProvisionError(f"Failed to read public key {pub_path}: {exc}")
+        print(f"  Using public key for VM access: {pub_path}")
+
     if dry_run:
         print("[DRY RUN] Would provision Proxmox VM:")
         print(f"  Proxmox node: {node_ip}")
@@ -700,21 +726,6 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
                 raise ProvisionError(
                     f"Invalid --image storage ref: {storage_ref}; expected STORAGE:iso/FILE"
                 )
-
-    pub_path = _resolve_public_key_path(config.ssh_key)
-    pubkey_contents: Optional[str] = None
-    if pub_path:
-        try:
-            with open(pub_path, "r", encoding="utf-8") as fh:
-                pubkey_contents = fh.read().strip()
-        except OSError as exc:
-            raise ProvisionError(f"Failed to read public key {pub_path}: {exc}")
-        print(f"  Using public key for VM access: {pub_path}")
-    else:
-        print(
-            "  ⚠ No SSH public key found alongside --key; cloud-init will not "
-            "install root credentials and remote setup will be unable to connect."
-        )
 
     user_data = _render_user_data(
         username=config.username, pubkey_contents=pubkey_contents,

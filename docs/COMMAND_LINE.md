@@ -350,7 +350,10 @@ Notes:
 
 - `--storage` is repeatable.
 - `root` storage is required when `--provision-on` is used.
-- Provisioned VMs require `--key PATH` and a readable matching `PATH.pub`; this key is installed by cloud-init for the SSH handoff.
+- Provisioned VMs automatically use a matching key from the registered
+  Proxmox host or the local `~/.ssh/id_ed25519`, `id_ecdsa`, or `id_rsa`
+  identity. Use `--key PATH` when the guest should use a different identity;
+  the matching `PATH.pub` is installed by cloud-init for the SSH handoff.
 - Provisioned VMs keep fixed memory by default while retaining the VirtIO balloon
   device for guest-memory telemetry. Set `--balloon-min` below `--memory` to
   opt into dynamic ballooning; the minimum cannot exceed the maximum.

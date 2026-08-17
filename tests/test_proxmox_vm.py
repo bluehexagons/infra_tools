@@ -82,6 +82,20 @@ class TestRenderUserData(unittest.TestCase):
         self.assertNotIn("ssh_authorized_keys", out)
         self.assertIn("qemu-guest-agent", out)
 
+    def test_rejects_multiline_pubkey(self):
+        with self.assertRaisesRegex(ProvisionError, r"single line"):
+            _render_user_data(
+                username="root",
+                pubkey_contents="ssh-ed25519 AAAA test\nruncmd:",
+            )
+
+    def test_quotes_pubkey_as_yaml_scalar(self):
+        out = _render_user_data(
+            username="root",
+            pubkey_contents="ssh-ed25519 AAAA comment-with-'quote'",
+        )
+        self.assertIn("- 'ssh-ed25519 AAAA comment-with-''quote'''", out)
+
 
 class TestVMHardwareProfile(unittest.TestCase):
     def test_desktop_and_rdp_profiles_need_graphical_console(self):

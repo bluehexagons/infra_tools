@@ -591,22 +591,23 @@ class TestValidateHostedFlags(unittest.TestCase):
             container_memory='2G',
             container_storage=[['root', 'auto', '10G']],
         )
-        with self.assertRaisesRegex(ValueError, r'requires --key'):
+        with self.assertRaisesRegex(ValueError, r'requires an SSH identity'):
             validate_hosted_flags(config)
 
     def test_hosted_vm_rejects_hostname_target_without_static_ip(self):
         config = _MockConfig(
             host='vm.example.com',
             machine_type='vm',
-            ssh_key='/tmp/does-not-matter',
             hosted_node='10.0.0.1',
             container_memory='2G',
             container_storage=[['root', 'auto', '10G']],
         )
-        with tempfile.NamedTemporaryFile(suffix='.pub') as pubkey:
-            pubkey.write(b'ssh-ed25519 AAAA test\n')
-            pubkey.flush()
-            config.ssh_key = pubkey.name[:-4]
+        with tempfile.TemporaryDirectory() as tmp:
+            config.ssh_key = os.path.join(tmp, 'id_test')
+            with open(config.ssh_key, 'w', encoding='utf-8') as private_key:
+                private_key.write('private')
+            with open(config.ssh_key + '.pub', 'w', encoding='utf-8') as pubkey:
+                pubkey.write('ssh-ed25519 AAAA test\n')
             with self.assertRaisesRegex(ValueError, r'literal IPv4'):
                 validate_hosted_flags(config)
 
@@ -617,11 +618,27 @@ class TestValidateHostedFlags(unittest.TestCase):
             container_memory='2G',
             container_storage=[['root', 'auto', '10G']],
         )
-        with tempfile.NamedTemporaryFile(suffix='.pub') as pubkey:
-            pubkey.write(b'ssh-ed25519 AAAA test\n')
-            pubkey.flush()
-            config.ssh_key = pubkey.name[:-4]
+        with tempfile.TemporaryDirectory() as tmp:
+            config.ssh_key = os.path.join(tmp, 'id_test')
+            with open(config.ssh_key, 'w', encoding='utf-8') as private_key:
+                private_key.write('private')
+            with open(config.ssh_key + '.pub', 'w', encoding='utf-8') as pubkey:
+                pubkey.write('ssh-ed25519 AAAA test\n')
             validate_hosted_flags(config)
+
+    def test_hosted_vm_rejects_public_key_without_private_key(self):
+        config = _MockConfig(
+            machine_type='vm',
+            hosted_node='10.0.0.1',
+            container_memory='2G',
+            container_storage=[['root', 'auto', '10G']],
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            config.ssh_key = os.path.join(tmp, 'id_test')
+            with open(config.ssh_key + '.pub', 'w', encoding='utf-8') as pubkey:
+                pubkey.write('ssh-ed25519 AAAA test\n')
+            with self.assertRaisesRegex(ValueError, r'readable SSH private key'):
+                validate_hosted_flags(config)
 
     def test_missing_memory(self):
         config = _MockConfig(

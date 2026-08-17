@@ -749,15 +749,63 @@ def _build_guest_hostname(
 
 
 def _resolve_public_key_path(ssh_key: Optional[str]) -> Optional[str]:
-    """Return the local path to the public key matching the given private key, if any."""
+    """Return a readable public key matching a readable private key, if any."""
     if not ssh_key:
         return None
-    pub_path = ssh_key + ".pub"
+    expanded_key = os.path.abspath(os.path.expanduser(ssh_key))
+    pub_path = expanded_key + ".pub"
     try:
-        if os.path.isfile(pub_path) and os.path.getsize(pub_path) > 0:
+        if (
+            os.path.isfile(expanded_key)
+            and os.access(expanded_key, os.R_OK)
+            and os.path.getsize(expanded_key) > 0
+            and os.path.isfile(pub_path)
+            and os.access(pub_path, os.R_OK)
+            and os.path.getsize(pub_path) > 0
+        ):
             return pub_path
     except OSError:
         return None
+    return None
+
+
+def resolve_guest_ssh_key(
+    *preferred_keys: Optional[str],
+    home: Optional[str] = None,
+) -> Optional[str]:
+    """Find a private key and matching public key for VM cloud-init.
+
+    Hosted VM setup needs the public half of an SSH identity in cloud-init,
+    while the subsequent regular setup uses the private half.  Prefer keys
+    already associated with the Proxmox connection, then follow the standard
+    OpenSSH identity names used by regular setup.
+    """
+    candidates: list[str] = []
+    seen: set[str] = set()
+    for key in preferred_keys:
+        if not key:
+            continue
+        candidate = os.path.abspath(os.path.expanduser(key))
+        if candidate not in seen:
+            candidates.append(candidate)
+            seen.add(candidate)
+
+    ssh_dir = os.path.join(os.path.expanduser(home or "~"), ".ssh")
+    for identity_name in ("id_ed25519", "id_ecdsa", "id_rsa"):
+        candidate = os.path.join(ssh_dir, identity_name)
+        if candidate not in seen:
+            candidates.append(candidate)
+            seen.add(candidate)
+
+    for candidate in candidates:
+        try:
+            if not os.path.isfile(candidate) or not os.access(candidate, os.R_OK):
+                continue
+        except OSError:
+            continue
+        if _resolve_public_key_path(candidate):
+            return candidate
+
     return None
 
 
@@ -811,6 +859,7 @@ __all__ = [
     "_list_storage_names_for_content",
     "_list_storage_pools",
     "_resolve_public_key_path",
+    "resolve_guest_ssh_key",
     "_resolve_storage_pool",
     "_ssh_opts",
     "_ssh_run",

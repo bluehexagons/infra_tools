@@ -114,15 +114,16 @@ can create the VM through `qm` + cloud-init without `--machine vm`:
 ```bash
 infra-tools setup server_web 10.0.0.50 \
     --provision-on proxmox.lan \
-    --key ~/.ssh/id_ed25519 \
     --memory 4G --cores 2 \
     --storage root local-lvm 32G
 ```
 
 Use `--machine unprivileged` to stay on the LXC path.
 
-Provisioned VMs require `--key PATH` with a readable matching `PATH.pub` so
-cloud-init can install the guest SSH key. `--provision-key` controls only SSH
+Provisioned VMs automatically use a matching key from the registered Proxmox
+host or the local `~/.ssh/id_ed25519`, `id_ecdsa`, or `id_rsa` identity. Use
+`--key PATH` when the guest should use a different identity. The matching
+public key is installed by cloud-init; `--provision-key` controls only SSH
 access to the Proxmox node. The target is the guest IPv4 address: bare IPv4
 uses `/24`, while `IPv4/PREFIX` selects another prefix.
 

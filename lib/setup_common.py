@@ -51,6 +51,7 @@ from lib.cache import get_cache_path_for_host, save_setup_command
 from lib.arg_parser import create_setup_argument_parser
 from lib.display import print_setup_summary
 from lib.notifications import validate_notification_args
+from lib.proxmox_guest import resolve_guest_ssh_key
 from lib.ssh_utils import build_ssh_command, chain_remote_commands
 from lib.workspace import set_workspace_dir
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -603,20 +604,31 @@ def _apply_hosted_proxmox_defaults(
     if config.machine_type == DEFAULT_MACHINE_TYPE:
         config.machine_type = "vm"
 
+    guest_key_was_provided = bool(config.ssh_key)
     host = find_proxmox_host(str(config.hosted_node), workspace)
+    registered_host_key = host.ssh_key if host else None
     if host:
         if config.hosted_node == host.name:
             config.hosted_node = host.address
-        if not config.hosted_key and host.ssh_key:
-            config.hosted_key = host.ssh_key
-        if not config.ssh_key and host.ssh_key:
-            config.ssh_key = host.ssh_key
+        if not config.hosted_key and registered_host_key:
+            config.hosted_key = registered_host_key
         if not config.hosted_bridge:
             config.hosted_bridge = host.default_bridge or (
                 host.facts.default_bridge if host.facts else None
             )
 
-    if not config.hosted_key and config.ssh_key:
+    if not config.ssh_key:
+        config.ssh_key = resolve_guest_ssh_key(
+            registered_host_key,
+            home=_local_user_home(),
+        )
+        # Keep the saved-host fallback visible to validation when no local
+        # public key can be inspected.  The resulting error identifies the
+        # missing guest identity instead of silently provisioning keyless VMs.
+        if not config.ssh_key and registered_host_key:
+            config.ssh_key = registered_host_key
+
+    if not config.hosted_key and config.ssh_key and guest_key_was_provided:
         config.hosted_key = config.ssh_key
 
     if not validate_host(str(config.hosted_node)):

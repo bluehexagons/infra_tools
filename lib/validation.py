@@ -1078,12 +1078,39 @@ def validate_hosted_flags(config: Any) -> None:
         ssh_key = getattr(config, "ssh_key", None)
         if not ssh_key:
             raise ValueError(
-                "VM provisioning requires --key PATH with a matching PATH.pub"
+                "VM provisioning requires an SSH identity with a matching .pub file; "
+                "use --key PATH when no default identity is available"
             )
-        pubkey_path = f"{ssh_key}.pub"
-        if not os.path.isfile(pubkey_path) or os.path.getsize(pubkey_path) <= 0:
+        expanded_ssh_key = os.path.abspath(os.path.expanduser(str(ssh_key)))
+        try:
+            private_key_valid = (
+                os.path.isfile(expanded_ssh_key)
+                and os.access(expanded_ssh_key, os.R_OK)
+                and os.path.getsize(expanded_ssh_key) > 0
+            )
+        except OSError:
+            private_key_valid = False
+        if not private_key_valid:
+            raise ValueError(
+                f"VM provisioning requires a readable SSH private key: {expanded_ssh_key}"
+            )
+        pubkey_path = f"{expanded_ssh_key}.pub"
+        try:
+            public_key_valid = (
+                os.path.isfile(pubkey_path)
+                and os.access(pubkey_path, os.R_OK)
+                and os.path.getsize(pubkey_path) > 0
+            )
+        except OSError:
+            public_key_valid = False
+        if not public_key_valid:
             raise ValueError(
                 f"VM provisioning requires a readable SSH public key: {pubkey_path}"
+            )
+        config.ssh_key = expanded_ssh_key
+        if getattr(config, "hosted_key", None):
+            config.hosted_key = os.path.abspath(
+                os.path.expanduser(str(config.hosted_key))
             )
 
         if not getattr(config, "static_ipv4", None):

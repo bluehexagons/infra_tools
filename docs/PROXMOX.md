@@ -51,9 +51,11 @@ Successful `server_proxmox` setup registers the host in the selected workspace;
 The matching `.pub` file must sit beside the private key, and the Proxmox
 `root` account must accept that key.
 
-VM provisioning uses the same private key's `.pub` file for cloud-init. If the
-Proxmox node key and guest key differ, pass `--provision-key` for the node and
-`--key` for the guest. VM image downloads and cloud-init snippets are
+VM provisioning uses an SSH identity's `.pub` file for cloud-init. `--key` is
+optional: infra_tools first uses a matching key associated with the registered
+Proxmox host, then the local `~/.ssh/id_ed25519`, `id_ecdsa`, or `id_rsa` key.
+If the Proxmox node key and guest key differ, pass `--provision-key` for the
+node and `--key` for the guest. VM image downloads and cloud-init snippets are
 placed through Proxmox storage APIs, so the selected node must have active
 `iso` and `snippets` storage content types.
 

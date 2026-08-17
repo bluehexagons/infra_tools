@@ -5,6 +5,7 @@ from __future__ import annotations
 import ipaddress
 import os
 import sys
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -18,6 +19,7 @@ from lib.proxmox_guest import (
     _wait_for_guest_ssh,
     probe_proxmox_cluster,
     probe_proxmox_host,
+    resolve_guest_ssh_key,
 )
 
 
@@ -37,6 +39,40 @@ class TestBuildGuestHostname(unittest.TestCase):
             _build_guest_hostname("10.0.0.50", None),
             "guest-10-0-0-50",
         )
+
+
+class TestGuestSshKeyResolution(unittest.TestCase):
+    def _write_identity(self, directory: str, name: str) -> str:
+        private_key = os.path.join(directory, name)
+        with open(private_key, "w", encoding="utf-8") as file_obj:
+            file_obj.write("private")
+        with open(private_key + ".pub", "w", encoding="utf-8") as file_obj:
+            file_obj.write("ssh-ed25519 AAAA...\n")
+        return private_key
+
+    def test_prefers_matching_preferred_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            preferred = self._write_identity(tmp, "preferred")
+            default_dir = os.path.join(tmp, "home")
+            os.makedirs(os.path.join(default_dir, ".ssh"))
+            self._write_identity(os.path.join(default_dir, ".ssh"), "id_ed25519")
+
+            self.assertEqual(
+                resolve_guest_ssh_key(preferred, home=default_dir),
+                preferred,
+            )
+
+    def test_falls_back_to_default_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            ssh_dir = os.path.join(tmp, ".ssh")
+            os.makedirs(ssh_dir)
+            default_key = self._write_identity(ssh_dir, "id_ed25519")
+
+            self.assertEqual(resolve_guest_ssh_key(home=tmp), default_key)
+
+    def test_returns_none_without_a_complete_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertIsNone(resolve_guest_ssh_key(home=tmp))
 
 
 class TestWaitForGuestSsh(unittest.TestCase):
