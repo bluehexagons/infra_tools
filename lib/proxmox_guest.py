@@ -40,12 +40,14 @@ def _ssh_run(
     cmd: str,
     dry_run: bool = False,
     log_cmd: Optional[str] = None,
+    quiet: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     """Run a command on the Proxmox host via SSH."""
     display_cmd = log_cmd if log_cmd is not None else cmd
     display_cmd = display_cmd[:80] + "..." if len(display_cmd) > 80 else display_cmd
-    print(f"  Running on {node_ip}: {display_cmd}")
-    sys.stdout.flush()
+    if not quiet:
+        print(f"  Running on {node_ip}: {display_cmd}")
+        sys.stdout.flush()
 
     if dry_run:
         print("  [DRY-RUN] Command not executed")
@@ -70,9 +72,10 @@ def _ssh_run(
     )
     if result.returncode != 0:
         stderr = result.stderr.strip()
-        if stderr:
+        if stderr and not quiet:
             print(f"    Warning: {stderr[:200]}")
-        sys.stdout.flush()
+        if not quiet:
+            sys.stdout.flush()
     return result
 
 
@@ -488,7 +491,6 @@ def _resolve_storage_pool(
 ) -> str:
     """Resolve a storage pool name."""
     if pool_arg != "auto":
-        print(f"  ✓ Using storage pool: {pool_arg}")
         if not _storage_pool_supports_content(
             pool_arg,
             content_filter,
@@ -501,6 +503,7 @@ def _resolve_storage_pool(
             raise ProvisionError(
                 f"Storage pool '{pool_arg}' does not support content type '{content_filter}'"
             )
+        print(f"  ✓ Using storage pool: {pool_arg} ({content_filter})")
         return pool_arg
 
     result = _ssh_run(
@@ -839,22 +842,43 @@ def _wait_for_guest_ssh(
     if dry_run:
         return
 
+    guest_label = label.lower()
+    print(
+        f"  Waiting for {guest_label} SSH at {target_ip}:22 "
+        "(cloud-init may still be completing)..."
+    )
     deadline = time.monotonic() + timeout
+    attempts = 0
+    progress_interval = max(1, 30 // 3)
     probe = (
         f"timeout 3 bash -c '</dev/tcp/{shlex.quote(target_ip)}/22' "
         f"&& echo READY"
     )
     last_err = ""
     while time.monotonic() < deadline:
-        result = _ssh_run(node_ip, user, ssh_opts, probe, dry_run=False)
+        attempts += 1
+        result = _ssh_run(
+            node_ip,
+            user,
+            ssh_opts,
+            probe,
+            dry_run=False,
+            quiet=True,
+        )
         if result.returncode == 0 and "READY" in result.stdout:
             print(f"  ✓ {label} SSH is reachable at {target_ip}:22")
             sys.stdout.flush()
             return
         last_err = (result.stderr or result.stdout or "").strip()
+        if attempts % progress_interval == 0:
+            elapsed = min(timeout, int(timeout - max(0, deadline - time.monotonic())))
+            print(
+                f"  Still waiting for {guest_label} SSH "
+                f"({elapsed}s elapsed; cloud-init may still be completing)..."
+            )
         time.sleep(3)
     raise ProvisionError(
-        f"Timed out after {timeout}s waiting for SSH on {target_ip}:22 "
+        f"Timed out after {timeout}s waiting for {guest_label} SSH on {target_ip}:22 "
         f"(last probe: {last_err or 'no response'})"
     )
 

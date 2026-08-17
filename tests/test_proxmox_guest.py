@@ -83,6 +83,7 @@ class TestWaitForGuestSsh(unittest.TestCase):
         _wait_for_guest_ssh("10.0.0.50", "10.0.0.1", "root", [], timeout=3)
 
         mock_run.assert_called_once()
+        self.assertTrue(mock_run.call_args.kwargs["quiet"])
 
     @patch("lib.proxmox_guest._ssh_run")
     def test_dry_run_skips_probe(self, mock_run) -> None:

@@ -609,27 +609,43 @@ def _wait_for_guest_agent(
     poll_interval: int = 5,
     dry_run: bool = False,
 ) -> None:
-    """Wait briefly for qemu-guest-agent to become reachable."""
+    """Wait for qemu-guest-agent while cloud-init finishes guest setup."""
     if dry_run:
         print(f"  [DRY-RUN] Would wait for qemu-guest-agent in VM {vmid}")
         return
 
-    print("  Waiting for qemu-guest-agent...")
+    print(
+        "  Waiting for qemu-guest-agent "
+        "(cloud-init may take a few minutes to install and start it)..."
+    )
     deadline = time.time() + timeout
+    attempts = 0
+    progress_interval = max(1, 30 // max(1, poll_interval))
     while time.time() < deadline:
+        attempts += 1
         result = _ssh_run(
             node_ip,
             user,
             ssh_opts,
             f"qm agent {vmid} ping",
             dry_run=False,
+            quiet=True,
         )
         if result.returncode == 0:
             print("  ✓ qemu-guest-agent is responding")
             return
+        if attempts % progress_interval == 0:
+            elapsed = min(timeout, int(timeout - max(0, deadline - time.time())))
+            print(
+                "  Still waiting for qemu-guest-agent "
+                f"({elapsed}s elapsed; cloud-init may still be completing)..."
+            )
         time.sleep(poll_interval)
 
-    print("  ⚠ qemu-guest-agent did not come up before SSH handoff; continuing")
+    print(
+        "  ⚠ qemu-guest-agent was not ready after "
+        f"{timeout}s; continuing with the SSH handoff"
+    )
 
 
 def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
@@ -864,7 +880,13 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
         )
         # Cloud-init takes longer than LXC startup; bump the timeout.
         _wait_for_guest_ssh(
-            target_ip, node_ip, user, ssh_opts, timeout=300, dry_run=dry_run
+            target_ip,
+            node_ip,
+            user,
+            ssh_opts,
+            timeout=300,
+            dry_run=dry_run,
+            label="VM",
         )
         provision_complete = True
     except Exception:

@@ -20,6 +20,7 @@ from lib.proxmox_vm import (
     _parse_disk_size_gib,
     _parse_memory_mb,
     _render_user_data,
+    _wait_for_guest_agent,
     check_vm_exists,
 )
 
@@ -136,6 +137,21 @@ class TestImageStorage(unittest.TestCase):
             "pvesm path local:iso/debian.img",
             mock_run.call_args_list[0].args[3],
         )
+
+
+class TestGuestAgentWait(unittest.TestCase):
+    @patch("lib.proxmox_vm.time.sleep")
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_wait_suppresses_expected_retry_warnings(self, mock_run, mock_sleep):
+        mock_run.side_effect = [
+            MagicMock(returncode=1, stdout="", stderr="not running"),
+            MagicMock(returncode=0, stdout="", stderr=""),
+        ]
+
+        _wait_for_guest_agent(111, "10.0.0.10", "root", [], poll_interval=5)
+
+        self.assertTrue(mock_run.call_args.kwargs["quiet"])
+        self.assertEqual(mock_sleep.call_count, 1)
 
 
 class TestParseMemory(unittest.TestCase):
