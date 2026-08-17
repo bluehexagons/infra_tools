@@ -36,8 +36,12 @@ class TestUpdateAndUpgradePackages(unittest.TestCase):
             order[0],
             "apt-get -o DPkg::Lock::Timeout=120 -o Dpkg::Use-Pty=0 update -q",
         )
-        self.assertEqual(order[1], "apt-get upgrade -y -qq")
-        self.assertEqual(order[2], "apt-get autoremove -y -qq")
+        expected_dpkg_options = (
+            "-o Dpkg::Options::=--force-confdef "
+            "-o Dpkg::Options::=--force-confold"
+        )
+        self.assertEqual(order[1], f"apt-get upgrade -y -qq {expected_dpkg_options}")
+        self.assertEqual(order[2], f"apt-get autoremove -y -qq {expected_dpkg_options}")
 
 
 class TestControlPlanePackages(unittest.TestCase):

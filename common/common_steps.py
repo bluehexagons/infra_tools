@@ -37,6 +37,10 @@ _GO_ARCH_BY_MACHINE = {
     "riscv64": "riscv64",
     "loongarch64": "loong64",
 }
+_APT_DPKG_NONINTERACTIVE_OPTIONS = (
+    "-o Dpkg::Options::=--force-confdef "
+    "-o Dpkg::Options::=--force-confold"
+)
 
 
 def _go_release_arch(machine: Optional[str] = None) -> Optional[str]:
@@ -68,8 +72,8 @@ def update_and_upgrade_packages(config: SetupConfig) -> None:
         details = getattr(update_result, "stderr", "") or "check network connectivity and APT sources"
         raise RuntimeError(f"APT package list update failed: {str(details).strip()[:300]}")
     print("  Upgrading packages...")
-    run("apt-get upgrade -y -qq")
-    run("apt-get autoremove -y -qq")
+    run(f"apt-get upgrade -y -qq {_APT_DPKG_NONINTERACTIVE_OPTIONS}")
+    run(f"apt-get autoremove -y -qq {_APT_DPKG_NONINTERACTIVE_OPTIONS}")
     
     print("  ✓ System packages updated and upgraded")
 
