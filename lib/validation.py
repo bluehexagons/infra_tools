@@ -861,6 +861,19 @@ def validate_network_setup_settings(config: Any) -> None:
     if activate_network and not (ipv4_interface or ipv6_interface):
         raise ValueError("--activate-network requires --ip or --ipv6")
 
+    if activate_network:
+        setup_host = str(getattr(config, "host", "")).lower().rstrip(".")
+        local_host = setup_host == "localhost"
+        try:
+            local_host = local_host or ipaddress.ip_address(setup_host).is_loopback
+        except ValueError:
+            pass
+        if local_host:
+            raise ValueError(
+                "--activate-network must run from a separate controller so the new "
+                "address can be verified externally"
+            )
+
     if gateway4_value:
         if not ipv4_interface:
             raise ValueError("--gateway requires --ip")
@@ -870,6 +883,19 @@ def validate_network_setup_settings(config: Any) -> None:
             raise ValueError(f"Invalid IPv4 gateway: {gateway4_value}") from exc
         if gateway4.version != 4 or gateway4.is_unspecified or gateway4.is_multicast:
             raise ValueError(f"Invalid IPv4 gateway: {gateway4_value}")
+        if gateway4 == ipv4_interface.ip or gateway4 not in ipv4_interface.network:
+            raise ValueError(
+                f"IPv4 gateway must be another address in {ipv4_interface.network}"
+            )
+        if (
+            ipv4_interface.network.prefixlen < 31
+            and gateway4
+            in {
+                ipv4_interface.network.network_address,
+                ipv4_interface.network.broadcast_address,
+            }
+        ):
+            raise ValueError(f"IPv4 gateway must be a usable host address: {gateway4_value}")
 
     if gateway6_value:
         if not ipv6_interface:
@@ -880,6 +906,13 @@ def validate_network_setup_settings(config: Any) -> None:
             raise ValueError(f"Invalid IPv6 gateway: {gateway6_value}") from exc
         if gateway6.version != 6 or gateway6.is_unspecified or gateway6.is_multicast:
             raise ValueError(f"Invalid IPv6 gateway: {gateway6_value}")
+        if gateway6 == ipv6_interface.ip or (
+            not gateway6.is_link_local and gateway6 not in ipv6_interface.network
+        ):
+            raise ValueError(
+                "IPv6 gateway must be link-local or another address in "
+                f"{ipv6_interface.network}"
+            )
 
     if not ipv4_interface and not ipv6_interface and (dns_values or interface_name):
         raise ValueError("A network DNS or interface option requires --ip or --ipv6")

@@ -1016,6 +1016,13 @@ def run_setup_command(args: argparse.Namespace) -> int:
         return 1
     
     config = SetupConfig.from_args(args, args.system_type)
+
+    if config.hosted_node and config.activate_network:
+        print(
+            "Error: --activate-network is for patching an already saved Proxmox "
+            "guest; initial hosted setup boots directly on its configured address"
+        )
+        return 1
     
     try:
         runtime_config = _prepare_runtime_config_for_cli(config)

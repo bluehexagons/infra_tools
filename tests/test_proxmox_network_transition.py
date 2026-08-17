@@ -10,6 +10,7 @@ from lib.config import SetupConfig
 from lib.proxmox_network_transition import (
     apply_proxmox_network_plan,
     prepare_proxmox_network_plan,
+    rollback_proxmox_network_plan,
 )
 
 
@@ -92,9 +93,23 @@ class TestPrepareProxmoxNetworkPlan(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "Multiple Proxmox"):
             prepare_proxmox_network_plan(_config(), "10.0.0.50")
 
+    @patch("lib.proxmox_network_transition._ssh_run")
+    def test_refuses_incomplete_conflict_scan_when_a_guest_is_unreadable(
+        self,
+        mock_run: MagicMock,
+    ) -> None:
+        mock_run.side_effect = [
+            _result("VMID Status Name\n101 running old\n102 running unknown\n"),
+            _result("hostname: old\nnet0: name=eth0,ip=10.0.0.50/24,type=veth\n"),
+            subprocess.CompletedProcess([], 1, "", "permission denied"),
+        ]
+
+        with self.assertRaisesRegex(RuntimeError, "checking network conflicts"):
+            prepare_proxmox_network_plan(_config(), "10.0.0.50")
+
 
 class TestApplyProxmoxNetworkPlan(unittest.TestCase):
-    @patch("lib.proxmox_network_transition._ssh_run", return_value=_result())
+    @patch("lib.proxmox_network_transition._ssh_run")
     def test_applies_preflighted_value_with_pct(self, mock_run: MagicMock) -> None:
         from lib.proxmox_network_transition import ProxmoxNetworkPlan
 
@@ -108,13 +123,69 @@ class TestApplyProxmoxNetworkPlan(unittest.TestCase):
             previous_value="name=eth0,ip=10.0.0.50/24,type=veth",
             requested_value="name=eth0,type=veth,ip=10.0.0.60/24",
         )
+        mock_run.side_effect = [
+            _result(f"net0: {plan.previous_value}\n"),
+            _result(),
+            _result("net0: ip=10.0.0.60/24,name=eth0,type=veth\n"),
+        ]
 
         apply_proxmox_network_plan(plan)
 
         self.assertEqual(
-            mock_run.call_args.args[3],
+            mock_run.call_args_list[1].args[3],
             "pct set 101 --net0 name=eth0,type=veth,ip=10.0.0.60/24",
         )
+
+    @patch("lib.proxmox_network_transition._ssh_run")
+    def test_refuses_to_overwrite_metadata_changed_after_preflight(
+        self,
+        mock_run: MagicMock,
+    ) -> None:
+        from lib.proxmox_network_transition import ProxmoxNetworkPlan
+
+        plan = ProxmoxNetworkPlan(
+            node="10.0.0.10",
+            user="root",
+            ssh_opts=[],
+            guest_kind="LXC",
+            vmid=101,
+            option="net0",
+            previous_value="name=eth0,ip=10.0.0.50/24,type=veth",
+            requested_value="name=eth0,ip=10.0.0.60/24,type=veth",
+        )
+        mock_run.return_value = _result(
+            "net0: name=eth0,bridge=vmbr1,ip=10.0.0.50/24,type=veth\n"
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "changed after preflight"):
+            apply_proxmox_network_plan(plan)
+
+        self.assertEqual(mock_run.call_count, 1)
+
+    @patch("lib.proxmox_network_transition._ssh_run")
+    def test_rollback_does_not_overwrite_a_concurrent_metadata_change(
+        self,
+        mock_run: MagicMock,
+    ) -> None:
+        from lib.proxmox_network_transition import ProxmoxNetworkPlan
+
+        plan = ProxmoxNetworkPlan(
+            node="10.0.0.10",
+            user="root",
+            ssh_opts=[],
+            guest_kind="LXC",
+            vmid=101,
+            option="net0",
+            previous_value="name=eth0,bridge=vmbr0,ip=10.0.0.50/24,type=veth",
+            requested_value="name=eth0,bridge=vmbr0,ip=10.0.0.60/24,type=veth",
+        )
+        mock_run.return_value = _result(
+            "net0: name=eth0,bridge=vmbr1,ip=10.0.0.60/24,type=veth\n"
+        )
+
+        rollback_proxmox_network_plan(plan)
+
+        self.assertEqual(mock_run.call_count, 1)
 
 
 if __name__ == "__main__":

@@ -16,7 +16,8 @@ infra-tools setup server_lite 10.20.0.15 admin \
   --dns 10.20.0.53 --dns 2001:db8:20::53
 ```
 
-Both address flags require a prefix length. `--dns` is repeatable, and
+Both address flags require a prefix length. A gateway must be another address
+on that link (an IPv6 link-local gateway is also accepted). `--dns` is repeatable, and
 `--network-interface` overrides default-route interface detection. The setup
 supports active NetworkManager, systemd-networkd, and ifupdown installations.
 It disables future cloud-init network regeneration when cloud-init is present.
@@ -35,15 +36,21 @@ infra-tools patch 10.20.0.15 admin \
   --activate-network
 ```
 
-This is a two-phase handoff. The target adds the new address as a temporary
+This is a transactional handoff. Run it from a separate controller; local-host
+activation is rejected because it cannot prove external reachability. The
+target adds the new address as a temporary
 secondary address and uses source-specific routing for its requested gateway,
 without removing the address used by the active SSH setup. The controller then
-requires SSH to succeed on every requested IPv4/IPv6 address before it writes
-the persistent backend configuration, and checks SSH again afterward. If the
-first check fails, it removes the temporary additions through the old address
-and leaves persistence unchanged. A successful handoff moves the saved host
-record to the new address. The old live address remains available until reboot,
-when the verified persistent configuration becomes the sole assignment.
+requires every requested IPv4/IPv6 endpoint to return the unique transaction
+identity created through the original authenticated connection. Before making
+changes it snapshots the relevant NetworkManager properties or network config
+files. It verifies both old and new endpoints around persistence, keeps commit
+and finalize operations safe to retry after lost SSH responses, and restores
+the persistent snapshot plus temporary live state if a later check fails. A
+successful handoff moves the saved host record to the new address; the
+one-shot activation flag is not saved. The old live address remains available
+until reboot, when the verified persistent configuration becomes the sole
+assignment.
 
 Hosted Proxmox guests receive their initial addressing during provisioning and
 therefore boot with it active. Existing Proxmox VMs and LXCs can use the same
@@ -53,7 +60,11 @@ persistence, the controller identifies exactly one matching VM or LXC on the
 saved Proxmox node. It then updates `qm ipconfig0` or `pct net0` after guest SSH
 is verified, preserving the existing bridge, firewall, MAC, device type, and
 unchanged address-family fields. It checks guest SSH again after the Proxmox
-update and restores the previous Proxmox value if that final check fails.
+update and restores the previous Proxmox value if that final check fails. The
+preflight now requires every listed guest to be readable, refuses metadata that
+changed concurrently, and reads the value back after applying it. Use
+`patch ... --activate-network` for existing hosted guests; initial hosted setup
+boots directly on its configured address and rejects the live-handoff flag.
 
 Proxmox host (`server_proxmox`) identity and bridge changes remain outside this
 generic workflow because they require cluster-aware planning. Generic setup

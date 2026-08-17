@@ -7,16 +7,19 @@ import ipaddress
 import json
 import os
 import re
+import secrets
 import shlex
 import shutil
 import stat
 import sys
+from dataclasses import dataclass
 
 from lib.atomic_io import write_json_atomic, write_text_atomic
 from lib.config import SetupConfig
 from lib.remote_utils import is_dry_run, run
-from lib.types import MaybeStr, StrList
+from lib.types import JSONDict, MaybeStr, StrList
 from lib.validation import (
+    validate_filesystem_path,
     validate_network_interface_name,
     validate_network_setup_settings,
     validate_system_hostname,
@@ -31,8 +34,38 @@ CLOUD_INIT_CONFIG_DIR = "/etc/cloud/cloud.cfg.d"
 CLOUD_INIT_NETWORK_CONFIG_PATH = "/etc/cloud/cloud.cfg.d/99-infra-tools-network.cfg"
 CLOUD_INIT_HOSTNAME_CONFIG_PATH = "/etc/cloud/cloud.cfg.d/99-infra-tools-hostname.cfg"
 NETWORK_TRANSITION_PATH = "/run/infra-tools-network-transition.json"
-NETWORK_TRANSITION_VERSION = 1
+NETWORK_TRANSITION_VERSION = 2
 POLICY_TABLE_RANGE = range(20000, 20100)
+NETWORK_TRANSITION_STATES = {"prepared", "committed"}
+NETWORKMANAGER_ROLLBACK_PROPERTIES = (
+    "ipv4.method",
+    "ipv4.addresses",
+    "ipv4.gateway",
+    "ipv4.never-default",
+    "ipv4.dns",
+    "ipv4.ignore-auto-dns",
+    "ipv6.method",
+    "ipv6.addresses",
+    "ipv6.gateway",
+    "ipv6.never-default",
+    "ipv6.dns",
+    "ipv6.ignore-auto-dns",
+)
+
+
+@dataclass(frozen=True)
+class NetworkTransition:
+    """Validated state for a reversible live network transition."""
+
+    transition_id: str
+    state: str
+    config: SetupConfig
+    interface: str
+    backend: str
+    added_addresses: list[str]
+    policy_tables: dict[str, int]
+    rollback: JSONDict
+    payload: JSONDict
 
 
 def configure_system_hostname(config: SetupConfig) -> None:
@@ -123,16 +156,25 @@ def _reject_managed_bridge(interface: str) -> None:
         )
 
 
-def _configure_networkmanager(config: SetupConfig, interface: str) -> None:
+def _networkmanager_connection(interface: str) -> str:
     result = run(
-        f"nmcli -g GENERAL.CONNECTION device show {shlex.quote(interface)}",
+        "nmcli --escape no --get-values GENERAL.CONNECTION device show "
+        f"{shlex.quote(interface)}",
         check=False,
         capture_output=True,
     )
     connection = (result.stdout or "").strip().splitlines()
     if result.returncode != 0 or not connection or connection[0] in {"", "--"}:
         raise RuntimeError(f"NetworkManager has no active connection for {interface}")
-    connection_name = connection[0]
+    return connection[0]
+
+
+def _configure_networkmanager(
+    config: SetupConfig,
+    interface: str,
+    connection_name: MaybeStr = None,
+) -> None:
+    connection_name = connection_name or _networkmanager_connection(interface)
     quoted_connection = shlex.quote(connection_name)
 
     if config.static_ipv4:
@@ -330,9 +372,19 @@ def _disable_cloud_init_networking() -> None:
     )
 
 
-def _persist_static_network(config: SetupConfig, interface: str, backend: str) -> None:
+def _persist_static_network(
+    config: SetupConfig,
+    interface: str,
+    backend: str,
+    rollback: JSONDict | None = None,
+) -> None:
     if backend == "networkmanager":
-        _configure_networkmanager(config, interface)
+        connection_name = None
+        if rollback and rollback.get("kind") == "networkmanager":
+            candidate = rollback.get("connection")
+            if isinstance(candidate, str):
+                connection_name = candidate
+        _configure_networkmanager(config, interface, connection_name)
     elif backend == "networkd":
         _configure_networkd(config, interface)
     elif backend == "ifupdown":
@@ -394,6 +446,8 @@ def _select_policy_table(version: int) -> int:
             check=False,
             capture_output=True,
         )
+        if route_result.returncode != 0:
+            raise RuntimeError(f"Could not inspect IPv{version} routing table {table}")
         if not (route_result.stdout or "").strip():
             return table
     raise RuntimeError(f"No unused IPv{version} policy routing table is available")
@@ -407,6 +461,208 @@ def _transition_addresses(
         for value in (config.static_ipv4, config.static_ipv6)
         if value
     ]
+
+
+def _snapshot_file(path: str) -> JSONDict:
+    validate_filesystem_path(path)
+    if not os.path.lexists(path):
+        return {"path": path, "kind": "absent"}
+    if os.path.islink(path):
+        return {"path": path, "kind": "symlink", "target": os.readlink(path)}
+    if not os.path.isfile(path):
+        raise RuntimeError(f"Cannot snapshot non-file network path: {path}")
+    try:
+        with open(path, "r", encoding="utf-8") as file_obj:
+            content = file_obj.read()
+        mode = stat.S_IMODE(os.stat(path).st_mode)
+    except (OSError, UnicodeError) as exc:
+        raise RuntimeError(f"Could not snapshot network config {path}: {exc}") from exc
+    return {"path": path, "kind": "file", "content": content, "mode": mode}
+
+
+def _ifupdown_snapshot_paths() -> list[str]:
+    paths = {IFUPDOWN_MAIN_CONFIG_PATH, IFUPDOWN_CONFIG_PATH, CLOUD_INIT_NETWORK_CONFIG_PATH}
+    for path in glob.glob(os.path.join(IFUPDOWN_CONFIG_DIR, "*")):
+        if os.path.isfile(path) or os.path.islink(path):
+            paths.add(path)
+        if not path.endswith(".infra-tools.bak"):
+            paths.add(f"{path}.infra-tools.bak")
+    paths.add(f"{IFUPDOWN_MAIN_CONFIG_PATH}.infra-tools.bak")
+    return sorted(paths)
+
+
+def _capture_persistence_rollback(backend: str, interface: str) -> JSONDict:
+    """Capture exactly what persistence can overwrite before any live changes."""
+
+    if backend == "networkmanager":
+        connection = _networkmanager_connection(interface)
+        properties: dict[str, list[str]] = {}
+        for property_name in NETWORKMANAGER_ROLLBACK_PROPERTIES:
+            result = run(
+                f"nmcli --escape no --get-values {property_name} connection show "
+                f"{shlex.quote(connection)}",
+                check=False,
+                capture_output=True,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"Could not snapshot NetworkManager property {property_name}"
+                )
+            properties[property_name] = (result.stdout or "").splitlines()
+        return {
+            "kind": "networkmanager",
+            "connection": connection,
+            "properties": properties,
+            "files": [_snapshot_file(CLOUD_INIT_NETWORK_CONFIG_PATH)],
+        }
+
+    if backend not in {"networkd", "ifupdown"}:
+        raise RuntimeError(f"Unsupported pending network backend: {backend}")
+    paths = (
+        [NETWORKD_CONFIG_PATH, CLOUD_INIT_NETWORK_CONFIG_PATH]
+        if backend == "networkd"
+        else _ifupdown_snapshot_paths()
+    )
+    return {
+        "kind": backend,
+        "files": [_snapshot_file(path) for path in paths],
+    }
+
+
+def _allowed_rollback_file(path: str, backend: str) -> bool:
+    absolute = os.path.abspath(path)
+    if absolute != path:
+        return False
+    common_paths = {CLOUD_INIT_NETWORK_CONFIG_PATH}
+    if backend == "networkd":
+        return path in common_paths | {NETWORKD_CONFIG_PATH}
+    if backend != "ifupdown":
+        return False
+    if path in common_paths | {
+        IFUPDOWN_MAIN_CONFIG_PATH,
+        f"{IFUPDOWN_MAIN_CONFIG_PATH}.infra-tools.bak",
+        IFUPDOWN_CONFIG_PATH,
+    }:
+        return True
+    return os.path.dirname(path) == os.path.abspath(IFUPDOWN_CONFIG_DIR)
+
+
+def _validate_persistence_rollback(rollback: object, backend: str) -> JSONDict:
+    if not isinstance(rollback, dict) or rollback.get("kind") != backend:
+        raise RuntimeError("Invalid pending persistence rollback data")
+
+    if backend == "networkmanager":
+        connection = rollback.get("connection")
+        properties = rollback.get("properties")
+        files = rollback.get("files")
+        if (
+            not isinstance(connection, str)
+            or not connection
+            or any(ord(char) < 32 or ord(char) == 127 for char in connection)
+            or not isinstance(properties, dict)
+            or set(properties) != set(NETWORKMANAGER_ROLLBACK_PROPERTIES)
+            or not isinstance(files, list)
+            or len(files) != 1
+            or not isinstance(files[0], dict)
+            or files[0].get("path") != CLOUD_INIT_NETWORK_CONFIG_PATH
+        ):
+            raise RuntimeError("Invalid pending NetworkManager rollback data")
+        for values in properties.values():
+            if not isinstance(values, list) or not all(
+                isinstance(value, str) and "\n" not in value and "\r" not in value
+                for value in values
+            ):
+                raise RuntimeError("Invalid pending NetworkManager property snapshot")
+        snapshot = files[0]
+        kind = snapshot.get("kind")
+        if not isinstance(kind, str):
+            raise RuntimeError("Invalid pending NetworkManager file snapshot")
+        if kind not in {"absent", "file", "symlink"}:
+            raise RuntimeError("Invalid pending NetworkManager file snapshot")
+        if kind == "file" and (
+            not isinstance(snapshot.get("content"), str)
+            or not isinstance(snapshot.get("mode"), int)
+            or not 0 <= snapshot["mode"] <= 0o7777
+        ):
+            raise RuntimeError("Invalid pending NetworkManager file contents")
+        if kind == "symlink" and not isinstance(snapshot.get("target"), str):
+            raise RuntimeError("Invalid pending NetworkManager symlink snapshot")
+        return rollback
+
+    files = rollback.get("files")
+    if not isinstance(files, list) or not files:
+        raise RuntimeError("Invalid pending network file snapshots")
+    seen: set[str] = set()
+    for snapshot in files:
+        if not isinstance(snapshot, dict):
+            raise RuntimeError("Invalid pending network file snapshot")
+        path = snapshot.get("path")
+        kind = snapshot.get("kind")
+        if (
+            not isinstance(path, str)
+            or path in seen
+            or not _allowed_rollback_file(path, backend)
+            or not isinstance(kind, str)
+            or kind not in {"absent", "file", "symlink"}
+        ):
+            raise RuntimeError("Invalid pending network file snapshot")
+        validate_filesystem_path(path)
+        seen.add(path)
+        if kind == "file" and (
+            not isinstance(snapshot.get("content"), str)
+            or not isinstance(snapshot.get("mode"), int)
+            or not 0 <= snapshot["mode"] <= 0o7777
+        ):
+            raise RuntimeError("Invalid pending network file contents")
+        if kind == "symlink" and not isinstance(snapshot.get("target"), str):
+            raise RuntimeError("Invalid pending network symlink snapshot")
+    required_paths = {
+        CLOUD_INIT_NETWORK_CONFIG_PATH,
+        NETWORKD_CONFIG_PATH if backend == "networkd" else IFUPDOWN_MAIN_CONFIG_PATH,
+    }
+    if backend == "ifupdown":
+        required_paths.add(IFUPDOWN_CONFIG_PATH)
+    if not required_paths.issubset(seen):
+        raise RuntimeError("Pending network rollback is missing required file snapshots")
+    return rollback
+
+
+def _restore_file_snapshot(snapshot: JSONDict) -> None:
+    path = snapshot["path"]
+    kind = snapshot["kind"]
+    if kind == "absent":
+        if os.path.lexists(path):
+            if os.path.isdir(path) and not os.path.islink(path):
+                raise RuntimeError(f"Refusing to remove directory at network config path: {path}")
+            os.unlink(path)
+        return
+    if kind == "file":
+        if os.path.isdir(path) and not os.path.islink(path):
+            raise RuntimeError(f"Refusing to replace directory at network config path: {path}")
+        write_text_atomic(path, snapshot["content"], mode=snapshot["mode"])
+        return
+    if os.path.lexists(path):
+        if os.path.isdir(path) and not os.path.islink(path):
+            raise RuntimeError(f"Refusing to replace directory at network config path: {path}")
+        os.unlink(path)
+    os.symlink(snapshot["target"], path)
+
+
+def _restore_persistence_rollback(rollback: JSONDict, backend: str) -> None:
+    rollback = _validate_persistence_rollback(rollback, backend)
+    if backend == "networkmanager":
+        connection = rollback["connection"]
+        properties = rollback["properties"]
+        parts = ["nmcli connection modify", shlex.quote(connection)]
+        for property_name in NETWORKMANAGER_ROLLBACK_PROPERTIES:
+            parts.extend(
+                [property_name, shlex.quote(",".join(properties[property_name]))]
+            )
+        run(" ".join(parts))
+        _restore_file_snapshot(rollback["files"][0])
+        return
+    for snapshot in rollback["files"]:
+        _restore_file_snapshot(snapshot)
 
 
 def _prepare_live_network_transition(
@@ -438,8 +694,11 @@ def _prepare_live_network_transition(
         if gateway:
             policy_tables[str(version)] = _select_policy_table(version)
 
-    payload = {
+    rollback = _capture_persistence_rollback(backend, interface)
+    payload: JSONDict = {
         "version": NETWORK_TRANSITION_VERSION,
+        "transition_id": secrets.token_hex(32),
+        "state": "prepared",
         "backend": backend,
         "interface": interface,
         "static_ipv4": config.static_ipv4,
@@ -449,6 +708,7 @@ def _prepare_live_network_transition(
         "dns": list(config.network_dns or []),
         "added_addresses": added_addresses,
         "policy_tables": policy_tables,
+        "rollback": rollback,
     }
     write_json_atomic(NETWORK_TRANSITION_PATH, payload, mode=0o600)
 
@@ -490,7 +750,7 @@ def _prepare_live_network_transition(
         raise
 
 
-def _load_network_transition() -> tuple[SetupConfig, str, str, list[str], dict[str, int]]:
+def _load_network_transition() -> NetworkTransition:
     try:
         with open(NETWORK_TRANSITION_PATH, "r", encoding="utf-8") as file_obj:
             payload = json.load(file_obj)
@@ -502,8 +762,22 @@ def _load_network_transition() -> tuple[SetupConfig, str, str, list[str], dict[s
     if not isinstance(payload, dict) or payload.get("version") != NETWORK_TRANSITION_VERSION:
         raise RuntimeError("Invalid pending network transition format")
 
+    transition_id = payload.get("transition_id")
+    state = payload.get("state")
+    if (
+        not isinstance(transition_id, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", transition_id)
+        or not isinstance(state, str)
+        or state not in NETWORK_TRANSITION_STATES
+    ):
+        raise RuntimeError("Invalid pending network transition identity or state")
+
     backend = payload.get("backend")
-    if backend not in {"networkmanager", "networkd", "ifupdown"}:
+    if not isinstance(backend, str) or backend not in {
+        "networkmanager",
+        "networkd",
+        "ifupdown",
+    }:
         raise RuntimeError("Invalid pending network backend")
     interface_value = payload.get("interface")
     if not isinstance(interface_value, str):
@@ -531,7 +805,7 @@ def _load_network_transition() -> tuple[SetupConfig, str, str, list[str], dict[s
         network_gateway6=string_fields["gateway6"],
         network_dns=list(dns),
         network_interface=interface,
-        activate_network=True,
+        activate_network=False,
     )
     validate_network_setup_settings(config)
 
@@ -540,6 +814,7 @@ def _load_network_transition() -> tuple[SetupConfig, str, str, list[str], dict[s
     if (
         not isinstance(added_addresses, list)
         or not all(isinstance(value, str) for value in added_addresses)
+        or len(added_addresses) != len(set(added_addresses))
         or not set(added_addresses).issubset(expected_addresses)
     ):
         raise RuntimeError("Invalid pending added-address list")
@@ -553,29 +828,85 @@ def _load_network_transition() -> tuple[SetupConfig, str, str, list[str], dict[s
             raise RuntimeError("Invalid pending policy routing table")
         policy_tables[version] = table
 
-    return config, interface, backend, list(added_addresses), policy_tables
+    expected_table_versions = {
+        version
+        for version, gateway in (("4", config.network_gateway4), ("6", config.network_gateway6))
+        if gateway
+    }
+    if set(policy_tables) != expected_table_versions:
+        raise RuntimeError("Pending policy routing tables do not match requested gateways")
+
+    rollback = _validate_persistence_rollback(payload.get("rollback"), backend)
+    return NetworkTransition(
+        transition_id=transition_id,
+        state=state,
+        config=config,
+        interface=interface,
+        backend=backend,
+        added_addresses=list(added_addresses),
+        policy_tables=policy_tables,
+        rollback=rollback,
+        payload=payload,
+    )
 
 
-def commit_network_transition() -> None:
+def _require_transition_id(
+    transition: NetworkTransition,
+    expected_id: MaybeStr,
+) -> None:
+    if expected_id is not None and transition.transition_id != expected_id:
+        raise RuntimeError("Pending network transition identity does not match")
+
+
+def commit_network_transition(expected_id: MaybeStr = None) -> None:
     """Persist a live transition only after the controller verified new-address SSH."""
 
-    config, interface, backend, _added_addresses, _tables = _load_network_transition()
-    _reject_managed_bridge(interface)
-    _persist_static_network(config, interface, backend)
-    os.unlink(NETWORK_TRANSITION_PATH)
-    print(f"  ✓ Verified network transition persisted for {interface} via {backend}")
+    transition = _load_network_transition()
+    _require_transition_id(transition, expected_id)
+    if transition.state == "committed":
+        print(f"  ✓ Network transition already persisted for {transition.interface}")
+        return
+    _reject_managed_bridge(transition.interface)
+    try:
+        _persist_static_network(
+            transition.config,
+            transition.interface,
+            transition.backend,
+            transition.rollback,
+        )
+        committed_payload = dict(transition.payload)
+        committed_payload["state"] = "committed"
+        write_json_atomic(NETWORK_TRANSITION_PATH, committed_payload, mode=0o600)
+    except Exception as exc:
+        try:
+            _restore_persistence_rollback(transition.rollback, transition.backend)
+        except Exception as rollback_exc:
+            raise RuntimeError(
+                f"Network persistence failed and rollback also failed: {rollback_exc}"
+            ) from exc
+        raise
+    print(
+        f"  ✓ Verified network transition persisted for {transition.interface} "
+        f"via {transition.backend}"
+    )
 
 
-def abort_network_transition() -> None:
-    """Remove temporary addresses and policy routes from an uncommitted transition."""
+def abort_network_transition(expected_id: MaybeStr = None) -> None:
+    """Restore persistence and remove temporary state from a transition."""
 
     if not os.path.exists(NETWORK_TRANSITION_PATH):
         return
-    config, interface, _backend, added_addresses, policy_tables = _load_network_transition()
+    transition = _load_network_transition()
+    _require_transition_id(transition, expected_id)
+    _restore_persistence_rollback(transition.rollback, transition.backend)
 
-    for version, table in policy_tables.items():
+    for version, table in transition.policy_tables.items():
         family_flag = "-4" if version == "4" else "-6"
-        address_value = config.static_ipv4 if version == "4" else config.static_ipv6
+        address_value = (
+            transition.config.static_ipv4
+            if version == "4"
+            else transition.config.static_ipv6
+        )
         if not address_value:
             raise RuntimeError(f"Pending IPv{version} policy route has no source address")
         address = ipaddress.ip_interface(address_value)
@@ -592,15 +923,27 @@ def abort_network_transition() -> None:
             capture_output=True,
         )
 
-    for address in added_addresses:
+    for address in transition.added_addresses:
         parsed = ipaddress.ip_interface(address)
         family_flag = "-4" if parsed.version == 4 else "-6"
         run(
             f"ip {family_flag} address del {shlex.quote(str(parsed))} "
-            f"dev {shlex.quote(interface)}",
+            f"dev {shlex.quote(transition.interface)}",
             check=False,
             capture_output=True,
         )
+    os.unlink(NETWORK_TRANSITION_PATH)
+
+
+def finalize_network_transition(expected_id: MaybeStr = None) -> None:
+    """Discard rollback state after every post-change accessibility check passes."""
+
+    if not os.path.exists(NETWORK_TRANSITION_PATH):
+        return
+    transition = _load_network_transition()
+    _require_transition_id(transition, expected_id)
+    if transition.state != "committed":
+        raise RuntimeError("Cannot finalize a network transition before persistence")
     os.unlink(NETWORK_TRANSITION_PATH)
 
 
@@ -629,7 +972,17 @@ def configure_static_network(config: SetupConfig) -> None:
         )
         return
 
-    _persist_static_network(config, interface, backend)
+    rollback = _capture_persistence_rollback(backend, interface)
+    try:
+        _persist_static_network(config, interface, backend, rollback)
+    except Exception as exc:
+        try:
+            _restore_persistence_rollback(rollback, backend)
+        except Exception as rollback_exc:
+            raise RuntimeError(
+                f"Static network staging failed and rollback also failed: {rollback_exc}"
+            ) from exc
+        raise
 
     print(
         f"  ✓ Static network configuration staged for {interface} via {backend}; "
@@ -639,13 +992,19 @@ def configure_static_network(config: SetupConfig) -> None:
 
 def _network_transition_main(argv: list[str]) -> int:
     try:
-        if argv == ["--commit-transition"]:
-            commit_network_transition()
+        if len(argv) == 2 and argv[0] == "--commit-transition":
+            commit_network_transition(argv[1])
             return 0
-        if argv == ["--abort-transition"]:
-            abort_network_transition()
+        if len(argv) == 2 and argv[0] == "--abort-transition":
+            abort_network_transition(argv[1])
             return 0
-        print("Usage: python3 -m common.network_steps --commit-transition|--abort-transition")
+        if len(argv) == 2 and argv[0] == "--finalize-transition":
+            finalize_network_transition(argv[1])
+            return 0
+        print(
+            "Usage: python3 -m common.network_steps "
+            "--commit-transition|--abort-transition|--finalize-transition ID"
+        )
         return 2
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"Network transition failed: {exc}", file=sys.stderr)

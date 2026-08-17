@@ -138,13 +138,18 @@ supports NetworkManager, systemd-networkd, and ifupdown on Debian. Without
 `--activate-network`, direct-host configuration is persisted but not activated
 live; reboot or deliberately restart the interface after reviewing it.
 
-`--activate-network` uses a two-phase handoff for an existing host. The remote
+`--activate-network` uses a retry-safe transaction for an existing host and
+must be run from a separate controller. The remote
 setup temporarily adds the requested addresses without removing the address
 carrying its SSH connection. After that setup process exits, the controller
-connects to every requested address, persists the new backend configuration
-through the verified address, and verifies SSH again. A failed first check
-removes the temporary addresses through the old connection. On success, the
+requires every requested endpoint to return a unique transaction identity,
+persists the new backend configuration through the verified address, and
+verifies both the old and new endpoints again. The transaction snapshots the
+affected backend settings and restores them together with temporary addresses
+and routes if a later check fails. Commit/finalize retries are idempotent, so a
+lost SSH response does not leave an ambiguous result. On success, the
 saved setup moves to the new IPv4 address (or IPv6 when no IPv4 was requested).
+The one-shot activation flag is not retained in the saved setup.
 The old address remains live only until reboot; it is absent from the new
 persistent configuration. Existing ifupdown files changed for the selected
 interface receive a one-time `.infra-tools.bak` copy.
@@ -167,10 +172,12 @@ infra-tools patch 192.168.1.50 admin \
 cluster identity and requires a node-specific migration plan. The runtime also
 refuses a generic change when the selected interface is a Linux bridge, even
 if the host was given another setup type. Existing Proxmox VM and LXC guests
-can use the same `patch ... --activate-network` handoff as other Debian hosts;
-the handoff preflights and updates `qm ipconfig0` or `pct net0` while preserving
-the guest's other network fields, then checks guest SSH once more. New hosted
-guests still receive their initial address from cloud-init or `pct`.
+can use the same `patch ... --activate-network` handoff as other Debian hosts.
+The handoff requires a complete guest-conflict scan, refuses concurrent
+metadata changes, updates and reads back `qm ipconfig0` or `pct net0` while
+preserving the guest's other network fields, and verifies both SSH endpoints
+before guest persistence. New hosted guests receive their initial address from
+cloud-init or `pct`, so initial hosted setup rejects `--activate-network`.
 
 Without `--rdp-source`, enabling RDP keeps a globally rate-limited UFW rule.
 Prefer one or more management, VPN, or trusted LAN CIDRs. On rerun,

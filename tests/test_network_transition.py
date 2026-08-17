@@ -7,7 +7,15 @@ import unittest
 from unittest.mock import patch
 
 from lib.config import SetupConfig
-from lib.network_transition import finish_network_transition, network_transition_targets
+from lib.network_transition import (
+    RemoteNetworkTransition,
+    _wait_for_transition_state,
+    finish_network_transition,
+    network_transition_targets,
+)
+
+
+TRANSITION_ID = "a" * 64
 
 
 def _config(**overrides: object) -> SetupConfig:
@@ -22,8 +30,12 @@ def _config(**overrides: object) -> SetupConfig:
     return SetupConfig(**values)  # type: ignore[arg-type]
 
 
-def _result(returncode: int = 0, stderr: str = "") -> subprocess.CompletedProcess[str]:
-    return subprocess.CompletedProcess(["ssh"], returncode, "", stderr)
+def _result(
+    returncode: int = 0,
+    stderr: str = "",
+    stdout: str = "",
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess(["ssh"], returncode, stdout, stderr)
 
 
 class TestNetworkTransitionTargets(unittest.TestCase):
@@ -37,30 +49,37 @@ class TestNetworkTransitionTargets(unittest.TestCase):
 
 
 class TestFinishNetworkTransition(unittest.TestCase):
-    @patch("lib.network_transition._run_transition_ssh", return_value=_result())
+    @patch("lib.network_transition._wait_for_any_transition")
+    @patch("lib.network_transition._wait_for_transition_state", return_value=_result())
     @patch("lib.network_transition._wait_for_transition_ssh", return_value=_result())
     def test_verifies_before_and_after_commit_then_adopts_new_host(
         self,
-        mock_wait,
-        mock_run,
+        mock_action,
+        mock_state,
+        mock_read,
     ) -> None:
+        mock_read.return_value = RemoteNetworkTransition(TRANSITION_ID, "prepared")
         config = _config()
 
         result = finish_network_transition(config, 0)
 
         self.assertEqual(result, 0)
         self.assertEqual(config.host, "192.168.10.21")
-        self.assertEqual(mock_wait.call_count, 2)
-        self.assertIn("--commit-transition", mock_run.call_args.args[2])
+        self.assertEqual(mock_state.call_count, 3)
+        self.assertEqual(mock_action.call_count, 2)
+        self.assertIn("--commit-transition", mock_action.call_args_list[0].args[2])
+        self.assertIn("--finalize-transition", mock_action.call_args_list[1].args[2])
 
     @patch("lib.network_transition.apply_proxmox_network_plan")
     @patch("lib.network_transition.prepare_proxmox_network_plan")
-    @patch("lib.network_transition._run_transition_ssh", return_value=_result())
+    @patch("lib.network_transition._wait_for_any_transition")
+    @patch("lib.network_transition._wait_for_transition_state", return_value=_result())
     @patch("lib.network_transition._wait_for_transition_ssh", return_value=_result())
     def test_updates_proxmox_metadata_between_guest_verification_checks(
         self,
-        mock_wait,
-        _mock_run,
+        _mock_action,
+        mock_state,
+        mock_read,
         mock_prepare,
         mock_apply,
     ) -> None:
@@ -78,31 +97,35 @@ class TestFinishNetworkTransition(unittest.TestCase):
             requested_value="name=eth0,ip=192.168.10.21/24,type=veth",
         )
         mock_prepare.return_value = plan
+        mock_read.return_value = RemoteNetworkTransition(TRANSITION_ID, "prepared")
 
         result = finish_network_transition(config, 0)
 
         self.assertEqual(result, 0)
         mock_prepare.assert_called_once_with(config, "192.168.10.20")
         mock_apply.assert_called_once_with(plan)
-        self.assertEqual(mock_wait.call_count, 3)
+        self.assertEqual(mock_state.call_count, 5)
 
     @patch("lib.network_transition._abort_transition")
+    @patch("lib.network_transition._wait_for_any_transition")
     @patch(
-        "lib.network_transition._wait_for_transition_ssh",
+        "lib.network_transition._wait_for_transition_state",
         return_value=_result(255, "connection refused"),
     )
     def test_failed_new_address_verification_aborts_without_changing_host(
         self,
-        _mock_wait,
+        _mock_state,
+        mock_read,
         mock_abort,
     ) -> None:
+        mock_read.return_value = RemoteNetworkTransition(TRANSITION_ID, "prepared")
         config = _config()
 
         result = finish_network_transition(config, 0)
 
         self.assertEqual(result, 1)
         self.assertEqual(config.host, "192.168.10.20")
-        mock_abort.assert_called_once_with(config)
+        mock_abort.assert_called_once_with(config, TRANSITION_ID, [])
 
     @patch("lib.network_transition._abort_transition")
     def test_failed_setup_cleans_up_temporary_addresses(self, mock_abort) -> None:
@@ -110,6 +133,51 @@ class TestFinishNetworkTransition(unittest.TestCase):
 
         self.assertEqual(finish_network_transition(config, 3), 3)
         mock_abort.assert_called_once_with(config)
+
+    @patch("lib.network_transition._rollback_handoff")
+    @patch("lib.network_transition._wait_for_any_transition")
+    @patch("lib.network_transition._wait_for_transition_state", return_value=_result())
+    @patch(
+        "lib.network_transition._wait_for_transition_ssh",
+        return_value=_result(1, "write failed"),
+    )
+    def test_persistence_failure_rolls_back_guest_and_proxmox_state(
+        self,
+        _mock_action,
+        _mock_state,
+        mock_read,
+        mock_rollback,
+    ) -> None:
+        mock_read.return_value = RemoteNetworkTransition(TRANSITION_ID, "prepared")
+        config = _config()
+
+        self.assertEqual(finish_network_transition(config, 0), 1)
+
+        mock_rollback.assert_called_once_with(
+            config,
+            None,
+            TRANSITION_ID,
+            ["192.168.10.21"],
+        )
+
+
+class TestTransitionIdentity(unittest.TestCase):
+    @patch(
+        "lib.network_transition._run_transition_ssh",
+        return_value=_result(stdout=f"{'b' * 64} prepared\n"),
+    )
+    def test_rejects_a_reachable_host_with_a_different_transaction(self, _mock_run) -> None:
+        result = _wait_for_transition_state(
+            _config(),
+            "192.168.10.21",
+            TRANSITION_ID,
+            "prepared",
+            attempts=1,
+            interval=0,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("identity", result.stderr)
 
 
 class TestSavedHostMigration(unittest.TestCase):

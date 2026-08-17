@@ -67,6 +67,25 @@ def _assignment_ip(value: str, key: str) -> Optional[str]:
     return _literal_ip(match.group(1).split("/", 1)[0])
 
 
+def _assignments_equal(left: str, right: str) -> bool:
+    def fields(value: str) -> Optional[dict[str, str]]:
+        parsed: dict[str, str] = {}
+        for field in value.split(","):
+            key, separator, field_value = field.partition("=")
+            if not separator or not key or key in parsed:
+                return None
+            parsed[key] = field_value
+        return parsed
+
+    left_fields = fields(left)
+    right_fields = fields(right)
+    return (
+        left == right
+        if left_fields is None or right_fields is None
+        else left_fields == right_fields
+    )
+
+
 def _replace_assignment_fields(
     current: str,
     replacements: list[tuple[str, Optional[str]]],
@@ -160,7 +179,15 @@ def prepare_proxmox_network_plan(
             dry_run=False,
         )
         if config_result.returncode != 0:
-            continue
+            detail = (
+                config_result.stderr
+                or config_result.stdout
+                or "command failed"
+            ).strip()
+            raise RuntimeError(
+                f"Could not inspect Proxmox {guest_kind} {vmid} while checking "
+                f"network conflicts: {detail}"
+            )
         assignment = _config_value(config_result.stdout or "", option)
         if assignment is None:
             continue
@@ -206,8 +233,42 @@ def prepare_proxmox_network_plan(
     )
 
 
-def _apply_plan_value(plan: ProxmoxNetworkPlan, value: str) -> None:
+def _read_plan_value(plan: ProxmoxNetworkPlan) -> str:
     command = "qm" if plan.guest_kind == "VM" else "pct"
+    result = _ssh_run(
+        plan.node,
+        plan.user,
+        plan.ssh_opts,
+        f"{command} config {plan.vmid}",
+        dry_run=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Could not verify Proxmox {plan.guest_kind} {plan.vmid} network metadata: "
+            f"{(result.stderr or result.stdout or '').strip() or 'command failed'}"
+        )
+    value = _config_value(result.stdout or "", plan.option)
+    if value is None:
+        raise RuntimeError(
+            f"Proxmox {plan.guest_kind} {plan.vmid} no longer has {plan.option}"
+        )
+    return value
+
+
+def _apply_plan_value(
+    plan: ProxmoxNetworkPlan,
+    value: str,
+    *,
+    expected_current: Optional[str] = None,
+) -> None:
+    command = "qm" if plan.guest_kind == "VM" else "pct"
+    if expected_current is not None:
+        current = _read_plan_value(plan)
+        if not _assignments_equal(current, expected_current):
+            raise RuntimeError(
+                f"Proxmox {plan.guest_kind} {plan.vmid} network metadata changed "
+                "after preflight; refusing to overwrite it"
+            )
     result = _ssh_run(
         plan.node,
         plan.user,
@@ -220,6 +281,12 @@ def _apply_plan_value(plan: ProxmoxNetworkPlan, value: str) -> None:
             f"Could not update Proxmox {plan.guest_kind} {plan.vmid} network metadata: "
             f"{(result.stderr or result.stdout or '').strip() or 'command failed'}"
         )
+    stored = _read_plan_value(plan)
+    if not _assignments_equal(stored, value):
+        raise RuntimeError(
+            f"Proxmox {plan.guest_kind} {plan.vmid} did not retain the requested "
+            f"{plan.option} value"
+        )
 
 
 def apply_proxmox_network_plan(plan: Optional[ProxmoxNetworkPlan]) -> None:
@@ -227,7 +294,11 @@ def apply_proxmox_network_plan(plan: Optional[ProxmoxNetworkPlan]) -> None:
 
     if plan is None or plan.requested_value == plan.previous_value:
         return
-    _apply_plan_value(plan, plan.requested_value)
+    _apply_plan_value(
+        plan,
+        plan.requested_value,
+        expected_current=plan.previous_value,
+    )
     print(
         f"  ✓ Proxmox {plan.guest_kind} {plan.vmid} network metadata updated on {plan.node}"
     )
@@ -239,7 +310,20 @@ def rollback_proxmox_network_plan(plan: Optional[ProxmoxNetworkPlan]) -> None:
     if plan is None or plan.requested_value == plan.previous_value:
         return
     try:
-        _apply_plan_value(plan, plan.previous_value)
+        current = _read_plan_value(plan)
+        if _assignments_equal(current, plan.previous_value):
+            return
+        if not _assignments_equal(current, plan.requested_value):
+            print(
+                f"  ⚠ Refusing to roll back Proxmox {plan.guest_kind} {plan.vmid}; "
+                "its network metadata changed concurrently"
+            )
+            return
+        _apply_plan_value(
+            plan,
+            plan.previous_value,
+            expected_current=plan.requested_value,
+        )
         print(f"  ✓ Restored Proxmox {plan.guest_kind} {plan.vmid} network metadata")
     except RuntimeError as exc:
         print(f"  ⚠ Proxmox network metadata rollback failed: {exc}")

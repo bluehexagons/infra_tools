@@ -860,6 +860,10 @@ class SetupConfig:
         data.pop('password', None)
         data.pop('share_credentials', None)
         data.pop('deploy_latest', None)
+        # Live activation is a one-shot controller operation. Persisting it
+        # would make a later deploy retry a sensitive address change without
+        # the operator explicitly requesting another handoff.
+        data.pop('activate_network', None)
         data['samba_shares'] = _strip_passwords_from_samba_shares(self.samba_shares)
         data['smb_mounts'] = _strip_passwords_from_smb_mounts(self.smb_mounts)
         if self.tags:
@@ -868,6 +872,10 @@ class SetupConfig:
     
     @classmethod
     def from_dict(cls, host: str, system_type: str, data: JSONDict) -> 'SetupConfig':
+        # Older cache entries may contain this one-shot flag. Never replay a
+        # sensitive live handoff merely because a saved configuration is
+        # loaded for deploy, patch, or reconstruction.
+        data.pop('activate_network', None)
         tags_str = data.get('tags')
         if tags_str and isinstance(tags_str, str):
             data['tags'] = [tag.strip() for tag in tags_str.split(',') if tag.strip()]
