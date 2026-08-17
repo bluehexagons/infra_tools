@@ -43,9 +43,10 @@ to the detailed setup and operations guides.
 
 Implementation plans and audit records live under [`plans/`](plans/). They are
 development references, not operator instructions. Start with the
-[project roadmap](plans/ROADMAP.md), then consult the
-[GitHub issue triage](plans/GITHUB_ISSUE_TRIAGE_2026-08-17.md) when matching
-issue status to implementation evidence.
+[planning and issue index](plans/README.md) for the active portfolio, then use
+the [project roadmap](plans/ROADMAP.md) for priority and the
+[GitHub issue triage](plans/GITHUB_ISSUE_TRIAGE_2026-08-17.md) for
+issue-to-implementation evidence.
 
 ## Documentation conventions
 

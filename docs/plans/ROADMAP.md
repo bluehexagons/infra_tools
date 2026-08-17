@@ -7,6 +7,10 @@ wide range of setup and operations tasks; the next releases should complete
 the safety and recovery loops around those tasks before adding more operating
 systems, desktop applications, or service-specific installers.
 
+See the [planning and issue index](README.md) for the portfolio view and the
+[GitHub issue triage](GITHUB_ISSUE_TRIAGE_2026-08-17.md) for current
+issue-to-implementation evidence.
+
 ## Product direction
 
 The project should become a small, dependable infrastructure reconciler for
@@ -56,15 +60,17 @@ The best next work packets are:
 5. Replace automatic SSH first-use trust with explicit enrollment before
    privileged setup/deploy operations.
 
-## GitHub issue alignment (2026-08-17)
+## Planning portfolio and GitHub issue alignment (2026-08-17)
 
 The current issue tracker has been reconciled with the implementation and the
 plans in this document. Completed operator-facing requests are identified as
 candidates for closure after their documentation and test evidence was checked.
-Partial requests remain open with their residual scope recorded. See the complete
+Partial requests remain open with their residual scope recorded. The
+[planning index](README.md) separates active projects, queued dependencies,
+unscheduled issue backlog, and completed reference records. See the complete
 [GitHub issue triage](GITHUB_ISSUE_TRIAGE_2026-08-17.md) for issue-by-issue
-evidence and ownership. This repository-only update did not change GitHub issue
-state.
+evidence and ownership. This repository-only update did not change GitHub
+issue state.
 
 The triage confirms that Proxmox VM provisioning, guest lifecycle management,
 local self-setup, Proxmox restart defaults, and Debian kernel-package cleanup
