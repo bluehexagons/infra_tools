@@ -72,9 +72,9 @@ class TestHostedFlagParsing(unittest.TestCase):
             [["root", "auto", "10G"], ["template", "local"]]
         )
 
-    def test_cores_default_1(self):
+    def test_cores_default_is_deferred_to_setup_config(self):
         args = self.parser.parse_args(["10.0.0.50"])
-        self.assertEqual(args.container_cores, 1)
+        self.assertFalse(hasattr(args, "container_cores"))
 
     def test_cores_override(self):
         args = self.parser.parse_args([
@@ -82,9 +82,9 @@ class TestHostedFlagParsing(unittest.TestCase):
         ])
         self.assertEqual(args.container_cores, 4)
 
-    def test_base_default_debian(self):
+    def test_base_default_is_deferred_to_setup_config(self):
         args = self.parser.parse_args(["10.0.0.50"])
-        self.assertEqual(args.container_base, "debian")
+        self.assertFalse(hasattr(args, "container_base"))
 
     def test_base_override(self):
         args = self.parser.parse_args([

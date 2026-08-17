@@ -195,14 +195,14 @@ def add_setup_arguments(
             "--cores",
             dest="container_cores",
             type=int,
-            default=1,
+            default=argparse.SUPPRESS,
             metavar="N",
             help="Provisioned guest CPU cores (default: 1)",
         )
         parser.add_argument(
             "--base",
             dest="container_base",
-            default="debian",
+            default=argparse.SUPPRESS,
             metavar="NAME",
             help="Base OS family for the LXC template or VM image catalog (default: debian)",
         )

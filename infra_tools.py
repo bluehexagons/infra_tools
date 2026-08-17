@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import ipaddress
 import json
 import os
 import sys
@@ -894,6 +895,74 @@ def _patch_preserve_keys(args: argparse.Namespace) -> set[str]:
     return preserve_keys
 
 
+_PROVISIONING_CHANGE_ARGS = (
+    "machine_type",
+    "hosted_bridge",
+    "container_memory",
+    "vm_balloon_min",
+    "container_storage",
+    "container_cores",
+    "container_base",
+    "vm_image",
+    "vm_image_storage",
+)
+
+_CACHED_PROVISIONING_FIELDS = (
+    "machine_type",
+    "hosted_node",
+    "hosted_user",
+    "hosted_key",
+    "hosted_bridge",
+    "container_memory",
+    "vm_balloon_min",
+    "container_storage",
+    "container_cores",
+    "container_base",
+    "vm_image",
+    "vm_image_storage",
+)
+
+
+def _provisioning_changes_requested(args: argparse.Namespace) -> bool:
+    """Return whether this invocation explicitly changes the guest shape."""
+    return any(
+        getattr(args, field, None) is not None
+        for field in _PROVISIONING_CHANGE_ARGS
+    )
+
+
+def _reuse_cached_provisioning_metadata(
+    config: SetupConfig,
+    args: argparse.Namespace,
+) -> bool:
+    """Hydrate an existing guest from local state and skip Proxmox discovery."""
+    if not config.hosted_node or _provisioning_changes_requested(args):
+        return False
+
+    cache_target = config.host
+    if "/" in cache_target:
+        try:
+            target_interface = ipaddress.ip_interface(cache_target)
+        except ValueError:
+            pass
+        else:
+            cache_target = str(target_interface.ip)
+
+    cached_config = load_setup_command(cache_target)
+    if cached_config is None or not cached_config.hosted_node:
+        return False
+
+    for field in _CACHED_PROVISIONING_FIELDS:
+        setattr(config, field, getattr(cached_config, field))
+
+    if config.ssh_key is None:
+        config.ssh_key = cached_config.ssh_key
+    if getattr(args, "static_ipv4", None) is None and cached_config.static_ipv4:
+        config.static_ipv4 = cached_config.static_ipv4
+
+    return True
+
+
 def _prepare_runtime_config_for_cli(config: SetupConfig) -> SetupConfig:
     _apply_hosted_proxmox_defaults(config, None)
     runtime_config = prepare_runtime_config(config)
@@ -1018,6 +1087,8 @@ def run_setup_command(args: argparse.Namespace) -> int:
 
     config = SetupConfig.from_args(args, args.system_type)
 
+    reuse_cached_provisioning = _reuse_cached_provisioning_metadata(config, args)
+
     if not validate_username(config.username):
         print(f"Error: Invalid username: {config.username}")
         return 1
@@ -1042,7 +1113,9 @@ def run_setup_command(args: argparse.Namespace) -> int:
     description = f"{args.system_type.replace('_', ' ').title()} Setup"
     print_setup_summary(config, description)
 
-    if config.hosted_node:
+    if config.hosted_node and reuse_cached_provisioning:
+        print("  ✓ Guest already provisioned in local metadata; skipping Proxmox host check")
+    elif config.hosted_node:
         if config.machine_type == "vm":
             from lib.proxmox_vm import provision_vm, VMAlreadyExists
 

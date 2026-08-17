@@ -125,6 +125,15 @@ Replace `100` with the VMID returned by `proxmox ls`.
 `RDP_PASSWORD` in a secure secret source rather than placing a literal in
 shell history; the password is not persisted in saved setup state.
 
+After a guest has been provisioned, a later `setup` invocation can retain
+`--provision-on` while omitting the guest-shape options. If the target has
+saved local setup metadata, infra-tools reuses its recorded Proxmox details
+and skips contacting the Proxmox host before updating the guest. Supplying any
+of `--machine`, `--bridge`, `--memory`, `--balloon-min`, `--storage`,
+`--cores`, `--base`, `--image`, or `--image-storage` requests a provisioning
+check instead. A target without saved provisioning metadata still requires
+`--memory` and root `--storage` on its first run.
+
 ## Graphical VM hardware baseline
 
 Provisioned VMs that include a desktop or enable RDP are created with both a
