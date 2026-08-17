@@ -11,6 +11,7 @@ from desktop.xrdp_steps import (
     _generate_sesman_ini,
     _generate_xrdp_ini,
     _generate_xorg_conf,
+    _remove_legacy_xrdp_socket_environment,
     _validate_xrdp_tls_certificate,
     harden_xrdp,
     install_xrdp,
@@ -231,6 +232,15 @@ class TestValidateXrdpTlsCertificate(unittest.TestCase):
 
 
 class TestInstallXrdp(unittest.TestCase):
+    @patch('desktop.xrdp_steps.run')
+    @patch('desktop.xrdp_steps.os.remove')
+    @patch('desktop.xrdp_steps.os.path.exists', return_value=True)
+    def test_removes_legacy_socket_environment(self, _exists, mock_remove, mock_run):
+        _remove_legacy_xrdp_socket_environment()
+
+        self.assertEqual(mock_remove.call_count, 2)
+        mock_run.assert_called_once_with("systemctl daemon-reload")
+
     """Test XRDP installation and configuration."""
 
     def setUp(self):

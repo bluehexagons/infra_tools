@@ -198,6 +198,21 @@ def _refresh_services(*services: str, reload_running_services: bool = True) -> N
         run(f"systemctl start {inactive_list}", check=False)
 
 
+def _remove_legacy_xrdp_socket_environment() -> None:
+    """Remove the obsolete static socket-path overrides from older setups."""
+    removed = False
+    for service in ("xrdp", "xrdp-sesman"):
+        dropin_path = f"/etc/systemd/system/{service}.service.d/infra-tools.conf"
+        if os.path.exists(dropin_path):
+            try:
+                os.remove(dropin_path)
+            except FileNotFoundError:
+                continue
+            removed = True
+    if removed:
+        run("systemctl daemon-reload")
+
+
 def _validate_xrdp_tls_certificate() -> None:
     """Refuse to activate XRDP with an unusable TLS certificate/key pair."""
     health = inspect_xrdp_certificate_pair(
@@ -273,6 +288,7 @@ def install_xrdp(config: SetupConfig) -> None:
     if log_dir_result.returncode != 0:
         raise RuntimeError("could not create the per-user Xorg log directory")
     run(f"chmod 700 {shlex.quote(xorg_log_dir)}")
+    _remove_legacy_xrdp_socket_environment()
     # Configure Xwrapper to allow XRDP sessions to start X server
     # This is critical for preventing session freezes and startup issues
     xwrapper_config = "/etc/X11/Xwrapper.config"
