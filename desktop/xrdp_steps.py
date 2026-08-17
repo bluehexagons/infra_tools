@@ -6,6 +6,7 @@ import shlex
 
 from lib.config import SetupConfig
 from lib.remote_utils import (
+    get_os_id,
     get_user_home,
     is_dry_run,
     is_package_installed,
@@ -20,6 +21,88 @@ from lib.xrdp_certificate import (
 
 _XRDP_XORG_LAUNCHER = "/usr/local/libexec/infra-tools-xrdp-Xorg"
 _XRDP_APPARMOR_LOCAL = "/etc/apparmor.d/local/Xorg"
+_XRDP_SID_SOURCES = "/etc/apt/sources.list.d/infra-tools-sid.sources"
+_XRDP_SID_PREFERENCES = "/etc/apt/preferences.d/infra-tools-sid.pref"
+_XRDP_SID_SOURCE = """Types: deb
+URIs: https://deb.debian.org/debian
+Suites: sid
+Components: main
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+"""
+_XRDP_SID_PREFERENCE = """Package: *
+Pin: release n=sid
+Pin-Priority: 50
+"""
+_XRDP_SID_FORBIDDEN_UPGRADES = (
+    "libc6",
+    "systemd",
+    "xserver-xorg-core",
+    "linux-image",
+    "linux-headers",
+)
+
+
+def _configure_xrdp_package_source() -> str:
+    """Configure the narrowly pinned Debian Sid source used for XRDP."""
+    if get_os_id() != "debian":
+        return ""
+
+    os.makedirs(os.path.dirname(_XRDP_SID_SOURCES), exist_ok=True)
+    os.makedirs(os.path.dirname(_XRDP_SID_PREFERENCES), exist_ok=True)
+    with open(_XRDP_SID_SOURCES, "w", encoding="utf-8") as source_file:
+        source_file.write(_XRDP_SID_SOURCE)
+    with open(_XRDP_SID_PREFERENCES, "w", encoding="utf-8") as preference_file:
+        preference_file.write(_XRDP_SID_PREFERENCE)
+
+    update_result = run("apt-get update -qq", check=False)
+    if update_result.returncode != 0:
+        raise RuntimeError("could not refresh Debian Sid package metadata")
+    return "-t sid"
+
+
+def _install_xrdp_packages(packages: tuple[str, ...]) -> None:
+    """Install XRDP packages without optional dependency stacks."""
+    target_release = _configure_xrdp_package_source()
+    package_list = " ".join(shlex.quote(package) for package in packages)
+    apt_prefix = f"apt-get {target_release + ' ' if target_release else ''}install"
+    simulation = run(
+        f"{apt_prefix} --simulate --no-install-recommends --no-remove {package_list}",
+        check=False,
+        capture_output=True,
+    )
+    if simulation.returncode != 0:
+        raise RuntimeError(
+            "xRDP package installation failed; could not simulate the transaction"
+        )
+    simulation_output = simulation.stdout or ""
+    simulated_installs = {
+        line.split()[1]
+        for line in simulation_output.splitlines()
+        if line.startswith("Inst ") and len(line.split()) > 1
+    }
+    forbidden = sorted(
+        package
+        for package in simulated_installs
+        if any(
+            package == forbidden_name
+            or package.startswith(f"{forbidden_name}-")
+            for forbidden_name in _XRDP_SID_FORBIDDEN_UPGRADES
+        )
+    )
+    if forbidden:
+        raise RuntimeError(
+            "refusing xRDP installation because it would upgrade core packages: "
+            + ", ".join(forbidden)
+        )
+
+    install_result = run(
+        f"{apt_prefix} -y -qq --no-install-recommends --no-remove {package_list}",
+        check=False,
+    )
+    if install_result.returncode != 0:
+        raise RuntimeError(
+            "xRDP package installation failed; check APT sources and package-manager output"
+        )
 
 def _generate_sesman_ini(config: SetupConfig) -> str:
     """Generate complete sesman.ini content.
@@ -274,14 +357,7 @@ def install_xrdp(config: SetupConfig) -> None:
         "x11-xserver-utils",
         "x11-utils",
     )
-    install_result = run(
-        "apt-get install -y -qq " + " ".join(required_packages),
-        check=False,
-    )
-    if install_result.returncode != 0:
-        raise RuntimeError(
-            "xRDP package installation failed; check APT sources and package-manager output"
-        )
+    _install_xrdp_packages(required_packages)
 
     missing_packages = [
         package for package in required_packages if not is_package_installed(package)

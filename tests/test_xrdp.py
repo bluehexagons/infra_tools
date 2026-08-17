@@ -245,6 +245,9 @@ class TestInstallXrdp(unittest.TestCase):
     """Test XRDP installation and configuration."""
 
     def setUp(self):
+        source_patcher = patch("desktop.xrdp_steps.get_os_id", return_value="")
+        self.addCleanup(source_patcher.stop)
+        source_patcher.start()
         certificate_patcher = patch(
             "desktop.xrdp_steps._validate_xrdp_tls_certificate"
         )

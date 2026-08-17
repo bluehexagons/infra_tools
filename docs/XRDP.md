@@ -24,6 +24,15 @@ support. Use the CLI flags below to change the managed channel policy.
 
 ## Set up XRDP
 
+On Debian workstations, setup uses the official Debian Sid builds of `xrdp`
+and `xorgxrdp` because the Trixie `xorgxrdp` build has a known Xorg crash in
+the RDP capture path. Sid is added with a low-priority pin, and only the XRDP
+transaction is targeted at it. Package installation disables recommendations,
+so the optional PipeWire XRDP module and its large codec/runtime dependency
+tree are not installed. Setup simulates the transaction first and refuses it
+if it would remove packages or upgrade core packages such as `libc6`,
+`systemd`, or `xserver-xorg-core`.
+
 For a remote target, provide the Unix account password through a secret source:
 
 ```bash
@@ -78,6 +87,8 @@ disconnected-session cleanup.
 | `/etc/xrdp/xrdp.ini` | RDP protocol and channel settings |
 | `/etc/X11/xrdp/xorg.conf` | Software-rendered `xrdpdev` display |
 | `/etc/X11/Xwrapper.config` | X server permissions |
+| `/etc/apt/sources.list.d/infra-tools-sid.sources` | Official Sid source for newer XRDP packages on Debian |
+| `/etc/apt/preferences.d/infra-tools-sid.pref` | Keeps Sid packages low priority outside the XRDP transaction |
 | `~/.local/share/xorg/Xorg.<display>.log` | Per-session Xorg diagnostics |
 | `~/startwm.sh` | Desktop session startup |
 
