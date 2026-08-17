@@ -18,6 +18,8 @@ from lib.xrdp_certificate import (
     inspect_xrdp_certificate_pair,
 )
 
+_XRDP_XORG_LAUNCHER = "/usr/local/libexec/infra-tools-xrdp-Xorg"
+
 def _generate_sesman_ini(config: SetupConfig) -> str:
     """Generate complete sesman.ini content.
     
@@ -60,7 +62,7 @@ EnableSyslog=true
 SyslogLevel=INFO
 
 [Xorg]
-param=/usr/lib/xorg/Xorg
+param={_XRDP_XORG_LAUNCHER}
 param=-config
 # Xorg rejects absolute -config paths when sesman starts it as a non-root user.
 # This trusted-search-path form resolves to /etc/X11/xrdp/xorg.conf on Debian.
@@ -289,6 +291,16 @@ def install_xrdp(config: SetupConfig) -> None:
         raise RuntimeError("could not create the per-user Xorg log directory")
     run(f"chmod 700 {shlex.quote(xorg_log_dir)}")
     _remove_legacy_xrdp_socket_environment()
+
+    launcher_dir = os.path.dirname(_XRDP_XORG_LAUNCHER)
+    os.makedirs(launcher_dir, exist_ok=True)
+    with open(_XRDP_XORG_LAUNCHER, "w", encoding="utf-8") as launcher:
+        launcher.write(
+            "#!/bin/sh\n"
+            'export XRDP_SOCKET_PATH="/run/xrdp/sockdir/$(id -u)"\n'
+            'exec /usr/lib/xorg/Xorg "$@"\n'
+        )
+    run(f"chmod 755 {shlex.quote(_XRDP_XORG_LAUNCHER)}")
     # Configure Xwrapper to allow XRDP sessions to start X server
     # This is critical for preventing session freezes and startup issues
     xwrapper_config = "/etc/X11/Xwrapper.config"

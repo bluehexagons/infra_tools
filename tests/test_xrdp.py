@@ -47,7 +47,7 @@ class TestGenerateSesmanIni(unittest.TestCase):
         
         # Xorg section should exist
         self.assertIn("[Xorg]", result)
-        self.assertIn("param=/usr/lib/xorg/Xorg", result)
+        self.assertIn("param=/usr/local/libexec/infra-tools-xrdp-Xorg", result)
         self.assertIn("param=xrdp/xorg.conf", result)
         self.assertNotIn("param=/etc/X11/xrdp/xorg.conf", result)
         self.assertIn("param=.local/share/xorg/Xorg.%s.log", result)
@@ -84,6 +84,7 @@ class TestGenerateSesmanIni(unittest.TestCase):
         self.assertIn("DisconnectedTimeLimit=86400", result)
         self.assertIn("IdleTimeLimit=14400", result)
         self.assertIn("SessionSockdirGroup=xrdp", result)
+        self.assertIn("param=/usr/local/libexec/infra-tools-xrdp-Xorg", result)
 
 
 class TestGenerateXrdpIni(unittest.TestCase):
@@ -386,7 +387,7 @@ class TestInstallXrdp(unittest.TestCase):
         combined_content = ''.join([str(c[0][0]) for c in write_calls if c[0]])
         
         self.assertIn("[Xorg]", combined_content)
-        self.assertIn("param=/usr/lib/xorg/Xorg", combined_content)
+        self.assertIn("param=/usr/local/libexec/infra-tools-xrdp-Xorg", combined_content)
         
     @patch('desktop.xrdp_steps.run')
     @patch('desktop.xrdp_steps.os.path.exists')
