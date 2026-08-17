@@ -57,6 +57,28 @@ class TestCollectMaintenanceReport(unittest.TestCase):
         self.assertEqual(report.storage_states, {"local": "active"})
         self.assertFalse(report.reboot_required)
 
+    @patch("lib.proxmox_maintenance.subprocess.run")
+    @patch("lib.proxmox_maintenance.build_ssh_command", return_value=["ssh"])
+    def test_run_uses_saved_key_and_allows_interactive_auth(
+        self, mock_build, mock_run
+    ) -> None:
+        host = ProxmoxHost(
+            name="pve1", address="10.0.0.10", user="root", ssh_key="/tmp/key"
+        )
+        mock_run.return_value = _result("pve1\n")
+
+        from lib.proxmox_maintenance import _run
+
+        _run(host, "hostname -s")
+
+        mock_build.assert_called_once()
+        kwargs = mock_build.call_args.kwargs
+        self.assertEqual(
+            mock_build.call_args.args[:3], ("10.0.0.10", "root", "/tmp/key")
+        )
+        self.assertFalse(kwargs["batch_mode"])
+        self.assertTrue(kwargs["control_path"].endswith(".sock"))
+
     @patch("lib.proxmox_maintenance._run")
     def test_reports_cluster_quorum_and_running_guests(self, mock_run) -> None:
         mock_run.side_effect = [

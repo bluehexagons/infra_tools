@@ -14,11 +14,20 @@ from lib.ssh_utils import (
     build_scp_command,
     build_ssh_command,
     chain_remote_commands,
+    get_ssh_control_path,
     shell_join,
 )
 
 
 class TestSshUtils(unittest.TestCase):
+    def test_control_path_is_private_and_identity_specific(self):
+        first = get_ssh_control_path("10.0.0.10", "root", "/tmp/key")
+        second = get_ssh_control_path("10.0.0.11", "root", "/tmp/key")
+
+        self.assertNotEqual(first, second)
+        self.assertTrue(first.endswith(".sock"))
+        self.assertIn("infra-tools-ssh-", first)
+
     def test_shell_join_quotes_spaces(self):
         self.assertEqual(shell_join(["cat", "/tmp/file name.txt"]), "cat '/tmp/file name.txt'")
 
@@ -66,6 +75,22 @@ class TestSshUtils(unittest.TestCase):
                 "echo ok",
             ],
         )
+
+    @patch("lib.ssh_utils.ensure_workspace_dir")
+    @patch("lib.ssh_utils.get_known_hosts_path", return_value="/tmp/workspace/known_hosts")
+    def test_build_ssh_command_can_reuse_authenticated_connection(
+        self, _mock_known_hosts, _mock_ensure_workspace
+    ):
+        command = build_ssh_command(
+            "example.com",
+            "root",
+            "/tmp/key",
+            control_path="/tmp/infra-tools.sock",
+        )
+
+        self.assertIn("ControlMaster=auto", command)
+        self.assertIn("ControlPersist=60s", command)
+        self.assertIn("ControlPath=/tmp/infra-tools.sock", command)
 
     @patch("lib.ssh_utils.ensure_workspace_dir")
     @patch("lib.ssh_utils.get_known_hosts_path", return_value="/tmp/workspace/known_hosts")

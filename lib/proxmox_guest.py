@@ -13,6 +13,7 @@ import time
 from typing import Optional
 
 from lib.proxmox_hosts import ProxmoxHost, ProxmoxHostFacts, ProxmoxStoragePool
+from lib.ssh_utils import get_ssh_control_path
 from lib.types import StrList
 
 
@@ -52,7 +53,18 @@ def _ssh_run(
             args=[cmd], returncode=0, stdout="", stderr=""
         )
 
-    ssh_cmd = ["ssh"] + ssh_opts + [f"{user}@{node_ip}", cmd]
+    hosted_key = None
+    if "-i" in ssh_opts:
+        key_index = ssh_opts.index("-i") + 1
+        if key_index < len(ssh_opts):
+            hosted_key = ssh_opts[key_index]
+    ssh_cmd = ["ssh"] + ssh_opts + [
+        "-o", "ControlMaster=auto",
+        "-o", "ControlPersist=60s",
+        "-o", f"ControlPath={get_ssh_control_path(node_ip, user, hosted_key)}",
+        f"{user}@{node_ip}",
+        cmd,
+    ]
     result = subprocess.run(
         ssh_cmd, capture_output=True, text=True, timeout=120
     )

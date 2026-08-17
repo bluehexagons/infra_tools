@@ -240,6 +240,12 @@ guests, and whether a reboot is pending. Text output distinguishes general
 health from reboot safety; JSON output is intended for automation. The command
 is read-only and exits nonzero when a health check fails.
 
+Proxmox SSH inspection commands reuse a short-lived OpenSSH control connection.
+With an encrypted key, the first connection prompts for its passphrase and the
+remaining checks reuse that authenticated connection. The maintenance audit is
+interactive so it can prompt when the saved key is not already available to an
+SSH agent; do not run it with `BatchMode=yes` when passphrase entry is required.
+
 Modify resources and configuration:
 
 ```bash

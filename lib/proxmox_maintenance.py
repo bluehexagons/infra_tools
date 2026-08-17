@@ -10,7 +10,7 @@ from typing import Optional
 
 from lib.proxmox_hosts import ProxmoxHost
 from lib.proxmox_manage import ContainerInfo, _parse_pct_list, _parse_qm_list
-from lib.ssh_utils import build_ssh_command
+from lib.ssh_utils import build_ssh_command, get_ssh_control_path
 
 
 MIN_ROOT_FREE_BYTES = 4 * 1024 ** 3
@@ -93,9 +93,12 @@ def _run(host: ProxmoxHost, command: str) -> subprocess.CompletedProcess[str]:
             host.user,
             host.ssh_key,
             remote_command=command,
-            batch_mode=True,
+            batch_mode=False,
             connect_timeout=10,
             server_alive_interval=10,
+            control_path=get_ssh_control_path(
+                host.address, host.user, host.ssh_key
+            ),
         ),
         capture_output=True,
         text=True,
