@@ -40,6 +40,10 @@ _XRDP_SID_FORBIDDEN_UPGRADES = (
     "linux-image",
     "linux-headers",
 )
+_XRDP_DPKG_OPTIONS = (
+    "-o Dpkg::Options::=--force-confdef "
+    "-o Dpkg::Options::=--force-confold"
+)
 
 
 def _configure_xrdp_package_source() -> str:
@@ -66,7 +70,8 @@ def _install_xrdp_packages(packages: tuple[str, ...]) -> None:
     package_list = " ".join(shlex.quote(package) for package in packages)
     apt_prefix = f"apt-get {target_release + ' ' if target_release else ''}install"
     simulation = run(
-        f"{apt_prefix} --simulate --no-install-recommends --no-remove {package_list}",
+        f"{apt_prefix} --simulate {_XRDP_DPKG_OPTIONS}"
+        f" --no-install-recommends --no-remove {package_list}",
         check=False,
         capture_output=True,
     )
@@ -96,7 +101,8 @@ def _install_xrdp_packages(packages: tuple[str, ...]) -> None:
         )
 
     install_result = run(
-        f"{apt_prefix} -y -qq --no-install-recommends --no-remove {package_list}",
+        f"{apt_prefix} -y -qq {_XRDP_DPKG_OPTIONS}"
+        f" --no-install-recommends --no-remove {package_list}",
         check=False,
     )
     if install_result.returncode != 0:

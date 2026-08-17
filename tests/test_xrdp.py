@@ -11,6 +11,7 @@ from desktop.xrdp_steps import (
     _generate_sesman_ini,
     _generate_xrdp_ini,
     _generate_xorg_conf,
+    _install_xrdp_packages,
     _remove_legacy_xrdp_socket_environment,
     _validate_xrdp_tls_certificate,
     harden_xrdp,
@@ -278,6 +279,21 @@ class TestInstallXrdp(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "xRDP package installation failed"):
             install_xrdp(config)
+
+    @patch("desktop.xrdp_steps.run")
+    def test_install_handles_modified_package_conffiles(self, mock_run):
+        """Package upgrades must not prompt for infra-tools-managed files."""
+        mock_run.side_effect = [
+            Mock(returncode=0, stdout="Inst xrdp (0.10.6.1-2 Debian:unstable)", stderr=""),
+            Mock(returncode=0, stdout="", stderr=""),
+        ]
+
+        _install_xrdp_packages(("xrdp", "xorgxrdp"))
+
+        commands = [call.args[0] for call in mock_run.call_args_list]
+        for command in commands:
+            self.assertIn("Dpkg::Options::=--force-confdef", command)
+            self.assertIn("Dpkg::Options::=--force-confold", command)
 
 
     @patch('desktop.xrdp_steps.run')

@@ -31,7 +31,9 @@ transaction is targeted at it. Package installation disables recommendations,
 so the optional PipeWire XRDP module and its large codec/runtime dependency
 tree are not installed. Setup simulates the transaction first and refuses it
 if it would remove packages or upgrade core packages such as `libc6`,
-`systemd`, or `xserver-xorg-core`.
+`systemd`, or `xserver-xorg-core`. The install keeps modified configuration
+files without prompting, then reapplies the managed versions after the
+package transaction completes.
 
 For a remote target, provide the Unix account password through a secret source:
 
