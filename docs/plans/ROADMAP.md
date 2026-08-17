@@ -56,6 +56,23 @@ The best next work packets are:
 5. Replace automatic SSH first-use trust with explicit enrollment before
    privileged setup/deploy operations.
 
+## GitHub issue alignment (2026-08-17)
+
+The current issue tracker has been reconciled with the implementation and the
+plans in this document. Completed operator-facing requests are identified as
+candidates for closure after their documentation and test evidence was checked.
+Partial requests remain open with their residual scope recorded. See the complete
+[GitHub issue triage](GITHUB_ISSUE_TRIAGE_2026-08-17.md) for issue-by-issue
+evidence and ownership. This repository-only update did not change GitHub issue
+state.
+
+The triage confirms that Proxmox VM provisioning, guest lifecycle management,
+local self-setup, Proxmox restart defaults, and Debian kernel-package cleanup
+are delivered. Interactive setup orchestration, generic deployment secrets,
+unified diagnostics, cross-host scheduling, and live XRDP verification remain
+follow-up work. APT caching, desktop widget preferences, and multimedia
+bundles are not current implementation priorities.
+
 ## P0: Transactional execution and state
 
 The first priority is resolving the execution and partial-apply risks captured
