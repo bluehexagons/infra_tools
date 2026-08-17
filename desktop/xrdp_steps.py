@@ -19,6 +19,7 @@ from lib.xrdp_certificate import (
 )
 
 _XRDP_XORG_LAUNCHER = "/usr/local/libexec/infra-tools-xrdp-Xorg"
+_XRDP_APPARMOR_LOCAL = "/etc/apparmor.d/local/Xorg"
 
 def _generate_sesman_ini(config: SetupConfig) -> str:
     """Generate complete sesman.ini content.
@@ -215,6 +216,18 @@ def _remove_legacy_xrdp_socket_environment() -> None:
         run("systemctl daemon-reload")
 
 
+def _configure_xrdp_apparmor_socket_access() -> None:
+    """Permit confined Xorg to create xorgxrdp's per-user socket."""
+    os.makedirs(os.path.dirname(_XRDP_APPARMOR_LOCAL), exist_ok=True)
+    with open(_XRDP_APPARMOR_LOCAL, "w", encoding="utf-8") as rules:
+        rules.write(
+            "# infra-tools: xorgxrdp per-user transport sockets\n"
+            "owner /run/xrdp/sockdir/** rw,\n"
+            "unix (create, bind, listen, accept, receive, send) type=stream,\n"
+        )
+    run("apparmor_parser -r /etc/apparmor.d/Xorg", check=False)
+
+
 def _validate_xrdp_tls_certificate() -> None:
     """Refuse to activate XRDP with an unusable TLS certificate/key pair."""
     health = inspect_xrdp_certificate_pair(
@@ -301,6 +314,7 @@ def install_xrdp(config: SetupConfig) -> None:
             'exec /usr/lib/xorg/Xorg "$@"\n'
         )
     run(f"chmod 755 {shlex.quote(_XRDP_XORG_LAUNCHER)}")
+    _configure_xrdp_apparmor_socket_access()
     # Configure Xwrapper to allow XRDP sessions to start X server
     # This is critical for preventing session freezes and startup issues
     xwrapper_config = "/etc/X11/Xwrapper.config"
