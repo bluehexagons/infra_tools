@@ -18,6 +18,8 @@ from lib.xrdp_certificate import (
     inspect_xrdp_certificate_pair,
 )
 
+_XRDP_SOCKET_PATH = "/run/xrdp/sockdir"
+
 
 def _generate_sesman_ini(config: SetupConfig) -> str:
     """Generate complete sesman.ini content.
@@ -198,6 +200,18 @@ def _refresh_services(*services: str, reload_running_services: bool = True) -> N
         run(f"systemctl start {inactive_list}", check=False)
 
 
+def _configure_xrdp_socket_environment() -> None:
+    """Make the AppArmor-compatible XRDP socket path available to daemons."""
+    dropin_content = f"[Service]\nEnvironment=XRDP_SOCKET_PATH={_XRDP_SOCKET_PATH}\n"
+    for service in ("xrdp", "xrdp-sesman"):
+        dropin_dir = f"/etc/systemd/system/{service}.service.d"
+        os.makedirs(dropin_dir, exist_ok=True)
+        dropin_path = os.path.join(dropin_dir, "infra-tools.conf")
+        with open(dropin_path, "w", encoding="utf-8") as dropin_file:
+            dropin_file.write(dropin_content)
+    run("systemctl daemon-reload")
+
+
 def _validate_xrdp_tls_certificate() -> None:
     """Refuse to activate XRDP with an unusable TLS certificate/key pair."""
     health = inspect_xrdp_certificate_pair(
@@ -273,6 +287,7 @@ def install_xrdp(config: SetupConfig) -> None:
     if log_dir_result.returncode != 0:
         raise RuntimeError("could not create the per-user Xorg log directory")
     run(f"chmod 700 {shlex.quote(xorg_log_dir)}")
+    _configure_xrdp_socket_environment()
 
     # Configure Xwrapper to allow XRDP sessions to start X server
     # This is critical for preventing session freezes and startup issues

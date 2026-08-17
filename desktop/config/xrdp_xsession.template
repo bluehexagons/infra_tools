@@ -11,7 +11,7 @@ exec 2> >(tee -a ~/.xsession-errors)
 # Set environment variables to indicate this is an RDP session
 # This helps desktop environments and applications behave appropriately
 export XRDP_SESSION=1
-export XRDP_SOCKET=/tmp/xrdp
+export XRDP_SOCKET_PATH=/run/xrdp/sockdir
 
 # Disable X screen saver and DPMS
 xset s off 2>/dev/null

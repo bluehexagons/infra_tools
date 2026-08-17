@@ -11,6 +11,7 @@ from desktop.xrdp_steps import (
     _generate_sesman_ini,
     _generate_xrdp_ini,
     _generate_xorg_conf,
+    _configure_xrdp_socket_environment,
     _validate_xrdp_tls_certificate,
     harden_xrdp,
     install_xrdp,
@@ -349,6 +350,21 @@ class TestInstallXrdp(unittest.TestCase):
             run_commands,
         )
         self.assertIn("chmod 700 /home/testuser/.local/share/xorg", run_commands)
+
+    @patch('desktop.xrdp_steps.run')
+    @patch('desktop.xrdp_steps.os.makedirs')
+    @patch('builtins.open', new_callable=unittest.mock.mock_open)
+    def test_configures_app_armor_compatible_socket_environment(
+        self, mock_open_func, mock_makedirs, mock_run
+    ):
+        """Both XRDP daemons should pass the socket path to rootless Xorg."""
+        _configure_xrdp_socket_environment()
+
+        written = "".join(
+            call.args[0] for call in mock_open_func().write.call_args_list
+        )
+        self.assertEqual(written.count("Environment=XRDP_SOCKET_PATH=/run/xrdp/sockdir"), 2)
+        self.assertEqual(mock_run.call_args_list[0].args[0], "systemctl daemon-reload")
         
     @patch('desktop.xrdp_steps.run')
     @patch('desktop.xrdp_steps.os.path.exists')
@@ -452,6 +468,7 @@ class TestInstallXrdp(unittest.TestCase):
         write_calls = [c for c in mock_open_func().write.call_args_list]
         combined_content = ''.join([str(c[0][0]) for c in write_calls if c[0]])
         self.assertIn("exec startlxqt", combined_content)
+        self.assertIn("XRDP_SOCKET_PATH=/run/xrdp/sockdir", combined_content)
         self.assertNotIn("exec xfce4-session", combined_content)
         
     @patch('desktop.xrdp_steps.run')

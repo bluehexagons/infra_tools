@@ -99,7 +99,8 @@ is accepted by Debian's enforced Xorg AppArmor profile; the traditional
 `~/.xorgxrdp.<display>.log` path is denied before rootless Xorg can initialize.
 Setup creates the log directory with mode `0700` and desktop-user ownership.
 
-The startup script sets `XRDP_SESSION=1` and `XRDP_SOCKET=/tmp/xrdp`, disables
+The startup script sets `XRDP_SESSION=1` and
+`XRDP_SOCKET_PATH=/run/xrdp/sockdir`, disables
 screen blanking and DPMS, and starts the selected desktop through D-Bus. XFCE
 display profiles and power-management settings that conflict with dynamic
 resolution are cleared, while `xfsettingsd` remains enabled for normal desktop
@@ -194,6 +195,10 @@ If `xrdp-sesman.log` waits ten seconds and then reports `Unable to open display`
 without creating an Xorg log, check whether AppArmor enforces the `Xorg`
 profile. Reapply the current configuration to move per-session logs from the
 denied home-directory path into `~/.local/share/xorg`.
+
+If Xorg logs `rdpClientConInit: g_tcp_local_bind failed` and then repeats
+`g_sck_accept failed`, the daemons are missing `XRDP_SOCKET_PATH`. Reapply
+setup so systemd passes `/run/xrdp/sockdir` to both `xrdp` and `xrdp-sesman`.
 
 ### Freeze while resizing
 
