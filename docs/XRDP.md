@@ -91,6 +91,7 @@ disconnected-session cleanup.
 | `/etc/X11/Xwrapper.config` | X server permissions |
 | `/etc/apt/sources.list.d/infra-tools-sid.sources` | Official Sid source for newer XRDP packages on Debian |
 | `/etc/apt/preferences.d/infra-tools-sid.pref` | Keeps Sid packages low priority outside the XRDP transaction |
+| `/etc/apparmor.d/local/Xorg` | Allows user-owned xorgxrdp sockets and capture buffers |
 | `~/.local/share/xorg/Xorg.<display>.log` | Per-session Xorg diagnostics |
 | `~/startwm.sh` | Desktop session startup |
 
@@ -111,6 +112,12 @@ Per-session Xorg logs use `~/.local/share/xorg/Xorg.<display>.log`. This path
 is accepted by Debian's enforced Xorg AppArmor profile; the traditional
 `~/.xorgxrdp.<display>.log` path is denied before rootless Xorg can initialize.
 Setup creates the log directory with mode `0700` and desktop-user ownership.
+
+The AppArmor local override also grants confined Xorg access to the
+desktop-user's entries under `/dev/shm`. xorgxrdp uses POSIX shared memory for
+RDP frame capture; without this rule, `g_alloc_shm_map_fd` fails and the
+capture path can terminate Xorg as soon as a client connects. The rule is
+limited to user-owned shared-memory entries and does not disable AppArmor.
 
 The startup script sets `XRDP_SESSION=1`, disables
 screen blanking and DPMS, and starts the selected desktop through D-Bus. XFCE

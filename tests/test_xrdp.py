@@ -443,6 +443,8 @@ class TestInstallXrdp(unittest.TestCase):
         # Check for disabled glamor (to prevent crashes)
         self.assertIn('UseGlamor', combined_content)
         self.assertIn('false', combined_content)
+        self.assertIn('owner /dev/shm/ rw,', combined_content)
+        self.assertIn('owner /dev/shm/** rw,', combined_content)
         
         # Check for virtual screen size (updated for 4K support)
         self.assertIn('Virtual 3840 2160', combined_content)

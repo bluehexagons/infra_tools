@@ -306,12 +306,15 @@ def _remove_legacy_xrdp_socket_environment() -> None:
 
 
 def _configure_xrdp_apparmor_socket_access() -> None:
-    """Permit confined Xorg to create xorgxrdp's per-user socket."""
+    """Permit confined Xorg to use xorgxrdp transport and capture buffers."""
     os.makedirs(os.path.dirname(_XRDP_APPARMOR_LOCAL), exist_ok=True)
     with open(_XRDP_APPARMOR_LOCAL, "w", encoding="utf-8") as rules:
         rules.write(
             "# infra-tools: xorgxrdp per-user transport sockets\n"
             "owner /run/xrdp/sockdir/** rw,\n"
+            "# xorgxrdp uses POSIX shared memory for RDP frame capture\n"
+            "owner /dev/shm/ rw,\n"
+            "owner /dev/shm/** rw,\n"
             "unix (create, bind, listen, accept, receive, send) type=stream,\n"
         )
     run("apparmor_parser -r /etc/apparmor.d/Xorg", check=False)
