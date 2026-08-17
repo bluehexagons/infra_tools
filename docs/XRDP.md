@@ -87,6 +87,12 @@ allowed_users=anybody
 needs_root_rights=no
 ```
 
+Because the X server runs without root privileges, `sesman.ini` selects its
+configuration as `xrdp/xorg.conf`. Xorg resolves that trusted relative path to
+`/etc/X11/xrdp/xorg.conf`; an absolute `-config` path is rejected for a
+non-root session and produces the generic "X server could not be started"
+login failure.
+
 The startup script sets `XRDP_SESSION=1` and `XRDP_SOCKET=/tmp/xrdp`, disables
 screen blanking and DPMS, and starts the selected desktop through D-Bus. XFCE
 display profiles and power-management settings that conflict with dynamic
@@ -171,6 +177,12 @@ commands are installed. Look for permission errors in `xrdp-sesman.log` and
 startup failures in `~/.xsession-errors`. A stale desktop autostart entry or
 fixed XFCE display profile can also prevent a session from starting; rerun
 `patch` to restore the managed desktop settings.
+
+If the connection log reports that `ip` is not needed, reapply the current
+configuration. Older managed `xrdp.ini` files included an obsolete `ip` field
+in the local Xorg session entry. The warning itself is harmless, but the same
+older configuration may also contain an absolute Xorg `-config` path that
+prevents a non-root X server from starting.
 
 ### Freeze while resizing
 

@@ -62,7 +62,9 @@ SyslogLevel=INFO
 [Xorg]
 param=/usr/lib/xorg/Xorg
 param=-config
-param=/etc/X11/xrdp/xorg.conf
+# Xorg rejects absolute -config paths when sesman starts it as a non-root user.
+# This trusted-search-path form resolves to /etc/X11/xrdp/xorg.conf on Debian.
+param=xrdp/xorg.conf
 param=-noreset
 param=-nolisten
 param=tcp

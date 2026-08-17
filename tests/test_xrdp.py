@@ -47,7 +47,8 @@ class TestGenerateSesmanIni(unittest.TestCase):
         # Xorg section should exist
         self.assertIn("[Xorg]", result)
         self.assertIn("param=/usr/lib/xorg/Xorg", result)
-        self.assertIn("param=/etc/X11/xrdp/xorg.conf", result)
+        self.assertIn("param=xrdp/xorg.conf", result)
+        self.assertNotIn("param=/etc/X11/xrdp/xorg.conf", result)
         
         # Xvnc section should NOT exist
         self.assertNotIn("[Xvnc]", result)
@@ -106,6 +107,8 @@ class TestGenerateXrdpIni(unittest.TestCase):
         self.assertIn("certificate=/etc/xrdp/cert.pem", rendered)
         self.assertIn("key_file=/etc/xrdp/key.pem", rendered)
         self.assertNotIn("channel_code", rendered)
+        xorg_section = rendered.split("[Xorg]\n", 1)[1]
+        self.assertNotIn("\nip=", xorg_section)
 
     def test_renders_listener_and_secure_coding_channel_defaults(self):
         template = (
