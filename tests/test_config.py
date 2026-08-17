@@ -819,22 +819,56 @@ class TestSetupConfigHostedFields(unittest.TestCase):
             container_storage=[['root', 'auto', '10G'], ['template', 'local']],
         )
         args_str = ' '.join(config.to_remote_args())
-        self.assertNotIn('--hosted', args_str)
+        self.assertNotIn('--provision-on', args_str)
         self.assertNotIn('--memory', args_str)
         self.assertNotIn('--storage', args_str)
         self.assertNotIn('--cores', args_str)
 
-    def test_hosted_fields_not_in_setup_command(self):
+    def test_provisioning_fields_are_reconstructed_in_setup_command(self):
         config = self._make_config(
+            host='10.0.0.50',
             hosted_node='10.0.0.1',
+            hosted_user='admin',
+            hosted_key='/path/to/proxmox-key',
+            hosted_bridge='sdn-public',
             container_memory='2G',
+            vm_balloon_min='1G',
             container_storage=[['root', 'auto', '10G'], ['template', 'local']],
+            container_cores=4,
+            container_base='ubuntu',
+            static_ipv4='10.0.0.50/24',
         )
         parts = config.to_setup_command()
         cmd = ' '.join(parts)
-        self.assertNotIn('--hosted', cmd)
-        self.assertNotIn('--memory', cmd)
-        self.assertNotIn('--storage', cmd)
+        self.assertIn('--provision-on 10.0.0.1', cmd)
+        self.assertIn('--provision-user admin', cmd)
+        self.assertIn('--provision-key /path/to/proxmox-key', cmd)
+        self.assertIn('--bridge sdn-public', cmd)
+        self.assertIn('--memory 2G', cmd)
+        self.assertIn('--balloon-min 1G', cmd)
+        self.assertIn('--storage root auto 10G', cmd)
+        self.assertIn('--storage template local', cmd)
+        self.assertIn('--cores 4', cmd)
+        self.assertIn('--base ubuntu', cmd)
+        self.assertNotIn('--ip', cmd)
+        self.assertEqual(parts[1], '10.0.0.50')
+
+    def test_provisioning_command_keeps_non_default_prefix_in_target(self):
+        config = self._make_config(
+            host='10.0.0.50',
+            hosted_node='10.0.0.1',
+            machine_type='vm',
+            ssh_key='/path/to/shared-key',
+            hosted_key='/path/to/shared-key',
+            static_ipv4='10.0.0.50/20',
+        )
+
+        parts = config.to_setup_command()
+
+        self.assertEqual(parts[1], '10.0.0.50/20')
+        self.assertNotIn('--ip 10.0.0.50/20', parts)
+        self.assertNotIn('--machine vm', parts)
+        self.assertFalse(any('--provision-key' in part for part in parts))
 
 
 if __name__ == '__main__':

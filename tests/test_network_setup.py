@@ -116,7 +116,7 @@ class TestNetworkSetupCLI(unittest.TestCase):
         legacy = SetupConfig.from_dict(config.host, config.system_type, legacy_data)
         self.assertFalse(legacy.activate_network)
 
-    def test_initial_hosted_setup_rejects_live_handoff(self):
+    def test_initial_provisioned_setup_rejects_live_handoff(self):
         parser, _setup_parser, _patch_parser = create_infra_tools_parser()
         args = parser.parse_args(
             [
@@ -124,11 +124,29 @@ class TestNetworkSetupCLI(unittest.TestCase):
                 "server_lite",
                 "192.168.10.20",
                 "admin",
-                "--hosted",
+                "--provision-on",
+                "192.168.10.2",
+                "--activate-network",
+            ]
+        )
+
+        with patch("infra_tools._prepare_runtime_config_for_cli") as mock_prepare:
+            self.assertEqual(run_setup_command(args), 1)
+
+        mock_prepare.assert_not_called()
+
+    def test_provisioned_setup_rejects_duplicate_ipv4_option(self):
+        parser, _setup_parser, _patch_parser = create_infra_tools_parser()
+        args = parser.parse_args(
+            [
+                "setup",
+                "server_lite",
+                "192.168.10.20",
+                "admin",
+                "--provision-on",
                 "192.168.10.2",
                 "--ip",
-                "192.168.10.21/24",
-                "--activate-network",
+                "192.168.10.20/24",
             ]
         )
 

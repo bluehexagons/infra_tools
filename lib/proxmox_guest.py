@@ -297,8 +297,75 @@ def _get_host_gateway(
     return gateway
 
 
+def _get_guest_gateway(
+    node_ip: str,
+    user: str,
+    ssh_opts: StrList,
+    bridge: str,
+    guest_interface: ipaddress.IPv4Interface,
+    dry_run: bool = False,
+) -> str:
+    """Resolve the guest gateway from the selected bridge and guest subnet."""
+    if dry_run:
+        result = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+    else:
+        result = _ssh_run(
+            node_ip,
+            user,
+            ssh_opts,
+            (
+                "ip -4 route show default; "
+                f"ip -o -4 addr show dev {shlex.quote(bridge)}"
+            ),
+            dry_run=False,
+        )
+        if result.returncode != 0:
+            raise ProvisionError(
+                f"Could not inspect IPv4 routing for Proxmox bridge {bridge}"
+            )
+
+    network = guest_interface.network
+    guest_ip = guest_interface.ip
+    bridge_addresses: list[ipaddress.IPv4Address] = []
+    for line in (result.stdout or "").splitlines():
+        route_match = re.search(r"^default\s+via\s+(\S+)\s+dev\s+(\S+)", line)
+        if route_match and route_match.group(2) == bridge:
+            try:
+                route_gateway = ipaddress.IPv4Address(route_match.group(1))
+            except ipaddress.AddressValueError:
+                continue
+            if route_gateway in network and route_gateway != guest_ip:
+                print(f"  ✓ Detected gateway on {bridge}: {route_gateway}")
+                return str(route_gateway)
+
+        address_match = re.search(r"\sinet\s+(\d+\.\d+\.\d+\.\d+)/\d+", line)
+        if address_match:
+            try:
+                bridge_addresses.append(ipaddress.IPv4Address(address_match.group(1)))
+            except ipaddress.AddressValueError:
+                continue
+
+    for bridge_address in bridge_addresses:
+        if bridge_address in network and bridge_address != guest_ip:
+            print(f"  ✓ Using {bridge} address as guest gateway: {bridge_address}")
+            return str(bridge_address)
+
+    for candidate in network.hosts():
+        if candidate == guest_ip:
+            continue
+        print(
+            f"  ⚠ No gateway route or bridge address found in {network}; "
+            f"assuming {candidate}"
+        )
+        return str(candidate)
+
+    raise ProvisionError(
+        f"Could not infer a gateway for {guest_interface}; specify --gateway"
+    )
+
+
 def _is_usable_nameserver(addr: str) -> bool:
-    """Return True if addr is a globally routable nameserver the guest can reach."""
+    """Return True for a non-local unicast nameserver address."""
     try:
         ip = ipaddress.ip_address(addr)
     except ValueError:
@@ -313,17 +380,31 @@ def _get_host_nameservers(
     user: str,
     ssh_opts: StrList,
     dry_run: bool = False,
+    *,
+    bridge: Optional[str] = None,
+    fallback_gateway: Optional[str] = None,
 ) -> StrList:
-    """Get nameservers from the Proxmox host, filtering out unreachable addresses."""
+    """Get upstream DNS from the Proxmox node, preferring the selected bridge."""
+    commands: StrList = []
+    if bridge:
+        commands.append(
+            f"resolvectl dns {shlex.quote(bridge)} 2>/dev/null | "
+            "awk '{for (i=2;i<=NF;i++) print $i}'"
+        )
+    commands.extend(
+        [
+            "resolvectl dns 2>/dev/null | awk '{for (i=2;i<=NF;i++) print $i}'",
+            "grep -oP '^nameserver\\s+\\K\\S+' /etc/resolv.conf",
+        ]
+    )
     result = _ssh_run(
         node_ip, user, ssh_opts,
-        "resolvectl dns 2>/dev/null | awk '{for (i=2;i<=NF;i++) print $i}' | sort -u; "
-        "grep -oP '^nameserver\\s+\\K\\S+' /etc/resolv.conf",
+        "; ".join(commands),
         dry_run=dry_run,
     )
 
     if dry_run:
-        return ["8.8.8.8"]
+        return [fallback_gateway or "1.1.1.1"]
 
     seen: set[str] = set()
     nameservers: StrList = []
@@ -339,7 +420,13 @@ def _get_host_nameservers(
             break
 
     if not nameservers:
-        print("  ⚠ No usable nameservers detected on host (only loopback?), using 1.1.1.1")
+        if fallback_gateway and _is_usable_nameserver(fallback_gateway):
+            print(
+                "  ⚠ No usable upstream DNS detected on the Proxmox node; "
+                f"using gateway {fallback_gateway}"
+            )
+            return [fallback_gateway]
+        print("  ⚠ No usable nameservers detected on host; using 1.1.1.1")
         return ["1.1.1.1"]
 
     print(f"  ✓ Detected nameservers: {', '.join(nameservers)}")
@@ -701,6 +788,7 @@ __all__ = [
     "_build_guest_hostname",
     "_get_bridge_prefix_length",
     "_get_corosync_config",
+    "_get_guest_gateway",
     "_get_host_gateway",
     "_get_host_nameservers",
     "_get_next_vmid",

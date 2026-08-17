@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import shlex
 from dataclasses import dataclass, asdict
 from typing import Optional, cast
@@ -39,7 +40,7 @@ def _resolve_machine_type(
     if explicit_machine_type:
         return explicit_machine_type
 
-    # Hosted setup creates a guest before remote setup runs, so it cannot use
+    # Proxmox provisioning creates a guest before remote setup runs, so it cannot use
     # target-side detection. Keep the existing VM default for that path;
     # callers can select an LXC explicitly with --machine unprivileged.
     if is_hosted:
@@ -245,7 +246,7 @@ class SetupConfig:
     auto_restart: bool = True
     auto_restart_force_days: int = 7
     auto_restart_grace: int = 5
-    # Hosted guest provisioning (Proxmox VM/LXC)
+    # Proxmox guest provisioning
     hosted_node: MaybeStr = None
     hosted_user: str = "root"
     hosted_key: MaybeStr = None
@@ -544,9 +545,22 @@ class SetupConfig:
         
         Returns a list of command parts that can be joined with spaces or newlines.
         """
+        setup_host = self.host
+        provisioned_ipv4 = False
+        if self.hosted_node and self.static_ipv4:
+            try:
+                guest_interface = ipaddress.ip_interface(self.static_ipv4)
+            except ValueError:
+                guest_interface = None
+            if isinstance(guest_interface, ipaddress.IPv4Interface):
+                provisioned_ipv4 = True
+                setup_host = str(guest_interface.ip)
+                if guest_interface.network.prefixlen != 24:
+                    setup_host = str(guest_interface)
+
         cmd_parts: StrList = [
             f"infra-tools setup {shlex.quote(self.system_type)}",
-            self.host,
+            shlex.quote(setup_host),
         ]
         
         # Add username if different from current user or if requested
@@ -556,6 +570,28 @@ class SetupConfig:
         # SSH key
         if self.ssh_key:
             cmd_parts.append(f"-k {shlex.quote(self.ssh_key)}")
+
+        if self.hosted_node:
+            cmd_parts.append(f"--provision-on {shlex.quote(self.hosted_node)}")
+            if self.hosted_user != "root":
+                cmd_parts.append(f"--provision-user {shlex.quote(self.hosted_user)}")
+            if self.hosted_key and self.hosted_key != self.ssh_key:
+                cmd_parts.append(f"--provision-key {shlex.quote(self.hosted_key)}")
+            if self.hosted_bridge:
+                cmd_parts.append(f"--bridge {shlex.quote(self.hosted_bridge)}")
+            if self.container_memory:
+                cmd_parts.append(f"--memory {shlex.quote(self.container_memory)}")
+            if self.vm_balloon_min:
+                cmd_parts.append(f"--balloon-min {shlex.quote(self.vm_balloon_min)}")
+            for storage_spec in _normalize_container_storage(self.container_storage) or []:
+                escaped_spec = " ".join(shlex.quote(str(part)) for part in storage_spec)
+                cmd_parts.append(f"--storage {escaped_spec}")
+            if self.container_cores != 1:
+                cmd_parts.append(f"--cores {self.container_cores}")
+            if self.container_base != "debian":
+                cmd_parts.append(f"--base {shlex.quote(self.container_base)}")
+            if self.vm_image:
+                cmd_parts.append(f"--image {shlex.quote(self.vm_image)}")
         
         # Password is intentionally not included in the command line for security reasons.
         # If a password is required, it should be provided interactively or via a secure
@@ -568,7 +604,7 @@ class SetupConfig:
         if self.system_hostname:
             cmd_parts.append(f"--hostname {shlex.quote(self.system_hostname)}")
 
-        if self.static_ipv4:
+        if self.static_ipv4 and not provisioned_ipv4:
             cmd_parts.append(f"--ip {shlex.quote(self.static_ipv4)}")
 
         if self.static_ipv6:
@@ -590,9 +626,13 @@ class SetupConfig:
             cmd_parts.append("--activate-network")
         
         # Machine type (if not the current setup default for this flow)
-        default_machine_type = _default_machine_type_for_setup(
-            self.system_type,
-            is_build_server=self.is_build_server,
+        default_machine_type = (
+            "vm"
+            if self.hosted_node
+            else _default_machine_type_for_setup(
+                self.system_type,
+                is_build_server=self.is_build_server,
+            )
         )
         if self.machine_type != default_machine_type:
             cmd_parts.append(f"--machine {shlex.quote(self.machine_type)}")

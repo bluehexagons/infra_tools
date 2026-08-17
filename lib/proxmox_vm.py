@@ -41,7 +41,7 @@ from lib.proxmox_guest import (
     ProvisionError,
     _build_guest_hostname,
     _get_bridge_prefix_length,
-    _get_host_gateway,
+    _get_guest_gateway,
     _get_host_nameservers,
     _get_next_vmid,
     _resolve_public_key_path,
@@ -119,7 +119,8 @@ def check_vm_exists(
         return False
     result = _ssh_run(node_ip, user, ssh_opts, "qm list", dry_run=False)
     if result.returncode != 0:
-        return False
+        detail = (result.stderr or result.stdout or "").strip() or "unknown error"
+        raise ProvisionError(f"Failed to query VMs on {node_ip}: {detail}")
     vmids: StrList = []
     for line in (result.stdout or "").splitlines()[1:]:
         parts = line.split()
@@ -132,7 +133,8 @@ def check_vm_exists(
     for vmid in vmids:
         cfg = _ssh_run(node_ip, user, ssh_opts, f"qm config {vmid}", dry_run=False)
         if cfg.returncode != 0:
-            continue
+            detail = (cfg.stderr or cfg.stdout or "").strip() or "unknown error"
+            raise ProvisionError(f"Failed to inspect VM {vmid} on {node_ip}: {detail}")
         if f"ip={target_ip}/" in (cfg.stdout or "") or f"ip={target_ip}," in (cfg.stdout or ""):
             status = _ssh_run(node_ip, user, ssh_opts, f"qm status {vmid}", dry_run=False)
             probe = _ssh_run(
@@ -570,6 +572,8 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
     storage_specs = cast(NestedStrList, config.container_storage)
     user: str = config.hosted_user
     static_ipv4 = ipaddress.ip_interface(config.static_ipv4) if config.static_ipv4 else None
+    if static_ipv4 is not None and not isinstance(static_ipv4, ipaddress.IPv4Interface):
+        raise ProvisionError("VM provisioning requires an IPv4 setup target")
     target_ip = str(static_ipv4.ip) if static_ipv4 else config.host
     ssh_opts = _ssh_opts(config.hosted_key)
     dry_run = config.dry_run
@@ -607,10 +611,14 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
             print(f"  Static IPv6: {config.static_ipv6}")
         if config.network_gateway4:
             print(f"  IPv4 gateway: {config.network_gateway4}")
+        else:
+            print("  IPv4 gateway: auto-detect from selected Proxmox bridge")
         if config.network_gateway6:
             print(f"  IPv6 gateway: {config.network_gateway6}")
         if config.network_dns:
             print(f"  DNS servers: {', '.join(config.network_dns)}")
+        else:
+            print("  DNS servers: auto-detect from Proxmox node")
         print(f"  Hostname: {hostname}")
         print(f"  Memory: {memory_mb} MiB")
         if balloon_min_mb < memory_mb:
@@ -631,11 +639,6 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
             print(f"  Image (URL): {resolved.url}")
         return
 
-    if check_vm_exists(node_ip, target_ip, user, ssh_opts):
-        raise VMAlreadyExists(
-            f"VM with IP {target_ip} already exists on {node_ip}"
-        )
-
     print(f"  Hostname: {hostname}")
 
     bridge = auto_detect_bridge(
@@ -644,13 +647,35 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
         config.hosted_key,
         preferred_bridge=getattr(config, "hosted_bridge", None),
     )
-    gateway = config.network_gateway4 or _get_host_gateway(node_ip, user, ssh_opts)
-    nameservers = config.network_dns or _get_host_nameservers(node_ip, user, ssh_opts)
+    if static_ipv4 is None:
+        raise ProvisionError("VM provisioning requires an IPv4 setup target")
+    gateway = config.network_gateway4 or _get_guest_gateway(
+        node_ip,
+        user,
+        ssh_opts,
+        bridge,
+        static_ipv4,
+    )
+    nameservers = list(config.network_dns or _get_host_nameservers(
+        node_ip,
+        user,
+        ssh_opts,
+        bridge=bridge,
+        fallback_gateway=gateway,
+    ))
+    config.hosted_bridge = bridge
+    config.network_gateway4 = gateway
+    config.network_dns = nameservers
     cidr_prefix = (
         str(static_ipv4.network.prefixlen)
         if static_ipv4
         else _get_bridge_prefix_length(node_ip, user, ssh_opts, bridge)
     )
+
+    if check_vm_exists(node_ip, target_ip, user, ssh_opts):
+        raise VMAlreadyExists(
+            f"VM with IP {target_ip} already exists on {node_ip}"
+        )
 
     root_pool = _resolve_storage_pool(
         root_pool_arg, node_ip, user, ssh_opts, "images"

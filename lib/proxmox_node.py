@@ -19,7 +19,7 @@ from lib.proxmox_guest import (
     ProvisionError,
     _build_guest_hostname,
     _get_bridge_prefix_length,
-    _get_host_gateway,
+    _get_guest_gateway,
     _get_host_nameservers,
     _get_next_vmid,
     _is_usable_nameserver,
@@ -97,7 +97,12 @@ def check_container_exists(
         dry_run=dry_run
     )
 
-    if dry_run or not result.stdout.strip():
+    if dry_run:
+        return False
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip() or "unknown error"
+        raise ProvisionError(f"Failed to query containers on {node_ip}: {detail}")
+    if not result.stdout.strip():
         return False
 
     for vmid in result.stdout.strip().split('\n'):
@@ -109,6 +114,13 @@ def check_container_exists(
             f"pct config {vmid}",
             dry_run=dry_run
         )
+        if config_result.returncode != 0:
+            detail = (
+                config_result.stderr or config_result.stdout or ""
+            ).strip() or "unknown error"
+            raise ProvisionError(
+                f"Failed to inspect container {vmid} on {node_ip}: {detail}"
+            )
         for line in config_result.stdout.split('\n'):
             if not line.startswith('net0:'):
                 continue
@@ -434,6 +446,8 @@ def provision_container(config: SetupConfig) -> None:
     storage_specs = cast(NestedStrList, config.container_storage)
     user: str = config.hosted_user
     static_ipv4 = ipaddress.ip_interface(config.static_ipv4) if config.static_ipv4 else None
+    if static_ipv4 is not None and not isinstance(static_ipv4, ipaddress.IPv4Interface):
+        raise ProvisionError("LXC provisioning requires an IPv4 setup target")
     target_ip = str(static_ipv4.ip) if static_ipv4 else config.host
     ssh_opts = _ssh_opts(config.hosted_key)
     dry_run = config.dry_run
@@ -453,10 +467,14 @@ def provision_container(config: SetupConfig) -> None:
             print(f"  Static IPv6: {config.static_ipv6}")
         if config.network_gateway4:
             print(f"  IPv4 gateway: {config.network_gateway4}")
+        else:
+            print("  IPv4 gateway: auto-detect from selected Proxmox bridge")
         if config.network_gateway6:
             print(f"  IPv6 gateway: {config.network_gateway6}")
         if config.network_dns:
             print(f"  DNS servers: {', '.join(config.network_dns)}")
+        else:
+            print("  DNS servers: auto-detect from Proxmox node")
         print(f"  Hostname: {hostname}")
         print(f"  Memory: {memory}")
         print(f"  Cores: {config.container_cores}")
@@ -470,14 +488,6 @@ def provision_container(config: SetupConfig) -> None:
         print(f"  Storage specs: {storage_specs}")
         return
 
-    # Check if already provisioned
-    if check_container_exists(
-        node_ip, target_ip, user, config.hosted_key, dry_run=dry_run
-    ):
-        raise ContainerAlreadyExists(
-            f"Container with IP {target_ip} already exists on {node_ip}"
-        )
-
     # Resolve hostname
     hostname = config.system_hostname or _build_container_hostname(
         target_ip, config.friendly_name
@@ -486,12 +496,39 @@ def provision_container(config: SetupConfig) -> None:
 
     # Auto-detect bridge
     bridge = auto_detect_bridge(
-        node_ip, user, config.hosted_key
+        node_ip,
+        user,
+        config.hosted_key,
+        preferred_bridge=getattr(config, "hosted_bridge", None),
     )
 
     # Detect gateway and nameservers
-    gateway = config.network_gateway4 or _get_host_gateway(node_ip, user, ssh_opts)
-    nameservers = config.network_dns or _get_host_nameservers(node_ip, user, ssh_opts)
+    if static_ipv4 is None:
+        raise ProvisionError("LXC provisioning requires an IPv4 setup target")
+    gateway = config.network_gateway4 or _get_guest_gateway(
+        node_ip,
+        user,
+        ssh_opts,
+        bridge,
+        static_ipv4,
+    )
+    nameservers = list(config.network_dns or _get_host_nameservers(
+        node_ip,
+        user,
+        ssh_opts,
+        bridge=bridge,
+        fallback_gateway=gateway,
+    ))
+    config.hosted_bridge = bridge
+    config.network_gateway4 = gateway
+    config.network_dns = nameservers
+
+    if check_container_exists(
+        node_ip, target_ip, user, config.hosted_key, dry_run=dry_run
+    ):
+        raise ContainerAlreadyExists(
+            f"Container with IP {target_ip} already exists on {node_ip}"
+        )
 
     root_spec = _get_storage_spec(storage_specs, "root")
     if not root_spec:

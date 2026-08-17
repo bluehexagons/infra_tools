@@ -30,7 +30,7 @@ sudo infra-tools self-setup --qemu-guest-agent
 ```
 
 The option installs `qemu-guest-agent` and runs
-`systemctl enable --now qemu-guest-agent`. Hosted VMs created by infra_tools
+`systemctl enable --now qemu-guest-agent`. VMs provisioned by infra_tools
 already receive the same package and service configuration through cloud-init.
 
 Set up, register, and inspect the host:
@@ -51,9 +51,9 @@ Successful `server_proxmox` setup registers the host in the selected workspace;
 The matching `.pub` file must sit beside the private key, and the Proxmox
 `root` account must accept that key.
 
-Hosted VM setup uses the same private key's `.pub` file for cloud-init. If the
-Proxmox node key and guest key differ, pass `--hosted-key` for the node and
-`--key` for the guest. Hosted VM image downloads and cloud-init snippets are
+VM provisioning uses the same private key's `.pub` file for cloud-init. If the
+Proxmox node key and guest key differ, pass `--provision-key` for the node and
+`--key` for the guest. VM image downloads and cloud-init snippets are
 placed through Proxmox storage APIs, so the selected node must have active
 `iso` and `snippets` storage content types.
 
@@ -98,7 +98,7 @@ Create a Debian VM with XFCE, RDP, Firefox, and coding tools:
 
 ```bash
 infra-tools setup workstation_dev 10.0.0.50 agent \
-  --hosted pve1 --base debian --name agent-dev-01 \
+  --provision-on pve1 --base debian --name agent-dev-01 \
   --cores 4 --memory 8G --storage root 40G \
   --desktop xfce --rdp --browser firefox \
   --password "$RDP_PASSWORD" \
@@ -123,7 +123,7 @@ shell history; the password is not persisted in saved setup state.
 
 ## Graphical VM hardware baseline
 
-Hosted VMs that include a desktop or enable RDP are created with both a
+Provisioned VMs that include a desktop or enable RDP are created with both a
 VirtIO-GPU display and a serial socket. The VirtIO device supplies a usable
 Proxmox noVNC recovery console; the serial socket remains available for boot
 diagnostics. Server-only VMs retain `vga: serial0` to avoid an unused emulated
@@ -168,24 +168,24 @@ Physical GPU passthrough is a different profile. It needs host IOMMU/device
 isolation, usually Q35/OVMF, explicit guest drivers, and separate xorgxrdp
 glamor compatibility testing. It is not enabled by the default RDP setup.
 
-## Hosted web server VM
+## Provisioned web server VM
 
 ```bash
 infra-tools setup server_web 10.0.0.50 admin \
-  --hosted pve1 --memory 4G --storage root 32G --cores 2 \
+  --provision-on pve1 --memory 4G --storage root 32G --cores 2 \
   --base debian --name web-01-vm --ruby --node \
   --ssl --ssl-email admin@example.com \
   --deploy example.com https://github.com/user/repo.git
 ```
 
-## Hosted LXC
+## Provisioned LXC
 
 Use `--machine unprivileged` explicitly for an LXC and include template
 storage:
 
 ```bash
 infra-tools setup server_web 10.0.0.50 admin \
-  --machine unprivileged --hosted pve1 \
+  --machine unprivileged --provision-on pve1 \
   --memory 4G --cores 2 --storage root 20G --storage template \
   --base debian --name web-01-lxc --ruby --node \
   --ssl --ssl-email admin@example.com \
@@ -198,6 +198,13 @@ Proxmox auto-detection. `--storage template` uses the saved/default template
 pool.
 The guest bridge defaults to the bridge carrying the Proxmox host's default
 route; use `--bridge NAME` when the host has multiple routed bridge networks.
+The positional target is also the guest IPv4 address: a bare address assumes
+`/24`, while `ADDRESS/PREFIX` selects another subnet without a duplicate
+`--ip` option. Unless explicitly set, the IPv4 gateway is selected from the
+chosen bridge's default route, then its own address, with the first usable
+subnet address as a clearly reported fallback. DNS comes from the Proxmox
+node, preferring bridge-specific resolvers; when the node exposes only a local
+stub resolver, the inferred gateway is used.
 
 ## Guest lifecycle
 
@@ -368,7 +375,7 @@ infra-tools proxmox hosts
 infra-tools proxmox probe pve1
 
 infra-tools setup workstation_dev 10.0.0.50 devuser \
-  --hosted pve1 --memory 8G --storage root 40G --cores 4 \
+  --provision-on pve1 --memory 8G --storage root 40G --cores 4 \
   --name dev-01-vm --rdp
 
 infra-tools proxmox ls pve1
@@ -380,7 +387,7 @@ infra-tools proxmox stop pve1 "$VMID"
 infra-tools proxmox start pve1 "$VMID"
 
 infra-tools setup server_lite 10.0.0.60 appuser \
-  --machine unprivileged --hosted pve1 \
+  --machine unprivileged --provision-on pve1 \
   --memory 2G --storage root 10G --storage template
 ```
 

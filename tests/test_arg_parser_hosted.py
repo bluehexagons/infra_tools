@@ -15,31 +15,31 @@ class TestHostedFlagParsing(unittest.TestCase):
     def setUp(self):
         self.parser = create_setup_argument_parser("Test", for_remote=False)
 
-    def test_hosted_flag(self):
-        args = self.parser.parse_args(["10.0.0.50", "--hosted", "10.0.0.1"])
+    def test_provision_on_flag(self):
+        args = self.parser.parse_args(["10.0.0.50", "--provision-on", "10.0.0.1"])
         self.assertEqual(args.hosted_node, "10.0.0.1")
 
     def test_hosted_user_default_root(self):
-        args = self.parser.parse_args(["10.0.0.50", "--hosted", "10.0.0.1"])
+        args = self.parser.parse_args(["10.0.0.50", "--provision-on", "10.0.0.1"])
         self.assertEqual(args.hosted_user, "root")
 
     def test_hosted_user_override(self):
         args = self.parser.parse_args([
-            "10.0.0.50", "--hosted", "10.0.0.1",
-            "--hosted-user", "admin"
+            "10.0.0.50", "--provision-on", "10.0.0.1",
+            "--provision-user", "admin"
         ])
         self.assertEqual(args.hosted_user, "admin")
 
     def test_hosted_key(self):
         args = self.parser.parse_args([
-            "10.0.0.50", "--hosted", "10.0.0.1",
-            "--hosted-key", "/path/to/key"
+            "10.0.0.50", "--provision-on", "10.0.0.1",
+            "--provision-key", "/path/to/key"
         ])
         self.assertEqual(args.hosted_key, "/path/to/key")
 
     def test_hosted_bridge(self):
         args = self.parser.parse_args([
-            "10.0.0.50", "--hosted", "10.0.0.1", "--bridge", "vmbr20"
+            "10.0.0.50", "--provision-on", "10.0.0.1", "--bridge", "vmbr20"
         ])
         self.assertEqual(args.hosted_bridge, "vmbr20")
 
@@ -94,7 +94,7 @@ class TestHostedFlagParsing(unittest.TestCase):
 
     def test_full_hosted_command(self):
         args = self.parser.parse_args([
-            "10.0.0.50", "--hosted", "10.0.0.1",
+            "10.0.0.50", "--provision-on", "10.0.0.1",
             "--memory", "2G", "--storage", "root", "auto", "10G",
             "--cores", "2", "--base", "debian",
             "--name", "web-01"
@@ -220,8 +220,8 @@ class TestHostedFlagsNotInRemoteParser(unittest.TestCase):
             "Remote", for_remote=True
         )
 
-    def test_no_hosted_flag(self):
-        """The --hosted flag should not exist in the remote parser."""
+    def test_no_provision_on_flag(self):
+        """The --provision-on flag should not exist in the remote parser."""
         args = self.parser.parse_args([
             "--system-type", "server_lite", "--username", "root"
         ])

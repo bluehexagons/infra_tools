@@ -381,7 +381,7 @@ class TestWorkspaceCli(unittest.TestCase):
     @patch("infra_tools.prepare_runtime_config")
     @patch("infra_tools.validate_username", return_value=True)
     @patch("infra_tools.validate_host", return_value=True)
-    def test_run_setup_command_rejects_invalid_hosted_node(
+    def test_run_setup_command_rejects_invalid_proxmox_node(
         self,
         _mock_validate_host,
         _mock_validate_username,
@@ -406,7 +406,7 @@ class TestWorkspaceCli(unittest.TestCase):
 
         self.assertEqual(result, 1)
         mock_run_remote.assert_not_called()
-        mock_print.assert_called_with("Error: Invalid hosted node host: bad host")
+        mock_print.assert_called_with("Error: Invalid Proxmox node host: bad host")
 
     @patch("builtins.print")
     @patch("infra_tools.validate_samba_share_credentials")
@@ -536,6 +536,7 @@ class TestWorkspaceCli(unittest.TestCase):
             username="testuser",
             system_type="server_web",
             machine_type="unprivileged",
+            hosted_bridge="sdn-public",
         )
 
         with patch("infra_tools.validate_host", return_value=True), \
@@ -547,6 +548,8 @@ class TestWorkspaceCli(unittest.TestCase):
         self.assertEqual(result, 0)
         patched_config = mock_execute.call_args.args[0]
         self.assertEqual(patched_config.machine_type, "unprivileged")
+        self.assertEqual(patched_config.hosted_bridge, "sdn-public")
+        self.assertIn("vm_balloon_min", infra_tools._patch_preserve_keys(args))
 
     def test_run_patch_command_allows_explicit_machine_override(self):
         parser, _setup_parser, _patch_parser = infra_tools.create_infra_tools_parser()
@@ -874,7 +877,7 @@ class TestWorkspaceCli(unittest.TestCase):
     @patch("infra_tools.load_setup_command")
     @patch("infra_tools.validate_username", return_value=True)
     @patch("infra_tools.validate_host", return_value=True)
-    def test_run_patch_command_rejects_invalid_hosted_node(
+    def test_run_patch_command_rejects_invalid_proxmox_node(
         self,
         _mock_validate_host,
         _mock_validate_username,
@@ -903,7 +906,7 @@ class TestWorkspaceCli(unittest.TestCase):
 
         self.assertEqual(result, 1)
         mock_run_remote.assert_not_called()
-        mock_print.assert_called_with("Error: Invalid hosted node host: bad host")
+        mock_print.assert_called_with("Error: Invalid Proxmox node host: bad host")
 
 
 class TestSetupUserPasswordless(unittest.TestCase):

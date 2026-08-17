@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import ipaddress
 import io
 import os
 import pwd
@@ -46,7 +47,6 @@ from lib.validation import (
     validate_timezone_name,
     validate_workspace_dir,
 )
-from lib.system_utils import get_current_username
 from lib.cache import get_cache_path_for_host, save_setup_command
 from lib.arg_parser import create_setup_argument_parser
 from lib.display import print_setup_summary
@@ -534,12 +534,70 @@ def _is_storage_amount(value: str) -> bool:
     return True
 
 
+def _normalize_provisioned_target(config: SetupConfig) -> None:
+    """Make the setup target the single source of truth for a guest IPv4."""
+    if not isinstance(config.hosted_node, str) or not config.hosted_node:
+        return
+
+    raw_target = str(config.host).strip()
+    configured_interface: Optional[ipaddress.IPv4Interface] = None
+    if config.static_ipv4:
+        try:
+            parsed_configured = ipaddress.ip_interface(config.static_ipv4)
+        except ValueError as exc:
+            raise ValueError(f"Invalid --ip address: {config.static_ipv4}") from exc
+        if not isinstance(parsed_configured, ipaddress.IPv4Interface):
+            raise ValueError("Proxmox provisioning requires an IPv4 setup target")
+        configured_interface = parsed_configured
+
+    if "/" in raw_target:
+        try:
+            target_interface = ipaddress.ip_interface(raw_target)
+        except ValueError as exc:
+            raise ValueError(f"Invalid provisioned target address: {raw_target}") from exc
+        if not isinstance(target_interface, ipaddress.IPv4Interface):
+            raise ValueError("Proxmox provisioning requires an IPv4 setup target")
+        if configured_interface and configured_interface != target_interface:
+            raise ValueError(
+                "The provisioned target and --ip describe different IPv4 interfaces; "
+                "specify the address once as HOST[/PREFIX]"
+            )
+        config.host = str(target_interface.ip)
+        config.static_ipv4 = str(target_interface)
+        return
+
+    try:
+        target_address = ipaddress.ip_address(raw_target)
+    except ValueError:
+        if configured_interface is None:
+            raise ValueError(
+                "Proxmox provisioning requires an IPv4 target; use HOST or "
+                "HOST/PREFIX after the setup type"
+            )
+        config.host = str(configured_interface.ip)
+        config.static_ipv4 = str(configured_interface)
+        return
+
+    if not isinstance(target_address, ipaddress.IPv4Address):
+        raise ValueError("Proxmox provisioning requires an IPv4 setup target")
+    if configured_interface and configured_interface.ip != target_address:
+        raise ValueError(
+            "The provisioned target and --ip use different IPv4 addresses; "
+            "specify the address once as HOST[/PREFIX]"
+        )
+
+    config.host = str(target_address)
+    config.static_ipv4 = str(
+        configured_interface or ipaddress.ip_interface(f"{target_address}/24")
+    )
+
+
 def _apply_hosted_proxmox_defaults(
     config: SetupConfig,
     workspace: Optional[str],
 ) -> None:
     """Resolve saved Proxmox host details and expand shorthand storage specs."""
-    if not config.hosted_node:
+    if not isinstance(config.hosted_node, str) or not config.hosted_node:
         return
 
     if config.machine_type == DEFAULT_MACHINE_TYPE:
@@ -557,6 +615,13 @@ def _apply_hosted_proxmox_defaults(
             config.hosted_bridge = host.default_bridge or (
                 host.facts.default_bridge if host.facts else None
             )
+
+    if not config.hosted_key and config.ssh_key:
+        config.hosted_key = config.ssh_key
+
+    if not validate_host(str(config.hosted_node)):
+        return
+    _normalize_provisioned_target(config)
 
     storage_specs = _normalize_container_storage(config.container_storage)
     if not storage_specs:
@@ -828,18 +893,27 @@ def setup_main(system_type: str, description: str, success_msg_fn: Callable[[Set
             print(f"Error: {e}")
             return 1
         set_workspace_dir(args.workspace)
-    
-    if not validate_host(args.host):
-        print(f"Error: Invalid IP address or hostname: {args.host}")
-        return 1
-    
-    username = args.username if args.username else get_current_username()
-    
-    if not validate_username(username):
-        print(f"Error: Invalid username: {username}")
+
+    explicit_ipv4 = getattr(args, "static_ipv4", None)
+    if getattr(args, "hosted_node", None) and isinstance(explicit_ipv4, str) and explicit_ipv4:
+        print(
+            "Error: --ip is redundant with --provision-on; put the guest address "
+            "and optional prefix in the positional HOST[/PREFIX] target"
+        )
         return 1
     
     config = SetupConfig.from_args(args, system_type)
+
+    if not validate_username(config.username):
+        print(f"Error: Invalid username: {config.username}")
+        return 1
+
+    if config.hosted_node and config.activate_network is True:
+        print(
+            "Error: --activate-network is for patching an existing Proxmox "
+            "guest; provisioned guests boot directly on their requested address"
+        )
+        return 1
 
     try:
         runtime_config = prepare_validated_runtime_config(
@@ -850,14 +924,12 @@ def setup_main(system_type: str, description: str, success_msg_fn: Callable[[Set
         print(f"Error: {e}")
         return 1
 
-    # Hosted guest provisioning (if --hosted)
-    if config.hosted_node:
-        try:
-            validate_hosted_flags(config)
-        except ValueError as e:
-            print(f"Error: {e}")
-            return 1
+    if not validate_host(config.host):
+        print(f"Error: Invalid IP address or hostname: {config.host}")
+        return 1
 
+    # Provision a Proxmox guest as the first phase of regular setup.
+    if config.hosted_node:
         if config.machine_type == "vm":
             from lib.proxmox_vm import provision_vm, VMAlreadyExists
 
@@ -886,6 +958,15 @@ def setup_main(system_type: str, description: str, success_msg_fn: Callable[[Set
             except Exception as e:
                 print(f"\n✗ Failed to provision container: {e}")
                 return 1
+
+        try:
+            runtime_config = prepare_validated_runtime_config(
+                config,
+                getattr(args, "workspace", None),
+            )
+        except ValueError as e:
+            print(f"Error: {e}")
+            return 1
 
     print_setup_summary(config, description)
     

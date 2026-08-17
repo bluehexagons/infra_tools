@@ -44,7 +44,6 @@ class TestSetupMainTimingPersistence(unittest.TestCase):
             with patch.object(setup_common, 'run_remote_setup', return_value=0), \
                  patch.object(setup_common, 'validate_host', return_value=True), \
                  patch.object(setup_common, 'validate_username', return_value=True), \
-                 patch.object(setup_common, 'get_current_username', return_value='testuser'), \
                  patch.object(setup_common, 'validate_samba_share_credentials'), \
                  patch.object(setup_common, 'print_setup_summary'), \
                  patch.object(setup_common, 'store_cli_credentials'), \
@@ -90,7 +89,6 @@ class TestSetupMainTimingPersistence(unittest.TestCase):
             with patch.object(setup_common, 'run_remote_setup', return_value=1), \
                  patch.object(setup_common, 'validate_host', return_value=True), \
                  patch.object(setup_common, 'validate_username', return_value=True), \
-                 patch.object(setup_common, 'get_current_username', return_value='testuser'), \
                  patch.object(setup_common, 'validate_samba_share_credentials'), \
                  patch.object(setup_common, 'print_setup_summary'), \
                  patch.object(setup_common, 'store_cli_credentials'), \
@@ -134,7 +132,6 @@ class TestSetupMainTimingPersistence(unittest.TestCase):
             with patch.object(setup_common, 'run_remote_setup', side_effect=RuntimeError('boom')), \
                  patch.object(setup_common, 'validate_host', return_value=True), \
                  patch.object(setup_common, 'validate_username', return_value=True), \
-                 patch.object(setup_common, 'get_current_username', return_value='testuser'), \
                  patch.object(setup_common, 'validate_samba_share_credentials'), \
                  patch.object(setup_common, 'print_setup_summary'), \
                  patch.object(setup_common, 'store_cli_credentials'), \
@@ -180,7 +177,6 @@ class TestSetupMainTimingPersistence(unittest.TestCase):
             with patch.object(setup_common, 'run_remote_setup', return_value=0), \
                  patch.object(setup_common, 'validate_host', return_value=True), \
                  patch.object(setup_common, 'validate_username', return_value=True), \
-                 patch.object(setup_common, 'get_current_username', return_value='testuser'), \
                  patch.object(setup_common, 'validate_samba_share_credentials'), \
                  patch.object(setup_common, 'print_setup_summary'), \
                  patch.object(setup_common, 'save_setup_command', side_effect=fake_save):
@@ -745,6 +741,7 @@ class TestHostedProvisioningDispatch(unittest.TestCase):
         parser = MagicMock()
         parser.parse_args.return_value = self._make_args()
         config = _make_config(
+            host="10.0.0.50",
             system_type="server_web",
             machine_type="vm",
             hosted_node="10.0.0.1",
@@ -756,7 +753,7 @@ class TestHostedProvisioningDispatch(unittest.TestCase):
         with patch.object(setup_common, "create_argument_parser", return_value=parser), \
              patch.object(setup_common, "validate_host", return_value=True), \
              patch.object(setup_common, "validate_username", return_value=True), \
-             patch.object(setup_common, "prepare_runtime_config", return_value=config), \
+             patch.object(setup_common, "prepare_runtime_config", return_value=config) as mock_prepare, \
              patch.object(setup_common, "validate_hosted_flags"), \
              patch.object(setup_common, "validate_samba_share_credentials"), \
              patch.object(setup_common, "print_setup_summary"), \
@@ -769,6 +766,7 @@ class TestHostedProvisioningDispatch(unittest.TestCase):
 
         self.assertEqual(result, 0)
         mock_provision_vm.assert_called_once_with(config, image=config.vm_image)
+        self.assertEqual(mock_prepare.call_count, 2)
         mock_run_remote.assert_called_once_with(config)
 
     @patch("builtins.print")
@@ -779,6 +777,7 @@ class TestHostedProvisioningDispatch(unittest.TestCase):
         parser = MagicMock()
         parser.parse_args.return_value = self._make_args()
         config = _make_config(
+            host="10.0.0.50",
             system_type="server_web",
             machine_type="vm",
             hosted_node="10.0.0.1",
@@ -810,6 +809,7 @@ class TestHostedProvisioningDispatch(unittest.TestCase):
         parser = MagicMock()
         parser.parse_args.return_value = self._make_args()
         config = _make_config(
+            host="10.0.0.50",
             machine_type="unprivileged",
             hosted_node="10.0.0.1",
             container_memory="2G",
@@ -856,6 +856,7 @@ class TestHostedProvisioningDispatch(unittest.TestCase):
             args.workspace = workspace
             parser.parse_args.return_value = args
             config = _make_config(
+                host="10.0.0.50",
                 system_type="server_web",
                 machine_type="vm",
                 hosted_node="pve1",
@@ -900,6 +901,7 @@ class TestHostedProvisioningDispatch(unittest.TestCase):
                 workspace,
             )
             config = _make_config(
+                host="10.0.0.50",
                 hosted_node="pve1",
                 hosted_key=None,
                 ssh_key="/keys/agent-vm",
@@ -910,6 +912,20 @@ class TestHostedProvisioningDispatch(unittest.TestCase):
 
         self.assertEqual(config.hosted_key, "/keys/proxmox")
         self.assertEqual(config.ssh_key, "/keys/agent-vm")
+
+    def test_unregistered_node_defaults_to_guest_ssh_key(self):
+        from lib import setup_common
+
+        config = _make_config(
+            host="10.0.0.50",
+            hosted_node="10.0.0.1",
+            ssh_key="/keys/shared",
+            container_storage=[["root", "10G"]],
+        )
+
+        setup_common._apply_hosted_proxmox_defaults(config, None)
+
+        self.assertEqual(config.hosted_key, "/keys/shared")
 
     @patch("builtins.print")
     def test_hosted_lxc_setup_expands_saved_template_storage(self, _mock_print):
@@ -930,6 +946,7 @@ class TestHostedProvisioningDispatch(unittest.TestCase):
             args.workspace = workspace
             parser.parse_args.return_value = args
             config = _make_config(
+                host="10.0.0.50",
                 machine_type="unprivileged",
                 hosted_node="pve1",
                 container_memory="2G",
@@ -961,6 +978,7 @@ class TestHostedProvisioningDispatch(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as workspace:
             config = _make_config(
+                host="10.0.0.50",
                 hosted_node="10.0.0.1",
                 container_storage=[["root", "10G"], ["template"]],
             )
@@ -972,6 +990,43 @@ class TestHostedProvisioningDispatch(unittest.TestCase):
             config.container_storage,
             [["root", "auto", "10G"], ["template", "auto"]],
         )
+
+    def test_provisioned_bare_ipv4_defaults_to_slash_24(self):
+        from lib import setup_common
+
+        config = _make_config(
+            host="10.0.0.50",
+            hosted_node="10.0.0.1",
+        )
+
+        setup_common._apply_hosted_proxmox_defaults(config, None)
+
+        self.assertEqual(config.host, "10.0.0.50")
+        self.assertEqual(config.static_ipv4, "10.0.0.50/24")
+
+    def test_provisioned_cidr_moves_prefix_into_static_network_config(self):
+        from lib import setup_common
+
+        config = _make_config(
+            host="10.0.0.50/20",
+            hosted_node="10.0.0.1",
+        )
+
+        setup_common._apply_hosted_proxmox_defaults(config, None)
+
+        self.assertEqual(config.host, "10.0.0.50")
+        self.assertEqual(config.static_ipv4, "10.0.0.50/20")
+
+    def test_provisioned_hostname_without_an_address_is_rejected(self):
+        from lib import setup_common
+
+        config = _make_config(
+            host="guest.example.test",
+            hosted_node="10.0.0.1",
+        )
+
+        with self.assertRaisesRegex(ValueError, "requires an IPv4 target"):
+            setup_common._apply_hosted_proxmox_defaults(config, None)
 
     def test_server_proxmox_setup_registers_host(self):
         from lib import setup_common

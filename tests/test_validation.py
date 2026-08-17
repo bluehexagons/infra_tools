@@ -563,6 +563,7 @@ class _MockConfig:
         self.ssh_key = kwargs.get('ssh_key')
         self.static_ipv4 = kwargs.get('static_ipv4')
         self.hosted_node = kwargs.get('hosted_node')
+        self.hosted_bridge = kwargs.get('hosted_bridge')
         self.container_memory = kwargs.get('container_memory')
         self.vm_balloon_min = kwargs.get('vm_balloon_min')
         self.container_storage = kwargs.get('container_storage')
@@ -685,7 +686,7 @@ class TestValidateHostedFlags(unittest.TestCase):
 
     def test_balloon_min_requires_hosted_provisioning(self):
         config = _MockConfig(hosted_node=None, vm_balloon_min='1G')
-        with self.assertRaisesRegex(ValueError, r'requires --hosted'):
+        with self.assertRaisesRegex(ValueError, r'requires --provision-on'):
             validate_hosted_flags(config)
 
     def test_invalid_hosted_node_host(self):
@@ -694,7 +695,26 @@ class TestValidateHostedFlags(unittest.TestCase):
             container_memory='2G',
             container_storage=[['root', 'auto', '10G']],
         )
-        with self.assertRaisesRegex(ValueError, "Invalid hosted node host: bad host"):
+        with self.assertRaisesRegex(ValueError, "Invalid Proxmox node host: bad host"):
+            validate_hosted_flags(config)
+
+    def test_named_sdn_bridge_is_accepted(self):
+        config = _MockConfig(
+            hosted_node='10.0.0.1',
+            hosted_bridge='sdn-public',
+            container_memory='2G',
+            container_storage=[['root', 'auto', '10G']],
+        )
+        validate_hosted_flags(config)
+
+    def test_invalid_bridge_name_is_rejected(self):
+        config = _MockConfig(
+            hosted_node='10.0.0.1',
+            hosted_bridge='bad bridge',
+            container_memory='2G',
+            container_storage=[['root', 'auto', '10G']],
+        )
+        with self.assertRaisesRegex(ValueError, "Invalid network interface"):
             validate_hosted_flags(config)
 
     def test_invalid_storage_amount_for_root(self):

@@ -62,7 +62,13 @@ def add_setup_arguments(
                 help="Type of system to set up",
             )
         if include_host:
-            parser.add_argument("host", help="IP address or hostname of the remote host")
+            parser.add_argument(
+                "host",
+                help=(
+                    "IP address or hostname of the remote host; with --provision-on, "
+                    "use IPv4 or IPv4/PREFIX (bare IPv4 defaults to /24)"
+                ),
+            )
             parser.add_argument("username", nargs="?", default=None,
                                help="Username (defaults to current user)")
         parser.add_argument("-k", "--key", dest="ssh_key", help="SSH private key path")
@@ -95,7 +101,7 @@ def add_setup_arguments(
         "--gateway",
         dest="network_gateway4",
         metavar="IP",
-        help="IPv4 default gateway; requires --ip",
+        help="IPv4 default gateway; requires --ip or a --provision-on target",
     )
     parser.add_argument(
         "--gateway6",
@@ -128,7 +134,7 @@ def add_setup_arguments(
                        choices=MACHINE_TYPES,
                        default=None,
                        help="Machine type override. Defaults to auto-detection "
-                            "on the target; hosted Proxmox setup defaults to a VM.")
+                            "on the target; Proxmox provisioning defaults to a VM.")
     parser.add_argument(
         "--control-plane",
         action="store_true",
@@ -139,35 +145,79 @@ def add_setup_arguments(
         parser.add_argument("--name", dest="friendly_name", help="Friendly name for this configuration")
         parser.add_argument("--tags", dest="tags", help="Comma-separated list of tags for this configuration")
 
-        # Hosted guest provisioning (Proxmox VM/LXC creation)
-        parser.add_argument("--hosted", dest="hosted_node",
-                           help="Proxmox node IP/hostname where the hosted guest will be created")
-        parser.add_argument("--hosted-user", dest="hosted_user", default="root",
-                           help="SSH user for Proxmox node (default: root)")
-        parser.add_argument("--hosted-key", dest="hosted_key",
-                           help="SSH key for Proxmox node (default: SSH config)")
-        parser.add_argument("--bridge", dest="hosted_bridge",
-                           help="Proxmox bridge for the hosted guest (default: host default route)")
-        parser.add_argument("--memory", dest="container_memory",
-                           help="Hosted guest memory (e.g. 2G, 512M)")
+        # Proxmox guest provisioning as part of the regular setup flow.
+        parser.add_argument(
+            "--provision-on",
+            dest="hosted_node",
+            metavar="HOST",
+            help="Create the setup target on this Proxmox node or registered host",
+        )
+        parser.add_argument(
+            "--provision-user",
+            dest="hosted_user",
+            default="root",
+            metavar="USER",
+            help="SSH user for Proxmox node (default: root)",
+        )
+        parser.add_argument(
+            "--provision-key",
+            dest="hosted_key",
+            metavar="PATH",
+            help="SSH key for Proxmox node (default: saved host key, --key, or SSH config)",
+        )
+        parser.add_argument(
+            "--bridge",
+            dest="hosted_bridge",
+            metavar="NAME",
+            help="Proxmox bridge for the new guest (default: node default-route bridge)",
+        )
+        parser.add_argument(
+            "--memory",
+            dest="container_memory",
+            metavar="SIZE",
+            help="Provisioned guest memory (e.g. 2G, 512M)",
+        )
         parser.add_argument(
             "--balloon-min",
             dest="vm_balloon_min",
             metavar="SIZE",
-            help="Hosted VM balloon minimum (e.g. 2G); defaults to --memory for fixed allocation",
+            help="Provisioned VM balloon minimum; defaults to --memory for fixed allocation",
         )
-        parser.add_argument("--storage", dest="container_storage",
-                           action="append", nargs="+", metavar="STORAGE",
-                           help="Hosted guest storage spec: root POOL AMOUNT, or template POOL for LXC only; repeat as needed")
-        parser.add_argument("--cores", dest="container_cores", type=int, default=1,
-                           help="Hosted guest CPU cores (default: 1)")
-        parser.add_argument("--base", dest="container_base", default="debian",
-                           help="Base OS family for the LXC template or VM image catalog (default: debian)")
-        parser.add_argument("--image", dest="vm_image", default=None,
-                            help="VM cloud image override: http(s) URL to a qcow2, or a "
-                                 "Proxmox storage reference like 'local:iso/foo.qcow2'. "
-                                 "Only used when --machine vm. Defaults to the curated "
-                                 "Debian catalog (lib/cloud_images.py).")
+        parser.add_argument(
+            "--storage",
+            dest="container_storage",
+            action="append",
+            nargs="+",
+            metavar="STORAGE",
+            help="Guest storage: root [POOL] AMOUNT, or template [POOL] for LXC; repeat as needed",
+        )
+        parser.add_argument(
+            "--cores",
+            dest="container_cores",
+            type=int,
+            default=1,
+            metavar="N",
+            help="Provisioned guest CPU cores (default: 1)",
+        )
+        parser.add_argument(
+            "--base",
+            dest="container_base",
+            default="debian",
+            metavar="NAME",
+            help="Base OS family for the LXC template or VM image catalog (default: debian)",
+        )
+        parser.add_argument(
+            "--image",
+            dest="vm_image",
+            default=None,
+            metavar="SOURCE",
+            help=(
+                "VM cloud image override: http(s) URL to a qcow2, or a Proxmox "
+                "storage reference like 'local:iso/foo.qcow2'. Used by VM "
+                "provisioning. Defaults to the curated Debian catalog "
+                "(lib/cloud_images.py)."
+            ),
+        )
     else:
         parser.add_argument("--name", dest="friendly_name", default=None,
                            help="Friendly name for this configuration")

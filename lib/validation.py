@@ -939,19 +939,19 @@ def validate_network_setup_settings(config: Any) -> None:
         except ValueError:
             if not ipv4_interface:
                 raise ValueError(
-                    "Hosted provisioning requires a literal IPv4 setup host or --ip"
+                    "Proxmox provisioning requires a literal IPv4 setup target"
                 )
             return
         if setup_host.version == 6 and not ipv4_interface:
             raise ValueError(
-                "Hosted provisioning currently requires an IPv4 target for the SSH handoff"
+                "Proxmox provisioning currently requires an IPv4 target for the SSH handoff"
             )
         configured = ipv4_interface if setup_host.version == 4 else ipv6_interface
         if configured is None or configured.ip != setup_host:
             if activate_network:
                 return
             raise ValueError(
-                "For hosted provisioning, the literal setup host must match the address "
+                "For Proxmox provisioning, the literal setup host must match the address "
                 "provided by --ip or --ipv6 unless --activate-network is used for an "
                 "existing guest"
             )
@@ -987,7 +987,7 @@ def validate_network_vlan_id(value: int | str) -> int:
 
 
 def validate_hosted_flags(config: Any) -> None:
-    """Validate that required hosted flags are present when --hosted is used.
+    """Validate Proxmox guest options used with ``--provision-on``.
 
     Args:
         config: SetupConfig instance
@@ -998,19 +998,19 @@ def validate_hosted_flags(config: Any) -> None:
     balloon_min = getattr(config, "vm_balloon_min", None)
     if not config.hosted_node:
         if balloon_min:
-            raise ValueError("--balloon-min requires --hosted")
+            raise ValueError("--balloon-min requires --provision-on")
         return
 
     from lib.validators import validate_host
 
     if not validate_host(config.hosted_node):
-        raise ValueError(f"Invalid hosted node host: {config.hosted_node}")
+        raise ValueError(f"Invalid Proxmox node host: {config.hosted_node}")
 
     if not config.container_memory:
-        raise ValueError("--memory is required when --hosted is specified")
+        raise ValueError("--memory is required with --provision-on")
 
     if not config.container_storage:
-        raise ValueError("--storage is required when --hosted is specified")
+        raise ValueError("--storage is required with --provision-on")
 
     storage_specs: list[list[str]] = []
     if config.container_storage:
@@ -1051,7 +1051,7 @@ def validate_hosted_flags(config: Any) -> None:
             )
 
     if not root_seen:
-        raise ValueError("--storage root POOL AMOUNT is required when --hosted is specified")
+        raise ValueError("--storage root [POOL] AMOUNT is required with --provision-on")
 
     memory_kib = _memory_string_kib(config.container_memory, "--memory")
 
@@ -1065,8 +1065,8 @@ def validate_hosted_flags(config: Any) -> None:
         raise ValueError("--cores must be at least 1")
 
     hosted_bridge = getattr(config, "hosted_bridge", None)
-    if hosted_bridge and not re.fullmatch(r"vmbr[0-9]+", hosted_bridge):
-        raise ValueError("--bridge must be a Proxmox bridge name such as vmbr0")
+    if hosted_bridge:
+        validate_network_interface_name(hosted_bridge)
 
     machine_type = getattr(config, "machine_type", None)
     vm_image = getattr(config, "vm_image", None)
@@ -1078,12 +1078,12 @@ def validate_hosted_flags(config: Any) -> None:
         ssh_key = getattr(config, "ssh_key", None)
         if not ssh_key:
             raise ValueError(
-                "Hosted VM provisioning requires --key PATH with a matching PATH.pub"
+                "VM provisioning requires --key PATH with a matching PATH.pub"
             )
         pubkey_path = f"{ssh_key}.pub"
         if not os.path.isfile(pubkey_path) or os.path.getsize(pubkey_path) <= 0:
             raise ValueError(
-                f"Hosted VM provisioning requires a readable SSH public key: {pubkey_path}"
+                f"VM provisioning requires a readable SSH public key: {pubkey_path}"
             )
 
         if not getattr(config, "static_ipv4", None):
@@ -1091,11 +1091,11 @@ def validate_hosted_flags(config: Any) -> None:
                 target_ip = ipaddress.ip_address(str(getattr(config, "host", "")))
             except ValueError as exc:
                 raise ValueError(
-                    "Hosted VM provisioning requires a literal IPv4 target or --ip"
+                    "VM provisioning requires a literal IPv4 target"
                 ) from exc
             if target_ip.version != 4:
                 raise ValueError(
-                    "Hosted VM provisioning currently requires an IPv4 target for the SSH handoff"
+                    "VM provisioning currently requires an IPv4 target for the SSH handoff"
                 )
 
         from lib.cloud_images import parse_image_argument, resolve_cloud_image

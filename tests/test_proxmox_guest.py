@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import sys
 import unittest
@@ -11,6 +12,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.proxmox_guest import (
     _build_guest_hostname,
+    _get_guest_gateway,
+    _get_host_nameservers,
     _parse_corosync_config,
     _wait_for_guest_ssh,
     probe_proxmox_cluster,
@@ -49,6 +52,69 @@ class TestWaitForGuestSsh(unittest.TestCase):
     def test_dry_run_skips_probe(self, mock_run) -> None:
         _wait_for_guest_ssh("10.0.0.50", "10.0.0.1", "root", [], dry_run=True)
         mock_run.assert_not_called()
+
+
+class TestGuestNetworkDefaults(unittest.TestCase):
+    @patch("lib.proxmox_guest._ssh_run")
+    def test_gateway_prefers_default_route_on_selected_bridge(self, mock_run) -> None:
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=(
+                "default via 10.0.0.1 dev vmbr0 proto static\n"
+                "2: vmbr0 inet 10.0.0.10/24 scope global vmbr0\n"
+            ),
+            stderr="",
+        )
+
+        gateway = _get_guest_gateway(
+            "10.0.0.10",
+            "root",
+            [],
+            "vmbr0",
+            ipaddress.IPv4Interface("10.0.0.50/24"),
+        )
+
+        self.assertEqual(gateway, "10.0.0.1")
+
+    @patch("lib.proxmox_guest._ssh_run")
+    def test_gateway_uses_bridge_address_for_isolated_network(self, mock_run) -> None:
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=(
+                "default via 10.0.0.1 dev vmbr0 proto static\n"
+                "3: sdn-private inet 172.20.0.254/24 scope global sdn-private\n"
+            ),
+            stderr="",
+        )
+
+        gateway = _get_guest_gateway(
+            "10.0.0.10",
+            "root",
+            [],
+            "sdn-private",
+            ipaddress.IPv4Interface("172.20.0.50/24"),
+        )
+
+        self.assertEqual(gateway, "172.20.0.254")
+
+    @patch("lib.proxmox_guest._ssh_run")
+    def test_dns_prefers_node_values_and_falls_back_to_gateway(self, mock_run) -> None:
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="127.0.0.53\n",
+            stderr="",
+        )
+
+        nameservers = _get_host_nameservers(
+            "10.0.0.10",
+            "root",
+            [],
+            bridge="sdn-private",
+            fallback_gateway="172.20.0.254",
+        )
+
+        self.assertEqual(nameservers, ["172.20.0.254"])
+        self.assertIn("resolvectl dns sdn-private", mock_run.call_args.args[3])
 
 
 class TestProbeProxmoxHost(unittest.TestCase):

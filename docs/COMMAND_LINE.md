@@ -85,7 +85,7 @@ tools, not for an LXC container.
 
 | Flag | Description |
 |------|-------------|
-| `host` | Hostname or IP address |
+| `host` | Hostname or IP address; with `--provision-on`, use IPv4 or IPv4/PREFIX (bare IPv4 means `/24`) |
 | `username` | Optional SSH username |
 | `-k, --key PATH` | SSH private key |
 | `-p, --password PASS` | SSH password |
@@ -93,7 +93,7 @@ tools, not for an LXC container.
 | `--hostname NAME` | Set the target system hostname; distinct from the saved `--name` label |
 | `--ip ADDRESS/PREFIX` | Stage a persistent static IPv4 address; CIDR prefix is required |
 | `--ipv6 ADDRESS/PREFIX` | Stage a persistent static IPv6 address; CIDR prefix is required |
-| `--gateway IP` | IPv4 default gateway; requires `--ip` |
+| `--gateway IP` | IPv4 default gateway; requires `--ip` or an IPv4 `--provision-on` target |
 | `--gateway6 IP` | IPv6 default gateway; requires `--ipv6` |
 | `--dns IP` | DNS server; repeatable and accepts IPv4 or IPv6 addresses |
 | `--network-interface NAME` | Interface to configure; defaults to the interface carrying the default route |
@@ -176,8 +176,9 @@ can use the same `patch ... --activate-network` handoff as other Debian hosts.
 The handoff requires a complete guest-conflict scan, refuses concurrent
 metadata changes, updates and reads back `qm ipconfig0` or `pct net0` while
 preserving the guest's other network fields, and verifies both SSH endpoints
-before guest persistence. New hosted guests receive their initial address from
-cloud-init or `pct`, so initial hosted setup rejects `--activate-network`.
+before guest persistence. Newly provisioned guests receive their initial
+address from cloud-init or `pct`, so initial provisioned setup rejects
+`--activate-network`.
 
 Without `--rdp-source`, enabling RDP keeps a globally rate-limited UFW rule.
 Prefer one or more management, VPN, or trusted LAN CIDRs. On rerun,
@@ -328,14 +329,14 @@ deferrals. For a host running long unattended agent tasks, use both
 `--no-auto-restart` and `--auto-restart-force-days 0` if automatic restarts must
 be fully disabled, then manage pending security reboots explicitly.
 
-### Hosted Proxmox Flags
+### Proxmox provisioning flags
 
 | Flag | Description |
 |------|-------------|
-| `--hosted HOST` | Proxmox node or registered host name |
-| `--hosted-user USER` | SSH user for the Proxmox node |
-| `--hosted-key PATH` | SSH key for the Proxmox node |
-| `--bridge NAME` | Proxmox bridge for the hosted guest; defaults to the host's default-route bridge |
+| `--provision-on HOST` | Create the setup target on this Proxmox node or registered host |
+| `--provision-user USER` | SSH user for the Proxmox node |
+| `--provision-key PATH` | SSH key for the Proxmox node; defaults to a saved host key, `--key`, or SSH config |
+| `--bridge NAME` | Proxmox bridge for the new guest; defaults to the node's default-route bridge |
 | `--memory SIZE` | Guest memory |
 | `--balloon-min SIZE` | VM-only minimum memory for dynamic ballooning; defaults to `--memory` |
 | `--storage root POOL AMOUNT` | Required root storage spec |
@@ -348,21 +349,24 @@ be fully disabled, then manage pending security reboots explicitly.
 Notes:
 
 - `--storage` is repeatable.
-- `root` storage is required when `--hosted` is used.
-- Hosted VMs require `--key PATH` and a readable matching `PATH.pub`; this key is installed by cloud-init for the SSH handoff.
-- Hosted VMs keep fixed memory by default while retaining the VirtIO balloon
+- `root` storage is required when `--provision-on` is used.
+- Provisioned VMs require `--key PATH` and a readable matching `PATH.pub`; this key is installed by cloud-init for the SSH handoff.
+- Provisioned VMs keep fixed memory by default while retaining the VirtIO balloon
   device for guest-memory telemetry. Set `--balloon-min` below `--memory` to
   opt into dynamic ballooning; the minimum cannot exceed the maximum.
-- Hosted VM targets must be literal IPv4 addresses unless `--ip` supplies the guest address.
+- The positional target is the guest IPv4 address. A bare address defaults to
+  `/24`; use `ADDRESS/PREFIX` for another prefix. Do not repeat it with `--ip`.
 - `template` storage is LXC-only.
 - Direct setup defaults to `--machine auto`, which detects Debian bare metal,
   VMs, and Proxmox LXC containers on the target.
-- Hosted Proxmox setup defaults to a VM because it is creating a new guest;
+- Proxmox provisioning defaults to a VM because it is creating a new guest;
   use `--machine unprivileged` for an LXC.
 - `--machine unprivileged` keeps an existing or intentional LXC path.
-- `--ip`, `--ipv6`, gateway, DNS, and `--hostname` override the values that
-  hosted guest provisioning would otherwise derive from the Proxmox node and
-  positional target address.
+- `--ipv6`, gateway, DNS, and `--hostname` remain regular setup options. When
+  omitted, the IPv4 gateway comes from the selected Proxmox bridge and DNS
+  comes from the Proxmox node (with bridge-specific values preferred). The
+  controller machine's gateway is not reused because it may be on a different
+  LAN or VPN.
 
 ## Deployment Flags
 

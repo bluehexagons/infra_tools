@@ -294,6 +294,17 @@ class TestCheckContainerExists(unittest.TestCase):
         self.assertFalse(result)
 
     @patch("lib.proxmox_node._ssh_run")
+    def test_container_list_failure_is_not_treated_as_empty(self, mock_run):
+        mock_run.return_value = MagicMock(
+            stdout="",
+            stderr="ssh timeout",
+            returncode=255,
+        )
+
+        with self.assertRaisesRegex(ProvisionError, "Failed to query containers"):
+            check_container_exists("10.0.0.1", "10.0.0.50")
+
+    @patch("lib.proxmox_node._ssh_run")
     def test_container_with_matching_ip(self, mock_run):
         list_result = MagicMock(stdout="100\n101\n", returncode=0)
         config_100 = MagicMock(

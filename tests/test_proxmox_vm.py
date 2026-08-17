@@ -241,6 +241,17 @@ class TestCheckVMExists(unittest.TestCase):
         self.assertFalse(check_vm_exists("10.0.0.1", "10.0.0.50", "root", []))
 
     @patch("lib.proxmox_vm._ssh_run")
+    def test_vm_list_failure_is_not_treated_as_no_match(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=255,
+            stdout="",
+            stderr="ssh timeout",
+        )
+
+        with self.assertRaisesRegex(ProvisionError, "Failed to query VMs"):
+            check_vm_exists("10.0.0.1", "10.0.0.50", "root", [])
+
+    @patch("lib.proxmox_vm._ssh_run")
     def test_unreachable_match_is_not_silently_reused(self, mock_run):
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout="VMID NAME STATUS\n101 b running\n"),

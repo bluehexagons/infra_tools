@@ -881,7 +881,9 @@ def _patch_preserve_keys(args: argparse.Namespace) -> set[str]:
                 "hosted_node",
                 "hosted_user",
                 "hosted_key",
+                "hosted_bridge",
                 "container_memory",
+                "vm_balloon_min",
                 "container_storage",
                 "container_cores",
                 "container_base",
@@ -1005,22 +1007,24 @@ def deploy_configurations(pattern: str, force: bool, deploy_latest: bool = False
 
 def run_setup_command(args: argparse.Namespace) -> int:
     """Execute the setup command."""
-    if not validate_host(args.host):
-        print(f"Error: Invalid IP address or hostname: {args.host}")
+    explicit_ipv4 = getattr(args, "static_ipv4", None)
+    if getattr(args, "hosted_node", None) and isinstance(explicit_ipv4, str) and explicit_ipv4:
+        print(
+            "Error: --ip is redundant with --provision-on; put the guest address "
+            "and optional prefix in the positional HOST[/PREFIX] target"
+        )
         return 1
-    
-    username = args.username if args.username else get_current_username()
-    
-    if not validate_username(username):
-        print(f"Error: Invalid username: {username}")
-        return 1
-    
+
     config = SetupConfig.from_args(args, args.system_type)
 
-    if config.hosted_node and config.activate_network:
+    if not validate_username(config.username):
+        print(f"Error: Invalid username: {config.username}")
+        return 1
+
+    if config.hosted_node and config.activate_network is True:
         print(
             "Error: --activate-network is for patching an already saved Proxmox "
-            "guest; initial hosted setup boots directly on its configured address"
+            "guest; provisioned guests boot directly on their requested address"
         )
         return 1
     
@@ -1028,6 +1032,10 @@ def run_setup_command(args: argparse.Namespace) -> int:
         runtime_config = _prepare_runtime_config_for_cli(config)
     except ValueError as e:
         print(f"Error: {e}")
+        return 1
+
+    if not validate_host(config.host):
+        print(f"Error: Invalid IP address or hostname: {config.host}")
         return 1
     
     description = f"{args.system_type.replace('_', ' ').title()} Setup"
@@ -1060,6 +1068,12 @@ def run_setup_command(args: argparse.Namespace) -> int:
             except Exception as e:
                 print(f"\n✗ Failed to provision container: {e}")
                 return 1
+
+        try:
+            runtime_config = _prepare_runtime_config_for_cli(config)
+        except ValueError as e:
+            print(f"Error: {e}")
+            return 1
 
     if not config.dry_run:
         store_cli_credentials(config)

@@ -67,7 +67,7 @@ compatibility labels, but they are not part of the official support target.
   on the target before setup steps run.
 - `auto` resolves to `hardware`, `vm`, or `unprivileged` for the officially
   supported configurations, and to `oci` when an OCI runtime is detected.
-- Hosted Proxmox provisioning defaults to a VM because the guest does not exist
+- Proxmox provisioning defaults to a VM because the guest does not exist
   yet; use `--machine unprivileged` to provision an LXC instead.
 - `server_proxmox` also uses `auto` and normally resolves to `hardware` on the
   Proxmox host itself.
@@ -108,22 +108,23 @@ infra-tools setup server_lite 192.168.1.30 --machine oci
 
 ## Provisioning a Proxmox VM
 
-Hosted flows default to VMs when you use `--hosted`, so you can provision a VM
-via `qm` + cloud-init without adding `--machine vm`:
+The regular setup flow defaults to a VM when `--provision-on` is present, so it
+can create the VM through `qm` + cloud-init without `--machine vm`:
 
 ```bash
 infra-tools setup server_web 10.0.0.50 \
-    --hosted proxmox.lan \
+    --provision-on proxmox.lan \
+    --key ~/.ssh/id_ed25519 \
     --memory 4G --cores 2 \
     --storage root local-lvm 32G
 ```
 
 Use `--machine unprivileged` to stay on the LXC path.
 
-Hosted VMs require `--key PATH` with a readable matching `PATH.pub` so
-cloud-init can install the guest SSH key. `--hosted-key` controls only SSH
-access to the Proxmox node. The target must be a literal IPv4 address unless
-`--ip` supplies the guest address.
+Provisioned VMs require `--key PATH` with a readable matching `PATH.pub` so
+cloud-init can install the guest SSH key. `--provision-key` controls only SSH
+access to the Proxmox node. The target is the guest IPv4 address: bare IPv4
+uses `/24`, while `IPv4/PREFIX` selects another prefix.
 
 For raw Proxmox addresses, storage shorthand falls back to `auto`. For
 registered hosts, shorthand uses the saved/probed storage defaults first.
