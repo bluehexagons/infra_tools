@@ -49,6 +49,8 @@ class TestGenerateSesmanIni(unittest.TestCase):
         self.assertIn("param=/usr/lib/xorg/Xorg", result)
         self.assertIn("param=xrdp/xorg.conf", result)
         self.assertNotIn("param=/etc/X11/xrdp/xorg.conf", result)
+        self.assertIn("param=.local/share/xorg/Xorg.%s.log", result)
+        self.assertNotIn("param=.xorgxrdp.%s.log", result)
         
         # Xvnc section should NOT exist
         self.assertNotIn("[Xvnc]", result)
@@ -319,6 +321,34 @@ class TestInstallXrdp(unittest.TestCase):
         
         self.assertIn("allowed_users=anybody", xwrapper_content)
         self.assertIn("needs_root_rights=no", xwrapper_content)
+
+    @patch('desktop.xrdp_steps.run')
+    @patch('desktop.xrdp_steps.os.path.exists')
+    @patch('desktop.xrdp_steps.os.makedirs')
+    @patch('builtins.open', new_callable=unittest.mock.mock_open)
+    @patch('desktop.xrdp_steps.is_service_active')
+    def test_creates_apparmor_compatible_xorg_log_directory(
+        self, mock_is_active, mock_open_func, mock_makedirs, mock_exists, mock_run
+    ):
+        """Rootless Xorg should log in the path allowed by Debian AppArmor."""
+        mock_exists.return_value = True
+        mock_is_active.return_value = True
+        mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
+        config = SetupConfig(
+            host="test.example.com",
+            username="testuser",
+            system_type="workstation_dev",
+            desktop="xfce",
+        )
+
+        install_xrdp(config)
+
+        run_commands = [call.args[0] for call in mock_run.call_args_list]
+        self.assertIn(
+            "runuser -u testuser -- mkdir -p /home/testuser/.local/share/xorg",
+            run_commands,
+        )
+        self.assertIn("chmod 700 /home/testuser/.local/share/xorg", run_commands)
         
     @patch('desktop.xrdp_steps.run')
     @patch('desktop.xrdp_steps.os.path.exists')

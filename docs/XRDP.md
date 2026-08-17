@@ -78,6 +78,7 @@ disconnected-session cleanup.
 | `/etc/xrdp/xrdp.ini` | RDP protocol and channel settings |
 | `/etc/X11/xrdp/xorg.conf` | Software-rendered `xrdpdev` display |
 | `/etc/X11/Xwrapper.config` | X server permissions |
+| `~/.local/share/xorg/Xorg.<display>.log` | Per-session Xorg diagnostics |
 | `~/startwm.sh` | Desktop session startup |
 
 The Xwrapper configuration requires:
@@ -92,6 +93,11 @@ configuration as `xrdp/xorg.conf`. Xorg resolves that trusted relative path to
 `/etc/X11/xrdp/xorg.conf`; an absolute `-config` path is rejected for a
 non-root session and produces the generic "X server could not be started"
 login failure.
+
+Per-session Xorg logs use `~/.local/share/xorg/Xorg.<display>.log`. This path
+is accepted by Debian's enforced Xorg AppArmor profile; the traditional
+`~/.xorgxrdp.<display>.log` path is denied before rootless Xorg can initialize.
+Setup creates the log directory with mode `0700` and desktop-user ownership.
 
 The startup script sets `XRDP_SESSION=1` and `XRDP_SOCKET=/tmp/xrdp`, disables
 screen blanking and DPMS, and starts the selected desktop through D-Bus. XFCE
@@ -167,7 +173,7 @@ sudo journalctl -u xrdp -u xrdp-sesman -n 100 --no-pager
 sudo tail -100 /var/log/xrdp.log
 sudo tail -100 /var/log/xrdp-sesman.log
 tail -100 ~/.xsession-errors
-tail -100 ~/.xorgxrdp.*.log
+tail -100 ~/.local/share/xorg/Xorg.*.log
 ```
 
 ### Black screen or immediate disconnect
@@ -183,6 +189,11 @@ configuration. Older managed `xrdp.ini` files included an obsolete `ip` field
 in the local Xorg session entry. The warning itself is harmless, but the same
 older configuration may also contain an absolute Xorg `-config` path that
 prevents a non-root X server from starting.
+
+If `xrdp-sesman.log` waits ten seconds and then reports `Unable to open display`
+without creating an Xorg log, check whether AppArmor enforces the `Xorg`
+profile. Reapply the current configuration to move per-session logs from the
+denied home-directory path into `~/.local/share/xorg`.
 
 ### Freeze while resizing
 

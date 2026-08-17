@@ -69,7 +69,8 @@ param=-noreset
 param=-nolisten
 param=tcp
 param=-logfile
-param=.xorgxrdp.%s.log
+# Debian's enforced Xorg AppArmor profile permits per-user Xorg logs here.
+param=.local/share/xorg/Xorg.%s.log
 '''
 
 
@@ -216,7 +217,9 @@ def install_xrdp(config: SetupConfig) -> None:
         return
 
     safe_username = shlex.quote(config.username)
-    xsession_path = os.path.join(get_user_home(config.username), "startwm.sh")
+    user_home = get_user_home(config.username)
+    xsession_path = os.path.join(user_home, "startwm.sh")
+    xorg_log_dir = os.path.join(user_home, ".local", "share", "xorg")
     sesman_config = "/etc/xrdp/sesman.ini"
     xrdp_config = "/etc/xrdp/xrdp.ini"
     
@@ -257,6 +260,17 @@ def install_xrdp(config: SetupConfig) -> None:
             + ", ".join(missing_packages)
         )
     print("  ✓ xRDP packages installed (Xorg+xorgxrdp backend for dynamic resolution)")
+
+    # Debian's Xorg AppArmor profile denies XRDP's traditional
+    # ~/.xorgxrdp.<display>.log path. Create the profile-approved log directory
+    # as the desktop user so rootless Xorg can start and write its diagnostics.
+    log_dir_result = run(
+        f"runuser -u {safe_username} -- mkdir -p {shlex.quote(xorg_log_dir)}",
+        check=False,
+    )
+    if log_dir_result.returncode != 0:
+        raise RuntimeError("could not create the per-user Xorg log directory")
+    run(f"chmod 700 {shlex.quote(xorg_log_dir)}")
 
     # Configure Xwrapper to allow XRDP sessions to start X server
     # This is critical for preventing session freezes and startup issues
