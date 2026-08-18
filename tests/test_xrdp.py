@@ -1,12 +1,14 @@
 """Tests for XRDP configuration functions."""
 
 from __future__ import annotations
+
 from pathlib import Path
 import unittest
 from unittest.mock import Mock, patch
 
 from lib.config import SetupConfig
 from desktop.xrdp_steps import (
+    _detect_xrdp_glamor_render_node,
     _ensure_user_in_group,
     _generate_sesman_ini,
     _generate_xrdp_ini,
@@ -203,6 +205,53 @@ class TestEnsureUserInGroup(unittest.TestCase):
         self.assertFalse(result)
 
 
+class TestDetectXrdpGlamorRenderNode(unittest.TestCase):
+    """Test the opt-in xorgxrdp glamor detection path."""
+
+    @patch("desktop.xrdp_steps.run")
+    @patch("desktop.xrdp_steps._ensure_user_in_group")
+    @patch("desktop.xrdp_steps._find_xrdp_glamor_render_node")
+    def test_returns_accessible_supported_node(
+        self, mock_find, mock_ensure_group, mock_run
+    ):
+        mock_find.return_value = ("/dev/dri/renderD128", "i915")
+        mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
+
+        result = _detect_xrdp_glamor_render_node("testuser")
+
+        self.assertEqual(result, ("/dev/dri/renderD128", "i915"))
+        mock_ensure_group.assert_called_once_with("testuser", "render")
+        mock_run.assert_called_once_with(
+            "runuser -u testuser -- test -r /dev/dri/renderD128"
+            " -a -w /dev/dri/renderD128",
+            check=False,
+        )
+
+    @patch("desktop.xrdp_steps.run")
+    @patch("desktop.xrdp_steps._ensure_user_in_group")
+    @patch("desktop.xrdp_steps._find_xrdp_glamor_render_node")
+    def test_falls_back_when_node_is_not_accessible(
+        self, mock_find, mock_ensure_group, mock_run
+    ):
+        mock_find.return_value = ("/dev/dri/renderD128", "amdgpu")
+        mock_run.return_value = Mock(returncode=1, stdout="", stderr="")
+
+        result = _detect_xrdp_glamor_render_node("testuser")
+
+        self.assertIsNone(result)
+        mock_ensure_group.assert_called_once_with("testuser", "render")
+
+    @patch("desktop.xrdp_steps._ensure_user_in_group")
+    @patch("desktop.xrdp_steps._find_xrdp_glamor_render_node")
+    def test_falls_back_when_no_supported_node_exists(
+        self, mock_find, mock_ensure_group
+    ):
+        mock_find.return_value = None
+
+        self.assertIsNone(_detect_xrdp_glamor_render_node("testuser"))
+        mock_ensure_group.assert_not_called()
+
+
 class TestValidateXrdpTlsCertificate(unittest.TestCase):
     @patch("desktop.xrdp_steps.inspect_xrdp_certificate_pair")
     def test_accepts_healthy_or_expiring_pair(self, mock_inspect):
@@ -266,6 +315,12 @@ class TestInstallXrdp(unittest.TestCase):
         )
         self.addCleanup(home_patcher.stop)
         home_patcher.start()
+        glamor_patcher = patch(
+            "desktop.xrdp_steps._detect_xrdp_glamor_render_node",
+            return_value=None,
+        )
+        self.addCleanup(glamor_patcher.stop)
+        glamor_patcher.start()
 
     @patch("desktop.xrdp_steps.run")
     def test_fails_when_xrdp_package_install_fails(self, mock_run):
@@ -461,6 +516,49 @@ class TestInstallXrdp(unittest.TestCase):
         self.assertIn('Option "UseGlamor" "false"', content)
         self.assertIn('Modes "640x480" "800x600" "1024x768"', content)
         self.assertIn('Virtual 3840 2160', content)
+
+    def test_generated_xorg_conf_enables_detected_glamor_node(self):
+        content = _generate_xorg_conf("/dev/dri/renderD128")
+
+        self.assertIn('Option "DRMDevice" "/dev/dri/renderD128"', content)
+        self.assertIn('Option "DRI3" "1"', content)
+        self.assertIn(
+            'Option "DRMAllowList" "amdgpu i915 xe msm radeon"',
+            content,
+        )
+        self.assertNotIn('Option "UseGlamor" "false"', content)
+
+    def test_install_enables_glamor_for_detected_node(self):
+        mock_file = unittest.mock.mock_open()
+        config = SetupConfig(
+            host="test.example.com",
+            username="testuser",
+            system_type="workstation_dev",
+            desktop="xfce",
+        )
+
+        with (
+            patch("desktop.xrdp_steps.run") as mock_run,
+            patch("desktop.xrdp_steps.os.path.exists", return_value=True),
+            patch("desktop.xrdp_steps.os.makedirs"),
+            patch("builtins.open", mock_file),
+            patch("desktop.xrdp_steps.is_service_active", return_value=True),
+            patch(
+                "desktop.xrdp_steps._detect_xrdp_glamor_render_node",
+                return_value=("/dev/dri/renderD128", "i915"),
+            ),
+        ):
+            mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
+            install_xrdp(config)
+
+        combined_content = "".join(
+            str(call.args[0])
+            for call in mock_file().write.call_args_list
+            if call.args
+        )
+        self.assertIn('Option "DRMDevice" "/dev/dri/renderD128"', combined_content)
+        self.assertIn('Option "DRI3" "1"', combined_content)
+        self.assertIn("/dev/dri/renderD128 rw,", combined_content)
 
     @patch('desktop.xrdp_steps.run')
     @patch('desktop.xrdp_steps.os.path.exists')

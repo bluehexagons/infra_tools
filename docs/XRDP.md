@@ -9,7 +9,7 @@ use Xvnc or a Proxmox emulated display as the RDP display.
 | Setting | Default |
 | --- | --- |
 | Backend | Xorg with the `xrdpdev` driver |
-| Rendering | Software rendering with a software cursor |
+| Rendering | Glamor acceleration when a supported, accessible DRM render node is detected; software fallback otherwise |
 | Desktop | XFCE is the recommended RDP desktop |
 | Listener | All IPv4 addresses on TCP 3389 |
 | Firewall | Globally rate-limited access unless `--rdp-source` is supplied |
@@ -87,11 +87,11 @@ disconnected-session cleanup.
 | --- | --- |
 | `/etc/xrdp/sesman.ini` | Session manager and Xorg backend |
 | `/etc/xrdp/xrdp.ini` | RDP protocol and channel settings |
-| `/etc/X11/xrdp/xorg.conf` | Software-rendered `xrdpdev` display |
+| `/etc/X11/xrdp/xorg.conf` | `xrdpdev` display with automatic glamor/software selection |
 | `/etc/X11/Xwrapper.config` | X server permissions |
 | `/etc/apt/sources.list.d/infra-tools-sid.sources` | Official Sid source for newer XRDP packages on Debian |
 | `/etc/apt/preferences.d/infra-tools-sid.pref` | Keeps Sid packages low priority outside the XRDP transaction |
-| `/etc/apparmor.d/local/Xorg` | Allows user-owned xorgxrdp sockets and capture buffers |
+| `/etc/apparmor.d/local/Xorg` | Allows xorgxrdp sockets, capture buffers, and the selected render node |
 | `~/.local/share/xorg/Xorg.<display>.log` | Per-session Xorg diagnostics |
 | `~/startwm.sh` | Desktop session startup |
 
@@ -118,6 +118,21 @@ desktop-user's entries under `/dev/shm`. xorgxrdp uses POSIX shared memory for
 RDP frame capture; without this rule, `g_alloc_shm_map_fd` fails and the
 capture path can terminate Xorg as soon as a client connects. The rule is
 limited to user-owned shared-memory entries and does not disable AppArmor.
+
+At setup time, infra-tools probes `/dev/dri/renderD*` and the corresponding
+kernel driver. It enables the xorgxrdp glamor path only when the driver is on
+xorgxrdp's supported allowlist (`amdgpu`, `i915`, `xe`, `msm`, or `radeon`)
+and the desktop user can read and write the render node. In that case the
+user is added to the `render` group, the exact node is allowed by AppArmor,
+and `xorg.conf` receives `DRMDevice`, `DRI3`, and `DRMAllowList` settings. If
+the supported node remains inaccessible after group setup, XRDP keeps the
+software path; the `render` membership is retained so a corrected device ACL
+can be picked up on the next setup run. This is a setup-time choice; rerun
+setup after changing the guest's GPU device or render-node permissions.
+
+This accelerates Xorg drawing and compositing. The Debian xrdp 0.10 packages
+still use the CPU x264 encoder for H.264 RDP output, so this is not hardware
+video encoding.
 
 The startup script sets `XRDP_SESSION=1`, disables
 screen blanking and DPMS, and starts the selected desktop through D-Bus. XFCE
@@ -162,9 +177,11 @@ client trust is required.
 ## Proxmox and containers
 
 A hosted desktop VM receives a VirtIO-GPU recovery/noVNC console and a serial
-socket. XRDP starts a separate software-rendered Xorg display, so changing the
-Proxmox emulated graphics device does not accelerate the RDP session. Setup
-does not add the desktop user to the `video` or `render` groups for this path.
+socket. XRDP starts a separate `xrdpdev` Xorg display. Setup probes for an
+accessible supported DRM render node and enables glamor only when one is
+actually present; the normal Proxmox emulated VirtIO-GPU recovery display is
+not treated as XRDP acceleration. In the usual VM case the session therefore
+uses the software fallback and no GPU group is added.
 
 Unprivileged Proxmox LXC guests support basic XRDP access, but host limits may
 affect desktop polish. A VM is the better choice for a reproducible graphical
@@ -214,6 +231,25 @@ If `xrdp-sesman.log` waits ten seconds and then reports `Unable to open display`
 without creating an Xorg log, check whether AppArmor enforces the `Xorg`
 profile. Reapply the current configuration to move per-session logs from the
 denied home-directory path into `~/.local/share/xorg`.
+
+### Check GPU acceleration
+
+When glamor is selected, the Xorg log contains `rdpPreInit` lines showing the
+render node, a DRM driver name, and `glamor init ok`. Check the decision and
+the effective permissions with:
+
+```bash
+grep -E 'rdpPreInit:|glamor init|unsupported render node' \
+  ~/.local/share/xorg/Xorg.*.log
+ls -l /dev/dri/renderD* 2>/dev/null
+id
+```
+
+`unsupported render node`, `open failed`, or an absent `/dev/dri/renderD*`
+means that the managed software fallback is in use. For Proxmox, a
+VirtIO-GPU recovery console alone is expected to produce this result; a
+guest-configured VirGL/3D render node must also expose a supported driver and
+usable permissions before glamor is enabled.
 
 If Xorg logs `rdpClientConInit: g_tcp_local_bind failed` and then repeats
 `g_sck_accept failed`, inspect the per-user socket directory under

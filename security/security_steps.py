@@ -31,6 +31,49 @@ _ISSUE_BANNER = "Authorized access only. All activity is monitored and logged.\n
 _SECURITY_MONITOR_SCRIPT = "/opt/infra_tools/security/service_tools/security_monitor.py"
 _RDP_RULE_COMMENT_PREFIX = "infra_tools RDP"
 _UFW_NUMBERED_RULE_RE = re.compile(r"^\[\s*(\d+)\]")
+_APPARMOR_USERNS_PROFILE = "/etc/apparmor.d/unprivileged_userns"
+_APPARMOR_USERNS_RESTRICTION = (
+    "/proc/sys/kernel/apparmor_restrict_unprivileged_userns"
+)
+
+
+def _apparmor_userns_restriction_enabled() -> bool:
+    """Return whether AppArmor mediates unprivileged user namespaces."""
+    try:
+        with open(_APPARMOR_USERNS_RESTRICTION, "r", encoding="utf-8") as setting:
+            return setting.read().strip() == "1"
+    except OSError:
+        return False
+
+
+def _ensure_browser_automation_userns_profile() -> bool:
+    """Load Debian's capability-stripping profile for browser sandboxes.
+
+    AppArmor 4 can transition otherwise-unconfined applications into the
+    ``unprivileged_userns`` profile when they create a user namespace.  This
+    supports browsers downloaded by Playwright and similar tools without a
+    broad attachment rule over user-writable cache directories.
+    """
+    if not _apparmor_userns_restriction_enabled():
+        return True
+    if not os.path.isfile(_APPARMOR_USERNS_PROFILE):
+        print(
+            "  ⚠ AppArmor restricts user namespaces but its compatibility "
+            "profile is missing"
+        )
+        return False
+
+    result = run(
+        f"apparmor_parser -r -W {shlex.quote(_APPARMOR_USERNS_PROFILE)}",
+        check=False,
+    )
+    if result.returncode != 0:
+        print(
+            "  ⚠ Could not load AppArmor's unprivileged-user-namespace "
+            "profile; browser automation sandboxes may not start"
+        )
+        return False
+    return True
 
 
 def create_remoteusers_group(config: SetupConfig) -> None:
@@ -430,18 +473,42 @@ def configure_apparmor(config: SetupConfig) -> None:
 
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get install -y -qq apparmor apparmor-utils")
+    run("systemctl enable apparmor", check=False)
 
-    result = run("aa-status --json 2>/dev/null | python3 -c \"import sys,json; d=json.load(sys.stdin); exit(0 if d.get('profiles') else 1)\"", check=False)
-    if result.returncode == 0:
-        # AppArmor is running; enforce all loaded profiles
-        run("aa-enforce /etc/apparmor.d/* 2>/dev/null || true", check=False)
-        run("systemctl enable apparmor", check=False)
-        print("  ✓ AppArmor enabled (enforce mode for all installed profiles)")
+    enabled = run("aa-enabled -q", check=False).returncode == 0
+    if not enabled:
+        # Starting is safe for the oneshot AppArmor service. Avoid `restart`,
+        # which systemd normally maps to stop/start and which AppArmor's unit
+        # deliberately does not support as an unload/reload operation.
+        run("systemctl start apparmor", check=False)
+        enabled = run("aa-enabled -q", check=False).returncode == 0
+
+    if not enabled:
+        print(
+            "  ✓ AppArmor configured for next boot (kernel policy is not "
+            "currently active)"
+        )
+        return
+
+    # The distro service is the canonical loader. It preserves each source
+    # profile's enforce, complain, or unconfined mode and does not rewrite
+    # package profiles or child profiles.
+    reload_result = run("systemctl reload apparmor", check=False)
+    if reload_result.returncode != 0:
+        print("  ⚠ One or more AppArmor profiles failed to reload; check the journal")
+
+    if not _ensure_browser_automation_userns_profile():
+        raise RuntimeError(
+            "AppArmor browser-sandbox compatibility profile failed to load"
+        )
+
+    if reload_result.returncode == 0:
+        print(
+            "  ✓ AppArmor enabled (package modes preserved; browser sandbox "
+            "support verified)"
+        )
     else:
-        run("systemctl enable apparmor", check=False)
-        run("systemctl restart apparmor", check=False)
-        run("aa-enforce /etc/apparmor.d/* 2>/dev/null || true", check=False)
-        print("  ✓ AppArmor configured (enforce mode; reboot may be needed to fully activate)")
+        print("  ✓ AppArmor enabled (browser sandbox support verified)")
 
 
 def configure_auditd(config: SetupConfig) -> None:

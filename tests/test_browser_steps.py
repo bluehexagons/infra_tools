@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from desktop.browser_steps import (
     _browsh_architecture,
     _browsh_asset_matches,
+    _reload_librewolf_apparmor_profile,
     install_single_browser,
     is_flatpak_app_installed,
 )
@@ -86,6 +87,37 @@ class TestBrowserSteps(unittest.TestCase):
             stderr="",
         )
         self.assertFalse(is_flatpak_app_installed("com.brave.Browser"))
+
+    @patch("desktop.browser_steps.os.path.isfile", return_value=True)
+    @patch("desktop.browser_steps.run")
+    def test_reloads_librewolf_unconfined_apparmor_profile(
+        self, mock_run, _isfile
+    ):
+        mock_run.side_effect = [
+            subprocess.CompletedProcess(args=["aa-enabled"], returncode=0),
+            subprocess.CompletedProcess(args=["apparmor_parser"], returncode=0),
+        ]
+
+        _reload_librewolf_apparmor_profile()
+
+        self.assertEqual(mock_run.call_count, 2)
+        mock_run.assert_any_call("aa-enabled -q", check=False)
+        mock_run.assert_any_call(
+            "apparmor_parser -r -W /etc/apparmor.d/librewolf", check=False
+        )
+
+    @patch("desktop.browser_steps.os.path.isfile", return_value=True)
+    @patch("desktop.browser_steps.run")
+    def test_skips_librewolf_profile_reload_when_apparmor_is_inactive(
+        self, mock_run, _isfile
+    ):
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=["aa-enabled"], returncode=1
+        )
+
+        _reload_librewolf_apparmor_profile()
+
+        mock_run.assert_called_once_with("aa-enabled -q", check=False)
 
 
 if __name__ == "__main__":

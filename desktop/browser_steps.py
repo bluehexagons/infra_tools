@@ -1,11 +1,11 @@
 """Desktop and workstation setup steps."""
 
 from __future__ import annotations
-from typing import Optional
 import os
 import shlex
 import shutil
 import subprocess
+from typing import Optional
 
 from lib.config import SetupConfig
 from lib.machine_state import is_container
@@ -23,6 +23,7 @@ FLATPAK_REMOTE = "flathub"
 _apt_update_done = False
 HELIUM_RELEASE_API = "https://api.github.com/repos/imputnet/helium-linux/releases/latest"
 BROWSH_GITHUB_REPO = "browsh-org/browsh"
+_LIBREWOLF_APPARMOR_PROFILE = "/etc/apparmor.d/librewolf"
 _BROWSH_ARCH_BY_DPKG = {
     "amd64": "amd64",
     "arm64": "arm64",
@@ -30,6 +31,32 @@ _BROWSH_ARCH_BY_DPKG = {
     "armhf": "armv7",
     "i386": "386",
 }
+
+
+_FLATPAK_BROWSER_IDS = {
+    "brave": "com.brave.Browser",
+    "firefox": "org.mozilla.firefox",
+    "librewolf": "io.gitlab.librewolf-community",
+}
+
+
+def _reload_librewolf_apparmor_profile() -> None:
+    """Load LibreWolf's package-declared AppArmor profile after installation.
+
+    The current package uses ``flags=(unconfined)`` so the browser keeps its
+    own sandbox. Reloading with the parser preserves that mode and also remains
+    correct if a future package intentionally changes its declared policy.
+    """
+    if not os.path.isfile(_LIBREWOLF_APPARMOR_PROFILE):
+        return
+    if run("aa-enabled -q", check=False).returncode != 0:
+        return
+    result = run(
+        f"apparmor_parser -r -W {shlex.quote(_LIBREWOLF_APPARMOR_PROFILE)}",
+        check=False,
+    )
+    if result.returncode != 0:
+        print("  ⚠ Could not reload LibreWolf's unconfined AppArmor profile")
 
 
 def _browsh_architecture() -> str:
@@ -211,11 +238,13 @@ def install_single_browser(browser: str, use_flatpak: bool) -> None:
                 return
         else:
             if is_package_installed("librewolf"):
+                _reload_librewolf_apparmor_profile()
                 print("  ✓ LibreWolf browser already installed")
                 return
             print("  Installing LibreWolf browser...")
 
             if _install_via_extrepo("LibreWolf", "librewolf", "librewolf"):
+                _reload_librewolf_apparmor_profile()
                 print("  ✓ LibreWolf browser installed")
 
     elif browser == "helium":
@@ -297,11 +326,19 @@ def configure_default_browser(config: SetupConfig) -> None:
     if not desktop_file:
         print(f"  ✓ No default browser configuration needed for {config.browser}")
         return
+
+    flatpak_app_id = _FLATPAK_BROWSER_IDS.get(config.browser)
+    using_flatpak_browser = bool(
+        config.use_flatpak
+        and flatpak_app_id
+        and is_flatpak_app_installed(flatpak_app_id)
+    )
+    if using_flatpak_browser:
+        desktop_file = f"{flatpak_app_id}.desktop"
     
-    if os.path.exists(mimeapps_path):
-        if file_contains(mimeapps_path, desktop_file):
-            print("  ✓ Default browser already set")
-            return
+    mimeapps_already_configured = os.path.exists(mimeapps_path) and file_contains(
+        mimeapps_path, desktop_file
+    )
     
     user_apps_dir = os.path.join(home_dir, ".local", "share", "applications")
     os.makedirs(user_apps_dir, exist_ok=True)
@@ -317,13 +354,57 @@ x-scheme-handler/https={desktop_file}
 text/html={desktop_file}
 application/xhtml+xml={desktop_file}
 """
-    
-    with open(mimeapps_path, "w") as f:
-        f.write(mimeapps_content)
+
+    if not mimeapps_already_configured:
+        with open(mimeapps_path, "w", encoding="utf-8") as f:
+            f.write(mimeapps_content)
     
     run(f"chown -R {safe_username}:{safe_username} {shlex.quote(config_dir)}")
     
-    run(f"xdg-mime default {desktop_file} x-scheme-handler/http", check=False)
-    run(f"xdg-mime default {desktop_file} x-scheme-handler/https", check=False)
+    browser_command = {
+        "brave": "brave-browser",
+        "firefox": "firefox",
+        "helium": "helium",
+        "librewolf": "librewolf",
+    }[config.browser]
+    if using_flatpak_browser:
+        browser_command = f"flatpak run {flatpak_app_id}"
+
+    xfce_config_dir = os.path.join(config_dir, "xfce4")
+    os.makedirs(xfce_config_dir, exist_ok=True)
+    xfce_helpers_path = os.path.join(xfce_config_dir, "helpers.rc")
+    existing_helpers = ""
+    if os.path.exists(xfce_helpers_path):
+        try:
+            with open(xfce_helpers_path, "r", encoding="utf-8") as f:
+                existing_helpers = f.read()
+        except OSError:
+            existing_helpers = ""
+    helper_lines = [
+        line for line in existing_helpers.splitlines()
+        if not line.startswith("WebBrowser=")
+    ]
+    helper_lines.append(f"WebBrowser={browser_command}")
+    helpers_content = "\n".join(helper_lines) + "\n"
+    if existing_helpers != helpers_content:
+        with open(xfce_helpers_path, "w", encoding="utf-8") as f:
+            f.write(helpers_content)
+
+    user_env = (
+        f"runuser -u {safe_username} -- env"
+        f" HOME={shlex.quote(home_dir)}"
+        f" XDG_CONFIG_HOME={shlex.quote(config_dir)}"
+    )
+    for mime_type in (
+        "x-scheme-handler/http",
+        "x-scheme-handler/https",
+        "text/html",
+        "application/xhtml+xml",
+    ):
+        run(
+            f"{user_env} xdg-mime default {desktop_file} {mime_type}",
+            check=False,
+        )
+    run(f"{user_env} xdg-settings set default-web-browser {desktop_file}", check=False)
     
     print(f"  ✓ Default browser set to {config.browser.capitalize()}")

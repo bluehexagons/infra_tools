@@ -126,7 +126,26 @@ Supported `--browser` values are `brave`, `firefox`, `librewolf`, `helium`,
 
 The first browser in a repeated list is written to the setup user's
 `~/.config/mimeapps.list` as the HTTP/HTTPS default. Text-only browsers do not
-write a desktop default.
+write a desktop default. XFCE's per-user WebBrowser helper is configured at
+the same time, so its launcher does not fall back to the optional
+`www-browser` command.
+
+On VM and hardware targets, AppArmor is enabled and its distro service reloads
+the installed policy without rewriting package profiles. This preserves each
+profile's declared `enforce`, `complain`, or `unconfined` mode. LibreWolf's
+package profile currently uses an unconfined label so its own browser sandbox
+continues to work; setup reloads that package-declared mode after installation
+instead of forcing a different policy.
+
+Debian 13's AppArmor policy also supplies the `unprivileged_userns` transition
+used by otherwise-unconfined applications that create a user namespace. Setup
+loads and verifies this capability-stripping compatibility profile whenever
+the kernel's AppArmor user-namespace restriction is active. This supports
+Chromium and Firefox builds downloaded into per-user caches by Playwright and
+other browser-automation tools without disabling their sandboxes or granting
+an unconfined AppArmor attachment to every executable in a user-writable cache.
+If that required profile cannot load, workstation setup stops with a clear
+error instead of leaving browser automation silently broken.
 
 ## Flatpak and containers
 
@@ -145,10 +164,12 @@ i3 receives an informational message because its theme is normally configured
 in the user's i3 setup.
 
 When a workstation is provisioned as a hosted Proxmox VM, it receives a
-VirtIO-GPU recovery/noVNC console plus a serial socket. XRDP still uses its own
-software-rendered xorgxrdp display, so changing the Proxmox emulated graphics
-card does not accelerate the remote session. The complete host-side settings
-and CPU/migration tradeoffs are in [`PROXMOX.md`](./PROXMOX.md).
+VirtIO-GPU recovery/noVNC console plus a serial socket. XRDP uses its own
+xorgxrdp display; setup enables glamor only when the guest exposes a supported,
+accessible DRM render node and otherwise uses the software fallback. Changing
+the recovery console device alone does not accelerate the remote session. The
+complete host-side settings and CPU/migration tradeoffs are in
+[`PROXMOX.md`](./PROXMOX.md).
 
 RDP logins use the setup user's Unix password. Remote setups and setups that
 create a user require a non-root `--password`; prefer a secret-sourced
@@ -189,6 +210,7 @@ After setup, inspect installed applications as the target user:
 command -v firefox librewolf brave-browser code remmina
 flatpak list --app
 xdg-mime query default x-scheme-handler/https
+xdg-settings get default-web-browser
 ```
 
 For remote sessions, test XRDP separately and use the log checks in

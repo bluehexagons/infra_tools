@@ -1,6 +1,8 @@
 """Desktop and workstation setup steps."""
 
 from __future__ import annotations
+
+import glob
 import os
 import shlex
 
@@ -44,6 +46,11 @@ _XRDP_DPKG_OPTIONS = (
     "-o Dpkg::Options::=--force-confdef "
     "-o Dpkg::Options::=--force-confold"
 )
+# Keep this aligned with xorgxrdp's built-in glamor allowlist. In particular,
+# virtio_gpu is not included: a Proxmox VirtIO recovery display is not enough
+# evidence that the guest has a stable VirGL render path for xrdpdev.
+_XRDP_GLAMOR_DRIVERS = frozenset({"amdgpu", "i915", "xe", "msm", "radeon"})
+_XRDP_GLAMOR_DRIVER_LIST = "amdgpu i915 xe msm radeon"
 
 
 def _configure_xrdp_package_source() -> str:
@@ -166,8 +173,59 @@ param=.local/share/xorg/Xorg.%s.log
 '''
 
 
-def _generate_xorg_conf() -> str:
-    """Generate the managed xorgxrdp configuration."""
+def _find_xrdp_glamor_render_node() -> tuple[str, str] | None:
+    """Find a render node using a driver supported by xorgxrdp glamor."""
+    for render_node in sorted(glob.glob("/dev/dri/renderD[0-9]*")):
+        node_name = os.path.basename(render_node)
+        if not node_name.startswith("renderD") or not node_name[7:].isdigit():
+            continue
+        driver_link = os.path.join(
+            "/sys/class/drm", node_name, "device", "driver"
+        )
+        driver = os.path.basename(os.path.realpath(driver_link))
+        if driver in _XRDP_GLAMOR_DRIVERS:
+            return render_node, driver
+    return None
+
+
+def _detect_xrdp_glamor_render_node(username: str) -> tuple[str, str] | None:
+    """Enable glamor only when the desktop user can access a supported GPU."""
+    render_info = _find_xrdp_glamor_render_node()
+    if render_info is None:
+        return None
+
+    render_node, _driver = render_info
+    _ensure_user_in_group(username, "render")
+    quoted_username = shlex.quote(username)
+    quoted_render_node = shlex.quote(render_node)
+    access_check = run(
+        f"runuser -u {quoted_username} -- test -r {quoted_render_node}"
+        f" -a -w {quoted_render_node}",
+        check=False,
+    )
+    if access_check.returncode != 0:
+        print(
+            f"  ⚠ Supported GPU found at {render_node}, but {username} "
+            "cannot access its render node; using software rendering"
+        )
+        return None
+    return render_info
+
+
+def _generate_xorg_conf(render_node: str | None = None) -> str:
+    """Generate managed xorgxrdp configuration with optional glamor."""
+    if render_node is None:
+        acceleration_options = (
+            '    # No supported, accessible DRM render node was detected.\n'
+            '    Option "UseGlamor" "false"\n'
+        )
+    else:
+        acceleration_options = (
+            '    # Enable glamor only for a supported, accessible render node.\n'
+            f'    Option "DRMDevice" "{render_node}"\n'
+            '    Option "DRI3" "1"\n'
+            f'    Option "DRMAllowList" "{_XRDP_GLAMOR_DRIVER_LIST}"\n'
+        )
     return '''Section "ServerLayout"
     Identifier "X11 Server"
     Screen "Screen (xrdpdev)"
@@ -211,9 +269,7 @@ EndSection
 Section "Device"
     Identifier "Video Card (xrdpdev)"
     Driver "xrdpdev"
-    # Disable glamor acceleration for the most stable XRDP resize behaviour
-    Option "UseGlamor" "false"
-    # Software cursor prevents cursor-related resize issues
+{acceleration_options}    # Software cursor prevents cursor-related resize issues
     Option "SWCursor" "true"
 EndSection
 
@@ -231,7 +287,7 @@ Section "Screen"
         Virtual 3840 2160
     EndSubSection
 EndSection
-'''
+'''.format(acceleration_options=acceleration_options)
 
 
 def _generate_xrdp_ini(config: SetupConfig, template: str) -> str:
@@ -305,8 +361,14 @@ def _remove_legacy_xrdp_socket_environment() -> None:
         run("systemctl daemon-reload")
 
 
-def _configure_xrdp_apparmor_socket_access() -> None:
+def _configure_xrdp_apparmor_socket_access(render_node: str | None = None) -> None:
     """Permit confined Xorg to use xorgxrdp transport and capture buffers."""
+    render_rule = ""
+    if render_node is not None:
+        render_rule = (
+            "# xorgxrdp glamor render node selected during setup\n"
+            f"{render_node} rw,\n"
+        )
     os.makedirs(os.path.dirname(_XRDP_APPARMOR_LOCAL), exist_ok=True)
     with open(_XRDP_APPARMOR_LOCAL, "w", encoding="utf-8") as rules:
         rules.write(
@@ -315,7 +377,8 @@ def _configure_xrdp_apparmor_socket_access() -> None:
             "# xorgxrdp uses POSIX shared memory for RDP frame capture\n"
             "owner /dev/shm/ rw,\n"
             "owner /dev/shm/** rw,\n"
-            "unix (create, bind, listen, accept, receive, send) type=stream,\n"
+            + render_rule
+            + "unix (create, bind, listen, accept, receive, send) type=stream,\n"
         )
     run("apparmor_parser -r /etc/apparmor.d/Xorg", check=False)
 
@@ -399,7 +462,15 @@ def install_xrdp(config: SetupConfig) -> None:
             'exec /usr/lib/xorg/Xorg "$@"\n'
         )
     run(f"chmod 755 {shlex.quote(_XRDP_XORG_LAUNCHER)}")
-    _configure_xrdp_apparmor_socket_access()
+    render_info = _detect_xrdp_glamor_render_node(config.username)
+    render_node = render_info[0] if render_info is not None else None
+    _configure_xrdp_apparmor_socket_access(render_node)
+    if render_info is None:
+        print("  ✓ xRDP software rendering selected (no supported accessible GPU)")
+    else:
+        print(
+            f"  ✓ xRDP glamor acceleration enabled ({render_info[1]}, {render_node})"
+        )
     # Configure Xwrapper to allow XRDP sessions to start X server
     # This is critical for preventing session freezes and startup issues
     xwrapper_config = "/etc/X11/Xwrapper.config"
@@ -476,8 +547,8 @@ needs_root_rights=no
     # Configure xorgxrdp - required for all XRDP environments
     # Fix for Debian Trixie/X.Org 21.1.16: glamoregl must be loaded before xorgxrdp
     # to resolve undefined glamor_xv_init symbol errors.
-    # UseGlamor=false keeps the software-rendered path that has been the most
-    # stable across VM-first desktops and compatibility guests.
+    # Glamor is enabled only when setup found a supported, accessible render
+    # node; otherwise the software-rendered path remains the safe fallback.
     # Large virtual screen supports up to 4K+ resolutions for dynamic resizing.
     xorg_conf_path = "/etc/X11/xrdp/xorg.conf"
     xorg_conf_dir = os.path.dirname(xorg_conf_path)
@@ -485,7 +556,7 @@ needs_root_rights=no
     if os.path.exists(xorg_conf_path) and not os.path.exists(f"{xorg_conf_path}.bak"):
         run(f"cp {xorg_conf_path} {xorg_conf_path}.bak")
     with open(xorg_conf_path, "w") as f:
-        f.write(_generate_xorg_conf())
+        f.write(_generate_xorg_conf(render_node))
     print("  ✓ xorgxrdp configuration deployed")
     
     run("systemctl enable xrdp")

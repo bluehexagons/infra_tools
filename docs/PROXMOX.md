@@ -144,16 +144,18 @@ diagnostics. Server-only VMs retain `vga: serial0` to avoid an unused emulated
 display. Existing desktop VMs created with a serial-only display can be shut
 down and changed with `qm set VMID --vga virtio` on the Proxmox node.
 
-The emulated display does **not** accelerate an XRDP session. xorgxrdp creates
-its own resizable X.Org display with the `xrdpdev` driver, and infra-tools keeps
-that path software-rendered for compatibility. Accordingly, setup does not add
-the desktop user to `video` or `render` merely because the target is a VM.
+The emulated display does **not** by itself accelerate an XRDP session.
+xorgxrdp creates its own resizable X.Org display with the `xrdpdev` driver.
+Infra-tools probes the guest for a supported, accessible DRM render node and
+enables xorgxrdp glamor only when that probe succeeds; otherwise it retains the
+software fallback. A VM is not granted `video` or `render` membership merely
+because it has an emulated display.
 
 The resulting Proxmox baseline is:
 
 | Setting | infra-tools default | Rationale / alternative |
 | --- | --- | --- |
-| Display | VirtIO-GPU for desktop/RDP; serial-only for servers | VirtIO-GPU is a recovery console, not XRDP acceleration. QXL/SPICE and `virtio-gl` add no benefit to this RDP path. |
+| Display | VirtIO-GPU for desktop/RDP; serial-only for servers | VirtIO-GPU is a recovery console, not XRDP acceleration by itself. QXL/SPICE and `virtio-gl` do not replace the guest render-node probe. |
 | Serial | `serial0: socket` | Retains low-level diagnostics alongside the graphical console. |
 | CPU | `host` | Best performance on one node or a CPU-homogeneous cluster. Use a compatible `x86-64-v*` model when cross-generation live migration matters. |
 | Machine/firmware | Proxmox defaults | Q35/OVMF are not required for an emulated display or XRDP; prefer them when PCIe GPU passthrough requires them. |
@@ -179,8 +181,11 @@ removed, preventing a stale `cicustom` reference. See the current
 [Proxmox VE administration guide](https://pve.proxmox.com/pve-docs/pve-admin-guide.pdf).
 
 Physical GPU passthrough is a different profile. It needs host IOMMU/device
-isolation, usually Q35/OVMF, explicit guest drivers, and separate xorgxrdp
-glamor compatibility testing. It is not enabled by the default RDP setup.
+isolation, usually Q35/OVMF, and explicit guest drivers. If the guest exposes a
+supported render node, the normal xorgxrdp probe can enable glamor; otherwise
+the software fallback remains safe. Passthrough still requires separate
+performance and compatibility testing and is not enabled by the default
+provisioning profile.
 
 ## Provisioned web server VM
 

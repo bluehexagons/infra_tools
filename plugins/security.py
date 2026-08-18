@@ -63,7 +63,7 @@ def get_security_steps(*, lite: bool) -> list[tuple[str, StepFunc]]:
             ("Hardening kernel parameters", harden_kernel),
             ("Configuring fail2ban (sshd jail)", configure_fail2ban),
             ("Configuring login banners", configure_login_banners),
-            ("Configuring AppArmor enforcement", configure_apparmor),
+            ("Configuring AppArmor policy", configure_apparmor),
             ("Configuring auditd (kernel audit framework)", configure_auditd),
             ("Configuring PAM account lockout", configure_pam_lockout),
             ("Configuring security event monitor", configure_security_monitor),

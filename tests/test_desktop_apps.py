@@ -79,8 +79,25 @@ class TestBrowserSteps(unittest.TestCase):
         write_calls = [call.args[0] for call in mock_open().write.call_args_list]
         self.assertIn("librewolf.desktop", "".join(write_calls))
         run_commands = [call.args[0] for call in mock_run.call_args_list]
-        self.assertIn("xdg-mime default librewolf.desktop x-scheme-handler/http", run_commands)
-        self.assertIn("xdg-mime default librewolf.desktop x-scheme-handler/https", run_commands)
+        self.assertTrue(
+            any(
+                "xdg-mime default librewolf.desktop x-scheme-handler/http" in command
+                for command in run_commands
+            )
+        )
+        self.assertTrue(
+            any(
+                "xdg-mime default librewolf.desktop x-scheme-handler/https" in command
+                for command in run_commands
+            )
+        )
+        self.assertTrue(
+            any(
+                "xdg-settings set default-web-browser librewolf.desktop" in command
+                for command in run_commands
+            )
+        )
+        self.assertIn("WebBrowser=librewolf", "".join(write_calls))
 
     @patch("desktop.browser_steps._install_via_extrepo")
     @patch("desktop.browser_steps.is_package_installed")
@@ -135,8 +152,18 @@ class TestBrowserSteps(unittest.TestCase):
         write_calls = [call.args[0] for call in mock_open().write.call_args_list]
         self.assertIn("helium.desktop", "".join(write_calls))
         run_commands = [call.args[0] for call in mock_run.call_args_list]
-        self.assertIn("xdg-mime default helium.desktop x-scheme-handler/http", run_commands)
-        self.assertIn("xdg-mime default helium.desktop x-scheme-handler/https", run_commands)
+        self.assertTrue(
+            any(
+                "xdg-mime default helium.desktop x-scheme-handler/http" in command
+                for command in run_commands
+            )
+        )
+        self.assertTrue(
+            any(
+                "xdg-mime default helium.desktop x-scheme-handler/https" in command
+                for command in run_commands
+            )
+        )
 
     @patch("desktop.browser_steps.os.path.exists")
     @patch("desktop.browser_steps.is_package_installed")

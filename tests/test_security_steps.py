@@ -14,8 +14,10 @@ from lib.config import SetupConfig
 from lib.maintenance_defaults import JOURNAL_MAX_USE
 from lib.system_types import get_steps_for_system_type
 from security.security_steps import (
+    _ensure_browser_automation_userns_profile,
     configure_auto_restart,
     configure_auto_updates,
+    configure_apparmor,
     configure_cleanup_maintenance,
     configure_fail2ban,
     configure_firewall,
@@ -23,6 +25,106 @@ from security.security_steps import (
     harden_kernel,
     harden_ssh,
 )
+
+
+class TestAppArmorProfiles(unittest.TestCase):
+    @patch("security.security_steps.run")
+    @patch("security.security_steps.os.path.isfile", return_value=True)
+    @patch(
+        "security.security_steps._apparmor_userns_restriction_enabled",
+        return_value=True,
+    )
+    def test_loads_browser_sandbox_profile_when_userns_is_restricted(
+        self, _restricted, _isfile, mock_run
+    ):
+        mock_run.return_value = SimpleNamespace(returncode=0)
+
+        self.assertTrue(_ensure_browser_automation_userns_profile())
+        mock_run.assert_called_once_with(
+            "apparmor_parser -r -W /etc/apparmor.d/unprivileged_userns",
+            check=False,
+        )
+
+    @patch("security.security_steps.run")
+    @patch(
+        "security.security_steps._apparmor_userns_restriction_enabled",
+        return_value=False,
+    )
+    def test_does_not_require_userns_profile_when_kernel_does_not_restrict_it(
+        self, _restricted, mock_run
+    ):
+        self.assertTrue(_ensure_browser_automation_userns_profile())
+        mock_run.assert_not_called()
+
+    @patch("security.security_steps._ensure_browser_automation_userns_profile")
+    @patch("security.security_steps.is_hardware", return_value=False)
+    @patch("security.security_steps.is_vm", return_value=True)
+    @patch("security.security_steps.run")
+    def test_configure_uses_supported_reload_and_preserves_declared_modes(
+        self, mock_run, _vm, _hardware, mock_userns
+    ):
+        mock_userns.return_value = True
+
+        def run_side_effect(command, **_kwargs):
+            return SimpleNamespace(returncode=0)
+
+        mock_run.side_effect = run_side_effect
+
+        configure_apparmor(
+            SetupConfig(username="u", host="h", system_type="workstation_dev")
+        )
+
+        commands = [call.args[0] for call in mock_run.call_args_list]
+        self.assertIn("systemctl reload apparmor", commands)
+        self.assertNotIn("systemctl restart apparmor", commands)
+        self.assertFalse(any(command.startswith("aa-enforce ") for command in commands))
+        mock_userns.assert_called_once_with()
+
+    @patch("security.security_steps._ensure_browser_automation_userns_profile")
+    @patch("security.security_steps.is_hardware", return_value=False)
+    @patch("security.security_steps.is_vm", return_value=True)
+    @patch("security.security_steps.run")
+    def test_configure_starts_service_when_policy_is_not_active(
+        self, mock_run, _vm, _hardware, mock_userns
+    ):
+        mock_userns.return_value = True
+        aa_enabled_results = iter((1, 0))
+
+        def run_side_effect(command, **_kwargs):
+            if command == "aa-enabled -q":
+                return SimpleNamespace(returncode=next(aa_enabled_results))
+            return SimpleNamespace(returncode=0)
+
+        mock_run.side_effect = run_side_effect
+
+        configure_apparmor(
+            SetupConfig(username="u", host="h", system_type="workstation_dev")
+        )
+
+        commands = [call.args[0] for call in mock_run.call_args_list]
+        self.assertIn("systemctl start apparmor", commands)
+        self.assertIn("systemctl reload apparmor", commands)
+
+    @patch(
+        "security.security_steps._ensure_browser_automation_userns_profile",
+        return_value=False,
+    )
+    @patch("security.security_steps.is_hardware", return_value=False)
+    @patch("security.security_steps.is_vm", return_value=True)
+    @patch("security.security_steps.run")
+    def test_configure_fails_when_required_browser_sandbox_policy_cannot_load(
+        self, mock_run, _vm, _hardware, _mock_userns
+    ):
+        mock_run.return_value = SimpleNamespace(returncode=0)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "browser-sandbox compatibility profile failed"
+        ):
+            configure_apparmor(
+                SetupConfig(
+                    username="u", host="h", system_type="workstation_dev"
+                )
+            )
 
 
 class TestHardenSSH(unittest.TestCase):
