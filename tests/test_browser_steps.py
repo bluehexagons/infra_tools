@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from desktop.browser_steps import (
     _browsh_architecture,
     _browsh_asset_matches,
-    _reload_librewolf_apparmor_profile,
+    _configure_librewolf_apparmor_profile,
     install_single_browser,
     is_flatpak_app_installed,
 )
@@ -90,13 +90,8 @@ class TestBrowserSteps(unittest.TestCase):
 
     @patch("desktop.browser_steps.os.path.isfile", return_value=True)
     @patch("desktop.browser_steps.run")
-    @patch("builtins.open", new_callable=unittest.mock.mock_open, read_data=(
-        "profile librewolf /usr/share/librewolf/{librewolf,librewolf-bin} {\n"
-        "        userns,\n"
-        "        include if exists <local/librewolf>\n"
-        "}\n"
-    ))
-    def test_reloads_librewolf_unconfined_apparmor_profile(
+    @patch("builtins.open", new_callable=unittest.mock.mock_open)
+    def test_recreates_and_reloads_librewolf_apparmor_profile(
         self, mock_open, mock_run, _isfile
     ):
         mock_run.side_effect = [
@@ -105,7 +100,7 @@ class TestBrowserSteps(unittest.TestCase):
             subprocess.CompletedProcess(args=["apparmor_parser"], returncode=0),
         ]
 
-        _reload_librewolf_apparmor_profile()
+        _configure_librewolf_apparmor_profile()
 
         self.assertEqual(mock_run.call_count, 3)
         mock_run.assert_any_call("aa-enabled -q", check=False)
@@ -123,10 +118,6 @@ class TestBrowserSteps(unittest.TestCase):
             "flags=(unconfined) {",
             written,
         )
-        self.assertNotIn(
-            "profile librewolf /usr/share/librewolf/ flags=(unconfined)",
-            written,
-        )
 
     @patch("desktop.browser_steps.os.path.isfile", return_value=True)
     @patch("desktop.browser_steps.run")
@@ -137,7 +128,7 @@ class TestBrowserSteps(unittest.TestCase):
             args=["aa-enabled"], returncode=1
         )
 
-        _reload_librewolf_apparmor_profile()
+        _configure_librewolf_apparmor_profile()
 
         mock_run.assert_called_once_with("aa-enabled -q", check=False)
 

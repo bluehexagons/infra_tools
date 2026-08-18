@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import re
 import shlex
 import shutil
 import subprocess
@@ -12,7 +11,6 @@ from typing import Optional
 from lib.config import SetupConfig
 from lib.machine_state import is_container
 from lib.remote_utils import (
-    file_contains,
     get_user_home,
     is_dry_run,
     is_package_installed,
@@ -27,11 +25,15 @@ HELIUM_RELEASE_API = "https://api.github.com/repos/imputnet/helium-linux/release
 BROWSH_GITHUB_REPO = "browsh-org/browsh"
 _LIBREWOLF_APPARMOR_PROFILE = "/etc/apparmor.d/librewolf"
 _XFCE_HELPER_SUBDIR = os.path.join(".local", "share", "xfce4", "helpers")
-_LIBREWOLF_PROFILE_HEADER = re.compile(
-    # The package path uses AppArmor brace expansion, so match through the
-    # final opening brace instead of stopping at the first path brace.
-    r"(?m)^profile\s+librewolf\s+.*\s+\{$"
-)
+_LIBREWOLF_APPARMOR_PROFILE_CONTENT = """# Managed by infra-tools.
+abi <abi/4.0>,
+include <tunables/global>
+
+profile librewolf /usr/share/librewolf/{librewolf,librewolf-bin} flags=(unconfined) {
+        userns,
+        include if exists <local/librewolf>
+}
+"""
 _BROWSH_ARCH_BY_DPKG = {
     "amd64": "amd64",
     "arm64": "arm64",
@@ -48,57 +50,28 @@ _FLATPAK_BROWSER_IDS = {
 }
 
 
-def _reload_librewolf_apparmor_profile() -> None:
-    """Load LibreWolf's package-declared AppArmor profile after installation.
+def _configure_librewolf_apparmor_profile() -> None:
+    """Write and load the managed LibreWolf AppArmor compatibility profile.
 
-    The current package uses ``flags=(unconfined)`` so the browser keeps its
-    own sandbox. Remove the previously loaded instance first: older
-    infra-tools versions forced every profile into enforce mode, and a normal
-    replacement can retain that stale runtime mode. The subsequent load still
-    takes its mode from the package profile, so a future package can declare a
-    different policy without being overridden.
+    LibreWolf's own browser sandbox remains responsible for confinement while
+    the AppArmor label avoids blocking its dynamic loader and user namespaces.
+    Workstation setup owns this small package-profile replacement; older
+    workstation state is intentionally outside the supported upgrade path.
     """
     if not os.path.isfile(_LIBREWOLF_APPARMOR_PROFILE):
         return
     if run("aa-enabled -q", check=False).returncode != 0:
         return
-
-    try:
-        with open(_LIBREWOLF_APPARMOR_PROFILE, "r", encoding="utf-8") as f:
-            profile_content = f.read()
-    except OSError:
-        profile_content = ""
-
-    # Some LibreWolf repository releases shipped the intended unconfined stub
-    # without the required profile flag. That turns the otherwise-empty stub
-    # into an enforcing allowlist and blocks the dynamic loader before the
-    # browser can start. Repair only that recognizable stub; never weaken a
-    # profile containing real path or capability rules.
-    header_match = _LIBREWOLF_PROFILE_HEADER.search(profile_content)
-    if (
-        header_match
-        and "flags=" not in header_match.group(0)
-        and "userns," in profile_content
-        and "include if exists <local/librewolf>" in profile_content
-        and not re.search(r"(?m)^\s*(?:deny\s+|/|owner\s+)", profile_content)
-    ):
-        repaired_header = header_match.group(0)[:-1].rstrip() + " flags=(unconfined) {"
-        repaired_content = (
-            profile_content[: header_match.start()]
-            + repaired_header
-            + profile_content[header_match.end() :]
-        )
-        try:
-            with open(_LIBREWOLF_APPARMOR_PROFILE, "w", encoding="utf-8") as f:
-                f.write(repaired_content)
-            print("  ✓ Repaired LibreWolf's malformed AppArmor compatibility profile")
-        except OSError:
-            print("  ⚠ Could not repair LibreWolf's AppArmor compatibility profile")
-
     run(
         f"apparmor_parser -R {shlex.quote(_LIBREWOLF_APPARMOR_PROFILE)}",
         check=False,
     )
+    try:
+        with open(_LIBREWOLF_APPARMOR_PROFILE, "w", encoding="utf-8") as f:
+            f.write(_LIBREWOLF_APPARMOR_PROFILE_CONTENT)
+    except OSError:
+        print("  ⚠ Could not write LibreWolf's managed AppArmor profile")
+        return
     result = run(
         f"apparmor_parser -r -W {shlex.quote(_LIBREWOLF_APPARMOR_PROFILE)}",
         check=False,
@@ -286,13 +259,13 @@ def install_single_browser(browser: str, use_flatpak: bool) -> None:
                 return
         else:
             if is_package_installed("librewolf"):
-                _reload_librewolf_apparmor_profile()
+                _configure_librewolf_apparmor_profile()
                 print("  ✓ LibreWolf browser already installed")
                 return
             print("  Installing LibreWolf browser...")
 
             if _install_via_extrepo("LibreWolf", "librewolf", "librewolf"):
-                _reload_librewolf_apparmor_profile()
+                _configure_librewolf_apparmor_profile()
                 print("  ✓ LibreWolf browser installed")
 
     elif browser == "helium":
@@ -384,30 +357,20 @@ def configure_default_browser(config: SetupConfig) -> None:
     if using_flatpak_browser:
         desktop_file = f"{flatpak_app_id}.desktop"
     
-    mimeapps_already_configured = os.path.exists(mimeapps_path) and file_contains(
-        mimeapps_path, desktop_file
-    )
-    
-    user_apps_dir = os.path.join(home_dir, ".local", "share", "applications")
-    os.makedirs(user_apps_dir, exist_ok=True)
     local_dir = os.path.join(home_dir, ".local")
-    run(f"chown -R {safe_username}:{safe_username} {shlex.quote(local_dir)}")
-    
     config_dir = os.path.join(home_dir, ".config")
     os.makedirs(config_dir, exist_ok=True)
-    
+
     mimeapps_content = f"""[Default Applications]
 x-scheme-handler/http={desktop_file}
 x-scheme-handler/https={desktop_file}
 text/html={desktop_file}
 application/xhtml+xml={desktop_file}
 """
-
-    if not mimeapps_already_configured:
-        with open(mimeapps_path, "w", encoding="utf-8") as f:
-            f.write(mimeapps_content)
-    
-    run(f"chown -R {safe_username}:{safe_username} {shlex.quote(config_dir)}")
+    # This file is managed by infra-tools. Recreate it instead of preserving
+    # stale defaults from an older workstation setup.
+    with open(mimeapps_path, "w", encoding="utf-8") as f:
+        f.write(mimeapps_content)
     
     browser_command = {
         "brave": "brave-browser",
@@ -421,6 +384,14 @@ application/xhtml+xml={desktop_file}
     helper_dir = os.path.join(home_dir, _XFCE_HELPER_SUBDIR)
     os.makedirs(helper_dir, exist_ok=True)
     helper_path = os.path.join(helper_dir, f"{config.browser}.desktop")
+    for managed_browser in ("brave", "firefox", "helium", "librewolf"):
+        stale_helper = os.path.join(helper_dir, f"{managed_browser}.desktop")
+        if stale_helper == helper_path:
+            continue
+        try:
+            os.remove(stale_helper)
+        except OSError:
+            pass
     if using_flatpak_browser:
         helper_binaries = "flatpak;"
         helper_commands = browser_command
@@ -439,34 +410,14 @@ X-XFCE-Category=WebBrowser
 X-XFCE-Commands={helper_commands};
 X-XFCE-CommandsWithParameter={helper_commands_with_parameter};
 """
-    try:
-        with open(helper_path, "r", encoding="utf-8") as f:
-            existing_helper = f.read()
-    except OSError:
-        existing_helper = ""
-    if existing_helper != helper_content:
-        with open(helper_path, "w", encoding="utf-8") as f:
-            f.write(helper_content)
+    with open(helper_path, "w", encoding="utf-8") as f:
+        f.write(helper_content)
 
     xfce_config_dir = os.path.join(config_dir, "xfce4")
     os.makedirs(xfce_config_dir, exist_ok=True)
     xfce_helpers_path = os.path.join(xfce_config_dir, "helpers.rc")
-    existing_helpers = ""
-    if os.path.exists(xfce_helpers_path):
-        try:
-            with open(xfce_helpers_path, "r", encoding="utf-8") as f:
-                existing_helpers = f.read()
-        except OSError:
-            existing_helpers = ""
-    helper_lines = [
-        line for line in existing_helpers.splitlines()
-        if not line.startswith("WebBrowser=")
-    ]
-    helper_lines.append(f"WebBrowser={browser_command}")
-    helpers_content = "\n".join(helper_lines) + "\n"
-    if existing_helpers != helpers_content:
-        with open(xfce_helpers_path, "w", encoding="utf-8") as f:
-            f.write(helpers_content)
+    with open(xfce_helpers_path, "w", encoding="utf-8") as f:
+        f.write(f"WebBrowser={browser_command}\n")
 
     user_env = (
         f"runuser -u {safe_username} -- env"
@@ -484,6 +435,7 @@ X-XFCE-CommandsWithParameter={helper_commands_with_parameter};
             check=False,
         )
     run(f"{user_env} xdg-settings set default-web-browser {desktop_file}", check=False)
+    run(f"chown -R {safe_username}:{safe_username} {shlex.quote(config_dir)}")
     run(f"chown -R {safe_username}:{safe_username} {shlex.quote(local_dir)}")
     
     print(f"  ✓ Default browser set to {config.browser.capitalize()}")

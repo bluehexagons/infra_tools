@@ -131,17 +131,18 @@ the same time, so its launcher does not fall back to the optional
 `www-browser` command. A per-user `X-XFCE-Helper` desktop entry is also
 created, so XFCE's Preferred Applications dialog and `exo-open --launch
 WebBrowser` resolve the selected browser rather than falling back to an
-unregistered command.
+unregistered command. These files are managed defaults: workstation setup
+recreates them rather than merging older infra-tools state. This release is
+intended for clean workstation builds; rebuild a workstation created by an
+older infra-tools release instead of attempting an in-place migration.
 
 On VM and hardware targets, AppArmor is enabled and its distro service reloads
 the installed policy without blanket-enforcing package profiles. This preserves
 each profile's declared `enforce`, `complain`, or `unconfined` mode. LibreWolf's
-package profile is intended to use an unconfined label so its own browser
-sandbox continues to work. Setup repairs the known repository variant that
-omits that flag, then reloads the package-declared mode instead of forcing a
-different policy. This also migrates machines that were configured by older
-infra-tools releases, which could leave the otherwise-empty profile enforced
-and block the dynamic loader.
+own browser sandbox remains responsible for browser confinement. Setup replaces
+the package profile with its managed unconfined compatibility profile and
+reloads it. This release is intended for clean workstation builds rather than
+in-place migration of older infra-tools state.
 
 Debian 13's AppArmor policy also supplies the `unprivileged_userns` transition
 used by otherwise-unconfined applications that create a user namespace. Setup

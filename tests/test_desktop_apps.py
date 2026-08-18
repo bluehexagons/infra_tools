@@ -50,22 +50,16 @@ class TestBrowserSteps(unittest.TestCase):
 
     @patch("desktop.browser_steps.run")
     @patch("desktop.browser_steps.os.makedirs")
-    @patch("desktop.browser_steps.os.path.exists")
-    @patch("desktop.browser_steps.file_contains")
     @patch("builtins.open", new_callable=unittest.mock.mock_open)
     def test_configures_librewolf_as_default_browser(
         self,
         mock_open,
-        mock_file_contains,
-        mock_exists,
         mock_makedirs,
         mock_run,
     ):
         """LibreWolf is the default browser for workstation setups and should be configurable."""
         from desktop.browser_steps import configure_default_browser
 
-        mock_exists.return_value = False
-        mock_file_contains.return_value = False
         mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
         config = SetupConfig(
             host="test.example.com",
@@ -76,6 +70,12 @@ class TestBrowserSteps(unittest.TestCase):
 
         configure_default_browser(config)
 
+        mock_open.assert_any_call(
+            "/home/testuser/.config/mimeapps.list", "w", encoding="utf-8"
+        )
+        mock_open.assert_any_call(
+            "/home/testuser/.config/xfce4/helpers.rc", "w", encoding="utf-8"
+        )
         write_calls = [call.args[0] for call in mock_open().write.call_args_list]
         self.assertIn("librewolf.desktop", "".join(write_calls))
         run_commands = [call.args[0] for call in mock_run.call_args_list]
@@ -127,22 +127,16 @@ class TestBrowserSteps(unittest.TestCase):
 
     @patch("desktop.browser_steps.run")
     @patch("desktop.browser_steps.os.makedirs")
-    @patch("desktop.browser_steps.os.path.exists")
-    @patch("desktop.browser_steps.file_contains")
     @patch("builtins.open", new_callable=unittest.mock.mock_open)
     def test_configures_helium_as_default_browser(
         self,
         mock_open,
-        mock_file_contains,
-        mock_exists,
         mock_makedirs,
         mock_run,
     ):
         """Helium should be configurable as the default browser."""
         from desktop.browser_steps import configure_default_browser
 
-        mock_exists.return_value = False
-        mock_file_contains.return_value = False
         mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
         config = SetupConfig(
             host="test.example.com",
