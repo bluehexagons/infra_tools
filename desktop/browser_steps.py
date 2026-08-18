@@ -28,7 +28,9 @@ BROWSH_GITHUB_REPO = "browsh-org/browsh"
 _LIBREWOLF_APPARMOR_PROFILE = "/etc/apparmor.d/librewolf"
 _XFCE_HELPER_SUBDIR = os.path.join(".local", "share", "xfce4", "helpers")
 _LIBREWOLF_PROFILE_HEADER = re.compile(
-    r"(?m)^profile\s+librewolf\s+[^\n{]+\s*\{"
+    # The package path uses AppArmor brace expansion, so match through the
+    # final opening brace instead of stopping at the first path brace.
+    r"(?m)^profile\s+librewolf\s+.*\s+\{$"
 )
 _BROWSH_ARCH_BY_DPKG = {
     "amd64": "amd64",

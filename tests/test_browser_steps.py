@@ -118,7 +118,15 @@ class TestBrowserSteps(unittest.TestCase):
         written = "".join(
             call.args[0] for call in mock_open().write.call_args_list if call.args
         )
-        self.assertIn("flags=(unconfined)", written)
+        self.assertIn(
+            "profile librewolf /usr/share/librewolf/{librewolf,librewolf-bin} "
+            "flags=(unconfined) {",
+            written,
+        )
+        self.assertNotIn(
+            "profile librewolf /usr/share/librewolf/ flags=(unconfined)",
+            written,
+        )
 
     @patch("desktop.browser_steps.os.path.isfile", return_value=True)
     @patch("desktop.browser_steps.run")
