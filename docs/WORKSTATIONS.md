@@ -128,14 +128,20 @@ The first browser in a repeated list is written to the setup user's
 `~/.config/mimeapps.list` as the HTTP/HTTPS default. Text-only browsers do not
 write a desktop default. XFCE's per-user WebBrowser helper is configured at
 the same time, so its launcher does not fall back to the optional
-`www-browser` command.
+`www-browser` command. A per-user `X-XFCE-Helper` desktop entry is also
+created, so XFCE's Preferred Applications dialog and `exo-open --launch
+WebBrowser` resolve the selected browser rather than falling back to an
+unregistered command.
 
 On VM and hardware targets, AppArmor is enabled and its distro service reloads
-the installed policy without rewriting package profiles. This preserves each
-profile's declared `enforce`, `complain`, or `unconfined` mode. LibreWolf's
-package profile currently uses an unconfined label so its own browser sandbox
-continues to work; setup reloads that package-declared mode after installation
-instead of forcing a different policy.
+the installed policy without blanket-enforcing package profiles. This preserves
+each profile's declared `enforce`, `complain`, or `unconfined` mode. LibreWolf's
+package profile is intended to use an unconfined label so its own browser
+sandbox continues to work. Setup repairs the known repository variant that
+omits that flag, then reloads the package-declared mode instead of forcing a
+different policy. This also migrates machines that were configured by older
+infra-tools releases, which could leave the otherwise-empty profile enforced
+and block the dynamic loader.
 
 Debian 13's AppArmor policy also supplies the `unprivileged_userns` transition
 used by otherwise-unconfined applications that create a user namespace. Setup

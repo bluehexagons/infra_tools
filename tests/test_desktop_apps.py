@@ -98,6 +98,10 @@ class TestBrowserSteps(unittest.TestCase):
             )
         )
         self.assertIn("WebBrowser=librewolf", "".join(write_calls))
+        helper_content = "".join(write_calls)
+        self.assertIn("Type=X-XFCE-Helper", helper_content)
+        self.assertIn("X-XFCE-Binaries=librewolf;", helper_content)
+        self.assertIn("X-XFCE-Category=WebBrowser", helper_content)
 
     @patch("desktop.browser_steps._install_via_extrepo")
     @patch("desktop.browser_steps.is_package_installed")

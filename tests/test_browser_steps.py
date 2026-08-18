@@ -90,21 +90,35 @@ class TestBrowserSteps(unittest.TestCase):
 
     @patch("desktop.browser_steps.os.path.isfile", return_value=True)
     @patch("desktop.browser_steps.run")
+    @patch("builtins.open", new_callable=unittest.mock.mock_open, read_data=(
+        "profile librewolf /usr/share/librewolf/{librewolf,librewolf-bin} {\n"
+        "        userns,\n"
+        "        include if exists <local/librewolf>\n"
+        "}\n"
+    ))
     def test_reloads_librewolf_unconfined_apparmor_profile(
-        self, mock_run, _isfile
+        self, mock_open, mock_run, _isfile
     ):
         mock_run.side_effect = [
             subprocess.CompletedProcess(args=["aa-enabled"], returncode=0),
+            subprocess.CompletedProcess(args=["apparmor_parser"], returncode=0),
             subprocess.CompletedProcess(args=["apparmor_parser"], returncode=0),
         ]
 
         _reload_librewolf_apparmor_profile()
 
-        self.assertEqual(mock_run.call_count, 2)
+        self.assertEqual(mock_run.call_count, 3)
         mock_run.assert_any_call("aa-enabled -q", check=False)
+        mock_run.assert_any_call(
+            "apparmor_parser -R /etc/apparmor.d/librewolf", check=False
+        )
         mock_run.assert_any_call(
             "apparmor_parser -r -W /etc/apparmor.d/librewolf", check=False
         )
+        written = "".join(
+            call.args[0] for call in mock_open().write.call_args_list if call.args
+        )
+        self.assertIn("flags=(unconfined)", written)
 
     @patch("desktop.browser_steps.os.path.isfile", return_value=True)
     @patch("desktop.browser_steps.run")
