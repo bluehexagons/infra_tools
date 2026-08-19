@@ -96,6 +96,26 @@ def get_repository_source_path(
     return (cache_path, commit_hash)
 
 
+def enable_detected_build_runtimes(config: SetupConfig) -> None:
+    """Enable target runtimes required by uploaded deployment sources.
+
+    The controller already uploads repositories before remote setup starts, so
+    the target can select a build runtime without project-specific CLI flags.
+    Explicit runtime choices remain supported; detection only adds missing
+    requirements.
+    """
+    if config.install_go or not config.deploy_specs:
+        return
+
+    for _deploy_spec, git_url in config.deploy_specs:
+        repo_name = extract_repo_name(git_url)
+        repo_path = os.path.join("/opt/infra_tools/deployments", repo_name)
+        if os.path.isfile(os.path.join(repo_path, "go.mod")):
+            config.install_go = True
+            print(f"Detected Go module in {repo_name}; enabling target Go runtime")
+            return
+
+
 def _load_args_file(args_file: str) -> list[str]:
     try:
         with open(args_file, "r", encoding="utf-8") as file_obj:
@@ -185,6 +205,8 @@ def _run_main() -> int:
     # When using --deploy-latest with lite mode, upgrade to default mode for fresh clone
     if args.deploy_latest and config.deployment_mode == "lite":
         config.deployment_mode = "default"
+
+    enable_detected_build_runtimes(config)
     
     if not validate_username(config.username):
         print(f"Error: Invalid username: {config.username}")

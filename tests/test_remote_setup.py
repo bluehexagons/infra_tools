@@ -144,6 +144,32 @@ class TestRepositorySourcePath(unittest.TestCase):
         self.assertIsNone(result)
 
 
+class TestBuildRuntimeDetection(unittest.TestCase):
+    def test_enables_go_for_uploaded_go_module(self):
+        config = SetupConfig(
+            host="localhost",
+            username="root",
+            system_type="server_lite",
+            deploy_specs=[["click.example.com", "https://github.com/example/goclick.git"]],
+        )
+        with patch.object(remote_setup.os.path, "isfile", return_value=True):
+            remote_setup.enable_detected_build_runtimes(config)
+
+        self.assertTrue(config.install_go)
+
+    def test_does_not_enable_go_without_uploaded_module(self):
+        config = SetupConfig(
+            host="localhost",
+            username="root",
+            system_type="server_lite",
+            deploy_specs=[["site.example.com", "https://github.com/example/site.git"]],
+        )
+        with patch.object(remote_setup.os.path, "isfile", return_value=False):
+            remote_setup.enable_detected_build_runtimes(config)
+
+        self.assertFalse(config.install_go)
+
+
 class TestAgentPayloadCleanup(unittest.TestCase):
     def test_main_removes_agent_payload_after_setup_failure(self):
         with tempfile.TemporaryDirectory() as directory:

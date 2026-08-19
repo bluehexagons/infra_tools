@@ -11,6 +11,7 @@ import re
 import socket
 import stat
 import sys
+import tempfile
 from datetime import datetime
 from typing import Optional, Any
 
@@ -747,63 +748,106 @@ class DeploymentOrchestrator:
         dest_path = self.get_deployment_path(domain, path, git_url)
         print(f"Deploying manifest ({len(manifest.components)} component(s)) to {dest_path}...")
 
-        # Stop any services this manifest previously installed before files move.
-        for component in manifest.components:
-            if component.is_service:
-                unit_name, _ = self._service_identity(dest_path, component)
-                run(f"systemctl stop {shlex.quote(unit_name)}.service", check=False)
-
         parent_dir = os.path.dirname(dest_path)
         if parent_dir and not os.path.exists(parent_dir):
             os.makedirs(parent_dir, exist_ok=True)
-        if os.path.exists(dest_path):
-            print(f"  Removing existing deployment at {dest_path}...")
-            shutil.rmtree(dest_path)
 
-        if keep_source:
-            shutil.copytree(source_path, dest_path)
-            print(f"  ✓ Copied to {dest_path}")
-        else:
-            shutil.move(source_path, dest_path)
-            print(f"  ✓ Moved to {dest_path}")
-
-        # Build every component, then describe it for nginx.
-        deps: list[dict[str, Any]] = []
-        for component in manifest.components:
-            component_domain = self._component_domain(component, domain)
-            print(f"  Component '{component.name}' ({component.type}) → {component_domain}{component.path}")
-            self._run_component_build(component, dest_path)
-            deps.append(self._component_dep(component, dest_path, domain))
-
-        # The release tree is deploy-owned and world-readable so nginx can serve
-        # static files and each (separately-owned) service user can read and exec
-        # its binary. Service writable state lives in a service-owned data dir.
-        result = run(
-            f"chown -R {shlex.quote(self.deploy_user)}:{shlex.quote(self.deploy_group)} {shlex.quote(dest_path)}",
-            check=False,
+        # Build beside the active release. A failed build therefore leaves the
+        # currently served release in place and does not interrupt its service.
+        staging_path = tempfile.mkdtemp(
+            prefix=f".{os.path.basename(dest_path)}.build-",
+            dir=parent_dir or None,
         )
-        if result.returncode != 0:
-            print(f"  ⚠ Warning: Could not set ownership to {self.deploy_user}:{self.deploy_group}")
-        run(f"chmod -R 755 {shlex.quote(dest_path)}", check=False)
+        try:
+            if keep_source:
+                shutil.copytree(source_path, staging_path, dirs_exist_ok=True)
+                print(f"  ✓ Copied source to staging path {staging_path}")
+            else:
+                shutil.copytree(source_path, staging_path, dirs_exist_ok=True)
+                print(f"  ✓ Copied source to staging path {staging_path}")
 
-        # Start services after the release tree is readable so they can exec.
-        for component in manifest.components:
-            if component.is_service:
-                self._install_service_component(component, dest_path, domain)
+            # Build as the non-root deployment owner. This keeps repository
+            # build hooks from running with target-root privileges and lets
+            # tools write their normal caches and build outputs.
+            run(
+                f"chown -R {shlex.quote(self.deploy_user)}:{shlex.quote(self.deploy_group)} {shlex.quote(staging_path)}",
+                check=False,
+            )
 
-        save_deployment_metadata(dest_path, git_url, commit_hash)
-        print(f"  ✓ Manifest deployed to {dest_path}")
-        return deps
+            # Build every component before touching the active release.
+            for component in manifest.components:
+                component_domain = self._component_domain(component, domain)
+                print(f"  Component '{component.name}' ({component.type}) → {component_domain}{component.path}")
+                self._run_component_build(component, staging_path)
+
+            # Stop services only for the short release swap window.
+            for component in manifest.components:
+                if component.is_service:
+                    unit_name, _ = self._service_identity(dest_path, component)
+                    run(f"systemctl stop {shlex.quote(unit_name)}.service", check=False)
+
+            backup_path: Optional[str] = None
+            if os.path.exists(dest_path):
+                backup_path = tempfile.mkdtemp(
+                    prefix=f".{os.path.basename(dest_path)}.previous-",
+                    dir=parent_dir or None,
+                )
+                os.rmdir(backup_path)
+                os.rename(dest_path, backup_path)
+            try:
+                os.rename(staging_path, dest_path)
+            except Exception:
+                if backup_path and os.path.exists(backup_path) and not os.path.exists(dest_path):
+                    os.rename(backup_path, dest_path)
+                raise
+            staging_path = ""
+            if backup_path:
+                shutil.rmtree(backup_path)
+
+            if not keep_source and os.path.exists(source_path):
+                shutil.rmtree(source_path)
+
+            print(f"  ✓ Activated release at {dest_path}")
+
+            # Describe the activated release for nginx.
+            deps: list[dict[str, Any]] = [
+                self._component_dep(component, dest_path, domain)
+                for component in manifest.components
+            ]
+
+            # The release tree is deploy-owned and world-readable so nginx can
+            # serve static files and each service user can read and exec its
+            # binary. Service writable state lives outside the release.
+            result = run(
+                f"chown -R {shlex.quote(self.deploy_user)}:{shlex.quote(self.deploy_group)} {shlex.quote(dest_path)}",
+                check=False,
+            )
+            if result.returncode != 0:
+                print(f"  ⚠ Warning: Could not set ownership to {self.deploy_user}:{self.deploy_group}")
+            run(f"chmod -R 755 {shlex.quote(dest_path)}", check=False)
+
+            # Start services after the release tree is readable so they can exec.
+            for component in manifest.components:
+                if component.is_service:
+                    self._install_service_component(component, dest_path, domain)
+
+            save_deployment_metadata(dest_path, git_url, commit_hash)
+            print(f"  ✓ Manifest deployed to {dest_path}")
+            return deps
+        finally:
+            if staging_path and os.path.exists(staging_path):
+                shutil.rmtree(staging_path)
 
     def _run_component_build(self, component: Component, dest_path: str) -> None:
-        """Run a component's build command(s) at the repo root with its env."""
+        """Run build commands as the non-root deployment owner."""
         if not component.build:
             return
         env_prefix = "".join(f"{key}={shlex.quote(value)} " for key, value in component.env.items())
         for command in component.build:
             print(f"    build: {command}")
+            build_shell = f"cd {shlex.quote(dest_path)} && {env_prefix}{command}"
             result = run(
-                f"cd {shlex.quote(dest_path)} && {env_prefix}{command}",
+                f"runuser -u {shlex.quote(self.deploy_user)} -- /bin/bash -lc {shlex.quote(build_shell)}",
                 check=False,
                 capture_output=True,
             )
@@ -896,6 +940,10 @@ class DeploymentOrchestrator:
     def _install_service_component(self, component: Component, dest_path: str,
                                    deploy_domain: Optional[str] = None) -> None:
         context = self._service_context(component, dest_path, deploy_domain)
+        runtime_env = {
+            key: render_template(value, context)
+            for key, value in component.runtime_env.items()
+        }
         username = context['web_user']
         service_name = context['service_name']
 
@@ -935,6 +983,7 @@ class DeploymentOrchestrator:
                 username,
                 env_file=context.get('env_file'),
                 description=f"infra.json service: {component.name}",
+                runtime_env=runtime_env,
             )
 
         if component.health:

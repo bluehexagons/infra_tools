@@ -71,6 +71,14 @@ class TestGenerateManagedService(unittest.TestCase):
         )
         self.assertIn("EnvironmentFile=/opt/app/.env", with_env)
 
+    def test_runtime_environment_is_written_and_escaped(self):
+        unit = generate_managed_service(
+            "app-api", "/bin/app", "/srv",
+            runtime_env={"APP_DATA": "/var/lib/app", "APP_QUOTE": 'a"b'},
+        )
+        self.assertIn('Environment="APP_DATA=/var/lib/app"', unit)
+        self.assertIn('Environment="APP_QUOTE=a\\"b"', unit)
+
 
 class TestComponentDescriptor(unittest.TestCase):
     def setUp(self):
@@ -208,7 +216,9 @@ class TestDeployManifest(unittest.TestCase):
                  "build": "npm run build", "output": "dist"},
                 {"name": "api", "type": "service", "domain": "api.example.com",
                  "build": "server/build.sh", "binary": "server/app",
-                 "env_file": "/opt/app/.env", "port": 8090, "health": "/health"},
+                 "env_file": "/opt/app/.env",
+                 "runtime_env": {"APP_DATA": "{{data_dir}}/app.sqlite3"},
+                 "port": 8090, "health": "/health"},
             ],
         }
         with open(os.path.join(self.source, "infra.json"), "w") as f:
@@ -263,6 +273,10 @@ class TestDeployManifest(unittest.TestCase):
         self.assertEqual(args[3], "app-example_com-api")           # web_user (dedicated)
         self.assertEqual(args[4], "app-example_com-api")           # web_group
         self.assertEqual(kwargs['env_file'], "/opt/app/.env")
+        self.assertEqual(
+            kwargs['runtime_env'],
+            {"APP_DATA": os.path.join(self.base_dir, ".infra_tools_shared", "example_com", "api", "data", "app.sqlite3")},
+        )
         mock_health.assert_called_once()
 
         # The managed, service-owned data dir was created outside the release.
@@ -300,6 +314,38 @@ class TestDeployManifest(unittest.TestCase):
                 keep_source=True,
             )
         self.assertIn("build failed", str(ctx.exception))
+
+    @patch.object(DeploymentOrchestrator, '_poll_health')
+    @patch('lib.deployment.create_managed_service')
+    @patch('lib.deployment.save_deployment_metadata')
+    @patch('lib.deployment.run')
+    def test_build_failure_preserves_active_release(self, mock_run, mock_meta, mock_service, mock_health):
+        active = os.path.join(self.base_dir, "example_com")
+        os.makedirs(active)
+        marker = os.path.join(active, "active-release.txt")
+        with open(marker, "w", encoding="utf-8") as handle:
+            handle.write("still serving")
+
+        def run_side_effect(cmd, *a, **k):
+            if "npm run build" in cmd:
+                return MagicMock(returncode=1, stdout="", stderr="broken build")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
+
+        with self.assertRaises(RuntimeError):
+            self.orch.deploy_manifest(
+                manifest=self.manifest, source_path=self.source,
+                domain="example.com", path="/",
+                git_url="https://git.example.com/shop.git", commit_hash="abc123",
+                keep_source=True,
+            )
+
+        self.assertTrue(os.path.exists(marker))
+        self.assertEqual(
+            [name for name in os.listdir(self.base_dir) if name.startswith(".example_com.build-")],
+            [],
+        )
 
     @patch.object(DeploymentOrchestrator, '_poll_health')
     @patch('lib.deployment.create_managed_service')

@@ -40,7 +40,7 @@ def deploy_repository(source_path: str, deploy_spec: str, git_url: str,
     legacy single-project detection path runs and yields one descriptor.
     """
     from lib.deploy_utils import parse_deploy_spec
-    from lib.project_manifest import load_manifest
+    from lib.project_manifest import infer_manifest, load_manifest
 
     ensure_deploy_user(deploy_user)
 
@@ -55,8 +55,15 @@ def deploy_repository(source_path: str, deploy_spec: str, git_url: str,
     )
 
     manifest = load_manifest(source_path)
+    inferred_manifest = False
+    if manifest is None:
+        manifest = infer_manifest(source_path)
+        if manifest is not None:
+            inferred_manifest = True
+            print("  Detected conventional Go application; using built-in manifest defaults")
     if manifest is not None:
-        print(f"  Detected infra.json manifest with {len(manifest.components)} component(s)")
+        if not inferred_manifest:
+            print(f"  Detected infra.json manifest with {len(manifest.components)} component(s)")
         return orchestrator.deploy_manifest(
             manifest=manifest,
             source_path=source_path,

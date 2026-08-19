@@ -14,6 +14,7 @@ from lib.project_manifest import (
     MANIFEST_FILENAME,
     Manifest,
     has_placeholder,
+    infer_manifest,
     load_manifest,
     parse_manifest,
     render_template,
@@ -103,6 +104,19 @@ class TestValidParse(unittest.TestCase):
         self.assertEqual(comp.health, "/api/health")
         self.assertFalse(comp.reverse_proxy)
         self.assertEqual(comp.working_dir, "server")
+
+    def test_runtime_env_accepts_deploy_templates(self):
+        comp = parse_manifest(
+            _manifest(
+                _service(
+                    runtime_env={
+                        "APP_DATABASE": "{{data_dir}}/app.sqlite3",
+                        "APP_PORT": "{{port}}",
+                    }
+                )
+            )
+        ).components[0]
+        self.assertEqual(comp.runtime_env["APP_DATABASE"], "{{data_dir}}/app.sqlite3")
 
 
 class TestRejects(unittest.TestCase):
@@ -296,6 +310,12 @@ class TestTemplatedFieldValidation(unittest.TestCase):
             _manifest(_service(working_dir="{{nope}}")), "unknown template variable"
         )
 
+    def test_runtime_env_unknown_placeholder_rejected(self):
+        self._assert_rejected(
+            _manifest(_service(runtime_env={"APP_VALUE": "{{nope}}"})),
+            "unknown template variable",
+        )
+
 
 class TestLoadManifest(unittest.TestCase):
     def test_absent_returns_none(self):
@@ -317,6 +337,29 @@ class TestLoadManifest(unittest.TestCase):
             with self.assertRaises(ValueError) as ctx:
                 load_manifest(repo)
             self.assertIn("invalid JSON", str(ctx.exception))
+
+    def test_infers_conventional_go_server(self):
+        with tempfile.TemporaryDirectory() as repo:
+            with open(os.path.join(repo, "go.mod"), "w", encoding="utf-8") as f:
+                f.write("module example.com/app\n\ngo 1.25\n")
+            os.makedirs(os.path.join(repo, "cmd", "server"))
+            with open(os.path.join(repo, "cmd", "server", "main.go"), "w", encoding="utf-8") as f:
+                f.write("package main\n\nfunc main() {}\n")
+
+            manifest = infer_manifest(repo)
+
+        assert manifest is not None
+        component = manifest.components[0]
+        self.assertEqual(component.name, "app")
+        self.assertEqual(component.binary, ".infra_tools/bin/app")
+        self.assertIn("./cmd/server", component.build[0])
+        self.assertEqual(component.port, 8080)
+
+    def test_does_not_infer_non_main_go_module(self):
+        with tempfile.TemporaryDirectory() as repo:
+            with open(os.path.join(repo, "go.mod"), "w", encoding="utf-8") as f:
+                f.write("module example.com/library\n\ngo 1.25\n")
+            self.assertIsNone(infer_manifest(repo))
 
     def test_bluehexagons_example(self):
         """The shipped bluehexagons infra.json must validate, if present."""

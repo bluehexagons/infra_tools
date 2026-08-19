@@ -326,16 +326,24 @@ def create_node_service(app_name: str, app_path: str, port: int,
         print(f"  ✓ {service_name} is running")
 
 
+def _systemd_environment_line(key: str, value: str) -> str:
+    """Render a validated environment value for a systemd unit line."""
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+    return f'Environment="{key}={escaped}"'
+
+
 def generate_managed_service(name: str, exec_start: str, working_dir: str,
                              web_user: str = "www-data", web_group: str = "www-data",
                              env_file: Optional[str] = None,
-                             description: Optional[str] = None) -> str:
+                             description: Optional[str] = None,
+                             runtime_env: Optional[dict[str, str]] = None) -> str:
     """Generate a hardened systemd unit for a manifest service component.
 
     Unlike the Rails/Node generators this makes no assumptions about the
     runtime: the component supplies its own ExecStart (a binary path or full
     command) and reads its configuration (including which port to bind) from
-    ``env_file``. infra_tools only needs the port for the nginx upstream.
+    ``env_file`` or ``runtime_env``. infra_tools only needs the port for the
+    nginx upstream.
     """
     lines = [
         "[Unit]",
@@ -350,6 +358,8 @@ def generate_managed_service(name: str, exec_start: str, working_dir: str,
     ]
     if env_file:
         lines.append(f"EnvironmentFile={env_file}")
+    for key, value in (runtime_env or {}).items():
+        lines.append(_systemd_environment_line(key, value))
     lines += [
         f"ExecStart={exec_start}",
         "Restart=always",
@@ -403,10 +413,12 @@ def _install_and_start_unit(service_name: str, unit_content: str) -> None:
 def create_managed_service(service_name: str, exec_start: str, working_dir: str,
                            web_user: str, web_group: str,
                            env_file: Optional[str] = None,
-                           description: Optional[str] = None) -> None:
+                           description: Optional[str] = None,
+                           runtime_env: Optional[dict[str, str]] = None) -> None:
     """Create, enable, and start a manifest-defined systemd service."""
     unit_content = generate_managed_service(
-        service_name, exec_start, working_dir, web_user, web_group, env_file, description
+        service_name, exec_start, working_dir, web_user, web_group, env_file,
+        description, runtime_env
     )
     _install_and_start_unit(service_name, unit_content)
 

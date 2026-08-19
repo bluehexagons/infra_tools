@@ -87,6 +87,7 @@ _SERVICE_FIELDS = {
     "port",
     "systemd_unit",
     "env_file",
+    "runtime_env",
     "reverse_proxy",
     "health",
     "working_dir",
@@ -114,6 +115,7 @@ class Component:
     reverse_proxy: bool = True
     health: Optional[str] = None
     working_dir: Optional[str] = None
+    runtime_env: StrDict = field(default_factory=dict)
 
     @property
     def is_static(self) -> bool:
@@ -151,6 +153,51 @@ def load_manifest(repo_path: str) -> Optional[Manifest]:
         raise ValueError(f"{MANIFEST_FILENAME}: cannot read: {exc}") from exc
 
     return parse_manifest(data)
+
+
+def infer_manifest(repo_path: str) -> Optional[Manifest]:
+    """Infer a minimal service manifest from a conventional Go repository.
+
+    Repositories with an explicit ``infra.json`` still take precedence. The
+    convention deliberately stays narrow: a Go module with either
+    ``cmd/server/main.go`` or a root ``main.go`` gets a buildable service on
+    port 8080. Projects with non-standard entry points can provide an explicit
+    manifest without changing infra_tools.
+    """
+    if not os.path.isfile(os.path.join(repo_path, "go.mod")):
+        return None
+
+    entrypoint = ""
+    for candidate in ("cmd/server/main.go", "main.go"):
+        candidate_path = os.path.join(repo_path, candidate)
+        if not os.path.isfile(candidate_path):
+            continue
+        try:
+            with open(candidate_path, "r", encoding="utf-8") as handle:
+                if re.search(r"^\s*package\s+main\b", handle.read(), re.MULTILINE):
+                    entrypoint = "./" + os.path.dirname(candidate) if os.path.dirname(candidate) else "."
+                    break
+        except OSError:
+            return None
+
+    if not entrypoint:
+        return None
+
+    return parse_manifest({
+        "version": SUPPORTED_VERSION,
+        "components": [{
+            "name": "app",
+            "type": "service",
+            "domain": "{{domain}}",
+            "build": (
+                "mkdir -p .infra_tools/bin && "
+                f"go build -trimpath -ldflags='-s -w' "
+                f"-o .infra_tools/bin/app {entrypoint}"
+            ),
+            "binary": ".infra_tools/bin/app",
+            "port": 8080,
+        }],
+    })
 
 
 def parse_manifest(data: object) -> Manifest:
@@ -271,6 +318,10 @@ def _parse_service(entry: dict, where: str, common: dict) -> Component:
                 f"{{{{...}}}} placeholders"
             )
 
+    runtime_env = _parse_env(
+        entry.get("runtime_env"), where, field="runtime_env", validate_templates=True
+    )
+
     reverse_proxy = entry.get("reverse_proxy", True)
     if not isinstance(reverse_proxy, bool):
         raise ValueError(f"{where}: reverse_proxy must be a boolean")
@@ -291,6 +342,7 @@ def _parse_service(entry: dict, where: str, common: dict) -> Component:
         port=port,
         systemd_unit=systemd_unit,
         env_file=env_file,
+        runtime_env=runtime_env,
         reverse_proxy=reverse_proxy,
         health=health,
         working_dir=working_dir,
@@ -317,16 +369,24 @@ def _parse_build(value: object, where: str) -> StrList:
     raise ValueError(f"{where}: build must be a string or array of strings")
 
 
-def _parse_env(value: object, where: str) -> StrDict:
+def _parse_env(
+    value: object,
+    where: str,
+    *,
+    field: str = "env",
+    validate_templates: bool = False,
+) -> StrDict:
     if value is None:
         return {}
     if not isinstance(value, dict):
-        raise ValueError(f"{where}: env must be an object of string values")
+        raise ValueError(f"{where}: {field} must be an object of string values")
     env: StrDict = {}
     for key, val in value.items():
-        validate_environment_variable_name(key, name=f"{where} env variable")
+        validate_environment_variable_name(key, name=f"{where} {field} variable")
         if not isinstance(val, str):
-            raise ValueError(f"{where}: env value for {key!r} must be a string")
+            raise ValueError(f"{where}: {field} value for {key!r} must be a string")
+        if validate_templates:
+            _validate_placeholders(val, field, where)
         env[key] = val
     return env
 

@@ -15,8 +15,16 @@ infra-tools setup server_web web.example.com deploy \
 ```
 
 Without a manifest, the repository is classified as Rails, Node, static, or
-unknown by the automatic detection rules. Use [`DEPLOYMENT_SAFETY.md`](./DEPLOYMENT_SAFETY.md)
+unknown by the automatic detection rules. A conventional Go module with
+`cmd/server/main.go` (or a root `main.go`) is also inferred as a service: it is
+built with `go build`, stored as `.infra_tools/bin/app`, and published on the
+default internal port 8080. Projects with a non-standard Go entry point or
+runtime settings can provide an explicit manifest. Use [`DEPLOYMENT_SAFETY.md`](./DEPLOYMENT_SAFETY.md)
 for backup, persistent-state, rollback, and update-policy behavior.
+
+For target-VM builds, infra_tools inspects the uploaded source before running
+setup steps and automatically enables Go when a deployed repository contains
+`go.mod`. No separate `--go` flag is required for a conventional Go deploy.
 
 ## Manifest shape
 
@@ -72,6 +80,9 @@ secrets in a committed manifest.
       "build": "server/build.sh",
       "binary": "server/app",
       "port": 8080,
+      "runtime_env": {
+        "APP_DATABASE": "{{data_dir}}/app.sqlite3"
+      },
       "env_file": "{{shared_dir}}/.env",
       "health": "/health"
     }
@@ -94,6 +105,9 @@ In addition to the common fields (`name`, `type`, `domain`, `path`, `build`, and
 - `binary` or `exec`: exactly one is required;
 - `working_dir`: repository-relative directory or a supported template path;
 - `env_file`: absolute server path, or a path using deploy-time templates;
+- `runtime_env`: environment values written directly into the generated
+  systemd unit; values may use deploy-time templates and override matching
+  entries from `env_file`;
 - `health`: optional URL path polled on `127.0.0.1:port` after startup; and
 - `systemd_unit`: optional repository-relative unit template. Without it,
   infra-tools writes a hardened managed unit.
@@ -108,6 +122,10 @@ a warning after retries but does not abort an otherwise successful deployment.
 
 - Manifest deployments build every component on each deployment; they do not
   use incremental builds.
+- Builds run in a temporary sibling release and are activated only after every
+  component build succeeds; a failed build leaves the active release serving.
+- Repository build commands run as the non-root deployment owner, while only
+  service installation and system configuration run as root.
 - Existing release files are replaced only after services are stopped. Static
   files are owned by the deployment user.
 - Each service receives a dedicated system user and persistent writable state
