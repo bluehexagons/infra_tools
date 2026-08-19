@@ -26,6 +26,9 @@ Agent installation, authentication, and non-secret configuration are separate
 choices. See [Credentials and agent configuration](CREDENTIALS.md) before
 copying active-user credentials to a workstation or VM, especially when
 multiple VMs need independent GitHub access.
+For agent-controlled page previews and interaction, see
+[Agent browser automation](BROWSER_AUTOMATION.md); it is independent of the
+human-operated browser described in this guide.
 
 ## Profiles
 
@@ -69,11 +72,13 @@ infra-tools setup workstation_dev 10.0.0.25 agent \
   --control-plane --desktop xfce --rdp \
   --password "$RDP_PASSWORD" --rdp-source 10.0.0.0/24 \
   --agent-tool gh --agent-tool codex --agent-config active \
+  --browser-automation playwright \
   --repo https://github.com/user/project.git
 ```
 
-This adds the selected agent tools, browser, Visual Studio Code, administrator
-tools, and the selected repository. Repeat `--agent-tool` for any combination
+This adds the selected agent tools, Playwright browser automation, desktop
+browser, Visual Studio Code, administrator tools, and the selected repository.
+Repeat `--agent-tool` for any combination
 of `gh`, `codex`, `claude`, `opencode`, and `t3code`. The RDP password is
 the target Unix
 account's password; provide it through a secret-sourced environment variable,
@@ -115,6 +120,10 @@ additional packages. Flatpak is enabled with `--flatpak`; the built-in desktop
 bundles use it for Discord, LibreOffice, and VS Code when possible.
 
 ## Browser choices
+
+This section covers the browser used by a person at the desktop. It does not
+configure an MCP server for coding agents; use `--browser-automation
+playwright` for that independent capability.
 
 Supported `--browser` values are `brave`, `firefox`, `librewolf`, `helium`,
 `browsh`, and `lynx`:

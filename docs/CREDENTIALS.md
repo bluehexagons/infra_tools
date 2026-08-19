@@ -1,7 +1,7 @@
 # Credentials and agent configuration
 
 This guide explains the credentials and configuration that can be used when
-setting up agent tooling on a workstation or VM. The setup model keeps four
+setting up agent tooling on a workstation or VM. The setup model keeps five
 concerns separate:
 
 | Concern | What it controls | How it is supplied |
@@ -10,6 +10,7 @@ concerns separate:
 | Git access policy | Whether the target may use Git repositories and whether its intended access is read-only or read-write | `--git-access` |
 | GitHub and agent authentication | Secret files installed for `gh`, Codex, Claude Code, or OpenCode | An active-user source, a specified file, or the interactive setup flow |
 | Agent configuration | Non-secret settings, instructions, skills, rules, aliases, and extensions | `--agent-config active` |
+| Browser website sessions | Credentials and cookies for sites visited through agent browser automation | Not copied by infra-tools; use a task-specific, scoped secret flow |
 
 The credentials copied to a VM are optional. Agent tools can be installed
 without authentication, and public HTTPS repositories can be cloned without
@@ -282,6 +283,7 @@ choices rather than replacing explicit options. The flow can ask for:
   hidden token prompt when the selected host is `github.com`;
 - an active or specified file for each selected non-GitHub agent auth payload;
 - whether to copy active non-secret agent configuration.
+- whether to install Playwright browser automation when Codex or OpenCode is selected.
 
 The interactive flow requires a terminal on standard input and output. A
 non-interactive automation system should use explicit options and protected
@@ -418,5 +420,7 @@ auth option and, if needed, `--agent-config active`, then rotate with
   command options.
 - [Installation guide](INSTALLATION.md) — setup flow and prerequisites.
 - [Workstations](WORKSTATIONS.md) — workstation and VM examples.
+- [Agent browser automation](BROWSER_AUTOMATION.md) — MCP setup, isolated
+  browser sessions, site credentials, and security boundaries.
 - [System administration](SYSADMIN.md) — target access and operational
   guidance.

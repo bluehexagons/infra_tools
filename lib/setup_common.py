@@ -33,6 +33,7 @@ from lib.validation import (
     validate_apt_packages,
     validate_agent_repositories,
     validate_agent_git_settings,
+    validate_browser_automation_settings,
     validate_antistatic_settings,
     validate_deploy_specs,
     validate_deploy_targets,
@@ -789,6 +790,7 @@ def prepare_validated_runtime_config(
     validate_apt_packages(runtime_config.apt_packages)
     validate_agent_repositories(runtime_config.agent_repos)
     validate_agent_git_settings(runtime_config)
+    validate_browser_automation_settings(runtime_config)
     validate_notification_args(runtime_config.notify_specs)
     validate_ssl_email(runtime_config.ssl_email)
     validate_deploy_specs(runtime_config.deploy_specs)

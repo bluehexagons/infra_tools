@@ -19,6 +19,7 @@ from lib.remote_utils import detect_os, is_dry_run, set_dry_run
 from lib.validation import (
     validate_agent_repositories,
     validate_agent_git_settings,
+    validate_browser_automation_settings,
     validate_network_setup_settings,
     validate_rdp_settings,
     validate_samba_share_credentials,
@@ -166,6 +167,7 @@ def config_from_remote_args(args: argparse.Namespace) -> SetupConfig:
     config.machine_type = resolve_machine_type(config.machine_type)
     validate_agent_repositories(config.agent_repos)
     validate_agent_git_settings(config)
+    validate_browser_automation_settings(config)
     validate_samba_share_specs(config.samba_shares, config.share_credentials)
     validate_samba_share_credentials(config)
     validate_smb_mount_specs(config.smb_mounts)

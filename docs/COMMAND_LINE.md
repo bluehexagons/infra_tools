@@ -225,6 +225,8 @@ The agent setup model separates explicit tool installation, VM-level Git
 policy, authentication payloads, and non-secret agent configuration. See
 [`CREDENTIALS.md`](./CREDENTIALS.md) for the source/destination matrix,
 per-VM credential guidance, interactive setup, and rotation details.
+See [`BROWSER_AUTOMATION.md`](./BROWSER_AUTOMATION.md) for the separate
+Playwright runtime, MCP registration, and browser security model.
 
 ```bash
 infra-tools setup server_dev 10.0.0.10 agentuser \
@@ -256,6 +258,7 @@ rm -f "$HOME/.infra_tools-install.sh"
 | Flag | Description |
 |------|-------------|
 | `--agent-tool TOOL` | Install one explicit tool (`gh`, `codex`, `claude`, `opencode`, or `t3code`); repeatable |
+| `--browser-automation PROVIDER` | Install and register explicit agent browser automation; currently `playwright`, with selected Codex and/or OpenCode required |
 | `--git-access POLICY` | Set the VM's declared agent Git policy: `none`, `read`, or `read-write` |
 | `--git-host HOST` | Select the Git host for credentials; GitHub auth currently uses `github.com` |
 | `--git-auth active` | Copy the active controller user's selected GitHub CLI host entry; if its token is keyring-backed, retrieve it with the controller's `gh auth token` |
@@ -302,6 +305,7 @@ On the configured VM, check selected tools without exposing credential contents:
 infra-tools agent doctor
 infra-tools agent doctor --tool t3code
 infra-tools agent doctor --tool codex --tool claude --json
+infra-tools agent doctor --tool codex --tool opencode --capability browser
 infra-tools agent update --dry-run
 infra-tools agent update --tool codex --tool claude
 infra-tools agent update --json
@@ -310,6 +314,9 @@ infra-tools agent update --json
 The default doctor check covers GitHub CLI, Codex CLI, Claude Code, and OpenCode.
 Missing credential files are reported as sign-in reminders but do not make an
 otherwise installed tool unhealthy.
+`--capability browser` additionally verifies managed launchers, MCP registration
+for installed compatible agents, and a local Chromium interaction/rendering
+smoke test.
 
 `agent update` deliberately updates the three user-installed terminal agents;
 it is never run by an automatic host timer. The command uses each vendor's

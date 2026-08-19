@@ -5,7 +5,12 @@ from __future__ import annotations
 import argparse
 
 
-from lib.config import AGENT_TOOLS, GIT_ACCESS_POLICIES, MACHINE_TYPES
+from lib.config import (
+    AGENT_TOOLS,
+    BROWSER_AUTOMATION_PROVIDERS,
+    GIT_ACCESS_POLICIES,
+    MACHINE_TYPES,
+)
 from lib.plugin_registry import get_system_type_names
 
 
@@ -378,6 +383,12 @@ def add_setup_arguments(
         choices=AGENT_TOOLS,
         metavar="TOOL",
         help="Install an explicit agent tool; repeat as needed",
+    )
+    parser.add_argument(
+        "--browser-automation",
+        choices=BROWSER_AUTOMATION_PROVIDERS,
+        metavar="PROVIDER",
+        help="Install and register browser automation for selected compatible agents",
     )
     parser.add_argument(
         "--git-access",

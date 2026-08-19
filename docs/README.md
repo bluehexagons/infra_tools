@@ -11,6 +11,7 @@ to the detailed setup and operations guides.
 | [Local system maintenance](LOCAL_MAINTENANCE.md) | Focused package, desktop, browser, hostname, IP, and DNS changes |
 | [Command-line reference](COMMAND_LINE.md) | Setup, patch, targeted updates, and utility flags |
 | [Credentials and agent configuration](CREDENTIALS.md) | Workspace passwords, GitHub/Git access, agent auth, non-secret config, sharing, and rotation |
+| [Agent browser automation](BROWSER_AUTOMATION.md) | Playwright provisioning, Codex/OpenCode registration, verification, and security boundaries |
 | [Machine types](MACHINE_TYPES.md) | Debian bare metal, VM, LXC, OCI, and capability differences |
 | [Samba shares](SAMBA_SHARES.md) | Authenticated shares, credentials, access changes, removals, and SMB mounts |
 | [Storage operations](STORAGE_OPERATIONS.md) | Rsync mirrors, par2 protection, schedules, locks, and recovery |
@@ -36,7 +37,7 @@ to the detailed setup and operations guides.
 | [Gogs Git service](GOGS.md) | Self-hosted Git, SSH access, storage, and release updates |
 | [Antistatic services](ANTISTATIC.md) | Lobby server, report administration, STUN, and antistatic-db |
 | [XRDP](XRDP.md) | Desktop RDP architecture, compatibility, and troubleshooting |
-| [Workstations and desktop applications](WORKSTATIONS.md) | Desktop profiles, browsers, Flatpak, office tools, and verification |
+| [Workstations and desktop applications](WORKSTATIONS.md) | Desktop profiles, human-operated browsers, Flatpak, office tools, and verification |
 | [Shell completion](SHELL_COMPLETION.md) | Bash, Zsh, Fish, and system-wide completion |
 | [Notifications](NOTIFICATIONS.md) | Webhook and mailbox targets shared by maintenance and operations |
 

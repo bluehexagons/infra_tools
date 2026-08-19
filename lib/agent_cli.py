@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -20,6 +21,7 @@ from lib.validation import validate_filesystem_path, validate_package_name
 
 
 AGENT_DOCTOR_TOOLS = ("gh", "codex", "claude", "opencode", "t3code")
+AGENT_DOCTOR_CAPABILITIES = ("browser",)
 DEFAULT_DOCTOR_TOOLS = ("gh", "codex", "claude", "opencode")
 AGENT_UPDATE_TOOLS = ("codex", "claude", "opencode")
 DEFAULT_UPDATE_TOOLS = AGENT_UPDATE_TOOLS
@@ -33,6 +35,8 @@ _AGENT_STATE_RELATIVE = os.path.join(
 _CODEX_INSTALLER_URL = "https://chatgpt.com/codex/install.sh"
 _MAX_INSTALLER_BYTES = 4 * 1024 * 1024
 _UPDATE_TIMEOUT_SECONDS = 600
+_BROWSER_MCP_WRAPPER = "/usr/local/bin/infra-tools-playwright-mcp"
+_BROWSER_DOCTOR_WRAPPER = "/usr/local/bin/infra-tools-playwright-doctor"
 
 _CREDENTIAL_PATHS = {
     "gh": ".config/gh/hosts.yml",
@@ -59,6 +63,13 @@ def add_agent_subparser(subparsers: argparse._SubParsersAction) -> None:
         action="append",
         choices=AGENT_DOCTOR_TOOLS,
         help="Tool to require; repeat as needed",
+    )
+    doctor.add_argument(
+        "--capability",
+        dest="agent_doctor_capabilities",
+        action="append",
+        choices=AGENT_DOCTOR_CAPABILITIES,
+        help="Provisioned agent capability to verify; repeat as needed",
     )
     doctor.add_argument(
         "--json",
@@ -530,6 +541,83 @@ def inspect_agent_tools(tools: StrList, home: Optional[str] = None) -> list[JSON
     return results
 
 
+def _codex_browser_registration(home: str) -> bool:
+    config_path = os.path.join(home, ".codex", "config.toml")
+    try:
+        with open(config_path, encoding="utf-8") as file_obj:
+            content = file_obj.read()
+    except OSError:
+        return False
+    section = re.search(r'^\[mcp_servers\.(?:playwright|"playwright")\]\s*$', content, re.MULTILINE)
+    return section is not None and _BROWSER_MCP_WRAPPER in content
+
+
+def _opencode_browser_registration(home: str) -> bool:
+    config_path = os.path.join(home, ".config", "opencode", "opencode.json")
+    try:
+        with open(config_path, encoding="utf-8") as file_obj:
+            value = json.load(file_obj)
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(value, dict) or not isinstance(value.get("mcp"), dict):
+        return False
+    registration = value["mcp"].get("playwright")
+    return bool(
+        isinstance(registration, dict)
+        and registration.get("type") == "local"
+        and registration.get("enabled") is True
+        and registration.get("command") == [_BROWSER_MCP_WRAPPER]
+    )
+
+
+def inspect_browser_automation(home: Optional[str] = None) -> JSONDict:
+    """Verify local launchers, selected-agent registration, and browser startup."""
+    user_home = home or os.path.expanduser("~")
+    launchers_installed = all(
+        os.path.isfile(path) and os.access(path, os.X_OK)
+        for path in (_BROWSER_MCP_WRAPPER, _BROWSER_DOCTOR_WRAPPER)
+    )
+
+    registrations: JSONDict = {}
+    if _tool_path("codex", user_home):
+        registrations["codex"] = _codex_browser_registration(user_home)
+    if _tool_path("opencode", user_home):
+        registrations["opencode"] = _opencode_browser_registration(user_home)
+
+    smoke_test = False
+    if launchers_installed:
+        environment = os.environ.copy()
+        environment["HOME"] = user_home
+        try:
+            result = subprocess.run(
+                [_BROWSER_DOCTOR_WRAPPER],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                env=environment,
+                cwd=user_home,
+            )
+            smoke_test = result.returncode == 0 and result.stdout.strip() == "browser-ready"
+        except (OSError, subprocess.TimeoutExpired):
+            smoke_test = False
+
+    healthy = bool(
+        launchers_installed
+        and smoke_test
+        and registrations
+        and all(bool(value) for value in registrations.values())
+    )
+    return {
+        "capability": "browser",
+        "installed": launchers_installed,
+        "path": _BROWSER_MCP_WRAPPER if launchers_installed else None,
+        "registrations": registrations,
+        "smoke_test": smoke_test,
+        "healthy": healthy,
+    }
+
+
 def run_agent_command(args: argparse.Namespace) -> int:
     """Run a local agent-tool command."""
     if args.agent_command == "auth":
@@ -584,8 +672,13 @@ def run_agent_command(args: argparse.Namespace) -> int:
 
     selected = list(args.agent_doctor_tools or DEFAULT_DOCTOR_TOOLS)
     results = inspect_agent_tools(selected)
+    capability_results = [
+        inspect_browser_automation()
+        for capability in (getattr(args, "agent_doctor_capabilities", None) or [])
+        if capability == "browser"
+    ]
     if args.json:
-        print(json.dumps(results, indent=2))
+        print(json.dumps([*results, *capability_results], indent=2))
     else:
         print("Agent tool check")
         for result in results:
@@ -602,4 +695,16 @@ def run_agent_command(args: argparse.Namespace) -> int:
             elif credential is False:
                 print("      credentials: not found; run the tool to sign in")
 
-    return 0 if all(bool(result["installed"]) for result in results) else 1
+        for result in capability_results:
+            if result["healthy"]:
+                print(f"  ✓ browser: {result['path']} (smoke test passed)")
+            elif not result["installed"]:
+                print("  ✗ browser: Playwright launchers are not installed")
+            elif not result["smoke_test"]:
+                print("  ✗ browser: local smoke test failed")
+            else:
+                print("  ✗ browser: agent MCP registration is missing")
+
+    tools_healthy = all(bool(result["installed"]) for result in results)
+    capabilities_healthy = all(bool(result["healthy"]) for result in capability_results)
+    return 0 if tools_healthy and capabilities_healthy else 1

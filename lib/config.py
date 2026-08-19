@@ -29,6 +29,7 @@ CLI_SYSTEMS = [
 ]
 
 AGENT_TOOLS = ("gh", "codex", "claude", "opencode", "t3code")
+BROWSER_AUTOMATION_PROVIDERS = ("playwright",)
 GIT_ACCESS_POLICIES = ("none", "read", "read-write")
 
 
@@ -215,6 +216,7 @@ class SetupConfig:
     install_opencode: bool = False
     install_t3code: bool = False
     agent_tools: Optional[StrList] = None
+    browser_automation: MaybeStr = None
     copy_agent_keys: bool = False
     copy_agent_config: bool = False
     agent_repos: Optional[StrList] = None
@@ -431,6 +433,11 @@ class SetupConfig:
 
         for tool in self.selected_agent_tools():
             args.append(f"--agent-tool {shlex.quote(tool)}")
+
+        if self.browser_automation:
+            args.append(
+                f"--browser-automation {shlex.quote(self.browser_automation)}"
+            )
 
         if self.git_access != "none":
             args.append(f"--git-access {shlex.quote(self.git_access)}")
@@ -736,6 +743,11 @@ class SetupConfig:
 
         for tool in self.selected_agent_tools():
             cmd_parts.append(f"--agent-tool {shlex.quote(tool)}")
+
+        if self.browser_automation:
+            cmd_parts.append(
+                f"--browser-automation {shlex.quote(self.browser_automation)}"
+            )
 
         if self.git_access != "none":
             cmd_parts.append(f"--git-access {shlex.quote(self.git_access)}")
@@ -1056,6 +1068,7 @@ class SetupConfig:
 
         raw_agent_tools = getattr(args, 'agent_tools', None)
         agent_tools = raw_agent_tools if isinstance(raw_agent_tools, list) else None
+        browser_automation = _optional_str_arg(args, 'browser_automation')
         raw_agent_repos = getattr(args, 'agent_repos', None)
         agent_repos = raw_agent_repos if isinstance(raw_agent_repos, list) else None
         raw_git_access = getattr(args, 'git_access', 'none')
@@ -1115,6 +1128,7 @@ class SetupConfig:
             install_node=getattr(args, 'install_node', False),
             install_python=getattr(args, 'install_python', False),
             agent_tools=agent_tools,
+            browser_automation=browser_automation,
             copy_agent_keys=bool(
                 git_auth_source
                 or git_auth_file

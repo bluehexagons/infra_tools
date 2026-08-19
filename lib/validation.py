@@ -837,6 +837,28 @@ def validate_agent_git_settings(config: Any) -> None:
             )
 
 
+def validate_browser_automation_settings(config: Any) -> None:
+    """Validate the explicit browser provider and compatible selected agents."""
+    from lib.config import BROWSER_AUTOMATION_PROVIDERS
+
+    provider = getattr(config, "browser_automation", None)
+    if provider is None:
+        return
+    if not isinstance(provider, str) or provider not in BROWSER_AUTOMATION_PROVIDERS:
+        raise ValueError(
+            "--browser-automation must be one of: "
+            f"{', '.join(BROWSER_AUTOMATION_PROVIDERS)}"
+        )
+
+    compatible_tools = {"codex", "opencode"}
+    selected_tools = set(config.selected_agent_tools())
+    if not selected_tools.intersection(compatible_tools):
+        raise ValueError(
+            "--browser-automation requires --agent-tool codex or "
+            "--agent-tool opencode"
+        )
+
+
 def validate_network_name(value: str, name: str = "network name") -> str:
     """Validate a generic network inventory name or role label."""
 

@@ -6,7 +6,11 @@ import getpass
 import sys
 from typing import Any
 
-from lib.config import AGENT_TOOLS, GIT_ACCESS_POLICIES
+from lib.config import (
+    AGENT_TOOLS,
+    BROWSER_AUTOMATION_PROVIDERS,
+    GIT_ACCESS_POLICIES,
+)
 
 
 def _prompt(prompt: str, default: str = "") -> str:
@@ -55,6 +59,15 @@ def run_interactive_setup(args: Any) -> None:
         args.agent_repos = _prompt_repositories() or None
 
     selected_tools = set(args.agent_tools or [])
+    compatible_browser_tools = selected_tools.intersection({"codex", "opencode"})
+    if compatible_browser_tools and not getattr(args, "browser_automation", None):
+        browser_choice = _prompt_choice(
+            "Agent browser automation",
+            ("none", *BROWSER_AUTOMATION_PROVIDERS),
+            "none",
+        )
+        args.browser_automation = None if browser_choice == "none" else browser_choice
+
     if args.agent_repos or "gh" in selected_tools:
         args.git_host = _prompt("Git host", getattr(args, "git_host", "github.com"))
         args.git_access = _prompt_choice(
