@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -19,6 +20,20 @@ def _make_config() -> SetupConfig:
 
 
 class TestInstallGo(unittest.TestCase):
+    @staticmethod
+    def _release_feed(arch: str = "amd64") -> str:
+        return json.dumps([{
+            "version": "go1.22.3",
+            "stable": True,
+            "files": [{
+                "filename": f"go1.22.3.linux-{arch}.tar.gz",
+                "os": "linux",
+                "arch": arch,
+                "kind": "archive",
+                "sha256": "abc123",
+            }],
+        }])
+
     def test_go_release_arch_maps_supported_machines(self):
         self.assertEqual(common_steps._go_release_arch("x86_64"), "amd64")
         self.assertEqual(common_steps._go_release_arch("aarch64"), "arm64")
@@ -31,8 +46,8 @@ class TestInstallGo(unittest.TestCase):
 
         def fake_run(command: str, **kwargs):
             commands.append(command)
-            if "VERSION?m=text" in command:
-                return subprocess.CompletedProcess(command, 0, stdout="go1.22.3\n", stderr="")
+            if "mode=json" in command:
+                return subprocess.CompletedProcess(command, 0, stdout=self._release_feed(), stderr="")
             if command == "/usr/local/go/bin/go version":
                 return subprocess.CompletedProcess(command, 0, stdout="go version go1.22.3 linux/amd64\n", stderr="")
             return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
@@ -49,10 +64,12 @@ class TestInstallGo(unittest.TestCase):
 
         def fake_run(command: str, **kwargs):
             commands.append(command)
-            if "VERSION?m=text" in command:
-                return subprocess.CompletedProcess(command, 0, stdout="go1.22.3\n", stderr="")
+            if "mode=json" in command:
+                return subprocess.CompletedProcess(command, 0, stdout=self._release_feed(), stderr="")
             if command == "/usr/local/go/bin/go version":
                 return subprocess.CompletedProcess(command, 0, stdout="go version go1.21.0 linux/amd64\n", stderr="")
+            if command.startswith("sha256sum "):
+                return subprocess.CompletedProcess(command, 0, stdout="abc123  archive\n", stderr="")
             return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
         with patch("common.common_steps.os.path.exists", return_value=True), \
@@ -69,10 +86,12 @@ class TestInstallGo(unittest.TestCase):
 
         def fake_run(command: str, **kwargs):
             commands.append(command)
-            if "VERSION?m=text" in command:
-                return subprocess.CompletedProcess(command, 0, stdout="go1.22.3\n", stderr="")
+            if "mode=json" in command:
+                return subprocess.CompletedProcess(command, 0, stdout=self._release_feed("arm64"), stderr="")
             if command == "/usr/local/go/bin/go version":
                 return subprocess.CompletedProcess(command, 0, stdout="go version go1.21.0 linux/amd64\n", stderr="")
+            if command.startswith("sha256sum "):
+                return subprocess.CompletedProcess(command, 0, stdout="abc123  archive\n", stderr="")
             return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
         with patch("common.common_steps.platform.machine", return_value="aarch64"), \

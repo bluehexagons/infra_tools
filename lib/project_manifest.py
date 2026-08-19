@@ -30,8 +30,8 @@ _NAME_PATTERN = re.compile(r"^[a-z0-9-]+$")
 _PLACEHOLDER_RE = re.compile(r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}")
 
 # Deploy-time template variables that may appear as ``{{name}}`` in a service
-# component's env_file / working_dir / exec, and in a repo-supplied systemd_unit
-# file. The orchestrator supplies the concrete values at deploy time.
+# component's env_file / working_dir / exec and backup settings. The
+# orchestrator supplies the concrete values at deploy time.
 TEMPLATE_VARS = frozenset({
     "release_dir",   # absolute path of the deployed release
     "base_dir",      # deployment root (e.g. /var/www)
@@ -85,12 +85,13 @@ _SERVICE_FIELDS = {
     "binary",
     "exec",
     "port",
-    "systemd_unit",
     "env_file",
     "runtime_env",
     "reverse_proxy",
     "health",
     "working_dir",
+    "sqlite_backup",
+    "backup_retention",
 }
 
 
@@ -110,12 +111,13 @@ class Component:
     binary: Optional[str] = None
     exec: Optional[str] = None
     port: Optional[int] = None
-    systemd_unit: Optional[str] = None
     env_file: Optional[str] = None
     reverse_proxy: bool = True
     health: Optional[str] = None
     working_dir: Optional[str] = None
     runtime_env: StrDict = field(default_factory=dict)
+    sqlite_backup: Optional[str] = None
+    backup_retention: int = 10
 
     @property
     def is_static(self) -> bool:
@@ -161,8 +163,8 @@ def infer_manifest(repo_path: str) -> Optional[Manifest]:
     Repositories with an explicit ``infra.json`` still take precedence. The
     convention deliberately stays narrow: a Go module with either
     ``cmd/server/main.go`` or a root ``main.go`` gets a buildable service on
-    port 8080. Projects with non-standard entry points can provide an explicit
-    manifest without changing infra_tools.
+    an automatically assigned loopback port. Projects with non-standard entry
+    points can provide an explicit manifest without changing infra_tools.
     """
     if not os.path.isfile(os.path.join(repo_path, "go.mod")):
         return None
@@ -195,7 +197,12 @@ def infer_manifest(repo_path: str) -> Optional[Manifest]:
                 f"-o .infra_tools/bin/app {entrypoint}"
             ),
             "binary": ".infra_tools/bin/app",
-            "port": 8080,
+            "port": "auto",
+            "runtime_env": {
+                "HOST": "127.0.0.1",
+                "PORT": "{{port}}",
+                "LISTEN_ADDR": "127.0.0.1:{{port}}",
+            },
         }],
     })
 
@@ -293,17 +300,15 @@ def _parse_service(entry: dict, where: str, common: dict) -> Component:
             raise ValueError(f"{where}: exec must be a non-empty string")
         _validate_placeholders(exec_cmd, "exec", where)
 
-    port = entry.get("port")
-    if not isinstance(port, int) or isinstance(port, bool):
-        raise ValueError(f"{where}: port must be an integer")
-    if not MIN_PORT <= port <= MAX_PORT:
-        raise ValueError(f"{where}: port must be between {MIN_PORT} and {MAX_PORT}, got {port}")
-
-    systemd_unit = entry.get("systemd_unit")
-    if systemd_unit is not None:
-        if not isinstance(systemd_unit, str) or not systemd_unit:
-            raise ValueError(f"{where}: systemd_unit must be a non-empty string")
-        _require_repo_relative(systemd_unit, "systemd_unit", where)
+    raw_port = entry.get("port")
+    if raw_port == "auto":
+        port = None
+    elif isinstance(raw_port, int) and not isinstance(raw_port, bool):
+        port = raw_port
+        if not MIN_PORT <= port <= MAX_PORT:
+            raise ValueError(f"{where}: port must be between {MIN_PORT} and {MAX_PORT}, got {port}")
+    else:
+        raise ValueError(f"{where}: port must be an integer or 'auto'")
 
     env_file = entry.get("env_file")
     if env_file is not None:
@@ -336,16 +341,36 @@ def _parse_service(entry: dict, where: str, common: dict) -> Component:
             raise ValueError(f"{where}: working_dir must be a non-empty string")
         _validate_placeholders(working_dir, "working_dir", where)
 
+    sqlite_backup = entry.get("sqlite_backup")
+    if sqlite_backup is not None:
+        if not isinstance(sqlite_backup, str) or not sqlite_backup:
+            raise ValueError(f"{where}: sqlite_backup must be a non-empty string")
+        _validate_placeholders(sqlite_backup, "sqlite_backup", where)
+        if not has_placeholder(sqlite_backup) and not os.path.isabs(sqlite_backup):
+            raise ValueError(
+                f"{where}: sqlite_backup must be an absolute server-side path or use "
+                f"{{{{...}}}} placeholders"
+            )
+
+    backup_retention = entry.get("backup_retention", 10)
+    if (
+        not isinstance(backup_retention, int)
+        or isinstance(backup_retention, bool)
+        or not 1 <= backup_retention <= 100
+    ):
+        raise ValueError(f"{where}: backup_retention must be an integer from 1 through 100")
+
     return Component(
         binary=binary,
         exec=exec_cmd,
         port=port,
-        systemd_unit=systemd_unit,
         env_file=env_file,
         runtime_env=runtime_env,
         reverse_proxy=reverse_proxy,
         health=health,
         working_dir=working_dir,
+        sqlite_backup=sqlite_backup,
+        backup_retention=backup_retention,
         **common,
     )
 

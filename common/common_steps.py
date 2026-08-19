@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import platform
 import shlex
@@ -47,6 +48,60 @@ def _go_release_arch(machine: Optional[str] = None) -> Optional[str]:
     """Return the Go download architecture for a Linux machine name."""
     machine_name = (machine or platform.machine()).strip().lower()
     return _GO_ARCH_BY_MACHINE.get(machine_name)
+
+
+def _select_go_download(
+    payload: object,
+    architecture: str,
+    requested_version: Optional[str],
+) -> tuple[str, str, str]:
+    """Return (version, archive, sha256) from the official Go release feed."""
+    if not isinstance(payload, list):
+        raise RuntimeError("Go release feed did not return an array")
+    requested_parts = None
+    if requested_version:
+        try:
+            requested_parts = tuple(int(part) for part in requested_version.split("."))
+        except ValueError as exc:
+            raise RuntimeError(f"Invalid requested Go version: {requested_version}") from exc
+        if len(requested_parts) != 3:
+            raise RuntimeError(f"Invalid requested Go version: {requested_version}")
+
+    candidates: list[tuple[tuple[int, int, int], str, str, str]] = []
+    for release in payload:
+        if not isinstance(release, dict) or not release.get("stable"):
+            continue
+        version = release.get("version")
+        if not isinstance(version, str) or not version.startswith("go"):
+            continue
+        try:
+            version_parts = tuple(int(part) for part in version[2:].split("."))
+        except ValueError:
+            continue
+        if len(version_parts) != 3:
+            continue
+        if requested_parts and version_parts[:2] != requested_parts[:2]:
+            continue
+        if requested_parts and version_parts < requested_parts:
+            continue
+        for file_info in release.get("files", []):
+            if not isinstance(file_info, dict):
+                continue
+            if (
+                file_info.get("os") == "linux"
+                and file_info.get("arch") == architecture
+                and file_info.get("kind") == "archive"
+                and isinstance(file_info.get("filename"), str)
+                and isinstance(file_info.get("sha256"), str)
+            ):
+                candidates.append(
+                    (version_parts, version, file_info["filename"], file_info["sha256"])
+                )
+    if not candidates:
+        requested = f" for Go {requested_version}" if requested_version else ""
+        raise RuntimeError(f"No supported Linux/{architecture} Go archive found{requested}")
+    _parts, version, filename, checksum = max(candidates)
+    return version, filename, checksum
 
 
 def set_user_password(username: str, password: str) -> bool:
@@ -434,15 +489,26 @@ def install_go(config: SetupConfig) -> None:
 
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get install -y -qq curl wget")
-    result = run("curl -s https://go.dev/VERSION?m=text | head -1", check=False, capture_output=True)
+    go_arch = _go_release_arch()
+    if go_arch is None:
+        raise RuntimeError(f"Unsupported Go architecture: {platform.machine()}")
+    result = run(
+        "curl -fsSL 'https://go.dev/dl/?mode=json&include=all'",
+        check=False,
+        capture_output=True,
+    )
     if result.returncode != 0 or not result.stdout.strip():
-        print("  ⚠ Failed to get latest Go version, skipping")
-        return
-    
-    go_version = result.stdout.strip()
-    if not go_version.startswith("go"):
-        print("  ⚠ Invalid Go version format, skipping")
-        return
+        raise RuntimeError("Failed to retrieve the official Go release feed")
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Official Go release feed returned invalid JSON") from exc
+    requested_version = os.environ.get("INFRA_TOOLS_GO_VERSION") or None
+    go_version, go_archive, expected_checksum = _select_go_download(
+        payload,
+        go_arch,
+        requested_version,
+    )
 
     go_binary = "/usr/local/go/bin/go"
     if not os.path.exists(go_binary):
@@ -462,16 +528,21 @@ def install_go(config: SetupConfig) -> None:
         else:
             print("  ⚠ Existing Go binary could not report a version; reinstalling")
     
-    go_arch = _go_release_arch()
-    if go_arch is None:
-        print(f"  ⚠ Unsupported Go architecture: {platform.machine()}; skipping")
-        return
-
-    go_archive = f"{go_version}.linux-{go_arch}.tar.gz"
-    run(f"wget -q https://go.dev/dl/{go_archive} -O /tmp/{go_archive}")
+    archive_path = os.path.join("/tmp", go_archive)
+    download_url = f"https://go.dev/dl/{go_archive}"
+    run(f"wget -q {shlex.quote(download_url)} -O {shlex.quote(archive_path)}")
+    checksum_result = run(
+        f"sha256sum {shlex.quote(archive_path)}",
+        check=False,
+        capture_output=True,
+    )
+    actual_checksum = checksum_result.stdout.strip().split()[0] if checksum_result.returncode == 0 else ""
+    if actual_checksum != expected_checksum:
+        run(f"rm {shlex.quote(archive_path)}", check=False)
+        raise RuntimeError(f"Checksum verification failed for {go_archive}")
     run("rm -rf /usr/local/go")
-    run(f"tar -C /usr/local -xzf /tmp/{go_archive}")
-    run(f"rm /tmp/{go_archive}")
+    run(f"tar -C /usr/local -xzf {shlex.quote(archive_path)}")
+    run(f"rm {shlex.quote(archive_path)}")
     
     profile_d_path = "/etc/profile.d/go.sh"
     with open(profile_d_path, "w") as f:

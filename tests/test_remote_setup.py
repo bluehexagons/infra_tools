@@ -42,8 +42,6 @@ class TestRemoteSetupArgsFile(unittest.TestCase):
         ), patch.object(
             remote_setup, "print_setup_summary"
         ), patch.object(
-            remote_setup, "cleanup_all_infra_services"
-        ) as cleanup, patch.object(
             remote_setup,
             "get_steps_for_system_type",
             return_value=[("Mutating step", step)],
@@ -52,7 +50,6 @@ class TestRemoteSetupArgsFile(unittest.TestCase):
             self.assertEqual(remote_setup._run_main(), 0)
 
         step.assert_not_called()
-        cleanup.assert_called_once_with(dry_run=True)
 
     def test_resolve_cli_args_loads_and_removes_args_file(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -152,8 +149,11 @@ class TestBuildRuntimeDetection(unittest.TestCase):
             system_type="server_lite",
             deploy_specs=[["click.example.com", "https://github.com/example/goclick.git"]],
         )
-        with patch.object(remote_setup.os.path, "isfile", return_value=True):
+        with patch.dict(os.environ, {}, clear=False), \
+             patch.object(remote_setup.os.path, "isfile", return_value=True), \
+             patch("builtins.open", mock_open(read_data="module example.com/app\n\ngo 1.25.0\n")):
             remote_setup.enable_detected_build_runtimes(config)
+            self.assertEqual(os.environ["INFRA_TOOLS_GO_VERSION"], "1.25.0")
 
         self.assertTrue(config.install_go)
 

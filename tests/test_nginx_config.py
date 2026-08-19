@@ -339,6 +339,49 @@ server {
             self.assertTrue(os.path.islink(enabled_link))
             self.assertEqual(os.path.realpath(enabled_link), os.path.join(available, 'example_com'))
 
+    @patch('lib.nginx_config.generate_self_signed_cert')
+    @patch('lib.nginx_config.run')
+    def test_create_sites_restores_previous_files_when_validation_fails(
+        self, mock_run, _mock_cert
+    ):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            available = os.path.join(temp_dir, 'sites-available')
+            enabled = os.path.join(temp_dir, 'sites-enabled')
+            os.makedirs(available)
+            os.makedirs(enabled)
+            config_path = os.path.join(available, 'example_com')
+            previous = f"{GENERATED_CONFIG_MARKER}\n# previous\n"
+            with open(config_path, 'w', encoding='utf-8') as handle:
+                handle.write(previous)
+            os.symlink(config_path, os.path.join(enabled, 'example_com'))
+
+            validations = iter((1, 0))
+
+            def run_side_effect(command, *_args, **_kwargs):
+                if command == 'nginx -t':
+                    return MagicMock(returncode=next(validations))
+                return MagicMock(returncode=0)
+
+            mock_run.side_effect = run_side_effect
+            deployments = [{
+                'path': '/',
+                'needs_proxy': False,
+                'serve_path': '/var/www/new',
+                'project_type': 'static',
+            }]
+
+            with patch('lib.nginx_config.NGINX_SITES_AVAILABLE_DIR', available), \
+                 patch('lib.nginx_config.NGINX_SITES_ENABLED_DIR', enabled):
+                with self.assertRaisesRegex(RuntimeError, 'configuration test'):
+                    create_nginx_sites_for_groups(
+                        {'example.com': deployments},
+                        enable_https_redirect=False,
+                    )
+
+            with open(config_path, 'r', encoding='utf-8') as handle:
+                self.assertEqual(handle.read(), previous)
+            self.assertTrue(os.path.islink(os.path.join(enabled, 'example_com')))
+
 
 if __name__ == '__main__':
     unittest.main()

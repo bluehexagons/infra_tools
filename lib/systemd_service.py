@@ -336,7 +336,8 @@ def generate_managed_service(name: str, exec_start: str, working_dir: str,
                              web_user: str = "www-data", web_group: str = "www-data",
                              env_file: Optional[str] = None,
                              description: Optional[str] = None,
-                             runtime_env: Optional[dict[str, str]] = None) -> str:
+                             runtime_env: Optional[dict[str, str]] = None,
+                             writable_paths: Optional[list[str]] = None) -> str:
     """Generate a hardened systemd unit for a manifest service component.
 
     Unlike the Rails/Node generators this makes no assumptions about the
@@ -360,18 +361,24 @@ def generate_managed_service(name: str, exec_start: str, working_dir: str,
         lines.append(f"EnvironmentFile={env_file}")
     for key, value in (runtime_env or {}).items():
         lines.append(_systemd_environment_line(key, value))
+    for path in writable_paths or []:
+        lines.append(f"ReadWritePaths={path}")
     lines += [
         f"ExecStart={exec_start}",
         "Restart=always",
         "RestartSec=5",
-        # Conservative hardening: read-only system dirs while still allowing
-        # writes under /var and /opt (e.g. a SQLite data directory).
+        # Default-deny filesystem writes; callers explicitly grant managed
+        # persistent paths above.
         "NoNewPrivileges=true",
         "PrivateTmp=true",
-        "ProtectSystem=full",
+        "PrivateDevices=true",
+        "ProtectSystem=strict",
         "ProtectHome=true",
         "ProtectControlGroups=true",
+        "ProtectKernelModules=true",
         "ProtectKernelTunables=true",
+        "LockPersonality=true",
+        "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6",
         "RestrictSUIDSGID=true",
         "",
         "[Install]",
@@ -405,30 +412,23 @@ def _install_and_start_unit(service_name: str, unit_content: str) -> None:
 
     result = run(f"systemctl is-active {shlex.quote(service_name)}", check=False)
     if result.returncode != 0:
-        print(f"  ⚠ Warning: {service_name} may not be running. Check with: systemctl status {service_name}")
-    else:
-        print(f"  ✓ {service_name} is running")
+        raise RuntimeError(
+            f"{service_name} did not become active; check systemctl status {service_name}"
+        )
+    print(f"  ✓ {service_name} is running")
 
 
 def create_managed_service(service_name: str, exec_start: str, working_dir: str,
                            web_user: str, web_group: str,
                            env_file: Optional[str] = None,
                            description: Optional[str] = None,
-                           runtime_env: Optional[dict[str, str]] = None) -> None:
+                           runtime_env: Optional[dict[str, str]] = None,
+                           writable_paths: Optional[list[str]] = None) -> None:
     """Create, enable, and start a manifest-defined systemd service."""
     unit_content = generate_managed_service(
         service_name, exec_start, working_dir, web_user, web_group, env_file,
-        description, runtime_env
+        description, runtime_env, writable_paths
     )
-    _install_and_start_unit(service_name, unit_content)
-
-
-def install_unit_file(service_name: str, unit_content: str) -> None:
-    """Install a fully-specified (already-rendered) unit and start it.
-
-    Used for repo-supplied ``systemd_unit`` templates: infra_tools substitutes
-    the deploy-time values and trusts the repo author's [Service] hardening.
-    """
     _install_and_start_unit(service_name, unit_content)
 
 

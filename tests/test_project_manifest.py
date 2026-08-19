@@ -91,19 +91,25 @@ class TestValidParse(unittest.TestCase):
         comp = parse_manifest(
             _manifest(
                 _service(
-                    systemd_unit="server/deploy/app.service",
                     env_file="/opt/app/.env",
                     health="/api/health",
                     reverse_proxy=False,
                     working_dir="server",
+                    sqlite_backup="{{data_dir}}/app.sqlite3",
+                    backup_retention=7,
                 )
             )
         ).components[0]
-        self.assertEqual(comp.systemd_unit, "server/deploy/app.service")
         self.assertEqual(comp.env_file, "/opt/app/.env")
         self.assertEqual(comp.health, "/api/health")
         self.assertFalse(comp.reverse_proxy)
         self.assertEqual(comp.working_dir, "server")
+        self.assertEqual(comp.sqlite_backup, "{{data_dir}}/app.sqlite3")
+        self.assertEqual(comp.backup_retention, 7)
+
+    def test_service_auto_port(self):
+        comp = parse_manifest(_manifest(_service(port="auto"))).components[0]
+        self.assertIsNone(comp.port)
 
     def test_runtime_env_accepts_deploy_templates(self):
         comp = parse_manifest(
@@ -195,6 +201,12 @@ class TestRejects(unittest.TestCase):
     def test_port_not_int(self):
         self._assert_rejected(_manifest(_service(port="8080")), "integer")
 
+    def test_custom_systemd_unit_is_rejected(self):
+        self._assert_rejected(
+            _manifest(_service(systemd_unit="deploy/app.service")),
+            "unknown field",
+        )
+
     def test_port_bool_rejected(self):
         self._assert_rejected(_manifest(_service(port=True)), "integer")
 
@@ -241,6 +253,12 @@ class TestRejects(unittest.TestCase):
 
     def test_reverse_proxy_not_bool(self):
         self._assert_rejected(_manifest(_service(reverse_proxy="yes")), "boolean")
+
+    def test_sqlite_backup_must_be_absolute_or_templated(self):
+        self._assert_rejected(_manifest(_service(sqlite_backup="data/app.db")), "absolute")
+
+    def test_backup_retention_is_bounded(self):
+        self._assert_rejected(_manifest(_service(backup_retention=0)), "backup_retention")
 
 
 class TestTemplating(unittest.TestCase):
@@ -353,7 +371,9 @@ class TestLoadManifest(unittest.TestCase):
         self.assertEqual(component.name, "app")
         self.assertEqual(component.binary, ".infra_tools/bin/app")
         self.assertIn("./cmd/server", component.build[0])
-        self.assertEqual(component.port, 8080)
+        self.assertIsNone(component.port)
+        self.assertEqual(component.runtime_env["HOST"], "127.0.0.1")
+        self.assertEqual(component.runtime_env["PORT"], "{{port}}")
 
     def test_does_not_infer_non_main_go_module(self):
         with tempfile.TemporaryDirectory() as repo:

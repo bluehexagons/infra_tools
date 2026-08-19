@@ -14,6 +14,14 @@ know.
   not discard data.
 - Manifest service components get dedicated runtime users and per-component
   writable state under `.infra_tools_shared/<app>/<component>`.
+- Manifest builds use per-application build users, stable automatic ports, and
+  a deployment lock. Existing services continue running during the build.
+- A manifest release is rolled back when service activation or a declared 2xx
+  health check fails. Previous systemd units are restored with the release.
+- Deployment-owned Nginx files are snapshotted and restored when `nginx -t`
+  rejects a generated configuration.
+- Services that declare `sqlite_backup` receive a consistent online backup
+  before replacement, with manifest-controlled retention.
 - Installs a weekly cleanup timer and caps journal growth on server-style
   setups.
 - Uses conservative package-update policy for Node, Ruby, and uv by default.
@@ -32,6 +40,12 @@ Backups live at:
 
 ```text
 /var/www/.infra_tools_shared/<app_name>/backups/
+```
+
+Manifest SQLite backups live under the component instead:
+
+```text
+/var/www/.infra_tools_shared/<app_name>/<component>/backups/
 ```
 
 Restore the latest backup by stopping the service, copying the database back,

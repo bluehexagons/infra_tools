@@ -75,9 +75,48 @@ def _reconcile_deployment_sites(current_config_names: set[str]) -> None:
             try:
                 _remove_path(path)
             except OSError as e:
-                print(f"  ⚠ Failed to remove stale nginx config {path}: {e}")
+                raise RuntimeError(f"Failed to remove stale nginx config {path}: {e}") from e
             else:
                 print(f"  ✓ Removed stale nginx config: {path}")
+
+
+def _snapshot_deployment_sites(current_config_names: set[str]) -> dict[str, tuple[str, object]]:
+    snapshot: dict[str, tuple[str, object]] = {}
+    for directory in (NGINX_SITES_AVAILABLE_DIR, NGINX_SITES_ENABLED_DIR):
+        if not os.path.isdir(directory):
+            continue
+        for name in os.listdir(directory):
+            path = os.path.join(directory, name)
+            if name not in current_config_names and not _is_infra_tools_deployment_site(path):
+                continue
+            if os.path.islink(path):
+                snapshot[path] = ("symlink", os.readlink(path))
+            elif os.path.isfile(path):
+                with open(path, "rb") as handle:
+                    snapshot[path] = ("file", (handle.read(), os.stat(path).st_mode & 0o777))
+    return snapshot
+
+
+def _restore_deployment_sites(
+    snapshot: dict[str, tuple[str, object]],
+    current_config_names: set[str],
+) -> None:
+    for directory in (NGINX_SITES_ENABLED_DIR, NGINX_SITES_AVAILABLE_DIR):
+        if not os.path.isdir(directory):
+            continue
+        for name in os.listdir(directory):
+            path = os.path.join(directory, name)
+            if name in current_config_names or _is_infra_tools_deployment_site(path):
+                _remove_path(path)
+    for path, (kind, value) in snapshot.items():
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        if kind == "symlink":
+            os.symlink(str(value), path)
+        else:
+            content, mode = value
+            with open(path, "wb") as handle:
+                handle.write(content)
+            os.chmod(path, mode)
 
 
 def get_ssl_cert_path(domain: Optional[str]) -> PathPair:
@@ -460,7 +499,7 @@ server {{
     return "\n".join([GENERATED_CONFIG_MARKER, cache_maps] + api_configs + [main_config])
 
 
-def create_nginx_sites_for_groups(
+def _create_nginx_sites_for_groups(
     grouped_deployments: dict[Optional[str], Deployments],
     enable_https_redirect: bool = True,
 ) -> None:
@@ -497,8 +536,7 @@ def create_nginx_sites_for_groups(
             with open(config_file, 'w') as f:
                 f.write(config_content)
         except PermissionError as e:
-            print(f"  ⚠ Failed to write nginx config to {config_file}: {e}")
-            continue
+            raise PermissionError(f"Failed to write nginx config to {config_file}: {e}") from e
         
         print(f"  ✓ Created nginx config: {config_file}")
         
@@ -514,7 +552,28 @@ def create_nginx_sites_for_groups(
             
     result = run("nginx -t", check=False)
     if result.returncode != 0:
-        print("  ⚠ nginx configuration test failed")
-    else:
-        run("systemctl reload nginx")
-        print(f"  ✓ nginx reloaded")
+        raise RuntimeError("nginx configuration test failed")
+    run("systemctl reload nginx")
+    print(f"  ✓ nginx reloaded")
+
+
+def create_nginx_sites_for_groups(
+    grouped_deployments: dict[Optional[str], Deployments],
+    enable_https_redirect: bool = True,
+) -> None:
+    """Atomically replace deployment-owned Nginx sites after validation."""
+    current_config_names = {_config_name_for_domain(domain) for domain in grouped_deployments}
+    snapshot = _snapshot_deployment_sites(current_config_names)
+    try:
+        _create_nginx_sites_for_groups(
+            grouped_deployments,
+            enable_https_redirect=enable_https_redirect,
+        )
+    except Exception:
+        _restore_deployment_sites(snapshot, current_config_names)
+        validation = run("nginx -t", check=False)
+        if validation.returncode != 0:
+            print("  ⚠ Restored previous Nginx files, but their validation also failed")
+        else:
+            print("  ✓ Restored previous Nginx configuration")
+        raise

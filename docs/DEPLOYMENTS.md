@@ -17,9 +17,12 @@ infra-tools setup server_web web.example.com deploy \
 Without a manifest, the repository is classified as Rails, Node, static, or
 unknown by the automatic detection rules. A conventional Go module with
 `cmd/server/main.go` (or a root `main.go`) is also inferred as a service: it is
-built with `go build`, stored as `.infra_tools/bin/app`, and published on the
-default internal port 8080. Projects with a non-standard Go entry point or
-runtime settings can provide an explicit manifest. Use [`DEPLOYMENT_SAFETY.md`](./DEPLOYMENT_SAFETY.md)
+built with `go build`, stored as `.infra_tools/bin/app`, and given a stable,
+automatically allocated internal port. Infra_tools supplies the conventional
+`HOST`, `PORT`, and `LISTEN_ADDR` variables; inferred applications must honor
+one of those settings and bind to loopback. Projects with a non-standard Go
+entry point or runtime settings can provide an explicit manifest. Use
+[`DEPLOYMENT_SAFETY.md`](./DEPLOYMENT_SAFETY.md)
 for backup, persistent-state, rollback, and update-policy behavior.
 
 For target-VM builds, infra_tools inspects the uploaded source before running
@@ -79,12 +82,14 @@ secrets in a committed manifest.
       "path": "/",
       "build": "server/build.sh",
       "binary": "server/app",
-      "port": 8080,
+      "port": "auto",
       "runtime_env": {
         "APP_DATABASE": "{{data_dir}}/app.sqlite3"
       },
       "env_file": "{{shared_dir}}/.env",
-      "health": "/health"
+      "health": "/health",
+      "sqlite_backup": "{{data_dir}}/app.sqlite3",
+      "backup_retention": 14
     }
   ]
 }
@@ -101,37 +106,50 @@ must provide exactly one of `binary` (a repository-relative built artifact) or
 In addition to the common fields (`name`, `type`, `domain`, `path`, `build`, and
 `env`), a `service` component supports:
 
-- `port`: required integer from 1024 through 65535;
+- `port`: an integer from 1024 through 65535, or `"auto"` for a stable
+  infra_tools-managed assignment;
 - `binary` or `exec`: exactly one is required;
 - `working_dir`: repository-relative directory or a supported template path;
 - `env_file`: absolute server path, or a path using deploy-time templates;
 - `runtime_env`: environment values written directly into the generated
   systemd unit; values may use deploy-time templates and override matching
   entries from `env_file`;
-- `health`: optional URL path polled on `127.0.0.1:port` after startup; and
-- `systemd_unit`: optional repository-relative unit template. Without it,
-  infra-tools writes a hardened managed unit.
+- `health`: optional URL path polled on `127.0.0.1:port` after startup;
+- `reverse_proxy`: set false for a worker or internal service that should not
+  receive an Nginx route;
+- `sqlite_backup`: optional absolute or templated SQLite database path backed
+  up with SQLite's online backup API before release replacement; and
+- `backup_retention`: number of deployment backups to retain, from 1 to 100.
+
+Infra-tools always writes the hardened systemd unit and runs it under the
+component's dedicated service account. Repository-supplied unit files are not
+accepted because installing one as root would bypass that isolation boundary.
 
 Supported templates include `{{release_dir}}`, `{{base_dir}}`, `{{name}}`,
 `{{service_name}}`, `{{domain}}`, `{{path}}`, `{{web_user}}`, `{{web_group}}`,
 `{{port}}`, `{{binary}}`, `{{working_dir}}`, `{{env_file}}`, `{{shared_dir}}`,
-and `{{data_dir}}`. Unknown templates fail validation. A health failure emits
-a warning after retries but does not abort an otherwise successful deployment.
+and `{{data_dir}}`. Unknown templates fail validation. A health endpoint must
+return a 2xx response; persistent failure rejects the release and restores the
+previous release and service units.
 
 ## Runtime and update behavior
 
 - Manifest deployments build every component on each deployment; they do not
   use incremental builds.
-- Builds run in a temporary sibling release and are activated only after every
-  component build succeeds; a failed build leaves the active release serving.
-- Repository build commands run as the non-root deployment owner, while only
-  service installation and system configuration run as root.
+- Builds run in a temporary sibling release and are accepted only after every
+  component build, service activation, and declared health check succeeds.
+- Repository build commands run as an application-specific non-root build
+  account that cannot modify another application's active release.
 - Existing release files are replaced only after services are stopped. Static
   files are owned by the deployment user.
 - Each service receives a dedicated system user and persistent writable state
   under `/var/www/.infra_tools_shared/<app>/<component>`.
 - Service state remains outside the release directory, so replacing a release
   does not remove component data.
+- Manifest deployments are serialized while stable ports are assigned and
+  activated, preventing concurrent deployments from claiming the same port.
+- Release files preserve executable bits instead of making every source file
+  executable or writable.
 - `infra-tools patch HOST --deploy ...` reruns the saved deployment with the
   same manifest-aware path. Use `infra-tools deploy PATTERN` to rerun saved
   configurations.

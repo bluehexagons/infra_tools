@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import hashlib
+import fcntl
 import json
 import os
 import shlex
@@ -9,9 +10,11 @@ import shutil
 import secrets
 import re
 import socket
+import sqlite3
 import stat
 import sys
 import tempfile
+from dataclasses import replace
 from datetime import datetime
 from typing import Optional, Any
 
@@ -25,7 +28,7 @@ from lib.deploy_utils import (
     save_deployment_metadata,
     should_redeploy
 )
-from lib.systemd_service import create_rails_service, create_managed_service, install_unit_file
+from lib.systemd_service import cleanup_service, create_rails_service, create_managed_service
 from lib.project_manifest import Component, Manifest, has_placeholder, load_manifest, render_template
 
 
@@ -375,16 +378,22 @@ class DeploymentOrchestrator:
         
         return None
     
-    def _get_used_ports(self) -> set[int]:
+    def _get_used_ports(self, exclude_services: Optional[set[str]] = None) -> set[int]:
         """Get set of ports currently used by infra_tools services."""
         used_ports: set[int] = set()
+        excluded = exclude_services or set()
         try:
             if not os.path.exists("/etc/systemd/system"):
                 return used_ports
                 
             files = os.listdir("/etc/systemd/system")
             for f in files:
-                if (f.startswith("rails-") or f.startswith("node-")) and f.endswith(".service"):
+                service_name = f.removesuffix(".service")
+                if (
+                    service_name not in excluded
+                    and (f.startswith("rails-") or f.startswith("node-") or f.startswith("app-"))
+                    and f.endswith(".service")
+                ):
                     path = os.path.join("/etc/systemd/system", f)
                     try:
                         with open(path, 'r') as service_file:
@@ -395,15 +404,18 @@ class DeploymentOrchestrator:
                             match = re.search(r'--port (\d+)', content)
                             if match:
                                 used_ports.add(int(match.group(1)))
+                            for match in re.finditer(r'(?:PORT=|LISTEN_ADDR=[^\n]*:|GOCLICK_ADDR=[^\n]*:)(\d+)', content):
+                                used_ports.add(int(match.group(1)))
                     except OSError:
                         pass
         except OSError:
             pass
         return used_ports
 
-    def _find_free_port(self, start_port: int) -> int:
+    def _find_free_port(self, start_port: int, reserved: Optional[set[int]] = None) -> int:
         """Find the first free port starting from start_port."""
         used_ports = self._get_used_ports()
+        used_ports.update(reserved or set())
         port = start_port
         while port < 65535:
             if port in used_ports:
@@ -729,10 +741,162 @@ class DeploymentOrchestrator:
         if result.returncode == 0:
             return
         print(f"  Creating service user: {username}")
-        run(
+        result = run(
             f"useradd --system --no-create-home --shell /usr/sbin/nologin {shlex.quote(username)}",
             check=False,
         )
+        if result.returncode != 0:
+            raise RuntimeError(f"Could not create service user {username}")
+
+    def _build_identity(self, dest_path: str) -> str:
+        return self._capped_identity("build", os.path.basename(dest_path.rstrip("/")))
+
+    def _ensure_build_user(self, username: str) -> None:
+        result = run(f"id {shlex.quote(username)}", check=False)
+        if result.returncode == 0:
+            return
+        home_dir = os.path.join("/var/lib/infra_tools/build-users", username)
+        result = run(
+            "useradd --system --user-group --create-home "
+            f"--home-dir {shlex.quote(home_dir)} --shell /usr/sbin/nologin {shlex.quote(username)}",
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Could not create build user {username}")
+
+    @staticmethod
+    def _build_home(username: str) -> str:
+        return os.path.join("/var/lib/infra_tools/build-users", username)
+
+    def _port_state_path(self, dest_path: str) -> str:
+        app_name = os.path.basename(dest_path.rstrip("/"))
+        return os.path.join(self._get_persistent_root(app_name), "manifest-ports.json")
+
+    def _load_manifest_ports(self, dest_path: str) -> dict[str, int]:
+        try:
+            with open(self._port_state_path(dest_path), "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        return {
+            key: value
+            for key, value in payload.items()
+            if isinstance(key, str) and isinstance(value, int) and 1024 <= value <= 65535
+        }
+
+    def _save_manifest_ports(self, dest_path: str, manifest: Manifest) -> None:
+        assignments = {
+            component.name: component.port
+            for component in manifest.components
+            if component.is_service and component.port is not None
+        }
+        state_path = self._port_state_path(dest_path)
+        self._ensure_dir(os.path.dirname(state_path))
+        temporary_path = f"{state_path}.tmp"
+        with open(temporary_path, "w", encoding="utf-8") as handle:
+            json.dump(assignments, handle, sort_keys=True)
+            handle.write("\n")
+        os.chmod(temporary_path, 0o600)
+        os.replace(temporary_path, state_path)
+
+    def _resolve_manifest_ports(self, manifest: Manifest, dest_path: str) -> Manifest:
+        stored = self._load_manifest_ports(dest_path)
+        own_services = {
+            self._service_identity(dest_path, component)[0]
+            for component in manifest.components
+            if component.is_service
+        }
+        unavailable = self._get_used_ports(exclude_services=own_services)
+        reserved: set[int] = set()
+        resolved: list[Component] = []
+        for component in manifest.components:
+            if not component.is_service:
+                resolved.append(component)
+                continue
+            port = component.port
+            if port is None:
+                candidate = stored.get(component.name)
+                if candidate is not None and candidate not in unavailable and candidate not in reserved:
+                    port = candidate
+                else:
+                    port = self._find_free_port(8000, unavailable | reserved)
+            elif port in unavailable or port in reserved:
+                raise RuntimeError(
+                    f"Component '{component.name}' cannot use port {port}; it is already assigned"
+                )
+            reserved.add(port)
+            resolved.append(replace(component, port=port))
+        return Manifest(version=manifest.version, components=resolved)
+
+    def _app_unit_snapshots(self, dest_path: str) -> dict[str, str]:
+        app_fragment = self._sanitize_user_part(os.path.basename(dest_path.rstrip("/")))
+        prefix = f"app-{app_fragment}-"
+        snapshots: dict[str, str] = {}
+        systemd_dir = "/etc/systemd/system"
+        if not os.path.isdir(systemd_dir):
+            return snapshots
+        for filename in os.listdir(systemd_dir):
+            if not filename.startswith(prefix) or not filename.endswith(".service"):
+                continue
+            try:
+                with open(os.path.join(systemd_dir, filename), "r", encoding="utf-8") as handle:
+                    snapshots[filename.removesuffix(".service")] = handle.read()
+            except OSError:
+                continue
+        return snapshots
+
+    def _restore_app_units(self, dest_path: str, snapshots: dict[str, str]) -> None:
+        current = self._app_unit_snapshots(dest_path)
+        for service_name in set(current) - set(snapshots):
+            cleanup_service(service_name)
+        for service_name, content in snapshots.items():
+            with open(f"/etc/systemd/system/{service_name}.service", "w", encoding="utf-8") as handle:
+                handle.write(content)
+        run("systemctl daemon-reload", check=False)
+        for service_name in snapshots:
+            run(f"systemctl enable {shlex.quote(service_name)}.service", check=False)
+            run(f"systemctl restart {shlex.quote(service_name)}.service", check=False)
+
+    def _backup_component_sqlite(
+        self,
+        component: Component,
+        dest_path: str,
+        deploy_domain: Optional[str],
+    ) -> None:
+        if not component.sqlite_backup:
+            return
+        context = self._service_context(component, dest_path, deploy_domain)
+        database_path = render_template(component.sqlite_backup, context)
+        if not os.path.isfile(database_path):
+            return
+        backup_dir = os.path.join(context["shared_dir"], "backups")
+        self._ensure_dir(backup_dir)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        backup_path = os.path.join(backup_dir, f"{component.name}_{stamp}.sqlite3")
+        temporary_path = f"{backup_path}.tmp"
+        source = sqlite3.connect(f"file:{database_path}?mode=ro", uri=True)
+        target = sqlite3.connect(temporary_path)
+        try:
+            source.backup(target)
+        finally:
+            target.close()
+            source.close()
+        os.chmod(temporary_path, 0o600)
+        os.replace(temporary_path, backup_path)
+        backups = sorted(
+            (
+                os.path.join(backup_dir, name)
+                for name in os.listdir(backup_dir)
+                if name.startswith(f"{component.name}_") and name.endswith(".sqlite3")
+            ),
+            key=os.path.getmtime,
+            reverse=True,
+        )
+        for old_backup in backups[component.backup_retention:]:
+            os.remove(old_backup)
+        print(f"  ✓ Backed up SQLite database to {backup_path}")
 
     def deploy_manifest(self, manifest: Manifest, source_path: str, domain: Optional[str],
                         path: str, git_url: str, commit_hash: Optional[str],
@@ -746,19 +910,41 @@ class DeploymentOrchestrator:
         optimization, kept out for a small, auditable surface.
         """
         dest_path = self.get_deployment_path(domain, path, git_url)
-        print(f"Deploying manifest ({len(manifest.components)} component(s)) to {dest_path}...")
-
         parent_dir = os.path.dirname(dest_path)
         if parent_dir and not os.path.exists(parent_dir):
             os.makedirs(parent_dir, exist_ok=True)
 
-        # Build beside the active release. A failed build therefore leaves the
-        # currently served release in place and does not interrupt its service.
-        staging_path = tempfile.mkdtemp(
-            prefix=f".{os.path.basename(dest_path)}.build-",
-            dir=parent_dir or None,
+        shared_root = os.path.join(self.base_dir, ".infra_tools_shared")
+        self._ensure_dir(shared_root)
+        lock_handle = open(
+            os.path.join(shared_root, ".manifest-deploy.lock"),
+            "a+",
+            encoding="utf-8",
         )
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+        staging_path = ""
+        backup_path: Optional[str] = None
+        activated = False
+        unit_snapshots: dict[str, str] = {}
+        desired_units: set[str] = set()
         try:
+            manifest = self._resolve_manifest_ports(manifest, dest_path)
+            print(f"Deploying manifest ({len(manifest.components)} component(s)) to {dest_path}...")
+            build_user = self._build_identity(dest_path)
+            self._ensure_build_user(build_user)
+            unit_snapshots = self._app_unit_snapshots(dest_path)
+            desired_units = {
+                self._service_identity(dest_path, component)[0]
+                for component in manifest.components
+                if component.is_service
+            }
+
+            # Build beside the active release. A failed build therefore leaves
+            # the currently served release in place and does not interrupt it.
+            staging_path = tempfile.mkdtemp(
+                prefix=f".{os.path.basename(dest_path)}.build-",
+                dir=parent_dir or None,
+            )
             if keep_source:
                 shutil.copytree(source_path, staging_path, dirs_exist_ok=True)
                 print(f"  ✓ Copied source to staging path {staging_path}")
@@ -766,27 +952,28 @@ class DeploymentOrchestrator:
                 shutil.copytree(source_path, staging_path, dirs_exist_ok=True)
                 print(f"  ✓ Copied source to staging path {staging_path}")
 
-            # Build as the non-root deployment owner. This keeps repository
-            # build hooks from running with target-root privileges and lets
-            # tools write their normal caches and build outputs.
-            run(
-                f"chown -R {shlex.quote(self.deploy_user)}:{shlex.quote(self.deploy_group)} {shlex.quote(staging_path)}",
+            # Build as an application-specific non-root identity.
+            result = run(
+                f"chown -R {shlex.quote(build_user)}:{shlex.quote(build_user)} {shlex.quote(staging_path)}",
                 check=False,
             )
+            if result.returncode != 0:
+                raise RuntimeError(f"Could not assign staging tree to build user {build_user}")
 
             # Build every component before touching the active release.
             for component in manifest.components:
                 component_domain = self._component_domain(component, domain)
                 print(f"  Component '{component.name}' ({component.type}) → {component_domain}{component.path}")
-                self._run_component_build(component, staging_path)
+                self._run_component_build(component, staging_path, build_user)
 
-            # Stop services only for the short release swap window.
             for component in manifest.components:
                 if component.is_service:
-                    unit_name, _ = self._service_identity(dest_path, component)
-                    run(f"systemctl stop {shlex.quote(unit_name)}.service", check=False)
+                    self._backup_component_sqlite(component, dest_path, domain)
 
-            backup_path: Optional[str] = None
+            # Stop services only for the short release swap window.
+            for unit_name in sorted(set(unit_snapshots) | desired_units):
+                run(f"systemctl stop {shlex.quote(unit_name)}.service", check=False)
+
             if os.path.exists(dest_path):
                 backup_path = tempfile.mkdtemp(
                     prefix=f".{os.path.basename(dest_path)}.previous-",
@@ -801,11 +988,7 @@ class DeploymentOrchestrator:
                     os.rename(backup_path, dest_path)
                 raise
             staging_path = ""
-            if backup_path:
-                shutil.rmtree(backup_path)
-
-            if not keep_source and os.path.exists(source_path):
-                shutil.rmtree(source_path)
+            activated = True
 
             print(f"  ✓ Activated release at {dest_path}")
 
@@ -813,6 +996,7 @@ class DeploymentOrchestrator:
             deps: list[dict[str, Any]] = [
                 self._component_dep(component, dest_path, domain)
                 for component in manifest.components
+                if component.is_static or component.reverse_proxy
             ]
 
             # The release tree is deploy-owned and world-readable so nginx can
@@ -823,22 +1007,63 @@ class DeploymentOrchestrator:
                 check=False,
             )
             if result.returncode != 0:
-                print(f"  ⚠ Warning: Could not set ownership to {self.deploy_user}:{self.deploy_group}")
-            run(f"chmod -R 755 {shlex.quote(dest_path)}", check=False)
+                raise RuntimeError(
+                    f"Could not set release ownership to {self.deploy_user}:{self.deploy_group}"
+                )
+            result = run(
+                f"chmod -R u=rwX,go=rX {shlex.quote(dest_path)}",
+                check=False,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"Could not set release permissions for {dest_path}")
 
             # Start services after the release tree is readable so they can exec.
             for component in manifest.components:
                 if component.is_service:
                     self._install_service_component(component, dest_path, domain)
 
+            for stale_unit in sorted(set(unit_snapshots) - desired_units):
+                cleanup_service(stale_unit)
+
+            self._save_manifest_ports(dest_path, manifest)
             save_deployment_metadata(dest_path, git_url, commit_hash)
+            if not keep_source and os.path.exists(source_path):
+                shutil.rmtree(source_path)
+            if backup_path:
+                shutil.rmtree(backup_path)
+                backup_path = None
             print(f"  ✓ Manifest deployed to {dest_path}")
             return deps
+        except Exception:
+            if activated:
+                for unit_name in sorted(desired_units):
+                    run(f"systemctl stop {shlex.quote(unit_name)}.service", check=False)
+                failed_path = tempfile.mkdtemp(
+                    prefix=f".{os.path.basename(dest_path)}.failed-",
+                    dir=parent_dir or None,
+                )
+                os.rmdir(failed_path)
+                if os.path.exists(dest_path):
+                    os.rename(dest_path, failed_path)
+                if backup_path and os.path.exists(backup_path):
+                    os.rename(backup_path, dest_path)
+                    backup_path = None
+                shutil.rmtree(failed_path, ignore_errors=True)
+                self._restore_app_units(dest_path, unit_snapshots)
+                print("  ✓ Restored previous release after failed activation")
+            raise
         finally:
             if staging_path and os.path.exists(staging_path):
                 shutil.rmtree(staging_path)
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+            lock_handle.close()
 
-    def _run_component_build(self, component: Component, dest_path: str) -> None:
+    def _run_component_build(
+        self,
+        component: Component,
+        dest_path: str,
+        build_user: Optional[str] = None,
+    ) -> None:
         """Run build commands as the non-root deployment owner."""
         if not component.build:
             return
@@ -846,8 +1071,10 @@ class DeploymentOrchestrator:
         for command in component.build:
             print(f"    build: {command}")
             build_shell = f"cd {shlex.quote(dest_path)} && {env_prefix}{command}"
+            build_home = self._build_home(build_user or self.deploy_user)
             result = run(
-                f"runuser -u {shlex.quote(self.deploy_user)} -- /bin/bash -lc {shlex.quote(build_shell)}",
+                f"runuser -u {shlex.quote(build_user or self.deploy_user)} -- "
+                f"env HOME={shlex.quote(build_home)} /bin/bash -lc {shlex.quote(build_shell)}",
                 check=False,
                 capture_output=True,
             )
@@ -901,8 +1128,7 @@ class DeploymentOrchestrator:
         """Build the deploy-time {{...}} substitution context for a service.
 
         Variables are resolved in dependency order (binary, then working_dir,
-        then env_file) so later fields and a repo-supplied unit template can
-        reference the earlier ones (e.g. ExecStart={{binary}}).
+        then env_file) so later fields can reference earlier values.
         """
         unit_name, username = self._service_identity(dest_path, component)
         context: dict[str, str] = {
@@ -963,28 +1189,18 @@ class DeploymentOrchestrator:
         run(f"chown -R {shlex.quote(username)}:{shlex.quote(username)} {shlex.quote(shared_dir)}", check=False)
         run(f"chmod 0750 {shlex.quote(shared_dir)} {shlex.quote(data_dir)}", check=False)
 
-        if component.systemd_unit:
-            # Honor the repo's hardened unit: substitute placeholders, install it.
-            unit_src = os.path.normpath(os.path.join(dest_path, component.systemd_unit))
-            if not os.path.exists(unit_src):
-                raise RuntimeError(
-                    f"Component '{component.name}': systemd_unit not found: {unit_src}"
-                )
-            with open(unit_src, "r", encoding="utf-8") as handle:
-                unit_content = render_template(handle.read(), context)
-            install_unit_file(service_name, unit_content)
-        else:
-            exec_start = render_template(component.exec, context) if component.exec else context['binary']
-            create_managed_service(
-                service_name,
-                exec_start,
-                context['working_dir'],
-                username,
-                username,
-                env_file=context.get('env_file'),
-                description=f"infra.json service: {component.name}",
-                runtime_env=runtime_env,
-            )
+        exec_start = render_template(component.exec, context) if component.exec else context['binary']
+        create_managed_service(
+            service_name,
+            exec_start,
+            context['working_dir'],
+            username,
+            username,
+            env_file=context.get('env_file'),
+            description=f"infra.json service: {component.name}",
+            runtime_env=runtime_env,
+            writable_paths=[shared_dir],
+        )
 
         if component.health:
             self._poll_health(component)
@@ -992,9 +1208,8 @@ class DeploymentOrchestrator:
     def _poll_health(self, component: Component, attempts: int = 10, delay: float = 1.0) -> None:
         """Poll a service's health endpoint until it answers, then return.
 
-        Any HTTP response below 500 counts as "up" (the service is bound and
-        routing). A persistent failure only warns: a transient slow start
-        should not abort an otherwise-successful multi-component deploy.
+        Only a 2xx response accepts the release. A persistent failure aborts
+        activation so the caller can restore the previous release.
         """
         import time
         import urllib.error
@@ -1004,17 +1219,17 @@ class DeploymentOrchestrator:
         for _attempt in range(attempts):
             try:
                 with urllib.request.urlopen(url, timeout=3) as resp:
-                    if resp.status < 500:
+                    if 200 <= resp.status < 300:
                         print(f"  ✓ Health check passed for '{component.name}' ({url} → {resp.status})")
                         return
             except urllib.error.HTTPError as exc:
-                if exc.code < 500:
-                    print(f"  ✓ Health check passed for '{component.name}' ({url} → {exc.code})")
-                    return
+                pass
             except (urllib.error.URLError, OSError):
                 pass
             time.sleep(delay)
-        print(f"  ⚠ Warning: health check for '{component.name}' did not pass after {attempts} attempts ({url})")
+        raise RuntimeError(
+            f"Health check for '{component.name}' did not pass after {attempts} attempts ({url})"
+        )
 
     def build_project(self, project_path: str, project_type: str, site_root: Optional[str] = None, app_name: Optional[str] = None, reset_migrations: bool = False):
         if project_type == "rails":

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import sys
 
@@ -29,7 +30,6 @@ from lib.validation import (
 from lib.validators import validate_username
 from lib.progress import progress_bar
 from lib.system_types import get_steps_for_system_type
-from lib.systemd_service import cleanup_all_infra_services
 from typing import Optional
 from lib.types import Deployments, StepFunc
 
@@ -105,16 +105,28 @@ def enable_detected_build_runtimes(config: SetupConfig) -> None:
     Explicit runtime choices remain supported; detection only adds missing
     requirements.
     """
-    if config.install_go or not config.deploy_specs:
+    if not config.deploy_specs:
         return
 
+    required_versions: list[tuple[int, int, int]] = []
     for _deploy_spec, git_url in config.deploy_specs:
         repo_name = extract_repo_name(git_url)
         repo_path = os.path.join("/opt/infra_tools/deployments", repo_name)
         if os.path.isfile(os.path.join(repo_path, "go.mod")):
-            config.install_go = True
-            print(f"Detected Go module in {repo_name}; enabling target Go runtime")
-            return
+            if not config.install_go:
+                config.install_go = True
+                print(f"Detected Go module in {repo_name}; enabling target Go runtime")
+            try:
+                with open(os.path.join(repo_path, "go.mod"), "r", encoding="utf-8") as handle:
+                    match = re.search(r"^go\s+(\d+)\.(\d+)(?:\.(\d+))?\s*$", handle.read(), re.MULTILINE)
+            except OSError:
+                match = None
+            if match:
+                required_versions.append(tuple(int(part or 0) for part in match.groups()))
+
+    if required_versions:
+        version = max(required_versions)
+        os.environ["INFRA_TOOLS_GO_VERSION"] = ".".join(str(part) for part in version)
 
 
 def _load_args_file(args_file: str) -> list[str]:
@@ -261,17 +273,6 @@ def _run_main() -> int:
         except OSError as e:
             print(f"Warning: Failed to save setup configuration: {e}", file=sys.stderr)
     
-    # Clean up all previously deployed services to ensure clean state.
-    # This treats the current deployment command as the desired baseline.
-    # NOTE: If a later setup step fails, services remain removed until
-    # a future successful deployment run.
-    print("\nCleaning up existing infra_tools services...")
-    print("WARNING: Previously deployed infra_tools services will be removed.")
-    print("If this run fails partway through, they remain removed until a future successful run.")
-    sys.stdout.flush()
-    cleanup_all_infra_services(dry_run=args.dry_run)
-    sys.stdout.flush()
-
     steps = get_steps_for_system_type(config)
 
     if args.dry_run:

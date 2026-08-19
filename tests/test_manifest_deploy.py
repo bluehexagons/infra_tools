@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -58,7 +59,8 @@ class TestGenerateManagedService(unittest.TestCase):
         self.assertIn("WorkingDirectory=/var/www/site", unit)
         self.assertIn("User=app-site-api", unit)
         self.assertIn("NoNewPrivileges=true", unit)
-        self.assertIn("ProtectSystem=full", unit)
+        self.assertIn("ProtectSystem=strict", unit)
+        self.assertIn("PrivateDevices=true", unit)
         self.assertIn("[Install]", unit)
         self.assertIn("WantedBy=multi-user.target", unit)
 
@@ -78,6 +80,12 @@ class TestGenerateManagedService(unittest.TestCase):
         )
         self.assertIn('Environment="APP_DATA=/var/lib/app"', unit)
         self.assertIn('Environment="APP_QUOTE=a\\"b"', unit)
+
+    def test_writable_paths_are_explicit(self):
+        unit = generate_managed_service(
+            "app-api", "/bin/app", "/srv", writable_paths=["/var/lib/app"]
+        )
+        self.assertIn("ReadWritePaths=/var/lib/app", unit)
 
 
 class TestComponentDescriptor(unittest.TestCase):
@@ -172,6 +180,57 @@ class TestServiceContext(unittest.TestCase):
         ctx = self.orch._service_context(comp, "/var/www/shop")
         self.assertNotIn('binary', ctx)
         self.assertEqual(ctx['port'], "8090")
+
+    def test_auto_port_assignment_is_persisted(self):
+        component = _service_component(port="auto")
+        manifest = Manifest(version=1, components=[component])
+        with tempfile.TemporaryDirectory() as base_dir:
+            orchestrator = DeploymentOrchestrator(base_dir=base_dir)
+            dest_path = os.path.join(base_dir, "shop")
+            with patch.object(orchestrator, '_get_used_ports', return_value=set()), \
+                 patch.object(orchestrator, '_find_free_port', return_value=8123) as find_port:
+                resolved = orchestrator._resolve_manifest_ports(manifest, dest_path)
+                orchestrator._save_manifest_ports(dest_path, resolved)
+                repeated = orchestrator._resolve_manifest_ports(manifest, dest_path)
+
+        self.assertEqual(resolved.components[0].port, 8123)
+        self.assertEqual(repeated.components[0].port, 8123)
+        find_port.assert_called_once()
+
+    def test_duplicate_fixed_ports_are_rejected(self):
+        manifest = Manifest(version=1, components=[
+            _service_component(name="one", port=8123),
+            _service_component(name="two", port=8123),
+        ])
+        with patch.object(self.orch, '_get_used_ports', return_value=set()):
+            with self.assertRaisesRegex(RuntimeError, "already assigned"):
+                self.orch._resolve_manifest_ports(manifest, "/var/www/shop")
+
+    def test_sqlite_backup_uses_online_backup_and_retention(self):
+        component = _service_component(
+            sqlite_backup="{{data_dir}}/app.sqlite3",
+            backup_retention=2,
+        )
+        with tempfile.TemporaryDirectory() as base_dir:
+            orchestrator = DeploymentOrchestrator(base_dir=base_dir)
+            dest_path = os.path.join(base_dir, "shop")
+            data_dir = orchestrator._component_data_dir(dest_path, component)
+            os.makedirs(data_dir)
+            database_path = os.path.join(data_dir, "app.sqlite3")
+            database = sqlite3.connect(database_path)
+            database.execute("CREATE TABLE values_table (value INTEGER)")
+            database.execute("INSERT INTO values_table VALUES (7)")
+            database.commit()
+            database.close()
+
+            orchestrator._backup_component_sqlite(component, dest_path, None)
+
+            backup_dir = os.path.join(orchestrator._component_shared_dir(dest_path, component), "backups")
+            backups = os.listdir(backup_dir)
+            self.assertEqual(len(backups), 1)
+            restored = sqlite3.connect(os.path.join(backup_dir, backups[0]))
+            self.assertEqual(restored.execute("SELECT value FROM values_table").fetchone(), (7,))
+            restored.close()
 
 
 class TestNginxIntegration(unittest.TestCase):
@@ -274,6 +333,10 @@ class TestDeployManifest(unittest.TestCase):
         self.assertEqual(args[4], "app-example_com-api")           # web_group
         self.assertEqual(kwargs['env_file'], "/opt/app/.env")
         self.assertEqual(
+            kwargs['writable_paths'],
+            [os.path.join(self.base_dir, ".infra_tools_shared", "example_com", "api")],
+        )
+        self.assertEqual(
             kwargs['runtime_env'],
             {"APP_DATA": os.path.join(self.base_dir, ".infra_tools_shared", "example_com", "api", "data", "app.sqlite3")},
         )
@@ -364,77 +427,55 @@ class TestDeployManifest(unittest.TestCase):
             )
         self.assertIn("binary not found", str(ctx.exception))
 
+    @patch.object(DeploymentOrchestrator, '_poll_health')
+    @patch('lib.deployment.create_managed_service', side_effect=RuntimeError("service failed"))
+    @patch('lib.deployment.save_deployment_metadata')
+    @patch('lib.deployment.run')
+    def test_service_failure_restores_previous_release(
+        self, mock_run, mock_meta, _mock_service, _mock_health
+    ):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        active = os.path.join(self.base_dir, "example_com")
+        os.makedirs(active)
+        marker = os.path.join(active, "previous.txt")
+        with open(marker, "w", encoding="utf-8") as handle:
+            handle.write("previous")
 
-class TestDeployManifestUnitTemplate(unittest.TestCase):
-    """A repo-supplied systemd_unit is installed as a substituted template."""
-
-    def setUp(self):
-        self.base_dir = tempfile.mkdtemp(prefix="manifest_base_")
-        self.source = tempfile.mkdtemp(prefix="manifest_src_")
-        self.orch = DeploymentOrchestrator(base_dir=self.base_dir)
-
-        manifest = {
-            "version": 1,
-            "components": [
-                {"name": "api", "type": "service", "domain": "api.example.com",
-                 "build": "server/build.sh", "binary": "server/app",
-                 "systemd_unit": "server/app.service.tmpl",
-                 "env_file": "/opt/app/.env", "working_dir": "{{release_dir}}/server",
-                 "port": 8090, "health": "/health"},
-            ],
-        }
-        with open(os.path.join(self.source, "infra.json"), "w") as f:
-            json.dump(manifest, f)
-        os.makedirs(os.path.join(self.source, "server"))
-        with open(os.path.join(self.source, "server", "app"), "w") as f:
-            f.write("#!/bin/sh\n")
-        with open(os.path.join(self.source, "server", "app.service.tmpl"), "w") as f:
-            f.write(
-                "[Service]\n"
-                "ExecStart={{binary}}\n"
-                "WorkingDirectory={{working_dir}}\n"
-                "EnvironmentFile={{env_file}}\n"
-                "User={{web_user}}\n"
-                "Environment=LISTEN_ADDR=:{{port}}\n"
+        with self.assertRaisesRegex(RuntimeError, "service failed"):
+            self.orch.deploy_manifest(
+                manifest=self.manifest,
+                source_path=self.source,
+                domain="example.com",
+                path="/",
+                git_url="https://git.example.com/shop.git",
+                commit_hash="abc123",
+                keep_source=True,
             )
-        with open(os.path.join(self.source, "infra.json")) as f:
-            self.manifest: Manifest = parse_manifest(json.load(f))
 
-    def tearDown(self):
-        for path in (self.base_dir, self.source):
-            if os.path.exists(path):
-                shutil.rmtree(path)
+        self.assertTrue(os.path.exists(marker))
+        mock_meta.assert_not_called()
 
     @patch.object(DeploymentOrchestrator, '_poll_health')
-    @patch('lib.deployment.install_unit_file')
     @patch('lib.deployment.create_managed_service')
     @patch('lib.deployment.save_deployment_metadata')
     @patch('lib.deployment.run')
-    def test_installs_rendered_unit(self, mock_run, mock_meta, mock_create, mock_install, mock_health):
+    def test_reverse_proxy_false_omits_nginx_descriptor(
+        self, mock_run, _mock_meta, _mock_service, _mock_health
+    ):
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        self.manifest.components[1].reverse_proxy = False
 
-        self.orch.deploy_manifest(
-            manifest=self.manifest, source_path=self.source,
-            domain="api.example.com", path="/",
-            git_url="https://git.example.com/shop.git", commit_hash="abc123",
+        deps = self.orch.deploy_manifest(
+            manifest=self.manifest,
+            source_path=self.source,
+            domain="example.com",
+            path="/",
+            git_url="https://git.example.com/shop.git",
+            commit_hash="abc123",
             keep_source=True,
         )
 
-        dest = os.path.join(self.base_dir, "api_example_com")
-        service_user = "app-api_example_com-api"
-
-        # The generated-unit path must NOT be used when systemd_unit is present.
-        mock_create.assert_not_called()
-        mock_install.assert_called_once()
-        service_name, rendered = mock_install.call_args.args
-        self.assertEqual(service_name, service_user)
-        # Placeholders resolved to deploy-time values, incl. the dedicated user.
-        self.assertIn(f"ExecStart={os.path.join(dest, 'server', 'app')}", rendered)
-        self.assertIn(f"WorkingDirectory={os.path.join(dest, 'server')}", rendered)
-        self.assertIn("EnvironmentFile=/opt/app/.env", rendered)
-        self.assertIn(f"User={service_user}", rendered)
-        self.assertIn("LISTEN_ADDR=:8090", rendered)
-        self.assertNotIn("{{", rendered)
+        self.assertEqual([dep["domain"] for dep in deps], ["example.com"])
 
 
 if __name__ == "__main__":
