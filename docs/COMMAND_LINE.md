@@ -38,6 +38,8 @@ infra-tools channel [CHANNEL]
 infra-tools upgrade
 infra-tools agent doctor
 infra-tools agent update [options]
+infra-tools agent auth set HOST USER --tool TOOL --file PATH
+infra-tools agent auth status HOST USER [--tool TOOL]
 infra-tools maintenance github [--root PATH] <audit|prune> [options]
 infra-tools shell
 infra-tools network ...
@@ -218,8 +220,8 @@ use it only when that lighter profile is intentional.
 
 ```bash
 infra-tools setup server_dev 10.0.0.10 agentuser \
-  --agent-suite terminal --copy-config \
-  --repo https://github.com/user/my_codebase.git
+  --agent-tool gh --agent-tool codex --agent-config active \
+  --git-access read --repo https://github.com/user/my_codebase.git
 ```
 
 For the local machine, the installer can select the control-plane profile and
@@ -227,7 +229,8 @@ run it immediately:
 
 ```bash
 wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
-sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup control_plane --agent-suite terminal
+sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup control_plane \
+  --agent-tool gh --agent-tool codex --agent-tool claude --agent-tool opencode
 rm -f "$HOME/.infra_tools-install.sh"
 ```
 
@@ -237,60 +240,55 @@ CLI and Codex CLI in this example):
 
 ```bash
 wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
-sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup workstation_dev --control-plane --gh --codex --desktop xfce --rdp --rdp-existing-password
+sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup workstation_dev \
+  --control-plane --agent-tool gh --agent-tool codex --desktop xfce --rdp --rdp-existing-password
 rm -f "$HOME/.infra_tools-install.sh"
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--gh` | Install GitHub CLI from GitHub's Debian apt repository |
-| `--codex` | Install Codex CLI with [OpenAI's official installer](https://learn.chatgpt.com/docs/codex/cli) |
-| `--claude` | Install Claude Code with [Anthropic's native installer](https://code.claude.com/docs/en/installation) |
-| `--opencode` | Install OpenCode with its [official installer](https://opencode.ai/docs/) |
-| `--t3code` | Install the verified [official T3 Code](https://github.com/pingdotgg/t3code) x86_64 AppImage, command, and desktop entry |
-| `--agent-suite terminal` | Install GitHub CLI, Codex CLI, Claude Code, OpenCode, and common coding utilities |
-| `--agent-suite desktop` | Install the terminal suite plus optional T3 Code |
-| `--agent-suite full` | Install the desktop suite plus Node, Python, and Go tooling |
-| `--copy-config` | Stage selected local config for tools enabled by the same command |
-| `--copy-keys` | Stage selected local credentials for tools enabled by the same command |
-| `--repo GIT_URL` | Clone locally, upload with the setup bundle, cache privately on the target, and copy to `/home/USER/repos/NAME`; repeatable |
+| `--agent-tool TOOL` | Install one explicit tool (`gh`, `codex`, `claude`, `opencode`, or `t3code`); repeatable |
+| `--git-access POLICY` | Set the VM's declared agent Git policy: `none`, `read`, or `read-write` |
+| `--git-host HOST` | Select the Git host for credentials; GitHub auth currently uses `github.com` |
+| `--git-auth active` | Copy the active controller user's selected GitHub CLI host entry |
+| `--git-auth-file PATH` | Copy a selected-host `hosts.yml` entry or a one-line GitHub token from a controller-local file |
+| `--agent-auth active` | Copy selected agent credentials from the active controller user's config |
+| `--agent-auth-file TOOL PATH` | Copy one selected agent credential from a specified controller-local file; repeatable |
+| `--agent-config active` | Copy optional non-secret config from the active controller user |
+| `--interactive` | Prompt for tools, HTTPS repositories, Git policy, and credential sources |
+| `--repo GIT_URL` | Clone an HTTPS repository on the target as `/home/USER/repos/NAME`; repeatable |
 
-Agent tools can be selected individually with `--gh`, `--codex`, `--claude`,
-`--opencode`, and `--t3code`; use any combination that fits the workstation.
-The `--agent-suite` presets remain available when the complete terminal,
-desktop, or full bundle is wanted.
+GitHub credential input requires `--git-access read` or `--git-access
+read-write`; `none` is the public/unauthenticated repository mode.
+
+Agent tools are selected individually with repeatable `--agent-tool` flags. There
+is no agent-suite preset or implicit coding-package baseline; add unrelated
+packages explicitly with `--apt-install`, and add language runtimes with their
+individual flags.
 
 Codex CLI, Claude Code, OpenCode, and T3 Code are installed from their official
 distribution channels. The Codex installer runs with `CODEX_NON_INTERACTIVE=1`,
 so setup does not prompt to start Codex or remove a conflicting installation.
 infra-tools does not install these tools with npm. Any
-selected agent also installs a baseline containing build tools, CMake, Ninja,
-Git LFS, ripgrep, fd, fzf, jq, bat, tmux, direnv, and ShellCheck.
+selected agent installs only that agent's tool and its required installer
+dependencies.
 
-Credential/config copy is intentionally tool-scoped:
+Credential/config copy is intentionally tool-scoped and transient:
 
-- `--gh --copy-config` copies GitHub CLI config such as `config.yml`, aliases, and extensions; it does not copy `hosts.yml`.
-- `--gh --copy-keys` copies GitHub CLI `hosts.yml` when present and runs `gh auth setup-git` for the setup user when auth validates.
-- `--codex --copy-config` copies known non-secret entries from `~/.codex`: `config.toml`, `AGENTS.md`, `skills`, and `rules`.
-- `--codex --copy-keys` copies `~/.codex/auth.json` when present.
-- `--claude --copy-config` copies known non-secret entries from `~/.claude`: settings, instructions, commands, agents, skills, and plugins.
-- `--claude --copy-keys` copies `~/.claude/.credentials.json` when present.
-- `--opencode --copy-config` copies `~/.config/opencode`, including global agents, skills, commands, plugins, and config files.
-- `--opencode --copy-keys` copies `~/.local/share/opencode/auth.json` when present.
+- `--git-auth`/`--git-auth-file` copy only the selected GitHub host entry, merge it into the target user's existing `gh` hosts file, and run `gh auth setup-git`.
+- `--agent-auth`/`--agent-auth-file` copy Codex, Claude Code, or OpenCode credentials without requiring those tools on the controller.
+- `--agent-config active` copies known non-secret configuration from the active controller user.
 - T3 Code receives only a command wrapper and desktop entry; infra-tools does not copy T3 Code credentials.
 
 The root-only upload payload is removed after the selected config and credentials
-are copied. Uploaded agent repositories are retained in a root-only target cache
-so repeated setup work does not expose private source to unrelated local users;
-the user-facing workspace is copied and owned by the setup user. Repository
-clones on the orchestration host are isolated by complete git URL. Agent
-repository URLs with embedded credentials are rejected. A requested repository
-that cannot be cloned stops setup instead of producing a successful VM without
-its workspace. Existing destinations on the VM are still skipped to avoid
-overwriting agent work on long-lived disposable VMs.
+are copied. Repositories are never cloned or cached on the controller: the
+target VM performs each HTTPS clone after GitHub credentials are configured.
+Public repositories on any reachable Git host work without credentials. Agent
+repository URLs with embedded credentials, SSH/scp syntax, and non-HTTPS schemes
+are rejected. A requested repository that cannot be cloned stops setup, while an
+existing repository is preserved only when its origin exactly matches.
 
-On the configured VM, check the terminal suite without exposing credential
-contents:
+On the configured VM, check selected tools without exposing credential contents:
 
 ```bash
 infra-tools agent doctor
@@ -301,10 +299,9 @@ infra-tools agent update --tool codex --tool claude
 infra-tools agent update --json
 ```
 
-The default doctor check requires GitHub CLI, Codex CLI, Claude Code, and
-OpenCode. Missing credential files are reported as sign-in reminders but do not
-make an otherwise installed tool unhealthy. GitHub CLI and the Debian utility
-baseline receive normal APT updates.
+The default doctor check covers GitHub CLI, Codex CLI, Claude Code, and OpenCode.
+Missing credential files are reported as sign-in reminders but do not make an
+otherwise installed tool unhealthy.
 
 `agent update` deliberately updates the three user-installed terminal agents;
 it is never run by an automatic host timer. The command uses each vendor's
@@ -325,6 +322,20 @@ verification.
 Rerunning setup skips an already available command. Use
 `infra-tools agent update` when you want to update the user-installed terminal
 agents.
+
+Credential rotation does not rebuild the VM or overwrite repositories:
+
+```bash
+infra-tools agent auth set 10.0.0.10 agent --tool gh --file /run/secrets/gh-hosts.yml
+infra-tools agent auth set 10.0.0.10 agent --tool codex --active
+infra-tools agent auth status 10.0.0.10 agent --json
+```
+
+`auth set` accepts an active-user source, a controller-local file, or
+interactive source selection. GitHub input is filtered to `github.com` and is
+installed with an atomic mode-`0600` replacement. Status reports only tool
+installation, credential presence/metadata, and the GitHub authentication
+check; it never prints credential contents.
 
 The normal restart policy can force a reboot after seven days of active-session
 deferrals. For a host running long unattended agent tasks, use both

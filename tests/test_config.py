@@ -75,6 +75,26 @@ class TestSetupConfigToDict(unittest.TestCase):
 
         self.assertNotIn('password', config.to_dict())
 
+    def test_to_dict_excludes_transient_agent_sources(self):
+        config = self._make_config(
+            agent_tools=['gh', 'codex'],
+            git_auth_source='active',
+            git_auth_file='/tmp/hosts.yml',
+            agent_auth_source='active',
+            agent_auth_files=[['codex', '/tmp/auth.json']],
+            agent_config_source='active',
+            copy_agent_keys=True,
+            copy_agent_config=True,
+        )
+        saved = config.to_dict()
+        for name in (
+            'git_auth_source', 'git_auth_file', 'agent_auth_source',
+            'agent_auth_files', 'agent_config_source', 'copy_agent_keys',
+            'copy_agent_config', 'agent_payload',
+        ):
+            self.assertNotIn(name, saved)
+        self.assertEqual(saved['agent_tools'], ['gh', 'codex'])
+
     def test_to_dict_keeps_antistatic_admin_username_without_password(self):
         config = self._make_config(
             antistatic_admin='operator',
@@ -203,13 +223,13 @@ class TestSetupConfigToRemoteArgs(unittest.TestCase):
             agent_repos=['https://github.com/user/my_codebase.git'],
         )
         args_str = ' '.join(config.to_remote_args())
-        self.assertIn('--gh', args_str)
-        self.assertIn('--codex', args_str)
-        self.assertIn('--claude', args_str)
-        self.assertIn('--opencode', args_str)
-        self.assertIn('--t3code', args_str)
-        self.assertIn('--copy-keys', args_str)
-        self.assertIn('--copy-config', args_str)
+        self.assertEqual(args_str.count('--agent-tool'), 5)
+        self.assertIn('--agent-tool gh', args_str)
+        self.assertIn('--agent-tool codex', args_str)
+        self.assertIn('--agent-tool claude', args_str)
+        self.assertIn('--agent-tool opencode', args_str)
+        self.assertIn('--agent-tool t3code', args_str)
+        self.assertIn('--agent-payload', args_str)
         self.assertIn('--repo https://github.com/user/my_codebase.git', args_str)
 
     def test_deploy_specs(self):
@@ -219,28 +239,16 @@ class TestSetupConfigToRemoteArgs(unittest.TestCase):
         # Default deployment mode doesn't add a flag; lite and full modes use --deployment-lite/--deployment-full
         self.assertIn('--deploy', args_str)
 
-    def test_terminal_agent_suite_selects_cli_agents_and_gh(self):
-        config = self._make_config(agent_suite='terminal')
+    def test_explicit_agent_tools_select_only_requested_tools(self):
+        config = self._make_config(agent_tools=['gh', 'codex'])
+        self.assertEqual(config.selected_agent_tools(), ['gh', 'codex'])
         self.assertTrue(config.install_gh)
-        self.assertEqual(
-            config.selected_agent_tools(),
-            ['codex', 'claude', 'opencode'],
-        )
+        self.assertTrue(config.install_codex)
         self.assertFalse(config.install_t3code)
 
-    def test_full_agent_suite_selects_runtimes_and_t3code(self):
-        config = self._make_config(agent_suite='full')
-        self.assertEqual(
-            config.selected_agent_tools(),
-            ['codex', 'claude', 'opencode', 't3code'],
-        )
-        self.assertTrue(config.install_node)
-        self.assertTrue(config.install_python)
-        self.assertTrue(config.install_go)
-
-    def test_invalid_agent_suite_fails(self):
-        with self.assertRaisesRegex(ValueError, 'agent_suite must be one of'):
-            self._make_config(agent_suite='everything')
+    def test_invalid_agent_tool_fails(self):
+        with self.assertRaisesRegex(ValueError, 'Unsupported agent tool'):
+            self._make_config(agent_tools=['everything'])
 
     def test_deployment_mode_flags(self):
         deploy_specs = [['example.com/', 'https://github.com/user/repo.git']]
@@ -497,18 +505,16 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
             install_t3code=True,
             copy_agent_keys=True,
             copy_agent_config=True,
-            agent_repos=['git@github.com:user/my_codebase.git'],
+            agent_repos=['https://github.com/user/my_codebase.git'],
         )
         parts = config.to_setup_command()
         cmd = ' '.join(parts)
-        self.assertIn('--gh', parts)
-        self.assertIn('--codex', parts)
-        self.assertIn('--claude', parts)
-        self.assertIn('--opencode', parts)
-        self.assertIn('--t3code', parts)
-        self.assertIn('--copy-keys', parts)
-        self.assertIn('--copy-config', parts)
-        self.assertIn('--repo git@github.com:user/my_codebase.git', cmd)
+        self.assertIn('--agent-tool gh', parts)
+        self.assertIn('--agent-tool codex', parts)
+        self.assertIn('--agent-tool claude', parts)
+        self.assertIn('--agent-tool opencode', parts)
+        self.assertIn('--agent-tool t3code', parts)
+        self.assertIn('--repo https://github.com/user/my_codebase.git', cmd)
 
     def test_smb_mount_password_redacted(self):
         config = self._make_config(

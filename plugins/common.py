@@ -21,14 +21,14 @@ PLUGIN = PluginDefinition(
         "install_go",
         "install_node",
         "install_python",
-        "install_agent_coding_tools",
         "install_github_cli",
         "install_codex",
         "install_claude",
         "install_opencode",
         "install_t3code",
         "copy_agent_tooling_payload",
-        "install_agent_repositories",
+        "install_git_for_agent_repositories",
+        "clone_agent_repositories",
         "configure_auto_update_uv",
         "update_and_upgrade_packages",
         "check_debian_package_sources",
@@ -164,21 +164,18 @@ def extend_package_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]])
 
 
 def extend_agent_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -> None:
-    """Append optional agent VM tooling and uploaded workspace steps."""
+    """Append optional agent tooling and target-side workspace steps."""
 
     from common.agent_steps import (
         copy_agent_tooling_payload,
-        install_agent_coding_tools,
-        install_agent_repositories,
+        clone_agent_repositories,
+        install_git_for_agent_repositories,
         install_claude,
         install_codex,
         install_github_cli,
         install_opencode,
         install_t3code,
     )
-
-    if config.selected_agent_tools():
-        steps.append(("Installing common agent coding tools", install_agent_coding_tools))
 
     if config.install_gh:
         steps.append(("Installing GitHub CLI", install_github_cli))
@@ -195,11 +192,12 @@ def extend_agent_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -
     if config.install_t3code:
         steps.append(("Installing T3 Code", install_t3code))
 
-    if config.copy_agent_config or config.copy_agent_keys:
+    if config.agent_payload:
         steps.append(("Copying agent tool configuration", copy_agent_tooling_payload))
 
     if config.agent_repos:
-        steps.append(("Installing uploaded agent repositories", install_agent_repositories))
+        steps.append(("Installing Git for agent repositories", install_git_for_agent_repositories))
+        steps.append(("Cloning agent repositories on target", clone_agent_repositories))
 
 
 def get_custom_step_functions() -> Mapping[str, StepFunc]:
@@ -234,8 +232,8 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
     )
     from common.agent_steps import (
         copy_agent_tooling_payload,
-        install_agent_coding_tools,
-        install_agent_repositories,
+        clone_agent_repositories,
+        install_git_for_agent_repositories,
         install_claude,
         install_codex,
         install_github_cli,
@@ -248,14 +246,14 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "install_go": install_go,
         "install_node": install_node,
         "install_python": install_python,
-        "install_agent_coding_tools": install_agent_coding_tools,
         "install_github_cli": install_github_cli,
         "install_codex": install_codex,
         "install_claude": install_claude,
         "install_opencode": install_opencode,
         "install_t3code": install_t3code,
         "copy_agent_tooling_payload": copy_agent_tooling_payload,
-        "install_agent_repositories": install_agent_repositories,
+        "clone_agent_repositories": clone_agent_repositories,
+        "install_git_for_agent_repositories": install_git_for_agent_repositories,
         "configure_auto_update_uv": configure_auto_update_uv,
         "update_and_upgrade_packages": update_and_upgrade_packages,
         "check_debian_package_sources": check_debian_package_sources,

@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from lib.atomic_io import write_json_atomic
+from lib.agent_auth import AGENT_AUTH_TOOLS
 from lib.types import JSONDict, StrList
 from lib.validation import validate_filesystem_path, validate_package_name
 
@@ -57,7 +58,7 @@ def add_agent_subparser(subparsers: argparse._SubParsersAction) -> None:
         dest="agent_doctor_tools",
         action="append",
         choices=AGENT_DOCTOR_TOOLS,
-        help="Tool to require; repeat as needed (default: terminal suite)",
+        help="Tool to require; repeat as needed",
     )
     doctor.add_argument(
         "--json",
@@ -85,6 +86,75 @@ def add_agent_subparser(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Output machine-readable JSON",
     )
+    auth = commands.add_parser(
+        "auth",
+        help="Rotate or inspect credentials on an agent VM",
+    )
+    auth_commands = auth.add_subparsers(
+        dest="agent_auth_command",
+        help="Credential operations",
+    )
+    auth_set = auth_commands.add_parser(
+        "set",
+        help="Atomically replace one target credential",
+    )
+    auth_set.add_argument("agent_auth_host", metavar="HOST")
+    auth_set.add_argument("agent_auth_username", metavar="USER")
+    auth_set.add_argument(
+        "--tool",
+        dest="agent_auth_tool",
+        required=True,
+        choices=AGENT_AUTH_TOOLS,
+        help="Credential to replace",
+    )
+    auth_source = auth_set.add_mutually_exclusive_group()
+    auth_source.add_argument(
+        "--file",
+        dest="agent_auth_file",
+        metavar="PATH",
+        help="Controller-local credential file",
+    )
+    auth_source.add_argument(
+        "--active",
+        dest="agent_auth_active",
+        action="store_true",
+        help="Use the active controller user's credential file",
+    )
+    auth_source.add_argument(
+        "--interactive",
+        dest="agent_auth_interactive",
+        action="store_true",
+        help="Choose the source interactively",
+    )
+    auth_set.add_argument(
+        "--git-host",
+        default="github.com",
+        metavar="HOST",
+        help="GitHub host for gh credentials (default: github.com)",
+    )
+    auth_set.add_argument("-k", "--key", dest="ssh_key", help="SSH private key path")
+
+    auth_status = auth_commands.add_parser(
+        "status",
+        help="Show non-secret credential and authentication status",
+    )
+    auth_status.add_argument("agent_auth_host", metavar="HOST")
+    auth_status.add_argument("agent_auth_username", metavar="USER")
+    auth_status.add_argument(
+        "--tool",
+        dest="agent_auth_tools",
+        action="append",
+        choices=AGENT_AUTH_TOOLS,
+        help="Tool to inspect; repeat as needed",
+    )
+    auth_status.add_argument(
+        "--git-host",
+        default="github.com",
+        metavar="HOST",
+        help="GitHub host to check with gh (default: github.com)",
+    )
+    auth_status.add_argument("--json", action="store_true", help="Output JSON")
+    auth_status.add_argument("-k", "--key", dest="ssh_key", help="SSH private key path")
 
 
 def _tool_path(tool: str, home: str) -> Optional[str]:
@@ -462,6 +532,20 @@ def inspect_agent_tools(tools: StrList, home: Optional[str] = None) -> list[JSON
 
 def run_agent_command(args: argparse.Namespace) -> int:
     """Run a local agent-tool command."""
+    if args.agent_command == "auth":
+        from lib.agent_auth import run_agent_auth_set, run_agent_auth_status
+
+        try:
+            if args.agent_auth_command == "set":
+                return run_agent_auth_set(args)
+            if args.agent_auth_command == "status":
+                return run_agent_auth_status(args)
+        except (OSError, RuntimeError, ValueError, EOFError, KeyboardInterrupt) as exc:
+            print(f"Error: {exc}")
+            return 1
+        print("Error: agent auth command required (set or status)")
+        return 1
+
     if args.agent_command == "update":
         selected = list(args.agent_update_tools or DEFAULT_UPDATE_TOOLS)
         try:

@@ -165,20 +165,19 @@ class TestPluginRegistry(unittest.TestCase):
             install_claude=True,
             install_opencode=True,
             install_t3code=True,
-            copy_agent_config=True,
-            copy_agent_keys=True,
+            agent_tools=["gh", "codex", "claude", "opencode", "t3code"],
+            agent_payload=True,
             agent_repos=["https://github.com/user/repo.git"],
             include_cli_tools=True,
         )
         step_names = [name for name, _ in get_steps_for_system_type(config)]
         self.assertIn("Installing GitHub CLI", step_names)
-        self.assertIn("Installing common agent coding tools", step_names)
         self.assertIn("Installing Codex CLI", step_names)
         self.assertIn("Installing Claude Code", step_names)
         self.assertIn("Installing OpenCode", step_names)
         self.assertIn("Installing T3 Code", step_names)
         self.assertIn("Copying agent tool configuration", step_names)
-        self.assertIn("Installing uploaded agent repositories", step_names)
+        self.assertIn("Cloning agent repositories on target", step_names)
         self.assertLess(
             step_names.index("Installing CLI tools"),
             step_names.index("Installing GitHub CLI"),
@@ -189,20 +188,19 @@ class TestPluginRegistry(unittest.TestCase):
             host="host",
             username="user",
             system_type="workstation_dev",
-            agent_suite="terminal",
-            copy_agent_config=True,
+            agent_tools=["gh", "codex", "claude", "opencode"],
+            agent_payload=True,
             agent_repos=["https://github.com/user/repo.git"],
             include_desktop=True,
             include_cli_tools=True,
         )
         step_names = [name for name, _ in get_steps_for_system_type(config)]
-        self.assertIn("Installing common agent coding tools", step_names)
         self.assertIn("Installing GitHub CLI", step_names)
         self.assertIn("Installing Codex CLI", step_names)
         self.assertIn("Installing Claude Code", step_names)
         self.assertIn("Installing OpenCode", step_names)
         self.assertIn("Copying agent tool configuration", step_names)
-        self.assertIn("Installing uploaded agent repositories", step_names)
+        self.assertIn("Cloning agent repositories on target", step_names)
         self.assertLess(
             step_names.index("Installing CLI tools"),
             step_names.index("Installing GitHub CLI"),

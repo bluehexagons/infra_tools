@@ -433,18 +433,6 @@ class TestCloneRepository(unittest.TestCase):
         self.assertTrue(first.startswith("/cache/repo-"))
         self.assertTrue(second.startswith("/cache/repo-"))
 
-    def test_requested_agent_repository_clone_failure_is_fatal(self):
-        from lib import setup_common
-
-        config = _make_config(
-            agent_repos=["https://github.com/user/missing.git"],
-        )
-        with tempfile.TemporaryDirectory() as target_dir, \
-             patch.object(setup_common, "clone_repository", return_value=None):
-            with self.assertRaisesRegex(RuntimeError, "requested agent repository"):
-                setup_common.prepare_agent_repositories(config, target_dir)
-
-
 class TestSetupMainValidation(unittest.TestCase):
 
     @patch("builtins.print")

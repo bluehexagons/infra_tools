@@ -110,16 +110,18 @@ def print_setup_summary(config: SetupConfig, description: Optional[str] = None) 
     if config.custom_steps:
         print(f"Steps: {config.custom_steps}")
 
-    if config.install_gh:
-        print("GitHub CLI: Yes")
-    if config.agent_suite:
-        print(f"Agent suite: {config.agent_suite}")
     if config.selected_agent_tools():
         print(f"Agent tools: {', '.join(config.selected_agent_tools())}")
-    if config.copy_agent_config:
-        print("Agent config copy: Yes")
-    if config.copy_agent_keys:
-        print("Agent credential copy: Yes")
+    if config.selected_agent_tools() or config.agent_repos or config.git_access != "none":
+        print(f"Agent Git access: {config.git_access}")
+    if config.agent_repos or config.git_host != "github.com":
+        print(f"Agent Git host: {config.git_host}")
+    if config.agent_config_source:
+        print("Agent config source: active user")
+    if config.git_auth_source or config.git_auth_file or config.git_auth_token:
+        print("GitHub auth: supplied for this setup")
+    if config.agent_auth_source or config.agent_auth_files:
+        print("Agent auth: supplied for this setup")
     if config.agent_repos:
         print(f"Agent repositories: {len(config.agent_repos)}")
         for git_url in config.agent_repos:

@@ -20,13 +20,14 @@ from common.agent_steps import (
     _copy_secret_file,
     _user_home,
     copy_agent_tooling_payload,
-    install_agent_repositories,
+    clone_agent_repositories,
     install_claude,
     install_codex,
     install_opencode,
     install_t3code,
 )
-from lib.agent_cli import inspect_agent_tools, run_agent_command, update_agent_tools
+from lib.agent_auth import get_agent_auth_status, set_agent_credential
+from lib.agent_cli import add_agent_subparser, inspect_agent_tools, run_agent_command, update_agent_tools
 from lib.agent_cli import _download_codex_installer, _invoke_agent_update
 from lib.config import SetupConfig
 
@@ -173,6 +174,84 @@ class TestAgentDoctor(unittest.TestCase):
             }
         ]):
             self.assertEqual(run_agent_command(args), 1)
+
+
+class TestAgentCredentialRotation(unittest.TestCase):
+    def test_parser_exposes_remote_auth_operations(self):
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers(dest="command")
+        add_agent_subparser(subparsers)
+
+        args = parser.parse_args([
+            "agent", "auth", "set", "vm.example", "agent",
+            "--tool", "codex", "--file", "/run/secrets/codex.json",
+        ])
+        self.assertEqual(args.agent_auth_command, "set")
+        self.assertEqual(args.agent_auth_tool, "codex")
+        self.assertEqual(args.agent_auth_file, "/run/secrets/codex.json")
+
+    def test_set_filters_github_hosts_and_does_not_send_secret_in_command(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = os.path.join(directory, "hosts.yml")
+            with open(source, "w", encoding="utf-8") as file_obj:
+                file_obj.write(
+                    "github.com:\n"
+                    "  oauth_token: selected-token\n"
+                    "gitlab.com:\n"
+                    "  oauth_token: unrelated-token\n"
+                )
+            os.chmod(source, 0o600)
+            with patch("lib.agent_auth._run_remote_script") as remote:
+                remote.return_value = type(
+                    "Completed",
+                    (),
+                    {"returncode": 0, "stdout": "{}", "stderr": ""},
+                )()
+                result = set_agent_credential(
+                    host="vm.example",
+                    username="agent",
+                    tool="gh",
+                    ssh_key=None,
+                    source=source,
+                    use_active=False,
+                )
+
+            self.assertEqual(result, 0)
+            payload = remote.call_args.args[4]
+            self.assertIn(b"selected-token", payload)
+            self.assertNotIn(b"unrelated-token", payload)
+            self.assertNotIn(b"selected-token", remote.call_args.args[3].encode())
+
+    def test_status_reports_non_secret_remote_result(self):
+        with patch("lib.agent_auth._run_remote_script") as remote:
+            remote.return_value = type(
+                "Completed",
+                (),
+                {
+                    "returncode": 0,
+                    "stdout": json.dumps({
+                        "tool": "codex",
+                        "installed": True,
+                        "path": "/home/agent/.local/bin/codex",
+                        "credential": {
+                            "path": "/home/agent/.codex/auth.json",
+                            "present": True,
+                            "mode": "0o600",
+                        },
+                        "authentication": None,
+                    }),
+                    "stderr": "",
+                },
+            )()
+            results = get_agent_auth_status(
+                host="vm.example",
+                username="agent",
+                tools=["codex"],
+                ssh_key=None,
+            )
+
+        self.assertTrue(results[0]["credential"]["present"])
+        self.assertNotIn("secret", json.dumps(results))
 
 
 class TestAgentUpdate(unittest.TestCase):
@@ -424,34 +503,28 @@ class TestAgentPayloadInstallation(unittest.TestCase):
             with open(outside, encoding='utf-8') as file_obj:
                 self.assertEqual(file_obj.read(), 'untouched')
 
-    def test_uploaded_repository_cache_is_retained_and_root_only(self):
+    def test_repository_is_cloned_on_target_without_controller_cache(self):
         config = SetupConfig(
             host='host',
             username='agent',
             system_type='server_dev',
+            agent_repos=['https://gitlab.com/user/repo.git'],
         )
         with tempfile.TemporaryDirectory() as directory:
-            staged = os.path.join(directory, 'staged')
-            cache = os.path.join(directory, 'cache', 'agent_repos')
             home = os.path.join(directory, 'home')
-            source = os.path.join(staged, 'repo', '.git')
-            os.makedirs(source)
             os.makedirs(home)
-            with open(os.path.join(source, 'config'), 'w', encoding='utf-8') as file_obj:
-                file_obj.write('[remote "origin"]\nurl = git@github.com:user/repo.git\n')
-
             with (
-                patch('common.agent_steps.REMOTE_AGENT_REPOS_DIR', staged),
-                patch('common.agent_steps.AGENT_REPOS_CACHE_DIR', cache),
                 patch('common.agent_steps._user_home', return_value=home),
                 patch('common.agent_steps._chown_path'),
+                patch('common.agent_steps._run_as_login_user') as run_as_user,
             ):
-                install_agent_repositories(config)
+                run_as_user.return_value = type('Completed', (), {'returncode': 0, 'stdout': '', 'stderr': ''})()
+                clone_agent_repositories(config)
 
-            self.assertTrue(os.path.exists(os.path.join(home, 'repos', 'repo', '.git', 'config')))
-            self.assertTrue(os.path.exists(os.path.join(cache, 'repo', '.git', 'config')))
-            self.assertEqual(os.stat(cache).st_mode & 0o777, 0o700)
-            self.assertTrue(os.path.isdir(staged))
+            command = run_as_user.call_args.args[2]
+            self.assertIn('GIT_TERMINAL_PROMPT=0', command)
+            self.assertIn('https://gitlab.com/user/repo.git', command)
+            self.assertFalse(os.path.exists(os.path.join(directory, 'cache')))
 
     def test_payload_is_removed_when_copying_fails(self):
         config = SetupConfig(
@@ -466,6 +539,13 @@ class TestAgentPayloadInstallation(unittest.TestCase):
             home = os.path.join(directory, 'home')
             os.makedirs(payload_dir)
             os.makedirs(home)
+            os.makedirs(os.path.join(payload_dir, 'secrets', 'codex'))
+            with open(
+                os.path.join(payload_dir, 'secrets', 'codex', 'auth.json'),
+                'w',
+                encoding='utf-8',
+            ) as file_obj:
+                file_obj.write('{}')
             with (
                 patch('common.agent_steps.REMOTE_AGENT_PAYLOAD_DIR', payload_dir),
                 patch('common.agent_steps._user_home', return_value=home),

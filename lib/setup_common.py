@@ -9,6 +9,7 @@ import os
 import pwd
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -30,6 +31,7 @@ from lib.validators import validate_host, validate_username
 from lib.validation import (
     validate_apt_packages,
     validate_agent_repositories,
+    validate_agent_git_settings,
     validate_antistatic_settings,
     validate_deploy_specs,
     validate_deploy_targets,
@@ -44,12 +46,14 @@ from lib.validation import (
     validate_ssl_email,
     validate_sync_specs,
     validate_memory_string,
+    validate_filesystem_path,
     validate_timezone_name,
     validate_workspace_dir,
 )
 from lib.cache import get_cache_path_for_host, save_setup_command
 from lib.arg_parser import create_setup_argument_parser
 from lib.display import print_setup_summary
+from lib.interactive_setup import run_interactive_setup
 from lib.notifications import validate_notification_args
 from lib.proxmox_guest import resolve_guest_ssh_key
 from lib.ssh_utils import build_ssh_command, chain_remote_commands
@@ -62,8 +66,8 @@ SERVICE_TOOLS_DIR = os.path.join(SCRIPT_DIR, "..", "service_tools")
 REMOTE_INSTALL_DIR = "/opt/infra_tools"
 GIT_CACHE_DIR = os.path.expanduser("~/.cache/infra_tools/git_repos")
 REMOTE_ARGS_FILENAME = ".remote_setup_args.json"
-AGENT_REPOS_DIRNAME = "agent_repos"
 AGENT_PAYLOAD_DIRNAME = "agent_payload"
+MAX_AGENT_CREDENTIAL_BYTES = 4 * 1024 * 1024
 
 
 def _repository_cache_path(cache_dir: str, git_url: str, repo_name: str) -> str:
@@ -264,7 +268,6 @@ def _activate_local_runtime(build_dir: str) -> None:
 
     for item in (
         "deployments",
-        AGENT_REPOS_DIRNAME,
         AGENT_PAYLOAD_DIRNAME,
         REMOTE_ARGS_FILENAME,
     ):
@@ -304,22 +307,6 @@ def prepare_deployments(config: SetupConfig, target_dir: str) -> None:
             print(f"Warning: Failed to clone {git_url}, skipping...")
 
 
-def prepare_agent_repositories(config: SetupConfig, target_dir: str) -> None:
-    if not config.agent_repos:
-        return
-
-    validate_agent_repositories(config.agent_repos)
-
-    print(f"\n{'='*60}")
-    print("Cloning agent repositories locally...")
-    print(f"{'='*60}")
-
-    for git_url in config.agent_repos:
-        result = clone_repository(git_url, target_dir, cache_dir=GIT_CACHE_DIR, dry_run=config.dry_run)
-        if result is None:
-            raise RuntimeError(f"Failed to clone requested agent repository: {git_url}")
-
-
 def _local_user_home() -> str:
     sudo_user = os.environ.get("SUDO_USER")
     if sudo_user and sudo_user != "root":
@@ -342,147 +329,160 @@ def _copy_existing_path(source: str, destination: str) -> bool:
     return True
 
 
-def _prepare_opencode_payload(config: SetupConfig, payload_dir: str, local_home: str) -> None:
-    if config.copy_agent_config:
-        source = os.path.join(local_home, ".config", "opencode")
-        destination = os.path.join(payload_dir, "config", "opencode")
-        if _copy_existing_path(source, destination):
-            print("  Staged OpenCode config")
-        else:
-            print(f"  No OpenCode config found at {source}")
-
-    if config.copy_agent_keys:
-        source = os.path.join(local_home, ".local", "share", "opencode", "auth.json")
-        destination = os.path.join(payload_dir, "secrets", "opencode", "auth.json")
-        if _copy_existing_path(source, destination):
-            os.chmod(destination, 0o600)
-            print("  Staged OpenCode credentials")
-        else:
-            print(f"  No OpenCode credentials found at {source}")
+_AGENT_AUTH_PATHS = {
+    "codex": os.path.join(".codex", "auth.json"),
+    "claude": os.path.join(".claude", ".credentials.json"),
+    "opencode": os.path.join(".local", "share", "opencode", "auth.json"),
+}
 
 
-def _stage_selected_agent_config(
-    source_dir: str,
-    destination_dir: str,
-    names: tuple[str, ...],
-) -> bool:
-    staged = False
-    for name in names:
-        staged = _copy_existing_path(
-            os.path.join(source_dir, name),
-            os.path.join(destination_dir, name),
-        ) or staged
-    return staged
+def _credential_source_path(path: str, label: str) -> str:
+    expanded = os.path.abspath(os.path.expanduser(path))
+    validate_filesystem_path(expanded, must_exist=True)
+    if os.path.islink(expanded) or not os.path.isfile(expanded):
+        raise ValueError(f"{label} must be a regular, non-symlink file: {path}")
+    mode = stat.S_IMODE(os.stat(expanded, follow_symlinks=False).st_mode)
+    if mode & 0o022:
+        raise ValueError(f"{label} must not be group- or world-writable: {path}")
+    if os.path.getsize(expanded) > MAX_AGENT_CREDENTIAL_BYTES:
+        raise ValueError(f"{label} exceeds the size limit: {path}")
+    return expanded
 
 
-def _prepare_codex_payload(config: SetupConfig, payload_dir: str, local_home: str) -> None:
-    codex_dir = os.path.join(local_home, ".codex")
-    if config.copy_agent_config:
-        destination = os.path.join(payload_dir, "config", "codex")
-        staged = _stage_selected_agent_config(
-            codex_dir,
-            destination,
-            ("config.toml", "AGENTS.md", "skills", "rules"),
-        )
-        print("  Staged Codex config" if staged else f"  No Codex config found at {codex_dir}")
-
-    if config.copy_agent_keys:
-        source = os.path.join(codex_dir, "auth.json")
-        destination = os.path.join(payload_dir, "secrets", "codex", "auth.json")
-        if _copy_existing_path(source, destination):
-            os.chmod(destination, 0o600)
-            print("  Staged Codex credentials")
-        else:
-            print(f"  No Codex credentials found at {source}")
+def _stage_secret_file(source: str, destination: str, label: str) -> None:
+    source_path = _credential_source_path(source, label)
+    if not _copy_existing_path(source_path, destination):
+        raise ValueError(f"{label} could not be read: {source}")
+    os.chmod(destination, 0o600)
+    print(f"  Staged {label}")
 
 
-def _prepare_claude_payload(config: SetupConfig, payload_dir: str, local_home: str) -> None:
-    claude_dir = os.path.join(local_home, ".claude")
-    if config.copy_agent_config:
-        destination = os.path.join(payload_dir, "config", "claude")
-        staged = _stage_selected_agent_config(
-            claude_dir,
-            destination,
-            ("settings.json", "CLAUDE.md", "commands", "agents", "skills", "plugins"),
-        )
-        print(
-            "  Staged Claude Code config"
-            if staged
-            else f"  No Claude Code config found at {claude_dir}"
-        )
-
-    if config.copy_agent_keys:
-        source = os.path.join(claude_dir, ".credentials.json")
-        destination = os.path.join(
-            payload_dir,
-            "secrets",
-            "claude",
-            ".credentials.json",
-        )
-        if _copy_existing_path(source, destination):
-            os.chmod(destination, 0o600)
-            print("  Staged Claude Code credentials")
-        else:
-            print(f"  No Claude Code credentials found at {source}")
+def _github_host_entry(hosts_path: str, host: str) -> str:
+    source = _credential_source_path(hosts_path, "GitHub CLI hosts file")
+    with open(source, encoding="utf-8") as file_obj:
+        lines = file_obj.readlines()
+    start = None
+    for index, line in enumerate(lines):
+        if line.startswith(f"{host}:") or line.startswith(f"'{host}':") or line.startswith(f'"{host}":'):
+            start = index
+            break
+    if start is None:
+        raise ValueError(f"GitHub CLI hosts file has no entry for {host}: {hosts_path}")
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        if lines[index].strip() and not lines[index][0].isspace() and not lines[index].lstrip().startswith("#"):
+            end = index
+            break
+    return "".join(lines[start:end])
 
 
-def _prepare_github_cli_payload(config: SetupConfig, payload_dir: str, local_home: str) -> None:
-    gh_config_dir = os.path.join(local_home, ".config", "gh")
+def _stage_github_auth(config: SetupConfig, payload_dir: str, local_home: str) -> None:
+    source = config.git_auth_file or os.path.join(local_home, ".config", "gh", "hosts.yml")
+    if config.git_auth_token:
+        token = config.git_auth_token.strip()
+        if not token or any(character.isspace() for character in token):
+            raise ValueError("GitHub token must be a non-empty single-line value")
+        import json
 
-    if config.copy_agent_config:
-        staged = False
-        for filename in ("config.yml", "aliases.yml"):
-            source = os.path.join(gh_config_dir, filename)
-            destination = os.path.join(payload_dir, "config", "gh", filename)
-            staged = _copy_existing_path(source, destination) or staged
-
-        extensions_source = os.path.join(gh_config_dir, "extensions")
-        extensions_destination = os.path.join(payload_dir, "config", "gh", "extensions")
-        staged = _copy_existing_path(extensions_source, extensions_destination) or staged
-
-        if staged:
-            print("  Staged GitHub CLI config")
-        else:
-            print(f"  No GitHub CLI config found at {gh_config_dir}")
-
-    if config.copy_agent_keys:
-        source = os.path.join(gh_config_dir, "hosts.yml")
+        entry = f"{config.git_host}:\n    oauth_token: {json.dumps(token)}\n    git_protocol: https\n"
         destination = os.path.join(payload_dir, "secrets", "gh", "hosts.yml")
-        if _copy_existing_path(source, destination):
-            os.chmod(destination, 0o600)
-            print("  Staged GitHub CLI credentials")
+        _copy_existing_path_value(entry.encode("utf-8"), destination)
+        print("  Staged GitHub CLI credentials")
+        return
+    try:
+        entry = _github_host_entry(source, config.git_host)
+    except ValueError:
+        source_path = _credential_source_path(source, "GitHub token file")
+        with open(source_path, encoding="utf-8") as file_obj:
+            token = file_obj.read().strip()
+        if not token or any(character.isspace() for character in token):
+            raise
+        import json
+
+        entry = f"{config.git_host}:\n    oauth_token: {json.dumps(token)}\n    git_protocol: https\n"
+    destination = os.path.join(payload_dir, "secrets", "gh", "hosts.yml")
+    _copy_existing_path_value(entry.encode("utf-8"), destination)
+    print("  Staged GitHub CLI credentials")
+
+
+def _copy_existing_path_value(value: bytes, destination: str) -> None:
+    os.makedirs(os.path.dirname(destination), mode=0o700, exist_ok=True)
+    with open(destination, "wb") as file_obj:
+        file_obj.write(value)
+    os.chmod(destination, 0o600)
+
+
+def _stage_active_agent_config(config: SetupConfig, payload_dir: str, local_home: str) -> None:
+    config_sources = {
+        "codex": (os.path.join(local_home, ".codex"), ("config.toml", "AGENTS.md", "skills", "rules")),
+        "claude": (os.path.join(local_home, ".claude"), ("settings.json", "CLAUDE.md", "commands", "agents", "skills", "plugins")),
+        "opencode": (os.path.join(local_home, ".config", "opencode"), None),
+        "gh": (os.path.join(local_home, ".config", "gh"), ("config.yml", "aliases.yml", "extensions")),
+    }
+    for tool, (source_dir, names) in config_sources.items():
+        if tool not in config.selected_agent_tools():
+            continue
+        destination = os.path.join(payload_dir, "config", tool)
+        staged = False
+        if names is None:
+            staged = _copy_existing_path(source_dir, destination)
         else:
-            print(f"  No GitHub CLI credentials found at {source}")
+            for name in names:
+                staged = _copy_existing_path(
+                    os.path.join(source_dir, name),
+                    os.path.join(destination, name),
+                ) or staged
+        if staged:
+            print(f"  Staged {tool} config")
 
 
 def prepare_agent_payload(config: SetupConfig, payload_dir: str) -> None:
     if not (config.copy_agent_config or config.copy_agent_keys):
         return
-
-    selected_tools = config.install_gh or bool(config.selected_agent_tools())
-    if not selected_tools:
-        print("\nAgent config/key copy requested, but no agent tool flags were selected")
-        return
+    if not config.selected_agent_tools():
+        raise ValueError("Agent credentials or config require at least one --agent-tool")
 
     print(f"\n{'='*60}")
-    print("Staging agent tool config and credentials...")
+    print("Staging selected agent config and credentials...")
     print(f"{'='*60}")
-
     if config.dry_run:
-        print("  [DRY RUN] Would stage selected agent tool config and credentials")
+        print("  [DRY RUN] Would stage selected agent config and credentials")
         return
 
     local_home = _local_user_home()
     os.makedirs(payload_dir, mode=0o700, exist_ok=True)
+    if config.copy_agent_config:
+        _stage_active_agent_config(config, payload_dir, local_home)
 
-    if config.install_codex:
-        _prepare_codex_payload(config, payload_dir, local_home)
-    if config.install_claude:
-        _prepare_claude_payload(config, payload_dir, local_home)
-    if config.install_opencode:
-        _prepare_opencode_payload(config, payload_dir, local_home)
-    if config.install_gh:
-        _prepare_github_cli_payload(config, payload_dir, local_home)
+    if config.git_auth_source or config.git_auth_file or config.git_auth_token:
+        if config.git_host != "github.com" or "gh" not in config.selected_agent_tools():
+            raise ValueError("GitHub auth requires --agent-tool gh and --git-host github.com")
+        _stage_github_auth(config, payload_dir, local_home)
+
+    if config.agent_auth_source:
+        for tool, relative_path in _AGENT_AUTH_PATHS.items():
+            if tool in config.selected_agent_tools():
+                _stage_secret_file(
+                    os.path.join(local_home, relative_path),
+                    os.path.join(payload_dir, "secrets", tool, os.path.basename(relative_path)),
+                    f"{tool} credentials",
+                )
+        if "gh" in config.selected_agent_tools() and not (
+            config.git_auth_source or config.git_auth_file or config.git_auth_token
+        ):
+            _stage_github_auth(config, payload_dir, local_home)
+
+    for tool, source in config.agent_auth_files or []:
+        destination_name = "hosts.yml" if tool == "gh" else os.path.basename(source)
+        if tool == "gh":
+            entry = _github_host_entry(_credential_source_path(source, "GitHub CLI hosts file"), config.git_host)
+            _copy_existing_path_value(entry.encode("utf-8"), os.path.join(payload_dir, "secrets", "gh", destination_name))
+        else:
+            _stage_secret_file(
+                source,
+                os.path.join(payload_dir, "secrets", tool, destination_name),
+                f"{tool} credentials",
+            )
 
 
 def create_tar_from_dir(source_dir: str) -> bytes:
@@ -678,6 +678,7 @@ def prepare_validated_runtime_config(
     validate_timezone_name(runtime_config.timezone)
     validate_apt_packages(runtime_config.apt_packages)
     validate_agent_repositories(runtime_config.agent_repos)
+    validate_agent_git_settings(runtime_config)
     validate_notification_args(runtime_config.notify_specs)
     validate_ssl_email(runtime_config.ssl_email)
     validate_deploy_specs(runtime_config.deploy_specs)
@@ -767,14 +768,10 @@ def run_remote_setup(config: SetupConfig) -> int:
             os.makedirs(deploy_dir, exist_ok=True)
             prepare_deployments(config, deploy_dir)
 
-        if config.agent_repos:
-            agent_repos_dir = os.path.join(build_dir, AGENT_REPOS_DIRNAME)
-            os.makedirs(agent_repos_dir, exist_ok=True)
-            prepare_agent_repositories(config, agent_repos_dir)
-
         if config.copy_agent_config or config.copy_agent_keys:
             agent_payload_dir = os.path.join(build_dir, AGENT_PAYLOAD_DIRNAME)
             prepare_agent_payload(config, agent_payload_dir)
+            config.agent_payload = True
 
         remote_arg_tokens = _expand_remote_args(config.to_remote_args())
         _write_remote_args_file(build_dir, remote_arg_tokens)
@@ -905,6 +902,13 @@ def setup_main(system_type: str, description: str, success_msg_fn: Callable[[Set
             print(f"Error: {e}")
             return 1
         set_workspace_dir(args.workspace)
+
+    if getattr(args, "interactive", False) is True:
+        try:
+            run_interactive_setup(args)
+        except (EOFError, KeyboardInterrupt, ValueError) as exc:
+            print(f"Error: {exc}")
+            return 1
 
     explicit_ipv4 = getattr(args, "static_ipv4", None)
     if getattr(args, "hosted_node", None) and isinstance(explicit_ipv4, str) and explicit_ipv4:

@@ -124,7 +124,7 @@ def _build_infra_tools_epilog() -> str:
     bootstrap                   Install packages, launcher, and completions (alias: self-setup)
     channel [CHANNEL]           Show or switch the installed source channel
     upgrade                     Upgrade the installed source on its selected channel
-    agent doctor|update        Check or deliberately update local coding agents
+    agent doctor|update|auth   Check, update, or rotate agent credentials
     maintenance github ...      Audit/prune GitHub releases, artifacts, and caches
     network [subcommand]        Manage generic network inventory profiles
     local [subcommand]          Maintain this local Debian system

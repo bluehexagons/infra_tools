@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 
 
-from lib.config import AGENT_SUITES, MACHINE_TYPES
+from lib.config import AGENT_TOOLS, GIT_ACCESS_POLICIES, MACHINE_TYPES
 from lib.plugin_registry import get_system_type_names
 
 
@@ -360,43 +360,78 @@ def add_setup_arguments(
                         default=None if not for_remote else False,
                         help="Install Python tooling (python aliases and uv). For shell autocompletion, use the local completions installer script.")
 
-    # Agent VM tooling
-    parser.add_argument("--gh", dest="install_gh",
-                       action=argparse.BooleanOptionalAction if not for_remote else "store_true",
-                       default=None if not for_remote else False,
-                       help="Install the GitHub CLI for agent workflows")
-    parser.add_argument("--codex", dest="install_codex",
-                       action=argparse.BooleanOptionalAction if not for_remote else "store_true",
-                       default=None if not for_remote else False,
-                       help="Install Codex CLI with OpenAI's official installer")
-    parser.add_argument("--claude", dest="install_claude",
-                       action=argparse.BooleanOptionalAction if not for_remote else "store_true",
-                       default=None if not for_remote else False,
-                       help="Install Claude Code with Anthropic's official installer")
-    parser.add_argument("--opencode", dest="install_opencode",
-                       action=argparse.BooleanOptionalAction if not for_remote else "store_true",
-                       default=None if not for_remote else False,
-                       help="Install OpenCode with its official installer")
-    parser.add_argument("--t3code", dest="install_t3code",
-                       action=argparse.BooleanOptionalAction if not for_remote else "store_true",
-                       default=None if not for_remote else False,
-                       help="Install the official T3 Code AppImage and desktop launcher (x86_64 only)")
-    parser.add_argument("--agent-suite", choices=AGENT_SUITES,
-                       help="Agent preset: terminal adds Codex, Claude Code, OpenCode, GitHub CLI, "
-                            "and common tools; desktop also adds T3 Code; full also adds Node, "
-                            "Python, and Go")
-    parser.add_argument("--copy-keys", dest="copy_agent_keys",
-                       action=argparse.BooleanOptionalAction if not for_remote else "store_true",
-                       default=None if not for_remote else False,
-                       help="Copy credentials for selected agent tools when available locally")
-    parser.add_argument("--copy-config", dest="copy_agent_config",
-                       action=argparse.BooleanOptionalAction if not for_remote else "store_true",
-                       default=None if not for_remote else False,
-                       help="Copy non-secret config for selected agent tools when available locally")
+    # Agent VM tooling. Tools are deliberately explicit; there is no suite that
+    # silently installs unrelated runtimes or a common package baseline.
+    parser.add_argument(
+        "--agent-tool",
+        dest="agent_tools",
+        action="append",
+        choices=AGENT_TOOLS,
+        metavar="TOOL",
+        help="Install an explicit agent tool; repeat as needed",
+    )
+    parser.add_argument(
+        "--git-access",
+        choices=GIT_ACCESS_POLICIES,
+        default="none",
+        help="Target VM Git policy for agent repositories",
+    )
+    parser.add_argument(
+        "--git-host",
+        default="github.com",
+        metavar="HOST",
+        help="Git host whose credentials are configured (default: github.com)",
+    )
+    parser.add_argument(
+        "--agent-payload",
+        dest="agent_payload",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    if not for_remote:
+        git_auth_group = parser.add_mutually_exclusive_group()
+        git_auth_group.add_argument(
+            "--git-auth",
+            dest="git_auth_source",
+            choices=("active",),
+            help="Copy GitHub CLI credentials from the active controller user's config",
+        )
+        git_auth_group.add_argument(
+            "--git-auth-file",
+            dest="git_auth_file",
+            metavar="PATH",
+            help="Copy GitHub CLI credentials from a controller-local file",
+        )
+        agent_auth_group = parser.add_mutually_exclusive_group()
+        agent_auth_group.add_argument(
+            "--agent-auth",
+            dest="agent_auth_source",
+            choices=("active",),
+            help="Copy selected agent credentials from the active controller user's config",
+        )
+        agent_auth_group.add_argument(
+            "--agent-auth-file",
+            dest="agent_auth_files",
+            action="append",
+            nargs=2,
+            metavar=("TOOL", "PATH"),
+            help="Copy one selected agent credential file; repeat for different tools",
+        )
+        parser.add_argument(
+            "--agent-config",
+            dest="agent_config_source",
+            choices=("active",),
+            help="Copy optional non-secret agent config from the active controller user",
+        )
+        parser.add_argument(
+            "--interactive",
+            action="store_true",
+            help="Choose tools, repositories, access, and credential sources interactively",
+        )
     parser.add_argument("--repo", dest="agent_repos",
                        action="append",
                        metavar="GIT_URL",
-                       help="Clone a git repository locally and upload it to /home/USER/repos on the target; repeat as needed")
+                       help="Clone an HTTPS repository on the target VM; repeat as needed")
     
     # Deployment options
     parser.add_argument("--deploy", dest="deploy_specs",

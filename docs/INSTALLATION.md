@@ -76,12 +76,13 @@ rm -f "$HOME/.infra_tools-install.sh"
 
 ### Set up a minimal Debian control plane
 
-This installs common administrator and Linux tools, the terminal agent suite,
-and configures the local machine to manage other VMs and containers:
+This installs common administrator and Linux tools and configures the local
+machine to manage other VMs and containers. Select agent tools explicitly:
 
 ```bash
 wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
-sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup control_plane --agent-suite terminal
+sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup control_plane \
+  --agent-tool gh --agent-tool codex --agent-tool claude --agent-tool opencode
 rm -f "$HOME/.infra_tools-install.sh"
 ```
 
@@ -92,7 +93,8 @@ self-setup:
 
 ```bash
 wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
-sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --qemu-guest-agent --local-setup control_plane --agent-suite terminal
+sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --qemu-guest-agent \
+  --local-setup control_plane --agent-tool gh --agent-tool codex
 rm -f "$HOME/.infra_tools-install.sh"
 ```
 
@@ -113,7 +115,8 @@ installs the selected agent tools (GitHub CLI and Codex CLI in this example):
 
 ```bash
 wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
-sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup workstation_dev --control-plane --gh --codex --desktop xfce --rdp --rdp-existing-password
+sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup workstation_dev \
+  --control-plane --agent-tool gh --agent-tool codex --desktop xfce --rdp --rdp-existing-password
 rm -f "$HOME/.infra_tools-install.sh"
 ```
 
@@ -130,13 +133,12 @@ Without `--rdp-source`, RDP is available on all local interfaces with the
 configured rate-limited firewall rule. See [XRDP](XRDP.md) for connection and
 firewall details.
 
-Use `--agent-suite terminal` on a headless host, `desktop` for the complete
-graphical agent bundle, or `full` when Node.js, Python, and Go tooling are also
-wanted. For a selective graphical setup, omit `--agent-suite` and choose any
-combination of `--gh`, `--codex`, `--claude`, `--opencode`, and `--t3code`.
-Append `--copy-config`, `--copy-keys`, or `--repo GIT_URL` when the control
-plane should receive selected agent settings, credentials, or repositories;
-these options are intentionally opt-in.
+There are no agent-suite presets. On a headless host or desktop, repeat
+`--agent-tool` for exactly the tools needed. Add Node.js, Python, or Go with
+their individual flags. Use `--agent-config active`, `--git-auth active`, or
+the specified-file credential options when the control plane should transfer
+selected settings or credentials. Use `--repo GIT_URL` for target-side HTTPS
+clones; public repositories on any reachable Git host are supported.
 
 ## Verify the installation
 
@@ -169,7 +171,7 @@ validates arguments and prints the steps without changing the target:
 
 ```bash
 sudo "$(command -v infra-tools)" setup workstation_dev localhost "$USER" \
-  --control-plane --gh --codex --desktop xfce --rdp \
+  --control-plane --agent-tool gh --agent-tool codex --desktop xfce --rdp \
   --rdp-existing-password --dry-run
 ```
 

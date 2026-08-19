@@ -36,7 +36,8 @@ Set up a minimal Debian control plane immediately:
 
 ```bash
 wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
-sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup control_plane --agent-suite terminal
+sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup control_plane \
+  --agent-tool gh --agent-tool codex --agent-tool claude --agent-tool opencode
 rm -f "$HOME/.infra_tools-install.sh"
 ```
 
@@ -46,7 +47,8 @@ GNOME for local logins, uses XFCE for RDP, and installs the selected agent tools
 
 ```bash
 wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
-sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup workstation_dev --control-plane --gh --codex --desktop xfce --rdp --rdp-existing-password
+sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup workstation_dev \
+  --control-plane --agent-tool gh --agent-tool codex --desktop xfce --rdp --rdp-existing-password
 rm -f "$HOME/.infra_tools-install.sh"
 ```
 
@@ -152,6 +154,10 @@ infra-tools proxmox health pve1 101
 
 Use the [documentation index](docs/README.md) for the complete command and
 feature map.
+
+Agent VM setup supports explicit tools, target-side HTTPS repository clones,
+VM-level Git policy, transient credential sources, and credential rotation via
+`infra-tools agent auth set/status`; see the [command reference](docs/COMMAND_LINE.md).
 
 ## Development checks
 

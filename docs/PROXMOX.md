@@ -106,7 +106,7 @@ infra-tools setup workstation_dev 10.0.0.50 agent \
   --cores 4 --memory 8G --storage root 40G --image-storage local \
   --desktop xfce --rdp --browser firefox \
   --password "$RDP_PASSWORD" \
-  --agent-suite terminal --copy-config \
+  --agent-tool gh --agent-tool codex --agent-config active --git-access read \
   --repo https://github.com/user/my_codebase.git \
   --node --go --python
 ```

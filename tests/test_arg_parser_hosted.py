@@ -118,38 +118,30 @@ class TestHostedFlagParsing(unittest.TestCase):
         self.assertTrue(args.install_node)
         self.assertIsNone(args.hosted_node)
 
-    def test_agent_tool_flags(self):
+    def test_explicit_agent_tool_flags(self):
         args = self.parser.parse_args([
             "10.0.0.50",
-            "--gh",
-            "--codex",
-            "--claude",
-            "--opencode",
-            "--t3code",
-            "--copy-keys",
-            "--copy-config",
+            "--agent-tool", "gh",
+            "--agent-tool", "codex",
+            "--agent-tool", "claude",
+            "--agent-tool", "opencode",
+            "--agent-tool", "t3code",
+            "--git-access", "read-write",
+            "--git-auth", "active",
+            "--agent-auth", "active",
+            "--agent-config", "active",
             "--repo", "https://github.com/user/one.git",
-            "--repo", "git@github.com:user/two.git",
+            "--repo", "https://gitlab.com/user/two.git",
         ])
-        self.assertTrue(args.install_gh)
-        self.assertTrue(args.install_codex)
-        self.assertTrue(args.install_claude)
-        self.assertTrue(args.install_opencode)
-        self.assertTrue(args.install_t3code)
-        self.assertTrue(args.copy_agent_keys)
-        self.assertTrue(args.copy_agent_config)
+        self.assertEqual(args.agent_tools, ["gh", "codex", "claude", "opencode", "t3code"])
+        self.assertEqual(args.git_access, "read-write")
+        self.assertEqual(args.git_auth_source, "active")
+        self.assertEqual(args.agent_auth_source, "active")
+        self.assertEqual(args.agent_config_source, "active")
         self.assertEqual(args.agent_repos, [
             "https://github.com/user/one.git",
-            "git@github.com:user/two.git",
+            "https://gitlab.com/user/two.git",
         ])
-
-    def test_agent_suite_flag(self):
-        args = self.parser.parse_args([
-            "10.0.0.50",
-            "--agent-suite",
-            "terminal",
-        ])
-        self.assertEqual(args.agent_suite, "terminal")
 
     def test_rdp_policy_flags(self):
         args = self.parser.parse_args([
@@ -245,26 +237,20 @@ class TestHostedFlagsNotInRemoteParser(unittest.TestCase):
         ])
         self.assertFalse(hasattr(args, 'vm_balloon_min'))
 
-    def test_agent_tool_flags_exist_remotely(self):
+    def test_explicit_agent_tool_flags_exist_remotely(self):
         args = self.parser.parse_args([
             "--system-type", "server_dev",
             "--username", "agentuser",
-            "--gh",
-            "--codex",
-            "--claude",
-            "--opencode",
-            "--t3code",
-            "--copy-keys",
-            "--copy-config",
+            "--agent-tool", "gh",
+            "--agent-tool", "codex",
+            "--agent-tool", "claude",
+            "--agent-tool", "opencode",
+            "--agent-tool", "t3code",
+            "--git-access", "read",
             "--repo", "https://github.com/user/repo.git",
         ])
-        self.assertTrue(args.install_gh)
-        self.assertTrue(args.install_codex)
-        self.assertTrue(args.install_claude)
-        self.assertTrue(args.install_opencode)
-        self.assertTrue(args.install_t3code)
-        self.assertTrue(args.copy_agent_keys)
-        self.assertTrue(args.copy_agent_config)
+        self.assertEqual(args.agent_tools, ["gh", "codex", "claude", "opencode", "t3code"])
+        self.assertEqual(args.git_access, "read")
         self.assertEqual(args.agent_repos, ["https://github.com/user/repo.git"])
 
 

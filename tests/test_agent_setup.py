@@ -26,6 +26,7 @@ class TestAgentPayloadPreparation(unittest.TestCase):
             os.makedirs(opencode_auth_dir)
             with open(os.path.join(opencode_auth_dir, 'auth.json'), 'w', encoding='utf-8') as file_obj:
                 file_obj.write('{"token":"secret"}\n')
+            os.chmod(os.path.join(opencode_auth_dir, 'auth.json'), 0o600)
 
             codex_dir = os.path.join(home, '.codex')
             os.makedirs(os.path.join(codex_dir, 'skills', 'review'))
@@ -33,6 +34,7 @@ class TestAgentPayloadPreparation(unittest.TestCase):
                 file_obj.write('model = "test"\n')
             with open(os.path.join(codex_dir, 'auth.json'), 'w', encoding='utf-8') as file_obj:
                 file_obj.write('{"token":"secret"}\n')
+            os.chmod(os.path.join(codex_dir, 'auth.json'), 0o600)
 
             claude_dir = os.path.join(home, '.claude')
             os.makedirs(os.path.join(claude_dir, 'commands'))
@@ -40,6 +42,7 @@ class TestAgentPayloadPreparation(unittest.TestCase):
                 file_obj.write('{}\n')
             with open(os.path.join(claude_dir, '.credentials.json'), 'w', encoding='utf-8') as file_obj:
                 file_obj.write('{"token":"secret"}\n')
+            os.chmod(os.path.join(claude_dir, '.credentials.json'), 0o600)
 
             gh_config_dir = os.path.join(home, '.config', 'gh')
             os.makedirs(gh_config_dir)
@@ -47,6 +50,7 @@ class TestAgentPayloadPreparation(unittest.TestCase):
                 file_obj.write('editor: nvim\n')
             with open(os.path.join(gh_config_dir, 'hosts.yml'), 'w', encoding='utf-8') as file_obj:
                 file_obj.write('github.com:\n  oauth_token: secret\n')
+            os.chmod(os.path.join(gh_config_dir, 'hosts.yml'), 0o600)
 
             config = SetupConfig(
                 host='10.0.0.10',
@@ -56,6 +60,8 @@ class TestAgentPayloadPreparation(unittest.TestCase):
                 install_codex=True,
                 install_claude=True,
                 install_opencode=True,
+                git_auth_source='active',
+                agent_auth_source='active',
                 copy_agent_config=True,
                 copy_agent_keys=True,
             )

@@ -21,15 +21,14 @@ The recommended baseline is:
 infra-tools setup workstation_dev 10.0.0.25 agent \
   --desktop xfce --rdp --password "$RDP_PASSWORD" \
   --rdp-source 10.0.0.0/24 \
-  --agent-suite terminal --copy-config \
+  --agent-tool gh --agent-tool codex --agent-tool claude --agent-tool opencode \
+  --agent-config active --git-access read \
   --repo https://github.com/user/project.git
 ```
 
 `workstation_dev` adds XFCE, a browser, Visual Studio Code, and the shared CLI
-bundle. The `terminal` agent suite adds GitHub CLI, Codex CLI, Claude Code,
-OpenCode, and common coding utilities. Use `--agent-suite desktop` only when
-the optional T3 Code AppImage is also wanted, or `full` when Node.js, Python
-tooling, and Go should be implicit.
+bundle. Agent tools are selected individually; add T3 Code with
+`--agent-tool t3code` and language runtimes with their individual flags.
 
 RDP is opt-in because it needs a Unix account password and opens an additional
 network service. The setup password is transmitted in a mode-`0600` argument
@@ -48,8 +47,8 @@ On a Debian VM or bare-metal target, the baseline inherits:
 | `user-cache-maintenance.timer` | Inventories and prunes bounded developer-tool caches weekly as the configured non-root user | Covers npm, pip, uv, Go, OpenCode cache data, Codex cache data, and stale Codex temporary entries; browser, editor, and Flatpak caches remain outside its allowlist |
 | `auto-restart-if-needed.timer` | Checks daily and after boot for `/var/run/reboot-required` | Defers for login sessions until the force deadline, then can restart despite an active RDP or agent workload |
 
-`--agent-suite full`, `--node`, or `--python` also add the user-scoped Node.js
-and uv update timers. Codex CLI, Claude Code, and OpenCode updates remain an
+`--node` or `--python` adds the corresponding user-scoped update timer. Codex
+CLI, Claude Code, and OpenCode updates remain an
 explicit `infra-tools agent update` action; T3 Code has no managed update path.
 See the [CLI-only agent audit](AGENT_CLI_MAINTENANCE_AUDIT_2026-08-09.md) for
 the shared agent-tool lifecycle work.

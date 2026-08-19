@@ -1,7 +1,7 @@
 # Agent VM Workspaces and Credentials
 
-Status: proposed project plan; unscheduled until the transaction and
-interactive-orchestration foundations have a delivery boundary.
+Status: implemented in the current release. Authenticated non-GitHub
+providers and offline snapshot mode remain future work.
 
 This project makes it straightforward to provision a Debian VM for agentic
 development while keeping tool selection, Git access, repository setup, and

@@ -637,7 +637,6 @@ _NETWORK_PROVIDER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
 _NETWORK_INTERFACE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,14}$")
 _PROXMOX_STORAGE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _HOSTNAME_LABEL_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
-_GIT_SCP_URL_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+@[^:\s]+:.+$")
 _SAFE_REPO_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
@@ -729,7 +728,7 @@ def _repo_name_from_git_url(git_url: str) -> str:
 
 
 def validate_agent_repositories(repositories: Optional[list[str]]) -> None:
-    """Validate git URLs supplied through --repo for agent VM workspaces."""
+    """Validate HTTPS URLs supplied through --repo for agent VM workspaces."""
     if not repositories:
         return
 
@@ -749,19 +748,12 @@ def validate_agent_repositories(repositories: Optional[list[str]]) -> None:
             raise ValueError(f"Invalid --repo git URL: {repository}")
 
         parsed = urlparse(git_url)
-        if parsed.scheme:
-            if parsed.scheme not in {"git", "http", "https", "ssh"} or not parsed.netloc:
-                raise ValueError(f"Invalid --repo git URL: {repository}")
-            if parsed.password is not None or (
-                parsed.scheme in {"http", "https"} and parsed.username is not None
-            ):
-                raise ValueError(
-                    "--repo URLs must not contain embedded credentials"
-                )
-        elif not _GIT_SCP_URL_PATTERN.match(git_url):
+        if parsed.scheme != "https" or not parsed.netloc or not parsed.path.strip("/"):
             raise ValueError(
-                "--repo must be an https://, ssh://, git://, or git@host:path git URL"
+                "--repo must be an https:// URL; SSH/scp and other schemes are not supported"
             )
+        if parsed.password is not None or parsed.username is not None:
+            raise ValueError("--repo URLs must not contain embedded credentials")
 
         repo_name = _repo_name_from_git_url(git_url)
         if not repo_name or not _SAFE_REPO_NAME_PATTERN.match(repo_name):
@@ -769,6 +761,64 @@ def validate_agent_repositories(repositories: Optional[list[str]]) -> None:
         if repo_name in seen_repo_names:
             raise ValueError(f"Duplicate --repo repository name: {repo_name}")
         seen_repo_names.add(repo_name)
+
+
+def validate_agent_git_settings(config: Any) -> None:
+    """Validate the VM Git policy and the currently supported auth provider."""
+    from lib.config import AGENT_TOOLS, GIT_ACCESS_POLICIES
+
+    git_access = getattr(config, "git_access", "none")
+    if git_access not in GIT_ACCESS_POLICIES:
+        raise ValueError(
+            f"--git-access must be one of: {', '.join(GIT_ACCESS_POLICIES)}"
+        )
+
+    git_host = str(getattr(config, "git_host", "")).strip()
+    if not git_host or git_host != getattr(config, "git_host", None):
+        raise ValueError("--git-host must be a non-empty hostname")
+    if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?", git_host):
+        raise ValueError(f"Invalid --git-host: {git_host}")
+
+    github_auth_requested = bool(
+        getattr(config, "git_auth_source", None)
+        or getattr(config, "git_auth_file", None)
+        or getattr(config, "git_auth_token", None)
+    )
+    github_agent_auth_requested = bool(
+        getattr(config, "agent_auth_source", None)
+        and "gh" in set(config.selected_agent_tools())
+    ) or any(
+        isinstance(spec, (list, tuple))
+        and len(spec) == 2
+        and spec[0] == "gh"
+        for spec in getattr(config, "agent_auth_files", None) or []
+    )
+    if (github_auth_requested or github_agent_auth_requested) and git_access == "none":
+        raise ValueError(
+            "GitHub credentials require --git-access read or read-write"
+        )
+    if (github_auth_requested or github_agent_auth_requested) and git_host != "github.com":
+        raise ValueError(
+            "GitHub CLI credentials currently support only --git-host github.com; "
+            "other Git hosts may be used publicly for now"
+        )
+
+    selected_tools = set(config.selected_agent_tools())
+    if github_auth_requested and "gh" not in selected_tools:
+        raise ValueError("GitHub auth requires --agent-tool gh")
+    for tool in selected_tools:
+        if tool not in AGENT_TOOLS:
+            raise ValueError(f"Unsupported --agent-tool: {tool}")
+
+    for spec in getattr(config, "agent_auth_files", None) or []:
+        if len(spec) != 2 or spec[0] not in selected_tools:
+            raise ValueError(
+                "--agent-auth-file requires a selected agent TOOL and a file PATH"
+            )
+        if spec[0] == "gh" and git_host != "github.com":
+            raise ValueError(
+                "GitHub CLI credentials currently support only --git-host github.com"
+            )
 
 
 def validate_network_name(value: str, name: str = "network name") -> str:

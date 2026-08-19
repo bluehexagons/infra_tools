@@ -10,7 +10,8 @@ and Codex CLI in this example):
 
 ```bash
 wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
-sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup workstation_dev --control-plane --gh --codex --desktop xfce --rdp --rdp-existing-password
+sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup workstation_dev \
+  --control-plane --agent-tool gh --agent-tool codex --desktop xfce --rdp --rdp-existing-password
 rm -f "$HOME/.infra_tools-install.sh"
 ```
 
@@ -18,8 +19,8 @@ This keeps the graphical workstation setup while adding the SSH, rsync,
 diagnostic, terminal, and package-management tools used to administer other
 VMs and containers. It assumes the standard Debian GNOME desktop and existing
 local account password: GNOME remains the console desktop, while XFCE is used
-for XRDP sessions. Use `--agent-suite terminal` if no graphical agents are
-needed, or `full` for the additional language runtimes.
+for XRDP sessions. Select only the graphical agents needed with repeatable
+`--agent-tool` flags; language runtimes remain separate explicit options.
 
 ## Profiles
 
@@ -44,14 +45,14 @@ runtimes your projects need:
 
 ```bash
 infra-tools setup control_plane 10.0.0.24 agent \
-  --agent-suite terminal --node --python --go \
-  --copy-config --repo https://github.com/user/project.git
+  --agent-tool gh --agent-tool codex --agent-tool claude --agent-tool opencode \
+  --node --python --go --agent-config active \
+  --git-access read --repo https://github.com/user/project.git
 ```
 
-This installs the terminal agent suite (GitHub CLI, Codex CLI, Claude Code,
-and OpenCode), administrator tools, and the selected runtimes. Remove
-`--copy-config` or `--repo` when those inputs are not needed. Use `tmux` for
-long-running agent sessions over SSH.
+This installs the explicitly selected agents, administrator tools, and selected
+runtimes. Remove `--agent-config` or `--repo` when those inputs are not needed.
+Use `tmux` for long-running agent sessions over SSH.
 
 ### Desktop agentic coding workstation with RDP
 
@@ -62,14 +63,13 @@ XFCE for the RDP session, and restrict RDP to the management network:
 infra-tools setup workstation_dev 10.0.0.25 agent \
   --control-plane --desktop xfce --rdp \
   --password "$RDP_PASSWORD" --rdp-source 10.0.0.0/24 \
-  --gh --codex --copy-config \
+  --agent-tool gh --agent-tool codex --agent-config active \
   --repo https://github.com/user/project.git
 ```
 
 This adds the selected agent tools, browser, Visual Studio Code, administrator
-tools, and the selected repository. Replace `--gh --codex` with any combination
-of `--gh`, `--codex`, `--claude`, `--opencode`, and `--t3code`; use an
-`--agent-suite` preset when the complete bundle is wanted. The RDP password is
+tools, and the selected repository. Repeat `--agent-tool` for any combination
+of `gh`, `codex`, `claude`, `opencode`, and `t3code`. The RDP password is
 the target Unix
 account's password; provide it through a secret-sourced environment variable,
 not a literal value in shell history. For a local Debian GNOME machine, use

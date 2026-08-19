@@ -13,6 +13,7 @@ from lib.config import SetupConfig
 from lib.validation import (
     validate_apt_packages,
     validate_agent_repositories,
+    validate_agent_git_settings,
     validate_antistatic_settings,
     validate_deploy_specs,
     validate_deploy_targets,
@@ -146,9 +147,18 @@ class TestValidateAgentRepositories(unittest.TestCase):
     def test_valid_urls_pass(self):
         validate_agent_repositories([
             'https://github.com/user/repo.git',
-            'ssh://git@github.com/user/repo-two.git',
-            'git@github.com:user/repo_three.git',
+            'https://gitlab.com/user/repo-two.git',
+            'https://codeberg.org/user/repo_three.git',
         ])
+
+    def test_ssh_and_non_https_urls_fail(self):
+        for url in (
+            'ssh://git@github.com/user/repo.git',
+            'git@github.com:user/repo.git',
+            'http://example.com/user/repo.git',
+        ):
+            with self.subTest(url=url), self.assertRaisesRegex(ValueError, "https://"):
+                validate_agent_repositories([url])
 
     def test_empty_url_fails(self):
         with self.assertRaisesRegex(ValueError, "--repo requires a non-empty git URL"):
@@ -183,8 +193,6 @@ class TestValidateAgentRepositories(unittest.TestCase):
     def test_http_urls_with_embedded_credentials_fail(self):
         for url in (
             'https://user:token@example.com/repo.git',
-            'http://token@example.com/repo.git',
-            'ssh://git:token@example.com/repo.git',
         ):
             with self.subTest(url=url), self.assertRaisesRegex(
                 ValueError,
@@ -196,7 +204,7 @@ class TestValidateAgentRepositories(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Duplicate --repo repository name: repo"):
             validate_agent_repositories([
                 'https://github.com/one/repo.git',
-                'git@github.com:two/repo.git',
+                'https://gitlab.com/two/repo.git',
             ])
 
 
@@ -221,6 +229,49 @@ class TestValidateGogsSettings(unittest.TestCase):
     def test_relative_data_path_fails(self):
         with self.assertRaisesRegex(ValueError, "Gogs data path must be absolute: relative/path"):
             validate_gogs_settings(['git.example.com', 'relative/path'])
+
+
+class TestValidateAgentGitSettings(unittest.TestCase):
+    def _make_config(self, **kwargs):
+        defaults = {
+            "host": "host",
+            "username": "agent",
+            "system_type": "server_dev",
+            "agent_tools": ["gh"],
+        }
+        defaults.update(kwargs)
+        return SetupConfig(**defaults)
+
+    def test_public_cross_host_policy_passes_without_credentials(self):
+        validate_agent_git_settings(
+            self._make_config(git_host="gitlab.com", git_access="none")
+        )
+
+    def test_github_credentials_require_git_access_policy(self):
+        with self.assertRaisesRegex(ValueError, "require --git-access"):
+            validate_agent_git_settings(
+                self._make_config(git_auth_source="active")
+            )
+
+    def test_github_credentials_require_gh(self):
+        with self.assertRaisesRegex(ValueError, "requires --agent-tool gh"):
+            validate_agent_git_settings(
+                self._make_config(
+                    agent_tools=["codex"],
+                    git_access="read",
+                    git_auth_source="active",
+                )
+            )
+
+    def test_github_credentials_reject_non_github_host(self):
+        with self.assertRaisesRegex(ValueError, "only --git-host github.com"):
+            validate_agent_git_settings(
+                self._make_config(
+                    git_access="read",
+                    git_host="gitlab.com",
+                    git_auth_source="active",
+                )
+            )
 
 
 class TestValidateAntistaticSettings(unittest.TestCase):

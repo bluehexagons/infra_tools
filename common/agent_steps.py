@@ -1,4 +1,4 @@
-"""Agent VM setup steps for AI coding tools and uploaded repositories."""
+"""Agent VM setup steps for explicit tools and target-side repositories."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import platform
 import pwd
 import shlex
 import shutil
+import tempfile
 import urllib.parse
 import urllib.request
 from typing import cast
@@ -21,23 +22,6 @@ from .common_steps import _run_as_login_user
 
 
 REMOTE_AGENT_PAYLOAD_DIR = "/opt/infra_tools/agent_payload"
-REMOTE_AGENT_REPOS_DIR = "/opt/infra_tools/agent_repos"
-AGENT_REPOS_CACHE_DIR = "/var/cache/infra_tools/agent_repos"
-AGENT_CODING_PACKAGES = (
-    "build-essential",
-    "cmake",
-    "ninja-build",
-    "pkg-config",
-    "git-lfs",
-    "ripgrep",
-    "fd-find",
-    "fzf",
-    "jq",
-    "bat",
-    "tmux",
-    "direnv",
-    "shellcheck",
-)
 
 
 def _user_home(config: SetupConfig) -> str:
@@ -85,6 +69,19 @@ def install_github_cli(config: SetupConfig) -> None:
         raise RuntimeError("GitHub CLI installation failed")
 
 
+def install_git_for_agent_repositories(config: SetupConfig) -> None:
+    """Install only the Git client required by target-side repository setup."""
+    if shutil.which("git"):
+        print("  Git already installed")
+        return
+    if is_dry_run():
+        print("  [DRY-RUN] Would install Git for agent repositories")
+        return
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
+    if not install_package("Git", "git", "apt-get install -y -qq git"):
+        raise RuntimeError("Git installation failed")
+
+
 def _tool_available(config: SetupConfig, command: str, extra_path: str = "") -> bool:
     user_home = _user_home(config)
     path_prefix = '$HOME/.local/bin:$HOME/.opencode/bin'
@@ -116,48 +113,6 @@ def _ensure_agent_shell_path(config: SetupConfig) -> None:
             file_obj.write(block)
 
     _chown_path(config, bashrc_path)
-
-
-def install_agent_coding_tools(config: SetupConfig) -> None:
-    """Install a practical baseline of Debian coding and shell utilities."""
-    if is_dry_run():
-        print("  [DRY-RUN] Would install common agent coding tools")
-        return
-
-    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    packages = " ".join(shlex.quote(package) for package in AGENT_CODING_PACKAGES)
-    result = run(f"apt-get install -y -qq {packages}", check=False)
-    if result.returncode != 0:
-        raise RuntimeError("Common agent coding-tool installation failed")
-
-    user_home = _user_home(config)
-    local_bin = os.path.join(user_home, ".local", "bin")
-    os.makedirs(local_bin, exist_ok=True)
-    for alias, system_command in (("fd", "/usr/bin/fdfind"), ("bat", "/usr/bin/batcat")):
-        destination = os.path.join(local_bin, alias)
-        if os.path.exists(system_command) and not os.path.lexists(destination):
-            os.symlink(system_command, destination)
-    legacy_launcher = os.path.join(local_bin, "infra_tools")
-    if os.path.islink(legacy_launcher) or os.path.isfile(legacy_launcher):
-        os.unlink(legacy_launcher)
-    infra_tools_launcher = os.path.join(local_bin, "infra-tools")
-    if not os.path.lexists(infra_tools_launcher):
-        with open(infra_tools_launcher, "w", encoding="utf-8") as file_obj:
-            file_obj.write(
-                "#!/bin/sh\n"
-                'exec python3 /opt/infra_tools/infra_tools.py "$@"\n'
-            )
-        os.chmod(infra_tools_launcher, 0o755)
-    _run_as_login_user(
-        config.username,
-        user_home,
-        "git lfs install --skip-repo",
-        check=False,
-        capture_output=True,
-    )
-    _chown_path(config, local_bin)
-    _ensure_agent_shell_path(config)
-    print("  Common agent coding tools installed")
 
 
 def _install_script_tool(
@@ -419,14 +374,14 @@ def _copy_secret_file(config: SetupConfig, source: str, destination: str, label:
 
 
 def _configure_github_git_credentials(config: SetupConfig) -> None:
-    """Wire git HTTPS auth through gh for the setup user when gh auth works."""
+    """Wire Git HTTPS auth through the selected GitHub CLI host."""
     user_home = _user_home(config)
     result = _run_as_login_user(
         config.username,
         user_home,
         'export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH" && '
-        'if gh auth status >/dev/null 2>&1; then '
-        'gh auth setup-git >/dev/null; '
+        f'if gh auth status --hostname {shlex.quote(config.git_host)} >/dev/null 2>&1; then '
+        f'gh auth setup-git --hostname {shlex.quote(config.git_host)} >/dev/null; '
         'else exit 2; fi',
         check=False,
         capture_output=True,
@@ -439,10 +394,79 @@ def _configure_github_git_credentials(config: SetupConfig) -> None:
         print("  Warning: failed to configure git for GitHub CLI credentials")
 
 
+def _payload_host_entry(source: str, host: str) -> str:
+    with open(source, encoding="utf-8") as file_obj:
+        lines = file_obj.readlines()
+    start = None
+    for index, line in enumerate(lines):
+        if line.startswith(f"{host}:") or line.startswith(f"'{host}':") or line.startswith(f'"{host}":'):
+            start = index
+            break
+    if start is None:
+        raise RuntimeError(f"Uploaded GitHub credentials have no entry for {host}")
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        if lines[index].strip() and not lines[index][0].isspace() and not lines[index].lstrip().startswith("#"):
+            end = index
+            break
+    return "".join(lines[start:end])
+
+
+def _merge_github_credentials(config: SetupConfig, source: str) -> bool:
+    """Replace only the selected host entry in the target gh hosts file."""
+    user_home = _user_home(config)
+    destination = os.path.join(user_home, ".config", "gh", "hosts.yml")
+    _reject_symlinked_agent_destination(os.path.dirname(destination))
+    _ensure_agent_directory(os.path.dirname(destination))
+    new_entry = _payload_host_entry(source, config.git_host)
+    existing = ""
+    if os.path.exists(destination):
+        if os.path.islink(destination):
+            raise RuntimeError(f"Refusing symlinked GitHub credentials: {destination}")
+        with open(destination, encoding="utf-8") as file_obj:
+            existing = file_obj.read()
+
+    lines = existing.splitlines(keepends=True)
+    start = None
+    for index, line in enumerate(lines):
+        if line.startswith(f"{config.git_host}:") or line.startswith(f"'{config.git_host}':") or line.startswith(f'"{config.git_host}":'):
+            start = index
+            break
+    if start is None:
+        merged = existing.rstrip("\n")
+        if merged:
+            merged += "\n"
+        merged += new_entry
+    else:
+        end = len(lines)
+        for index in range(start + 1, len(lines)):
+            if lines[index].strip() and not lines[index][0].isspace() and not lines[index].lstrip().startswith("#"):
+                end = index
+                break
+        merged = "".join(lines[:start]) + new_entry + "".join(lines[end:])
+
+    descriptor, temporary = tempfile.mkstemp(
+        dir=os.path.dirname(destination),
+        prefix=".hosts.yml.",
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as file_obj:
+            file_obj.write(merged)
+            file_obj.flush()
+            os.fsync(file_obj.fileno())
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, destination)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    _chown_path(config, destination)
+    return True
+
+
 def copy_agent_tooling_payload(config: SetupConfig) -> None:
-    """Install uploaded config and credential payloads for selected agent tools."""
-    if not config.install_gh and not config.selected_agent_tools():
-        print("  No selected agent tools for config or credential copy")
+    """Install uploaded config and credential payloads, then remove the payload."""
+    if not os.path.isdir(REMOTE_AGENT_PAYLOAD_DIR):
+        print("  No agent configuration payload found")
         return
 
     if is_dry_run():
@@ -452,7 +476,7 @@ def copy_agent_tooling_payload(config: SetupConfig) -> None:
     user_home = _user_home(config)
 
     try:
-        if config.copy_agent_config and config.install_codex:
+        if config.install_codex:
             _copy_payload_directory(
                 config,
                 _payload_path("config", "codex"),
@@ -460,7 +484,7 @@ def copy_agent_tooling_payload(config: SetupConfig) -> None:
                 "Codex",
             )
 
-        if config.copy_agent_keys and config.install_codex:
+        if os.path.isfile(_payload_path("secrets", "codex", "auth.json")):
             _copy_secret_file(
                 config,
                 _payload_path("secrets", "codex", "auth.json"),
@@ -468,7 +492,7 @@ def copy_agent_tooling_payload(config: SetupConfig) -> None:
                 "Codex",
             )
 
-        if config.copy_agent_config and config.install_claude:
+        if config.install_claude:
             _copy_payload_directory(
                 config,
                 _payload_path("config", "claude"),
@@ -476,7 +500,7 @@ def copy_agent_tooling_payload(config: SetupConfig) -> None:
                 "Claude Code",
             )
 
-        if config.copy_agent_keys and config.install_claude:
+        if os.path.isfile(_payload_path("secrets", "claude", ".credentials.json")):
             _copy_secret_file(
                 config,
                 _payload_path("secrets", "claude", ".credentials.json"),
@@ -484,7 +508,7 @@ def copy_agent_tooling_payload(config: SetupConfig) -> None:
                 "Claude Code",
             )
 
-        if config.copy_agent_config and config.install_opencode:
+        if config.install_opencode:
             _copy_payload_directory(
                 config,
                 _payload_path("config", "opencode"),
@@ -492,7 +516,7 @@ def copy_agent_tooling_payload(config: SetupConfig) -> None:
                 "OpenCode",
             )
 
-        if config.copy_agent_keys and config.install_opencode:
+        if os.path.isfile(_payload_path("secrets", "opencode", "auth.json")):
             _copy_secret_file(
                 config,
                 _payload_path("secrets", "opencode", "auth.json"),
@@ -500,7 +524,7 @@ def copy_agent_tooling_payload(config: SetupConfig) -> None:
                 "OpenCode",
             )
 
-        if config.copy_agent_config and config.install_gh:
+        if config.install_gh:
             _copy_payload_directory(
                 config,
                 _payload_path("config", "gh"),
@@ -508,14 +532,9 @@ def copy_agent_tooling_payload(config: SetupConfig) -> None:
                 "GitHub CLI",
             )
 
-        if config.copy_agent_keys and config.install_gh:
-            copied = _copy_secret_file(
-                config,
-                _payload_path("secrets", "gh", "hosts.yml"),
-                os.path.join(user_home, ".config", "gh", "hosts.yml"),
-                "GitHub CLI",
-            )
-            if copied:
+        gh_credentials = _payload_path("secrets", "gh", "hosts.yml")
+        if config.install_gh and os.path.isfile(gh_credentials):
+            if _merge_github_credentials(config, gh_credentials):
                 _configure_github_git_credentials(config)
     finally:
         if os.path.isdir(REMOTE_AGENT_PAYLOAD_DIR):
@@ -523,60 +542,49 @@ def copy_agent_tooling_payload(config: SetupConfig) -> None:
             print("  Removed uploaded agent configuration payload")
 
 
-def install_agent_repositories(config: SetupConfig) -> None:
-    """Cache uploaded repositories and copy them into /home/USER/repos."""
-    if is_dry_run():
-        print("  [DRY-RUN] Would copy uploaded repositories to the setup user's repos directory")
+def clone_agent_repositories(config: SetupConfig) -> None:
+    """Clone requested HTTPS repositories as the target login user."""
+    if not config.agent_repos:
         return
-
-    staged_repo_names: list[str] = []
-    if os.path.isdir(REMOTE_AGENT_REPOS_DIR):
-        _ensure_agent_directory(AGENT_REPOS_CACHE_DIR)
-        os.chmod(AGENT_REPOS_CACHE_DIR, 0o700)
-        for repo_name in sorted(os.listdir(REMOTE_AGENT_REPOS_DIR)):
-            source = os.path.join(REMOTE_AGENT_REPOS_DIR, repo_name)
-            if os.path.islink(source) or not os.path.isdir(source):
-                raise RuntimeError(f"Unsafe uploaded agent repository: {source}")
-
-            destination = os.path.join(AGENT_REPOS_CACHE_DIR, repo_name)
-            _reject_symlinked_agent_destination(destination)
-            if os.path.lexists(destination):
-                if not os.path.isdir(destination):
-                    raise RuntimeError(f"Unsafe agent repository cache path: {destination}")
-                shutil.rmtree(destination)
-            shutil.copytree(source, destination, symlinks=True)
-            os.chmod(destination, 0o700)
-            staged_repo_names.append(repo_name)
-
-    if staged_repo_names:
-        source_root = AGENT_REPOS_CACHE_DIR
-        repo_names = staged_repo_names
-    elif os.path.isdir(AGENT_REPOS_CACHE_DIR):
-        source_root = AGENT_REPOS_CACHE_DIR
-        repo_names = sorted(os.listdir(source_root))
-    elif os.path.isdir(REMOTE_AGENT_REPOS_DIR):
-        source_root = REMOTE_AGENT_REPOS_DIR
-        repo_names = sorted(os.listdir(source_root))
-    else:
-        print("  No uploaded agent repositories found")
+    if is_dry_run():
+        for git_url in config.agent_repos:
+            print(f"  [DRY-RUN] Would clone {git_url} on the target VM")
         return
 
     repos_dir = os.path.join(_user_home(config), "repos")
     _reject_symlinked_agent_destination(repos_dir)
     _ensure_agent_directory(repos_dir)
     _chown_path(config, repos_dir)
-
-    for repo_name in repo_names:
-        source = os.path.join(source_root, repo_name)
-        if not os.path.isdir(source):
-            continue
-
+    for git_url in config.agent_repos:
+        repo_name = git_url.rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
         destination = os.path.join(repos_dir, repo_name)
         _reject_symlinked_agent_destination(destination)
         if os.path.lexists(destination):
-            print(f"  Skipping existing repository {destination} to avoid overwriting agent work")
+            if not os.path.isdir(destination):
+                raise RuntimeError(f"Repository destination is not a directory: {destination}")
+            result = _run_as_login_user(
+                config.username,
+                _user_home(config),
+                f"git -C {shlex.quote(destination)} remote get-url origin",
+                check=False,
+                capture_output=True,
+            )
+            actual_url = (result.stdout or "").strip().rstrip("/")
+            if result.returncode != 0 or actual_url != git_url.rstrip("/"):
+                raise RuntimeError(
+                    f"Existing repository {destination} has a different origin; refusing to overwrite it"
+                )
+            print(f"  Repository already present: {destination}")
             continue
 
-        shutil.copytree(source, destination, symlinks=True)
-        _chown_path(config, destination)
-        print(f"  Copied {repo_name} to {destination}")
+        result = _run_as_login_user(
+            config.username,
+            _user_home(config),
+            f"GIT_TERMINAL_PROMPT=0 git clone -- {shlex.quote(git_url)} {shlex.quote(destination)}",
+            check=False,
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "clone failed").strip()
+            raise RuntimeError(f"Failed to clone {git_url}: {detail}")
+        print(f"  Cloned {git_url} to {destination}")

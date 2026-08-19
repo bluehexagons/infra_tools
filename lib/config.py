@@ -28,7 +28,8 @@ CLI_SYSTEMS = [
     if system_type.include_cli_tools
 ]
 
-AGENT_SUITES = ("terminal", "desktop", "full")
+AGENT_TOOLS = ("gh", "codex", "claude", "opencode", "t3code")
+GIT_ACCESS_POLICIES = ("none", "read", "read-write")
 
 
 def _resolve_machine_type(
@@ -213,10 +214,19 @@ class SetupConfig:
     install_claude: bool = False
     install_opencode: bool = False
     install_t3code: bool = False
-    agent_suite: MaybeStr = None
+    agent_tools: Optional[StrList] = None
     copy_agent_keys: bool = False
     copy_agent_config: bool = False
     agent_repos: Optional[StrList] = None
+    git_access: str = "none"
+    git_host: str = "github.com"
+    git_auth_source: MaybeStr = None
+    git_auth_file: MaybeStr = None
+    git_auth_token: MaybeStr = None
+    agent_auth_source: MaybeStr = None
+    agent_auth_files: Optional[NestedStrList] = None
+    agent_config_source: MaybeStr = None
+    agent_payload: bool = False
     custom_steps: Optional[str] = None
     deploy_specs: Optional[NestedStrList] = None
     deployment_mode: str = "default"  # "default" (smart cache), "lite" (cached only), "full" (always fresh)
@@ -277,26 +287,32 @@ class SetupConfig:
         if self.deployment_mode == "full":
             self.full_deploy = True
 
-        if self.agent_suite:
-            if self.agent_suite not in AGENT_SUITES:
-                raise ValueError(
-                    f"agent_suite must be one of: {', '.join(AGENT_SUITES)}"
-                )
-            self.install_gh = True
-            self.install_codex = True
-            self.install_claude = True
-            self.install_opencode = True
-            if self.agent_suite in {"desktop", "full"}:
-                self.install_t3code = True
-            if self.agent_suite == "full":
-                self.install_node = True
-                self.install_python = True
-                self.install_go = True
+        if self.git_access not in GIT_ACCESS_POLICIES:
+            raise ValueError(
+                f"git_access must be one of: {', '.join(GIT_ACCESS_POLICIES)}"
+            )
+        if not isinstance(self.git_host, str) or not self.git_host or any(
+            character.isspace() or ord(character) < 32 for character in self.git_host
+        ):
+            raise ValueError("git_host must be a non-empty hostname")
+
+        selected = list(self.agent_tools or [])
+        for tool in selected:
+            if tool not in AGENT_TOOLS:
+                raise ValueError(f"Unsupported agent tool: {tool}")
+        selected = list(dict.fromkeys(selected))
+        self.agent_tools = selected or None
+        self.install_gh = "gh" in selected or self.install_gh
+        self.install_codex = "codex" in selected or self.install_codex
+        self.install_claude = "claude" in selected or self.install_claude
+        self.install_opencode = "opencode" in selected or self.install_opencode
+        self.install_t3code = "t3code" in selected or self.install_t3code
 
     def selected_agent_tools(self) -> StrList:
         """Return selected coding agents in stable display/install order."""
         tools: StrList = []
         for name, enabled in (
+            ("gh", self.install_gh),
             ("codex", self.install_codex),
             ("claude", self.install_claude),
             ("opencode", self.install_opencode),
@@ -412,26 +428,15 @@ class SetupConfig:
         if self.install_python:
             args.append("--python")
 
-        if self.install_gh:
-            args.append("--gh")
+        for tool in self.selected_agent_tools():
+            args.append(f"--agent-tool {shlex.quote(tool)}")
 
-        if self.install_codex:
-            args.append("--codex")
-
-        if self.install_claude:
-            args.append("--claude")
-
-        if self.install_opencode:
-            args.append("--opencode")
-
-        if self.install_t3code:
-            args.append("--t3code")
-
-        if self.copy_agent_keys:
-            args.append("--copy-keys")
-
-        if self.copy_agent_config:
-            args.append("--copy-config")
+        if self.git_access != "none":
+            args.append(f"--git-access {shlex.quote(self.git_access)}")
+        if self.git_host != "github.com":
+            args.append(f"--git-host {shlex.quote(self.git_host)}")
+        if self.copy_agent_config or self.copy_agent_keys or self.agent_payload:
+            args.append("--agent-payload")
 
         if self.agent_repos:
             for git_url in self.agent_repos:
@@ -724,26 +729,13 @@ class SetupConfig:
         if self.install_python:
             cmd_parts.append("--python")
 
-        if self.install_gh:
-            cmd_parts.append("--gh")
+        for tool in self.selected_agent_tools():
+            cmd_parts.append(f"--agent-tool {shlex.quote(tool)}")
 
-        if self.install_codex:
-            cmd_parts.append("--codex")
-
-        if self.install_claude:
-            cmd_parts.append("--claude")
-
-        if self.install_opencode:
-            cmd_parts.append("--opencode")
-
-        if self.install_t3code:
-            cmd_parts.append("--t3code")
-
-        if self.copy_agent_keys:
-            cmd_parts.append("--copy-keys")
-
-        if self.copy_agent_config:
-            cmd_parts.append("--copy-config")
+        if self.git_access != "none":
+            cmd_parts.append(f"--git-access {shlex.quote(self.git_access)}")
+        if self.git_host != "github.com":
+            cmd_parts.append(f"--git-host {shlex.quote(self.git_host)}")
 
         if self.agent_repos:
             for git_url in self.agent_repos:
@@ -905,6 +897,27 @@ class SetupConfig:
         data.pop('password', None)
         data.pop('share_credentials', None)
         data.pop('deploy_latest', None)
+        for transient_field in (
+            'copy_agent_keys',
+            'copy_agent_config',
+            'git_auth_source',
+            'git_auth_file',
+            'git_auth_token',
+            'agent_auth_source',
+            'agent_auth_files',
+            'agent_config_source',
+            'agent_payload',
+        ):
+            data.pop(transient_field, None)
+        for legacy_field in (
+            'install_gh',
+            'install_codex',
+            'install_claude',
+            'install_opencode',
+            'install_t3code',
+        ):
+            data.pop(legacy_field, None)
+        data['agent_tools'] = self.selected_agent_tools() or None
         # Live activation is a one-shot controller operation. Persisting it
         # would make a later deploy retry a sensitive address change without
         # the operator explicitly requesting another handoff.
@@ -1035,6 +1048,24 @@ class SetupConfig:
         if auto_restart_grace is None:
             auto_restart_grace = 5
         auto_restart_grace = _validate_non_negative_int('auto_restart_grace', auto_restart_grace)
+
+        raw_agent_tools = getattr(args, 'agent_tools', None)
+        agent_tools = raw_agent_tools if isinstance(raw_agent_tools, list) else None
+        raw_agent_repos = getattr(args, 'agent_repos', None)
+        agent_repos = raw_agent_repos if isinstance(raw_agent_repos, list) else None
+        raw_git_access = getattr(args, 'git_access', 'none')
+        git_access = raw_git_access if raw_git_access in GIT_ACCESS_POLICIES else 'none'
+        raw_git_host = getattr(args, 'git_host', 'github.com')
+        git_host = raw_git_host if isinstance(raw_git_host, str) else 'github.com'
+        raw_agent_auth_files = getattr(args, 'agent_auth_files', None)
+        agent_auth_files = (
+            raw_agent_auth_files if isinstance(raw_agent_auth_files, list) else None
+        )
+        git_auth_source = _optional_str_arg(args, 'git_auth_source')
+        git_auth_file = _optional_str_arg(args, 'git_auth_file')
+        git_auth_token = _optional_str_arg(args, 'git_auth_token')
+        agent_auth_source = _optional_str_arg(args, 'agent_auth_source')
+        agent_config_source = _optional_str_arg(args, 'agent_config_source')
         
         return cls(
             host=args.host,
@@ -1078,15 +1109,25 @@ class SetupConfig:
             install_go=getattr(args, 'install_go', False),
             install_node=getattr(args, 'install_node', False),
             install_python=getattr(args, 'install_python', False),
-            install_gh=getattr(args, 'install_gh', False),
-            install_codex=getattr(args, 'install_codex', False),
-            install_claude=getattr(args, 'install_claude', False),
-            install_opencode=getattr(args, 'install_opencode', False),
-            install_t3code=getattr(args, 'install_t3code', False),
-            agent_suite=_optional_str_arg(args, 'agent_suite'),
-            copy_agent_keys=getattr(args, 'copy_agent_keys', False),
-            copy_agent_config=getattr(args, 'copy_agent_config', False),
-            agent_repos=getattr(args, 'agent_repos', None),
+            agent_tools=agent_tools,
+            copy_agent_keys=bool(
+                git_auth_source
+                or git_auth_file
+                or git_auth_token
+                or agent_auth_source
+                or agent_auth_files
+            ),
+            copy_agent_config=bool(agent_config_source),
+            agent_repos=agent_repos,
+            git_access=git_access,
+            git_host=git_host,
+            git_auth_source=git_auth_source,
+            git_auth_file=git_auth_file,
+            git_auth_token=git_auth_token,
+            agent_auth_source=agent_auth_source,
+            agent_auth_files=agent_auth_files,
+            agent_config_source=agent_config_source,
+            agent_payload=_optional_bool_arg(args, 'agent_payload') is True,
             custom_steps=getattr(args, 'custom_steps', None),
             deploy_specs=getattr(args, 'deploy_specs', None),
             deployment_mode=getattr(args, 'deployment_mode', 'default'),

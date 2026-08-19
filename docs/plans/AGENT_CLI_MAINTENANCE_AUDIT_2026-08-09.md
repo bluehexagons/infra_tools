@@ -16,7 +16,8 @@ The recommended CLI-only profile is now:
 
 ```bash
 infra-tools setup server_dev 10.0.0.10 agent \
-  --agent-suite terminal --copy-config \
+  --agent-tool gh --agent-tool codex --agent-tool claude --agent-tool opencode \
+  --agent-config active --git-access read \
   --repo https://github.com/user/project.git
 ```
 
@@ -24,10 +25,9 @@ infra-tools setup server_dev 10.0.0.10 agent \
 the firewall and generic CLI bundle, so it should be selected only when that
 lighter security/packaging boundary is intentional.
 
-The `terminal` suite enables GitHub CLI, Codex CLI, Claude Code, OpenCode, and
-the shared coding-tool package set. It does not implicitly install Node, Python
-tooling, or Go; those are part of `--agent-suite full` or their individual
-runtime flags.
+The explicit `--agent-tool` flags enable GitHub CLI, Codex CLI, Claude Code, and
+OpenCode. No common coding-tool package set or language runtime is implicit;
+add packages and runtimes with their individual flags.
 
 ## Maintenance currently applied
 
