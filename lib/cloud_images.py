@@ -110,7 +110,7 @@ def is_local_image_ref(ref: str) -> bool:
 def parse_image_argument(value: Optional[str]) -> tuple[Optional[str], Optional[str]]:
     """Split ``--image`` into ``(url, storage_ref)``.
 
-    Returns a ``(url, None)`` tuple when ``value`` is an http(s) URL, a
+    Returns a ``(url, None)`` tuple when ``value`` is an HTTPS URL, a
     ``(None, storage_ref)`` tuple when it looks like ``storage:import/foo.qcow2``
     or ``storage:iso/foo.img``,
     or ``(None, None)`` when ``value`` is empty.
@@ -118,7 +118,7 @@ def parse_image_argument(value: Optional[str]) -> tuple[Optional[str], Optional[
     if not value:
         return None, None
     stripped = value.strip()
-    if stripped.startswith("http://") or stripped.startswith("https://"):
+    if stripped.startswith("https://"):
         return stripped, None
     if is_local_image_ref(stripped):
         _, _, volume = stripped.partition(":")
@@ -133,6 +133,6 @@ def parse_image_argument(value: Optional[str]) -> tuple[Optional[str], Optional[
         return None, stripped
     raise ValueError(
         f"Invalid --image value: {value!r}. "
-        "Expected an http(s) URL or a Proxmox storage reference like "
+        "Expected an https:// URL or a Proxmox storage reference like "
         "'local:import/foo.qcow2'."
     )

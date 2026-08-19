@@ -60,6 +60,9 @@ placed through Proxmox storage APIs. By default, image staging prefers an
 active file-based storage with `import` content and falls back to `iso` content;
 use `--image-storage STORAGE` to choose the source storage explicitly. The
 selected node must also have active `snippets` content for cloud-init data.
+Custom VM image URLs must use HTTPS and include a matching 128-character
+SHA-512 value with `--image-sha512`; the curated Debian catalog carries pinned
+hashes automatically.
 
 ## Host-safety defaults
 

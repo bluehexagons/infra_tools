@@ -106,8 +106,9 @@ tools, not for an LXC container.
 | `--control-plane` | Add the common administrator/Linux tool bundle to any profile |
 | `--name NAME` | Friendly name for the configuration |
 | `--tags TAG1,TAG2` | Comma-separated tags |
-| `--image SOURCE` | VM qcow2 URL or `STORAGE:import/FILE` / `STORAGE:iso/FILE` reference; used with `--machine vm` |
+| `--image SOURCE` | VM HTTPS qcow2 URL or `STORAGE:import/FILE` / `STORAGE:iso/FILE` reference; used with `--machine vm` |
 | `--image-storage STORAGE` | Storage for downloaded VM images; prefers `import`, then falls back to `iso` content |
+| `--image-sha512 HEX` | Required 128-character SHA-512 for a custom HTTPS VM image URL |
 | `--steps STEP...` | Run an explicit space-separated step list with `custom_steps` |
 | `--dry-run` | Validate the setup and print its step plan without executing commands or changing target files |
 | `--auto-restart` / `--no-auto-restart` | Control normal automatic restarts |

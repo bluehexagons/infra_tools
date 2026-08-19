@@ -12,21 +12,29 @@ import os
 import sys
 import json
 import subprocess
-import platform
 import glob
 import re
 import shutil
+import tempfile
 from typing import Optional, Any
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
 from lib.types import StrDict, JSONDict
-from lib.atomic_io import write_json_atomic
+from lib.atomic_io import write_json_atomic, write_text_atomic
+from lib.validators import validate_host
 
 
 CONFIG_DIR = "/etc/cloudflared"
 STATE_FILE = "/etc/cloudflared/tunnel-state.json"
 NGINX_SITES_DIR = "/etc/nginx/sites-enabled"
+CLOUDFLARE_APT_KEY_URL = "https://pkg.cloudflare.com/cloudflare-main.gpg"
+CLOUDFLARE_APT_KEYRING = "/usr/share/keyrings/cloudflare-main.gpg"
+CLOUDFLARE_APT_SOURCE = "/etc/apt/sources.list.d/cloudflared.list"
+CLOUDFLARE_APT_SOURCE_CONTENT = (
+    "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] "
+    "https://pkg.cloudflare.com/cloudflared any main\n"
+)
 
 
 def run_command(cmd: list[str], check: bool = True, capture_output: bool = False) -> subprocess.CompletedProcess[str]:
@@ -57,42 +65,50 @@ def check_root():
         sys.exit(1)
 
 
-def detect_architecture() -> str:
-    """Detect system architecture and return appropriate package name."""
-    arch = platform.machine()
-    
-    arch_map = {
-        'x86_64': 'cloudflared-linux-amd64.deb',
-        'aarch64': 'cloudflared-linux-arm64.deb',
-        'arm64': 'cloudflared-linux-arm64.deb',
-        'armv7l': 'cloudflared-linux-arm.deb',
-    }
-    
-    package = arch_map.get(arch)
-    if not package:
-        print(f"✗ Unsupported architecture: {arch}")
-        sys.exit(1)
-    
-    return package
-
-
 def install_cloudflared():
-    """Install cloudflared if not already installed."""
+    """Install cloudflared from Cloudflare's signed APT repository."""
     if shutil.which('cloudflared'):
         print("✓ cloudflared already installed")
         return
-    
+
     print("Installing cloudflared...")
-    package = detect_architecture()
-    url = f"https://github.com/cloudflare/cloudflared/releases/latest/download/{package}"
-    
-    print(f"  Downloading {package}...")
-    run_command(['wget', '-q', url])
-    
-    print("  Installing package...")
-    run_command(['dpkg', '-i', package])
-    
-    os.remove(package)
+
+    # The old release download used a floating URL and wrote into the current
+    # directory before invoking dpkg.  Use Cloudflare's signed repository so
+    # APT verifies the package and no attacker-controlled working directory is
+    # involved.
+    run_command(["apt-get", "update"])
+    run_command(["apt-get", "install", "-y", "ca-certificates", "curl"])
+    os.makedirs(os.path.dirname(CLOUDFLARE_APT_KEYRING), mode=0o755, exist_ok=True)
+
+    file_descriptor, temporary_key = tempfile.mkstemp(
+        prefix=".cloudflare-main-",
+        dir=os.path.dirname(CLOUDFLARE_APT_KEYRING),
+    )
+    os.close(file_descriptor)
+    try:
+        run_command([
+            "curl",
+            "--fail",
+            "--silent",
+            "--show-error",
+            "--location",
+            "--proto",
+            "=https",
+            "--tlsv1.2",
+            "--output",
+            temporary_key,
+            CLOUDFLARE_APT_KEY_URL,
+        ])
+        os.chmod(temporary_key, 0o644)
+        os.replace(temporary_key, CLOUDFLARE_APT_KEYRING)
+    finally:
+        if os.path.exists(temporary_key):
+            os.unlink(temporary_key)
+
+    write_text_atomic(CLOUDFLARE_APT_SOURCE, CLOUDFLARE_APT_SOURCE_CONTENT, mode=0o644)
+    run_command(["apt-get", "update"])
+    run_command(["apt-get", "install", "-y", "cloudflared"])
     print("✓ cloudflared installed successfully")
 
 
@@ -166,6 +182,7 @@ def create_tunnel(tunnel_name: str) -> dict[str, Any]:
 def discover_nginx_sites() -> list[StrDict]:
     """Discover sites from nginx configuration."""
     sites: list[StrDict] = []
+    seen: set[tuple[str, str]] = set()
     
     if not os.path.exists(NGINX_SITES_DIR):
         print(f"  ⚠ Nginx sites directory not found: {NGINX_SITES_DIR}")
@@ -191,11 +208,19 @@ def discover_nginx_sites() -> list[StrDict]:
             for match in server_name_matches:
                 domains = match.strip().split()
                 for domain in domains:
-                    if domain and domain != '_' and not domain.startswith('*'):
-                        sites.append({
-                            'hostname': domain,
-                            'service': 'http://localhost:80'
-                        })
+                    if not domain or domain == '_' or domain.startswith('*'):
+                        continue
+                    if not validate_host(domain):
+                        print(f"  ⚠ Skipping invalid Nginx hostname: {domain}")
+                        continue
+                    site = {
+                        'hostname': domain,
+                        'service': 'http://localhost:80'
+                    }
+                    site_key = (domain.lower(), site['service'])
+                    if site_key not in seen:
+                        sites.append(site)
+                        seen.add(site_key)
         except Exception as e:
             print(f"  ⚠ Error reading {target}: {e}")
     
@@ -204,16 +229,29 @@ def discover_nginx_sites() -> list[StrDict]:
 
 def generate_config_yml(tunnel: JSONDict, sites: list[StrDict]) -> str:
     """Generate cloudflared config.yml content."""
+    tunnel_id = tunnel.get('id')
+    credentials_file = tunnel.get('credentials_file')
+    if not isinstance(tunnel_id, str) or not tunnel_id:
+        raise ValueError("Tunnel state is missing a tunnel ID")
+    if not isinstance(credentials_file, str) or not os.path.isabs(credentials_file):
+        raise ValueError("Tunnel state must contain an absolute credentials path")
+
     config_lines = [
-        f"tunnel: {tunnel['id']}",
-        f"credentials-file: {tunnel['credentials_file']}",
+        f"tunnel: {json.dumps(tunnel_id)}",
+        f"credentials-file: {json.dumps(credentials_file)}",
         "",
         "ingress:"
     ]
-    
+
     for site in sites:
-        config_lines.append(f"  - hostname: {site['hostname']}")
-        config_lines.append(f"    service: {site['service']}")
+        hostname = site.get('hostname')
+        service = site.get('service')
+        if not isinstance(hostname, str) or not validate_host(hostname):
+            raise ValueError(f"Invalid tunnel hostname: {hostname!r}")
+        if service != 'http://localhost:80':
+            raise ValueError(f"Unsupported tunnel origin service: {service!r}")
+        config_lines.append(f"  - hostname: {json.dumps(hostname)}")
+        config_lines.append(f"    service: {json.dumps(service)}")
     
     config_lines.append("  - service: http_status:404")
     config_lines.append("")
@@ -237,16 +275,110 @@ def load_state() -> Optional[dict[str, Any]]:
     """Load saved tunnel state."""
     if not os.path.exists(STATE_FILE):
         return None
-    
+
     try:
         with open(STATE_FILE, 'r') as f:
-            return json.load(f)
+            state = json.load(f)
     except Exception as e:
-        print(f"  ⚠ Error loading state file: {e}")
-        return None
+        raise ValueError(f"Could not load Cloudflare tunnel state: {e}") from e
+
+    if not isinstance(state, dict):
+        raise ValueError("Cloudflare tunnel state must be a JSON object")
+    tunnel = state.get('tunnel')
+    if not isinstance(tunnel, dict):
+        raise ValueError("Cloudflare tunnel state is missing its tunnel object")
+    for key in ('name', 'id', 'credentials_file'):
+        if not isinstance(tunnel.get(key), str) or not tunnel[key]:
+            raise ValueError(f"Cloudflare tunnel state has an invalid {key}")
+    if not os.path.isabs(tunnel['credentials_file']):
+        raise ValueError("Cloudflare tunnel credentials path must be absolute")
+
+    sites = state.get('sites')
+    if not isinstance(sites, list):
+        raise ValueError("Cloudflare tunnel state is missing its sites list")
+    for site in sites:
+        if not isinstance(site, dict):
+            raise ValueError("Cloudflare tunnel state contains an invalid site")
+        if not isinstance(site.get('hostname'), str) or not validate_host(site['hostname']):
+            raise ValueError("Cloudflare tunnel state contains an invalid hostname")
+        if site.get('service') != 'http://localhost:80':
+            raise ValueError("Cloudflare tunnel state contains an unsupported origin")
+    return state
 
 
-def install_and_start_service(tunnel_name: str):
+def _write_config_file(config_file: str, content: str) -> None:
+    """Validate a generated config before atomically installing it."""
+    os.makedirs(os.path.dirname(config_file), mode=0o755, exist_ok=True)
+    file_descriptor, temporary_path = tempfile.mkstemp(
+        prefix=".cloudflared-config-",
+        dir=os.path.dirname(config_file),
+        text=True,
+    )
+    os.close(file_descriptor)
+    try:
+        write_text_atomic(temporary_path, content, mode=0o600)
+        result = run_command(
+            ['cloudflared', 'tunnel', 'ingress', 'validate', '--config', temporary_path],
+            check=False,
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or '').strip()
+            raise ValueError(
+                f"cloudflared rejected the generated configuration: {detail or 'validation failed'}"
+            )
+        os.replace(temporary_path, config_file)
+        os.chmod(config_file, 0o600)
+    finally:
+        if os.path.exists(temporary_path):
+            os.unlink(temporary_path)
+
+
+def _config_is_valid(config_file: str) -> bool:
+    """Return whether an existing config still passes cloudflared validation."""
+    if not os.path.isfile(config_file):
+        return False
+    result = run_command(
+        ['cloudflared', 'tunnel', 'ingress', 'validate', '--config', config_file],
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or '').strip()
+        print(f"  ⚠ Existing Cloudflare config is invalid: {detail or 'validation failed'}")
+        return False
+    return True
+
+
+def _ensure_service_running() -> bool:
+    """Start the installed service when possible and verify it is active."""
+    result = run_command(
+        ['systemctl', 'is-active', 'cloudflared'],
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        result = run_command(
+            ['systemctl', 'enable', '--now', 'cloudflared'],
+            check=False,
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or '').strip()
+            print(f"  ⚠ Cloudflared service is not running: {detail or 'start failed'}")
+            return False
+        result = run_command(
+            ['systemctl', 'is-active', 'cloudflared'],
+            check=False,
+            capture_output=True,
+        )
+    if result.returncode != 0:
+        print("  ⚠ Cloudflared service did not become active")
+        return False
+    return True
+
+
+def install_and_start_service():
     """Install and start the cloudflared service."""
     print("\nInstalling cloudflared service...")
     
@@ -289,43 +421,42 @@ def main(interactive: bool = True, auto_update: bool = False):
         print()
     
     check_root()
-    
-    install_cloudflared()
-    
+
     state = load_state()
-    
     if not interactive:
         if not state:
             return False
-        
+
+    install_cloudflared()
+
+    if not interactive:
         tunnel = state['tunnel']
         sites = discover_nginx_sites()
-        
         if not sites:
             return False
-        
+
         old_sites = state.get('sites', [])
-        old_hostnames = set(s['hostname'] for s in old_sites)
-        new_hostnames = set(s['hostname'] for s in sites)
-        
-        if old_hostnames == new_hostnames:
-            return True
-        
-        config_content = generate_config_yml(tunnel, sites)
+        old_site_keys = {
+            (site['hostname'].lower(), site['service'])
+            for site in old_sites
+        }
+        new_site_keys = {
+            (site['hostname'].lower(), site['service'])
+            for site in sites
+        }
         config_file = f"{CONFIG_DIR}/config.yml"
-        
-        with open(config_file, 'w') as f:
-            f.write(config_content)
-        
-        os.chmod(config_file, 0o600)
-        
-        save_state(tunnel, sites)
-        
-        result = run_command(['systemctl', 'is-active', 'cloudflared'], check=False, capture_output=True)
-        if result.returncode == 0:
-            run_command(['systemctl', 'restart', 'cloudflared'], check=False)
-        
-        return True
+        config_needs_update = (
+            old_site_keys != new_site_keys
+            or not _config_is_valid(config_file)
+            or not os.path.isfile(tunnel['credentials_file'])
+        )
+
+        if config_needs_update:
+            config_content = generate_config_yml(tunnel, sites)
+            _write_config_file(config_file, config_content)
+            save_state(tunnel, sites)
+
+        return _ensure_service_running()
     
     # Interactive mode falls through to show configuration and return True on success
     if state:
@@ -395,12 +526,17 @@ def main(interactive: bool = True, auto_update: bool = False):
         
         manual = input("Add a site manually? (y/n): ").strip().lower()
         if manual == 'y':
-            hostname = input("Enter hostname (e.g., example.com): ").strip()
-            if hostname:
-                sites.append({
-                    'hostname': hostname,
-                    'service': 'http://localhost:80'
-                })
+            while True:
+                hostname = input("Enter hostname (e.g., example.com): ").strip()
+                if not hostname:
+                    break
+                if validate_host(hostname):
+                    sites.append({
+                        'hostname': hostname,
+                        'service': 'http://localhost:80'
+                    })
+                    break
+                print("✗ Invalid hostname; enter a DNS hostname such as example.com")
     
     if not sites:
         print("\n✗ No sites configured. Exiting.")
@@ -412,10 +548,7 @@ def main(interactive: bool = True, auto_update: bool = False):
     config_file = f"{CONFIG_DIR}/config.yml"
     
     print(f"\nWriting configuration to {config_file}...")
-    with open(config_file, 'w') as f:
-        f.write(config_content)
-    
-    os.chmod(config_file, 0o600)
+    _write_config_file(config_file, config_content)
     print("✓ Configuration file created")
     
     save_state(tunnel, sites)
@@ -425,7 +558,7 @@ def main(interactive: bool = True, auto_update: bool = False):
     proceed = input("Install and start the tunnel service? (y/n): ").strip().lower()
     
     if proceed == 'y':
-        install_and_start_service(tunnel['name'])
+        install_and_start_service()
         
         print("\n" + "=" * 50)
         print("Setup Complete!")

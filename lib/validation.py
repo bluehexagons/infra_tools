@@ -1077,11 +1077,14 @@ def validate_hosted_flags(config: Any) -> None:
     """
     balloon_min = getattr(config, "vm_balloon_min", None)
     image_storage = getattr(config, "vm_image_storage", None)
+    image_sha512 = getattr(config, "vm_image_sha512", None)
     if not config.hosted_node:
         if balloon_min:
             raise ValueError("--balloon-min requires --provision-on")
         if image_storage:
             raise ValueError("--image-storage requires --provision-on")
+        if image_sha512:
+            raise ValueError("--image-sha512 requires --provision-on")
         return
 
     from lib.validators import validate_host
@@ -1218,12 +1221,25 @@ def validate_hosted_flags(config: Any) -> None:
                 )
         if vm_image:
             _image_url, image_storage_ref = parse_image_argument(vm_image)
+            if _image_url:
+                if not image_sha512:
+                    raise ValueError(
+                        "Custom VM image URLs require --image-sha512 for integrity verification"
+                    )
+                if not re.fullmatch(r"[0-9A-Fa-f]{128}", str(image_sha512)):
+                    raise ValueError("--image-sha512 must be exactly 128 hexadecimal characters")
+            elif image_sha512:
+                raise ValueError(
+                    "--image-sha512 applies only to downloaded VM image URLs"
+                )
             if image_storage and image_storage_ref:
                 raise ValueError(
                     "--image-storage applies to downloaded VM images; omit it "
                     "when --image is already a Proxmox storage reference"
                 )
         else:
+            if image_sha512:
+                raise ValueError("--image-sha512 requires --image")
             base = getattr(config, "container_base", None) or "debian"
             resolve_cloud_image(base)
     else:

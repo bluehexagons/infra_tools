@@ -6,12 +6,16 @@ import os
 import sys
 import unittest
 from types import SimpleNamespace
+from tempfile import TemporaryDirectory
 from unittest.mock import call, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from lib.config import SetupConfig
-from web.cloudflare_steps import configure_cloudflare_firewall
+from web.cloudflare_steps import (
+    configure_cloudflare_firewall,
+    configure_nginx_for_cloudflare,
+)
 
 
 def _make_config(antistatic_server: str | None = None) -> SetupConfig:
@@ -36,7 +40,9 @@ class TestConfigureCloudflareFirewall(unittest.TestCase):
                 call("ufw status 2>/dev/null | grep -q 'Status: active'", check=False),
                 call("ufw default deny incoming"),
                 call("ufw default allow outgoing"),
-                call("ufw allow ssh"),
+                call("ufw delete allow ssh", check=False),
+                call("ufw delete allow 22/tcp", check=False),
+                call("ufw limit ssh"),
                 call("ufw delete allow 80/tcp", check=False),
                 call("ufw delete allow 443/tcp", check=False),
                 call("ufw delete allow 80", check=False),
@@ -59,7 +65,9 @@ class TestConfigureCloudflareFirewall(unittest.TestCase):
                 call("ufw status 2>/dev/null | grep -q 'Status: active'", check=False),
                 call("ufw default deny incoming"),
                 call("ufw default allow outgoing"),
-                call("ufw allow ssh"),
+                call("ufw delete allow ssh", check=False),
+                call("ufw delete allow 22/tcp", check=False),
+                call("ufw limit ssh"),
                 call("ufw delete allow 80/tcp", check=False),
                 call("ufw delete allow 443/tcp", check=False),
                 call("ufw delete allow 80", check=False),
@@ -69,6 +77,40 @@ class TestConfigureCloudflareFirewall(unittest.TestCase):
                 call("ufw --force enable"),
             ]
         )
+
+
+class TestConfigureNginxForCloudflare(unittest.TestCase):
+    @patch("web.cloudflare_steps.run")
+    def test_validates_and_reloads_generated_config(self, mock_run):
+        mock_run.return_value = SimpleNamespace(returncode=0, stdout="", stderr="")
+        with TemporaryDirectory() as tmp:
+            conf_path = os.path.join(tmp, "cloudflare.conf")
+            with patch("web.cloudflare_steps.NGINX_CLOUDFLARE_CONF", conf_path), \
+                    patch("web.cloudflare_steps.NGINX_CLOUDFLARE_CONF_DIR", tmp):
+                configure_nginx_for_cloudflare(_make_config())
+
+            with open(conf_path, encoding="utf-8") as generated:
+                self.assertIn("set_real_ip_from", generated.read())
+        mock_run.assert_has_calls([
+            call("nginx -t", check=False, capture_output=True),
+            call("systemctl reload nginx", check=False, capture_output=True),
+        ])
+
+    @patch("web.cloudflare_steps.run")
+    def test_restores_previous_config_when_validation_fails(self, mock_run):
+        mock_run.return_value = SimpleNamespace(
+            returncode=1, stdout="", stderr="invalid config"
+        )
+        with TemporaryDirectory() as tmp:
+            conf_path = os.path.join(tmp, "cloudflare.conf")
+            with open(conf_path, "w", encoding="utf-8") as existing:
+                existing.write("old config\n")
+            with patch("web.cloudflare_steps.NGINX_CLOUDFLARE_CONF", conf_path), \
+                    patch("web.cloudflare_steps.NGINX_CLOUDFLARE_CONF_DIR", tmp):
+                with self.assertRaisesRegex(RuntimeError, "rejected"):
+                    configure_nginx_for_cloudflare(_make_config())
+            with open(conf_path, encoding="utf-8") as restored:
+                self.assertEqual(restored.read(), "old config\n")
 
 
 if __name__ == "__main__":

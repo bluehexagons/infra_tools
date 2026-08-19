@@ -646,6 +646,7 @@ class _MockConfig:
         self.container_storage = kwargs.get('container_storage')
         self.container_cores = kwargs.get('container_cores', 1)
         self.vm_image = kwargs.get('vm_image')
+        self.vm_image_sha512 = kwargs.get('vm_image_sha512')
         self.vm_image_storage = kwargs.get('vm_image_storage')
 
 
@@ -740,6 +741,41 @@ class TestValidateHostedFlags(unittest.TestCase):
             with open(config.ssh_key + '.pub', 'w', encoding='utf-8') as pubkey:
                 pubkey.write('ssh-ed25519 AAAA test\n')
             with self.assertRaisesRegex(ValueError, r'applies to downloaded'):
+                validate_hosted_flags(config)
+
+    def test_custom_vm_image_requires_sha512(self):
+        config = _MockConfig(
+            machine_type='vm',
+            hosted_node='10.0.0.1',
+            container_memory='2G',
+            container_storage=[['root', 'auto', '10G']],
+            vm_image='https://example.com/custom.qcow2',
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            config.ssh_key = os.path.join(tmp, 'id_test')
+            with open(config.ssh_key, 'w', encoding='utf-8') as private_key:
+                private_key.write('private')
+            with open(config.ssh_key + '.pub', 'w', encoding='utf-8') as pubkey:
+                pubkey.write('ssh-ed25519 AAAA test\n')
+            with self.assertRaisesRegex(ValueError, r'require --image-sha512'):
+                validate_hosted_flags(config)
+
+    def test_custom_vm_image_rejects_invalid_sha512(self):
+        config = _MockConfig(
+            machine_type='vm',
+            hosted_node='10.0.0.1',
+            container_memory='2G',
+            container_storage=[['root', 'auto', '10G']],
+            vm_image='https://example.com/custom.qcow2',
+            vm_image_sha512='not-a-hash',
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            config.ssh_key = os.path.join(tmp, 'id_test')
+            with open(config.ssh_key, 'w', encoding='utf-8') as private_key:
+                private_key.write('private')
+            with open(config.ssh_key + '.pub', 'w', encoding='utf-8') as pubkey:
+                pubkey.write('ssh-ed25519 AAAA test\n')
+            with self.assertRaisesRegex(ValueError, r'128 hexadecimal'):
                 validate_hosted_flags(config)
 
     def test_missing_memory(self):

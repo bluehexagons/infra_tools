@@ -5,8 +5,13 @@ from __future__ import annotations
 import os
 import shlex
 
+from lib.atomic_io import write_text_atomic
 from lib.config import SetupConfig
 from lib.remote_utils import run
+
+
+NGINX_CLOUDFLARE_CONF = "/etc/nginx/conf.d/cloudflare.conf"
+NGINX_CLOUDFLARE_CONF_DIR = "/etc/nginx/conf.d"
 
 
 def _allow_antistatic_direct_access_for_cloudflare(config: SetupConfig) -> bool:
@@ -45,7 +50,11 @@ def configure_cloudflare_firewall(config: SetupConfig) -> None:
 
     run("ufw default deny incoming")
     run("ufw default allow outgoing")
-    run("ufw allow ssh")
+    # Remove the unrestricted rules a prior version created before applying
+    # UFW's SSH rate limit.  This preserves the intended brute-force control.
+    run("ufw delete allow ssh", check=False)
+    run("ufw delete allow 22/tcp", check=False)
+    run("ufw limit ssh")
 
     # Explicitly remove web ports if they were added by previous steps
     run("ufw delete allow 80/tcp", check=False)
@@ -85,23 +94,45 @@ def create_cloudflared_config_directory(config: SetupConfig) -> None:
 
 def configure_nginx_for_cloudflare(config: SetupConfig) -> None:
     """Configure nginx to trust Cloudflare IPs and use real visitor IPs."""
-    cloudflare_conf = "/etc/nginx/conf.d/cloudflare.conf"
-    
+    del config
+    cloudflare_conf = NGINX_CLOUDFLARE_CONF
+    previous_config = None
     if os.path.exists(cloudflare_conf):
-        print("  ✓ Nginx already configured for Cloudflare")
-        return
-    
+        with open(cloudflare_conf, 'r', encoding='utf-8') as f:
+            previous_config = f.read()
+
     config_template_dir = os.path.join(os.path.dirname(__file__), '..', 'web', 'config')
     template_path = os.path.join(config_template_dir, 'cloudflare_ips.conf')
     with open(template_path, 'r', encoding='utf-8') as f:
         cloudflare_config = f.read()
-    
-    os.makedirs("/etc/nginx/conf.d", exist_ok=True)
-    
-    with open(cloudflare_conf, "w") as f:
-        f.write(cloudflare_config)
-    
-    print("  ✓ Nginx configured to trust Cloudflare IPs")
+
+    os.makedirs(NGINX_CLOUDFLARE_CONF_DIR, exist_ok=True)
+    write_text_atomic(cloudflare_conf, cloudflare_config, mode=0o644)
+
+    validation = run("nginx -t", check=False, capture_output=True)
+    if validation.returncode != 0:
+        if previous_config is None:
+            os.unlink(cloudflare_conf)
+        else:
+            write_text_atomic(cloudflare_conf, previous_config, mode=0o644)
+        detail = getattr(validation, "stderr", "") or getattr(validation, "stdout", "")
+        raise RuntimeError(
+            f"Nginx rejected the Cloudflare configuration: {detail.strip() or 'nginx -t failed'}"
+        )
+
+    reload_result = run("systemctl reload nginx", check=False, capture_output=True)
+    if reload_result.returncode != 0:
+        if previous_config is None:
+            os.unlink(cloudflare_conf)
+        else:
+            write_text_atomic(cloudflare_conf, previous_config, mode=0o644)
+        detail = getattr(reload_result, "stderr", "") or getattr(reload_result, "stdout", "")
+        raise RuntimeError(
+            f"Nginx could not reload the Cloudflare configuration: "
+            f"{detail.strip() or 'reload failed'}"
+        )
+
+    print("  ✓ Nginx configured and reloaded to trust Cloudflare IPs")
 
 
 def install_cloudflared_service_helper(config: SetupConfig) -> None:

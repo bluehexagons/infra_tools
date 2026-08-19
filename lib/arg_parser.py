@@ -212,10 +212,19 @@ def add_setup_arguments(
             default=None,
             metavar="SOURCE",
             help=(
-                "VM cloud image override: http(s) URL to a qcow2, or a Proxmox "
+                "VM cloud image override: HTTPS URL to a qcow2, or a Proxmox "
                 "storage reference like 'local:import/foo.qcow2'. Used by VM "
                 "provisioning. Defaults to the curated Debian catalog "
                 "(lib/cloud_images.py)."
+            ),
+        )
+        parser.add_argument(
+            "--image-sha512",
+            dest="vm_image_sha512",
+            metavar="HEX",
+            help=(
+                "Expected SHA-512 for a custom HTTPS VM image (128 hexadecimal "
+                "characters); required with --image SOURCE URL"
             ),
         )
         parser.add_argument(

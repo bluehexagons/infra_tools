@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import ipaddress
 import os
+import re
 import shlex
 import subprocess
 import time
@@ -173,8 +174,13 @@ def _resolve_image(
             )
         if url:
             filename = url.rsplit("/", 1)[-1]
+            sha512 = getattr(config, "vm_image_sha512", None)
+            if not isinstance(sha512, str) or not re.fullmatch(r"[0-9A-Fa-f]{128}", sha512):
+                raise ProvisionError(
+                    "Custom VM image URLs require --image-sha512 with 128 hexadecimal characters"
+                )
             return (
-                _ResolvedImage(url=url, sha512=None, filename=filename, storage_ref=None),
+                _ResolvedImage(url=url, sha512=sha512.lower(), filename=filename, storage_ref=None),
                 None,
             )
     image = resolve_cloud_image(config.container_base or "debian")
@@ -298,7 +304,7 @@ def _download_image_to_host(
         )
     fetch = (
         f"if [ ! -f {shlex.quote(remote_path)} ]; then "
-        f"wget -q --show-progress -O {shlex.quote(remote_path)}.part "
+        f"wget -q --https-only --show-progress -O {shlex.quote(remote_path)}.part "
         f"{shlex.quote(image.url)} && "
         f"mv {shlex.quote(remote_path)}.part {shlex.quote(remote_path)}; "
         f"fi"
@@ -452,14 +458,21 @@ def _destroy_vm_best_effort(
 ) -> None:
     """Remove a VM created by this run after a failed provisioning attempt."""
     print(f"  ⚠ Cleaning up partially provisioned VM {vmid}")
-    _ssh_run(node_ip, user, ssh_opts, f"qm stop {vmid} --skiplock 1", dry_run=False)
-    _ssh_run(
-        node_ip,
-        user,
-        ssh_opts,
+    failures: list[str] = []
+    for command in (
+        f"qm stop {vmid} --skiplock 1",
         f"qm destroy {vmid} --purge 1 --skiplock 1",
-        dry_run=False,
-    )
+    ):
+        result = _ssh_run(node_ip, user, ssh_opts, command, dry_run=False)
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip()
+            failures.append(f"{command}: {detail or f'exit {result.returncode}'}")
+    if failures:
+        print("  ⚠ VM cleanup incomplete; inspect the Proxmox guest before retrying:")
+        for failure in failures:
+            print(f"    {failure}")
+    else:
+        print(f"  ✓ Removed partially provisioned VM {vmid}")
 
 
 def _create_vm(

@@ -14,7 +14,7 @@ infra-tools setup server_web example.com deploy \
 
 The setup flow:
 
-- installs or enables UFW with default-deny incoming policy and SSH access;
+- installs or enables UFW with default-deny incoming policy and rate-limited SSH access;
 - removes public 80/tcp and 443/tcp firewall allowances;
 - configures Nginx to trust Cloudflare source ranges;
 - creates `/etc/cloudflared/README.md`; and
@@ -34,11 +34,16 @@ Run the helper interactively on the configured host:
 sudo setup-cloudflare-tunnel
 ```
 
-The helper installs `cloudflared` when needed, runs Cloudflare authentication,
+The helper installs `cloudflared` from Cloudflare's signed APT repository when needed, runs Cloudflare authentication,
 creates or reuses a tunnel, discovers hostnames from enabled Nginx sites, writes
 `/etc/cloudflared/config.yml`, and can install and enable the `cloudflared`
 systemd service. Tunnel credentials and state are stored under
 `/etc/cloudflared` with restrictive permissions.
+
+Generated tunnel and Nginx configurations are validated before activation. A
+non-interactive refresh compares complete hostname/origin entries, repairs a
+missing or invalid config, and verifies that the service is active; it reports
+failure when the service cannot be started instead of claiming success.
 
 After adding or removing an Nginx site, rerun the helper to refresh ingress
 entries. A setup or patch run with `--cloudflare` also attempts a non-interactive
@@ -72,7 +77,8 @@ ports. See [Antistatic services](./ANTISTATIC.md).
 ## Limitations and recovery
 
 - `--cloudflare` changes firewall and Nginx behavior; do not use it until the
-  tunnel path and SSH management route are ready.
+  tunnel path and SSH management route are ready. SSH is rate-limited with UFW;
+  add a management-network-specific rule separately if your policy needs one.
 - Tunnel creation requires an interactive browser login and Cloudflare account
   access; unattended setup cannot create the initial tunnel.
 - If a tunnel is unavailable, inspect `cloudflared` and Nginx journals and use

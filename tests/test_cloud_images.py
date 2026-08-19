@@ -70,6 +70,8 @@ class TestParseImageArgument(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_image_argument("not-a-url-or-ref.qcow2")
         with self.assertRaises(ValueError):
+            parse_image_argument("http://example.com/foo.qcow2")
+        with self.assertRaises(ValueError):
             parse_image_argument("local:")
 
 

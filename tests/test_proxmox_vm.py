@@ -20,12 +20,31 @@ from lib.proxmox_vm import (
     _parse_disk_size_gib,
     _parse_memory_mb,
     _render_user_data,
+    _resolve_image,
+    _destroy_vm_best_effort,
     _wait_for_guest_agent,
     check_vm_exists,
 )
 
 
 class TestImageStorage(unittest.TestCase):
+    def test_custom_image_requires_and_preserves_sha512(self):
+        config = MagicMock(
+            container_base="debian",
+            vm_image_sha512="A" * 128,
+        )
+        resolved, catalog = _resolve_image(
+            config,
+            "https://example.com/custom.qcow2",
+        )
+        self.assertIsNone(catalog)
+        self.assertEqual(resolved.sha512, "a" * 128)
+
+    def test_custom_image_without_sha512_is_rejected(self):
+        config = MagicMock(container_base="debian", vm_image_sha512=None)
+        with self.assertRaisesRegex(ProvisionError, "image-sha512"):
+            _resolve_image(config, "https://example.com/custom.qcow2")
+
     def test_iso_staging_uses_img_suffix(self):
         self.assertEqual(
             _iso_staging_filename("debian-13-genericcloud.qcow2"),
@@ -325,6 +344,22 @@ class TestVMHardwareProfile(unittest.TestCase):
             "qm stop 101 --skiplock 1",
             "qm destroy 101 --purge 1 --skiplock 1",
         ])
+
+
+class TestVMCleanup(unittest.TestCase):
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_cleanup_reports_failed_stop_or_destroy(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(returncode=1, stdout="", stderr="stop failed"),
+            MagicMock(returncode=1, stdout="", stderr="destroy failed"),
+        ]
+        with patch("builtins.print") as mock_print:
+            _destroy_vm_best_effort(101, "10.0.0.10", "root", [])
+
+        output = "\n".join(str(call.args[0]) for call in mock_print.call_args_list)
+        self.assertIn("cleanup incomplete", output)
+        self.assertIn("stop failed", output)
+        self.assertIn("destroy failed", output)
 
     @patch("lib.proxmox_vm._ssh_run")
     def test_resize_failure_destroys_partial_vm(self, mock_run):
