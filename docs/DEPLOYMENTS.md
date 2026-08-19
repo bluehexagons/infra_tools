@@ -32,6 +32,11 @@ Separate runtime flags are therefore unnecessary for ordinary deployments.
 Explicit flags remain useful when a repository generates those files later or
 uses a non-standard layout.
 
+The planned versioned convention for zero-config root Go services, inactive
+nested-module discovery, standard health/state behavior, and compact monorepo
+composition is documented in
+[`plans/GO_SITE_CONVENTION.md`](./plans/GO_SITE_CONVENTION.md).
+
 ## Manifest shape
 
 The top-level object must contain `version: 1` and a non-empty `components`
