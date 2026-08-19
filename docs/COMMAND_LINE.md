@@ -306,6 +306,7 @@ infra-tools agent doctor
 infra-tools agent doctor --tool t3code
 infra-tools agent doctor --tool codex --tool claude --json
 infra-tools agent doctor --tool codex --tool opencode --capability browser
+infra-tools agent doctor --capability browser
 infra-tools agent update --dry-run
 infra-tools agent update --tool codex --tool claude
 infra-tools agent update --json
@@ -317,6 +318,8 @@ otherwise installed tool unhealthy.
 `--capability browser` additionally verifies managed launchers, MCP registration
 for installed compatible agents, and a local Chromium interaction/rendering
 smoke test.
+When `--capability` is supplied without `--tool`, doctor checks only the
+requested capability instead of requiring the default set of terminal agents.
 
 `agent update` deliberately updates the three user-installed terminal agents;
 it is never run by an automatic host timer. The command uses each vendor's

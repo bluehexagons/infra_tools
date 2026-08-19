@@ -22,7 +22,8 @@ infra-tools setup workstation_dev 192.168.0.41 agent \
 ```
 
 `--browser-automation playwright` currently requires `--agent-tool codex`
-or `--agent-tool opencode`. It registers the managed `playwright` MCP server
+or `--agent-tool opencode`. It registers the managed
+`infra-tools-playwright` MCP server
 only for the compatible tools selected by that setup. GitHub CLI, Claude Code,
 and T3 Code do not receive a browser integration. The browser capability owns
 its system Node.js dependency, so `--node` is not required unless projects on
@@ -31,6 +32,9 @@ the VM also need the user-managed Node.js development environment.
 The interactive setup flow offers the same choice after agent selection. A
 saved setup command retains the provider choice, so a later full setup restores
 the browser capability without retaining any browser or website credentials.
+For an explicit `--steps` setup, include `install_browser_automation` after
+installing the selected compatible agent; it is available as a registered
+custom step as well.
 
 ## Installed components and agent configuration
 
@@ -46,9 +50,12 @@ The managed launchers are:
 - `/usr/local/bin/infra-tools-playwright-doctor` for a local smoke test.
 
 Codex registration is performed through `codex mcp`; OpenCode's existing JSON
-configuration is merged atomically. If `--agent-config active` copied a config,
+or JSONC configuration is merged atomically. JSONC comments and formatting are
+normalized during the rewrite, while configuration values are preserved. If
+`--agent-config active` copied a config,
 the browser registration is applied afterward, so the explicit setup choice
-owns the `playwright` entry while preserving unrelated settings and MCP servers.
+owns the `infra-tools-playwright` entry while preserving unrelated settings and
+MCP servers.
 Malformed or symlinked target configuration is rejected.
 
 The MCP launcher always starts Chromium in headless, isolated mode. Each MCP
@@ -60,7 +67,7 @@ browser profile is required.
 
 ## What agents can do
 
-Once provisioned, Codex or OpenCode can ask the `playwright` MCP server to open
+Once provisioned, Codex or OpenCode can ask the `infra-tools-playwright` MCP server to open
 pages, inspect rendered content, click controls, fill forms, and capture
 screenshots. Browser traffic originates from the VM and is subject to its DNS,
 routing, firewall, proxy, and destination-site controls. The provisioning smoke
@@ -97,8 +104,10 @@ For lower-level checks:
 codex mcp list
 ```
 
-Inspect `~/.config/opencode/opencode.json` for OpenCode's `mcp.playwright`
-entry. Do not print agent auth files while troubleshooting.
+Inspect `~/.config/opencode/opencode.json` or `opencode.jsonc` for OpenCode's
+`mcp.infra-tools-playwright` entry. The managed OpenCode entry uses a 30-second tool
+discovery timeout to accommodate cold VM startup. Do not print agent auth files
+while troubleshooting.
 
 ## Security and operating limits
 

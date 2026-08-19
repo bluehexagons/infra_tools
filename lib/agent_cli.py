@@ -37,6 +37,7 @@ _MAX_INSTALLER_BYTES = 4 * 1024 * 1024
 _UPDATE_TIMEOUT_SECONDS = 600
 _BROWSER_MCP_WRAPPER = "/usr/local/bin/infra-tools-playwright-mcp"
 _BROWSER_DOCTOR_WRAPPER = "/usr/local/bin/infra-tools-playwright-doctor"
+_BROWSER_MCP_SERVER_NAME = "infra-tools-playwright"
 
 _CREDENTIAL_PATHS = {
     "gh": ".config/gh/hosts.yml",
@@ -548,25 +549,45 @@ def _codex_browser_registration(home: str) -> bool:
             content = file_obj.read()
     except OSError:
         return False
-    section = re.search(r'^\[mcp_servers\.(?:playwright|"playwright")\]\s*$', content, re.MULTILINE)
-    return section is not None and _BROWSER_MCP_WRAPPER in content
+    escaped_name = re.escape(_BROWSER_MCP_SERVER_NAME)
+    section = re.search(
+        rf'^\[mcp_servers\.(?:{escaped_name}|"{escaped_name}")\]\s*$',
+        content,
+        re.MULTILINE,
+    )
+    if section is None:
+        return False
+
+    following_section = re.search(r'^\[', content[section.end():], re.MULTILINE)
+    section_content = content[section.end():]
+    if following_section is not None:
+        section_content = section_content[:following_section.start()]
+    command = re.search(
+        r'^\s*command\s*=\s*(?:"([^"]*)"|\'([^\']*)\')\s*(?:#.*)?$',
+        section_content,
+        re.MULTILINE,
+    )
+    return bool(command and (command.group(1) or command.group(2)) == _BROWSER_MCP_WRAPPER)
 
 
 def _opencode_browser_registration(home: str) -> bool:
-    config_path = os.path.join(home, ".config", "opencode", "opencode.json")
+    from common.browser_automation_steps import _load_opencode_config, _opencode_config_path
+
+    config_dir = os.path.join(home, ".config", "opencode")
+    config_path = _opencode_config_path(config_dir)
     try:
-        with open(config_path, encoding="utf-8") as file_obj:
-            value = json.load(file_obj)
-    except (OSError, json.JSONDecodeError):
+        value = _load_opencode_config(config_path)
+    except (OSError, ValueError):
         return False
-    if not isinstance(value, dict) or not isinstance(value.get("mcp"), dict):
+    if not isinstance(value.get("mcp"), dict):
         return False
-    registration = value["mcp"].get("playwright")
+    registration = value["mcp"].get(_BROWSER_MCP_SERVER_NAME)
     return bool(
         isinstance(registration, dict)
         and registration.get("type") == "local"
         and registration.get("enabled") is True
         and registration.get("command") == [_BROWSER_MCP_WRAPPER]
+        and registration.get("timeout") == 30000
     )
 
 
@@ -670,11 +691,18 @@ def run_agent_command(args: argparse.Namespace) -> int:
         print("Error: agent command required (doctor or update)")
         return 1
 
-    selected = list(args.agent_doctor_tools or DEFAULT_DOCTOR_TOOLS)
+    requested_tools = getattr(args, "agent_doctor_tools", None)
+    requested_capabilities = getattr(args, "agent_doctor_capabilities", None) or []
+    if requested_tools:
+        selected = list(requested_tools)
+    elif requested_capabilities:
+        selected = []
+    else:
+        selected = list(DEFAULT_DOCTOR_TOOLS)
     results = inspect_agent_tools(selected)
     capability_results = [
         inspect_browser_automation()
-        for capability in (getattr(args, "agent_doctor_capabilities", None) or [])
+        for capability in requested_capabilities
         if capability == "browser"
     ]
     if args.json:

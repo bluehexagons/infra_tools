@@ -16,6 +16,7 @@ from lib.arg_parser import add_setup_arguments
 from lib.config import SetupConfig
 from lib.validation import validate_browser_automation_settings
 from plugins.common import extend_agent_steps
+from plugins.common import get_custom_step_functions
 
 
 def _config(*tools: str, browser_automation: str | None = "playwright") -> SetupConfig:
@@ -69,6 +70,12 @@ class BrowserAutomationConfigTests(unittest.TestCase):
         self.assertLess(
             names.index("Installing agent browser automation"),
             names.index("Cloning agent repositories on target"),
+        )
+
+    def test_browser_automation_is_available_to_explicit_custom_steps(self) -> None:
+        self.assertIs(
+            get_custom_step_functions()["install_browser_automation"],
+            browser_automation_steps.install_browser_automation,
         )
 
 
@@ -163,14 +170,62 @@ class BrowserAutomationProvisioningTests(unittest.TestCase):
             self.assertEqual(value["theme"], "system")
             self.assertTrue(value["mcp"]["existing"]["enabled"])
             self.assertEqual(
-                value["mcp"]["playwright"],
+                value["mcp"][browser_automation_steps.PLAYWRIGHT_MCP_SERVER_NAME],
                 {
                     "type": "local",
                     "command": [browser_automation_steps.PLAYWRIGHT_MCP_WRAPPER],
                     "enabled": True,
+                    "timeout": 30000,
                 },
             )
             self.assertEqual(config_path.stat().st_mode & 0o777, 0o600)
+
+    def test_opencode_jsonc_registration_accepts_comments_and_preserves_values(self) -> None:
+        config = _config("opencode")
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            home = Path(temporary_directory)
+            config_dir = home / ".config" / "opencode"
+            config_dir.mkdir(parents=True)
+            config_path = config_dir / "opencode.jsonc"
+            config_path.write_text(
+                "{\n"
+                "  // Keep this JSONC file supported.\n"
+                "  \"theme\": \"https://example.test//path\",\n"
+                "  \"mcp\": {\n"
+                "    \"existing\": {\"enabled\": true,},\n"
+                "  },\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            with (
+                patch.object(browser_automation_steps, "_tool_available", return_value=True),
+                patch.object(browser_automation_steps, "_user_home", return_value=str(home)),
+                patch.object(browser_automation_steps, "_chown_path"),
+            ):
+                browser_automation_steps._configure_opencode(config)
+
+            value = browser_automation_steps._load_opencode_config(str(config_path))
+            self.assertEqual(value["theme"], "https://example.test//path")
+            self.assertTrue(value["mcp"]["existing"]["enabled"])
+            self.assertEqual(
+                value["mcp"][browser_automation_steps.PLAYWRIGHT_MCP_SERVER_NAME]["timeout"],
+                30000,
+            )
+
+    def test_codex_registration_does_not_match_command_in_another_section(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            home = Path(temporary_directory)
+            codex_dir = home / ".codex"
+            codex_dir.mkdir()
+            (codex_dir / "config.toml").write_text(
+                f"[mcp_servers.{agent_cli._BROWSER_MCP_SERVER_NAME}]\n"
+                "enabled = true\n"
+                "[mcp_servers.other]\n"
+                f'command = "{agent_cli._BROWSER_MCP_WRAPPER}"\n',
+                encoding="utf-8",
+            )
+
+            self.assertFalse(agent_cli._codex_browser_registration(str(home)))
 
     def test_managed_mcp_launcher_is_headless_and_isolated(self) -> None:
         content = browser_automation_steps._MCP_WRAPPER_CONTENT
@@ -178,6 +233,7 @@ class BrowserAutomationProvisioningTests(unittest.TestCase):
         self.assertIn("--headless", content)
         self.assertIn("--isolated", content)
         self.assertNotIn("--no-sandbox", content)
+        self.assertIn('PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright"', content)
 
 
 class BrowserAutomationDoctorTests(unittest.TestCase):
@@ -195,7 +251,7 @@ class BrowserAutomationDoctorTests(unittest.TestCase):
             codex_dir = home / ".codex"
             codex_dir.mkdir()
             (codex_dir / "config.toml").write_text(
-                "[mcp_servers.playwright]\n"
+                f"[mcp_servers.{agent_cli._BROWSER_MCP_SERVER_NAME}]\n"
                 f'command = "{mcp_wrapper}"\n',
                 encoding="utf-8",
             )
@@ -214,6 +270,40 @@ class BrowserAutomationDoctorTests(unittest.TestCase):
         self.assertTrue(result["smoke_test"])
         self.assertEqual(result["registrations"], {"codex": True})
         self.assertTrue(result["healthy"])
+
+    def test_doctor_accepts_opencode_jsonc_registration(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            home = Path(temporary_directory)
+            config_dir = home / ".config" / "opencode"
+            config_dir.mkdir(parents=True)
+            (config_dir / "opencode.jsonc").write_text(
+                f'{{"mcp": {{"{agent_cli._BROWSER_MCP_SERVER_NAME}": {{'
+                "\"type\": \"local\", "
+                f"\"command\": [\"{agent_cli._BROWSER_MCP_WRAPPER}\"], "
+                "\"enabled\": true, \"timeout\": 30000,"
+                "}}}\n",
+                encoding="utf-8",
+            )
+            with patch.object(agent_cli, "_tool_path", return_value="/tmp/opencode"):
+                self.assertTrue(agent_cli._opencode_browser_registration(str(home)))
+
+    def test_capability_only_doctor_does_not_require_default_tools(self) -> None:
+        args = argparse.Namespace(
+            agent_command="doctor",
+            agent_doctor_capabilities=["browser"],
+            agent_doctor_tools=None,
+            json=True,
+        )
+        with (
+            patch.object(agent_cli, "inspect_agent_tools", return_value=[]) as tools,
+            patch.object(
+                agent_cli,
+                "inspect_browser_automation",
+                return_value={"capability": "browser", "healthy": True},
+            ),
+        ):
+            self.assertEqual(agent_cli.run_agent_command(args), 0)
+        tools.assert_called_once_with([])
 
 
 if __name__ == "__main__":

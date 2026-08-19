@@ -23,6 +23,7 @@ from .common_steps import _run_as_login_user
 
 
 PLAYWRIGHT_MCP_VERSION = "0.0.79"
+PLAYWRIGHT_MCP_SERVER_NAME = "infra-tools-playwright"
 PLAYWRIGHT_MCP_INTEGRITY = (
     "sha512-VpqD4a3vFyGQMY9sh3UJiO6wjcurggkljKfAyCHL0QWGY5m6Ehr3MNsAAHPDHO//"
     "n13g0PCjpHatAOiulrqdZQ=="
@@ -59,13 +60,13 @@ SYSTEM_NODE = "/usr/bin/node"
 
 _MCP_WRAPPER_CONTENT = f"""#!/bin/sh
 set -eu
-export PLAYWRIGHT_BROWSERS_PATH="${{PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}}"
+export PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright"
 exec {SYSTEM_NODE} {PLAYWRIGHT_MCP_CLI} --headless --isolated "$@"
 """
 
 _DOCTOR_WRAPPER_CONTENT = f"""#!/bin/sh
 set -eu
-export PLAYWRIGHT_BROWSERS_PATH="${{PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}}"
+export PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright"
 exec {SYSTEM_NODE} {PLAYWRIGHT_SMOKE_SCRIPT}
 """
 
@@ -95,6 +96,104 @@ const {{ chromium }} = require('{PLAYWRIGHT_ROOT}/node_modules/playwright');
   process.exitCode = 1;
 }});
 """
+
+
+def _opencode_config_path(config_dir: str) -> str:
+    """Return the existing OpenCode global config, preferring JSON."""
+    json_path = os.path.join(config_dir, "opencode.json")
+    jsonc_path = os.path.join(config_dir, "opencode.jsonc")
+    if os.path.lexists(json_path):
+        return json_path
+    if os.path.lexists(jsonc_path):
+        return jsonc_path
+    return json_path
+
+
+def _strip_jsonc_comments(content: str) -> str:
+    """Remove JSONC comments without interpreting comment markers in strings."""
+    output: list[str] = []
+    index = 0
+    in_string = False
+    escaped = False
+    while index < len(content):
+        character = content[index]
+        if in_string:
+            output.append(character)
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            index += 1
+            continue
+
+        if character == '"':
+            in_string = True
+            output.append(character)
+            index += 1
+        elif character == "/" and index + 1 < len(content) and content[index + 1] == "/":
+            index += 2
+            while index < len(content) and content[index] not in "\r\n":
+                index += 1
+        elif character == "/" and index + 1 < len(content) and content[index + 1] == "*":
+            index += 2
+            while index + 1 < len(content) and content[index:index + 2] != "*/":
+                if content[index] in "\r\n":
+                    output.append(content[index])
+                index += 1
+            index = min(index + 2, len(content))
+        else:
+            output.append(character)
+            index += 1
+    return "".join(output)
+
+
+def _strip_jsonc_trailing_commas(content: str) -> str:
+    """Remove trailing commas without changing commas inside JSON strings."""
+    output: list[str] = []
+    index = 0
+    in_string = False
+    escaped = False
+    while index < len(content):
+        character = content[index]
+        if in_string:
+            output.append(character)
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            index += 1
+            continue
+
+        if character == '"':
+            in_string = True
+            output.append(character)
+            index += 1
+            continue
+        if character == ",":
+            lookahead = index + 1
+            while lookahead < len(content) and content[lookahead].isspace():
+                lookahead += 1
+            if lookahead < len(content) and content[lookahead] in "}]":
+                index += 1
+                continue
+        output.append(character)
+        index += 1
+    return "".join(output)
+
+
+def _load_opencode_config(path: str) -> JSONDict:
+    """Load JSON or JSONC OpenCode configuration into a JSON object."""
+    with open(path, encoding="utf-8") as file_obj:
+        content = file_obj.read()
+    normalized = _strip_jsonc_trailing_commas(_strip_jsonc_comments(content))
+    loaded = json.loads(normalized)
+    if not isinstance(loaded, dict):
+        raise ValueError(f"OpenCode config must contain a JSON object: {path}")
+    return cast(JSONDict, loaded)
 
 
 def _ensure_safe_root_path(path: str) -> None:
@@ -218,7 +317,7 @@ def _configure_codex(config: SetupConfig) -> None:
     _run_as_login_user(
         config.username,
         user_home,
-        f"{path_setup}codex mcp add playwright -- {PLAYWRIGHT_MCP_WRAPPER}",
+        f"{path_setup}codex mcp add {PLAYWRIGHT_MCP_SERVER_NAME} -- {PLAYWRIGHT_MCP_WRAPPER}",
     )
 
 
@@ -228,20 +327,16 @@ def _configure_opencode(config: SetupConfig) -> None:
         raise RuntimeError("OpenCode was selected but is not available for MCP registration")
     user_home = _user_home(config)
     config_dir = os.path.join(user_home, ".config", "opencode")
-    config_path = os.path.join(config_dir, "opencode.json")
     _ensure_agent_directory(config_dir)
     _reject_symlinked_agent_destination(config_dir)
+    config_path = _opencode_config_path(config_dir)
 
     value: JSONDict = {}
-    if os.path.exists(config_path):
+    if os.path.lexists(config_path):
         try:
-            with open(config_path, encoding="utf-8") as file_obj:
-                loaded = json.load(file_obj)
-        except (OSError, json.JSONDecodeError) as exc:
+            value = _load_opencode_config(config_path)
+        except (OSError, ValueError) as exc:
             raise RuntimeError(f"Cannot update malformed OpenCode config: {config_path}") from exc
-        if not isinstance(loaded, dict):
-            raise RuntimeError(f"OpenCode config must contain a JSON object: {config_path}")
-        value = cast(JSONDict, loaded)
 
     existing_mcp = value.get("mcp")
     if existing_mcp is None:
@@ -250,10 +345,11 @@ def _configure_opencode(config: SetupConfig) -> None:
         mcp = cast(JSONDict, existing_mcp)
     else:
         raise RuntimeError("OpenCode config 'mcp' entry must contain a JSON object")
-    mcp["playwright"] = {
+    mcp[PLAYWRIGHT_MCP_SERVER_NAME] = {
         "type": "local",
         "command": [PLAYWRIGHT_MCP_WRAPPER],
         "enabled": True,
+        "timeout": 30000,
     }
     value["mcp"] = mcp
     write_json_atomic(config_path, value, mode=0o600, sort_keys=True)

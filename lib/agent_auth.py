@@ -232,7 +232,11 @@ def set_agent_credential(
     if tool not in AGENT_AUTH_TOOLS:
         raise ValueError(f"Unsupported agent auth tool: {tool}")
     git_host = _validate_git_host(git_host)
-    if (source is None) == (not use_active) and token is None:
+    source_count = sum(
+        value is not None
+        for value in (source, "active" if use_active else None, token)
+    )
+    if source_count != 1:
         raise ValueError("choose exactly one credential source")
     if token is not None and tool != "gh":
         raise ValueError("interactive token entry is supported only for gh")

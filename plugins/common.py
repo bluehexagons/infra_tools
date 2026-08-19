@@ -27,6 +27,7 @@ PLUGIN = PluginDefinition(
         "install_opencode",
         "install_t3code",
         "copy_agent_tooling_payload",
+        "install_browser_automation",
         "install_git_for_agent_repositories",
         "clone_agent_repositories",
         "configure_auto_update_uv",
@@ -245,6 +246,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         install_opencode,
         install_t3code,
     )
+    from common.browser_automation_steps import install_browser_automation
 
     return {
         "install_ruby": install_ruby,
@@ -257,6 +259,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "install_opencode": install_opencode,
         "install_t3code": install_t3code,
         "copy_agent_tooling_payload": copy_agent_tooling_payload,
+        "install_browser_automation": install_browser_automation,
         "clone_agent_repositories": clone_agent_repositories,
         "install_git_for_agent_repositories": install_git_for_agent_repositories,
         "configure_auto_update_uv": configure_auto_update_uv,

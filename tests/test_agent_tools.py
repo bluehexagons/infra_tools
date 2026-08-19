@@ -263,6 +263,28 @@ class TestAgentCredentialRotation(unittest.TestCase):
                 timeout=20,
             )
 
+    def test_set_rejects_multiple_credential_sources(self):
+        with self.assertRaisesRegex(ValueError, "choose exactly one"):
+            set_agent_credential(
+                host="vm.example",
+                username="agent",
+                tool="codex",
+                ssh_key=None,
+                source="/run/secrets/codex.json",
+                use_active=True,
+            )
+
+        with self.assertRaisesRegex(ValueError, "choose exactly one"):
+            set_agent_credential(
+                host="vm.example",
+                username="agent",
+                tool="gh",
+                ssh_key=None,
+                source="/run/secrets/hosts.yml",
+                use_active=False,
+                token="token-value",
+            )
+
     def test_status_reports_non_secret_remote_result(self):
         with patch("lib.agent_auth._run_remote_script") as remote:
             remote.return_value = type(
