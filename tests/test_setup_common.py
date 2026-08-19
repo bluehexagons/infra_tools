@@ -356,6 +356,108 @@ class TestRunRemoteSetupArgumentSecurity(unittest.TestCase):
             self.assertTrue(os.path.isfile(os.path.join(managed_dir, setup_common.REMOTE_ARGS_FILENAME)))
 
 
+class TestAgentCredentialStaging(unittest.TestCase):
+    def test_active_github_auth_reads_keyring_token_through_gh(self):
+        from lib import setup_common
+
+        config = _make_config(
+            agent_tools=["gh"],
+            copy_agent_keys=True,
+            git_access="read",
+            git_auth_source="active",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            home = os.path.join(directory, "home")
+            payload_dir = os.path.join(directory, "payload")
+            hosts_path = os.path.join(home, ".config", "gh", "hosts.yml")
+            os.makedirs(os.path.dirname(hosts_path))
+            with open(hosts_path, "w", encoding="utf-8") as file_obj:
+                file_obj.write("github.com:\n    user: octocat\n    git_protocol: https\n")
+            os.chmod(hosts_path, 0o600)
+            result = type(
+                "Completed",
+                (),
+                {"returncode": 0, "stdout": "keyring-token\n", "stderr": ""},
+            )()
+
+            with (
+                patch("lib.setup_common.shutil.which", return_value="/usr/bin/gh"),
+                patch("lib.setup_common.subprocess.run", return_value=result) as run,
+            ):
+                setup_common._stage_github_auth(config, payload_dir, home)
+
+            payload_path = os.path.join(payload_dir, "secrets", "gh", "hosts.yml")
+            with open(payload_path, encoding="utf-8") as file_obj:
+                payload = file_obj.read()
+            self.assertIn("keyring-token", payload)
+            run.assert_called_once_with(
+                ["/usr/bin/gh", "auth", "token", "--hostname", "github.com"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+
+    def test_active_github_auth_explains_missing_controller_gh(self):
+        from lib import setup_common
+
+        config = _make_config(
+            agent_tools=["gh"],
+            copy_agent_keys=True,
+            git_access="read",
+            git_auth_source="active",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            with patch("lib.setup_common.shutil.which", return_value=None):
+                with self.assertRaisesRegex(ValueError, "gh is not installed"):
+                    setup_common._stage_github_auth(
+                        config,
+                        os.path.join(directory, "payload"),
+                        os.path.join(directory, "home"),
+                    )
+
+    def test_github_agent_auth_file_accepts_one_line_token(self):
+        from lib import setup_common
+
+        config = _make_config(
+            agent_tools=["gh"],
+            copy_agent_keys=True,
+            git_access="read",
+            agent_auth_files=[],
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            token_path = os.path.join(directory, "github-token")
+            with open(token_path, "w", encoding="utf-8") as file_obj:
+                file_obj.write("per-vm-token\n")
+            os.chmod(token_path, 0o600)
+            config.agent_auth_files = [["gh", token_path]]
+            payload_dir = os.path.join(directory, "payload")
+
+            setup_common.prepare_agent_payload(config, payload_dir)
+
+            with open(
+                os.path.join(payload_dir, "secrets", "gh", "hosts.yml"),
+                encoding="utf-8",
+            ) as file_obj:
+                self.assertIn("per-vm-token", file_obj.read())
+
+    def test_missing_active_codex_file_mentions_file_backend(self):
+        from lib import setup_common
+
+        config = _make_config(
+            agent_tools=["codex"],
+            copy_agent_keys=True,
+            agent_auth_source="active",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(setup_common, "_local_user_home", return_value=directory):
+                with self.assertRaisesRegex(ValueError, "cli_auth_credentials_store"):
+                    setup_common.prepare_agent_payload(
+                        config,
+                        os.path.join(directory, "payload"),
+                    )
+
+
 class TestCloneRepository(unittest.TestCase):
     def test_repository_name_cannot_escape_work_directory(self):
         from lib import setup_common

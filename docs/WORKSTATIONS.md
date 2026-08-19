@@ -22,6 +22,11 @@ local account password: GNOME remains the console desktop, while XFCE is used
 for XRDP sessions. Select only the graphical agents needed with repeatable
 `--agent-tool` flags; language runtimes remain separate explicit options.
 
+Agent installation, authentication, and non-secret configuration are separate
+choices. See [Credentials and agent configuration](CREDENTIALS.md) before
+copying active-user credentials to a workstation or VM, especially when
+multiple VMs need independent GitHub access.
+
 ## Profiles
 
 | Profile | Adds by default |

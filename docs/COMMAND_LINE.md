@@ -11,6 +11,8 @@ Related pages:
 - [`CICD.md`](./CICD.md) for webhook CI/CD setup
 - [`WORKSTATIONS.md`](./WORKSTATIONS.md) for desktop profiles and application choices
 - [`MACHINE_TYPES.md`](./MACHINE_TYPES.md) for machine type behavior
+- [`CREDENTIALS.md`](./CREDENTIALS.md) for workspace passwords, Git access,
+  agent auth/config sources, sharing, and credential rotation
 - [`README.md`](./README.md) for the full documentation map
 
 ## Commands
@@ -219,6 +221,11 @@ a desktop/browser, and `control_plane` is the recommended terminal-only
 profile. `server_lite` omits the standard firewall and generic CLI bundle, so
 use it only when that lighter profile is intentional.
 
+The agent setup model separates explicit tool installation, VM-level Git
+policy, authentication payloads, and non-secret agent configuration. See
+[`CREDENTIALS.md`](./CREDENTIALS.md) for the source/destination matrix,
+per-VM credential guidance, interactive setup, and rotation details.
+
 ```bash
 infra-tools setup server_dev 10.0.0.10 agentuser \
   --agent-tool gh --agent-tool codex --agent-config active \
@@ -251,11 +258,11 @@ rm -f "$HOME/.infra_tools-install.sh"
 | `--agent-tool TOOL` | Install one explicit tool (`gh`, `codex`, `claude`, `opencode`, or `t3code`); repeatable |
 | `--git-access POLICY` | Set the VM's declared agent Git policy: `none`, `read`, or `read-write` |
 | `--git-host HOST` | Select the Git host for credentials; GitHub auth currently uses `github.com` |
-| `--git-auth active` | Copy the active controller user's selected GitHub CLI host entry |
+| `--git-auth active` | Copy the active controller user's selected GitHub CLI host entry; if its token is keyring-backed, retrieve it with the controller's `gh auth token` |
 | `--git-auth-file PATH` | Copy a selected-host `hosts.yml` entry or a one-line GitHub token from a controller-local file |
-| `--agent-auth active` | Copy selected agent credentials from the active controller user's config |
-| `--agent-auth-file TOOL PATH` | Copy one selected agent credential from a specified controller-local file; repeatable |
-| `--agent-config active` | Copy optional non-secret config from the active controller user |
+| `--agent-auth active` | Copy selected file-backed agent credentials from the active controller user's known files; active `gh` also uses the `gh auth token` fallback |
+| `--agent-auth-file TOOL PATH` | Copy one selected agent credential from a specified controller-local file to its canonical target path; `gh` accepts a hosts file or one-line token; repeatable |
+| `--agent-config active` | Copy known non-secret config from the active controller; does not copy auth files |
 | `--interactive` | Prompt for tools, HTTPS repositories, Git policy, and credential sources |
 | `--repo GIT_URL` | Clone an HTTPS repository on the target as `/home/USER/repos/NAME`; repeatable |
 
@@ -277,7 +284,7 @@ dependencies.
 Credential/config copy is intentionally tool-scoped and transient:
 
 - `--git-auth`/`--git-auth-file` copy only the selected GitHub host entry, merge it into the target user's existing `gh` hosts file, and run `gh auth setup-git`.
-- `--agent-auth`/`--agent-auth-file` copy Codex, Claude Code, or OpenCode credentials without requiring those tools on the controller.
+- `--agent-auth`/`--agent-auth-file` copy Codex, Claude Code, or OpenCode credentials without requiring those tools on the controller; active `gh` requires controller `gh` only when its token is keyring-backed.
 - `--agent-config active` copies known non-secret configuration from the active controller user.
 - T3 Code receives only a command wrapper and desktop entry; infra-tools does not copy T3 Code credentials.
 
@@ -333,8 +340,11 @@ infra-tools agent auth status 10.0.0.10 agent --json
 ```
 
 `auth set` accepts an active-user source, a controller-local file, or
-interactive source selection. GitHub input is filtered to `github.com` and is
-installed with an atomic mode-`0600` replacement. Status reports only tool
+interactive source selection. Active `gh` rotation can retrieve a keyring-backed
+token through the controller's `gh auth token`; active Codex, Claude Code, and
+OpenCode rotation still requires their file-backed credential paths. GitHub
+input is filtered to `github.com` and is installed with an atomic mode-`0600`
+replacement. Status reports only tool
 installation, credential presence/metadata, and the GitHub authentication
 check; it never prints credential contents.
 

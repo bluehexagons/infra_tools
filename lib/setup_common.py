@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import ipaddress
 import io
+import json
 import os
 import pwd
 import shlex
@@ -366,13 +367,20 @@ def _github_host_entry(hosts_path: str, host: str) -> str:
     source = _credential_source_path(hosts_path, "GitHub CLI hosts file")
     with open(source, encoding="utf-8") as file_obj:
         lines = file_obj.readlines()
+    entry = _github_host_entry_from_lines(lines, host)
+    if entry is None:
+        raise ValueError(f"GitHub CLI hosts file has no entry for {host}: {hosts_path}")
+    return entry
+
+
+def _github_host_entry_from_lines(lines: list[str], host: str) -> Optional[str]:
     start = None
     for index, line in enumerate(lines):
         if line.startswith(f"{host}:") or line.startswith(f"'{host}':") or line.startswith(f'"{host}":'):
             start = index
             break
     if start is None:
-        raise ValueError(f"GitHub CLI hosts file has no entry for {host}: {hosts_path}")
+        return None
     end = len(lines)
     for index in range(start + 1, len(lines)):
         if lines[index].strip() and not lines[index][0].isspace() and not lines[index].lstrip().startswith("#"):
@@ -381,32 +389,132 @@ def _github_host_entry(hosts_path: str, host: str) -> str:
     return "".join(lines[start:end])
 
 
-def _stage_github_auth(config: SetupConfig, payload_dir: str, local_home: str) -> None:
-    source = config.git_auth_file or os.path.join(local_home, ".config", "gh", "hosts.yml")
-    if config.git_auth_token:
-        token = config.git_auth_token.strip()
-        if not token or any(character.isspace() for character in token):
-            raise ValueError("GitHub token must be a non-empty single-line value")
-        import json
+def _github_entry_has_token(entry: str) -> bool:
+    """Return whether a selected hosts.yml entry contains a token value."""
+    for line in entry.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("oauth_token:"):
+            continue
+        value = stripped.partition(":")[2].strip()
+        return value not in {"", "null", "~", "''", '""'}
+    return False
 
-        entry = f"{config.git_host}:\n    oauth_token: {json.dumps(token)}\n    git_protocol: https\n"
-        destination = os.path.join(payload_dir, "secrets", "gh", "hosts.yml")
-        _copy_existing_path_value(entry.encode("utf-8"), destination)
-        print("  Staged GitHub CLI credentials")
-        return
+
+def _github_token_entry(token: str, host: str) -> str:
+    normalized = token.strip()
+    if not normalized or any(character.isspace() for character in normalized):
+        raise ValueError("GitHub token must be a non-empty single-line value")
+    return f"{host}:\n    oauth_token: {json.dumps(normalized)}\n    git_protocol: https\n"
+
+
+def _github_auth_payload_from_file(source: str, host: str) -> bytes:
+    """Read a selected GitHub hosts entry or a one-line token file."""
     try:
-        entry = _github_host_entry(source, config.git_host)
-    except ValueError:
+        entry = _github_host_entry(source, host)
+    except ValueError as hosts_error:
         source_path = _credential_source_path(source, "GitHub token file")
         with open(source_path, encoding="utf-8") as file_obj:
             token = file_obj.read().strip()
         if not token or any(character.isspace() for character in token):
-            raise
-        import json
+            raise hosts_error
+        entry = _github_token_entry(token, host)
+    else:
+        if not _github_entry_has_token(entry):
+            raise ValueError(
+                f"GitHub CLI hosts entry for {host} has no oauth_token: {source}"
+            )
+    return entry.encode("utf-8")
 
-        entry = f"{config.git_host}:\n    oauth_token: {json.dumps(token)}\n    git_protocol: https\n"
+
+def _github_auth_payload_from_active(hosts_path: str, host: str) -> bytes:
+    """Read active GitHub auth, including tokens held by gh's keyring."""
+    entry: Optional[str] = None
+    if os.path.lexists(os.path.abspath(os.path.expanduser(hosts_path))):
+        entry = _github_host_entry_from_validated_path(hosts_path, host)
+    if entry and _github_entry_has_token(entry):
+        return entry.encode("utf-8")
+
+    gh_path = shutil.which("gh")
+    if not gh_path:
+        raise ValueError(
+            "Active GitHub credentials are not available in hosts.yml and gh is "
+            "not installed; use --git-auth-file PATH or --interactive to provide "
+            "a token file"
+        )
+    try:
+        result = subprocess.run(
+            [gh_path, "auth", "token", "--hostname", host],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ValueError(
+            "gh could not read the active GitHub token; use --git-auth-file PATH "
+            "or --interactive to provide a token file"
+        ) from exc
+    if result.returncode != 0:
+        raise ValueError(
+            "gh could not read the active GitHub token; authenticate gh or use "
+            "--git-auth-file PATH"
+        )
+    return _github_token_entry(result.stdout, host).encode("utf-8")
+
+
+def _github_host_entry_from_validated_path(hosts_path: str, host: str) -> Optional[str]:
+    source = _credential_source_path(hosts_path, "GitHub CLI hosts file")
+    with open(source, encoding="utf-8") as file_obj:
+        return _github_host_entry_from_lines(file_obj.readlines(), host)
+
+
+def _active_agent_credential_error(tool: str, source: str) -> str:
+    if tool == "codex":
+        return (
+            f"Codex active credentials are not present at {source}. Codex may be "
+            "using its OS credential store; set cli_auth_credentials_store to "
+            '"file" and authenticate, or use --agent-auth-file codex PATH'
+        )
+    if tool == "claude":
+        return (
+            f"Claude Code active credentials are not present at {source}. They "
+            "may be stored in an OS keychain; use --agent-auth-file claude PATH "
+            "or authenticate on the target VM"
+        )
+    return (
+        f"OpenCode active credentials are not present at {source}; use "
+        "--agent-auth-file opencode PATH or authenticate on the target VM"
+    )
+
+
+def _stage_active_agent_credential(
+    tool: str,
+    local_home: str,
+    payload_dir: str,
+    relative_path: str,
+) -> None:
+    source = os.path.join(local_home, relative_path)
+    if not os.path.exists(source):
+        raise ValueError(_active_agent_credential_error(tool, source))
+    _stage_secret_file(
+        source,
+        os.path.join(payload_dir, "secrets", tool, os.path.basename(relative_path)),
+        f"{tool} credentials",
+    )
+
+
+def _stage_github_auth(config: SetupConfig, payload_dir: str, local_home: str) -> None:
+    if config.git_auth_token:
+        payload = _github_token_entry(config.git_auth_token, config.git_host).encode("utf-8")
+    elif config.git_auth_file:
+        payload = _github_auth_payload_from_file(config.git_auth_file, config.git_host)
+    else:
+        payload = _github_auth_payload_from_active(
+            os.path.join(local_home, ".config", "gh", "hosts.yml"),
+            config.git_host,
+        )
     destination = os.path.join(payload_dir, "secrets", "gh", "hosts.yml")
-    _copy_existing_path_value(entry.encode("utf-8"), destination)
+    _copy_existing_path_value(payload, destination)
     print("  Staged GitHub CLI credentials")
 
 
@@ -466,12 +574,8 @@ def prepare_agent_payload(config: SetupConfig, payload_dir: str) -> None:
 
     if config.agent_auth_source:
         for tool, relative_path in _AGENT_AUTH_PATHS.items():
-            if tool in config.selected_agent_tools():
-                _stage_secret_file(
-                    os.path.join(local_home, relative_path),
-                    os.path.join(payload_dir, "secrets", tool, os.path.basename(relative_path)),
-                    f"{tool} credentials",
-                )
+            if tool in config.selected_agent_tools() and tool != "gh":
+                _stage_active_agent_credential(tool, local_home, payload_dir, relative_path)
         if "gh" in config.selected_agent_tools() and not (
             config.git_auth_source or config.git_auth_file or config.git_auth_token
         ):
@@ -479,9 +583,8 @@ def prepare_agent_payload(config: SetupConfig, payload_dir: str) -> None:
 
     for tool, source in config.agent_auth_files or []:
         if tool == "gh":
-            entry = _github_host_entry(_credential_source_path(source, "GitHub CLI hosts file"), config.git_host)
             _copy_existing_path_value(
-                entry.encode("utf-8"),
+                _github_auth_payload_from_file(source, config.git_host),
                 os.path.join(payload_dir, "secrets", "gh", "hosts.yml"),
             )
         else:

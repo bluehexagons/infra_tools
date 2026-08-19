@@ -137,8 +137,13 @@ There are no agent-suite presets. On a headless host or desktop, repeat
 `--agent-tool` for exactly the tools needed. Add Node.js, Python, or Go with
 their individual flags. Use `--agent-config active`, `--git-auth active`, or
 the specified-file credential options when the control plane should transfer
-selected settings or credentials. Use `--repo GIT_URL` for target-side HTTPS
-clones; public repositories on any reachable Git host are supported.
+selected settings or credentials. Active GitHub auth can use the controller's
+`gh auth token` command when the token is stored in the controller's keyring;
+file-backed Codex, Claude Code, and OpenCode credentials must be supplied as
+files. Use `--repo GIT_URL` for target-side HTTPS clones; public repositories
+on any reachable Git host are supported.
+The [credentials guide](CREDENTIALS.md) explains the difference between
+workspace passwords, GitHub auth, agent auth, and non-secret agent config.
 
 ## Verify the installation
 
@@ -277,7 +282,9 @@ when separating projects or test environments:
 infra-tools --workspace /srv/infra-tools-workspace list
 ```
 
-Store remote credentials separately and prefer interactive entry:
+The `credentials` commands manage the workspace password store used by
+features such as Samba/SMB; they do not configure GitHub, Codex, Claude Code,
+or OpenCode:
 
 ```bash
 infra-tools credentials set admin
@@ -287,9 +294,15 @@ infra-tools credentials remove admin
 
 Passwords are excluded from saved setup state and reconstructed commands.
 
+For agent VM authentication, Git policy, active/file sources, per-VM
+credential isolation, and remote rotation, see [Credentials and agent
+configuration](CREDENTIALS.md).
+
 ## Related guides
 
 - [Command-line reference](COMMAND_LINE.md) — all setup flags and system types
+- [Credentials and agent configuration](CREDENTIALS.md) — workspace passwords,
+  Git access, agent auth, configuration, sharing, and rotation
 - [Workstations](WORKSTATIONS.md) — desktop profiles, browsers, and agents
 - [XRDP](XRDP.md) — RDP sessions and firewall behavior
 - [Machine types](MACHINE_TYPES.md) — Debian VMs, bare metal, and containers

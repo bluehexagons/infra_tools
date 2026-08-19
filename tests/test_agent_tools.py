@@ -222,6 +222,47 @@ class TestAgentCredentialRotation(unittest.TestCase):
             self.assertNotIn(b"unrelated-token", payload)
             self.assertNotIn(b"selected-token", remote.call_args.args[3].encode())
 
+    def test_active_github_auth_reads_keyring_token_through_gh(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = os.path.join(directory, "hosts.yml")
+            with open(source, "w", encoding="utf-8") as file_obj:
+                file_obj.write("github.com:\n  user: octocat\n")
+            os.chmod(source, 0o600)
+            completed = type(
+                "Completed",
+                (),
+                {"returncode": 0, "stdout": "active-token\n", "stderr": ""},
+            )()
+            with (
+                patch("lib.agent_auth._active_source_path", return_value=source),
+                patch("lib.setup_common.shutil.which", return_value="/usr/bin/gh"),
+                patch("lib.setup_common.subprocess.run", return_value=completed) as run,
+                patch("lib.agent_auth._run_remote_script") as remote,
+            ):
+                remote.return_value = type(
+                    "Completed",
+                    (),
+                    {"returncode": 0, "stdout": "{}", "stderr": ""},
+                )()
+                result = set_agent_credential(
+                    host="vm.example",
+                    username="agent",
+                    tool="gh",
+                    ssh_key=None,
+                    source=None,
+                    use_active=True,
+                )
+
+            self.assertEqual(result, 0)
+            self.assertIn(b"active-token", remote.call_args.args[4])
+            run.assert_called_once_with(
+                ["/usr/bin/gh", "auth", "token", "--hostname", "github.com"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+
     def test_status_reports_non_secret_remote_result(self):
         with patch("lib.agent_auth._run_remote_script") as remote:
             remote.return_value = type(

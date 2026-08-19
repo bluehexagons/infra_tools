@@ -45,38 +45,28 @@ def _active_source_path(tool: str) -> str:
     return os.path.join(_local_user_home(), _AGENT_AUTH_PATHS[tool])
 
 
-def _github_host_entry(path: str, host: str) -> str:
-    from lib.setup_common import _github_host_entry as select_host_entry
-
-    return select_host_entry(path, host)
-
-
-def _token_payload(token: str, host: str) -> bytes:
-    normalized = token.strip()
-    if not normalized or any(character.isspace() for character in normalized):
-        raise ValueError("GitHub token must be a non-empty single-line value")
-    return (
-        f"{host}:\n"
-        f"    oauth_token: {json.dumps(normalized)}\n"
-        "    git_protocol: https\n"
-    ).encode("utf-8")
-
-
-def _read_credential(tool: str, source: str, git_host: str, token: Optional[str]) -> bytes:
+def _read_credential(
+    tool: str,
+    source: str,
+    git_host: str,
+    token: Optional[str],
+    *,
+    use_active: bool = False,
+) -> bytes:
     if tool == "gh":
         if git_host != "github.com":
             raise ValueError("GitHub CLI credentials currently support only github.com")
+        from lib.setup_common import (
+            _github_auth_payload_from_active,
+            _github_auth_payload_from_file,
+            _github_token_entry,
+        )
+
         if token is not None:
-            return _token_payload(token, git_host)
-        source_path = _credential_source_path(source, "GitHub CLI credential file")
-        try:
-            return _github_host_entry(source_path, git_host).encode("utf-8")
-        except ValueError as hosts_error:
-            with open(source_path, encoding="utf-8") as file_obj:
-                token_value = file_obj.read().strip()
-            if not token_value or any(character.isspace() for character in token_value):
-                raise hosts_error
-            return _token_payload(token_value, git_host)
+            return _github_token_entry(token, git_host).encode("utf-8")
+        if use_active:
+            return _github_auth_payload_from_active(source, git_host)
+        return _github_auth_payload_from_file(source, git_host)
 
     source_path = _credential_source_path(source, f"{tool} credential file")
     with open(source_path, "rb") as file_obj:
@@ -247,7 +237,13 @@ def set_agent_credential(
     if token is not None and tool != "gh":
         raise ValueError("interactive token entry is supported only for gh")
     selected_source = _active_source_path(tool) if use_active else source
-    payload = _read_credential(tool, selected_source or "", git_host, token)
+    payload = _read_credential(
+        tool,
+        selected_source or "",
+        git_host,
+        token,
+        use_active=use_active,
+    )
     result = _run_remote_script(
         host,
         username,
