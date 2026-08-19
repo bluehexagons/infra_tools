@@ -335,6 +335,11 @@ _AGENT_AUTH_PATHS = {
     "opencode": os.path.join(".local", "share", "opencode", "auth.json"),
 }
 
+_AGENT_AUTH_FILENAMES = {
+    tool: os.path.basename(relative_path)
+    for tool, relative_path in _AGENT_AUTH_PATHS.items()
+}
+
 
 def _credential_source_path(path: str, label: str) -> str:
     expanded = os.path.abspath(os.path.expanduser(path))
@@ -473,14 +478,16 @@ def prepare_agent_payload(config: SetupConfig, payload_dir: str) -> None:
             _stage_github_auth(config, payload_dir, local_home)
 
     for tool, source in config.agent_auth_files or []:
-        destination_name = "hosts.yml" if tool == "gh" else os.path.basename(source)
         if tool == "gh":
             entry = _github_host_entry(_credential_source_path(source, "GitHub CLI hosts file"), config.git_host)
-            _copy_existing_path_value(entry.encode("utf-8"), os.path.join(payload_dir, "secrets", "gh", destination_name))
+            _copy_existing_path_value(
+                entry.encode("utf-8"),
+                os.path.join(payload_dir, "secrets", "gh", "hosts.yml"),
+            )
         else:
             _stage_secret_file(
                 source,
-                os.path.join(payload_dir, "secrets", tool, destination_name),
+                os.path.join(payload_dir, "secrets", tool, _AGENT_AUTH_FILENAMES[tool]),
                 f"{tool} credentials",
             )
 

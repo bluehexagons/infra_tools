@@ -319,12 +319,11 @@ infra-tools setup server_dev 10.0.0.10 agent \
   --repo https://github.com/acme/application.git
 ```
 
-The exact flag names can be finalized during implementation, but the public
-model should remain this small: explicit tools, one VM-level Git policy,
-optional host-neutral repositories, GitHub authentication as the first
-provider-specific integration, active-user configuration or specified files,
-and an interactive alternative. Credential source options are operation-only
-and are omitted from saved commands.
+The implementation uses these flag names and keeps the public model small:
+explicit tools, one VM-level Git policy, optional host-neutral repositories,
+GitHub authentication as the first provider-specific integration, active-user
+configuration or specified files, and an interactive alternative. Credential
+source options are operation-only and are omitted from saved commands.
 
 ## Implementation phases
 

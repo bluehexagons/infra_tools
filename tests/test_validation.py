@@ -273,6 +273,32 @@ class TestValidateAgentGitSettings(unittest.TestCase):
                 )
             )
 
+    def test_agent_auth_rejects_tools_without_supported_credentials(self):
+        with self.assertRaisesRegex(ValueError, "supported credentials"):
+            validate_agent_git_settings(
+                self._make_config(
+                    agent_tools=["t3code"],
+                    agent_auth_source="active",
+                )
+            )
+
+        with self.assertRaisesRegex(ValueError, "supported credentials"):
+            validate_agent_git_settings(
+                self._make_config(
+                    agent_tools=["t3code"],
+                    agent_auth_files=[["t3code", "/run/secrets/t3code.json"]],
+                )
+            )
+
+    def test_malformed_agent_auth_file_is_rejected_as_configuration_error(self):
+        for malformed in ("bad-spec", [["codex"], "/run/secrets/codex.json"]):
+            with self.subTest(malformed=malformed), self.assertRaisesRegex(
+                ValueError, "--agent-auth-file"
+            ):
+                validate_agent_git_settings(
+                    self._make_config(agent_auth_files=[malformed])
+                )
+
 
 class TestValidateAntistaticSettings(unittest.TestCase):
     def _make_config(self, **kwargs):

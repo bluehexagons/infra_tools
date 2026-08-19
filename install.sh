@@ -49,7 +49,8 @@ Examples:
   rm -f "$HOME/.infra_tools-install.sh"
   Download with wget and run a privileged setup:
   wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
-  sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup control_plane --agent-suite terminal
+  sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup control_plane \
+    --agent-tool gh --agent-tool codex --agent-tool claude --agent-tool opencode
   rm -f "$HOME/.infra_tools-install.sh"
   Add qemu-guest-agent when the orchestration host is a Proxmox VM by placing
   --qemu-guest-agent before --local-setup:

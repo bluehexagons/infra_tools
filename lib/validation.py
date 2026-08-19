@@ -810,10 +810,26 @@ def validate_agent_git_settings(config: Any) -> None:
         if tool not in AGENT_TOOLS:
             raise ValueError(f"Unsupported --agent-tool: {tool}")
 
+    supported_auth_tools = {"gh", "codex", "claude", "opencode"}
+    if (
+        getattr(config, "agent_auth_source", None)
+        and not selected_tools.intersection(supported_auth_tools)
+    ):
+        raise ValueError(
+            "--agent-auth active requires a selected tool with supported credentials"
+        )
+
     for spec in getattr(config, "agent_auth_files", None) or []:
-        if len(spec) != 2 or spec[0] not in selected_tools:
+        if (
+            not isinstance(spec, (list, tuple))
+            or len(spec) != 2
+            or not all(isinstance(value, str) for value in spec)
+            or spec[0] not in selected_tools
+            or spec[0] not in supported_auth_tools
+        ):
             raise ValueError(
-                "--agent-auth-file requires a selected agent TOOL and a file PATH"
+                "--agent-auth-file requires a selected agent TOOL with supported credentials "
+                "and a file PATH"
             )
         if spec[0] == "gh" and git_host != "github.com":
             raise ValueError(

@@ -103,6 +103,30 @@ class TestAgentPayloadPreparation(unittest.TestCase):
                 os.path.join(payload_dir, 'secrets', 'gh', 'hosts.yml')
             ))
 
+    def test_specified_agent_file_uses_canonical_target_name(self):
+        with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as payload_dir:
+            source = os.path.join(home, 'mounted-secret.txt')
+            with open(source, 'w', encoding='utf-8') as file_obj:
+                file_obj.write('{"token":"secret"}\n')
+            os.chmod(source, 0o600)
+
+            config = SetupConfig(
+                host='10.0.0.10',
+                username='agentuser',
+                system_type='server_dev',
+                agent_tools=['codex'],
+                agent_auth_files=[['codex', source]],
+                copy_agent_keys=True,
+            )
+
+            with patch.dict(os.environ, {'HOME': home, 'SUDO_USER': ''}):
+                prepare_agent_payload(config, payload_dir)
+
+            canonical = os.path.join(payload_dir, 'secrets', 'codex', 'auth.json')
+            self.assertTrue(os.path.isfile(canonical))
+            with open(canonical, encoding='utf-8') as file_obj:
+                self.assertEqual(file_obj.read(), '{"token":"secret"}\n')
+
 
 if __name__ == '__main__':
     unittest.main()

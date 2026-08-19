@@ -18,6 +18,18 @@ INSTALL_SCRIPT = os.path.join(PROJECT_ROOT, "install.sh")
 
 
 class TestInstallScript(unittest.TestCase):
+    def test_help_uses_explicit_agent_tool_options(self):
+        result = subprocess.run(
+            ["sh", INSTALL_SCRIPT, "--help"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--agent-tool gh", result.stdout)
+        self.assertNotIn("--agent-suite", result.stdout)
+
     def _create_fixture(
         self,
         directory: str,
