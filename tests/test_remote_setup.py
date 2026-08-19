@@ -142,6 +142,29 @@ class TestRepositorySourcePath(unittest.TestCase):
 
 
 class TestBuildRuntimeDetection(unittest.TestCase):
+    def test_finds_runtime_markers_in_monorepo_children(self):
+        with tempfile.TemporaryDirectory() as repo_path:
+            os.makedirs(os.path.join(repo_path, "frontend"))
+            os.makedirs(os.path.join(repo_path, "services", "api"))
+            os.makedirs(os.path.join(repo_path, "node_modules", "ignored"))
+            for relative_path in (
+                "frontend/package.json",
+                "services/api/pyproject.toml",
+                "node_modules/ignored/go.mod",
+            ):
+                path = os.path.join(repo_path, relative_path)
+                with open(path, "w", encoding="utf-8") as handle:
+                    handle.write("{}")
+
+            found = remote_setup._find_project_runtime_files(repo_path)
+
+        self.assertEqual(found["node"], [os.path.join(repo_path, "frontend", "package.json")])
+        self.assertEqual(
+            found["python"],
+            [os.path.join(repo_path, "services", "api", "pyproject.toml")],
+        )
+        self.assertEqual(found["go"], [])
+
     def test_enables_go_for_uploaded_go_module(self):
         config = SetupConfig(
             host="localhost",
@@ -168,6 +191,24 @@ class TestBuildRuntimeDetection(unittest.TestCase):
             remote_setup.enable_detected_build_runtimes(config)
 
         self.assertFalse(config.install_go)
+
+    def test_enables_node_python_and_ruby_from_uploaded_source(self):
+        config = SetupConfig(
+            host="localhost",
+            username="root",
+            system_type="server_lite",
+            deploy_specs=[["app.example.com", "https://github.com/example/polyglot.git"]],
+        )
+
+        def isfile(path: str) -> bool:
+            return os.path.basename(path) in {"package.json", "pyproject.toml", "Gemfile"}
+
+        with patch.object(remote_setup.os.path, "isfile", side_effect=isfile):
+            remote_setup.enable_detected_build_runtimes(config)
+
+        self.assertTrue(config.install_node)
+        self.assertTrue(config.install_python)
+        self.assertTrue(config.install_ruby)
 
 
 class TestAgentPayloadCleanup(unittest.TestCase):

@@ -10,7 +10,7 @@ falling back to automatic detection.
 
 ```bash
 infra-tools setup server_web web.example.com deploy \
-  --ruby --node --ssl --ssl-email admin@example.com \
+  --ssl --ssl-email admin@example.com \
   --deploy web.example.com https://github.com/example/web.git
 ```
 
@@ -25,9 +25,12 @@ entry point or runtime settings can provide an explicit manifest. Use
 [`DEPLOYMENT_SAFETY.md`](./DEPLOYMENT_SAFETY.md)
 for backup, persistent-state, rollback, and update-policy behavior.
 
-For target-VM builds, infra_tools inspects the uploaded source before running
-setup steps and automatically enables Go when a deployed repository contains
-`go.mod`. No separate `--go` flag is required for a conventional Go deploy.
+For target-VM builds, infra_tools inspects uploaded sources before running
+setup steps. It enables Go for `go.mod`, Node.js for `package.json`, Python for
+`pyproject.toml`, `uv.lock`, or `requirements.txt`, and Ruby for `Gemfile`.
+Separate runtime flags are therefore unnecessary for ordinary deployments.
+Explicit flags remain useful when a repository generates those files later or
+uses a non-standard layout.
 
 ## Manifest shape
 
@@ -140,6 +143,11 @@ previous release and service units.
   component build, service activation, and declared health check succeeds.
 - Repository build commands run as an application-specific non-root build
   account that cannot modify another application's active release.
+- Node and uv are provisioned in that application's persistent build home;
+  Node projects may pin the build version with `.nvmrc`. Build caches survive
+  release replacement without being shared between applications.
+- Static output directories and service binaries are checked before any active
+  service is stopped. A declared binary must exist and be executable.
 - Existing release files are replaced only after services are stopped. Static
   files are owned by the deployment user.
 - Each service receives a dedicated system user and persistent writable state
@@ -158,8 +166,9 @@ previous release and service units.
 
 Manifest validation is strict: unknown fields, duplicate names, invalid domains,
 unsafe paths, unsupported versions, invalid ports, invalid environment variable
-names, and malformed service templates are rejected. Check the remote deployment
-output and inspect the generated service when a component does not start:
+names, duplicate resolved domain/path routes, and malformed service templates
+are rejected. Check the remote deployment output and inspect the generated
+service when a component does not start:
 
 ```text
 sudo systemctl status app-<deployment>-<component>.service
@@ -167,6 +176,9 @@ sudo journalctl -u app-<deployment>-<component>.service -n 100 --no-pager
 ```
 
 Replace `<deployment>` and `<component>` with the generated service name.
+Infra-tools also refuses to replace an existing same-named Nginx site unless it
+recognizes that site as one it generated. Rename or explicitly migrate a manual
+site before assigning its domain to a managed deployment.
 
 For Nginx and deployment rollback behavior, see
 [`DEPLOYMENT_SAFETY.md`](./DEPLOYMENT_SAFETY.md). For webhook-triggered builds,

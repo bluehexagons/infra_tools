@@ -929,6 +929,7 @@ class DeploymentOrchestrator:
         desired_units: set[str] = set()
         try:
             manifest = self._resolve_manifest_ports(manifest, dest_path)
+            self._validate_manifest_routes(manifest, domain)
             print(f"Deploying manifest ({len(manifest.components)} component(s)) to {dest_path}...")
             build_user = self._build_identity(dest_path)
             self._ensure_build_user(build_user)
@@ -960,11 +961,15 @@ class DeploymentOrchestrator:
             if result.returncode != 0:
                 raise RuntimeError(f"Could not assign staging tree to build user {build_user}")
 
+            self._prepare_build_toolchain(staging_path, build_user)
+
             # Build every component before touching the active release.
             for component in manifest.components:
                 component_domain = self._component_domain(component, domain)
                 print(f"  Component '{component.name}' ({component.type}) → {component_domain}{component.path}")
                 self._run_component_build(component, staging_path, build_user)
+
+            self._validate_manifest_artifacts(manifest, staging_path)
 
             for component in manifest.components:
                 if component.is_service:
@@ -1064,14 +1069,29 @@ class DeploymentOrchestrator:
         dest_path: str,
         build_user: Optional[str] = None,
     ) -> None:
-        """Run build commands as the non-root deployment owner."""
+        """Run build commands as the application-specific build account."""
         if not component.build:
             return
         env_prefix = "".join(f"{key}={shlex.quote(value)} " for key, value in component.env.items())
         for command in component.build:
             print(f"    build: {command}")
-            build_shell = f"cd {shlex.quote(dest_path)} && {env_prefix}{command}"
             build_home = self._build_home(build_user or self.deploy_user)
+            path_entries = [os.path.join(build_home, ".local", "bin"), "/usr/local/go/bin"]
+            shell_parts = [
+                f"export PATH={shlex.quote(':'.join(path_entries))}:$PATH",
+            ]
+            nvm_dir = os.path.join(build_home, ".nvm")
+            nvm_script = os.path.join(nvm_dir, "nvm.sh")
+            if os.path.isfile(nvm_script):
+                shell_parts.extend((
+                    f"export NVM_DIR={shlex.quote(nvm_dir)}",
+                    f". {shlex.quote(nvm_script)}",
+                ))
+            shell_parts.extend((
+                f"cd {shlex.quote(dest_path)}",
+                f"{env_prefix}{command}",
+            ))
+            build_shell = " && ".join(shell_parts)
             result = run(
                 f"runuser -u {shlex.quote(build_user or self.deploy_user)} -- "
                 f"env HOME={shlex.quote(build_home)} /bin/bash -lc {shlex.quote(build_shell)}",
@@ -1082,6 +1102,79 @@ class DeploymentOrchestrator:
                 error = self._get_command_error(result, "build command failed")
                 raise RuntimeError(f"Component '{component.name}' build failed: {error}")
 
+    def _prepare_build_toolchain(self, source_path: str, build_user: str) -> None:
+        """Provision repository-declared user-scoped build tools once per app."""
+        build_home = self._build_home(build_user)
+        if self._source_has_marker(source_path, {"package.json"}):
+            nvm_script = os.path.join(build_home, ".nvm", "nvm.sh")
+            if not os.path.isfile(nvm_script):
+                from common.common_steps import install_node_for_user
+
+                install_node_for_user(build_user, build_home)
+            if not os.path.isfile(nvm_script):
+                raise RuntimeError(f"Node.js toolchain setup failed for {build_user}")
+            if os.path.isfile(os.path.join(source_path, ".nvmrc")):
+                nvm_dir = os.path.join(build_home, ".nvm")
+                script = " && ".join((
+                    f"export NVM_DIR={shlex.quote(nvm_dir)}",
+                    f". {shlex.quote(nvm_script)}",
+                    f"cd {shlex.quote(source_path)}",
+                    "nvm install",
+                ))
+                result = run(
+                    f"runuser -u {shlex.quote(build_user)} -- "
+                    f"env HOME={shlex.quote(build_home)} /bin/bash -lc {shlex.quote(script)}",
+                    check=False,
+                    capture_output=True,
+                )
+                if result.returncode != 0:
+                    error = self._get_command_error(result, "nvm install failed")
+                    raise RuntimeError(f"Node.js version setup failed for {build_user}: {error}")
+
+        if self._source_has_marker(
+            source_path,
+            {"pyproject.toml", "requirements.txt", "uv.lock"},
+        ):
+            uv_path = os.path.join(build_home, ".local", "bin", "uv")
+            if not os.path.isfile(uv_path):
+                from common.common_steps import install_or_update_uv
+
+                if not install_or_update_uv(build_home, username=build_user):
+                    raise RuntimeError(f"uv toolchain setup failed for {build_user}")
+
+    @staticmethod
+    def _source_has_marker(source_path: str, markers: set[str]) -> bool:
+        ignored = {".git", ".infra_tools", ".venv", "node_modules", "vendor"}
+        for _current_dir, directories, filenames in os.walk(source_path):
+            directories[:] = [name for name in directories if name not in ignored]
+            if markers.intersection(filenames):
+                return True
+        return False
+
+    @staticmethod
+    def _validate_manifest_artifacts(manifest: Manifest, staging_path: str) -> None:
+        """Reject incomplete builds before stopping the active application."""
+        for component in manifest.components:
+            if component.is_static:
+                output_path = os.path.join(staging_path, component.output or "")
+                if not os.path.isdir(output_path):
+                    raise RuntimeError(
+                        f"Component '{component.name}': static output not found after build: "
+                        f"{output_path}"
+                    )
+                continue
+            if not component.binary:
+                continue
+            binary_path = os.path.join(staging_path, component.binary)
+            if not os.path.isfile(binary_path):
+                raise RuntimeError(
+                    f"Component '{component.name}': binary not found after build: {binary_path}"
+                )
+            if not os.access(binary_path, os.X_OK):
+                raise RuntimeError(
+                    f"Component '{component.name}': binary is not executable: {binary_path}"
+                )
+
     def _component_domain(self, component: Component, deploy_domain: Optional[str]) -> str:
         if not has_placeholder(component.domain):
             return component.domain
@@ -1090,6 +1183,25 @@ class DeploymentOrchestrator:
                 f"Component '{component.name}' domain uses {{domain}}, but no deploy domain was provided"
             )
         return render_template(component.domain, {'domain': deploy_domain})
+
+    def _validate_manifest_routes(
+        self,
+        manifest: Manifest,
+        deploy_domain: Optional[str],
+    ) -> None:
+        """Reject components that would generate the same Nginx location."""
+        routes: dict[tuple[str, str], str] = {}
+        for component in manifest.components:
+            if component.is_service and not component.reverse_proxy:
+                continue
+            route = (self._component_domain(component, deploy_domain), component.path)
+            previous = routes.get(route)
+            if previous:
+                raise RuntimeError(
+                    f"Components '{previous}' and '{component.name}' both declare "
+                    f"{route[0]}{route[1]}"
+                )
+            routes[route] = component.name
 
     def _component_dep(self, component: Component, dest_path: str,
                        deploy_domain: Optional[str] = None) -> dict[str, Any]:

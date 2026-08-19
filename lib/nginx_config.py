@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shlex
 import shutil
+import tempfile
 from typing import Optional
 
 from lib.types import Deployments, StrList, PathPair
@@ -51,6 +52,35 @@ def _is_infra_tools_deployment_site(path: str) -> bool:
         "location /.well-known/acme-challenge/",
         "add_header Strict-Transport-Security",
     ))
+
+
+def _write_config_atomic(path: str, content: bytes, mode: int = 0o644) -> None:
+    """Replace a config file without exposing a partial write."""
+    fd, temporary_path = tempfile.mkstemp(
+        prefix=f".{os.path.basename(path)}.",
+        dir=os.path.dirname(path),
+    )
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary_path, mode)
+        os.replace(temporary_path, path)
+    finally:
+        if os.path.exists(temporary_path):
+            os.unlink(temporary_path)
+
+
+def _assert_managed_config_names(current_config_names: set[str]) -> None:
+    """Refuse to replace a same-named Nginx site not owned by infra_tools."""
+    for directory in (NGINX_SITES_AVAILABLE_DIR, NGINX_SITES_ENABLED_DIR):
+        for name in current_config_names:
+            path = os.path.join(directory, name)
+            if os.path.lexists(path) and not _is_infra_tools_deployment_site(path):
+                raise RuntimeError(
+                    f"Refusing to replace unmanaged Nginx configuration: {path}"
+                )
 
 
 def _reconcile_deployment_sites(current_config_names: set[str]) -> None:
@@ -114,9 +144,7 @@ def _restore_deployment_sites(
             os.symlink(str(value), path)
         else:
             content, mode = value
-            with open(path, "wb") as handle:
-                handle.write(content)
-            os.chmod(path, mode)
+            _write_config_atomic(path, content, mode)
 
 
 def get_ssl_cert_path(domain: Optional[str]) -> PathPair:
@@ -533,8 +561,7 @@ def _create_nginx_sites_for_groups(
         )
         
         try:
-            with open(config_file, 'w') as f:
-                f.write(config_content)
+            _write_config_atomic(config_file, config_content.encode("utf-8"))
         except PermissionError as e:
             raise PermissionError(f"Failed to write nginx config to {config_file}: {e}") from e
         
@@ -563,6 +590,7 @@ def create_nginx_sites_for_groups(
 ) -> None:
     """Atomically replace deployment-owned Nginx sites after validation."""
     current_config_names = {_config_name_for_domain(domain) for domain in grouped_deployments}
+    _assert_managed_config_names(current_config_names)
     snapshot = _snapshot_deployment_sites(current_config_names)
     try:
         _create_nginx_sites_for_groups(

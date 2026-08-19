@@ -683,6 +683,11 @@ def install_or_update_uv(user_home: str, username: Optional[str] = None) -> bool
                 print("  ✗ Downloaded uv installer failed validation")
                 return False
 
+            # mkstemp creates a root-only file. The validated installer must
+            # be readable by the unprivileged account that executes it.
+            if username:
+                os.chmod(installer_path, 0o644)
+
             if username:
                 install_result = _run_as_login_user(
                     username,

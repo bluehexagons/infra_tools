@@ -5,8 +5,9 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import tempfile
 import unittest
-from unittest.mock import call, patch
+from unittest.mock import MagicMock, call, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -47,6 +48,31 @@ class TestPythonFlag(unittest.TestCase):
     @patch("common.common_steps.is_dry_run", return_value=True)
     def test_install_or_update_uv_returns_true_in_dry_run(self, _is_dry_run):
         self.assertTrue(common_steps.install_or_update_uv(user_home="/home/user", username="user"))
+
+    @patch("common.common_steps._validate_uv_install_script", return_value=True)
+    @patch("common.common_steps.run")
+    def test_uv_installer_is_readable_by_target_user(self, mock_run, _validate):
+        observed_modes = []
+        with tempfile.TemporaryDirectory() as user_home:
+            installer_path = os.path.join(user_home, "installer.sh")
+            fd = os.open(installer_path, os.O_CREAT | os.O_RDWR, 0o600)
+
+            def run_side_effect(command, *_args, **_kwargs):
+                if "runuser" in command and f"sh {installer_path}" in command:
+                    observed_modes.append(os.stat(installer_path).st_mode & 0o777)
+                    uv_dir = os.path.join(user_home, ".local", "bin")
+                    os.makedirs(uv_dir, exist_ok=True)
+                    with open(os.path.join(uv_dir, "uv"), "w", encoding="utf-8"):
+                        pass
+                return MagicMock(returncode=0, stdout="", stderr="")
+
+            mock_run.side_effect = run_side_effect
+            with patch("common.common_steps.tempfile.mkstemp", return_value=(fd, installer_path)):
+                self.assertTrue(
+                    common_steps.install_or_update_uv(user_home, username="build-example")
+                )
+
+        self.assertEqual(observed_modes, [0o644])
 
     @patch("common.common_steps.configure_maintenance_timer")
     def test_configure_auto_update_uv_disables_ecosystem_auto_upgrades(self, mock_configure):

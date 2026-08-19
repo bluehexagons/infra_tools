@@ -112,21 +112,66 @@ def enable_detected_build_runtimes(config: SetupConfig) -> None:
     for _deploy_spec, git_url in config.deploy_specs:
         repo_name = extract_repo_name(git_url)
         repo_path = os.path.join("/opt/infra_tools/deployments", repo_name)
-        if os.path.isfile(os.path.join(repo_path, "go.mod")):
+        project_files = _find_project_runtime_files(repo_path)
+        if project_files["node"] and not config.install_node:
+            config.install_node = True
+            print(f"Detected Node.js project in {repo_name}; enabling target Node.js runtime")
+        if project_files["python"] and not config.install_python:
+            config.install_python = True
+            print(f"Detected Python project in {repo_name}; enabling target Python runtime")
+        if project_files["ruby"] and not config.install_ruby:
+            config.install_ruby = True
+            print(f"Detected Ruby project in {repo_name}; enabling target Ruby runtime")
+        if project_files["go"]:
             if not config.install_go:
                 config.install_go = True
                 print(f"Detected Go module in {repo_name}; enabling target Go runtime")
-            try:
-                with open(os.path.join(repo_path, "go.mod"), "r", encoding="utf-8") as handle:
-                    match = re.search(r"^go\s+(\d+)\.(\d+)(?:\.(\d+))?\s*$", handle.read(), re.MULTILINE)
-            except OSError:
-                match = None
-            if match:
-                required_versions.append(tuple(int(part or 0) for part in match.groups()))
+            for go_mod in project_files["go"]:
+                try:
+                    with open(go_mod, "r", encoding="utf-8") as handle:
+                        match = re.search(
+                            r"^go\s+(\d+)\.(\d+)(?:\.(\d+))?\s*$",
+                            handle.read(),
+                            re.MULTILINE,
+                        )
+                except OSError:
+                    match = None
+                if match:
+                    required_versions.append(tuple(int(part or 0) for part in match.groups()))
 
     if required_versions:
         version = max(required_versions)
         os.environ["INFRA_TOOLS_GO_VERSION"] = ".".join(str(part) for part in version)
+
+
+def _find_project_runtime_files(repo_path: str) -> dict[str, list[str]]:
+    """Find runtime marker files in a repository, including monorepo children."""
+    markers = {
+        "go": {"go.mod"},
+        "node": {"package.json"},
+        "python": {"pyproject.toml", "uv.lock", "requirements.txt"},
+        "ruby": {"Gemfile"},
+    }
+    found: dict[str, list[str]] = {runtime: [] for runtime in markers}
+    if not os.path.isdir(repo_path):
+        for runtime, filenames in markers.items():
+            found[runtime] = [
+                os.path.join(repo_path, filename)
+                for filename in filenames
+                if os.path.isfile(os.path.join(repo_path, filename))
+            ]
+        return found
+
+    ignored = {".git", ".infra_tools", ".venv", "node_modules", "vendor"}
+    for current_dir, directories, filenames in os.walk(repo_path):
+        directories[:] = [name for name in directories if name not in ignored]
+        names = set(filenames)
+        for runtime, runtime_markers in markers.items():
+            found[runtime].extend(
+                os.path.join(current_dir, filename)
+                for filename in sorted(names & runtime_markers)
+            )
+    return found
 
 
 def _load_args_file(args_file: str) -> list[str]:

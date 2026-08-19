@@ -86,17 +86,21 @@ Each finding lists: severity, evidence, validation outcome, and direct follow-up
 - **Impact**
   - Remote command execution boundary is effectively “script file is trusted,” which is acceptable only with strict review/validation controls. Current code provides low friction.
 
-### ARCH-05: Remote setup "cleanup first" has no rollback/failover protection
+### ARCH-05: Remote setup "cleanup first" has no rollback/failover protection (resolved)
 
 **Severity: Medium-High**
 
 - **Evidence**
-  - `remote_setup.py:219-227` intentionally removes existing infra_tools services before iterating install steps.
-  - Immediate follow-on comments acknowledge that services remain removed if subsequent steps fail (`remote_setup.py:221-223`).
+  - The global pre-setup service cleanup was removed on 2026-08-19.
+  - Manifest deployments reconcile only the application's units after a staged
+    build and artifact validation succeeds.
 - **Validation**
-  - Confirmed by inline comments and call order before `get_steps_for_system_type(config)`.
+  - Regression tests verify build and artifact failures occur before app
+    services are stopped, and failed activation restores the previous release.
 - **Impact**
-  - Partial outages are possible on failed setup runs; cleanup becomes user-facing operational debt until rerun success.
+  - Setup no longer creates an outage for every managed application before
+    unrelated work. Broader non-manifest setup rollback remains tracked in the
+    transactional execution plan.
 
 ### ARCH-06: State/cache file writes were best-effort and non-atomic (resolved)
 
@@ -167,13 +171,12 @@ Validation was performed by static evidence checks (no behavior-altering actions
 - **2026-08-08 — ARCH-07 resolved:** manifest environment variable names are
   now validated as shell identifiers before deployment command assembly. Keep
   this validation at the manifest boundary when the build executor is refactored.
-- **2026-08-09 — open findings reverified:** setup still removes managed
-  services before running steps,
-  manifest deploy still removes the active tree before building, manifest
-  health failures still warn without failing, the shared SSH builders still
-  use `accept-new`, and plugin discovery still imports every built-in plugin
-  eagerly. The first atomic persistence slice landed, but corrupt-state
-  handling remains permissive.
+- **2026-08-09 — historical revalidation:** at that point setup still removed
+  managed services before running steps, manifest deploy replaced the active
+  tree before building, and health failures only warned. Those deployment
+  findings were resolved on 2026-08-19. Shared SSH builders still use
+  `accept-new`, plugin discovery still imports every built-in plugin eagerly,
+  and corrupt-state handling remains permissive.
 - **2026-08-09 — ARCH-06 resolved:** introduced the shared writer and migrated
   all JSON state/configuration paths, including secret-bearing files with mode
   `0600`. Tests cover complete writes, replacement failure preservation, and
@@ -184,7 +187,11 @@ Validation was performed by static evidence checks (no behavior-altering actions
   paths, and common secret assignment/option values are redacted from command
   output and exception text. Caller inventory and a complete secret-display
   audit remain follow-up work.
-- ARCH-01, ARCH-03, ARCH-05, and ARCH-08 are sequenced in
+- **2026-08-19 — ARCH-05 resolved:** removed global service teardown from
+  remote setup. Manifest deployments now build and validate before stopping
+  app-scoped units, then restore the prior release and units after activation
+  or health failure. Durable interruption markers remain open work.
+- ARCH-01, ARCH-03, and ARCH-08 are sequenced in
   [Transactional execution and reconciliation](TRANSACTIONAL_EXECUTION.md).
   ARCH-02 remains a P3 startup-isolation task in [the roadmap](ROADMAP.md), and
   ARCH-04 is a trust-boundary requirement for

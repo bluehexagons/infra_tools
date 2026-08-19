@@ -259,6 +259,89 @@ class TestNginxIntegration(unittest.TestCase):
         self.assertIn("location /api/", cfg)
         self.assertIn("proxy_pass http://127.0.0.1:8090;", cfg)
 
+    def test_duplicate_resolved_routes_are_rejected(self):
+        manifest = Manifest(
+            version=1,
+            components=[
+                _static_component(name="first", domain="{{domain}}"),
+                _static_component(name="second", domain="example.com"),
+            ],
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "both declare example.com/"):
+            self.orch._validate_manifest_routes(manifest, "example.com")
+
+    def test_internal_services_do_not_claim_nginx_routes(self):
+        manifest = Manifest(
+            version=1,
+            components=[
+                _service_component(name="worker", domain="example.com", reverse_proxy=False),
+                _static_component(name="site", domain="example.com"),
+            ],
+        )
+
+        self.orch._validate_manifest_routes(manifest, "example.com")
+
+
+class TestManifestBuildToolchains(unittest.TestCase):
+    def setUp(self):
+        self.orch = DeploymentOrchestrator(base_dir="/var/www")
+
+    @patch('lib.deployment.run')
+    def test_build_loads_app_scoped_node_and_python_tools(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        with tempfile.TemporaryDirectory() as source, tempfile.TemporaryDirectory() as build_home:
+            nvm_dir = os.path.join(build_home, ".nvm")
+            os.makedirs(nvm_dir)
+            with open(os.path.join(nvm_dir, "nvm.sh"), "w", encoding="utf-8") as handle:
+                handle.write("# nvm")
+
+            component = _static_component(build="npm run build")
+            with patch.object(self.orch, "_build_home", return_value=build_home):
+                self.orch._run_component_build(component, source, "build-example")
+
+        command = mock_run.call_args.args[0]
+        self.assertIn(f"export NVM_DIR={nvm_dir}", command)
+        self.assertIn(os.path.join(build_home, ".local", "bin"), command)
+        self.assertIn("/usr/local/go/bin", command)
+
+    @patch('lib.deployment.run')
+    @patch('common.common_steps.install_or_update_uv')
+    @patch('common.common_steps.install_node_for_user')
+    def test_prepares_detected_toolchains_once(
+        self, mock_install_node, mock_install_uv, mock_run
+    ):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        with tempfile.TemporaryDirectory() as source, tempfile.TemporaryDirectory() as build_home:
+            for filename in ("package.json", "pyproject.toml", ".nvmrc"):
+                with open(os.path.join(source, filename), "w", encoding="utf-8") as handle:
+                    handle.write("{}" if filename != ".nvmrc" else "22\n")
+
+            def install_node(_user: str, home: str) -> None:
+                os.makedirs(os.path.join(home, ".nvm"), exist_ok=True)
+                with open(os.path.join(home, ".nvm", "nvm.sh"), "w", encoding="utf-8"):
+                    pass
+
+            def install_uv(home: str, username: str) -> bool:
+                uv_dir = os.path.join(home, ".local", "bin")
+                os.makedirs(uv_dir, exist_ok=True)
+                with open(os.path.join(uv_dir, "uv"), "w", encoding="utf-8"):
+                    pass
+                return True
+
+            mock_install_node.side_effect = install_node
+            mock_install_uv.side_effect = install_uv
+            with patch.object(self.orch, "_build_home", return_value=build_home):
+                self.orch._prepare_build_toolchain(source, "build-example")
+                self.orch._prepare_build_toolchain(source, "build-example")
+
+        mock_install_node.assert_called_once_with("build-example", build_home)
+        mock_install_uv.assert_called_once_with(build_home, username="build-example")
+        self.assertEqual(
+            sum("nvm install" in call.args[0] for call in mock_run.call_args_list),
+            2,
+        )
+
 
 class TestDeployManifest(unittest.TestCase):
     def setUp(self):
@@ -288,6 +371,7 @@ class TestDeployManifest(unittest.TestCase):
         os.makedirs(os.path.join(self.source, "server"))
         with open(os.path.join(self.source, "server", "app"), "w") as f:
             f.write("#!/bin/sh\n")
+        os.chmod(os.path.join(self.source, "server", "app"), 0o755)
         with open(os.path.join(self.source, "infra.json")) as f:
             self.manifest: Manifest = parse_manifest(json.load(f))
 
@@ -426,6 +510,59 @@ class TestDeployManifest(unittest.TestCase):
                 keep_source=True,
             )
         self.assertIn("binary not found", str(ctx.exception))
+        self.assertFalse(
+            any("systemctl stop" in call.args[0] for call in mock_run.call_args_list)
+        )
+
+    @patch.object(DeploymentOrchestrator, '_poll_health')
+    @patch('lib.deployment.create_managed_service')
+    @patch('lib.deployment.save_deployment_metadata')
+    @patch('lib.deployment.run')
+    def test_missing_static_output_aborts_before_service_stop(
+        self, mock_run, _mock_meta, _mock_service, _mock_health
+    ):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        shutil.rmtree(os.path.join(self.source, "dist"))
+
+        with self.assertRaisesRegex(RuntimeError, "static output not found"):
+            self.orch.deploy_manifest(
+                manifest=self.manifest,
+                source_path=self.source,
+                domain="example.com",
+                path="/",
+                git_url="https://git.example.com/shop.git",
+                commit_hash="abc123",
+                keep_source=True,
+            )
+
+        self.assertFalse(
+            any("systemctl stop" in call.args[0] for call in mock_run.call_args_list)
+        )
+
+    @patch.object(DeploymentOrchestrator, '_poll_health')
+    @patch('lib.deployment.create_managed_service')
+    @patch('lib.deployment.save_deployment_metadata')
+    @patch('lib.deployment.run')
+    def test_non_executable_binary_aborts_before_service_stop(
+        self, mock_run, _mock_meta, _mock_service, _mock_health
+    ):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        os.chmod(os.path.join(self.source, "server", "app"), 0o644)
+
+        with self.assertRaisesRegex(RuntimeError, "binary is not executable"):
+            self.orch.deploy_manifest(
+                manifest=self.manifest,
+                source_path=self.source,
+                domain="example.com",
+                path="/",
+                git_url="https://git.example.com/shop.git",
+                commit_hash="abc123",
+                keep_source=True,
+            )
+
+        self.assertFalse(
+            any("systemctl stop" in call.args[0] for call in mock_run.call_args_list)
+        )
 
     @patch.object(DeploymentOrchestrator, '_poll_health')
     @patch('lib.deployment.create_managed_service', side_effect=RuntimeError("service failed"))

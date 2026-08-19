@@ -307,7 +307,7 @@ server {
 
     @patch('lib.nginx_config.generate_self_signed_cert')
     @patch('lib.nginx_config.run')
-    def test_create_sites_repairs_wrong_enabled_path(self, mock_run, _mock_cert):
+    def test_create_sites_refuses_unmanaged_same_name(self, mock_run, _mock_cert):
         with tempfile.TemporaryDirectory() as temp_dir:
             available = os.path.join(temp_dir, 'sites-available')
             enabled = os.path.join(temp_dir, 'sites-enabled')
@@ -318,13 +318,6 @@ server {
             with open(enabled_link, 'w', encoding='utf-8') as handle:
                 handle.write('stale file')
 
-            def run_side_effect(cmd, *_args, **_kwargs):
-                if cmd.startswith('ln -s '):
-                    os.symlink(os.path.join(available, 'example_com'), enabled_link)
-                return MagicMock(returncode=0)
-
-            mock_run.side_effect = run_side_effect
-
             deployments = [{
                 'path': '/',
                 'needs_proxy': False,
@@ -334,10 +327,15 @@ server {
 
             with patch('lib.nginx_config.NGINX_SITES_AVAILABLE_DIR', available), \
                  patch('lib.nginx_config.NGINX_SITES_ENABLED_DIR', enabled):
-                create_nginx_sites_for_groups({'example.com': deployments}, enable_https_redirect=False)
+                with self.assertRaisesRegex(RuntimeError, 'unmanaged Nginx'):
+                    create_nginx_sites_for_groups(
+                        {'example.com': deployments}, enable_https_redirect=False
+                    )
 
-            self.assertTrue(os.path.islink(enabled_link))
-            self.assertEqual(os.path.realpath(enabled_link), os.path.join(available, 'example_com'))
+            self.assertFalse(os.path.islink(enabled_link))
+            with open(enabled_link, 'r', encoding='utf-8') as handle:
+                self.assertEqual(handle.read(), 'stale file')
+            mock_run.assert_not_called()
 
     @patch('lib.nginx_config.generate_self_signed_cert')
     @patch('lib.nginx_config.run')

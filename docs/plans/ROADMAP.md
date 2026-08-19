@@ -28,15 +28,21 @@ Priorities are ordered by these principles:
 5. New providers and platforms should reuse these guarantees rather than add
    parallel execution models.
 
-## Verification snapshot (2026-08-09)
+## Verification snapshot (2026-08-19)
 
 The ordering remains justified by the current implementation:
 
 - required command failures now raise from `remote_utils.run(check=True)`;
   caller classification and recovery orchestration remain incomplete;
-- full setup removes existing managed services before replacement steps run;
-- manifest deployment stops services and deletes the current tree before the
-  replacement build, while exhausted health checks only warn;
+- full setup no longer tears down all managed services before replacement
+  steps run;
+- manifest deployment builds and validates a sibling release before stopping
+  app-scoped services, restores the prior release and unit files after failed
+  activation, and treats exhausted health checks as deployment failures;
+- manifest builds use application-specific accounts, automatically detect
+  common language runtimes, and retain isolated Node/uv build homes;
+- deployment-owned Nginx files are snapshotted, validated, atomically written,
+  and restored on failure without overwriting unmanaged same-name sites;
 - persistent JSON state/configuration now uses the shared atomic writer, but
   corrupt-state readers still fall back permissively; and
 - privileged shared SSH command builders still accept first-seen host keys.
@@ -55,9 +61,7 @@ The best next work packets are:
    `lib/transaction.py` framework; do not build a parallel transaction layer.
 3. Replace permissive corrupt-state fallbacks with schema/version checks and
    actionable remediation, then define durable operation markers.
-4. Stage manifest releases and make health-check failure block activation and
-   restore the previous release.
-5. Replace automatic SSH first-use trust with explicit enrollment before
+4. Replace automatic SSH first-use trust with explicit enrollment before
    privileged setup/deploy operations.
 
 ## Planning portfolio and GitHub issue alignment (2026-08-17)
@@ -108,9 +112,8 @@ shared application model.
 The sequence should be:
 
 1. Implement [deploy secrets and optional components](DEPLOY_SECRETS.md).
-2. Make component health failures block activation and trigger rollback.
-3. Teach [CI/CD to reuse manifests](CICD_MANIFEST_REUSE.md).
-4. Add component-level change detection and artifact reuse after correctness is
+2. Teach [CI/CD to reuse manifests](CICD_MANIFEST_REUSE.md).
+3. Add component-level change detection and artifact reuse after correctness is
    shared across both entry points.
 
 The desired result is one definition for components, build inputs, secrets,

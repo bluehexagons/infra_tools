@@ -1,6 +1,7 @@
 # Transactional Execution and Reconciliation
 
-Status: verified and ready to implement; highest priority.
+Status: partially implemented; durable operation state and broader setup
+reconciliation remain highest priority.
 
 This plan turns setup and deployment from a sequence of mostly independent
 commands into an operation with explicit preparation, activation, verification,
@@ -16,16 +17,21 @@ ARCH-08 from the [architectural risk review](ARCHITECTURAL_RISK_REVIEW_2026-08-0
 - Keep best-effort maintenance operations possible, but make that choice
   explicit at each call site.
 
-## Verified implementation baseline (2026-08-09)
+## Verified implementation baseline (2026-08-19)
 
 - `lib.remote_utils.run(check=True)` now raises `CommandExecutionError` with a
   bounded stderr diagnostic; callers that intentionally inspect failure use
   explicit `check=False`.
-- `remote_setup.py` removes all managed services before executing setup steps.
-- `DeploymentOrchestrator.deploy_manifest()` stops services and deletes the
-  active deployment tree before building its replacement.
-- Manifest health polling prints a warning after exhaustion and deployment is
-  still recorded as successful.
+- `remote_setup.py` no longer removes all managed services before setup steps.
+- `DeploymentOrchestrator.deploy_manifest()` builds and validates a sibling
+  release before stopping app-scoped services. Failed activation restores the
+  prior release and generated unit files.
+- Manifest health polling accepts only 2xx responses and rejects an unhealthy
+  release. Stable ports, app-scoped build identities, SQLite pre-deploy backups,
+  and deployment serialization are implemented.
+- Nginx deployment files are snapshotted and restored after failed validation;
+  managed files use atomic replacement and unmanaged same-name sites are not
+  overwritten.
 - A shared `lib.atomic_io.write_json_atomic()` now protects machine/setup state,
   caches/history, webhook and deploy-target configuration, deployment/release
   metadata, host/network inventories, Cloudflare state, remote argument files,
@@ -105,6 +111,12 @@ state where they are valid.
 
 ## Phase 3: Staged service reconciliation
 
+Manifest deployments now record application units, build and validate before
+stopping app-scoped services, remove obsolete units only after activation, and
+restore the previous release and units on failure. Unit preparation still
+occurs during activation. The remaining work is to apply the broader contract
+to non-manifest setup services and persist interruption/recovery markers.
+
 Replace cleanup-first setup with a staged reconciliation model:
 
 1. Record the currently managed services and configuration artifacts.
@@ -121,6 +133,11 @@ that marker instead of silently starting another cleanup.
 
 ## Phase 4: Release activation and health gates
 
+The manifest deployment path now stages releases, validates declared outputs,
+gates activation on service startup and health, and restores the prior release
+and unit files on failure. Immutable release history/current symlinks and
+database migration policy remain open.
+
 Deploy into immutable release directories and switch a stable `current` link
 only after builds and preflight validation pass. Retain at least the previously
 active release. Health checks must determine deployment success for components
@@ -131,10 +148,8 @@ files cannot always reverse a schema change. Record the migration boundary,
 create and verify backups before migration, and clearly report when application
 rollback also requires database restoration.
 
-For manifest deployments, replace the current stop/delete/build sequence with
-staging under an immutable release path. A declared health check must exhaust
-its retry policy by raising a deployment failure, restoring the previous
-service/unit and release pointer, and recording whether rollback succeeded.
+The remaining manifest work is durable operation history and explicit recovery
+when a process or machine is interrupted during the short activation window.
 
 ## Phase 5: Managed SSH trust
 

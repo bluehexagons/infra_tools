@@ -65,10 +65,11 @@ changes.
 ### P1: Proxmox-aware update orchestration
 
 Current daily APT maintenance is node-local and repository-agnostic. The
-separate rolling-update command replays the saved setup and inherits the
-cleanup-first service gap tracked by `ARCH-05`. It now establishes basic node
-health and refuses to reboot a node with running or locked guests, but it does
-not evaluate HA/Ceph policy or evacuate workloads.
+separate rolling-update command replays the saved setup. The global
+cleanup-first service gap tracked by `ARCH-05` was removed on 2026-08-19, but
+the update still lacks durable per-node transaction state. It establishes
+basic node health and refuses to reboot a node with running or locked guests,
+but it does not evaluate HA/Ceph policy or evacuate workloads.
 
 Design a dedicated update transaction that:
 
