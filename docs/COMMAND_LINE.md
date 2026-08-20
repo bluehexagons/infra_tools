@@ -266,6 +266,7 @@ rm -f "$HOME/.infra_tools-install.sh"
 | `--web-interface-port PORT` | TCP port for the selected web interface; default `3773` |
 | `--web-interface-source IP_OR_CIDR` | Permit direct web-interface access from this private source; repeatable and required for non-loopback binds |
 | `--browser-automation PROVIDER` | Install and register explicit agent browser automation; currently `playwright`, with selected Codex and/or OpenCode required |
+| `--refresh-packages` | Force the APT update/upgrade and versioned runtime checks that normal reruns skip when their completion state is already present |
 | `--git-access POLICY` | Set the VM's declared agent Git policy: `none`, `read`, or `read-write` |
 | `--git-host HOST` | Select the Git host for credentials; GitHub auth currently uses `github.com` |
 | `--git-auth active` | Copy the active controller user's selected GitHub CLI host entry; if its token is keyring-backed, retrieve it with the controller's `gh auth token` |
@@ -292,6 +293,11 @@ T3 Code is selected explicitly as either `--desktop-interface t3code` or
 desktop path installs the verified AppImage. The web path installs Node and a
 boot-persistent headless service; see [T3_CODE.md](T3_CODE.md) for LAN access,
 pairing, client choices, and the loopback/HTTPS boundary.
+
+After a LAN T3 Code service is installed, obtain its one-time authenticated
+pairing URL from the control system with `infra-tools agent web pair HOST USER`
+(add `--key PATH` when needed). Opening the bare service address is expected to
+show T3's pairing-key form; it is not an authenticated session.
 
 Codex CLI, Claude Code, OpenCode, and T3 Code are installed from their official
 distribution channels. The Codex installer runs with `CODEX_NON_INTERACTIVE=1`,

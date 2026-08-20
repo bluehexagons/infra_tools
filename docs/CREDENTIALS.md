@@ -262,9 +262,9 @@ Only selected provider tools receive their corresponding configuration. T3
 Code is an interface, not a provider credential source: its headless server
 uses the provider credentials already installed for the target user, and its
 pairing/session credentials are created and managed on the VM with
-`t3code-pair` and `npx t3 auth`. Missing source files or directories are
-skipped; `--agent-config active` does not invent a default configuration for a
-tool.
+`t3code-pair` (or `infra-tools agent web pair HOST USER`) and `t3 auth`.
+Missing source files or directories are skipped; `--agent-config active` does
+not invent a default configuration for a tool.
 
 The active configuration source uses the same active-user selection described
 for active credentials. There is currently no arbitrary config-file option;

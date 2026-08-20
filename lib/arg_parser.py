@@ -376,6 +376,14 @@ def add_setup_arguments(
                        action=argparse.BooleanOptionalAction if not for_remote else "store_true",
                        default=None if not for_remote else False,
                        help="Configure desktop to use dark theme")
+    parser.add_argument(
+        "--refresh-packages",
+        action="store_true",
+        help=(
+            "Refresh APT and explicitly update versioned runtimes; normally "
+            "unchanged setup work is reused on reruns"
+        ),
+    )
     
     # Development tools
     parser.add_argument("--ruby", dest="install_ruby", 

@@ -953,9 +953,10 @@ interface that has no suitable native authentication. A loopback-only SSH
 tunnel is also sufficient network authentication for such a tool.
 
 Current implementation boundary: direct T3 pairing, loopback/LAN source
-filtering, and pairing-token redaction are implemented. Nginx integration and
-Basic Auth remain future C2 work; the options below are design constraints,
-not currently accepted CLI flags.
+filtering, pairing-token redaction, and the control-plane
+`infra-tools agent web pair HOST USER` helper are implemented. Nginx
+integration and Basic Auth remain future C2 work; the options below are design
+constraints, not currently accepted CLI flags.
 
 Do not add raw passwords to setup arguments, saved commands, process
 environments, or systemd unit files. Add optional Nginx Basic Auth as an edge
@@ -1022,18 +1023,18 @@ remains:
 
 ```text
 infra-tools agent web status HOST USER [--tool t3code] [--json]
-infra-tools agent web pair HOST USER --tool t3code
+infra-tools agent web pair HOST USER
 infra-tools agent web sessions HOST USER --tool t3code [--json]
 infra-tools agent web revoke HOST USER --tool t3code ACCESS_ID
 ```
 
 `pair` invokes the tool's supported access-issuance command on the target and
-prints the credential once to an interactive terminal; it has no JSON mode and
-refuses a non-TTY output stream. `status` and `sessions` expose only non-secret
-identifiers and metadata. `revoke` accepts a listed pairing or session
-identifier and verifies that it is no longer usable. These commands reuse the
-normal managed SSH identity and redaction path rather than creating an HTTP
-administration endpoint.
+prints the credential once to the operator; it has no JSON mode. `status` and
+`sessions` expose only non-secret identifiers and metadata. `revoke` accepts a
+listed pairing or session identifier and verifies that it is no longer usable.
+These commands reuse the normal managed SSH identity and redaction path rather
+than creating an HTTP administration endpoint. The first implemented command
+is `agent web pair`; status/session/revocation commands remain future work.
 
 ### T3 Code runtime and service integration
 
@@ -1062,6 +1063,14 @@ depend on npm's temporary npx cache or network access. `t3code-pair` invokes
 the same installed binary for an operator. A later update/revocation command
 should use T3's supported service/auth lifecycle rather than adding a second
 credential store.
+
+Setup reruns are reconciliatory: completed APT package work, Go release-feed
+lookups, uv self-updates, T3 npm installs, Playwright downloads, and xRDP Sid
+package transactions are skipped when their installed-state checks pass.
+`--refresh-packages` is a transient escape hatch for deliberately refreshing
+those checks; it is not written into saved setup commands. Remote setup also
+reports per-step elapsed time so a slow target-specific operation is visible
+instead of being mistaken for general setup latency.
 
 Setup ordering currently installs Node as a derived T3 dependency, installs
 selected provider CLIs and their staged credentials/configuration, then creates
@@ -1501,11 +1510,13 @@ pairing/session management remain open.
   `--agent-tool`.
 - Interface declarations are repeatable in the parser and saved command;
   duplicate T3 declarations collapse to one service instance for the target
-  user. HTTPS/WebSocket nginx integration and optional Basic Auth remain C2
-  acceptance work.
+  user. The pairing helper can be invoked from the control system with
+  `infra-tools agent web pair`; HTTPS/WebSocket nginx integration and optional
+  Basic Auth remain C2 acceptance work.
 - T3 Code discovers only the explicitly installed provider CLIs from its
   service context and uses the setup user's existing protected credentials.
-- An operator can issue one pairing credential with the target-side
+- An operator can issue one pairing credential with the control-plane
+  `infra-tools agent web pair HOST USER` command or the target-side
   `t3code-pair` helper; managed session listing/revocation remains open.
 - No pairing credential, session secret, or agent credential appears in saved
   commands, generated unit/proxy files, dry runs, status JSON, or ordinary

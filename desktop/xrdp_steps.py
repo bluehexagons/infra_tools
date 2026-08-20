@@ -429,7 +429,18 @@ def install_xrdp(config: SetupConfig) -> None:
         "x11-xserver-utils",
         "x11-utils",
     )
-    _install_xrdp_packages(required_packages)
+    missing_packages = [
+        package for package in required_packages if not is_package_installed(package)
+    ]
+    if missing_packages or config.refresh_packages:
+        packages_to_install = (
+            tuple(required_packages)
+            if config.refresh_packages
+            else tuple(missing_packages)
+        )
+        _install_xrdp_packages(packages_to_install)
+    else:
+        print("  ✓ xRDP packages already installed; skipping APT source refresh")
 
     missing_packages = [
         package for package in required_packages if not is_package_installed(package)

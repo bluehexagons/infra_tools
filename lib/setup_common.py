@@ -1152,6 +1152,12 @@ def setup_main(system_type: str, description: str, success_msg_fn: Callable[[Set
     print("Setup Complete!")
     print("=" * 60)
     success_msg_fn(config)
+    if "t3code" in (config.web_interfaces or []):
+        print()
+        print("T3 Code pairing (one-time):")
+        print(f"  infra-tools agent web pair {config.host} {config.username}")
+        if config.ssh_key:
+            print(f"  Add --key {config.ssh_key} if the SSH key is not your default identity")
     print("=" * 60)
     
     return 0

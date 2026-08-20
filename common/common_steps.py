@@ -43,6 +43,7 @@ _APT_DPKG_NONINTERACTIVE_OPTIONS = (
     "-o Dpkg::Options::=--force-confdef "
     "-o Dpkg::Options::=--force-confold"
 )
+PACKAGE_UPDATE_MARKER = "/var/lib/infra_tools/state/package-update-complete"
 
 
 def _go_release_arch(machine: Optional[str] = None) -> Optional[str]:
@@ -128,6 +129,12 @@ def set_user_password(username: str, password: str) -> bool:
 
 def update_and_upgrade_packages(config: SetupConfig) -> None:
     check_debian_package_sources(config)
+    if not config.refresh_packages and os.path.exists(PACKAGE_UPDATE_MARKER):
+        print(
+            "  ✓ System packages already reconciled; skipping APT update/upgrade "
+            "(use --refresh-packages to force it)"
+        )
+        return
 
     print("  Updating package lists (APT may wait for another package operation)...")
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
@@ -138,6 +145,15 @@ def update_and_upgrade_packages(config: SetupConfig) -> None:
     print("  Upgrading packages...")
     run(f"apt-get upgrade -y -qq {_APT_DPKG_NONINTERACTIVE_OPTIONS}")
     run(f"apt-get autoremove -y -qq {_APT_DPKG_NONINTERACTIVE_OPTIONS}")
+
+    try:
+        marker_parent = os.path.dirname(PACKAGE_UPDATE_MARKER)
+        os.makedirs(marker_parent, mode=0o755, exist_ok=True)
+        with open(PACKAGE_UPDATE_MARKER, "w", encoding="utf-8") as marker:
+            marker.write("infra-tools package reconciliation complete\n")
+        os.chmod(PACKAGE_UPDATE_MARKER, 0o644)
+    except OSError as exc:
+        raise RuntimeError(f"Could not record package reconciliation state: {exc}") from exc
     
     print("  ✓ System packages updated and upgraded")
 
@@ -498,6 +514,28 @@ def install_go(config: SetupConfig) -> None:
 
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get install -y -qq curl wget")
+    requested_version = os.environ.get("INFRA_TOOLS_GO_VERSION") or None
+    go_binary = "/usr/local/go/bin/go"
+    if not os.path.exists(go_binary):
+        found_go = shutil.which("go")
+        if found_go:
+            go_binary = found_go
+
+    if os.path.exists(go_binary) and not config.refresh_packages and not requested_version:
+        installed_result = run(
+            f"{shlex.quote(go_binary)} version",
+            check=False,
+            capture_output=True,
+        )
+        if installed_result.returncode == 0:
+            version_parts = installed_result.stdout.strip().split()
+            installed_version = version_parts[2] if len(version_parts) >= 3 else "unknown"
+            print(
+                f"  ✓ Go already installed ({installed_version}); skipping release check "
+                "(use --refresh-packages to check for updates)"
+            )
+            return
+
     go_arch = _go_release_arch()
     if go_arch is None:
         raise RuntimeError(f"Unsupported Go architecture: {platform.machine()}")
@@ -512,18 +550,11 @@ def install_go(config: SetupConfig) -> None:
         payload = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
         raise RuntimeError("Official Go release feed returned invalid JSON") from exc
-    requested_version = os.environ.get("INFRA_TOOLS_GO_VERSION") or None
     go_version, go_archive, expected_checksum = _select_go_download(
         payload,
         go_arch,
         requested_version,
     )
-
-    go_binary = "/usr/local/go/bin/go"
-    if not os.path.exists(go_binary):
-        found_go = shutil.which("go")
-        if found_go:
-            go_binary = found_go
 
     if os.path.exists(go_binary):
         installed_result = run(f"{shlex.quote(go_binary)} version", check=False, capture_output=True)
@@ -567,7 +598,12 @@ def install_go(config: SetupConfig) -> None:
     print(f"  ✓ Go {go_version} installed")
 
 
-def install_node_for_user(username: str, user_home: str) -> None:
+def install_node_for_user(
+    username: str,
+    user_home: str,
+    *,
+    refresh: bool = False,
+) -> None:
     """Install nvm-managed Node.js for a specific login/build user."""
     if is_dry_run():
         print("  [DRY-RUN] Would install Node.js for the setup user")
@@ -593,6 +629,31 @@ def install_node_for_user(username: str, user_home: str) -> None:
             print("  ✓ nvm already installed")
         else:
             print("  ⚠ nvm is installed but could not be loaded for user")
+            return
+
+        if not refresh:
+            return
+        print("  Refreshing Node.js LTS, npm, and pnpm")
+        nvm_env = f"export NVM_DIR={safe_nvm_dir} && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\""
+        _run_as_login_user(
+            username,
+            user_home,
+            f"{nvm_env} && nvm install --lts && nvm alias default 'lts/*'",
+        )
+        npm_freshness = shlex.join(npm_freshness_args())
+        npm_freshness_suffix = f" {npm_freshness}" if npm_freshness else ""
+        _run_as_login_user(
+            username,
+            user_home,
+            f"{nvm_env} && npm install -g npm@latest{npm_freshness_suffix}",
+        )
+        _run_as_login_user(
+            username,
+            user_home,
+            f"{nvm_env} && npm install -g pnpm{npm_freshness_suffix}",
+        )
+        _chown_existing_paths(username, _user_tool_paths(user_home))
+        print("  ✓ Node.js LTS + NPM (latest) + PNPM refreshed for user")
         return
     
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
@@ -641,7 +702,11 @@ def install_node_for_user(username: str, user_home: str) -> None:
 
 
 def install_node(config: SetupConfig) -> None:
-    install_node_for_user(config.username, get_user_home(config.username))
+    install_node_for_user(
+        config.username,
+        get_user_home(config.username),
+        refresh=config.refresh_packages,
+    )
 
 
 def _validate_uv_install_script(script_path: str) -> bool:
@@ -665,7 +730,12 @@ def _validate_uv_install_script(script_path: str) -> bool:
     return True
 
 
-def install_or_update_uv(user_home: str, username: Optional[str] = None) -> bool:
+def install_or_update_uv(
+    user_home: str,
+    username: Optional[str] = None,
+    *,
+    update: bool = True,
+) -> bool:
     """Install or update uv for a user. Returns True if uv is available afterwards."""
     uv_path = os.path.join(user_home, ".local", "bin", "uv")
     safe_home = shlex.quote(user_home)
@@ -722,6 +792,10 @@ def install_or_update_uv(user_home: str, username: Optional[str] = None) -> bool
                 pass
 
     safe_uv_path = shlex.quote(uv_path)
+    if not update and os.path.exists(uv_path):
+        print("  ✓ uv already installed; skipping update")
+        return True
+
     if username:
         update_result = _run_as_login_user(
             username,
@@ -767,7 +841,11 @@ def install_python(config: SetupConfig) -> None:
         raise RuntimeError("python3 command unavailable after package installation")
 
     uv_preexisting = os.path.exists(f"{user_home}/.local/bin/uv")
-    if install_or_update_uv(user_home=user_home, username=config.username):
+    if install_or_update_uv(
+        user_home=user_home,
+        username=config.username,
+        update=not uv_preexisting or config.refresh_packages,
+    ):
         if uv_preexisting:
             print("  ✓ uv already installed")
         else:

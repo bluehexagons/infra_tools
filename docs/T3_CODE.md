@@ -73,24 +73,42 @@ installs T3 and its native dependencies as the target user under
 compile on Linux, and npm install scripts are explicitly enabled for this
 isolated VM-local runtime. The service executes that installed binary directly;
 it does not run `npx`, download packages, or rebuild native modules at every
-boot. Rerunning the setup command updates or repairs this runtime.
+boot. A normal setup rerun verifies the persistent runtime and repairs it only
+when unhealthy; pass `--refresh-packages` when you deliberately want to
+refresh T3 and the other versioned runtimes.
 
 Normal service output is not placed in the journal because startup output can
 contain pairing material. Errors remain in the journal.
 
-## Pair a client
+## Pair a client or browser
 
-After setup, SSH to the VM as the agent user and run:
+The bare service address is intentionally not an authenticated web session. If
+you browse to `http://192.168.0.41:3773/`, T3 Code will show a field for a
+pairing key. That is expected: the pairing key is the one-time authentication
+step, not a setup failure. Do not remove pairing or publish the bare endpoint.
+
+From the control system, obtain a fresh pairing URL without opening an
+interactive VM shell:
+
+```bash
+infra-tools agent web pair 192.168.0.41 agent
+```
+
+Add `--key /path/to/ssh_key` when the saved SSH identity is not the default.
+The command runs the target user's `t3code-pair` helper over SSH and prints
+T3's one-time URL, token, and QR information. Use the complete pairing URL in
+the T3 Code desktop or mobile client, or scan the QR code where supported. For
+a browser, open the complete direct LAN pairing URL from that output—not the
+bare service address—and then add the VM projects from T3's normal project
+picker. Treat the URL and token as passwords.
+
+The equivalent target-side command is:
 
 ```bash
 t3code-pair
 ```
 
-The helper uses the same Node/T3 environment as the service and prints a
-one-time pairing URL and token. Use the full URL in the T3 Code desktop or
-mobile client, or scan the QR code where supported. Treat the URL and token as
-passwords. After pairing, use T3's authentication commands to inspect or
-revoke sessions:
+After pairing, use T3's authentication commands to inspect or revoke sessions:
 
 ```bash
 t3 auth --help
@@ -104,7 +122,7 @@ above.
 
 For a desktop client, the normal choices are:
 
-- enter the full pairing URL in the client after running `t3code-pair`;
+- enter the full pairing URL in the client after running `infra-tools agent web pair`;
 - use the direct LAN endpoint from a client that can reach the VM; or
 - use the client's SSH remote-environment flow when you prefer not to expose a
   LAN port. The SSH flow forwards the VM's loopback service and still leaves

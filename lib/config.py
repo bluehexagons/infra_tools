@@ -208,6 +208,7 @@ class SetupConfig:
     flatpak_packages: Optional[StrList] = None
     dark_theme: bool = False
     dry_run: bool = False
+    refresh_packages: bool = False
     install_ruby: bool = False
     install_go: bool = False
     install_node: bool = False
@@ -462,6 +463,9 @@ class SetupConfig:
         
         if self.dark_theme:
             args.append("--dark")
+
+        if self.refresh_packages:
+            args.append("--refresh-packages")
         
         if self.dry_run:
             args.append("--dry-run")
@@ -800,7 +804,7 @@ class SetupConfig:
         
         if self.dark_theme:
             cmd_parts.append("--dark")
-        
+
         # Development tools
         if self.install_ruby:
             cmd_parts.append("--ruby")
@@ -1011,6 +1015,7 @@ class SetupConfig:
         data.pop('share_credentials', None)
         data.pop('deploy_latest', None)
         for transient_field in (
+            'refresh_packages',
             'copy_agent_keys',
             'copy_agent_config',
             'git_auth_source',
@@ -1219,6 +1224,7 @@ class SetupConfig:
             flatpak_packages=getattr(args, 'flatpak_packages', None),
             dark_theme=getattr(args, 'dark_theme', False),
             dry_run=getattr(args, 'dry_run', False),
+            refresh_packages=getattr(args, 'refresh_packages', False),
             install_ruby=getattr(args, 'install_ruby', False),
             install_go=getattr(args, 'install_go', False),
             install_node=getattr(args, 'install_node', False),

@@ -56,6 +56,9 @@ PLAYWRIGHT_SMOKE_SCRIPT = os.path.join(PLAYWRIGHT_ROOT, "browser-smoke.js")
 PLAYWRIGHT_MCP_WRAPPER = "/usr/local/bin/infra-tools-playwright-mcp"
 PLAYWRIGHT_DOCTOR_WRAPPER = "/usr/local/bin/infra-tools-playwright-doctor"
 SYSTEM_NODE = "/usr/bin/node"
+PLAYWRIGHT_DEPS_MARKER = (
+    f"/var/lib/infra_tools/state/playwright-deps-{PLAYWRIGHT_VERSION}"
+)
 
 
 _MCP_WRAPPER_CONTENT = f"""#!/bin/sh
@@ -208,11 +211,32 @@ def _ensure_safe_root_path(path: str) -> None:
             raise RuntimeError(f"Refusing symlinked browser automation path: {current}")
 
 
-def _install_runtime_package() -> None:
+def _install_runtime_package(*, refresh: bool = False) -> bool:
     """Install and verify the pinned MCP package without lifecycle scripts."""
     _ensure_safe_root_path(PLAYWRIGHT_ROOT)
     run("apt-get -o DPkg::Lock::Timeout=60 install -y -qq ca-certificates nodejs npm")
     run(f"install -d -m 0755 -o root -g root {shlex.quote(PLAYWRIGHT_ROOT)}")
+    package_path = os.path.join(
+        PLAYWRIGHT_ROOT,
+        "node_modules",
+        "@playwright",
+        "mcp",
+        "package.json",
+    )
+    lock_path = os.path.join(PLAYWRIGHT_ROOT, "package-lock.json")
+    try:
+        _verify_runtime_package(package_path, lock_path)
+    except RuntimeError:
+        pass
+    else:
+        if not refresh:
+            print("  ✓ Playwright MCP runtime already verified; skipping npm install")
+            return False
+    if refresh:
+        print("  Refreshing the pinned Playwright MCP runtime")
+    if not refresh:
+        print("  Repairing the missing or invalid Playwright MCP runtime")
+
     run(
         "npm install --ignore-scripts --no-audit --no-fund --save-exact "
         f"--prefix {shlex.quote(PLAYWRIGHT_ROOT)} "
@@ -228,19 +252,11 @@ def _install_runtime_package() -> None:
     if node_major < 18:
         raise RuntimeError("Playwright MCP requires Node.js 18 or newer")
 
-    _verify_runtime_package(
-        os.path.join(
-            PLAYWRIGHT_ROOT,
-            "node_modules",
-            "@playwright",
-            "mcp",
-            "package.json",
-        ),
-        os.path.join(PLAYWRIGHT_ROOT, "package-lock.json"),
-    )
+    _verify_runtime_package(package_path, lock_path)
 
     run(f"chown -R root:root {shlex.quote(PLAYWRIGHT_ROOT)}")
     run(f"chmod -R go-w {shlex.quote(PLAYWRIGHT_ROOT)}")
+    return True
 
 
 def _verify_runtime_package(package_path: str, lock_path: str) -> None:
@@ -296,16 +312,42 @@ def _write_launchers() -> None:
     write_text_atomic(PLAYWRIGHT_SMOKE_SCRIPT, _SMOKE_SCRIPT_CONTENT, mode=0o644)
 
 
-def _install_browser(config: SetupConfig) -> None:
+def _install_browser(config: SetupConfig) -> bool:
     """Install OS dependencies and a user-owned Chromium browser payload."""
     user_home = _user_home(config)
-    run(f"{SYSTEM_NODE} {shlex.quote(PLAYWRIGHT_CLI)} install-deps chromium")
+    deps_changed = config.refresh_packages or not os.path.exists(PLAYWRIGHT_DEPS_MARKER)
+    if deps_changed:
+        run(f"{SYSTEM_NODE} {shlex.quote(PLAYWRIGHT_CLI)} install-deps chromium")
+        os.makedirs(os.path.dirname(PLAYWRIGHT_DEPS_MARKER), mode=0o755, exist_ok=True)
+        with open(PLAYWRIGHT_DEPS_MARKER, "w", encoding="utf-8") as marker:
+            marker.write("infra-tools Playwright OS dependencies installed\n")
+        os.chmod(PLAYWRIGHT_DEPS_MARKER, 0o644)
+    else:
+        print("  ✓ Playwright OS dependencies already installed; skipping apt transaction")
+
+    browser_marker = (
+        f"$HOME/.cache/ms-playwright/.infra-tools-chromium-"
+        f"{PLAYWRIGHT_VERSION}.installed"
+    )
+    browser_ready = not config.refresh_packages and _run_as_login_user(
+        config.username,
+        user_home,
+        f"test -f \"{browser_marker}\"",
+        check=False,
+    ).returncode == 0
+    if browser_ready:
+        print("  ✓ Playwright Chromium already installed; skipping browser download")
+        return deps_changed
+
     _run_as_login_user(
         config.username,
         user_home,
         "export PLAYWRIGHT_BROWSERS_PATH=\"$HOME/.cache/ms-playwright\" && "
-        f"{SYSTEM_NODE} {shlex.quote(PLAYWRIGHT_CLI)} install chromium",
+        f"{SYSTEM_NODE} {shlex.quote(PLAYWRIGHT_CLI)} install chromium && "
+        f"mkdir -p \"$HOME/.cache/ms-playwright\" && "
+        f"printf '%s\\n' {shlex.quote(PLAYWRIGHT_VERSION)} > \"{browser_marker}\"",
     )
+    return True
 
 
 def _configure_codex(config: SetupConfig) -> None:
@@ -391,7 +433,10 @@ def install_browser_automation(config: SetupConfig) -> None:
         print("  [DRY-RUN] Would register browser automation for selected agents")
         return
 
-    _install_runtime_package()
+    if config.refresh_packages:
+        _install_runtime_package(refresh=True)
+    else:
+        _install_runtime_package()
     _write_launchers()
     _install_browser(config)
 

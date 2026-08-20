@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -29,7 +30,18 @@ class TestUpdateAndUpgradePackages(unittest.TestCase):
 
         mock_run.side_effect = run_side_effect
 
-        update_and_upgrade_packages(SetupConfig(host="testhost", username="testuser", system_type="server_lite"))
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch(
+                "common.common_steps.PACKAGE_UPDATE_MARKER",
+                os.path.join(temporary, "state", "package-update-complete"),
+            ):
+                update_and_upgrade_packages(
+                    SetupConfig(
+                        host="testhost",
+                        username="testuser",
+                        system_type="server_lite",
+                    )
+                )
 
         mock_check_sources.assert_called_once()
         self.assertEqual(
@@ -42,6 +54,24 @@ class TestUpdateAndUpgradePackages(unittest.TestCase):
         )
         self.assertEqual(order[1], f"apt-get upgrade -y -qq {expected_dpkg_options}")
         self.assertEqual(order[2], f"apt-get autoremove -y -qq {expected_dpkg_options}")
+
+    @patch("common.common_steps.check_debian_package_sources")
+    @patch("common.common_steps.run")
+    def test_skips_completed_package_reconciliation(self, mock_run, mock_check_sources):
+        with tempfile.TemporaryDirectory() as temporary:
+            marker = os.path.join(temporary, "package-update-complete")
+            open(marker, "w", encoding="utf-8").close()
+            with patch("common.common_steps.PACKAGE_UPDATE_MARKER", marker):
+                update_and_upgrade_packages(
+                    SetupConfig(
+                        host="testhost",
+                        username="testuser",
+                        system_type="server_lite",
+                    )
+                )
+
+        mock_run.assert_not_called()
+        mock_check_sources.assert_called_once()
 
 
 class TestControlPlanePackages(unittest.TestCase):

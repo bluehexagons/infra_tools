@@ -168,7 +168,14 @@ def _ensure_t3_shell_path(home: str, uid: int, gid: int) -> None:
     os.chown(bashrc, uid, gid)
 
 
-def _install_t3_runtime(home: str, username: str, uid: int, gid: int) -> str:
+def _install_t3_runtime(
+    home: str,
+    username: str,
+    uid: int,
+    gid: int,
+    *,
+    refresh: bool = False,
+) -> tuple[str, bool]:
     """Install T3 and its Linux native dependencies for the target user.
 
     T3 depends on node-pty, which may need to compile on Linux.  Keeping this
@@ -204,30 +211,59 @@ def _install_t3_runtime(home: str, username: str, uid: int, gid: int) -> str:
         os.chown(package_json, uid, gid)
 
     t3_binary = os.path.join(runtime, "node_modules", ".bin", "t3")
-    safe_runtime = shlex.quote(runtime)
-    safe_binary = shlex.quote(t3_binary)
-    result = _run_as_login_user(
-        username,
-        home,
-        "export NVM_DIR=\"$HOME/.nvm\" && "
-        '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && '
-        'export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH" && '
-        f"cd {safe_runtime} && "
-        "npm install --no-fund --no-audit --dangerously-allow-all-scripts "
-        "t3@latest && "
-        f"test -x {safe_binary}",
-        check=False,
-        capture_output=True,
+    package_lock = os.path.join(runtime, "package-lock.json")
+    runtime_ready = (
+        not refresh
+        and os.path.isfile(package_lock)
+        and os.path.isfile(t3_binary)
     )
-    if result.returncode != 0:
-        details = (result.stderr or result.stdout or "").strip()
-        detail = f": {details[-500:]}" if details else ""
-        raise RuntimeError(f"T3 Code installation failed{detail}")
+    runtime_repaired = False
+    if runtime_ready:
+        safe_runtime = shlex.quote(runtime)
+        safe_binary = shlex.quote(t3_binary)
+        health = _run_as_login_user(
+            username,
+            home,
+            "export NVM_DIR=\"$HOME/.nvm\" && "
+            '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && '
+            'export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH" && '
+            f"cd {safe_runtime} && test -x {safe_binary} && "
+            "node -e 'require(\"node-pty\")' && "
+            f"{safe_binary} --version >/dev/null 2>&1",
+            check=False,
+            capture_output=True,
+        )
+        runtime_ready = health.returncode == 0
+
+    if not runtime_ready:
+        safe_runtime = shlex.quote(runtime)
+        safe_binary = shlex.quote(t3_binary)
+        result = _run_as_login_user(
+            username,
+            home,
+            "export NVM_DIR=\"$HOME/.nvm\" && "
+            '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && '
+            'export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH" && '
+            f"cd {safe_runtime} && "
+            "npm install --no-fund --no-audit --dangerously-allow-all-scripts "
+            "t3@latest && "
+            f"test -x {safe_binary}",
+            check=False,
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            details = (result.stderr or result.stdout or "").strip()
+            detail = f": {details[-500:]}" if details else ""
+            raise RuntimeError(f"T3 Code installation failed{detail}")
+        runtime_repaired = True
 
     _ensure_t3_shell_path(home, uid, gid)
     os.chown(runtime, uid, gid)
-    print(f"  ✓ T3 Code runtime installed for {username}")
-    return t3_binary
+    if runtime_repaired:
+        print(f"  ✓ T3 Code runtime installed or repaired for {username}")
+    else:
+        print(f"  ✓ T3 Code runtime already healthy for {username}")
+    return t3_binary, runtime_repaired
 
 
 def _write_wrapper(
@@ -238,7 +274,7 @@ def _write_wrapper(
     host: str,
     port: int,
     command: str,
-) -> None:
+) -> bool:
     content = (
         "#!/bin/bash\n"
         "set -eu\n"
@@ -252,9 +288,17 @@ def _write_wrapper(
         f"cd {shlex.quote(workspace)}\n"
         f"exec {shlex.quote(t3_binary)} {command}\n"
     )
-    with open(path, "w", encoding="utf-8") as file_obj:
-        file_obj.write(content)
+    changed = True
+    try:
+        with open(path, encoding="utf-8") as file_obj:
+            changed = file_obj.read() != content
+    except OSError:
+        pass
+    if changed:
+        with open(path, "w", encoding="utf-8") as file_obj:
+            file_obj.write(content)
     os.chmod(path, 0o755)
+    return changed
 
 
 def install_t3code_web(config: SetupConfig) -> None:
@@ -273,15 +317,16 @@ def install_t3code_web(config: SetupConfig) -> None:
 
     os.makedirs(workspace, mode=0o755, exist_ok=True)
     os.makedirs(os.path.join(home, ".local", "bin"), mode=0o755, exist_ok=True)
-    t3_binary = _install_t3_runtime(
+    t3_binary, runtime_changed = _install_t3_runtime(
         home,
         config.username,
         account.pw_uid,
         account.pw_gid,
+        refresh=config.refresh_packages,
     )
     wrapper = os.path.join(home, ".local", "bin", "infra-tools-t3code-web")
     pair_wrapper = os.path.join(home, ".local", "bin", "t3code-pair")
-    _write_wrapper(
+    wrapper_changed = _write_wrapper(
         wrapper,
         home,
         workspace,
@@ -290,7 +335,9 @@ def install_t3code_web(config: SetupConfig) -> None:
         port,
         f"serve --host {shlex.quote(host)} --port {port} --no-browser",
     )
-    _write_wrapper(pair_wrapper, home, workspace, t3_binary, host, port, "pair")
+    pair_wrapper_changed = _write_wrapper(
+        pair_wrapper, home, workspace, t3_binary, host, port, "pair"
+    )
     os.chown(wrapper, account.pw_uid, account.pw_gid)
     os.chown(pair_wrapper, account.pw_uid, account.pw_gid)
     os.chown(workspace, account.pw_uid, account.pw_gid)
@@ -316,15 +363,44 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target
 """
-    with open(T3_SERVICE_FILE, "w", encoding="utf-8") as file_obj:
-        file_obj.write(service_content)
-    os.chmod(T3_SERVICE_FILE, 0o644)
+    service_changed = True
+    try:
+        with open(T3_SERVICE_FILE, encoding="utf-8") as file_obj:
+            service_changed = file_obj.read() != service_content
+    except OSError:
+        pass
+    if service_changed:
+        with open(T3_SERVICE_FILE, "w", encoding="utf-8") as file_obj:
+            file_obj.write(service_content)
+        os.chmod(T3_SERVICE_FILE, 0o644)
 
-    run("systemctl daemon-reload")
-    run(f"systemctl enable {T3_SERVICE_NAME}.service")
-    run(f"systemctl restart {T3_SERVICE_NAME}.service")
+    if service_changed:
+        run("systemctl daemon-reload")
+    enabled = run(
+        f"systemctl is-enabled {T3_SERVICE_NAME}.service",
+        check=False,
+    )
+    if enabled.returncode != 0:
+        run(f"systemctl enable {T3_SERVICE_NAME}.service")
+
+    if service_changed or wrapper_changed or pair_wrapper_changed or runtime_changed:
+        run(f"systemctl restart {T3_SERVICE_NAME}.service")
+    else:
+        active = run(
+            f"systemctl is-active {T3_SERVICE_NAME}.service",
+            check=False,
+        )
+        if active.returncode != 0:
+            run(f"systemctl start {T3_SERVICE_NAME}.service")
     print(f"  T3 Code web service listening on {host}:{port}")
-    print("  Run 't3code-pair' as the target user to print a one-time pairing URL")
+    print(
+        "  Pairing is required: run 'infra-tools agent web pair HOST USER' "
+        "from the control system"
+    )
+    print(
+        "  Use the full one-time pairing URL; the bare web address intentionally "
+        "shows a pairing-key form"
+    )
 
 
 __all__ = ["install_t3code_web"]

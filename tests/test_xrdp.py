@@ -324,16 +324,46 @@ class TestInstallXrdp(unittest.TestCase):
 
     @patch("desktop.xrdp_steps.run")
     def test_fails_when_xrdp_package_install_fails(self, mock_run):
-        mock_run.return_value = Mock(returncode=100, stdout="", stderr="apt failed")
-        config = SetupConfig(
-            host="test.example.com",
-            username="testuser",
-            system_type="workstation_dev",
-            desktop="xfce",
-        )
+        with patch("desktop.xrdp_steps.is_package_installed", return_value=False):
+            mock_run.return_value = Mock(returncode=100, stdout="", stderr="apt failed")
+            config = SetupConfig(
+                host="test.example.com",
+                username="testuser",
+                system_type="workstation_dev",
+                desktop="xfce",
+            )
 
-        with self.assertRaisesRegex(RuntimeError, "xRDP package installation failed"):
+            with self.assertRaisesRegex(RuntimeError, "xRDP package installation failed"):
+                install_xrdp(config)
+
+    @patch('desktop.xrdp_steps.run')
+    @patch('desktop.xrdp_steps.os.path.exists')
+    @patch('desktop.xrdp_steps.os.makedirs')
+    @patch('builtins.open', new_callable=unittest.mock.mock_open)
+    @patch('desktop.xrdp_steps.is_service_active')
+    def test_installs_required_packages(self, mock_is_active, mock_open, mock_makedirs, mock_exists, mock_run):
+        """Should install xrdp, xorgxrdp, and utilities when missing."""
+        mock_exists.return_value = True
+        mock_is_active.return_value = True
+        mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
+        package_states = iter([False] * 5 + [True] * 5)
+
+        with patch('desktop.xrdp_steps.is_package_installed', side_effect=package_states):
+            config = SetupConfig(
+                host="test.example.com",
+                username="testuser",
+                system_type="workstation_dev",
+                desktop="xfce"
+            )
+
             install_xrdp(config)
+
+        install_calls = [c for c in mock_run.call_args_list if 'apt-get install' in str(c)]
+        self.assertGreater(len(install_calls), 0)
+        first_install = str(install_calls[0])
+        self.assertIn("xrdp", first_install)
+        self.assertIn("xorgxrdp", first_install)
+        self.assertIn("dbus-x11", first_install)
 
     @patch("desktop.xrdp_steps.run")
     def test_install_handles_modified_package_conffiles(self, mock_run):
@@ -351,36 +381,6 @@ class TestInstallXrdp(unittest.TestCase):
             self.assertIn("Dpkg::Options::=--force-confold", command)
 
 
-    @patch('desktop.xrdp_steps.run')
-    @patch('desktop.xrdp_steps.os.path.exists')
-    @patch('desktop.xrdp_steps.os.makedirs')
-    @patch('builtins.open', new_callable=unittest.mock.mock_open)
-    @patch('desktop.xrdp_steps.is_service_active')
-    def test_installs_required_packages(self, mock_is_active, mock_open, mock_makedirs, mock_exists, mock_run):
-        """Should install xrdp, xorgxrdp, and utilities."""
-        mock_exists.return_value = True
-        mock_is_active.return_value = True
-        mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
-        
-        config = SetupConfig(
-            host="test.example.com",
-            username="testuser",
-            system_type="workstation_dev",
-            desktop="xfce"
-        )
-        
-        install_xrdp(config)
-        
-        # Check apt-get install was called with correct packages
-        install_calls = [c for c in mock_run.call_args_list if 'apt-get install' in str(c)]
-        self.assertGreater(len(install_calls), 0)
-        
-        # First install call should have xrdp packages
-        first_install = str(install_calls[0])
-        self.assertIn("xrdp", first_install)
-        self.assertIn("xorgxrdp", first_install)
-        self.assertIn("dbus-x11", first_install)
-        
     @patch('desktop.xrdp_steps.run')
     @patch('desktop.xrdp_steps.os.path.exists')
     @patch('desktop.xrdp_steps.os.makedirs')

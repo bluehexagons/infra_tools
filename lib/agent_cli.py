@@ -16,8 +16,10 @@ from typing import Optional
 
 from lib.atomic_io import write_json_atomic
 from lib.agent_auth import AGENT_AUTH_TOOLS
+from lib.ssh_utils import build_ssh_command
 from lib.types import JSONDict, StrList
 from lib.validation import validate_filesystem_path, validate_package_name
+from lib.validators import validate_host, validate_username
 
 
 AGENT_DOCTOR_TOOLS = ("gh", "codex", "claude", "opencode")
@@ -167,6 +169,21 @@ def add_agent_subparser(subparsers: argparse._SubParsersAction) -> None:
     )
     auth_status.add_argument("--json", action="store_true", help="Output JSON")
     auth_status.add_argument("-k", "--key", dest="ssh_key", help="SSH private key path")
+    web = commands.add_parser(
+        "web",
+        help="Pair with a remote agent web interface",
+    )
+    web_commands = web.add_subparsers(
+        dest="agent_web_command",
+        help="Web interface operations",
+    )
+    web_pair = web_commands.add_parser(
+        "pair",
+        help="Print a fresh T3 Code pairing URL from a remote VM",
+    )
+    web_pair.add_argument("agent_web_host", metavar="HOST")
+    web_pair.add_argument("agent_web_username", metavar="USER")
+    web_pair.add_argument("-k", "--key", dest="ssh_key", help="SSH private key path")
 
 
 def _tool_path(tool: str, home: str) -> Optional[str]:
@@ -637,8 +654,46 @@ def inspect_browser_automation(home: Optional[str] = None) -> JSONDict:
     }
 
 
+def run_agent_web_pair(args: argparse.Namespace) -> int:
+    """Ask a remote T3 Code service to mint a one-time pairing URL."""
+
+    host = str(args.agent_web_host)
+    username = str(args.agent_web_username)
+    if not validate_host(host):
+        print(f"Error: Invalid IP address or hostname: {host}")
+        return 1
+    if not validate_username(username):
+        print(f"Error: Invalid username: {username}")
+        return 1
+
+    command = build_ssh_command(
+        host,
+        username,
+        args.ssh_key,
+        batch_mode=True,
+        remote_command="exec ~/.local/bin/t3code-pair",
+        connect_timeout=30,
+        server_alive_interval=30,
+    )
+    try:
+        result = subprocess.run(command, check=False, timeout=120)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print(f"Error: could not obtain T3 Code pairing URL: {exc}")
+        return 1
+    if result.returncode != 0:
+        print(f"Error: remote T3 Code pairing command failed (exit {result.returncode})")
+        return 1
+    return 0
+
+
 def run_agent_command(args: argparse.Namespace) -> int:
     """Run a local agent-tool command."""
+    if args.agent_command == "web":
+        if args.agent_web_command == "pair":
+            return run_agent_web_pair(args)
+        print("Error: agent web command required (pair)")
+        return 1
+
     if args.agent_command == "auth":
         from lib.agent_auth import run_agent_auth_set, run_agent_auth_status
 

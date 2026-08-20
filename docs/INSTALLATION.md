@@ -145,6 +145,10 @@ on any reachable Git host are supported.
 The [credentials guide](CREDENTIALS.md) explains the difference between
 workspace passwords, GitHub auth, agent auth, and non-secret agent config.
 
+Setup reruns reuse completed package and tool work. Use `--refresh-packages`
+when you deliberately want a new APT update/upgrade and versioned runtime
+check; the flag is one-shot and is not retained in the saved setup command.
+
 ## Verify the installation
 
 Start a new login shell if necessary, then run:

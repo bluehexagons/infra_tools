@@ -15,8 +15,13 @@ import common.common_steps as common_steps
 from lib.config import SetupConfig
 
 
-def _make_config() -> SetupConfig:
-    return SetupConfig(host="testhost", username="testuser", system_type="server_lite")
+def _make_config(*, refresh_packages: bool = False) -> SetupConfig:
+    return SetupConfig(
+        host="testhost",
+        username="testuser",
+        system_type="server_lite",
+        refresh_packages=refresh_packages,
+    )
 
 
 class TestInstallGo(unittest.TestCase):
@@ -76,7 +81,7 @@ class TestInstallGo(unittest.TestCase):
 
         with patch("common.common_steps.os.path.exists", return_value=True), \
              patch("common.common_steps.run", side_effect=fake_run):
-            common_steps.install_go(_make_config())
+            common_steps.install_go(_make_config(refresh_packages=True))
 
         self.assertNotIn("rm -rf /usr/local/go", commands)
         self.assertFalse(any(command.startswith("wget ") for command in commands))
@@ -103,7 +108,7 @@ class TestInstallGo(unittest.TestCase):
              patch("common.common_steps.run", side_effect=fake_run), \
              patch("common.common_steps.open", mock_open()), \
              patch("common.common_steps.shutil.which", return_value=None):
-            common_steps.install_go(_make_config())
+            common_steps.install_go(_make_config(refresh_packages=True))
 
         self.assertIn("rm -rf /usr/local/go", commands)
         self.assertTrue(any("https://go.dev/dl/go1.22.3" in command for command in commands))
@@ -135,7 +140,7 @@ class TestInstallGo(unittest.TestCase):
              patch("common.common_steps.run", side_effect=fake_run), \
              patch("common.common_steps.open", mock_open()), \
              patch("common.common_steps.shutil.which", return_value=None):
-            common_steps.install_go(_make_config())
+            common_steps.install_go(_make_config(refresh_packages=True))
 
         self.assertTrue(any("go1.22.3.linux-arm64.tar.gz" in command for command in commands))
 

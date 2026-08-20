@@ -262,6 +262,36 @@ class TestAgentCredentialRotation(unittest.TestCase):
         self.assertEqual(args.agent_auth_tool, "codex")
         self.assertEqual(args.agent_auth_file, "/run/secrets/codex.json")
 
+    def test_parser_exposes_remote_web_pairing(self):
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers(dest="command")
+        add_agent_subparser(subparsers)
+
+        args = parser.parse_args([
+            "agent", "web", "pair", "vm.example", "agent", "--key", "/run/id_ed25519",
+        ])
+        self.assertEqual(args.agent_web_command, "pair")
+        self.assertEqual(args.agent_web_host, "vm.example")
+        self.assertEqual(args.agent_web_username, "agent")
+        self.assertEqual(args.ssh_key, "/run/id_ed25519")
+
+    def test_remote_web_pairing_runs_target_helper(self):
+        args = argparse.Namespace(
+            agent_command="web",
+            agent_web_command="pair",
+            agent_web_host="vm.example",
+            agent_web_username="agent",
+            ssh_key="/run/id_ed25519",
+        )
+        completed = argparse.Namespace(returncode=0)
+        with patch("lib.agent_cli.subprocess.run", return_value=completed) as run_command:
+            self.assertEqual(run_agent_command(args), 0)
+
+        command = run_command.call_args.args[0]
+        self.assertIn("-i", command)
+        self.assertIn("/run/id_ed25519", command)
+        self.assertIn("exec ~/.local/bin/t3code-pair", command)
+
     def test_set_filters_github_hosts_and_does_not_send_secret_in_command(self):
         with tempfile.TemporaryDirectory() as directory:
             source = os.path.join(directory, "hosts.yml")

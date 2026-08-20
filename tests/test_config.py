@@ -34,6 +34,7 @@ class TestSetupConfigDefaults(unittest.TestCase):
         self.assertEqual(config.rdp_disconnected_timeout, 0)
         self.assertEqual(config.rdp_idle_timeout, 0)
         self.assertFalse(config.dry_run)
+        self.assertFalse(config.refresh_packages)
         self.assertEqual(config.desktop, 'xfce')
 
     def test_custom_values(self):
@@ -54,6 +55,13 @@ class TestSetupConfigToDict(unittest.TestCase):
         d = config.to_dict()
         self.assertNotIn('host', d)
         self.assertNotIn('system_type', d)
+
+    def test_refresh_packages_is_transient(self):
+        config = self._make_config(refresh_packages=True)
+
+        self.assertIn('--refresh-packages', config.to_remote_args())
+        self.assertNotIn('--refresh-packages', config.to_setup_command())
+        self.assertNotIn('refresh_packages', config.to_dict())
 
     def test_to_dict_includes_username(self):
         config = self._make_config()

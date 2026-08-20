@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -342,11 +343,13 @@ def _run_main() -> int:
         bar = progress_bar(i, total_steps)
         print(f"\n{bar} [{i}/{total_steps}] {name}")
         sys.stdout.flush()
+        step_started = time.monotonic()
         try:
             func(config)
         except Exception as e:
             error_msg = f"Step '{name}' failed: {e}"
-            print(f"  ✗ {error_msg}")
+            elapsed = time.monotonic() - step_started
+            print(f"  ✗ {error_msg} ({elapsed:.1f}s)")
             setup_errors.append(error_msg)
             if config.notify_specs:
                 send_setup_notification(
@@ -358,6 +361,8 @@ def _run_main() -> int:
                     friendly_name=config.friendly_name,
                 )
             raise
+        elapsed = time.monotonic() - step_started
+        print(f"  ✓ Step completed in {elapsed:.1f}s")
     
     bar = progress_bar(total_steps, total_steps)
     print(f"\n{bar} Complete!")
