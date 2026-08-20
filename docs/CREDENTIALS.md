@@ -11,6 +11,7 @@ concerns separate:
 | GitHub and agent authentication | Secret files installed for `gh`, Codex, Claude Code, or OpenCode | An active-user source, a specified file, or the interactive setup flow |
 | Agent configuration | Non-secret settings, instructions, skills, rules, aliases, and extensions | `--agent-config active` |
 | Browser website sessions | Credentials and cookies for sites visited through agent browser automation | Not copied by infra-tools; use a task-specific, scoped secret flow |
+| Device enrollment | Basic Auth account used to request short-lived provider pairing links | A specified htpasswd file or hidden interactive prompts |
 
 The credentials copied to a VM are optional. Agent tools can be installed
 without authentication, and public HTTPS repositories can be cloned without
@@ -263,6 +264,10 @@ Code is an interface, not a provider credential source: its headless server
 uses the provider credentials already installed for the target user, and its
 pairing/session credentials are created and managed on the VM with
 `t3code-pair` (or `infra-tools agent web pair HOST USER`) and `t3 auth`.
+The optional protected enrollment portal can also issue one-time T3 links
+without terminal access. Its Basic Auth file is an infra-tools/Nginx secret,
+not a T3 or coding-provider credential; see
+[DEVICE_PAIRING.md](DEVICE_PAIRING.md).
 Missing source files or directories are skipped; `--agent-config active` does
 not invent a default configuration for a tool.
 
@@ -292,6 +297,8 @@ choices rather than replacing explicit options. The flow can ask for:
 - an active or specified file for each selected non-GitHub agent auth payload;
 - whether to copy active non-secret agent configuration.
 - whether to install Playwright browser automation when Codex or OpenCode is selected.
+- whether to enable protected T3 device enrollment and, when selected, the
+  Basic Auth username plus hidden password confirmation.
 
 The interactive flow requires a terminal on standard input and output. A
 non-interactive automation system should use explicit options and protected
@@ -389,6 +396,9 @@ operator or provisioning service.
   saved setup commands or ordinary setup summaries.
 - Credential payloads are staged for the target setup, transferred with
   restrictive permissions, and removed after processing or failure cleanup.
+- Device-pairing htpasswd sources use the same transient staging model. The
+  target copy is root-owned and readable by Nginx; its source path and any
+  interactively entered password are not saved.
 - Auth source files are never deleted or modified by setup.
 - Keep source files outside the repository and protect their containing
   directories.
@@ -430,5 +440,7 @@ auth option and, if needed, `--agent-config active`, then rotate with
 - [Workstations](WORKSTATIONS.md) — workstation and VM examples.
 - [Agent browser automation](BROWSER_AUTOMATION.md) — MCP setup, isolated
   browser sessions, site credentials, and security boundaries.
+- [Protected device pairing](DEVICE_PAIRING.md) — Basic Auth enrollment,
+  provider-native sessions, rotation, and removal.
 - [System administration](SYSADMIN.md) — target access and operational
   guidance.

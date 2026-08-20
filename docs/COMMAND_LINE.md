@@ -43,6 +43,7 @@ infra-tools agent doctor
 infra-tools agent update [options]
 infra-tools agent auth set HOST USER --tool TOOL --file PATH
 infra-tools agent auth status HOST USER [--tool TOOL]
+infra-tools agent web pair HOST USER [-k PATH]
 infra-tools gogs health HOST [--json] [--min-free-bytes N] [--min-free-inodes N]
 infra-tools maintenance github [--root PATH] <audit|prune> [options]
 infra-tools shell
@@ -265,6 +266,10 @@ rm -f "$HOME/.infra_tools-install.sh"
 | `--web-interface-host IP` | Bind address for the selected web interface; defaults to loopback, or `0.0.0.0` when a source is supplied |
 | `--web-interface-port PORT` | TCP port for the selected web interface; default `3773` |
 | `--web-interface-source IP_OR_CIDR` | Permit direct web-interface access from this private source; repeatable and required for non-loopback binds |
+| `--device-pairing PROVIDER` | Install the protected browser enrollment portal for a provider; repeatable, currently `t3code` |
+| `--device-pairing-port PORT` | Pairing portal port; default `3774` and must differ from the web-interface port |
+| `--device-pairing-auth-file PATH` | Controller-local Nginx htpasswd file for the portal; transient and not saved |
+| `--no-device-pairing` | Remove the pairing broker, Nginx site, firewall rule, and installed portal password file from a saved host |
 | `--browser-automation PROVIDER` | Install and register explicit agent browser automation; currently `playwright`, with selected Codex and/or OpenCode required |
 | `--refresh-packages` | Force the APT update/upgrade and versioned runtime checks that normal reruns skip when their completion state is already present |
 | `--git-access POLICY` | Set the VM's declared agent Git policy: `none`, `read`, or `read-write` |
@@ -292,12 +297,20 @@ T3 Code is selected explicitly as either `--desktop-interface t3code` or
 `--web-interface t3code`; it is no longer an `--agent-tool` provider. The
 desktop path installs the verified AppImage. The web path installs Node and a
 boot-persistent headless service; see [T3_CODE.md](T3_CODE.md) for LAN access,
-pairing, client choices, and the loopback/HTTPS boundary.
+pairing, client choices, and the loopback/HTTPS boundary. The optional
+`--device-pairing t3code` portal lets a new device request its own one-time
+link through Nginx Basic Auth; see [DEVICE_PAIRING.md](DEVICE_PAIRING.md).
 
 After a LAN T3 Code service is installed, obtain its one-time authenticated
 pairing URL from the control system with `infra-tools agent web pair HOST USER`
 (add `--key PATH` when needed). Opening the bare service address is expected to
 show T3's pairing-key form; it is not an authenticated session.
+
+When the protected portal is selected, open `http://HOST:3774/`, answer the
+Basic Auth challenge, and pair the current browser or create a link for a
+desktop/mobile client. Basic Auth protects only enrollment; T3 continues to
+own and revoke the resulting device session. The direct HTTP mode is limited
+to trusted private source CIDRs and does not encrypt the Basic Auth password.
 
 Codex CLI, Claude Code, OpenCode, and T3 Code are installed from their official
 distribution channels. The Codex installer runs with `CODEX_NON_INTERACTIVE=1`,

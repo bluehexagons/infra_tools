@@ -143,6 +143,15 @@ def print_setup_summary(config: SetupConfig, description: Optional[str] = None) 
             )
         else:
             print("Web interface sources: loopback only")
+    if config.device_pairing_providers:
+        print(
+            "Device pairing: "
+            f"{', '.join(config.device_pairing_providers)} "
+            f"({config.web_interface_host or '127.0.0.1'}:{config.device_pairing_port})"
+        )
+        print("Device pairing protection: Nginx Basic Auth + provider-native sessions")
+        if config.device_pairing_auth_file or config.device_pairing_auth_username:
+            print("Device pairing auth: supplied for this setup")
 
     if config.deploy_specs:
         print(f"Deployments: {len(config.deploy_specs)} repository(ies)")

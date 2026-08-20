@@ -161,6 +161,8 @@ VM-level Git policy, transient credential sources, and credential rotation via
 and [command reference](docs/COMMAND_LINE.md). Codex and OpenCode can receive an
 explicit, isolated Playwright capability described in the
 [browser automation guide](docs/BROWSER_AUTOMATION.md).
+New browsers and T3 clients can be enrolled without live terminal access by
+using the [protected device-pairing portal](docs/DEVICE_PAIRING.md).
 
 ## Development checks
 

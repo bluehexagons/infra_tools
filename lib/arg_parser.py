@@ -8,6 +8,7 @@ import argparse
 from lib.config import (
     AGENT_TOOLS,
     BROWSER_AUTOMATION_PROVIDERS,
+    DEVICE_PAIRING_PROVIDERS,
     DESKTOP_INTERFACES,
     GIT_ACCESS_POLICIES,
     MACHINE_TYPES,
@@ -462,6 +463,48 @@ def add_setup_arguments(
             "needed. Required when binding outside loopback."
         ),
     )
+    device_pairing_group = parser.add_mutually_exclusive_group()
+    device_pairing_group.add_argument(
+        "--device-pairing",
+        dest="device_pairing_providers",
+        action="append",
+        choices=DEVICE_PAIRING_PROVIDERS,
+        metavar="PROVIDER",
+        help=(
+            "Install a Basic-Auth-protected browser enrollment portal; repeat "
+            "for future providers (currently: t3code)"
+        ),
+    )
+    parser.add_argument(
+        "--device-pairing-port",
+        type=int,
+        default=3774 if for_remote else None,
+        metavar="PORT",
+        help="TCP port for the protected device-pairing portal (default: 3774)",
+    )
+    parser.add_argument(
+        "--device-pairing-payload",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    if not for_remote:
+        device_pairing_group.add_argument(
+            "--no-device-pairing",
+            dest="disable_device_pairing",
+            action="store_true",
+            help=(
+                "Remove the managed device-pairing portal and its Basic Auth "
+                "credentials from a saved host"
+            ),
+        )
+        parser.add_argument(
+            "--device-pairing-auth-file",
+            metavar="PATH",
+            help=(
+                "Controller-local Nginx htpasswd file used to protect the "
+                "device-pairing portal"
+            ),
+        )
     parser.add_argument(
         "--browser-automation",
         choices=BROWSER_AUTOMATION_PROVIDERS,

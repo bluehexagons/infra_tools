@@ -749,6 +749,8 @@ def show_info(pattern: Optional[str] = None, *, compact: bool = False) -> int:
             features.append(f"Desktop {interface}")
         for interface in args.get("web_interfaces", []) or []:
             features.append(f"Web {interface}")
+        for provider in args.get("device_pairing_providers", []) or []:
+            features.append(f"Device pairing {provider}")
         if args.get("install_office"):
             features.append("Office")
         if args.get("use_flatpak"):
@@ -943,6 +945,8 @@ def _patch_preserve_keys(args: argparse.Namespace) -> set[str]:
                 "vm_image",
             }
         )
+    if getattr(args, "device_pairing_port", None) is None:
+        preserve_keys.add("device_pairing_port")
     return preserve_keys
 
 

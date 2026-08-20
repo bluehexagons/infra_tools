@@ -40,21 +40,26 @@ from lib.types import Deployments, StepFunc
 
 
 REMOTE_AGENT_PAYLOAD_DIR = "/opt/infra_tools/agent_payload"
+REMOTE_DEVICE_PAIRING_PAYLOAD_DIR = "/opt/infra_tools/device_pairing_payload"
 
 
-def _remove_agent_payload() -> None:
-    """Remove uploaded agent config and credentials after any setup outcome."""
+def _remove_secret_payloads() -> None:
+    """Remove uploaded credentials after any setup outcome."""
     if is_dry_run():
         return
-    if not os.path.isdir(REMOTE_AGENT_PAYLOAD_DIR):
-        return
-    try:
-        shutil.rmtree(REMOTE_AGENT_PAYLOAD_DIR)
-    except OSError as exc:
-        print(
-            f"Warning: Failed to remove agent payload {REMOTE_AGENT_PAYLOAD_DIR}: {exc}",
-            file=sys.stderr,
-        )
+    for payload_dir in (
+        REMOTE_AGENT_PAYLOAD_DIR,
+        REMOTE_DEVICE_PAIRING_PAYLOAD_DIR,
+    ):
+        if not os.path.isdir(payload_dir):
+            continue
+        try:
+            shutil.rmtree(payload_dir)
+        except OSError as exc:
+            print(
+                f"Warning: Failed to remove secret payload {payload_dir}: {exc}",
+                file=sys.stderr,
+            )
 
 
 def extract_repo_name(git_url: str) -> str:
@@ -563,7 +568,7 @@ def main() -> int:
     try:
         return _run_main()
     finally:
-        _remove_agent_payload()
+        _remove_secret_payloads()
 
 
 if __name__ == "__main__":

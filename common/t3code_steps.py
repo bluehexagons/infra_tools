@@ -8,16 +8,33 @@ import os
 import pwd
 import re
 import shlex
+import shutil
+import tempfile
 
 from common.common_steps import _run_as_login_user
 from lib.config import SetupConfig
 from lib.remote_utils import install_package, is_dry_run, run
 from lib.validation import validate_filesystem_path, validate_network_ip_or_cidr
+from lib.validators import validate_username
 
 
 T3_SERVICE_NAME = "infra-tools-t3code"
 T3_SERVICE_FILE = f"/etc/systemd/system/{T3_SERVICE_NAME}.service"
 T3_UFW_RULE_COMMENT_PREFIX = "infra_tools T3 Code"
+DEVICE_PAIRING_SERVICE_NAME = "infra-tools-device-pairing"
+DEVICE_PAIRING_SERVICE_FILE = (
+    f"/etc/systemd/system/{DEVICE_PAIRING_SERVICE_NAME}.service"
+)
+DEVICE_PAIRING_CONFIG_DIR = "/etc/infra-tools/device-pairing"
+DEVICE_PAIRING_AUTH_FILE = f"{DEVICE_PAIRING_CONFIG_DIR}/htpasswd"
+DEVICE_PAIRING_PROVIDERS_FILE = f"{DEVICE_PAIRING_CONFIG_DIR}/providers.json"
+DEVICE_PAIRING_PAYLOAD_FILE = "/opt/infra_tools/device_pairing_payload/htpasswd"
+DEVICE_PAIRING_SOCKET = "/run/infra-tools-device-pairing/http.sock"
+DEVICE_PAIRING_SCRIPT = (
+    "/opt/infra_tools/common/service_tools/device_pairing_service.py"
+)
+DEVICE_PAIRING_NGINX_SITE = "/etc/nginx/sites-available/infra-tools-device-pairing"
+DEVICE_PAIRING_NGINX_LINK = "/etc/nginx/sites-enabled/infra-tools-device-pairing"
 _UFW_NUMBERED_RULE_RE = re.compile(r"^\[\s*(\d+)\]\s+(.*)$")
 _T3_RUNTIME_RELATIVE_PATH = (".local", "share", "infra-tools", "t3code")
 
@@ -105,33 +122,45 @@ def _configure_firewall(config: SetupConfig, port: int, host: str) -> None:
         for _number, comment, _line in existing_rules
         if comment.startswith(T3_UFW_RULE_COMMENT_PREFIX)
     }
-    conflicting = [
-        line
-        for _number, comment, line in existing_rules
-        if f"{port}/tcp" in line
-        and "ALLOW IN" in line
-        and comment not in existing_managed_comments
-    ]
+    exposed_ports = [(port, "")]
+    if config.device_pairing_providers:
+        exposed_ports.append((config.device_pairing_port, " pairing"))
+    conflicting = []
+    for exposed_port, _suffix in exposed_ports:
+        conflicting.extend(
+            line
+            for _number, comment, line in existing_rules
+            if f"{exposed_port}/tcp" in line
+            and "ALLOW IN" in line
+            and comment not in existing_managed_comments
+        )
     if conflicting:
+        port_list = ", ".join(str(item[0]) for item in exposed_ports)
         raise RuntimeError(
-            f"Unmanaged UFW allow rules already expose T3 Code port {port}; "
+            f"Unmanaged UFW allow rules already expose managed port(s) {port_list}; "
             "remove them before using --web-interface-source"
         )
 
     desired_comments: set[str] = set()
     for source in sources:
-        comment = f"{T3_UFW_RULE_COMMENT_PREFIX} {port}/tcp source {source}"
-        desired_comments.add(comment)
-        if comment in existing_managed_comments:
-            continue
-        result = run(
-            "ufw allow from "
-            f"{shlex.quote(source)} to any port {port} proto tcp "
-            f"comment {shlex.quote(comment)}",
-            check=False,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"Could not install T3 Code firewall rule for {source}")
+        for exposed_port, suffix in exposed_ports:
+            comment = (
+                f"{T3_UFW_RULE_COMMENT_PREFIX}{suffix} "
+                f"{exposed_port}/tcp source {source}"
+            )
+            desired_comments.add(comment)
+            if comment in existing_managed_comments:
+                continue
+            result = run(
+                "ufw allow from "
+                f"{shlex.quote(source)} to any port {exposed_port} proto tcp "
+                f"comment {shlex.quote(comment)}",
+                check=False,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"Could not install T3 Code firewall rule for {source}"
+                )
     updated_rules = _ufw_numbered_rules()
     observed_comments = {comment for _number, comment, _line in updated_rules}
     missing = desired_comments - observed_comments
@@ -266,6 +295,36 @@ def _install_t3_runtime(
     return t3_binary, runtime_repaired
 
 
+def _write_executable_if_changed(path: str, content: str) -> bool:
+    """Atomically write a managed user executable without following symlinks."""
+
+    if os.path.lexists(path) and (
+        os.path.islink(path) or not os.path.isfile(path)
+    ):
+        raise RuntimeError(f"Refusing unsafe managed executable: {path}")
+    changed = True
+    try:
+        with open(path, encoding="utf-8") as file_obj:
+            changed = file_obj.read() != content
+    except FileNotFoundError:
+        pass
+    if changed:
+        descriptor, temporary = tempfile.mkstemp(
+            prefix=f".{os.path.basename(path)}-", dir=os.path.dirname(path)
+        )
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as file_obj:
+                file_obj.write(content)
+            os.chmod(temporary, 0o755)
+            os.replace(temporary, path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+    else:
+        os.chmod(path, 0o755)
+    return changed
+
+
 def _write_wrapper(
     path: str,
     home: str,
@@ -288,17 +347,346 @@ def _write_wrapper(
         f"cd {shlex.quote(workspace)}\n"
         f"exec {shlex.quote(t3_binary)} {command}\n"
     )
-    changed = True
+    return _write_executable_if_changed(path, content)
+
+
+def _write_passthrough_wrapper(path: str, home: str, t3_binary: str) -> bool:
+    """Write a stable T3 launcher that accepts only caller-supplied argv."""
+
+    content = (
+        "#!/bin/bash\n"
+        "set -eu\n"
+        f"export HOME={shlex.quote(home)}\n"
+        'export NVM_DIR="$HOME/.nvm"\n'
+        '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"\n'
+        'export PATH="$HOME/.local/share/infra-tools/t3code/node_modules/.bin:'
+        '$HOME/.opencode/bin:$HOME/.local/bin:$PATH"\n'
+        f'exec {shlex.quote(t3_binary)} "$@"\n'
+    )
+    return _write_executable_if_changed(path, content)
+
+
+def _write_text_if_changed(path: str, content: str, mode: int) -> bool:
+    if os.path.islink(path):
+        raise RuntimeError(f"Refusing symlinked managed configuration: {path}")
     try:
         with open(path, encoding="utf-8") as file_obj:
             changed = file_obj.read() != content
     except OSError:
-        pass
+        changed = True
     if changed:
         with open(path, "w", encoding="utf-8") as file_obj:
             file_obj.write(content)
-    os.chmod(path, 0o755)
+    os.chmod(path, mode)
     return changed
+
+
+def _validate_htpasswd_file(path: str) -> None:
+    if os.path.islink(path) or not os.path.isfile(path):
+        raise RuntimeError(f"Device-pairing auth must be a regular file: {path}")
+    if os.path.getsize(path) > 64 * 1024:
+        raise RuntimeError("Device-pairing auth file exceeds the size limit")
+    try:
+        with open(path, encoding="utf-8") as file_obj:
+            records = [
+                line.rstrip("\n") for line in file_obj if line.rstrip("\n")
+            ]
+    except UnicodeDecodeError as exc:
+        raise RuntimeError("Device-pairing auth file must be UTF-8 text") from exc
+    if not records:
+        raise RuntimeError("Device-pairing auth file has no user records")
+    for record in records:
+        username, separator, password_hash = record.partition(":")
+        if (
+            not separator
+            or not validate_username(username)
+            or not password_hash.startswith("$")
+            or any(
+                ord(character) < 32 or ord(character) == 127
+                for character in record
+            )
+        ):
+            raise RuntimeError("Device-pairing auth file contains an invalid record")
+
+
+def _replace_pairing_auth_file(payload: bytes) -> None:
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=".htpasswd-", dir=DEVICE_PAIRING_CONFIG_DIR
+    )
+    try:
+        with os.fdopen(descriptor, "wb") as file_obj:
+            file_obj.write(payload)
+        os.chmod(temporary, 0o640)
+        os.replace(temporary, DEVICE_PAIRING_AUTH_FILE)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def _install_pairing_auth_file() -> tuple[bool, bytes | None]:
+    if os.path.lexists(DEVICE_PAIRING_CONFIG_DIR) and (
+        os.path.islink(DEVICE_PAIRING_CONFIG_DIR)
+        or not os.path.isdir(DEVICE_PAIRING_CONFIG_DIR)
+    ):
+        raise RuntimeError(
+            f"Refusing unsafe device-pairing config path: {DEVICE_PAIRING_CONFIG_DIR}"
+        )
+    os.makedirs(DEVICE_PAIRING_CONFIG_DIR, mode=0o750, exist_ok=True)
+    source_available = os.path.lexists(DEVICE_PAIRING_PAYLOAD_FILE)
+    previous_payload = None
+    if source_available:
+        _validate_htpasswd_file(DEVICE_PAIRING_PAYLOAD_FILE)
+        with open(DEVICE_PAIRING_PAYLOAD_FILE, "rb") as source_file:
+            payload = source_file.read()
+        existing = None
+        if os.path.lexists(DEVICE_PAIRING_AUTH_FILE):
+            if os.path.islink(DEVICE_PAIRING_AUTH_FILE) or not os.path.isfile(
+                DEVICE_PAIRING_AUTH_FILE
+            ):
+                raise RuntimeError(
+                    "Refusing unsafe device-pairing auth destination: "
+                    f"{DEVICE_PAIRING_AUTH_FILE}"
+                )
+            with open(DEVICE_PAIRING_AUTH_FILE, "rb") as destination_file:
+                existing = destination_file.read()
+            previous_payload = existing
+        changed = existing != payload
+        if changed:
+            _replace_pairing_auth_file(payload)
+    else:
+        if not os.path.exists(DEVICE_PAIRING_AUTH_FILE):
+            raise RuntimeError(
+                "Device pairing needs --device-pairing-auth-file on first setup "
+                "or credentials entered through --interactive"
+            )
+        _validate_htpasswd_file(DEVICE_PAIRING_AUTH_FILE)
+        with open(DEVICE_PAIRING_AUTH_FILE, "rb") as destination_file:
+            previous_payload = destination_file.read()
+        changed = False
+
+    web_account = pwd.getpwnam("www-data")
+    os.chown(DEVICE_PAIRING_CONFIG_DIR, 0, web_account.pw_gid)
+    os.chmod(DEVICE_PAIRING_CONFIG_DIR, 0o750)
+    os.chown(DEVICE_PAIRING_AUTH_FILE, 0, web_account.pw_gid)
+    os.chmod(DEVICE_PAIRING_AUTH_FILE, 0o640)
+    return changed, previous_payload
+
+
+def _restore_pairing_auth_file(previous_payload: bytes | None) -> None:
+    if previous_payload is None:
+        if os.path.exists(DEVICE_PAIRING_AUTH_FILE):
+            os.remove(DEVICE_PAIRING_AUTH_FILE)
+        return
+    _replace_pairing_auth_file(previous_payload)
+    web_account = pwd.getpwnam("www-data")
+    os.chown(DEVICE_PAIRING_AUTH_FILE, 0, web_account.pw_gid)
+    os.chmod(DEVICE_PAIRING_AUTH_FILE, 0o640)
+
+
+def _nginx_listen_address(host: str, port: int) -> str:
+    if ":" in host and not host.startswith("["):
+        return f"[{host}]:{port}"
+    return f"{host}:{port}"
+
+
+def _configure_device_pairing(
+    config: SetupConfig,
+    home: str,
+    t3_binary: str,
+    host: str,
+    t3_port: int,
+) -> None:
+    from web.web_steps import install_nginx
+
+    install_nginx(config)
+    auth_changed, previous_auth = _install_pairing_auth_file()
+    web_account = pwd.getpwnam("www-data")
+    t3_state_dir = os.path.join(home, ".t3")
+    os.makedirs(t3_state_dir, mode=0o700, exist_ok=True)
+    account = pwd.getpwnam(config.username)
+    os.chown(t3_state_dir, account.pw_uid, account.pw_gid)
+    provider_wrapper = os.path.join(
+        home, ".local", "bin", "infra-tools-t3code-pairing-provider"
+    )
+    os.makedirs(os.path.dirname(provider_wrapper), mode=0o755, exist_ok=True)
+    _write_passthrough_wrapper(provider_wrapper, home, t3_binary)
+    os.chown(provider_wrapper, account.pw_uid, account.pw_gid)
+
+    providers = {
+        "version": 1,
+        "providers": {
+            "t3code": {
+                "label": "T3 Code",
+                "command": [
+                    provider_wrapper,
+                    "auth",
+                    "pairing",
+                    "create",
+                    "--base-dir",
+                    t3_state_dir,
+                    "--ttl",
+                    "10m",
+                    "--label",
+                    "infra-tools device enrollment",
+                    "--json",
+                ],
+                "base_url_flag": "--base-url",
+                "url_field": "pairUrl",
+                "expires_field": "expiresAt",
+                "public_port": t3_port,
+            }
+        },
+    }
+    providers_content = json.dumps(providers, indent=2, sort_keys=True) + "\n"
+    providers_changed = _write_text_if_changed(
+        DEVICE_PAIRING_PROVIDERS_FILE, providers_content, 0o640
+    )
+    os.chown(DEVICE_PAIRING_PROVIDERS_FILE, 0, web_account.pw_gid)
+
+    service_content = f"""[Unit]
+Description=infra-tools protected device-pairing broker
+After=network-online.target {T3_SERVICE_NAME}.service nginx.service
+Wants=network-online.target
+Requires={T3_SERVICE_NAME}.service
+
+[Service]
+Type=simple
+User={config.username}
+Group=www-data
+RuntimeDirectory=infra-tools-device-pairing
+RuntimeDirectoryMode=0750
+UMask=0007
+Environment=HOME={home}
+ExecStart=/usr/bin/python3 {DEVICE_PAIRING_SCRIPT} --config {DEVICE_PAIRING_PROVIDERS_FILE} --socket {DEVICE_PAIRING_SOCKET}
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths={t3_state_dir}
+RestrictAddressFamilies=AF_UNIX
+StandardOutput=null
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+"""
+    service_changed = _write_text_if_changed(
+        DEVICE_PAIRING_SERVICE_FILE, service_content, 0o644
+    )
+    if service_changed:
+        run("systemctl daemon-reload")
+    enabled = run(
+        f"systemctl is-enabled {DEVICE_PAIRING_SERVICE_NAME}.service",
+        check=False,
+    )
+    if enabled.returncode != 0:
+        run(f"systemctl enable {DEVICE_PAIRING_SERVICE_NAME}.service")
+    if service_changed or providers_changed:
+        run(f"systemctl restart {DEVICE_PAIRING_SERVICE_NAME}.service")
+    else:
+        active = run(
+            f"systemctl is-active {DEVICE_PAIRING_SERVICE_NAME}.service",
+            check=False,
+        )
+        if active.returncode != 0:
+            run(f"systemctl start {DEVICE_PAIRING_SERVICE_NAME}.service")
+
+    nginx_content = f"""# Managed by infra_tools device pairing
+server {{
+    listen {_nginx_listen_address(host, config.device_pairing_port)};
+    server_name _;
+    access_log off;
+
+    auth_basic "Device pairing";
+    auth_basic_user_file {DEVICE_PAIRING_AUTH_FILE};
+    client_max_body_size 4k;
+
+    location / {{
+        proxy_pass http://unix:{DEVICE_PAIRING_SOCKET}:/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 35s;
+        proxy_send_timeout 35s;
+    }}
+}}
+"""
+    previous_nginx_content = None
+    if os.path.exists(DEVICE_PAIRING_NGINX_SITE):
+        if os.path.islink(DEVICE_PAIRING_NGINX_SITE) or not os.path.isfile(
+            DEVICE_PAIRING_NGINX_SITE
+        ):
+            raise RuntimeError(
+                f"Refusing unmanaged Nginx pairing site: {DEVICE_PAIRING_NGINX_SITE}"
+            )
+        with open(DEVICE_PAIRING_NGINX_SITE, encoding="utf-8") as file_obj:
+            previous_nginx_content = file_obj.read()
+    nginx_changed = previous_nginx_content != nginx_content
+    if nginx_changed:
+        with open(DEVICE_PAIRING_NGINX_SITE, "w", encoding="utf-8") as file_obj:
+            file_obj.write(nginx_content)
+        os.chmod(DEVICE_PAIRING_NGINX_SITE, 0o644)
+    link_created = False
+    if not os.path.islink(DEVICE_PAIRING_NGINX_LINK):
+        if os.path.lexists(DEVICE_PAIRING_NGINX_LINK):
+            raise RuntimeError(
+                f"Refusing unmanaged Nginx pairing site: {DEVICE_PAIRING_NGINX_LINK}"
+            )
+        os.symlink(DEVICE_PAIRING_NGINX_SITE, DEVICE_PAIRING_NGINX_LINK)
+        nginx_changed = True
+        link_created = True
+    validation = run("nginx -t", check=False, capture_output=True)
+    if validation.returncode != 0:
+        if previous_nginx_content is None:
+            if os.path.exists(DEVICE_PAIRING_NGINX_SITE):
+                os.remove(DEVICE_PAIRING_NGINX_SITE)
+        else:
+            with open(DEVICE_PAIRING_NGINX_SITE, "w", encoding="utf-8") as file_obj:
+                file_obj.write(previous_nginx_content)
+            os.chmod(DEVICE_PAIRING_NGINX_SITE, 0o644)
+        if link_created and os.path.islink(DEVICE_PAIRING_NGINX_LINK):
+            os.unlink(DEVICE_PAIRING_NGINX_LINK)
+        if auth_changed:
+            _restore_pairing_auth_file(previous_auth)
+        raise RuntimeError("Nginx rejected the device-pairing configuration")
+    if nginx_changed or auth_changed:
+        run("systemctl reload nginx")
+
+
+def _remove_device_pairing() -> None:
+    if os.path.islink(DEVICE_PAIRING_CONFIG_DIR):
+        raise RuntimeError(
+            f"Refusing unsafe device-pairing config path: {DEVICE_PAIRING_CONFIG_DIR}"
+        )
+    changed = False
+    if os.path.exists(DEVICE_PAIRING_SERVICE_FILE):
+        run(f"systemctl disable --now {DEVICE_PAIRING_SERVICE_NAME}.service", check=False)
+        os.remove(DEVICE_PAIRING_SERVICE_FILE)
+        run("systemctl daemon-reload")
+    for path in (
+        DEVICE_PAIRING_NGINX_LINK,
+        DEVICE_PAIRING_NGINX_SITE,
+        DEVICE_PAIRING_PROVIDERS_FILE,
+        DEVICE_PAIRING_AUTH_FILE,
+    ):
+        if os.path.lexists(path):
+            os.remove(path)
+            changed = True
+    if os.path.isdir(DEVICE_PAIRING_CONFIG_DIR):
+        try:
+            os.rmdir(DEVICE_PAIRING_CONFIG_DIR)
+        except OSError:
+            pass
+    if changed and shutil.which("nginx"):
+        validation = run("nginx -t", check=False, capture_output=True)
+        if validation.returncode != 0:
+            raise RuntimeError("Nginx configuration is invalid after removing device pairing")
+        run("systemctl reload nginx", check=False)
 
 
 def install_t3code_web(config: SetupConfig) -> None:
@@ -392,11 +780,21 @@ WantedBy=multi-user.target
         )
         if active.returncode != 0:
             run(f"systemctl start {T3_SERVICE_NAME}.service")
+    if config.device_pairing_providers:
+        _configure_device_pairing(config, home, t3_binary, host, port)
+    else:
+        _remove_device_pairing()
     print(f"  T3 Code web service listening on {host}:{port}")
-    print(
-        "  Pairing is required: run 'infra-tools agent web pair HOST USER' "
-        "from the control system"
-    )
+    if config.device_pairing_providers:
+        print(
+            "  Protected device enrollment listening on "
+            f"{host}:{config.device_pairing_port}"
+        )
+    else:
+        print(
+            "  Pairing is required: run 'infra-tools agent web pair HOST USER' "
+            "from the control system"
+        )
     print(
         "  Use the full one-time pairing URL; the bare web address intentionally "
         "shows a pairing-key form"

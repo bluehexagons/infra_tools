@@ -31,6 +31,8 @@ infra-tools setup server_dev 192.168.0.41 agent \
   --agent-tool opencode \
   --web-interface t3code \
   --web-interface-source 192.168.0.0/24 \
+  --device-pairing t3code \
+  --device-pairing-auth-file /run/secrets/agent-1-pairing.htpasswd \
   --agent-workspace /srv/agent-workspace \
   --git-access read
 ```
@@ -78,7 +80,10 @@ when unhealthy; pass `--refresh-packages` when you deliberately want to
 refresh T3 and the other versioned runtimes.
 
 Normal service output is not placed in the journal because startup output can
-contain pairing material. Errors remain in the journal.
+contain pairing material. Errors remain in the journal. When device pairing is
+selected, a separate `infra-tools-device-pairing.service` runs a generic local
+broker over a Unix socket and Nginx exposes its Basic-Auth-protected enrollment
+page on port `3774` by default.
 
 ## Pair a client or browser
 
@@ -87,8 +92,28 @@ you browse to `http://192.168.0.41:3773/`, T3 Code will show a field for a
 pairing key. That is expected: the pairing key is the one-time authentication
 step, not a setup failure. Do not remove pairing or publish the bare endpoint.
 
-From the control system, obtain a fresh pairing URL without opening an
-interactive VM shell:
+With `--device-pairing t3code`, visit the protected enrollment portal from an
+allowed LAN device:
+
+```text
+http://192.168.0.41:3774/
+```
+
+After the Nginx Basic Auth prompt, **Pair this browser** creates a ten-minute,
+one-time T3 credential and redirects that browser into the authenticated T3
+session. **Create a link for another T3 client** displays a link that can be
+copied into the desktop or mobile client. New devices therefore do not require
+terminal access at enrollment time.
+
+The pairing portal is separate from T3's port. Basic Auth protects credential
+issuance; T3's native pairing exchange and per-device session protect the
+actual agent service. This keeps ordinary desktop and mobile clients compatible
+with the direct T3 endpoint. See [Protected device pairing](DEVICE_PAIRING.md)
+for password-file creation, rotation, removal, and the plaintext-LAN security
+boundary.
+
+Without the portal, or for recovery, obtain a fresh pairing URL from the
+control system without opening an interactive VM shell:
 
 ```bash
 infra-tools agent web pair 192.168.0.41 agent
@@ -133,21 +158,22 @@ Add Environment. A numeric private-network address uses HTTP for direct LAN
 access; use an explicit `https://` address only after configuring an HTTPS
 endpoint.
 
-The direct LAN workflow uses HTTP and is intended only for a trusted private
-network. Direct T3 desktop/mobile clients can use this endpoint. A browser
-page served over HTTPS, including `https://app.t3.codes`, cannot connect to a
-plain HTTP/WebSocket backend because of mixed-content restrictions. For that
-workflow, put the service behind an HTTPS reverse proxy or an HTTPS tailnet
-endpoint and pair with the resulting `https://` URL. infra-tools currently
-does not create that public reverse-proxy exposure automatically; keep the
-backend private until TLS, WebSocket proxying, and any desired outer access
-control are configured.
+The direct LAN workflow and its optional Basic Auth enrollment portal use HTTP
+and are intended only for a trusted private network. Basic Auth is not
+transport encryption. Direct T3 desktop/mobile clients can use the T3
+endpoint. A browser page served over HTTPS, including `https://app.t3.codes`,
+cannot connect to a plain HTTP/WebSocket backend because of mixed-content
+restrictions. For that workflow, put the service behind an HTTPS reverse proxy
+or an HTTPS tailnet endpoint and pair with the resulting `https://` URL.
+infra-tools currently does not create that public reverse-proxy exposure
+automatically; keep the backend private until TLS, WebSocket proxying, and any
+desired outer access control are configured.
 
-T3's native pairing is the authentication boundary. CIDR firewall rules limit
-which machines can reach the endpoint, but they do not replace pairing. An
-HTTP Basic Auth layer can be added at a future reverse-proxy boundary; it is
-not used by the direct service because it would not replace T3's own session
-authentication.
+T3's native pairing remains the service authentication boundary. CIDR firewall
+rules limit which machines can reach the endpoint, but they do not replace
+pairing. The optional Basic Auth layer protects only infra-tools' separate
+credential-issuance portal; it is not placed in front of T3's API/WebSocket
+endpoint and does not replace or revoke T3 sessions.
 
 ## Desktop installation
 

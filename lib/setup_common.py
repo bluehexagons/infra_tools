@@ -71,7 +71,9 @@ REMOTE_INSTALL_DIR = "/opt/infra_tools"
 GIT_CACHE_DIR = os.path.expanduser("~/.cache/infra_tools/git_repos")
 REMOTE_ARGS_FILENAME = ".remote_setup_args.json"
 AGENT_PAYLOAD_DIRNAME = "agent_payload"
+DEVICE_PAIRING_PAYLOAD_DIRNAME = "device_pairing_payload"
 MAX_AGENT_CREDENTIAL_BYTES = 4 * 1024 * 1024
+MAX_DEVICE_PAIRING_AUTH_BYTES = 64 * 1024
 
 
 def _repository_cache_path(cache_dir: str, git_url: str, repo_name: str) -> str:
@@ -273,6 +275,7 @@ def _activate_local_runtime(build_dir: str) -> None:
     for item in (
         "deployments",
         AGENT_PAYLOAD_DIRNAME,
+        DEVICE_PAIRING_PAYLOAD_DIRNAME,
         REMOTE_ARGS_FILENAME,
     ):
         destination = os.path.join(REMOTE_INSTALL_DIR, item)
@@ -364,6 +367,87 @@ def _stage_secret_file(source: str, destination: str, label: str) -> None:
         raise ValueError(f"{label} could not be read: {source}")
     os.chmod(destination, 0o600)
     print(f"  Staged {label}")
+
+
+def _validate_htpasswd_content(content: bytes) -> None:
+    """Validate the narrow Nginx password-file format accepted by pairing."""
+
+    if not content or len(content) > MAX_DEVICE_PAIRING_AUTH_BYTES:
+        raise ValueError("Device-pairing htpasswd file is empty or too large")
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("Device-pairing htpasswd file must be UTF-8 text") from exc
+    records = [line for line in text.splitlines() if line]
+    if not records:
+        raise ValueError("Device-pairing htpasswd file has no user records")
+    for line in records:
+        if any(ord(character) < 32 or ord(character) == 127 for character in line):
+            raise ValueError("Device-pairing htpasswd records contain control characters")
+        username, separator, password_hash = line.partition(":")
+        if not separator or not validate_username(username):
+            raise ValueError(f"Invalid device-pairing htpasswd username: {username}")
+        if not password_hash.startswith("$"):
+            raise ValueError(
+                "Device-pairing htpasswd entries must use crypt-style hashes"
+            )
+
+
+def _generated_htpasswd(config: SetupConfig) -> bytes:
+    username = config.device_pairing_auth_username
+    password = config.device_pairing_auth_password
+    if not username or not password:
+        raise ValueError("Interactive device-pairing credentials are incomplete")
+    try:
+        result = subprocess.run(
+            ["openssl", "passwd", "-6", "-stdin"],
+            input=f"{password}\n",
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ValueError(
+            "OpenSSL is required to generate the device-pairing password file"
+        ) from exc
+    password_hash = result.stdout.strip()
+    if result.returncode != 0 or not password_hash.startswith("$6$"):
+        raise ValueError("OpenSSL could not generate the device-pairing password hash")
+    payload = f"{username}:{password_hash}\n".encode("utf-8")
+    _validate_htpasswd_content(payload)
+    return payload
+
+
+def prepare_device_pairing_payload(config: SetupConfig, payload_dir: str) -> None:
+    """Stage a controller-local Basic Auth file without persisting its secret."""
+
+    if not config.device_pairing_providers:
+        return
+    if not (
+        config.device_pairing_auth_file
+        or config.device_pairing_auth_username
+        or config.device_pairing_auth_password
+    ):
+        return
+    if config.dry_run:
+        print("  [DRY RUN] Would stage device-pairing Basic Auth credentials")
+        return
+
+    if config.device_pairing_auth_file:
+        source = _credential_source_path(
+            config.device_pairing_auth_file,
+            "Device-pairing htpasswd file",
+        )
+        if os.path.getsize(source) > MAX_DEVICE_PAIRING_AUTH_BYTES:
+            raise ValueError("Device-pairing htpasswd file exceeds the size limit")
+        with open(source, "rb") as file_obj:
+            payload = file_obj.read()
+    else:
+        payload = _generated_htpasswd(config)
+    _validate_htpasswd_content(payload)
+    destination = os.path.join(payload_dir, "htpasswd")
+    _copy_existing_path_value(payload, destination)
+    print("  Staged device-pairing Basic Auth credentials")
 
 
 def _github_host_entry(hosts_path: str, host: str) -> str:
@@ -893,6 +977,17 @@ def run_remote_setup(config: SetupConfig) -> int:
             prepare_agent_payload(config, agent_payload_dir)
             config.agent_payload = True
 
+        if (
+            config.device_pairing_auth_file
+            or config.device_pairing_auth_username
+            or config.device_pairing_auth_password
+        ):
+            pairing_payload_dir = os.path.join(
+                build_dir, DEVICE_PAIRING_PAYLOAD_DIRNAME
+            )
+            prepare_device_pairing_payload(config, pairing_payload_dir)
+            config.device_pairing_payload = True
+
         remote_arg_tokens = _expand_remote_args(config.to_remote_args())
         _write_remote_args_file(build_dir, remote_arg_tokens)
         remote_args_path = os.path.join(REMOTE_INSTALL_DIR, REMOTE_ARGS_FILENAME)
@@ -1154,10 +1249,22 @@ def setup_main(system_type: str, description: str, success_msg_fn: Callable[[Set
     success_msg_fn(config)
     if "t3code" in (config.web_interfaces or []):
         print()
-        print("T3 Code pairing (one-time):")
-        print(f"  infra-tools agent web pair {config.host} {config.username}")
-        if config.ssh_key:
-            print(f"  Add --key {config.ssh_key} if the SSH key is not your default identity")
+        if "t3code" in (config.device_pairing_providers or []):
+            scheme = "http"
+            display_host = (
+                f"[{config.host}]" if ":" in config.host else config.host
+            )
+            print("Protected T3 Code device enrollment:")
+            print(f"  {scheme}://{display_host}:{config.device_pairing_port}/")
+            print("  Sign in with the configured Basic Auth account, then pair this browser.")
+        else:
+            print("T3 Code pairing (one-time):")
+            print(f"  infra-tools agent web pair {config.host} {config.username}")
+            if config.ssh_key:
+                print(
+                    f"  Add --key {config.ssh_key} if the SSH key is not your "
+                    "default identity"
+                )
     print("=" * 60)
     
     return 0

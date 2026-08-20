@@ -31,6 +31,7 @@ CLI_SYSTEMS = [
 AGENT_TOOLS = ("gh", "codex", "claude", "opencode")
 DESKTOP_INTERFACES = ("t3code",)
 WEB_INTERFACES = ("t3code",)
+DEVICE_PAIRING_PROVIDERS = ("t3code",)
 BROWSER_AUTOMATION_PROVIDERS = ("playwright",)
 GIT_ACCESS_POLICIES = ("none", "read", "read-write")
 
@@ -223,6 +224,13 @@ class SetupConfig:
     web_interface_host: MaybeStr = None
     web_interface_port: int = 3773
     web_interface_sources: Optional[StrList] = None
+    device_pairing_providers: Optional[StrList] = None
+    device_pairing_port: int = 3774
+    device_pairing_auth_file: MaybeStr = None
+    device_pairing_auth_username: MaybeStr = None
+    device_pairing_auth_password: MaybeStr = None
+    device_pairing_payload: bool = False
+    disable_device_pairing: bool = False
     browser_automation: MaybeStr = None
     copy_agent_keys: bool = False
     copy_agent_config: bool = False
@@ -331,6 +339,14 @@ class SetupConfig:
                 raise ValueError(f"Unsupported web interface: {interface}")
         self.desktop_interfaces = desktop_interfaces or None
         self.web_interfaces = web_interfaces or None
+        pairing_providers = list(dict.fromkeys(self.device_pairing_providers or []))
+        if self.disable_device_pairing:
+            pairing_providers = []
+            self.device_pairing_port = 3774
+        for provider in pairing_providers:
+            if provider not in DEVICE_PAIRING_PROVIDERS:
+                raise ValueError(f"Unsupported device pairing provider: {provider}")
+        self.device_pairing_providers = pairing_providers or None
         if self.desktop_interfaces or self.web_interfaces:
             if not self.install_codex and not self.install_claude and not self.install_opencode:
                 raise ValueError(
@@ -351,6 +367,13 @@ class SetupConfig:
             # T3 Code's headless server requires the Node runtime even when
             # the operator did not select --node separately.
             self.install_node = True
+        if self.device_pairing_providers:
+            if not 1 <= self.device_pairing_port <= 65535:
+                raise ValueError("device_pairing_port must be between 1 and 65535")
+            if self.device_pairing_port == self.web_interface_port:
+                raise ValueError(
+                    "device_pairing_port must differ from web_interface_port"
+                )
 
     def selected_agent_tools(self) -> StrList:
         """Return selected coding agents in stable display/install order."""
@@ -496,6 +519,12 @@ class SetupConfig:
             args.append(f"--web-interface-port {self.web_interface_port}")
             for source in self.web_interface_sources or []:
                 args.append(f"--web-interface-source {shlex.quote(source)}")
+        for provider in self.device_pairing_providers or []:
+            args.append(f"--device-pairing {shlex.quote(provider)}")
+        if self.device_pairing_providers:
+            args.append(f"--device-pairing-port {self.device_pairing_port}")
+        if self.device_pairing_payload:
+            args.append("--device-pairing-payload")
 
         if self.browser_automation:
             args.append(
@@ -832,6 +861,10 @@ class SetupConfig:
             cmd_parts.append(f"--web-interface-port {self.web_interface_port}")
             for source in self.web_interface_sources or []:
                 cmd_parts.append(f"--web-interface-source {shlex.quote(source)}")
+        for provider in self.device_pairing_providers or []:
+            cmd_parts.append(f"--device-pairing {shlex.quote(provider)}")
+        if self.device_pairing_providers and self.device_pairing_port != 3774:
+            cmd_parts.append(f"--device-pairing-port {self.device_pairing_port}")
 
         if self.browser_automation:
             cmd_parts.append(
@@ -1025,6 +1058,11 @@ class SetupConfig:
             'agent_auth_files',
             'agent_config_source',
             'agent_payload',
+            'device_pairing_auth_file',
+            'device_pairing_auth_username',
+            'device_pairing_auth_password',
+            'device_pairing_payload',
+            'disable_device_pairing',
         ):
             data.pop(transient_field, None)
         for legacy_field in (
@@ -1185,6 +1223,9 @@ class SetupConfig:
         git_auth_token = _optional_str_arg(args, 'git_auth_token')
         agent_auth_source = _optional_str_arg(args, 'agent_auth_source')
         agent_config_source = _optional_str_arg(args, 'agent_config_source')
+        device_pairing_port = _optional_int_arg(args, 'device_pairing_port')
+        if device_pairing_port is None:
+            device_pairing_port = 3774
         
         return cls(
             host=args.host,
@@ -1235,6 +1276,23 @@ class SetupConfig:
             web_interface_host=getattr(args, 'web_interface_host', None),
             web_interface_port=getattr(args, 'web_interface_port', 3773),
             web_interface_sources=getattr(args, 'web_interface_sources', None),
+            device_pairing_providers=getattr(args, 'device_pairing_providers', None),
+            device_pairing_port=device_pairing_port,
+            device_pairing_auth_file=_optional_str_arg(
+                args, 'device_pairing_auth_file'
+            ),
+            device_pairing_auth_username=_optional_str_arg(
+                args, 'device_pairing_auth_username'
+            ),
+            device_pairing_auth_password=_optional_str_arg(
+                args, 'device_pairing_auth_password'
+            ),
+            device_pairing_payload=(
+                _optional_bool_arg(args, 'device_pairing_payload') is True
+            ),
+            disable_device_pairing=bool(
+                getattr(args, 'disable_device_pairing', False)
+            ),
             browser_automation=browser_automation,
             copy_agent_keys=bool(
                 git_auth_source

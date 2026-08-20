@@ -479,6 +479,12 @@ def validate_web_interface_settings(config: Any) -> None:
     host = getattr(config, "web_interface_host", None)
     sources = getattr(config, "web_interface_sources", None) or []
     port = getattr(config, "web_interface_port", 3773)
+    pairing_providers = getattr(config, "device_pairing_providers", None) or []
+    pairing_port = getattr(config, "device_pairing_port", 3774)
+    pairing_auth_file = getattr(config, "device_pairing_auth_file", None)
+    pairing_auth_username = getattr(config, "device_pairing_auth_username", None)
+    pairing_auth_password = getattr(config, "device_pairing_auth_password", None)
+    pairing_payload = bool(getattr(config, "device_pairing_payload", False))
     if not interfaces:
         if host is not None or sources:
             raise ValueError(
@@ -488,6 +494,16 @@ def validate_web_interface_settings(config: Any) -> None:
             raise ValueError(
                 "--web-interface-port requires --web-interface"
             )
+        if (
+            pairing_providers
+            or pairing_auth_file
+            or pairing_auth_username
+            or pairing_auth_password
+            or pairing_payload
+        ):
+            raise ValueError("--device-pairing requires --web-interface")
+        if pairing_port != 3774:
+            raise ValueError("--device-pairing-port requires --device-pairing")
         return
 
     from lib.config import WEB_INTERFACES
@@ -495,6 +511,47 @@ def validate_web_interface_settings(config: Any) -> None:
     for interface in interfaces:
         if interface not in WEB_INTERFACES:
             raise ValueError(f"Unsupported web interface: {interface}")
+    from lib.config import DEVICE_PAIRING_PROVIDERS
+
+    for provider in pairing_providers:
+        if provider not in DEVICE_PAIRING_PROVIDERS:
+            raise ValueError(f"Unsupported device pairing provider: {provider}")
+        if provider not in interfaces:
+            raise ValueError(
+                f"--device-pairing {provider} requires --web-interface {provider}"
+            )
+    if not pairing_providers:
+        if pairing_port != 3774:
+            raise ValueError("--device-pairing-port requires --device-pairing")
+        if pairing_auth_file or pairing_auth_username or pairing_auth_password or pairing_payload:
+            raise ValueError("Device-pairing authentication requires --device-pairing")
+    else:
+        if not isinstance(pairing_port, int) or isinstance(pairing_port, bool):
+            raise ValueError("--device-pairing-port must be an integer")
+        if not 1 <= pairing_port <= 65535:
+            raise ValueError("--device-pairing-port must be between 1 and 65535")
+        if pairing_port == port:
+            raise ValueError(
+                "--device-pairing-port must differ from --web-interface-port"
+            )
+        if pairing_auth_file and (pairing_auth_username or pairing_auth_password):
+            raise ValueError(
+                "--device-pairing-auth-file cannot be combined with interactive credentials"
+            )
+        if bool(pairing_auth_username) != bool(pairing_auth_password):
+            raise ValueError(
+                "Device-pairing Basic Auth requires both a username and password"
+            )
+        if pairing_auth_username:
+            from lib.validators import validate_username
+
+            if not validate_username(pairing_auth_username):
+                raise ValueError(
+                    f"Invalid device-pairing username: {pairing_auth_username}"
+                )
+            validate_no_control_characters(
+                pairing_auth_password, "Device-pairing password"
+            )
     if not isinstance(port, int) or not 1 <= port <= 65535:
         raise ValueError("--web-interface-port must be between 1 and 65535")
     if not isinstance(host, str) or not host:

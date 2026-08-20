@@ -42,8 +42,8 @@ avoid abstraction whose only purpose is a hypothetical provider or service.
 | B1: explicit and safe Gogs LFS | Implemented (IPv4) | Verified releases, local LFS layout, required mounts, safe hostless exposure, reusable health/status, and agent Git LFS setup are complete; IPv6 exposure remains explicitly deferred |
 | B2: Gogs recovery | Dependency-gated | Shared recovery mechanism and authenticated restore smoke test |
 | B3: Samba storage roles | Planned | Path-role enforcement and consistent archive publication |
-| C1: T3 Code interfaces | Desktop and direct headless slice implemented | Desktop AppImage, Node-backed system service, loopback/LAN CIDR exposure, pairing helper, provider separation, and client-side project adding are implemented; managed remote lifecycle commands and optional pre-registration remain |
-| C2: controlled web exposure | Planned | HTTPS/WebSocket reverse proxy, optional Basic Auth, and trusted-proxy/source-policy integration |
+| C1: T3 Code interfaces | Desktop, headless, and enrollment slices implemented | Desktop AppImage, Node-backed system service, loopback/LAN CIDR exposure, SSH pairing helper, protected enrollment portal, provider separation, and client-side project adding are implemented; managed remote lifecycle commands and optional pre-registration remain |
+| C2: controlled web exposure | Planned | HTTPS/WebSocket reverse proxy for the T3 endpoint plus trusted-proxy, hostname, and source-policy integration |
 
 ## Product decisions
 
@@ -121,11 +121,12 @@ avoid abstraction whose only purpose is a hypothetical provider or service.
   keeps the initial formatting decision tied to a disk allocated in the same
   provisioning operation and avoids implying that `/home` migration is safe
   before the transactional recovery dependency is available.
-- Nginx HTTP Basic Auth is an optional edge gate for selected web interfaces,
-  implemented with Nginx's existing module and one protected password file per
-  interface. It is never sent over plaintext HTTP, never replaces T3 Code's
-  native pairing/session authentication, and never stores a raw password in a
-  command, saved configuration, process environment, or unit file.
+- Nginx HTTP Basic Auth protects the separate device-enrollment portal with a
+  root-owned password file. It never replaces T3 Code's native pairing/session
+  authentication and never stores a raw password in a command, saved
+  configuration, process environment, or unit file. Plain HTTP is accepted
+  only for an explicitly allowlisted trusted private network and is documented
+  as observable; other networks require a separately managed HTTPS endpoint.
 - T3 Code is an acceptable first interface because its source is available
   under the MIT license. Each later interface still needs its own license,
   release, runtime, and update-path review before being added.
@@ -325,11 +326,12 @@ remain open.
 
 ### Agent web interfaces
 
-The current T3 Code installer downloads the desktop AppImage and creates a
-desktop launcher. It does not install or supervise the separate headless CLI
-service used by `t3 serve`, expose it through nginx, or manage remote pairing.
-The new design keeps that installer as the explicit desktop-interface path and
-adds a separate web-interface adapter; neither path is an alias for the other.
+The T3 Code implementation keeps the desktop AppImage and launcher as an
+explicit desktop-interface path. Its separate web-interface adapter installs
+and supervises the headless CLI used by `t3 serve`, and its optional enrollment
+adapter exposes only credential issuance through Nginx. Neither interface path
+is an alias for the other, and the enrollment listener is not a reverse proxy
+for T3's HTTP/WebSocket endpoint.
 
 T3 Code's supported remote model already provides a headless server, one-time
 owner pairing credentials, authenticated sessions, session revocation, and a
@@ -376,8 +378,9 @@ launcher.
   each backend bound to loopback and each public exposure explicit.
 - Make a loopback service plus an SSH tunnel the safe zero-configuration web
   interface, with optional nginx hostname/TLS and CIDR filtering.
-- Offer Nginx Basic Auth as a minimally secure, optional edge gate where TLS,
-  password-file handling, and browser/WebSocket behavior are all verifiable.
+- Keep the implemented Basic Auth enrollment gate separate from T3's native
+  browser/WebSocket session endpoint; evaluate any later edge gate only with
+  TLS and verified desktop/mobile client compatibility.
 - Preserve each tool's native authentication and access-revocation model,
   while ensuring startup output and normal logs do not expose pairing secrets.
 - Ensure web services see the same explicit agent binaries, credentials, and
@@ -928,9 +931,10 @@ The following exposure modes keep a bare declaration useful and safe:
    `0.0.0.0` unless a different bind is explicit and add matching UFW rules.
    This is for a deliberately trusted LAN or private routed network; CIDR
    filtering does not encrypt pairing credentials.
-3. HTTPS/WebSocket reverse-proxy integration, hostname handling, and optional
-   Basic Auth remain Lane C2 work. The current direct service does not install
-   nginx or advertise compatibility with the hosted HTTPS client.
+3. The implemented device-enrollment portal uses a separate Nginx listener
+   with Basic Auth. It does not proxy the T3 API/WebSocket endpoint, so native
+   desktop/mobile clients keep using T3's normal bearer sessions. HTTPS
+   reverse proxying for the T3 endpoint itself remains later work.
 4. Reject a non-loopback listener without a CIDR restriction. The first slice
    does not expose a public listener or bypass T3's native pairing.
 
@@ -953,55 +957,54 @@ interface that has no suitable native authentication. A loopback-only SSH
 tunnel is also sufficient network authentication for such a tool.
 
 Current implementation boundary: direct T3 pairing, loopback/LAN source
-filtering, pairing-token redaction, and the control-plane
-`infra-tools agent web pair HOST USER` helper are implemented. Nginx
-integration and Basic Auth remain future C2 work; the options below are design
-constraints, not currently accepted CLI flags.
+filtering, pairing-token redaction, the control-plane
+`infra-tools agent web pair HOST USER` helper, and a protected on-demand
+enrollment portal are implemented. The portal broker is provider-backed rather
+than T3-specific internally, with T3 Code as the first fixed adapter.
 
 Do not add raw passwords to setup arguments, saved commands, process
-environments, or systemd unit files. Add optional Nginx Basic Auth as an edge
-gate with a compact policy rather than a new identity system:
+environments, or systemd unit files. The implemented setup shape is:
 
 ```text
---web-interface-auth t3code native
---web-interface-auth t3code native+basic
---web-interface-auth-file t3code /run/secrets/t3code.htpasswd
+--device-pairing t3code
+--device-pairing-port 3774
+--device-pairing-auth-file /run/secrets/t3code-pairing.htpasswd
 ```
 
-`native` is the default for T3 Code. `native+basic` retains T3's pairing and
-session checks while requiring an Nginx Basic Auth password file before the
-request reaches the service. A future interface without native authentication
-may use `basic` as its only edge gate, but only over HTTPS, Cloudflare, or a
-loopback/SSH-tunnel path; Basic Auth over plaintext HTTP is rejected. The
-source allowlist remains available as additional network defense and is not a
-replacement for encryption.
+Nginx Basic Auth gates only the ability to invoke a provider adapter and mint a
+short-lived pairing link. It is intentionally not placed in front of T3's
+normal HTTP/WebSocket endpoint because separate desktop/mobile clients cannot
+be assumed to implement that extra challenge. T3's pairing exchange, session
+checks, and revocation remain authoritative for actual access.
+
+The portal inherits the web-interface bind and source allowlist, uses a
+separate port, and proxies to a broker on a local Unix socket. It uses a
+single-use same-site form nonce, per-source issuance limiting, no access log,
+and a fixed root-managed provider command. T3 issuance uses the supported
+`t3 auth pairing create --ttl 10m --base-url ... --json` interface. The broker
+validates that the returned URL belongs to the expected public T3 origin.
 
 The auth file is an Nginx-compatible `name:hash` file. The operator may supply
 an existing regular file or, in interactive setup, enter a username and hidden
-password so infra-tools can generate one with the system's existing OpenSSL
+password so infra-tools can generate one with the controller's existing OpenSSL
 `passwd` support. Do not add `apache2-utils` only to obtain `htpasswd`, and do
 not implement password hashing in infra-tools. Store one root-owned,
-mode-`0600` or appropriately group-readable file per interface, replace it
+appropriately group-readable file for the portal, replace it
 atomically during rotation, and reload Nginx only after a complete
 configuration test. A supplied file is a secret input and is never copied to
 saved setup state or printed in a plan.
 
-Basic Auth is a gate, not a session or revocation system: changing the file
-does not necessarily terminate an already-open WebSocket, and there is no
-MFA, per-session expiry, or audit identity beyond the username. T3 pairing
-session revocation remains required. The hosted T3 client cannot be assumed
-to answer a cross-origin HTTP Basic challenge or set credentials on a browser
-WebSocket, so a Basic-protected T3 endpoint must serve the matching client
-from the same Nginx origin until a live hosted-client test proves otherwise.
-Setup must not advertise `app.t3.codes` as compatible merely because the
-backend returns a successful HTTP 401/200 sequence.
+Basic Auth is an issuance gate, not a session or revocation system: changing
+the file prevents later portal use but does not terminate a T3 session that
+was already paired. There is no MFA or user-level T3 audit identity implied by
+the Basic Auth username. T3 session revocation remains required.
 
-Nginx applies the Basic challenge to the initial HTTP/WebSocket upgrade. The
-proxy still needs the normal explicit `Upgrade` and `Connection` headers,
-bounded timeouts, and host/origin checks. Authentication tests must cover the
-ordinary UI, the WebSocket handshake, reconnects, credential rotation, and
-the fact that the loopback backend cannot be reached directly from the
-network.
+The first LAN transport is HTTP and is allowed only with the existing private
+or otherwise non-global source CIDR requirement. Documentation explicitly
+warns that Basic Auth and the returned pairing link are observable on an
+untrusted LAN. Loopback plus SSH forwarding or a separately managed HTTPS
+endpoint is required outside a trusted network. The implementation does not
+claim hosted `app.t3.codes` compatibility for a plaintext endpoint.
 
 Pairing URLs and tokens must be treated as credentials. Normal setup output,
 saved commands, dry runs, generated nginx files, and service logs must not
@@ -1032,9 +1035,11 @@ infra-tools agent web revoke HOST USER --tool t3code ACCESS_ID
 prints the credential once to the operator; it has no JSON mode. `status` and
 `sessions` expose only non-secret identifiers and metadata. `revoke` accepts a
 listed pairing or session identifier and verifies that it is no longer usable.
-These commands reuse the normal managed SSH identity and redaction path rather
-than creating an HTTP administration endpoint. The first implemented command
-is `agent web pair`; status/session/revocation commands remain future work.
+These commands reuse the normal managed SSH identity and redaction path. The
+first implemented command is `agent web pair`; status/session/revocation
+commands remain future work. Browser-based issuance is also implemented
+through the protected portal, and `--no-device-pairing` reconciles removal
+without revoking existing provider sessions.
 
 ### T3 Code runtime and service integration
 
@@ -1352,17 +1357,18 @@ pairing/session management remain open.
 
 ### Lane C2: controlled network exposure
 
-- Reuse shared nginx ownership and staged reconciliation for hostname/TLS and
-  private CIDR modes, synchronized UFW rules, and rollback.
-- Add optional per-interface Nginx Basic Auth with interactive or supplied
-  hashed-file input, atomic rotation, mode/ownership checks, and no raw secret
-  in generated artifacts.
-- Add HTTP, WebSocket, host/origin, upload, timeout, native-authentication, and
-  Basic Auth, and no-direct-bypass health checks.
+- Reuse shared Nginx ownership and staged reconciliation for hostname/TLS,
+  trusted forwarded headers, synchronized UFW rules, and rollback.
+- Proxy the T3 HTTP/WebSocket endpoint only after hostname, origin, upgrade,
+  upload, timeout, native-authentication, and no-direct-bypass checks pass.
+- Reuse the implemented enrollment password-file flow where appropriate, but
+  do not put Basic Auth in front of T3's endpoint until desktop/mobile and
+  same-origin browser behavior is verified.
 - Add update/removal reconciliation, retained-state reporting, resource limits,
   and low-end VM measurements.
 - Validate T3 Code through an SSH tunnel, direct private CIDR access, and nginx
-  HTTPS, including native session revocation and the optional Basic Auth gate.
+  HTTPS, including native session revocation and continued separation of the
+  Basic Auth enrollment gate.
 
 ### Release integration
 
@@ -1419,11 +1425,11 @@ pairing/session management remain open.
 - Parser and registry tests prove `--agent-tool t3code` is absent, while
   `--desktop-interface t3code` selects only the verified desktop adapter and
   `--web-interface t3code` selects only the headless path.
-- Unit tests render systemd and nginx configuration in temporary directories,
-  mock all service/firewall calls, and prove that backends bind only to
-  loopback, WebSocket headers are present, source rules end in `deny all`,
-  Basic Auth files are per-interface and secret-free in generated output, and
-  activation rolls back on a failed health check.
+- Current unit tests render the T3 and enrollment systemd/Nginx configuration
+  in temporary directories, mock service/firewall calls, and prove that the
+  Basic Auth secret is absent from provider and saved configuration. Lane C2
+  must add direct-proxy WebSocket, hostname/origin, no-bypass, and failed
+  activation rollback coverage before HTTPS exposure ships.
 - Redaction tests seed recognizable pairing URLs, tokens, and agent credentials
   and prove none appear in setup plans, dry runs, generated configuration,
   status JSON, or normal service logs.
@@ -1511,13 +1517,17 @@ pairing/session management remain open.
 - Interface declarations are repeatable in the parser and saved command;
   duplicate T3 declarations collapse to one service instance for the target
   user. The pairing helper can be invoked from the control system with
-  `infra-tools agent web pair`; HTTPS/WebSocket nginx integration and optional
-  Basic Auth remain C2 acceptance work.
+  `infra-tools agent web pair`. The optional generic device-enrollment broker
+  exposes a separate Basic-Auth Nginx portal, mints short-lived native T3
+  credentials, and leaves HTTPS/WebSocket proxying for the T3 endpoint itself
+  as later C2 work.
 - T3 Code discovers only the explicitly installed provider CLIs from its
   service context and uses the setup user's existing protected credentials.
 - An operator can issue one pairing credential with the control-plane
   `infra-tools agent web pair HOST USER` command or the target-side
-  `t3code-pair` helper; managed session listing/revocation remains open.
+  `t3code-pair` helper. An authenticated browser can also issue its own
+  credential through the protected portal without live terminal access;
+  managed session listing/revocation remains open.
 - No pairing credential, session secret, or agent credential appears in saved
   commands, generated unit/proxy files, dry runs, status JSON, or ordinary
   logs.

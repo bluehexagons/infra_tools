@@ -37,6 +37,19 @@ def _prompt_repositories() -> list[str]:
         repositories.append(value)
 
 
+def _prompt_device_pairing_credentials(args: Any) -> None:
+    """Collect transient Basic Auth credentials for the enrollment portal."""
+
+    args.device_pairing_auth_username = _prompt(
+        "Device-pairing portal username", "agent"
+    )
+    password = getpass.getpass("Device-pairing portal password (hidden): ")
+    confirmation = getpass.getpass("Confirm portal password: ")
+    if not password or password != confirmation:
+        raise ValueError("Device-pairing portal passwords did not match")
+    args.device_pairing_auth_password = password
+
+
 def run_interactive_setup(args: Any) -> None:
     """Fill agent setup choices into a parsed setup namespace.
 
@@ -75,6 +88,18 @@ def run_interactive_setup(args: Any) -> None:
             GIT_ACCESS_POLICIES,
             getattr(args, "git_access", "none"),
         )
+
+    web_interfaces = set(getattr(args, "web_interfaces", None) or [])
+    if "t3code" in web_interfaces and not getattr(
+        args, "device_pairing_providers", None
+    ):
+        pairing_choice = _prompt_choice(
+            "Allow new browsers to request T3 Code pairing links",
+            ("yes", "no"),
+            "yes",
+        )
+        if pairing_choice == "yes":
+            args.device_pairing_providers = ["t3code"]
 
     if getattr(args, "dry_run", False):
         print("Dry-run: skipping credential prompts and secret staging.")
@@ -118,7 +143,24 @@ def run_interactive_setup(args: Any) -> None:
                 args.agent_auth_files = None
 
     if selected_tools:
-        if _prompt_choice("Copy optional non-secret agent config", ("no", "active"), "no") == "active":
+        if (
+            _prompt_choice(
+                "Copy optional non-secret agent config", ("no", "active"), "no"
+            )
+            == "active"
+        ):
             args.agent_config_source = "active"
 
-    print("Interactive agent setup choices recorded; credentials will not be saved in the setup command.")
+    pairing_providers = set(getattr(args, "device_pairing_providers", None) or [])
+    pairing_auth_supplied = bool(
+        getattr(args, "device_pairing_auth_file", None)
+        or getattr(args, "device_pairing_auth_username", None)
+        or getattr(args, "device_pairing_auth_password", None)
+    )
+    if "t3code" in pairing_providers and not pairing_auth_supplied:
+        _prompt_device_pairing_credentials(args)
+
+    print(
+        "Interactive agent setup choices recorded; credentials will not be saved "
+        "in the setup command."
+    )
