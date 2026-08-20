@@ -11,6 +11,65 @@ def _rdp_access_summary(config: SetupConfig) -> str:
     return "global (rate-limited; use --rdp-source to restrict)"
 
 
+def _url_host(host: str) -> str:
+    """Format an IPv6 host for use in a URL."""
+
+    if ":" in host and not host.startswith("["):
+        return f"[{host}]"
+    return host
+
+
+def _http_url(host: str, port: int | None = None, *, scheme: str = "http") -> str:
+    """Build a display-only HTTP URL without exposing credentials."""
+
+    default_port = 443 if scheme == "https" else 80
+    port_suffix = "" if port is None or port == default_port else f":{port}"
+    return f"{scheme}://{_url_host(host)}{port_suffix}/"
+
+
+def _access_host(config: SetupConfig, bind: str) -> tuple[str, bool]:
+    """Return the useful client host and whether the listener is loopback-only."""
+
+    normalized = bind.strip().lower()
+    if normalized in {"localhost", "127.0.0.1", "::1"}:
+        return bind, True
+    if normalized in {"0.0.0.0", "::"}:
+        return config.host, False
+    return bind, False
+
+
+def _split_service_spec(spec: str, default_port: int) -> tuple[str, int]:
+    """Parse the simple DOMAIN[:PORT] forms used by managed web services."""
+
+    normalized = spec.strip()
+    if normalized.isdigit():
+        return "", int(normalized)
+    if ":" not in normalized:
+        return normalized, default_port
+    domain, _, raw_port = normalized.rpartition(":")
+    if raw_port.isdigit():
+        return domain, int(raw_port)
+    return normalized, default_port
+
+
+def _service_url(
+    config: SetupConfig,
+    spec: str,
+    default_port: int,
+    *,
+    scheme: str,
+    source_restricted: bool = False,
+    direct_host: str = "127.0.0.1",
+) -> tuple[str, bool]:
+    """Return a service URL and whether it is loopback-only."""
+
+    domain, port = _split_service_spec(spec, default_port)
+    if domain:
+        return _http_url(domain, scheme=scheme), False
+    host = config.host if source_restricted else direct_host
+    return _http_url(host, port, scheme=scheme), not source_restricted
+
+
 def print_name_and_tags(config: SetupConfig) -> None:
     if config.friendly_name:
         print(f"Name: {config.friendly_name}")
@@ -32,6 +91,104 @@ def print_rdp_info(config: SetupConfig) -> None:
         print(f"  Bind address: {config.rdp_bind_address}")
         print(f"  Allowed sources: {_rdp_access_summary(config)}")
         print(f"  Client: Remmina, Microsoft Remote Desktop")
+
+
+def print_service_access_summary(config: SetupConfig) -> None:
+    """Print links and ports for services selected by a setup."""
+
+    lines: list[tuple[str, str, str | None]] = []
+
+    if config.system_type == "server_web":
+        scheme = "https" if config.enable_ssl else "http"
+        lines.append(("Web server", _http_url(config.host, scheme=scheme), None))
+
+    if config.web_interfaces:
+        bind = config.web_interface_host or "127.0.0.1"
+        access_host, loopback_only = _access_host(config, bind)
+        web_url = _http_url(access_host, config.web_interface_port)
+        for interface in config.web_interfaces:
+            label = "T3 Code web" if interface == "t3code" else f"{interface} web"
+            note = f"bind {bind}"
+            if loopback_only:
+                note += "; loopback-only, use an SSH tunnel"
+            lines.append((label, web_url, note))
+
+        if "t3code" in config.web_interfaces:
+            if config.device_pairing_providers:
+                pairing_url = _http_url(access_host, config.device_pairing_port)
+                note = "Nginx Basic Auth; creates one-time T3 client links"
+                if loopback_only:
+                    note += "; loopback-only, use an SSH tunnel"
+                lines.append(("T3 Code device-pairing portal", pairing_url, note))
+            else:
+                lines.append(
+                    (
+                        "T3 Code pairing",
+                        f"infra-tools agent web pair {config.host} {config.username}",
+                        "run from the control system",
+                    )
+                )
+
+    if config.gogs:
+        gogs_spec = str(config.gogs[0])
+        scheme = "https" if config.enable_ssl or config.enable_cloudflare else "http"
+        gogs_url, loopback_only = _service_url(
+            config,
+            gogs_spec,
+            3000,
+            scheme=scheme,
+            source_restricted=bool(config.gogs_sources),
+        )
+        note = "loopback-only, use an SSH tunnel" if loopback_only else None
+        lines.append(("Gogs web", gogs_url, note))
+        domain, _port = _split_service_spec(gogs_spec, 3000)
+        lines.append(
+            ("Gogs Git over SSH", f"git@{domain or config.host}", "TCP 22")
+        )
+
+    if config.antistatic_server:
+        scheme = "https" if config.enable_ssl or config.enable_cloudflare else "http"
+        server_url, _loopback_only = _service_url(
+            config,
+            config.antistatic_server,
+            8080,
+            scheme=scheme,
+            direct_host=config.host,
+        )
+        lines.append(("Antistatic lobby", server_url, None))
+        lines.append(("Antistatic STUN", f"{config.host}:3478/udp", None))
+
+    if config.antistatic_db:
+        scheme = "https" if config.enable_ssl or config.enable_cloudflare else "http"
+        db_url, _loopback_only = _service_url(
+            config,
+            config.antistatic_db,
+            8081,
+            scheme=scheme,
+            direct_host=config.host,
+        )
+        lines.append(("Antistatic DB", db_url, None))
+
+    if config.enable_rdp:
+        lines.append(
+            (
+                "RDP",
+                f"{_url_host(config.host)}:3389",
+                f"bind {config.rdp_bind_address}",
+            )
+        )
+
+    if config.enable_samba:
+        lines.append(("Samba/SMB", f"//{_url_host(config.host)}", "TCP 445"))
+
+    if not lines:
+        return
+
+    print("Access:")
+    for label, address, note in lines:
+        print(f"  {label}: {address}")
+        if note:
+            print(f"    {note}")
 
 
 def print_setup_summary(config: SetupConfig, description: Optional[str] = None) -> None:

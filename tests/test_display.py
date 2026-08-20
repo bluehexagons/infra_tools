@@ -7,7 +7,11 @@ import unittest
 from contextlib import redirect_stdout
 
 from lib.config import SetupConfig
-from lib.display import print_rdp_info, print_setup_summary
+from lib.display import (
+    print_rdp_info,
+    print_service_access_summary,
+    print_setup_summary,
+)
 
 
 class TestRdpDisplay(unittest.TestCase):
@@ -94,6 +98,61 @@ class TestRdpDisplay(unittest.TestCase):
         self.assertIn("Web interface sources: 192.168.0.0/24", rendered)
         self.assertIn("Backup Jobs: 1 job(s)", rendered)
         self.assertIn("/srv/workspace → /srv/backups/workspace (daily)", rendered)
+
+    def test_access_summary_lists_web_interfaces_and_services(self) -> None:
+        config = SetupConfig(
+            host="192.168.0.41",
+            username="agent",
+            system_type="server_web",
+            agent_tools=["codex"],
+            web_interfaces=["t3code"],
+            web_interface_sources=["192.168.0.0/24"],
+            device_pairing_providers=["t3code"],
+            gogs=["git.example.com:3000", "/srv/gogs"],
+            antistatic_server="lobby.example.com",
+            antistatic_db=":8081",
+            enable_rdp=True,
+            enable_samba=True,
+        )
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            print_service_access_summary(config)
+
+        rendered = output.getvalue()
+        self.assertIn("T3 Code web: http://192.168.0.41:3773/", rendered)
+        self.assertIn(
+            "T3 Code device-pairing portal: http://192.168.0.41:3774/",
+            rendered,
+        )
+        self.assertIn("Gogs web: http://git.example.com/", rendered)
+        self.assertIn("Gogs Git over SSH: git@git.example.com", rendered)
+        self.assertIn("TCP 22", rendered)
+        self.assertIn("Antistatic lobby: http://lobby.example.com/", rendered)
+        self.assertIn("Antistatic DB: http://192.168.0.41:8081/", rendered)
+        self.assertIn("RDP: 192.168.0.41:3389", rendered)
+        self.assertIn("Samba/SMB: //192.168.0.41", rendered)
+
+    def test_access_summary_marks_loopback_web_interfaces(self) -> None:
+        config = SetupConfig(
+            host="agent-vm",
+            username="agent",
+            system_type="server_dev",
+            agent_tools=["codex"],
+            web_interfaces=["t3code"],
+        )
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            print_service_access_summary(config)
+
+        rendered = output.getvalue()
+        self.assertIn("T3 Code web: http://127.0.0.1:3773/", rendered)
+        self.assertIn("loopback-only, use an SSH tunnel", rendered)
+        self.assertIn(
+            "T3 Code pairing: infra-tools agent web pair agent-vm agent",
+            rendered,
+        )
 
 
 if __name__ == "__main__":

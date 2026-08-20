@@ -62,7 +62,12 @@ from lib.credentials import (
     store_cli_credentials,
 )
 from lib.github_maintenance import add_maintenance_subparser, run_maintenance_command
-from lib.display import print_name_and_tags, print_setup_summary, print_success_header
+from lib.display import (
+    print_name_and_tags,
+    print_service_access_summary,
+    print_setup_summary,
+    print_success_header,
+)
 from lib.interactive_shell import run_interactive_shell
 from lib.notifications import validate_notification_args
 from lib.orchestrator_bootstrap import LAUNCHER_NAME, run_orchestrator_bootstrap
@@ -1267,8 +1272,7 @@ def run_setup_command(args: argparse.Namespace) -> int:
     print_success_header(config)
     print()
     print(f"Connect via SSH: ssh {config.username}@{config.host}")
-    if args.system_type == "server_web":
-        print(f"View website: http://{config.host}")
+    print_service_access_summary(config)
     print("=" * 60)
     
     return 0

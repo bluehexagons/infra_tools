@@ -289,6 +289,16 @@ rm -f "$HOME/.infra_tools-install.sh"
 GitHub credential input requires `--git-access read` or `--git-access
 read-write`; `none` is the public/unauthenticated repository mode.
 
+### Setup completion access details
+
+After a successful setup, the `Setup Complete!` block includes an `Access:`
+section for selected web interfaces and services. It lists the usable URL or
+port for T3 Code, the optional protected device-pairing portal, the generic
+web server, Gogs, Antistatic services, RDP, and Samba. Loopback-only services
+are shown with `127.0.0.1` and are marked as requiring an SSH tunnel. For
+example, a T3 Code setup with device pairing reports both the direct T3 port
+(`3773` by default) and the Basic Auth enrollment portal (`3774` by default).
+
 Agent tools are selected individually with repeatable `--agent-tool` flags. There
 is no agent-suite preset or implicit coding-package baseline; add unrelated
 packages explicitly with `--apt-install`, and add language runtimes with their
