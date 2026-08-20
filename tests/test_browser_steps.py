@@ -15,6 +15,7 @@ from desktop.browser_steps import (
     _browsh_architecture,
     _browsh_asset_matches,
     _configure_librewolf_apparmor_profile,
+    _refresh_existing_extrepo_sources,
     install_single_browser,
     is_flatpak_app_installed,
 )
@@ -140,6 +141,41 @@ class TestBrowserSteps(unittest.TestCase):
         _configure_librewolf_apparmor_profile()
 
         mock_run.assert_called_once_with("aa-enabled -q", check=False)
+
+    @patch("desktop.browser_steps.os.path.isfile")
+    @patch("desktop.browser_steps.run")
+    def test_refreshes_existing_extrepo_source_definitions(self, mock_run, mock_isfile):
+        mock_isfile.side_effect = lambda path: path.endswith(
+            "extrepo_librewolf.sources"
+        )
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=["extrepo"], returncode=0
+        )
+
+        _refresh_existing_extrepo_sources()
+
+        mock_run.assert_called_once_with("extrepo update librewolf", check=False)
+
+    @patch("desktop.browser_steps.os.path.isfile", return_value=True)
+    @patch("desktop.browser_steps.run")
+    def test_reports_but_keeps_using_source_when_extrepo_refresh_fails(
+        self, mock_run, _isfile
+    ):
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=["extrepo"], returncode=1
+        )
+
+        _refresh_existing_extrepo_sources()
+
+        self.assertEqual(mock_run.call_count, 3)
+        self.assertEqual(
+            [call.args[0] for call in mock_run.call_args_list],
+            [
+                "extrepo update brave",
+                "extrepo update librewolf",
+                "extrepo update vscode",
+            ],
+        )
 
 
 if __name__ == "__main__":

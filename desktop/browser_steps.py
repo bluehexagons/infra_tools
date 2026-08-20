@@ -22,6 +22,8 @@ from lib.release_management import fetch_latest_github_release_asset
 
 FLATPAK_REMOTE = "flathub"
 _apt_update_done = False
+_EXTREPO_SOURCE_DIR = "/etc/apt/sources.list.d"
+_MANAGED_EXTREPOS = ("brave", "librewolf", "vscode")
 HELIUM_RELEASE_API = "https://api.github.com/repos/imputnet/helium-linux/releases/latest"
 BROWSH_GITHUB_REPO = "browsh-org/browsh"
 _LIBREWOLF_APPARMOR_PROFILE = "/etc/apparmor.d/librewolf"
@@ -123,14 +125,43 @@ def is_flatpak_app_installed(app_id: str) -> bool:
     return app_id in result.stdout.splitlines()
 
 
+def _refresh_existing_extrepo_sources() -> None:
+    """Refresh extrepo source definitions that are already enabled locally.
+
+    extrepo source definitions are versioned independently from the installed
+    packages.  A workstation created with older extrepo metadata can
+    otherwise retain a stale LibreWolf definition and make an unrelated APT
+    refresh fail.  Only the source definitions owned by extrepo are refreshed;
+    manually managed APT source files are deliberately left untouched.
+    """
+    for extrepo_name in _MANAGED_EXTREPOS:
+        source_path = os.path.join(
+            _EXTREPO_SOURCE_DIR, f"extrepo_{extrepo_name}.sources"
+        )
+        if not os.path.isfile(source_path):
+            continue
+        result = run(f"extrepo update {extrepo_name}", check=False)
+        if result.returncode != 0:
+            print(
+                f"  ⚠ Could not refresh the extrepo {extrepo_name} "
+                "source definition; continuing with the existing source"
+            )
+
+
 def _ensure_extrepo_and_update() -> None:
     """Install extrepo if needed and run apt-get update only once."""
     global _apt_update_done
     if not is_package_installed("extrepo"):
         os.environ["DEBIAN_FRONTEND"] = "noninteractive"
         run("apt-get install -y -qq extrepo", check=False)
+    _refresh_existing_extrepo_sources()
     if not _apt_update_done:
-        run("apt-get update -qq", check=False)
+        update_result = run("apt-get update -qq", check=False)
+        if update_result.returncode != 0:
+            print(
+                "  ⚠ APT metadata refresh reported an error; "
+                "continuing so the requested package can be verified"
+            )
         _apt_update_done = True
 
 
