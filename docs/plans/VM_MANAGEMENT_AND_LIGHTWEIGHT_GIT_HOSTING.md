@@ -310,8 +310,10 @@ object path. The generated `app.ini` now selects local LFS storage explicitly,
 places completed objects and temporary uploads below the selected Gogs data
 root, creates those directories, and rejects symlinked managed data paths.
 When that root is a declared VM data mount, setup verifies the mounted marker
-and UUID before creating Gogs data. Capacity reporting, the complete recovery
-workflow, and authenticated upload/download smoke coverage remain open.
+and UUID before creating Gogs data. Reusable capacity, update-age, SQLite,
+filesystem, and local endpoint-configuration reporting is implemented. The
+complete recovery workflow and authenticated upload/download smoke coverage
+remain open.
 
 ### Agent web interfaces
 
@@ -680,8 +682,10 @@ check.
 Release installation must verify the selected Gogs asset with an upstream
 digest or signature before activation, then run the binary as the restricted
 `git` user. Downloading over HTTPS and validating the release URL are not by
-themselves artifact verification. A previously healthy release remains active
-when verification, extraction, startup, or health checks fail.
+themselves artifact verification. A previously verified release is restored
+when activation, startup, or health checks fail; if there is no verified
+rollback target, the service remains stopped. The active release path and
+saved digest must agree before an idempotent update is accepted.
 
 ### Capacity and low-end operation
 
@@ -1263,9 +1267,12 @@ observation, resize, adoption, detach, and migration workflows remain.
 
 Implementation status: explicit local LFS paths, directory creation, symlink
 rejection, declared-mount verification, CIFS rejection, loopback/source-rule
-exposure, setup-time storage and SQLite health, and agent Git LFS initialization
-publisher-digest-verified release activation, and reusable threshold-aware
-health reporting are complete for the declared IPv4 scope.
+exposure, setup-time storage and SQLite health, agent Git LFS initialization,
+release-metadata-digest-verified activation, and reusable threshold-aware
+health reporting are complete for the declared IPv4 scope. Exposure-mode
+changes remove stale managed direct rules, direct HTTP redirects to HTTPS,
+nginx validation fails setup, and weekly update checks have a persisted
+failure/staleness signal.
 
 - Depend on Lane A3 for the dedicated Gogs data-disk and mount contract when a
   data disk is declared.
@@ -1457,8 +1464,9 @@ health reporting are complete for the declared IPv4 scope.
   and LFS objects together.
 - Hostless Gogs is loopback-only by default and cannot bind externally unless
   validated source firewall rules are active.
-- Gogs health distinguishes local service readiness from a client-reachable
-  LFS endpoint and does not mark loopback-only SSH Git as remote-LFS ready.
+- Gogs health distinguishes local service readiness from a configured remote
+  LFS endpoint, labels loopback-only SSH Git as not remotely LFS-ready, and
+  does not claim to have probed client routing, DNS, or authentication.
 - Agent workspace setup can install Git LFS once and prepare normal `--repo`
   declarations without adding a parallel repository API or general
   development-tool suite.

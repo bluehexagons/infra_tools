@@ -16,6 +16,7 @@ from lib.validators import validate_host, validate_username
 
 DEFAULT_MIN_FREE_BYTES = 1024 * 1024 * 1024
 DEFAULT_MIN_FREE_INODES = 10_000
+DEFAULT_MAX_UPDATE_AGE_SECONDS = 9 * 24 * 60 * 60
 
 
 def add_gogs_subparser(subparsers: argparse._SubParsersAction) -> None:
@@ -59,11 +60,13 @@ def _resolve_connection(
 def _remote_health_script(min_free_bytes: int, min_free_inodes: int) -> str:
     """Return a root-side Python health probe with no external dependencies."""
     return f'''
-import configparser, glob, json, os, re, subprocess
+import configparser, glob, json, os, re, subprocess, time
 
 STATE = "/opt/infra_tools/state/gogs.json"
+UPDATE_STATE = "/opt/infra_tools/state/gogs_update.json"
 MIN_FREE_BYTES = {min_free_bytes}
 MIN_FREE_INODES = {min_free_inodes}
+MAX_UPDATE_AGE_SECONDS = {DEFAULT_MAX_UPDATE_AGE_SECONDS}
 
 def run(*args):
     return subprocess.run(args, check=False, capture_output=True, text=True, timeout=60)
@@ -146,10 +149,35 @@ timer_state["available"] = timer.returncode == 0
 timer_active = timer_state.get("ActiveState") == "active"
 timer_scheduled = timer_state.get("NextElapseUSecRealtime") not in (None, "", "n/a")
 
+update_check = {{}}
+update_check_source = UPDATE_STATE if os.path.exists(UPDATE_STATE) else STATE
+try:
+    update_check_age_seconds = max(0, int(time.time() - os.path.getmtime(update_check_source)))
+except OSError:
+    update_check_age_seconds = None
+if update_check_source == UPDATE_STATE:
+    try:
+        with open(UPDATE_STATE, encoding="utf-8") as source:
+            update_check = json.load(source)
+    except (OSError, ValueError, TypeError):
+        update_check = {{}}
+update_check_successful = (
+    update_check.get("schema_version") == 1
+    and update_check.get("successful") is True
+    if update_check_source == UPDATE_STATE
+    else True
+)
+update_check_stale = (
+    update_check_age_seconds is None
+    or update_check_age_seconds > MAX_UPDATE_AGE_SECONDS
+)
+
 app = configparser.ConfigParser(interpolation=None)
 app.read(config_path)
 external_url = app.get("server", "EXTERNAL_URL", fallback="")
-lfs_client_reachable = not bool(re.match(r"^https?://(?:127\\.0\\.0\\.1|localhost)(?::|/)", external_url))
+remote_lfs_endpoint_configured = bool(external_url) and not bool(
+    re.match(r"^https?://(?:127\\.0\\.0\\.1|localhost)(?::|/)", external_url)
+)
 nginx_required = external_url.startswith("https://")
 
 nginx_limit_bytes = None
@@ -176,6 +204,8 @@ healthy = all((
     update_state["available"],
     timer_active,
     timer_scheduled,
+    update_check_successful,
+    not update_check_stale,
     (not nginx_required and nginx_limit_bytes is None) or (nginx_limit_bytes is not None and nginx_limit_bytes >= 512 * 1024 * 1024),
 ))
 
@@ -198,9 +228,16 @@ print(json.dumps({{
     "sqlite_healthy": sqlite_healthy,
     "update_job": {{"failed": update_failed, **update_state}},
     "update_timer": {{"active": timer_active, "scheduled": timer_scheduled, **timer_state}},
+    "update_check": {{
+        **update_check,
+        "age_seconds": update_check_age_seconds,
+        "max_age_seconds": MAX_UPDATE_AGE_SECONDS,
+        "stale": update_check_stale,
+        "successful": update_check_successful,
+    }},
     "nginx_upload_limit_bytes": nginx_limit_bytes,
     "external_url": external_url,
-    "lfs_client_reachable": lfs_client_reachable,
+    "remote_lfs_endpoint_configured": remote_lfs_endpoint_configured,
 }}, sort_keys=True))
 '''
 
@@ -247,6 +284,7 @@ def _format_health(value: dict[str, Any], host: str) -> str:
     storage = value.get("storage", {})
     update = value.get("update_job", {})
     timer = value.get("update_timer", {})
+    check = value.get("update_check", {})
     usage = storage.get("usage_bytes", {})
     lines = [
         f"Gogs health for {host}: {'healthy' if value.get('healthy') else 'UNHEALTHY'}",
@@ -257,8 +295,14 @@ def _format_health(value: dict[str, Any], host: str) -> str:
         "  Usage: " + ", ".join(f"{name}={size}" for name, size in usage.items()),
         f"  Update job: {'FAILED' if update.get('failed') else 'ok'}",
         f"  Update timer: {'active' if timer.get('active') and timer.get('scheduled') else 'FAILED'}",
+        f"  Last update check: {'STALE' if check.get('stale') else 'ok'} ({check.get('age_seconds')} seconds ago)",
         f"  Nginx upload limit: {value.get('nginx_upload_limit_bytes')}",
-        f"  Remote LFS endpoint: {'reachable' if value.get('lfs_client_reachable') else 'loopback-only'}",
+        "  Remote LFS endpoint: "
+        + (
+            "configured (network reachability not probed)"
+            if value.get("remote_lfs_endpoint_configured")
+            else "loopback-only"
+        ),
     ]
     return "\n".join(lines)
 

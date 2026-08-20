@@ -34,8 +34,9 @@ def _healthy_result() -> dict[str, object]:
         },
         "update_job": {"failed": False},
         "update_timer": {"active": True},
+        "update_check": {"age_seconds": 60, "stale": False, "successful": True},
         "nginx_upload_limit_bytes": 536_870_912,
-        "lfs_client_reachable": True,
+        "remote_lfs_endpoint_configured": True,
     }
 
 
@@ -84,14 +85,15 @@ class TestRemoteGogsHealth(unittest.TestCase):
         self.assertEqual(result, payload)
         self.assertTrue(build.call_args.kwargs["remote_command"].startswith("sudo -n python3 -c "))
 
-    def test_remote_script_checks_git_access_timer_and_lfs_reachability(self):
+    def test_remote_script_checks_git_access_timer_and_lfs_configuration(self):
         script = _remote_health_script(100, 10)
 
         compile(script, "<gogs-health>", "exec")
         self.assertIn('runuser", "-u", "git"', script)
         self.assertIn('auto-update-gogs.timer', script)
         self.assertIn('timer_scheduled', script)
-        self.assertIn('lfs_client_reachable', script)
+        self.assertIn('remote_lfs_endpoint_configured', script)
+        self.assertIn('update_check_stale', script)
         self.assertIn('client_max_body_size', script)
 
     def test_negative_threshold_is_rejected_before_ssh(self):
@@ -107,7 +109,7 @@ class TestGogsHealthOutput(unittest.TestCase):
 
         self.assertIn("Gogs health for git.example.test: healthy", output)
         self.assertIn("/dev/vdb1 (ext4)", output)
-        self.assertIn("Remote LFS endpoint: reachable", output)
+        self.assertIn("Remote LFS endpoint: configured", output)
 
     def test_unhealthy_json_returns_nonzero(self):
         value = _healthy_result()

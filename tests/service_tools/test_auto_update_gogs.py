@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -14,6 +16,14 @@ from common.service_tools import auto_update_gogs
 
 
 class TestAutoUpdateGogs(unittest.TestCase):
+    def setUp(self):
+        self.record_update_function = auto_update_gogs._record_update_result
+        self.record_update_patcher = patch(
+            "common.service_tools.auto_update_gogs._record_update_result"
+        )
+        self.record_update = self.record_update_patcher.start()
+        self.addCleanup(self.record_update_patcher.stop)
+
     @patch("common.service_tools.auto_update_gogs.send_notification_safe")
     @patch("common.service_tools.auto_update_gogs._run_command")
     @patch("common.service_tools.auto_update_gogs._run_shell_command")
@@ -34,6 +44,7 @@ class TestAutoUpdateGogs(unittest.TestCase):
         with self.assertLogs(auto_update_gogs.logger, level="INFO") as logs:
             result = auto_update_gogs.main()
         self.assertEqual(result, 0)
+        self.record_update.assert_called_once_with(0)
         mock_shell.assert_not_called()
         mock_command.assert_not_called()
         mock_notify.assert_not_called()
@@ -64,6 +75,7 @@ class TestAutoUpdateGogs(unittest.TestCase):
         result = auto_update_gogs.main()
 
         self.assertEqual(result, 0)
+        self.record_update.assert_called_once_with(0)
         self.assertEqual(mock_shell.call_count, 2)
         mock_write_state.assert_called_once_with(
             "v1.2.4",
@@ -90,6 +102,7 @@ class TestAutoUpdateGogs(unittest.TestCase):
     ):
         result = auto_update_gogs.main()
         self.assertEqual(result, 1)
+        self.record_update.assert_called_once_with(1)
         mock_notify.assert_called_once()
         self.assertIn("Gogs update failed", mock_notify.call_args.kwargs["subject"])
 
@@ -124,6 +137,7 @@ class TestAutoUpdateGogs(unittest.TestCase):
         result = auto_update_gogs.main()
 
         self.assertEqual(result, 1)
+        self.record_update.assert_called_once_with(1)
         mock_command.assert_not_called()
         mock_rollback.assert_called_once_with("/opt/gogs/releases/v1.2.3")
         self.assertIn("Previous release restored", mock_notify.call_args.kwargs["details"])
@@ -143,6 +157,24 @@ class TestAutoUpdateGogs(unittest.TestCase):
                 ["systemctl", "restart", "gogs"],
             ],
         )
+
+    def test_records_root_owned_update_health_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = os.path.join(directory, "gogs_update.json")
+            with patch.object(
+                auto_update_gogs,
+                "GOGS_UPDATE_STATE_FILE",
+                state_path,
+            ):
+                self.record_update_function(1)
+
+            with open(state_path, encoding="utf-8") as source:
+                state = json.load(source)
+
+        self.assertEqual(state["schema_version"], 1)
+        self.assertEqual(state["exit_code"], 1)
+        self.assertFalse(state["successful"])
+        self.assertTrue(state["checked_at"].endswith("+00:00"))
 
 
 if __name__ == "__main__":

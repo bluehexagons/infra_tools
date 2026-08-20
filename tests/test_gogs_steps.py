@@ -140,6 +140,10 @@ class TestInstallGogsRelease(unittest.TestCase):
     @patch("web.gogs_steps.run")
     @patch("web.gogs_steps.os.path.exists", return_value=True)
     @patch(
+        "web.gogs_steps.os.path.realpath",
+        return_value=f"/opt/gogs/releases/v1.2.4-{'a' * 12}",
+    )
+    @patch(
         "web.gogs_steps._load_gogs_state",
         return_value={"tag_name": "v1.2.4", "archive_sha256": "a" * 64},
     )
@@ -153,6 +157,7 @@ class TestInstallGogsRelease(unittest.TestCase):
         _arch,
         _fetch,
         _state,
+        _realpath,
         _exists,
         mock_run,
     ):
@@ -160,6 +165,35 @@ class TestInstallGogsRelease(unittest.TestCase):
             gogs_steps.install_or_update_gogs_release(),
             ("v1.2.4", False, "a" * 64),
         )
+        mock_run.assert_not_called()
+
+    @patch("web.gogs_steps.run")
+    @patch("web.gogs_steps.os.path.exists", return_value=True)
+    @patch(
+        "web.gogs_steps.os.path.realpath",
+        return_value=f"/opt/gogs/releases/v1.2.4-{'a' * 12}",
+    )
+    @patch(
+        "web.gogs_steps._load_gogs_state",
+        return_value={"tag_name": "v1.2.4", "archive_sha256": "b" * 64},
+    )
+    @patch(
+        "web.gogs_steps.fetch_preferred_gogs_release",
+        return_value=("v1.2.4", "https://example.com/gogs-v1.2.4.tar.gz", "a" * 64),
+    )
+    @patch("web.gogs_steps.detect_release_arch", return_value="amd64")
+    def test_refuses_to_delete_active_release_when_state_digest_disagrees(
+        self,
+        _arch,
+        _fetch,
+        _state,
+        _realpath,
+        _exists,
+        mock_run,
+    ):
+        with self.assertRaisesRegex(RuntimeError, "Refusing to replace the active"):
+            gogs_steps.install_or_update_gogs_release()
+
         mock_run.assert_not_called()
 
     @patch("web.gogs_steps.run")
@@ -349,6 +383,28 @@ class TestGenerateGogsConfig(unittest.TestCase):
         self.assertIn("ExecStart=/opt/gogs/current/gogs web --config /srv/gogs/custom/conf/app.ini", content)
         self.assertIn("User=git", content)
 
+    def test_direct_nginx_http_redirects_to_https(self):
+        content = gogs_steps.generate_gogs_nginx_config(
+            "git.example.test",
+            3000,
+            forwarded_proto="$scheme",
+        )
+
+        self.assertEqual(content.count("listen 80;"), 1)
+        self.assertIn("return 301 https://$host$request_uri;", content)
+        self.assertIn("proxy_pass http://127.0.0.1:3000;", content)
+
+    def test_cloudflare_http_origin_proxies_without_redirect(self):
+        content = gogs_steps.generate_gogs_nginx_config(
+            "git.example.test",
+            3000,
+            forwarded_proto="https",
+        )
+
+        self.assertIn("listen 80;", content)
+        self.assertNotIn("return 301", content)
+        self.assertIn("proxy_set_header X-Forwarded-Proto https;", content)
+
     def test_redacted_admin_create_user_command_hides_password(self):
         command = gogs_steps._redacted_admin_create_user_command(
             "/srv/gogs/custom/conf/app.ini",
@@ -371,7 +427,7 @@ class TestGogsHostlessFirewall(unittest.TestCase):
         inactive = SimpleNamespace(returncode=1, stdout="", stderr="")
         with patch("web.gogs_steps.run", return_value=inactive):
             with self.assertRaisesRegex(RuntimeError, "requires an active UFW"):
-                gogs_steps._configure_hostless_gogs_firewall(config, 3000)
+                gogs_steps._reconcile_gogs_direct_firewall(config, 3000)
 
     def test_source_rules_are_verified_before_old_managed_rule_is_removed(self):
         config = SetupConfig(
@@ -406,11 +462,136 @@ class TestGogsHostlessFirewall(unittest.TestCase):
             "web.gogs_steps.run",
             side_effect=[active, initial, active, updated, active, active],
         ) as runner:
-            gogs_steps._configure_hostless_gogs_firewall(config, 3000)
+            gogs_steps._reconcile_gogs_direct_firewall(config, 3000)
 
         commands = [call.args[0] for call in runner.call_args_list]
         self.assertIn("ufw allow from 192.168.0.0/24", commands[2])
         self.assertEqual(commands[-2:], ["ufw --force delete 2", "ufw --force delete 1"])
+
+    def test_hostname_transition_removes_old_direct_and_web_rules(self):
+        config = SetupConfig(
+            host="git.example.test",
+            username="admin",
+            system_type="server_web",
+            gogs=["git.example.test:3000"],
+            enable_ssl=True,
+        )
+        active = SimpleNamespace(returncode=0, stdout="", stderr="")
+        existing = SimpleNamespace(
+            returncode=0,
+            stdout=(
+                "[ 1] 3000/tcp ALLOW IN 192.168.0.0/24 "
+                "# infra_tools Gogs 3000/tcp source 192.168.0.0/24\n"
+                "[ 2] 443/tcp ALLOW IN Anywhere # gogs web\n"
+            ),
+            stderr="",
+        )
+        with patch(
+            "web.gogs_steps.run",
+            side_effect=[active, existing, existing, active, active],
+        ) as runner:
+            gogs_steps._reconcile_gogs_direct_firewall(config, 3000)
+
+        self.assertEqual(
+            [call.args[0] for call in runner.call_args_list][-2:],
+            ["ufw --force delete 2", "ufw --force delete 1"],
+        )
+
+    def test_inactive_ufw_does_not_retain_dormant_managed_rules(self):
+        config = SetupConfig(
+            host="git.example.test",
+            username="admin",
+            system_type="server_web",
+            gogs=["git.example.test:3000"],
+            enable_ssl=True,
+        )
+        inactive = SimpleNamespace(returncode=1, stdout="", stderr="")
+        available = SimpleNamespace(returncode=0, stdout="/usr/sbin/ufw\n", stderr="")
+        existing = SimpleNamespace(
+            returncode=0,
+            stdout="[ 1] 3000/tcp ALLOW IN Anywhere # gogs direct HTTP\n",
+            stderr="",
+        )
+        deleted = SimpleNamespace(returncode=0, stdout="", stderr="")
+        with patch(
+            "web.gogs_steps.run",
+            side_effect=[inactive, available, existing, deleted],
+        ) as runner:
+            gogs_steps._reconcile_gogs_direct_firewall(config, 3000)
+
+        self.assertEqual(runner.call_args_list[-1].args[0], "ufw --force delete 1")
+
+
+class TestGogsNginx(unittest.TestCase):
+    def test_invalid_nginx_configuration_fails_setup(self):
+        config = SetupConfig(
+            host="git.example.test",
+            username="admin",
+            system_type="server_web",
+            gogs=["git.example.test:3000"],
+            enable_ssl=True,
+        )
+        completed = SimpleNamespace(returncode=0, stdout="", stderr="")
+        invalid = SimpleNamespace(returncode=1, stdout="", stderr="invalid")
+        with (
+            patch("web.gogs_steps.generate_self_signed_cert"),
+            patch("web.gogs_steps.os.path.exists", return_value=True),
+            patch("web.gogs_steps.run", side_effect=[completed, invalid]),
+            patch.object(gogs_steps, "open", create=True),
+            patch.object(
+                gogs_steps,
+                "generate_gogs_nginx_config",
+                return_value="server {}\n",
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "nginx configuration test"):
+                gogs_steps._write_gogs_nginx_config(config, "git.example.test", 3000)
+
+    def test_failed_certificate_issuance_fails_setup(self):
+        config = SetupConfig(
+            host="git.example.test",
+            username="admin",
+            system_type="server_web",
+            gogs=["git.example.test:3000"],
+            enable_ssl=True,
+        )
+        completed = SimpleNamespace(returncode=0, stdout="", stderr="")
+        with (
+            patch("web.gogs_steps.generate_self_signed_cert"),
+            patch("web.gogs_steps.os.path.exists", return_value=True),
+            patch("web.gogs_steps.run", return_value=completed),
+            patch("web.gogs_steps.install_certbot"),
+            patch(
+                "web.gogs_steps.obtain_letsencrypt_certificate",
+                return_value=False,
+            ),
+            patch.object(gogs_steps, "open", create=True),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "TLS certificate"):
+                gogs_steps._write_gogs_nginx_config(config, "git.example.test", 3000)
+
+
+class TestGogsRequiredSetupSteps(unittest.TestCase):
+    def test_ssh_reload_failure_is_fatal(self):
+        failed = SimpleNamespace(returncode=1, stdout="", stderr="failed")
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(gogs_steps, "GOGS_SSH_DROPIN_DIR", directory),
+            patch.object(
+                gogs_steps,
+                "GOGS_SSH_DROPIN_FILE",
+                os.path.join(directory, "gogs.conf"),
+            ),
+            patch("web.gogs_steps.run", return_value=failed),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Could not reload SSH"):
+                gogs_steps._configure_git_ssh_access()
+
+    def test_post_setup_hook_refresh_failure_is_fatal(self):
+        failed = SimpleNamespace(returncode=1, stdout="", stderr="failed")
+        with patch("web.gogs_steps.run", return_value=failed):
+            with self.assertRaisesRegex(RuntimeError, "authorized_keys"):
+                gogs_steps._run_gogs_post_setup_commands("/srv/gogs/app.ini")
 
 
 class TestGogsStorageHealth(unittest.TestCase):

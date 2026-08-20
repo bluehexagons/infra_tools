@@ -44,6 +44,7 @@ DEFAULT_GOGS_HTTP_PORT = 3000
 DEFAULT_GOGS_DATA_PATH = "/var/lib/gogs"
 _GOGS_RULE_COMMENT_PREFIX = "infra_tools Gogs"
 _LEGACY_GOGS_DIRECT_COMMENT = "gogs direct HTTP"
+_LEGACY_GOGS_WEB_COMMENT = "gogs web"
 _UFW_NUMBERED_RULE_RE = re.compile(r"^\[\s*(\d+)\]")
 
 
@@ -183,13 +184,22 @@ def install_or_update_gogs_release() -> tuple[str, bool, str]:
     installed_tag = installed_state.get("tag_name")
     installed_digest = installed_state.get("archive_sha256")
     current_binary = f"{GOGS_CURRENT_DIR}/gogs"
+    current_release = os.path.realpath(GOGS_CURRENT_DIR)
+    expected_release = os.path.realpath(release_dir)
     if (
         installed_tag == tag_name
         and installed_digest == expected_sha256
+        and current_release == expected_release
         and os.path.exists(current_binary)
     ):
         print(f"  ✓ Gogs already up to date ({tag_name})")
         return tag_name, False, expected_sha256
+
+    if current_release == expected_release and os.path.exists(current_binary):
+        raise RuntimeError(
+            "Refusing to replace the active Gogs release because its saved "
+            "digest does not match; restore the managed Gogs state before retrying"
+        )
 
     run(f"mkdir -p {shlex.quote(GOGS_RELEASES_DIR)}")
     with tempfile.TemporaryDirectory(prefix="infra-tools-gogs-release-") as temporary_dir:
@@ -265,7 +275,10 @@ def _ensure_git_user() -> str:
 
 def _ensure_gogs_dependencies() -> None:
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    run("apt-get install -y -qq git git-lfs openssh-server sqlite3 curl ca-certificates", check=False)
+    run(
+        "apt-get install -y -qq git git-lfs openssh-server sqlite3 curl ca-certificates",
+        check=True,
+    )
 
 
 def _reject_symlinked_gogs_path(path: str) -> None:
@@ -405,10 +418,28 @@ def generate_gogs_nginx_config(
 ) -> str:
     """Return an nginx site config that proxies to Gogs."""
     cert_file, key_file = get_ssl_cert_path(domain)
-    return f"""server {{
+    if forwarded_proto == "https":
+        http_listener = "    listen 80;\n    listen [::]:80;\n"
+        http_redirect = ""
+    else:
+        http_listener = ""
+        http_redirect = f"""server {{
     listen 80;
     listen [::]:80;
-    listen 443 ssl;
+    server_name {domain};
+
+    location /.well-known/acme-challenge/ {{
+        root /var/www/letsencrypt;
+    }}
+
+    location / {{
+        return 301 https://$host$request_uri;
+    }}
+}}
+
+"""
+    return f"""{http_redirect}server {{
+{http_listener}    listen 443 ssl;
     listen [::]:443 ssl;
     http2 on;
     server_name {domain};
@@ -452,22 +483,25 @@ def _write_gogs_nginx_config(config: SetupConfig, domain: str, port: int) -> Non
     if not os.path.exists(enabled_link):
         run(f"ln -s {shlex.quote(config_file)} {shlex.quote(enabled_link)}")
     result = run("nginx -t", check=False)
-    if result.returncode == 0:
-        run("systemctl reload nginx")
-        print("  ✓ nginx configured for Gogs")
-    else:
-        print("  ⚠ nginx configuration test failed")
+    if result.returncode != 0:
+        raise RuntimeError("nginx configuration test failed for Gogs")
+    run("systemctl reload nginx")
+    print("  ✓ nginx configured for Gogs")
 
     if config.enable_ssl:
         install_certbot(config)
-        if obtain_letsencrypt_certificate([domain], config.ssl_email, domain):
-            with open(config_file, "w", encoding="utf-8") as file_obj:
-                file_obj.write(generate_gogs_nginx_config(domain, port, forwarded_proto=forwarded_proto))
-            setup_certificate_renewal()
-            result = run("nginx -t", check=False)
-            if result.returncode == 0:
-                run("systemctl reload nginx")
-                print("  ✓ Let's Encrypt enabled for Gogs")
+        if not obtain_letsencrypt_certificate([domain], config.ssl_email, domain):
+            raise RuntimeError("Could not obtain the requested Gogs TLS certificate")
+        with open(config_file, "w", encoding="utf-8") as file_obj:
+            file_obj.write(generate_gogs_nginx_config(domain, port, forwarded_proto=forwarded_proto))
+        setup_certificate_renewal()
+        result = run("nginx -t", check=False)
+        if result.returncode != 0:
+            raise RuntimeError(
+                "nginx configuration test failed after enabling Gogs TLS"
+            )
+        run("systemctl reload nginx")
+        print("  ✓ Let's Encrypt enabled for Gogs")
 
     if config.enable_cloudflare:
         run_cloudflare_tunnel_setup(config)
@@ -492,7 +526,9 @@ Match User {GOGS_GIT_USER}
 
     reload_result = run("systemctl reload ssh", check=False)
     if reload_result.returncode != 0:
-        run("systemctl reload sshd", check=False)
+        reload_result = run("systemctl reload sshd", check=False)
+    if reload_result.returncode != 0:
+        raise RuntimeError("Could not reload SSH after configuring Gogs access")
     print("  ✓ SSH configured for Git-over-SSH access")
 
 
@@ -521,7 +557,10 @@ def _remove_managed_gogs_rules(
         for number, comment, _line in rules
         if (
             comment.startswith(_GOGS_RULE_COMMENT_PREFIX)
-            or comment == _LEGACY_GOGS_DIRECT_COMMENT
+            or comment in {
+                _LEGACY_GOGS_DIRECT_COMMENT,
+                _LEGACY_GOGS_WEB_COMMENT,
+            }
         )
         and comment not in desired_comments
     ]
@@ -531,8 +570,8 @@ def _remove_managed_gogs_rules(
             raise RuntimeError("Could not remove a stale managed Gogs firewall rule")
 
 
-def _configure_hostless_gogs_firewall(config: SetupConfig, port: int) -> None:
-    """Reconcile source-restricted hostless Gogs access before it binds."""
+def _reconcile_gogs_direct_firewall(config: SetupConfig, port: int) -> None:
+    """Reconcile direct Gogs rules before changing the service listener."""
 
     active = run(
         "ufw status 2>/dev/null | grep -q 'Status: active'",
@@ -544,6 +583,11 @@ def _configure_hostless_gogs_firewall(config: SetupConfig, port: int) -> None:
             raise RuntimeError(
                 "Hostless Gogs source exposure requires an active UFW firewall"
             )
+        available = run("command -v ufw", check=False, capture_output=True)
+        if available.returncode != 0:
+            return
+        existing_rules = _ufw_numbered_rules()
+        _remove_managed_gogs_rules(existing_rules, set())
         return
 
     existing_rules = _ufw_numbered_rules()
@@ -552,7 +596,10 @@ def _configure_hostless_gogs_firewall(config: SetupConfig, port: int) -> None:
             comment
             for _number, comment, _line in existing_rules
             if comment.startswith(_GOGS_RULE_COMMENT_PREFIX)
-            or comment == _LEGACY_GOGS_DIRECT_COMMENT
+            or comment in {
+                _LEGACY_GOGS_DIRECT_COMMENT,
+                _LEGACY_GOGS_WEB_COMMENT,
+            }
         }
         conflicting = [
             line
@@ -601,7 +648,14 @@ def _maybe_configure_firewall(config: SetupConfig, domain: str, port: int) -> No
             print("  ✓ Cloudflare tunnel enabled; not exposing public HTTP/HTTPS ports for Gogs")
             return
         for rule_port in (80, 443):
-            run(f"ufw allow {rule_port}/tcp comment 'gogs web'", check=False)
+            rule = run(
+                f"ufw allow {rule_port}/tcp comment 'gogs web'",
+                check=False,
+            )
+            if rule.returncode != 0:
+                raise RuntimeError(
+                    f"Could not install the Gogs web firewall rule for {rule_port}/tcp"
+                )
         print("  ✓ Firewall allows Gogs web access on 80/tcp and 443/tcp")
         return
 
@@ -715,7 +769,7 @@ def _run_gogs_post_setup_commands(config_path: str) -> None:
         if result.returncode == 0:
             print(f"  ✓ Refreshed Gogs {label}")
         else:
-            print(f"  ⚠ Failed to refresh Gogs {label}")
+            raise RuntimeError(f"Failed to refresh Gogs {label}")
 
 
 def _gogs_directory_usage(path: str) -> int:
@@ -938,9 +992,8 @@ def setup_gogs(config: SetupConfig) -> None:
     assert_declared_storage_mount(config, data_path)
     _gogs_backing_filesystem(data_path)
 
-    if not domain:
-        run(f"systemctl stop {GOGS_SERVICE}", check=False)
-        _configure_hostless_gogs_firewall(config, port)
+    run(f"systemctl stop {GOGS_SERVICE}", check=False)
+    _reconcile_gogs_direct_firewall(config, port)
 
     _ensure_gogs_dependencies()
     git_home = _ensure_git_user()

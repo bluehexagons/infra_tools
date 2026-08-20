@@ -8,10 +8,12 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from datetime import datetime, timezone
 from logging import ERROR
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
+from lib.atomic_io import write_json_atomic
 from lib.logging_utils import get_service_logger, log_event
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
 from web.gogs_steps import (
@@ -27,6 +29,7 @@ from web.gogs_steps import (
 
 
 logger = get_service_logger('auto_update_gogs', 'common', use_syslog=True)
+GOGS_UPDATE_STATE_FILE = "/opt/infra_tools/state/gogs_update.json"
 
 
 def _run_command(command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -86,7 +89,7 @@ def _details_with_rollback(details: str, rolled_back: bool) -> str:
     return f"{details}\n{rollback_status}"
 
 
-def main() -> int:
+def _run_update() -> int:
     """Update Gogs to the preferred upstream release when installed."""
     notification_configs = load_notification_configs_from_state(logger)
     state = read_gogs_state()
@@ -213,6 +216,33 @@ def main() -> int:
         logger=logger,
     )
     return 0
+
+
+def _record_update_result(exit_code: int) -> None:
+    """Persist the completion of every scheduled update check for health reporting."""
+
+    write_json_atomic(
+        GOGS_UPDATE_STATE_FILE,
+        {
+            "schema_version": 1,
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+            "exit_code": exit_code,
+            "successful": exit_code == 0,
+        },
+        mode=0o600,
+        sort_keys=True,
+    )
+
+
+def main() -> int:
+    """Run and record one Gogs update check."""
+
+    result = 1
+    try:
+        result = _run_update()
+        return result
+    finally:
+        _record_update_result(result)
 
 
 if __name__ == "__main__":

@@ -18,7 +18,9 @@ infra-tools setup server_web git.example.com deploy \
 
 With `--ssl`, infra-tools obtains and renews a Let's Encrypt certificate. With
 `--cloudflare`, the nginx-to-Gogs connection remains private and the tunnel
-serves the hostname; public HTTP/HTTPS firewall ports are not opened.
+serves the hostname; public HTTP/HTTPS firewall ports are not opened. Direct
+hostname deployments redirect ordinary port-80 requests to HTTPS, while the
+Cloudflare-only HTTP origin remains unreachable outside the tunnel.
 
 For a lab or private-network service, omit the hostname. With no source rules,
 Gogs stays on loopback and setup prints an SSH tunnel command:
@@ -46,7 +48,9 @@ infra-tools-managed rules, and only then writes a non-loopback listener. It
 refuses public IPv4 sources, IPv6 sources in this release, and unmanaged allow
 rules for the same port. A source rule does not encrypt traffic; use hostname
 mode with `--ssl` or `--cloudflare` across untrusted networks. Hostname mode
-requires one of those encrypted ingress options.
+requires one of those encrypted ingress options. Switching between hostless,
+hostname, and Cloudflare modes removes obsolete managed direct-access rules,
+including dormant rules while UFW is installed but inactive.
 
 The port defaults to 3000, so `--gogs 3000` is also valid. The optional data
 path must be absolute and defaults to `/var/lib/gogs`.
@@ -78,11 +82,14 @@ database under `data/gogs.db`, repositories, logs, completed LFS objects under
 `data/tmp/lfs-objects`. Gogs uses its local LFS backend explicitly; no separate
 LFS daemon or object store is required. Release binaries live under
 `/opt/gogs/releases`; `/opt/gogs/current` and `/usr/local/bin/gogs` point to
-the active release. Infra-tools requires the publisher-provided SHA-256 from
-the GitHub release asset metadata and verifies the downloaded archive before
-extracting or activating it. A failed activation restores the prior release;
-a failed first installation stops the service. Setup and patch also run a
-SQLite quick check, verify that the `git` user can read and write each managed
+the active release. Infra-tools requires the SHA-256 supplied in GitHub's
+release asset metadata and verifies the downloaded archive before extracting
+or activating it. A failed activation restores the prior verified release;
+if no verified rollback target exists, setup stops the service. Setup also
+refuses to replace an active release whose digest-qualified path disagrees
+with the saved state; repair or restore that root-owned state before retrying.
+Setup and patch also run a SQLite quick check, verify that the `git` user can
+read and write each managed
 directory, reject CIFS/SMB live storage, and print the backing filesystem, free
 bytes, free inodes, and repository/LFS/attachment/log usage. Useful checks are:
 
@@ -98,16 +105,21 @@ Run `infra-tools gogs health` on the control system. It reads the root-owned
 managed state through non-interactive sudo and reports service and SQLite
 health, the backing filesystem, free bytes and inodes, per-category usage,
 directory access as `git`, the update service/timer, nginx's upload limit, and
-whether clients can reach the LFS HTTP endpoint. Defaults require at least 1
-GiB and 10,000 inodes free; override them with `--min-free-bytes` and
-`--min-free-inodes`. The check is read-only and never prunes LFS objects.
+whether a non-loopback LFS HTTP endpoint is configured. It does not perform a
+client-side network or authentication probe, so “configured” is not a claim
+that DNS, routing, an external firewall, or credentials work. Defaults require
+at least 1 GiB and 10,000 inodes free; override them with `--min-free-bytes`
+and `--min-free-inodes`. The check is read-only and never prunes LFS objects.
 
 `auto-update-gogs.timer` checks weekly (Sunday at 05:30). It validates the
 downloaded binary from a private, randomly named temporary workspace, refreshes
 authorized keys and hooks, restarts Gogs, and updates the saved state only after
 success. If a post-update command, restart, or state write fails, the previous
 release symlink is restored and a failure notification is emitted when
-notifications are configured.
+notifications are configured. Every completed check records a root-owned
+result in `/opt/infra_tools/state/gogs_update.json`; health fails when the last
+result failed or the record (falling back to initial setup state before the
+first timer run) is older than nine days.
 
 Run the normal `patch` flow to reapply the saved Gogs configuration. Do not
 edit `app.ini` while the service is running unless you understand that a later
@@ -161,8 +173,9 @@ not as the live SQLite, repository, or LFS-object filesystem.
 
 ## Troubleshooting
 
-- A hostname setup that fails nginx validation leaves the service local; run
-  `sudo nginx -t` and inspect the generated `gogs_<hostname>` site.
+- A hostname setup that fails nginx validation fails setup and leaves Gogs
+  stopped unless a prior verified release can be restored; run `sudo nginx -t`
+  and inspect the generated `gogs_<hostname>` site before retrying.
 - A hostless source setup fails closed when UFW is inactive or another rule
   already exposes the selected port. Inspect `sudo ufw status numbered` before
   retrying.
