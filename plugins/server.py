@@ -100,6 +100,12 @@ def build_server_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
 
     if config.include_web_firewall:
         steps.extend(get_web_firewall_steps())
+    elif config.system_type == "server_lite" and config.web_ports:
+        from security.steps import configure_firewall
+
+        steps.append(
+            ("Configuring firewall for requested web ports", configure_firewall)
+        )
 
     steps.extend(get_security_steps(lite=config.system_type in {"server_web", "server_lite"}))
 

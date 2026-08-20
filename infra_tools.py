@@ -953,6 +953,8 @@ def _patch_preserve_keys(args: argparse.Namespace) -> set[str]:
         )
     if getattr(args, "device_pairing_port", None) is None:
         preserve_keys.add("device_pairing_port")
+    if getattr(args, "default_web_ports", None) is None:
+        preserve_keys.add("default_web_ports")
     return preserve_keys
 
 

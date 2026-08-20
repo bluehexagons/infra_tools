@@ -274,6 +274,8 @@ rm -f "$HOME/.infra_tools-install.sh"
 | `--web-interface-host IP` | Bind address for the selected web interface; defaults to loopback, or `0.0.0.0` when a source is supplied |
 | `--web-interface-port PORT` | TCP port for the selected web interface; default `3773` |
 | `--web-interface-source IP_OR_CIDR` | Permit direct web-interface access from this private source; repeatable and required for non-loopback binds |
+| `--web-port PORT` | Allow an additional global TCP web port through guest UFW; repeatable |
+| `--no-default-web-ports` | Disable the agent-VM defaults of TCP 80, 443, 8080, and 8081 |
 | `--device-pairing PROVIDER` | Install the protected browser enrollment portal for a provider; repeatable, currently `t3code` |
 | `--device-pairing-port PORT` | Pairing portal port; default `3774` and must differ from the web-interface port |
 | `--device-pairing-auth-file PATH` | Controller-local Nginx htpasswd file for the portal; transient and not saved |
@@ -293,6 +295,15 @@ rm -f "$HOME/.infra_tools-install.sh"
 | `--git-lfs` | Install Git LFS, initialize it for the target user, and do so before every requested repository clone |
 | `--agent-workspace PATH` | Set the repository clone root; defaults to the target user's `~/repos` and may use a verified named-disk mount |
 | `--backup SOURCE DESTINATION INTERVAL` | Configure a generic rsync-backed path mirror through the existing storage-ops service; repeatable |
+
+On VM targets with agent features selected, guest UFW allows TCP ports 80,
+443, 8080, and 8081 by default. Repeat `--web-port` for additional development
+servers. `--no-default-web-ports` removes those agent defaults while retaining
+explicit `--web-port` values. These rules are global ingress rules; applications
+must still bind a reachable interface and provide their own authentication and
+transport security. Local control planes, hardware, containers, and
+`server_lite` do not receive the defaults. An explicit `--web-port` still
+enables the standard SSH-rate-limited UFW policy for `server_lite`.
 
 GitHub credential input requires `--git-access read` or `--git-access
 read-write`; `none` is the public/unauthenticated repository mode.

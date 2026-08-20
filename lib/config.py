@@ -34,6 +34,7 @@ WEB_INTERFACES = ("t3code",)
 DEVICE_PAIRING_PROVIDERS = ("t3code",)
 BROWSER_AUTOMATION_PROVIDERS = ("playwright",)
 GIT_ACCESS_POLICIES = ("none", "read", "read-write")
+DEFAULT_AGENT_WEB_PORTS = (80, 443, 8080, 8081)
 
 
 def _resolve_machine_type(
@@ -224,6 +225,8 @@ class SetupConfig:
     web_interface_host: MaybeStr = None
     web_interface_port: int = 3773
     web_interface_sources: Optional[StrList] = None
+    web_ports: Optional[list[int]] = None
+    default_web_ports: bool = True
     device_pairing_providers: Optional[StrList] = None
     device_pairing_port: int = 3774
     device_pairing_auth_file: MaybeStr = None
@@ -382,6 +385,11 @@ class SetupConfig:
                     "device_pairing_port must differ from web_interface_port"
                 )
 
+        from lib.validation import validate_web_port_settings
+
+        validate_web_port_settings(self)
+        self.web_ports = list(dict.fromkeys(self.web_ports or [])) or None
+
     def selected_agent_tools(self) -> StrList:
         """Return selected coding agents in stable display/install order."""
         tools: StrList = []
@@ -394,6 +402,35 @@ class SetupConfig:
             if enabled:
                 tools.append(name)
         return tools
+
+    def has_agent_features(self) -> bool:
+        """Return whether this setup declares an agent-oriented workload."""
+
+        return bool(
+            self.selected_agent_tools()
+            or self.desktop_interfaces
+            or self.web_interfaces
+            or self.browser_automation
+            or self.agent_repos
+            or self.git_access != "none"
+            or self.agent_workspace
+            or self.install_git_lfs
+        )
+
+    def effective_web_ports(self) -> list[int]:
+        """Return globally allowed TCP web ports for this resolved target."""
+
+        ports = list(self.web_ports or [])
+        if self.include_web_firewall:
+            ports.extend((80, 443))
+        if (
+            self.default_web_ports
+            and self.machine_type == "vm"
+            and self.system_type != "server_lite"
+            and self.has_agent_features()
+        ):
+            ports.extend(DEFAULT_AGENT_WEB_PORTS)
+        return sorted(set(ports))
 
     def to_remote_args(self) -> StrList:
         """Generate command line arguments for remote execution."""
@@ -526,6 +563,10 @@ class SetupConfig:
             args.append(f"--web-interface-port {self.web_interface_port}")
             for source in self.web_interface_sources or []:
                 args.append(f"--web-interface-source {shlex.quote(source)}")
+        for port in self.web_ports or []:
+            args.append(f"--web-port {port}")
+        if not self.default_web_ports:
+            args.append("--no-default-web-ports")
         for provider in self.device_pairing_providers or []:
             args.append(f"--device-pairing {shlex.quote(provider)}")
         if self.device_pairing_providers:
@@ -868,6 +909,10 @@ class SetupConfig:
             cmd_parts.append(f"--web-interface-port {self.web_interface_port}")
             for source in self.web_interface_sources or []:
                 cmd_parts.append(f"--web-interface-source {shlex.quote(source)}")
+        for port in self.web_ports or []:
+            cmd_parts.append(f"--web-port {port}")
+        if not self.default_web_ports:
+            cmd_parts.append("--no-default-web-ports")
         for provider in self.device_pairing_providers or []:
             cmd_parts.append(f"--device-pairing {shlex.quote(provider)}")
         if self.device_pairing_providers and self.device_pairing_port != 3774:
@@ -1214,6 +1259,8 @@ class SetupConfig:
 
         raw_agent_tools = getattr(args, 'agent_tools', None)
         agent_tools = raw_agent_tools if isinstance(raw_agent_tools, list) else None
+        raw_web_ports = getattr(args, 'web_ports', None)
+        web_ports = raw_web_ports if isinstance(raw_web_ports, list) else None
         browser_automation = _optional_str_arg(args, 'browser_automation')
         raw_agent_repos = getattr(args, 'agent_repos', None)
         agent_repos = raw_agent_repos if isinstance(raw_agent_repos, list) else None
@@ -1233,6 +1280,9 @@ class SetupConfig:
         device_pairing_port = _optional_int_arg(args, 'device_pairing_port')
         if device_pairing_port is None:
             device_pairing_port = 3774
+        default_web_ports = _optional_bool_arg(args, 'default_web_ports')
+        if default_web_ports is None:
+            default_web_ports = True
         
         return cls(
             host=args.host,
@@ -1283,6 +1333,8 @@ class SetupConfig:
             web_interface_host=getattr(args, 'web_interface_host', None),
             web_interface_port=getattr(args, 'web_interface_port', 3773),
             web_interface_sources=getattr(args, 'web_interface_sources', None),
+            web_ports=web_ports,
+            default_web_ports=default_web_ports,
             device_pairing_providers=getattr(args, 'device_pairing_providers', None),
             device_pairing_port=device_pairing_port,
             device_pairing_auth_file=_optional_str_arg(

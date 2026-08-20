@@ -30,6 +30,7 @@ _PAM_FAILLOCK_PROFILE = "/usr/share/pam-configs/faillock-infra-tools"
 _ISSUE_BANNER = "Authorized access only. All activity is monitored and logged.\n"
 _SECURITY_MONITOR_SCRIPT = "/opt/infra_tools/security/service_tools/security_monitor.py"
 _RDP_RULE_COMMENT_PREFIX = "infra_tools RDP"
+_WEB_RULE_COMMENT_PREFIX = "infra_tools web TCP"
 _UFW_NUMBERED_RULE_RE = re.compile(r"^\[\s*(\d+)\]")
 _APPARMOR_USERNS_PROFILE = "/etc/apparmor.d/unprivileged_userns"
 _APPARMOR_USERNS_RESTRICTION = (
@@ -116,8 +117,11 @@ def _rdp_firewall_rules(config: SetupConfig) -> list[tuple[str, str]]:
     return rules
 
 
-def _remove_stale_managed_rdp_rules(desired_comments: set[str]) -> None:
-    """Remove obsolete comment-tagged RDP rules in descending UFW order."""
+def _remove_stale_managed_rules(
+    comment_prefix: str,
+    desired_comments: set[str],
+) -> None:
+    """Remove obsolete comment-tagged rules in descending UFW order."""
     result = run("ufw status numbered", check=False, capture_output=True)
     stdout = getattr(result, "stdout", None)
     if result.returncode != 0 or not isinstance(stdout, str):
@@ -128,7 +132,7 @@ def _remove_stale_managed_rdp_rules(desired_comments: set[str]) -> None:
         if "#" not in line:
             continue
         comment = line.split("#", 1)[1].strip()
-        if not comment.startswith(_RDP_RULE_COMMENT_PREFIX):
+        if comment != comment_prefix and not comment.startswith(f"{comment_prefix} "):
             continue
         if comment in desired_comments:
             continue
@@ -165,25 +169,63 @@ def _configure_rdp_firewall(config: SetupConfig) -> None:
         run("ufw delete allow 3389/tcp", check=False)
         run("ufw delete limit 3389/tcp", check=False)
 
-    _remove_stale_managed_rdp_rules({comment for comment, _command in rules})
+    _remove_stale_managed_rules(
+        _RDP_RULE_COMMENT_PREFIX,
+        {comment for comment, _command in rules},
+    )
+
+
+def _configure_managed_web_ports(config: SetupConfig) -> list[int]:
+    """Reconcile globally allowed, infra_tools-managed TCP web ports."""
+
+    ports = config.effective_web_ports()
+    # The server_web profile retains its established untagged HTTP/HTTPS rules.
+    # Manage only its additional ports here so existing operator rules are not
+    # mistaken for legacy infra_tools state.
+    managed_ports = [
+        port
+        for port in ports
+        if not (config.include_web_firewall and port in {80, 443})
+    ]
+    desired_comments: set[str] = set()
+    for port in managed_ports:
+        comment = f"{_WEB_RULE_COMMENT_PREFIX} {port}"
+        result = run(
+            f"ufw allow {port}/tcp comment {shlex.quote(comment)}",
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to install web firewall rule for TCP {port}")
+        desired_comments.add(comment)
+
+    _remove_stale_managed_rules(_WEB_RULE_COMMENT_PREFIX, desired_comments)
+    return ports
 
 
 def configure_firewall(config: SetupConfig) -> None:
     result = run("ufw status 2>/dev/null | grep -q 'Status: active'", check=False)
-    if result.returncode == 0:
-        print("  ✓ Firewall already configured")
-        if config.enable_rdp:
-            _configure_rdp_firewall(config)
-        return
+    firewall_active = result.returncode == 0
 
-    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    run("apt-get install -y -qq ufw")
-    run("ufw default deny incoming", check=False)
-    run("ufw default allow outgoing", check=False)
-    run("ufw limit ssh", check=False)
+    if not firewall_active:
+        os.environ["DEBIAN_FRONTEND"] = "noninteractive"
+        run("apt-get install -y -qq ufw")
+        run("ufw default deny incoming", check=False)
+        run("ufw default allow outgoing", check=False)
+        run("ufw limit ssh", check=False)
     if config.enable_rdp:
         _configure_rdp_firewall(config)
-    
+    web_ports = _configure_managed_web_ports(config)
+
+    if firewall_active:
+        if web_ports:
+            print(
+                "  ✓ Firewall already active; web ports reconciled: "
+                + ", ".join(str(port) for port in web_ports)
+            )
+        else:
+            print("  ✓ Firewall already configured")
+        return
+
     result = run("ufw --force enable", check=False)
     if result.returncode != 0:
         if is_container():
@@ -192,7 +234,13 @@ def configure_firewall(config: SetupConfig) -> None:
             print("  ⚠ Firewall could not be enabled (check logs)")
         return
 
-    if config.enable_rdp:
+    if web_ports:
+        print(
+            "  ✓ Firewall configured (SSH rate-limited; web TCP ports: "
+            + ", ".join(str(port) for port in web_ports)
+            + ")"
+        )
+    elif config.enable_rdp:
         if config.rdp_allowed_sources:
             print("  ✓ Firewall configured (SSH rate-limited; RDP source-restricted)")
         else:
@@ -706,20 +754,24 @@ def configure_auto_updates(config: SetupConfig) -> None:
 
 def configure_firewall_web(config: SetupConfig) -> None:
     result = run("ufw status 2>/dev/null | grep -q 'Status: active'", check=False)
-    if result.returncode == 0:
-        result = run("ufw status | grep -q '80/tcp'", check=False)
-        if result.returncode == 0:
-            print("  ✓ Firewall already configured for web")
-            return
-
-    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    run("apt-get install -y -qq ufw")
-    run("ufw default deny incoming", check=False)
-    run("ufw default allow outgoing", check=False)
-    run("ufw limit ssh", check=False)
+    firewall_active = result.returncode == 0
+    if not firewall_active:
+        os.environ["DEBIAN_FRONTEND"] = "noninteractive"
+        run("apt-get install -y -qq ufw")
+        run("ufw default deny incoming", check=False)
+        run("ufw default allow outgoing", check=False)
+        run("ufw limit ssh", check=False)
     run("ufw allow 80/tcp", check=False)
     run("ufw allow 443/tcp", check=False)
-    
+    web_ports = _configure_managed_web_ports(config)
+
+    if firewall_active:
+        print(
+            "  ✓ Firewall already active; web ports reconciled: "
+            + ", ".join(str(port) for port in web_ports)
+        )
+        return
+
     result = run("ufw --force enable", check=False)
     if result.returncode != 0:
         if is_container():
@@ -728,7 +780,11 @@ def configure_firewall_web(config: SetupConfig) -> None:
             print("  ⚠ Firewall could not be enabled (check logs)")
         return
     
-    print("  ✓ Firewall configured (SSH, HTTP, and HTTPS allowed)")
+    print(
+        "  ✓ Firewall configured (SSH; web TCP ports: "
+        + ", ".join(str(port) for port in web_ports)
+        + ")"
+    )
 
 
 def configure_firewall_ssh_only(config: SetupConfig) -> None:

@@ -463,6 +463,27 @@ def add_setup_arguments(
             "needed. Required when binding outside loopback."
         ),
     )
+    parser.add_argument(
+        "--web-port",
+        dest="web_ports",
+        action="append",
+        type=int,
+        metavar="PORT",
+        help=(
+            "Allow an additional global TCP web port through UFW; repeat as "
+            "needed"
+        ),
+    )
+    parser.add_argument(
+        "--no-default-web-ports",
+        dest="default_web_ports",
+        action="store_false",
+        default=True if for_remote else None,
+        help=(
+            "Do not automatically allow TCP ports 80, 443, 8080, and 8081 on "
+            "agent VMs"
+        ),
+    )
     device_pairing_group = parser.add_mutually_exclusive_group()
     device_pairing_group.add_argument(
         "--device-pairing",

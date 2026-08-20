@@ -269,6 +269,12 @@ def print_setup_summary(config: SetupConfig, description: Optional[str] = None) 
 
     if config.selected_agent_tools():
         print(f"Agent tools: {', '.join(config.selected_agent_tools())}")
+    effective_web_ports = config.effective_web_ports()
+    if effective_web_ports:
+        print(
+            "Globally allowed web TCP ports: "
+            + ", ".join(str(port) for port in effective_web_ports)
+        )
     if config.browser_automation:
         print(f"Agent browser automation: {config.browser_automation}")
     if config.selected_agent_tools() or config.agent_repos or config.git_access != "none":

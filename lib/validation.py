@@ -475,6 +475,8 @@ def validate_backup_specs(backup_specs: Optional[list[list[str]]]) -> None:
 def validate_web_interface_settings(config: Any) -> None:
     """Validate explicit headless web-interface exposure settings."""
 
+    validate_web_port_settings(config)
+
     interfaces = getattr(config, "web_interfaces", None) or []
     host = getattr(config, "web_interface_host", None)
     sources = getattr(config, "web_interface_sources", None) or []
@@ -591,6 +593,24 @@ def validate_web_interface_settings(config: Any) -> None:
         if canonical in seen_sources:
             raise ValueError(f"Duplicate --web-interface-source: {canonical}")
         seen_sources.add(canonical)
+
+
+def validate_web_port_settings(config: Any) -> None:
+    """Validate globally allowed TCP web ports and their default policy."""
+
+    ports = getattr(config, "web_ports", None)
+    default_ports = getattr(config, "default_web_ports", True)
+    if not isinstance(default_ports, bool):
+        raise ValueError("default_web_ports must be a boolean")
+    if ports is None:
+        return
+    if not isinstance(ports, list):
+        raise ValueError("--web-port must be a repeatable integer option")
+    for port in ports:
+        if not isinstance(port, int) or isinstance(port, bool):
+            raise ValueError("--web-port must be an integer")
+        if not 1 <= port <= 65535:
+            raise ValueError("--web-port must be between 1 and 65535")
 
 
 def validate_scrub_specs(scrub_specs: Optional[list[list[str]]]) -> None:
