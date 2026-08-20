@@ -27,6 +27,7 @@ from lib.atomic_io import write_json_atomic
 from lib.config import DEFAULT_MACHINE_TYPE, SetupConfig, _normalize_nested_specs
 from lib.credentials import prepare_runtime_config, store_cli_credentials
 from lib.network_transition import finish_network_transition
+from lib.proxmox_guest import get_provisioned_guest_ssh_user
 from lib.proxmox_hosts import ProxmoxHost, find_proxmox_host, sync_proxmox_host
 from lib.validators import validate_host, validate_username
 from lib.validation import (
@@ -1048,24 +1049,35 @@ def run_remote_setup(config: SetupConfig) -> int:
         else:
             tar_data = create_tar_from_dir(build_dir)
             
+            remote_user = (
+                get_provisioned_guest_ssh_user(config.machine_type, config.username)
+                if config.hosted_node
+                else "root"
+            )
+
+            def privileged(command: list[str]) -> list[str]:
+                if remote_user == "root":
+                    return command
+                return ["sudo", "-n", *command]
+
             remote_python = "python3"
             remote_script = os.path.join(REMOTE_INSTALL_DIR, "remote_setup.py")
             remote_cmd_args = [remote_python, remote_script, "--args-file", remote_args_path]
             remote_shell_cmd = chain_remote_commands(
                 [
-                    ["rm", "-rf", REMOTE_INSTALL_DIR],
-                    ["mkdir", "-p", REMOTE_INSTALL_DIR],
-                    ["cd", REMOTE_INSTALL_DIR],
-                    ["tar", "xzf", "-"],
-                    ["chmod", "0755", REMOTE_INSTALL_DIR],
-                    remote_cmd_args,
+                    privileged(["rm", "-rf", REMOTE_INSTALL_DIR]),
+                    privileged(["mkdir", "-p", REMOTE_INSTALL_DIR]),
+                    privileged(["tar", "xzf", "-", "-C", REMOTE_INSTALL_DIR]),
+                    privileged(["chmod", "0755", REMOTE_INSTALL_DIR]),
+                    privileged(remote_cmd_args),
                 ]
             )
             ssh_cmd = build_ssh_command(
                 config.host,
-                "root",
+                remote_user,
                 config.ssh_key,
                 remote_command=remote_shell_cmd,
+                batch_mode=True,
                 connect_timeout=30,
                 server_alive_interval=30,
             )

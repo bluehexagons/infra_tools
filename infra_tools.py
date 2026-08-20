@@ -74,7 +74,11 @@ from lib.orchestrator_bootstrap import LAUNCHER_NAME, run_orchestrator_bootstrap
 from lib.plugin_registry import format_system_type_help, get_system_type_names
 from lib.network_cli import add_network_subparser, run_network_command
 from lib.local_cli import add_local_subparser, run_local_command
-from lib.proxmox_guest import ProvisionError, ensure_guest_ipv4_route
+from lib.proxmox_guest import (
+    ProvisionError,
+    ensure_guest_ipv4_route,
+    get_provisioned_guest_ssh_user,
+)
 from lib.proxmox_cli import add_proxmox_subparser, run_proxmox_command
 from lib.vm_cli import add_vm_subparser, run_vm_command
 from lib.sysadmin_cli import add_sysadmin_subparsers, run_sysadmin_command
@@ -1260,6 +1264,7 @@ def run_setup_command(args: argparse.Namespace) -> int:
             ensure_guest_ipv4_route(
                 config.static_ipv4,
                 config.network_gateway4,
+                get_provisioned_guest_ssh_user(config.machine_type, config.username),
                 config.ssh_key,
                 dry_run=config.dry_run,
             )

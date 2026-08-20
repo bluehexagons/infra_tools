@@ -65,9 +65,12 @@ guest-data migration.
 The matching `.pub` file must sit beside the private key, and the Proxmox
 `root` account must accept that key.
 
-VM provisioning uses an SSH identity's `.pub` file for cloud-init. `--key` is
-optional: infra-tools first uses a matching key associated with the registered
-Proxmox host, then the local `~/.ssh/id_ed25519`, `id_ecdsa`, or `id_rsa` key.
+VM provisioning uses an SSH identity's `.pub` file for cloud-init. The key is
+installed for both root and the configured guest setup username; the latter is
+created with non-interactive sudo and is used for the route and remote setup
+handoff. `--key` is optional: infra-tools first uses a matching key associated
+with the registered Proxmox host, then the local `~/.ssh/id_ed25519`,
+`id_ecdsa`, or `id_rsa` key.
 If the Proxmox node key and guest key differ, pass `--provision-key` for the
 node and `--key` for the guest. VM image downloads and cloud-init snippets are
 placed through Proxmox storage APIs. By default, image staging prefers an

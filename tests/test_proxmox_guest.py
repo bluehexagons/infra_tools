@@ -105,10 +105,12 @@ class TestGuestRouteRepair(unittest.TestCase):
         ensure_guest_ipv4_route(
             "192.168.0.41/24",
             "192.168.0.1",
+            "agent",
             "/keys/agent",
         )
 
         mock_build.assert_called_once()
+        self.assertEqual(mock_build.call_args.args[1], "agent")
         self.assertIn("192.168.0.41", mock_build.call_args.kwargs["remote_command"])
         self.assertIn("192.168.0.1", mock_build.call_args.kwargs["remote_command"])
         mock_run.assert_called_once_with(
@@ -128,9 +130,14 @@ class TestGuestRouteRepair(unittest.TestCase):
         ensure_guest_ipv4_route(
             "192.168.0.41/24",
             "192.168.0.1",
+            "agent",
             "/keys/agent",
         )
 
+        self.assertIn(
+            'sudo -n ip -4 route replace default via "$gateway"',
+            _mock_build.call_args.kwargs["remote_command"],
+        )
         mock_run.assert_called_once()
 
     @patch("lib.proxmox_guest.build_ssh_command", return_value=["ssh"])
@@ -144,6 +151,7 @@ class TestGuestRouteRepair(unittest.TestCase):
             ensure_guest_ipv4_route(
                 "192.168.0.41/24",
                 "192.168.0.1",
+                "agent",
                 "/keys/agent",
             )
 

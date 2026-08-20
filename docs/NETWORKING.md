@@ -61,11 +61,14 @@ Proxmox instead of silently skipping the provisioning handoff.
 
 After guest SSH becomes available, hosted setup verifies the live IPv4 default
 route. If cloud-init brought up the address without the route, infra-tools
-repairs it automatically before package installation; the normal static
-network step then persists the same gateway through the guest's active network
-backend. A failed verification stops setup with the SSH/error detail so a
-guest cannot be reported as successfully configured while lacking its expected
-route.
+repairs it automatically before package installation. For VMs, this check and
+the remote setup upload use the configured guest setup username and its
+non-interactive `sudo` privileges; they do not require root SSH access. LXC
+guests continue to use root for this first handoff because their setup user is
+created by the initial remote setup. The normal static network step then
+persists the same gateway through the guest's active network backend. A failed
+verification stops setup with the SSH/error detail so a guest cannot be
+reported as successfully configured while lacking its expected route.
 
 Existing Proxmox VMs and LXCs can use the same verified patch handoff as
 physical hosts and non-Proxmox VMs, including when a saved hosted configuration

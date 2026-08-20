@@ -154,7 +154,11 @@ setup and restored on reruns. If a legacy setup cache is missing them,
 infra-tools refreshes the Proxmox defaults instead of skipping discovery. Once
 guest SSH is available, setup also verifies the live IPv4 default route and
 repairs a missing route before package installation; the normal final network
-step persists the repaired configuration.
+step persists the repaired configuration. A provisioned VM connects for this
+handoff as the configured guest username and uses non-interactive `sudo` for
+the route and remote setup staging, so root SSH access is not required. LXC
+guests use root for the initial handoff because their setup user is created by
+that first remote setup.
 
 `--activate-network` uses a retry-safe transaction for an existing host and
 must be run from a separate controller. The remote

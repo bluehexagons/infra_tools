@@ -15,10 +15,24 @@ from typing import Optional
 from lib.proxmox_hosts import ProxmoxHost, ProxmoxHostFacts, ProxmoxStoragePool
 from lib.ssh_utils import build_ssh_command, get_ssh_control_path
 from lib.types import StrList
+from lib.validators import validate_username
 
 
 class ProvisionError(Exception):
     """Raised when guest provisioning fails."""
+
+
+def get_provisioned_guest_ssh_user(machine_type: str, setup_username: str) -> str:
+    """Return the account infra-tools can use after guest provisioning.
+
+    Cloud-init creates the configured setup account with passwordless sudo for
+    VMs. LXC provisioning bootstraps only root SSH access because the setup
+    account is created by the first remote setup run.
+    """
+
+    if machine_type == "vm":
+        return setup_username
+    return "root"
 
 
 def _ssh_opts(hosted_key: Optional[str] = None) -> StrList:
@@ -831,6 +845,7 @@ def resolve_guest_ssh_key(
 def ensure_guest_ipv4_route(
     target_interface: str,
     gateway: str,
+    username: str,
     ssh_key: Optional[str],
     *,
     dry_run: bool = False,
@@ -844,6 +859,9 @@ def ensure_guest_ipv4_route(
     logging in manually.  Persistent configuration is written by the regular
     static-network setup step later in the run.
     """
+    if not validate_username(username):
+        raise ProvisionError(f"Invalid guest SSH username: {username}")
+
     try:
         parsed_interface = ipaddress.ip_interface(target_interface)
         parsed_gateway = ipaddress.ip_address(gateway)
@@ -869,6 +887,11 @@ def ensure_guest_ipv4_route(
 
     target_ip = str(parsed_interface.ip)
     gateway_ip = str(parsed_gateway)
+    route_replace = (
+        'ip -4 route replace default via "$gateway" dev "$interface"'
+        if username == "root"
+        else 'sudo -n ip -4 route replace default via "$gateway" dev "$interface"'
+    )
     remote_script = "\n".join(
         [
             "set -eu",
@@ -885,7 +908,7 @@ def ensure_guest_ipv4_route(
             '  echo already',
             "  exit 0",
             "fi",
-            'ip -4 route replace default via "$gateway" dev "$interface"',
+            route_replace,
             'current=$(ip -4 route show default | awk \'$1 == "default" {print $3 " " $5; exit}\')',
             'if [ "$current" != "$expected" ]; then',
             '  echo "Guest default route did not become $expected" >&2',
@@ -896,7 +919,7 @@ def ensure_guest_ipv4_route(
     )
     command = build_ssh_command(
         target_ip,
-        "root",
+        username,
         ssh_key,
         remote_command=remote_script,
         batch_mode=True,
@@ -911,7 +934,9 @@ def ensure_guest_ipv4_route(
     )
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip() or "unknown SSH error"
-        raise ProvisionError(f"Could not verify or repair the guest IPv4 route: {detail}")
+        raise ProvisionError(
+            f"Could not verify or repair the guest IPv4 route as {username}: {detail}"
+        )
 
     if "repaired" in (result.stdout or ""):
         print(f"  ✓ Repaired guest IPv4 default route via {gateway_ip}")
@@ -976,6 +1001,7 @@ def _wait_for_guest_ssh(
 
 __all__ = [
     "ProvisionError",
+    "get_provisioned_guest_ssh_user",
     "_build_guest_hostname",
     "_get_bridge_prefix_length",
     "_get_corosync_config",

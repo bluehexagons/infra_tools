@@ -286,6 +286,36 @@ class TestRunRemoteSetupArgumentSecurity(unittest.TestCase):
         self.assertEqual(result, 0)
         mock_finish.assert_called_once_with(config, 0)
 
+    def test_hosted_vm_remote_setup_uses_setup_user_and_noninteractive_sudo(self):
+        from lib import setup_common
+
+        config = _make_config(
+            host="192.168.10.20",
+            username="agent",
+            machine_type="vm",
+            hosted_node="pve1",
+        )
+        process = MagicMock()
+        process.stdin = io.BytesIO()
+        process.stdout = io.BytesIO(b"")
+        process.wait.return_value = 0
+
+        with patch.object(setup_common, "copy_project_files"), \
+             patch.object(setup_common, "build_ssh_command", return_value=["ssh"]) as mock_build, \
+             patch("subprocess.Popen", return_value=process):
+            result = setup_common.run_remote_setup(config)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(mock_build.call_args.args[1], "agent")
+        self.assertTrue(mock_build.call_args.kwargs["batch_mode"])
+        remote_command = mock_build.call_args.kwargs["remote_command"]
+        self.assertIn("sudo -n rm -rf /opt/infra_tools", remote_command)
+        self.assertIn("sudo -n tar xzf - -C /opt/infra_tools", remote_command)
+        self.assertIn(
+            "sudo -n python3 /opt/infra_tools/remote_setup.py",
+            remote_command,
+        )
+
     def test_adopts_only_a_controller_verified_replacement_host(self):
         from lib import setup_common
 

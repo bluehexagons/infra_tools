@@ -229,6 +229,7 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
         mock_route.assert_called_once_with(
             "10.0.0.50/24",
             "10.0.0.1",
+            "agent",
             current.ssh_key,
             dry_run=False,
         )
