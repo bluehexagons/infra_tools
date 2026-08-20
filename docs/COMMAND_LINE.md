@@ -27,6 +27,7 @@ infra-tools list [pattern] [--json]
 infra-tools info [pattern] [--compact]
 infra-tools cmd [pattern]
 infra-tools rm <pattern>
+infra-tools cleanup [host] [options]
 infra-tools deploy <pattern> [--yes]
 infra-tools credentials set <username> [password]
 infra-tools credentials list
@@ -554,6 +555,38 @@ mount checks, and logs, and [Notifications](./NOTIFICATIONS.md) for delivery
 targets and failure behavior.
 
 ## Maintenance and Utilities
+
+### Cleaning obsolete local configuration
+
+Use `cleanup` after upgrading infra-tools when a saved setup or development
+registry entry was written by an older, incompatible revision. A host argument
+limits the operation to that setup host:
+
+```bash
+# Inspect only the saved setup state for this VM.
+infra-tools cleanup 192.168.0.41 --dry-run
+
+# Remove obsolete setup state after reviewing the findings.
+infra-tools cleanup 192.168.0.41 --yes
+
+# Inspect and clean every invalid setup cache and Proxmox record.
+infra-tools cleanup --dry-run
+infra-tools cleanup --yes
+
+# Select one category explicitly.
+infra-tools cleanup --setup-cache --yes
+infra-tools cleanup --proxmox-registry --yes
+```
+
+With a host argument, setup-cache cleanup is selected by default. Add
+`--proxmox-registry` when the host is a registered Proxmox node, or omit the
+host to inspect the entire local Proxmox registry. The command removes only
+setup-cache files that cannot be loaded by the current `SetupConfig` and
+Proxmox records that fail the current schema or validation. Valid records are
+preserved. It makes a timestamped copy of every changed file in
+`<workspace>/cleanup-backups/` before modifying anything; use `--workspace` to
+select a different workspace. `--yes` is required for non-interactive use,
+and `--dry-run` never changes files.
 
 ### GitHub Maintenance
 

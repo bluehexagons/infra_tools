@@ -52,6 +52,7 @@ from lib.channel_manager import (
     upgrade_channel,
 )
 from lib.completions import run_completion_setup
+from lib.config_cleanup import run_cleanup
 from lib.config import SetupConfig
 from lib.credentials import (
     list_workspace_credentials,
@@ -120,6 +121,7 @@ def _build_infra_tools_epilog() -> str:
     info [pattern]              Show saved configuration details
     cmd [pattern]               Show reconstructed setup commands
     rm <pattern>                Remove saved configurations
+    cleanup [host] [options]   Remove obsolete local configuration state
     deploy <pattern>            Redeploy saved configurations
     recall <host> [username]    Fetch or reconstruct a remote setup command
     reconstruct                 Analyze this host and emit a setup summary
@@ -354,6 +356,45 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
     remove_parser.add_argument(
         "--workspace",
         help="Workspace root for saved setups, credentials, known_hosts, and history"
+    )
+
+    cleanup_parser = subparsers.add_parser(
+        "cleanup",
+        help="Remove obsolete local setup and Proxmox configuration state",
+    )
+    cleanup_parser.add_argument(
+        "host",
+        nargs="?",
+        help=(
+            "Optional setup or Proxmox host to target; with no host, inspect all "
+            "selected local state"
+        ),
+    )
+    cleanup_parser.add_argument(
+        "--setup-cache",
+        action="store_true",
+        help="Inspect obsolete setup-cache files",
+    )
+    cleanup_parser.add_argument(
+        "--proxmox-registry",
+        action="store_true",
+        help="Inspect invalid Proxmox host records",
+    )
+    cleanup_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show findings without changing files",
+    )
+    cleanup_parser.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="Apply cleanup without prompting",
+    )
+    cleanup_parser.add_argument(
+        "--workspace",
+        default=argparse.SUPPRESS,
+        help="Workspace root for saved setups, credentials, known_hosts, and history",
     )
 
     deploy_parser = subparsers.add_parser(
@@ -1377,6 +1418,20 @@ def main() -> int:
         return show_command(args.pattern)
     elif args.command in {"rm", "remove"}:
         return remove_configurations(args.pattern, args.yes)
+    elif args.command == "cleanup":
+        has_selector = args.setup_cache or args.proxmox_registry
+        include_setup_cache = args.setup_cache or not has_selector
+        include_proxmox_registry = args.proxmox_registry or (
+            not has_selector and args.host is None
+        )
+        return run_cleanup(
+            args.host,
+            workspace=getattr(args, "workspace", None),
+            include_setup_cache=include_setup_cache,
+            include_proxmox_registry=include_proxmox_registry,
+            dry_run=args.dry_run,
+            assume_yes=args.yes,
+        )
     elif args.command == "deploy":
         return run_deploy_command(args)
     elif args.command == "reconstruct":
