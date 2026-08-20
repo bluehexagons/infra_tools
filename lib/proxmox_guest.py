@@ -13,6 +13,7 @@ import time
 from typing import Optional
 
 from lib.proxmox_hosts import ProxmoxHost, ProxmoxHostFacts, ProxmoxStoragePool
+from lib.ssh_enrollment import replace_scanned_host_keys
 from lib.ssh_utils import (
     build_ssh_command,
     ensure_remote_sudo,
@@ -61,6 +62,7 @@ def _ssh_run(
     dry_run: bool = False,
     log_cmd: Optional[str] = None,
     quiet: bool = False,
+    input_data: Optional[str] = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a command on the Proxmox host via SSH."""
     display_cmd = log_cmd if log_cmd is not None else cmd
@@ -88,7 +90,11 @@ def _ssh_run(
         cmd,
     ]
     result = subprocess.run(
-        ssh_cmd, capture_output=True, text=True, timeout=120
+        ssh_cmd,
+        input=input_data,
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
     if result.returncode != 0:
         stderr = result.stderr.strip()
@@ -1016,6 +1022,50 @@ def _wait_for_guest_ssh(
     )
 
 
+def enroll_provisioned_guest_host_keys(
+    target_ip: str,
+    node_ip: str,
+    user: str,
+    ssh_opts: StrList,
+    *,
+    dry_run: bool = False,
+) -> None:
+    """Enroll a new guest's SSH key through its trusted Proxmox node.
+
+    This is only for guests created by the current provisioning run. Scanning
+    from the already authenticated Proxmox node keeps the discovery on the
+    guest's bridge and lets strict workspace host-key checking remain enabled
+    for every subsequent guest connection.
+    """
+    if dry_run:
+        print(
+            f"  [DRY-RUN] Would enroll the new guest SSH host key for {target_ip}"
+        )
+        return
+
+    scan_result = _ssh_run(
+        node_ip,
+        user,
+        ssh_opts,
+        f"ssh-keyscan -T 10 -t ed25519 {shlex.quote(target_ip)}",
+        dry_run=False,
+        quiet=True,
+    )
+    scan = (scan_result.stdout or "").strip()
+    if scan_result.returncode != 0 or not scan:
+        detail = (scan_result.stderr or "").strip() or "no ED25519 key was returned"
+        raise ProvisionError(
+            f"Could not read the new guest SSH host key for {target_ip}: {detail}"
+        )
+    try:
+        known_hosts = replace_scanned_host_keys(target_ip, scan)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise ProvisionError(
+            f"Could not enroll the new guest SSH host key for {target_ip}: {exc}"
+        ) from exc
+    print(f"  ✓ Enrolled new guest SSH host key in {known_hosts}")
+
+
 __all__ = [
     "ProvisionError",
     "get_provisioned_guest_ssh_user",
@@ -1039,6 +1089,7 @@ __all__ = [
     "_ssh_run",
     "_storage_pool_supports_content",
     "ensure_guest_ipv4_route",
+    "enroll_provisioned_guest_host_keys",
     "_wait_for_guest_ssh",
     "auto_detect_bridge",
     "probe_proxmox_cluster",

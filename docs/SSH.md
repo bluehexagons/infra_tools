@@ -42,14 +42,24 @@ repository, setup cache, systemd unit, or shell script.
 
 Proxmox inspection and maintenance commands use a short-lived OpenSSH control
 connection, so the first authenticated connection can be reused by subsequent
-checks. This reduces repeated prompts, but it does not replace an agent for
-parallel operations such as `fan`, `df`, or `reachable`. Preload the key when a
-command can open more than one SSH connection at a time.
+checks and by the streamed cloud-init or public-key uploads used during guest
+provisioning. This reduces repeated prompts, but it does not replace an agent
+for parallel operations such as `fan`, `df`, or `reachable`. Preload the key
+when a command can open more than one SSH connection at a time.
 
 The same terminal-aware behavior is used by SCP, rsync-over-SSH, SSHFS, and
-the raw SSH uploads used during Proxmox provisioning. SSHFS mounts may detach
-or reconnect after the original terminal is gone, so an agent is the reliable
-choice for a long-lived mount.
+other SSH uploads. A hosted setup may still prompt once for the Proxmox
+identity and once for a different guest identity; loading both keys into the
+agent avoids both prompts. SSHFS mounts may detach or reconnect after the
+original terminal is gone, so an agent is the reliable choice for a long-lived
+mount.
+
+New Proxmox guests are a special host-key enrollment case. After provisioning,
+infra-tools scans the guest's ED25519 key from the authenticated Proxmox node,
+replaces any stale entry for that address in the workspace `known_hosts`, and
+then uses strict checking for the direct guest connection. It does not do this
+for existing guests; enroll those explicitly with `infra-tools ssh-key enroll`
+after verifying the displayed fingerprint.
 
 Hosted VM setup also needs the guest setup account to run privileged staging
 commands. The upload itself uses SSH standard input for a tar stream, so

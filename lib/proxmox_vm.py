@@ -27,7 +27,6 @@ import ipaddress
 import os
 import re
 import shlex
-import subprocess
 import time
 from dataclasses import dataclass
 from typing import Optional, cast
@@ -52,6 +51,7 @@ from lib.proxmox_guest import (
     _ssh_run,
     _wait_for_guest_ssh,
     auto_detect_bridge,
+    enroll_provisioned_guest_host_keys,
 )
 from lib.types import NestedStrList, StrList
 from lib.validators import validate_username
@@ -502,12 +502,13 @@ def _upload_user_data(
             f"Failed to prepare snippet storage path on {node_ip}: "
             f"{(mkdir_result.stderr or mkdir_result.stdout or '').strip() or 'mkdir failed'}"
         )
-    write_cmd = ["ssh"] + ssh_opts + [
-        f"{user}@{node_ip}",
+    proc = _ssh_run(
+        node_ip,
+        user,
+        ssh_opts,
         f"cat > {shlex.quote(remote_path)}",
-    ]
-    proc = subprocess.run(
-        write_cmd, input=rendered, text=True, capture_output=True, timeout=60
+        dry_run=False,
+        input_data=rendered,
     )
     if proc.returncode != 0:
         raise ProvisionError(
@@ -1041,6 +1042,13 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
             timeout=300,
             dry_run=dry_run,
             label="VM",
+        )
+        enroll_provisioned_guest_host_keys(
+            target_ip,
+            node_ip,
+            user,
+            ssh_opts,
+            dry_run=dry_run,
         )
         provision_complete = True
     except Exception:

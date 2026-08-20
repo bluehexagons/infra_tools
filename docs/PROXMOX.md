@@ -81,6 +81,14 @@ Custom VM image URLs must use HTTPS and include a matching 128-character
 SHA-512 value with `--image-sha512`; the curated Debian catalog carries pinned
 hashes automatically.
 
+After a newly created VM or LXC begins accepting SSH, infra-tools scans its
+ED25519 host key from the already authenticated Proxmox node and records it in
+the workspace `known_hosts` file before the first direct guest login. A stale
+entry for that guest address is replaced only in this new-provisioning path;
+all following guest SSH still uses `StrictHostKeyChecking=yes`. Existing or
+adopted guests are not trusted automatically. Verify them independently and
+use `infra-tools ssh-key enroll HOST` when enrollment is required.
+
 ## Host-safety defaults
 
 The `server_proxmox` flow deliberately leaves firewall policy to Proxmox and

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch, MagicMock
 
@@ -21,6 +22,7 @@ from lib.proxmox_node import (
     _resolve_public_key_path,
     _resolve_storage_pool,
     _resolve_template_name,
+    _upload_pubkey_to_host,
     _template_sort_key,
     check_container_exists,
     _ssh_opts,
@@ -483,6 +485,36 @@ class TestPublicKeyResolution(unittest.TestCase):
             with open(pub, "w") as fh:
                 fh.write("ssh-ed25519 AAAA...")
             self.assertEqual(_resolve_public_key_path(priv), pub)
+
+
+class TestPublicKeyUpload(unittest.TestCase):
+    @patch("lib.proxmox_node._ssh_run")
+    def test_upload_reuses_proxmox_ssh_connection(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(
+                returncode=0,
+                stdout="/tmp/infra_tools_pubkey.abc\n",
+                stderr="",
+            ),
+            MagicMock(returncode=0, stdout="", stderr=""),
+        ]
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8") as key_file:
+            key_file.write("ssh-ed25519 AAAA test\n")
+            key_file.flush()
+
+            path = _upload_pubkey_to_host(
+                key_file.name,
+                "192.0.2.10",
+                "root",
+                ["-i", "/keys/proxmox"],
+                dry_run=False,
+            )
+
+        self.assertEqual(path, "/tmp/infra_tools_pubkey.abc")
+        self.assertEqual(
+            mock_run.call_args_list[1].kwargs["input_data"],
+            "ssh-ed25519 AAAA test\n",
+        )
 
 
 class TestHostnameLengthCap(unittest.TestCase):

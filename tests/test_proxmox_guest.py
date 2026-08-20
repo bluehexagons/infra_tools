@@ -18,7 +18,9 @@ from lib.proxmox_guest import (
     _get_host_nameservers,
     _parse_corosync_config,
     ProvisionError,
+    enroll_provisioned_guest_host_keys,
     ensure_guest_ipv4_route,
+    _ssh_run,
     _wait_for_guest_ssh,
     probe_proxmox_cluster,
     probe_proxmox_host,
@@ -92,6 +94,72 @@ class TestWaitForGuestSsh(unittest.TestCase):
     def test_dry_run_skips_probe(self, mock_run) -> None:
         _wait_for_guest_ssh("10.0.0.50", "10.0.0.1", "root", [], dry_run=True)
         mock_run.assert_not_called()
+
+
+class TestProxmoxSshRun(unittest.TestCase):
+    @patch("lib.proxmox_guest.get_ssh_control_path", return_value="/tmp/control.sock")
+    @patch("lib.proxmox_guest.subprocess.run")
+    def test_streamed_input_reuses_the_control_connection(
+        self, mock_run, _mock_control_path
+    ) -> None:
+        mock_run.return_value = subprocess.CompletedProcess(
+            ["ssh"], 0, stdout="", stderr=""
+        )
+
+        _ssh_run(
+            "192.0.2.10",
+            "root",
+            ["-i", "/keys/proxmox"],
+            "cat > /tmp/payload",
+            input_data="payload",
+        )
+
+        command = mock_run.call_args.args[0]
+        self.assertIn("ControlMaster=auto", command)
+        self.assertIn("ControlPath=/tmp/control.sock", command)
+        self.assertEqual(mock_run.call_args.kwargs["input"], "payload")
+
+
+class TestProvisionedGuestHostKeyEnrollment(unittest.TestCase):
+    @patch(
+        "lib.proxmox_guest.replace_scanned_host_keys",
+        return_value="/workspace/known_hosts",
+    )
+    @patch("lib.proxmox_guest._ssh_run")
+    def test_scans_through_proxmox_and_replaces_workspace_key(
+        self, mock_run, mock_replace
+    ) -> None:
+        scan = "192.0.2.40 ssh-ed25519 AAAA"
+        mock_run.return_value = MagicMock(returncode=0, stdout=scan, stderr="")
+
+        enroll_provisioned_guest_host_keys(
+            "192.0.2.40",
+            "192.0.2.10",
+            "root",
+            ["-i", "/keys/proxmox"],
+        )
+
+        self.assertIn(
+            "ssh-keyscan -T 10 -t ed25519 192.0.2.40",
+            mock_run.call_args.args[3],
+        )
+        self.assertTrue(mock_run.call_args.kwargs["quiet"])
+        mock_replace.assert_called_once_with("192.0.2.40", scan)
+
+    @patch("lib.proxmox_guest.replace_scanned_host_keys")
+    @patch("lib.proxmox_guest._ssh_run")
+    def test_missing_key_fails_before_guest_login(self, mock_run, mock_replace) -> None:
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="timeout")
+
+        with self.assertRaisesRegex(ProvisionError, "timeout"):
+            enroll_provisioned_guest_host_keys(
+                "192.0.2.40",
+                "192.0.2.10",
+                "root",
+                [],
+            )
+
+        mock_replace.assert_not_called()
 
 
 class TestGuestRouteRepair(unittest.TestCase):

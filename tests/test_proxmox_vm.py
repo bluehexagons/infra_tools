@@ -23,6 +23,7 @@ from lib.proxmox_vm import (
     _render_user_data,
     _resolve_image,
     _destroy_vm_best_effort,
+    _upload_user_data,
     _wait_for_guest_agent,
     check_vm_exists,
 )
@@ -257,6 +258,37 @@ class TestRenderUserData(unittest.TestCase):
             pubkey_contents="ssh-ed25519 AAAA comment-with-'quote'",
         )
         self.assertIn("- 'ssh-ed25519 AAAA comment-with-''quote'''", out)
+
+
+class TestUserDataUpload(unittest.TestCase):
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_upload_reuses_proxmox_ssh_connection(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(
+                returncode=0,
+                stdout="/var/lib/vz/snippets/infra-tools-vm.yaml\n",
+                stderr="",
+            ),
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout="", stderr=""),
+        ]
+
+        path = _upload_user_data(
+            "#cloud-config\nhostname: __HOSTNAME__\n",
+            "vm-01",
+            "local",
+            "192.0.2.10",
+            "root",
+            ["-i", "/keys/proxmox"],
+            dry_run=False,
+        )
+
+        self.assertEqual(path, "/var/lib/vz/snippets/infra-tools-vm.yaml")
+        upload_call = mock_run.call_args_list[2]
+        self.assertEqual(
+            upload_call.kwargs["input_data"],
+            "#cloud-config\nhostname: vm-01\n",
+        )
 
 
 class TestVMHardwareProfile(unittest.TestCase):

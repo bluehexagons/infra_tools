@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import ipaddress
 import re
-import subprocess
 import shlex
 import time
 from typing import Optional, cast
@@ -30,6 +29,7 @@ from lib.proxmox_guest import (
     _storage_pool_supports_content,
     _wait_for_guest_ssh,
     auto_detect_bridge,
+    enroll_provisioned_guest_host_keys,
 )
 from lib.types import NestedStrList, StrList
 
@@ -341,12 +341,13 @@ def _upload_pubkey_to_host(
         )
     remote_path = mk.stdout.strip()
 
-    write_cmd = ["ssh"] + ssh_opts + [
-        f"{user}@{node_ip}",
+    proc = _ssh_run(
+        node_ip,
+        user,
+        ssh_opts,
         f"cat > {shlex.quote(remote_path)} && chmod 600 {shlex.quote(remote_path)}",
-    ]
-    proc = subprocess.run(
-        write_cmd, input=pub_contents, text=True, capture_output=True, timeout=60
+        dry_run=False,
+        input_data=pub_contents,
     )
     if proc.returncode != 0:
         raise ProvisionError(
@@ -621,6 +622,13 @@ def provision_container(config: SetupConfig) -> None:
         if remote_pubkey_path:
             _wait_for_container_ssh(
                 target_ip, node_ip, user, ssh_opts, dry_run=dry_run
+            )
+            enroll_provisioned_guest_host_keys(
+                target_ip,
+                node_ip,
+                user,
+                ssh_opts,
+                dry_run=dry_run,
             )
     finally:
         if remote_pubkey_path and not dry_run:
