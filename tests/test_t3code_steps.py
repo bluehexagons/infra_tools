@@ -124,6 +124,10 @@ class T3CodeWebTest(unittest.TestCase):
             with open(wrapper, encoding="utf-8") as file_obj:
                 content = file_obj.read()
             self.assertIn("serve --host 0.0.0.0 --port 3773 --no-browser", content)
+            self.assertIn(
+                'export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"',
+                content,
+            )
             with open(service_path, encoding="utf-8") as file_obj:
                 service = file_obj.read()
             self.assertIn("User=agent", service)

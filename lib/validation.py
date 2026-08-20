@@ -949,6 +949,7 @@ def validate_agent_git_settings(config: Any) -> None:
             "--agent-auth active requires a selected tool with supported credentials"
         )
 
+    seen_auth_tools: set[str] = set()
     for spec in getattr(config, "agent_auth_files", None) or []:
         if (
             not isinstance(spec, (list, tuple))
@@ -961,7 +962,16 @@ def validate_agent_git_settings(config: Any) -> None:
                 "--agent-auth-file requires a selected agent TOOL with supported credentials "
                 "and a file PATH"
             )
-        if spec[0] == "gh" and git_host != "github.com":
+        tool = spec[0]
+        if tool in seen_auth_tools:
+            raise ValueError(f"Duplicate --agent-auth-file for tool: {tool}")
+        seen_auth_tools.add(tool)
+        if tool == "gh" and github_auth_requested:
+            raise ValueError(
+                "GitHub credentials must use either --git-auth/--git-auth-file "
+                "or --agent-auth-file gh, not both"
+            )
+        if tool == "gh" and git_host != "github.com":
             raise ValueError(
                 "GitHub CLI credentials currently support only --git-host github.com"
             )

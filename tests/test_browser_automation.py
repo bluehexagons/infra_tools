@@ -8,6 +8,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from common import browser_automation_steps
@@ -184,6 +185,46 @@ class BrowserAutomationProvisioningTests(unittest.TestCase):
                 },
             )
             self.assertEqual(config_path.stat().st_mode & 0o777, 0o600)
+
+    def test_codex_registration_reconciles_managed_server(self) -> None:
+        config = _config("codex")
+        successful = SimpleNamespace(returncode=0, stdout="", stderr="")
+        with (
+            patch.object(browser_automation_steps, "_tool_available", return_value=True),
+            patch.object(browser_automation_steps, "_user_home", return_value="/home/agent"),
+            patch.object(
+                browser_automation_steps,
+                "_run_as_login_user",
+                return_value=successful,
+            ) as run_as_user,
+        ):
+            browser_automation_steps._configure_codex(config)
+
+        self.assertEqual(run_as_user.call_count, 2)
+        remove_command = run_as_user.call_args_list[0].args[2]
+        add_command = run_as_user.call_args_list[1].args[2]
+        self.assertIn("codex mcp remove infra-tools-playwright", remove_command)
+        self.assertIn("codex mcp add infra-tools-playwright", add_command)
+
+    def test_codex_registration_reports_add_failure(self) -> None:
+        config = _config("codex")
+        successful = SimpleNamespace(returncode=0, stdout="", stderr="")
+        failed = SimpleNamespace(
+            returncode=1,
+            stdout="",
+            stderr="codex could not update MCP configuration",
+        )
+        with (
+            patch.object(browser_automation_steps, "_tool_available", return_value=True),
+            patch.object(browser_automation_steps, "_user_home", return_value="/home/agent"),
+            patch.object(
+                browser_automation_steps,
+                "_run_as_login_user",
+                side_effect=[successful, failed],
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "could not update MCP"):
+                browser_automation_steps._configure_codex(config)
 
     def test_opencode_jsonc_registration_accepts_comments_and_preserves_values(self) -> None:
         config = _config("opencode")

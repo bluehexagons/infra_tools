@@ -317,8 +317,21 @@ def _configure_codex(config: SetupConfig) -> None:
     _run_as_login_user(
         config.username,
         user_home,
-        f"{path_setup}codex mcp add {PLAYWRIGHT_MCP_SERVER_NAME} -- {PLAYWRIGHT_MCP_WRAPPER}",
+        f"{path_setup}codex mcp remove {PLAYWRIGHT_MCP_SERVER_NAME} "
+        ">/dev/null 2>&1 || true",
+        check=False,
     )
+    result = _run_as_login_user(
+        config.username,
+        user_home,
+        f"{path_setup}codex mcp add {PLAYWRIGHT_MCP_SERVER_NAME} -- "
+        f"{PLAYWRIGHT_MCP_WRAPPER}",
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "registration failed").strip()
+        raise RuntimeError(f"Codex MCP registration failed: {detail}")
 
 
 def _configure_opencode(config: SetupConfig) -> None:

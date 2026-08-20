@@ -15,6 +15,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from common.agent_steps import (
+    _chown_path,
     _download_verified_file,
     _latest_t3code_asset,
     _copy_secret_file,
@@ -83,6 +84,29 @@ class TestOfficialAgentInstallers(unittest.TestCase):
         account = type('Account', (), {'pw_dir': '/srv/agent'})()
         with patch('common.agent_steps.pwd.getpwnam', return_value=account):
             self.assertEqual(_user_home(self.config), '/srv/agent')
+
+    def test_agent_paths_use_primary_group_and_fail_on_ownership_error(self):
+        account = type(
+            'Account',
+            (),
+            {'pw_dir': '/srv/agent', 'pw_uid': 1201, 'pw_gid': 1202},
+        )()
+        failed = type(
+            'Completed',
+            (),
+            {'returncode': 1, 'stdout': '', 'stderr': 'operation not permitted'},
+        )()
+        with (
+            patch('common.agent_steps.pwd.getpwnam', return_value=account),
+            patch('common.agent_steps.run', return_value=failed) as run_command,
+        ):
+            with self.assertRaisesRegex(RuntimeError, 'operation not permitted'):
+                _chown_path(self.config, '/srv/agent/.codex')
+
+        self.assertEqual(
+            run_command.call_args.args[0],
+            'chown -R 1201:1202 /srv/agent/.codex',
+        )
 
     def test_verified_download_rejects_checksum_mismatch(self):
         with tempfile.TemporaryDirectory() as directory:

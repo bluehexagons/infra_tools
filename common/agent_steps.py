@@ -32,8 +32,19 @@ def _user_home(config: SetupConfig) -> str:
 
 
 def _chown_path(config: SetupConfig, path: str) -> None:
-    safe_username = shlex.quote(config.username)
-    run(f"chown -R {safe_username}:{safe_username} {shlex.quote(path)}", check=False)
+    try:
+        account = pwd.getpwnam(config.username)
+    except KeyError as exc:
+        raise RuntimeError(f"Target user does not exist: {config.username}") from exc
+
+    result = run(
+        f"chown -R {account.pw_uid}:{account.pw_gid} {shlex.quote(path)}",
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "ownership change failed").strip()
+        raise RuntimeError(f"Could not set ownership for {path}: {detail}")
 
 
 def install_github_cli(config: SetupConfig) -> None:

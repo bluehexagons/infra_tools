@@ -147,6 +147,7 @@ def _write_wrapper(path: str, home: str, host: str, port: int, command: str) -> 
         f"export HOME={shlex.quote(home)}\n"
         'export NVM_DIR="$HOME/.nvm"\n'
         '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"\n'
+        'export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"\n'
         f"export T3CODE_HOST={shlex.quote(host)}\n"
         f"export T3CODE_PORT={port}\n"
         f"exec npx --yes t3@latest {command}\n"

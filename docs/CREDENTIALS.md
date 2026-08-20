@@ -183,6 +183,12 @@ world-writable, and must be no larger than 4 MiB. The source is copied; it is
 not removed from the controller. The target file is installed for the target
 user with mode `0600`.
 
+Use `--agent-auth-file gh` as the alternative to `--git-auth`,
+`--git-auth-file`, or a GitHub token. Do not supply two GitHub credential
+sources, combine `--agent-auth active` with a file for the same tool, or repeat
+a tool in `--agent-auth-file`; setup rejects those ambiguous combinations
+instead of silently choosing one.
+
 ### GitHub file formats
 
 `--git-auth-file` accepts either:

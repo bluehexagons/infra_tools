@@ -61,6 +61,11 @@ sudo systemctl status infra-tools-t3code.service
 sudo journalctl -u infra-tools-t3code.service -n 100 --no-pager
 ```
 
+The service wrapper explicitly adds the setup user's `~/.local/bin` and
+`~/.opencode/bin` directories to `PATH`. This is required because systemd does
+not load the user's interactive shell startup files, and it lets the service
+discover user-scoped Codex, Claude Code, and OpenCode installations.
+
 Normal service output is not placed in the journal because startup output can
 contain pairing material. Errors remain in the journal.
 
