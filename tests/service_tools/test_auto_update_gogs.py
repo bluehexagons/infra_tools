@@ -17,7 +17,7 @@ class TestAutoUpdateGogs(unittest.TestCase):
     @patch("common.service_tools.auto_update_gogs.send_notification_safe")
     @patch("common.service_tools.auto_update_gogs._run_command")
     @patch("common.service_tools.auto_update_gogs._run_shell_command")
-    @patch("common.service_tools.auto_update_gogs.install_or_update_gogs_release", return_value=("v1.2.3", False))
+    @patch("common.service_tools.auto_update_gogs.install_or_update_gogs_release", return_value=("v1.2.3", False, "a" * 64))
     @patch("common.service_tools.auto_update_gogs.read_gogs_state", return_value={"tag_name": "v1.2.3", "config_path": "/srv/gogs/custom/conf/app.ini"})
     @patch("common.service_tools.auto_update_gogs.os.path.exists", return_value=True)
     @patch("common.service_tools.auto_update_gogs.load_notification_configs_from_state", return_value=[])
@@ -43,7 +43,7 @@ class TestAutoUpdateGogs(unittest.TestCase):
     @patch("common.service_tools.auto_update_gogs._run_command")
     @patch("common.service_tools.auto_update_gogs._run_shell_command")
     @patch("common.service_tools.auto_update_gogs.write_gogs_state")
-    @patch("common.service_tools.auto_update_gogs.install_or_update_gogs_release", return_value=("v1.2.4", True))
+    @patch("common.service_tools.auto_update_gogs.install_or_update_gogs_release", return_value=("v1.2.4", True, "a" * 64))
     @patch("common.service_tools.auto_update_gogs.read_gogs_state", return_value={"tag_name": "v1.2.3", "config_path": "/srv/gogs/custom/conf/app.ini"})
     @patch("common.service_tools.auto_update_gogs.os.path.exists", return_value=True)
     @patch("common.service_tools.auto_update_gogs.load_notification_configs_from_state", return_value=[])
@@ -65,7 +65,12 @@ class TestAutoUpdateGogs(unittest.TestCase):
 
         self.assertEqual(result, 0)
         self.assertEqual(mock_shell.call_count, 2)
-        mock_write_state.assert_called_once_with("v1.2.4", "/srv/gogs", "/srv/gogs/custom/conf/app.ini")
+        mock_write_state.assert_called_once_with(
+            "v1.2.4",
+            "/srv/gogs",
+            "/srv/gogs/custom/conf/app.ini",
+            "a" * 64,
+        )
         mock_command.assert_called_once_with(["systemctl", "restart", "gogs"])
         mock_notify.assert_called_once()
         self.assertIn("Success: Gogs updated", mock_notify.call_args.kwargs["subject"])
@@ -93,7 +98,7 @@ class TestAutoUpdateGogs(unittest.TestCase):
     @patch("common.service_tools.auto_update_gogs._current_release_path", return_value="/opt/gogs/releases/v1.2.3")
     @patch("common.service_tools.auto_update_gogs._run_command")
     @patch("common.service_tools.auto_update_gogs._run_shell_command")
-    @patch("common.service_tools.auto_update_gogs.install_or_update_gogs_release", return_value=("v1.2.4", True))
+    @patch("common.service_tools.auto_update_gogs.install_or_update_gogs_release", return_value=("v1.2.4", True, "a" * 64))
     @patch(
         "common.service_tools.auto_update_gogs.read_gogs_state",
         return_value={"tag_name": "v1.2.3", "config_path": "/srv/gogs/custom/conf/app.ini"},

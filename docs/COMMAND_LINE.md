@@ -492,9 +492,10 @@ Hostname mode requires `--ssl` or `--cloudflare`. Use `--gogs :3000` for a
 hostless loopback service reached through an SSH tunnel. To expose hostless
 HTTP on a trusted private network, repeat `--gogs-source IP_OR_CIDR`; only
 non-global IPv4 sources are accepted, active UFW is required, and setup fails
-before binding externally if it cannot verify the rules. Gogs updates validate
-the extracted executable before activation and can roll back to the previous
-release if post-update commands or restart checks fail.
+before binding externally if it cannot verify the rules. Gogs releases require
+and verify the publisher-provided SHA-256 before extraction, and activation can
+roll back to the previous release if service, post-update, or health checks
+fail.
 
 | Flag | Description |
 |------|-------------|

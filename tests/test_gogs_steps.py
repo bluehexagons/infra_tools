@@ -85,6 +85,7 @@ class TestFetchPreferredGogsRelease(unittest.TestCase):
                     {
                         "name": "gogs_v2.0.0_linux_amd64.tar.gz",
                         "browser_download_url": "https://example.com/v2.0.0.tgz",
+                        "digest": f"sha256:{'b' * 64}",
                     }
                 ],
             },
@@ -97,6 +98,7 @@ class TestFetchPreferredGogsRelease(unittest.TestCase):
                     {
                         "name": "gogs_v1.9.0_linux_amd64.tar.gz",
                         "browser_download_url": "https://example.com/v1.9.0.tgz",
+                        "digest": f"sha256:{'a' * 64}",
                     }
                 ],
             },
@@ -104,17 +106,66 @@ class TestFetchPreferredGogsRelease(unittest.TestCase):
         mock_run.return_value = SimpleNamespace(returncode=0, stdout=json.dumps(payload), stderr="")
 
         with patch.dict(os.environ, {"INFRA_TOOLS_DEPENDENCY_MIN_AGE_DAYS": "7"}):
-            tag_name, download_url = gogs_steps.fetch_preferred_gogs_release("amd64")
+            tag_name, download_url, digest = gogs_steps.fetch_preferred_gogs_release("amd64")
 
         self.assertEqual(tag_name, "v1.9.0")
         self.assertEqual(download_url, "https://example.com/v1.9.0.tgz")
+        self.assertEqual(digest, "a" * 64)
+
+    @patch("lib.release_management.run")
+    def test_release_without_publisher_digest_is_rejected(self, mock_run):
+        payload = [
+            {
+                "tag_name": "v1.9.0",
+                "published_at": "2020-01-01T00:00:00Z",
+                "draft": False,
+                "prerelease": False,
+                "assets": [
+                    {
+                        "name": "gogs_v1.9.0_linux_amd64.tar.gz",
+                        "browser_download_url": "https://example.com/v1.9.0.tgz",
+                    }
+                ],
+            }
+        ]
+        mock_run.return_value = SimpleNamespace(
+            returncode=0, stdout=json.dumps(payload), stderr=""
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "publisher-provided SHA-256"):
+            gogs_steps.fetch_preferred_gogs_release("amd64")
 
 
 class TestInstallGogsRelease(unittest.TestCase):
     @patch("web.gogs_steps.run")
+    @patch("web.gogs_steps.os.path.exists", return_value=True)
+    @patch(
+        "web.gogs_steps._load_gogs_state",
+        return_value={"tag_name": "v1.2.4", "archive_sha256": "a" * 64},
+    )
     @patch(
         "web.gogs_steps.fetch_preferred_gogs_release",
-        return_value=("../../escape", "https://example.com/gogs.tar.gz"),
+        return_value=("v1.2.4", "https://example.com/gogs-v1.2.4.tar.gz", "a" * 64),
+    )
+    @patch("web.gogs_steps.detect_release_arch", return_value="amd64")
+    def test_skips_only_when_installed_digest_matches(
+        self,
+        _arch,
+        _fetch,
+        _state,
+        _exists,
+        mock_run,
+    ):
+        self.assertEqual(
+            gogs_steps.install_or_update_gogs_release(),
+            ("v1.2.4", False, "a" * 64),
+        )
+        mock_run.assert_not_called()
+
+    @patch("web.gogs_steps.run")
+    @patch(
+        "web.gogs_steps.fetch_preferred_gogs_release",
+        return_value=("../../escape", "https://example.com/gogs.tar.gz", "a" * 64),
     )
     @patch("web.gogs_steps.detect_release_arch", return_value="amd64")
     def test_rejects_release_tag_path_traversal(self, _arch, _fetch, mock_run):
@@ -128,7 +179,7 @@ class TestInstallGogsRelease(unittest.TestCase):
     @patch("web.gogs_steps.read_installed_gogs_release", return_value="v1.2.3")
     @patch(
         "web.gogs_steps.fetch_preferred_gogs_release",
-        return_value=("v1.2.4", "https://example.com/gogs-v1.2.4.tar.gz"),
+        return_value=("v1.2.4", "https://example.com/gogs-v1.2.4.tar.gz", "a" * 64),
     )
     @patch("web.gogs_steps.detect_release_arch", return_value="amd64")
     def test_validates_extracted_binary_before_activating_release(
@@ -139,11 +190,16 @@ class TestInstallGogsRelease(unittest.TestCase):
         _exists,
         mock_run,
     ):
-        mock_run.return_value = SimpleNamespace(returncode=0, stdout="v1.2.4", stderr="")
+        def result_for(command: str, **_kwargs):
+            stdout = f"{'a' * 64}  archive\n" if command.startswith("sha256sum ") else "v1.2.4"
+            return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
 
-        tag_name, changed = gogs_steps.install_or_update_gogs_release()
+        mock_run.side_effect = result_for
+
+        tag_name, changed, digest = gogs_steps.install_or_update_gogs_release()
 
         self.assertEqual((tag_name, changed), ("v1.2.4", True))
+        self.assertEqual(digest, "a" * 64)
         calls = mock_run.call_args_list
         version_index = next(
             index for index, call in enumerate(calls) if call.args[0].endswith("/gogs --version")
@@ -151,7 +207,9 @@ class TestInstallGogsRelease(unittest.TestCase):
         activate_index = next(
             index
             for index, call in enumerate(calls)
-            if call.args[0].startswith("ln -sfn /opt/gogs/releases/v1.2.4 /opt/gogs/current")
+            if call.args[0].startswith(
+                f"ln -sfn /opt/gogs/releases/v1.2.4-{'a' * 12} /opt/gogs/current"
+            )
         )
         self.assertLess(version_index, activate_index)
         self.assertTrue(calls[version_index].kwargs["check"])
@@ -164,6 +222,42 @@ class TestInstallGogsRelease(unittest.TestCase):
         self.assertIn("/infra-tools-gogs-release-", download_command)
         self.assertNotIn("-o /tmp/gogs_", download_command)
         self.assertIn("--proto-redir '=https'", download_command)
+        checksum_index = next(
+            index for index, call in enumerate(calls) if call.args[0].startswith("sha256sum ")
+        )
+        extract_index = next(
+            index for index, call in enumerate(calls) if call.args[0].startswith("tar -xzf ")
+        )
+        self.assertLess(checksum_index, extract_index)
+
+    @patch("web.gogs_steps.run")
+    @patch("web.gogs_steps.os.path.exists", return_value=False)
+    @patch("web.gogs_steps.read_installed_gogs_release", return_value="v1.2.3")
+    @patch(
+        "web.gogs_steps.fetch_preferred_gogs_release",
+        return_value=("v1.2.4", "https://example.com/gogs-v1.2.4.tar.gz", "a" * 64),
+    )
+    @patch("web.gogs_steps.detect_release_arch", return_value="amd64")
+    def test_checksum_failure_stops_before_extraction_or_activation(
+        self,
+        _arch,
+        _fetch,
+        _installed,
+        _exists,
+        mock_run,
+    ):
+        def result_for(command: str, **_kwargs):
+            stdout = f"{'b' * 64}  archive\n" if command.startswith("sha256sum ") else ""
+            return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+
+        mock_run.side_effect = result_for
+
+        with self.assertRaisesRegex(RuntimeError, "checksum"):
+            gogs_steps.install_or_update_gogs_release()
+
+        commands = [call.args[0] for call in mock_run.call_args_list]
+        self.assertFalse(any(command.startswith("tar -xzf ") for command in commands))
+        self.assertFalse(any("/opt/gogs/current" in command for command in commands))
 
 
 class TestGenerateGogsConfig(unittest.TestCase):
@@ -361,6 +455,49 @@ class TestGogsStorageHealth(unittest.TestCase):
         with patch("web.gogs_steps.run", return_value=result):
             with self.assertRaisesRegex(RuntimeError, "cannot use CIFS"):
                 gogs_steps.check_gogs_storage_health("/srv/gogs")
+
+
+class TestGogsSetupRollback(unittest.TestCase):
+    def test_restores_previous_release_and_state_after_failed_activation(self):
+        completed = SimpleNamespace(returncode=0, stdout="", stderr="")
+        with (
+            patch("web.gogs_steps.os.path.exists", return_value=True),
+            patch("web.gogs_steps.run", return_value=completed) as runner,
+            patch("web.gogs_steps.write_gogs_state") as write_state,
+        ):
+            gogs_steps._rollback_failed_gogs_setup(
+                "v1.2.3",
+                "b" * 64,
+                "/srv/gogs",
+                "/srv/gogs/custom/conf/app.ini",
+            )
+
+        commands = [call.args[0] for call in runner.call_args_list]
+        self.assertEqual(
+            commands,
+            [
+                f"ln -sfn /opt/gogs/releases/v1.2.3-{'b' * 12} /opt/gogs/current",
+                "systemctl restart gogs",
+            ],
+        )
+        write_state.assert_called_once_with(
+            "v1.2.3",
+            "/srv/gogs",
+            "/srv/gogs/custom/conf/app.ini",
+            "b" * 64,
+        )
+
+    def test_failed_initial_install_is_stopped(self):
+        completed = SimpleNamespace(returncode=0, stdout="", stderr="")
+        with patch("web.gogs_steps.run", return_value=completed) as runner:
+            gogs_steps._rollback_failed_gogs_setup(
+                None,
+                None,
+                "/srv/gogs",
+                "/srv/gogs/custom/conf/app.ini",
+            )
+
+        runner.assert_called_once_with("systemctl stop gogs", check=False)
 
 
 class TestConfigureAutoUpdateGogs(unittest.TestCase):

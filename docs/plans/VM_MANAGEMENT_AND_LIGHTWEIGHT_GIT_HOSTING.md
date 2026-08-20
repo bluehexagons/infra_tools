@@ -1,8 +1,8 @@
 # Generic VM Management, Agent Interfaces, and Lightweight Git Hosting
 
 Status: active. The provisioning-only portion of Lane A3 and most of Lane B1
-are implemented on `main`; independent publisher verification for Gogs release
-artifacts and the remaining delivery lanes stay subject to the gates below.
+are implemented on `main`; reusable Gogs status reporting and the remaining
+delivery lanes stay subject to the gates below.
 Reviewed against `main` and upstream T3 Code, Nginx, Samba, and Git LFS
 documentation on 2026-08-20.
 
@@ -37,7 +37,7 @@ avoid abstraction whose only purpose is a hypothetical provider or service.
 | A2: existing VM mutations | Dependency-gated | Durable operation markers and staged mutation contract |
 | A3: declarative VM data disks and guest mounts | Provisioning slice implemented | Live Proxmox validation, read-only mount status, then coordinated grow-only resize; existing-disk adoption, detach, and `/home` migration remain rejected |
 | A4: clone and restore | Dependency-gated | Shared transaction and recovery contracts |
-| B1: explicit and safe Gogs LFS | Mostly implemented | Local LFS layout, required mounts, safe hostless exposure, setup-time storage health, and agent Git LFS setup are complete; publisher artifact verification and ongoing health/status observations remain |
+| B1: explicit and safe Gogs LFS | Mostly implemented | Verified releases, local LFS layout, required mounts, safe hostless exposure, setup-time storage health, and agent Git LFS setup are complete; ongoing health/status observations remain |
 | B2: Gogs recovery | Dependency-gated | Shared recovery mechanism and authenticated restore smoke test |
 | B3: Samba storage roles | Planned | Path-role enforcement and consistent archive publication |
 | C1/C2: T3 Code interfaces | Planned | Upstream service/artifact/redaction validation, then loopback service and controlled exposure |
@@ -1264,13 +1264,11 @@ observation, resize, adoption, detach, and migration workflows remain.
 Implementation status: explicit local LFS paths, directory creation, symlink
 rejection, declared-mount verification, CIFS rejection, loopback/source-rule
 exposure, setup-time storage and SQLite health, and agent Git LFS initialization
-are complete. Independent publisher verification and reusable ongoing health
-reporting remain open.
+and publisher-digest-verified release activation are complete. Reusable ongoing
+health reporting remains open.
 
 - Depend on Lane A3 for the dedicated Gogs data-disk and mount contract when a
   data disk is declared.
-- Verify release artifacts before activation and preserve the prior release on
-  failure.
 - Extend setup-time Gogs/LFS capacity and health observations into a reusable
   status command with thresholds, update-job state, and nginx limit reporting.
 - Add tested IPv6 source exposure only when Gogs's listener and UFW policy can

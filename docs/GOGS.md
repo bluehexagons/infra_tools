@@ -78,10 +78,13 @@ database under `data/gogs.db`, repositories, logs, completed LFS objects under
 `data/tmp/lfs-objects`. Gogs uses its local LFS backend explicitly; no separate
 LFS daemon or object store is required. Release binaries live under
 `/opt/gogs/releases`; `/opt/gogs/current` and `/usr/local/bin/gogs` point to
-the active executable-checked release. Setup and patch also run a SQLite quick
-check, verify that the `git` user can read and write each managed directory,
-reject CIFS/SMB live storage, and print the backing filesystem, free bytes,
-free inodes, and repository/LFS/attachment/log usage. Useful checks are:
+the active release. Infra-tools requires the publisher-provided SHA-256 from
+the GitHub release asset metadata and verifies the downloaded archive before
+extracting or activating it. A failed activation restores the prior release;
+a failed first installation stops the service. Setup and patch also run a
+SQLite quick check, verify that the `git` user can read and write each managed
+directory, reject CIFS/SMB live storage, and print the backing filesystem, free
+bytes, free inodes, and repository/LFS/attachment/log usage. Useful checks are:
 
 ```bash
 sudo systemctl status gogs

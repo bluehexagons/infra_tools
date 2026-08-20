@@ -18,6 +18,7 @@ from lib.validation import validate_filesystem_path, validate_no_control_charact
 
 
 _RELEASE_TAG_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$")
+_SHA256_DIGEST_PATTERN = re.compile(r"^sha256:([0-9a-fA-F]{64})$")
 
 
 def validate_release_tag(value: str) -> str:
@@ -39,6 +40,18 @@ def validate_release_download_url(value: str) -> str:
     if parsed.username is not None or parsed.password is not None:
         raise ValueError("Release download URL must not embed credentials")
     return value
+
+
+def validate_release_sha256_digest(value: str) -> str:
+    """Return the normalized hexadecimal value of a GitHub asset SHA-256."""
+    if not isinstance(value, str):
+        raise ValueError("Release asset digest must be a sha256 value")
+    match = _SHA256_DIGEST_PATTERN.fullmatch(value)
+    if not match:
+        raise ValueError(
+            "Release asset digest must be sha256 followed by 64 hexadecimal characters"
+        )
+    return match.group(1).lower()
 
 
 def detect_release_arch() -> str:
@@ -161,6 +174,48 @@ def fetch_preferred_github_release_asset(
         releases,
         asset_matches=asset_matches,
         missing_asset_description=missing_asset_description,
+    )
+
+
+def fetch_preferred_verified_github_release_asset(
+    repo: str,
+    *,
+    asset_matches: Callable[[str, str], bool],
+    missing_asset_description: str,
+    per_page: int = 20,
+) -> tuple[str, str, str]:
+    """Fetch a preferred release asset with its publisher-provided SHA-256."""
+    releases = order_preferred_github_releases(
+        fetch_github_releases(repo, per_page=per_page)
+    )
+    for release in releases:
+        tag_name = release.get("tag_name")
+        assets = release.get("assets")
+        if not isinstance(tag_name, str) or not isinstance(assets, list):
+            continue
+        for asset in assets:
+            if not isinstance(asset, dict):
+                continue
+            asset_name = asset.get("name")
+            download_url = asset.get("browser_download_url")
+            digest = asset.get("digest")
+            if not (
+                isinstance(asset_name, str)
+                and isinstance(download_url, str)
+                and isinstance(digest, str)
+                and asset_matches(tag_name, asset_name)
+            ):
+                continue
+            try:
+                return (
+                    validate_release_tag(tag_name),
+                    validate_release_download_url(download_url),
+                    validate_release_sha256_digest(digest),
+                )
+            except ValueError:
+                continue
+    raise RuntimeError(
+        f"{missing_asset_description}; a publisher-provided SHA-256 is required"
     )
 
 

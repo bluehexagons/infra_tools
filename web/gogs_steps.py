@@ -14,7 +14,7 @@ from lib.config import SetupConfig
 from lib.nginx_config import SSL_CIPHERS, SSL_PROTOCOLS, generate_self_signed_cert, get_ssl_cert_path
 from lib.release_management import (
     detect_release_arch,
-    fetch_preferred_github_release_asset,
+    fetch_preferred_verified_github_release_asset,
     load_json_state,
     validate_release_download_url,
     validate_release_tag,
@@ -45,6 +45,16 @@ DEFAULT_GOGS_DATA_PATH = "/var/lib/gogs"
 _GOGS_RULE_COMMENT_PREFIX = "infra_tools Gogs"
 _LEGACY_GOGS_DIRECT_COMMENT = "gogs direct HTTP"
 _UFW_NUMBERED_RULE_RE = re.compile(r"^\[\s*(\d+)\]")
+
+
+def _gogs_release_dir(tag_name: str, archive_sha256: str) -> str:
+    """Return the immutable release directory for one verified archive."""
+    safe_tag = validate_release_tag(tag_name)
+    if len(archive_sha256) != 64 or any(
+        character not in "0123456789abcdef" for character in archive_sha256
+    ):
+        raise ValueError("Invalid Gogs release SHA-256")
+    return f"{GOGS_RELEASES_DIR}/{safe_tag}-{archive_sha256[:12]}"
 
 
 def parse_gogs_spec(spec: str, *, strict: bool = False) -> tuple[str, int]:
@@ -121,13 +131,19 @@ def _load_gogs_state() -> dict[str, Any]:
     )
 
 
-def write_gogs_state(tag_name: str, data_path: str, config_path: str) -> None:
+def write_gogs_state(
+    tag_name: str,
+    data_path: str,
+    config_path: str,
+    archive_sha256: str,
+) -> None:
     write_json_state(
         GOGS_STATE_FILE,
         {
             "tag_name": tag_name,
             "data_path": data_path,
             "config_path": config_path,
+            "archive_sha256": archive_sha256,
         },
         mode=0o600,
     )
@@ -144,10 +160,10 @@ def read_gogs_state() -> Mapping[str, Any]:
     return _load_gogs_state()
 
 
-def fetch_preferred_gogs_release(arch: str) -> tuple[str, str]:
-    """Return the preferred Gogs release tag and download URL for this architecture."""
+def fetch_preferred_gogs_release(arch: str) -> tuple[str, str, str]:
+    """Return the preferred Gogs tag, URL, and publisher SHA-256."""
     binary_name_suffix = f"_linux_{arch}.tar.gz"
-    return fetch_preferred_github_release_asset(
+    return fetch_preferred_verified_github_release_asset(
         GOGS_GITHUB_REPO,
         asset_matches=lambda tag_name, asset_name: (
             asset_name.startswith(f"gogs_{tag_name}") and asset_name.endswith(binary_name_suffix)
@@ -156,18 +172,24 @@ def fetch_preferred_gogs_release(arch: str) -> tuple[str, str]:
     )
 
 
-def install_or_update_gogs_release() -> tuple[str, bool]:
-    """Install the preferred Gogs release and return (tag, changed)."""
+def install_or_update_gogs_release() -> tuple[str, bool, str]:
+    """Install the preferred Gogs release and return tag, change, and digest."""
     arch = detect_release_arch()
-    tag_name, download_url = fetch_preferred_gogs_release(arch)
+    tag_name, download_url, expected_sha256 = fetch_preferred_gogs_release(arch)
     tag_name = validate_release_tag(tag_name)
     download_url = validate_release_download_url(download_url)
-    release_dir = f"{GOGS_RELEASES_DIR}/{tag_name}"
-    installed_tag = read_installed_gogs_release()
+    release_dir = _gogs_release_dir(tag_name, expected_sha256)
+    installed_state = _load_gogs_state()
+    installed_tag = installed_state.get("tag_name")
+    installed_digest = installed_state.get("archive_sha256")
     current_binary = f"{GOGS_CURRENT_DIR}/gogs"
-    if installed_tag == tag_name and os.path.exists(current_binary):
+    if (
+        installed_tag == tag_name
+        and installed_digest == expected_sha256
+        and os.path.exists(current_binary)
+    ):
         print(f"  ✓ Gogs already up to date ({tag_name})")
-        return tag_name, False
+        return tag_name, False, expected_sha256
 
     run(f"mkdir -p {shlex.quote(GOGS_RELEASES_DIR)}")
     with tempfile.TemporaryDirectory(prefix="infra-tools-gogs-release-") as temporary_dir:
@@ -182,6 +204,14 @@ def install_or_update_gogs_release() -> tuple[str, bool]:
                 f"-o {archive_path} <release URL>"
             ),
         )
+        checksum_result = run(
+            f"sha256sum {shlex.quote(archive_path)}",
+            check=False,
+            capture_output=True,
+        )
+        observed_sha256 = (checksum_result.stdout or "").split(maxsplit=1)[0].lower()
+        if checksum_result.returncode != 0 or observed_sha256 != expected_sha256:
+            raise RuntimeError("Gogs release archive checksum verification failed")
         run(f"mkdir -p {shlex.quote(extract_dir)}")
         run(f"rm -rf {shlex.quote(release_dir)}", check=False)
         run(
@@ -207,7 +237,7 @@ def install_or_update_gogs_release() -> tuple[str, bool]:
             check=True,
         )
     print(f"  ✓ Installed Gogs {tag_name}")
-    return tag_name, True
+    return tag_name, True, expected_sha256
 
 
 def _ensure_git_user() -> str:
@@ -795,34 +825,17 @@ def check_gogs_storage_health(data_path: str) -> Mapping[str, Any]:
     }
 
 
-def setup_gogs(config: SetupConfig) -> None:
-    """Install and run Gogs with HTTP(S) and Git-over-SSH enabled."""
-    if not config.gogs:
-        return
-
-    domain, port = parse_gogs_spec(str(config.gogs[0]), strict=True)
-    data_path = _gogs_data_path(config)
-    if domain:
-        listen_label = f"{domain} -> 127.0.0.1:{port}"
-    elif config.gogs_sources:
-        listen_label = f"private sources -> :{port}"
-    else:
-        listen_label = f"127.0.0.1:{port} (SSH tunnel only)"
-    print(f"  Setting up Gogs: {listen_label}")
-
-    from common.storage_steps import assert_declared_storage_mount
-
-    assert_declared_storage_mount(config, data_path)
-    _gogs_backing_filesystem(data_path)
-
-    if not domain:
-        run(f"systemctl stop {GOGS_SERVICE}", check=False)
-        _configure_hostless_gogs_firewall(config, port)
-
-    _ensure_gogs_dependencies()
-    git_home = _ensure_git_user()
-    config_path = _ensure_gogs_data_dirs(data_path)
-    tag_name, _changed = install_or_update_gogs_release()
+def _complete_gogs_setup(
+    config: SetupConfig,
+    *,
+    domain: str,
+    port: int,
+    data_path: str,
+    git_home: str,
+    config_path: str,
+    tag_name: str,
+    archive_sha256: str,
+) -> None:
     with open(config_path, "w", encoding="utf-8") as file_obj:
         file_obj.write(
             generate_gogs_app_ini(
@@ -834,7 +847,7 @@ def setup_gogs(config: SetupConfig) -> None:
             )
         )
     run(f"chown {shlex.quote(GOGS_GIT_USER)}:{shlex.quote(GOGS_GIT_GROUP)} {shlex.quote(config_path)}")
-    write_gogs_state(tag_name, data_path, config_path)
+    write_gogs_state(tag_name, data_path, config_path, archive_sha256)
     _configure_git_ssh_access()
 
     if domain:
@@ -865,3 +878,98 @@ def setup_gogs(config: SetupConfig) -> None:
             f"  Connect with: ssh -L {port}:127.0.0.1:{port} "
             f"{config.username}@{config.host}"
         )
+
+
+def _rollback_failed_gogs_setup(
+    previous_tag: str | None,
+    previous_archive_sha256: str | None,
+    data_path: str,
+    config_path: str,
+) -> None:
+    if previous_tag:
+        try:
+            safe_previous_tag = validate_release_tag(previous_tag)
+        except ValueError:
+            safe_previous_tag = ""
+        previous_release = (
+            _gogs_release_dir(safe_previous_tag, previous_archive_sha256)
+            if safe_previous_tag and previous_archive_sha256
+            else ""
+        )
+        if (
+            safe_previous_tag
+            and previous_archive_sha256
+            and os.path.exists(f"{previous_release}/gogs")
+        ):
+            run(
+                f"ln -sfn {shlex.quote(previous_release)} "
+                f"{shlex.quote(GOGS_CURRENT_DIR)}",
+                check=False,
+            )
+            write_gogs_state(
+                safe_previous_tag,
+                data_path,
+                config_path,
+                previous_archive_sha256,
+            )
+            run(f"systemctl restart {GOGS_SERVICE}", check=False)
+            print(f"  ⚠ Restored Gogs {safe_previous_tag} after setup failure")
+            return
+    run(f"systemctl stop {GOGS_SERVICE}", check=False)
+
+
+def setup_gogs(config: SetupConfig) -> None:
+    """Install and run Gogs with HTTP(S) and Git-over-SSH enabled."""
+    if not config.gogs:
+        return
+
+    domain, port = parse_gogs_spec(str(config.gogs[0]), strict=True)
+    data_path = _gogs_data_path(config)
+    if domain:
+        listen_label = f"{domain} -> 127.0.0.1:{port}"
+    elif config.gogs_sources:
+        listen_label = f"private sources -> :{port}"
+    else:
+        listen_label = f"127.0.0.1:{port} (SSH tunnel only)"
+    print(f"  Setting up Gogs: {listen_label}")
+
+    from common.storage_steps import assert_declared_storage_mount
+
+    assert_declared_storage_mount(config, data_path)
+    _gogs_backing_filesystem(data_path)
+
+    if not domain:
+        run(f"systemctl stop {GOGS_SERVICE}", check=False)
+        _configure_hostless_gogs_firewall(config, port)
+
+    _ensure_gogs_dependencies()
+    git_home = _ensure_git_user()
+    config_path = _ensure_gogs_data_dirs(data_path)
+    previous_state = _load_gogs_state()
+    previous_tag = previous_state.get("tag_name")
+    previous_archive_sha256 = previous_state.get("archive_sha256")
+    tag_name, changed, archive_sha256 = install_or_update_gogs_release()
+    try:
+        _complete_gogs_setup(
+            config,
+            domain=domain,
+            port=port,
+            data_path=data_path,
+            git_home=git_home,
+            config_path=config_path,
+            tag_name=tag_name,
+            archive_sha256=archive_sha256,
+        )
+    except Exception:
+        if changed:
+            _rollback_failed_gogs_setup(
+                previous_tag if isinstance(previous_tag, str) else None,
+                (
+                    previous_archive_sha256
+                    if isinstance(previous_archive_sha256, str)
+                    else None
+                ),
+                data_path,
+                config_path,
+            )
+        raise

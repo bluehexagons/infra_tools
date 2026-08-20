@@ -104,7 +104,7 @@ def main() -> int:
     previous_release = _current_release_path()
     log_event(logger, "Starting Gogs update check", current_version=installed_tag or "unknown")
     try:
-        target_tag, changed = install_or_update_gogs_release()
+        target_tag, changed, archive_sha256 = install_or_update_gogs_release()
     except Exception as exc:
         details = str(exc)
         log_event(logger, "Gogs release update failed", level=ERROR, stderr=details)
@@ -182,7 +182,7 @@ def main() -> int:
         return 1
 
     try:
-        write_gogs_state(target_tag, data_path, config_path)
+        write_gogs_state(target_tag, data_path, config_path, archive_sha256)
     except (OSError, ValueError) as exc:
         details = str(exc)
         rolled_back = _rollback_gogs_release(previous_release)
