@@ -113,6 +113,11 @@ class T3CodeWebTest(unittest.TestCase):
                     "common.t3code_steps.run",
                     side_effect=run_command,
                 ),
+                patch("common.t3code_steps.install_package", return_value=True),
+                patch(
+                    "common.t3code_steps._run_as_login_user",
+                    return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
+                ),
                 patch("common.t3code_steps.T3_SERVICE_FILE", service_path),
             ):
                 install_t3code_web(config)
@@ -125,9 +130,18 @@ class T3CodeWebTest(unittest.TestCase):
                 content = file_obj.read()
             self.assertIn("serve --host 0.0.0.0 --port 3773 --no-browser", content)
             self.assertIn(
-                'export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"',
+                f"exec {os.path.join(temporary, '.local', 'share', 'infra-tools', 't3code', 'node_modules', '.bin', 't3')}",
                 content,
             )
+            self.assertIn(f"cd {os.path.join(temporary, 'repos')}", content)
+            self.assertNotIn("npx", content)
+            self.assertIn(
+                'export PATH="$HOME/.local/share/infra-tools/t3code/node_modules/.bin:',
+                content,
+            )
+            with open(os.path.join(temporary, ".bashrc"), encoding="utf-8") as file_obj:
+                bashrc = file_obj.read()
+            self.assertIn("infra-tools T3 Code runtime", bashrc)
             with open(service_path, encoding="utf-8") as file_obj:
                 service = file_obj.read()
             self.assertIn("User=agent", service)

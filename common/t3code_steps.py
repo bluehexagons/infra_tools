@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import ipaddress
+import json
 import os
 import pwd
 import re
 import shlex
 
+from common.common_steps import _run_as_login_user
 from lib.config import SetupConfig
-from lib.remote_utils import is_dry_run, run
+from lib.remote_utils import install_package, is_dry_run, run
 from lib.validation import validate_filesystem_path, validate_network_ip_or_cidr
 
 
@@ -17,6 +19,7 @@ T3_SERVICE_NAME = "infra-tools-t3code"
 T3_SERVICE_FILE = f"/etc/systemd/system/{T3_SERVICE_NAME}.service"
 T3_UFW_RULE_COMMENT_PREFIX = "infra_tools T3 Code"
 _UFW_NUMBERED_RULE_RE = re.compile(r"^\[\s*(\d+)\]\s+(.*)$")
+_T3_RUNTIME_RELATIVE_PATH = (".local", "share", "infra-tools", "t3code")
 
 
 def _user_home(config: SetupConfig) -> str:
@@ -140,17 +143,114 @@ def _configure_firewall(config: SetupConfig, port: int, host: str) -> None:
     _remove_managed_rules(updated_rules, desired_comments)
 
 
-def _write_wrapper(path: str, home: str, host: str, port: int, command: str) -> None:
+def _t3_runtime_path(home: str) -> str:
+    return os.path.join(home, *_T3_RUNTIME_RELATIVE_PATH)
+
+
+def _ensure_t3_shell_path(home: str, uid: int, gid: int) -> None:
+    """Make the installed T3 CLI available in target-user login shells."""
+
+    bashrc = os.path.join(home, ".bashrc")
+    path_line = (
+        'export PATH="$HOME/.local/share/infra-tools/t3code/'
+        'node_modules/.bin:$PATH"\n'
+    )
+    existing = ""
+    if os.path.exists(bashrc):
+        with open(bashrc, "r", encoding="utf-8") as file_obj:
+            existing = file_obj.read()
+    if path_line not in existing:
+        with open(bashrc, "a", encoding="utf-8") as file_obj:
+            if existing and not existing.endswith("\n"):
+                file_obj.write("\n")
+            file_obj.write("# infra-tools T3 Code runtime\n")
+            file_obj.write(path_line)
+    os.chown(bashrc, uid, gid)
+
+
+def _install_t3_runtime(home: str, username: str, uid: int, gid: int) -> str:
+    """Install T3 and its Linux native dependencies for the target user.
+
+    T3 depends on node-pty, which may need to compile on Linux.  Keeping this
+    install in a persistent target-user directory means service restarts do
+    not depend on npx's temporary cache, npm's current script policy, or a
+    network connection.
+    """
+
+    for name, package in (
+        ("T3 Code native build tools", "build-essential"),
+        ("T3 Code Python build support", "python3"),
+    ):
+        if not install_package(name, package, f"apt-get install -y -qq {package}"):
+            raise RuntimeError(f"Could not install {package}, required by T3 Code")
+
+    runtime = _t3_runtime_path(home)
+    os.makedirs(runtime, mode=0o700, exist_ok=True)
+    os.chmod(runtime, 0o700)
+    os.chown(runtime, uid, gid)
+
+    package_json = os.path.join(runtime, "package.json")
+    if not os.path.exists(package_json):
+        with open(package_json, "w", encoding="utf-8") as file_obj:
+            json.dump(
+                {
+                    "name": "infra-tools-t3code-runtime",
+                    "private": True,
+                },
+                file_obj,
+            )
+            file_obj.write("\n")
+        os.chmod(package_json, 0o600)
+        os.chown(package_json, uid, gid)
+
+    t3_binary = os.path.join(runtime, "node_modules", ".bin", "t3")
+    safe_runtime = shlex.quote(runtime)
+    safe_binary = shlex.quote(t3_binary)
+    result = _run_as_login_user(
+        username,
+        home,
+        "export NVM_DIR=\"$HOME/.nvm\" && "
+        '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && '
+        'export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH" && '
+        f"cd {safe_runtime} && "
+        "npm install --no-fund --no-audit --dangerously-allow-all-scripts "
+        "t3@latest && "
+        f"test -x {safe_binary}",
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        details = (result.stderr or result.stdout or "").strip()
+        detail = f": {details[-500:]}" if details else ""
+        raise RuntimeError(f"T3 Code installation failed{detail}")
+
+    _ensure_t3_shell_path(home, uid, gid)
+    os.chown(runtime, uid, gid)
+    print(f"  ✓ T3 Code runtime installed for {username}")
+    return t3_binary
+
+
+def _write_wrapper(
+    path: str,
+    home: str,
+    workspace: str,
+    t3_binary: str,
+    host: str,
+    port: int,
+    command: str,
+) -> None:
     content = (
         "#!/bin/bash\n"
         "set -eu\n"
         f"export HOME={shlex.quote(home)}\n"
         'export NVM_DIR="$HOME/.nvm"\n'
         '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"\n'
-        'export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"\n'
+        'export PATH="$HOME/.local/share/infra-tools/t3code/node_modules/.bin:'
+        '$HOME/.opencode/bin:$HOME/.local/bin:$PATH"\n'
         f"export T3CODE_HOST={shlex.quote(host)}\n"
         f"export T3CODE_PORT={port}\n"
-        f"exec npx --yes t3@latest {command}\n"
+        f"cd {shlex.quote(workspace)}\n"
+        f"exec {shlex.quote(t3_binary)} {command}\n"
     )
     with open(path, "w", encoding="utf-8") as file_obj:
         file_obj.write(content)
@@ -173,16 +273,24 @@ def install_t3code_web(config: SetupConfig) -> None:
 
     os.makedirs(workspace, mode=0o755, exist_ok=True)
     os.makedirs(os.path.join(home, ".local", "bin"), mode=0o755, exist_ok=True)
+    t3_binary = _install_t3_runtime(
+        home,
+        config.username,
+        account.pw_uid,
+        account.pw_gid,
+    )
     wrapper = os.path.join(home, ".local", "bin", "infra-tools-t3code-web")
     pair_wrapper = os.path.join(home, ".local", "bin", "t3code-pair")
     _write_wrapper(
         wrapper,
         home,
+        workspace,
+        t3_binary,
         host,
         port,
         f"serve --host {shlex.quote(host)} --port {port} --no-browser",
     )
-    _write_wrapper(pair_wrapper, home, host, port, "pair")
+    _write_wrapper(pair_wrapper, home, workspace, t3_binary, host, port, "pair")
     os.chown(wrapper, account.pw_uid, account.pw_gid)
     os.chown(pair_wrapper, account.pw_uid, account.pw_gid)
     os.chown(workspace, account.pw_uid, account.pw_gid)

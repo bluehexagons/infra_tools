@@ -1037,8 +1037,10 @@ administration endpoint.
 
 ### T3 Code runtime and service integration
 
-`--web-interface t3code` installs the Node runtime and invokes the supported
-headless `npx t3@latest serve` CLI. The web selection does not require a
+`--web-interface t3code` installs the Node runtime, native build prerequisites,
+and a persistent target-user T3 runtime under
+`~/.local/share/infra-tools/t3code`, then invokes its supported headless CLI.
+The web selection does not require a
 separate `--node` flag, install the desktop AppImage, or install GitHub CLI or
 provider CLIs that were not explicitly selected with `--agent-tool`. The
 current implementation requires at least one of Codex, Claude Code, or
@@ -1052,11 +1054,14 @@ copies credentials merely because T3 Code was selected.
 
 The current service is an infra-tools-managed system unit with explicit HOME,
 working directory, bind, port, restart policy, and target-user ownership. Its
-wrapper loads the target user's nvm environment and invokes `npx --yes
-t3@latest serve`; service stdout is discarded so pairing material is not
-captured in journald. `t3code-pair` invokes the supported pairing command for
-an operator. A later update/revocation command should use T3's supported
-service/auth lifecycle rather than adding a second credential store.
+wrapper loads the target user's nvm environment and invokes the persistent T3
+binary directly; service stdout is discarded so pairing material is not
+captured in journald. T3's Linux `node-pty` dependency is compiled during
+setup with the required Debian build packages, and service restarts do not
+depend on npm's temporary npx cache or network access. `t3code-pair` invokes
+the same installed binary for an operator. A later update/revocation command
+should use T3's supported service/auth lifecycle rather than adding a second
+credential store.
 
 Setup ordering currently installs Node as a derived T3 dependency, installs
 selected provider CLIs and their staged credentials/configuration, then creates

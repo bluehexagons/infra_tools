@@ -61,10 +61,19 @@ sudo systemctl status infra-tools-t3code.service
 sudo journalctl -u infra-tools-t3code.service -n 100 --no-pager
 ```
 
-The service wrapper explicitly adds the setup user's `~/.local/bin` and
-`~/.opencode/bin` directories to `PATH`. This is required because systemd does
-not load the user's interactive shell startup files, and it lets the service
-discover user-scoped Codex, Claude Code, and OpenCode installations.
+The service wrapper explicitly adds the T3 runtime, setup user's `~/.local/bin`,
+and `~/.opencode/bin` directories to `PATH`. This is required because systemd
+does not load the user's interactive shell startup files, and it lets the
+service discover user-scoped T3, Codex, Claude Code, and OpenCode
+installations.
+
+During setup, infra-tools installs `build-essential` and `python3`, then
+installs T3 and its native dependencies as the target user under
+`~/.local/share/infra-tools/t3code`. T3's `node-pty` dependency may need to
+compile on Linux, and npm install scripts are explicitly enabled for this
+isolated VM-local runtime. The service executes that installed binary directly;
+it does not run `npx`, download packages, or rebuild native modules at every
+boot. Rerunning the setup command updates or repairs this runtime.
 
 Normal service output is not placed in the journal because startup output can
 contain pairing material. Errors remain in the journal.
@@ -84,8 +93,14 @@ passwords. After pairing, use T3's authentication commands to inspect or
 revoke sessions:
 
 ```bash
-npx t3 auth --help
+t3 auth --help
 ```
+
+The T3 runtime is already installed in the target user's persistent
+`~/.local/share/infra-tools/t3code` directory, and its bin directory is on the
+login user's PATH. Do not use `npx` for T3 administration, since that can
+select a different version or recreate the native-module problem described
+above.
 
 For a desktop client, the normal choices are:
 
