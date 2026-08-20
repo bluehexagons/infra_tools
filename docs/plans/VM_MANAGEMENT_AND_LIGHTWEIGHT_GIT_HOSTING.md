@@ -1,8 +1,8 @@
-# Generic VM Management, Agent Web Interfaces, and Lightweight Git Hosting
+# Generic VM Management, Agent Interfaces, and Lightweight Git Hosting
 
 Status: implementation-ready project brief; individual delivery lanes remain
 subject to the dependency gates below. Reviewed against `main` and upstream
-T3 Code documentation on 2026-08-20.
+T3 Code, Nginx, Samba, and Git LFS documentation on 2026-08-20.
 
 This project sharpens infra-tools around the environments it is intended to
 serve: small businesses running Debian systems on their own Proxmox hardware
@@ -19,8 +19,9 @@ The project has three related tracks:
 2. make the existing minimal Gogs service a deliberate Git and Git LFS server
    for low-end systems, including explicit storage, health, and recovery
    contracts; and
-3. let an agent VM run explicitly selected web interfaces, beginning with T3
-   Code, behind a small and secure service, proxy, and access-policy contract.
+3. let an agent VM install explicitly selected desktop or web interfaces,
+   beginning with T3 Code, behind a small and secure interface, service,
+   proxy, and access-policy contract.
 
 The tracks share the same product constraints: prefer straightforward
 open-source components, keep saved commands as the reusable declaration, and
@@ -53,14 +54,30 @@ avoid abstraction whose only purpose is a hypothetical provider or service.
   must update saved-command rendering, documentation, completions, callers,
   and tests in the same change, then remove the superseded path instead of
   carrying aliases, adapters, deprecated fields, or dual dispatch.
-- Agent web interfaces are explicit selections. `--web-interface t3code`
-  installs and runs T3 Code's headless service; it does not imply a general
-  agent suite, a desktop AppImage, or every available provider CLI.
-- Remove `t3code` from `--agent-tool` and retire the current AppImage installer.
-  T3 Code is an interface that drives selected provider CLIs, not a provider
-  agent itself. A future desktop package requires a separate explicit
-  desktop-interface option and a concrete use case; it is not an alias for the
-  web service.
+- Agent capabilities are explicit and have separate categories. `--agent-tool`
+  selects provider CLIs such as `gh`, `codex`, or `opencode`;
+  `--desktop-interface t3code` selects the T3 Code desktop application; and
+  `--web-interface t3code` selects its headless web service. None of these
+  selections implies the others, a general agent suite, or unselected
+  provider CLIs.
+- Remove `t3code` from `--agent-tool`, but retain the current AppImage path as
+  a dedicated desktop-interface adapter. T3 Code is an interface that drives
+  selected provider CLIs, not a provider agent itself. Desktop installation
+  must be explicit, require a suitable desktop session, and never create a
+  web listener or background service as a side effect. The desktop and web
+  adapters may share a verified release-artifact registry without sharing
+  launchers, service state, or exposure policy.
+- Samba is an optional storage and operator-access integration, not a Git
+  transport, Git authorization layer, or general-purpose application data
+  backend. Git and Git LFS continue to use their normal HTTPS Git service
+  endpoints. Live Gogs data and active agent worktrees remain local in the
+  first storage slice; Samba is used for explicitly scoped assets, import and
+  export, and consistent backup archives.
+- Nginx HTTP Basic Auth is an optional edge gate for selected web interfaces,
+  implemented with Nginx's existing module and one protected password file per
+  interface. It is never sent over plaintext HTTP, never replaces T3 Code's
+  native pairing/session authentication, and never stores a raw password in a
+  command, saved configuration, process environment, or unit file.
 - T3 Code is an acceptable first interface because its source is available
   under the MIT license. Each later interface still needs its own license,
   release, runtime, and update-path review before being added.
@@ -146,8 +163,8 @@ after setup.
 The current T3 Code installer downloads the desktop AppImage and creates a
 desktop launcher. It does not install or supervise the separate headless CLI
 service used by `t3 serve`, expose it through nginx, or manage remote pairing.
-The new web-interface path replaces that installer; it does not retain the
-desktop path as another mode or alias.
+The new design keeps that installer as the explicit desktop-interface path and
+adds a separate web-interface adapter; neither path is an alias for the other.
 
 T3 Code's supported remote model already provides a headless server, one-time
 owner pairing credentials, authenticated sessions, session revocation, and a
@@ -177,10 +194,17 @@ launcher.
   required metadata in one documented Gogs recovery contract.
 - Ensure agent workspaces can explicitly install Git LFS before cloning normal
   repository declarations that use it.
+- Keep desktop T3 Code available for desktop/RDP use cases without making it a
+  prerequisite for, or side effect of, the headless web service.
+- Define how existing Samba server and client support can provide scoped agent
+  assets, Git/Gogs backup storage, and import/export without placing live Git
+  metadata or SQLite on an unsafe shared filesystem.
 - Let operators select one or more explicit agent web interfaces while keeping
   each backend bound to loopback and each public exposure explicit.
 - Make a loopback service plus an SSH tunnel the safe zero-configuration web
   interface, with optional nginx hostname/TLS and CIDR filtering.
+- Offer Nginx Basic Auth as a minimally secure, optional edge gate where TLS,
+  password-file handling, and browser/WebSocket behavior are all verifiable.
 - Preserve each tool's native authentication and access-revocation model,
   while ensuring startup output and normal logs do not expose pairing secrets.
 - Ensure web services see the same explicit agent binaries, credentials, and
@@ -203,6 +227,9 @@ launcher.
   this project.
 - Adding an external Git LFS server, S3-compatible storage abstraction, or
   distributed object store.
+- Making Samba a Git protocol, a replacement for Gogs's HTTPS LFS endpoint, or
+  a live writable home for Gogs's SQLite database, repositories, or LFS
+  objects in the first release.
 - Emulating Git LFS file locking that Gogs does not implement.
 - Making every Proxmox API or `qm` option available through a raw pass-through
   interface.
@@ -213,7 +240,9 @@ launcher.
   preview.
 - Adding a generic username/password database, OAuth provider, identity proxy,
   Caddy, Traefik, or a container-based web-interface stack in the first slice.
-- Installing or maintaining the T3 Code desktop AppImage in this release.
+- Installing a desktop T3 Code application on a headless target, or making
+  desktop installation imply provider credentials, RDP, browser automation,
+  or a web listener.
 
 ## Track A: provider-neutral VM commands
 
@@ -523,7 +552,110 @@ For an SSH Git remote, diagnostics must still verify the separate HTTPS LFS
 credential path and explain that successful SSH authentication alone is not
 enough for object transfer.
 
+### Samba storage boundary
+
+The repository already has separate Samba server and CIFS client capabilities:
+`--samba` and `--share` configure an authenticated server share, while
+`--smbclient` and `--mount-smb` install and mount a remote share. They should be
+used as storage roles around Git, not as another Git protocol or credential
+system. Samba credentials grant filesystem access to a path; they do not scope
+repositories, Git pushes, or Git LFS objects.
+
+The first storage design uses the following boundaries:
+
+| Data or operation | First-release location | Samba role |
+| --- | --- | --- |
+| Gogs SQLite database, `app.ini`, secrets, and generated hooks | Local Gogs data filesystem | Never a live writable share |
+| Gogs bare repositories | Local Gogs data filesystem, owned by `git` | Offline backup/export only |
+| Gogs LFS objects and temporary uploads | Local Gogs LFS paths | Offline backup/export only; do not set `OBJECTS_PATH` to CIFS |
+| Agent `.git` directories and active worktrees | Local VM filesystem | Import/export or backup only |
+| Large agent assets that are not active Git worktrees | Explicit mounted share | Optional `--mount-smb` asset path |
+| Consistent Gogs or workspace archives | Separate restricted backup share | Local backup job or dedicated backup account writes; ordinary agents have no access or read-only access |
+
+Do not expose the live Gogs data root as a writeable Samba share. Direct SMB
+writes bypass Gogs authentication, hooks, repository policy, and LFS
+reachability checks; concurrent access also makes SQLite and repository
+operations unsafe. A share may use the same physical disk through a separate
+directory, but the exported path must not contain Gogs's database, secrets,
+hooks, or live repositories. The share configuration should use explicit
+`valid users`, least-privilege read/write mode, and normal Unix permissions;
+`force user` or symlink-following exceptions are not a substitute for a data
+ownership design.
+
+Backups to a Samba destination must cross the same consistency boundary as any
+other Gogs backup. Stop Gogs for the short archive window (or use the future
+recovery mechanism that provides an equivalent consistent snapshot), create
+the archive locally, verify its size and checksum, copy it to a restricted
+backup share under a temporary name, and atomically rename it after the copy
+completes. Restore must copy the archive back locally and pass the normal Git
+and Git LFS smoke test before re-enabling service access. Do not treat a live
+copy of SQLite, repositories, and LFS objects at unrelated times as a
+recoverable backup.
+
+Agent VMs should keep active `--repo` worktrees on local ext4 or xfs storage.
+Git can operate on a mounted filesystem, but a CIFS worktree adds differences
+in locking, case behavior, symlinks, executable bits, file notification,
+latency, and concurrent-writer semantics. A direct `file://` Git remote on a
+share also does not provide Gogs authentication, server hooks, or a safe
+multi-writer protocol. The setup flow should therefore reject or clearly mark
+repository paths on CIFS in the first release. Use normal HTTPS Git and the
+Git LFS endpoint for repository transport, and use Samba for assets, staging,
+or archives. A later share-backed-worktree mode needs its own explicit option
+and live compatibility tests; it must not be inferred from a path under
+`/mnt`.
+
+Git LFS remains independent of the share. `git lfs install` initializes the
+target user, Git stores pointer files in the local worktree, and the LFS client
+transfers the large content to the Git host's HTTPS LFS endpoint. A mounted
+asset share can hold source material before it is copied into a local LFS
+worktree, but it does not become the LFS server or bypass the LFS credential.
+The Gogs LFS object directory can be included in an offline archive placed on
+Samba, but a live CIFS `OBJECTS_PATH` is out of scope until Gogs's locking,
+latency, failure, and recovery behavior has been tested on the supported
+hardware.
+
+This keeps the initial CLI simple: compose the existing Samba storage options
+with `--git-lfs` and normal `--repo` declarations, without adding a
+Git-specific share syntax or a second repository URL. If the implementation
+needs more automation later, add role-aware storage declarations for `asset`
+and `backup` first; do not add a generic “put application data on Samba” flag.
+
 ## Track C: agent web interfaces
+
+### Desktop T3 Code interface
+
+Desktop installation remains available for a VM that has a deliberate
+desktop/RDP workload. Its selection is separate from both provider CLIs and
+the headless web service:
+
+```text
+--desktop-interface t3code
+```
+
+This adapter installs the verified T3 Code desktop artifact for the target
+user, creates its launcher and desktop entry, and reports the required
+desktop-session and architecture prerequisites. It does not install RDP,
+provider CLIs, browser automation, or credentials implicitly; those remain
+separate explicit setup choices. It does not create a systemd web service,
+nginx site, firewall rule, or remote pairing endpoint. Desktop T3 Code may
+still start its own local server as part of normal upstream desktop behavior,
+but infra-tools does not advertise or expose that server as a managed web
+interface.
+
+The current Linux artifact is an upstream AppImage. The installer must verify
+the selected release asset before activation, keep the download outside the
+user's credential directories, install it as the setup user, and create a
+launcher that points at the real artifact. Prefer a verified upstream Debian
+package or another supported native artifact when the release registry makes
+one available, but do not add a package manager abstraction solely for this
+adapter. Desktop update and version-skew behavior must remain visible to the
+operator; it must not silently update a running desktop session or its data.
+
+`--desktop-interface t3code` is valid on a desktop-capable target and is
+invalid as a synonym for `--web-interface t3code`. A target may select both,
+but they are independent installations with independent health, update,
+exposure, and removal state. The desktop selection is also not a reason to
+accept `--agent-tool t3code`; that provider-tool name remains removed.
 
 ### Declaration and command shape
 
@@ -537,6 +669,8 @@ shape is:
 --web-interface-port t3code 443
 --web-interface-source t3code 192.168.0.0/24
 --web-interface-source t3code 10.0.0.0/8
+--web-interface-auth t3code native+basic
+--web-interface-auth-file t3code /run/secrets/t3code.htpasswd
 ```
 
 `--web-interface` is repeatable across distinct tools. Each companion option
@@ -595,12 +729,49 @@ interface that has no suitable native authentication. A loopback-only SSH
 tunnel is also sufficient network authentication for such a tool.
 
 Do not add raw passwords to setup arguments, saved commands, process
-environments, or systemd unit files. Generic nginx Basic Auth is deferred: T3
-Code does not need a second login prompt, while safely designing password
-input, hashing, rotation, recovery, and WebSocket behavior would be more work
-than the first use case warrants. If a later unauthenticated tool needs public
-access, add a username plus interactive or file-based secret input; never a
-literal command-line password.
+environments, or systemd unit files. Add optional Nginx Basic Auth as an edge
+gate with a compact policy rather than a new identity system:
+
+```text
+--web-interface-auth t3code native
+--web-interface-auth t3code native+basic
+--web-interface-auth-file t3code /run/secrets/t3code.htpasswd
+```
+
+`native` is the default for T3 Code. `native+basic` retains T3's pairing and
+session checks while requiring an Nginx Basic Auth password file before the
+request reaches the service. A future interface without native authentication
+may use `basic` as its only edge gate, but only over HTTPS, Cloudflare, or a
+loopback/SSH-tunnel path; Basic Auth over plaintext HTTP is rejected. The
+source allowlist remains available as additional network defense and is not a
+replacement for encryption.
+
+The auth file is an Nginx-compatible `name:hash` file. The operator may supply
+an existing regular file or, in interactive setup, enter a username and hidden
+password so infra-tools can generate one with the system's existing OpenSSL
+`passwd` support. Do not add `apache2-utils` only to obtain `htpasswd`, and do
+not implement password hashing in infra-tools. Store one root-owned,
+mode-`0600` or appropriately group-readable file per interface, replace it
+atomically during rotation, and reload Nginx only after a complete
+configuration test. A supplied file is a secret input and is never copied to
+saved setup state or printed in a plan.
+
+Basic Auth is a gate, not a session or revocation system: changing the file
+does not necessarily terminate an already-open WebSocket, and there is no
+MFA, per-session expiry, or audit identity beyond the username. T3 pairing
+session revocation remains required. The hosted T3 client cannot be assumed
+to answer a cross-origin HTTP Basic challenge or set credentials on a browser
+WebSocket, so a Basic-protected T3 endpoint must serve the matching client
+from the same Nginx origin until a live hosted-client test proves otherwise.
+Setup must not advertise `app.t3.codes` as compatible merely because the
+backend returns a successful HTTP 401/200 sequence.
+
+Nginx applies the Basic challenge to the initial HTTP/WebSocket upgrade. The
+proxy still needs the normal explicit `Upgrade` and `Connection` headers,
+bounded timeouts, and host/origin checks. Authentication tests must cover the
+ordinary UI, the WebSocket handshake, reconnects, credential rotation, and
+the fact that the loopback backend cannot be reached directly from the
+network.
 
 Pairing URLs and tokens must be treated as credentials. Normal setup output,
 saved commands, dry runs, generated nginx files, and service logs must not
@@ -637,16 +808,21 @@ administration endpoint.
 
 ### T3 Code runtime and service integration
 
-`--web-interface t3code` replaces the retired `--agent-tool t3code` AppImage
-path and installs the supported headless `t3` CLI and the Node
+`--web-interface t3code` installs the supported headless `t3` CLI and the Node
 runtime version it requires. Reuse a compatible explicitly selected Node
 runtime; otherwise install only the minimum runtime owned by the T3 interface.
-Git is a required T3 dependency and is installed if absent. The selection does
-not require a separate `--node` flag, install the desktop AppImage, or install
-GitHub CLI or provider CLIs that were not explicitly selected with
+Git is a required T3 dependency and is installed if absent. The web selection
+does not require a separate `--node` flag, install the desktop AppImage, or
+install GitHub CLI or provider CLIs that were not explicitly selected with
 `--agent-tool`. Setup should report when no supported provider CLI is selected,
 but it may still install the interface so credentials or providers can be
 added later.
+
+The desktop adapter and web adapter share only the artifact verification and
+version policy. The web adapter owns the headless service, systemd user unit,
+loopback port, project registration, and Nginx exposure described below; the
+desktop adapter owns its per-user launcher and desktop entry. Neither adapter
+copies credentials merely because T3 Code was selected.
 
 Use T3 Code's supported `service install`, `service update`, and `service
 uninstall` lifecycle instead of maintaining a second version-switching and
@@ -692,19 +868,21 @@ after validation and are restored if the service or proxy health check fails.
 
 ### Reconciliation, health, and low-end operation
 
-Each interface definition owns one service instance, nginx site when present,
-firewall rules, and a small observed-state record. Re-running the same command
-is idempotent. Removing an interface from a saved command should show the
-stale managed resources and require the normal reconciliation/removal
-confirmation rather than leaving an unknown listener or deleting tool data
-silently.
+Each web-interface definition owns one service instance, nginx site when
+present, firewall rules, and a small observed-state record. Each
+desktop-interface definition owns only its verified artifact, launcher,
+desktop entry, and desktop installation state. Re-running the same command is
+idempotent. Removing an interface from a saved command should show the stale
+managed resources and require the normal reconciliation/removal confirmation
+rather than leaving an unknown listener or deleting tool data silently.
 
-Observed state has an explicit schema version and records ownership, tool,
-Unix user, installed version, fixed backend port, generated artifact paths,
-exposure mode, and last health result. It contains no credential or copied
-configuration data. Reconciliation removes only artifacts carrying the same
-infra-tools ownership marker; a same-named unmanaged unit or nginx site is a
-hard error. Dry run lists every resource that would be created, replaced,
+Observed state has an explicit schema version and records ownership, interface
+kind, tool, Unix user, installed version, fixed backend port when applicable,
+generated artifact paths, exposure mode when applicable, and last health
+result. It contains no credential or copied configuration data.
+Reconciliation removes only artifacts carrying the same infra-tools ownership
+marker; a same-named unmanaged unit, launcher, desktop entry, or nginx site is
+a hard error. Dry run lists every resource that would be created, replaced,
 retained, or removed.
 
 T3 Code conversations, sessions, and settings are user data even on a
@@ -756,15 +934,18 @@ the first web-interface slice.
 Use this decision test whenever implementation proposes another package:
 
 1. Keep mature software when it owns a security-sensitive protocol, complex
-   lifecycle, or compatibility surface. nginx remains the TLS/WebSocket proxy,
-   systemd remains the supervisor, and T3 Code remains the owner of its
-   authentication, database migration, and version rollback.
+   lifecycle, or compatibility surface. nginx remains the TLS/WebSocket proxy
+   and Basic Auth gate, Samba remains the SMB server/client, systemd remains
+   the supervisor, and T3 Code remains the owner of its authentication,
+   database migration, and version rollback.
 2. Implement small deterministic behavior in infra-tools when Python's
    standard library and existing modules are sufficient. This includes
    web-option parsing, tool/host/port/CIDR validation, nginx rendering, state
    observation, health polling, redaction, and saved-command serialization.
 3. Do not add a general proxy, supervisor, template engine, secrets daemon,
-   container runtime, or `htpasswd` package for one narrow feature.
+   container runtime, or `htpasswd` package for one narrow feature. Nginx's
+   password-file format can use the existing OpenSSL `passwd` command; do not
+   maintain a bespoke password hash or add Apache utilities solely for it.
 4. Record why a new runtime dependency is necessary, install it only when its
    owning explicit feature is selected, and pin or verify downloaded artifacts
    using the repository's existing supply-chain rules.
@@ -839,13 +1020,29 @@ The shared roadmap imposes two gates:
 - Add an authenticated end-to-end backup/restore smoke test for ordinary Git
   and Git LFS data.
 
+### Lane B3: Samba storage roles
+
+- Audit the existing `--samba`, `--share`, `--smbclient`, and `--mount-smb`
+  flows against the Git/Gogs storage boundary in this plan.
+- Add path and mount checks that prevent live Gogs SQLite, repositories,
+  secrets, hooks, or LFS object paths from being configured as writable CIFS
+  application data in the first release.
+- Support a restricted backup/archive share and an optional agent asset share
+  without changing Git HTTPS or Git LFS authentication behavior.
+- Test SMB3 permissions, credential-file ownership, mount failure and retry,
+  atomic archive publication, and restore from a share-backed archive. Do not
+  call a mounted repository or a copied set of live files a valid Git backup
+  without the consistency and Git/LFS verification steps.
+
 ### Lane C1: loopback T3 Code service
 
 - Add repeatable tool declarations and scoped `TOOL VALUE` options with
   validation and saved-command rendering.
-- Remove T3 Code from the agent-tool registry and replace the AppImage installer
-  with the verified headless CLI/runtime path and only its required
-  dependencies.
+- Remove T3 Code from the agent-tool registry, add the explicit desktop and
+  web interface categories, and retain the verified AppImage installer as the
+  desktop adapter.
+- Add the verified headless CLI/runtime path with only its required
+  dependencies; selecting it must not install the desktop artifact.
 - Integrate the supported user service with explicit HOME, PATH, workspace,
   fixed loopback port, provider discovery, and credential ordering.
 - Register prepared `--repo` paths through T3 Code's supported project command
@@ -859,12 +1056,15 @@ The shared roadmap imposes two gates:
 
 - Reuse shared nginx ownership and staged reconciliation for hostname/TLS and
   private CIDR modes, synchronized UFW rules, and rollback.
+- Add optional per-interface Nginx Basic Auth with interactive or supplied
+  hashed-file input, atomic rotation, mode/ownership checks, and no raw secret
+  in generated artifacts.
 - Add HTTP, WebSocket, host/origin, upload, timeout, native-authentication, and
-  no-direct-bypass health checks.
+  Basic Auth, and no-direct-bypass health checks.
 - Add update/removal reconciliation, retained-state reporting, resource limits,
   and low-end VM measurements.
 - Validate T3 Code through an SSH tunnel, direct private CIDR access, and nginx
-  HTTPS, including session revocation.
+  HTTPS, including native session revocation and the optional Basic Auth gate.
 
 ### Release integration
 
@@ -890,19 +1090,27 @@ The shared roadmap imposes two gates:
 - Gogs tests use temporary directories and mock system calls; they verify LFS
   path rendering, permissions, symlink refusal, release-digest failure, nginx
   limits, safe hostless defaults, source-rule replacement, and backup
-  inventory.
+  inventory. They also reject writable CIFS paths for live Gogs data.
 - Git LFS client tests prove installation and user initialization precede
-  every normal repository clone without changing `--repo` URL handling.
+  every normal repository clone without changing `--repo` URL handling, and
+  reject active repository paths on CIFS unless a future explicit mode opts in.
+- Samba tests use mocked system calls and temporary paths to cover share roles,
+  least-privilege users, root-only mount credentials, failed mounts, and
+  atomic backup publication without exposing a live Gogs data root.
 - Web-interface parser tests cover repeated distinct tools, duplicate-tool
   rejection, scoped `TOOL VALUE` options, normalized IPv4/IPv6 sources,
   hostname and port collisions, undeclared tools, TLS requirements, fixed
   backend-port conflicts, unsupported Cloudflare/source combinations, and
-  stable saved-command ordering.
-- Parser and registry tests prove `--agent-tool t3code` and the AppImage
-  installer are absent rather than retained as aliases.
+  stable saved-command ordering. Desktop-interface tests cover explicit T3
+  selection, desktop prerequisite failures, duplicate declarations, and the
+  fact that desktop selection creates no web exposure.
+- Parser and registry tests prove `--agent-tool t3code` is absent, while
+  `--desktop-interface t3code` selects only the verified desktop adapter and
+  `--web-interface t3code` selects only the headless path.
 - Unit tests render systemd and nginx configuration in temporary directories,
   mock all service/firewall calls, and prove that backends bind only to
-  loopback, WebSocket headers are present, source rules end in `deny all`, and
+  loopback, WebSocket headers are present, source rules end in `deny all`,
+  Basic Auth files are per-interface and secret-free in generated output, and
   activation rolls back on a failed health check.
 - Redaction tests seed recognizable pairing URLs, tokens, and agent credentials
   and prove none appear in setup plans, dry runs, generated configuration,
@@ -913,9 +1121,17 @@ The shared roadmap imposes two gates:
   running user service, opens a declared project, pairs a browser, reconnects
   with the session, revokes it, verifies rejection, and confirms an unrelated
   nginx site and systemd service remain active.
+- A live desktop-target test verifies `--desktop-interface t3code` launches
+  with a supported desktop session, while proving it does not install the web
+  service or open an nginx/firewall listener. A separate web test proves the
+  inverse.
 - A live Gogs test on modest Debian hardware pushes, clones, and restores both
   ordinary Git data and LFS objects over HTTPS, then proves an SSH Git remote
   still uses the configured HTTPS credential for LFS transfer.
+- A live Samba recovery test publishes a consistent Gogs archive to a
+  restricted share, restores it locally, and runs the ordinary Git/LFS smoke
+  test; an agent asset-share test proves the active `.git` worktree remains
+  local.
 - A live Proxmox test covers QEMU lifecycle, clone, snapshot rollback, backup,
   restore, and destruction without affecting an unrelated guest.
 - No test talks to DigitalOcean or another cloud provider.
@@ -950,16 +1166,22 @@ The shared roadmap imposes two gates:
 - Agent workspace setup can install Git LFS once and prepare normal `--repo`
   declarations without adding a parallel repository API or general
   development-tool suite.
+- Samba can provide a deliberately scoped agent asset or backup share while
+  active Git worktrees, Gogs data, and live LFS objects remain local and Git
+  and Git LFS continue to use HTTPS transport and credentials.
 - A bare `--web-interface t3code` creates a boot-persistent loopback service
   and reports a working SSH tunnel without opening a firewall port.
-- T3 Code is selected only as a web interface; it is absent from
-  `--agent-tool`, and no desktop AppImage is installed.
+- `--desktop-interface t3code` installs a verified desktop T3 Code artifact
+  only when a desktop-capable target explicitly selects it; it does not create
+  the web service or a public listener. `t3code` is absent from
+  `--agent-tool`.
 - Web-interface declarations are repeatable across distinct registered tools;
   duplicate T3 Code declarations are rejected, and each declared tool uses a
   stable non-conflicting loopback endpoint.
 - A T3 Code hostname is served through nginx with valid HTTPS, WebSocket
-  operation, native pairing/session authentication, optional CIDR filtering,
-  and no direct upstream bypass.
+  operation, native pairing/session authentication, optional per-interface
+  Basic Auth and CIDR filtering, and no direct upstream bypass. Basic Auth is
+  accepted only with a tested same-origin client path and encrypted transport.
 - A private non-hostname interface requires an explicit client-facing port and
   source list, and setup refuses exposure when nginx or UFW cannot enforce the
   policy.
@@ -972,6 +1194,9 @@ The shared roadmap imposes two gates:
 - No pairing credential, session secret, or agent credential appears in saved
   commands, generated unit/proxy files, dry runs, status JSON, or ordinary
   logs.
+- Basic Auth rotation replaces a protected per-interface password file
+  atomically, reloads Nginx only after validation, and does not claim to revoke
+  existing T3 sessions without the native T3 revocation step.
 - Removing or updating one interface preserves unrelated interfaces, reports
   retained state, and leaves no stale public listener.
 - No DigitalOcean provisioning or management dependency is introduced.
@@ -981,10 +1206,11 @@ The shared roadmap imposes two gates:
 The following are implementation gates rather than reasons to broaden the
 first release:
 
-1. **Exact T3 artifact and service contract**: the current AppImage path is not
-   the headless CLI. Pin and verify the official CLI/runtime path, test its
-   background-service and `t3 project` behavior, and confirm that update and
-   database rollback work before enabling managed headless installation.
+1. **Exact T3 artifact and service contract**: the current AppImage path is the
+   desktop adapter, not the headless CLI. Pin and verify both the official
+   desktop artifact and CLI/runtime path, test the headless background-service
+   and `t3 project` behavior, and confirm desktop version-skew plus service
+   update and database rollback before enabling either managed installer.
 2. **Secret-bearing startup output**: prove whether the upstream service emits
    its owner pairing token to a private file or journal. Do not ship automatic
    startup until setup, status, and service logs pass the redaction tests.
@@ -997,8 +1223,9 @@ first release:
    the endpoint is ready prematurely.
 5. **HTTP trust boundary**: test allowed host and origin behavior, forwarded
    scheme/host values, WebSocket authentication, request limits, and
-   connection throttling. Never trust client-supplied forwarding headers from
-   an untrusted proxy.
+   connection throttling. Test Nginx Basic Auth on the initial upgrade,
+   reconnect, and same-origin browser paths, including password-file rotation.
+   Never trust client-supplied forwarding headers from an untrusted proxy.
 6. **Resource and update policy**: measure idle and active T3 Code operation on
    the intended 4 GB and smaller VMs, set conservative restart/resource
    defaults, and make updates wait for or explicitly interrupt active work.
@@ -1012,6 +1239,13 @@ first release:
    record transitive runtime/package licenses, release source, digest or
    signature behavior, download paths, and update ownership for T3 Code and
    Gogs before enabling unattended installation.
+
+10. **Samba and filesystem semantics**: verify which target filesystems are
+    local versus CIFS before configuring Git, Gogs, or LFS. Confirm that the
+    backup mechanism produces one consistent archive before copying it to a
+    share, that share credentials cannot read application secrets, and that
+    failed mounts or disconnected shares do not turn a missing data disk into
+    an empty directory that agents can overwrite.
 
 The shared recovery project still needs to choose the first backup archive and
 storage mechanism. This plan defines the Gogs and T3 data consistency,
@@ -1044,5 +1278,11 @@ sensitivity, and verification contracts that mechanism must consume.
 - [T3 Code update lifecycle](https://github.com/pingdotgg/t3code/blob/main/docs/user/updating.md)
 - [T3 Code MIT license](https://github.com/pingdotgg/t3code/blob/main/LICENSE)
 - [T3 Code remote preview gateway gap](https://github.com/pingdotgg/t3code/issues/5101)
+- [Nginx HTTP Basic Auth module](https://nginx.org/en/docs/http/ngx_http_auth_basic_module.html)
+- [Nginx WebSocket proxying](https://nginx.org/en/docs/http/websocket.html)
+- [Samba `smb.conf` reference](https://www.samba.org/samba/docs/current/man-html/smb.conf.5.html)
+- [Git LFS command and storage model](https://github.com/git-lfs/git-lfs/blob/main/docs/man/git-lfs.adoc)
+- [Git LFS API and authentication](https://github.com/git-lfs/git-lfs/blob/main/docs/api/README.md)
 - [Gogs Git LFS documentation](https://gogs.io/advancing/git-lfs)
+- [Samba shares and client mounts](../SAMBA_SHARES.md)
 - [Proxmox VE Administration Guide](https://pve.proxmox.com/pve-docs/pve-admin-guide.pdf)

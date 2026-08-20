@@ -186,6 +186,70 @@ The setup also configures a fail2ban jail for failed Samba authentication. A
 share's internal directories identified by configured scrub jobs are hidden
 from SMB clients with `veto files`.
 
+## Git and Git LFS storage
+
+Samba is a file-storage and operator-access layer. It is not a Git transport,
+Git authorization boundary, or replacement for a Git LFS server. Use HTTPS
+Git and the Git host's HTTPS LFS endpoint for repository operations.
+
+Keep live application data and active work local:
+
+| Data | Recommended location | Samba use |
+| --- | --- | --- |
+| Gogs database, configuration, secrets, hooks, and repositories | Local Gogs data filesystem | Offline backup/export only |
+| Gogs LFS objects and temporary uploads | Local Gogs LFS paths | Offline backup/export only |
+| Agent `.git` directories and active worktrees | Local VM filesystem | Import/export or backup only |
+| Large non-repository assets | An explicitly mounted share | Optional shared asset storage |
+| Consistent Git/Gogs archives | A restricted backup share | A local backup job or dedicated backup account writes; ordinary agents have no access or read-only access |
+
+Do not make the live Gogs data directory a writable Samba share. Direct SMB
+writes bypass Gogs authentication, hooks, repository policy, and LFS
+reachability checks, while concurrent access can make SQLite and repository
+operations unsafe. A separate share directory may use the same physical data
+disk, but it must not contain the live database, secrets, hooks, repositories,
+or LFS object path. Samba users should have only the read or write access they
+need; `force user` and symlink exceptions are not safe substitutes for that
+separation.
+
+For a Gogs backup, stop Gogs for the short archive window (or use an
+equivalent consistent snapshot), create and checksum the archive locally, copy
+it to the share under a temporary name, and rename it only after the copy is
+complete. Restore locally, then verify ordinary Git cloning and Git LFS upload
+and download before re-enabling service access. A live copy of SQLite,
+repositories, and LFS objects taken at unrelated times is not a recoverable
+backup. Do not configure Gogs's LFS `OBJECTS_PATH` directly on a CIFS mount in
+the initial design.
+
+Agent worktrees should also stay on local ext4 or xfs storage. CIFS changes
+locking, case behavior, symlink and executable-bit handling, file
+notifications, latency, and concurrent-writer semantics. A `file://` Git
+remote on a share does not provide Gogs authentication or server hooks. Use a
+mounted share for assets, staging, or archives; use a normal HTTPS remote for
+Git and Git LFS. `git lfs install` and the local LFS cache remain part of the
+agent VM setup, and a share does not bypass the LFS credential.
+
+The current CLI composes these roles with the existing options rather than
+adding Git-specific share syntax. Create the account through the credential
+store first; the examples intentionally contain no password:
+
+```bash
+# Prompts for the restricted share account without putting its password in the command
+infra-tools credentials set backup-admin
+
+# Restricted server-side archive area
+infra-tools setup server_lite fileserver admin \
+  --samba --share read gogs-backups /srv/gogs-backups backup-admin
+
+# Optional asset share mounted on an agent VM
+infra-tools setup workstation_dev agent-vm agent \
+  --smbclient --mount-smb /mnt/assets fileserver agent-assets assets_write /
+```
+
+If a future release supports share-backed worktrees or live LFS object
+storage, it must use an explicit storage mode with filesystem compatibility,
+locking, disconnect, and recovery tests. It must never infer that behavior
+from a path under `/mnt`.
+
 ## Connecting from a client
 
 The server share name is `<SHARE_NAME>_<ACCESS_TYPE>`:
