@@ -143,10 +143,11 @@ Supported `--browser` values are `brave`, `firefox`, `librewolf`, `helium`,
 - Lynx installs the Debian terminal browser and does not become a graphical
   default.
 
-Before an extrepo-based browser or VS Code install, setup refreshes any
-existing extrepo-managed definitions for Brave, LibreWolf, and VS Code. This
-repairs definitions written by older extrepo metadata before the APT refresh;
-it does not remove or rewrite manually managed files under
+For an extrepo-based browser or VS Code install, setup first refreshes APT
+normally. If that refresh fails, it makes one bounded attempt to refresh any
+existing extrepo-managed definitions for Brave, LibreWolf, and VS Code, then
+retries APT. The extrepo repair has a 30-second per-source timeout and does not
+run on successful reruns. It does not remove or rewrite manually managed files under
 `/etc/apt/sources.list` or `/etc/apt/sources.list.d`. If APT still reports an
 unrelated third-party source error, repair or disable that source separately
 before rerunning setup.

@@ -15,6 +15,7 @@ from desktop.browser_steps import (
     _browsh_architecture,
     _browsh_asset_matches,
     _configure_librewolf_apparmor_profile,
+    _ensure_extrepo_and_update,
     _refresh_existing_extrepo_sources,
     install_single_browser,
     is_flatpak_app_installed,
@@ -154,7 +155,9 @@ class TestBrowserSteps(unittest.TestCase):
 
         _refresh_existing_extrepo_sources()
 
-        mock_run.assert_called_once_with("extrepo update librewolf", check=False)
+        mock_run.assert_called_once_with(
+            "timeout --kill-after=5s 30s extrepo update librewolf", check=False
+        )
 
     @patch("desktop.browser_steps.os.path.isfile", return_value=True)
     @patch("desktop.browser_steps.run")
@@ -171,11 +174,44 @@ class TestBrowserSteps(unittest.TestCase):
         self.assertEqual(
             [call.args[0] for call in mock_run.call_args_list],
             [
-                "extrepo update brave",
-                "extrepo update librewolf",
-                "extrepo update vscode",
+                "timeout --kill-after=5s 30s extrepo update brave",
+                "timeout --kill-after=5s 30s extrepo update librewolf",
+                "timeout --kill-after=5s 30s extrepo update vscode",
             ],
         )
+
+    @patch("desktop.browser_steps._refresh_existing_extrepo_sources")
+    @patch("desktop.browser_steps._update_apt_metadata")
+    @patch("desktop.browser_steps.is_package_installed", return_value=True)
+    def test_does_not_refresh_extrepo_sources_after_successful_apt_update(
+        self, _is_installed, mock_update, mock_refresh
+    ):
+        mock_update.return_value = subprocess.CompletedProcess(
+            args=["apt-get"], returncode=0
+        )
+
+        with patch("desktop.browser_steps._apt_update_done", False):
+            _ensure_extrepo_and_update()
+
+        mock_update.assert_called_once_with()
+        mock_refresh.assert_not_called()
+
+    @patch("desktop.browser_steps._refresh_existing_extrepo_sources", return_value=True)
+    @patch("desktop.browser_steps._update_apt_metadata")
+    @patch("desktop.browser_steps.is_package_installed", return_value=True)
+    def test_retries_apt_after_a_failed_refresh(
+        self, _is_installed, mock_update, mock_refresh
+    ):
+        mock_update.side_effect = [
+            subprocess.CompletedProcess(args=["apt-get"], returncode=100),
+            subprocess.CompletedProcess(args=["apt-get"], returncode=0),
+        ]
+
+        with patch("desktop.browser_steps._apt_update_done", False):
+            _ensure_extrepo_and_update()
+
+        self.assertEqual(mock_update.call_count, 2)
+        mock_refresh.assert_called_once_with()
 
 
 if __name__ == "__main__":

@@ -24,6 +24,12 @@ FLATPAK_REMOTE = "flathub"
 _apt_update_done = False
 _EXTREPO_SOURCE_DIR = "/etc/apt/sources.list.d"
 _MANAGED_EXTREPOS = ("brave", "librewolf", "vscode")
+_EXTREPO_UPDATE_TIMEOUT_SECONDS = 30
+_APT_UPDATE_COMMAND = (
+    "apt-get -o DPkg::Lock::Timeout=120 "
+    "-o Acquire::Retries=0 -o Acquire::http::Timeout=15 "
+    "-o Acquire::https::Timeout=15 update -qq"
+)
 HELIUM_RELEASE_API = "https://api.github.com/repos/imputnet/helium-linux/releases/latest"
 BROWSH_GITHUB_REPO = "browsh-org/browsh"
 _LIBREWOLF_APPARMOR_PROFILE = "/etc/apparmor.d/librewolf"
@@ -125,7 +131,7 @@ def is_flatpak_app_installed(app_id: str) -> bool:
     return app_id in result.stdout.splitlines()
 
 
-def _refresh_existing_extrepo_sources() -> None:
+def _refresh_existing_extrepo_sources() -> bool:
     """Refresh extrepo source definitions that are already enabled locally.
 
     extrepo source definitions are versioned independently from the installed
@@ -134,18 +140,36 @@ def _refresh_existing_extrepo_sources() -> None:
     refresh fail.  Only the source definitions owned by extrepo are refreshed;
     manually managed APT source files are deliberately left untouched.
     """
+    refreshed_any = False
     for extrepo_name in _MANAGED_EXTREPOS:
         source_path = os.path.join(
             _EXTREPO_SOURCE_DIR, f"extrepo_{extrepo_name}.sources"
         )
         if not os.path.isfile(source_path):
             continue
-        result = run(f"extrepo update {extrepo_name}", check=False)
+        refreshed_any = True
+        result = run(
+            f"timeout --kill-after=5s {_EXTREPO_UPDATE_TIMEOUT_SECONDS}s "
+            f"extrepo update {shlex.quote(extrepo_name)}",
+            check=False,
+        )
+        if result.returncode in (124, 137):
+            print(
+                f"  ⚠ Timed out refreshing the extrepo {extrepo_name} "
+                f"source definition after {_EXTREPO_UPDATE_TIMEOUT_SECONDS}s"
+            )
+            continue
         if result.returncode != 0:
             print(
                 f"  ⚠ Could not refresh the extrepo {extrepo_name} "
                 "source definition; continuing with the existing source"
             )
+    return refreshed_any
+
+
+def _update_apt_metadata() -> subprocess.CompletedProcess[str]:
+    """Refresh APT metadata with bounded network and lock waits."""
+    return run(_APT_UPDATE_COMMAND, check=False)
 
 
 def _ensure_extrepo_and_update() -> None:
@@ -154,14 +178,22 @@ def _ensure_extrepo_and_update() -> None:
     if not is_package_installed("extrepo"):
         os.environ["DEBIAN_FRONTEND"] = "noninteractive"
         run("apt-get install -y -qq extrepo", check=False)
-    _refresh_existing_extrepo_sources()
     if not _apt_update_done:
-        update_result = run("apt-get update -qq", check=False)
+        update_result = _update_apt_metadata()
         if update_result.returncode != 0:
-            print(
-                "  ⚠ APT metadata refresh reported an error; "
-                "continuing so the requested package can be verified"
-            )
+            print("  ⚠ APT metadata refresh failed; checking extrepo definitions")
+            if _refresh_existing_extrepo_sources():
+                retry_result = _update_apt_metadata()
+                if retry_result.returncode != 0:
+                    print(
+                        "  ⚠ APT metadata refresh still reports an error; "
+                        "continuing so the requested package can be verified"
+                    )
+            else:
+                print(
+                    "  ⚠ No managed extrepo definitions were found; "
+                    "continuing so the requested package can be verified"
+                )
         _apt_update_done = True
 
 
@@ -169,7 +201,7 @@ def _install_via_extrepo(name: str, extrepo_name: str, package_name: str) -> boo
     """Install a package via extrepo. Returns True if successful."""
     _ensure_extrepo_and_update()
     run(f"extrepo enable {extrepo_name}", check=False)
-    run("apt-get update -qq", check=False)
+    _update_apt_metadata()
     sources_path = f"/etc/apt/sources.list.d/extrepo_{extrepo_name}.sources"
     if os.path.exists(sources_path):
         os.environ["DEBIAN_FRONTEND"] = "noninteractive"
