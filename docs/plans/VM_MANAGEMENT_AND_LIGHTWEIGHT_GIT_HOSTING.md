@@ -73,6 +73,31 @@ avoid abstraction whose only purpose is a hypothetical provider or service.
   endpoints. Live Gogs data and active agent worktrees remain local in the
   first storage slice; Samba is used for explicitly scoped assets, import and
   export, and consistent backup archives.
+- Proxmox storage-pool allocation and guest filesystem mounting are separate
+  concerns. A provisioned QEMU VM may receive additional virtual disks backed
+  by a selected Proxmox storage pool, then format and mount them inside the
+  guest for Gogs, Git LFS, agent workspaces, `/home`, or another approved
+  application path. This is guest-local block storage, not an in-guest CIFS
+  workaround.
+- The first storage API should use repeatable logical declarations such as
+  `--storage git-data ts1-storage 128G` and
+  `--storage-mount git-data /srv/gogs ext4`. Disk names, filesystem identity,
+  mount paths, and ownership are persisted as one versioned declaration. A
+  missing required mount must stop dependent setup rather than allowing an
+  empty directory on the root filesystem to receive data.
+- Common paths are supported by policy, not by silently mounting over them.
+  Tool-owned empty paths such as `/srv/gogs` and
+  `/srv/agent-workspace` are the first slice. A populated path such as
+  `/home` requires an explicit migration policy, backup or snapshot checks,
+  and a verified copy before cutover. Broad system paths such as `/`, `/etc`,
+  `/usr`, and `/boot` are outside the first storage contract.
+- The first implementation is provisioning-only: it allocates blank data
+  disks for a newly created QEMU VM and mounts them at empty, tool-owned
+  paths. Adoption of an existing disk, detach, coordinated provider/guest
+  resize, and populated-path migration remain later mutation workflows. This
+  keeps the initial formatting decision tied to a disk allocated in the same
+  provisioning operation and avoids implying that `/home` migration is safe
+  before the transactional recovery dependency is available.
 - Nginx HTTP Basic Auth is an optional edge gate for selected web interfaces,
   implemented with Nginx's existing module and one protected password file per
   interface. It is never sent over plaintext HTTP, never replaces T3 Code's
@@ -144,6 +169,118 @@ The implementation currently calls both QEMU VMs and LXC containers
 as part of the CLI split. Generic VM operations must not silently claim that
 all Proxmox LXC behavior is portable to a future VM provider.
 
+### VM disks and guest filesystems
+
+The current provisioning path has only a root-disk contract. The repeatable
+`--storage` parser is normalized as root or LXC template storage, VM
+validation requires one root entry, and `provision_vm` imports the image as
+`scsi0` before resizing that disk. It does not create or attach a second VM
+disk, format a guest block device, write a persistent mount, or verify that a
+service is using the intended filesystem. Existing Proxmox disk-resize
+operations can grow an already attached volume, but they do not provide this
+missing guest-storage lifecycle. `--image-storage` is only the Proxmox-side
+staging location for a downloaded image; it is not guest data storage.
+
+Agent repositories currently clone to `<user-home>/repos`, and Gogs accepts a
+data path without checking that it is a separate mounted filesystem. A
+provisioned VM therefore cannot currently dedicate non-root capacity to Git,
+Git LFS, Gogs, agent workspaces, `/home`, or another application directory
+through one declarative setup request.
+
+### Planned VM storage contract
+
+The redesign should distinguish three layers and report them separately:
+
+1. **Provider storage** is the Proxmox pool and virtual disk allocation. It
+   answers where the disk is allocated and how large it is.
+2. **Guest storage** is the device identity, partition, filesystem, UUID, and
+   mount unit inside the VM. It answers whether the expected disk is present
+   and mounted.
+3. **Application placement** is the path and owner used by Gogs, Git LFS, or
+   an agent workspace. It must only run after guest storage verification.
+
+The proposed QEMU setup shape is intentionally small and declarative:
+
+```text
+--storage root ts1-storage 32G
+--storage git-data ts1-storage 128G
+--storage-mount git-data /srv/gogs ext4
+--storage agent-data ts1-storage 128G
+--storage-mount agent-data /srv/agent-workspace ext4
+--agent-workspace /srv/agent-workspace
+```
+
+`root` is reserved for the boot disk. Every other logical disk name is
+unique, maps to one selected Proxmox storage pool and size, and has one
+explicit guest mount declaration in the first slice. `ext4` and `xfs` are the
+initial filesystem choices. Mount declarations also carry a small policy such
+as `empty` for a tool-owned directory or `migrate` for a populated directory;
+the full shape is `--storage-mount NAME PATH FILESYSTEM POLICY`, with
+`empty` as the only policy accepted by the first implementation. The syntax
+reserves a later policy position, but `migrate` must remain rejected until the
+separate populated-path workflow is implemented. Mount declarations must not
+become an unvalidated collection of arbitrary `mkfs`, mount, or `fstab`
+options. Attach-only disks can be added later for an operator-managed
+filesystem, but the initial automated path should not present an attached
+unmounted disk as a successfully prepared application volume.
+
+The persisted storage record should include a schema version, logical name,
+Proxmox pool, requested size, bus slot, generated serial, guest device or
+partition, filesystem type, UUID, mount path, and policy. Application
+ownership stays with the consuming setup step: generic mounts remain
+root-owned, the agent workspace applies the setup user's ownership after
+mount verification, and Gogs applies its service user's ownership after that
+account exists. The record contains no credentials. It is the basis for
+idempotent reconciliation and for reporting whether a clone, backup, restore,
+or resize preserved the complete storage contract.
+
+The implementation should attach additional disks as stable VirtIO-SCSI
+slots (`scsi1`, `scsi2`, and so on) with a generated logical serial. Inside
+the guest, the storage step must verify the expected serial and capacity,
+create one GPT partition on a confirmed blank disk, use `/dev/disk/by-id` or
+the resulting filesystem UUID rather than `/dev/sdb`, and persist a native
+systemd mount unit or an equivalent UUID-based mount. A
+required mount must not use `nofail`: if the disk is absent or the mount fails,
+dependent Gogs, agent, and repository setup must stop before writing data.
+The health marker used to prove a mount is active must live on the mounted
+filesystem, so a root-directory fallback cannot pass the check.
+
+Formatting is allowed only after the target device is positively identified
+and confirmed blank: no partition table, filesystem signature, mount, or
+unexpected contents. A nonblank or unexpected device must fail without
+formatting; a `wipefs` probe may identify signatures, but automated setup must
+not blindly wipe them. Re-running setup with the expected UUID is idempotent
+and reuses the filesystem; resizing is grow-only and must coordinate Proxmox
+disk resize, guest partition growth, and filesystem growth. Shrinking,
+implicit reformatting, in-guest LVM/RAID, and automatic disk removal are out
+of scope.
+
+For `/srv/gogs`, `/srv/agent-workspace`, and similar tool-owned paths, the
+storage step creates and verifies the mount point before the consuming setup
+step applies ownership. For `/home`, the later explicit `migrate` policy must
+stage the filesystem, copy existing
+contents while preserving ownership, permissions, and extended attributes,
+verify the copy, arrange the cutover during a maintenance window, and only
+then create credentials and repositories. Existing VMs require a current
+backup or snapshot and explicit operator confirmation. A failed migration must
+leave the original path usable and must never hide populated data beneath an
+unverified mount.
+
+On a manually provisioned VPS, infra-tools does not attach provider volumes.
+The operator or control system must attach the volume, after which a future
+generic guest-storage path may apply the same identity and mount checks. The
+first implementation should focus on Proxmox attachment plus guest setup and
+should not pretend that a VPS provider volume was managed by infra-tools.
+
+Cloud-init's disk and filesystem modules may be used for first-boot mechanics,
+but they must not become a second source of truth. The persisted infra-tools
+declaration owns the logical disk, expected identity, mount policy, and health
+result; the target-side step must still verify the result after SSH readiness
+and before application setup. Native systemd mount units are preferred for
+reconciliation because their device dependencies and status are directly
+observable, while generated fstab entries remain an acceptable implementation
+detail if they use the same UUID and fail-closed requirements.
+
 ### Gogs and Git LFS
 
 `--gogs` currently installs a native Gogs release, Git, Git LFS, OpenSSH,
@@ -190,6 +327,14 @@ launcher.
   with the transactional and recovery work already on the roadmap.
 - Make Gogs's Git LFS storage layout explicit and suitable for a dedicated
   low-cost data disk.
+- Let QEMU provisioning attach one or more additional Proxmox-backed disks
+  and make their guest filesystems and mount points explicit before Git, LFS,
+  Gogs, or agent-workspace setup runs.
+- Keep data-disk setup idempotent and fail-closed: identify devices by stable
+  metadata, format only a confirmed blank device, mount by UUID or another
+  stable identity, and never silently fall back to the root filesystem.
+- Allow an explicit agent-workspace root so repository clones can use a
+  dedicated data disk without requiring a `/home` migration.
 - Include repositories, SQLite state, LFS objects, configuration secrets, and
   required metadata in one documented Gogs recovery contract.
 - Ensure agent workspaces can explicitly install Git LFS before cloning normal
@@ -238,6 +383,10 @@ launcher.
 - Treating an agent web interface as a general-purpose application hosting
   platform, remote desktop, or automatically exposed development-server
   preview.
+- Providing arbitrary in-guest repartitioning or silently migrating populated
+  system directories. `/home` migration is an explicit, separately verified
+  storage policy; `/`, `/etc`, `/usr`, and `/boot` are not generic mount
+  targets.
 - Adding a generic username/password database, OAuth provider, identity proxy,
   Caddy, Traefik, or a container-based web-interface stack in the first slice.
 - Installing a desktop T3 Code application on a headless target, or making
@@ -284,7 +433,11 @@ infra-tools vm reboot HOST ID [--timeout SECONDS]
 infra-tools vm pause HOST ID
 infra-tools vm resume HOST ID
 infra-tools vm modify HOST ID [--cores N] [--memory SIZE] [--balloon-min SIZE] [--dry-run]
-infra-tools vm disk resize HOST ID VOLUME SIZE [--dry-run]
+infra-tools vm disk list HOST ID [--json]
+infra-tools vm disk attach HOST ID NAME --storage POOL --size SIZE [--dry-run]
+infra-tools vm disk resize HOST ID NAME SIZE [--dry-run]
+infra-tools vm disk detach HOST ID NAME [--yes] [--dry-run]
+infra-tools vm mount status HOST ID [--json]
 infra-tools vm snapshot list HOST ID [--json]
 infra-tools vm snapshot create HOST ID NAME [--description TEXT] [--dry-run]
 infra-tools vm snapshot rollback HOST ID NAME [--dry-run]
@@ -297,6 +450,16 @@ infra-tools vm migrate HOST ID --to DESTINATION [options]
 infra-tools vm unlock HOST ID [--dry-run]
 infra-tools vm destroy HOST ID [--force] [--yes]
 ```
+
+The `vm disk` commands manage provider-side virtual hardware and use the
+logical disk name recorded in the VM declaration; they must report the
+Proxmox volume, bus slot, serial, size, and whether a guest mount is known.
+Guest formatting and mounting belong to the setup engine, not an opaque
+provider command. `vm mount status` observes the guest through the QEMU agent
+or SSH and reports the expected UUID, mount path, and fail-closed health state.
+Detaching a disk is destructive and must refuse to remove a disk that is
+declared as required application storage unless the operator explicitly
+removes or overrides that declaration.
 
 Do not add `vm create` in the first release. Provisioning continues to compose
 through `infra-tools setup ... --provision-on HOST`, which calls the provider
@@ -390,7 +553,18 @@ behavior:
 6. **Configuration**: retain typed CPU, memory, balloon, boot, and disk options.
    Remove the current arbitrary `--set KEY=VALUE` surface rather than
    presenting raw `qm`/`pct` arguments as provider-neutral.
-7. **Recovery and unfinished work**: before a managed agent VM is destroyed or
+7. **Declarative data disks**: let QEMU provisioning allocate named
+   Proxmox-backed disks, attach them on stable VirtIO-SCSI slots, and pass a
+   versioned guest mount declaration to the normal setup engine. Preflight
+   pool capacity and content type before allocation; verify serial, size,
+   filesystem, UUID, mount activation, and ownership inside the guest before
+   dependent services or repository clones run. Keep `/home` migration
+   explicitly gated and refuse unsafe or ambiguous devices.
+8. **Disk lifecycle**: expose observation, grow-only resize, backup inclusion,
+   clone/restore metadata, and explicit detach behavior for every declared
+   data disk. A missing required disk or mount must be a visible failed state,
+   not a successful VM with writes redirected to root storage.
+9. **Recovery and unfinished work**: before a managed agent VM is destroyed or
    rebuilt, optionally inspect declared repositories for dirty work and local
    commits not present on a remote. Archiving patches or Git bundles is a later
    agent-workspace slice, not a reason to back up the entire VM.
@@ -430,6 +604,22 @@ The object and temporary paths must be absolute after rendering, owned by the
 `git` account, protected from symlink traversal, and created before Gogs
 starts. The default remains inside the selected Gogs data path so one mounted
 data disk contains repositories, SQLite, attachments, and LFS objects.
+
+The intended dedicated-disk composition is:
+
+```text
+--storage root ts1-storage 32G
+--storage git-data ts1-storage 128G
+--storage-mount git-data /srv/gogs ext4
+--gogs :3000 /srv/gogs
+```
+
+The Gogs setup step must verify that `/srv/gogs` is the declared mounted
+filesystem before it creates the database, repositories, or LFS paths. A
+configured path that resolves to the root filesystem, a missing mount, or a
+writable CIFS mount is a setup error. Capacity and backup observations must
+identify the filesystem containing the data root rather than reporting only
+the VM's root-disk capacity.
 
 Do not add a separate LFS path in the first release. A later need to place
 large objects on another mounted filesystem would require an explicit absolute
@@ -535,6 +725,22 @@ client once for the target user:
 --git-lfs
 --repo https://git.example.com/team/assets.git
 ```
+
+Repository placement should be independently selectable from Git transport.
+When a dedicated agent disk is declared, use an explicit workspace root:
+
+```text
+--storage agent-data ts1-storage 128G
+--storage-mount agent-data /srv/agent-workspace ext4
+--agent-workspace /srv/agent-workspace
+--repo https://git.example.com/team/project.git
+```
+
+`--agent-workspace` changes the target-side clone root but does not change the
+repository URL, Git credentials, or Git LFS endpoint. It must be validated as
+an existing required local mount before the first clone. The default can
+remain the setup user's `~/repos`, which makes a separate `/home` disk useful
+without making `/home` migration a prerequisite.
 
 Do not add a second `--repo-lfs` URL list. Git LFS installation and user
 initialization are VM-level concerns, while `.gitattributes` and repository
@@ -993,17 +1199,45 @@ The shared roadmap imposes two gates:
 - Preserve dry runs and confirmations, and require the shared staged-operation
   contract before destructive commands land.
 
-### Lane A3: Proxmox clone and restore
+### Lane A3: declarative VM data disks and guest mounts
+
+- Replace the development-era storage shape with named QEMU disk
+  declarations and explicit guest mount declarations; retain a separate LXC
+  template path.
+- Preflight Proxmox storage-pool content, free capacity, disk names, and bus
+  slots before creating any additional disk. Attach disks with stable serials
+  and include them in the saved provisioning declaration.
+- Add a target-side storage step after SSH/QEMU-agent readiness and before
+  Gogs, Git LFS initialization, agent credentials, repository clones, or T3
+  project registration.
+- Implement blank-device-only formatting, UUID-based native mount units,
+  required-mount fail-closed behavior, ownership after mounting, idempotent
+  re-runs, and mount health markers stored on the mounted filesystem.
+- Add `--agent-workspace` so normal `--repo` clones can use a dedicated local
+  data disk without changing transport or credential behavior.
+- Explicitly reject `/home`, `migrate`, existing-disk adoption, detach, and
+  resize in this provisioning slice. Follow with a separately reviewed
+  `/home` migration workflow that has backup/snapshot, maintenance-window,
+  preservation, verification, and rollback checks.
+- Follow with read-only mount status and coordinated grow-only
+  disk/partition/filesystem resize; do not add shrink or implicit reformat
+  operations.
+
+### Lane A4: Proxmox clone and restore
 
 - Implement full clone with explicit storage, cloud-init/network handling, and
   collision checks; keep linked clones deferred.
 - Implement backup restore without overwriting an existing guest and with an
-  optional isolated verification boot.
+  optional isolated verification boot. Restore and clone must preserve the
+  complete additional-disk declaration and verify required mounts before
+  reporting an application-ready guest.
 - Reuse shared durable operation and recovery records, then add live tests for
   directory/qcow2 and block-backed storage where behavior differs.
 
 ### Lane B1: explicit and safe Gogs LFS operation
 
+- Depend on Lane A3 for the dedicated Gogs data-disk and mount contract when a
+  data disk is declared.
 - Verify release artifacts before activation and preserve the prior release on
   failure.
 - Render and validate `[lfs]` paths, create the owned directories, and add
@@ -1015,10 +1249,12 @@ The shared roadmap imposes two gates:
 ### Lane B2: Gogs recovery contract
 
 - Document complete data placement and add repositories, SQLite, attachments,
-  secrets, and LFS objects to the recovery inventory.
+  secrets, LFS objects, and the backing filesystem/disk identity to the
+  recovery inventory.
 - Implement the consistency boundary selected by the shared recovery project.
 - Add an authenticated end-to-end backup/restore smoke test for ordinary Git
-  and Git LFS data.
+  and Git LFS data, including a restore where the Gogs data disk is a separate
+  attached volume.
 
 ### Lane B3: Samba storage roles
 
@@ -1045,6 +1281,9 @@ The shared roadmap imposes two gates:
   dependencies; selecting it must not install the desktop artifact.
 - Integrate the supported user service with explicit HOME, PATH, workspace,
   fixed loopback port, provider discovery, and credential ordering.
+- Run the service only after its declared workspace mount is healthy; a
+  missing agent data disk must prevent project registration and repository
+  writes rather than falling back to root storage.
 - Register prepared `--repo` paths through T3 Code's supported project command
   and verify they are visible to the remote client.
 - Add schema-versioned observed state, SSH-tunnel output, secret-free health,
@@ -1080,8 +1319,22 @@ The shared roadmap imposes two gates:
 
 - Parser, rendering, and dispatch tests cover the positional-host and nested
   disk/snapshot/backup command shapes and prove old paths are absent.
+- Setup parser tests cover unique named disks, root-disk requirements, valid
+  Proxmox pool and size declarations, mount-path normalization, ext4/xfs
+  selection, empty versus migrate policy, duplicate declarations, unsafe
+  system paths, and `--agent-workspace` placement.
 - Provider tests use mocked SSH/system commands and verify capability failures
   occur before mutation.
+- Proxmox storage tests verify content-type and capacity preflights, stable
+  `scsiN` slot/serial assignment, additional-disk attach, partial-failure
+  cleanup, grow-only resize, and reporting of every disk in inventory,
+  snapshots, backups, clone, and restore operations.
+- Guest-storage tests mock `lsblk`, `blkid`, `findmnt`, filesystem creation,
+  and systemd calls. They prove only a confirmed blank device is formatted,
+  UUID mounts are persisted, re-runs are idempotent, nonblank devices and
+  unexpected serials are rejected, required mounts fail closed, ownership is
+  applied after mounting, and `/home` migration preserves metadata and keeps
+  the original path usable when verification fails.
 - JSON fixtures prove stable field names and explicit provider data.
 - Destructive-command tests cover dry run, confirmation refusal, timeout,
   partial provider failure, and post-operation verification failure.
@@ -1128,6 +1381,12 @@ The shared roadmap imposes two gates:
 - A live Gogs test on modest Debian hardware pushes, clones, and restores both
   ordinary Git data and LFS objects over HTTPS, then proves an SSH Git remote
   still uses the configured HTTPS credential for LFS transfer.
+- A live Proxmox storage test provisions a VM with separate root and
+  `git-data` disks, verifies the data mount by UUID before Gogs setup, reboots
+  without writing to root storage, grows the data disk, and proves Git/LFS
+  data remains available. A separate agent-workspace test proves repository
+  clones use `--agent-workspace`; `/home` migration is tested only in a
+  disposable guest with an explicit backup/snapshot.
 - A live Samba recovery test publishes a consistent Gogs archive to a
   restricted share, restores it locally, and runs the ordinary Git/LFS smoke
   test; an agent asset-share test proves the active `.git` worktree remains
@@ -1146,6 +1405,17 @@ The shared roadmap imposes two gates:
   mistaken for a managed VM.
 - Existing one-command Proxmox provisioning plus setup still uses the normal
   setup engine and emits a reusable saved command.
+- A QEMU provisioning declaration can attach one or more named non-root disks
+  from selected Proxmox pools, format only blank devices, mount them by stable
+  identity, and verify every required mount before Gogs, Git LFS, agent
+  credentials, repository clones, or T3 projects use the path.
+- A missing, wrong, or failed required mount blocks dependent setup and cannot
+  redirect writes into an empty root-directory fallback. `vm mount status`
+  identifies the disk, filesystem, mount path, and failure reason.
+- A dedicated local agent workspace can be selected without changing Git URLs
+  or credential behavior. A populated `/home` can be migrated only through an
+  explicit, verified policy with preserved metadata and a recoverable failure
+  path.
 - VM list/show/health/snapshot/backup output has stable JSON and useful text.
 - Reboot, full clone, and backup restore work with capability preflights,
   collision protection, waits, and result verification.
@@ -1240,7 +1510,24 @@ first release:
    signature behavior, download paths, and update ownership for T3 Code and
    Gogs before enabling unattended installation.
 
-10. **Samba and filesystem semantics**: verify which target filesystems are
+10. **Provider versus guest storage**: keep Proxmox pool allocation,
+    virtual-disk attachment, guest filesystem creation, mount activation, and
+    application placement as separately observable operations. Preflight pool
+    content type and capacity before provider mutation, then verify the guest
+    disk before formatting or starting a dependent service.
+
+11. **Disk identity and fail-closed mounts**: test stable serial, by-id, UUID,
+    and mount-unit behavior across reboot, disk order changes, missing disks,
+    and a root directory that exists before the mount. A disconnected data
+    disk must produce a health failure and block writes, never look like a
+    fresh empty application directory.
+
+12. **Populated-directory migration**: define the backup, maintenance,
+    metadata-copy, verification, cutover, and rollback contract for `/home`
+    before exposing it as a normal option. An empty tool-owned mount and a
+    migration of a populated system directory are different workflows.
+
+13. **Samba and filesystem semantics**: verify which target filesystems are
     local versus CIFS before configuring Git, Gogs, or LFS. Confirm that the
     backup mechanism produces one consistent archive before copying it to a
     share, that share credentials cannot read application secrets, and that
@@ -1258,8 +1545,10 @@ sensitivity, and verification contracts that mechanism must consume.
 - `lib/proxmox_vm.py`
 - `lib/proxmox_backup.py`
 - `lib/proxmox_hosts.py`
+- `lib/proxmox_guest.py`
 - `lib/arg_parser.py`
 - `lib/config.py`
+- `lib/setup_common.py`
 - `lib/agent_cli.py`
 - `lib/validation.py`
 - `web/gogs_steps.py`
@@ -1285,4 +1574,8 @@ sensitivity, and verification contracts that mechanism must consume.
 - [Git LFS API and authentication](https://github.com/git-lfs/git-lfs/blob/main/docs/api/README.md)
 - [Gogs Git LFS documentation](https://gogs.io/advancing/git-lfs)
 - [Samba shares and client mounts](../SAMBA_SHARES.md)
+- [Proxmox storage model](https://pve.proxmox.com/pve-docs/pvesm.1.html)
 - [Proxmox VE Administration Guide](https://pve.proxmox.com/pve-docs/pve-admin-guide.pdf)
+- [Cloud-init disk, filesystem, and mount modules](https://docs.cloud-init.io/en/latest/reference/modules.html)
+- [Debian `fstab(5)`](https://manpages.debian.org/unstable/mount/fstab.5.en.html)
+- [systemd `mount(5)`](https://manpages.debian.org/unstable/systemd/systemd.mount.5.en.html)

@@ -114,6 +114,16 @@ infra-tools setup workstation_dev 10.0.0.50 agent \
   --node --go --python
 ```
 
+Current VM storage is limited to one root disk. Although `--storage` is
+repeatable for the shared setup parser, the current QEMU path accepts only the
+root disk; it does not attach, format, or persistently mount additional guest
+disks. `--image-storage` selects where the Proxmox image is staged and is not
+guest data storage. For Git/Git LFS or agent data that should survive root-disk
+pressure, attach and mount a separate volume manually and verify it before
+placing application data there. Declarative Proxmox-backed data disks,
+UUID-based guest mounts, and explicit `/home` migration are planned in the
+[VM management and lightweight Git hosting plan](plans/VM_MANAGEMENT_AND_LIGHTWEIGHT_GIT_HOSTING.md).
+
 Find the assigned VMID and inspect it:
 
 ```bash
@@ -214,10 +224,14 @@ infra-tools setup server_web 10.0.0.50 admin \
   --deploy example.com https://github.com/user/repo.git
 ```
 
-`--storage` is repeatable. Root storage accepts `--storage root POOL AMOUNT`
-or the shorthand `--storage root AMOUNT`, which uses cached host defaults or
-Proxmox auto-detection. `--storage template` uses the saved/default template
-pool.
+For the current release, `--storage` is repeatable because the same parser is
+used by VMs and LXCs. QEMU provisioning accepts one root disk using
+`--storage root POOL AMOUNT` or the shorthand `--storage root AMOUNT`, which
+uses cached host defaults or Proxmox auto-detection. LXC provisioning also
+uses `--storage template` for the saved/default template pool. Repeated
+non-root QEMU disks and guest mount declarations are not current options; see
+the [storage plan](plans/VM_MANAGEMENT_AND_LIGHTWEIGHT_GIT_HOSTING.md) for
+the planned redesign.
 The guest bridge defaults to the bridge carrying the Proxmox host's default
 route; use `--bridge NAME` when the host has multiple routed bridge networks.
 The positional target is also the guest IPv4 address: a bare address assumes
