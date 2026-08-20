@@ -43,6 +43,9 @@ _APT_DPKG_NONINTERACTIVE_OPTIONS = (
     "-o Dpkg::Options::=--force-confdef "
     "-o Dpkg::Options::=--force-confold"
 )
+_USER_COMMAND_SYSTEM_PATH = (
+    "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+)
 PACKAGE_UPDATE_MARKER = "/var/lib/infra_tools/state/package-update-complete"
 
 
@@ -446,10 +449,20 @@ def _run_as_login_user(
     """Run a shell command as a login user's home-scoped tool environment."""
     safe_username = shlex.quote(username)
     safe_home = shlex.quote(user_home)
+    safe_path = shlex.quote(
+        os.pathsep.join(
+            (
+                os.path.join(user_home, ".local", "bin"),
+                os.path.join(user_home, ".opencode", "bin"),
+                _USER_COMMAND_SYSTEM_PATH,
+            )
+        )
+    )
     shell_script = f"cd {safe_home} && {command}"
     return run(
         f"runuser -u {safe_username} -- env "
         f"HOME={safe_home} USER={safe_username} LOGNAME={safe_username} "
+        f"PATH={safe_path} "
         f"bash -lc {shlex.quote(shell_script)}",
         check=check,
         capture_output=capture_output,

@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import os
+import pwd
 import re
 import shutil
 import subprocess
@@ -47,6 +48,25 @@ _CREDENTIAL_PATHS = {
     "claude": ".claude/.credentials.json",
     "opencode": ".local/share/opencode/auth.json",
 }
+
+_UPDATE_ENVIRONMENT_REDIRECTS = {
+    "bash_env",
+    "cdpath",
+    "codex_home",
+    "env",
+    "git_config_global",
+    "nvm_dir",
+    "oldpwd",
+    "pwd",
+    "tmpdir",
+    "xdg_cache_home",
+    "xdg_config_home",
+    "xdg_data_home",
+    "xdg_state_home",
+}
+_UPDATE_SYSTEM_PATH = os.pathsep.join(
+    ("/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/usr/bin", "/sbin", "/bin")
+)
 
 
 def add_agent_subparser(subparsers: argparse._SubParsersAction) -> None:
@@ -191,7 +211,7 @@ def _tool_path(tool: str, home: str) -> Optional[str]:
         (
             os.path.join(home, ".local", "bin"),
             os.path.join(home, ".opencode", "bin"),
-            os.environ.get("PATH", ""),
+            _UPDATE_SYSTEM_PATH,
         )
     )
     return shutil.which(tool, path=search_path)
@@ -269,6 +289,76 @@ def _within_home(path: str, home: str) -> bool:
         return os.path.commonpath((os.path.realpath(path), resolved_home)) == resolved_home
     except ValueError:
         return False
+
+
+def _validate_update_identity(home: str) -> pwd.struct_passwd:
+    """Require updates to run as the owner of the user-scoped installation."""
+
+    try:
+        owner = pwd.getpwuid(os.stat(home).st_uid)
+    except (OSError, KeyError) as exc:
+        raise RuntimeError(f"Could not determine the owner of agent home: {home}") from exc
+
+    if os.geteuid() != owner.pw_uid:
+        try:
+            current_user = pwd.getpwuid(os.geteuid()).pw_name
+        except KeyError:
+            current_user = str(os.geteuid())
+        raise RuntimeError(
+            f"Agent updates for {home} must run as {owner.pw_name}; "
+            f"current user is {current_user}. Use 'sudo -u {owner.pw_name} -H'."
+        )
+    return owner
+
+
+def _agent_update_environment(home: str, owner: pwd.struct_passwd) -> dict[str, str]:
+    """Build an environment rooted in the account being updated.
+
+    ``sudo -u`` normally preserves the caller's working directory and some
+    environment variables. Vendor installers may use those values while
+    changing directories, causing an unprivileged account to touch the
+    caller's home. Keep useful inherited values such as proxy and agent
+    sockets, but remove path/home redirects and replace them with the target
+    account's locations.
+    """
+
+    environment = os.environ.copy()
+    for key in list(environment):
+        normalized = key.lower()
+        if normalized.startswith("sudo_"):
+            environment.pop(key, None)
+        elif normalized in _UPDATE_ENVIRONMENT_REDIRECTS:
+            environment.pop(key, None)
+        elif normalized in {
+            "npm_config_userconfig",
+            "npm_config_prefix",
+            "npm_config_cache",
+        }:
+            environment.pop(key, None)
+
+    environment.update(
+        {
+            "HOME": home,
+            "LOGNAME": owner.pw_name,
+            "PATH": os.pathsep.join(
+                (
+                    os.path.join(home, ".local", "bin"),
+                    os.path.join(home, ".opencode", "bin"),
+                    _UPDATE_SYSTEM_PATH,
+                )
+            ),
+            "PWD": home,
+            "TMPDIR": "/tmp",
+            "USER": owner.pw_name,
+            "XDG_CACHE_HOME": os.path.join(home, ".cache"),
+            "XDG_CONFIG_HOME": os.path.join(home, ".config"),
+            "XDG_DATA_HOME": os.path.join(home, ".local", "share"),
+            "XDG_STATE_HOME": os.path.join(home, ".local", "state"),
+            "CODEX_HOME": os.path.join(home, ".codex"),
+            "NVM_DIR": os.path.join(home, ".nvm"),
+        }
+    )
+    return environment
 
 
 def _backup_executable(tool: str, path: str, home: str) -> str:
@@ -362,15 +452,8 @@ def _download_codex_installer(directory: str) -> tuple[str, str]:
 
 
 def _invoke_agent_update(tool: str, path: str, home: str) -> JSONDict:
-    environment = os.environ.copy()
-    environment["HOME"] = home
-    environment["PATH"] = os.pathsep.join(
-        (
-            os.path.join(home, ".local", "bin"),
-            os.path.join(home, ".opencode", "bin"),
-            environment.get("PATH", ""),
-        )
-    )
+    owner = _validate_update_identity(home)
+    environment = _agent_update_environment(home, owner)
     installer_path: Optional[str] = None
     installer_sha256: Optional[str] = None
     if tool == "codex":
@@ -439,6 +522,7 @@ def update_agent_tools(
     _validate_update_tools(tools)
     user_home = os.path.abspath(home or os.path.expanduser("~"))
     validate_filesystem_path(user_home, must_exist=True)
+    _validate_update_identity(user_home)
     state_path = _state_path(user_home)
     state = _load_update_state(state_path) if not dry_run else None
     results: list[JSONDict] = []
@@ -724,11 +808,15 @@ def run_agent_command(args: argparse.Namespace) -> int:
                 tool = str(result["tool"])
                 status = str(result["status"])
                 if status == "planned":
-                    print(f"  • {tool}: {result['method']} ({result['before_version']})")
+                    print(
+                        f"  • {tool}: {result['method']} ({result['before_version']})"
+                        f" at {result.get('path') or 'unknown path'}"
+                    )
                 elif status in ("updated", "current"):
                     print(
                         f"  ✓ {tool}: {status} "
                         f"({result['before_version']} → {result['after_version']})"
+                        f" at {result.get('path') or 'unknown path'}"
                     )
                 else:
                     detail = str(result.get("failure", "unknown_error"))
@@ -737,7 +825,10 @@ def run_agent_command(args: argparse.Namespace) -> int:
                     rollback = "; rollback restored" if result.get("rollback") else ""
                     if result.get("rollback_failure"):
                         rollback = "; rollback verification failed"
-                    print(f"  ✗ {tool}: {detail}{rollback}")
+                    print(
+                        f"  ✗ {tool}: {detail}{rollback}"
+                        f" at {result.get('path') or 'unknown path'}"
+                    )
         return 0 if all(result["status"] in ("planned", "updated", "current") for result in results) else 1
 
     if args.agent_command != "doctor":

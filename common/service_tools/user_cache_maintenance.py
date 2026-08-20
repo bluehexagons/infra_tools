@@ -80,7 +80,12 @@ def _tool_environment(context: UserContext) -> dict[str, str]:
         os.path.join(context.home, ".local", "bin"),
         os.path.join(context.home, ".opencode", "bin"),
         "/usr/local/go/bin",
-        environment.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
+        "/usr/local/sbin",
+        "/usr/local/bin",
+        "/usr/sbin",
+        "/usr/bin",
+        "/sbin",
+        "/bin",
     )
     environment.update(
         {
@@ -88,6 +93,14 @@ def _tool_environment(context: UserContext) -> dict[str, str]:
             "USER": context.username,
             "LOGNAME": context.username,
             "PATH": os.pathsep.join(path_entries),
+            "PWD": context.home,
+            "TMPDIR": "/tmp",
+            "XDG_CACHE_HOME": os.path.join(context.home, ".cache"),
+            "XDG_CONFIG_HOME": os.path.join(context.home, ".config"),
+            "XDG_DATA_HOME": os.path.join(context.home, ".local", "share"),
+            "XDG_STATE_HOME": os.path.join(context.home, ".local", "state"),
+            "CODEX_HOME": os.path.join(context.home, ".codex"),
+            "NVM_DIR": os.path.join(context.home, ".nvm"),
         }
     )
     return environment
@@ -607,11 +620,11 @@ def cleanup_go_cache(
 
 def cleanup_agent_caches(context: UserContext, *, dry_run: bool) -> list[str]:
     """Clean only explicitly rebuildable Codex and OpenCode paths."""
-    xdg_cache_home = os.environ.get(
-        "XDG_CACHE_HOME",
-        os.path.join(context.home, ".cache"),
-    )
-    codex_home = os.environ.get("CODEX_HOME", os.path.join(context.home, ".codex"))
+    # Do not trust the service process environment for paths. This function
+    # may be called from a test, a manually launched helper, or a unit with
+    # inherited environment overrides; cache cleanup must remain user-scoped.
+    xdg_cache_home = os.path.join(context.home, ".cache")
+    codex_home = os.path.join(context.home, ".codex")
     failures = cleanup_managed_directory(
         context,
         label="OpenCode",

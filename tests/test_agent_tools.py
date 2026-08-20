@@ -30,7 +30,13 @@ from common.agent_steps import (
     install_t3code_desktop,
 )
 from lib.agent_auth import get_agent_auth_status, set_agent_credential
-from lib.agent_cli import add_agent_subparser, inspect_agent_tools, run_agent_command, update_agent_tools
+from lib.agent_cli import (
+    _tool_path,
+    add_agent_subparser,
+    inspect_agent_tools,
+    run_agent_command,
+    update_agent_tools,
+)
 from lib.agent_cli import _download_codex_installer, _invoke_agent_update
 from lib.config import SetupConfig
 
@@ -597,17 +603,69 @@ class TestAgentUpdate(unittest.TestCase):
 
     def test_native_updaters_use_vendor_subcommands_without_a_shell(self):
         completed = type('Completed', (), {'returncode': 0})()
-        cases = (
-            ('claude', ['/home/agent/.local/bin/claude', 'update']),
-            ('opencode', ['/home/agent/.opencode/bin/opencode', 'upgrade']),
-        )
-        for tool, expected in cases:
-            with self.subTest(tool=tool):
-                with patch('lib.agent_cli.subprocess.run', return_value=completed) as runner:
-                    result = _invoke_agent_update(tool, expected[0], '/home/agent')
-                self.assertEqual(runner.call_args.args[0], expected)
-                self.assertNotIn('shell', runner.call_args.kwargs)
-                self.assertEqual(result['returncode'], 0)
+        cases = ('claude', 'opencode')
+        with tempfile.TemporaryDirectory() as home:
+            for tool in cases:
+                with self.subTest(tool=tool):
+                    path = os.path.join(
+                        home,
+                        '.local' if tool == 'claude' else '.opencode',
+                        'bin',
+                        tool,
+                    )
+                    expected = [path, 'update' if tool == 'claude' else 'upgrade']
+                    with patch('lib.agent_cli.subprocess.run', return_value=completed) as runner:
+                        result = _invoke_agent_update(tool, expected[0], home)
+                    self.assertEqual(runner.call_args.args[0], expected)
+                    self.assertNotIn('shell', runner.call_args.kwargs)
+                    self.assertEqual(result['returncode'], 0)
+
+    def test_updater_environment_is_rooted_in_target_home(self):
+        completed = type('Completed', (), {'returncode': 0})()
+        with tempfile.TemporaryDirectory() as home:
+            with patch.dict(
+                os.environ,
+                {
+                    'HOME': '/home/loren',
+                    'PWD': '/home/loren',
+                    'OLDPWD': '/home/loren/old',
+                    'PATH': '/home/loren/.local/bin:/usr/bin',
+                    'XDG_CONFIG_HOME': '/home/loren/.config',
+                    'CODEX_HOME': '/home/loren/.codex',
+                    'NPM_CONFIG_PREFIX': '/home/loren/.npm-global',
+                },
+            ), patch('lib.agent_cli.subprocess.run', return_value=completed) as runner:
+                _invoke_agent_update(
+                    'claude',
+                    os.path.join(home, '.local', 'bin', 'claude'),
+                    home,
+                )
+
+        environment = runner.call_args.kwargs['env']
+        self.assertEqual(environment['HOME'], home)
+        self.assertEqual(environment['PWD'], home)
+        self.assertEqual(environment['CODEX_HOME'], os.path.join(home, '.codex'))
+        self.assertEqual(environment['XDG_CONFIG_HOME'], os.path.join(home, '.config'))
+        self.assertNotIn('/home/loren', environment['PATH'])
+        self.assertNotIn('OLDPWD', environment)
+        self.assertNotIn('NPM_CONFIG_PREFIX', environment)
+        self.assertEqual(runner.call_args.kwargs['cwd'], home)
+
+    def test_tool_lookup_does_not_use_another_account_path(self):
+        with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as other_home:
+            other_tool = os.path.join(other_home, 'codex')
+            with open(other_tool, 'w', encoding='utf-8') as file_obj:
+                file_obj.write('#!/bin/sh\n')
+            os.chmod(other_tool, 0o755)
+
+            with patch.dict(os.environ, {'PATH': other_home}, clear=False):
+                self.assertIsNone(_tool_path('codex', home))
+
+    def test_update_requires_the_user_owning_the_agent_home(self):
+        with tempfile.TemporaryDirectory() as home:
+            with patch('lib.agent_cli.os.geteuid', return_value=os.geteuid() + 1):
+                with self.assertRaisesRegex(RuntimeError, 'must run as'):
+                    update_agent_tools(['codex'], home=home)
 
 
 class TestAgentPayloadInstallation(unittest.TestCase):

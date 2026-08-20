@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from common.common_steps import (
     CONTROL_PLANE_PACKAGES,
+    _run_as_login_user,
     check_debian_package_sources,
     update_and_upgrade_packages,
 )
@@ -78,6 +79,18 @@ class TestControlPlanePackages(unittest.TestCase):
     def test_uses_debian_trixie_dns_package_name(self):
         self.assertIn("bind9-dnsutils", CONTROL_PLANE_PACKAGES)
         self.assertNotIn("dnsutils", CONTROL_PLANE_PACKAGES)
+
+
+class TestUserCommandEnvironment(unittest.TestCase):
+    @patch("common.common_steps.run")
+    def test_login_user_commands_use_target_home_and_system_path(self, mock_run):
+        _run_as_login_user("agent", "/home/agent", "command -v codex")
+
+        command = mock_run.call_args.args[0]
+        self.assertIn("HOME=/home/agent", command)
+        self.assertIn("PATH=/home/agent/.local/bin:/home/agent/.opencode/bin", command)
+        self.assertIn("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", command)
+        self.assertNotIn("/home/loren", command)
 
 
 class TestDebianPackageSources(unittest.TestCase):

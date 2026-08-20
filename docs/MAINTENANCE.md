@@ -64,10 +64,15 @@ job. Explicitly selected Codex CLI, Claude Code, and OpenCode installations
 remain outside recurring root updates; their rebuildable caches are covered
 by the separate user maintenance job. T3 Code's current desktop installation
 has no managed update path. Run `infra-tools agent update --dry-run` and then
-`infra-tools agent update` as the setup user for a deliberate terminal-agent
-vendor update with before/after verification, a retained prior executable,
-automatic rollback after a broken update, and a private audit record. Setup
-still skips an installer when its command is already present.
+`infra-tools agent update` as the account that owns the tools (for example,
+`sudo -u agent -H infra-tools agent update --tool codex`) for a deliberate
+terminal-agent vendor update with before/after verification, a retained prior
+executable, automatic rollback after a broken update, and a private audit
+record. The update environment is reset to that account's home so a caller's
+working directory and PATH cannot redirect the vendor installer. Setup still
+skips an installer when its command is already present.
+If a vendor command is run directly, use the same account and working
+directory, such as `sudo -u agent -H sh -lc 'cd /home/agent && codex update'`.
 
 Set `INFRA_TOOLS_ECOSYSTEM_AUTO_UPGRADE=1` in the relevant service environment
 to allow global npm packages, gems, and uv-managed tools to advance. The default

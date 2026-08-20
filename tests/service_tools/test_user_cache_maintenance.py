@@ -80,11 +80,12 @@ class TestUserCacheHelpers(unittest.TestCase):
         mock_run.return_value = subprocess.CompletedProcess([], 0, "", "")
         context = self._context("/home/agent")
 
-        user_cache_maintenance.run_tool_command(
-            context,
-            ["npm", "cache", "verify"],
-            load_nvm=True,
-        )
+        with patch.dict(os.environ, {"PATH": "/home/loren/.local/bin:/usr/bin"}, clear=False):
+            user_cache_maintenance.run_tool_command(
+                context,
+                ["npm", "cache", "verify"],
+                load_nvm=True,
+            )
 
         command = mock_run.call_args.args[0]
         self.assertEqual(command[:2], ["/bin/bash", "-c"])
@@ -92,7 +93,11 @@ class TestUserCacheHelpers(unittest.TestCase):
         self.assertIn('"$NVM_DIR/nvm.sh"', command[2])
         self.assertIn("exec npm cache verify", command[2])
         self.assertEqual(mock_run.call_args.kwargs["cwd"], "/home/agent")
-        self.assertEqual(mock_run.call_args.kwargs["env"]["HOME"], "/home/agent")
+        environment = mock_run.call_args.kwargs["env"]
+        self.assertEqual(environment["HOME"], "/home/agent")
+        self.assertEqual(environment["PWD"], "/home/agent")
+        self.assertNotIn("/home/loren", environment["PATH"])
+        self.assertEqual(environment["CODEX_HOME"], "/home/agent/.codex")
 
     @patch("common.service_tools.user_cache_maintenance.run_tool_command")
     def test_query_cache_path_uses_first_available_tool(self, mock_run):
@@ -380,7 +385,14 @@ class TestUserCachePolicies(unittest.TestCase):
         mock_directory_cleanup,
         mock_stale_cleanup,
     ):
-        with patch.dict(os.environ, {}, clear=True):
+        with patch.dict(
+            os.environ,
+            {
+                "XDG_CACHE_HOME": "/home/loren/.cache",
+                "CODEX_HOME": "/home/loren/.codex",
+            },
+            clear=False,
+        ):
             user_cache_maintenance.cleanup_agent_caches(self.context, dry_run=False)
 
         managed_paths = [call.kwargs["path"] for call in mock_directory_cleanup.call_args_list]

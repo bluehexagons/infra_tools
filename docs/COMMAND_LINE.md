@@ -398,7 +398,10 @@ requested capability instead of requiring the default set of terminal agents.
 it is never run by an automatic host timer. The command uses each vendor's
 supported path: OpenAI's standalone installer for Codex, `claude update`, and
 `opencode upgrade`. It refuses executables resolved outside the current user's
-home so package-manager installations remain under their package manager.
+home so package-manager installations remain under their package manager. It
+must be run as the account that owns that home and reports the exact executable
+path being updated; `/home/loren/.local/bin/codex` and
+`/home/agent/.local/bin/codex` are separate installations.
 Before changing a tool it checks `--version` and `--help`, retains the previous
 executable, writes an atomic `in_progress` record, and repeats both checks after
 the vendor updater exits. A changed or unusable executable is rolled back when
@@ -412,7 +415,28 @@ verification.
 
 Rerunning setup skips an already available command. Use
 `infra-tools agent update` when you want to update the user-installed terminal
-agents.
+agents. For example, when an operator is logged in as another account:
+
+```bash
+sudo -u agent -H sh -lc \
+  'cd /home/agent && infra-tools agent update --tool codex'
+```
+
+The updater resets the working directory and user-scoped environment before
+calling the vendor installer, so the invoking account's home and PATH do not
+leak into the update.
+
+If you invoke a vendor updater directly instead of using infra-tools, apply the
+same account and working-directory rule yourself. For example:
+
+```bash
+sudo -u agent -H sh -lc 'cd /home/agent && codex update'
+```
+
+Running `codex update` from another user's home can make the installer fail
+while restoring its working directory, or update the wrong user-scoped
+installation. The `infra-tools agent update` command is the preferred managed
+path because it also performs preflight checks and rollback.
 
 Credential rotation does not rebuild the VM or overwrite repositories:
 
