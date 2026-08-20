@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from common.common_steps import (
     CONTROL_PLANE_PACKAGES,
+    _ensure_vm_setup_user_sudoers,
     _run_as_login_user,
     check_debian_package_sources,
     update_and_upgrade_packages,
@@ -91,6 +92,71 @@ class TestUserCommandEnvironment(unittest.TestCase):
         self.assertIn("PATH=/home/agent/.local/bin:/home/agent/.opencode/bin", command)
         self.assertIn("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", command)
         self.assertNotIn("/home/loren", command)
+
+
+class TestVMSudoers(unittest.TestCase):
+    @patch("common.common_steps.os.chown")
+    @patch("common.common_steps.run")
+    def test_installs_validated_sudoers_drop_in_with_mode_0440(
+        self, mock_run, mock_chown
+    ):
+        mock_run.return_value = MagicMock(returncode=0)
+        config = SetupConfig(
+            host="testhost",
+            username="agent",
+            system_type="workstation_dev",
+            machine_type="vm",
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch("common.common_steps.VM_SETUP_SUDOERS_DIR", temporary):
+                _ensure_vm_setup_user_sudoers(config)
+
+            sudoers_path = os.path.join(temporary, "infra-tools-agent")
+            self.assertEqual(
+                os.stat(sudoers_path).st_mode & 0o777,
+                0o440,
+            )
+            with open(sudoers_path, encoding="utf-8") as file_obj:
+                self.assertEqual(
+                    file_obj.read(), "agent ALL=(ALL) NOPASSWD:ALL\n"
+                )
+
+        mock_run.assert_called_once()
+        self.assertIn("visudo -cf", mock_run.call_args.args[0])
+        self.assertTrue(mock_chown.called)
+
+    @patch("common.common_steps.run")
+    def test_repairs_existing_wrong_mode(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0)
+        config = SetupConfig(
+            host="testhost",
+            username="agent",
+            system_type="workstation_dev",
+            machine_type="vm",
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            sudoers_path = os.path.join(temporary, "infra-tools-agent")
+            with open(sudoers_path, "w", encoding="utf-8") as file_obj:
+                file_obj.write("agent ALL=(ALL) NOPASSWD:ALL\n")
+            os.chmod(sudoers_path, 0o644)
+            with patch("common.common_steps.VM_SETUP_SUDOERS_DIR", temporary), \
+                patch("common.common_steps.os.chown"):
+                _ensure_vm_setup_user_sudoers(config)
+            self.assertEqual(os.stat(sudoers_path).st_mode & 0o777, 0o440)
+
+    @patch("common.common_steps.run")
+    def test_ignores_non_vm_setup(self, mock_run):
+        _ensure_vm_setup_user_sudoers(
+            SetupConfig(
+                host="testhost",
+                username="agent",
+                system_type="server_lite",
+                machine_type="hardware",
+            )
+        )
+        mock_run.assert_not_called()
 
 
 class TestDebianPackageSources(unittest.TestCase):

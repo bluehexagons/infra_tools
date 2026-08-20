@@ -229,6 +229,9 @@ class TestRenderUserData(unittest.TestCase):
         out = _render_user_data(username="alice", pubkey_contents="ssh-ed25519 KEY")
         self.assertIn("- name: alice", out)
         self.assertIn("NOPASSWD:ALL", out)
+        self.assertIn("/etc/sudoers.d/infra-tools-alice", out)
+        self.assertIn("owner: root:root", out)
+        self.assertIn("permissions: '0440'", out)
         # SSH key is added under both root and alice.
         self.assertEqual(out.count("ssh-ed25519 KEY"), 2)
 
@@ -243,6 +246,10 @@ class TestRenderUserData(unittest.TestCase):
                 username="root",
                 pubkey_contents="ssh-ed25519 AAAA test\nruncmd:",
             )
+
+    def test_rejects_invalid_username(self):
+        with self.assertRaisesRegex(ProvisionError, "Invalid VM setup username"):
+            _render_user_data(username="bad user", pubkey_contents=None)
 
     def test_quotes_pubkey_as_yaml_scalar(self):
         out = _render_user_data(

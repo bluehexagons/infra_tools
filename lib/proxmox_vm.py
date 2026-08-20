@@ -54,6 +54,7 @@ from lib.proxmox_guest import (
     auto_detect_bridge,
 )
 from lib.types import NestedStrList, StrList
+from lib.validators import validate_username
 from lib.vm_storage import VMDataDisk, data_disks, storage_size_kib
 
 
@@ -399,6 +400,8 @@ def _render_user_data(
     Creates ``username`` (with sudo NOPASSWD) and installs the SSH key. The
     rest of infra_tools' setup runs over SSH afterward, so we keep this short.
     """
+    if not validate_username(username):
+        raise ProvisionError(f"Invalid VM setup username: {username!r}")
     normalized_pubkey = pubkey_contents.strip() if pubkey_contents else None
     if normalized_pubkey and any(
         ord(char) < 32 or ord(char) == 127 for char in normalized_pubkey
@@ -423,10 +426,20 @@ def _render_user_data(
         "    permissions: '0644'",
         "    content: |",
         "      virtio_balloon",
+    ]
+    if username and username != "root":
+        lines.extend([
+            "  - path: /etc/sudoers.d/infra-tools-" + username,
+            "    owner: root:root",
+            "    permissions: '0440'",
+            "    content: |",
+            f"      {username} ALL=(ALL) NOPASSWD:ALL",
+        ])
+    lines.extend([
         "users:",
         "  - name: root",
         "    lock_passwd: false",
-    ]
+    ])
     if pubkey_yaml:
         lines.append("    ssh_authorized_keys:")
         lines.append(f"      - {pubkey_yaml}")
@@ -434,7 +447,6 @@ def _render_user_data(
         lines.extend([
             f"  - name: {username}",
             "    groups: sudo",
-            "    sudo: 'ALL=(ALL) NOPASSWD:ALL'",
             "    shell: /bin/bash",
             "    lock_passwd: false",
         ])

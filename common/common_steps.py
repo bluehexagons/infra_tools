@@ -7,6 +7,7 @@ import os
 import platform
 import shlex
 import shutil
+import stat
 import subprocess
 import tempfile
 from typing import Optional
@@ -24,6 +25,7 @@ from lib.remote_utils import (
     run,
 )
 from lib.update_policy import ECOSYSTEM_AUTO_UPGRADE_ENV, npm_freshness_args
+from lib.validators import validate_username
 
 
 NVM_VERSION = "v0.40.6"
@@ -47,6 +49,7 @@ _USER_COMMAND_SYSTEM_PATH = (
     "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 )
 PACKAGE_UPDATE_MARKER = "/var/lib/infra_tools/state/package-update-complete"
+VM_SETUP_SUDOERS_DIR = "/etc/sudoers.d"
 
 
 def _go_release_arch(machine: Optional[str] = None) -> Optional[str]:
@@ -257,9 +260,89 @@ def setup_user(config: SetupConfig) -> None:
     result = run("getent group remoteusers", check=False)
     if result.returncode == 0:
         run(f"usermod -aG remoteusers {safe_username}", check=False)
-        print("  ✓ User configured with sudo privileges and remoteusers group")
+        user_groups_message = "  ✓ User configured with sudo privileges and remoteusers group"
     else:
-        print("  ✓ User configured with sudo privileges")
+        user_groups_message = "  ✓ User configured with sudo privileges"
+
+    print(user_groups_message)
+    _ensure_vm_setup_user_sudoers(config)
+
+
+def _ensure_vm_setup_user_sudoers(config: SetupConfig) -> None:
+    """Install the VM setup user's passwordless sudo rule with safe metadata.
+
+    Proxmox VM cloud-init needs this rule before the first remote setup run.
+    Keeping the rule under an infra-tools-owned filename also lets reruns repair
+    stale permissions left by older revisions without changing other sudoers
+    policy files.
+    """
+    if config.machine_type != "vm" or config.username == "root":
+        return
+    if not validate_username(config.username):
+        raise ValueError(f"Invalid setup username: {config.username}")
+    if is_dry_run():
+        print(
+            "  [DRY-RUN] Would ensure VM setup sudoers drop-in has mode 0440"
+        )
+        return
+
+    sudoers_path = os.path.join(
+        VM_SETUP_SUDOERS_DIR,
+        f"infra-tools-{config.username}",
+    )
+    sudoers_content = f"{config.username} ALL=(ALL) NOPASSWD:ALL\n"
+
+    try:
+        existing = os.stat(sudoers_path, follow_symlinks=False)
+        if (
+            stat.S_ISREG(existing.st_mode)
+            and stat.S_IMODE(existing.st_mode) == 0o440
+            and existing.st_uid == 0
+            and existing.st_gid == 0
+        ):
+            with open(sudoers_path, "r", encoding="utf-8") as file_obj:
+                if file_obj.read() == sudoers_content:
+                    print("  ✓ VM setup sudoers already configured (0440)")
+                    return
+    except (FileNotFoundError, OSError):
+        pass
+
+    os.makedirs(VM_SETUP_SUDOERS_DIR, mode=0o755, exist_ok=True)
+    descriptor, temporary_path = tempfile.mkstemp(
+        dir=VM_SETUP_SUDOERS_DIR,
+        prefix=f".infra-tools-{config.username}-",
+        text=True,
+    )
+    descriptor_open = True
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as file_obj:
+            descriptor_open = False
+            file_obj.write(sudoers_content)
+            file_obj.flush()
+            os.fsync(file_obj.fileno())
+        os.chown(temporary_path, 0, 0)
+        os.chmod(temporary_path, 0o440)
+
+        validation = run(
+            f"visudo -cf {shlex.quote(temporary_path)}",
+            check=False,
+        )
+        if validation.returncode != 0:
+            raise RuntimeError(
+                f"Generated VM setup sudoers file failed validation: {sudoers_path}"
+            )
+
+        os.replace(temporary_path, sudoers_path)
+        os.chown(sudoers_path, 0, 0)
+        os.chmod(sudoers_path, 0o440)
+        print("  ✓ VM setup sudoers configured (root:root, mode 0440)")
+    finally:
+        if descriptor_open:
+            os.close(descriptor)
+        try:
+            os.unlink(temporary_path)
+        except FileNotFoundError:
+            pass
 
 
 def generate_ssh_key(config: SetupConfig) -> None:

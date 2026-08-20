@@ -57,6 +57,10 @@ infra-tools never lets a remote `sudo` prompt consume that stream. It first
 checks `sudo -n`; on an interactive run, if the guest requires a password, it
 opens a separate terminal-backed `sudo -v` session and then continues the
 upload. Non-interactive runs require passwordless sudo for the setup account.
+Proxmox VM cloud-init installs that rule as
+`/etc/sudoers.d/infra-tools-USERNAME`, owned by `root:root` with mode `0440`.
+The normal VM setup flow validates and repairs that drop-in on reruns, so an
+older file with overly broad permissions is corrected automatically.
 For an existing VM that was not provisioned by infra-tools, either run setup
 from a terminal when prompted or grant the setup account the intended
 `NOPASSWD` sudo rule. The sudo password is not stored, passed in the archive,
