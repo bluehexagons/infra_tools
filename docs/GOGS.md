@@ -66,10 +66,11 @@ sudo /usr/local/bin/gogs --version
 ```
 
 `auto-update-gogs.timer` checks weekly (Sunday at 05:30). It validates the
-downloaded binary, refreshes authorized keys and hooks, restarts Gogs, and
-updates the saved state only after success. If a post-update command, restart,
-or state write fails, the previous release symlink is restored and a failure
-notification is emitted when notifications are configured.
+downloaded binary from a private, randomly named temporary workspace, refreshes
+authorized keys and hooks, restarts Gogs, and updates the saved state only after
+success. If a post-update command, restart, or state write fails, the previous
+release symlink is restored and a failure notification is emitted when
+notifications are configured.
 
 Run the normal `patch` flow to reapply the saved Gogs configuration. Do not
 edit `app.ini` while the service is running unless you understand that a later

@@ -94,8 +94,16 @@ def _select_go_download(
                 and isinstance(file_info.get("filename"), str)
                 and isinstance(file_info.get("sha256"), str)
             ):
+                filename = file_info["filename"]
+                checksum = file_info["sha256"].lower()
+                if os.path.basename(filename) != filename:
+                    continue
+                if len(checksum) != 64 or any(
+                    character not in "0123456789abcdef" for character in checksum
+                ):
+                    continue
                 candidates.append(
-                    (version_parts, version, file_info["filename"], file_info["sha256"])
+                    (version_parts, version, filename, checksum)
                 )
     if not candidates:
         requested = f" for Go {requested_version}" if requested_version else ""
@@ -528,21 +536,27 @@ def install_go(config: SetupConfig) -> None:
         else:
             print("  ⚠ Existing Go binary could not report a version; reinstalling")
     
-    archive_path = os.path.join("/tmp", go_archive)
     download_url = f"https://go.dev/dl/{go_archive}"
-    run(f"wget -q {shlex.quote(download_url)} -O {shlex.quote(archive_path)}")
-    checksum_result = run(
-        f"sha256sum {shlex.quote(archive_path)}",
-        check=False,
-        capture_output=True,
-    )
-    actual_checksum = checksum_result.stdout.strip().split()[0] if checksum_result.returncode == 0 else ""
-    if actual_checksum != expected_checksum:
-        run(f"rm {shlex.quote(archive_path)}", check=False)
-        raise RuntimeError(f"Checksum verification failed for {go_archive}")
-    run("rm -rf /usr/local/go")
-    run(f"tar -C /usr/local -xzf {shlex.quote(archive_path)}")
-    run(f"rm {shlex.quote(archive_path)}")
+    with tempfile.TemporaryDirectory(prefix="infra-tools-go-release-") as temporary_dir:
+        archive_path = os.path.join(temporary_dir, go_archive)
+        run(
+            f"wget -q --https-only {shlex.quote(download_url)} "
+            f"-O {shlex.quote(archive_path)}"
+        )
+        checksum_result = run(
+            f"sha256sum {shlex.quote(archive_path)}",
+            check=False,
+            capture_output=True,
+        )
+        actual_checksum = (
+            checksum_result.stdout.strip().split()[0]
+            if checksum_result.returncode == 0
+            else ""
+        )
+        if actual_checksum != expected_checksum:
+            raise RuntimeError(f"Checksum verification failed for {go_archive}")
+        run("rm -rf /usr/local/go")
+        run(f"tar -C /usr/local -xzf {shlex.quote(archive_path)}")
     
     profile_d_path = "/etc/profile.d/go.sh"
     with open(profile_d_path, "w") as f:

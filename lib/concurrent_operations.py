@@ -1,18 +1,25 @@
 """Concurrent operation coordination for sync/scrub systems with memory-aware resource management."""
 
 from __future__ import annotations
+
+import hashlib
 import os
+import stat
 import time
 import threading
 
 import fcntl
-from typing import Optional, Any, Callable
+from typing import Any, Callable, Optional, TextIO
 from dataclasses import dataclass, field
 from enum import Enum
 from collections import deque
 
 from lib.operation_log import OperationLogger
 from lib.types import BYTES_PER_MB, BYTES_PER_KB
+from lib.validation import validate_filesystem_path
+
+
+DEFAULT_OPERATION_LOCK_DIR = "/run/lock/infra_tools/operations"
 
 
 class OperationType(Enum):
@@ -100,16 +107,50 @@ class MemoryMonitor:
 class SimpleLockManager:
     """File-based lock manager using flock. Properly tracks file handles to avoid leaks."""
     
-    def __init__(self, lock_dir: str = "/tmp/operation_locks"):
+    def __init__(self, lock_dir: str = DEFAULT_OPERATION_LOCK_DIR):
+        validate_filesystem_path(lock_dir, must_exist=False)
+        absolute_lock_dir = os.path.abspath(lock_dir)
+        if os.path.realpath(absolute_lock_dir) != absolute_lock_dir:
+            raise ValueError(f"Lock directory must not contain symlinks: {lock_dir}")
+
         self.lock_dir = lock_dir
-        os.makedirs(lock_dir, exist_ok=True)
-        self._file_handles: dict[str, Any] = {}  # Store file objects, not just fds
+        os.makedirs(lock_dir, mode=0o700, exist_ok=True)
+        lock_dir_stat = os.lstat(lock_dir)
+        if not stat.S_ISDIR(lock_dir_stat.st_mode):
+            raise ValueError(f"Lock path is not a directory: {lock_dir}")
+        if lock_dir_stat.st_uid != os.geteuid():
+            raise PermissionError(f"Lock directory is not owned by the current user: {lock_dir}")
+        if stat.S_IMODE(lock_dir_stat.st_mode) & 0o022:
+            raise PermissionError(f"Lock directory is group- or world-writable: {lock_dir}")
+
+        self._file_handles: dict[str, TextIO] = {}
     
     def _get_lock_path(self, resource: str) -> str:
         # Use hash to avoid overly long filenames
-        import hashlib
-        safe_name = hashlib.md5(resource.encode()).hexdigest()[:16]
+        safe_name = hashlib.sha256(resource.encode()).hexdigest()[:24]
         return os.path.join(self.lock_dir, f"{safe_name}.lock")
+
+    def _open_lock_file(self, lock_path: str) -> TextIO:
+        """Open a current-user-owned regular lock file without following links."""
+        flags = os.O_RDWR | os.O_CREAT
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        file_descriptor = os.open(lock_path, flags, 0o600)
+        try:
+            lock_stat = os.fstat(file_descriptor)
+            if not stat.S_ISREG(lock_stat.st_mode):
+                raise ValueError(f"Lock path is not a regular file: {lock_path}")
+            if lock_stat.st_uid != os.geteuid():
+                raise PermissionError(f"Lock file is not owned by the current user: {lock_path}")
+            if stat.S_IMODE(lock_stat.st_mode) & 0o022:
+                raise PermissionError(f"Lock file is group- or world-writable: {lock_path}")
+            os.fchmod(file_descriptor, 0o600)
+            lock_file = os.fdopen(file_descriptor, "a+", encoding="utf-8")
+            file_descriptor = -1
+            return lock_file
+        finally:
+            if file_descriptor >= 0:
+                os.close(file_descriptor)
     
     def acquire_lock(self, resource: str, exclusive: bool = True) -> bool:
         if resource in self._file_handles:
@@ -120,11 +161,11 @@ class SimpleLockManager:
         lock_file = None
         
         try:
-            lock_file = open(lock_path, 'w')
+            lock_file = self._open_lock_file(lock_path)
             fcntl.flock(lock_file.fileno(), lock_mode | fcntl.LOCK_NB)
             self._file_handles[resource] = lock_file
             return True
-        except (IOError, OSError):
+        except (IOError, OSError, ValueError):
             if lock_file:
                 lock_file.close()
             return False
@@ -140,29 +181,19 @@ class SimpleLockManager:
         except (IOError, OSError):
             # Best-effort unlock: ignore failures closing lock handles.
             pass
-        
-        lock_path = self._get_lock_path(resource)
-        try:
-            os.unlink(lock_path)
-        except (IOError, OSError):
-            # Best-effort cleanup: ignore errors removing lock file.
-            pass
     
     def check_locked(self, resource: str, exclusive: bool = True) -> bool:
         if resource in self._file_handles:
             return True  # Locked by us
         
         lock_path = self._get_lock_path(resource)
-        if not os.path.exists(lock_path):
-            return False
-        
         lock_mode = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
         try:
-            with open(lock_path, 'w') as test_file:
+            with self._open_lock_file(lock_path) as test_file:
                 fcntl.flock(test_file.fileno(), lock_mode | fcntl.LOCK_NB)
                 fcntl.flock(test_file.fileno(), fcntl.LOCK_UN)
             return False
-        except (IOError, OSError):
+        except (IOError, OSError, ValueError):
             return True
 
 
@@ -258,7 +289,8 @@ class ConcurrentOperationManager:
     """Main coordinator for concurrent operations."""
     
     def __init__(self, max_concurrent: int = 3, memory_warning_mb: int = 512, 
-                 memory_critical_mb: int = 256, lock_dir: str = "/tmp/operation_locks"):
+                 memory_critical_mb: int = 256,
+                 lock_dir: str = DEFAULT_OPERATION_LOCK_DIR):
         self.max_concurrent = max_concurrent
         self.memory_monitor = MemoryMonitor(memory_warning_mb, memory_critical_mb)
         self.lock_manager = SimpleLockManager(lock_dir)

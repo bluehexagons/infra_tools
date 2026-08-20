@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import sys
 import tempfile
 import unittest
@@ -652,16 +653,27 @@ class TestAntistaticReleaseDownloads(unittest.TestCase):
         tag_name = _download_antistatic_binary("amd64")
 
         self.assertEqual(tag_name, "v1.2.3")
+        download_parts = shlex.split(mock_run.call_args_list[0].args[0])
+        temporary_path = download_parts[download_parts.index("-o") + 1]
+        self.assertEqual(
+            os.path.basename(temporary_path),
+            "antistatic-server-linux-amd64",
+        )
+        self.assertNotEqual(os.path.dirname(temporary_path), "/tmp")
         mock_run.assert_has_calls(
             [
                 call(
-                    "curl -fL -o /tmp/antistatic-server-linux-amd64.v1.2.3 https://example.invalid/antistatic-server-linux-amd64",
+                    "curl -fL --proto '=https' --proto-redir '=https' "
+                    f"-o {temporary_path} https://example.invalid/antistatic-server-linux-amd64",
                     check=True,
-                    display_cmd="curl -fL -o /tmp/antistatic-server-linux-amd64.v1.2.3 <release URL>",
+                    display_cmd=(
+                        "curl -fL --proto '=https' --proto-redir '=https' "
+                        f"-o {temporary_path} <release URL>"
+                    ),
                 ),
-                call("chmod +x /tmp/antistatic-server-linux-amd64.v1.2.3", check=True),
+                call(f"chmod +x {temporary_path}", check=True),
                 call(
-                    "mv /tmp/antistatic-server-linux-amd64.v1.2.3 /usr/local/bin/antistatic-server",
+                    f"mv {temporary_path} /usr/local/bin/antistatic-server",
                     check=True,
                 ),
             ]
@@ -808,16 +820,27 @@ class TestAntistaticDbReleaseDownloads(unittest.TestCase):
         tag_name = _download_antistatic_db_binary("amd64")
 
         self.assertEqual(tag_name, "v0.1.0")
+        download_parts = shlex.split(mock_run.call_args_list[0].args[0])
+        temporary_path = download_parts[download_parts.index("-o") + 1]
+        self.assertEqual(
+            os.path.basename(temporary_path),
+            "antistatic-db-linux-amd64",
+        )
+        self.assertNotEqual(os.path.dirname(temporary_path), "/tmp")
         mock_run.assert_has_calls(
             [
                 call(
-                    "curl -fL -o /tmp/antistatic-db-linux-amd64.v0.1.0 https://example.invalid/antistatic-db-linux-amd64",
+                    "curl -fL --proto '=https' --proto-redir '=https' "
+                    f"-o {temporary_path} https://example.invalid/antistatic-db-linux-amd64",
                     check=True,
-                    display_cmd="curl -fL -o /tmp/antistatic-db-linux-amd64.v0.1.0 <release URL>",
+                    display_cmd=(
+                        "curl -fL --proto '=https' --proto-redir '=https' "
+                        f"-o {temporary_path} <release URL>"
+                    ),
                 ),
-                call("chmod +x /tmp/antistatic-db-linux-amd64.v0.1.0", check=True),
+                call(f"chmod +x {temporary_path}", check=True),
                 call(
-                    "mv /tmp/antistatic-db-linux-amd64.v0.1.0 /usr/local/bin/antistatic-db",
+                    f"mv {temporary_path} /usr/local/bin/antistatic-db",
                     check=True,
                 ),
             ]

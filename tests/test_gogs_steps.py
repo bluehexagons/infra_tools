@@ -87,6 +87,18 @@ class TestFetchPreferredGogsRelease(unittest.TestCase):
 
 class TestInstallGogsRelease(unittest.TestCase):
     @patch("web.gogs_steps.run")
+    @patch(
+        "web.gogs_steps.fetch_preferred_gogs_release",
+        return_value=("../../escape", "https://example.com/gogs.tar.gz"),
+    )
+    @patch("web.gogs_steps.detect_release_arch", return_value="amd64")
+    def test_rejects_release_tag_path_traversal(self, _arch, _fetch, mock_run):
+        with self.assertRaisesRegex(ValueError, "Invalid release tag"):
+            gogs_steps.install_or_update_gogs_release()
+
+        mock_run.assert_not_called()
+
+    @patch("web.gogs_steps.run")
     @patch("web.gogs_steps.os.path.exists", return_value=False)
     @patch("web.gogs_steps.read_installed_gogs_release", return_value="v1.2.3")
     @patch(
@@ -119,6 +131,14 @@ class TestInstallGogsRelease(unittest.TestCase):
         self.assertLess(version_index, activate_index)
         self.assertTrue(calls[version_index].kwargs["check"])
         self.assertTrue(calls[version_index].kwargs["capture_output"])
+        download_command = next(
+            call.args[0]
+            for call in calls
+            if call.args[0].startswith("curl -fL ")
+        )
+        self.assertIn("/infra-tools-gogs-release-", download_command)
+        self.assertNotIn("-o /tmp/gogs_", download_command)
+        self.assertIn("--proto-redir '=https'", download_command)
 
 
 class TestGenerateGogsConfig(unittest.TestCase):

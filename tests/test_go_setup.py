@@ -30,7 +30,7 @@ class TestInstallGo(unittest.TestCase):
                 "os": "linux",
                 "arch": arch,
                 "kind": "archive",
-                "sha256": "abc123",
+                "sha256": "a" * 64,
             }],
         }])
 
@@ -40,6 +40,28 @@ class TestInstallGo(unittest.TestCase):
         self.assertEqual(common_steps._go_release_arch("armv7l"), "armv6l")
         self.assertEqual(common_steps._go_release_arch("riscv64"), "riscv64")
         self.assertIsNone(common_steps._go_release_arch("mips64"))
+
+    def test_release_feed_rejects_unsafe_archive_metadata(self):
+        base_file = {
+            "os": "linux",
+            "arch": "amd64",
+            "kind": "archive",
+            "sha256": "a" * 64,
+        }
+        for override in (
+            {"filename": "../go.tar.gz"},
+            {"filename": "go.tar.gz", "sha256": "not-a-digest"},
+        ):
+            payload = [{
+                "version": "go1.22.3",
+                "stable": True,
+                "files": [{**base_file, **override}],
+            }]
+            with self.subTest(override=override), self.assertRaisesRegex(
+                RuntimeError,
+                "No supported Linux/amd64 Go archive found",
+            ):
+                common_steps._select_go_download(payload, "amd64", None)
 
     def test_skips_reinstall_when_usr_local_go_is_current(self):
         commands: list[str] = []
@@ -57,7 +79,7 @@ class TestInstallGo(unittest.TestCase):
             common_steps.install_go(_make_config())
 
         self.assertNotIn("rm -rf /usr/local/go", commands)
-        self.assertFalse(any(command.startswith("wget -q https://go.dev/dl/") for command in commands))
+        self.assertFalse(any(command.startswith("wget ") for command in commands))
 
     def test_reinstalls_when_usr_local_go_is_outdated(self):
         commands: list[str] = []
@@ -69,7 +91,12 @@ class TestInstallGo(unittest.TestCase):
             if command == "/usr/local/go/bin/go version":
                 return subprocess.CompletedProcess(command, 0, stdout="go version go1.21.0 linux/amd64\n", stderr="")
             if command.startswith("sha256sum "):
-                return subprocess.CompletedProcess(command, 0, stdout="abc123  archive\n", stderr="")
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    stdout=f"{'a' * 64}  archive\n",
+                    stderr="",
+                )
             return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
         with patch("common.common_steps.os.path.exists", return_value=True), \
@@ -79,7 +106,11 @@ class TestInstallGo(unittest.TestCase):
             common_steps.install_go(_make_config())
 
         self.assertIn("rm -rf /usr/local/go", commands)
-        self.assertTrue(any(command.startswith("wget -q https://go.dev/dl/go1.22.3") for command in commands))
+        self.assertTrue(any("https://go.dev/dl/go1.22.3" in command for command in commands))
+        download_command = next(command for command in commands if command.startswith("wget -q "))
+        self.assertIn("--https-only", download_command)
+        self.assertIn("/infra-tools-go-release-", download_command)
+        self.assertNotIn("-O /tmp/go1.22.3", download_command)
 
     def test_reinstalls_with_native_arm64_archive(self):
         commands: list[str] = []
@@ -91,7 +122,12 @@ class TestInstallGo(unittest.TestCase):
             if command == "/usr/local/go/bin/go version":
                 return subprocess.CompletedProcess(command, 0, stdout="go version go1.21.0 linux/amd64\n", stderr="")
             if command.startswith("sha256sum "):
-                return subprocess.CompletedProcess(command, 0, stdout="abc123  archive\n", stderr="")
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    stdout=f"{'a' * 64}  archive\n",
+                    stderr="",
+                )
             return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
         with patch("common.common_steps.platform.machine", return_value="aarch64"), \

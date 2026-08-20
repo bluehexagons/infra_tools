@@ -6,6 +6,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import tempfile
 from typing import Optional
 
 from lib.config import SetupConfig
@@ -191,10 +192,18 @@ else:
             print(f"    {result.stderr.strip()[:200]}")
         return
 
-    run(f"wget -qO /tmp/helium.deb {shlex.quote(helium_url)}", check=False)
-    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    run("apt-get install -y -qq /tmp/helium.deb", check=False)
-    run("rm -f /tmp/helium.deb", check=False)
+    with tempfile.TemporaryDirectory(prefix="infra-tools-helium-") as temporary_dir:
+        package_path = os.path.join(temporary_dir, "helium.deb")
+        download_result = run(
+            f"wget --https-only -qO {shlex.quote(package_path)} "
+            f"{shlex.quote(helium_url)}",
+            check=False,
+        )
+        if download_result.returncode != 0:
+            print("  ✗ Failed to download Helium package")
+            return
+        os.environ["DEBIAN_FRONTEND"] = "noninteractive"
+        run(f"apt-get install -y -qq {shlex.quote(package_path)}", check=False)
     if is_package_installed("helium-bin") or os.path.exists("/usr/bin/helium"):
         print("  ✓ Helium browser installed")
 
@@ -242,11 +251,7 @@ def install_single_browser(browser: str, use_flatpak: bool) -> None:
             else:
                 return
         
-        print("  Installing uBlock Origin extension for Firefox...")
-        run("wget -qO /tmp/ublock_origin.xpi https://addons.mozilla.org/firefox/downloads/latest/ublock-origin/latest.xpi", check=False)
-        if os.path.exists("/tmp/ublock_origin.xpi"):
-            print("  ✓ Firefox installed (uBlock Origin downloaded to /tmp/ublock_origin.xpi)")
-    
+
     elif browser == "librewolf":
         if use_flatpak:
             if is_flatpak_app_installed("io.gitlab.librewolf-community"):
@@ -286,13 +291,21 @@ def install_single_browser(browser: str, use_flatpak: bool) -> None:
         except RuntimeError as exc:
             print(f"  ✗ Failed to resolve current Browsh release: {exc}")
             return
-        run(
-            f"wget -qO /tmp/browsh.deb {shlex.quote(browsh_url)}",
-            check=False,
-            display_cmd=f"wget -qO /tmp/browsh.deb <Browsh {tag_name} release URL>",
-        )
-        run("apt-get install -y -qq /tmp/browsh.deb", check=False)
-        run("rm -f /tmp/browsh.deb", check=False)
+        with tempfile.TemporaryDirectory(prefix="infra-tools-browsh-") as temporary_dir:
+            package_path = os.path.join(temporary_dir, "browsh.deb")
+            download_result = run(
+                f"wget --https-only -qO {shlex.quote(package_path)} "
+                f"{shlex.quote(browsh_url)}",
+                check=False,
+                display_cmd=(
+                    f"wget --https-only -qO {package_path} "
+                    f"<Browsh {tag_name} release URL>"
+                ),
+            )
+            if download_result.returncode != 0:
+                print("  ✗ Failed to download Browsh package")
+                return
+            run(f"apt-get install -y -qq {shlex.quote(package_path)}", check=False)
         if is_package_installed("browsh") or shutil.which("browsh"):
             print("  ✓ Browsh installed")
     

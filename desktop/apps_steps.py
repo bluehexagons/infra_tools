@@ -1,7 +1,10 @@
 """Desktop and workstation setup steps."""
 
 from __future__ import annotations
+
 import os
+import shlex
+import tempfile
 
 from lib.config import SetupConfig
 from lib.machine_state import is_container
@@ -110,10 +113,19 @@ def install_desktop_apps(config: SetupConfig) -> None:
             return
 
         print("  Installing Discord...")
-        run("wget -qO /tmp/discord.deb 'https://discord.com/api/download?platform=linux&format=deb'", check=False)
-        os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-        run("apt-get install -y -qq /tmp/discord.deb", check=False)
-        run("rm -f /tmp/discord.deb", check=False)
+        with tempfile.TemporaryDirectory(prefix="infra-tools-discord-") as temporary_dir:
+            package_path = os.path.join(temporary_dir, "discord.deb")
+            download_result = run(
+                "wget --https-only -qO "
+                f"{shlex.quote(package_path)} "
+                "'https://discord.com/api/download?platform=linux&format=deb'",
+                check=False,
+            )
+            if download_result.returncode != 0:
+                print("  ⚠ Failed to download Discord")
+                return
+            os.environ["DEBIAN_FRONTEND"] = "noninteractive"
+            run(f"apt-get install -y -qq {shlex.quote(package_path)}", check=False)
         discord_installed = is_package_installed("discord")
 
         if discord_installed:

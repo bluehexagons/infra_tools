@@ -4,13 +4,41 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
+import tempfile
 from collections.abc import Callable, Mapping
 from typing import Any
+from urllib.parse import urlsplit
 
 from lib.atomic_io import write_json_atomic
 from lib.remote_utils import run
 from lib.update_policy import order_preferred_github_releases
+from lib.validation import validate_filesystem_path, validate_no_control_characters
+
+
+_RELEASE_TAG_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$")
+
+
+def validate_release_tag(value: str) -> str:
+    """Return a release tag that is safe as metadata and a path component."""
+    if not isinstance(value, str) or not _RELEASE_TAG_PATTERN.fullmatch(value):
+        raise ValueError(f"Invalid release tag: {value}")
+    validate_no_control_characters(value, "release tag")
+    return value
+
+
+def validate_release_download_url(value: str) -> str:
+    """Require an HTTPS release asset URL without embedded credentials."""
+    if not isinstance(value, str) or not value:
+        raise ValueError("Release download URL must be a non-empty string")
+    validate_no_control_characters(value, "release download URL")
+    parsed = urlsplit(value)
+    if parsed.scheme != "https" or not parsed.hostname:
+        raise ValueError("Release download URL must use HTTPS")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("Release download URL must not embed credentials")
+    return value
 
 
 def detect_release_arch() -> str:
@@ -110,7 +138,13 @@ def _select_github_release_asset(
                 and isinstance(download_url, str)
                 and asset_matches(tag_name, asset_name)
             ):
-                return tag_name, download_url
+                try:
+                    return (
+                        validate_release_tag(tag_name),
+                        validate_release_download_url(download_url),
+                    )
+                except ValueError:
+                    continue
     raise RuntimeError(missing_asset_description)
 
 
@@ -182,25 +216,44 @@ def install_binary_release(
     persist_installed_tag: Callable[[str], None],
 ) -> str:
     """Download and replace a release-managed binary when the tag changes."""
+    validate_no_control_characters(binary_name, "release binary name")
+    if (
+        not binary_name
+        or os.path.basename(binary_name) != binary_name
+        or binary_name in {".", ".."}
+    ):
+        raise ValueError(f"Invalid release binary name: {binary_name}")
+    validate_filesystem_path(binary_path, must_exist=False)
+    tag_name = validate_release_tag(tag_name)
+    download_url = validate_release_download_url(download_url)
+
     if installed_tag == tag_name and os.path.exists(binary_path):
         print(f"  ✓ {os.path.basename(binary_path)} already up to date ({tag_name})")
         return tag_name
 
     print(f"  Downloading {binary_name} ({tag_name})...")
-    tmp_path = f"/tmp/{binary_name}.{tag_name}"
-    download_result = run(
-        f"curl -fL -o {shlex.quote(tmp_path)} {shlex.quote(download_url)}",
-        check=True,
-        display_cmd=f"curl -fL -o {tmp_path} <release URL>",
-    )
-    if download_result.returncode != 0:
-        raise RuntimeError(f"Failed to download {binary_name} {tag_name}")
-    chmod_result = run(f"chmod +x {shlex.quote(tmp_path)}", check=True)
-    if chmod_result.returncode != 0:
-        raise RuntimeError(f"Failed to make {binary_name} {tag_name} executable")
-    install_result = run(f"mv {shlex.quote(tmp_path)} {shlex.quote(binary_path)}", check=True)
-    if install_result.returncode != 0:
-        raise RuntimeError(f"Failed to install {binary_name} {tag_name}")
+    with tempfile.TemporaryDirectory(prefix="infra-tools-release-") as temporary_dir:
+        tmp_path = os.path.join(temporary_dir, binary_name)
+        download_result = run(
+            "curl -fL --proto '=https' --proto-redir '=https' "
+            f"-o {shlex.quote(tmp_path)} {shlex.quote(download_url)}",
+            check=True,
+            display_cmd=(
+                "curl -fL --proto '=https' --proto-redir '=https' "
+                f"-o {tmp_path} <release URL>"
+            ),
+        )
+        if download_result.returncode != 0:
+            raise RuntimeError(f"Failed to download {binary_name} {tag_name}")
+        chmod_result = run(f"chmod +x {shlex.quote(tmp_path)}", check=True)
+        if chmod_result.returncode != 0:
+            raise RuntimeError(f"Failed to make {binary_name} {tag_name} executable")
+        install_result = run(
+            f"mv {shlex.quote(tmp_path)} {shlex.quote(binary_path)}",
+            check=True,
+        )
+        if install_result.returncode != 0:
+            raise RuntimeError(f"Failed to install {binary_name} {tag_name}")
     persist_installed_tag(tag_name)
     print(f"  ✓ Installed {binary_path} ({tag_name})")
     return tag_name

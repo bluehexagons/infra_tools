@@ -31,6 +31,44 @@ class TestDesktopApps(unittest.TestCase):
         self.assertNotIn("codium", commands)
         self.assertNotIn("vscodium", commands.lower())
 
+    @patch("desktop.apps_steps.install_office_apps")
+    @patch("desktop.apps_steps.install_browser")
+    @patch("desktop.apps_steps.run")
+    @patch("desktop.apps_steps.is_package_installed")
+    def test_discord_package_uses_private_temporary_directory(
+        self,
+        mock_package,
+        mock_run,
+        _mock_browser,
+        _mock_office,
+    ):
+        from desktop.apps_steps import install_desktop_apps
+
+        mock_package.side_effect = [False, True]
+        mock_run.return_value = Mock(returncode=0)
+        config = SetupConfig(
+            host="test.example.com",
+            username="testuser",
+            system_type="workstation_desktop",
+            use_flatpak=False,
+        )
+
+        install_desktop_apps(config)
+
+        commands = [call.args[0] for call in mock_run.call_args_list]
+        download_command = next(
+            command for command in commands if command.startswith("wget --https-only -qO ")
+        )
+        self.assertIn("/infra-tools-discord-", download_command)
+        self.assertNotIn("-qO /tmp/discord.deb", download_command)
+        self.assertTrue(
+            any(
+                command.startswith("apt-get install -y -qq ")
+                and "/infra-tools-discord-" in command
+                for command in commands
+            )
+        )
+
     def test_desktop_steps_exports_librewolf_default_browser_config(self):
         """desktop.steps should expose the browser implementation with LibreWolf support."""
         from desktop import steps
@@ -182,9 +220,18 @@ class TestBrowserSteps(unittest.TestCase):
         _install_helium_browser()
 
         commands = [call.args[0] for call in mock_run.call_args_list]
-        self.assertIn("wget -qO /tmp/helium.deb https://example.test/helium-bin_1.0-1_amd64.deb", commands)
-        self.assertIn("apt-get install -y -qq /tmp/helium.deb", commands)
-        self.assertIn("rm -f /tmp/helium.deb", commands)
+        download_command = next(
+            command for command in commands if command.startswith("wget --https-only -qO ")
+        )
+        self.assertIn("/infra-tools-helium-", download_command)
+        self.assertNotIn("-qO /tmp/helium.deb", download_command)
+        self.assertTrue(
+            any(
+                command.startswith("apt-get install -y -qq ")
+                and "/infra-tools-helium-" in command
+                for command in commands
+            )
+        )
 
 
 if __name__ == "__main__":

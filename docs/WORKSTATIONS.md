@@ -129,14 +129,17 @@ Supported `--browser` values are `brave`, `firefox`, `librewolf`, `helium`,
 `browsh`, and `lynx`:
 
 - Brave and LibreWolf use Debian repositories unless `--flatpak` is selected.
-- Firefox uses `firefox-esr` through apt, or the Flathub build with Flatpak;
-  setup also downloads the uBlock Origin extension package to `/tmp`.
+- Firefox uses `firefox-esr` through apt, or the Flathub build with Flatpak.
 - Helium is downloaded from its upstream GitHub release for amd64 or arm64.
 - Browsh installs Firefox as a dependency, resolves the newest stable release
   with a Debian package for the target architecture, and provides a terminal
   browser.
 - Lynx installs the Debian terminal browser and does not become a graphical
   default.
+
+Native Discord, Helium, and Browsh packages are staged in private, randomly
+named temporary directories and removed after installation. Setup does not
+leave uninstalled browser-extension packages in the shared `/tmp` directory.
 
 The first browser in a repeated list is written to the setup user's
 `~/.config/mimeapps.list` as the HTTP/HTTPS default. Text-only browsers do not

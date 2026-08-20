@@ -177,7 +177,9 @@ class TestSimpleLockManager(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             mgr = SimpleLockManager(lock_dir=tmpdir)
             self.assertTrue(mgr.acquire_lock('resource-a'))
+            lock_path = mgr._get_lock_path('resource-a')
             mgr.release_lock('resource-a')
+            self.assertTrue(os.path.isfile(lock_path))
 
     def test_acquire_same_resource_twice_returns_true(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -237,8 +239,41 @@ class TestSimpleLockManager(unittest.TestCase):
             lock_dir = os.path.join(tmpdir, 'sub', 'locks')
             mgr = SimpleLockManager(lock_dir=lock_dir)
             self.assertTrue(os.path.isdir(lock_dir))
+            self.assertEqual(os.stat(lock_dir).st_mode & 0o777, 0o700)
             self.assertTrue(mgr.acquire_lock('auto-dir'))
             mgr.release_lock('auto-dir')
+
+    def test_rejects_symlinked_lock_directory(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            real_dir = os.path.join(tmpdir, 'real')
+            link_dir = os.path.join(tmpdir, 'link')
+            os.mkdir(real_dir)
+            os.symlink(real_dir, link_dir)
+
+            with self.assertRaisesRegex(ValueError, "must not contain symlinks"):
+                SimpleLockManager(lock_dir=link_dir)
+
+    def test_rejects_writable_lock_directory(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            lock_dir = os.path.join(tmpdir, 'locks')
+            os.mkdir(lock_dir)
+            os.chmod(lock_dir, 0o777)
+
+            with self.assertRaisesRegex(PermissionError, "group- or world-writable"):
+                SimpleLockManager(lock_dir=lock_dir)
+
+    @unittest.skipUnless(hasattr(os, "O_NOFOLLOW"), "O_NOFOLLOW is unavailable")
+    def test_symlinked_lock_file_cannot_truncate_target(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mgr = SimpleLockManager(lock_dir=tmpdir)
+            target = os.path.join(tmpdir, "target")
+            with open(target, "w", encoding="utf-8") as file_obj:
+                file_obj.write("preserve me")
+            os.symlink(target, mgr._get_lock_path("hostile"))
+
+            self.assertFalse(mgr.acquire_lock("hostile"))
+            with open(target, encoding="utf-8") as file_obj:
+                self.assertEqual(file_obj.read(), "preserve me")
 
 
 # ---------------------------------------------------------------------------

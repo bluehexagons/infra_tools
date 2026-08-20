@@ -78,6 +78,13 @@ artifacts at least seven days old. Change the policy with
 The deployment flag `--deploy-latest DOMAIN_OR_PATH GIT_URL` explicitly bypasses
 the deployment freshness policy for that repository.
 
+Privileged Go, Gogs, and managed binary downloads use private, randomly named
+temporary directories. They never download through a predictable public
+`/tmp` filename that another local account could replace with a symbolic link.
+Release tags are restricted to safe path components, release assets require
+credential-free HTTPS URLs without protocol-downgrade redirects, and Go
+archives require the official feed's full SHA-256 digest before extraction.
+
 ## Cleanup and State Safety
 
 `cleanup-maintenance` removes disposable APT caches, rotates journals before
@@ -136,8 +143,10 @@ the root filesystem remains healthy. Network and FUSE mounts are excluded to
 avoid blocking maintenance on unavailable remote storage.
 
 Storage synchronization and scrub jobs write scheduling state atomically and
-use a persistent lock inode to prevent overlapping runs. Invalid specifications
-or unavailable mounts fail visibly so the next scheduled run can retry them.
+use current-user-owned, mode-`0700` lock directories under
+`/run/lock/infra_tools`; lock files are regular mode-`0600` files and retain a
+persistent inode to prevent overlapping runs. Invalid specifications or
+unavailable mounts fail visibly so the next scheduled run can retry them.
 
 ## Related Configuration
 

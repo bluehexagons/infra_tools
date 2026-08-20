@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import secrets
 import shlex
+import tempfile
 from typing import Any, Mapping
 
 from lib.atomic_io import write_json_atomic, write_text_atomic
@@ -14,6 +15,8 @@ from lib.release_management import (
     detect_release_arch,
     fetch_preferred_github_release_asset,
     load_json_state,
+    validate_release_download_url,
+    validate_release_tag,
     write_json_state,
 )
 from lib.remote_utils import generate_password, is_service_active, run, user_exists
@@ -153,6 +156,8 @@ def install_or_update_gogs_release() -> tuple[str, bool]:
     """Install the preferred Gogs release and return (tag, changed)."""
     arch = detect_release_arch()
     tag_name, download_url = fetch_preferred_gogs_release(arch)
+    tag_name = validate_release_tag(tag_name)
+    download_url = validate_release_download_url(download_url)
     release_dir = f"{GOGS_RELEASES_DIR}/{tag_name}"
     installed_tag = read_installed_gogs_release()
     current_binary = f"{GOGS_CURRENT_DIR}/gogs"
@@ -160,30 +165,43 @@ def install_or_update_gogs_release() -> tuple[str, bool]:
         print(f"  ✓ Gogs already up to date ({tag_name})")
         return tag_name, False
 
-    archive_path = f"/tmp/gogs_{tag_name}_{arch}.tar.gz"
-    extract_dir = f"/tmp/gogs_extract_{tag_name}_{arch}"
     run(f"mkdir -p {shlex.quote(GOGS_RELEASES_DIR)}")
-    run(f"rm -rf {shlex.quote(extract_dir)}", check=False)
-    run(
-        f"curl -fL -o {shlex.quote(archive_path)} {shlex.quote(download_url)}",
-        check=True,
-        display_cmd=f"curl -fL -o {archive_path} <release URL>",
-    )
-    run(f"mkdir -p {shlex.quote(extract_dir)}")
-    run(f"rm -rf {shlex.quote(release_dir)}", check=False)
-    run(f"tar -xzf {shlex.quote(archive_path)} -C {shlex.quote(extract_dir)}", check=True)
-    run(f"mv {shlex.quote(extract_dir)}/gogs {shlex.quote(release_dir)}", check=True)
-    release_binary = f"{release_dir}/gogs"
-    run(f"test -x {shlex.quote(release_binary)}", check=True)
-    run(
-        f"runuser -u {shlex.quote(GOGS_GIT_USER)} -- {shlex.quote(release_binary)} --version",
-        check=True,
-        capture_output=True,
-    )
-    run(f"ln -sfn {shlex.quote(release_dir)} {shlex.quote(GOGS_CURRENT_DIR)}", check=True)
-    run(f"ln -sfn {shlex.quote(GOGS_CURRENT_DIR)}/gogs {shlex.quote(GOGS_BINARY_LINK)}", check=True)
-    run(f"rm -f {shlex.quote(archive_path)}", check=False)
-    run(f"rm -rf {shlex.quote(extract_dir)}", check=False)
+    with tempfile.TemporaryDirectory(prefix="infra-tools-gogs-release-") as temporary_dir:
+        archive_path = os.path.join(temporary_dir, "gogs.tar.gz")
+        extract_dir = os.path.join(temporary_dir, "extract")
+        run(
+            "curl -fL --proto '=https' --proto-redir '=https' "
+            f"-o {shlex.quote(archive_path)} {shlex.quote(download_url)}",
+            check=True,
+            display_cmd=(
+                "curl -fL --proto '=https' --proto-redir '=https' "
+                f"-o {archive_path} <release URL>"
+            ),
+        )
+        run(f"mkdir -p {shlex.quote(extract_dir)}")
+        run(f"rm -rf {shlex.quote(release_dir)}", check=False)
+        run(
+            f"tar -xzf {shlex.quote(archive_path)} -C {shlex.quote(extract_dir)}",
+            check=True,
+        )
+        run(f"mv {shlex.quote(extract_dir)}/gogs {shlex.quote(release_dir)}", check=True)
+        release_binary = f"{release_dir}/gogs"
+        run(f"test -x {shlex.quote(release_binary)}", check=True)
+        run(
+            f"runuser -u {shlex.quote(GOGS_GIT_USER)} -- "
+            f"{shlex.quote(release_binary)} --version",
+            check=True,
+            capture_output=True,
+        )
+        run(
+            f"ln -sfn {shlex.quote(release_dir)} {shlex.quote(GOGS_CURRENT_DIR)}",
+            check=True,
+        )
+        run(
+            f"ln -sfn {shlex.quote(GOGS_CURRENT_DIR)}/gogs "
+            f"{shlex.quote(GOGS_BINARY_LINK)}",
+            check=True,
+        )
     print(f"  ✓ Installed Gogs {tag_name}")
     return tag_name, True
 
