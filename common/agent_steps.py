@@ -342,7 +342,13 @@ def _payload_path(*parts: str) -> str:
 
 
 def _reject_symlinked_agent_destination(path: str) -> None:
-    """Reject symlinks in an agent-owned destination path before writing."""
+    """Reject symlinked path components in an agent destination before writing.
+
+    Do not recursively inspect an existing agent directory. Codex and other
+    tools may keep legitimate runtime symlinks in temporary or cache trees
+    beneath their configuration directories; only the path being written and
+    its ancestors need to be protected here.
+    """
     absolute_path = os.path.abspath(path)
     current = os.path.sep
     for component in absolute_path.split(os.path.sep):
@@ -351,15 +357,6 @@ def _reject_symlinked_agent_destination(path: str) -> None:
         current = os.path.join(current, component)
         if os.path.lexists(current) and os.path.islink(current):
             raise RuntimeError(f"Refusing symlinked agent destination: {current}")
-
-    if not os.path.isdir(absolute_path):
-        return
-
-    for root, directories, files in os.walk(absolute_path, followlinks=False):
-        for name in (*directories, *files):
-            candidate = os.path.join(root, name)
-            if os.path.islink(candidate):
-                raise RuntimeError(f"Refusing symlinked agent destination: {candidate}")
 
 
 def _ensure_agent_directory(path: str, mode: int = 0o700) -> None:
@@ -379,13 +376,35 @@ def _ensure_agent_directory(path: str, mode: int = 0o700) -> None:
     _reject_symlinked_agent_destination(absolute_path)
 
 
+def _validate_agent_payload_tree(source: str, destination: str) -> None:
+    """Validate only destination paths represented by a payload tree."""
+    try:
+        entries = list(os.scandir(source))
+    except OSError as exc:
+        raise RuntimeError(f"Could not inspect agent payload: {source}") from exc
+
+    for entry in entries:
+        source_entry = entry.path
+        destination_entry = os.path.join(destination, entry.name)
+        if entry.is_symlink():
+            raise RuntimeError(f"Refusing symlinked agent payload: {source_entry}")
+        _reject_symlinked_agent_destination(destination_entry)
+        if entry.is_dir(follow_symlinks=False):
+            _validate_agent_payload_tree(source_entry, destination_entry)
+        elif not entry.is_file(follow_symlinks=False):
+            raise RuntimeError(f"Refusing unsupported agent payload entry: {source_entry}")
+
+
 def _copy_payload_directory(config: SetupConfig, source: str, destination: str, label: str) -> None:
     if not os.path.isdir(source):
         print(f"  No {label} payload found")
         return
+    if os.path.islink(source):
+        raise RuntimeError(f"Refusing symlinked agent payload: {source}")
 
     _reject_symlinked_agent_destination(destination)
     _ensure_agent_directory(destination)
+    _validate_agent_payload_tree(source, destination)
     _reject_symlinked_agent_destination(destination)
     shutil.copytree(source, destination, symlinks=True, dirs_exist_ok=True)
     _reject_symlinked_agent_destination(destination)

@@ -18,6 +18,7 @@ from common.agent_steps import (
     _chown_path,
     _download_verified_file,
     _latest_t3code_asset,
+    _copy_payload_directory,
     _copy_secret_file,
     _user_home,
     copy_agent_tooling_payload,
@@ -580,6 +581,73 @@ class TestAgentUpdate(unittest.TestCase):
 
 
 class TestAgentPayloadInstallation(unittest.TestCase):
+    def test_existing_codex_runtime_symlinks_do_not_block_secret_copy(self):
+        config = SetupConfig(
+            host='host',
+            username='agent',
+            system_type='server_dev',
+            install_codex=True,
+            copy_agent_keys=True,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            source = os.path.join(directory, 'auth.json')
+            home = os.path.join(directory, 'home')
+            runtime_dir = os.path.join(home, '.codex', 'tmp', 'arg0')
+            os.makedirs(runtime_dir)
+            with open(source, 'w', encoding='utf-8') as file_obj:
+                file_obj.write('{"token":"secret"}\n')
+            os.symlink('/bin/true', os.path.join(runtime_dir, 'codex-linux-sandbox'))
+
+            with (
+                patch('common.agent_steps._user_home', return_value=home),
+                patch('common.agent_steps._chown_path'),
+            ):
+                _copy_secret_file(
+                    config,
+                    source,
+                    os.path.join(home, '.codex', 'auth.json'),
+                    'Codex',
+                )
+
+            self.assertTrue(os.path.isfile(os.path.join(home, '.codex', 'auth.json')))
+            self.assertTrue(os.path.islink(os.path.join(runtime_dir, 'codex-linux-sandbox')))
+
+    def test_payload_directory_rejects_symlinks_at_the_written_path(self):
+        config = SetupConfig(
+            host='host',
+            username='agent',
+            system_type='server_dev',
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            source = os.path.join(directory, 'source')
+            home = os.path.join(directory, 'home')
+            destination = os.path.join(home, '.codex')
+            os.makedirs(source)
+            os.makedirs(home)
+            os.symlink(directory, destination)
+
+            with self.assertRaisesRegex(RuntimeError, 'symlinked agent destination'):
+                _copy_payload_directory(config, source, destination, 'Codex')
+
+    def test_payload_directory_rejects_nested_destination_symlink(self):
+        config = SetupConfig(
+            host='host',
+            username='agent',
+            system_type='server_dev',
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            source = os.path.join(directory, 'source')
+            home = os.path.join(directory, 'home')
+            destination = os.path.join(home, '.codex')
+            os.makedirs(source)
+            os.makedirs(destination)
+            with open(os.path.join(source, 'config.toml'), 'w', encoding='utf-8') as file_obj:
+                file_obj.write('model = "test"\n')
+            os.symlink(os.path.join(directory, 'outside'), os.path.join(destination, 'config.toml'))
+
+            with self.assertRaisesRegex(RuntimeError, 'symlinked agent destination'):
+                _copy_payload_directory(config, source, destination, 'Codex')
+
     def test_copied_credentials_are_removed_from_uploaded_payload(self):
         config = SetupConfig(
             host='host',
