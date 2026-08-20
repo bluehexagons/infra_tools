@@ -190,6 +190,7 @@ def install_t3code_web(config: SetupConfig) -> None:
 Description=T3 Code headless agentic coding service
 After=network-online.target
 Wants=network-online.target
+RequiresMountsFor={home}
 RequiresMountsFor={workspace}
 
 [Service]

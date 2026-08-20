@@ -520,8 +520,9 @@ def _run_main() -> int:
         print("=" * 60)
 
         if config.sync_specs or config.backup_specs:
+            storage_job_count = len(config.sync_specs or []) + len(config.backup_specs or [])
             print(
-                f"\nPreparing {len(config.sync_specs) + len(config.backup_specs)} "
+                f"\nPreparing {storage_job_count} "
                 "sync/backup job(s)..."
             )
             install_rsync(config)

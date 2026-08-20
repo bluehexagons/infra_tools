@@ -127,6 +127,7 @@ class T3CodeWebTest(unittest.TestCase):
             with open(service_path, encoding="utf-8") as file_obj:
                 service = file_obj.read()
             self.assertIn("User=agent", service)
+            self.assertIn(f"RequiresMountsFor={temporary}", service)
             self.assertIn(f"RequiresMountsFor={os.path.join(temporary, 'repos')}", service)
             self.assertIn("StandardOutput=null", service)
             self.assertIn("infra-tools-t3code-web", service)

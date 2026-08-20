@@ -136,6 +136,13 @@ def print_setup_summary(config: SetupConfig, description: Optional[str] = None) 
             f"Web interfaces: {', '.join(config.web_interfaces)} "
             f"({bind}:{config.web_interface_port})"
         )
+        if config.web_interface_sources:
+            print(
+                "Web interface sources: "
+                + ", ".join(config.web_interface_sources)
+            )
+        else:
+            print("Web interface sources: loopback only")
 
     if config.deploy_specs:
         print(f"Deployments: {len(config.deploy_specs)} repository(ies)")
@@ -174,6 +181,11 @@ def print_setup_summary(config: SetupConfig, description: Optional[str] = None) 
     if config.sync_specs:
         print(f"Sync Jobs: {len(config.sync_specs)} job(s)")
         for source, dest, interval in config.sync_specs:
+            print(f"  - {source} → {dest} ({interval})")
+
+    if config.backup_specs:
+        print(f"Backup Jobs: {len(config.backup_specs)} job(s)")
+        for source, dest, interval in config.backup_specs:
             print(f"  - {source} → {dest} ({interval})")
     
     if config.scrub_specs:

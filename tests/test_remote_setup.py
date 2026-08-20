@@ -51,6 +51,48 @@ class TestRemoteSetupArgsFile(unittest.TestCase):
 
         step.assert_not_called()
 
+    def test_backup_only_setup_handles_missing_sync_specs(self):
+        args = SimpleNamespace(
+            deploy_latest=False,
+            dry_run=False,
+            custom_steps=None,
+            system_type="server_lite",
+        )
+        config = SetupConfig(
+            host="localhost",
+            username="root",
+            system_type="server_lite",
+            backup_specs=[["/srv/projects", "/srv/backups/projects", "daily"]],
+        )
+
+        with patch.object(
+            remote_setup, "create_setup_argument_parser"
+        ) as create_parser, patch.object(
+            remote_setup, "config_from_remote_args", return_value=config
+        ), patch.object(
+            remote_setup, "print_setup_summary"
+        ), patch.object(
+            remote_setup, "detect_os", return_value="Debian"
+        ), patch.object(
+            remote_setup, "save_machine_state"
+        ), patch.object(
+            remote_setup, "save_setup_config"
+        ), patch.object(
+            remote_setup, "get_steps_for_system_type", return_value=[]
+        ), patch(
+            "sync.sync_steps.install_rsync"
+        ) as install_rsync, patch(
+            "sync.storage_ops_steps.create_storage_ops_service"
+        ) as create_service, patch(
+            "sync.storage_ops_steps.schedule_storage_ops_update"
+        ) as schedule_update:
+            create_parser.return_value.parse_args.return_value = args
+            self.assertEqual(remote_setup._run_main(), 0)
+
+        install_rsync.assert_called_once_with(config)
+        create_service.assert_called_once_with(config)
+        schedule_update.assert_called_once_with()
+
     def test_resolve_cli_args_loads_and_removes_args_file(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             args_path = os.path.join(tmpdir, "args.json")

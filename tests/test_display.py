@@ -75,6 +75,26 @@ class TestRdpDisplay(unittest.TestCase):
 
         self.assertIn("Allowed sources: 10.0.0.0/24", output.getvalue())
 
+    def test_setup_summary_shows_t3_sources_and_backup_jobs(self) -> None:
+        config = SetupConfig(
+            host="agent-vm",
+            username="agent",
+            system_type="server_dev",
+            agent_tools=["codex"],
+            web_interfaces=["t3code"],
+            web_interface_sources=["192.168.0.0/24"],
+            backup_specs=[["/srv/workspace", "/srv/backups/workspace", "daily"]],
+        )
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            print_setup_summary(config)
+
+        rendered = output.getvalue()
+        self.assertIn("Web interface sources: 192.168.0.0/24", rendered)
+        self.assertIn("Backup Jobs: 1 job(s)", rendered)
+        self.assertIn("/srv/workspace → /srv/backups/workspace (daily)", rendered)
+
 
 if __name__ == "__main__":
     unittest.main()

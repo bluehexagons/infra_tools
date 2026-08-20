@@ -38,7 +38,9 @@ infra-tools setup server_dev 192.168.0.41 agent \
 T3 Code also enables the Node.js runtime automatically because its headless
 CLI requires Node. The service runs as the setup user, starts at boot, and
 uses `/srv/agent-workspace` as its working directory. If no workspace is
-specified, it uses `~/repos`.
+specified, it uses `~/repos`. The generated systemd unit waits for both the
+account's home path and workspace path to be mounted before starting, so a
+separate data disk can safely host either agent state or the workspace.
 
 The current T3 Code server requires a compatible Node.js release (currently
 `^22.16 || ^23.11 || >=24.10`) and at least one authenticated provider CLI on
