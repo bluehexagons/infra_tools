@@ -53,18 +53,32 @@ until reboot, when the verified persistent configuration becomes the sole
 assignment.
 
 Hosted Proxmox guests receive their initial addressing during provisioning and
-therefore boot with it active. Existing Proxmox VMs and LXCs can use the same
-verified patch handoff as physical hosts and non-Proxmox VMs, including when a
-saved hosted configuration still contains its Proxmox metadata. Before guest
-persistence, the controller identifies exactly one matching VM or LXC on the
-saved Proxmox node. It then updates `qm ipconfig0` or `pct net0` after guest SSH
-is verified, preserving the existing bridge, firewall, MAC, device type, and
-unchanged address-family fields. It checks guest SSH again after the Proxmox
-update and restores the previous Proxmox value if that final check fails. The
-preflight now requires every listed guest to be readable, refuses metadata that
-changed concurrently, and reads the value back after applying it. Use
-`patch ... --activate-network` for existing hosted guests; initial hosted setup
-boots directly on its configured address and rejects the live-handoff flag.
+therefore boot with it active. The controller retains the gateway and DNS
+defaults resolved from the selected Proxmox bridge in the saved setup. On a
+rerun, it restores those values before building the remote setup arguments. If
+an older cache is missing them, the command refreshes the defaults from
+Proxmox instead of silently skipping the provisioning handoff.
+
+After guest SSH becomes available, hosted setup verifies the live IPv4 default
+route. If cloud-init brought up the address without the route, infra-tools
+repairs it automatically before package installation; the normal static
+network step then persists the same gateway through the guest's active network
+backend. A failed verification stops setup with the SSH/error detail so a
+guest cannot be reported as successfully configured while lacking its expected
+route.
+
+Existing Proxmox VMs and LXCs can use the same verified patch handoff as
+physical hosts and non-Proxmox VMs, including when a saved hosted configuration
+still contains its Proxmox metadata. Before guest persistence, the controller
+identifies exactly one matching VM or LXC on the saved Proxmox node. It then
+updates `qm ipconfig0` or `pct net0` after guest SSH is verified, preserving the
+existing bridge, firewall, MAC, device type, and unchanged address-family
+fields. It checks guest SSH again after the Proxmox update and restores the
+previous Proxmox value if that final check fails. The preflight now requires
+every listed guest to be readable, refuses metadata that changed concurrently,
+and reads the value back after applying it. Use `patch ... --activate-network`
+for existing hosted guests; initial hosted setup boots directly on its
+configured address and rejects the live-handoff flag.
 
 Proxmox host (`server_proxmox`) identity and bridge changes remain outside this
 generic workflow because they require cluster-aware planning. Generic setup

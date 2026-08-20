@@ -148,6 +148,14 @@ supports NetworkManager, systemd-networkd, and ifupdown on Debian. Without
 `--activate-network`, direct-host configuration is persisted but not activated
 live; reboot or deliberately restart the interface after reviewing it.
 
+For `--provision-on`, the IPv4 gateway and DNS default to values discovered
+from the selected Proxmox bridge and node. Those values are saved with the
+setup and restored on reruns. If a legacy setup cache is missing them,
+infra-tools refreshes the Proxmox defaults instead of skipping discovery. Once
+guest SSH is available, setup also verifies the live IPv4 default route and
+repairs a missing route before package installation; the normal final network
+step persists the repaired configuration.
+
 `--activate-network` uses a retry-safe transaction for an existing host and
 must be run from a separate controller. The remote
 setup temporarily adds the requested addresses without removing the address

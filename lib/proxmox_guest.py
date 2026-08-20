@@ -13,7 +13,7 @@ import time
 from typing import Optional
 
 from lib.proxmox_hosts import ProxmoxHost, ProxmoxHostFacts, ProxmoxStoragePool
-from lib.ssh_utils import get_ssh_control_path
+from lib.ssh_utils import build_ssh_command, get_ssh_control_path
 from lib.types import StrList
 
 
@@ -828,6 +828,97 @@ def resolve_guest_ssh_key(
     return None
 
 
+def ensure_guest_ipv4_route(
+    target_interface: str,
+    gateway: str,
+    ssh_key: Optional[str],
+    *,
+    dry_run: bool = False,
+) -> None:
+    """Verify and repair a provisioned guest's live IPv4 default route.
+
+    Proxmox stores the initial gateway in guest metadata, but cloud-init or a
+    later network backend can still bring up the address without installing
+    the corresponding route.  This runs after guest SSH is available and
+    before package setup, so a hosted guest can recover without an operator
+    logging in manually.  Persistent configuration is written by the regular
+    static-network setup step later in the run.
+    """
+    try:
+        parsed_interface = ipaddress.ip_interface(target_interface)
+        parsed_gateway = ipaddress.ip_address(gateway)
+    except ValueError as exc:
+        raise ProvisionError(
+            f"Invalid guest IPv4 route settings: {target_interface}, {gateway}"
+        ) from exc
+    if not isinstance(parsed_interface, ipaddress.IPv4Interface):
+        raise ProvisionError("Provisioned guest route requires an IPv4 interface")
+    if not isinstance(parsed_gateway, ipaddress.IPv4Address):
+        raise ProvisionError("Provisioned guest route requires an IPv4 gateway")
+    if parsed_gateway not in parsed_interface.network:
+        raise ProvisionError(
+            f"Guest gateway {parsed_gateway} is not reachable on {parsed_interface.network}"
+        )
+
+    if dry_run:
+        print(
+            "  [DRY-RUN] Would verify and repair the guest IPv4 default route "
+            f"via {parsed_gateway}"
+        )
+        return
+
+    target_ip = str(parsed_interface.ip)
+    gateway_ip = str(parsed_gateway)
+    remote_script = "\n".join(
+        [
+            "set -eu",
+            f"target_ip={shlex.quote(target_ip)}",
+            f"gateway={shlex.quote(gateway_ip)}",
+            "interface=$(ip -o -4 addr show | awk -v target=\"$target_ip\" '$4 ~ (\"^\" target \"/\") {print $2; exit}')",
+            'if [ -z "$interface" ]; then',
+            '  echo "Could not find the guest interface carrying $target_ip" >&2',
+            "  exit 1",
+            "fi",
+            'expected="$gateway $interface"',
+            'current=$(ip -4 route show default | awk \'$1 == "default" {print $3 " " $5; exit}\')',
+            'if [ "$current" = "$expected" ]; then',
+            '  echo already',
+            "  exit 0",
+            "fi",
+            'ip -4 route replace default via "$gateway" dev "$interface"',
+            'current=$(ip -4 route show default | awk \'$1 == "default" {print $3 " " $5; exit}\')',
+            'if [ "$current" != "$expected" ]; then',
+            '  echo "Guest default route did not become $expected" >&2',
+            "  exit 1",
+            "fi",
+            "echo repaired",
+        ]
+    )
+    command = build_ssh_command(
+        target_ip,
+        "root",
+        ssh_key,
+        remote_command=remote_script,
+        batch_mode=True,
+        connect_timeout=30,
+        server_alive_interval=30,
+    )
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip() or "unknown SSH error"
+        raise ProvisionError(f"Could not verify or repair the guest IPv4 route: {detail}")
+
+    if "repaired" in (result.stdout or ""):
+        print(f"  ✓ Repaired guest IPv4 default route via {gateway_ip}")
+    else:
+        print(f"  ✓ Guest IPv4 default route already uses {gateway_ip}")
+
+
 def _wait_for_guest_ssh(
     target_ip: str,
     node_ip: str,
@@ -904,6 +995,7 @@ __all__ = [
     "_ssh_opts",
     "_ssh_run",
     "_storage_pool_supports_content",
+    "ensure_guest_ipv4_route",
     "_wait_for_guest_ssh",
     "auto_detect_bridge",
     "probe_proxmox_cluster",

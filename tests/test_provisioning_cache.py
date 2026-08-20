@@ -57,6 +57,8 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
             storage_mounts=[["agent-data", "/srv/agent-workspace"]],
             container_cores=4,
             static_ipv4="10.0.0.50/24",
+            network_gateway4="10.0.0.1",
+            network_dns=["1.1.1.1"],
             ssh_key="/keys/agent",
         )
 
@@ -79,6 +81,8 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
             [["agent-data", "/srv/agent-workspace"]],
         )
         self.assertEqual(current.static_ipv4, "10.0.0.50/24")
+        self.assertEqual(current.network_gateway4, "10.0.0.1")
+        self.assertEqual(current.network_dns, ["1.1.1.1"])
         self.assertEqual(current.ssh_key, "/keys/agent")
 
     def test_explicit_guest_shape_change_requires_proxmox(self) -> None:
@@ -152,9 +156,24 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
 
         self.assertFalse(reused)
 
+    def test_legacy_cache_without_network_defaults_requires_refresh(self) -> None:
+        cached = _config(static_ipv4="10.0.0.50/24")
+
+        with patch("infra_tools.load_setup_command", return_value=cached):
+            reused = infra_tools._reuse_cached_provisioning_metadata(
+                _config(),
+                _args(),
+            )
+
+        self.assertFalse(reused)
+
     def test_cidr_target_looks_up_metadata_by_guest_address(self) -> None:
         current = _config(host="10.0.0.50/20")
-        cached = _config(static_ipv4="10.0.0.50/20")
+        cached = _config(
+            static_ipv4="10.0.0.50/20",
+            network_gateway4="10.0.0.1",
+            network_dns=["1.1.1.1"],
+        )
 
         with patch(
             "infra_tools.load_setup_command",
@@ -189,6 +208,9 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
             hosted_node="10.0.0.10",
             container_memory="4G",
             container_storage=[["root", "local-lvm", "32G"]],
+            static_ipv4="10.0.0.50/24",
+            network_gateway4="10.0.0.1",
+            network_dns=["1.1.1.1"],
         )
         args = _args()
 
@@ -198,11 +220,18 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
                  "infra_tools._prepare_runtime_config_for_cli",
                  side_effect=lambda config: config,
              ) as mock_prepare:
-            result = infra_tools.run_setup_command(args)
+            with patch("infra_tools.ensure_guest_ipv4_route") as mock_route:
+                result = infra_tools.run_setup_command(args)
 
         self.assertEqual(result, 0)
         mock_provision.assert_not_called()
         mock_prepare.assert_called_once_with(current)
+        mock_route.assert_called_once_with(
+            "10.0.0.50/24",
+            "10.0.0.1",
+            current.ssh_key,
+            dry_run=False,
+        )
 
 
 if __name__ == "__main__":

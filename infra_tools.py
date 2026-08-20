@@ -74,6 +74,7 @@ from lib.orchestrator_bootstrap import LAUNCHER_NAME, run_orchestrator_bootstrap
 from lib.plugin_registry import format_system_type_help, get_system_type_names
 from lib.network_cli import add_network_subparser, run_network_command
 from lib.local_cli import add_local_subparser, run_local_command
+from lib.proxmox_guest import ProvisionError, ensure_guest_ipv4_route
 from lib.proxmox_cli import add_proxmox_subparser, run_proxmox_command
 from lib.vm_cli import add_vm_subparser, run_vm_command
 from lib.sysadmin_cli import add_sysadmin_subparsers, run_sysadmin_command
@@ -1026,8 +1027,34 @@ def _reuse_cached_provisioning_metadata(
 
     if config.ssh_key is None:
         config.ssh_key = cached_config.ssh_key
-    if getattr(args, "static_ipv4", None) is None and cached_config.static_ipv4:
-        config.static_ipv4 = cached_config.static_ipv4
+
+    # Network defaults are resolved by Proxmox during the first provisioning
+    # pass. Preserve them on a repeated command, but never replace an
+    # explicit value supplied on the command line. A legacy cache without
+    # these values must go through Proxmox again so they can be refreshed.
+    for field in (
+        "static_ipv4",
+        "static_ipv6",
+        "network_gateway4",
+        "network_gateway6",
+        "network_dns",
+        "network_interface",
+    ):
+        if getattr(config, field) is not None:
+            continue
+        cached_value = getattr(cached_config, field)
+        if cached_value is None:
+            continue
+        setattr(
+            config,
+            field,
+            list(cached_value) if field == "network_dns" else cached_value,
+        )
+
+    if config.static_ipv4 and (
+        not config.network_gateway4 or not config.network_dns
+    ):
+        return False
 
     return True
 
@@ -1224,6 +1251,18 @@ def run_setup_command(args: argparse.Namespace) -> int:
             runtime_config = _prepare_runtime_config_for_cli(config)
         except ValueError as e:
             print(f"Error: {e}")
+            return 1
+
+    if config.hosted_node and config.static_ipv4 and config.network_gateway4:
+        try:
+            ensure_guest_ipv4_route(
+                config.static_ipv4,
+                config.network_gateway4,
+                config.ssh_key,
+                dry_run=config.dry_run,
+            )
+        except ProvisionError as exc:
+            print(f"\n✗ Failed to prepare the provisioned guest network: {exc}")
             return 1
 
     if not config.dry_run:

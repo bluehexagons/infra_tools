@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -16,6 +17,8 @@ from lib.proxmox_guest import (
     _get_guest_gateway,
     _get_host_nameservers,
     _parse_corosync_config,
+    ProvisionError,
+    ensure_guest_ipv4_route,
     _wait_for_guest_ssh,
     probe_proxmox_cluster,
     probe_proxmox_host,
@@ -89,6 +92,60 @@ class TestWaitForGuestSsh(unittest.TestCase):
     def test_dry_run_skips_probe(self, mock_run) -> None:
         _wait_for_guest_ssh("10.0.0.50", "10.0.0.1", "root", [], dry_run=True)
         mock_run.assert_not_called()
+
+
+class TestGuestRouteRepair(unittest.TestCase):
+    @patch("lib.proxmox_guest.build_ssh_command", return_value=["ssh"])
+    @patch("lib.proxmox_guest.subprocess.run")
+    def test_existing_route_is_left_in_place(self, mock_run, mock_build):
+        mock_run.return_value = subprocess.CompletedProcess(
+            ["ssh"], 0, stdout="already\n", stderr=""
+        )
+
+        ensure_guest_ipv4_route(
+            "192.168.0.41/24",
+            "192.168.0.1",
+            "/keys/agent",
+        )
+
+        mock_build.assert_called_once()
+        self.assertIn("192.168.0.41", mock_build.call_args.kwargs["remote_command"])
+        self.assertIn("192.168.0.1", mock_build.call_args.kwargs["remote_command"])
+        mock_run.assert_called_once_with(
+            ["ssh"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+    @patch("lib.proxmox_guest.build_ssh_command", return_value=["ssh"])
+    @patch("lib.proxmox_guest.subprocess.run")
+    def test_repairs_missing_route(self, mock_run, _mock_build):
+        mock_run.return_value = subprocess.CompletedProcess(
+            ["ssh"], 0, stdout="repaired\n", stderr=""
+        )
+
+        ensure_guest_ipv4_route(
+            "192.168.0.41/24",
+            "192.168.0.1",
+            "/keys/agent",
+        )
+
+        mock_run.assert_called_once()
+
+    @patch("lib.proxmox_guest.build_ssh_command", return_value=["ssh"])
+    @patch("lib.proxmox_guest.subprocess.run")
+    def test_route_failure_is_reported(self, mock_run, _mock_build):
+        mock_run.return_value = subprocess.CompletedProcess(
+            ["ssh"], 1, stdout="", stderr="route failed"
+        )
+
+        with self.assertRaisesRegex(ProvisionError, "route failed"):
+            ensure_guest_ipv4_route(
+                "192.168.0.41/24",
+                "192.168.0.1",
+                "/keys/agent",
+            )
 
 
 class TestGuestNetworkDefaults(unittest.TestCase):
