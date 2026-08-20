@@ -54,6 +54,7 @@ from lib.proxmox_guest import (
     auto_detect_bridge,
 )
 from lib.types import NestedStrList, StrList
+from lib.vm_storage import VMDataDisk, data_disks, storage_size_kib
 
 
 class VMAlreadyExists(Exception):
@@ -97,10 +98,64 @@ def _parse_memory_mb(value: str) -> int:
 
 def _parse_disk_size_gib(value: str) -> int:
     """Convert a storage amount like ``32G`` / ``2T`` / ``8192M`` to GiB."""
-    gib = _parse_size_kib(value, label="VM disk size") // (1024 * 1024)
-    if gib < 1:
+    size_kib = _parse_size_kib(value, label="VM disk size")
+    if size_kib < 1024 * 1024:
         raise ProvisionError(f"VM disk must be at least 1G (got {value!r})")
+    gib = (size_kib + (1024 * 1024) - 1) // (1024 * 1024)
     return gib
+
+
+def _preflight_data_disk_capacity(
+    disks: list[VMDataDisk],
+    node_ip: str,
+    user: str,
+    ssh_opts: StrList,
+) -> None:
+    """Conservatively require enough reported free capacity for data disks."""
+
+    requested_by_pool: dict[str, int] = {}
+    for disk in disks:
+        requested_by_pool[disk.pool] = (
+            requested_by_pool.get(disk.pool, 0) + storage_size_kib(disk.size)
+        )
+
+    for pool, requested_kib in requested_by_pool.items():
+        result = _ssh_run(
+            node_ip,
+            user,
+            ssh_opts,
+            f"pvesm status --storage {shlex.quote(pool)}",
+            dry_run=False,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip() or "unknown error"
+            raise ProvisionError(
+                f"Could not inspect free capacity for storage pool '{pool}': {detail}"
+            )
+
+        available_kib: Optional[int] = None
+        for line in (result.stdout or "").splitlines()[1:]:
+            fields = line.split()
+            if len(fields) < 6 or fields[0] != pool or fields[2] != "active":
+                continue
+            try:
+                available_kib = int(fields[5])
+            except ValueError as exc:
+                raise ProvisionError(
+                    f"Proxmox returned an invalid available-capacity value for '{pool}'"
+                ) from exc
+            break
+        if available_kib is None:
+            raise ProvisionError(
+                f"Storage pool '{pool}' is not active or did not report available capacity"
+            )
+        if requested_kib > available_kib:
+            requested_gib = (requested_kib + 1024 * 1024 - 1) // (1024 * 1024)
+            available_gib = available_kib // (1024 * 1024)
+            raise ProvisionError(
+                f"Storage pool '{pool}' has {available_gib}G available but "
+                f"{requested_gib}G of VM data disks were requested"
+            )
 
 
 def _needs_graphical_console(config: SetupConfig) -> bool:
@@ -486,6 +541,7 @@ def _create_vm(
     cores: int,
     root_pool: str,
     disk_size_gib: int,
+    data_disk_specs: list[VMDataDisk],
     cidr_prefix: str,
     bridge: str,
     gateway: str,
@@ -597,6 +653,49 @@ def _create_vm(
             f"{(resize_result.stderr or resize_result.stdout or '').strip() or 'the requested disk may be smaller than the image'}"
         )
 
+    for index, disk in enumerate(data_disk_specs, 1):
+        data_size_gib = _parse_disk_size_gib(disk.size)
+        disk_option = (
+            f"{disk.pool}:{data_size_gib}G,iothread=1,serial={disk.serial}"
+        )
+        attach_result = _ssh_run(
+            node_ip,
+            user,
+            ssh_opts,
+            f"qm set {vmid} --scsi{index} {shlex.quote(disk_option)}",
+            dry_run=dry_run,
+        )
+        if attach_result.returncode != 0:
+            if not dry_run and created:
+                _destroy_vm_best_effort(vmid, node_ip, user, ssh_opts)
+            raise ProvisionError(
+                f"Could not attach VM data disk '{disk.name}' at scsi{index}: "
+                f"{(attach_result.stderr or attach_result.stdout or '').strip() or 'unknown error'}"
+            )
+
+    if data_disk_specs and not dry_run:
+        config_result = _ssh_run(
+            node_ip,
+            user,
+            ssh_opts,
+            f"qm config {vmid}",
+            dry_run=False,
+        )
+        config_text = config_result.stdout or ""
+        if config_result.returncode != 0 or any(
+            not re.search(
+                rf"^scsi{index}: .*serial={re.escape(disk.serial)}(?:,|$)",
+                config_text,
+                flags=re.MULTILINE,
+            )
+            for index, disk in enumerate(data_disk_specs, 1)
+        ):
+            if created:
+                _destroy_vm_best_effort(vmid, node_ip, user, ssh_opts)
+            raise ProvisionError(
+                f"Proxmox did not preserve the declared data-disk identities for VM {vmid}"
+            )
+
     start_result = _ssh_run(
         node_ip, user, ssh_opts, f"qm start {vmid}", dry_run=dry_run
     )
@@ -692,6 +791,7 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
     if not root_spec or len(root_spec) < 3:
         raise ProvisionError("Missing root storage specification (--storage root POOL AMOUNT)")
     root_pool_arg, disk_amount = root_spec[1], root_spec[2]
+    declared_data_disks = data_disks(config)
 
     memory_mb = _parse_memory_mb(memory_str)
     balloon_min_mb = (
@@ -751,6 +851,11 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
             + ("VirtIO-GPU + serial" if _needs_graphical_console(config) else "serial")
         )
         print(f"  Root storage: {root_pool_arg} ({disk_size_gib}G)")
+        for index, disk in enumerate(declared_data_disks, 1):
+            print(
+                f"  Data storage {disk.name}: {disk.pool} "
+                f"({_parse_disk_size_gib(disk.size)}G, scsi{index}, serial={disk.serial})"
+            )
         if catalog_entry:
             print(f"  Image (catalog): {catalog_entry['codename']} {catalog_entry['snapshot']} → {catalog_entry['filename']}")
         elif resolved.storage_ref:
@@ -805,6 +910,29 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
     root_pool = _resolve_storage_pool(
         root_pool_arg, node_ip, user, ssh_opts, "images"
     )
+    resolved_data_disks = [
+        VMDataDisk(
+            disk.name,
+            _resolve_storage_pool(
+                disk.pool, node_ip, user, ssh_opts, "images", strict_content=True
+            ),
+            disk.size,
+        )
+        for disk in declared_data_disks
+    ]
+    _preflight_data_disk_capacity(
+        resolved_data_disks,
+        node_ip,
+        user,
+        ssh_opts,
+    )
+    resolved_by_name = {disk.name: disk for disk in resolved_data_disks}
+    config.container_storage = [
+        [spec[0], resolved_by_name[spec[0]].pool, spec[2]]
+        if len(spec) == 3 and spec[0] in resolved_by_name
+        else list(spec)
+        for spec in storage_specs
+    ]
     snippet_pool = _resolve_storage_pool(
         "auto", node_ip, user, ssh_opts, "snippets"
     )
@@ -859,6 +987,7 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
             "cores": config.container_cores,
             "root_pool": root_pool,
             "disk_size_gib": disk_size_gib,
+            "data_disk_specs": resolved_data_disks,
             "cidr_prefix": cidr_prefix,
             "bridge": bridge,
             "gateway": gateway,

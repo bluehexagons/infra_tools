@@ -19,12 +19,14 @@ from lib.proxmox_vm import (
     _needs_graphical_console,
     _parse_disk_size_gib,
     _parse_memory_mb,
+    _preflight_data_disk_capacity,
     _render_user_data,
     _resolve_image,
     _destroy_vm_best_effort,
     _wait_for_guest_agent,
     check_vm_exists,
 )
+from lib.vm_storage import VMDataDisk
 
 
 class TestImageStorage(unittest.TestCase):
@@ -274,6 +276,7 @@ class TestVMHardwareProfile(unittest.TestCase):
             cores=4,
             root_pool="local-lvm",
             disk_size_gib=40,
+            data_disk_specs=[],
             cidr_prefix="24",
             bridge="vmbr0",
             gateway="10.0.0.1",
@@ -327,6 +330,7 @@ class TestVMHardwareProfile(unittest.TestCase):
                 cores=2,
                 root_pool="local-lvm",
                 disk_size_gib=20,
+                data_disk_specs=[],
                 cidr_prefix="24",
                 bridge="vmbr0",
                 gateway="10.0.0.1",
@@ -382,6 +386,7 @@ class TestVMCleanup(unittest.TestCase):
                 cores=2,
                 root_pool="local-lvm",
                 disk_size_gib=1,
+                data_disk_specs=[],
                 cidr_prefix="24",
                 bridge="vmbr0",
                 gateway="10.0.0.1",
@@ -399,6 +404,150 @@ class TestVMCleanup(unittest.TestCase):
             "qm stop 101 --skiplock 1",
             "qm destroy 101 --purge 1 --skiplock 1",
         ])
+
+
+class TestVMDataDisks(unittest.TestCase):
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_attaches_and_verifies_stable_disk_identity(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(
+                returncode=0,
+                stdout=(
+                    "scsi0: local-lvm:vm-101-disk-0,iothread=1\n"
+                    "scsi1: bulk-lvm:vm-101-disk-1,iothread=1,"
+                    "serial=it-agent-data,size=128G\n"
+                ),
+                stderr="",
+            ),
+            MagicMock(returncode=0, stdout="", stderr=""),
+        ]
+
+        _create_vm(
+            vmid=101,
+            target_ip="10.0.0.50",
+            image_remote_path="/var/lib/vz/import/debian.qcow2",
+            storage_ref=None,
+            memory_mb=4096,
+            balloon_min_mb=1024,
+            cores=4,
+            root_pool="local-lvm",
+            disk_size_gib=32,
+            data_disk_specs=[VMDataDisk("agent-data", "bulk-lvm", "128G")],
+            cidr_prefix="24",
+            bridge="vmbr0",
+            gateway="10.0.0.1",
+            nameservers=["10.0.0.1"],
+            hostname="agent-vm",
+            user_data_path=None,
+            user_data_ref=None,
+            graphical_console=False,
+            node_ip="10.0.0.10",
+            user="root",
+            ssh_opts=[],
+        )
+
+        commands = [call.args[3] for call in mock_run.call_args_list]
+        self.assertIn(
+            "qm set 101 --scsi1 bulk-lvm:128G,iothread=1,serial=it-agent-data",
+            commands,
+        )
+        self.assertLess(commands.index("qm config 101"), commands.index("qm start 101"))
+
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_attach_failure_destroys_partial_vm(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=1, stdout="", stderr="pool full"),
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout="", stderr=""),
+        ]
+
+        with self.assertRaisesRegex(ProvisionError, "pool full"):
+            _create_vm(
+                vmid=101,
+                target_ip="10.0.0.50",
+                image_remote_path="/var/lib/vz/import/debian.qcow2",
+                storage_ref=None,
+                memory_mb=4096,
+                balloon_min_mb=1024,
+                cores=4,
+                root_pool="local-lvm",
+                disk_size_gib=32,
+                data_disk_specs=[VMDataDisk("git-data", "bulk-lvm", "64G")],
+                cidr_prefix="24",
+                bridge="vmbr0",
+                gateway="10.0.0.1",
+                nameservers=["10.0.0.1"],
+                hostname="git-vm",
+                user_data_path=None,
+                user_data_ref=None,
+                graphical_console=False,
+                node_ip="10.0.0.10",
+                user="root",
+                ssh_opts=[],
+            )
+
+        commands = [call.args[3] for call in mock_run.call_args_list]
+        self.assertEqual(
+            commands[-2:],
+            [
+                "qm stop 101 --skiplock 1",
+                "qm destroy 101 --purge 1 --skiplock 1",
+            ],
+        )
+
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_capacity_preflight_groups_disks_by_pool(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=(
+                "Name Type Status Total Used Available %\n"
+                "bulk lvmthin active 419430400 0 314572800 0.00%\n"
+            ),
+            stderr="",
+        )
+
+        _preflight_data_disk_capacity(
+            [
+                VMDataDisk("git-data", "bulk", "100G"),
+                VMDataDisk("agent-data", "bulk", "128G"),
+            ],
+            "10.0.0.10",
+            "root",
+            [],
+        )
+
+        mock_run.assert_called_once()
+
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_capacity_preflight_refuses_insufficient_space(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=(
+                "Name Type Status Total Used Available %\n"
+                "bulk lvmthin active 419430400 0 104857600 0.00%\n"
+            ),
+            stderr="",
+        )
+
+        with self.assertRaisesRegex(ProvisionError, "228G.*requested"):
+            _preflight_data_disk_capacity(
+                [
+                    VMDataDisk("git-data", "bulk", "100G"),
+                    VMDataDisk("agent-data", "bulk", "128G"),
+                ],
+                "10.0.0.10",
+                "root",
+                [],
+            )
 
 
 class TestCheckVMExists(unittest.TestCase):

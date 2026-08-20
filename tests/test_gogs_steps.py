@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -142,6 +143,20 @@ class TestInstallGogsRelease(unittest.TestCase):
 
 
 class TestGenerateGogsConfig(unittest.TestCase):
+    @patch("web.gogs_steps.run")
+    def test_data_directory_setup_rejects_symlinked_subpath(self, mock_run):
+        with tempfile.TemporaryDirectory() as directory:
+            outside = os.path.join(directory, "outside")
+            os.mkdir(outside)
+            os.symlink(outside, os.path.join(directory, "custom"))
+
+            with self.assertRaisesRegex(RuntimeError, "symlinked Gogs data path"):
+                gogs_steps._ensure_gogs_data_dirs(directory)
+
+        self.assertFalse(
+            any("custom" in call.args[0] for call in mock_run.call_args_list)
+        )
+
     def test_generate_app_ini_enables_external_ssh(self):
         config = SetupConfig(
             host="host.example.com",
@@ -165,6 +180,10 @@ class TestGenerateGogsConfig(unittest.TestCase):
         self.assertIn("SSH_ROOT_PATH = /home/git/.ssh", content)
         self.assertIn("ROOT = /srv/gogs/repositories", content)
         self.assertIn("PATH = /srv/gogs/data/gogs.db", content)
+        self.assertIn("[lfs]", content)
+        self.assertIn("STORAGE = local", content)
+        self.assertIn("OBJECTS_PATH = /srv/gogs/data/lfs-objects", content)
+        self.assertIn("OBJECTS_TEMP_PATH = /srv/gogs/data/tmp/lfs-objects", content)
         self.assertIn("DISABLE_REGISTRATION = true", content)
 
     def test_generate_service_uses_explicit_config_path(self):

@@ -836,6 +836,44 @@ class TestSetupConfigHostedFields(unittest.TestCase):
         self.assertNotIn('--storage', args_str)
         self.assertNotIn('--cores', args_str)
 
+    def test_vm_data_storage_is_sent_to_remote_setup(self):
+        config = self._make_config(
+            machine_type='vm',
+            hosted_node='10.0.0.1',
+            container_storage=[
+                ['root', 'local-lvm', '32G'],
+                ['agent-data', 'fast-lvm', '128G'],
+            ],
+            storage_mounts=[['agent-data', '/srv/agent-workspace', 'ext4']],
+            agent_workspace='/srv/agent-workspace',
+        )
+
+        args_str = ' '.join(config.to_remote_args())
+
+        self.assertNotIn('--storage root', args_str)
+        self.assertIn('--storage agent-data fast-lvm 128G', args_str)
+        self.assertIn(
+            '--storage-mount agent-data /srv/agent-workspace ext4',
+            args_str,
+        )
+        self.assertIn('--agent-workspace /srv/agent-workspace', args_str)
+
+    def test_vm_data_storage_is_reconstructed_in_setup_command(self):
+        config = self._make_config(
+            machine_type='vm',
+            hosted_node='10.0.0.1',
+            container_storage=[
+                ['root', 'local-lvm', '32G'],
+                ['git-data', 'bulk-lvm', '256G'],
+            ],
+            storage_mounts=[['git-data', '/srv/gogs', 'xfs']],
+        )
+
+        command = ' '.join(config.to_setup_command())
+
+        self.assertIn('--storage git-data bulk-lvm 256G', command)
+        self.assertIn('--storage-mount git-data /srv/gogs xfs', command)
+
     def test_provisioning_fields_are_reconstructed_in_setup_command(self):
         config = self._make_config(
             host='10.0.0.50',

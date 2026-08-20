@@ -267,7 +267,8 @@ rm -f "$HOME/.infra_tools-install.sh"
 | `--agent-auth-file TOOL PATH` | Copy one selected agent credential from a specified controller-local file to its canonical target path; `gh` accepts a hosts file or one-line token; repeatable |
 | `--agent-config active` | Copy known non-secret config from the active controller; does not copy auth files |
 | `--interactive` | Prompt for tools, HTTPS repositories, Git policy, and credential sources |
-| `--repo GIT_URL` | Clone an HTTPS repository on the target as `/home/USER/repos/NAME`; repeatable |
+| `--repo GIT_URL` | Clone an HTTPS repository below the selected agent workspace; repeatable |
+| `--agent-workspace PATH` | Set the repository clone root; defaults to the target user's `~/repos` and may use a verified named-disk mount |
 
 GitHub credential input requires `--git-access read` or `--git-access
 read-write`; `none` is the public/unauthenticated repository mode.
@@ -375,6 +376,9 @@ be fully disabled, then manage pending security reboots explicitly.
 | `--balloon-min SIZE` | VM-only minimum memory for dynamic ballooning; defaults to `--memory` |
 | `--storage root POOL AMOUNT` | Required root storage spec |
 | `--storage root AMOUNT` | Root storage shorthand using saved defaults or `auto` |
+| `--storage NAME POOL AMOUNT` | Provision a named non-root QEMU data disk; repeatable |
+| `--storage NAME AMOUNT` | Named-disk shorthand using the root-pool default |
+| `--storage-mount NAME PATH [FILESYSTEM] [empty]` | Prepare the matching blank data disk at an empty guest path; filesystem defaults to `ext4` and may be `ext4` or `xfs` |
 | `--storage template POOL` | LXC template storage spec |
 | `--storage template` | LXC shorthand for the saved/default template pool |
 | `--cores N` | Guest vCPU count |
@@ -384,6 +388,16 @@ Notes:
 
 - `--storage` is repeatable.
 - `root` storage is required when `--provision-on` is used.
+- Named data disks are available only while provisioning a new QEMU VM. Every
+  name must have exactly one mount declaration; logical names use lowercase
+  letters, numbers, and hyphens and are at most 17 characters.
+- Automated mounting accepts only a confirmed blank disk and an empty `/data`
+  path or a path below `/srv`, `/var/lib`, `/opt`, or `/mnt`. It rejects
+  populated-path migration, `/home`, existing-disk adoption, detach, and
+  data-disk resize in this release.
+- Guest mounts are required UUID-based systemd mounts. Missing or mismatched
+  storage stops dependent Gogs and agent repository setup instead of writing
+  to the root filesystem.
 - Provisioned VMs automatically use a matching key from the registered
   Proxmox host or the local `~/.ssh/id_ed25519`, `id_ecdsa`, or `id_rsa`
   identity. Use `--key PATH` when the guest should use a different identity;

@@ -72,6 +72,24 @@ class TestHostedFlagParsing(unittest.TestCase):
             [["root", "auto", "10G"], ["template", "local"]]
         )
 
+    def test_named_vm_data_disk_and_mount(self):
+        args = self.parser.parse_args([
+            "10.0.0.50",
+            "--storage", "root", "local-lvm", "32G",
+            "--storage", "agent-data", "fast-lvm", "128G",
+            "--storage-mount", "agent-data", "/srv/agent-workspace", "xfs",
+            "--agent-workspace", "/srv/agent-workspace",
+        ])
+        self.assertEqual(
+            args.container_storage,
+            [["root", "local-lvm", "32G"], ["agent-data", "fast-lvm", "128G"]],
+        )
+        self.assertEqual(
+            args.storage_mounts,
+            [["agent-data", "/srv/agent-workspace", "xfs"]],
+        )
+        self.assertEqual(args.agent_workspace, "/srv/agent-workspace")
+
     def test_cores_default_is_deferred_to_setup_config(self):
         args = self.parser.parse_args(["10.0.0.50"])
         self.assertFalse(hasattr(args, "container_cores"))
@@ -252,6 +270,21 @@ class TestHostedFlagsNotInRemoteParser(unittest.TestCase):
         self.assertEqual(args.agent_tools, ["gh", "codex", "claude", "opencode", "t3code"])
         self.assertEqual(args.git_access, "read")
         self.assertEqual(args.agent_repos, ["https://github.com/user/repo.git"])
+
+    def test_vm_data_declarations_exist_remotely(self):
+        args = self.parser.parse_args([
+            "--system-type", "server_dev",
+            "--username", "agentuser",
+            "--machine", "vm",
+            "--storage", "agent-data", "fast-lvm", "128G",
+            "--storage-mount", "agent-data", "/srv/agent-workspace", "ext4",
+            "--agent-workspace", "/srv/agent-workspace",
+        ])
+        self.assertEqual(args.container_storage, [["agent-data", "fast-lvm", "128G"]])
+        self.assertEqual(
+            args.storage_mounts,
+            [["agent-data", "/srv/agent-workspace", "ext4"]],
+        )
 
 
 if __name__ == '__main__':

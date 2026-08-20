@@ -183,6 +183,29 @@ class TestPluginRegistry(unittest.TestCase):
             step_names.index("Installing GitHub CLI"),
         )
 
+    def test_vm_storage_is_prepared_before_agent_repository_clones(self):
+        config = SetupConfig(
+            host="host",
+            username="agent",
+            system_type="server_dev",
+            machine_type="vm",
+            container_storage=[
+                ["root", "local-lvm", "32G"],
+                ["agent-data", "bulk-lvm", "128G"],
+            ],
+            storage_mounts=[["agent-data", "/srv/agent-workspace"]],
+            agent_workspace="/srv/agent-workspace",
+            agent_repos=["https://github.com/user/repo.git"],
+        )
+
+        step_names = [name for name, _ in get_steps_for_system_type(config)]
+        storage_index = step_names.index("Preparing VM data storage")
+        self.assertGreater(storage_index, step_names.index("Setting up user"))
+        self.assertLess(
+            storage_index,
+            step_names.index("Cloning agent repositories on target"),
+        )
+
     def test_workstation_dev_adds_agent_vm_steps(self):
         config = SetupConfig(
             host="host",

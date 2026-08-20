@@ -114,15 +114,47 @@ infra-tools setup workstation_dev 10.0.0.50 agent \
   --node --go --python
 ```
 
-Current VM storage is limited to one root disk. Although `--storage` is
-repeatable for the shared setup parser, the current QEMU path accepts only the
-root disk; it does not attach, format, or persistently mount additional guest
-disks. `--image-storage` selects where the Proxmox image is staged and is not
-guest data storage. For Git/Git LFS or agent data that should survive root-disk
-pressure, attach and mount a separate volume manually and verify it before
-placing application data there. Declarative Proxmox-backed data disks,
-UUID-based guest mounts, and explicit `/home` migration are planned in the
-[VM management and lightweight Git hosting plan](plans/VM_MANAGEMENT_AND_LIGHTWEIGHT_GIT_HOSTING.md).
+For a newly provisioned QEMU VM, add named data disks and required guest
+mounts in the same declaration:
+
+```bash
+infra-tools setup workstation_dev 10.0.0.51 agent \
+  --provision-on pve1 --memory 8G --storage root 40G \
+  --storage agent-data bulk-lvm 128G \
+  --storage-mount agent-data /srv/agent-workspace ext4 \
+  --agent-workspace /srv/agent-workspace \
+  --agent-tool gh --agent-tool codex \
+  --repo https://github.com/user/my_codebase.git
+```
+
+Each non-root `--storage NAME [POOL] AMOUNT` requires exactly one matching
+`--storage-mount NAME PATH [ext4|xfs] [empty]`. When `POOL` is omitted, the
+root-pool default is used. Provisioning checks that each selected pool is
+active, accepts VM images, and reports enough aggregate free capacity. It then
+attaches the disks as `scsi1`, `scsi2`, and so on with stable `it-NAME`
+serials.
+
+After SSH becomes ready, target setup identifies each disk by serial and
+declared capacity, partitions and formats it only when it is confirmed blank,
+and creates a required UUID-based systemd mount. Existing signatures, an
+ambiguous device, a nonempty mount path, a wrong filesystem, or a failed mount
+stops setup. The mount does not use `nofail`, and a marker on the mounted
+filesystem prevents an empty root-disk directory from passing application
+checks. Gogs and agent repository setup verify the mount before writing.
+Observed mount state is stored root-only in
+`/opt/infra_tools/state/vm-storage.json`; each mounted filesystem also carries
+`.infra-tools-storage.json` for fail-closed verification.
+
+This first slice is deliberately provisioning-only. It does not adopt an
+existing disk, attach data storage to LXC, detach or resize a data disk,
+migrate populated paths such as `/home`, or manage a manually attached VPS
+volume. Supported empty mount targets are `/data` or paths below `/srv`,
+`/var/lib`, `/opt`, and `/mnt`. `--image-storage` remains only the staging pool
+for the VM image; it is not guest data storage. See the
+[VM management and lightweight Git hosting plan](plans/VM_MANAGEMENT_AND_LIGHTWEIGHT_GIT_HOSTING.md)
+for the deferred lifecycle work. Idempotent reruns are supported when the VM's
+saved provisioning metadata matches the declaration; an existing unsaved VM
+is not treated as permission to adopt disks.
 
 Find the assigned VMID and inspect it:
 
@@ -224,14 +256,13 @@ infra-tools setup server_web 10.0.0.50 admin \
   --deploy example.com https://github.com/user/repo.git
 ```
 
-For the current release, `--storage` is repeatable because the same parser is
-used by VMs and LXCs. QEMU provisioning accepts one root disk using
-`--storage root POOL AMOUNT` or the shorthand `--storage root AMOUNT`, which
-uses cached host defaults or Proxmox auto-detection. LXC provisioning also
-uses `--storage template` for the saved/default template pool. Repeated
-non-root QEMU disks and guest mount declarations are not current options; see
-the [storage plan](plans/VM_MANAGEMENT_AND_LIGHTWEIGHT_GIT_HOSTING.md) for
-the planned redesign.
+`--storage` is repeatable. QEMU provisioning accepts one root disk using
+`--storage root POOL AMOUNT` or the shorthand `--storage root AMOUNT`, plus
+named data disks using `--storage NAME POOL AMOUNT` or
+`--storage NAME AMOUNT`. Every named disk requires a matching
+`--storage-mount`. LXC provisioning uses root storage and
+`--storage template` for the saved/default template pool; named disks and
+guest mount declarations are VM-only.
 The guest bridge defaults to the bridge carrying the Proxmox host's default
 route; use `--bridge NAME` when the host has multiple routed bridge networks.
 The positional target is also the guest IPv4 address: a bare address assumes

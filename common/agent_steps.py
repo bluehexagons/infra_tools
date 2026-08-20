@@ -546,12 +546,15 @@ def clone_agent_repositories(config: SetupConfig) -> None:
     """Clone requested HTTPS repositories as the target login user."""
     if not config.agent_repos:
         return
+    repos_dir = config.agent_workspace or os.path.join(_user_home(config), "repos")
     if is_dry_run():
         for git_url in config.agent_repos:
-            print(f"  [DRY-RUN] Would clone {git_url} on the target VM")
+            print(f"  [DRY-RUN] Would clone {git_url} to {repos_dir}")
         return
 
-    repos_dir = os.path.join(_user_home(config), "repos")
+    from common.storage_steps import assert_declared_storage_mount
+
+    assert_declared_storage_mount(config, repos_dir)
     _reject_symlinked_agent_destination(repos_dir)
     _ensure_agent_directory(repos_dir)
     _chown_path(config, repos_dir)

@@ -145,6 +145,33 @@ def add_setup_arguments(
         action="store_true",
         help="Install common administrator and Linux control-plane tools in addition to the selected profile",
     )
+
+    parser.add_argument(
+        "--storage",
+        dest="container_storage",
+        action="append",
+        nargs="+",
+        metavar="STORAGE",
+        help=(
+            "Guest storage: root [POOL] AMOUNT, NAME [POOL] AMOUNT for a VM "
+            "data disk, or template [POOL] for LXC; repeat as needed"
+            if not for_remote
+            else argparse.SUPPRESS
+        ),
+    )
+    parser.add_argument(
+        "--storage-mount",
+        dest="storage_mounts",
+        action="append",
+        nargs="+",
+        metavar="MOUNT",
+        help=(
+            "Prepare a named VM data disk at an empty path: NAME PATH "
+            "[ext4|xfs] [empty]; repeat as needed"
+            if not for_remote
+            else argparse.SUPPRESS
+        ),
+    )
     
     if not for_remote:
         parser.add_argument("--name", dest="friendly_name", help="Friendly name for this configuration")
@@ -187,14 +214,6 @@ def add_setup_arguments(
             dest="vm_balloon_min",
             metavar="SIZE",
             help="Provisioned VM balloon minimum; defaults to --memory for fixed allocation",
-        )
-        parser.add_argument(
-            "--storage",
-            dest="container_storage",
-            action="append",
-            nargs="+",
-            metavar="STORAGE",
-            help="Guest storage: root [POOL] AMOUNT, or template [POOL] for LXC; repeat as needed",
         )
         parser.add_argument(
             "--cores",
@@ -452,6 +471,14 @@ def add_setup_arguments(
                        action="append",
                        metavar="GIT_URL",
                        help="Clone an HTTPS repository on the target VM; repeat as needed")
+    parser.add_argument(
+        "--agent-workspace",
+        metavar="PATH",
+        help=(
+            "Directory in which agent repositories are cloned; defaults to "
+            "the target user's ~/repos"
+        ),
+    )
     
     # Deployment options
     parser.add_argument("--deploy", dest="deploy_specs",

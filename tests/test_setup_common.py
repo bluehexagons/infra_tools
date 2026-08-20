@@ -893,6 +893,44 @@ class TestHostedProvisioningDispatch(unittest.TestCase):
         mock_run_remote.assert_called_once_with(config)
 
     @patch("builtins.print")
+    def test_hosted_vm_refuses_data_disk_adoption_when_vm_exists(self, mock_print):
+        from lib import setup_common
+        from lib.proxmox_vm import VMAlreadyExists
+
+        parser = MagicMock()
+        parser.parse_args.return_value = self._make_args()
+        config = _make_config(
+            host="10.0.0.50",
+            system_type="server_web",
+            machine_type="vm",
+            hosted_node="10.0.0.1",
+            container_memory="2G",
+            container_storage=[
+                ["root", "local-lvm", "10G"],
+                ["git-data", "bulk-lvm", "64G"],
+            ],
+            storage_mounts=[["git-data", "/srv/gogs"]],
+        )
+
+        with patch.object(setup_common, "create_argument_parser", return_value=parser), \
+             patch.object(setup_common, "validate_host", return_value=True), \
+             patch.object(setup_common, "validate_username", return_value=True), \
+             patch.object(setup_common, "prepare_runtime_config", return_value=config), \
+             patch.object(setup_common, "validate_hosted_flags"), \
+             patch.object(setup_common, "validate_samba_share_credentials"), \
+             patch.object(setup_common, "run_remote_setup") as mock_remote, \
+             patch("lib.config.SetupConfig.from_args", return_value=config), \
+             patch("lib.proxmox_vm.provision_vm", side_effect=VMAlreadyExists()):
+            result = setup_common.setup_main("server_web", "Test", lambda c: None)
+
+        self.assertEqual(result, 1)
+        mock_remote.assert_not_called()
+        self.assertIn(
+            "refusing to adopt disks",
+            "\n".join(str(call.args[0]) for call in mock_print.call_args_list),
+        )
+
+    @patch("builtins.print")
     def test_hosted_lxc_setup_dispatches_to_provision_container(self, _mock_print):
         from lib import setup_common
 

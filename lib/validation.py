@@ -658,6 +658,7 @@ _NETWORK_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 _NETWORK_PROVIDER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
 _NETWORK_INTERFACE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,14}$")
 _PROXMOX_STORAGE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+_VM_STORAGE_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,16}$")
 _HOSTNAME_LABEL_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
 _SAFE_REPO_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
@@ -692,6 +693,19 @@ def validate_proxmox_storage_name(
         raise ValueError(
             f"Invalid {name} storage ID '{value}'; use letters, numbers, '.', '_' or '-'"
         )
+
+
+def validate_vm_storage_name(value: str) -> str:
+    """Validate a logical VM data-disk name that fits its Proxmox serial."""
+
+    if not isinstance(value, str) or not _VM_STORAGE_NAME_PATTERN.fullmatch(value):
+        raise ValueError(
+            "VM data-disk names must start with a lowercase letter, contain only "
+            "lowercase letters, numbers, or '-', and be at most 17 characters"
+        )
+    if value in {"root", "template"}:
+        raise ValueError(f"'{value}' is reserved and cannot name a VM data disk")
+    return value
 
 
 def _memory_string_kib(value: str, name: str) -> int:
@@ -1110,6 +1124,168 @@ def validate_network_vlan_id(value: int | str) -> int:
     return vlan_id
 
 
+_VM_MOUNT_ALLOWED_PREFIXES = ("/srv/", "/var/lib/", "/opt/", "/mnt/")
+_VM_MOUNT_EXACT_PATHS = {"/data"}
+_VM_MOUNT_PATH_PATTERN = re.compile(r"^/[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$")
+
+
+def _nested_string_specs(value: Any, flag: str) -> list[list[str]]:
+    """Normalize an argparse append/nargs value and reject malformed records."""
+
+    if not value:
+        return []
+    if not isinstance(value, list):
+        raise ValueError(f"{flag} must be repeated argument records")
+    if value and isinstance(value[0], str):
+        raw_specs: list[Any] = [value]
+    else:
+        raw_specs = value
+    specs: list[list[str]] = []
+    for raw_spec in raw_specs:
+        if not isinstance(raw_spec, list) or not all(
+            isinstance(part, str) for part in raw_spec
+        ):
+            raise ValueError(f"{flag} must contain only string values")
+        specs.append(list(raw_spec))
+    return specs
+
+
+def _validate_vm_mount_path(path: str) -> str:
+    """Validate an empty-path mount target supported by the first VM slice."""
+
+    if not isinstance(path, str) or not os.path.isabs(path):
+        raise ValueError(f"--storage-mount PATH must be absolute: {path}")
+    validate_filesystem_path(path, must_exist=False)
+    normalized = os.path.normpath(path)
+    if normalized != path:
+        raise ValueError(
+            f"--storage-mount PATH must be normalized without a trailing slash: {path}"
+        )
+    if not _VM_MOUNT_PATH_PATTERN.fullmatch(path):
+        raise ValueError(
+            "--storage-mount PATH components may contain only letters, numbers, "
+            "'.', '_', or '-'"
+        )
+    if path == "/home" or path.startswith("/home/"):
+        raise ValueError(
+            "/home storage migration is not implemented; use an empty tool-owned "
+            "path such as /srv/agent-workspace"
+        )
+    if path not in _VM_MOUNT_EXACT_PATHS and not path.startswith(
+        _VM_MOUNT_ALLOWED_PREFIXES
+    ):
+        raise ValueError(
+            "--storage-mount PATH must be /data or below /srv, /var/lib, /opt, or /mnt"
+        )
+    return path
+
+
+def validate_vm_storage_settings(
+    config: Any,
+    *,
+    require_provisioning: bool,
+) -> None:
+    """Validate named VM data disks, empty mounts, and agent placement."""
+
+    storage_specs = _nested_string_specs(
+        getattr(config, "container_storage", None), "--storage"
+    )
+    mount_specs = _nested_string_specs(
+        getattr(config, "storage_mounts", None), "--storage-mount"
+    )
+    agent_workspace = getattr(config, "agent_workspace", None)
+
+    if require_provisioning and (storage_specs or mount_specs) and not getattr(
+        config, "hosted_node", None
+    ):
+        raise ValueError(
+            "--storage and --storage-mount require --provision-on in this release"
+        )
+
+    if agent_workspace is not None:
+        if not isinstance(agent_workspace, str) or not os.path.isabs(agent_workspace):
+            raise ValueError("--agent-workspace must be an absolute path")
+        validate_filesystem_path(agent_workspace, must_exist=False)
+        if os.path.normpath(agent_workspace) != agent_workspace or agent_workspace == "/":
+            raise ValueError("--agent-workspace must be a normalized non-root path")
+        user_home_prefix = f"/home/{getattr(config, 'username', '')}/"
+        if not agent_workspace.startswith(user_home_prefix):
+            try:
+                _validate_vm_mount_path(agent_workspace)
+            except ValueError as exc:
+                raise ValueError(
+                    "--agent-workspace must be below the setup user's /home directory "
+                    "or use an approved tool-owned path below /srv, /var/lib, /opt, "
+                    "/mnt, or at /data"
+                ) from exc
+
+    data_names: set[str] = set()
+    for spec in storage_specs:
+        if not spec or spec[0] in {"root", "template"}:
+            continue
+        if len(spec) != 3:
+            raise ValueError(
+                "VM data storage requires NAME POOL AMOUNT (or NAME AMOUNT before "
+                "Proxmox defaults are resolved)"
+            )
+        name, pool, amount = spec
+        validate_vm_storage_name(name)
+        if name in data_names:
+            raise ValueError(f"Duplicate --storage NAME '{name}'")
+        data_names.add(name)
+        validate_proxmox_storage_name(pool, f"--storage {name}")
+        _memory_string_kib(amount, f"--storage {name} AMOUNT")
+    if len(data_names) > 30:
+        raise ValueError("A Proxmox VM supports at most 30 declared data disks")
+
+    mount_names: set[str] = set()
+    mount_paths: list[str] = []
+    for spec in mount_specs:
+        if not 2 <= len(spec) <= 4:
+            raise ValueError(
+                "--storage-mount requires NAME PATH [ext4|xfs] [empty]"
+            )
+        name, path = spec[:2]
+        validate_vm_storage_name(name)
+        if name in mount_names:
+            raise ValueError(f"Duplicate --storage-mount NAME '{name}'")
+        mount_names.add(name)
+        filesystem = spec[2] if len(spec) >= 3 else "ext4"
+        policy = spec[3] if len(spec) >= 4 else "empty"
+        if filesystem not in {"ext4", "xfs"}:
+            raise ValueError("--storage-mount filesystem must be ext4 or xfs")
+        if policy != "empty":
+            raise ValueError(
+                "--storage-mount currently supports only the empty policy; "
+                "populated-path migration is not implemented"
+            )
+        mount_paths.append(_validate_vm_mount_path(path))
+
+    for index, path in enumerate(mount_paths):
+        for other in mount_paths[index + 1:]:
+            common = os.path.commonpath((path, other))
+            if common in {path, other}:
+                raise ValueError(
+                    f"Overlapping --storage-mount paths are not supported: {path}, {other}"
+                )
+
+    missing_mounts = data_names - mount_names
+    if missing_mounts:
+        raise ValueError(
+            "Every VM data disk requires --storage-mount; missing: "
+            + ", ".join(sorted(missing_mounts))
+        )
+    unknown_mounts = mount_names - data_names
+    if unknown_mounts:
+        raise ValueError(
+            "--storage-mount references unknown VM data disk(s): "
+            + ", ".join(sorted(unknown_mounts))
+        )
+
+    machine_type = getattr(config, "machine_type", None)
+    if (data_names or mount_names) and machine_type != "vm":
+        raise ValueError("Named data disks and --storage-mount require --machine vm")
+
 def validate_hosted_flags(config: Any) -> None:
     """Validate Proxmox guest options used with ``--provision-on``.
 
@@ -1122,6 +1298,7 @@ def validate_hosted_flags(config: Any) -> None:
     balloon_min = getattr(config, "vm_balloon_min", None)
     image_storage = getattr(config, "vm_image_storage", None)
     image_sha512 = getattr(config, "vm_image_sha512", None)
+    validate_vm_storage_settings(config, require_provisioning=True)
     if not config.hosted_node:
         if balloon_min:
             raise ValueError("--balloon-min requires --provision-on")
@@ -1161,7 +1338,7 @@ def validate_hosted_flags(config: Any) -> None:
 
         storage_type = spec[0]
         if storage_type in seen_types:
-            raise ValueError(f"Duplicate --storage TYPE '{storage_type}'")
+            raise ValueError(f"Duplicate --storage NAME '{storage_type}'")
         seen_types.add(storage_type)
 
         if storage_type == "root":
@@ -1176,9 +1353,12 @@ def validate_hosted_flags(config: Any) -> None:
                     "--storage template requires TYPE POOL"
                 )
         else:
-            raise ValueError(
-                f"--storage TYPE must be one of root, template (got '{storage_type}')"
-            )
+            if len(spec) != 3:
+                raise ValueError(
+                    f"--storage {storage_type} requires NAME POOL AMOUNT"
+                )
+
+        validate_proxmox_storage_name(spec[1], f"--storage {storage_type}")
 
     if not root_seen:
         raise ValueError("--storage root [POOL] AMOUNT is required with --provision-on")
@@ -1186,10 +1366,10 @@ def validate_hosted_flags(config: Any) -> None:
     memory_kib = _memory_string_kib(config.container_memory, "--memory")
 
     for spec in storage_specs:
-        if spec[0] != "root":
+        if spec[0] == "template":
             continue
         amount = spec[2]
-        validate_memory_string(amount, "--storage AMOUNT")
+        _memory_string_kib(amount, f"--storage {spec[0]} AMOUNT")
 
     if config.container_cores < 1:
         raise ValueError("--cores must be at least 1")

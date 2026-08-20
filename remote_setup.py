@@ -26,6 +26,7 @@ from lib.validation import (
     validate_samba_share_credentials,
     validate_samba_share_specs,
     validate_smb_mount_specs,
+    validate_vm_storage_settings,
 )
 from lib.validators import validate_username
 from lib.progress import progress_bar
@@ -228,6 +229,7 @@ def config_from_remote_args(args: argparse.Namespace) -> SetupConfig:
     validate_samba_share_specs(config.samba_shares, config.share_credentials)
     validate_samba_share_credentials(config)
     validate_smb_mount_specs(config.smb_mounts)
+    validate_vm_storage_settings(config, require_provisioning=False)
     validate_network_setup_settings(config)
     validate_rdp_settings(config)
     

@@ -589,6 +589,36 @@ class TestAgentPayloadInstallation(unittest.TestCase):
             self.assertIn('https://gitlab.com/user/repo.git', command)
             self.assertFalse(os.path.exists(os.path.join(directory, 'cache')))
 
+    def test_repository_uses_declared_data_disk_workspace(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = os.path.join(directory, 'agent-workspace')
+            config = SetupConfig(
+                host='host',
+                username='agent',
+                system_type='server_dev',
+                agent_repos=['https://example.com/team/repo.git'],
+                agent_workspace=workspace,
+                storage_mounts=[['agent-data', workspace]],
+            )
+            with (
+                patch(
+                    'common.storage_steps.assert_declared_storage_mount'
+                ) as assert_mount,
+                patch('common.agent_steps._user_home', return_value=directory),
+                patch('common.agent_steps._chown_path'),
+                patch('common.agent_steps._run_as_login_user') as run_as_user,
+            ):
+                run_as_user.return_value = type(
+                    'Completed',
+                    (),
+                    {'returncode': 0, 'stdout': '', 'stderr': ''},
+                )()
+                clone_agent_repositories(config)
+
+            assert_mount.assert_called_once_with(config, workspace)
+            command = run_as_user.call_args.args[2]
+            self.assertIn(os.path.join(workspace, 'repo'), command)
+
     def test_payload_is_removed_when_copying_fails(self):
         config = SetupConfig(
             host='host',

@@ -887,6 +887,7 @@ def _patch_preserve_keys(args: argparse.Namespace) -> set[str]:
                 "container_memory",
                 "vm_balloon_min",
                 "container_storage",
+                "storage_mounts",
                 "container_cores",
                 "container_base",
                 "vm_image",
@@ -901,6 +902,7 @@ _PROVISIONING_CHANGE_ARGS = (
     "container_memory",
     "vm_balloon_min",
     "container_storage",
+    "storage_mounts",
     "container_cores",
     "container_base",
     "vm_image",
@@ -916,6 +918,7 @@ _CACHED_PROVISIONING_FIELDS = (
     "container_memory",
     "vm_balloon_min",
     "container_storage",
+    "storage_mounts",
     "container_cores",
     "container_base",
     "vm_image",
@@ -1132,6 +1135,12 @@ def run_setup_command(args: argparse.Namespace) -> int:
             try:
                 provision_vm(config, image=config.vm_image)
             except VMAlreadyExists:
+                if config.storage_mounts:
+                    print(
+                        "Error: named VM data disks are provisioning-only; "
+                        "refusing to adopt disks on an existing unsaved VM"
+                    )
+                    return 1
                 print("  ✓ VM already provisioned, skipping creation")
             except Exception as e:
                 print(f"\n✗ Failed to provision VM: {e}")

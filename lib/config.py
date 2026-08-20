@@ -81,7 +81,7 @@ def _optional_str_arg(args: argparse.Namespace, name: str) -> Optional[str]:
     return value if isinstance(value, str) else None
 
 
-def _normalize_container_storage(value: NestedStrList | list[str] | None) -> Optional[NestedStrList]:
+def _normalize_nested_specs(value: NestedStrList | list[str] | None) -> Optional[NestedStrList]:
     if not value:
         return None
 
@@ -229,6 +229,7 @@ class SetupConfig:
     agent_auth_files: Optional[NestedStrList] = None
     agent_config_source: MaybeStr = None
     agent_payload: bool = False
+    agent_workspace: MaybeStr = None
     custom_steps: Optional[str] = None
     deploy_specs: Optional[NestedStrList] = None
     deployment_mode: str = "default"  # "default" (smart cache), "lite" (cached only), "full" (always fresh)
@@ -265,7 +266,8 @@ class SetupConfig:
     hosted_bridge: MaybeStr = None
     container_memory: MaybeStr = None
     vm_balloon_min: MaybeStr = None
-    container_storage: Optional[NestedStrList] = None  # [[type, pool, amount?], ...]
+    container_storage: Optional[NestedStrList] = None  # [[name, pool, amount?], ...]
+    storage_mounts: Optional[NestedStrList] = None  # [[name, path, filesystem?, policy?], ...]
     container_cores: int = 1
     container_base: str = "debian"
     vm_image: MaybeStr = None  # HTTPS URL or 'storage:import/file.qcow2'
@@ -332,6 +334,14 @@ class SetupConfig:
         args.append(f"--system-type {shlex.quote(self.system_type)}")
         args.append(f"--username {shlex.quote(self.username)}")
         args.append(f"--machine {shlex.quote(self.machine_type)}")
+        for storage_spec in _normalize_nested_specs(self.container_storage) or []:
+            if not storage_spec or storage_spec[0] in {"root", "template"}:
+                continue
+            escaped_spec = " ".join(shlex.quote(str(part)) for part in storage_spec)
+            args.append(f"--storage {escaped_spec}")
+        for mount_spec in _normalize_nested_specs(self.storage_mounts) or []:
+            escaped_spec = " ".join(shlex.quote(str(part)) for part in mount_spec)
+            args.append(f"--storage-mount {escaped_spec}")
         if self.include_control_plane_tools:
             args.append("--control-plane")
         
@@ -449,6 +459,8 @@ class SetupConfig:
         if self.agent_repos:
             for git_url in self.agent_repos:
                 args.append(f"--repo {shlex.quote(git_url)}")
+        if self.agent_workspace:
+            args.append(f"--agent-workspace {shlex.quote(self.agent_workspace)}")
         
         if self.custom_steps:
             args.append(f"--steps {shlex.quote(self.custom_steps)}")
@@ -597,9 +609,12 @@ class SetupConfig:
                 cmd_parts.append(f"--memory {shlex.quote(self.container_memory)}")
             if self.vm_balloon_min:
                 cmd_parts.append(f"--balloon-min {shlex.quote(self.vm_balloon_min)}")
-            for storage_spec in _normalize_container_storage(self.container_storage) or []:
+            for storage_spec in _normalize_nested_specs(self.container_storage) or []:
                 escaped_spec = " ".join(shlex.quote(str(part)) for part in storage_spec)
                 cmd_parts.append(f"--storage {escaped_spec}")
+            for mount_spec in _normalize_nested_specs(self.storage_mounts) or []:
+                escaped_spec = " ".join(shlex.quote(str(part)) for part in mount_spec)
+                cmd_parts.append(f"--storage-mount {escaped_spec}")
             if self.container_cores != 1:
                 cmd_parts.append(f"--cores {self.container_cores}")
             if self.container_base != "debian":
@@ -757,6 +772,8 @@ class SetupConfig:
         if self.agent_repos:
             for git_url in self.agent_repos:
                 cmd_parts.append(f"--repo {shlex.quote(git_url)}")
+        if self.agent_workspace:
+            cmd_parts.append(f"--agent-workspace {shlex.quote(self.agent_workspace)}")
         
         # Custom steps
         if self.custom_steps:
@@ -957,7 +974,8 @@ class SetupConfig:
         elif not tags_str:
             data['tags'] = None
 
-        data['container_storage'] = _normalize_container_storage(data.get('container_storage'))
+        data['container_storage'] = _normalize_nested_specs(data.get('container_storage'))
+        data['storage_mounts'] = _normalize_nested_specs(data.get('storage_mounts'))
         system_defaults = get_system_type_definition(system_type)
         if 'auto_restart' not in data or data.get('auto_restart') is None:
             if 'no_restart' in data and data.get('no_restart') is not None:
@@ -1147,6 +1165,7 @@ class SetupConfig:
             agent_auth_files=agent_auth_files,
             agent_config_source=agent_config_source,
             agent_payload=_optional_bool_arg(args, 'agent_payload') is True,
+            agent_workspace=_optional_str_arg(args, 'agent_workspace'),
             custom_steps=getattr(args, 'custom_steps', None),
             deploy_specs=getattr(args, 'deploy_specs', None),
             deployment_mode=getattr(args, 'deployment_mode', 'default'),
@@ -1182,7 +1201,8 @@ class SetupConfig:
             hosted_bridge=getattr(args, 'hosted_bridge', None),
             container_memory=getattr(args, 'container_memory', None),
             vm_balloon_min=getattr(args, 'vm_balloon_min', None),
-            container_storage=_normalize_container_storage(getattr(args, 'container_storage', None)),
+            container_storage=_normalize_nested_specs(getattr(args, 'container_storage', None)),
+            storage_mounts=_normalize_nested_specs(getattr(args, 'storage_mounts', None)),
             container_cores=getattr(args, 'container_cores', 1),
             container_base=getattr(args, 'container_base', 'debian'),
             vm_image=getattr(args, 'vm_image', None),

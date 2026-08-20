@@ -234,6 +234,18 @@ def _ensure_gogs_dependencies() -> None:
     run("apt-get install -y -qq git git-lfs openssh-server sqlite3 curl ca-certificates", check=False)
 
 
+def _reject_symlinked_gogs_path(path: str) -> None:
+    """Reject symlinks in a managed Gogs data path before writing."""
+
+    current = os.path.sep
+    for component in os.path.abspath(path).split(os.path.sep):
+        if not component:
+            continue
+        current = os.path.join(current, component)
+        if os.path.lexists(current) and os.path.islink(current):
+            raise RuntimeError(f"Refusing symlinked Gogs data path: {current}")
+
+
 def _ensure_gogs_data_dirs(data_path: str) -> str:
     config_dir = f"{data_path}/custom/conf"
     for path in (
@@ -241,9 +253,12 @@ def _ensure_gogs_data_dirs(data_path: str) -> str:
         f"{data_path}/custom",
         config_dir,
         f"{data_path}/data",
+        f"{data_path}/data/lfs-objects",
+        f"{data_path}/data/tmp/lfs-objects",
         f"{data_path}/repositories",
         f"{data_path}/log",
     ):
+        _reject_symlinked_gogs_path(path)
         run(f"mkdir -p {shlex.quote(path)}")
     run(f"chown -R {shlex.quote(GOGS_GIT_USER)}:{shlex.quote(GOGS_GIT_GROUP)} {shlex.quote(data_path)}")
     return f"{config_dir}/app.ini"
@@ -305,6 +320,11 @@ DISABLE_HTTP_GIT = false
 [database]
 TYPE = sqlite3
 PATH = {data_path}/data/gogs.db
+
+[lfs]
+STORAGE = local
+OBJECTS_PATH = {data_path}/data/lfs-objects
+OBJECTS_TEMP_PATH = {data_path}/data/tmp/lfs-objects
 
 [security]
 INSTALL_LOCK = true
@@ -575,6 +595,10 @@ def setup_gogs(config: SetupConfig) -> None:
     data_path = _gogs_data_path(config)
     listen_label = f"{domain} -> 127.0.0.1:{port}" if domain else f":{port}"
     print(f"  Setting up Gogs: {listen_label}")
+
+    from common.storage_steps import assert_declared_storage_mount
+
+    assert_declared_storage_mount(config, data_path)
 
     _ensure_gogs_dependencies()
     git_home = _ensure_git_user()

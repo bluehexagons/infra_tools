@@ -33,6 +33,7 @@ def _args(**overrides: object) -> Namespace:
         "container_memory": None,
         "vm_balloon_min": None,
         "container_storage": None,
+        "storage_mounts": None,
         "vm_image": None,
         "vm_image_storage": None,
         "static_ipv4": None,
@@ -49,7 +50,11 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
             hosted_bridge="vmbr0",
             container_memory="4G",
             vm_balloon_min="1G",
-            container_storage=[["root", "local-lvm", "32G"]],
+            container_storage=[
+                ["root", "local-lvm", "32G"],
+                ["agent-data", "bulk-lvm", "128G"],
+            ],
+            storage_mounts=[["agent-data", "/srv/agent-workspace"]],
             container_cores=4,
             static_ipv4="10.0.0.50/24",
             ssh_key="/keys/agent",
@@ -62,7 +67,17 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
         self.assertEqual(current.hosted_node, "10.0.0.10")
         self.assertEqual(current.container_memory, "4G")
         self.assertEqual(current.container_cores, 4)
-        self.assertEqual(current.container_storage, [["root", "local-lvm", "32G"]])
+        self.assertEqual(
+            current.container_storage,
+            [
+                ["root", "local-lvm", "32G"],
+                ["agent-data", "bulk-lvm", "128G"],
+            ],
+        )
+        self.assertEqual(
+            current.storage_mounts,
+            [["agent-data", "/srv/agent-workspace"]],
+        )
         self.assertEqual(current.static_ipv4, "10.0.0.50/24")
         self.assertEqual(current.ssh_key, "/keys/agent")
 
@@ -84,6 +99,13 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
                 _config(container_cores=2),
                 _config(container_cores=1),
                 _args(container_cores=2),
+            )
+        )
+        self.assertTrue(
+            infra_tools._provisioning_changes_requested(
+                _config(storage_mounts=[["data", "/srv/new"]]),
+                _config(storage_mounts=[["data", "/srv/old"]]),
+                _args(storage_mounts=[["data", "/srv/new"]]),
             )
         )
         self.assertTrue(

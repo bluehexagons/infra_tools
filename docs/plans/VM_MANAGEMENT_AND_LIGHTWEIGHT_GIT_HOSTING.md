@@ -1,8 +1,10 @@
 # Generic VM Management, Agent Interfaces, and Lightweight Git Hosting
 
-Status: implementation-ready project brief; individual delivery lanes remain
-subject to the dependency gates below. Reviewed against `main` and upstream
-T3 Code, Nginx, Samba, and Git LFS documentation on 2026-08-20.
+Status: active. The provisioning-only portion of Lane A3 and the explicit local
+Gogs LFS layout from Lane B1 are implemented on `main`; the remaining delivery
+lanes and lifecycle work remain subject to the dependency gates below.
+Reviewed against `main` and upstream T3 Code, Nginx, Samba, and Git LFS
+documentation on 2026-08-20.
 
 This project sharpens infra-tools around the environments it is intended to
 serve: small businesses running Debian systems on their own Proxmox hardware
@@ -26,6 +28,19 @@ The project has three related tracks:
 The tracks share the same product constraints: prefer straightforward
 open-source components, keep saved commands as the reusable declaration, and
 avoid abstraction whose only purpose is a hypothetical provider or service.
+
+## Delivery status
+
+| Lane | State | Next boundary |
+| --- | --- | --- |
+| A1: VM terminology and read-only commands | Planned | Provider-neutral typed inventory and removal of the old guest CLI surface |
+| A2: existing VM mutations | Dependency-gated | Durable operation markers and staged mutation contract |
+| A3: declarative VM data disks and guest mounts | Provisioning slice implemented | Live Proxmox validation, read-only mount status, then coordinated grow-only resize; existing-disk adoption, detach, and `/home` migration remain rejected |
+| A4: clone and restore | Dependency-gated | Shared transaction and recovery contracts |
+| B1: explicit and safe Gogs LFS | Partially implemented | Explicit local object/temp paths and required-mount checks are complete; release verification, hostless exposure, capacity health, and agent Git LFS client setup remain |
+| B2: Gogs recovery | Dependency-gated | Shared recovery mechanism and authenticated restore smoke test |
+| B3: Samba storage roles | Planned | Path-role enforcement and consistent archive publication |
+| C1/C2: T3 Code interfaces | Planned | Upstream service/artifact/redaction validation, then loopback service and controlled exposure |
 
 ## Product decisions
 
@@ -171,21 +186,23 @@ all Proxmox LXC behavior is portable to a future VM provider.
 
 ### VM disks and guest filesystems
 
-The current provisioning path has only a root-disk contract. The repeatable
-`--storage` parser is normalized as root or LXC template storage, VM
-validation requires one root entry, and `provision_vm` imports the image as
-`scsi0` before resizing that disk. It does not create or attach a second VM
-disk, format a guest block device, write a persistent mount, or verify that a
-service is using the intended filesystem. Existing Proxmox disk-resize
-operations can grow an already attached volume, but they do not provide this
-missing guest-storage lifecycle. `--image-storage` is only the Proxmox-side
-staging location for a downloaded image; it is not guest data storage.
+At the initial review, provisioning had only a root-disk contract. Lane A3 now
+accepts named non-root QEMU disk declarations and matching empty-path mount
+declarations for a newly provisioned VM. Provider setup resolves an
+image-capable Proxmox pool, preflights aggregate reported free capacity,
+attaches each disk on a stable VirtIO-SCSI slot and serial, verifies the
+identity before boot, and preserves the resolved declaration in saved setup
+state. `--image-storage` remains only the Proxmox-side staging location for a
+downloaded image; it is not guest data storage.
 
-Agent repositories currently clone to `<user-home>/repos`, and Gogs accepts a
-data path without checking that it is a separate mounted filesystem. A
-provisioned VM therefore cannot currently dedicate non-root capacity to Git,
-Git LFS, Gogs, agent workspaces, `/home`, or another application directory
-through one declarative setup request.
+The target-side storage step identifies the declared serial and capacity,
+formats only a confirmed blank device, creates one GPT partition and an ext4
+or XFS filesystem, mounts it through a required UUID-based systemd unit, and
+stores versioned state plus a health marker on the mounted filesystem. Gogs
+and agent repository setup verify that marker and active UUID before writing.
+`--agent-workspace` can place clones on the mounted disk. Existing-disk
+adoption, LXC data disks, attach-only disks, detach, resize, populated-path
+migration, and `/home` remain deferred and rejected by validation.
 
 ### Planned VM storage contract
 
@@ -289,11 +306,12 @@ integration, an initial administrator, and a managed weekly release updater.
 The selected data directory contains the database and repositories.
 
 Gogs serves Git LFS through its own HTTP endpoints and supports a local LFS
-object path. infra-tools currently relies on the upstream defaults because its
-generated `app.ini` does not include an explicit `[lfs]` section. The public
-documentation also does not identify the LFS object directory, include it in
-the recovery inventory, check its capacity, or prove an LFS upload/download
-after setup.
+object path. The generated `app.ini` now selects local LFS storage explicitly,
+places completed objects and temporary uploads below the selected Gogs data
+root, creates those directories, and rejects symlinked managed data paths.
+When that root is a declared VM data mount, setup verifies the mounted marker
+and UUID before creating Gogs data. Capacity reporting, the complete recovery
+workflow, and authenticated upload/download smoke coverage remain open.
 
 ### Agent web interfaces
 
@@ -1201,6 +1219,10 @@ The shared roadmap imposes two gates:
 
 ### Lane A3: declarative VM data disks and guest mounts
 
+Implementation status: the provisioning-only blank-disk/empty-path slice is
+complete in code and unit tests. Live Proxmox/reboot validation and the later
+observation, resize, adoption, detach, and migration workflows remain.
+
 - Replace the development-era storage shape with named QEMU disk
   declarations and explicit guest mount declarations; retain a separate LXC
   template path.
@@ -1235,6 +1257,10 @@ The shared roadmap imposes two gates:
   directory/qcow2 and block-backed storage where behavior differs.
 
 ### Lane B1: explicit and safe Gogs LFS operation
+
+Implementation status: explicit local LFS paths, directory creation,
+symlink rejection, and declared-mount verification are complete. The remaining
+items in this lane are still open.
 
 - Depend on Lane A3 for the dedicated Gogs data-disk and mount contract when a
   data disk is declared.
@@ -1543,6 +1569,7 @@ sensitivity, and verification contracts that mechanism must consume.
 - `lib/proxmox_cli.py`
 - `lib/proxmox_manage.py`
 - `lib/proxmox_vm.py`
+- `lib/vm_storage.py`
 - `lib/proxmox_backup.py`
 - `lib/proxmox_hosts.py`
 - `lib/proxmox_guest.py`
@@ -1554,6 +1581,7 @@ sensitivity, and verification contracts that mechanism must consume.
 - `web/gogs_steps.py`
 - `web/service_tools/deploy_admin.py`
 - `common/agent_steps.py`
+- `common/storage_steps.py`
 - `plugins/common.py`
 - `lib/nginx_config.py`
 - `docs/GOGS.md`

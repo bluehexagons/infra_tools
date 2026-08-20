@@ -72,6 +72,7 @@ def get_common_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
         update_and_upgrade_packages,
     )
     from security.steps import create_remoteusers_group
+    from common.storage_steps import setup_vm_storage
 
     steps: list[tuple[str, StepFunc]] = [
         ("Updating and upgrading packages", update_and_upgrade_packages),
@@ -80,6 +81,11 @@ def get_common_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
         ("Configuring IPv4 preference", configure_ipv4_preference),
         ("Creating remoteusers group", create_remoteusers_group),
         ("Setting up user", setup_user),
+        *(
+            [("Preparing VM data storage", setup_vm_storage)]
+            if config.storage_mounts
+            else []
+        ),
         ("Copying SSH keys to user", copy_ssh_keys_to_user),
         ("Generating SSH key for user", generate_ssh_key),
         ("Configuring time synchronization", configure_time_sync),

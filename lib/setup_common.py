@@ -24,7 +24,7 @@ except ImportError:
     argcomplete = None
 
 from lib.atomic_io import write_json_atomic
-from lib.config import DEFAULT_MACHINE_TYPE, SetupConfig, _normalize_container_storage
+from lib.config import DEFAULT_MACHINE_TYPE, SetupConfig, _normalize_nested_specs
 from lib.credentials import prepare_runtime_config, store_cli_credentials
 from lib.network_transition import finish_network_transition
 from lib.proxmox_hosts import ProxmoxHost, find_proxmox_host, sync_proxmox_host
@@ -746,7 +746,7 @@ def _apply_hosted_proxmox_defaults(
         return
     _normalize_provisioned_target(config)
 
-    storage_specs = _normalize_container_storage(config.container_storage)
+    storage_specs = _normalize_nested_specs(config.container_storage)
     if not storage_specs:
         return
 
@@ -770,8 +770,12 @@ def _apply_hosted_proxmox_defaults(
             if len(normalized) == 1:
                 normalized = ["template", template_pool]
                 changed = True
-            elif len(normalized) == 2 and normalized[1] in {"default", "host"}:
-                normalized = ["template", template_pool]
+        elif normalized:
+            if len(normalized) == 2 and _is_storage_amount(normalized[1]):
+                normalized = [normalized[0], root_pool, normalized[1]]
+                changed = True
+            elif len(normalized) == 3 and normalized[1] in {"default", "host"}:
+                normalized = [normalized[0], root_pool, normalized[2]]
                 changed = True
         updated_specs.append(normalized)
 
@@ -1068,6 +1072,12 @@ def setup_main(system_type: str, description: str, success_msg_fn: Callable[[Set
             try:
                 provision_vm(config, image=config.vm_image)
             except VMAlreadyExists:
+                if config.storage_mounts:
+                    print(
+                        "Error: named VM data disks are provisioning-only; "
+                        "refusing to adopt disks on an existing unsaved VM"
+                    )
+                    return 1
                 print("  ✓ VM already provisioned, skipping creation")
             except Exception as e:
                 print(f"\n✗ Failed to provision VM: {e}")

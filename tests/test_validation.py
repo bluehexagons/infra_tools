@@ -31,6 +31,7 @@ from lib.validation import (
     validate_ssl_email,
     validate_timezone_name,
     validate_workspace_dir,
+    validate_vm_storage_settings,
 )
 
 
@@ -636,6 +637,7 @@ class _MockConfig:
     """Minimal mock for SetupConfig used by validate_hosted_flags."""
     def __init__(self, **kwargs):
         self.host = kwargs.get('host', '10.0.0.50')
+        self.username = kwargs.get('username', 'user')
         self.machine_type = kwargs.get('machine_type')
         self.ssh_key = kwargs.get('ssh_key')
         self.static_ipv4 = kwargs.get('static_ipv4')
@@ -644,6 +646,8 @@ class _MockConfig:
         self.container_memory = kwargs.get('container_memory')
         self.vm_balloon_min = kwargs.get('vm_balloon_min')
         self.container_storage = kwargs.get('container_storage')
+        self.storage_mounts = kwargs.get('storage_mounts')
+        self.agent_workspace = kwargs.get('agent_workspace')
         self.container_cores = kwargs.get('container_cores', 1)
         self.vm_image = kwargs.get('vm_image')
         self.vm_image_sha512 = kwargs.get('vm_image_sha512')
@@ -798,7 +802,7 @@ class TestValidateHostedFlags(unittest.TestCase):
             validate_hosted_flags(config)
         self.assertIn('--storage', str(ctx.exception))
 
-    def test_invalid_storage_type(self):
+    def test_named_storage_requires_mount(self):
         config = _MockConfig(
             hosted_node='10.0.0.1',
             container_memory='2G',
@@ -806,7 +810,7 @@ class TestValidateHostedFlags(unittest.TestCase):
         )
         with self.assertRaises(ValueError) as ctx:
             validate_hosted_flags(config)
-        self.assertIn('TYPE', str(ctx.exception))
+        self.assertIn('requires --storage-mount', str(ctx.exception))
 
     def test_invalid_memory_format(self):
         config = _MockConfig(
@@ -898,7 +902,7 @@ class TestValidateHostedFlags(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_hosted_flags(config)
 
-    def test_path_type_rejected(self):
+    def test_named_path_storage_requires_mount(self):
         config = _MockConfig(
             hosted_node='10.0.0.1',
             container_memory='2G',
@@ -906,7 +910,7 @@ class TestValidateHostedFlags(unittest.TestCase):
         )
         with self.assertRaises(ValueError) as ctx:
             validate_hosted_flags(config)
-        self.assertIn('TYPE', str(ctx.exception))
+        self.assertIn('requires --storage-mount', str(ctx.exception))
 
     def test_zero_cores_rejected(self):
         config = _MockConfig(
@@ -937,6 +941,109 @@ class TestValidateHostedFlags(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             validate_hosted_flags(config)
         self.assertIn('TYPE POOL AMOUNT', str(ctx.exception))
+
+
+class TestValidateVMStorageSettings(unittest.TestCase):
+    def test_valid_named_data_disks_and_mounts(self):
+        config = _MockConfig(
+            machine_type='vm',
+            container_storage=[
+                ['root', 'local-lvm', '32G'],
+                ['git-data', 'bulk-lvm', '128G'],
+                ['agent-data', 'bulk-lvm', '128G'],
+            ],
+            storage_mounts=[
+                ['git-data', '/srv/gogs', 'ext4'],
+                ['agent-data', '/srv/agent-workspace', 'xfs', 'empty'],
+            ],
+            agent_workspace='/srv/agent-workspace',
+        )
+
+        validate_vm_storage_settings(config, require_provisioning=False)
+
+    def test_unknown_disk_and_duplicate_mounts_are_rejected(self):
+        config = _MockConfig(
+            machine_type='vm',
+            container_storage=[['agent-data', 'local-lvm', '32G']],
+            storage_mounts=[['other-data', '/srv/agent-workspace']],
+        )
+        with self.assertRaisesRegex(ValueError, 'missing: agent-data'):
+            validate_vm_storage_settings(config, require_provisioning=False)
+
+        config.storage_mounts = [
+            ['agent-data', '/srv/one'],
+            ['agent-data', '/srv/two'],
+        ]
+        with self.assertRaisesRegex(ValueError, 'Duplicate --storage-mount'):
+            validate_vm_storage_settings(config, require_provisioning=False)
+
+    def test_unsafe_and_overlapping_mount_paths_are_rejected(self):
+        config = _MockConfig(
+            machine_type='vm',
+            container_storage=[['one', 'local-lvm', '32G']],
+            storage_mounts=[['one', '/home']],
+        )
+        with self.assertRaisesRegex(ValueError, '/home storage migration'):
+            validate_vm_storage_settings(config, require_provisioning=False)
+
+        config.container_storage = [
+            ['one', 'local-lvm', '32G'],
+            ['two', 'local-lvm', '32G'],
+        ]
+        config.storage_mounts = [
+            ['one', '/srv/data'],
+            ['two', '/srv/data/nested'],
+        ]
+        with self.assertRaisesRegex(ValueError, 'Overlapping'):
+            validate_vm_storage_settings(config, require_provisioning=False)
+
+        config.container_storage = [['one', 'local-lvm', '32G']]
+        config.storage_mounts = [['one', '/srv/data%specifier']]
+        with self.assertRaisesRegex(ValueError, 'components may contain only'):
+            validate_vm_storage_settings(config, require_provisioning=False)
+
+    def test_migrate_policy_and_lxc_data_disks_are_rejected(self):
+        config = _MockConfig(
+            machine_type='vm',
+            container_storage=[['home-data', 'local-lvm', '32G']],
+            storage_mounts=[['home-data', '/srv/home-data', 'ext4', 'migrate']],
+        )
+        with self.assertRaisesRegex(ValueError, 'only the empty policy'):
+            validate_vm_storage_settings(config, require_provisioning=False)
+
+        config.machine_type = 'unprivileged'
+        config.storage_mounts = [['home-data', '/srv/home-data']]
+        with self.assertRaisesRegex(ValueError, 'require --machine vm'):
+            validate_vm_storage_settings(config, require_provisioning=False)
+
+    def test_logical_name_length_preserves_complete_serial(self):
+        config = _MockConfig(
+            machine_type='vm',
+            container_storage=[['this-name-is-far-too-long', 'local-lvm', '32G']],
+            storage_mounts=[['this-name-is-far-too-long', '/srv/data']],
+        )
+        with self.assertRaisesRegex(ValueError, 'at most 17 characters'):
+            validate_vm_storage_settings(config, require_provisioning=False)
+
+    def test_agent_workspace_rejects_broad_system_path(self):
+        config = _MockConfig(
+            username='agent',
+            machine_type='vm',
+            agent_workspace='/etc/agent-workspace',
+        )
+
+        with self.assertRaisesRegex(ValueError, 'approved tool-owned path'):
+            validate_vm_storage_settings(config, require_provisioning=False)
+
+    def test_agent_workspace_accepts_user_home_or_tool_owned_path(self):
+        for path in ('/home/agent/repos', '/srv/agent-workspace'):
+            with self.subTest(path=path):
+                config = _MockConfig(
+                    username='agent',
+                    machine_type='vm',
+                    agent_workspace=path,
+                )
+                validate_vm_storage_settings(config, require_provisioning=False)
 
 
 if __name__ == '__main__':
