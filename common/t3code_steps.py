@@ -524,6 +524,8 @@ def _configure_device_pairing(
                     "create",
                     "--base-dir",
                     t3_state_dir,
+                    "--port",
+                    str(t3_port),
                     "--ttl",
                     "10m",
                     "--label",

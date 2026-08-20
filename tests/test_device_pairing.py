@@ -460,6 +460,10 @@ class DevicePairingRemoteSetupTest(unittest.TestCase):
             command = providers["providers"]["t3code"]["command"]
             self.assertIn("pairing", command)
             self.assertIn("create", command)
+            self.assertEqual(
+                command[command.index("--port") : command.index("--port") + 2],
+                ["--port", "3773"],
+            )
             self.assertIn("--json", command)
             self.assertNotIn("$6$salt$hash", json.dumps(providers))
             provider_wrapper = command[0]

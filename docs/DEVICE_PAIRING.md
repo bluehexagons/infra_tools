@@ -84,8 +84,11 @@ portal actions:
 - **Create a link for another T3 client** displays the short-lived URL so it
   can be copied into a desktop or mobile T3 Code client.
 
-The broker uses T3's supported `auth pairing create` command with a ten-minute
-TTL and JSON output. Pairing URLs are returned only to the authenticated
+The broker uses T3's supported `auth pairing create` command with the same
+configured T3 port, a ten-minute TTL, and JSON output. Supplying the port is
+important because the protected broker is intentionally restricted to Unix
+sockets and must not perform a network probe while issuing a credential.
+Pairing URLs are returned only to the authenticated
 request. They are not written to setup output, Nginx access logs, the broker
 journal, provider configuration, or saved infra-tools commands.
 
