@@ -90,7 +90,17 @@ bytes, free inodes, and repository/LFS/attachment/log usage. Useful checks are:
 sudo systemctl status gogs
 sudo journalctl -u gogs -n 100 --no-pager
 sudo /usr/local/bin/gogs --version
+infra-tools gogs health git.example.com
+infra-tools gogs health git.example.com --json
 ```
+
+Run `infra-tools gogs health` on the control system. It reads the root-owned
+managed state through non-interactive sudo and reports service and SQLite
+health, the backing filesystem, free bytes and inodes, per-category usage,
+directory access as `git`, the update service/timer, nginx's upload limit, and
+whether clients can reach the LFS HTTP endpoint. Defaults require at least 1
+GiB and 10,000 inodes free; override them with `--min-free-bytes` and
+`--min-free-inodes`. The check is read-only and never prunes LFS objects.
 
 `auto-update-gogs.timer` checks weekly (Sunday at 05:30). It validates the
 downloaded binary from a private, randomly named temporary workspace, refreshes

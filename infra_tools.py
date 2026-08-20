@@ -42,6 +42,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from lib.arg_parser import add_setup_arguments
 from lib.agent_cli import add_agent_subparser, run_agent_command
+from lib.gogs_cli import add_gogs_subparser, run_gogs_command
 from lib.cache import get_cache_path_for_host, load_setup_command, merge_setup_configs, save_setup_command
 from lib.channel_manager import (
     ChannelError,
@@ -492,6 +493,7 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
     add_maintenance_subparser(subparsers)
     add_sysadmin_subparsers(subparsers)
     add_agent_subparser(subparsers)
+    add_gogs_subparser(subparsers)
 
     shell_parser = subparsers.add_parser(
         "shell",
@@ -1420,6 +1422,8 @@ def main() -> int:
         return run_maintenance_command(args)
     elif args.command == "agent":
         return run_agent_command(args)
+    elif args.command == "gogs":
+        return run_gogs_command(args)
     elif args.command in {"mount", "umount", "health", "ssh", "push", "pull", "key", "ssh-key", "df", "fan", "svc", "logs", "upgrade", "reachable"}:
         return run_sysadmin_command(args)
     elif args.command == "shell":

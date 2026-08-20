@@ -42,6 +42,7 @@ infra-tools agent doctor
 infra-tools agent update [options]
 infra-tools agent auth set HOST USER --tool TOOL --file PATH
 infra-tools agent auth status HOST USER [--tool TOOL]
+infra-tools gogs health HOST [--json] [--min-free-bytes N] [--min-free-inodes N]
 infra-tools maintenance github [--root PATH] <audit|prune> [options]
 infra-tools shell
 infra-tools network ...
@@ -501,6 +502,22 @@ fail.
 |------|-------------|
 | `--gogs DOMAIN[:PORT] [DATA_PATH]` | Install Gogs; omit `DOMAIN` for loopback/source-restricted hostless mode |
 | `--gogs-source IP_OR_CIDR` | Allow one private IPv4 source to a hostless Gogs listener; repeatable and requires active UFW |
+
+Inspect an installed service from the control system with:
+
+```bash
+infra-tools gogs health 192.168.1.10
+infra-tools gogs health 192.168.1.10 --json \
+  --min-free-bytes 2147483648 --min-free-inodes 20000
+```
+
+The command inherits the saved setup username and SSH key unless overridden
+with `--username` or `--key`. A non-root SSH user must have non-interactive
+sudo, as normal infra-tools setup users do. Health is nonzero when the service,
+SQLite database, managed paths, local filesystem, update service/timer,
+capacity thresholds, or documented nginx upload limit is unhealthy. JSON also
+reports release identity, per-category usage, the external URL, and whether
+the LFS HTTP endpoint is remotely reachable or loopback-only.
 
 ## Storage and data movement
 
