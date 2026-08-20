@@ -7,6 +7,12 @@ import secrets
 import shlex
 
 from lib.remote_utils import run
+from lib.validation import (
+    validate_environment_variable_name,
+    validate_filesystem_path,
+    validate_no_control_characters,
+    validate_systemd_exec_command,
+)
 
 
 SYSTEMD_DIR = "/etc/systemd/system"
@@ -328,7 +334,9 @@ def create_node_service(app_name: str, app_path: str, port: int,
 
 def _systemd_environment_line(key: str, value: str) -> str:
     """Render a validated environment value for a systemd unit line."""
-    escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+    validate_environment_variable_name(key)
+    validate_no_control_characters(value, f"systemd environment value for {key}")
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
     return f'Environment="{key}={escaped}"'
 
 
@@ -346,6 +354,18 @@ def generate_managed_service(name: str, exec_start: str, working_dir: str,
     ``env_file`` or ``runtime_env``. infra_tools only needs the port for the
     nginx upstream.
     """
+    validate_no_control_characters(name, "systemd service name")
+    validate_systemd_exec_command(exec_start)
+    validate_filesystem_path(working_dir, must_exist=False)
+    validate_no_control_characters(web_user, "systemd service user")
+    validate_no_control_characters(web_group, "systemd service group")
+    if env_file:
+        validate_filesystem_path(env_file, must_exist=False)
+    if description:
+        validate_no_control_characters(description, "systemd service description")
+    for path in writable_paths or []:
+        validate_filesystem_path(path, must_exist=False)
+
     lines = [
         "[Unit]",
         f"Description={description or f'infra_tools managed service: {name}'}",

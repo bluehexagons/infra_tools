@@ -116,9 +116,12 @@ In addition to the common fields (`name`, `type`, `domain`, `path`, `build`, and
 
 - `port`: an integer from 1024 through 65535, or `"auto"` for a stable
   infra_tools-managed assignment;
-- `binary` or `exec`: exactly one is required;
+- `binary` or `exec`: exactly one is required; `exec` cannot use systemd's
+  privilege-control prefixes (`+` or `!`);
 - `working_dir`: repository-relative directory or a supported template path;
-- `env_file`: absolute server path, or a path using deploy-time templates;
+- `env_file`: absolute server path, or a path using deploy-time templates; the
+  file must be readable but not writable by the component's dedicated service
+  account, and its parent directory must not be writable by that account;
 - `runtime_env`: environment values written directly into the generated
   systemd unit; values may use deploy-time templates and override matching
   entries from `env_file`;
@@ -126,7 +129,8 @@ In addition to the common fields (`name`, `type`, `domain`, `path`, `build`, and
 - `reverse_proxy`: set false for a worker or internal service that should not
   receive an Nginx route;
 - `sqlite_backup`: optional absolute or templated SQLite database path backed
-  up with SQLite's online backup API before release replacement; and
+  up with SQLite's online backup API before release replacement; the resolved
+  path must remain under that component's `{{shared_dir}}`; and
 - `backup_retention`: number of deployment backups to retain, from 1 to 100.
 
 Infra-tools always writes the hardened systemd unit and runs it under the
@@ -172,8 +176,9 @@ previous release and service units.
 Manifest validation is strict: unknown fields, duplicate names, invalid domains,
 unsafe paths, unsupported versions, invalid ports, invalid environment variable
 names, duplicate resolved domain/path routes, and malformed service templates
-are rejected. Check the remote deployment output and inspect the generated
-service when a component does not start:
+are rejected. Control characters and systemd privilege-control command prefixes
+are also rejected before any unit is installed. Check the remote deployment
+output and inspect the generated service when a component does not start:
 
 ```text
 sudo systemctl status app-<deployment>-<component>.service

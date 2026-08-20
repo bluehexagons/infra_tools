@@ -218,6 +218,20 @@ class TestRejects(unittest.TestCase):
     def test_service_neither_binary_nor_exec(self):
         self._assert_rejected(_manifest(_service(binary=None)), "exactly one")
 
+    def test_exec_rejects_systemd_privilege_prefixes(self):
+        for command in ("+/bin/sh", "!/bin/sh", "-+/bin/sh"):
+            with self.subTest(command=command):
+                self._assert_rejected(
+                    _manifest(_service(binary=None, exec=command)),
+                    "privilege-control prefixes",
+                )
+
+    def test_exec_rejects_injected_unit_directive(self):
+        self._assert_rejected(
+            _manifest(_service(binary=None, exec="/bin/true\nUser=root")),
+            "control characters",
+        )
+
     def test_env_file_not_absolute(self):
         self._assert_rejected(_manifest(_service(env_file="relative/.env")), "absolute")
 
@@ -250,6 +264,12 @@ class TestRejects(unittest.TestCase):
 
     def test_health_without_leading_slash(self):
         self._assert_rejected(_manifest(_service(health="health")), "health")
+
+    def test_path_rejects_injected_nginx_directive(self):
+        self._assert_rejected(
+            _manifest(_static(path="/\nlocation /admin")),
+            "control characters",
+        )
 
     def test_reverse_proxy_not_bool(self):
         self._assert_rejected(_manifest(_service(reverse_proxy="yes")), "boolean")
@@ -315,6 +335,12 @@ class TestTemplatedFieldValidation(unittest.TestCase):
     def test_exec_unknown_placeholder_rejected(self):
         self._assert_rejected(
             _manifest(_service(binary=None, exec="{{wat}}")), "unknown template variable"
+        )
+
+    def test_malformed_placeholder_rejected(self):
+        self._assert_rejected(
+            _manifest(_service(env_file="{{shared_dir}/.env")),
+            "malformed template placeholder",
         )
 
     def test_working_dir_placeholder_accepted(self):

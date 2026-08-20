@@ -30,6 +30,7 @@ from lib.deploy_utils import (
 )
 from lib.systemd_service import cleanup_service, create_rails_service, create_managed_service
 from lib.project_manifest import Component, Manifest, has_placeholder, load_manifest, render_template
+from lib.validation import validate_filesystem_path
 
 
 class DeploymentOrchestrator:
@@ -868,7 +869,19 @@ class DeploymentOrchestrator:
         if not component.sqlite_backup:
             return
         context = self._service_context(component, dest_path, deploy_domain)
-        database_path = render_template(component.sqlite_backup, context)
+        rendered_database_path = render_template(component.sqlite_backup, context)
+        validate_filesystem_path(rendered_database_path, must_exist=False)
+        database_path = os.path.realpath(rendered_database_path)
+        managed_root = os.path.realpath(context["shared_dir"])
+        try:
+            inside_managed_root = os.path.commonpath((database_path, managed_root)) == managed_root
+        except ValueError:
+            inside_managed_root = False
+        if not inside_managed_root:
+            raise RuntimeError(
+                f"Component '{component.name}': sqlite_backup must resolve inside "
+                f"its managed shared directory: {managed_root}"
+            )
         if not os.path.isfile(database_path):
             return
         backup_dir = os.path.join(context["shared_dir"], "backups")
@@ -876,13 +889,22 @@ class DeploymentOrchestrator:
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         backup_path = os.path.join(backup_dir, f"{component.name}_{stamp}.sqlite3")
         temporary_path = f"{backup_path}.tmp"
-        source = sqlite3.connect(f"file:{database_path}?mode=ro", uri=True)
-        target = sqlite3.connect(temporary_path)
         try:
-            source.backup(target)
-        finally:
-            target.close()
-            source.close()
+            source = sqlite3.connect(f"file:{database_path}?mode=ro", uri=True)
+            try:
+                target = sqlite3.connect(temporary_path)
+                try:
+                    source.backup(target)
+                finally:
+                    target.close()
+            finally:
+                source.close()
+        except (OSError, sqlite3.Error):
+            try:
+                os.remove(temporary_path)
+            except OSError:
+                pass
+            raise
         os.chmod(temporary_path, 0o600)
         os.replace(temporary_path, backup_path)
         backups = sorted(
@@ -1301,6 +1323,24 @@ class DeploymentOrchestrator:
         run(f"chown -R {shlex.quote(username)}:{shlex.quote(username)} {shlex.quote(shared_dir)}", check=False)
         run(f"chmod 0750 {shlex.quote(shared_dir)} {shlex.quote(data_dir)}", check=False)
 
+        env_file = context.get('env_file')
+        if env_file:
+            validate_filesystem_path(env_file, must_exist=False)
+            env_file = os.path.realpath(env_file)
+            env_parent = os.path.dirname(env_file)
+            safe_env_file = run(
+                f"runuser -u {shlex.quote(username)} -- test -r {shlex.quote(env_file)} && "
+                f"! runuser -u {shlex.quote(username)} -- test -w {shlex.quote(env_file)} && "
+                f"! runuser -u {shlex.quote(username)} -- test -w {shlex.quote(env_parent)}",
+                check=False,
+            )
+            if safe_env_file.returncode != 0:
+                raise RuntimeError(
+                    f"Component '{component.name}': env_file must be readable but not "
+                    f"writable by service user {username}, and its directory must not "
+                    f"be writable by that user: {env_file}"
+                )
+
         exec_start = render_template(component.exec, context) if component.exec else context['binary']
         create_managed_service(
             service_name,
@@ -1308,7 +1348,7 @@ class DeploymentOrchestrator:
             context['working_dir'],
             username,
             username,
-            env_file=context.get('env_file'),
+            env_file=env_file,
             description=f"infra.json service: {component.name}",
             runtime_env=runtime_env,
             writable_paths=[shared_dir],

@@ -24,11 +24,33 @@ def _resolve_plugin_validator(name: str) -> Callable[..., object]:
     return resolve_validator(name)
 
 
-def _validate_no_control_characters(value: str, name: str) -> None:
+def validate_no_control_characters(value: str, name: str) -> None:
     """Reject values that could add lines to generated configuration files."""
 
     if any(ord(char) < 32 or ord(char) == 127 for char in value):
         raise ValueError(f"{name} must not contain control characters")
+
+
+def validate_systemd_exec_command(
+    value: str,
+    name: str = "systemd ExecStart command",
+) -> str:
+    """Reject command text that can bypass a generated unit's isolation.
+
+    systemd treats ``+`` and ``!`` before an executable as privilege-control
+    prefixes. They override ``User=``, ``Group=``, and some sandbox settings,
+    so repository-controlled commands must never be allowed to use them.
+    """
+
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{name} must be a non-empty string")
+    validate_no_control_characters(value, name)
+    prefix_match = re.match(r"^\s*([@:+!\-]+)", value)
+    if prefix_match and ({"+", "!"} & set(prefix_match.group(1))):
+        raise ValueError(
+            f"{name} must not use systemd privilege-control prefixes '+' or '!'"
+        )
+    return value
 
 
 def validate_filesystem_path(path: str, must_exist: bool = False, check_writable: bool = False) -> None:
@@ -45,7 +67,7 @@ def validate_filesystem_path(path: str, must_exist: bool = False, check_writable
     if not path:
         raise ValueError("Path must be a non-empty string")
 
-    _validate_no_control_characters(path, "Path")
+    validate_no_control_characters(path, "Path")
     
     # Basic path format validation
     try:
@@ -82,7 +104,7 @@ def validate_channel(channel: str) -> str:
 
     if not isinstance(channel, str) or not channel:
         raise ValueError("Channel must be a non-empty string")
-    _validate_no_control_characters(channel, "Channel")
+    validate_no_control_characters(channel, "Channel")
 
     if channel in {"stable", "dev"}:
         return channel
@@ -461,8 +483,8 @@ def validate_smb_mount_specs(smb_mounts: Optional[list[list[str]]]) -> None:
             raise ValueError(f"Invalid SMB mount host: {mount_config['ip']}")
         if not mount_config["username"] or not mount_config["password"]:
             raise ValueError("SMB mount credentials must include a non-empty username and password")
-        _validate_no_control_characters(mount_config["username"], "SMB mount username")
-        _validate_no_control_characters(mount_config["password"], "SMB mount password")
+        validate_no_control_characters(mount_config["username"], "SMB mount username")
+        validate_no_control_characters(mount_config["password"], "SMB mount password")
         if (
             not mount_config["share"]
             or "/" in mount_config["share"]
@@ -470,7 +492,7 @@ def validate_smb_mount_specs(smb_mounts: Optional[list[list[str]]]) -> None:
             or any(char.isspace() for char in mount_config["share"])
         ):
             raise ValueError(f"Invalid share name (cannot contain /, \\, or spaces): {mount_config['share']}")
-        _validate_no_control_characters(mount_config["subdir"], "SMB mount subdirectory")
+        validate_no_control_characters(mount_config["subdir"], "SMB mount subdirectory")
         if mount_config["subdir"] and not mount_config["subdir"].startswith("/"):
             raise ValueError(f"Subdirectory must start with /: {mount_config['subdir']}")
 
@@ -529,14 +551,14 @@ def validate_samba_share_specs(
                 raise ValueError(f"Invalid Samba username: {username}")
             if not password:
                 raise ValueError(f"Samba password must not be empty for user: {username}")
-            _validate_no_control_characters(username, "Samba username")
-            _validate_no_control_characters(password, "Samba password")
+            validate_no_control_characters(username, "Samba username")
+            validate_no_control_characters(password, "Samba password")
 
 
 def validate_samba_share_name(share_name: str) -> None:
     """Validate a Samba share name used in config sections and Unix groups."""
 
-    _validate_no_control_characters(share_name, "Samba share name")
+    validate_no_control_characters(share_name, "Samba share name")
     if not share_name or "/" in share_name or "\\" in share_name or " " in share_name:
         raise ValueError(
             f"Invalid Samba share name (cannot contain /, \\, or spaces): {share_name}"
@@ -895,7 +917,7 @@ def validate_system_hostname(value: str) -> str:
     normalized = value.strip()
     if not normalized or normalized != value or len(normalized) > 63:
         raise ValueError(f"Invalid system hostname: {value}")
-    _validate_no_control_characters(normalized, "System hostname")
+    validate_no_control_characters(normalized, "System hostname")
     if normalized.endswith("."):
         raise ValueError("System hostname must not end with a dot")
     if any(not _HOSTNAME_LABEL_PATTERN.fullmatch(label) for label in normalized.split(".")):
@@ -1342,7 +1364,7 @@ def validate_rdp_settings(config: Any) -> None:
     else:
         if not isinstance(password, str) or not password.strip():
             raise ValueError("--rdp requires --password for the desktop login account")
-        _validate_no_control_characters(password, "RDP password")
+        validate_no_control_characters(password, "RDP password")
 
     bind_address = getattr(config, "rdp_bind_address", "0.0.0.0")
     if not isinstance(bind_address, str):

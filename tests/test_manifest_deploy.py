@@ -87,6 +87,18 @@ class TestGenerateManagedService(unittest.TestCase):
         )
         self.assertIn("ReadWritePaths=/var/lib/app", unit)
 
+    def test_rejects_systemd_privilege_prefix(self):
+        with self.assertRaisesRegex(ValueError, "privilege-control prefixes"):
+            generate_managed_service("app-api", "+/bin/sh", "/srv")
+
+    def test_rejects_multiline_unit_values(self):
+        with self.assertRaisesRegex(ValueError, "control characters"):
+            generate_managed_service(
+                "app-api",
+                "/bin/true",
+                "/srv\nUser=root",
+            )
+
 
 class TestComponentDescriptor(unittest.TestCase):
     def setUp(self):
@@ -231,6 +243,49 @@ class TestServiceContext(unittest.TestCase):
             restored = sqlite3.connect(os.path.join(backup_dir, backups[0]))
             self.assertEqual(restored.execute("SELECT value FROM values_table").fetchone(), (7,))
             restored.close()
+
+    def test_sqlite_backup_rejects_symlink_outside_managed_state(self):
+        component = _service_component(sqlite_backup="{{data_dir}}/app.sqlite3")
+        with tempfile.TemporaryDirectory() as base_dir:
+            orchestrator = DeploymentOrchestrator(base_dir=base_dir)
+            dest_path = os.path.join(base_dir, "shop")
+            data_dir = orchestrator._component_data_dir(dest_path, component)
+            os.makedirs(data_dir)
+            external_database = os.path.join(base_dir, "privileged.sqlite3")
+            database = sqlite3.connect(external_database)
+            database.execute("CREATE TABLE secret (value TEXT)")
+            database.close()
+            os.symlink(external_database, os.path.join(data_dir, "app.sqlite3"))
+
+            with self.assertRaisesRegex(RuntimeError, "managed shared directory"):
+                orchestrator._backup_component_sqlite(component, dest_path, None)
+
+    @patch('lib.deployment.create_managed_service')
+    @patch('lib.deployment.run')
+    def test_env_file_must_be_read_only_to_service_user(self, mock_run, mock_service):
+        component = _service_component(
+            binary=None,
+            exec="/bin/true",
+            env_file="/root/private.env",
+        )
+
+        def run_result(command: str, **_kwargs: object) -> MagicMock:
+            return MagicMock(
+                returncode=1 if " -- test -r " in command else 0,
+                stdout="",
+                stderr="",
+            )
+
+        mock_run.side_effect = run_result
+        with tempfile.TemporaryDirectory() as base_dir:
+            orchestrator = DeploymentOrchestrator(base_dir=base_dir)
+            with self.assertRaisesRegex(RuntimeError, "readable but not writable"):
+                orchestrator._install_service_component(
+                    component,
+                    os.path.join(base_dir, "shop"),
+                )
+
+        mock_service.assert_not_called()
 
 
 class TestNginxIntegration(unittest.TestCase):

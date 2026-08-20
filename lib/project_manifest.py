@@ -18,7 +18,12 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from lib.types import StrDict, StrList
-from lib.validation import validate_environment_variable_name
+from lib.validation import (
+    validate_environment_variable_name,
+    validate_filesystem_path,
+    validate_no_control_characters,
+    validate_systemd_exec_command,
+)
 from lib.validators import validate_host
 
 MANIFEST_FILENAME = "infra.json"
@@ -78,6 +83,9 @@ def _validate_placeholders(text: str, field: str, where: str) -> None:
                 f"{where}: {field} references unknown template variable "
                 f"{{{{{match.group(1)}}}}}; known: {', '.join(sorted(TEMPLATE_VARS))}"
             )
+    unmatched = _PLACEHOLDER_RE.sub("", text)
+    if "{{" in unmatched or "}}" in unmatched:
+        raise ValueError(f"{where}: {field} contains a malformed template placeholder")
 
 _COMMON_FIELDS = {"name", "type", "domain", "path", "build", "env"}
 _STATIC_FIELDS = {"output"}
@@ -265,6 +273,7 @@ def _parse_component(entry: object, index: int) -> Component:
     path = entry.get("path", "/")
     if not isinstance(path, str) or not path.startswith("/"):
         raise ValueError(f"{where}: path must be a string starting with '/'")
+    validate_no_control_characters(path, f"{where} path")
 
     build = _parse_build(entry.get("build"), where)
     env = _parse_env(entry.get("env"), where)
@@ -298,6 +307,7 @@ def _parse_service(entry: dict, where: str, common: dict) -> Component:
     if exec_cmd is not None:
         if not isinstance(exec_cmd, str) or not exec_cmd:
             raise ValueError(f"{where}: exec must be a non-empty string")
+        validate_systemd_exec_command(exec_cmd, f"{where} exec")
         _validate_placeholders(exec_cmd, "exec", where)
 
     raw_port = entry.get("port")
@@ -314,6 +324,7 @@ def _parse_service(entry: dict, where: str, common: dict) -> Component:
     if env_file is not None:
         if not isinstance(env_file, str) or not env_file:
             raise ValueError(f"{where}: env_file must be a non-empty string")
+        validate_filesystem_path(env_file, must_exist=False)
         _validate_placeholders(env_file, "env_file", where)
         # Must resolve to an absolute server-side path: either literally absolute
         # or built from placeholders (e.g. {{base_dir}}/{{name}}/.env).
@@ -334,17 +345,21 @@ def _parse_service(entry: dict, where: str, common: dict) -> Component:
     health = entry.get("health")
     if health is not None and (not isinstance(health, str) or not health.startswith("/")):
         raise ValueError(f"{where}: health must be a string starting with '/'")
+    if health is not None:
+        validate_no_control_characters(health, f"{where} health")
 
     working_dir = entry.get("working_dir")
     if working_dir is not None:
         if not isinstance(working_dir, str) or not working_dir:
             raise ValueError(f"{where}: working_dir must be a non-empty string")
+        validate_filesystem_path(working_dir, must_exist=False)
         _validate_placeholders(working_dir, "working_dir", where)
 
     sqlite_backup = entry.get("sqlite_backup")
     if sqlite_backup is not None:
         if not isinstance(sqlite_backup, str) or not sqlite_backup:
             raise ValueError(f"{where}: sqlite_backup must be a non-empty string")
+        validate_filesystem_path(sqlite_backup, must_exist=False)
         _validate_placeholders(sqlite_backup, "sqlite_backup", where)
         if not has_placeholder(sqlite_backup) and not os.path.isabs(sqlite_backup):
             raise ValueError(
@@ -411,6 +426,7 @@ def _parse_env(
         if not isinstance(val, str):
             raise ValueError(f"{where}: {field} value for {key!r} must be a string")
         if validate_templates:
+            validate_no_control_characters(val, f"{where} {field} value for {key!r}")
             _validate_placeholders(val, field, where)
         env[key] = val
     return env
@@ -420,11 +436,13 @@ def _require_str(entry: dict, key: str, where: str) -> str:
     value = entry.get(key)
     if not isinstance(value, str) or not value:
         raise ValueError(f"{where}: {key} is required and must be a non-empty string")
+    validate_no_control_characters(value, f"{where} {key}")
     return value
 
 
 def _require_repo_relative(value: str, key: str, where: str) -> None:
     """Reject absolute paths and any that escape the repo root via '..'."""
+    validate_filesystem_path(value, must_exist=False)
     if os.path.isabs(value):
         raise ValueError(f"{where}: {key} must be relative to the repo root: {value}")
     normalized = os.path.normpath(value)

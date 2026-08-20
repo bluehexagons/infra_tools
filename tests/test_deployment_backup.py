@@ -519,6 +519,11 @@ class TestSkippedDeploymentServiceRecreation(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
         self.orchestrator = DeploymentOrchestrator(base_dir=self.tmpdir)
+        self.port_patcher = patch.object(
+            self.orchestrator, '_find_free_port', return_value=3000
+        )
+        self.port_patcher.start()
+        self.addCleanup(self.port_patcher.stop)
         
         # Create a fake Rails project directory
         self.app_dir = os.path.join(self.tmpdir, "example_com")
@@ -713,6 +718,11 @@ class TestRailsFrontendServePathDetection(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
         self.orchestrator = DeploymentOrchestrator(base_dir=self.tmpdir)
+        self.port_patcher = patch.object(
+            self.orchestrator, '_find_free_port', return_value=3000
+        )
+        self.port_patcher.start()
+        self.addCleanup(self.port_patcher.stop)
 
     def tearDown(self):
         import shutil
