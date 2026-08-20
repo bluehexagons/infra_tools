@@ -472,6 +472,12 @@ def add_setup_arguments(
                        metavar="GIT_URL",
                        help="Clone an HTTPS repository on the target VM; repeat as needed")
     parser.add_argument(
+        "--git-lfs",
+        dest="install_git_lfs",
+        action="store_true",
+        help="Install Git LFS and initialize it for the target user before repository clones",
+    )
+    parser.add_argument(
         "--agent-workspace",
         metavar="PATH",
         help=(
@@ -603,7 +609,17 @@ def add_setup_arguments(
         help="Deploy Gogs as a minimal self-hosted Git service. "
              "Usage: --gogs DOMAIN[:PORT] [DATA_PATH]. DOMAIN is the optional public "
              "hostname, PORT defaults to 3000, and DATA_PATH defaults to /var/lib/gogs. "
-             "Hostless specs like :3000 or 3000 listen directly without nginx.",
+             "Hostless specs bind to loopback unless --gogs-source is repeated.",
+    )
+    parser.add_argument(
+        "--gogs-source",
+        dest="gogs_sources",
+        action="append",
+        metavar="IP_OR_CIDR",
+        help=(
+            "Allow a trusted private IPv4 source to reach a hostless Gogs port; "
+            "repeat as needed"
+        ),
     )
     
     restart_group = parser.add_mutually_exclusive_group()

@@ -58,6 +58,7 @@ class BrowserAutomationConfigTests(unittest.TestCase):
         config = _config("codex")
         config.agent_payload = True
         config.agent_repos = ["https://github.com/example/project.git"]
+        config.install_git_lfs = True
         steps: list[tuple[str, object]] = []
 
         extend_agent_steps(config, steps)  # type: ignore[arg-type]
@@ -69,6 +70,10 @@ class BrowserAutomationConfigTests(unittest.TestCase):
         )
         self.assertLess(
             names.index("Installing agent browser automation"),
+            names.index("Installing Git LFS for agent repositories"),
+        )
+        self.assertLess(
+            names.index("Installing Git LFS for agent repositories"),
             names.index("Cloning agent repositories on target"),
         )
 

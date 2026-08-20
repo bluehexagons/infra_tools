@@ -1,8 +1,8 @@
 # Generic VM Management, Agent Interfaces, and Lightweight Git Hosting
 
-Status: active. The provisioning-only portion of Lane A3 and the explicit local
-Gogs LFS layout from Lane B1 are implemented on `main`; the remaining delivery
-lanes and lifecycle work remain subject to the dependency gates below.
+Status: active. The provisioning-only portion of Lane A3 and most of Lane B1
+are implemented on `main`; independent publisher verification for Gogs release
+artifacts and the remaining delivery lanes stay subject to the gates below.
 Reviewed against `main` and upstream T3 Code, Nginx, Samba, and Git LFS
 documentation on 2026-08-20.
 
@@ -37,7 +37,7 @@ avoid abstraction whose only purpose is a hypothetical provider or service.
 | A2: existing VM mutations | Dependency-gated | Durable operation markers and staged mutation contract |
 | A3: declarative VM data disks and guest mounts | Provisioning slice implemented | Live Proxmox validation, read-only mount status, then coordinated grow-only resize; existing-disk adoption, detach, and `/home` migration remain rejected |
 | A4: clone and restore | Dependency-gated | Shared transaction and recovery contracts |
-| B1: explicit and safe Gogs LFS | Partially implemented | Explicit local object/temp paths and required-mount checks are complete; release verification, hostless exposure, capacity health, and agent Git LFS client setup remain |
+| B1: explicit and safe Gogs LFS | Mostly implemented | Local LFS layout, required mounts, safe hostless exposure, setup-time storage health, and agent Git LFS setup are complete; publisher artifact verification and ongoing health/status observations remain |
 | B2: Gogs recovery | Dependency-gated | Shared recovery mechanism and authenticated restore smoke test |
 | B3: Samba storage roles | Planned | Path-role enforcement and consistent archive publication |
 | C1/C2: T3 Code interfaces | Planned | Upstream service/artifact/redaction validation, then loopback service and controlled exposure |
@@ -659,10 +659,13 @@ one or more private sources are explicitly declared:
 ```
 
 `--gogs-source` is repeatable and valid only for hostless mode. Before Gogs
-binds a non-loopback address, infra-tools must install and verify matching
-IPv4/IPv6 UFW rules; if it cannot enforce them, setup fails without exposing
-the service. Reconciliation installs replacement allow rules before removing
-old ones. A source list is access control, not transport encryption; use
+binds a non-loopback address, infra-tools must install and verify matching UFW
+rules; if it cannot enforce them, setup fails without exposing the service.
+The first implementation accepts only non-global IPv4 sources because Gogs is
+rendered with an explicit IPv4 listener. IPv6 exposure remains deferred until
+the listener and firewall behavior can be tested together. Reconciliation
+installs replacement allow rules before removing old ones. A source list is
+access control, not transport encryption; use
 hostless HTTP only on a trusted or encrypted private network and prefer the SSH
 tunnel for web login. Hostname mode remains intentionally public unless
 another existing firewall policy restricts it.
@@ -1258,19 +1261,20 @@ observation, resize, adoption, detach, and migration workflows remain.
 
 ### Lane B1: explicit and safe Gogs LFS operation
 
-Implementation status: explicit local LFS paths, directory creation,
-symlink rejection, and declared-mount verification are complete. The remaining
-items in this lane are still open.
+Implementation status: explicit local LFS paths, directory creation, symlink
+rejection, declared-mount verification, CIFS rejection, loopback/source-rule
+exposure, setup-time storage and SQLite health, and agent Git LFS initialization
+are complete. Independent publisher verification and reusable ongoing health
+reporting remain open.
 
 - Depend on Lane A3 for the dedicated Gogs data-disk and mount contract when a
   data disk is declared.
 - Verify release artifacts before activation and preserve the prior release on
   failure.
-- Render and validate `[lfs]` paths, create the owned directories, and add
-  Gogs/LFS capacity and health observations.
-- Replace unsafe hostless exposure with loopback-by-default behavior and
-  validated `--gogs-source` firewall rules.
-- Add explicit `--git-lfs` agent-client setup before normal `--repo` clones.
+- Extend setup-time Gogs/LFS capacity and health observations into a reusable
+  status command with thresholds, update-job state, and nginx limit reporting.
+- Add tested IPv6 source exposure only when Gogs's listener and UFW policy can
+  be enforced as one fail-closed operation.
 
 ### Lane B2: Gogs recovery contract
 

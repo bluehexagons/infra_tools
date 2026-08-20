@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import secrets
 import shlex
 import tempfile
@@ -41,6 +42,9 @@ GOGS_SSH_DROPIN_DIR = "/etc/ssh/sshd_config.d"
 GOGS_SSH_DROPIN_FILE = f"{GOGS_SSH_DROPIN_DIR}/99-gogs-git-user.conf"
 DEFAULT_GOGS_HTTP_PORT = 3000
 DEFAULT_GOGS_DATA_PATH = "/var/lib/gogs"
+_GOGS_RULE_COMMENT_PREFIX = "infra_tools Gogs"
+_LEGACY_GOGS_DIRECT_COMMENT = "gogs direct HTTP"
+_UFW_NUMBERED_RULE_RE = re.compile(r"^\[\s*(\d+)\]")
 
 
 def parse_gogs_spec(spec: str, *, strict: bool = False) -> tuple[str, int]:
@@ -90,7 +94,7 @@ def _gogs_public_host(config: SetupConfig, domain: str) -> str:
 
 def _gogs_external_url(config: SetupConfig, domain: str, port: int) -> str:
     scheme = "https" if domain and (config.enable_ssl or config.enable_cloudflare) else "http"
-    host = _gogs_public_host(config, domain)
+    host = domain or (config.host if config.gogs_sources else "127.0.0.1")
     if domain:
         return f"{scheme}://{host}/"
     default_port = 443 if scheme == "https" else 80
@@ -289,7 +293,7 @@ def generate_gogs_app_ini(
     """Return app.ini contents for a minimal self-hosted Gogs service."""
     public_host = _gogs_public_host(config, domain)
     external_url = _gogs_external_url(config, domain, port)
-    http_addr = "127.0.0.1" if domain else "0.0.0.0"
+    http_addr = "0.0.0.0" if config.gogs_sources and not domain else "127.0.0.1"
     secret_key = _load_or_create_gogs_secret_key()
     return f"""APP_NAME = Gogs
 RUN_USER = {GOGS_GIT_USER}
@@ -462,6 +466,101 @@ Match User {GOGS_GIT_USER}
     print("  ✓ SSH configured for Git-over-SSH access")
 
 
+def _ufw_numbered_rules() -> list[tuple[int, str, str]]:
+    """Return numbered UFW rules as ``(number, comment, line)`` records."""
+
+    result = run("ufw status numbered", check=False, capture_output=True)
+    if result.returncode != 0 or not isinstance(result.stdout, str):
+        raise RuntimeError("Could not inspect UFW rules for Gogs")
+    rules: list[tuple[int, str, str]] = []
+    for line in result.stdout.splitlines():
+        match = _UFW_NUMBERED_RULE_RE.match(line.strip())
+        if not match:
+            continue
+        comment = line.split("#", 1)[1].strip() if "#" in line else ""
+        rules.append((int(match.group(1)), comment, line))
+    return rules
+
+
+def _remove_managed_gogs_rules(
+    rules: list[tuple[int, str, str]],
+    desired_comments: set[str],
+) -> None:
+    stale_numbers = [
+        number
+        for number, comment, _line in rules
+        if (
+            comment.startswith(_GOGS_RULE_COMMENT_PREFIX)
+            or comment == _LEGACY_GOGS_DIRECT_COMMENT
+        )
+        and comment not in desired_comments
+    ]
+    for number in sorted(stale_numbers, reverse=True):
+        result = run(f"ufw --force delete {number}", check=False)
+        if result.returncode != 0:
+            raise RuntimeError("Could not remove a stale managed Gogs firewall rule")
+
+
+def _configure_hostless_gogs_firewall(config: SetupConfig, port: int) -> None:
+    """Reconcile source-restricted hostless Gogs access before it binds."""
+
+    active = run(
+        "ufw status 2>/dev/null | grep -q 'Status: active'",
+        check=False,
+    ).returncode == 0
+    sources = config.gogs_sources or []
+    if not active:
+        if sources:
+            raise RuntimeError(
+                "Hostless Gogs source exposure requires an active UFW firewall"
+            )
+        return
+
+    existing_rules = _ufw_numbered_rules()
+    if sources:
+        managed_comments = {
+            comment
+            for _number, comment, _line in existing_rules
+            if comment.startswith(_GOGS_RULE_COMMENT_PREFIX)
+            or comment == _LEGACY_GOGS_DIRECT_COMMENT
+        }
+        conflicting = [
+            line
+            for _number, comment, line in existing_rules
+            if f"{port}/tcp" in line
+            and "ALLOW IN" in line
+            and comment not in managed_comments
+        ]
+        if conflicting:
+            raise RuntimeError(
+                f"Unmanaged UFW allow rules already expose Gogs port {port}; "
+                "remove them before using --gogs-source"
+            )
+
+    desired_comments: set[str] = set()
+    for source in sources:
+        comment = f"{_GOGS_RULE_COMMENT_PREFIX} {port}/tcp source {source}"
+        desired_comments.add(comment)
+        result = run(
+            "ufw allow from "
+            f"{shlex.quote(source)} to any port {port} proto tcp "
+            f"comment {shlex.quote(comment)}",
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError("Could not install a requested Gogs source rule")
+
+    updated_rules = _ufw_numbered_rules()
+    observed_comments = {comment for _number, comment, _line in updated_rules}
+    missing = desired_comments - observed_comments
+    if missing:
+        raise RuntimeError(
+            "UFW did not retain all requested Gogs source rules: "
+            + ", ".join(sorted(missing))
+        )
+    _remove_managed_gogs_rules(updated_rules, desired_comments)
+
+
 def _maybe_configure_firewall(config: SetupConfig, domain: str, port: int) -> None:
     result = run("ufw status 2>/dev/null | grep -q 'Status: active'", check=False)
     if result.returncode != 0:
@@ -476,8 +575,11 @@ def _maybe_configure_firewall(config: SetupConfig, domain: str, port: int) -> No
         print("  ✓ Firewall allows Gogs web access on 80/tcp and 443/tcp")
         return
 
-    run(f"ufw allow {port}/tcp comment 'gogs direct HTTP'", check=False)
-    print(f"  ✓ Firewall allows direct Gogs access on {port}/tcp")
+    if config.gogs_sources:
+        print(
+            f"  ✓ Firewall restricts Gogs {port}/tcp to "
+            f"{', '.join(config.gogs_sources)}"
+        )
 
 
 def build_gogs_admin_command(args: list[str], config_path: str) -> str:
@@ -586,6 +688,113 @@ def _run_gogs_post_setup_commands(config_path: str) -> None:
             print(f"  ⚠ Failed to refresh Gogs {label}")
 
 
+def _gogs_directory_usage(path: str) -> int:
+    if not os.path.exists(path):
+        return 0
+    result = run(
+        f"du -sx -B1 -- {shlex.quote(path)}",
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode != 0 or not result.stdout:
+        raise RuntimeError(f"Could not measure Gogs storage usage: {path}")
+    try:
+        return int(result.stdout.split()[0])
+    except (IndexError, ValueError) as exc:
+        raise RuntimeError(f"Invalid storage usage result for {path}") from exc
+
+
+def _gogs_backing_filesystem(data_path: str) -> tuple[str, str, str]:
+    probe_path = os.path.abspath(data_path)
+    while not os.path.exists(probe_path):
+        parent = os.path.dirname(probe_path)
+        if parent == probe_path:
+            break
+        probe_path = parent
+    mount_result = run(
+        f"findmnt -n -o SOURCE,FSTYPE,TARGET -T {shlex.quote(probe_path)}",
+        check=False,
+        capture_output=True,
+    )
+    mount_fields = (mount_result.stdout or "").strip().split()
+    if mount_result.returncode != 0 or len(mount_fields) < 3:
+        raise RuntimeError("Could not identify the filesystem backing Gogs data")
+    source, filesystem, mount_target = mount_fields[:3]
+    if filesystem.lower() in {"cifs", "smb3"}:
+        raise RuntimeError(
+            "Gogs live repositories, SQLite, and LFS objects cannot use CIFS storage"
+        )
+    return source, filesystem, mount_target
+
+
+def check_gogs_storage_health(data_path: str) -> Mapping[str, Any]:
+    """Validate and report the local filesystem backing Gogs live data."""
+    source, filesystem, mount_target = _gogs_backing_filesystem(data_path)
+
+    managed_paths = (
+        data_path,
+        f"{data_path}/data",
+        f"{data_path}/data/lfs-objects",
+        f"{data_path}/data/tmp/lfs-objects",
+        f"{data_path}/repositories",
+        f"{data_path}/log",
+    )
+    for path in managed_paths:
+        result = run(
+            f"runuser -u {shlex.quote(GOGS_GIT_USER)} -- "
+            f"test -r {shlex.quote(path)} -a -w {shlex.quote(path)}",
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Gogs data path is not readable and writable by git: {path}")
+
+    database_path = f"{data_path}/data/gogs.db"
+    database_result = run(
+        f"sqlite3 {shlex.quote(database_path)} 'PRAGMA quick_check;'",
+        check=False,
+        capture_output=True,
+    )
+    if database_result.returncode != 0 or (database_result.stdout or "").strip() != "ok":
+        raise RuntimeError("Gogs SQLite quick check failed")
+
+    capacity_result = run(
+        f"df -B1 --output=avail,iavail {shlex.quote(data_path)}",
+        check=False,
+        capture_output=True,
+    )
+    capacity_lines = [line.split() for line in (capacity_result.stdout or "").splitlines()]
+    if capacity_result.returncode != 0 or len(capacity_lines) < 2 or len(capacity_lines[-1]) < 2:
+        raise RuntimeError("Could not inspect Gogs free bytes and inodes")
+    try:
+        free_bytes, free_inodes = (int(value) for value in capacity_lines[-1][:2])
+    except ValueError as exc:
+        raise RuntimeError("Invalid Gogs filesystem capacity result") from exc
+
+    usage = {
+        "repositories": _gogs_directory_usage(f"{data_path}/repositories"),
+        "lfs_objects": _gogs_directory_usage(f"{data_path}/data/lfs-objects"),
+        "attachments": _gogs_directory_usage(f"{data_path}/data/attachments"),
+        "logs": _gogs_directory_usage(f"{data_path}/log"),
+    }
+    print(
+        "  ✓ Gogs storage healthy: "
+        f"{source} ({filesystem}) mounted at {mount_target}; "
+        f"{free_bytes} bytes and {free_inodes} inodes free"
+    )
+    print(
+        "  ✓ Gogs usage: "
+        + ", ".join(f"{name}={size} bytes" for name, size in usage.items())
+    )
+    return {
+        "source": source,
+        "filesystem": filesystem,
+        "mount_target": mount_target,
+        "free_bytes": free_bytes,
+        "free_inodes": free_inodes,
+        "usage": usage,
+    }
+
+
 def setup_gogs(config: SetupConfig) -> None:
     """Install and run Gogs with HTTP(S) and Git-over-SSH enabled."""
     if not config.gogs:
@@ -593,12 +802,22 @@ def setup_gogs(config: SetupConfig) -> None:
 
     domain, port = parse_gogs_spec(str(config.gogs[0]), strict=True)
     data_path = _gogs_data_path(config)
-    listen_label = f"{domain} -> 127.0.0.1:{port}" if domain else f":{port}"
+    if domain:
+        listen_label = f"{domain} -> 127.0.0.1:{port}"
+    elif config.gogs_sources:
+        listen_label = f"private sources -> :{port}"
+    else:
+        listen_label = f"127.0.0.1:{port} (SSH tunnel only)"
     print(f"  Setting up Gogs: {listen_label}")
 
     from common.storage_steps import assert_declared_storage_mount
 
     assert_declared_storage_mount(config, data_path)
+    _gogs_backing_filesystem(data_path)
+
+    if not domain:
+        run(f"systemctl stop {GOGS_SERVICE}", check=False)
+        _configure_hostless_gogs_firewall(config, port)
 
     _ensure_gogs_dependencies()
     git_home = _ensure_git_user()
@@ -639,4 +858,10 @@ def setup_gogs(config: SetupConfig) -> None:
 
     _ensure_gogs_admin_account(config, config_path, data_path)
     _run_gogs_post_setup_commands(config_path)
+    check_gogs_storage_health(data_path)
     _maybe_configure_firewall(config, domain, port)
+    if not domain and not config.gogs_sources:
+        print(
+            f"  Connect with: ssh -L {port}:127.0.0.1:{port} "
+            f"{config.username}@{config.host}"
+        )

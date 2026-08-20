@@ -990,7 +990,7 @@ def _prepare_runtime_config_for_cli(config: SetupConfig) -> SetupConfig:
         runtime_config.samba_shares,
         runtime_config.share_credentials,
     )
-    validate_gogs_settings(runtime_config.gogs)
+    validate_gogs_settings(runtime_config)
     validate_antistatic_settings(runtime_config)
     validate_hosted_flags(runtime_config)
     validate_network_setup_settings(runtime_config)

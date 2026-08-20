@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -15,6 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import common.common_steps as common_steps
 from lib.config import SetupConfig
+from lib.arg_parser import add_setup_arguments
 from web import gogs_steps
 
 
@@ -34,6 +36,28 @@ class TestParseGogsSpec(unittest.TestCase):
     def test_invalid_port_rejected_in_strict_mode(self):
         with self.assertRaisesRegex(ValueError, "Invalid Gogs port: nope"):
             gogs_steps.parse_gogs_spec("git.example.com:nope", strict=True)
+
+    def test_parser_and_config_preserve_repeatable_sources(self):
+        parser = argparse.ArgumentParser()
+        add_setup_arguments(parser, for_remote=True, include_host=False)
+        args = parser.parse_args(
+            [
+                "--gogs",
+                ":3000",
+                "/srv/gogs",
+                "--gogs-source",
+                "192.168.0.0/24",
+                "--gogs-source",
+                "10.0.0.5",
+            ]
+        )
+        args.host = "10.0.0.41"
+        args.username = "admin"
+        config = SetupConfig.from_args(args, "server_web")
+
+        self.assertEqual(config.gogs_sources, ["192.168.0.0/24", "10.0.0.5"])
+        self.assertIn("--gogs-source 192.168.0.0/24", config.to_remote_args())
+        self.assertIn("--gogs-source 10.0.0.5", config.to_setup_command())
 
 
 class TestFetchPreferredGogsRelease(unittest.TestCase):
@@ -186,6 +210,45 @@ class TestGenerateGogsConfig(unittest.TestCase):
         self.assertIn("OBJECTS_TEMP_PATH = /srv/gogs/data/tmp/lfs-objects", content)
         self.assertIn("DISABLE_REGISTRATION = true", content)
 
+    def test_hostless_app_ini_is_loopback_only_by_default(self):
+        config = SetupConfig(
+            host="10.0.0.41",
+            username="admin",
+            system_type="server_web",
+            gogs=[":3000", "/srv/gogs"],
+        )
+        with patch("web.gogs_steps._load_or_create_gogs_secret_key", return_value="secret"):
+            content = gogs_steps.generate_gogs_app_ini(
+                config,
+                git_home="/home/git",
+                data_path="/srv/gogs",
+                domain="",
+                port=3000,
+            )
+
+        self.assertIn("HTTP_ADDR = 127.0.0.1", content)
+        self.assertIn("EXTERNAL_URL = http://127.0.0.1:3000/", content)
+
+    def test_hostless_private_source_app_ini_binds_for_firewalled_access(self):
+        config = SetupConfig(
+            host="10.0.0.41",
+            username="admin",
+            system_type="server_web",
+            gogs=[":3000", "/srv/gogs"],
+            gogs_sources=["192.168.0.0/24"],
+        )
+        with patch("web.gogs_steps._load_or_create_gogs_secret_key", return_value="secret"):
+            content = gogs_steps.generate_gogs_app_ini(
+                config,
+                git_home="/home/git",
+                data_path="/srv/gogs",
+                domain="",
+                port=3000,
+            )
+
+        self.assertIn("HTTP_ADDR = 0.0.0.0", content)
+        self.assertIn("EXTERNAL_URL = http://10.0.0.41:3000/", content)
+
     def test_generate_service_uses_explicit_config_path(self):
         content = gogs_steps.generate_gogs_service("/srv/gogs/custom/conf/app.ini")
         self.assertIn("WorkingDirectory=/opt/gogs/current", content)
@@ -200,6 +263,104 @@ class TestGenerateGogsConfig(unittest.TestCase):
         )
         self.assertIn("[REDACTED]", command)
         self.assertNotIn("supersecret", command)
+
+
+class TestGogsHostlessFirewall(unittest.TestCase):
+    def test_source_exposure_requires_active_ufw(self):
+        config = SetupConfig(
+            host="10.0.0.41",
+            username="admin",
+            system_type="server_web",
+            gogs=[":3000"],
+            gogs_sources=["192.168.0.0/24"],
+        )
+        inactive = SimpleNamespace(returncode=1, stdout="", stderr="")
+        with patch("web.gogs_steps.run", return_value=inactive):
+            with self.assertRaisesRegex(RuntimeError, "requires an active UFW"):
+                gogs_steps._configure_hostless_gogs_firewall(config, 3000)
+
+    def test_source_rules_are_verified_before_old_managed_rule_is_removed(self):
+        config = SetupConfig(
+            host="10.0.0.41",
+            username="admin",
+            system_type="server_web",
+            gogs=[":3000"],
+            gogs_sources=["192.168.0.0/24"],
+        )
+        active = SimpleNamespace(returncode=0, stdout="", stderr="")
+        initial = SimpleNamespace(
+            returncode=0,
+            stdout=(
+                "[ 1] 3000/tcp ALLOW IN Anywhere # gogs direct HTTP\n"
+                "[ 2] 4000/tcp ALLOW IN 192.168.0.0/24 "
+                "# infra_tools Gogs 4000/tcp source 192.168.0.0/24\n"
+            ),
+            stderr="",
+        )
+        updated = SimpleNamespace(
+            returncode=0,
+            stdout=(
+                "[ 1] 3000/tcp ALLOW IN Anywhere # gogs direct HTTP\n"
+                "[ 2] 4000/tcp ALLOW IN 192.168.0.0/24 "
+                "# infra_tools Gogs 4000/tcp source 192.168.0.0/24\n"
+                "[ 3] 3000/tcp ALLOW IN 192.168.0.0/24 "
+                "# infra_tools Gogs 3000/tcp source 192.168.0.0/24\n"
+            ),
+            stderr="",
+        )
+        with patch(
+            "web.gogs_steps.run",
+            side_effect=[active, initial, active, updated, active, active],
+        ) as runner:
+            gogs_steps._configure_hostless_gogs_firewall(config, 3000)
+
+        commands = [call.args[0] for call in runner.call_args_list]
+        self.assertIn("ufw allow from 192.168.0.0/24", commands[2])
+        self.assertEqual(commands[-2:], ["ufw --force delete 2", "ufw --force delete 1"])
+
+
+class TestGogsStorageHealth(unittest.TestCase):
+    def test_reports_local_capacity_and_usage(self):
+        with tempfile.TemporaryDirectory() as data_path:
+            for relative in (
+                "data/lfs-objects",
+                "data/tmp/lfs-objects",
+                "data/attachments",
+                "repositories",
+                "log",
+            ):
+                os.makedirs(os.path.join(data_path, relative), exist_ok=True)
+            open(os.path.join(data_path, "data", "gogs.db"), "a", encoding="utf-8").close()
+
+            def result_for(command: str, **_kwargs):
+                if command.startswith("findmnt "):
+                    stdout = "/dev/vdb1 ext4 /srv/gogs\n"
+                elif command.startswith("sqlite3 "):
+                    stdout = "ok\n"
+                elif command.startswith("df "):
+                    stdout = " Avail IAvail\n 1048576 2048\n"
+                elif command.startswith("du "):
+                    stdout = "4096 path\n"
+                else:
+                    stdout = ""
+                return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+
+            with patch("web.gogs_steps.run", side_effect=result_for):
+                health = gogs_steps.check_gogs_storage_health(data_path)
+
+        self.assertEqual(health["filesystem"], "ext4")
+        self.assertEqual(health["free_bytes"], 1048576)
+        self.assertEqual(health["usage"]["lfs_objects"], 4096)
+
+    def test_rejects_cifs_live_data(self):
+        result = SimpleNamespace(
+            returncode=0,
+            stdout="//server/share cifs /srv/gogs\n",
+            stderr="",
+        )
+        with patch("web.gogs_steps.run", return_value=result):
+            with self.assertRaisesRegex(RuntimeError, "cannot use CIFS"):
+                gogs_steps.check_gogs_storage_health("/srv/gogs")
 
 
 class TestConfigureAutoUpdateGogs(unittest.TestCase):

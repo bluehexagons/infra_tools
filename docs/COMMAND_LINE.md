@@ -268,6 +268,7 @@ rm -f "$HOME/.infra_tools-install.sh"
 | `--agent-config active` | Copy known non-secret config from the active controller; does not copy auth files |
 | `--interactive` | Prompt for tools, HTTPS repositories, Git policy, and credential sources |
 | `--repo GIT_URL` | Clone an HTTPS repository below the selected agent workspace; repeatable |
+| `--git-lfs` | Install Git LFS, initialize it for the target user, and do so before every requested repository clone |
 | `--agent-workspace PATH` | Set the repository clone root; defaults to the target user's `~/repos` and may use a verified named-disk mount |
 
 GitHub credential input requires `--git-access read` or `--git-access
@@ -487,9 +488,18 @@ infra-tools setup server_web 192.168.1.10 \
   --ssl --ssl-email admin@example.com
 ```
 
-Use `--gogs :3000` for hostless direct mode. Gogs updates are validated before
-activation and can roll back to the previous release if post-update commands
-or restart checks fail.
+Hostname mode requires `--ssl` or `--cloudflare`. Use `--gogs :3000` for a
+hostless loopback service reached through an SSH tunnel. To expose hostless
+HTTP on a trusted private network, repeat `--gogs-source IP_OR_CIDR`; only
+non-global IPv4 sources are accepted, active UFW is required, and setup fails
+before binding externally if it cannot verify the rules. Gogs updates validate
+the extracted executable before activation and can roll back to the previous
+release if post-update commands or restart checks fail.
+
+| Flag | Description |
+|------|-------------|
+| `--gogs DOMAIN[:PORT] [DATA_PATH]` | Install Gogs; omit `DOMAIN` for loopback/source-restricted hostless mode |
+| `--gogs-source IP_OR_CIDR` | Allow one private IPv4 source to a hostless Gogs listener; repeatable and requires active UFW |
 
 ## Storage and data movement
 

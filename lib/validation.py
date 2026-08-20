@@ -321,9 +321,13 @@ def validate_deploy_targets(targets: Optional[list[str]]) -> None:
             raise ValueError(f"Invalid deploy target host: {target}")
 
 
-def validate_gogs_settings(gogs: Optional[list[str]]) -> None:
+def validate_gogs_settings(config: "SetupConfig") -> None:
     """Validate Gogs setup arguments before setup or patch execution."""
+    gogs = config.gogs
+    sources = config.gogs_sources or []
     if not gogs:
+        if sources:
+            raise ValueError("--gogs-source requires --gogs")
         return
 
     if len(gogs) not in (1, 2):
@@ -339,6 +343,33 @@ def validate_gogs_settings(gogs: Optional[list[str]]) -> None:
     domain, _port = parse_gogs_spec(spec, strict=True)
     if domain and not validate_host(domain):
         raise ValueError(f"Invalid Gogs domain: {domain}")
+    if domain:
+        if sources:
+            raise ValueError("--gogs-source is valid only for hostless Gogs")
+        if not (config.enable_ssl or config.enable_cloudflare):
+            raise ValueError(
+                "Hostname-based Gogs requires --ssl or --cloudflare so credentials "
+                "are not sent over plaintext HTTP"
+            )
+
+    normalized_sources: set[str] = set()
+    for source in sources:
+        normalized = validate_network_ip_or_cidr(source, "Gogs source")
+        network = ipaddress.ip_network(
+            normalized if "/" in normalized else f"{normalized}/32",
+            strict=False,
+        )
+        if network.version != 4:
+            raise ValueError("--gogs-source currently supports only private IPv4 sources")
+        if network.is_global:
+            raise ValueError(
+                "--gogs-source must be private or otherwise non-global; hostless "
+                "Gogs uses plaintext HTTP"
+            )
+        canonical_source = str(network)
+        if canonical_source in normalized_sources:
+            raise ValueError(f"Duplicate --gogs-source: {canonical_source}")
+        normalized_sources.add(canonical_source)
 
     if len(gogs) == 2:
         data_path = str(gogs[1]).strip()

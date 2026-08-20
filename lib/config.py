@@ -230,6 +230,7 @@ class SetupConfig:
     agent_config_source: MaybeStr = None
     agent_payload: bool = False
     agent_workspace: MaybeStr = None
+    install_git_lfs: bool = False
     custom_steps: Optional[str] = None
     deploy_specs: Optional[NestedStrList] = None
     deployment_mode: str = "default"  # "default" (smart cache), "lite" (cached only), "full" (always fresh)
@@ -256,6 +257,7 @@ class SetupConfig:
     antistatic_admin: MaybeStr = None  # Username; password stays in the credential store
     antistatic_db: MaybeStr = None  # "DOMAIN[:port]" spec
     gogs: Optional[StrList] = None  # ["DOMAIN[:port]", "DATA_PATH"?]
+    gogs_sources: Optional[StrList] = None
     auto_restart: bool = True
     auto_restart_force_days: int = 7
     auto_restart_grace: int = 5
@@ -461,6 +463,8 @@ class SetupConfig:
                 args.append(f"--repo {shlex.quote(git_url)}")
         if self.agent_workspace:
             args.append(f"--agent-workspace {shlex.quote(self.agent_workspace)}")
+        if self.install_git_lfs:
+            args.append("--git-lfs")
         
         if self.custom_steps:
             args.append(f"--steps {shlex.quote(self.custom_steps)}")
@@ -556,6 +560,8 @@ class SetupConfig:
         if self.gogs:
             escaped_gogs = " ".join(shlex.quote(str(part)) for part in self.gogs)
             args.append(f"--gogs {escaped_gogs}")
+        for source in self.gogs_sources or []:
+            args.append(f"--gogs-source {shlex.quote(source)}")
         
         if self.auto_restart:
             args.append("--auto-restart")
@@ -774,6 +780,8 @@ class SetupConfig:
                 cmd_parts.append(f"--repo {shlex.quote(git_url)}")
         if self.agent_workspace:
             cmd_parts.append(f"--agent-workspace {shlex.quote(self.agent_workspace)}")
+        if self.install_git_lfs:
+            cmd_parts.append("--git-lfs")
         
         # Custom steps
         if self.custom_steps:
@@ -912,6 +920,8 @@ class SetupConfig:
         if self.gogs:
             escaped_gogs = " ".join(shlex.quote(str(part)) for part in self.gogs)
             cmd_parts.append(f"--gogs {escaped_gogs}")
+        for source in self.gogs_sources or []:
+            cmd_parts.append(f"--gogs-source {shlex.quote(source)}")
         
         # Restart control
         system_defaults = get_system_type_definition(self.system_type)
@@ -1166,6 +1176,7 @@ class SetupConfig:
             agent_config_source=agent_config_source,
             agent_payload=_optional_bool_arg(args, 'agent_payload') is True,
             agent_workspace=_optional_str_arg(args, 'agent_workspace'),
+            install_git_lfs=getattr(args, 'install_git_lfs', False),
             custom_steps=getattr(args, 'custom_steps', None),
             deploy_specs=getattr(args, 'deploy_specs', None),
             deployment_mode=getattr(args, 'deployment_mode', 'default'),
@@ -1192,6 +1203,7 @@ class SetupConfig:
             antistatic_admin=getattr(args, 'antistatic_admin', None),
             antistatic_db=getattr(args, 'antistatic_db', None),
             gogs=getattr(args, 'gogs', None),
+            gogs_sources=getattr(args, 'gogs_sources', None),
             auto_restart=auto_restart,
             auto_restart_force_days=auto_restart_force_days,
             auto_restart_grace=auto_restart_grace,

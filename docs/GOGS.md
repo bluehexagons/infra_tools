@@ -20,18 +20,36 @@ With `--ssl`, infra-tools obtains and renews a Let's Encrypt certificate. With
 `--cloudflare`, the nginx-to-Gogs connection remains private and the tunnel
 serves the hostname; public HTTP/HTTPS firewall ports are not opened.
 
-For a lab or private-network service, omit the hostname and expose Gogs
-directly on its port:
+For a lab or private-network service, omit the hostname. With no source rules,
+Gogs stays on loopback and setup prints an SSH tunnel command:
 
 ```bash
 infra-tools setup server_web 192.168.1.10 deploy \
   --gogs :3000 /srv/gogs-data
+
+ssh -L 3000:127.0.0.1:3000 deploy@192.168.1.10
 ```
 
-Hostless mode binds directly to `0.0.0.0:<port>` and opens that port only when
-UFW is already active. The port defaults to 3000, so `--gogs 3000` is also
-valid. The optional data path must be absolute and defaults to
-`/var/lib/gogs`.
+To make plaintext HTTP reachable on a trusted private network, repeat
+`--gogs-source` for the exact IPv4 hosts or networks that need access:
+
+```bash
+infra-tools setup server_web 192.168.1.10 deploy \
+  --gogs :3000 /srv/gogs-data \
+  --gogs-source 192.168.1.0/24 \
+  --gogs-source 10.0.0.0/8
+```
+
+Source-restricted mode requires active UFW. Setup stops the existing Gogs
+service, installs and verifies replacement source rules, removes obsolete
+infra-tools-managed rules, and only then writes a non-loopback listener. It
+refuses public IPv4 sources, IPv6 sources in this release, and unmanaged allow
+rules for the same port. A source rule does not encrypt traffic; use hostname
+mode with `--ssl` or `--cloudflare` across untrusted networks. Hostname mode
+requires one of those encrypted ingress options.
+
+The port defaults to 3000, so `--gogs 3000` is also valid. The optional data
+path must be absolute and defaults to `/var/lib/gogs`.
 
 ## First login and Git access
 
@@ -60,7 +78,10 @@ database under `data/gogs.db`, repositories, logs, completed LFS objects under
 `data/tmp/lfs-objects`. Gogs uses its local LFS backend explicitly; no separate
 LFS daemon or object store is required. Release binaries live under
 `/opt/gogs/releases`; `/opt/gogs/current` and `/usr/local/bin/gogs` point to
-the active validated release. Useful checks are:
+the active executable-checked release. Setup and patch also run a SQLite quick
+check, verify that the `git` user can read and write each managed directory,
+reject CIFS/SMB live storage, and print the backing filesystem, free bytes,
+free inodes, and repository/LFS/attachment/log usage. Useful checks are:
 
 ```bash
 sudo systemctl status gogs
@@ -85,6 +106,20 @@ remote, so clients still need credentials and network access to the Gogs web
 URL. Gogs does not provide Git LFS file locking. Treat repositories, SQLite,
 configuration, and completed LFS objects as one recovery set; do not copy
 those live paths independently and call the result a consistent backup.
+
+Agent VMs that need LFS can install and initialize the client once before all
+normal repository clones:
+
+```bash
+infra-tools setup server_dev 192.168.1.41 agent \
+  --git-lfs \
+  --repo https://git.example.com/team/assets.git
+```
+
+`--git-lfs` does not alter repository URLs or credentials. A loopback-only
+Gogs deployment is not remotely LFS-ready unless the client has a persistent
+HTTP tunnel and a matching repository LFS URL; routine LFS use should use the
+HTTPS hostname mode or source-restricted private listener.
 
 ## Dedicated VM data disk
 
@@ -115,6 +150,9 @@ not as the live SQLite, repository, or LFS-object filesystem.
 
 - A hostname setup that fails nginx validation leaves the service local; run
   `sudo nginx -t` and inspect the generated `gogs_<hostname>` site.
+- A hostless source setup fails closed when UFW is inactive or another rule
+  already exposes the selected port. Inspect `sudo ufw status numbered` before
+  retrying.
 - A failed Git-over-SSH clone usually means the user's public key is missing or
   port 22 is blocked; check the SSH drop-in and `journalctl -u ssh`.
 - If the web service is down, inspect `journalctl -u gogs` and verify ownership

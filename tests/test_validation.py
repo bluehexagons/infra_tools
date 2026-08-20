@@ -210,26 +210,95 @@ class TestValidateAgentRepositories(unittest.TestCase):
 
 
 class TestValidateGogsSettings(unittest.TestCase):
+    def _make_config(self, **kwargs):
+        defaults = {
+            "host": "host",
+            "username": "agent",
+            "system_type": "server_web",
+            "gogs": None,
+            "gogs_sources": None,
+        }
+        defaults.update(kwargs)
+        return SetupConfig(**defaults)
+
     def test_none_passes(self):
-        validate_gogs_settings(None)
+        validate_gogs_settings(self._make_config())
 
     def test_valid_domain_and_default_path_pass(self):
-        validate_gogs_settings(['git.example.com:3000'])
+        validate_gogs_settings(
+            self._make_config(gogs=['git.example.com:3000'], enable_ssl=True)
+        )
 
     def test_valid_domain_and_absolute_data_path_pass(self):
-        validate_gogs_settings(['git.example.com:3000', '/srv/gogs'])
+        validate_gogs_settings(
+            self._make_config(
+                gogs=['git.example.com:3000', '/srv/gogs'],
+                enable_cloudflare=True,
+            )
+        )
+
+    def test_valid_hostless_private_sources_pass(self):
+        validate_gogs_settings(
+            self._make_config(
+                gogs=[':3000', '/srv/gogs'],
+                gogs_sources=['192.168.0.0/24', '10.0.0.5'],
+            )
+        )
 
     def test_invalid_argument_count_fails(self):
         with self.assertRaisesRegex(ValueError, "--gogs requires DOMAIN\\[:PORT\\] and optional DATA_PATH"):
-            validate_gogs_settings(['git.example.com', '/srv/gogs', 'extra'])
+            validate_gogs_settings(
+                self._make_config(
+                    gogs=['git.example.com', '/srv/gogs', 'extra'],
+                    enable_ssl=True,
+                )
+            )
 
     def test_invalid_domain_fails(self):
         with self.assertRaisesRegex(ValueError, "Invalid Gogs domain: bad domain"):
-            validate_gogs_settings(['bad domain:3000'])
+            validate_gogs_settings(
+                self._make_config(gogs=['bad domain:3000'], enable_ssl=True)
+            )
 
     def test_relative_data_path_fails(self):
         with self.assertRaisesRegex(ValueError, "Gogs data path must be absolute: relative/path"):
-            validate_gogs_settings(['git.example.com', 'relative/path'])
+            validate_gogs_settings(
+                self._make_config(
+                    gogs=['git.example.com', 'relative/path'],
+                    enable_ssl=True,
+                )
+            )
+
+    def test_domain_requires_encrypted_ingress(self):
+        with self.assertRaisesRegex(ValueError, "requires --ssl or --cloudflare"):
+            validate_gogs_settings(self._make_config(gogs=['git.example.com']))
+
+    def test_sources_require_hostless_gogs(self):
+        with self.assertRaisesRegex(ValueError, "requires --gogs"):
+            validate_gogs_settings(
+                self._make_config(gogs_sources=['192.168.0.0/24'])
+            )
+        with self.assertRaisesRegex(ValueError, "valid only for hostless"):
+            validate_gogs_settings(
+                self._make_config(
+                    gogs=['git.example.com'],
+                    gogs_sources=['192.168.0.0/24'],
+                    enable_ssl=True,
+                )
+            )
+
+    def test_sources_reject_public_ipv4_ipv6_and_duplicates(self):
+        for sources, message in (
+            (['8.8.8.8'], "private or otherwise non-global"),
+            (['fd00::/64'], "only private IPv4"),
+            (['10.0.0.1', '10.0.0.1/32'], "Duplicate --gogs-source"),
+        ):
+            with self.subTest(sources=sources), self.assertRaisesRegex(
+                ValueError, message
+            ):
+                validate_gogs_settings(
+                    self._make_config(gogs=[':3000'], gogs_sources=sources)
+                )
 
 
 class TestValidateAgentGitSettings(unittest.TestCase):

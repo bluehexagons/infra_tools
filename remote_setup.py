@@ -21,6 +21,7 @@ from lib.validation import (
     validate_agent_repositories,
     validate_agent_git_settings,
     validate_browser_automation_settings,
+    validate_gogs_settings,
     validate_network_setup_settings,
     validate_rdp_settings,
     validate_samba_share_credentials,
@@ -229,6 +230,7 @@ def config_from_remote_args(args: argparse.Namespace) -> SetupConfig:
     validate_samba_share_specs(config.samba_shares, config.share_credentials)
     validate_samba_share_credentials(config)
     validate_smb_mount_specs(config.smb_mounts)
+    validate_gogs_settings(config)
     validate_vm_storage_settings(config, require_provisioning=False)
     validate_network_setup_settings(config)
     validate_rdp_settings(config)

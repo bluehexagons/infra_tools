@@ -82,6 +82,40 @@ def install_git_for_agent_repositories(config: SetupConfig) -> None:
         raise RuntimeError("Git installation failed")
 
 
+def install_git_lfs_for_agent_repositories(config: SetupConfig) -> None:
+    """Install Git LFS and initialize it for the target login user."""
+    if is_dry_run():
+        print("  [DRY-RUN] Would install and initialize Git LFS")
+        return
+
+    if not shutil.which("git-lfs"):
+        os.environ["DEBIAN_FRONTEND"] = "noninteractive"
+        if not install_package("Git LFS", "git-lfs", "apt-get install -y -qq git-lfs"):
+            raise RuntimeError("Git LFS installation failed")
+
+    result = _run_as_login_user(
+        config.username,
+        _user_home(config),
+        "git lfs install",
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "initialization failed").strip()
+        raise RuntimeError(f"Git LFS user initialization failed: {detail}")
+
+    verification = _run_as_login_user(
+        config.username,
+        _user_home(config),
+        "git lfs version",
+        check=False,
+        capture_output=True,
+    )
+    if verification.returncode != 0:
+        raise RuntimeError("Git LFS installation could not be verified")
+    print("  Git LFS installed and initialized")
+
+
 def _tool_available(config: SetupConfig, command: str, extra_path: str = "") -> bool:
     user_home = _user_home(config)
     path_prefix = '$HOME/.local/bin:$HOME/.opencode/bin'

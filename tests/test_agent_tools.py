@@ -23,6 +23,7 @@ from common.agent_steps import (
     clone_agent_repositories,
     install_claude,
     install_codex,
+    install_git_lfs_for_agent_repositories,
     install_opencode,
     install_t3code,
 )
@@ -136,6 +137,52 @@ class TestOfficialAgentInstallers(unittest.TestCase):
                 self.assertIn('APPIMAGE_EXTRACT_AND_RUN', file_obj.read())
             with open(desktop, encoding='utf-8') as file_obj:
                 self.assertIn(f'Exec={wrapper}', file_obj.read())
+
+    def test_git_lfs_is_installed_and_initialized_for_target_user(self):
+        completed = type(
+            'Completed',
+            (),
+            {'returncode': 0, 'stdout': 'git-lfs/3.7.0', 'stderr': ''},
+        )()
+        with (
+            patch('common.agent_steps.shutil.which', return_value=None),
+            patch('common.agent_steps.install_package', return_value=True) as install,
+            patch('common.agent_steps._user_home', return_value='/home/agent'),
+            patch(
+                'common.agent_steps._run_as_login_user',
+                return_value=completed,
+            ) as run_as_user,
+        ):
+            install_git_lfs_for_agent_repositories(self.config)
+
+        install.assert_called_once_with(
+            'Git LFS', 'git-lfs', 'apt-get install -y -qq git-lfs'
+        )
+        self.assertEqual(
+            [call.args[2] for call in run_as_user.call_args_list],
+            ['git lfs install', 'git lfs version'],
+        )
+
+    def test_git_lfs_initialization_failure_is_fatal(self):
+        failed = type(
+            'Completed',
+            (),
+            {'returncode': 1, 'stdout': '', 'stderr': 'config failed'},
+        )()
+        with (
+            patch('common.agent_steps.shutil.which', return_value='/usr/bin/git-lfs'),
+            patch('common.agent_steps._user_home', return_value='/home/agent'),
+            patch('common.agent_steps._run_as_login_user', return_value=failed),
+        ):
+            with self.assertRaisesRegex(RuntimeError, 'config failed'):
+                install_git_lfs_for_agent_repositories(self.config)
+
+    def test_git_lfs_is_preserved_in_remote_and_saved_commands(self):
+        self.config.install_git_lfs = True
+
+        self.assertIn('--git-lfs', self.config.to_remote_args())
+        self.assertIn('--git-lfs', self.config.to_setup_command())
+        self.assertTrue(self.config.to_dict()['install_git_lfs'])
 
 
 class TestAgentDoctor(unittest.TestCase):

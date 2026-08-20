@@ -29,6 +29,7 @@ PLUGIN = PluginDefinition(
         "copy_agent_tooling_payload",
         "install_browser_automation",
         "install_git_for_agent_repositories",
+        "install_git_lfs_for_agent_repositories",
         "clone_agent_repositories",
         "configure_auto_update_uv",
         "update_and_upgrade_packages",
@@ -177,6 +178,7 @@ def extend_agent_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -
         copy_agent_tooling_payload,
         clone_agent_repositories,
         install_git_for_agent_repositories,
+        install_git_lfs_for_agent_repositories,
         install_claude,
         install_codex,
         install_github_cli,
@@ -207,8 +209,18 @@ def extend_agent_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -
 
         steps.append(("Installing agent browser automation", install_browser_automation))
 
-    if config.agent_repos:
+    if config.agent_repos or config.install_git_lfs:
         steps.append(("Installing Git for agent repositories", install_git_for_agent_repositories))
+
+    if config.install_git_lfs:
+        steps.append(
+            (
+                "Installing Git LFS for agent repositories",
+                install_git_lfs_for_agent_repositories,
+            )
+        )
+
+    if config.agent_repos:
         steps.append(("Cloning agent repositories on target", clone_agent_repositories))
 
 
@@ -246,6 +258,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         copy_agent_tooling_payload,
         clone_agent_repositories,
         install_git_for_agent_repositories,
+        install_git_lfs_for_agent_repositories,
         install_claude,
         install_codex,
         install_github_cli,
@@ -268,6 +281,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "install_browser_automation": install_browser_automation,
         "clone_agent_repositories": clone_agent_repositories,
         "install_git_for_agent_repositories": install_git_for_agent_repositories,
+        "install_git_lfs_for_agent_repositories": install_git_lfs_for_agent_repositories,
         "configure_auto_update_uv": configure_auto_update_uv,
         "update_and_upgrade_packages": update_and_upgrade_packages,
         "check_debian_package_sources": check_debian_package_sources,
