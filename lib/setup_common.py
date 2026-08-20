@@ -61,7 +61,7 @@ from lib.display import print_setup_summary
 from lib.interactive_setup import run_interactive_setup
 from lib.notifications import validate_notification_args
 from lib.proxmox_guest import resolve_guest_ssh_key
-from lib.ssh_utils import build_ssh_command, chain_remote_commands
+from lib.ssh_utils import build_ssh_command, chain_remote_commands, ssh_batch_mode
 from lib.workspace import set_workspace_dir
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REMOTE_SCRIPT_PATH = os.path.join(SCRIPT_DIR, "..", "remote_setup.py")
@@ -1077,7 +1077,7 @@ def run_remote_setup(config: SetupConfig) -> int:
                 remote_user,
                 config.ssh_key,
                 remote_command=remote_shell_cmd,
-                batch_mode=not sys.stdin.isatty(),
+                batch_mode=ssh_batch_mode(),
                 connect_timeout=30,
                 server_alive_interval=30,
             )

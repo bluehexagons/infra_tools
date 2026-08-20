@@ -16,10 +16,19 @@ from lib.ssh_utils import (
     chain_remote_commands,
     get_ssh_control_path,
     shell_join,
+    ssh_batch_mode,
 )
 
 
 class TestSshUtils(unittest.TestCase):
+    @patch("lib.ssh_utils.sys.stdin.isatty", return_value=True)
+    def test_ssh_batch_mode_allows_terminal_prompts(self, _mock_isatty):
+        self.assertFalse(ssh_batch_mode())
+
+    @patch("lib.ssh_utils.sys.stdin.isatty", return_value=False)
+    def test_ssh_batch_mode_requires_agent_without_terminal(self, _mock_isatty):
+        self.assertTrue(ssh_batch_mode())
+
     def test_control_path_is_private_and_identity_specific(self):
         first = get_ssh_control_path("10.0.0.10", "root", "/tmp/key")
         second = get_ssh_control_path("10.0.0.11", "root", "/tmp/key")
@@ -102,6 +111,7 @@ class TestSshUtils(unittest.TestCase):
             "/tmp/remote file",
             "/tmp/key",
             port=2222,
+            batch_mode=True,
         )
         self.assertEqual(
             command,
@@ -124,15 +134,38 @@ class TestSshUtils(unittest.TestCase):
             ],
         )
 
+    @patch("lib.ssh_utils.ssh_batch_mode", return_value=False)
+    @patch("lib.ssh_utils.ensure_workspace_dir")
+    @patch("lib.ssh_utils.get_known_hosts_path", return_value="/tmp/workspace/known_hosts")
+    def test_build_scp_command_allows_passphrase_prompt_in_terminal(
+        self, _mock_known_hosts, _mock_ensure_workspace, _mock_batch_mode
+    ):
+        command = build_scp_command(
+            "example.com", "deploy", "/tmp/local", "/tmp/remote", "/tmp/key"
+        )
+        self.assertIn("BatchMode=no", command)
+
     @patch("lib.ssh_utils.ensure_workspace_dir")
     @patch("lib.ssh_utils.get_known_hosts_path", return_value="/tmp/workspace/known_hosts")
     def test_build_rsync_ssh_transport_quotes_key_path(self, _mock_known_hosts, _mock_ensure_workspace):
-        transport = build_rsync_ssh_transport(ssh_key="/tmp/key file", port=2222)
+        transport = build_rsync_ssh_transport(
+            ssh_key="/tmp/key file", port=2222, batch_mode=True
+        )
         self.assertIn("ssh", transport)
         self.assertIn("'/tmp/key file'", transport)
         self.assertIn("-p 2222", transport)
         self.assertIn("UserKnownHostsFile=/tmp/workspace/known_hosts", transport)
         self.assertIn("StrictHostKeyChecking=yes", transport)
+        self.assertIn("BatchMode=yes", transport)
+
+    @patch("lib.ssh_utils.ssh_batch_mode", return_value=False)
+    @patch("lib.ssh_utils.ensure_workspace_dir")
+    @patch("lib.ssh_utils.get_known_hosts_path", return_value="/tmp/workspace/known_hosts")
+    def test_build_rsync_ssh_transport_allows_passphrase_prompt_in_terminal(
+        self, _mock_known_hosts, _mock_ensure_workspace, _mock_batch_mode
+    ):
+        transport = build_rsync_ssh_transport()
+        self.assertIn("BatchMode=no", transport)
 
 
 if __name__ == "__main__":

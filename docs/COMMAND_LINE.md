@@ -7,6 +7,7 @@ surface and behaviors that are easy to miss.
 Related pages:
 
 - [`SYSADMIN.md`](./SYSADMIN.md) for remote host shortcuts
+- [`SSH.md`](./SSH.md) for passphrase-protected keys and SSH-agent setup
 - [`NETWORKING.md`](./NETWORKING.md) for workspace network inventory
 - [`CICD.md`](./CICD.md) for webhook CI/CD setup
 - [`WORKSTATIONS.md`](./WORKSTATIONS.md) for desktop profiles and application choices
@@ -160,7 +161,9 @@ the route and remote setup staging, so root SSH access is not required. LXC
 guests use root for the initial handoff because their setup user is created by
 that first remote setup. When setup is launched from a terminal, SSH may prompt
 for the configured private-key passphrase; piped or otherwise non-interactive
-runs require the key to be loaded in an SSH agent.
+runs require the key to be loaded in an SSH agent. See
+[SSH authentication](SSH.md) for the same behavior across transfers,
+Proxmox operations, maintenance, and agent commands.
 
 `--activate-network` uses a retry-safe transaction for an existing host and
 must be run from a separate controller. The remote

@@ -9,7 +9,7 @@ import sys
 from typing import Optional
 
 from lib.cache import load_setup_command
-from lib.ssh_utils import get_workspace_known_hosts_path
+from lib.ssh_utils import get_workspace_known_hosts_path, ssh_batch_mode
 
 
 def _resolve_host_credentials(
@@ -40,6 +40,7 @@ def _build_sshfs_options(
     ssh_opts = [
         f"UserKnownHostsFile={known_hosts}",
         "StrictHostKeyChecking=yes",
+        f"BatchMode={'yes' if ssh_batch_mode() else 'no'}",
         "ServerAliveInterval=30",
         "ServerAliveCountMax=3",
     ]

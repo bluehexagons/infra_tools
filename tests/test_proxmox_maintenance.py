@@ -57,10 +57,11 @@ class TestCollectMaintenanceReport(unittest.TestCase):
         self.assertEqual(report.storage_states, {"local": "active"})
         self.assertFalse(report.reboot_required)
 
+    @patch("lib.proxmox_maintenance.ssh_batch_mode", return_value=False)
     @patch("lib.proxmox_maintenance.subprocess.run")
     @patch("lib.proxmox_maintenance.build_ssh_command", return_value=["ssh"])
     def test_run_uses_saved_key_and_allows_interactive_auth(
-        self, mock_build, mock_run
+        self, mock_build, mock_run, _mock_batch_mode
     ) -> None:
         host = ProxmoxHost(
             name="pve1", address="10.0.0.10", user="root", ssh_key="/tmp/key"

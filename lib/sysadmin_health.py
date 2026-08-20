@@ -7,7 +7,7 @@ import sys
 from typing import Optional
 
 from lib.cache import load_setup_command
-from lib.ssh_utils import build_ssh_command
+from lib.ssh_utils import build_ssh_command, ssh_batch_mode
 
 
 # Remote shell script — runs as a single SSH invocation
@@ -112,7 +112,7 @@ def run_health(
         host,
         username,
         ssh_key,
-        batch_mode=True,
+        batch_mode=ssh_batch_mode(),
         remote_command=_HEALTH_SCRIPT,
     )
 

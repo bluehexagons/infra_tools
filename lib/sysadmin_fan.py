@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
 from lib.cache import load_setup_command
-from lib.ssh_utils import build_ssh_command
+from lib.ssh_utils import build_ssh_command, ssh_batch_mode
 
 
 def _resolve_credentials(
@@ -38,7 +38,7 @@ def _run_remote(
         host,
         resolved_user,
         resolved_key,
-        batch_mode=True,
+        batch_mode=ssh_batch_mode(),
         connect_timeout=15,
         remote_command=command,
     )

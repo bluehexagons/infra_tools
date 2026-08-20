@@ -9,7 +9,7 @@ import sys
 from typing import Optional
 
 from lib.cache import load_setup_command
-from lib.ssh_utils import build_rsync_ssh_transport
+from lib.ssh_utils import build_rsync_ssh_transport, ssh_batch_mode
 
 
 def _resolve_credentials(
@@ -50,7 +50,9 @@ def _build_rsync_cmd(
         print("Error: rsync is not installed.", file=sys.stderr)
         raise RuntimeError("rsync not found")
 
-    transport = build_rsync_ssh_transport(ssh_key=ssh_key, port=port, batch_mode=True)
+    transport = build_rsync_ssh_transport(
+        ssh_key=ssh_key, port=port, batch_mode=ssh_batch_mode()
+    )
     cmd = ["rsync", "-avP", "-e", transport, src, dst]
     if delete:
         cmd.append("--delete")

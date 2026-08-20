@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
 from lib.cache import load_setup_command
-from lib.ssh_utils import build_ssh_command
+from lib.ssh_utils import build_ssh_command, ssh_batch_mode
 from lib.workspace import get_setup_cache_dir
 import os
 
@@ -47,7 +47,7 @@ def _probe_host(host: str, username: Optional[str], ssh_key: Optional[str]) -> t
         host,
         resolved_user,
         resolved_key,
-        batch_mode=True,
+        batch_mode=ssh_batch_mode(),
         connect_timeout=5,
         server_alive_interval=None,
         remote_command="true",

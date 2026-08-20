@@ -10,7 +10,7 @@ import tempfile
 import posixpath
 from typing import Optional
 
-from lib.ssh_utils import build_scp_command, build_ssh_command, build_rsync_ssh_transport, chain_remote_commands, shell_join
+from lib.ssh_utils import build_scp_command, build_ssh_command, build_rsync_ssh_transport, chain_remote_commands, shell_join, ssh_batch_mode
 from lib.types import JSONDict
 
 
@@ -74,7 +74,7 @@ def _build_ssh_cmd(target: JSONDict, remote_cmd: str) -> list[str]:
         ssh_key,
         port=ssh_port,
         remote_command=remote_cmd,
-        batch_mode=True,
+        batch_mode=ssh_batch_mode(),
         connect_timeout=30,
         server_alive_interval=None,
     )
@@ -115,7 +115,7 @@ def push_artifact(
     
     rsync_cmd = [
         'rsync', '-avz', '--delete',
-        '-e', build_rsync_ssh_transport(ssh_key=ssh_key, port=ssh_port, batch_mode=True, connect_timeout=30),
+        '-e', build_rsync_ssh_transport(ssh_key=ssh_key, port=ssh_port, batch_mode=ssh_batch_mode(), connect_timeout=30),
     ]
     
     if exclude_patterns:
@@ -178,7 +178,7 @@ def push_nginx_config(config_content: str, target_host: str, domain: str) -> boo
             remote_temp_path,
             ssh_key,
             port=ssh_port,
-            batch_mode=True,
+            batch_mode=ssh_batch_mode(),
             connect_timeout=30,
         )
         

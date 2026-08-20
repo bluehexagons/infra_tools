@@ -16,7 +16,7 @@ from typing import Optional
 
 from lib.atomic_io import write_json_atomic
 from lib.agent_auth import AGENT_AUTH_TOOLS
-from lib.ssh_utils import build_ssh_command
+from lib.ssh_utils import build_ssh_command, ssh_batch_mode
 from lib.types import JSONDict, StrList
 from lib.validation import validate_filesystem_path, validate_package_name
 from lib.validators import validate_host, validate_username
@@ -670,7 +670,7 @@ def run_agent_web_pair(args: argparse.Namespace) -> int:
         host,
         username,
         args.ssh_key,
-        batch_mode=True,
+        batch_mode=ssh_batch_mode(),
         remote_command="exec ~/.local/bin/t3code-pair",
         connect_timeout=30,
         server_alive_interval=30,

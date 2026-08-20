@@ -10,6 +10,7 @@ to the detailed setup and operations guides.
 | [Installation and bootstrap](INSTALLATION.md) | Installing the launcher, preparing an orchestration host, shell completion, and requirements |
 | [Local system maintenance](LOCAL_MAINTENANCE.md) | Focused package, desktop, browser, hostname, IP, and DNS changes |
 | [Command-line reference](COMMAND_LINE.md) | Setup, patch, targeted updates, and utility flags |
+| [SSH authentication](SSH.md) | Passphrase-protected keys, terminal prompts, SSH agents, and troubleshooting |
 | [Credentials and agent configuration](CREDENTIALS.md) | Workspace passwords, GitHub/Git access, agent auth, non-secret config, sharing, and rotation |
 | [Agent browser automation](BROWSER_AUTOMATION.md) | Playwright provisioning, Codex/OpenCode registration, verification, and security boundaries |
 | [T3 Code interfaces](T3_CODE.md) | Desktop installation, headless LAN service, pairing, remote clients, and security boundaries |

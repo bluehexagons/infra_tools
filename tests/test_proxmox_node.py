@@ -70,6 +70,7 @@ class TestSshOpts(unittest.TestCase):
     def test_no_key(self):
         opts = _ssh_opts()
         self.assertIn("StrictHostKeyChecking=yes", opts)
+        self.assertIn("BatchMode=yes", opts)
         self.assertNotIn("-i", opts)
 
     def test_with_key(self):

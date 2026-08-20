@@ -10,7 +10,7 @@ import sys
 from typing import Any
 
 from lib.cache import load_setup_command
-from lib.ssh_utils import build_ssh_command
+from lib.ssh_utils import build_ssh_command, ssh_batch_mode
 from lib.validators import validate_host, validate_username
 
 
@@ -264,7 +264,7 @@ def inspect_remote_gogs(
         host,
         username,
         ssh_key,
-        batch_mode=True,
+        batch_mode=ssh_batch_mode(),
         remote_command=remote_command,
     )
     result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=90)

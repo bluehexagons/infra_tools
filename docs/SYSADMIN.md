@@ -5,6 +5,12 @@ inherit SSH credentials (username, key, port) from the saved infra-tools
 configuration for the host when available, so you rarely need to pass them
 explicitly.
 
+Commands started in a terminal can prompt for a password-protected key's
+passphrase. For piped commands and parallel operations, preload the key with
+`ssh-agent`/`ssh-add`; see [SSH authentication](SSH.md). This is especially
+important for `fan`, `df`, and `reachable`, which may create several SSH
+connections at once.
+
 ## Command Index
 
 | Command | Summary |

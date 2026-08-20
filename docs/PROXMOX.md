@@ -326,9 +326,10 @@ is read-only and exits nonzero when a health check fails.
 
 Proxmox SSH inspection commands reuse a short-lived OpenSSH control connection.
 With an encrypted key, the first connection prompts for its passphrase and the
-remaining checks reuse that authenticated connection. The maintenance audit is
-interactive so it can prompt when the saved key is not already available to an
-SSH agent; do not run it with `BatchMode=yes` when passphrase entry is required.
+remaining checks reuse that authenticated connection. All Proxmox operations
+allow that prompt when launched from a terminal; piped or parallel operations
+require the key to be loaded into an SSH agent. See
+[SSH authentication](SSH.md) for setup and troubleshooting.
 
 Modify resources and configuration:
 

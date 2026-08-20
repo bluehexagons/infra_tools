@@ -13,7 +13,7 @@ import time
 from typing import Optional
 
 from lib.proxmox_hosts import ProxmoxHost, ProxmoxHostFacts, ProxmoxStoragePool
-from lib.ssh_utils import build_ssh_command, get_ssh_control_path
+from lib.ssh_utils import build_ssh_command, get_ssh_control_path, ssh_batch_mode
 from lib.types import StrList
 from lib.validators import validate_username
 
@@ -39,6 +39,7 @@ def _ssh_opts(hosted_key: Optional[str] = None) -> StrList:
     """Build SSH options list for Proxmox node connections."""
     opts = [
         "-o", "StrictHostKeyChecking=yes",
+        "-o", f"BatchMode={'yes' if ssh_batch_mode() else 'no'}",
         "-o", "ConnectTimeout=30",
         "-o", "ServerAliveInterval=30",
     ]
@@ -922,7 +923,7 @@ def ensure_guest_ipv4_route(
         username,
         ssh_key,
         remote_command=remote_script,
-        batch_mode=not sys.stdin.isatty(),
+        batch_mode=ssh_batch_mode(),
         connect_timeout=30,
         server_alive_interval=30,
     )

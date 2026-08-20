@@ -16,7 +16,7 @@ from lib.proxmox_network_transition import (
     prepare_proxmox_network_plan,
     rollback_proxmox_network_plan,
 )
-from lib.ssh_utils import build_ssh_command, chain_remote_commands
+from lib.ssh_utils import build_ssh_command, chain_remote_commands, ssh_batch_mode
 
 
 REMOTE_INSTALL_DIR = "/opt/infra_tools"
@@ -53,7 +53,7 @@ def _run_transition_ssh(
         "root",
         config.ssh_key,
         remote_command=remote_command,
-        batch_mode=True,
+        batch_mode=ssh_batch_mode(),
         connect_timeout=5,
         server_alive_interval=5,
     )

@@ -10,7 +10,7 @@ import shlex
 import subprocess
 from typing import Any, Optional
 
-from lib.ssh_utils import build_ssh_command
+from lib.ssh_utils import build_ssh_command, ssh_batch_mode
 
 
 AGENT_AUTH_TOOLS = ("gh", "codex", "claude", "opencode")
@@ -205,7 +205,7 @@ def _run_remote_script(
         host,
         username,
         ssh_key,
-        batch_mode=True,
+        batch_mode=ssh_batch_mode(),
         remote_command=f"python3 -c {shlex.quote(script)}",
     )
     return subprocess.run(

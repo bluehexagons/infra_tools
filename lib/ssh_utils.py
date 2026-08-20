@@ -5,10 +5,24 @@ from __future__ import annotations
 import hashlib
 import os
 import shlex
+import sys
 import tempfile
 from typing import Sequence
 
 from lib.workspace import ensure_workspace_dir, get_known_hosts_path
+
+
+def ssh_batch_mode() -> bool:
+    """Return whether SSH should fail instead of prompting for input.
+
+    OpenSSH can ask for a passphrase through the controlling terminal even
+    when its stdout and stderr are captured.  Keep that behavior for commands
+    started from a terminal.  Commands started with redirected stdin cannot
+    answer a prompt reliably, so they must use an already-loaded SSH agent (or
+    fail clearly instead of hanging).
+    """
+
+    return not sys.stdin.isatty()
 
 
 def shell_join(argv: Sequence[str]) -> str:
@@ -79,6 +93,8 @@ def build_ssh_command(
 
     command.extend(["-o", f"UserKnownHostsFile={get_workspace_known_hosts_path()}"])
     command.extend(["-o", "StrictHostKeyChecking=yes"])
+    if batch_mode is None:
+        batch_mode = ssh_batch_mode()
     if batch_mode is True:
         command.extend(["-o", "BatchMode=yes"])
     elif batch_mode is False:
@@ -108,7 +124,7 @@ def build_scp_command(
     ssh_key: str | None = None,
     *,
     port: int | str | None = None,
-    batch_mode: bool | None = True,
+    batch_mode: bool | None = None,
     connect_timeout: int | None = 30,
 ) -> list[str]:
     """Build an SCP command with consistent options."""
@@ -121,6 +137,8 @@ def build_scp_command(
 
     command.extend(["-o", f"UserKnownHostsFile={get_workspace_known_hosts_path()}"])
     command.extend(["-o", "StrictHostKeyChecking=yes"])
+    if batch_mode is None:
+        batch_mode = ssh_batch_mode()
     if batch_mode is True:
         command.extend(["-o", "BatchMode=yes"])
     elif batch_mode is False:
@@ -136,7 +154,7 @@ def build_rsync_ssh_transport(
     *,
     ssh_key: str | None = None,
     port: int | str | None = None,
-    batch_mode: bool = True,
+    batch_mode: bool | None = None,
     connect_timeout: int | None = 30,
 ) -> str:
     """Build the rsync -e SSH transport string with quoted argv."""
@@ -148,8 +166,12 @@ def build_rsync_ssh_transport(
         ssh_command.extend(["-p", str(port)])
     ssh_command.extend(["-o", f"UserKnownHostsFile={get_workspace_known_hosts_path()}"])
     ssh_command.extend(["-o", "StrictHostKeyChecking=yes"])
-    if batch_mode:
+    if batch_mode is None:
+        batch_mode = ssh_batch_mode()
+    if batch_mode is True:
         ssh_command.extend(["-o", "BatchMode=yes"])
+    elif batch_mode is False:
+        ssh_command.extend(["-o", "BatchMode=no"])
     if connect_timeout is not None:
         ssh_command.extend(["-o", f"ConnectTimeout={connect_timeout}"])
     return shell_join(ssh_command)

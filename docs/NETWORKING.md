@@ -67,7 +67,8 @@ non-interactive `sudo` privileges; they do not require root SSH access. LXC
 guests continue to use root for this first handoff because their setup user is
 created by the initial remote setup. Interactive runs may prompt for the
 configured SSH key's passphrase; non-interactive runs require that key to be
-available through an SSH agent. The normal static network step then
+available through an SSH agent. See [SSH authentication](SSH.md). The normal
+static network step then
 persists the same gateway through the guest's active network backend. A failed
 verification stops setup with the SSH/error detail so a guest cannot be
 reported as successfully configured while lacking its expected route.

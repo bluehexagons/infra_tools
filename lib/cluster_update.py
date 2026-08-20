@@ -12,7 +12,7 @@ from lib.config import SetupConfig
 from lib.proxmox_hosts import ProxmoxHost
 from lib.proxmox_maintenance import ProxmoxMaintenanceReport, collect_maintenance_report
 from lib.setup_common import prepare_validated_runtime_config
-from lib.ssh_utils import build_ssh_command
+from lib.ssh_utils import build_ssh_command, ssh_batch_mode
 from lib.workspace import set_workspace_dir
 
 
@@ -43,7 +43,7 @@ def _ssh_result(
             "root",
             config.ssh_key,
             remote_command=remote_command,
-            batch_mode=True,
+            batch_mode=ssh_batch_mode(),
             connect_timeout=connect_timeout,
             server_alive_interval=connect_timeout,
         ),
