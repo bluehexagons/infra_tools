@@ -22,6 +22,8 @@ from lib.workspace import ensure_workspace_dir, normalize_workspace_dir
 
 
 PROXMOX_HOSTS_FILENAME = "proxmox_hosts.json"
+PROXMOX_HOST_SCHEMA_VERSION = 1
+PROXMOX_PROVIDER = "proxmox"
 
 
 @dataclass
@@ -113,6 +115,8 @@ class ProxmoxHost:
 
     name: str
     address: str
+    schema_version: int = PROXMOX_HOST_SCHEMA_VERSION
+    provider: str = PROXMOX_PROVIDER
     user: str = "root"
     ssh_key: Optional[str] = None
     description: Optional[str] = None
@@ -127,6 +131,16 @@ class ProxmoxHost:
 
     @classmethod
     def from_dict(cls, data: JSONDict) -> "ProxmoxHost":
+        if data.get("schema_version") != PROXMOX_HOST_SCHEMA_VERSION:
+            raise ValueError(
+                "Unsupported Proxmox host record schema; remove and re-register "
+                "this development record with 'infra-tools proxmox add'"
+            )
+        if data.get("provider") != PROXMOX_PROVIDER:
+            raise ValueError(
+                "Proxmox host record must declare provider='proxmox'; remove and "
+                "re-register this development record with 'infra-tools proxmox add'"
+            )
         if "name" not in data or "address" not in data:
             raise ValueError("Proxmox host record missing 'name' or 'address'")
         tags_raw = data.get("tags") or []
@@ -135,6 +149,8 @@ class ProxmoxHost:
         return cls(
             name=str(data["name"]),
             address=str(data["address"]),
+            schema_version=PROXMOX_HOST_SCHEMA_VERSION,
+            provider=PROXMOX_PROVIDER,
             user=str(data.get("user") or "root"),
             ssh_key=cast(Optional[str], data.get("ssh_key")),
             description=cast(Optional[str], data.get("description")),
@@ -177,10 +193,17 @@ def load_proxmox_hosts(workspace: Optional[str] = None) -> list[ProxmoxHost]:
     path = get_proxmox_hosts_path(workspace)
     raw = _load_raw(path)
     hosts: list[ProxmoxHost] = []
-    for entry in raw:
+    for index, entry in enumerate(raw):
         if not isinstance(entry, dict):
             raise ValueError(f"Invalid entry in {path}: expected object")
-        hosts.append(ProxmoxHost.from_dict(cast(JSONDict, entry)))
+        try:
+            host = ProxmoxHost.from_dict(cast(JSONDict, entry))
+            _validate_host_record(host)
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid Proxmox host record {index} in {path}: {exc}"
+            ) from exc
+        hosts.append(host)
     return hosts
 
 
@@ -189,6 +212,8 @@ def save_proxmox_hosts(
     workspace: Optional[str] = None,
 ) -> str:
     """Persist the registry, returning the file path."""
+    for host in hosts:
+        _validate_host_record(host)
     ensure_workspace_dir(workspace)
     path = get_proxmox_hosts_path(workspace)
     payload = [host.to_dict() for host in hosts]
@@ -224,6 +249,8 @@ def merge_proxmox_host(existing: ProxmoxHost, incoming: ProxmoxHost) -> ProxmoxH
     return ProxmoxHost(
         name=incoming.name,
         address=incoming.address,
+        schema_version=PROXMOX_HOST_SCHEMA_VERSION,
+        provider=PROXMOX_PROVIDER,
         user=existing.user or incoming.user,
         ssh_key=existing.ssh_key or incoming.ssh_key,
         description=existing.description or incoming.description,
@@ -238,6 +265,14 @@ def merge_proxmox_host(existing: ProxmoxHost, incoming: ProxmoxHost) -> ProxmoxH
 
 
 def _validate_host_record(host: ProxmoxHost) -> None:
+    if host.schema_version != PROXMOX_HOST_SCHEMA_VERSION:
+        raise ValueError(
+            f"Unsupported Proxmox host schema version: {host.schema_version}"
+        )
+    if host.provider != PROXMOX_PROVIDER:
+        raise ValueError(
+            f"Invalid provider for Proxmox host: {host.provider!r}"
+        )
     if not host.name or not host.name.strip():
         raise ValueError("Proxmox host name is required")
     if any(ord(char) < 32 or ord(char) == 127 for char in host.name):
@@ -324,15 +359,29 @@ def sync_proxmox_host(
 def remove_proxmox_host(
     name_or_address: str, workspace: Optional[str] = None
 ) -> bool:
-    """Remove a host by name or address; returns True if removed."""
+    """Remove a host by name or address, including an incompatible record."""
     needle = name_or_address.strip()
     needle_lc = needle.lower()
-    hosts = load_proxmox_hosts(workspace)
-    new_hosts = [
-        h for h in hosts
-        if h.name.lower() != needle_lc and h.address != needle
-    ]
-    if len(new_hosts) == len(hosts):
+    path = get_proxmox_hosts_path(workspace)
+    raw = _load_raw(path)
+    retained: JSONList = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            retained.append(entry)
+            continue
+        name = entry.get("name")
+        address = entry.get("address")
+        if (
+            isinstance(name, str)
+            and name.lower() == needle_lc
+        ) or (
+            isinstance(address, str)
+            and address.lower().rstrip(".") == needle_lc.rstrip(".")
+        ):
+            continue
+        retained.append(entry)
+    if len(retained) == len(raw):
         return False
-    save_proxmox_hosts(new_hosts, workspace)
+    ensure_workspace_dir(workspace)
+    write_json_atomic(path, retained, mode=0o600, sort_keys=True)
     return True

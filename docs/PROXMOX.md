@@ -47,6 +47,15 @@ infra-tools proxmox ls pve1
 
 Successful `server_proxmox` setup registers the host in the selected workspace;
 `--name` supplies the registry name and defaults to the host address when omitted.
+New host records explicitly store `schema_version: 1` and
+`provider: proxmox`. Records produced by earlier development builds are not
+silently reinterpreted. If loading the registry reports an unsupported schema
+or missing provider, run `infra-tools proxmox remove NAME` using the name shown
+in that record, then run the normal `server_proxmox` setup or
+`infra-tools proxmox add` command again. Removal matches only the stored name
+or address and can delete an incompatible record without interpreting it.
+This is an intentional breaking-release boundary, not a credential or
+guest-data migration.
 
 The matching `.pub` file must sit beside the private key, and the Proxmox
 `root` account must accept that key.

@@ -33,7 +33,7 @@ avoid abstraction whose only purpose is a hypothetical provider or service.
 
 | Lane | State | Next boundary |
 | --- | --- | --- |
-| A1: VM terminology and read-only commands | Planned | Provider-neutral typed inventory and removal of the old guest CLI surface |
+| A1: VM terminology and read-only commands | In progress | Provider/schema-tagged host records are implemented; provider-neutral typed inventory and removal of the old guest CLI surface remain |
 | A2: existing VM mutations | Dependency-gated | Durable operation markers and staged mutation contract |
 | A3: declarative VM data disks and guest mounts | Provisioning slice implemented | Live Proxmox validation, read-only mount status, then coordinated grow-only resize; existing-disk adoption, detach, and `/home` migration remain rejected |
 | A4: clone and restore | Dependency-gated | Shared transaction and recovery contracts |
@@ -1200,6 +1200,11 @@ The shared roadmap imposes two gates:
    consistency rules, and restore smoke tests can land before that backend.
 
 ### Lane A1: VM terminology and read-only commands
+
+Implementation status: newly written Proxmox host records carry an explicit
+schema version and provider identity, and incompatible development records
+fail with re-registration guidance. The neutral VM observation/result types
+and command move remain open.
 
 - Add provider and schema-version fields to registered infrastructure hosts;
   reject incompatible development records without mutating them and document

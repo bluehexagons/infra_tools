@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -10,6 +11,8 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.proxmox_hosts import (
+    PROXMOX_HOST_SCHEMA_VERSION,
+    PROXMOX_PROVIDER,
     ProxmoxHost,
     ProxmoxHostFacts,
     ProxmoxStoragePool,
@@ -67,6 +70,21 @@ class TestProxmoxHostRecord(unittest.TestCase):
         )
         restored = ProxmoxHost.from_dict(host.to_dict())
         self.assertEqual(restored, host)
+        self.assertEqual(restored.schema_version, PROXMOX_HOST_SCHEMA_VERSION)
+        self.assertEqual(restored.provider, PROXMOX_PROVIDER)
+
+    def test_from_dict_rejects_development_records_without_schema_or_provider(self) -> None:
+        with self.assertRaisesRegex(ValueError, "re-register"):
+            ProxmoxHost.from_dict({"name": "pve", "address": "10.0.0.10"})
+        with self.assertRaisesRegex(ValueError, "provider='proxmox'"):
+            ProxmoxHost.from_dict(
+                {
+                    "schema_version": PROXMOX_HOST_SCHEMA_VERSION,
+                    "provider": "other",
+                    "name": "pve",
+                    "address": "10.0.0.10",
+                }
+            )
 
     def test_from_dict_requires_name_and_address(self) -> None:
         with self.assertRaises(ValueError):
@@ -77,12 +95,16 @@ class TestProxmoxHostRecord(unittest.TestCase):
     def test_from_dict_rejects_bad_tags(self) -> None:
         with self.assertRaises(ValueError):
             ProxmoxHost.from_dict({
+                "schema_version": PROXMOX_HOST_SCHEMA_VERSION,
+                "provider": PROXMOX_PROVIDER,
                 "name": "pve", "address": "10.0.0.10", "tags": "prod"
             })
 
     def test_from_dict_rejects_bad_facts_lists(self) -> None:
         with self.assertRaises(ValueError):
             ProxmoxHost.from_dict({
+                "schema_version": PROXMOX_HOST_SCHEMA_VERSION,
+                "provider": PROXMOX_PROVIDER,
                 "name": "pve",
                 "address": "10.0.0.10",
                 "facts": {"bridges": "vmbr0"},
@@ -108,6 +130,18 @@ class TestRegistryRoundTrip(_WorkspaceFixture):
         path = get_proxmox_hosts_path(self.workspace)
         mode = os.stat(path).st_mode & 0o777
         self.assertEqual(mode, 0o600)
+        with open(path, encoding="utf-8") as source:
+            record = json.load(source)[0]
+        self.assertEqual(record["schema_version"], PROXMOX_HOST_SCHEMA_VERSION)
+        self.assertEqual(record["provider"], PROXMOX_PROVIDER)
+
+    def test_save_rejects_invalid_provider_before_writing(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Invalid provider"):
+            save_proxmox_hosts(
+                [ProxmoxHost(name="a", address="10.0.0.1", provider="other")],
+                self.workspace,
+            )
+        self.assertFalse(os.path.exists(get_proxmox_hosts_path(self.workspace)))
 
     def test_load_rejects_non_array(self) -> None:
         path = get_proxmox_hosts_path(self.workspace)
@@ -115,6 +149,15 @@ class TestRegistryRoundTrip(_WorkspaceFixture):
         with open(path, "w", encoding="utf-8") as fh:
             fh.write('{"not": "an array"}')
         with self.assertRaises(ValueError):
+            load_proxmox_hosts(self.workspace)
+
+    def test_load_error_identifies_incompatible_record_and_registry(self) -> None:
+        path = get_proxmox_hosts_path(self.workspace)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as destination:
+            json.dump([{"name": "old", "address": "10.0.0.1"}], destination)
+
+        with self.assertRaisesRegex(ValueError, "record 0.*proxmox_hosts.json"):
             load_proxmox_hosts(self.workspace)
 
 
@@ -150,6 +193,26 @@ class TestAddProxmoxHost(_WorkspaceFixture):
         with self.assertRaisesRegex(ValueError, "Invalid Proxmox SSH user"):
             add_proxmox_host(
                 ProxmoxHost(name="pve1", address="10.0.0.10", user="bad user"),
+                self.workspace,
+            )
+
+    def test_add_rejects_wrong_provider_or_schema(self) -> None:
+        with self.assertRaisesRegex(ValueError, "schema version"):
+            add_proxmox_host(
+                ProxmoxHost(
+                    name="pve1",
+                    address="10.0.0.10",
+                    schema_version=2,
+                ),
+                self.workspace,
+            )
+        with self.assertRaisesRegex(ValueError, "Invalid provider"):
+            add_proxmox_host(
+                ProxmoxHost(
+                    name="pve1",
+                    address="10.0.0.10",
+                    provider="other",
+                ),
                 self.workspace,
             )
 
@@ -234,6 +297,23 @@ class TestFindAndRemove(_WorkspaceFixture):
 
     def test_remove_missing_returns_false(self) -> None:
         self.assertFalse(remove_proxmox_host("missing", self.workspace))
+
+    def test_remove_can_delete_incompatible_development_record(self) -> None:
+        path = get_proxmox_hosts_path(self.workspace)
+        with open(path, "w", encoding="utf-8") as destination:
+            json.dump(
+                [
+                    ProxmoxHost(name="pve1", address="10.0.0.10").to_dict(),
+                    {"name": "old", "address": "10.0.0.99"},
+                ],
+                destination,
+            )
+
+        self.assertTrue(remove_proxmox_host("old", self.workspace))
+        self.assertEqual(
+            [host.name for host in load_proxmox_hosts(self.workspace)],
+            ["pve1"],
+        )
 
 
 if __name__ == "__main__":
