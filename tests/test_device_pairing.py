@@ -460,10 +460,7 @@ class DevicePairingRemoteSetupTest(unittest.TestCase):
             command = providers["providers"]["t3code"]["command"]
             self.assertIn("pairing", command)
             self.assertIn("create", command)
-            self.assertEqual(
-                command[command.index("--port") : command.index("--port") + 2],
-                ["--port", "3773"],
-            )
+            self.assertNotIn("--port", command)
             self.assertIn("--json", command)
             self.assertNotIn("$6$salt$hash", json.dumps(providers))
             provider_wrapper = command[0]
@@ -471,6 +468,11 @@ class DevicePairingRemoteSetupTest(unittest.TestCase):
                 wrapper = file_obj.read()
             self.assertIn('export NVM_DIR="$HOME/.nvm"', wrapper)
             self.assertIn('"$@"', wrapper)
+            with open(
+                os.path.join(temporary, "pairing.service"), encoding="utf-8"
+            ) as file_obj:
+                service = file_obj.read()
+            self.assertIn("Environment=T3CODE_PORT=3773", service)
 
     def test_firewall_includes_pairing_port(self) -> None:
         config = _config()

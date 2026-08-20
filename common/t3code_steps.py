@@ -524,8 +524,6 @@ def _configure_device_pairing(
                     "create",
                     "--base-dir",
                     t3_state_dir,
-                    "--port",
-                    str(t3_port),
                     "--ttl",
                     "10m",
                     "--label",
@@ -559,6 +557,7 @@ RuntimeDirectory=infra-tools-device-pairing
 RuntimeDirectoryMode=0750
 UMask=0007
 Environment=HOME={home}
+Environment=T3CODE_PORT={t3_port}
 ExecStart=/usr/bin/python3 {DEVICE_PAIRING_SCRIPT} --config {DEVICE_PAIRING_PROVIDERS_FILE} --socket {DEVICE_PAIRING_SOCKET}
 Restart=on-failure
 RestartSec=5
