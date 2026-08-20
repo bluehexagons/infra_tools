@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import unittest
 from unittest.mock import patch
@@ -14,6 +15,7 @@ from lib.ssh_utils import (
     build_scp_command,
     build_ssh_command,
     chain_remote_commands,
+    ensure_remote_sudo,
     get_ssh_control_path,
     shell_join,
     ssh_batch_mode,
@@ -100,6 +102,79 @@ class TestSshUtils(unittest.TestCase):
         self.assertIn("ControlMaster=auto", command)
         self.assertIn("ControlPersist=60s", command)
         self.assertIn("ControlPath=/tmp/infra-tools.sock", command)
+
+    @patch("lib.ssh_utils.ensure_workspace_dir")
+    @patch("lib.ssh_utils.get_known_hosts_path", return_value="/tmp/workspace/known_hosts")
+    def test_build_ssh_command_can_allocate_a_terminal(
+        self, _mock_known_hosts, _mock_ensure_workspace
+    ):
+        command = build_ssh_command(
+            "example.com",
+            "agent",
+            remote_command="sudo -v",
+            batch_mode=False,
+            allocate_tty=True,
+        )
+
+        self.assertEqual(command[1], "-tt")
+
+    @patch("lib.ssh_utils.subprocess.run")
+    def test_remote_sudo_succeeds_without_prompt_when_nopasswd_is_available(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess([], 0, "", "")
+
+        with patch("lib.ssh_utils.build_ssh_command", return_value=["ssh"]):
+            self.assertTrue(
+                ensure_remote_sudo(
+                    "192.0.2.40",
+                    "agent",
+                    "/tmp/key",
+                    control_path="/tmp/infra-tools.sock",
+                )
+            )
+
+        mock_run.assert_called_once_with(
+            ["ssh"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+    @patch("lib.ssh_utils.sys.stdin.isatty", return_value=False)
+    @patch("lib.ssh_utils.subprocess.run")
+    def test_remote_sudo_fails_clearly_without_terminal(
+        self, mock_run, _mock_isatty
+    ):
+        mock_run.return_value = subprocess.CompletedProcess(
+            [], 1, "", "sudo: a password is required\n"
+        )
+
+        with patch("lib.ssh_utils.build_ssh_command", return_value=["ssh"]):
+            self.assertFalse(ensure_remote_sudo("192.0.2.40", "agent"))
+
+        mock_run.assert_called_once()
+
+    @patch("lib.ssh_utils.sys.stdin.isatty", return_value=True)
+    @patch("lib.ssh_utils.subprocess.run")
+    def test_remote_sudo_uses_separate_tty_authentication(
+        self, mock_run, _mock_isatty
+    ):
+        mock_run.side_effect = [
+            subprocess.CompletedProcess([], 1, "", "sudo: a password is required"),
+            subprocess.CompletedProcess([], 0, "", ""),
+            subprocess.CompletedProcess([], 0, "", ""),
+        ]
+        with patch(
+            "lib.ssh_utils.build_ssh_command",
+            side_effect=[["probe"], ["auth"], ["verify"]],
+        ) as mock_build:
+            self.assertTrue(ensure_remote_sudo("192.0.2.40", "agent", "/tmp/key"))
+
+        self.assertEqual(mock_run.call_count, 3)
+        auth_kwargs = mock_build.call_args_list[1].kwargs
+        self.assertEqual(auth_kwargs["remote_command"], "sudo -v")
+        self.assertFalse(auth_kwargs["batch_mode"])
+        self.assertTrue(auth_kwargs["allocate_tty"])
 
     @patch("lib.ssh_utils.ensure_workspace_dir")
     @patch("lib.ssh_utils.get_known_hosts_path", return_value="/tmp/workspace/known_hosts")

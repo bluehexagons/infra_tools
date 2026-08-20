@@ -95,9 +95,10 @@ class TestWaitForGuestSsh(unittest.TestCase):
 
 
 class TestGuestRouteRepair(unittest.TestCase):
+    @patch("lib.proxmox_guest.ensure_remote_sudo", return_value=True)
     @patch("lib.proxmox_guest.build_ssh_command", return_value=["ssh"])
     @patch("lib.proxmox_guest.subprocess.run")
-    def test_existing_route_is_left_in_place(self, mock_run, mock_build):
+    def test_existing_route_is_left_in_place(self, mock_run, mock_build, _mock_sudo):
         mock_run.return_value = subprocess.CompletedProcess(
             ["ssh"], 0, stdout="already\n", stderr=""
         )
@@ -124,9 +125,10 @@ class TestGuestRouteRepair(unittest.TestCase):
             timeout=60,
         )
 
+    @patch("lib.proxmox_guest.ensure_remote_sudo", return_value=True)
     @patch("lib.proxmox_guest.build_ssh_command", return_value=["ssh"])
     @patch("lib.proxmox_guest.subprocess.run")
-    def test_repairs_missing_route(self, mock_run, _mock_build):
+    def test_repairs_missing_route(self, mock_run, _mock_build, _mock_sudo):
         mock_run.return_value = subprocess.CompletedProcess(
             ["ssh"], 0, stdout="repaired\n", stderr=""
         )
@@ -144,9 +146,10 @@ class TestGuestRouteRepair(unittest.TestCase):
         )
         mock_run.assert_called_once()
 
+    @patch("lib.proxmox_guest.ensure_remote_sudo", return_value=True)
     @patch("lib.proxmox_guest.build_ssh_command", return_value=["ssh"])
     @patch("lib.proxmox_guest.subprocess.run")
-    def test_route_failure_is_reported(self, mock_run, _mock_build):
+    def test_route_failure_is_reported(self, mock_run, _mock_build, _mock_sudo):
         mock_run.return_value = subprocess.CompletedProcess(
             ["ssh"], 1, stdout="", stderr="route failed"
         )

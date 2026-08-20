@@ -51,6 +51,17 @@ the raw SSH uploads used during Proxmox provisioning. SSHFS mounts may detach
 or reconnect after the original terminal is gone, so an agent is the reliable
 choice for a long-lived mount.
 
+Hosted VM setup also needs the guest setup account to run privileged staging
+commands. The upload itself uses SSH standard input for a tar stream, so
+infra-tools never lets a remote `sudo` prompt consume that stream. It first
+checks `sudo -n`; on an interactive run, if the guest requires a password, it
+opens a separate terminal-backed `sudo -v` session and then continues the
+upload. Non-interactive runs require passwordless sudo for the setup account.
+For an existing VM that was not provisioned by infra-tools, either run setup
+from a terminal when prompted or grant the setup account the intended
+`NOPASSWD` sudo rule. The sudo password is not stored, passed in the archive,
+or written to the setup cache.
+
 ## Troubleshooting
 
 Check which agent is active and whether it has the expected identity:

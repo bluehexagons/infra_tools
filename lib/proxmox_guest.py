@@ -13,7 +13,12 @@ import time
 from typing import Optional
 
 from lib.proxmox_hosts import ProxmoxHost, ProxmoxHostFacts, ProxmoxStoragePool
-from lib.ssh_utils import build_ssh_command, get_ssh_control_path, ssh_batch_mode
+from lib.ssh_utils import (
+    build_ssh_command,
+    ensure_remote_sudo,
+    get_ssh_control_path,
+    ssh_batch_mode,
+)
 from lib.types import StrList
 from lib.validators import validate_username
 
@@ -888,6 +893,16 @@ def ensure_guest_ipv4_route(
 
     target_ip = str(parsed_interface.ip)
     gateway_ip = str(parsed_gateway)
+    control_path = get_ssh_control_path(target_ip, username, ssh_key)
+    if not ensure_remote_sudo(
+        target_ip,
+        username,
+        ssh_key,
+        control_path=control_path,
+    ):
+        raise ProvisionError(
+            f"Remote sudo authentication was not available for {username}@{target_ip}"
+        )
     route_replace = (
         'ip -4 route replace default via "$gateway" dev "$interface"'
         if username == "root"
@@ -926,6 +941,7 @@ def ensure_guest_ipv4_route(
         batch_mode=ssh_batch_mode(),
         connect_timeout=30,
         server_alive_interval=30,
+        control_path=control_path,
     )
     result = subprocess.run(
         command,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shlex
+import subprocess
 import sys
 import tempfile
 from typing import Sequence
@@ -82,10 +83,13 @@ def build_ssh_command(
     connect_timeout: int | None = 30,
     server_alive_interval: int | None = 30,
     control_path: str | None = None,
+    allocate_tty: bool = False,
 ) -> list[str]:
     """Build an SSH command with consistent options."""
 
     command = ["ssh"]
+    if allocate_tty:
+        command.append("-tt")
     if ssh_key:
         command.extend(["-i", ssh_key])
     if port is not None:
@@ -114,6 +118,119 @@ def build_ssh_command(
     if remote_command is not None:
         command.append(remote_command)
     return command
+
+
+def ensure_remote_sudo(
+    host: str,
+    username: str,
+    ssh_key: str | None = None,
+    *,
+    control_path: str | None = None,
+    timeout: int = 60,
+) -> bool:
+    """Verify remote sudo and interactively authenticate when necessary.
+
+    Setup uploads use SSH stdin for a tar stream, so a remote sudo prompt
+    cannot safely be allowed to consume that stream. Probe non-interactively
+    first; when the caller has a terminal, authenticate with a separate
+    terminal-backed ``sudo -v`` session and verify the cached authorization
+    before returning.
+    """
+    if username == "root":
+        return True
+
+    probe = build_ssh_command(
+        host,
+        username,
+        ssh_key,
+        remote_command="sudo -n true",
+        batch_mode=ssh_batch_mode(),
+        connect_timeout=30,
+        server_alive_interval=30,
+        control_path=control_path,
+    )
+    try:
+        result = subprocess.run(
+            probe,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print(f"Error: could not verify remote sudo for {username}@{host}: {exc}")
+        return False
+
+    if result.returncode == 0:
+        return True
+
+    detail = (result.stderr or result.stdout or "").strip()
+    if result.returncode == 255:
+        print(
+            f"Error: could not establish SSH for remote sudo verification "
+            f"to {username}@{host}."
+        )
+        if detail:
+            print(f"  SSH check: {detail[:240]}")
+        return False
+    if not sys.stdin.isatty():
+        print(
+            f"Error: {username}@{host} does not provide passwordless sudo and "
+            "setup has no terminal for a password prompt. Run setup from a "
+            "terminal, load the SSH key into ssh-agent, or configure the setup "
+            "user with the required NOPASSWD sudo rule."
+        )
+        if detail:
+            print(f"  Remote sudo check: {detail[:240]}")
+        return False
+
+    print(
+        f"  Remote sudo authentication is required for {username}@{host}; "
+        "enter the guest sudo password if prompted."
+    )
+    authenticate = build_ssh_command(
+        host,
+        username,
+        ssh_key,
+        remote_command="sudo -v",
+        batch_mode=False,
+        connect_timeout=30,
+        server_alive_interval=30,
+        control_path=control_path,
+        allocate_tty=True,
+    )
+    try:
+        auth_result = subprocess.run(authenticate, check=False, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print(f"Error: remote sudo authentication could not run: {exc}")
+        return False
+    if auth_result.returncode != 0:
+        print(
+            f"Error: remote sudo authentication failed for {username}@{host} "
+            f"(exit {auth_result.returncode})."
+        )
+        return False
+
+    try:
+        verification = subprocess.run(
+            probe,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print(f"Error: could not verify remote sudo after authentication: {exc}")
+        return False
+    if verification.returncode != 0:
+        detail = (verification.stderr or verification.stdout or "").strip()
+        print(f"Error: remote sudo remains unavailable for {username}@{host}.")
+        if detail:
+            print(f"  Remote sudo check: {detail[:240]}")
+        return False
+
+    print(f"  ✓ Remote sudo access verified for {username}@{host}")
+    return True
 
 
 def build_scp_command(

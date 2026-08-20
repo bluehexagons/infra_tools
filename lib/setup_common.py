@@ -61,7 +61,13 @@ from lib.display import print_setup_summary
 from lib.interactive_setup import run_interactive_setup
 from lib.notifications import validate_notification_args
 from lib.proxmox_guest import resolve_guest_ssh_key
-from lib.ssh_utils import build_ssh_command, chain_remote_commands, ssh_batch_mode
+from lib.ssh_utils import (
+    build_ssh_command,
+    chain_remote_commands,
+    ensure_remote_sudo,
+    get_ssh_control_path,
+    ssh_batch_mode,
+)
 from lib.workspace import set_workspace_dir
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REMOTE_SCRIPT_PATH = os.path.join(SCRIPT_DIR, "..", "remote_setup.py")
@@ -964,6 +970,27 @@ def run_remote_setup(config: SetupConfig) -> int:
         print("Error: Local setup requires root privileges. Please run with sudo.")
         return 1
 
+    remote_user = "root"
+    control_path: Optional[str] = None
+    if not is_local:
+        remote_user = (
+            get_provisioned_guest_ssh_user(config.machine_type, config.username)
+            if config.hosted_node
+            else "root"
+        )
+        control_path = get_ssh_control_path(
+            config.host,
+            remote_user,
+            config.ssh_key,
+        )
+        if not ensure_remote_sudo(
+            config.host,
+            remote_user,
+            config.ssh_key,
+            control_path=control_path,
+        ):
+            return 1
+
     build_dir = tempfile.mkdtemp(prefix="infra_setup_build_")
     try:
         copy_project_files(build_dir)
@@ -1049,12 +1076,6 @@ def run_remote_setup(config: SetupConfig) -> int:
         else:
             tar_data = create_tar_from_dir(build_dir)
             
-            remote_user = (
-                get_provisioned_guest_ssh_user(config.machine_type, config.username)
-                if config.hosted_node
-                else "root"
-            )
-
             def privileged(command: list[str]) -> list[str]:
                 if remote_user == "root":
                     return command
@@ -1080,6 +1101,7 @@ def run_remote_setup(config: SetupConfig) -> int:
                 batch_mode=ssh_batch_mode(),
                 connect_timeout=30,
                 server_alive_interval=30,
+                control_path=control_path,
             )
             
             ssh_env = os.environ.copy()

@@ -301,6 +301,7 @@ class TestRunRemoteSetupArgumentSecurity(unittest.TestCase):
         process.wait.return_value = 0
 
         with patch.object(setup_common, "copy_project_files"), \
+             patch.object(setup_common, "ensure_remote_sudo", return_value=True), \
              patch.object(setup_common, "build_ssh_command", return_value=["ssh"]) as mock_build, \
              patch("subprocess.Popen", return_value=process):
             result = setup_common.run_remote_setup(config)

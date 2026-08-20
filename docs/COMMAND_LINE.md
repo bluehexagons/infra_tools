@@ -157,7 +157,10 @@ guest SSH is available, setup also verifies the live IPv4 default route and
 repairs a missing route before package installation; the normal final network
 step persists the repaired configuration. A provisioned VM connects for this
 handoff as the configured guest username and uses non-interactive `sudo` for
-the route and remote setup staging, so root SSH access is not required. LXC
+the route and remote setup staging, so root SSH access is not required. On an
+interactive run, infra-tools first authenticates remote sudo in a separate
+terminal-backed SSH session when an existing VM requires a password; the setup
+payload is then streamed only after sudo access is verified. LXC
 guests use root for the initial handoff because their setup user is created by
 that first remote setup. When setup is launched from a terminal, SSH may prompt
 for the configured private-key passphrase; piped or otherwise non-interactive
