@@ -397,7 +397,7 @@ def _generated_htpasswd(config: SetupConfig) -> bytes:
     username = config.device_pairing_auth_username
     password = config.device_pairing_auth_password
     if not username or not password:
-        raise ValueError("Interactive device-pairing credentials are incomplete")
+        raise ValueError("Device-pairing credentials are incomplete")
     try:
         result = subprocess.run(
             ["openssl", "passwd", "-6", "-stdin"],

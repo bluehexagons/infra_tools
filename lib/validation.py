@@ -534,10 +534,17 @@ def validate_web_interface_settings(config: Any) -> None:
             raise ValueError(
                 "--device-pairing-port must differ from --web-interface-port"
             )
-        if pairing_auth_file and (pairing_auth_username or pairing_auth_password):
+        if pairing_auth_file and (
+            pairing_auth_username is not None or pairing_auth_password is not None
+        ):
             raise ValueError(
                 "--device-pairing-auth-file cannot be combined with interactive credentials"
             )
+        if pairing_auth_username is not None or pairing_auth_password is not None:
+            if not pairing_auth_username or not pairing_auth_password:
+                raise ValueError(
+                    "Device-pairing Basic Auth requires a non-empty username and password"
+                )
         if bool(pairing_auth_username) != bool(pairing_auth_password):
             raise ValueError(
                 "Device-pairing Basic Auth requires both a username and password"

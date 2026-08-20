@@ -11,7 +11,7 @@ concerns separate:
 | GitHub and agent authentication | Secret files installed for `gh`, Codex, Claude Code, or OpenCode | An active-user source, a specified file, or the interactive setup flow |
 | Agent configuration | Non-secret settings, instructions, skills, rules, aliases, and extensions | `--agent-config active` |
 | Browser website sessions | Credentials and cookies for sites visited through agent browser automation | Not copied by infra-tools; use a task-specific, scoped secret flow |
-| Device enrollment | Basic Auth account used to request short-lived provider pairing links | A specified htpasswd file or hidden interactive prompts |
+| Device enrollment | Basic Auth account used to request short-lived provider pairing links | A specified htpasswd file, transient password option, or hidden interactive prompts |
 
 The credentials copied to a VM are optional. Agent tools can be installed
 without authentication, and public HTTPS repositories can be cloned without

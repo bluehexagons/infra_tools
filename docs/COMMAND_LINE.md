@@ -269,6 +269,7 @@ rm -f "$HOME/.infra_tools-install.sh"
 | `--device-pairing PROVIDER` | Install the protected browser enrollment portal for a provider; repeatable, currently `t3code` |
 | `--device-pairing-port PORT` | Pairing portal port; default `3774` and must differ from the web-interface port |
 | `--device-pairing-auth-file PATH` | Controller-local Nginx htpasswd file for the portal; transient and not saved |
+| `--device-pairing-password PASS` | Controller-local portal password; hashed locally, transient, and not saved; the portal username defaults to the setup username |
 | `--no-device-pairing` | Remove the pairing broker, Nginx site, firewall rule, and installed portal password file from a saved host |
 | `--browser-automation PROVIDER` | Install and register explicit agent browser automation; currently `playwright`, with selected Codex and/or OpenCode required |
 | `--refresh-packages` | Force the APT update/upgrade and versioned runtime checks that normal reruns skip when their completion state is already present |

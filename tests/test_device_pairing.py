@@ -83,6 +83,36 @@ class DevicePairingConfigTest(unittest.TestCase):
         self.assertNotIn("device_pairing_auth_file", serialized)
         self.assertNotIn("device_pairing_auth_password", serialized)
 
+    def test_cli_password_defaults_portal_username_and_stays_transient(self) -> None:
+        parser = create_setup_argument_parser("test")
+        args = parser.parse_args(
+            [
+                "agent-vm",
+                "agent",
+                "--agent-tool",
+                "codex",
+                "--web-interface",
+                "t3code",
+                "--device-pairing",
+                "t3code",
+                "--device-pairing-password",
+                "portal-secret",
+            ]
+        )
+        config = SetupConfig.from_args(args, "server_dev")
+        validate_web_interface_settings(config)
+
+        self.assertEqual(config.device_pairing_auth_username, "agent")
+        self.assertEqual(config.device_pairing_auth_password, "portal-secret")
+        self.assertNotIn("portal-secret", " ".join(config.to_remote_args()))
+        self.assertNotIn("portal-secret", " ".join(config.to_setup_command()))
+        self.assertNotIn("portal-secret", str(config.to_dict()))
+
+    def test_empty_cli_password_is_rejected(self) -> None:
+        config = _config(device_pairing_auth_password="")
+        with self.assertRaisesRegex(ValueError, "non-empty username and password"):
+            validate_web_interface_settings(config)
+
     def test_provider_requires_matching_web_interface(self) -> None:
         config = SetupConfig(
             host="agent-vm",
@@ -224,6 +254,18 @@ class DevicePairingPayloadTest(unittest.TestCase):
             self.assertEqual(mock_run.call_args.args[0], ["openssl", "passwd", "-6", "-stdin"])
             self.assertEqual(mock_run.call_args.kwargs["input"], "very-secret\n")
             self.assertNotIn("very-secret", mock_run.call_args.args[0])
+
+    def test_password_only_uses_target_username_for_htpasswd(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            config = _config(device_pairing_auth_password="very-secret")
+            completed = SimpleNamespace(returncode=0, stdout="$6$salt$hash\n")
+            with patch("lib.setup_common.subprocess.run", return_value=completed):
+                prepare_device_pairing_payload(config, temporary)
+
+            with open(
+                os.path.join(temporary, "htpasswd"), encoding="utf-8"
+            ) as file_obj:
+                self.assertEqual(file_obj.read(), "agent:$6$salt$hash\n")
 
     def test_remote_cleanup_removes_all_uploaded_secret_payloads(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

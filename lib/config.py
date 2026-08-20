@@ -347,6 +347,13 @@ class SetupConfig:
             if provider not in DEVICE_PAIRING_PROVIDERS:
                 raise ValueError(f"Unsupported device pairing provider: {provider}")
         self.device_pairing_providers = pairing_providers or None
+        if (
+            self.device_pairing_providers
+            and self.device_pairing_auth_password is not None
+            and not self.device_pairing_auth_file
+            and not self.device_pairing_auth_username
+        ):
+            self.device_pairing_auth_username = self.username
         if self.desktop_interfaces or self.web_interfaces:
             if not self.install_codex and not self.install_claude and not self.install_opencode:
                 raise ValueError(

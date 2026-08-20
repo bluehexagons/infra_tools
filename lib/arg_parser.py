@@ -505,6 +505,15 @@ def add_setup_arguments(
                 "device-pairing portal"
             ),
         )
+        parser.add_argument(
+            "--device-pairing-password",
+            dest="device_pairing_auth_password",
+            metavar="PASSWORD",
+            help=(
+                "Controller-local portal password; transient and hashed before "
+                "staging (the portal username defaults to the setup username)"
+            ),
+        )
     parser.add_argument(
         "--browser-automation",
         choices=BROWSER_AUTOMATION_PROVIDERS,

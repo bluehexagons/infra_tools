@@ -57,6 +57,17 @@ When T3 Code web setup is selected, choose device enrollment and enter the
 portal username and password at the hidden prompts. The password is passed to
 OpenSSL over standard input, never as a process argument.
 
+For a one-off setup, the password can instead be supplied directly:
+
+```bash
+--device-pairing-password '<portal-password>'
+```
+
+This uses the setup username as the portal's Basic Auth username. The password
+is hashed locally and is not placed in remote arguments or saved configuration,
+but the command-line value may still be visible in shell history or process
+inspection. Prefer a password file when that exposure matters.
+
 ## Enroll a device
 
 From a permitted device, visit:
