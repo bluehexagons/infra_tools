@@ -258,7 +258,7 @@ rm -f "$HOME/.infra_tools-install.sh"
 
 | Flag | Description |
 |------|-------------|
-| `--agent-tool TOOL` | Install one explicit tool (`gh`, `codex`, `claude`, `opencode`, or `t3code`); repeatable |
+| `--agent-tool TOOL` | Install one explicit tool (`gh`, `codex`, `claude`, `opencode`, or the current desktop-only `t3code` integration); repeatable |
 | `--browser-automation PROVIDER` | Install and register explicit agent browser automation; currently `playwright`, with selected Codex and/or OpenCode required |
 | `--git-access POLICY` | Set the VM's declared agent Git policy: `none`, `read`, or `read-write` |
 | `--git-host HOST` | Select the Git host for credentials; GitHub auth currently uses `github.com` |
@@ -279,6 +279,12 @@ Agent tools are selected individually with repeatable `--agent-tool` flags. Ther
 is no agent-suite preset or implicit coding-package baseline; add unrelated
 packages explicitly with `--apt-install`, and add language runtimes with their
 individual flags.
+
+In the current release, `--agent-tool t3code` installs the desktop AppImage,
+launcher, and desktop entry only. It does not start a web service or expose a
+network listener. The planned `--desktop-interface` and `--web-interface`
+options are not implemented yet; use the active `--agent-tool` surface and RDP
+for desktop access until that interface split is delivered.
 
 Codex CLI, Claude Code, OpenCode, and T3 Code are installed from their official
 distribution channels. The Codex installer runs with `CODEX_NON_INTERACTIVE=1`,
@@ -494,7 +500,8 @@ hostless loopback service reached through an SSH tunnel. To expose hostless
 HTTP on a trusted private network, repeat `--gogs-source IP_OR_CIDR`; only
 non-global IPv4 sources are accepted, active UFW is required, and setup fails
 before binding externally if it cannot verify the rules. Gogs releases require
-and verify the publisher-provided SHA-256 before extraction, and activation can
+and verify the SHA-256 supplied in GitHub release asset metadata before
+extraction, and activation can
 roll back to the previous release if service, post-update, or health checks
 fail.
 
@@ -517,7 +524,9 @@ sudo, as normal infra-tools setup users do. Health is nonzero when the service,
 SQLite database, managed paths, local filesystem, update service/timer,
 capacity thresholds, or documented nginx upload limit is unhealthy. JSON also
 reports release identity, per-category usage, the external URL, and whether
-the LFS HTTP endpoint is remotely reachable or loopback-only.
+the LFS HTTP endpoint is configured for non-loopback access or is loopback-only.
+This is configuration evidence, not a client-side network or authentication
+probe.
 
 ## Storage and data movement
 
@@ -587,6 +596,8 @@ one control-plane address before it will produce a non-error plan.
 
 ```text
 infra-tools proxmox add <name> <address> [--user USER] [--key PATH]
+infra-tools proxmox hosts
+infra-tools proxmox remove <name-or-address>
 infra-tools proxmox probe <host>
 infra-tools proxmox probe-cluster <address> [--user USER] [--key PATH] [--tag TAG]
 infra-tools proxmox audit <host> [<host> ...] [--json]
@@ -621,6 +632,21 @@ read-only and checks core Proxmox services, cluster quorum, active tasks,
 configured storage, root free space, guest locks, running guests, and the reboot
 marker. It exits nonzero when the host is not healthy and supports stable JSON
 output for automation.
+
+Registered host records contain `schema_version: 1` and `provider: proxmox`.
+The current release rejects incompatible development records rather than
+guessing how to interpret them. Remove an incompatible record by its stored
+name or address, then register it again:
+
+```bash
+infra-tools proxmox remove pve1
+infra-tools proxmox add pve1 10.0.0.10 --user root --key ~/.ssh/proxmox_ed25519
+```
+
+The provider-neutral `infra-tools vm ...` command tree described in the active
+project plan is not available yet. Until that A1 redesign is complete, guest
+listing, lifecycle, storage, snapshots, backups, and migration remain under
+the current `infra-tools proxmox ...` commands documented above.
 
 `rolling-update` uses saved setup commands and workspace credentials. It audits
 all targets before making changes, audits each node again after its update and

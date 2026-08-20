@@ -5,25 +5,25 @@ providers and offline snapshot mode remain future work.
 
 This project makes it straightforward to provision a Debian VM for agentic
 development while keeping tool selection, Git access, repository setup, and
-credential transfer explicit. It replaces the current bundled agent-suite
+credential transfer explicit. It replaces the bundled agent-suite
 model with a small set of deliberate setup choices. This is an intentional
 CLI redesign: old suite flags and compatibility aliases are not retained.
 
 ## Problem
 
-The current agent-host path combines several concerns:
+Earlier development versions of the agent-host path combined several concerns:
 
-- an agent suite selects multiple tools and a shared package bundle;
-- separate flags select configuration and credential copying;
-- repositories are cloned on the orchestration host before being uploaded;
-- credential copying assumes the controller user's known tool directories; and
-- Git access is configured as a consequence of copying GitHub CLI state.
+- an agent suite selected multiple tools and a shared package bundle;
+- separate flags selected configuration and credential copying;
+- repositories were cloned on the orchestration host before being uploaded;
+- credential copying assumed the controller user's known tool directories; and
+- Git access was configured as a consequence of copying GitHub CLI state.
 
-That is workable when the controller is also the user's development machine,
-but it is a poor fit for a control system that only manages VMs. The controller
-may not have GitHub CLI, Codex, or OpenCode installed. The target may need
-access to only a deliberately limited set of repositories. An operator may
-also want to enter or select credentials during setup without putting secret
+That model is workable when the controller is also the user's development
+machine, but it is a poor fit for a control system that only manages VMs. The
+current release instead lets the controller select explicit target tools,
+operate without those tools installed locally, provide public repositories
+without credentials, and select per-VM credentials without putting secret
 values in a saved command.
 
 ## Goals
@@ -62,8 +62,9 @@ values in a saved command.
 
 ### Explicit tools
 
-Remove `agent_suite` and its `terminal`, `desktop`, and `full` presets. Agent
-installation should use one repeatable option with a closed set of choices:
+The release removes `agent_suite` and its `terminal`, `desktop`, and `full`
+presets. Agent installation uses one repeatable option with a closed set of
+choices:
 
 ```text
 --agent-tool gh
@@ -78,7 +79,7 @@ large coding-utility bundle. The current common coding-tool baseline is not
 installed implicitly; optional packages remain available through the normal
 package options.
 
-The implementation should use one tool registry. A tool entry owns its
+The implementation uses one tool registry. A tool entry owns its
 installer, target configuration paths, credential path/format, authentication
 check, and any Git integration. This prevents each new tool from adding
 another set of conditionals to setup and payload handling.
@@ -325,52 +326,59 @@ GitHub authentication as the first provider-specific integration, active-user
 configuration or specified files, and an interactive alternative. Credential
 source options are operation-only and are omitted from saved commands.
 
-## Implementation phases
+## Delivered implementation phases
 
-### Phase 1: Configuration model and explicit tools
+The phases below are complete in the current release. Their bullets record the
+delivered design and security boundaries; they are not an open implementation
+queue. Authenticated non-GitHub providers and offline snapshot mode remain
+explicitly deferred as stated above.
 
-- Remove `AGENT_SUITES`, `agent_suite`, and suite expansion from configuration.
-- Replace individual suite-derived behavior with repeatable explicit tool
+### Phase 1: Configuration model and explicit tools — complete
+
+- Removed `AGENT_SUITES`, `agent_suite`, and suite expansion from configuration.
+- Replaced suite-derived behavior with repeatable explicit tool
   selection and a tool registry.
-- Remove the implicit common coding-tool baseline; keep only required tool
-  dependencies and expose optional packages through normal package options.
-- Define a host-neutral repository declaration and a non-persisted credential
+- Removed the implicit common coding-tool baseline; only required tool
+  dependencies remain, and optional packages are exposed through normal
+  package options.
+- Defined a host-neutral repository declaration and a non-persisted credential
   input model separate from saved `SetupConfig`.
-- Update command help, saved-command serialization, summaries, completion,
+- Updated command help, saved-command serialization, summaries, completion,
   and documentation.
 
-### Phase 2: VM-level Git credentials and target-side repositories
+### Phase 2: VM-level Git credentials and target-side repositories — complete
 
-- Add the VM-level Git policy and credential configuration.
-- Implement public HTTPS repository cloning on the target for any reachable
+- Added the VM-level Git policy and credential configuration.
+- Implemented public HTTPS repository cloning on the target for any reachable
   Git host without invoking the controller's agent tools.
-- Implement one-host GitHub credential staging without invoking the
-  controller's `gh`, and require target-side `gh` for private GitHub access.
-- Configure HTTPS Git on the target through `gh auth setup-git` when private
+- Implemented one-host GitHub credential staging without invoking the
+  controller's `gh`, and required target-side `gh` for private GitHub access.
+- Configured HTTPS Git on the target through `gh auth setup-git` when private
   GitHub access is requested.
-- Move normal `--repo` preparation to the target after credentials are ready
+- Moved normal `--repo` preparation to the target after credentials are ready
   when private repositories are requested.
-- Make failed setup cleanup cover upload, extraction, and remote-step
+- Made failed setup cleanup cover upload, extraction, and remote-step
   interruption, not only the normal remote `finally` path.
-- Preserve safe destination checks, collision behavior, and private cache
+- Preserved safe destination checks, collision behavior, and private cache
   cleanup for any retained snapshot path.
 
-### Phase 3: Interactive setup
+### Phase 3: Interactive setup — complete
 
-- Add the guided selection and prompt flow.
-- Reuse the normal parser, validators, setup plan, confirmation, and saved
+- Added the guided selection and prompt flow.
+- Reused the normal parser, validators, setup plan, confirmation, and saved
   command generation.
-- Ensure the redacted plan clearly shows tools, Git policy, credential
+- Ensured the redacted plan clearly shows tools, Git policy, credential
   presence/source category, repository hosts, and repository declarations.
-- Reject interactive mode without a TTY and ensure dry-run never reads or
+- Rejected interactive mode without a TTY and ensured dry-run never reads or
   stages secret material.
 
-### Phase 4: Credential rotation and diagnostics
+### Phase 4: Credential rotation and diagnostics — complete
 
-- Add `agent auth set` and `agent auth status`.
-- Add post-setup checks for tool availability, credential permissions, Git
+- Added `agent auth set` and `agent auth status`.
+- Added post-setup checks for tool availability, credential permissions, Git
   remote access, and each declared repository.
-- Add explicit snapshot mode only if an offline workflow requires it.
+- Kept explicit snapshot mode deferred because no supported offline workflow
+  currently requires it.
 
 Authenticated providers other than GitHub should be a later adapter project;
 they must not change the host-neutral public repository contract.

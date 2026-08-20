@@ -3,6 +3,9 @@
 infra-tools can register Proxmox hosts, cache their capabilities, provision
 Debian VMs or unprivileged LXCs, and manage guest lifecycle operations.
 [Machine types](MACHINE_TYPES.md) explains the guest capability differences.
+The current release exposes these operations under `infra-tools proxmox ...`.
+The provider-neutral `infra-tools vm ...` command tree is still planned; do
+not use it until the A1 command redesign is delivered.
 
 These workflows target Proxmox VE 9.2 and use its current `qm` and `pct`
 interfaces. Bridge discovery identifies Linux bridge interfaces by type, so

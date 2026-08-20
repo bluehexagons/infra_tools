@@ -31,8 +31,8 @@ add packages and runtimes with their individual flags.
 
 ## Maintenance currently applied
 
-On a Debian VM or bare-metal `server_dev` target, the default terminal suite
-inherits these host jobs:
+On a Debian VM or bare-metal `server_dev` target, an explicitly selected
+terminal-agent setup inherits these host jobs:
 
 | Unit | Behavior | Agent-specific effect |
 | --- | --- | --- |
@@ -42,7 +42,7 @@ inherits these host jobs:
 | `user-cache-maintenance.timer` | Inventories and prunes bounded developer-tool caches weekly as the configured non-root user | Covers npm, pip, uv, Go, OpenCode cache data, Codex cache data, and stale Codex temporary entries while preserving persistent agent state |
 | `auto-restart-if-needed.timer` | Checks daily and after boot for `/var/run/reboot-required` | Defers for active login sessions until the force deadline, then may restart despite active work |
 
-The terminal suite does **not** install an automatic updater for Codex CLI,
+Selected terminal agents do **not** install an automatic updater for Codex CLI,
 Claude Code, or OpenCode. Their setup functions skip installation whenever the
 command is already found. `infra-tools agent update` now provides an explicit
 per-user update with pre/post smoke checks, an atomic non-secret audit record,
@@ -224,7 +224,7 @@ needs the real-VM validation described above.
 
 - Unit tests cover no-notification local monitoring and every required timer
   verification failure.
-- A Debian VM smoke test verifies the canonical `server_dev` terminal suite,
+- A Debian VM smoke test verifies the canonical `server_dev` explicit-agent setup,
   firewall access, all five host timers, and `agent doctor` as the setup user.
 - Upgrade tests cover interrupted download, bad digest/signature, failed smoke
   test, and rollback for each supported agent tool.

@@ -30,6 +30,12 @@ For agent-controlled page previews and interaction, see
 [Agent browser automation](BROWSER_AUTOMATION.md); it is independent of the
 human-operated browser described in this guide.
 
+The current release installs T3 Code's desktop AppImage through
+`--agent-tool t3code`. This path creates a launcher and desktop entry for the
+logged-in desktop user; it does not start a web service or expose a listener.
+The project plan calls for separate desktop and web interface options in a
+later redesign, so those planned flags should not be used yet.
+
 ## Profiles
 
 | Profile | Adds by default |
