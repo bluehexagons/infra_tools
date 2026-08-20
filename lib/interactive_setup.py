@@ -99,7 +99,7 @@ def run_interactive_setup(args: Any) -> None:
     elif "gh" in selected_tools and args.git_access == "none":
         print("GitHub credentials skipped because VM Git access is none.")
 
-    non_gh_tools = sorted(selected_tools.difference({"gh", "t3code"}))
+    non_gh_tools = sorted(selected_tools.difference({"gh"}))
     if non_gh_tools:
         agent_auth_choice = _prompt_choice(
             "Credential source for selected coding agents",

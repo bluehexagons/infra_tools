@@ -45,6 +45,8 @@ from lib.validation import (
     validate_samba_share_specs,
     validate_smb_mount_specs,
     validate_scrub_specs,
+    validate_backup_specs,
+    validate_web_interface_settings,
     validate_ssl_email,
     validate_sync_specs,
     validate_memory_string,
@@ -800,7 +802,9 @@ def prepare_validated_runtime_config(
     validate_deploy_specs(runtime_config.deploy_specs)
     validate_deploy_targets(runtime_config.deploy_targets)
     validate_sync_specs(runtime_config.sync_specs)
+    validate_backup_specs(runtime_config.backup_specs)
     validate_scrub_specs(runtime_config.scrub_specs)
+    validate_web_interface_settings(runtime_config)
     validate_smb_mount_specs(runtime_config.smb_mounts)
     validate_samba_share_specs(
         runtime_config.samba_shares,

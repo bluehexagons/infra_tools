@@ -12,9 +12,11 @@ to the detailed setup and operations guides.
 | [Command-line reference](COMMAND_LINE.md) | Setup, patch, targeted updates, and utility flags |
 | [Credentials and agent configuration](CREDENTIALS.md) | Workspace passwords, GitHub/Git access, agent auth, non-secret config, sharing, and rotation |
 | [Agent browser automation](BROWSER_AUTOMATION.md) | Playwright provisioning, Codex/OpenCode registration, verification, and security boundaries |
+| [T3 Code interfaces](T3_CODE.md) | Desktop installation, headless LAN service, pairing, remote clients, and security boundaries |
 | [Machine types](MACHINE_TYPES.md) | Debian bare metal, VM, LXC, OCI, and capability differences |
 | [Samba shares](SAMBA_SHARES.md) | Authenticated shares, credentials, access changes, removals, and SMB mounts |
 | [Storage operations](STORAGE_OPERATIONS.md) | Rsync mirrors, par2 protection, schedules, locks, and recovery |
+| [Generic path backups](BACKUPS.md) | Provider-neutral backup mirrors, mounted destinations, parity, and consistency limits |
 
 ## Operations and infrastructure
 

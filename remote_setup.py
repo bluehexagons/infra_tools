@@ -21,6 +21,8 @@ from lib.validation import (
     validate_agent_repositories,
     validate_agent_git_settings,
     validate_browser_automation_settings,
+    validate_backup_specs,
+    validate_web_interface_settings,
     validate_gogs_settings,
     validate_network_setup_settings,
     validate_rdp_settings,
@@ -227,6 +229,8 @@ def config_from_remote_args(args: argparse.Namespace) -> SetupConfig:
     validate_agent_repositories(config.agent_repos)
     validate_agent_git_settings(config)
     validate_browser_automation_settings(config)
+    validate_backup_specs(config.backup_specs)
+    validate_web_interface_settings(config)
     validate_samba_share_specs(config.samba_shares, config.share_credentials)
     validate_samba_share_credentials(config)
     validate_smb_mount_specs(config.smb_mounts)
@@ -503,7 +507,7 @@ def _run_main() -> int:
         
         print("\n✓ SMB mount configuration complete")
     
-    if config.sync_specs or config.scrub_specs:
+    if config.sync_specs or config.backup_specs or config.scrub_specs:
         from sync.sync_steps import install_rsync
         from sync.scrub_steps import install_par2
         from sync.storage_ops_steps import (
@@ -515,8 +519,11 @@ def _run_main() -> int:
         print("Configuring storage operations service...")
         print("=" * 60)
 
-        if config.sync_specs:
-            print(f"\nPreparing {len(config.sync_specs)} sync job(s)...")
+        if config.sync_specs or config.backup_specs:
+            print(
+                f"\nPreparing {len(config.sync_specs) + len(config.backup_specs)} "
+                "sync/backup job(s)..."
+            )
             install_rsync(config)
 
         if config.scrub_specs:

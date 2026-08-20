@@ -274,7 +274,7 @@ def _download_verified_file(url: str, expected_sha256: str, destination: str) ->
             os.remove(temporary)
 
 
-def install_t3code(config: SetupConfig) -> None:
+def install_t3code_desktop(config: SetupConfig) -> None:
     """Install T3 Code's official AppImage with a minimal desktop launcher."""
     if is_dry_run():
         print("  [DRY-RUN] Would install T3 Code AppImage")

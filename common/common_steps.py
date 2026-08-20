@@ -20,6 +20,7 @@ from lib.remote_utils import (
     install_package,
     is_dry_run,
     is_package_installed,
+    get_user_home,
     run,
 )
 from lib.update_policy import ECOSYSTEM_AUTO_UPGRADE_ENV, npm_freshness_args
@@ -640,7 +641,7 @@ def install_node_for_user(username: str, user_home: str) -> None:
 
 
 def install_node(config: SetupConfig) -> None:
-    install_node_for_user(config.username, f"/home/{config.username}")
+    install_node_for_user(config.username, get_user_home(config.username))
 
 
 def _validate_uv_install_script(script_path: str) -> bool:

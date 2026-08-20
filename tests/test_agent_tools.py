@@ -25,7 +25,7 @@ from common.agent_steps import (
     install_codex,
     install_git_lfs_for_agent_repositories,
     install_opencode,
-    install_t3code,
+    install_t3code_desktop,
 )
 from lib.agent_auth import get_agent_auth_status, set_agent_credential
 from lib.agent_cli import add_agent_subparser, inspect_agent_tools, run_agent_command, update_agent_tools
@@ -123,7 +123,7 @@ class TestOfficialAgentInstallers(unittest.TestCase):
                 patch('common.agent_steps._chown_path'),
                 patch('common.agent_steps._ensure_agent_shell_path'),
             ):
-                install_t3code(self.config)
+                install_t3code_desktop(self.config)
 
             wrapper = os.path.join(home, '.local', 'bin', 't3code')
             desktop = os.path.join(
@@ -208,12 +208,12 @@ class TestAgentDoctor(unittest.TestCase):
     def test_explicit_missing_tool_is_unhealthy(self):
         args = argparse.Namespace(
             agent_command='doctor',
-            agent_doctor_tools=['t3code'],
+            agent_doctor_tools=['codex'],
             json=True,
         )
         with patch('lib.agent_cli.inspect_agent_tools', return_value=[
             {
-                'tool': 't3code',
+                'tool': 'codex',
                 'installed': False,
                 'path': None,
                 'version': None,

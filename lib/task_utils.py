@@ -127,13 +127,18 @@ def get_all_storage_paths(config: "SetupConfig | RuntimeConfig") -> list[str]:
     paths: set[str] = set()
 
     # Collect paths from sync specs (source and destination)
-    for spec in config.sync_specs:
+    for spec in getattr(config, "sync_specs", None) or []:
         if len(spec) >= 2:
             paths.add(spec[0])  # source
             paths.add(spec[1])  # destination
 
+    for spec in getattr(config, "backup_specs", []) or []:
+        if len(spec) >= 2:
+            paths.add(spec[0])
+            paths.add(spec[1])
+
     # Collect paths from scrub specs (directory and database)
-    for spec in config.scrub_specs:
+    for spec in getattr(config, "scrub_specs", None) or []:
         if len(spec) >= 2:
             paths.add(spec[0])  # directory
             paths.add(spec[1])  # database
@@ -177,7 +182,7 @@ def has_mount_paths(config: "SetupConfig | RuntimeConfig") -> bool:
     for path in get_all_storage_paths(config):
         if needs_mount_check(path, config):
             return True
-    return False
+    return bool(getattr(config, "storage_mounts", None))
 
 
 def get_mount_points_from_config(config: SetupConfig) -> set[str]:
@@ -215,5 +220,9 @@ def get_mount_points_from_config(config: SetupConfig) -> set[str]:
     for mount_spec in smb_mounts:
         if mount_spec:
             mount_points.add(mount_spec[0])
+
+    for mount_spec in getattr(config, "storage_mounts", None) or []:
+        if len(mount_spec) >= 2:
+            mount_points.add(mount_spec[1])
 
     return mount_points

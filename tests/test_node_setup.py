@@ -21,7 +21,8 @@ from web import dev_tools_steps
 
 class TestNodeSetup(unittest.TestCase):
     @patch("web.dev_tools_steps.configure_maintenance_timer")
-    def test_configure_auto_update_node_disables_risky_auto_upgrades(self, mock_configure):
+    @patch("web.dev_tools_steps.get_user_home", return_value="/srv/users/user")
+    def test_configure_auto_update_node_disables_risky_auto_upgrades(self, _get_home, mock_configure):
         config = SetupConfig(host="host", username="user", system_type="server_web", install_node=True)
         dev_tools_steps.configure_auto_update_node(config)
         mock_configure.assert_called_once_with(
@@ -30,7 +31,7 @@ class TestNodeSetup(unittest.TestCase):
             timer_desc="Auto-update Node.js weekly",
             script_path="/opt/infra_tools/web/service_tools/auto_update_node.py",
             schedule="Sun *-*-* 03:00:00",
-            check_path="/home/user/.nvm/nvm.sh",
+            check_path="/srv/users/user/.nvm/nvm.sh",
             check_name="Node.js",
             user="user",
             environment={ECOSYSTEM_AUTO_UPGRADE_ENV: "0"},
@@ -40,7 +41,8 @@ class TestNodeSetup(unittest.TestCase):
     @patch("common.common_steps.open", new_callable=mock_open, read_data="")
     @patch("common.common_steps.os.path.exists")
     @patch("common.common_steps.run")
-    def test_install_node_uses_npm_freshness_cutoff(self, mock_run, mock_exists, _open):
+    @patch("common.common_steps.get_user_home", return_value="/home/user")
+    def test_install_node_uses_npm_freshness_cutoff(self, _get_home, mock_run, mock_exists, _open):
         nvm_installed = {"value": False}
 
         def exists(path: str) -> bool:
@@ -72,7 +74,8 @@ class TestNodeSetup(unittest.TestCase):
     @patch("common.common_steps.open", new_callable=mock_open, read_data='export NVM_DIR="$HOME/.nvm"\n')
     @patch("common.common_steps.os.path.exists")
     @patch("common.common_steps.run")
-    def test_install_node_repairs_existing_nvm_ownership_before_returning(self, mock_run, mock_exists, _open):
+    @patch("common.common_steps.get_user_home", return_value="/home/user")
+    def test_install_node_repairs_existing_nvm_ownership_before_returning(self, _get_home, mock_run, mock_exists, _open):
         def exists(path: str) -> bool:
             return path in {
                 "/home/user/.nvm",

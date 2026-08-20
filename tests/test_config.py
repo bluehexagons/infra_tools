@@ -217,18 +217,17 @@ class TestSetupConfigToRemoteArgs(unittest.TestCase):
             install_codex=True,
             install_claude=True,
             install_opencode=True,
-            install_t3code=True,
             copy_agent_keys=True,
             copy_agent_config=True,
             agent_repos=['https://github.com/user/my_codebase.git'],
         )
         args_str = ' '.join(config.to_remote_args())
-        self.assertEqual(args_str.count('--agent-tool'), 5)
+        self.assertEqual(args_str.count('--agent-tool'), 4)
         self.assertIn('--agent-tool gh', args_str)
         self.assertIn('--agent-tool codex', args_str)
         self.assertIn('--agent-tool claude', args_str)
         self.assertIn('--agent-tool opencode', args_str)
-        self.assertIn('--agent-tool t3code', args_str)
+        self.assertNotIn('--agent-tool t3code', args_str)
         self.assertIn('--agent-payload', args_str)
         self.assertIn('--repo https://github.com/user/my_codebase.git', args_str)
 
@@ -244,7 +243,7 @@ class TestSetupConfigToRemoteArgs(unittest.TestCase):
         self.assertEqual(config.selected_agent_tools(), ['gh', 'codex'])
         self.assertTrue(config.install_gh)
         self.assertTrue(config.install_codex)
-        self.assertFalse(config.install_t3code)
+        self.assertIsNone(config.desktop_interfaces)
 
     def test_invalid_agent_tool_fails(self):
         with self.assertRaisesRegex(ValueError, 'Unsupported agent tool'):
@@ -502,7 +501,8 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
             install_codex=True,
             install_claude=True,
             install_opencode=True,
-            install_t3code=True,
+            desktop_interfaces=['t3code'],
+            include_desktop=True,
             copy_agent_keys=True,
             copy_agent_config=True,
             agent_repos=['https://github.com/user/my_codebase.git'],
@@ -513,7 +513,7 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
         self.assertIn('--agent-tool codex', parts)
         self.assertIn('--agent-tool claude', parts)
         self.assertIn('--agent-tool opencode', parts)
-        self.assertIn('--agent-tool t3code', parts)
+        self.assertIn('--desktop-interface t3code', cmd)
         self.assertIn('--repo https://github.com/user/my_codebase.git', cmd)
 
     def test_smb_mount_password_redacted(self):

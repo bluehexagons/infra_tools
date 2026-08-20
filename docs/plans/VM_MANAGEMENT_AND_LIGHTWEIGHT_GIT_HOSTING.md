@@ -1,8 +1,10 @@
 # Generic VM Management, Agent Interfaces, and Lightweight Git Hosting
 
-Status: active. The provisioning-only portion of Lane A3 and the IPv4 scope of
-Lane B1 are implemented on `main`; the remaining delivery lanes stay subject
-to the gates below.
+Status: active. The provisioning-only portion of Lane A3, the IPv4 scope of
+Lane B1, the first provider-neutral VM read-only surface, explicit T3 Code
+desktop/headless setup, and generic path-backup composition are implemented on
+`main`; lifecycle mutation, HTTPS proxying, recovery, and broader provider
+support remain subject to the gates below.
 Reviewed against `main` and upstream T3 Code, Nginx, Samba, and Git LFS
 documentation on 2026-08-20.
 
@@ -33,14 +35,15 @@ avoid abstraction whose only purpose is a hypothetical provider or service.
 
 | Lane | State | Next boundary |
 | --- | --- | --- |
-| A1: VM terminology and read-only commands | In progress | Provider/schema-tagged host records are implemented; provider-neutral typed inventory and removal of the old guest CLI surface remain |
+| A1: VM terminology and read-only commands | Read-only slice implemented | `vm list/show/health/snapshot list/backup list` now emit versioned provider-neutral output; lifecycle mutations and removal of the old Proxmox guest paths remain |
 | A2: existing VM mutations | Dependency-gated | Durable operation markers and staged mutation contract |
 | A3: declarative VM data disks and guest mounts | Provisioning slice implemented | Live Proxmox validation, read-only mount status, then coordinated grow-only resize; existing-disk adoption, detach, and `/home` migration remain rejected |
 | A4: clone and restore | Dependency-gated | Shared transaction and recovery contracts |
 | B1: explicit and safe Gogs LFS | Implemented (IPv4) | Verified releases, local LFS layout, required mounts, safe hostless exposure, reusable health/status, and agent Git LFS setup are complete; IPv6 exposure remains explicitly deferred |
 | B2: Gogs recovery | Dependency-gated | Shared recovery mechanism and authenticated restore smoke test |
 | B3: Samba storage roles | Planned | Path-role enforcement and consistent archive publication |
-| C1/C2: T3 Code interfaces | Planned | Upstream service/artifact/redaction validation, then loopback service and controlled exposure |
+| C1: T3 Code interfaces | Desktop and direct headless slice implemented | Desktop AppImage, Node-backed system service, loopback/LAN CIDR exposure, pairing helper, provider separation, and client-side project adding are implemented; managed remote lifecycle commands and optional pre-registration remain |
+| C2: controlled web exposure | Planned | HTTPS/WebSocket reverse proxy, optional Basic Auth, and trusted-proxy/source-policy integration |
 
 ## Product decisions
 
@@ -106,6 +109,11 @@ avoid abstraction whose only purpose is a hypothetical provider or service.
   `/home` requires an explicit migration policy, backup or snapshot checks,
   and a verified copy before cutover. Broad system paths such as `/`, `/etc`,
   `/usr`, and `/boot` are outside the first storage contract.
+- `--backup SOURCE DESTINATION INTERVAL` is a generic path-mirror declaration,
+  not a Samba feature. It composes with the existing root-owned rsync and
+  par2 storage-operations service; a destination may be a local path, a
+  separately managed mount, or a Proxmox-provisioned non-root disk. It does
+  not claim application-consistent snapshots or replace an off-host copy.
 - The first implementation is provisioning-only: it allocates blank data
   disks for a newly created QEMU VM and mounts them at empty, tool-owned
   paths. Adoption of an existing disk, detach, coordinated provider/guest
@@ -896,55 +904,40 @@ shape is:
 
 ```text
 --web-interface t3code
---web-interface-host t3code agent.example.com
---web-interface-port t3code 443
---web-interface-source t3code 192.168.0.0/24
---web-interface-source t3code 10.0.0.0/8
---web-interface-auth t3code native+basic
---web-interface-auth-file t3code /run/secrets/t3code.htpasswd
+--web-interface-host 0.0.0.0
+--web-interface-port 3773
+--web-interface-source 192.168.0.0/24
+--web-interface-source 10.0.0.0/8
 ```
 
-`--web-interface` is repeatable across distinct tools. Each companion option
-takes `TOOL VALUE`, matching existing multi-value setup options and avoiding a
-new `key=value` mini-language. A tool may run once per target Unix user; the
-first release does not add custom instance IDs or multiple T3 Code services.
-Duplicate tools, options for undeclared tools, shared hostnames, and actual
-listen-address/port/hostname collisions fail during local validation.
-Distinct hostnames may share nginx port 443.
-
-The port option is the client-facing nginx port, not the tool's upstream port.
-Each interface adapter owns one fixed loopback default and validates that an
-unmanaged process is not already using it; T3 Code uses its upstream default
-of 3773. Do not add an automatic port allocator or allocation profile for the
-first release. The saved setup command remains the declaration; generated
-units, nginx sites, and observed service state are derived data.
+The implemented first slice accepts repeatable interface declarations, but
+T3 Code currently has one service instance per target user. Its companion
+options are global to the selected T3 interface: `--web-interface-host` is
+the T3 bind address, `--web-interface-port` is the T3 port, and
+`--web-interface-source` is a private CIDR allowlist. A source list without an
+explicit host promotes the default bind to `0.0.0.0`. The saved setup command
+remains the declaration; the systemd unit, firewall rules, and pairing helper
+are derived data.
 
 The following exposure modes keep a bare declaration useful and safe:
 
 1. With only `--web-interface t3code`, run the service on loopback and print a
    reusable SSH tunnel command. Do not install or open nginx for that
    interface.
-2. With `--web-interface-host`, proxy the loopback service through the existing
-   nginx flow. Require `--ssl` or `--cloudflare`; port 443 is the default. DNS
-   and certificate prerequisites must be checked before replacing an active
-   site. Direct private access remains the recommended deployment, so setup
-   warns before exposing a hostname without a source restriction.
-3. With one or more `--web-interface-source` values but no hostname, allow an
-   explicitly private HTTP listener through nginx. Require an explicit public
-   port that differs from the tool's loopback port. This is for a routed
-   private network such as an encrypted VPN, or a deliberately trusted LAN;
-   CIDR filtering does not encrypt pairing credentials. The setup result must
-   also explain that an HTTPS hosted client cannot connect to a plain
-   HTTP/WebSocket backend because of browser mixed-content policy.
-4. Reject a non-loopback listener that has neither a hostname/TLS policy nor a
-   CIDR restriction. The tool backend itself always remains on loopback so the
-   nginx and firewall policy cannot be bypassed.
+2. With one or more `--web-interface-source` values, bind the T3 service to
+   `0.0.0.0` unless a different bind is explicit and add matching UFW rules.
+   This is for a deliberately trusted LAN or private routed network; CIDR
+   filtering does not encrypt pairing credentials.
+3. HTTPS/WebSocket reverse-proxy integration, hostname handling, and optional
+   Basic Auth remain Lane C2 work. The current direct service does not install
+   nginx or advertise compatibility with the hosted HTTPS client.
+4. Reject a non-loopback listener without a CIDR restriction. The first slice
+   does not expose a public listener or bypass T3's native pairing.
 
 Source values accept IPv4 or IPv6 addresses and CIDRs through the existing
-network validators. nginx should enforce `allow` rules against the actual
-socket peer followed by `deny all`; UFW should expose the matching listener
-only to the same sources. A tunnel or CDN changes the observed peer address,
-so source filtering must not claim to preserve the browser's original IP
+network validators. UFW exposes the listener only to the same sources. A
+tunnel or CDN changes the observed peer address, so source filtering must not
+claim to preserve the browser's original IP
 unless a separately validated trusted-proxy configuration exists. Reject
 source filtering with a Cloudflare tunnel in the first release unless its
 client-IP restoration and trusted-proxy chain are explicitly supported and
@@ -958,6 +951,11 @@ pairing credentials, inspect sessions, and revoke access. A source allowlist
 is optional defense in depth for T3 Code and mandatory for any future
 interface that has no suitable native authentication. A loopback-only SSH
 tunnel is also sufficient network authentication for such a tool.
+
+Current implementation boundary: direct T3 pairing, loopback/LAN source
+filtering, and pairing-token redaction are implemented. Nginx integration and
+Basic Auth remain future C2 work; the options below are design constraints,
+not currently accepted CLI flags.
 
 Do not add raw passwords to setup arguments, saved commands, process
 environments, or systemd unit files. Add optional Nginx Basic Auth as an edge
@@ -1019,8 +1017,8 @@ describe it at that privilege level, not as a harmless dashboard. Session
 revocation, pairing expiration, and interface removal must be documented next
 to the initial connection flow.
 
-Use the existing remote agent-management shape for lifecycle and access
-operations:
+The planned remote agent-management shape for lifecycle and access operations
+remains:
 
 ```text
 infra-tools agent web status HOST USER [--tool t3code] [--json]
@@ -1039,48 +1037,45 @@ administration endpoint.
 
 ### T3 Code runtime and service integration
 
-`--web-interface t3code` installs the supported headless `t3` CLI and the Node
-runtime version it requires. Reuse a compatible explicitly selected Node
-runtime; otherwise install only the minimum runtime owned by the T3 interface.
-Git is a required T3 dependency and is installed if absent. The web selection
-does not require a separate `--node` flag, install the desktop AppImage, or
-install GitHub CLI or provider CLIs that were not explicitly selected with
-`--agent-tool`. Setup should report when no supported provider CLI is selected,
-but it may still install the interface so credentials or providers can be
-added later.
+`--web-interface t3code` installs the Node runtime and invokes the supported
+headless `npx t3@latest serve` CLI. The web selection does not require a
+separate `--node` flag, install the desktop AppImage, or install GitHub CLI or
+provider CLIs that were not explicitly selected with `--agent-tool`. The
+current implementation requires at least one of Codex, Claude Code, or
+OpenCode so the resulting interface is useful immediately.
 
 The desktop adapter and web adapter share only the artifact verification and
-version policy. The web adapter owns the headless service, systemd user unit,
-loopback port, project registration, and Nginx exposure described below; the
+version policy. The web adapter owns the headless service, systemd system unit
+running as the target user, loopback/LAN bind, and source firewall rules; the
 desktop adapter owns its per-user launcher and desktop entry. Neither adapter
 copies credentials merely because T3 Code was selected.
 
-Use T3 Code's supported `service install`, `service update`, and `service
-uninstall` lifecycle instead of maintaining a second version-switching and
-database-migration implementation. infra-tools may install a managed systemd
-drop-in for validated bind options, working directory, absolute executable
-paths, resource limits, and the explicit login-user `PATH`. The service must
-run as that user with lingering enabled and must read provider credentials from
-that user's normal protected configuration locations. Credentials must not be
-copied into nginx or service configuration. Resolve and invoke the real CLI
-package entry point when installing or updating the service; do not depend on
-a wrapper symlink being a valid package root.
+The current service is an infra-tools-managed system unit with explicit HOME,
+working directory, bind, port, restart policy, and target-user ownership. Its
+wrapper loads the target user's nvm environment and invokes `npx --yes
+t3@latest serve`; service stdout is discarded so pairing material is not
+captured in journald. `t3code-pair` invokes the supported pairing command for
+an operator. A later update/revocation command should use T3's supported
+service/auth lifecycle rather than adding a second credential store.
 
-Setup ordering is explicit: install selected provider CLIs, stage their
-credentials and non-secret configuration, prepare repositories and Git LFS,
-then install or update the T3 runtime, register declared repository paths with
-T3 Code, and start the service. Expose nginx/firewall only after
-service-context health succeeds. A credential rotation should restart T3 only
-when the affected provider requires it and should verify the provider again
-after restart.
+Setup ordering currently installs Node as a derived T3 dependency, installs
+selected provider CLIs and their staged credentials/configuration, then creates
+the T3 service and its pairing helper. Repository cloning remains the normal
+`--repo` path. After pairing, the T3 client can add a prepared repository with
+its normal Add Project flow; infra-tools does not currently invent a second
+project-registration API.
+Firewall exposure is reconciled before service start and only for validated
+private sources. A credential rotation should restart T3 only when the
+affected provider requires it and should verify the provider again after
+restart.
 
-T3 Code's current remote GUI cannot add projects, so setup must idempotently
-register each successfully prepared `--repo` path through the supported `t3
-project` command before reporting the interface ready. It must not register an
+T3 Code's remote clients can add projects after pairing through the normal
+Command Palette/Add Project flow. Setup must not silently register an
 unvalidated path, change an existing repository, or make repository discovery
-depend on the service working directory. Documentation should give the same
-target-side command for adding a project later and note when upstream UI
-support makes that step unnecessary.
+depend on the service working directory. A future pre-registration feature
+must use a documented upstream interface or an explicit target-side command;
+until then, `--repo` prepares the checkout and the client owns project
+registration.
 
 The service environment needs deliberate binary discovery because a systemd
 user service is not a login shell. Include system and user-local binary paths
@@ -1203,16 +1198,14 @@ The shared roadmap imposes two gates:
 
 Implementation status: newly written Proxmox host records carry an explicit
 schema version and provider identity, and incompatible development records
-fail with re-registration guidance. The neutral VM observation/result types
-and command move remain open.
+fail with re-registration guidance. The first neutral VM observation/result
+types and read-only command move are implemented.
 
 - Add provider and schema-version fields to registered infrastructure hosts;
   reject incompatible development records without mutating them and document
   the short Proxmox re-registration flow.
-- Introduce neutral VM reference, observation, capability, result, and error
-  types with stable text/JSON rendering.
-- Move list, show, health, snapshot list, and backup list to the nested `vm`
-  command shape.
+- Extend the neutral VM models with capability and durable-operation types.
+- Move lifecycle mutations and mount status to the nested `vm` command shape.
 - Rename internal `container_*` symbols where they apply to both or only to
   QEMU VMs; leave true LXC concepts explicit under `proxmox lxc`.
 - Reorganize Proxmox host/cluster commands, remove the interactive shell and
@@ -1231,9 +1224,11 @@ and command move remain open.
 
 ### Lane A3: declarative VM data disks and guest mounts
 
-Implementation status: the provisioning-only blank-disk/empty-path slice is
-complete in code and unit tests. Live Proxmox/reboot validation and the later
-observation, resize, adoption, detach, and migration workflows remain.
+Implementation status: the provisioning-only blank-disk/empty-path slice and
+generic `--backup` composition with the existing rsync/par2 storage service
+are complete in code and unit tests. Live Proxmox/reboot validation and the
+later observation, resize, adoption, detach, restore, and migration workflows
+remain.
 
 - Replace the development-era storage shape with named QEMU disk
   declarations and explicit guest mount declarations; retain a separate LXC
@@ -1310,20 +1305,32 @@ failure/staleness signal.
 
 ### Lane C1: loopback T3 Code service
 
-- Add repeatable tool declarations and scoped `TOOL VALUE` options with
-  validation and saved-command rendering.
+Implementation status: explicit desktop and headless T3 Code selection,
+provider separation, Node dependency setup, a target-user system service,
+loopback/LAN bind validation, private-source UFW rules, pairing helper, and
+service-log redaction are implemented. Project registration and remote
+pairing/session management remain open.
+
+- Keep repeatable interface declarations and add scoped per-interface options
+  only when a second web interface requires them; current T3 options are
+  target-global because there is one T3 service instance per user.
 - Remove T3 Code from the agent-tool registry, add the explicit desktop and
   web interface categories, and retain the verified AppImage installer as the
   desktop adapter.
 - Add the verified headless CLI/runtime path with only its required
-  dependencies; selecting it must not install the desktop artifact.
-- Integrate the supported user service with explicit HOME, PATH, workspace,
-  fixed loopback port, provider discovery, and credential ordering.
+  dependencies; selecting it must not install the desktop artifact. (Done for
+  the direct headless slice.)
+- Integrate the supported service with explicit HOME, PATH, workspace, fixed
+  loopback/LAN port, provider discovery, and credential ordering. (Done with a
+  target-user system unit; T3's own background-service lifecycle is still to
+  be evaluated for a later replacement.)
 - Run the service only after its declared workspace mount is healthy; a
   missing agent data disk must prevent project registration and repository
   writes rather than falling back to root storage.
-- Register prepared `--repo` paths through T3 Code's supported project command
-  and verify they are visible to the remote client.
+- Keep prepared `--repo` paths available to the client's normal Add Project
+  flow and verify them through a live remote-client test. Optional
+  pre-registration remains open; the normal clone path is implemented
+  independently.
 - Add schema-versioned observed state, SSH-tunnel output, secret-free health,
   and `agent web` pairing/session/revocation commands.
 - Do not complete this slice until startup and service logs pass pairing-token
@@ -1479,35 +1486,29 @@ failure/staleness signal.
   active Git worktrees, Gogs data, and live LFS objects remain local and Git
   and Git LFS continue to use HTTPS transport and credentials.
 - A bare `--web-interface t3code` creates a boot-persistent loopback service
-  and reports a working SSH tunnel without opening a firewall port.
+  and supports a documented SSH tunnel without opening a firewall port.
+- `--web-interface-source` promotes the default bind only for explicit private
+  sources, reconciles matching UFW rules, and refuses non-loopback exposure
+  without those sources.
 - `--desktop-interface t3code` installs a verified desktop T3 Code artifact
   only when a desktop-capable target explicitly selects it; it does not create
   the web service or a public listener. `t3code` is absent from
   `--agent-tool`.
-- Web-interface declarations are repeatable across distinct registered tools;
-  duplicate T3 Code declarations are rejected, and each declared tool uses a
-  stable non-conflicting loopback endpoint.
-- A T3 Code hostname is served through nginx with valid HTTPS, WebSocket
-  operation, native pairing/session authentication, optional per-interface
-  Basic Auth and CIDR filtering, and no direct upstream bypass. Basic Auth is
-  accepted only with a tested same-origin client path and encrypted transport.
-- A private non-hostname interface requires an explicit client-facing port and
-  source list, and setup refuses exposure when nginx or UFW cannot enforce the
-  policy.
+- Interface declarations are repeatable in the parser and saved command;
+  duplicate T3 declarations collapse to one service instance for the target
+  user. HTTPS/WebSocket nginx integration and optional Basic Auth remain C2
+  acceptance work.
 - T3 Code discovers only the explicitly installed provider CLIs from its
   service context and uses the setup user's existing protected credentials.
-- Every successfully prepared `--repo` path is visible in the remote T3 Code
-  client without requiring a second SSH setup session.
-- An operator can issue one pairing credential, list non-secret sessions, and
-  revoke access through managed SSH without opening an administration API.
+- An operator can issue one pairing credential with the target-side
+  `t3code-pair` helper; managed session listing/revocation remains open.
 - No pairing credential, session secret, or agent credential appears in saved
   commands, generated unit/proxy files, dry runs, status JSON, or ordinary
   logs.
-- Basic Auth rotation replaces a protected per-interface password file
-  atomically, reloads Nginx only after validation, and does not claim to revoke
-  existing T3 sessions without the native T3 revocation step.
-- Removing or updating one interface preserves unrelated interfaces, reports
-  retained state, and leaves no stale public listener.
+- A generic `--backup` declaration uses the existing storage-ops rsync path,
+  can target a separately mounted non-root disk, composes with `--scrub`, and
+  is documented as a file mirror rather than an application-consistent
+  snapshot.
 - No DigitalOcean provisioning or management dependency is introduced.
 
 ## Cross-cutting gaps to close during implementation
@@ -1518,8 +1519,9 @@ first release:
 1. **Exact T3 artifact and service contract**: the current AppImage path is the
    desktop adapter, not the headless CLI. Pin and verify both the official
    desktop artifact and CLI/runtime path, test the headless background-service
-   and `t3 project` behavior, and confirm desktop version-skew plus service
-   update and database rollback before enabling either managed installer.
+   and client Add Project behavior, and confirm desktop version-skew plus
+   service update and database rollback before enabling either managed
+   installer.
 2. **Secret-bearing startup output**: prove whether the upstream service emits
    its owner pairing token to a private file or journal. Do not ship automatic
    startup until setup, status, and service logs pass the redaction tests.

@@ -28,7 +28,9 @@ CLI_SYSTEMS = [
     if system_type.include_cli_tools
 ]
 
-AGENT_TOOLS = ("gh", "codex", "claude", "opencode", "t3code")
+AGENT_TOOLS = ("gh", "codex", "claude", "opencode")
+DESKTOP_INTERFACES = ("t3code",)
+WEB_INTERFACES = ("t3code",)
 BROWSER_AUTOMATION_PROVIDERS = ("playwright",)
 GIT_ACCESS_POLICIES = ("none", "read", "read-write")
 
@@ -214,8 +216,12 @@ class SetupConfig:
     install_codex: bool = False
     install_claude: bool = False
     install_opencode: bool = False
-    install_t3code: bool = False
     agent_tools: Optional[StrList] = None
+    desktop_interfaces: Optional[StrList] = None
+    web_interfaces: Optional[StrList] = None
+    web_interface_host: MaybeStr = None
+    web_interface_port: int = 3773
+    web_interface_sources: Optional[StrList] = None
     browser_automation: MaybeStr = None
     copy_agent_keys: bool = False
     copy_agent_config: bool = False
@@ -251,6 +257,7 @@ class SetupConfig:
     enable_smbclient: bool = False
     smb_mounts: Optional[NestedStrList] = None
     sync_specs: Optional[NestedStrList] = None
+    backup_specs: Optional[NestedStrList] = None
     scrub_specs: Optional[NestedStrList] = None
     notify_specs: Optional[NestedStrList] = None
     antistatic_server: MaybeStr = None  # "DOMAIN[:port]" spec
@@ -313,7 +320,36 @@ class SetupConfig:
         self.install_codex = "codex" in selected or self.install_codex
         self.install_claude = "claude" in selected or self.install_claude
         self.install_opencode = "opencode" in selected or self.install_opencode
-        self.install_t3code = "t3code" in selected or self.install_t3code
+        desktop_interfaces = list(dict.fromkeys(self.desktop_interfaces or []))
+        web_interfaces = list(dict.fromkeys(self.web_interfaces or []))
+        for interface in desktop_interfaces:
+            if interface not in DESKTOP_INTERFACES:
+                raise ValueError(f"Unsupported desktop interface: {interface}")
+        for interface in web_interfaces:
+            if interface not in WEB_INTERFACES:
+                raise ValueError(f"Unsupported web interface: {interface}")
+        self.desktop_interfaces = desktop_interfaces or None
+        self.web_interfaces = web_interfaces or None
+        if self.desktop_interfaces or self.web_interfaces:
+            if not self.install_codex and not self.install_claude and not self.install_opencode:
+                raise ValueError(
+                    "T3 Code requires at least one provider CLI: "
+                    "--agent-tool codex, claude, or opencode"
+                )
+        if self.desktop_interfaces and not self.include_desktop:
+            raise ValueError(
+                "--desktop-interface requires a desktop-capable setup or --rdp"
+            )
+        if self.web_interfaces:
+            if self.web_interface_host is None:
+                self.web_interface_host = (
+                    "0.0.0.0" if self.web_interface_sources else "127.0.0.1"
+                )
+            if not 1 <= self.web_interface_port <= 65535:
+                raise ValueError("web_interface_port must be between 1 and 65535")
+            # T3 Code's headless server requires the Node runtime even when
+            # the operator did not select --node separately.
+            self.install_node = True
 
     def selected_agent_tools(self) -> StrList:
         """Return selected coding agents in stable display/install order."""
@@ -323,7 +359,6 @@ class SetupConfig:
             ("codex", self.install_codex),
             ("claude", self.install_claude),
             ("opencode", self.install_opencode),
-            ("t3code", self.install_t3code),
         ):
             if enabled:
                 tools.append(name)
@@ -446,6 +481,18 @@ class SetupConfig:
         for tool in self.selected_agent_tools():
             args.append(f"--agent-tool {shlex.quote(tool)}")
 
+        for interface in self.desktop_interfaces or []:
+            args.append(f"--desktop-interface {shlex.quote(interface)}")
+        for interface in self.web_interfaces or []:
+            args.append(f"--web-interface {shlex.quote(interface)}")
+        if self.web_interfaces:
+            args.append(
+                f"--web-interface-host {shlex.quote(self.web_interface_host or '127.0.0.1')}"
+            )
+            args.append(f"--web-interface-port {self.web_interface_port}")
+            for source in self.web_interface_sources or []:
+                args.append(f"--web-interface-source {shlex.quote(source)}")
+
         if self.browser_automation:
             args.append(
                 f"--browser-automation {shlex.quote(self.browser_automation)}"
@@ -537,6 +584,11 @@ class SetupConfig:
             for sync_spec in self.sync_specs:
                 escaped_spec = ' '.join(shlex.quote(str(s)) for s in sync_spec)
                 args.append(f"--sync {escaped_spec}")
+
+        if self.backup_specs:
+            for backup_spec in self.backup_specs:
+                escaped_spec = ' '.join(shlex.quote(str(s)) for s in backup_spec)
+                args.append(f"--backup {escaped_spec}")
         
         if self.scrub_specs:
             for scrub_spec in self.scrub_specs:
@@ -765,6 +817,18 @@ class SetupConfig:
         for tool in self.selected_agent_tools():
             cmd_parts.append(f"--agent-tool {shlex.quote(tool)}")
 
+        for interface in self.desktop_interfaces or []:
+            cmd_parts.append(f"--desktop-interface {shlex.quote(interface)}")
+        for interface in self.web_interfaces or []:
+            cmd_parts.append(f"--web-interface {shlex.quote(interface)}")
+        if self.web_interfaces:
+            cmd_parts.append(
+                f"--web-interface-host {shlex.quote(self.web_interface_host or '127.0.0.1')}"
+            )
+            cmd_parts.append(f"--web-interface-port {self.web_interface_port}")
+            for source in self.web_interface_sources or []:
+                cmd_parts.append(f"--web-interface-source {shlex.quote(source)}")
+
         if self.browser_automation:
             cmd_parts.append(
                 f"--browser-automation {shlex.quote(self.browser_automation)}"
@@ -893,6 +957,11 @@ class SetupConfig:
             for sync_spec in self.sync_specs:
                 escaped_spec = ' '.join(shlex.quote(str(s)) for s in sync_spec)
                 cmd_parts.append(f"--sync {escaped_spec}")
+
+        if self.backup_specs:
+            for backup_spec in self.backup_specs:
+                escaped_spec = ' '.join(shlex.quote(str(s)) for s in backup_spec)
+                cmd_parts.append(f"--backup {escaped_spec}")
         
         # Scrub
         if self.scrub_specs:
@@ -958,7 +1027,6 @@ class SetupConfig:
             'install_codex',
             'install_claude',
             'install_opencode',
-            'install_t3code',
         ):
             data.pop(legacy_field, None)
         data['agent_tools'] = self.selected_agent_tools() or None
@@ -1156,6 +1224,11 @@ class SetupConfig:
             install_node=getattr(args, 'install_node', False),
             install_python=getattr(args, 'install_python', False),
             agent_tools=agent_tools,
+            desktop_interfaces=getattr(args, 'desktop_interfaces', None),
+            web_interfaces=getattr(args, 'web_interfaces', None),
+            web_interface_host=getattr(args, 'web_interface_host', None),
+            web_interface_port=getattr(args, 'web_interface_port', 3773),
+            web_interface_sources=getattr(args, 'web_interface_sources', None),
             browser_automation=browser_automation,
             copy_agent_keys=bool(
                 git_auth_source
@@ -1197,6 +1270,7 @@ class SetupConfig:
             enable_smbclient=enable_smbclient,
             smb_mounts=smb_mounts,
             sync_specs=getattr(args, 'sync_specs', None),
+            backup_specs=getattr(args, 'backup_specs', None),
             scrub_specs=getattr(args, 'scrub_specs', None),
             notify_specs=getattr(args, 'notify_specs', None),
             antistatic_server=getattr(args, 'antistatic_server', None),

@@ -26,7 +26,7 @@ def add_vm_subparser(subparsers: argparse._SubParsersAction) -> argparse.Argumen
 
     parser = subparsers.add_parser(
         "vm",
-        help="Inspect and manage virtual machines through a provider-neutral API",
+        help="Inspect virtual machines through a provider-neutral API",
         description=(
             "Provider-neutral guest operations. The first provider is Proxmox; "
             "provider-specific host administration remains under 'proxmox'."

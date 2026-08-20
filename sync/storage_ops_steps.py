@@ -58,7 +58,7 @@ def create_storage_ops_service(config: SetupConfig, **_kwargs: Any) -> None:
     orchestrate all sync and scrub operations defined in the config.
     The service reads specs from machine state and executes them in order.
     """
-    if not config.sync_specs and not config.scrub_specs:
+    if not config.sync_specs and not config.backup_specs and not config.scrub_specs:
         print("  No storage operations configured, skipping unified service creation")
         return
     if is_dry_run():

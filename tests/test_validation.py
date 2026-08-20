@@ -347,7 +347,7 @@ class TestValidateAgentGitSettings(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "supported credentials"):
             validate_agent_git_settings(
                 self._make_config(
-                    agent_tools=["t3code"],
+                    agent_tools=[],
                     agent_auth_source="active",
                 )
             )
@@ -355,8 +355,8 @@ class TestValidateAgentGitSettings(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "supported credentials"):
             validate_agent_git_settings(
                 self._make_config(
-                    agent_tools=["t3code"],
-                    agent_auth_files=[["t3code", "/run/secrets/t3code.json"]],
+                    agent_tools=[],
+                    agent_auth_files=[["codex", "/run/secrets/codex.json"]],
                 )
             )
 

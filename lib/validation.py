@@ -466,6 +466,69 @@ def validate_sync_specs(sync_specs: Optional[list[list[str]]]) -> None:
         validate_filesystem_path(sync_config["destination"], must_exist=False)
 
 
+def validate_backup_specs(backup_specs: Optional[list[list[str]]]) -> None:
+    """Validate semantic backup specs using the existing rsync spec parser."""
+
+    validate_sync_specs(backup_specs)
+
+
+def validate_web_interface_settings(config: Any) -> None:
+    """Validate explicit headless web-interface exposure settings."""
+
+    interfaces = getattr(config, "web_interfaces", None) or []
+    host = getattr(config, "web_interface_host", None)
+    sources = getattr(config, "web_interface_sources", None) or []
+    port = getattr(config, "web_interface_port", 3773)
+    if not interfaces:
+        if host is not None or sources:
+            raise ValueError(
+                "--web-interface-host and --web-interface-source require --web-interface"
+            )
+        if port != 3773:
+            raise ValueError(
+                "--web-interface-port requires --web-interface"
+            )
+        return
+
+    from lib.config import WEB_INTERFACES
+
+    for interface in interfaces:
+        if interface not in WEB_INTERFACES:
+            raise ValueError(f"Unsupported web interface: {interface}")
+    if not isinstance(port, int) or not 1 <= port <= 65535:
+        raise ValueError("--web-interface-port must be between 1 and 65535")
+    if not isinstance(host, str) or not host:
+        raise ValueError("--web-interface-host must be a non-empty IP address")
+    normalized_host = host.lower()
+    if normalized_host != "localhost":
+        normalized_host = validate_network_ip_or_cidr(host, "web interface bind address")
+    loopback = normalized_host in {"127.0.0.1", "::1", "localhost"}
+    if loopback and sources:
+        raise ValueError(
+            "--web-interface-source requires a non-loopback web interface bind"
+        )
+    if not loopback and not sources:
+        raise ValueError(
+            "A non-loopback web interface bind requires --web-interface-source"
+        )
+
+    seen_sources: set[str] = set()
+    for source in sources:
+        normalized = validate_network_ip_or_cidr(source, "web interface source")
+        network = ipaddress.ip_network(
+            normalized if "/" in normalized else f"{normalized}/32",
+            strict=False,
+        )
+        if network.is_global:
+            raise ValueError(
+                "--web-interface-source must be a private or otherwise non-global network"
+            )
+        canonical = str(network)
+        if canonical in seen_sources:
+            raise ValueError(f"Duplicate --web-interface-source: {canonical}")
+        seen_sources.add(canonical)
+
+
 def validate_scrub_specs(scrub_specs: Optional[list[list[str]]]) -> None:
     """Validate scrub specs before setup or patch execution."""
 

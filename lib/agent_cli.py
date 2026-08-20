@@ -20,7 +20,7 @@ from lib.types import JSONDict, StrList
 from lib.validation import validate_filesystem_path, validate_package_name
 
 
-AGENT_DOCTOR_TOOLS = ("gh", "codex", "claude", "opencode", "t3code")
+AGENT_DOCTOR_TOOLS = ("gh", "codex", "claude", "opencode")
 AGENT_DOCTOR_CAPABILITIES = ("browser",)
 DEFAULT_DOCTOR_TOOLS = ("gh", "codex", "claude", "opencode")
 AGENT_UPDATE_TOOLS = ("codex", "claude", "opencode")
@@ -181,8 +181,6 @@ def _tool_path(tool: str, home: str) -> Optional[str]:
 
 
 def _tool_version(tool: str, path: str) -> Optional[str]:
-    if tool == "t3code":
-        return None
     try:
         result = subprocess.run(
             [path, "--version"],

@@ -7,7 +7,7 @@ orchestrator and service tools.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Any
 
 
@@ -31,6 +31,7 @@ class RuntimeConfig:
     sync_specs: list[list[str]]
     scrub_specs: list[list[str]]
     notify_specs: list[list[str]]
+    backup_specs: list[list[str]] = field(default_factory=list)
     friendly_name: Optional[str] = None
     smb_mounts: Optional[list[list[str]]] = None
 
@@ -47,6 +48,7 @@ class RuntimeConfig:
         return cls(
             username=data.get("username", "root"),
             sync_specs=data.get("sync_specs") or [],
+            backup_specs=data.get("backup_specs") or [],
             scrub_specs=data.get("scrub_specs") or [],
             notify_specs=data.get("notify_specs") or [],
             friendly_name=data.get("friendly_name"),
@@ -66,6 +68,7 @@ class RuntimeConfig:
         return cls(
             username=config.username,
             sync_specs=config.sync_specs or [],
+            backup_specs=getattr(config, "backup_specs", None) or [],
             scrub_specs=config.scrub_specs or [],
             notify_specs=config.notify_specs or [],
             friendly_name=getattr(config, 'friendly_name', None),
@@ -82,6 +85,7 @@ class RuntimeConfig:
             "username": self.username,
             "friendly_name": self.friendly_name,
             "sync_specs": self.sync_specs,
+            "backup_specs": self.backup_specs or [],
             "scrub_specs": self.scrub_specs,
             "notify_specs": self.notify_specs,
             "smb_mounts": self.smb_mounts,
@@ -93,7 +97,12 @@ class RuntimeConfig:
         Returns:
             True if sync or scrub specs are configured
         """
-        return bool(self.sync_specs or self.scrub_specs)
+        return bool(self.sync_specs or self.backup_specs or self.scrub_specs)
+
+    def all_sync_specs(self) -> list[list[str]]:
+        """Return ordinary sync and semantic backup jobs for execution."""
+
+        return [*self.sync_specs, *(self.backup_specs or [])]
 
     def get_all_paths(self) -> list[str]:
         """Get all unique paths from sync and scrub specs.

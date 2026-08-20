@@ -89,7 +89,6 @@ The currently supported tool names are:
 | `codex` | Yes | Yes |
 | `claude` | Yes | Yes |
 | `opencode` | Yes | Yes |
-| `t3code` | No auth transfer | No config transfer |
 
 Authentication and configuration are independent. Selecting a tool does not
 copy its credentials, and selecting `--agent-config active` does not copy
@@ -252,11 +251,14 @@ configuration sources are:
 | `codex` | `~/.codex/config.toml`, `AGENTS.md`, `skills`, and `rules` |
 | `claude` | `~/.claude/settings.json`, `CLAUDE.md`, `commands`, `agents`, `skills`, and `plugins` |
 | `opencode` | The active `~/.config/opencode` directory |
-| `t3code` | Nothing currently |
 
-Only selected tools receive their corresponding configuration. Missing source
-files or directories are skipped; `--agent-config active` does not invent a
-default configuration for a tool.
+Only selected provider tools receive their corresponding configuration. T3
+Code is an interface, not a provider credential source: its headless server
+uses the provider credentials already installed for the target user, and its
+pairing/session credentials are created and managed on the VM with
+`t3code-pair` and `npx t3 auth`. Missing source files or directories are
+skipped; `--agent-config active` does not invent a default configuration for a
+tool.
 
 The active configuration source uses the same active-user selection described
 for active credentials. There is currently no arbitrary config-file option;

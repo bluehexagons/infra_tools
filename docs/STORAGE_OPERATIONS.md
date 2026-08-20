@@ -1,6 +1,6 @@
 # Storage operations
 
-`--sync` and `--scrub` configure recurring storage work. They are saved with
+`--sync`, `--backup`, and `--scrub` configure recurring storage work. They are saved with
 the machine configuration and run together through the root-owned
 `storage-ops.service` and its hourly `storage-ops.timer`.
 
@@ -16,7 +16,12 @@ infra-tools setup server_lite fileserver admin \
 Both paths must be absolute. A scrub database may be a relative path, which is
 resolved under the protected directory, or an absolute path on another volume.
 Supported intervals are `hourly`, `daily`, `weekly`, `biweekly`, `monthly`, and
-`bimonthly`. Multiple `--sync` and `--scrub` specifications may be supplied.
+`bimonthly`. Multiple `--sync`, `--backup`, and `--scrub` specifications may be supplied.
+
+Use `--backup SOURCE DESTINATION INTERVAL` for a semantic backup mirror. It
+uses the same rsync service and mount checks as `--sync` but is kept distinct
+in saved configuration and summaries. It is not tied to Samba; see
+[BACKUPS.md](BACKUPS.md) for mounted VM storage and consistency guidance.
 
 Setup validates the paths and mounts, creates missing destination/metadata
 directories, and performs an initial sync. Initial parity files are created in
@@ -32,9 +37,10 @@ is a mirror: files removed from the source are removed from the destination.
 Do not use `--sync` for an append-only backup unless that deletion behavior is
 acceptable.
 
-Operations validate mount ancestors before running. If an expected SMB or
-other mounted filesystem is unavailable, the operation is skipped and reported
-as an error instead of writing to an underlying local directory.
+Operations validate mount ancestors before running. Declared VM data disks are
+also protected by a systemd mount guard on the storage service. If an expected
+SMB, VM, or other mounted filesystem is unavailable, the operation is skipped
+or prevented from starting instead of writing to an underlying local directory.
 
 ## Parity and repair behavior
 

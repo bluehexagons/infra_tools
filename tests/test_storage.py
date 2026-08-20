@@ -29,6 +29,7 @@ from lib.task_utils import (
     escape_systemd_description,
     check_path_on_smb_mount,
     ensure_directory,
+    get_all_storage_paths,
     get_mount_points_from_config,
     VALID_FREQUENCIES,
 )
@@ -347,6 +348,16 @@ class TestGetMountPointsFromConfig(unittest.TestCase):
         )
         mount_points = get_mount_points_from_config(config)
         self.assertIn('/srv/nas', mount_points)
+
+    def test_includes_declared_vm_storage_mount_points(self):
+        config = SetupConfig(
+            host='test', username='test', system_type='server_lite',
+            backup_specs=[['/srv/workspace', '/srv/backups', 'daily']],
+            storage_mounts=[['backup-data', '/srv/backups', 'ext4', 'empty']],
+        )
+        mount_points = get_mount_points_from_config(config)
+        self.assertIn('/srv/workspace', get_all_storage_paths(config))
+        self.assertIn('/srv/backups', mount_points)
 
 
 # ---------------------------------------------------------------------------

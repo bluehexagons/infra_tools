@@ -258,7 +258,12 @@ rm -f "$HOME/.infra_tools-install.sh"
 
 | Flag | Description |
 |------|-------------|
-| `--agent-tool TOOL` | Install one explicit tool (`gh`, `codex`, `claude`, `opencode`, or the current desktop-only `t3code` integration); repeatable |
+| `--agent-tool TOOL` | Install one explicit provider tool (`gh`, `codex`, `claude`, or `opencode`); repeatable |
+| `--desktop-interface INTERFACE` | Install an explicit desktop interface; currently `t3code` |
+| `--web-interface INTERFACE` | Install an explicit headless web interface; currently `t3code` |
+| `--web-interface-host IP` | Bind address for the selected web interface; defaults to loopback, or `0.0.0.0` when a source is supplied |
+| `--web-interface-port PORT` | TCP port for the selected web interface; default `3773` |
+| `--web-interface-source IP_OR_CIDR` | Permit direct web-interface access from this private source; repeatable and required for non-loopback binds |
 | `--browser-automation PROVIDER` | Install and register explicit agent browser automation; currently `playwright`, with selected Codex and/or OpenCode required |
 | `--git-access POLICY` | Set the VM's declared agent Git policy: `none`, `read`, or `read-write` |
 | `--git-host HOST` | Select the Git host for credentials; GitHub auth currently uses `github.com` |
@@ -271,6 +276,7 @@ rm -f "$HOME/.infra_tools-install.sh"
 | `--repo GIT_URL` | Clone an HTTPS repository below the selected agent workspace; repeatable |
 | `--git-lfs` | Install Git LFS, initialize it for the target user, and do so before every requested repository clone |
 | `--agent-workspace PATH` | Set the repository clone root; defaults to the target user's `~/repos` and may use a verified named-disk mount |
+| `--backup SOURCE DESTINATION INTERVAL` | Configure a generic rsync-backed path mirror through the existing storage-ops service; repeatable |
 
 GitHub credential input requires `--git-access read` or `--git-access
 read-write`; `none` is the public/unauthenticated repository mode.
@@ -280,11 +286,11 @@ is no agent-suite preset or implicit coding-package baseline; add unrelated
 packages explicitly with `--apt-install`, and add language runtimes with their
 individual flags.
 
-In the current release, `--agent-tool t3code` installs the desktop AppImage,
-launcher, and desktop entry only. It does not start a web service or expose a
-network listener. The planned `--desktop-interface` and `--web-interface`
-options are not implemented yet; use the active `--agent-tool` surface and RDP
-for desktop access until that interface split is delivered.
+T3 Code is selected explicitly as either `--desktop-interface t3code` or
+`--web-interface t3code`; it is no longer an `--agent-tool` provider. The
+desktop path installs the verified AppImage. The web path installs Node and a
+boot-persistent headless service; see [T3_CODE.md](T3_CODE.md) for LAN access,
+pairing, client choices, and the loopback/HTTPS boundary.
 
 Codex CLI, Claude Code, OpenCode, and T3 Code are installed from their official
 distribution channels. The Codex installer runs with `CODEX_NON_INTERACTIVE=1`,
@@ -312,8 +318,7 @@ On the configured VM, check selected tools without exposing credential contents:
 
 ```bash
 infra-tools agent doctor
-infra-tools agent doctor --tool t3code
-infra-tools agent doctor --tool codex --tool claude --json
+  infra-tools agent doctor --tool codex --tool claude --json
 infra-tools agent doctor --tool codex --tool opencode --capability browser
 infra-tools agent doctor --capability browser
 infra-tools agent update --dry-run
@@ -625,6 +630,12 @@ infra-tools proxmox unlock <host> <vmid> [--dry-run]
 infra-tools proxmox notifications install-webhook <host> <url> [--send-test]
 infra-tools proxmox notifications test-webhook <host>
 infra-tools proxmox [shell]
+
+infra-tools vm list <host> [--json]
+infra-tools vm show <host> <id> [--json]
+infra-tools vm health <host> <id> [--no-ssh] [--json]
+infra-tools vm snapshot list <host> <id> [--json]
+infra-tools vm backup list <host> <id> [--json]
 ```
 
 `probe` caches bridge, gateway, DNS, and storage recommendations. `audit` is
@@ -643,10 +654,11 @@ infra-tools proxmox remove pve1
 infra-tools proxmox add pve1 10.0.0.10 --user root --key ~/.ssh/proxmox_ed25519
 ```
 
-The provider-neutral `infra-tools vm ...` command tree described in the active
-project plan is not available yet. Until that A1 redesign is complete, guest
-listing, lifecycle, storage, snapshots, backups, and migration remain under
-the current `infra-tools proxmox ...` commands documented above.
+The provider-neutral `infra-tools vm ...` commands provide stable read-only
+inventory, inspection, health, snapshot, and backup-list output. Their JSON
+envelope includes `schema_version`, `provider`, `host`, `operation`, and
+`resources`. Proxmox-specific lifecycle and host administration remain under
+`infra-tools proxmox ...` until the mutation boundary is migrated.
 
 `rolling-update` uses saved setup commands and workspace credentials. It audits
 all targets before making changes, audits each node again after its update and

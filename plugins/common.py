@@ -25,7 +25,8 @@ PLUGIN = PluginDefinition(
         "install_codex",
         "install_claude",
         "install_opencode",
-        "install_t3code",
+        "install_t3code_desktop",
+        "install_t3code_web",
         "copy_agent_tooling_payload",
         "install_browser_automation",
         "install_git_for_agent_repositories",
@@ -183,8 +184,9 @@ def extend_agent_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -
         install_codex,
         install_github_cli,
         install_opencode,
-        install_t3code,
+        install_t3code_desktop,
     )
+    from common.t3code_steps import install_t3code_web
 
     if config.install_gh:
         steps.append(("Installing GitHub CLI", install_github_cli))
@@ -198,8 +200,11 @@ def extend_agent_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -
     if config.install_opencode:
         steps.append(("Installing OpenCode", install_opencode))
 
-    if config.install_t3code:
-        steps.append(("Installing T3 Code", install_t3code))
+    if "t3code" in (config.desktop_interfaces or []):
+        steps.append(("Installing T3 Code desktop interface", install_t3code_desktop))
+
+    if "t3code" in (config.web_interfaces or []):
+        steps.append(("Installing T3 Code web interface", install_t3code_web))
 
     if config.agent_payload:
         steps.append(("Copying agent tool configuration", copy_agent_tooling_payload))
@@ -263,8 +268,9 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         install_codex,
         install_github_cli,
         install_opencode,
-        install_t3code,
+        install_t3code_desktop,
     )
+    from common.t3code_steps import install_t3code_web
     from common.browser_automation_steps import install_browser_automation
 
     return {
@@ -276,7 +282,8 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "install_codex": install_codex,
         "install_claude": install_claude,
         "install_opencode": install_opencode,
-        "install_t3code": install_t3code,
+        "install_t3code_desktop": install_t3code_desktop,
+        "install_t3code_web": install_t3code_web,
         "copy_agent_tooling_payload": copy_agent_tooling_payload,
         "install_browser_automation": install_browser_automation,
         "clone_agent_repositories": clone_agent_repositories,

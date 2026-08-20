@@ -28,7 +28,8 @@ infra-tools setup workstation_dev 10.0.0.25 agent \
 
 `workstation_dev` adds XFCE, a browser, Visual Studio Code, and the shared CLI
 bundle. Agent tools are selected individually; add T3 Code with
-`--agent-tool t3code` and language runtimes with their individual flags.
+`--desktop-interface t3code`, `--web-interface t3code`, and language runtimes
+with their individual flags.
 
 RDP is opt-in because it needs a Unix account password and opens an additional
 network service. The setup password is transmitted in a mode-`0600` argument

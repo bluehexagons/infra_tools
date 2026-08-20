@@ -101,6 +101,8 @@ from lib.validation import (
     validate_samba_share_specs,
     validate_smb_mount_specs,
     validate_scrub_specs,
+    validate_backup_specs,
+    validate_web_interface_settings,
     validate_ssl_email,
     validate_sync_specs,
     validate_timezone_name,
@@ -702,8 +704,10 @@ def show_info(pattern: Optional[str] = None, *, compact: bool = False) -> int:
             features.append("Claude Code")
         if args.get("install_opencode"):
             features.append("OpenCode")
-        if args.get("install_t3code"):
-            features.append("T3 Code")
+        for interface in args.get("desktop_interfaces", []) or []:
+            features.append(f"Desktop {interface}")
+        for interface in args.get("web_interfaces", []) or []:
+            features.append(f"Web {interface}")
         if args.get("install_office"):
             features.append("Office")
         if args.get("use_flatpak"):
@@ -989,7 +993,9 @@ def _prepare_runtime_config_for_cli(config: SetupConfig) -> SetupConfig:
     validate_deploy_specs(runtime_config.deploy_specs)
     validate_deploy_targets(runtime_config.deploy_targets)
     validate_sync_specs(runtime_config.sync_specs)
+    validate_backup_specs(runtime_config.backup_specs)
     validate_scrub_specs(runtime_config.scrub_specs)
+    validate_web_interface_settings(runtime_config)
     validate_smb_mount_specs(runtime_config.smb_mounts)
     validate_samba_share_specs(
         runtime_config.samba_shares,

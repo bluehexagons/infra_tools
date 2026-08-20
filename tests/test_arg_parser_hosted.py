@@ -143,7 +143,8 @@ class TestHostedFlagParsing(unittest.TestCase):
             "--agent-tool", "codex",
             "--agent-tool", "claude",
             "--agent-tool", "opencode",
-            "--agent-tool", "t3code",
+            "--desktop-interface", "t3code",
+            "--web-interface", "t3code",
             "--git-access", "read-write",
             "--git-auth", "active",
             "--agent-auth", "active",
@@ -151,7 +152,9 @@ class TestHostedFlagParsing(unittest.TestCase):
             "--repo", "https://github.com/user/one.git",
             "--repo", "https://gitlab.com/user/two.git",
         ])
-        self.assertEqual(args.agent_tools, ["gh", "codex", "claude", "opencode", "t3code"])
+        self.assertEqual(args.agent_tools, ["gh", "codex", "claude", "opencode"])
+        self.assertEqual(args.desktop_interfaces, ["t3code"])
+        self.assertEqual(args.web_interfaces, ["t3code"])
         self.assertEqual(args.git_access, "read-write")
         self.assertEqual(args.git_auth_source, "active")
         self.assertEqual(args.agent_auth_source, "active")
@@ -263,11 +266,14 @@ class TestHostedFlagsNotInRemoteParser(unittest.TestCase):
             "--agent-tool", "codex",
             "--agent-tool", "claude",
             "--agent-tool", "opencode",
-            "--agent-tool", "t3code",
+            "--desktop-interface", "t3code",
+            "--web-interface", "t3code",
             "--git-access", "read",
             "--repo", "https://github.com/user/repo.git",
         ])
-        self.assertEqual(args.agent_tools, ["gh", "codex", "claude", "opencode", "t3code"])
+        self.assertEqual(args.agent_tools, ["gh", "codex", "claude", "opencode"])
+        self.assertEqual(args.desktop_interfaces, ["t3code"])
+        self.assertEqual(args.web_interfaces, ["t3code"])
         self.assertEqual(args.git_access, "read")
         self.assertEqual(args.agent_repos, ["https://github.com/user/repo.git"])
 

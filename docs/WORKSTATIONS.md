@@ -30,11 +30,10 @@ For agent-controlled page previews and interaction, see
 [Agent browser automation](BROWSER_AUTOMATION.md); it is independent of the
 human-operated browser described in this guide.
 
-The current release installs T3 Code's desktop AppImage through
-`--agent-tool t3code`. This path creates a launcher and desktop entry for the
-logged-in desktop user; it does not start a web service or expose a listener.
-The project plan calls for separate desktop and web interface options in a
-later redesign, so those planned flags should not be used yet.
+T3 Code's desktop AppImage is selected with `--desktop-interface t3code`.
+The headless service is a separate `--web-interface t3code` choice; it is
+documented in [T3_CODE.md](T3_CODE.md) and can be selected alongside the
+desktop interface when both local RDP and remote clients are useful.
 
 ## Profiles
 
@@ -85,7 +84,8 @@ infra-tools setup workstation_dev 10.0.0.25 agent \
 This adds the selected agent tools, Playwright browser automation, desktop
 browser, Visual Studio Code, administrator tools, and the selected repository.
 Repeat `--agent-tool` for any combination
-of `gh`, `codex`, `claude`, `opencode`, and `t3code`. The RDP password is
+of `gh`, `codex`, `claude`, and `opencode`. Add `--desktop-interface t3code`
+for the graphical T3 Code client. The RDP password is
 the target Unix
 account's password; provide it through a secret-sourced environment variable,
 not a literal value in shell history. For a local Debian GNOME machine, use

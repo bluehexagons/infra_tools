@@ -8,8 +8,10 @@ import argparse
 from lib.config import (
     AGENT_TOOLS,
     BROWSER_AUTOMATION_PROVIDERS,
+    DESKTOP_INTERFACES,
     GIT_ACCESS_POLICIES,
     MACHINE_TYPES,
+    WEB_INTERFACES,
 )
 from lib.plugin_registry import get_system_type_names
 
@@ -404,6 +406,55 @@ def add_setup_arguments(
         help="Install an explicit agent tool; repeat as needed",
     )
     parser.add_argument(
+        "--desktop-interface",
+        dest="desktop_interfaces",
+        action="append",
+        choices=DESKTOP_INTERFACES,
+        metavar="INTERFACE",
+        help=(
+            "Install an explicit desktop client/interface; repeat as needed "
+            "(currently: t3code)"
+        ),
+    )
+    parser.add_argument(
+        "--web-interface",
+        dest="web_interfaces",
+        action="append",
+        choices=WEB_INTERFACES,
+        metavar="INTERFACE",
+        help=(
+            "Install an explicit headless web interface; repeat as needed "
+            "(currently: t3code)"
+        ),
+    )
+    parser.add_argument(
+        "--web-interface-host",
+        dest="web_interface_host",
+        metavar="IP",
+        help=(
+            "Bind address for web interfaces (default: loopback; a non-loopback "
+            "address requires --web-interface-source)"
+        ),
+    )
+    parser.add_argument(
+        "--web-interface-port",
+        dest="web_interface_port",
+        type=int,
+        default=3773,
+        metavar="PORT",
+        help="TCP port for web interfaces (default: 3773)",
+    )
+    parser.add_argument(
+        "--web-interface-source",
+        dest="web_interface_sources",
+        action="append",
+        metavar="IP_OR_CIDR",
+        help=(
+            "Allow direct web-interface access only from this private/non-global source; repeat as "
+            "needed. Required when binding outside loopback."
+        ),
+    )
+    parser.add_argument(
         "--browser-automation",
         choices=BROWSER_AUTOMATION_PROVIDERS,
         metavar="PROVIDER",
@@ -562,6 +613,18 @@ def add_setup_arguments(
     parser.add_argument("--sync", dest="sync_specs", 
                        action="append", nargs=3, metavar=("SOURCE", "DESTINATION", "INTERVAL"),
                        help="Configure directory synchronization: source_path, destination_path, interval (hourly|daily|weekly|biweekly|monthly|bimonthly). Uses rsync with systemd timer (can be used multiple times)")
+
+    parser.add_argument(
+        "--backup",
+        dest="backup_specs",
+        action="append",
+        nargs=3,
+        metavar=("SOURCE", "DESTINATION", "INTERVAL"),
+        help=(
+            "Mirror a standard path to a backup destination with the existing "
+            "rsync storage service; repeat as needed"
+        ),
+    )
     
     parser.add_argument("--scrub", dest="scrub_specs",
                        action="append", nargs=4, metavar=("DIRECTORY", "DATABASE_PATH", "REDUNDANCY", "FREQUENCY"),

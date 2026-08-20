@@ -310,12 +310,14 @@ def execute_storage_operations() -> dict:
         return results
     
     config = RuntimeConfig.from_dict(config_dict)
+    sync_specs = config.all_sync_specs()
     notification_configs = parse_notification_args(config.notify_specs)
     
     log_event(
         logger,
         "Loaded storage operation specs",
-        sync_specs=len(config.sync_specs),
+        sync_specs=len(sync_specs),
+        backup_specs=len(config.backup_specs),
         scrub_specs=len(config.scrub_specs),
     )
     
@@ -335,7 +337,7 @@ def execute_storage_operations() -> dict:
                 new_state[scrub_op_id] = baseline_time
     
     # Calculate total operations for progress tracking
-    total_syncs = sum(1 for spec in config.sync_specs if len(spec) == 3 and is_operation_due(last_run, get_sync_op_id(spec[0], spec[1]), spec[2]))
+    total_syncs = sum(1 for spec in sync_specs if len(spec) == 3 and is_operation_due(last_run, get_sync_op_id(spec[0], spec[1]), spec[2]))
     total_scrubs = sum(1 for spec in config.scrub_specs if len(spec) == 4 and is_operation_due(last_run, get_scrub_op_id(spec[0], spec[1]), spec[3], first_run_default=False))
     total_parity = sum(
         1
@@ -370,7 +372,7 @@ def execute_storage_operations() -> dict:
         except Exception as e:
             log_event(logger, "Failed to send sync start notification", level=ERROR, error=str(e))
     
-    for spec in config.sync_specs:
+    for spec in sync_specs:
         if len(spec) != 3:
             log_event(logger, "Invalid sync spec", level=ERROR, spec=spec)
             results["syncs"].append({"spec": spec, "success": False, "error": "Invalid spec"})
