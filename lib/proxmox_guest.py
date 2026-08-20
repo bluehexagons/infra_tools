@@ -922,7 +922,7 @@ def ensure_guest_ipv4_route(
         username,
         ssh_key,
         remote_command=remote_script,
-        batch_mode=True,
+        batch_mode=not sys.stdin.isatty(),
         connect_timeout=30,
         server_alive_interval=30,
     )

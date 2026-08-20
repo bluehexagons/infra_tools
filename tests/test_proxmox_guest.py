@@ -113,6 +113,10 @@ class TestGuestRouteRepair(unittest.TestCase):
         self.assertEqual(mock_build.call_args.args[1], "agent")
         self.assertIn("192.168.0.41", mock_build.call_args.kwargs["remote_command"])
         self.assertIn("192.168.0.1", mock_build.call_args.kwargs["remote_command"])
+        self.assertEqual(
+            mock_build.call_args.kwargs["batch_mode"],
+            not sys.stdin.isatty(),
+        )
         mock_run.assert_called_once_with(
             ["ssh"],
             capture_output=True,

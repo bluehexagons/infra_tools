@@ -1077,7 +1077,7 @@ def run_remote_setup(config: SetupConfig) -> int:
                 remote_user,
                 config.ssh_key,
                 remote_command=remote_shell_cmd,
-                batch_mode=True,
+                batch_mode=not sys.stdin.isatty(),
                 connect_timeout=30,
                 server_alive_interval=30,
             )

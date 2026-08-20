@@ -158,7 +158,9 @@ step persists the repaired configuration. A provisioned VM connects for this
 handoff as the configured guest username and uses non-interactive `sudo` for
 the route and remote setup staging, so root SSH access is not required. LXC
 guests use root for the initial handoff because their setup user is created by
-that first remote setup.
+that first remote setup. When setup is launched from a terminal, SSH may prompt
+for the configured private-key passphrase; piped or otherwise non-interactive
+runs require the key to be loaded in an SSH agent.
 
 `--activate-network` uses a retry-safe transaction for an existing host and
 must be run from a separate controller. The remote

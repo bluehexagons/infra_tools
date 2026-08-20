@@ -307,7 +307,10 @@ class TestRunRemoteSetupArgumentSecurity(unittest.TestCase):
 
         self.assertEqual(result, 0)
         self.assertEqual(mock_build.call_args.args[1], "agent")
-        self.assertTrue(mock_build.call_args.kwargs["batch_mode"])
+        self.assertEqual(
+            mock_build.call_args.kwargs["batch_mode"],
+            not sys.stdin.isatty(),
+        )
         remote_command = mock_build.call_args.kwargs["remote_command"]
         self.assertIn("sudo -n rm -rf /opt/infra_tools", remote_command)
         self.assertIn("sudo -n tar xzf - -C /opt/infra_tools", remote_command)
