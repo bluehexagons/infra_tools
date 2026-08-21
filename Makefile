@@ -1,5 +1,5 @@
 # Makefile for infra_tools development tasks
-.PHONY: check test test-verbose help clean compile docs-check package-check
+.PHONY: check test test-verbose help clean compile docs-check package-check artifact-check
 
 # Default target
 help:
@@ -12,6 +12,7 @@ help:
 	@echo "  make compile           Check all Python files compile"
 	@echo "  make docs-check        Check documented CLI entry points"
 	@echo "  make package-check     Check package launcher metadata"
+	@echo "  make artifact-check    Build, install, and smoke-test the wheel"
 	@echo "  make clean             Remove Python cache files"
 	@echo "  make help              Show this help message"
 	@echo ""
@@ -30,6 +31,9 @@ docs-check:
 
 package-check:
 	@python3 scripts/check_package_metadata.py
+
+artifact-check:
+	@python3 scripts/check_wheel_artifact.py
 
 # Run tests (all or specific if TEST variable is set)
 test:

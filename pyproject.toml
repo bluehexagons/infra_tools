@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "infra_tools"
 version = "1.0.0"
@@ -9,8 +13,28 @@ dependencies = []
 completion = ["argcomplete>=3.0.0"]
 
 [project.scripts]
-infra_tools = "infra_tools:main"
+infra-tools = "infra_tools:main"
 webhook_manager = "web.service_tools.webhook_manager:main"
 
 [tool.setuptools]
 py-modules = ["infra_tools", "remote_setup"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = [
+    "common*",
+    "deploy*",
+    "desktop*",
+    "game*",
+    "lib*",
+    "plugins*",
+    "security*",
+    "smb*",
+    "sync*",
+    "web*",
+]
+namespaces = true
+
+[tool.setuptools.package-data]
+desktop = ["config/*.template"]
+web = ["config/*"]

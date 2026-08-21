@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+"""Build or inspect a wheel and smoke-test it outside the source tree."""
+
+from __future__ import annotations
+
+import argparse
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import venv
+import zipfile
+
+
+ROOT = Path(__file__).resolve().parents[1]
+REQUIRED_WHEEL_PATHS = (
+    "infra_tools.py",
+    "remote_setup.py",
+    "lib/config.py",
+    "plugins/common.py",
+    "common/agent_steps.py",
+    "deploy/deploy_steps.py",
+    "desktop/config/xrdp.ini.template",
+    "security/security_steps.py",
+    "smb/samba_steps.py",
+    "sync/service_tools/scrub_par2.py",
+    "web/config/nginx.conf.template",
+    "web/service_tools/webhook_manager.py",
+)
+
+
+def _build_wheel(output_dir: Path) -> Path:
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "build",
+            "--wheel",
+            "--outdir",
+            str(output_dir),
+            str(ROOT),
+        ],
+        check=True,
+        cwd=ROOT,
+    )
+    wheels = list(output_dir.glob("*.whl"))
+    if len(wheels) != 1:
+        raise RuntimeError(f"Expected one wheel in {output_dir}, found {len(wheels)}")
+    return wheels[0]
+
+
+def _check_wheel_contents(wheel: Path) -> None:
+    with zipfile.ZipFile(wheel) as archive:
+        names = set(archive.namelist())
+    missing = [path for path in REQUIRED_WHEEL_PATHS if path not in names]
+    if missing:
+        raise RuntimeError(
+            "Wheel is missing required runtime files: " + ", ".join(missing)
+        )
+
+
+def _venv_command(venv_dir: Path, command: str) -> Path:
+    bin_dir = "Scripts" if os.name == "nt" else "bin"
+    return venv_dir / bin_dir / command
+
+
+def _smoke_installed_wheel(wheel: Path, work_dir: Path) -> None:
+    venv_dir = work_dir / "venv"
+    venv.EnvBuilder(with_pip=True, clear=True).create(venv_dir)
+    python = _venv_command(venv_dir, "python")
+    pip = _venv_command(venv_dir, "pip")
+    environment = os.environ.copy()
+    environment.pop("PYTHONPATH", None)
+    environment.pop("PYTHONHOME", None)
+
+    subprocess.run(
+        [str(pip), "install", "--no-deps", str(wheel)],
+        check=True,
+        cwd=work_dir,
+        env=environment,
+    )
+    subprocess.run(
+        [
+            str(python),
+            "-I",
+            "-c",
+            (
+                "import common, deploy, desktop, game, infra_tools, lib, plugins, "
+                "remote_setup, security, smb, sync, web; "
+                "import sync.service_tools.scrub_par2; "
+                "import web.service_tools.webhook_manager"
+            ),
+        ],
+        check=True,
+        cwd=work_dir,
+        env=environment,
+    )
+    subprocess.run(
+        [str(_venv_command(venv_dir, "infra-tools")), "--help"],
+        check=True,
+        cwd=work_dir,
+        env=environment,
+        stdout=subprocess.DEVNULL,
+    )
+    subprocess.run(
+        [str(_venv_command(venv_dir, "webhook_manager")), "--help"],
+        check=True,
+        cwd=work_dir,
+        env=environment,
+        stdout=subprocess.DEVNULL,
+    )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "wheel",
+        nargs="?",
+        type=Path,
+        help="Existing wheel to inspect; omit to build one in a temporary directory",
+    )
+    args = parser.parse_args()
+
+    with tempfile.TemporaryDirectory(prefix="infra-tools-wheel-") as temp_dir:
+        work_dir = Path(temp_dir)
+        wheel = args.wheel.resolve() if args.wheel else _build_wheel(work_dir / "dist")
+        if not wheel.is_file():
+            parser.error(f"wheel does not exist: {wheel}")
+        _check_wheel_contents(wheel)
+        _smoke_installed_wheel(wheel, work_dir)
+
+    print(f"Wheel artifact check passed: {wheel.name}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

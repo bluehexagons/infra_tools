@@ -50,8 +50,8 @@ The ordering remains justified by the current implementation:
   unauthenticated `ssh-keyscan` results;
 - remote setup writes target remembered state before its step loop and has no
   durable in-progress marker;
-- the declared wheel is incomplete, and release CI does not build or smoke-test
-  the artifact; and
+- package metadata now produces a self-contained wheel, and tagged-release CI
+  installs, smoke-tests, and publishes the artifact;
 - signed webhook deliveries have no delivery-ID replay protection;
 - command diagnostics can leak suffixes of quoted secrets, and the shared
   command runner has no timeout contract; and
@@ -78,11 +78,9 @@ The best next work packets are:
    actionable remediation, then define durable operation markers.
 4. Replace automatic SSH first-use trust with explicit enrollment before
    privileged setup/deploy operations.
-5. Repair package metadata and add clean-environment artifact tests before
-   publishing releases; reject source symlinks during agent staging, require
-   successful service stops before release activation, and standardize
-   destructive CLI confirmations and updater trust policy after the P0
-   state/failure work.
+5. Reject source symlinks during agent staging, require successful service stops
+   before release activation, and standardize destructive CLI confirmations and
+   updater trust policy after the P0 state/failure work.
 
 ## Planning portfolio and GitHub issue alignment (2026-08-17)
 

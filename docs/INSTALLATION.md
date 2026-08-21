@@ -189,6 +189,13 @@ installing the launcher, so a separate setup command is not required.
 SSH hardening is applied when `openssh-server` is present; an outbound-only
 control plane without `sshd` reports a skip instead of failing the setup.
 
+Tagged GitHub releases also attach a Python wheel. Release CI installs that
+wheel into an isolated environment and smoke-tests both packaged entry points
+before publication. The source installer remains the recommended operator path
+because it provides channel selection and worktree-aware upgrades; the wheel is
+primarily a verified release artifact and an option for externally managed
+Python environments.
+
 ## Install and configure a remote host
 
 Install the launcher on the control plane first, then run setup through the

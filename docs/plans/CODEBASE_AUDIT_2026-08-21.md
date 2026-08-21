@@ -27,7 +27,7 @@ Verification included:
 
 ## Findings
 
-### AUD-01: The declared wheel is not self-contained
+### AUD-01: The declared wheel is not self-contained (resolved)
 
 **Severity: High — release and installation maintenance**
 
@@ -41,9 +41,11 @@ The release workflow runs `make check` and publishes a GitHub release, but it
 does not build, install, or smoke-test a wheel. The source-worktree installer
 currently masks this packaging defect.
 
-**Follow-up:** declare the package layout explicitly, add a clean-environment
-install/launcher smoke test, and make release CI build and test the artifact
-before publication.
+**Resolution (2026-08-21):** package discovery now includes every runtime
+package and required desktop/web template, while retaining the two top-level
+modules. A clean virtual-environment check inspects the wheel, imports its
+runtime packages outside the source tree, and runs both installed launchers.
+Tagged-release CI builds, verifies, and attaches that wheel before publication.
 
 ### AUD-02: CI/CD deployment targets are enrolled from unauthenticated scans
 

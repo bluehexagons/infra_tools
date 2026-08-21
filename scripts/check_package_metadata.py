@@ -14,8 +14,11 @@ def main() -> int:
     with (ROOT / "pyproject.toml").open("rb") as file_obj:
         project = tomllib.load(file_obj)["project"]
     scripts = project.get("scripts", {})
-    if scripts.get("infra_tools") != "infra_tools:main":
-        print("pyproject.toml must expose infra_tools:main as the package entry point")
+    if scripts.get("infra-tools") != "infra_tools:main":
+        print("pyproject.toml must expose infra_tools:main as the infra-tools entry point")
+        return 1
+    if "infra_tools" in scripts:
+        print("pyproject.toml must not restore the retired infra_tools launcher")
         return 1
     command_reference = (ROOT / "docs" / "COMMAND_LINE.md").read_text(encoding="utf-8")
     if "infra-tools setup" not in command_reference:
