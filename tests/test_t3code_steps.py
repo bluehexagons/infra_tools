@@ -164,10 +164,15 @@ class T3CodeWebTest(unittest.TestCase):
                 "$PATH:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
                 content,
             )
+            self.assertIn('export GH_CONFIG_DIR="$HOME/.config/gh"', content)
             with open(cli_wrapper, encoding="utf-8") as file_obj:
                 cli_content = file_obj.read()
             self.assertIn(
                 "$PATH:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                cli_content,
+            )
+            self.assertIn(
+                'export GH_CONFIG_DIR="$HOME/.config/gh"',
                 cli_content,
             )
             with open(pair_wrapper, encoding="utf-8") as file_obj:

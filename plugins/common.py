@@ -224,14 +224,16 @@ def extend_agent_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -
     if config.install_opencode:
         steps.append(("Installing OpenCode", install_opencode))
 
+    # Install provider configuration and credentials before starting an
+    # interface that probes those providers during its initial discovery.
+    if config.agent_payload:
+        steps.append(("Copying agent tool configuration", copy_agent_tooling_payload))
+
     if "t3code" in (config.desktop_interfaces or []):
         steps.append(("Installing T3 Code desktop interface", install_t3code_desktop))
 
     if "t3code" in (config.web_interfaces or []):
         steps.append(("Installing T3 Code web interface", install_t3code_web))
-
-    if config.agent_payload:
-        steps.append(("Copying agent tool configuration", copy_agent_tooling_payload))
 
     if config.browser_automation:
         from common.browser_automation_steps import install_browser_automation

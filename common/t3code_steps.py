@@ -54,6 +54,7 @@ _T3_PATH_EXPORT = (
     '$HOME/.opencode/bin:$HOME/.local/bin:$PATH:'
     '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"'
 )
+_T3_GH_CONFIG_EXPORT = 'export GH_CONFIG_DIR="$HOME/.config/gh"'
 
 
 def _user_home(config: SetupConfig) -> str:
@@ -360,6 +361,7 @@ def _write_wrapper(
         'export NVM_DIR="$HOME/.nvm"\n'
         '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"\n'
         f"{_T3_PATH_EXPORT}\n"
+        f"{_T3_GH_CONFIG_EXPORT}\n"
         f"export T3CODE_HOST={shlex.quote(host)}\n"
         f"export T3CODE_PORT={port}\n"
         f"cd {shlex.quote(workspace)}\n"
@@ -378,6 +380,7 @@ def _write_passthrough_wrapper(path: str, home: str, t3_binary: str) -> bool:
         'export NVM_DIR="$HOME/.nvm"\n'
         '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"\n'
         f"{_T3_PATH_EXPORT}\n"
+        f"{_T3_GH_CONFIG_EXPORT}\n"
         f'exec {shlex.quote(t3_binary)} "$@"\n'
     )
     return _write_executable_if_changed(path, content)

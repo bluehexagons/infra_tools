@@ -72,7 +72,11 @@ This is required because systemd does not load the user's interactive shell
 startup files. It lets the service discover user-scoped T3, Codex, Claude Code,
 and OpenCode installations as well as system packages such as GitHub CLI. A
 shell opened in T3 can otherwise find `gh` after initializing its own `PATH`
-even while T3's direct Source Control probe reports it as unavailable.
+even while T3's direct Source Control probe reports it as unavailable. The
+wrapper also sets `GH_CONFIG_DIR` to the managed `~/.config/gh` directory.
+During setup, selected agent configuration and credentials are copied before
+T3 starts so its initial Source Control probe sees the same GitHub identity as
+the target user's terminal.
 
 During setup, infra-tools installs `build-essential` and `python3`, then
 installs T3 and its native dependencies as the target user under
