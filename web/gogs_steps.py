@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import secrets
@@ -10,6 +11,7 @@ import tempfile
 from typing import Any, Mapping
 
 from lib.atomic_io import write_json_atomic, write_text_atomic
+from lib.auth_failure_bans import configure_nginx_auth_failure_ban
 from lib.config import SetupConfig
 from lib.nginx_config import SSL_CIPHERS, SSL_PROTOCOLS, generate_self_signed_cert, get_ssl_cert_path
 from lib.release_management import (
@@ -42,6 +44,7 @@ GOGS_SSH_DROPIN_DIR = "/etc/ssh/sshd_config.d"
 GOGS_SSH_DROPIN_FILE = f"{GOGS_SSH_DROPIN_DIR}/99-gogs-git-user.conf"
 DEFAULT_GOGS_HTTP_PORT = 3000
 DEFAULT_GOGS_DATA_PATH = "/var/lib/gogs"
+GOGS_AUTH_FAILURE_LOG = "/var/log/nginx/infra-tools-gogs-auth-failures.log"
 _GOGS_RULE_COMMENT_PREFIX = "infra_tools Gogs"
 _LEGACY_GOGS_DIRECT_COMMENT = "gogs direct HTTP"
 _LEGACY_GOGS_WEB_COMMENT = "gogs web"
@@ -421,9 +424,16 @@ def generate_gogs_nginx_config(
     port: int,
     *,
     forwarded_proto: str,
+    client_ip: str = "$remote_addr",
 ) -> str:
     """Return an nginx site config that proxies to Gogs."""
     cert_file, key_file = get_ssl_cert_path(domain)
+    zone_suffix = hashlib.sha256(domain.encode("utf-8")).hexdigest()[:12]
+    login_zone = f"infra_tools_gogs_login_{zone_suffix}"
+    login_failure = f"infra_tools_gogs_login_failure_{zone_suffix}"
+    basic_failure = f"infra_tools_gogs_basic_failure_{zone_suffix}"
+    auth_failure = f"infra_tools_gogs_auth_failure_{zone_suffix}"
+    log_format = f"infra_tools_gogs_auth_{zone_suffix}"
     if forwarded_proto == "https":
         http_listener = "    listen 80;\n    listen [::]:80;\n"
         http_redirect = ""
@@ -444,7 +454,37 @@ def generate_gogs_nginx_config(
 }}
 
 """
-    return f"""{http_redirect}server {{
+    proxy_settings = f"""        proxy_pass http://127.0.0.1:{port};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP {client_ip};
+        proxy_set_header X-Forwarded-For {client_ip};
+        proxy_set_header X-Forwarded-Proto {forwarded_proto};
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_read_timeout 300s;
+"""
+    return f"""limit_req_zone {client_ip} zone={login_zone}:10m rate=5r/m;
+
+map "$request_method:$status:$uri" ${login_failure} {{
+    default 0;
+    ~^POST:401:/api/web/user/(?:sign-in|mfa|mfa/recovery)$ 1;
+}}
+
+map "$http_authorization:$status" ${basic_failure} {{
+    default 0;
+    ~^.+:401$ 1;
+}}
+
+map "${login_failure}:${basic_failure}" ${auth_failure} {{
+    default 0;
+    ~1 1;
+}}
+
+log_format {log_format} '{client_ip} [$time_local] infra-tools-auth-failure';
+
+{http_redirect}server {{
 {http_listener}    listen 443 ssl;
     listen [::]:443 ssl;
     http2 on;
@@ -456,23 +496,19 @@ def generate_gogs_nginx_config(
     ssl_prefer_server_ciphers on;
     ssl_ciphers {SSL_CIPHERS};
     client_max_body_size 512m;
+    access_log {GOGS_AUTH_FAILURE_LOG} {log_format} if=${auth_failure};
 
     location /.well-known/acme-challenge/ {{
         root /var/www/letsencrypt;
     }}
 
+    location ~ ^/(?:api/web/user/(?:sign-in|mfa(?:/recovery)?)|user/login(?:/two_factor(?:_recovery_code)?)?)$ {{
+        limit_req zone={login_zone} burst=5 nodelay;
+        limit_req_status 429;
+{proxy_settings}    }}
+
     location / {{
-        proxy_pass http://127.0.0.1:{port};
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto {forwarded_proto};
-        proxy_http_version 1.1;
-        proxy_set_header Connection "";
-        proxy_buffering off;
-        proxy_request_buffering off;
-        proxy_read_timeout 300s;
-    }}
+{proxy_settings}    }}
 }}
 """
 
@@ -483,9 +519,17 @@ def _write_gogs_nginx_config(config: SetupConfig, domain: str, port: int) -> Non
     config_file = f"/etc/nginx/sites-available/{config_name}"
     enabled_link = f"/etc/nginx/sites-enabled/{config_name}"
     forwarded_proto = "https" if config.enable_cloudflare else "$scheme"
+    client_ip = "$http_cf_connecting_ip" if config.enable_cloudflare else "$remote_addr"
     run("mkdir -p /var/www/letsencrypt/.well-known/acme-challenge")
     with open(config_file, "w", encoding="utf-8") as file_obj:
-        file_obj.write(generate_gogs_nginx_config(domain, port, forwarded_proto=forwarded_proto))
+        file_obj.write(
+            generate_gogs_nginx_config(
+                domain,
+                port,
+                forwarded_proto=forwarded_proto,
+                client_ip=client_ip,
+            )
+        )
     if not os.path.exists(enabled_link):
         run(f"ln -s {shlex.quote(config_file)} {shlex.quote(enabled_link)}")
     result = run("nginx -t", check=False)
@@ -499,7 +543,14 @@ def _write_gogs_nginx_config(config: SetupConfig, domain: str, port: int) -> Non
         if not obtain_letsencrypt_certificate([domain], config.ssl_email, domain):
             raise RuntimeError("Could not obtain the requested Gogs TLS certificate")
         with open(config_file, "w", encoding="utf-8") as file_obj:
-            file_obj.write(generate_gogs_nginx_config(domain, port, forwarded_proto=forwarded_proto))
+            file_obj.write(
+                generate_gogs_nginx_config(
+                    domain,
+                    port,
+                    forwarded_proto=forwarded_proto,
+                    client_ip=client_ip,
+                )
+            )
         setup_certificate_renewal()
         result = run("nginx -t", check=False)
         if result.returncode != 0:
@@ -511,6 +562,7 @@ def _write_gogs_nginx_config(config: SetupConfig, domain: str, port: int) -> Non
 
     if config.enable_cloudflare:
         run_cloudflare_tunnel_setup(config)
+    configure_nginx_auth_failure_ban("gogs", GOGS_AUTH_FAILURE_LOG)
 
 
 def _configure_git_ssh_access() -> None:

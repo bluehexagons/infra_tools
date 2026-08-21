@@ -73,7 +73,11 @@ infra-tools setup server_lite 192.168.1.10 \
 ```
 
 The credential is stored in the mode-0600 workspace store and installed in a
-root-only environment file.
+root-only environment file. Nginx limits `/admin` traffic to ten requests per
+minute per client with a small burst. It conditionally records only failed
+Basic Auth attempts, without the Authorization header; five failures within
+ten minutes trigger a one-hour Fail2ban source ban. Check the active jail with
+`sudo fail2ban-client status infra-tools-antistatic`.
 
 ## antistatic-db
 

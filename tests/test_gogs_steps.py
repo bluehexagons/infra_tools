@@ -405,6 +405,30 @@ class TestGenerateGogsConfig(unittest.TestCase):
         self.assertNotIn("return 301", content)
         self.assertIn("proxy_set_header X-Forwarded-Proto https;", content)
 
+    def test_nginx_throttles_login_and_records_only_auth_failures(self):
+        content = gogs_steps.generate_gogs_nginx_config(
+            "git.example.test",
+            3000,
+            forwarded_proto="https",
+            client_ip="$http_cf_connecting_ip",
+        )
+
+        self.assertIn("rate=5r/m", content)
+        self.assertIn("/api/web/user/", content)
+        self.assertIn("user/login", content)
+        self.assertIn("limit_req_status 429;", content)
+        self.assertIn("$http_authorization:$status", content)
+        self.assertIn("infra-tools-auth-failure", content)
+        self.assertIn(
+            "log_format infra_tools_gogs_auth_",
+            content,
+        )
+        self.assertNotIn("$http_authorization [$time_local]", content)
+        self.assertIn(
+            "proxy_set_header X-Real-IP $http_cf_connecting_ip;",
+            content,
+        )
+
     def test_redacted_admin_create_user_command_hides_password(self):
         command = gogs_steps._redacted_admin_create_user_command(
             "/srv/gogs/custom/conf/app.ini",

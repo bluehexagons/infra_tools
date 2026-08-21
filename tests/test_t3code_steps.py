@@ -122,6 +122,7 @@ class T3CodeWebTest(unittest.TestCase):
                     return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
                 ),
                 patch("common.t3code_steps.T3_SERVICE_FILE", service_path),
+                patch("common.t3code_steps.remove_nginx_auth_failure_ban"),
             ):
                 install_t3code_web(config)
 

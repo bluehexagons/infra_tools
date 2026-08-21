@@ -12,6 +12,10 @@ import shutil
 import tempfile
 
 from common.common_steps import _run_as_login_user
+from lib.auth_failure_bans import (
+    configure_nginx_auth_failure_ban,
+    remove_nginx_auth_failure_ban,
+)
 from lib.config import SetupConfig
 from lib.remote_utils import install_package, is_dry_run, run
 from lib.validation import validate_filesystem_path, validate_network_ip_or_cidr
@@ -35,6 +39,9 @@ DEVICE_PAIRING_SCRIPT = (
 )
 DEVICE_PAIRING_NGINX_SITE = "/etc/nginx/sites-available/infra-tools-device-pairing"
 DEVICE_PAIRING_NGINX_LINK = "/etc/nginx/sites-enabled/infra-tools-device-pairing"
+DEVICE_PAIRING_AUTH_FAILURE_LOG = (
+    "/var/log/nginx/infra-tools-device-pairing-auth-failures.log"
+)
 _UFW_NUMBERED_RULE_RE = re.compile(r"^\[\s*(\d+)\]\s+(.*)$")
 _T3_RUNTIME_RELATIVE_PATH = (".local", "share", "infra-tools", "t3code")
 
@@ -596,16 +603,28 @@ WantedBy=multi-user.target
             run(f"systemctl start {DEVICE_PAIRING_SERVICE_NAME}.service")
 
     nginx_content = f"""# Managed by infra_tools device pairing
+limit_req_zone $binary_remote_addr zone=infra_tools_device_pairing_auth:10m rate=5r/m;
+
+map $status $infra_tools_device_pairing_auth_failure {{
+    default 0;
+    401 1;
+}}
+
+log_format infra_tools_device_pairing_auth '$remote_addr [$time_local] infra-tools-auth-failure';
+
 server {{
     listen {_nginx_listen_address(host, config.device_pairing_port)};
     server_name _;
-    access_log off;
+    access_log {DEVICE_PAIRING_AUTH_FAILURE_LOG} infra_tools_device_pairing_auth
+        if=$infra_tools_device_pairing_auth_failure;
 
     auth_basic "Device pairing";
     auth_basic_user_file {DEVICE_PAIRING_AUTH_FILE};
     client_max_body_size 4k;
 
     location / {{
+        limit_req zone=infra_tools_device_pairing_auth burst=5 nodelay;
+        limit_req_status 429;
         proxy_pass http://unix:{DEVICE_PAIRING_SOCKET}:/;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
@@ -658,6 +677,10 @@ server {{
         raise RuntimeError("Nginx rejected the device-pairing configuration")
     if nginx_changed or auth_changed:
         run("systemctl reload nginx")
+    configure_nginx_auth_failure_ban(
+        "device-pairing",
+        DEVICE_PAIRING_AUTH_FAILURE_LOG,
+    )
 
 
 def _remove_device_pairing() -> None:
@@ -689,6 +712,7 @@ def _remove_device_pairing() -> None:
         if validation.returncode != 0:
             raise RuntimeError("Nginx configuration is invalid after removing device pairing")
         run("systemctl reload nginx", check=False)
+    remove_nginx_auth_failure_ban("device-pairing")
 
 
 def install_t3code_web(config: SetupConfig) -> None:

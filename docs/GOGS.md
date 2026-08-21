@@ -60,7 +60,21 @@ path must be absolute and defaults to `/var/lib/gogs`.
 Registration is disabled. Setup creates the initial administrator named by
 the setup username and writes the generated password to the root-only file
 `/opt/infra_tools/state/gogs_admin_credentials.json`; retrieve it locally on
-the target and rotate it after the first login.
+the target and rotate it after the first login. The generated password has 24
+random characters. Use another unique, high-entropy value when rotating it and
+enable MFA for administrator accounts.
+
+Hostname deployments throttle password and MFA submission endpoints to five
+requests per minute per client with a small burst. Nginx also emits a
+privacy-preserving marker for failed current-API web authentication and all
+HTTP Basic authentication; five failures within ten minutes produce a one-hour
+Fail2ban source ban. This covers Git/LFS and API Basic Auth without throttling
+successful high-volume transfers.
+Both the current Gogs API sign-in paths and the login/MFA paths used by older
+managed releases receive the request limit. Cloudflare deployments derive the
+client address from the trusted tunnel header. Direct hostless mode does not
+pass through Nginx, so retain its private source restriction or use the default
+SSH tunnel.
 
 The web UI manages repository users and their SSH keys. Clone over HTTPS using
 the configured hostname, or over SSH through the `git` account:
@@ -95,6 +109,7 @@ bytes, free inodes, and repository/LFS/attachment/log usage. Useful checks are:
 
 ```bash
 sudo systemctl status gogs
+sudo fail2ban-client status infra-tools-gogs
 sudo journalctl -u gogs -n 100 --no-pager
 sudo /usr/local/bin/gogs --version
 infra-tools gogs health git.example.com

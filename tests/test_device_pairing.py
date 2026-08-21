@@ -461,6 +461,9 @@ class DevicePairingRemoteSetupTest(unittest.TestCase):
                 patch("common.t3code_steps.pwd.getpwnam", return_value=account),
                 patch("common.t3code_steps.os.chown"),
                 patch("common.t3code_steps.run", side_effect=run_command),
+                patch(
+                    "common.t3code_steps.configure_nginx_auth_failure_ban"
+                ) as configure_ban,
                 patch("web.web_steps.install_nginx"),
             ):
                 _configure_device_pairing(
@@ -474,6 +477,12 @@ class DevicePairingRemoteSetupTest(unittest.TestCase):
             with open(nginx_available, encoding="utf-8") as file_obj:
                 nginx = file_obj.read()
             self.assertIn('auth_basic "Device pairing"', nginx)
+            self.assertIn("rate=5r/m", nginx)
+            self.assertIn(
+                "limit_req zone=infra_tools_device_pairing_auth burst=5 nodelay",
+                nginx,
+            )
+            self.assertIn("infra-tools-auth-failure", nginx)
             self.assertIn("listen 0.0.0.0:3774", nginx)
             self.assertIn(
                 "proxy_pass http://unix:"
@@ -500,6 +509,10 @@ class DevicePairingRemoteSetupTest(unittest.TestCase):
             ) as file_obj:
                 service = file_obj.read()
             self.assertIn("Environment=T3CODE_PORT=3773", service)
+            configure_ban.assert_called_once_with(
+                "device-pairing",
+                "/var/log/nginx/infra-tools-device-pairing-auth-failures.log",
+            )
 
     def test_firewall_includes_pairing_port(self) -> None:
         config = _config()

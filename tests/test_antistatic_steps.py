@@ -301,6 +301,16 @@ class TestGenerateAntistaticNginxConfig(unittest.TestCase):
         config = self._make_config()
         self.assertIn("http2 on;", config)
 
+    def test_admin_authentication_is_throttled_and_failure_logged(self):
+        config = self._make_config()
+
+        self.assertIn("rate=10r/m", config)
+        self.assertIn("location = /admin", config)
+        self.assertIn("location ^~ /admin/", config)
+        self.assertIn("limit_req_status 429;", config)
+        self.assertIn("$http_authorization:$status:$uri", config)
+        self.assertIn("infra-tools-auth-failure", config)
+
     def test_listens_on_80_and_443(self):
         config = self._make_config()
         self.assertIn("listen 80;", config)
@@ -412,12 +422,20 @@ class TestConfigureAntistaticNginx(unittest.TestCase):
                     "/etc/letsencrypt/live/lobby.example.com/privkey.pem",
                 ),
             ],
-        ), patch("builtins.open", unittest.mock.mock_open()) as mock_file:
+        ), patch(
+            "game.antistatic_steps.configure_nginx_auth_failure_ban"
+        ) as configure_ban, patch(
+            "builtins.open", unittest.mock.mock_open()
+        ) as mock_file:
             _configure_nginx_proxy(config, "lobby.example.com", 8080)
 
         final_content = mock_file().write.call_args_list[-1].args[0]
         self.assertIn("/etc/letsencrypt/live/lobby.example.com/fullchain.pem", final_content)
         self.assertIn("return 301 https://$host$request_uri;", final_content)
+        configure_ban.assert_called_once_with(
+            "antistatic",
+            "/var/log/nginx/infra-tools-antistatic-auth-failures.log",
+        )
 
     @patch("lib.nginx_config.generate_self_signed_cert")
     @patch("game.antistatic_steps.run")
@@ -434,6 +452,8 @@ class TestConfigureAntistaticNginx(unittest.TestCase):
         with patch(
             "lib.nginx_config.get_ssl_cert_path",
             return_value=("/etc/nginx/ssl/lobby.crt", "/etc/nginx/ssl/lobby.key"),
+        ), patch(
+            "game.antistatic_steps.configure_nginx_auth_failure_ban"
         ), patch("builtins.open", unittest.mock.mock_open()) as mock_file:
             _configure_nginx_proxy(config, "lobby.example.com", 8080)
 

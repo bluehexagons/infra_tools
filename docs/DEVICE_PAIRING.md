@@ -164,10 +164,16 @@ the proxy must preserve that externally reachable mapping. An HTTPS page such
 as `app.t3.codes` cannot connect to the plain HTTP T3 backend because browsers
 block mixed content.
 
-The broker listens only on a local Unix socket shared with Nginx. Requests use
-a single-use same-site form nonce and are rate-limited per source. Provider
-commands are fixed in a root-managed configuration, executed without a shell,
-and required to return a link for the expected T3 origin.
+The broker listens only on a local Unix socket shared with Nginx. Nginx limits
+the entire portal, including failed Basic Auth checks, to five requests per
+minute per source with a small burst. Five authentication failures within ten
+minutes also trigger a one-hour Fail2ban ban. The failure-only log contains the
+source address, timestamp, and a fixed marker; it never contains the Basic Auth
+header or a pairing URL. After authentication, requests use a single-use
+same-site form nonce, and the broker independently limits pairing issuance to
+five requests per minute per source. Provider commands are fixed in a
+root-managed configuration, executed without a shell, and required to return a
+link for the expected T3 origin.
 
 ## Files and services
 
@@ -185,6 +191,7 @@ Check the local components without revealing pairing credentials:
 ```bash
 sudo systemctl status infra-tools-t3code.service infra-tools-device-pairing.service
 sudo nginx -t
+sudo fail2ban-client status infra-tools-device-pairing
 sudo ss -lntp | grep -E ':(3773|3774)\b'
 curl -I http://BIND_ADDRESS:3774/
 ```

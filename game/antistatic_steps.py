@@ -6,6 +6,7 @@ as a systemd service behind an nginx reverse proxy.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shlex
 import tempfile
@@ -21,6 +22,7 @@ from lib.release_management import (
     load_json_state,
     write_json_state,
 )
+from lib.auth_failure_bans import configure_nginx_auth_failure_ban
 from lib.remote_utils import install_package, run, user_exists, is_service_active
 from lib.systemd_service import cleanup_service
 
@@ -32,6 +34,9 @@ ANTISTATIC_RELEASE_STATE_FILE = "/opt/infra_tools/state/antistatic_release.json"
 ANTISTATIC_DATA_DIR = "/var/lib/antistatic"
 ANTISTATIC_CONFIG_DIR = "/etc/antistatic"
 ANTISTATIC_ENV_FILE = f"{ANTISTATIC_CONFIG_DIR}/server.env"
+ANTISTATIC_AUTH_FAILURE_LOG = (
+    "/var/log/nginx/infra-tools-antistatic-auth-failures.log"
+)
 MIN_ANTISTATIC_RELEASE = (0, 10, 0)
 GITHUB_REPO = "bluehexagons/antistatic-server"
 DEFAULT_INTERNAL_PORT = 8080
@@ -336,6 +341,10 @@ def generate_antistatic_nginx_config(
     from lib.nginx_config import SSL_PROTOCOLS, SSL_CIPHERS, get_ssl_cert_path
 
     cert_file, key_file = get_ssl_cert_path(domain)
+    zone_suffix = hashlib.sha256(domain.encode("utf-8")).hexdigest()[:12]
+    admin_zone = f"infra_tools_antistatic_admin_{zone_suffix}"
+    auth_failure = f"infra_tools_antistatic_auth_failure_{zone_suffix}"
+    log_format = f"infra_tools_antistatic_auth_{zone_suffix}"
     http_listeners = (
         "    listen 127.0.0.1:80;\n    listen [::1]:80;"
         if private_origin
@@ -347,13 +356,7 @@ def generate_antistatic_nginx_config(
         else "    listen 443 ssl;\n    listen [::]:443 ssl;"
     )
 
-    http_location = """\
-    location / {
-        return 301 https://$host$request_uri;
-    }
-""" if enable_https_redirect else f"""\
-    location / {{
-        proxy_pass http://127.0.0.1:{port};
+    proxy_settings = f"""        proxy_pass http://127.0.0.1:{port};
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP {forwarded_client_ip};
         proxy_set_header X-Forwarded-For {forwarded_client_ip};
@@ -363,13 +366,41 @@ def generate_antistatic_nginx_config(
         proxy_read_timeout 30s;
         proxy_buffering on;
         proxy_intercept_errors off;
-    }}
+"""
+    admin_proxy_settings = f"""        limit_req zone={admin_zone} burst=10 nodelay;
+        limit_req_status 429;
+{proxy_settings}"""
+    admin_location = f"""\
+    location = /admin {{
+{admin_proxy_settings}    }}
+
+    location ^~ /admin/ {{
+{admin_proxy_settings}    }}
+"""
+    http_location = """\
+    location / {
+        return 301 https://$host$request_uri;
+    }
+""" if enable_https_redirect else f"""\
+{admin_location}
+    location / {{
+{proxy_settings}    }}
 """
 
     return f"""\
+limit_req_zone {forwarded_client_ip} zone={admin_zone}:10m rate=10r/m;
+
+map "$http_authorization:$status:$uri" ${auth_failure} {{
+    default 0;
+    ~^.+:401:/admin(?:/|$) 1;
+}}
+
+log_format {log_format} '{forwarded_client_ip} [$time_local] infra-tools-auth-failure';
+
 server {{
 {http_listeners}
     server_name {domain};
+    access_log {ANTISTATIC_AUTH_FAILURE_LOG} {log_format} if=${auth_failure};
 
     location /.well-known/acme-challenge/ {{
         root /var/www/letsencrypt;
@@ -389,20 +420,11 @@ server {{
     ssl_ciphers {SSL_CIPHERS};
 
     add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+    access_log {ANTISTATIC_AUTH_FAILURE_LOG} {log_format} if=${auth_failure};
 
+{admin_location}
     location / {{
-        proxy_pass http://127.0.0.1:{port};
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP {forwarded_client_ip};
-        proxy_set_header X-Forwarded-For {forwarded_client_ip};
-        proxy_set_header X-Forwarded-Proto {forwarded_proto};
-
-        proxy_http_version 1.1;
-        proxy_set_header Connection "";
-        proxy_read_timeout 30s;
-        proxy_buffering on;
-        proxy_intercept_errors off;
-    }}
+{proxy_settings}    }}
 }}
 """
 
@@ -482,6 +504,7 @@ def _configure_nginx_proxy(config: SetupConfig, domain: str, port: int) -> None:
         from web.cloudflare_steps import run_cloudflare_tunnel_setup
 
         run_cloudflare_tunnel_setup(config)
+    configure_nginx_auth_failure_ban("antistatic", ANTISTATIC_AUTH_FAILURE_LOG)
 
 
 def _remove_empty_domain_nginx_proxy() -> None:
