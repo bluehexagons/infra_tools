@@ -77,7 +77,6 @@ PLUGIN = PluginDefinition(
             default_git_auth_source="active",
             default_agent_auth_source="active",
             default_browser_automation="playwright",
-            required_explicit_runtimes=("node", "go"),
             step_builder="plugins.workstation:build_workstation_steps",
         ),
     ),

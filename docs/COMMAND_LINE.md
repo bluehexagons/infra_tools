@@ -282,9 +282,9 @@ the common T3 Code web service, Playwright automation, Geany, RDP, private
 source ranges, protected T3 pairing, read-write Git, and active auth sources.
 All three default to GitHub CLI and Codex. `--agent-tool` values add to those
 defaults and accept comma-separated lists; use `--no-agent-tool` to remove a
-default. The full profile does not choose Proxmox capacity and requires
-explicit `--node` and `--go` flags. Missing account and pairing passwords are
-requested securely from a terminal.
+default. The full profile does not choose Proxmox capacity. It installs Node.js
+automatically for T3 Code, while Go and other project runtimes remain optional.
+Missing account and pairing passwords are requested securely from a terminal.
 `server_lite` omits the standard firewall and generic CLI bundle, so use it
 only when that lighter profile is intentional.
 
@@ -308,7 +308,7 @@ capacity and project runtimes explicit:
 infra-tools setup agent_code_vm 10.0.0.11 agentuser \
   --provision-on pve1 --name agent-1 \
   --memory 4G --cores 4 --storage root local-lvm 32G \
-  --node --go --agent-tool opencode --lan-access
+  --agent-tool opencode --lan-access
 ```
 
 The profile supplies T3 Code, Playwright, Geany, RDP, read-write Git, active

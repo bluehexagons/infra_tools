@@ -86,7 +86,6 @@ infra-tools setup agent_code_vm 10.0.0.25 agent \
   --image-storage local-lvm \
   --memory 4G --balloon-min 1G --cores 4 \
   --storage root local-lvm 32G \
-  --node --go \
   --lan-access \
   --agent-tool opencode
 ```
@@ -98,8 +97,9 @@ Code remains loopback-only and RDP uses its global rate-limited fallback.
 Omitted account and pairing passwords are requested with hidden prompts;
 an empty pairing password reuses the account password. Use
 `--git-access none --git-auth none --agent-auth none`, `--no-rdp`, `--no-web-interface`, or
-`--no-device-pairing` to disable individual defaults. Both `--node` and `--go`
-remain explicit requirements for this profile.
+`--no-device-pairing` to disable individual defaults. Node.js is installed
+automatically because T3 Code requires it. Go and other project runtimes remain
+optional and can be selected with their runtime flags.
 
 ### Desktop agentic coding workstation with RDP
 

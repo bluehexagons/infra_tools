@@ -128,7 +128,6 @@ class TestPluginRegistry(unittest.TestCase):
         self.assertEqual(system_type.default_editor, "geany")
         self.assertEqual(system_type.default_web_interfaces, ("t3code",))
         self.assertEqual(system_type.default_browser_automation, "playwright")
-        self.assertEqual(system_type.required_explicit_runtimes, ("node", "go"))
         self.assertTrue(system_type.default_enable_rdp)
         self.assertEqual(system_type.default_git_access, "read-write")
         self.assertFalse(hasattr(system_type, "default_web_interface_sources"))

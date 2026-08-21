@@ -1424,18 +1424,6 @@ class SetupConfig:
         from lib.system_utils import get_current_username, get_local_timezone
 
         system_type_definition = get_system_type_definition(system_type)
-        missing_required_runtimes = [
-            runtime
-            for runtime in system_type_definition.required_explicit_runtimes
-            if not bool(getattr(args, f'install_{runtime}', False))
-        ]
-        if missing_required_runtimes:
-            required_flags = ' '.join(
-                f'--{runtime}' for runtime in missing_required_runtimes
-            )
-            raise ValueError(
-                f"{system_type} requires explicit runtime selection: {required_flags}"
-            )
         tags = None
         if hasattr(args, 'tags') and args.tags:
             tags = [tag.strip() for tag in args.tags.split(',') if tag.strip()]

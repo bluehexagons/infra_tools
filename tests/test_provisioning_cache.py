@@ -45,6 +45,37 @@ def _args(**overrides: object) -> Namespace:
 
 
 class TestCachedProvisioningMetadata(unittest.TestCase):
+    def test_setup_reports_configuration_errors_without_a_traceback(self) -> None:
+        args = _args()
+
+        with patch("infra_tools.prompt_for_missing_passwords"), \
+             patch(
+                 "infra_tools.SetupConfig.from_args",
+                 side_effect=ValueError("invalid setup selection"),
+             ), \
+             patch("builtins.print") as mock_print:
+            result = infra_tools.run_setup_command(args)
+
+        self.assertEqual(result, 1)
+        mock_print.assert_called_once_with("Error: invalid setup selection")
+
+    def test_patch_reports_configuration_errors_without_a_traceback(self) -> None:
+        args = _args()
+        cached = _config()
+
+        with patch("infra_tools.validate_host", return_value=True), \
+             patch("infra_tools.validate_username", return_value=True), \
+             patch("infra_tools.load_setup_command", return_value=cached), \
+             patch(
+                 "infra_tools.SetupConfig.from_args",
+                 side_effect=ValueError("invalid patch selection"),
+             ), \
+             patch("builtins.print") as mock_print:
+            result = infra_tools.run_patch_command(args)
+
+        self.assertEqual(result, 1)
+        mock_print.assert_called_once_with("Error: invalid patch selection")
+
     def test_reuses_saved_guest_shape_when_no_changes_are_requested(self) -> None:
         current = _config()
         cached = _config(

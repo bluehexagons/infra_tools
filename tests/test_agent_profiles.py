@@ -53,10 +53,7 @@ class TestAgentProfiles(unittest.TestCase):
         self.assertIn("Installing Codex CLI", step_names)
 
     def test_agent_code_vm_adds_t3_playwright_and_geany(self) -> None:
-        config = SetupConfig.from_args(
-            _setup_args(install_node=True, install_go=True),
-            "agent_code_vm",
-        )
+        config = SetupConfig.from_args(_setup_args(), "agent_code_vm")
 
         self.assertEqual(config.selected_agent_tools(), ["gh", "codex"])
         self.assertEqual(config.browser, "firefox")
@@ -65,7 +62,8 @@ class TestAgentProfiles(unittest.TestCase):
         self.assertEqual(config.browser_automation, "playwright")
         self.assertTrue(config.include_desktop)
         self.assertTrue(config.enable_rdp)
-        self.assertTrue(config.install_go)
+        self.assertTrue(config.install_node)
+        self.assertFalse(config.install_go)
         self.assertEqual(config.git_access, "read-write")
         self.assertIsNone(config.web_interface_sources)
         self.assertIsNone(config.rdp_allowed_sources)
@@ -84,16 +82,18 @@ class TestAgentProfiles(unittest.TestCase):
         self.assertNotIn("--web-interface-source", command)
         self.assertNotIn("--rdp-source", command)
 
-    def test_agent_code_vm_keeps_node_runtime_explicit(self) -> None:
-        with self.assertRaisesRegex(
-            ValueError,
-            "agent_code_vm requires explicit runtime selection: --node --go",
-        ):
-            SetupConfig.from_args(_setup_args(), "agent_code_vm")
+    def test_agent_code_vm_accepts_optional_go_runtime(self) -> None:
+        config = SetupConfig.from_args(
+            _setup_args(install_go=True),
+            "agent_code_vm",
+        )
+
+        self.assertTrue(config.install_node)
+        self.assertTrue(config.install_go)
 
     def test_agent_code_vm_lan_access_is_explicit(self) -> None:
         config = SetupConfig.from_args(
-            _setup_args(install_node=True, install_go=True, lan_access=True),
+            _setup_args(lan_access=True),
             "agent_code_vm",
         )
 
@@ -109,7 +109,7 @@ class TestAgentProfiles(unittest.TestCase):
 
     def test_agent_code_vm_explicit_editor_replaces_geany(self) -> None:
         config = SetupConfig.from_args(
-            _setup_args(editor="vscode", install_node=True, install_go=True),
+            _setup_args(editor="vscode"),
             "agent_code_vm",
         )
 
@@ -165,13 +165,14 @@ class TestAgentProfiles(unittest.TestCase):
                 "include_cli_tools": True,
                 "include_workstation_dev_apps": True,
                 "browser": "firefox",
-                "install_node": True,
             },
         )
 
         self.assertEqual(config.editor, "geany")
         self.assertEqual(config.web_interfaces, ["t3code"])
         self.assertEqual(config.browser_automation, "playwright")
+        self.assertTrue(config.install_node)
+        self.assertFalse(config.install_go)
         self.assertIsNone(config.web_interface_sources)
         self.assertIsNone(config.rdp_allowed_sources)
 

@@ -73,7 +73,6 @@ from lib.notifications import validate_notification_args
 from lib.orchestrator_bootstrap import LAUNCHER_NAME, run_orchestrator_bootstrap
 from lib.plugin_registry import (
     format_system_type_help,
-    get_system_type_definition,
     get_system_type_names,
 )
 from lib.network_cli import add_network_subparser, run_network_command
@@ -1278,7 +1277,11 @@ def run_setup_command(args: argparse.Namespace) -> int:
         print(f"Error: {exc}")
         return 1
 
-    config = SetupConfig.from_args(args, args.system_type)
+    try:
+        config = SetupConfig.from_args(args, args.system_type)
+    except ValueError as exc:
+        print(f"Error: {exc}")
+        return 1
 
     reuse_cached_provisioning = _reuse_cached_provisioning_metadata(config, args)
 
@@ -1431,18 +1434,16 @@ def run_patch_command(args: argparse.Namespace) -> int:
         print(f"Please run the initial setup first using 'infra-tools setup <system_type> {args.host}'")
         return 1
 
-    # Profile defaults are required for an initial setup, but a patch without
-    # an explicit override must retain the cached runtime and access policy.
-    profile_defaults = get_system_type_definition(cached_config.system_type)
-    for runtime in profile_defaults.required_explicit_runtimes:
-        if getattr(args, f"install_{runtime}", None) is None:
-            setattr(args, f"install_{runtime}", getattr(cached_config, f"install_{runtime}"))
     if getattr(args, "enable_rdp", None) is None:
         args.enable_rdp = cached_config.enable_rdp
     if getattr(args, "git_access", None) is None:
         args.git_access = cached_config.git_access
 
-    new_config = SetupConfig.from_args(args, cached_config.system_type)
+    try:
+        new_config = SetupConfig.from_args(args, cached_config.system_type)
+    except ValueError as exc:
+        print(f"Error: {exc}")
+        return 1
     merged_config = merge_setup_configs(
         cached_config,
         new_config,

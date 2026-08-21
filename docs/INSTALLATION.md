@@ -139,8 +139,8 @@ comma-separated lists; use `--no-agent-tool` to remove a default. The
 `agent_code_vm` profile additionally defaults to Geany, T3 Code, Playwright,
 RDP, T3 pairing, read-write Git, and active auth sources. It does not assume a
 management network; add `--lan-access`, `--access-source`, or service-specific
-source flags explicitly. Its T3 Code service requires explicit `--node` and
-`--go`; add Python only when the project needs it. Use
+source flags explicitly. Node.js is installed automatically because T3 Code
+requires it. Go, Python, and other project runtimes remain optional. Use
 `--agent-config active`, `--git-auth active`, or the specified-file credential
 options when the control plane should transfer selected settings or
 credentials. Active GitHub auth can use the controller's `gh auth token`

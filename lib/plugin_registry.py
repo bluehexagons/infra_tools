@@ -49,7 +49,6 @@ class SystemTypeDefinition:
     default_git_auth_source: str | None = None
     default_agent_auth_source: str | None = None
     default_browser_automation: str | None = None
-    required_explicit_runtimes: tuple[str, ...] = ()
     step_builder: str | None = None
 
 
