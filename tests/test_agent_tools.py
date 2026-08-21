@@ -227,7 +227,7 @@ class TestOfficialAgentInstallers(unittest.TestCase):
             with (
                 patch('common.agent_steps.AGENT_CLI_SOURCE', source),
                 patch('common.agent_steps._user_home', return_value=home),
-                patch('common.agent_steps._chown_path'),
+                patch('common.agent_steps._chown_path') as chown_path,
                 patch('common.agent_steps._ensure_agent_shell_path'),
             ):
                 install_agent_cli_launcher(self.config)
@@ -238,6 +238,52 @@ class TestOfficialAgentInstallers(unittest.TestCase):
             self.assertIn('# Managed by infra_tools agent setup', content)
             self.assertIn(f'exec /usr/bin/python3 {source} "$@"', content)
             self.assertEqual(os.stat(launcher).st_mode & 0o777, 0o755)
+            self.assertEqual(
+                chown_path.call_args_list[0].args[1],
+                os.path.join(home, '.local'),
+            )
+
+    def test_script_installer_repairs_local_bin_ownership_before_running(self):
+        completed = type(
+            'Completed',
+            (),
+            {'returncode': 0, 'stdout': '', 'stderr': ''},
+        )()
+        events: list[str] = []
+
+        with (
+            patch('common.agent_steps._user_home', return_value='/home/agent'),
+            patch(
+                'common.agent_steps._tool_available',
+                side_effect=[False, True],
+            ),
+            patch('common.agent_steps.run', return_value=completed),
+            patch(
+                'common.agent_steps._ensure_agent_directory',
+                side_effect=lambda path, mode: events.append(f'ensure:{path}:{mode:o}'),
+            ),
+            patch(
+                'common.agent_steps._chown_path',
+                side_effect=lambda _config, path: events.append(f'chown:{path}'),
+            ),
+            patch(
+                'common.agent_steps._run_as_login_user',
+                side_effect=lambda *_args, **_kwargs: (
+                    events.append('installer') or completed
+                ),
+            ),
+            patch('common.agent_steps._ensure_agent_shell_path'),
+        ):
+            install_codex(self.config)
+
+        self.assertEqual(
+            events,
+            [
+                'ensure:/home/agent/.local/bin:755',
+                'chown:/home/agent/.local',
+                'installer',
+            ],
+        )
 
     def test_agent_vm_launcher_refuses_symlink_destination(self):
         with tempfile.TemporaryDirectory() as directory:

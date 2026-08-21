@@ -432,6 +432,11 @@ authentication, and non-secret configuration are separate. Add the relevant
 auth option and, if needed, `--agent-config active`, then rotate with
 `agent auth set` for an existing VM.
 
+**An agent installer reports permission denied under `~/.local/bin`.** Current
+setup repairs ownership of the target user's `.local` tree before running
+Codex, Claude Code, or OpenCode installers. Rerun the saved setup command; no
+manual recursive ownership command should be necessary.
+
 ## Related documentation
 
 - [Command-line reference](COMMAND_LINE.md) — complete setup and agent

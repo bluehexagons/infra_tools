@@ -67,8 +67,8 @@ def install_agent_cli_launcher(config: SetupConfig) -> None:
     user_home = _user_home(config)
     bin_dir = os.path.join(user_home, ".local", "bin")
     launcher_path = os.path.join(bin_dir, "infra-tools")
-    _ensure_agent_directory(bin_dir, mode=0o755)
     _reject_symlinked_agent_destination(launcher_path)
+    _prepare_agent_local_bin(config, user_home)
 
     content = (
         "#!/bin/sh\n"
@@ -258,6 +258,7 @@ def _install_script_tool(
         raise RuntimeError(f"{label} installation dependencies failed")
 
     user_home = _user_home(config)
+    _prepare_agent_local_bin(config, user_home)
     result = _run_as_login_user(
         config.username,
         user_home,
@@ -447,6 +448,21 @@ def _ensure_agent_directory(path: str, mode: int = 0o700) -> None:
         os.mkdir(current, mode)
 
     _reject_symlinked_agent_destination(absolute_path)
+
+
+def _prepare_agent_local_bin(config: SetupConfig, user_home: str) -> str:
+    """Create a writable target-user ``~/.local/bin`` directory.
+
+    Setup runs as root, while vendor agent installers run as the target user.
+    Repair the complete user-scoped ``.local`` tree so earlier root-created
+    directories cannot block an installer's atomic link or file replacement.
+    """
+
+    local_dir = os.path.join(user_home, ".local")
+    bin_dir = os.path.join(local_dir, "bin")
+    _ensure_agent_directory(bin_dir, mode=0o755)
+    _chown_path(config, local_dir)
+    return bin_dir
 
 
 def _validate_agent_payload_tree(source: str, destination: str) -> None:
