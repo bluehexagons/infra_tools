@@ -58,6 +58,7 @@ SystemType = Literal[
     "pc_dev", 
     "workstation_dev",
     "agent_workstation",
+    "agent_code_vm",
     "control_plane",
     "agent_vm",
     "server_dev",

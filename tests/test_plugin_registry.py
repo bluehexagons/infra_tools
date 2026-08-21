@@ -31,6 +31,7 @@ class TestPluginRegistry(unittest.TestCase):
                 "pc_dev",
                 "workstation_dev",
                 "agent_workstation",
+                "agent_code_vm",
                 "control_plane",
                 "agent_vm",
                 "server_dev",
@@ -88,6 +89,10 @@ class TestPluginRegistry(unittest.TestCase):
             get_system_type_definition("agent_workstation").step_builder,
             "plugins.workstation:build_workstation_steps",
         )
+        self.assertEqual(
+            get_system_type_definition("agent_code_vm").step_builder,
+            "plugins.workstation:build_workstation_steps",
+        )
 
     def test_system_type_metadata_drives_defaults(self):
         system_type = get_system_type_definition("pc_dev")
@@ -105,16 +110,26 @@ class TestPluginRegistry(unittest.TestCase):
             "pc_dev",
             "workstation_dev",
             "agent_workstation",
+            "agent_code_vm",
         ):
             with self.subTest(profile=profile):
                 system_type = get_system_type_definition(profile)
                 self.assertEqual(system_type.default_browser, "firefox")
 
     def test_agent_profiles_declare_narrow_provider_defaults(self):
-        for profile in ("agent_vm", "agent_workstation"):
+        for profile in ("agent_vm", "agent_workstation", "agent_code_vm"):
             with self.subTest(profile=profile):
                 system_type = get_system_type_definition(profile)
                 self.assertEqual(system_type.default_agent_tools, ("gh", "codex"))
+
+    def test_agent_code_vm_declares_full_coding_defaults(self):
+        system_type = get_system_type_definition("agent_code_vm")
+
+        self.assertEqual(system_type.default_editor, "geany")
+        self.assertEqual(system_type.default_web_interfaces, ("t3code",))
+        self.assertEqual(system_type.default_browser_automation, "playwright")
+        self.assertEqual(system_type.required_explicit_runtimes, ("node",))
+        self.assertFalse(system_type.default_enable_rdp)
 
     def test_control_plane_profile_adds_administrator_tools(self):
         config = SetupConfig(

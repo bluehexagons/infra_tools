@@ -60,6 +60,21 @@ PLUGIN = PluginDefinition(
             default_agent_tools=("gh", "codex"),
             step_builder="plugins.workstation:build_workstation_steps",
         ),
+        SystemTypeDefinition(
+            name="agent_code_vm",
+            description="Full graphical agent coding VM",
+            order=34,
+            include_desktop=True,
+            include_cli_tools=True,
+            include_workstation_dev_apps=True,
+            default_browser="firefox",
+            default_editor="geany",
+            default_agent_tools=("gh", "codex"),
+            default_web_interfaces=("t3code",),
+            default_browser_automation="playwright",
+            required_explicit_runtimes=("node",),
+            step_builder="plugins.workstation:build_workstation_steps",
+        ),
     ),
 )
 

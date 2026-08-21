@@ -880,7 +880,7 @@ class SetupConfig:
         ):
             cmd_parts.append(f"--browser {shlex.quote(self.browser)}")
 
-        if self.editor:
+        if self.editor and self.editor != system_type_defaults.default_editor:
             cmd_parts.append(f"--editor {shlex.quote(self.editor)}")
         
         if self.use_flatpak:
@@ -918,15 +918,32 @@ class SetupConfig:
             for tool in selected_agent_tools:
                 cmd_parts.append(f"--agent-tool {shlex.quote(tool)}")
 
-        for interface in self.desktop_interfaces or []:
-            cmd_parts.append(f"--desktop-interface {shlex.quote(interface)}")
-        for interface in self.web_interfaces or []:
-            cmd_parts.append(f"--web-interface {shlex.quote(interface)}")
+        desktop_interfaces = self.desktop_interfaces or []
+        if desktop_interfaces != list(
+            system_type_defaults.default_desktop_interfaces
+        ):
+            for interface in desktop_interfaces:
+                cmd_parts.append(f"--desktop-interface {shlex.quote(interface)}")
+        web_interfaces = self.web_interfaces or []
+        web_interfaces_are_default = web_interfaces == list(
+            system_type_defaults.default_web_interfaces
+        )
+        if not web_interfaces_are_default:
+            for interface in web_interfaces:
+                cmd_parts.append(f"--web-interface {shlex.quote(interface)}")
         if self.web_interfaces:
-            cmd_parts.append(
-                f"--web-interface-host {shlex.quote(self.web_interface_host or '127.0.0.1')}"
+            inferred_web_host = (
+                "0.0.0.0" if self.web_interface_sources else "127.0.0.1"
             )
-            cmd_parts.append(f"--web-interface-port {self.web_interface_port}")
+            if (
+                not web_interfaces_are_default
+                or self.web_interface_host != inferred_web_host
+            ):
+                cmd_parts.append(
+                    f"--web-interface-host {shlex.quote(self.web_interface_host or '127.0.0.1')}"
+                )
+            if not web_interfaces_are_default or self.web_interface_port != 3773:
+                cmd_parts.append(f"--web-interface-port {self.web_interface_port}")
             for source in self.web_interface_sources or []:
                 cmd_parts.append(f"--web-interface-source {shlex.quote(source)}")
         for port in self.web_ports or []:
@@ -938,7 +955,11 @@ class SetupConfig:
         if self.device_pairing_providers and self.device_pairing_port != 3774:
             cmd_parts.append(f"--device-pairing-port {self.device_pairing_port}")
 
-        if self.browser_automation:
+        if (
+            self.browser_automation
+            and self.browser_automation
+            != system_type_defaults.default_browser_automation
+        ):
             cmd_parts.append(
                 f"--browser-automation {shlex.quote(self.browser_automation)}"
             )
@@ -1172,6 +1193,18 @@ class SetupConfig:
         system_defaults = get_system_type_definition(system_type)
         if not data.get('agent_tools'):
             data['agent_tools'] = list(system_defaults.default_agent_tools) or None
+        if not data.get('desktop_interfaces'):
+            data['desktop_interfaces'] = (
+                list(system_defaults.default_desktop_interfaces) or None
+            )
+        if not data.get('web_interfaces'):
+            data['web_interfaces'] = (
+                list(system_defaults.default_web_interfaces) or None
+            )
+        if not data.get('editor'):
+            data['editor'] = system_defaults.default_editor
+        if not data.get('browser_automation'):
+            data['browser_automation'] = system_defaults.default_browser_automation
         if 'auto_restart' not in data or data.get('auto_restart') is None:
             if 'no_restart' in data and data.get('no_restart') is not None:
                 data['auto_restart'] = not bool(data.pop('no_restart'))
@@ -1200,6 +1233,18 @@ class SetupConfig:
         from lib.system_utils import get_current_username, get_local_timezone
 
         system_type_definition = get_system_type_definition(system_type)
+        missing_required_runtimes = [
+            runtime
+            for runtime in system_type_definition.required_explicit_runtimes
+            if not bool(getattr(args, f'install_{runtime}', False))
+        ]
+        if missing_required_runtimes:
+            required_flags = ' '.join(
+                f'--{runtime}' for runtime in missing_required_runtimes
+            )
+            raise ValueError(
+                f"{system_type} requires explicit runtime selection: {required_flags}"
+            )
         tags = None
         if hasattr(args, 'tags') and args.tags:
             tags = [tag.strip() for tag in args.tags.split(',') if tag.strip()]
@@ -1287,7 +1332,26 @@ class SetupConfig:
         )
         raw_web_ports = getattr(args, 'web_ports', None)
         web_ports = raw_web_ports if isinstance(raw_web_ports, list) else None
-        browser_automation = _optional_str_arg(args, 'browser_automation')
+        browser_automation = (
+            _optional_str_arg(args, 'browser_automation')
+            or system_type_definition.default_browser_automation
+        )
+        editor = (
+            _optional_str_arg(args, 'editor')
+            or system_type_definition.default_editor
+        )
+        raw_desktop_interfaces = getattr(args, 'desktop_interfaces', None)
+        desktop_interfaces = (
+            raw_desktop_interfaces
+            if isinstance(raw_desktop_interfaces, list) and raw_desktop_interfaces
+            else list(system_type_definition.default_desktop_interfaces) or None
+        )
+        raw_web_interfaces = getattr(args, 'web_interfaces', None)
+        web_interfaces = (
+            raw_web_interfaces
+            if isinstance(raw_web_interfaces, list) and raw_web_interfaces
+            else list(system_type_definition.default_web_interfaces) or None
+        )
         raw_agent_repos = getattr(args, 'agent_repos', None)
         agent_repos = raw_agent_repos if isinstance(raw_agent_repos, list) else None
         raw_git_access = getattr(args, 'git_access', 'none')
@@ -1342,7 +1406,7 @@ class SetupConfig:
             desktop=desktop,
             browser=browser,
             browsers=browsers,
-            editor=_optional_str_arg(args, 'editor'),
+            editor=editor,
             use_flatpak=getattr(args, 'use_flatpak', False),
             install_office=install_office,
             apt_packages=getattr(args, 'apt_packages', None),
@@ -1355,8 +1419,8 @@ class SetupConfig:
             install_node=getattr(args, 'install_node', False),
             install_python=getattr(args, 'install_python', False),
             agent_tools=agent_tools,
-            desktop_interfaces=getattr(args, 'desktop_interfaces', None),
-            web_interfaces=getattr(args, 'web_interfaces', None),
+            desktop_interfaces=desktop_interfaces,
+            web_interfaces=web_interfaces,
             web_interface_host=getattr(args, 'web_interface_host', None),
             web_interface_port=getattr(args, 'web_interface_port', 3773),
             web_interface_sources=getattr(args, 'web_interface_sources', None),

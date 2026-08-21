@@ -40,7 +40,12 @@ class SystemTypeDefinition:
     default_auto_restart: bool = True
     default_auto_restart_force_days: int = 7
     default_browser: str | None = None
+    default_editor: str | None = None
     default_agent_tools: tuple[str, ...] = ()
+    default_desktop_interfaces: tuple[str, ...] = ()
+    default_web_interfaces: tuple[str, ...] = ()
+    default_browser_automation: str | None = None
+    required_explicit_runtimes: tuple[str, ...] = ()
     step_builder: str | None = None
 
 

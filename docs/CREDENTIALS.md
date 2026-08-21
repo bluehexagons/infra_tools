@@ -20,10 +20,11 @@ it, such as a private GitHub repository or an agent account.
 
 ## The basic setup model
 
-The `agent_vm` and `agent_workstation` profiles default narrowly to GitHub CLI
-and Codex. Supply repeatable `--agent-tool` options when the VM needs a
-different provider set; an explicit list replaces those defaults. There are no
-broad agent-suite presets that install every supported tool. For example:
+The `agent_vm`, `agent_workstation`, and `agent_code_vm` profiles default
+narrowly to GitHub CLI and Codex. Supply repeatable `--agent-tool` options when
+the VM needs a different provider set; an explicit list replaces those
+defaults. `agent_code_vm` adds interfaces and local capabilities, not every
+supported provider CLI. For example:
 
 ```bash
 infra-tools setup agent_workstation 192.168.0.41 \

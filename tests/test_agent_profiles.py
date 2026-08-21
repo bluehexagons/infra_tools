@@ -52,6 +52,47 @@ class TestAgentProfiles(unittest.TestCase):
         self.assertIn("Installing GitHub CLI", step_names)
         self.assertIn("Installing Codex CLI", step_names)
 
+    def test_agent_code_vm_adds_t3_playwright_and_geany(self) -> None:
+        config = SetupConfig.from_args(
+            _setup_args(install_node=True),
+            "agent_code_vm",
+        )
+
+        self.assertEqual(config.selected_agent_tools(), ["gh", "codex"])
+        self.assertEqual(config.browser, "firefox")
+        self.assertEqual(config.editor, "geany")
+        self.assertEqual(config.web_interfaces, ["t3code"])
+        self.assertEqual(config.browser_automation, "playwright")
+        self.assertTrue(config.include_desktop)
+        self.assertFalse(config.enable_rdp)
+        self.assertFalse(config.install_go)
+
+        step_names = [name for name, _step in get_steps_for_system_type(config)]
+        self.assertIn("Installing workstation editor", step_names)
+        self.assertIn("Installing T3 Code web interface", step_names)
+        self.assertIn("Installing agent browser automation", step_names)
+
+        command = " ".join(config.to_setup_command())
+        self.assertNotIn("--editor", command)
+        self.assertNotIn("--web-interface", command)
+        self.assertNotIn("--browser-automation", command)
+
+    def test_agent_code_vm_keeps_node_runtime_explicit(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError,
+            "agent_code_vm requires explicit runtime selection: --node",
+        ):
+            SetupConfig.from_args(_setup_args(), "agent_code_vm")
+
+    def test_agent_code_vm_explicit_editor_replaces_geany(self) -> None:
+        config = SetupConfig.from_args(
+            _setup_args(editor="vscode", install_node=True),
+            "agent_code_vm",
+        )
+
+        self.assertEqual(config.editor, "vscode")
+        self.assertIn("--editor vscode", " ".join(config.to_setup_command()))
+
     def test_explicit_agent_tool_list_replaces_profile_defaults(self) -> None:
         config = SetupConfig.from_args(
             _setup_args(agent_tools=["claude", "opencode"]),
@@ -81,6 +122,24 @@ class TestAgentProfiles(unittest.TestCase):
         )
 
         self.assertEqual(config.selected_agent_tools(), ["gh", "codex"])
+
+    def test_saved_agent_code_vm_restores_capability_defaults(self) -> None:
+        config = SetupConfig.from_dict(
+            "192.0.2.10",
+            "agent_code_vm",
+            {
+                "username": "agent",
+                "include_desktop": True,
+                "include_cli_tools": True,
+                "include_workstation_dev_apps": True,
+                "browser": "firefox",
+                "install_node": True,
+            },
+        )
+
+        self.assertEqual(config.editor, "geany")
+        self.assertEqual(config.web_interfaces, ["t3code"])
+        self.assertEqual(config.browser_automation, "playwright")
 
 
 if __name__ == "__main__":

@@ -5,10 +5,12 @@ providers and offline snapshot mode remain future work.
 
 This project makes it straightforward to provision a Debian VM for agentic
 development while keeping Git access, repository setup, and credential
-transfer explicit. The `agent_vm` and `agent_workstation` system types provide
-a narrow GitHub CLI plus Codex default; supplying any `--agent-tool` options
-replaces that provider set. This avoids the former large agent-suite model
-while reducing boilerplate for the most common configuration.
+transfer explicit. The `agent_vm`, `agent_workstation`, and `agent_code_vm`
+system types provide a narrow GitHub CLI plus Codex default; supplying any
+`--agent-tool` options replaces that provider set. The first two are narrow
+terminal and graphical bases. `agent_code_vm` composes the separately managed
+Geany, T3 Code web, and Playwright capabilities without selecting every agent,
+language runtime, network boundary, or provisioning setting.
 
 ## Problem
 
@@ -74,13 +76,15 @@ choices:
 --agent-tool opencode
 ```
 
-Other supported tools may be selected in the same way. `agent_vm` and
-`agent_workstation` default to `gh` and `codex`; the first explicit tool list
-replaces both defaults rather than adding to them. Selecting one tool installs
-that tool and only the dependencies required by its installer. It does not
-select other agents, language runtimes, browser automation, editors, or a
-large coding-utility bundle. Optional packages remain available through the
-normal package options.
+Other supported tools may be selected in the same way. All three agent
+profiles default to `gh` and `codex`; the first explicit tool list replaces
+both defaults rather than adding to them. Selecting one tool installs that tool
+and only the dependencies required by its installer. The narrow `agent_vm` and
+`agent_workstation` profiles do not select language runtimes, browser
+automation, editors, or a large coding-utility bundle. The explicitly
+opinionated `agent_code_vm` composition adds Playwright, Geany, and T3 Code web
+while retaining the same narrow provider default. Optional packages remain
+available through the normal package options.
 
 The implementation uses one tool registry. A tool entry owns its
 installer, target configuration paths, credential path/format, authentication
@@ -346,6 +350,10 @@ explicitly deferred as stated above.
   and documentation.
 - Added `agent_vm` and `agent_workstation` as narrow `gh` plus `codex`
   shorthands while preserving explicit-list replacement behavior.
+- Added `agent_code_vm` as an opt-in high-capability composition of the
+  graphical workstation, Geany, T3 Code web, and Playwright defaults while
+  retaining explicit provisioning, access, credential, and project-runtime
+  options.
 
 ### Phase 2: VM-level Git credentials and target-side repositories — complete
 

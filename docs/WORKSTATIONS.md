@@ -43,12 +43,14 @@ desktop interface when both local RDP and remote clients are useful.
 | `pc_dev` | Desktop, Firefox ESR, LibreOffice, SMB client packages, Remmina, and CLI tools |
 | `workstation_dev` | Desktop, Firefox ESR, and CLI tools including Neovim |
 | `agent_workstation` | Developer workstation defaults plus GitHub CLI and Codex |
+| `agent_code_vm` | Agent workstation plus Geany, T3 Code web, and Playwright automation |
 
 The default desktop is XFCE. All workstation profiles use Debian's Firefox ESR
 by default. A browser selected with `--browser` becomes the default for the
 setup user; repeat the flag to install more than one browser. Graphical editors
-are explicit: select Geany or Visual Studio Code with `--editor geany` or
-`--editor vscode`.
+are explicit on the general profiles: select Geany or Visual Studio Code with
+`--editor geany` or `--editor vscode`. The opinionated `agent_code_vm` profile
+defaults to Geany; `--editor vscode` replaces that editor default.
 
 ## Common setups
 
@@ -69,6 +71,36 @@ control-plane administrator package set. Remove `--agent-config` or `--repo`
 when those inputs are not needed. Use `tmux` for long-running agent sessions
 over SSH. To use another provider set, repeat `--agent-tool`; any explicit list
 replaces the profile defaults.
+
+### High-capability graphical agent VM
+
+Use `agent_code_vm` for the recurring combination of a graphical coding
+desktop, Firefox ESR, Geany, T3 Code's headless web service, Playwright browser
+automation, GitHub CLI, and Codex. Provisioning capacity, project language
+runtimes, RDP exposure, T3 Code exposure, and protected device pairing remain
+operator choices:
+
+```bash
+infra-tools setup agent_code_vm 10.0.0.25 agent \
+  --provision-on pve1 --name agent-1 \
+  --image-storage local-lvm \
+  --memory 4G --balloon-min 1G --cores 4 \
+  --storage root local-lvm 32G \
+  --node --go \
+  --git-access read --git-auth active --agent-auth active \
+  --web-interface-source 10.0.0.0/24 \
+  --device-pairing t3code \
+  --device-pairing-password "$PAIRING_PASSWORD" \
+  --rdp --password "$RDP_PASSWORD" --rdp-source 10.0.0.0/24
+```
+
+Without `--web-interface-source`, the profile keeps T3 Code on loopback for
+SSH-tunnel access. RDP is not enabled by the profile because enabling a remote
+login service also requires an explicit account-password and trusted-source
+decision. Device pairing likewise remains explicit because its Basic Auth
+credential is transient. Add `--agent-tool` flags only to replace the default
+`gh` plus `codex` provider set. `--node` is required for this profile's T3 Code
+service; `--go` and other project runtimes remain optional explicit choices.
 
 ### Desktop agentic coding workstation with RDP
 

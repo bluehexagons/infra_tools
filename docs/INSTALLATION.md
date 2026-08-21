@@ -133,16 +133,19 @@ Without `--rdp-source`, RDP is available on all local interfaces with the
 configured rate-limited firewall rule. See [XRDP](XRDP.md) for connection and
 firewall details.
 
-The `agent_vm` and `agent_workstation` profiles default to GitHub CLI and
-Codex. On either profile, repeat `--agent-tool` to replace that provider set.
-Add Node.js, Python, or Go with their individual flags. Use `--agent-config
-active`, `--git-auth active`, or the specified-file credential options when
-the control plane should transfer selected settings or credentials. Active
-GitHub auth can use the controller's `gh auth token` command when the token is
-stored in the controller's keyring; file-backed Codex, Claude Code, and
-OpenCode credentials must be supplied as files. Use `--repo GIT_URL` for
-target-side HTTPS clones; public repositories on any reachable Git host are
-supported.
+The `agent_vm`, `agent_workstation`, and `agent_code_vm` profiles default to
+GitHub CLI and Codex. On any of them, repeat `--agent-tool` to replace that
+provider set. The `agent_code_vm` profile additionally defaults to Geany, T3
+Code web, and Playwright, while leaving provisioning, RDP, trusted network
+sources, and project runtime choices explicit. Its T3 Code service requires an
+explicit `--node`; add Python or Go only when the project needs them. Use
+`--agent-config active`, `--git-auth active`, or the specified-file credential
+options when the control plane should transfer selected settings or
+credentials. Active GitHub auth can use the controller's `gh auth token`
+command when the token is stored in the controller's keyring; file-backed
+Codex, Claude Code, and OpenCode credentials must be supplied as files. Use
+`--repo GIT_URL` for target-side HTTPS clones; public repositories on any
+reachable Git host are supported.
 The [credentials guide](CREDENTIALS.md) explains the difference between
 workspace passwords, GitHub auth, agent auth, and non-secret agent config.
 

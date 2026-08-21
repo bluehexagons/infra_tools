@@ -84,6 +84,7 @@ tools, not for an LXC container.
 | `control_plane` | Debian infrastructure control plane with administrator tools |
 | `agent_vm` | Headless agent coding VM; defaults to GitHub CLI and Codex |
 | `agent_workstation` | Graphical agent coding workstation; adds Firefox ESR |
+| `agent_code_vm` | Full graphical agent VM with T3 Code, Playwright, and Geany |
 | `workstation_desktop` | Desktop workstation with GUI |
 | `workstation_dev` | Developer workstation |
 | `pc_dev` | PC development environment |
@@ -242,8 +243,13 @@ Selecting a language runtime also installs its managed update timer. See
 
 These flags prepare a Debian VM or local control plane for agentic coding. They
 work with any setup type. `agent_vm` is the recommended terminal-only profile,
-and `agent_workstation` adds a desktop and Firefox ESR. Both default to GitHub
-CLI and Codex; an explicit `--agent-tool` list replaces those defaults.
+`agent_workstation` adds a desktop and Firefox ESR, and `agent_code_vm` adds
+the common T3 Code web service, Playwright automation, and Geany stack. All
+three default to GitHub CLI and Codex; an explicit `--agent-tool` list replaces
+those defaults. The full profile does not choose Proxmox capacity, language
+runtimes, network exposure, RDP, or device-pairing credentials. It requires
+the explicit `--node` flag because its T3 Code service uses that runtime; Go
+and other project runtimes remain optional explicit selections.
 `server_lite` omits the standard firewall and generic CLI bundle, so use it
 only when that lighter profile is intentional.
 
@@ -258,6 +264,18 @@ Playwright runtime, MCP registration, and browser security model.
 infra-tools setup agent_vm 10.0.0.10 agentuser \
   --agent-config active \
   --git-access read --repo https://github.com/user/my_codebase.git
+```
+
+For a provisioned graphical coding VM, use the full profile while keeping
+capacity, project runtimes, and trusted network boundaries explicit:
+
+```bash
+infra-tools setup agent_code_vm 10.0.0.11 agentuser \
+  --provision-on pve1 --name agent-1 \
+  --memory 4G --cores 4 --storage root local-lvm 32G \
+  --node --go \
+  --web-interface-source 10.0.0.0/24 \
+  --rdp --password "$RDP_PASSWORD" --rdp-source 10.0.0.0/24
 ```
 
 For the local machine, the installer can select the control-plane profile and
@@ -334,10 +352,10 @@ example, a T3 Code setup with device pairing reports both the direct T3 port
 (`3773` by default) and the Basic Auth enrollment portal (`3774` by default).
 
 Agent tools are selected individually with repeatable `--agent-tool` flags.
-The two agent profiles provide the narrow `gh` plus `codex` default; supplying
-any `--agent-tool` flags replaces that provider set. Other profiles retain no
-implicit agents. Add unrelated packages explicitly with `--apt-install`, and
-add language runtimes with their individual flags.
+The three agent profiles provide the narrow `gh` plus `codex` default;
+supplying any `--agent-tool` flags replaces that provider set. Other profiles
+retain no implicit agents. Add unrelated packages explicitly with
+`--apt-install`, and add language runtimes with their individual flags.
 
 Any setup with agent features installs a managed `~/.local/bin/infra-tools`
 launcher for the target user. On a remote setup the launcher uses the source
