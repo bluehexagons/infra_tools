@@ -2,7 +2,9 @@
 
 Status: active roadmap input. This review records verified maintenance and
 operational gaps found across the repository; implementation sequencing remains
-owned by [the project roadmap](ROADMAP.md).
+owned by [the project roadmap](ROADMAP.md). The scope is intentionally
+proportional to a small-business tool: reliability and clear failure reporting
+come before controls that add recurring operator administration.
 
 ## Scope and verification
 
@@ -138,7 +140,8 @@ idempotency.
 **Follow-up:** persist bounded delivery IDs (with repository/commit context and
 expiry), reject or coalesce repeats, and add a replay regression test. Keep the
 existing one-attempt queue consumption behavior as a separate malformed-job
-safety measure.
+safety measure. **Disposition:** defer until CI/CD deployment work resumes;
+this is not part of the current reliability slice.
 
 ### AUD-08: Destructive snapshot deletion lacks the CLI confirmation contract
 
@@ -259,14 +262,17 @@ rollback stop failure, and inactive/active verification failures.
   retains incomplete rollback state; target setup integration remains open
   under AUD-04.
 
-## Recommended order
+## Current recommended order
 
-1. Fix packaging metadata and add artifact smoke tests to release CI.
-2. Close host-key enrollment inconsistencies for CI/CD and Proxmox.
-3. Add durable setup operation markers and finish required-command caller
-   classification.
-4. Fix command redaction and define bounded command execution, then make
-   config staging reject source symlinks and deployment stop failures fail fast.
-5. Make corrupt-state failures actionable and add webhook delivery idempotency.
-6. Standardize destructive CLI confirmation and define the agent updater trust
-   policy.
+1. Finish required-command caller classification and step-level failure tests.
+2. Add lightweight inspection and rerun guidance for the landed operation
+   markers.
+3. Make corrupt-state failures actionable without silently resetting state.
+4. Add the local package-install smoke test and improve status/`--json` output.
+5. Complete explicit SSH enrollment for CI/CD targets when that deployment path
+   is next maintained.
+6. Standardize destructive CLI confirmation where a command still lacks it.
+
+Webhook replay protection and a stronger updater trust policy remain valid
+follow-ups, but are deferred until their respective workflows justify the
+additional state or operator policy.

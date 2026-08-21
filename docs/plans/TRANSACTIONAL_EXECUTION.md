@@ -1,8 +1,9 @@
 # Transactional Execution and Reconciliation
 
 Status: partially implemented. The misleading in-memory transaction framework
-has been retired; durable operation state and broader setup reconciliation
-remain highest priority.
+has been retired and durable operation state is landed; required-command
+classification, corrupt-state handling, and lightweight recovery guidance
+remain the active scope.
 
 This plan turns setup and deployment from a sequence of mostly independent
 commands into an operation with explicit preparation, activation, verification,
@@ -62,7 +63,7 @@ required callers to trigger rollback manually, and kept all transaction and
 checkpoint state in memory. Sync and scrub callers now use explicit fail-fast
 control flow and retain `lib/operation_log.py` only for diagnostic events. Their
 initial-operation failures now propagate to setup instead of being logged as
-successful configuration. Durable recovery state will be a small, versioned
+successful configuration. Durable recovery state is a small, versioned
 operation record rather than a registry of non-serializable callbacks.
 
 ## Phase 0: Contract and primitive convergence
@@ -188,9 +189,10 @@ Interactive convenience commands may offer a clearly labelled trust-on-first-
 use mode, but automated privileged paths should not enable it by default.
 
 The Proxmox guest helper now uses the workspace enrollment file. The remaining
-implementation slice is CI/CD deploy-target enrollment. A successful
-`ssh-keyscan` is discovery data, not operator approval; deployment must not be
-enabled until the expected fingerprint is explicitly verified.
+implementation slice is CI/CD deploy-target enrollment and is deferred until
+that workflow is next maintained. A successful `ssh-keyscan` is discovery data,
+not operator approval; deployment must not be enabled until the expected
+fingerprint is explicitly verified.
 
 ## Acceptance criteria
 
@@ -210,8 +212,10 @@ enabled until the expected fingerprint is explicitly verified.
 
 The atomic persistence, execution-contract, transaction-framework retirement,
 and setup/deployment operation-marker slices are complete. The next delivery
-should add phase-specific recovery where it can be proven safe, tighten corrupt
-state readers, and finish the `remote_utils.run()` caller inventory.
+should finish the `remote_utils.run()` caller inventory, add lightweight
+phase-specific recovery guidance, and tighten corrupt-state readers. Broader
+recovery automation should wait until real operational experience identifies a
+repeated need.
 
 ## Non-goals
 

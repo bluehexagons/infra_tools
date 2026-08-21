@@ -14,6 +14,8 @@ the [project roadmap](ROADMAP.md) or the
   state and verification contracts exist.
 - **P3** improves extensibility and release quality once the core lifecycle is
   dependable.
+- Prioritize safeguards that reduce operator effort; defer controls that add
+  recurring manual administration until usage or incidents justify them.
 - **Unscheduled** work needs a project brief or an explicit roadmap slot before
   implementation starts.
 - **Reference** documents preserve evidence or completed review decisions; they
@@ -36,7 +38,7 @@ criteria.
 | Generic VM management, agent interfaces, and lightweight Git hosting | Active; provider/schema-tagged Proxmox host records, the initial VM data-disk/mount slice, and explicit Gogs LFS paths implemented; mutation/recovery slices dependency-gated | Unscheduled | No dedicated issue | [VM management, agent interfaces, and lightweight Git hosting](VM_MANAGEMENT_AND_LIGHTWEIGHT_GIT_HOSTING.md): next validate the storage slice on live Proxmox, then sequence provider-neutral VM observation, Gogs safety/health, and the explicit T3 Code desktop/web interface split without bypassing transaction and recovery gates. |
 | Recovery workflows | Queued behind transaction and deployment state | P2 | Recovery portion of [#97](https://github.com/bluehexagons/infra_tools/issues/97) | [Roadmap](ROADMAP.md), with Proxmox backup and restore details in the [Proxmox audit](PROXMOX_MAINTENANCE_AUDIT_2026-08-09.md). |
 | Safe network apply and rollback | Address handoff delivered; firewall apply remains | P2 | No dedicated open issue | [Roadmap](ROADMAP.md): extend the verified host/guest address handoff model to reviewed Proxmox firewall artifacts with timed rollback and connectivity confirmation. |
-| Extensibility and release quality | Queued | P3 | No dedicated open issue | [Roadmap](ROADMAP.md): plugin isolation, packaging smoke tests, lint/type/coverage gates, and a documented provider contract. |
+| Extensibility and release quality | Queued | P3 | No dedicated open issue | [Roadmap](ROADMAP.md): plugin isolation, retained packaging smoke tests, lint/type/coverage gates, and a documented provider contract. |
 
 ## Unscheduled issue backlog
 

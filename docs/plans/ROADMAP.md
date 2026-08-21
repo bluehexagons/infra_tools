@@ -28,6 +28,11 @@ Priorities are ordered by these principles:
 5. New providers and platforms should reuse these guarantees rather than add
    parallel execution models.
 
+These guarantees should remain proportional to the tool's small-business
+operating model. Prefer safeguards that reduce operator effort and make
+failures obvious; defer controls that require recurring manual administration
+until actual usage or incidents justify them.
+
 ## Verification snapshot (2026-08-21)
 
 The ordering remains justified by the current implementation:
@@ -53,14 +58,15 @@ The ordering remains justified by the current implementation:
   target state is finalized only after setup succeeds;
 - package metadata now produces a self-contained wheel, and tagged-release CI
   installs, smoke-tests, and publishes the artifact;
-- signed webhook deliveries have no delivery-ID replay protection;
+- signed webhook deliveries have no delivery-ID replay protection; this is
+  intentionally deferred until CI/CD work resumes;
 - command diagnostics redact complete quoted shell values, and the shared
   command runner now enforces a caller-overridable one-hour bound; and
 - active agent config staging rejects source symlinks, and manifest release
   activation now fails closed on app-unit stop or verification failures.
 - the old callback-based transaction framework has been removed; sync and scrub
-  now fail explicitly, while durable setup/deployment operation records remain
-  to be implemented.
+  now fail explicitly, while durable setup/deployment operation records are
+  landed and retain interruption/recovery context.
 
 The manifest environment-key injection finding is resolved. CI now tests
 Python 3.13, the interpreter shipped by Debian Trixie, and `make compile`
@@ -70,19 +76,20 @@ work.
 
 The best next work packets are:
 
-1. Complete the `remote_utils.run()` caller inventory and move suitable callers
-   toward an argv-native API (strict, secret-safe, and bounded execution are now
-   landed).
-2. Add safe phase-specific recovery actions to the landed target-setup and
-   manifest operation markers; diagnostic event logging remains separate from
-   this authoritative state.
+1. Complete the `remote_utils.run()` caller inventory and move required setup
+   callers toward strict, argv-native execution. Strict, secret-safe, and
+   bounded execution are already landed; intentional probes and cleanup remain
+   best-effort.
+2. Add lightweight, phase-specific recovery inspection and rerun guidance to
+   the landed target-setup and manifest markers; do not build a generalized
+   transaction coordinator.
 3. Replace permissive corrupt-state fallbacks with schema/version checks and
-   actionable remediation, then extend durable markers to remaining mutations.
-4. Replace automatic SSH first-use trust with explicit enrollment before
-   privileged setup/deploy operations.
-5. Standardize destructive CLI confirmations and updater trust policy after the
-   P0 state/failure work. Source-symlink rejection and required, verified
-   service stops before release activation are landed.
+   actionable remediation.
+4. Add low-administration release and operator improvements: a local package
+   install smoke test, consistent status/`--json` output, and documentation of
+   the supported recovery path.
+5. Replace automatic SSH first-use trust with a documented one-time enrollment
+   step before privileged setup/deploy operations.
 
 ## Planning portfolio and GitHub issue alignment (2026-08-17)
 
@@ -210,7 +217,8 @@ Once the lifecycle work is established:
 - isolate malformed plugins so one optional capability cannot break unrelated
   commands;
 - document a stable provider/adapter contract for network and secret backends;
-- add packaging installation smoke tests and explicit package metadata;
+- retain the landed packaging installation smoke tests and explicit package
+  metadata;
 - add linting, incremental type checking, and a measured coverage floor; and
 - consider another Debian-like distribution only when its CI and live-test
   expectations can be stated precisely.
@@ -222,8 +230,8 @@ security, package, service, and networking behavior.
 
 Small, well-contained fixes should not wait for a larger phase. Good follow-ups
 include plugin import fault isolation, consistent `--json` support for
-read-only commands, a local package-install smoke test, and auditing remaining
-non-JSON configuration writes for atomic replacement and permissions.
+read-only commands, and auditing remaining non-JSON configuration writes for
+atomic replacement and permissions.
 
 ## Deliberately deferred
 
@@ -232,7 +240,10 @@ Until P0 and P1 are substantially complete, avoid prioritizing:
 - additional browsers, desktop environments, and language installers;
 - broad non-Debian support;
 - multiple network providers before safe Proxmox apply exists; and
-- a generalized public plugin SDK before startup isolation is in place.
+- a generalized public plugin SDK before startup isolation is in place;
+- webhook delivery replay protection before CI/CD work resumes; and
+- updater signature infrastructure or other recurring trust administration
+  without a concrete operational need.
 
 These features increase surface area without improving the reliability of the
 core workflows operators already depend on.
