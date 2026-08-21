@@ -82,7 +82,13 @@ service therefore puts a T3-only `gh` compatibility shim first on its `PATH`.
 The shim removes that null field from T3's exact auth-discovery command. If a
 valid token-only GitHub CLI entry reports success without an account name, the
 shim asks the authenticated GitHub API for that account's login and supplies it
-to T3. All other GitHub CLI arguments execute the installed binary unchanged,
+to T3. It also normalizes T3's exact repository lookup response. If GitHub CLI
+cannot complete that lookup for a syntactically valid `owner/repo`, the shim
+supplies the deterministic GitHub clone URLs and leaves `git clone` to verify
+access. T3 0.0.33 always selects the returned SSH field; when GitHub CLI is
+configured for HTTPS, the shim supplies the HTTPS URL in that field so private
+clones use the installed `gh` credential helper instead of requiring a separate
+SSH key. All other GitHub CLI arguments execute the installed binary unchanged,
 and normal user shells do not use the shim. The launcher records the helper's
 digest so a setup rerun restarts T3 whenever this compatibility behavior changes.
 
@@ -249,6 +255,12 @@ credential options described in [CREDENTIALS.md](CREDENTIALS.md). Public HTTPS
 repositories can be cloned without credentials. Use `--repo` and
 `--agent-workspace` for initial checkout, or create projects on the VM as the
 target user.
+
+T3's **GitHub repository** source accepts `owner/repo`. As a simpler path that
+bypasses provider lookup entirely, select **Git URL** and enter the canonical
+HTTPS URL, such as `https://github.com/owner/repo.git`. Private GitHub URLs use
+the same target-user credential helper installed by `gh auth setup-git`; no
+token should be embedded in the URL.
 
 T3's browser-facing client is separate from infra-tools' browser automation
 capability. Add `--browser-automation playwright` when Codex/OpenCode need a

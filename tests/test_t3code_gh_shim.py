@@ -80,6 +80,125 @@ class T3CodeGitHubShimTest(unittest.TestCase):
             [binary, "pr", "list", "--limit", "10"],
         )
 
+    def test_repository_lookup_normalizes_output_and_honors_https(self) -> None:
+        repository = {
+            "nameWithOwner": "bluehexagons/infra_tools",
+            "sshUrl": "git@github.com:bluehexagons/infra_tools.git",
+            "url": "https://github.com/bluehexagons/infra_tools",
+        }
+        responses = [
+            SimpleNamespace(
+                returncode=0,
+                stdout=json.dumps(repository, indent=2) + "\n",
+                stderr="",
+            ),
+            SimpleNamespace(returncode=0, stdout="https\n", stderr=""),
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            binary = self._binary(temporary)
+            with (
+                patch.object(
+                    t3code_gh_shim.subprocess,
+                    "run",
+                    side_effect=responses,
+                ) as run_command,
+                redirect_stdout(io.StringIO()) as stdout,
+                redirect_stderr(io.StringIO()) as stderr,
+            ):
+                result = t3code_gh_shim.run(
+                    binary,
+                    [
+                        "repo",
+                        "view",
+                        "bluehexagons/infra_tools",
+                        "--json",
+                        "nameWithOwner,url,sshUrl",
+                    ],
+                )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(stderr.getvalue(), "")
+        normalized = json.loads(stdout.getvalue())
+        self.assertEqual(normalized["nameWithOwner"], "bluehexagons/infra_tools")
+        self.assertEqual(
+            normalized["sshUrl"],
+            "https://github.com/bluehexagons/infra_tools",
+        )
+        self.assertEqual(
+            run_command.call_args_list[1].args[0],
+            [binary, "config", "get", "git_protocol", "--host", "github.com"],
+        )
+
+    def test_repository_lookup_falls_back_to_safe_canonical_urls(self) -> None:
+        responses = [
+            SimpleNamespace(returncode=1, stdout="", stderr="lookup failed\n"),
+            SimpleNamespace(returncode=0, stdout="ssh\n", stderr=""),
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            binary = self._binary(temporary)
+            with (
+                patch.object(
+                    t3code_gh_shim.subprocess,
+                    "run",
+                    side_effect=responses,
+                ),
+                redirect_stdout(io.StringIO()) as stdout,
+                redirect_stderr(io.StringIO()) as stderr,
+            ):
+                result = t3code_gh_shim.run(
+                    binary,
+                    [
+                        "repo",
+                        "view",
+                        "bluehexagons/beast_cards",
+                        "--json",
+                        "nameWithOwner,url,sshUrl",
+                    ],
+                )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(stderr.getvalue(), "")
+        self.assertEqual(
+            json.loads(stdout.getvalue()),
+            {
+                "nameWithOwner": "bluehexagons/beast_cards",
+                "url": "https://github.com/bluehexagons/beast_cards",
+                "sshUrl": "git@github.com:bluehexagons/beast_cards.git",
+            },
+        )
+
+    def test_repository_lookup_preserves_failure_for_unsafe_name(self) -> None:
+        response = SimpleNamespace(
+            returncode=1,
+            stdout="",
+            stderr="invalid repository\n",
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            binary = self._binary(temporary)
+            with (
+                patch.object(
+                    t3code_gh_shim.subprocess,
+                    "run",
+                    return_value=response,
+                ),
+                redirect_stdout(io.StringIO()) as stdout,
+                redirect_stderr(io.StringIO()) as stderr,
+            ):
+                result = t3code_gh_shim.run(
+                    binary,
+                    [
+                        "repo",
+                        "view",
+                        "../unsafe",
+                        "--json",
+                        "nameWithOwner,url,sshUrl",
+                    ],
+                )
+
+        self.assertEqual(result, 1)
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertEqual(stderr.getvalue(), "invalid repository\n")
+
     def test_discovery_resolves_login_for_authenticated_token_only_entry(self) -> None:
         payload = {
             "hosts": {
