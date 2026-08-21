@@ -58,6 +58,18 @@ class TestAgentWebPortConfig(unittest.TestCase):
         self.assertIn("--no-default-web-ports", config.to_remote_args())
         self.assertIn("--no-default-web-ports", config.to_setup_command())
 
+    def test_godot_web_bundle_always_opens_its_https_origin(self) -> None:
+        config = SetupConfig(
+            host="agent-vm",
+            username="agent",
+            system_type="server_lite",
+            machine_type="vm",
+            godot_bundles=["web"],
+            default_web_ports=False,
+        )
+
+        self.assertEqual(config.effective_web_ports(), [8443])
+
     def test_defaults_do_not_apply_to_hardware_or_server_lite(self) -> None:
         hardware = SetupConfig(
             host="agent-host",
@@ -141,6 +153,19 @@ class TestAgentWebPortConfig(unittest.TestCase):
         self.assertIn(
             "Configuring firewall for requested web ports",
             [name for name, _step in get_steps_for_system_type(with_ports)],
+        )
+
+        with_godot_web = SetupConfig(
+            host="agent-vm",
+            username="agent",
+            system_type="server_lite",
+            machine_type="vm",
+            godot_bundles=["web"],
+            default_web_ports=False,
+        )
+        self.assertIn(
+            "Configuring firewall for requested web ports",
+            [name for name, _step in get_steps_for_system_type(with_godot_web)],
         )
 
 

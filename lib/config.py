@@ -36,6 +36,7 @@ BROWSER_AUTOMATION_PROVIDERS = ("playwright",)
 EDITORS = ("geany", "vscode")
 GIT_ACCESS_POLICIES = ("none", "read", "read-write")
 GODOT_BUNDLES = ("web", "publishing")
+GODOT_WEB_HTTPS_PORT = 8443
 DEFAULT_AGENT_WEB_PORTS = (80, 443, 8080, 8081)
 LAN_ACCESS_SOURCES = (
     "10.0.0.0/8",
@@ -505,6 +506,8 @@ class SetupConfig:
         """Return managed TCP web ports for this resolved target."""
 
         ports = list(self.web_ports or [])
+        if "web" in (self.godot_bundles or []):
+            ports.append(GODOT_WEB_HTTPS_PORT)
         if self.include_web_firewall:
             ports.extend((80, 443))
         if (

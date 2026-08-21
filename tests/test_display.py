@@ -154,6 +154,25 @@ class TestRdpDisplay(unittest.TestCase):
             rendered,
         )
 
+    def test_access_summary_lists_managed_godot_https_origin(self) -> None:
+        config = SetupConfig(
+            host="192.168.0.42",
+            username="agent",
+            system_type="agent_vm",
+            godot_bundles=["web"],
+        )
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            print_service_access_summary(config)
+
+        rendered = output.getvalue()
+        self.assertIn(
+            "Godot web exports: https://192.168.0.42:8443/games/agent/",
+            rendered,
+        )
+        self.assertIn("godot-web-publish GAME_NAME", rendered)
+
 
 if __name__ == "__main__":
     unittest.main()

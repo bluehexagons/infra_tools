@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from typing import Optional
-from lib.config import SetupConfig
+from lib.config import GODOT_WEB_HTTPS_PORT, SetupConfig
 
 
 def _rdp_access_summary(config: SetupConfig) -> str:
@@ -102,6 +102,20 @@ def print_service_access_summary(config: SetupConfig) -> None:
     if config.system_type == "server_web":
         scheme = "https" if config.enable_ssl else "http"
         lines.append(("Web server", _http_url(config.host, scheme=scheme), None))
+
+    if "web" in (config.godot_bundles or []):
+        game_root = _http_url(
+            config.host,
+            GODOT_WEB_HTTPS_PORT,
+            scheme="https",
+        ) + f"games/{config.username}/"
+        lines.append(
+            (
+                "Godot web exports",
+                game_root,
+                "publish with godot-web-publish GAME_NAME",
+            )
+        )
 
     if config.web_interfaces:
         bind = config.web_interface_host or "127.0.0.1"
@@ -277,6 +291,8 @@ def print_setup_summary(config: SetupConfig, description: Optional[str] = None) 
 
     if config.selected_agent_tools():
         print(f"Agent tools: {', '.join(config.selected_agent_tools())}")
+    if config.godot_bundles:
+        print(f"Godot bundles: {', '.join(config.godot_bundles)}")
     effective_web_ports = config.effective_web_ports()
     if effective_web_ports:
         exposure = "source-restricted" if access_sources else "global"

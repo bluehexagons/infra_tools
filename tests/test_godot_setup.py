@@ -96,6 +96,50 @@ class TestGodotSetup(unittest.TestCase):
                 godot_bundles=["publishing"],
             )
 
+    def test_registered_bundle_state_validates_https_identities(self):
+        with patch.object(
+            godot_steps,
+            "read_godot_bundle_state",
+            return_value={
+                "bundles": ["web"],
+                "users": ["agent"],
+                "web_identities": ["Games.Example", "192.0.2.10"],
+            },
+        ):
+            bundles, users, identities = godot_steps._validated_registered_bundles()
+
+        self.assertEqual(bundles, ["web"])
+        self.assertEqual(users, ["agent"])
+        self.assertEqual(identities, ["games.example", "192.0.2.10"])
+
+    def test_legacy_web_bundle_registration_discovers_https_identity(self):
+        with (
+            patch.object(
+                godot_steps,
+                "_validated_registered_bundles",
+                return_value=(["web"], ["agent"], []),
+            ),
+            patch(
+                "common.godot_web_steps.discover_local_web_identities",
+                return_value=["godot-vm", "127.0.0.1"],
+            ),
+            patch.object(godot_steps, "write_godot_bundle_state") as write_state,
+            patch.object(
+                godot_steps,
+                "_install_selected_godot_bundles",
+                return_value=True,
+            ) as install_bundles,
+        ):
+            changed = godot_steps.update_registered_godot_bundles()
+
+        self.assertTrue(changed)
+        write_state.assert_called_once_with(
+            ["web"], ["agent"], ["godot-vm", "127.0.0.1"]
+        )
+        install_bundles.assert_called_once_with(
+            ["web"], ["agent"], ["godot-vm", "127.0.0.1"]
+        )
+
     def test_agent_profile_can_add_graphical_and_headless_godot_steps(self):
         for system_type in ("agent_vm", "agent_workstation"):
             with self.subTest(system_type=system_type):

@@ -31,7 +31,7 @@ currently accepts these bundles:
 
 | Bundle | Installed tooling |
 | --- | --- |
-| `web` | Version-matched web export templates for regular, single-threaded, and GDExtension-enabled debug/release exports |
+| `web` | Version-matched web export templates plus a managed HTTPS publishing origin for regular, single-threaded, threaded, and GDExtension-enabled debug/release exports |
 | `publishing` | Butler for itch.io and, on x86_64, the SteamCMD command-line publisher |
 
 The web bundle selects the official export-template TPZ matching the active
@@ -43,6 +43,57 @@ all-platform archive. The cache is kept under `/opt/godot/export_templates`;
 files are copied into the configured account's
 `~/.local/share/godot/export_templates/VERSION` directory so graphical users
 and agents running as that account see the same export targets.
+
+### Managed HTTPS web hosting
+
+The web bundle also installs an isolated Nginx origin on TCP 8443. Setup opens
+that port through the same UFW and `--access-source` policy as other managed
+web ports, creates a publishing directory for the configured account, and
+installs `godot-web-publish` system-wide. A project with a `Web` export preset
+can be exported and activated without writing a game-specific service or
+Nginx configuration:
+
+```bash
+cd ~/repos/my-game
+godot-web-publish my-game
+# Use another preset or create a debug export when needed:
+godot-web-publish my-game --preset "Web Threads" --debug
+```
+
+The resulting URL is
+`https://HOST:8443/games/USERNAME/my-game/`. The host sends the secure-context
+and cross-origin isolation headers required by threaded and web GDExtension
+exports:
+
+```text
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Embedder-Policy: require-corp
+```
+
+The same endpoint works for Godot's default single-threaded exports. Published
+games are replaced only after Godot completes a new export, so a failed build
+does not remove the last working copy. Agents and interactive users share the
+same command and user-owned publishing root.
+
+If a current Let's Encrypt certificate already exists for a configured DNS
+name, the origin reuses it. Otherwise setup creates a VM-local certificate
+authority, installs it into the VM's system trust store, and issues a server
+certificate covering the setup host, configured system hostname, and loopback
+names. Browsers and agents running inside the VM therefore trust the origin
+without per-game configuration. A browser on another computer must trust that
+VM CA once; a publicly trusted certificate cannot be issued automatically for
+a private IP or an unowned internal hostname. Setup prints the CA file
+fingerprint, and the certificate is available on the VM at:
+
+```text
+/var/lib/infra_tools/internal-web-pki/ca.crt
+```
+
+The private CA key remains root-only. Re-running setup preserves the CA and
+renews the server certificate when its names change or it approaches expiry.
+The weekly Godot maintenance run also reconciles the certificate, Nginx site,
+publishing users, and export templates. No game-specific TLS renewal job is
+needed.
 
 The publishing bundle installs verified Butler GitHub releases system-wide as
 `butler`. It also installs Valve's pinned SteamCMD bootstrap in the configured
@@ -62,8 +113,9 @@ steamcmd +login YOUR_STEAM_ACCOUNT
 ```
 
 Combine `web` with an explicit browser or the existing Playwright integration
-when exported games need browser smoke tests; the bundle itself does not alter
-browser or agent configuration.
+when exported games need browser smoke tests. The origin and publisher are
+system-wide, so browser-capable agents can test the same URL shown after
+publishing without a separate server process.
 
 ## Release and integrity policy
 
