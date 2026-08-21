@@ -83,13 +83,10 @@ def build_ssh_command(
     connect_timeout: int | None = 30,
     server_alive_interval: int | None = 30,
     control_path: str | None = None,
-    allocate_tty: bool = False,
 ) -> list[str]:
     """Build an SSH command with consistent options."""
 
     command = ["ssh"]
-    if allocate_tty:
-        command.append("-tt")
     if ssh_key:
         command.extend(["-i", ssh_key])
     if port is not None:
@@ -132,9 +129,9 @@ def ensure_remote_sudo(
 
     Setup uploads use SSH stdin for a tar stream, so a remote sudo prompt
     cannot safely be allowed to consume that stream. Probe non-interactively
-    first; when the caller has a terminal, authenticate with a separate
-    terminal-backed ``sudo -v`` session and verify the cached authorization
-    before returning.
+    and require the setup account to have the intended passwordless policy.
+    A prior ``sudo -v`` in another SSH session is not reliable because sudo
+    normally scopes cached credentials to a terminal or parent process.
     """
     if username == "root":
         return True
@@ -173,64 +170,14 @@ def ensure_remote_sudo(
         if detail:
             print(f"  SSH check: {detail[:240]}")
         return False
-    if not sys.stdin.isatty():
-        print(
-            f"Error: {username}@{host} does not provide passwordless sudo and "
-            "setup has no terminal for a password prompt. Run setup from a "
-            "terminal, load the SSH key into ssh-agent, or configure the setup "
-            "user with the required NOPASSWD sudo rule."
-        )
-        if detail:
-            print(f"  Remote sudo check: {detail[:240]}")
-        return False
-
     print(
-        f"  Remote sudo authentication is required for {username}@{host}; "
-        "enter the guest sudo password if prompted."
+        f"Error: {username}@{host} does not provide the required non-interactive "
+        "sudo access. Configure the setup user with the intended NOPASSWD rule "
+        "before retrying."
     )
-    authenticate = build_ssh_command(
-        host,
-        username,
-        ssh_key,
-        remote_command="sudo -v",
-        batch_mode=False,
-        connect_timeout=30,
-        server_alive_interval=30,
-        control_path=control_path,
-        allocate_tty=True,
-    )
-    try:
-        auth_result = subprocess.run(authenticate, check=False, timeout=timeout)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        print(f"Error: remote sudo authentication could not run: {exc}")
-        return False
-    if auth_result.returncode != 0:
-        print(
-            f"Error: remote sudo authentication failed for {username}@{host} "
-            f"(exit {auth_result.returncode})."
-        )
-        return False
-
-    try:
-        verification = subprocess.run(
-            probe,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        print(f"Error: could not verify remote sudo after authentication: {exc}")
-        return False
-    if verification.returncode != 0:
-        detail = (verification.stderr or verification.stdout or "").strip()
-        print(f"Error: remote sudo remains unavailable for {username}@{host}.")
-        if detail:
-            print(f"  Remote sudo check: {detail[:240]}")
-        return False
-
-    print(f"  ✓ Remote sudo access verified for {username}@{host}")
-    return True
+    if detail:
+        print(f"  Remote sudo check: {detail[:240]}")
+    return False
 
 
 def build_scp_command(

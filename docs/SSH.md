@@ -63,18 +63,17 @@ after verifying the displayed fingerprint.
 
 Hosted VM setup also needs the guest setup account to run privileged staging
 commands. The upload itself uses SSH standard input for a tar stream, so
-infra-tools never lets a remote `sudo` prompt consume that stream. It first
-checks `sudo -n`; on an interactive run, if the guest requires a password, it
-opens a separate terminal-backed `sudo -v` session and then continues the
-upload. Non-interactive runs require passwordless sudo for the setup account.
+infra-tools never lets a remote `sudo` prompt consume that stream. It checks
+`sudo -n` and requires passwordless sudo for the setup account. Authenticating
+with `sudo -v` in a separate SSH terminal is not sufficient because normal
+sudo credential caches are scoped to a terminal or parent process.
 Proxmox VM cloud-init installs that rule as
 `/etc/sudoers.d/infra-tools-USERNAME`, owned by `root:root` with mode `0440`.
 The normal VM setup flow validates and repairs that drop-in on reruns, so an
 older file with overly broad permissions is corrected automatically.
-For an existing VM that was not provisioned by infra-tools, either run setup
-from a terminal when prompted or grant the setup account the intended
-`NOPASSWD` sudo rule. The sudo password is not stored, passed in the archive,
-or written to the setup cache.
+For an existing VM that was not provisioned by infra-tools, grant the setup
+account the intended `NOPASSWD` sudo rule before setup. No sudo password is
+accepted, stored, passed in the archive, or written to the setup cache.
 
 ## Troubleshooting
 

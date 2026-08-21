@@ -64,9 +64,8 @@ route. If cloud-init brought up the address without the route, infra-tools
 repairs it automatically before package installation. For VMs, this check and
 the remote setup upload use the configured guest setup username and its
 non-interactive `sudo` privileges; they do not require root SSH access. On an
-interactive run, infra-tools can first authenticate a password-protected sudo
-policy through a separate terminal-backed SSH session before the route check
-and upload. LXC
+existing VM, the setup account must have an explicit `NOPASSWD` policy because
+the route check and streamed upload cannot safely consume a sudo password. LXC
 guests continue to use root for this first handoff because their setup user is
 created by the initial remote setup. Interactive runs may prompt for the
 configured SSH key's passphrase; non-interactive runs require that key to be
