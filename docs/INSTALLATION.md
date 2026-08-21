@@ -137,9 +137,10 @@ The `agent_vm`, `agent_workstation`, and `agent_code_vm` profiles default to
 GitHub CLI and Codex. `--agent-tool` values add to those defaults and accept
 comma-separated lists; use `--no-agent-tool` to remove a default. The
 `agent_code_vm` profile additionally defaults to Geany, T3 Code, Playwright,
-RDP, private source ranges, T3 pairing, read-write Git, and active auth
-sources. Its T3 Code service requires explicit `--node` and `--go`; add Python
-only when the project needs it. Use
+RDP, T3 pairing, read-write Git, and active auth sources. It does not assume a
+management network; add `--lan-access`, `--access-source`, or service-specific
+source flags explicitly. Its T3 Code service requires explicit `--node` and
+`--go`; add Python only when the project needs it. Use
 `--agent-config active`, `--git-auth active`, or the specified-file credential
 options when the control plane should transfer selected settings or
 credentials. Active GitHub auth can use the controller's `gh auth token`

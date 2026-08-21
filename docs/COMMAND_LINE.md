@@ -297,12 +297,14 @@ capacity and project runtimes explicit:
 infra-tools setup agent_code_vm 10.0.0.11 agentuser \
   --provision-on pve1 --name agent-1 \
   --memory 4G --cores 4 --storage root local-lvm 32G \
-  --node --go --agent-tool opencode
+  --node --go --agent-tool opencode --lan-access
 ```
 
-The profile supplies T3 Code, Playwright, Geany, RDP, `192.168.0.0/24` and
-`10.0.0.0/8` source ranges, read-write Git, active auth sources, and T3
-pairing. Passwords omitted from the command are requested with hidden prompts;
+The profile supplies T3 Code, Playwright, Geany, RDP, read-write Git, active
+auth sources, and T3 pairing. Access sources are deliberately explicit; the
+example uses `--lan-access`, while a narrower deployment can use
+`--access-source` or the service-specific source flags. Passwords omitted from
+the command are requested with hidden prompts;
 an empty pairing password reuses the target account password. Use
 `--git-access none --git-auth none --agent-auth none` or the `--no-*` switches
 when a deployment needs a narrower posture.

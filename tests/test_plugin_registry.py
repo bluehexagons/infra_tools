@@ -131,7 +131,8 @@ class TestPluginRegistry(unittest.TestCase):
         self.assertEqual(system_type.required_explicit_runtimes, ("node", "go"))
         self.assertTrue(system_type.default_enable_rdp)
         self.assertEqual(system_type.default_git_access, "read-write")
-        self.assertEqual(system_type.default_web_interface_sources, ("192.168.0.0/24", "10.0.0.0/8"))
+        self.assertFalse(hasattr(system_type, "default_web_interface_sources"))
+        self.assertFalse(hasattr(system_type, "default_rdp_sources"))
 
     def test_control_plane_profile_adds_administrator_tools(self):
         config = SetupConfig(

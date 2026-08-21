@@ -963,9 +963,7 @@ class SetupConfig:
                 )
             if self.clear_rdp_sources:
                 cmd_parts.append("--no-rdp-source")
-            elif list(self.rdp_allowed_sources or []) != list(
-                system_type_defaults.default_rdp_sources
-            ):
+            else:
                 for source in self.rdp_allowed_sources or []:
                     cmd_parts.append(f"--rdp-source {shlex.quote(source)}")
             if not self.rdp_clipboard:
@@ -1071,9 +1069,7 @@ class SetupConfig:
                 cmd_parts.append(f"--web-interface-port {self.web_interface_port}")
             if self.clear_web_interface_sources:
                 cmd_parts.append("--no-web-interface-source")
-            elif list(self.web_interface_sources or []) != list(
-                system_type_defaults.default_web_interface_sources
-            ):
+            else:
                 for source in self.web_interface_sources or []:
                     cmd_parts.append(f"--web-interface-source {shlex.quote(source)}")
         for port in self.web_ports or []:
@@ -1356,16 +1352,6 @@ class SetupConfig:
             data['browser_automation'] = system_defaults.default_browser_automation
         if 'enable_rdp' not in data or data.get('enable_rdp') is None:
             data['enable_rdp'] = system_defaults.default_enable_rdp
-        if not data.get('clear_rdp_sources') and not data.get('rdp_allowed_sources'):
-            data['rdp_allowed_sources'] = (
-                list(system_defaults.default_rdp_sources) or None
-            )
-        if not data.get('clear_web_interface_sources') and not data.get(
-            'web_interface_sources'
-        ) and not data.get('disable_web_interface'):
-            data['web_interface_sources'] = (
-                list(system_defaults.default_web_interface_sources) or None
-            )
         if not data.get('disable_device_pairing') and not data.get(
             'device_pairing_providers'
         ):
@@ -1622,7 +1608,7 @@ class SetupConfig:
             else (
                 raw_rdp_sources
                 if isinstance(raw_rdp_sources, list) and raw_rdp_sources
-                else list(system_type_definition.default_rdp_sources) or None
+                else None
             )
         )
         clear_web_interface_sources = bool(
@@ -1635,7 +1621,7 @@ class SetupConfig:
             else (
                 raw_web_sources
                 if isinstance(raw_web_sources, list) and raw_web_sources
-                else list(system_type_definition.default_web_interface_sources) or None
+                else None
             )
         )
         disable_device_pairing = bool(

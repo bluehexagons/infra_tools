@@ -43,7 +43,7 @@ desktop interface when both local RDP and remote clients are useful.
 | `pc_dev` | Desktop, Firefox ESR, LibreOffice, SMB client packages, Remmina, and CLI tools |
 | `workstation_dev` | Desktop, Firefox ESR, and CLI tools including Neovim |
 | `agent_workstation` | Developer workstation defaults plus GitHub CLI and Codex |
-| `agent_code_vm` | Agent workstation plus Geany, T3 Code web, Playwright, RDP, private source ranges, pairing, and read-write Git/auth defaults |
+| `agent_code_vm` | Agent workstation plus Geany, T3 Code web, Playwright, RDP, pairing, and read-write Git/auth defaults |
 
 The default desktop is XFCE. All workstation profiles use Debian's Firefox ESR
 by default. A browser selected with `--browser` becomes the default for the
@@ -76,9 +76,9 @@ comma-separated list. Use `--no-agent-tool gh` to remove a profile default.
 
 Use `agent_code_vm` for the recurring combination of a graphical coding
 desktop, Firefox ESR, Geany, T3 Code's headless web service, Playwright browser
-automation, GitHub CLI, Codex, RDP, private management ranges, protected
-pairing, and read-write Git/auth defaults. Provisioning capacity and project
-language runtimes remain operator choices:
+automation, GitHub CLI, Codex, RDP, protected pairing, and read-write Git/auth
+defaults. Provisioning capacity, project language runtimes, and network access
+remain operator choices:
 
 ```bash
 infra-tools setup agent_code_vm 10.0.0.25 agent \
@@ -87,11 +87,15 @@ infra-tools setup agent_code_vm 10.0.0.25 agent \
   --memory 4G --balloon-min 1G --cores 4 \
   --storage root local-lvm 32G \
   --node --go \
+  --lan-access \
   --agent-tool opencode
 ```
 
-The profile supplies `192.168.0.0/24` and `10.0.0.0/8` for both web and RDP
-access. Omitted account and pairing passwords are requested with hidden prompts;
+The profile does not supply implicit web or RDP source ranges. The example
+opts into all private LAN ranges with `--lan-access`; use `--access-source` or
+service-specific flags for a narrower policy. Without an access source, T3
+Code remains loopback-only and RDP uses its global rate-limited fallback.
+Omitted account and pairing passwords are requested with hidden prompts;
 an empty pairing password reuses the account password. Use
 `--git-access none --git-auth none --agent-auth none`, `--no-rdp`, `--no-web-interface`, or
 `--no-device-pairing` to disable individual defaults. Both `--node` and `--go`

@@ -67,7 +67,9 @@ class TestAgentProfiles(unittest.TestCase):
         self.assertTrue(config.enable_rdp)
         self.assertTrue(config.install_go)
         self.assertEqual(config.git_access, "read-write")
-        self.assertEqual(config.web_interface_sources, ["192.168.0.0/24", "10.0.0.0/8"])
+        self.assertIsNone(config.web_interface_sources)
+        self.assertIsNone(config.rdp_allowed_sources)
+        self.assertEqual(config.web_interface_host, "127.0.0.1")
         self.assertEqual(config.device_pairing_providers, ["t3code"])
 
         step_names = [name for name, _step in get_steps_for_system_type(config)]
@@ -79,6 +81,8 @@ class TestAgentProfiles(unittest.TestCase):
         self.assertNotIn("--editor", command)
         self.assertNotIn("--web-interface", command)
         self.assertNotIn("--browser-automation", command)
+        self.assertNotIn("--web-interface-source", command)
+        self.assertNotIn("--rdp-source", command)
 
     def test_agent_code_vm_keeps_node_runtime_explicit(self) -> None:
         with self.assertRaisesRegex(
@@ -86,6 +90,22 @@ class TestAgentProfiles(unittest.TestCase):
             "agent_code_vm requires explicit runtime selection: --node --go",
         ):
             SetupConfig.from_args(_setup_args(), "agent_code_vm")
+
+    def test_agent_code_vm_lan_access_is_explicit(self) -> None:
+        config = SetupConfig.from_args(
+            _setup_args(install_node=True, install_go=True, lan_access=True),
+            "agent_code_vm",
+        )
+
+        self.assertTrue(config.lan_access)
+        self.assertEqual(
+            config.effective_rdp_sources(),
+            ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"],
+        )
+        self.assertEqual(
+            config.effective_web_interface_sources(),
+            config.effective_rdp_sources(),
+        )
 
     def test_agent_code_vm_explicit_editor_replaces_geany(self) -> None:
         config = SetupConfig.from_args(
@@ -152,6 +172,8 @@ class TestAgentProfiles(unittest.TestCase):
         self.assertEqual(config.editor, "geany")
         self.assertEqual(config.web_interfaces, ["t3code"])
         self.assertEqual(config.browser_automation, "playwright")
+        self.assertIsNone(config.web_interface_sources)
+        self.assertIsNone(config.rdp_allowed_sources)
 
 
 if __name__ == "__main__":
