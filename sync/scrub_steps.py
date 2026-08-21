@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import hashlib
-import time
 from typing import Optional, Any
 
 from lib.config import SetupConfig
@@ -17,34 +16,11 @@ from lib.validation import (
     validate_redundancy_percentage,
 )
 from lib.operation_log import create_operation_logger
-from lib.transaction import create_transaction
 from lib.task_utils import (
     validate_frequency,
     check_path_on_smb_mount,
     ensure_directory
 )
-
-
-def remove_par2_files_under(database_path: str) -> list[str]:
-    """Remove all .par2 files under ``database_path``.
-
-    Used by initial-par2 rollback at setup time. Returns the list of removed
-    paths (best-effort; OSErrors during removal are swallowed but the path is
-    still reported as not-removed by being absent from the result).
-    """
-    removed: list[str] = []
-    if not os.path.isdir(database_path):
-        return removed
-    for root, _, files in os.walk(database_path):
-        for file in files:
-            if file.endswith('.par2'):
-                full = os.path.join(root, file)
-                try:
-                    os.remove(full)
-                    removed.append(full)
-                except OSError:
-                    pass
-    return removed
 
 
 def install_par2(config: SetupConfig) -> None:
@@ -102,115 +78,57 @@ def create_scrub_service(config: SetupConfig, scrub_spec: Optional[list[str]] = 
     frequency: str = scrub_config['frequency']
     logger = create_operation_logger("scrub", directory=directory, database_path=database_path, 
                                     redundancy=redundancy, frequency=frequency)
-    transaction = create_transaction(f"scrub_{int(time.time())}", logger, timeout_seconds=3600)
-    
+
     try:
-        transaction.add_validation_step(
-            lambda: validate_filesystem_path(directory, must_exist=True, check_writable=False),
-            f"Validate directory path: {directory}",
-            "validate_directory"
-        )
-        transaction.add_validation_step(
-            lambda: validate_database_path(database_path),
-            f"Validate database path: {database_path}",
-            "validate_database"
-        )
-        transaction.add_validation_step(
-            lambda: validate_mount_for_sync(directory, "directory"),
-            f"Validate directory mount: {directory}",
-            "validate_directory_mount"
-        )
-        transaction.add_validation_step(
-            lambda: validate_mount_for_sync(database_path, "database"),
-            f"Validate database mount: {database_path}",
-            "validate_database_mount"
-        )
-        
-        def validate_redundancy():
-            redundancy_int = validate_redundancy_percentage(redundancy)
-            if redundancy_int < 1 or redundancy_int > 100:
-                raise ValueError(f"Redundancy percentage must be between 1 and 100: {redundancy_int}")
-            return redundancy_int
-        
-        transaction.add_validation_step(
-            validate_redundancy,
-            f"Validate redundancy percentage: {redundancy}",
-            "validate_redundancy"
-        )
-        
-        if not transaction.execute():
-            logger.log_error("validation_failed", "Pre-scrub validation failed")
-            transaction.rollback("Validation failed")
-            return
-        
+        logger.log_step("validation", "started", "Validating scrub paths, mounts, and redundancy")
+        validate_filesystem_path(directory, must_exist=True, check_writable=False)
+        validate_database_path(database_path)
+        validate_mount_for_sync(directory, "directory")
+        validate_mount_for_sync(database_path, "database")
+        redundancy_value = validate_redundancy_percentage(redundancy)
+        logger.log_step("validation", "completed", "Scrub inputs are valid")
         logger.log_metric("validation_success", True)
-        
-    except Exception as e:
-        logger.log_error("scrub_setup_error", str(e))
-        if transaction:
-            transaction.rollback(str(e))
-        raise
-    
-    ensure_directory(directory, config.username)
-    
-    db_parent = os.path.dirname(database_path)
-    if db_parent:
-        ensure_directory(db_parent, config.username)
-    
-    dir_on_smb = check_path_on_smb_mount(directory, config)
-    db_on_smb = check_path_on_smb_mount(database_path, config)
-    
-    if dir_on_smb or db_on_smb:
-        logger.log_step("mount_validation_enhanced", "started", "Performing enhanced mount validation")
-        if dir_on_smb:
-            logger.log_metric("directory_smb_connectivity", validate_smb_connectivity(directory))
-        if db_on_smb:
-            logger.log_metric("database_smb_connectivity", validate_smb_connectivity(database_path))
-        logger.log_step("mount_validation_enhanced", "completed", "Enhanced mount validation completed")
-    
-    print(f"  ✓ Scrub spec validated: {directory}")
-    
-    print(f"  ℹ Performing initial par2 creation (fast mode)...")
-    
-    def perform_initial_par2():
+
+        ensure_directory(directory, config.username)
+
+        db_parent = os.path.dirname(database_path)
+        if db_parent:
+            ensure_directory(db_parent, config.username)
+
+        dir_on_smb = check_path_on_smb_mount(directory, config)
+        db_on_smb = check_path_on_smb_mount(database_path, config)
+
+        if dir_on_smb or db_on_smb:
+            logger.log_step("mount_validation_enhanced", "started", "Performing enhanced mount validation")
+            if dir_on_smb:
+                logger.log_metric("directory_smb_connectivity", validate_smb_connectivity(directory))
+            if db_on_smb:
+                logger.log_metric("database_smb_connectivity", validate_smb_connectivity(database_path))
+            logger.log_step("mount_validation_enhanced", "completed", "Enhanced mount validation completed")
+
+        print(f"  ✓ Scrub spec validated: {directory}")
+        print("  ℹ Performing initial par2 creation (fast mode)...")
+
         from sync.service_tools.scrub_par2 import scrub_directory
         log_dir = "/var/log/scrub"
         os.makedirs(log_dir, exist_ok=True)
         scrub_id = hashlib.md5(f"{directory}:{database_path}".encode()).hexdigest()[:8]
         log_file = f"{log_dir}/scrub-{scrub_id}.log"
-        
-        redundancy_value = int(redundancy.rstrip('%'))
-        scrub_directory(directory, database_path, redundancy_value, log_file, verify=False)
-        return True
-    
-    def rollback_initial_par2():
-        # Initial creation writes par2 files under database_path (mirroring the
-        # protected directory tree), not directly under ``directory``. Walk the
-        # database tree and remove anything we created.
-        try:
-            remove_par2_files_under(database_path)
-        except Exception as e:
-            logger.log_error("rollback_initial_par2_failed", str(e))
-    
-    try:
-        transaction.add_step(perform_initial_par2, rollback_initial_par2, "Initial par2 creation", "initial_par2_creation")
-        
-        if not transaction.execute():
-            logger.log_error("initial_par2_failed", "Initial par2 failed")
-            transaction.rollback("Initial par2 failed")
-        else:
-            logger.log_step("initial_par2", "completed", "Initial par2 successful")
-        
+        result = scrub_directory(directory, database_path, redundancy_value, log_file, verify=False)
+        if not result.get("ok", False):
+            raise RuntimeError("Initial par2 creation did not complete successfully")
+
+        logger.log_step("initial_par2", "completed", "Initial par2 successful")
+
+        dir_disk = get_disk_usage_details(directory)
+        db_disk = get_disk_usage_details(os.path.dirname(database_path))
+        logger.log_metric("directory_disk_usage_percent", dir_disk['usage_percent'], "percent")
+        logger.log_metric("database_disk_usage_percent", db_disk['usage_percent'], "percent")
         logger.complete("completed", "Scrub configured")
-        
+
     except Exception as e:
-        logger.log_error("initial_par2_error", str(e))
-        if transaction:
-            transaction.rollback(str(e))
-    
-    dir_disk = get_disk_usage_details(directory)
-    db_disk = get_disk_usage_details(os.path.dirname(database_path))
-    logger.log_metric("directory_disk_usage_percent", dir_disk['usage_percent'], "percent")
-    logger.log_metric("database_disk_usage_percent", db_disk['usage_percent'], "percent")
-    
+        logger.log_error("scrub_setup_error", str(e))
+        logger.complete("failed", f"Scrub setup failed: {e}")
+        raise
+
     print(f"  ✓ Scrub configured: {directory} ({redundancy}, {frequency})")

@@ -57,6 +57,9 @@ The ordering remains justified by the current implementation:
   command runner has no timeout contract; and
 - active agent config staging follows source symlinks, while manifest release
   activation does not stop when an app unit stop fails.
+- the old callback-based transaction framework has been removed; sync and scrub
+  now fail explicitly, while durable setup/deployment operation records remain
+  to be implemented.
 
 The manifest environment-key injection finding is resolved. CI now tests
 Python 3.13, the interpreter shipped by Debian Trixie, and `make compile`
@@ -69,8 +72,8 @@ The best next work packets are:
 1. Complete the `remote_utils.run()` caller inventory, define strict versus
    best-effort contracts, and add secret-safe bounded execution (the strict
    helper slice is now landed).
-2. Decide whether to redesign or remove the currently unused
-   `lib/transaction.py` framework; do not build a parallel transaction layer.
+2. Define the versioned durable operation-record schema; keep diagnostic event
+   logging separate from authoritative recovery state.
 3. Replace permissive corrupt-state fallbacks with schema/version checks and
    actionable remediation, then define durable operation markers.
 4. Replace automatic SSH first-use trust with explicit enrollment before

@@ -1,6 +1,4 @@
-"""Regression tests for sync/service_tools/scrub_par2 verify_repair semantics
-and sync/scrub_steps initial-par2 rollback.
-"""
+"""Regression tests for scrub verification and setup failure semantics."""
 
 from __future__ import annotations
 
@@ -9,7 +7,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -66,39 +65,93 @@ class TestVerifyRepairOutcomes(unittest.TestCase):
         self.assertEqual(result, scrub_par2.VERIFY_UNREPAIRABLE)
 
 
-class TestRollbackInitialPar2(unittest.TestCase):
-    """rollback_initial_par2 must clean the database directory tree, not the
-    protected directory (par2 files are written into ``database_path``)."""
+class TestSetupFailurePropagation(unittest.TestCase):
+    """Initial sync and scrub failures must reach the setup orchestrator."""
 
-    def test_remove_par2_files_under_walks_tree(self):
-        from sync.scrub_steps import remove_par2_files_under
+    def test_initial_sync_failure_is_logged_and_raised(self):
+        from sync import sync_steps
 
-        with tempfile.TemporaryDirectory() as tmp:
-            directory = os.path.join(tmp, 'data')
-            database = os.path.join(tmp, 'pardb')
-            os.makedirs(os.path.join(database, 'sub'))
+        logger = Mock()
+        with (
+            patch.object(sync_steps, 'create_operation_logger', return_value=logger),
+            patch.object(sync_steps, 'validate_filesystem_path') as validate_path,
+            patch.object(sync_steps, 'validate_mount_for_sync') as validate_mount,
+            patch.object(sync_steps, 'ensure_directory'),
+            patch.object(sync_steps, 'check_path_on_smb_mount', return_value=False),
+            patch.object(sync_steps, 'get_disk_usage_details') as disk_usage,
+            patch(
+                'sync.service_tools.sync_rsync.run_rsync_with_notifications',
+                return_value=1,
+            ) as run_sync,
+        ):
+            with self.assertRaisesRegex(RuntimeError, 'Initial sync failed'):
+                sync_steps.create_sync_service(
+                    SimpleNamespace(username='agent'),
+                    ['/source', '/destination', 'daily'],
+                )
+
+        self.assertEqual(validate_path.call_count, 2)
+        self.assertEqual(validate_mount.call_count, 2)
+        run_sync.assert_called_once_with('/source', '/destination')
+        disk_usage.assert_not_called()
+        logger.complete.assert_called_once()
+        self.assertEqual(logger.complete.call_args.args[0], 'failed')
+
+
+class TestScrubResultFailures(unittest.TestCase):
+    def test_parity_creation_failure_makes_result_unsuccessful(self):
+        operation_logger = Mock()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            directory = os.path.join(tmpdir, 'data')
+            database = os.path.join(tmpdir, 'parity')
             os.makedirs(directory)
+            os.makedirs(database)
+            source = os.path.join(directory, 'source.bin')
+            with open(source, 'wb') as file_obj:
+                file_obj.write(b'data')
 
-            par2_top = os.path.join(database, 'a.par2')
-            par2_nested = os.path.join(database, 'sub', 'b.vol00+01.par2')
-            for path in (par2_top, par2_nested):
-                with open(path, 'wb') as fh:
-                    fh.write(b'')
+            with (
+                patch.object(scrub_par2, 'create_operation_logger', return_value=operation_logger),
+                patch.object(scrub_par2, 'create_par2', return_value=False),
+            ):
+                result = scrub_par2.scrub_directory(
+                    directory,
+                    database,
+                    10,
+                    os.path.join(tmpdir, 'scrub.log'),
+                    verify=False,
+                    suppress_notifications=True,
+                )
 
-            unrelated = os.path.join(directory, 'keep.txt')
-            with open(unrelated, 'w') as fh:
-                fh.write('keep me')
+        self.assertFalse(result['ok'])
+        self.assertEqual(result['files_failed'], ['source.bin'])
+        self.assertEqual(operation_logger.complete.call_args.args[0], 'failed')
 
-            removed = remove_par2_files_under(database)
+    def test_initial_scrub_failure_is_logged_and_raised(self):
+        from sync import scrub_steps
 
-            self.assertEqual(sorted(removed), sorted([par2_top, par2_nested]))
-            self.assertFalse(os.path.exists(par2_top))
-            self.assertFalse(os.path.exists(par2_nested))
-            self.assertTrue(os.path.exists(unrelated))
+        logger = Mock()
+        with (
+            patch.object(scrub_steps, 'create_operation_logger', return_value=logger),
+            patch.object(scrub_steps, 'validate_filesystem_path'),
+            patch.object(scrub_steps, 'validate_database_path'),
+            patch.object(scrub_steps, 'validate_mount_for_sync'),
+            patch.object(scrub_steps, 'validate_redundancy_percentage', return_value=10),
+            patch.object(scrub_steps, 'ensure_directory'),
+            patch.object(scrub_steps, 'check_path_on_smb_mount', return_value=False),
+            patch.object(scrub_steps, 'get_disk_usage_details') as disk_usage,
+            patch.object(scrub_steps.os, 'makedirs'),
+            patch('sync.service_tools.scrub_par2.scrub_directory', return_value={'ok': False}),
+        ):
+            with self.assertRaisesRegex(RuntimeError, 'Initial par2 creation'):
+                scrub_steps.create_scrub_service(
+                    SimpleNamespace(username='agent'),
+                    ['/data', '/database', '10%', 'daily'],
+                )
 
-    def test_remove_par2_files_under_missing_dir(self):
-        from sync.scrub_steps import remove_par2_files_under
-        self.assertEqual(remove_par2_files_under('/nonexistent/path/xyz'), [])
+        disk_usage.assert_not_called()
+        logger.complete.assert_called_once()
+        self.assertEqual(logger.complete.call_args.args[0], 'failed')
 
 
 if __name__ == '__main__':

@@ -230,10 +230,11 @@ injection tests for stop failure before activation and during rollback.
   not be generalized to required setup mutations.
 - Proxmox guest destruction and orphan-volume cleanup require explicit
   confirmation, and the network transition has focused identity/rollback tests.
-- The existing transaction/logging framework is used by sync/scrub operations;
-  the gap is that the main setup/deployment apply paths do not use a durable
-  transaction marker. Its fate should be decided before another abstraction is
-  introduced.
+- The callback-based transaction framework was retired after this audit.
+  Sync/scrub operations now use explicit fail-fast control flow, while the
+  operation logger remains diagnostic evidence. The main setup/deployment paths
+  still need a small durable operation marker rather than another callback
+  abstraction.
 
 ## Recommended order
 

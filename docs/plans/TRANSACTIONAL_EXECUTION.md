@@ -1,7 +1,8 @@
 # Transactional Execution and Reconciliation
 
-Status: partially implemented; durable operation state and broader setup
-reconciliation remain highest priority.
+Status: partially implemented. The misleading in-memory transaction framework
+has been retired; durable operation state and broader setup reconciliation
+remain highest priority.
 
 This plan turns setup and deployment from a sequence of mostly independent
 commands into an operation with explicit preparation, activation, verification,
@@ -44,12 +45,14 @@ ARCH-08 from the [architectural risk review](ARCHITECTURAL_RISK_REVIEW_2026-08-0
   file, and build-server deployment targets are still populated from an
   unauthenticated `ssh-keyscan`.
 
-There is also an existing `lib/transaction.py` and `lib/operation_log.py` pair,
-but production apply paths do not use the transaction manager. Its state is
-in-memory, `execute()` does not trigger rollback, and continue-on-error can
-report success after a failed step. It must be deliberately redesigned and
-adopted or removed; this project should not introduce a second competing
-transaction abstraction.
+The former `lib/transaction.py` callback framework was removed on 2026-08-21.
+It reran completed steps, could report success after continue-on-error failures,
+required callers to trigger rollback manually, and kept all transaction and
+checkpoint state in memory. Sync and scrub callers now use explicit fail-fast
+control flow and retain `lib/operation_log.py` only for diagnostic events. Their
+initial-operation failures now propagate to setup instead of being logged as
+successful configuration. Durable recovery state will be a small, versioned
+operation record rather than a registry of non-serializable callbacks.
 
 ## Phase 0: Contract and primitive convergence
 
@@ -57,9 +60,9 @@ Before changing broad execution behavior:
 
 1. Inventory and classify every `remote_utils.run()` caller as required,
    optional, probe, or cleanup, including its current return-code handling.
-2. Decide the fate of `lib/transaction.py` and `lib/operation_log.py` against
-   the interruption-recovery requirements below. Remove unused pieces that do
-   not fit the chosen design.
+2. **Complete:** retire `lib/transaction.py`, preserve operation logging as
+   diagnostic evidence, and require explicit orchestration code to own apply,
+   verification, and recovery behavior.
 3. Define the durable operation-marker schema, ownership, location, and
    recovery behavior before wiring setup or deploy to it.
 4. Add fault-injection tests at the orchestration boundary, not only unit tests
@@ -188,11 +191,11 @@ enabled until the expected fingerprint is explicitly verified.
 
 ## Recommended first delivery slice
 
-The atomic persistence and initial execution-contract slices are complete. The
-next delivery should finish the `remote_utils.run()` caller inventory and
-transaction-framework decision, then use the shared writer for durable
-operation markers and add fault-injection tests around setup/deployment
-interruption.
+The atomic persistence, initial execution-contract, and transaction-framework
+retirement slices are complete. The next delivery should finish the
+`remote_utils.run()` caller inventory and define the durable operation-record
+schema, then use the shared writer for setup/deployment markers and add
+fault-injection tests around interruption.
 
 ## Non-goals
 

@@ -2,7 +2,7 @@
 """Par2 scrub operations for data integrity checking.
 
 This script creates par2 parity files, verifies files, and repairs corrupted files.
-Enhanced with transaction support and improved error recovery.
+Includes structured operation logging and explicit failure reporting.
 Supports sending notifications on completion or failure.
 """
 
@@ -22,7 +22,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../
 
 from lib.logging_utils import get_rotating_logger, log_message
 from lib.operation_log import create_operation_logger
-from lib.transaction import create_transaction
 from lib.validation import validate_filesystem_path
 from lib.disk_utils import estimate_operation_duration
 from lib.progress_utils import ProgressTracker, ProgressMessage
@@ -84,8 +83,7 @@ def create_par2(
     redundancy: int,
     log_file: str,
     force: bool = False,
-    operation_logger: Optional[Any] = None,
-    transaction: Optional[Any] = None
+    operation_logger: Optional[Any] = None
 ) -> bool:
     """Create par2 parity file if it doesn't exist.
     
@@ -97,7 +95,6 @@ def create_par2(
         log_file: Log file path
         force: Whether to recreate existing par2 files
         operation_logger: Optional operation logger for enhanced logging
-        transaction: Optional transaction for atomic operations
         
     Returns:
         True if created or already exists, False on error
@@ -158,20 +155,8 @@ def create_par2(
             # Atomic removal of existing par2 files
             def remove_existing_par2():
                 _remove_par2_files(par2_base, log_file)
-            
-            def restore_par2_backup():
-                # In a real implementation, this would restore from backup
-                log(f"Warning: Cannot restore par2 files for {relative_path} (no backup available)", log_file)
-            
-            if transaction:
-                transaction.add_step(
-                    remove_existing_par2,
-                    restore_par2_backup,
-                    f"Remove existing par2 files for {relative_path}",
-                    f"remove_par2_{relative_path.replace('/', '_')}"
-                )
-            else:
-                remove_existing_par2()
+
+            remove_existing_par2()
         else:
             # Files exist and are up-to-date, silently skip
             return True
@@ -230,20 +215,7 @@ def create_par2(
         
         return False
     
-    def cleanup_partial_par2():
-        _remove_par2_files(par2_base, log_file)
-        log(f"Cleaned up partial par2 files for {relative_path}", log_file)
-    
-    if transaction:
-        transaction.add_step(
-            create_par2_atomic,
-            cleanup_partial_par2,
-            f"Create par2 files for {relative_path}",
-            f"create_par2_{relative_path.replace('/', '_')}"
-        )
-        return transaction.execute()  # Execute just this step
-    else:
-        return create_par2_atomic()
+    return create_par2_atomic()
 
 
 def _par2_base_from_parity_file(parity_path: str) -> str:
@@ -268,8 +240,7 @@ def _cleanup_orphan_par2(
     database: str,
     existing_files: set[str],
     log_file: str,
-    operation_logger: Optional[Any] = None,
-    transaction: Optional[Any] = None
+    operation_logger: Optional[Any] = None
 ) -> None:
     """Remove parity files for data files that no longer exist."""
     checked_bases: set[str] = set()
@@ -308,16 +279,7 @@ def _cleanup_orphan_par2(
                 def remove_orphan():
                     _remove_par2_files(par2_base, log_file)
                 
-                # No rollback needed for orphan removal
-                if transaction:
-                    transaction.add_step(
-                        remove_orphan,
-                        lambda: None,  # No-op rollback
-                        f"Remove orphan par2 for {relative_data}",
-                        f"remove_orphan_{relative_data.replace('/', '_')}"
-                    )
-                else:
-                    remove_orphan()
+                remove_orphan()
                 
                 orphan_count += 1
                 
@@ -406,9 +368,9 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
 
     Returns:
         Result dict with keys: ok (bool), files_processed, files_created,
-        files_updated, files_verified, files_repaired, files_unrepairable
-        (list of relative paths). ``ok`` is False when validation failed or
-        any files could not be repaired.
+        files_updated, files_verified, files_repaired, files_failed, and
+        files_unrepairable (lists of relative paths). ``ok`` is False when
+        validation or parity creation failed or any files could not be repaired.
     """
     result: dict = {
         "ok": True,
@@ -417,6 +379,7 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
         "files_updated": 0,
         "files_verified": 0,
         "files_repaired": 0,
+        "files_failed": [],
         "files_unrepairable": [],
     }
     # Load notification configs from machine state
@@ -443,8 +406,6 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
         redundancy=redundancy, 
         verify=verify
     )
-    transaction = create_transaction(f"scrub_{int(time.time())}", operation_logger, timeout_seconds=7200)  # 2 hours
-    
     try:
         log("=" * 60, log_file)
         log(f"Scrub started: {datetime.now()}", log_file)
@@ -457,19 +418,10 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
         operation_logger.log_step("scrub_initiated", "started", 
                                f"Starting scrub of {directory} with {redundancy}% redundancy")
         
-        # Enhanced validation
-        transaction.add_validation_step(
-            lambda: validate_filesystem_path(directory, must_exist=True),
-            f"Validate directory exists: {directory}",
-            "validate_directory"
-        )
-        transaction.add_validation_step(
-            lambda: validate_filesystem_path(database, check_writable=True),
-            f"Validate database directory writable: {database}",
-            "validate_database"
-        )
-        
-        if not transaction.execute():
+        try:
+            validate_filesystem_path(directory, must_exist=True)
+            validate_filesystem_path(database, check_writable=True)
+        except ValueError as e:
             operation_logger.log_error("validation_failed", "Directory validation failed")
             log("Validation failed, aborting scrub", log_file)
             
@@ -491,6 +443,7 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
                 except Exception as notify_err:
                     log(f"Warning: Failed to send notification: {notify_err}", log_file)
             
+            operation_logger.complete("failed", f"Scrub validation failed: {e}")
             result["ok"] = False
             return result
         
@@ -502,6 +455,7 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
         files_updated = 0
         files_verified = 0
         files_repaired = 0
+        files_failed: list[str] = []
         files_unrepairable: list[str] = []
         files_created = 0  # Track newly created par2 files
         files_skipped_empty = 0  # Track 0-byte files skipped
@@ -514,9 +468,6 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
             interval_seconds=30,
             log_func=lambda msg: log(msg, log_file)
         )
-        
-        # Create checkpoint after validation
-        transaction.create_checkpoint("validation_complete")
         
         mode_str = "verify+repair" if verify else "parity update"
         log(f"Starting {mode_str} for {directory}", log_file)
@@ -569,10 +520,8 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
                         log(f"Error checking par2 timestamps for {relative_path}: {e}", log_file)
                         force = True
                 
-                # Create par2 with transaction support (disabled for performance)
-                # Using transactions causes O(n²) slowdown as each file re-executes all previous steps
                 success = create_par2(file_path, directory, database, redundancy, log_file, 
-                                    force=force, operation_logger=operation_logger, transaction=None)
+                                    force=force, operation_logger=operation_logger)
                 if success:
                     files_processed += 1
                     if is_new_par2:
@@ -580,6 +529,8 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
                     elif not force:
                         # File was skipped because par2 is up-to-date
                         files_skipped_uptodate += 1
+                else:
+                    files_failed.append(relative_path)
                 
                 # Log progress periodically with detailed stats
                 if progress_tracker.should_log():
@@ -604,13 +555,10 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
         
         log(f"Directory scan complete: {files_found} files in {dirs_found} directories", log_file)
         
-        # Create checkpoint before cleanup
-        transaction.create_checkpoint("par2_creation_complete")
-        
         # Enhanced orphan cleanup
         log("Starting orphan cleanup...", log_file)
         _cleanup_orphan_par2(directory, database, existing_files, log_file, 
-                           operation_logger=operation_logger, transaction=transaction)
+                           operation_logger=operation_logger)
         
         # Final metrics
         operation_logger.log_metric("files_processed", files_processed, "count")
@@ -620,18 +568,26 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
         operation_logger.log_metric("files_skipped_uptodate", files_skipped_uptodate, "count")
         operation_logger.log_metric("files_verified", files_verified, "count")
         operation_logger.log_metric("files_repaired", files_repaired, "count")
+        operation_logger.log_metric("files_failed", len(files_failed), "count")
         operation_logger.log_metric("files_unrepairable", len(files_unrepairable), "count")
         operation_logger.log_metric("total_file_size_mb", total_file_size // (1024 * 1024), "MB")
         
-        # Execute any remaining transaction steps
-        if not transaction.execute():
-            operation_logger.log_error("finalization_failed", "Scrub finalization failed")
-        else:
-            operation_logger.log_step("scrub_completed", "completed", 
-                                   f"Successfully processed {files_processed} files")
+        operation_status = "failed" if files_failed or files_unrepairable else "completed"
+        operation_logger.log_step(
+            "scrub_completed",
+            operation_status,
+            f"Processed {files_processed} files with {len(files_failed)} creation failures",
+        )
         
-        log(f"Scrub completed: {datetime.now()}", log_file)
-        log(f"Files: {files_processed} processed, {files_created} created, {files_updated} updated, {files_verified} verified, {files_repaired} repaired, {len(files_unrepairable)} UNREPAIRABLE", log_file)
+        completion_label = "completed" if operation_status == "completed" else "finished with errors"
+        log(f"Scrub {completion_label}: {datetime.now()}", log_file)
+        log(
+            f"Files: {files_processed} processed, {files_created} created, "
+            f"{files_updated} updated, {len(files_failed)} creation failures, "
+            f"{files_verified} verified, {files_repaired} repaired, "
+            f"{len(files_unrepairable)} UNREPAIRABLE",
+            log_file,
+        )
         if files_unrepairable:
             log("Unrepairable files:", log_file)
             for unrepairable in files_unrepairable:
@@ -641,20 +597,27 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
         log("", log_file)
         
         # Log completion summary
-        summary_msg = f"✓ Scrub completed: {files_processed} processed, {files_created} new, {files_updated} updated"
+        summary_symbol = "✓" if operation_status == "completed" else "✗"
+        summary_msg = (
+            f"{summary_symbol} Scrub {completion_label}: {files_processed} processed, "
+            f"{files_created} new, {files_updated} updated, {len(files_failed)} failed"
+        )
         if verify:
             summary_msg += f", {files_verified} verified, {files_repaired} repaired"
         log(summary_msg, log_file)
         
-        operation_logger.complete("completed", 
-                              f"Scrub completed: {files_processed} files processed, {files_repaired} repaired")
+        operation_logger.complete(
+            operation_status,
+            f"Scrub completed: {files_processed} files processed, "
+            f"{len(files_failed)} failed, {files_repaired} repaired",
+        )
         
         # Send completion notification (escalate to error if any files could not be repaired)
         if notification_configs:
             try:
                 from lib.notifications import send_notification
                 name_prefix = f"[{friendly_name}] " if friendly_name else ""
-                if files_unrepairable:
+                if files_failed or files_unrepairable:
                     status = "error"
                     subject_state = "ERROR"
                 elif files_repaired > 0:
@@ -670,6 +633,8 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
                     message += f", updated {files_updated}"
                 if files_repaired > 0:
                     message += f", repaired {files_repaired}"
+                if files_failed:
+                    message += f", parity creation failed: {len(files_failed)}"
                 if files_unrepairable:
                     message += f", UNREPAIRABLE: {len(files_unrepairable)}"
                 if files_verified > 0:
@@ -682,6 +647,7 @@ Files created: {files_created}
 Files updated: {files_updated}
 Files verified: {files_verified}
 Files repaired: {files_repaired}
+Parity creation failures: {len(files_failed)}
 Files unrepairable: {len(files_unrepairable)}
 Total size: {total_file_size // (1024 * 1024)} MB
 Redundancy: {redundancy}%
@@ -712,12 +678,14 @@ Redundancy: {redundancy}%
         result["files_updated"] = files_updated
         result["files_verified"] = files_verified
         result["files_repaired"] = files_repaired
+        result["files_failed"] = list(files_failed)
         result["files_unrepairable"] = list(files_unrepairable)
-        result["ok"] = not files_unrepairable
+        result["ok"] = not files_failed and not files_unrepairable
         return result
 
     except Exception as e:
         operation_logger.log_error("scrub_failed", str(e))
+        operation_logger.complete("failed", f"Scrub failed: {e}")
         log(f"Scrub failed: {e}", log_file)
         
         # Send error notification
@@ -739,8 +707,6 @@ Redundancy: {redundancy}%
             except Exception as notify_err:
                 log(f"Warning: Failed to send error notification: {notify_err}", log_file)
         
-        if transaction:
-            transaction.rollback(str(e))
         raise
 
 
