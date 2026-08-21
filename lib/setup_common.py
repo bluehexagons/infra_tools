@@ -58,7 +58,7 @@ from lib.validation import (
 from lib.cache import get_cache_path_for_host, save_setup_command
 from lib.arg_parser import create_setup_argument_parser
 from lib.display import print_setup_summary
-from lib.interactive_setup import run_interactive_setup
+from lib.interactive_setup import prompt_for_missing_passwords, run_interactive_setup
 from lib.notifications import validate_notification_args
 from lib.proxmox_guest import resolve_guest_ssh_key
 from lib.ssh_utils import (
@@ -1177,6 +1177,12 @@ def setup_main(system_type: str, description: str, success_msg_fn: Callable[[Set
         except (EOFError, KeyboardInterrupt, ValueError) as exc:
             print(f"Error: {exc}")
             return 1
+
+    try:
+        prompt_for_missing_passwords(args, system_type)
+    except (EOFError, KeyboardInterrupt, ValueError) as exc:
+        print(f"Error: {exc}")
+        return 1
 
     explicit_ipv4 = getattr(args, "static_ipv4", None)
     if getattr(args, "hosted_node", None) and isinstance(explicit_ipv4, str) and explicit_ipv4:

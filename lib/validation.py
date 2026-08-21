@@ -1697,6 +1697,10 @@ def validate_rdp_settings(config: Any) -> None:
 
     password = getattr(config, "password", None)
     if use_existing_password:
+        if getattr(config, "hosted_node", None):
+            raise ValueError(
+                "--rdp-existing-password cannot be used while provisioning a guest"
+            )
         local_hosts = {"localhost", "127.0.0.1", "::1"}
         if str(getattr(config, "host", "")).strip().lower() not in local_hosts:
             raise ValueError("--rdp-existing-password requires a local setup target")
@@ -1731,8 +1735,16 @@ def validate_rdp_settings(config: Any) -> None:
             )
     else:
         if not isinstance(password, str) or not password.strip():
-            raise ValueError("--rdp requires --password for the desktop login account")
-        validate_no_control_characters(password, "RDP password")
+            if not getattr(config, "dry_run", False):
+                raise ValueError("--rdp requires --password for the desktop login account")
+        else:
+            validate_no_control_characters(password, "RDP password")
+
+    _validate_rdp_network_policy(config)
+
+
+def _validate_rdp_network_policy(config: Any) -> None:
+    """Validate RDP bind, source, session, and timeout policy."""
 
     bind_address = getattr(config, "rdp_bind_address", "0.0.0.0")
     if not isinstance(bind_address, str):

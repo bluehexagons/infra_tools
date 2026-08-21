@@ -43,7 +43,7 @@ desktop interface when both local RDP and remote clients are useful.
 | `pc_dev` | Desktop, Firefox ESR, LibreOffice, SMB client packages, Remmina, and CLI tools |
 | `workstation_dev` | Desktop, Firefox ESR, and CLI tools including Neovim |
 | `agent_workstation` | Developer workstation defaults plus GitHub CLI and Codex |
-| `agent_code_vm` | Agent workstation plus Geany, T3 Code web, and Playwright automation |
+| `agent_code_vm` | Agent workstation plus Geany, T3 Code web, Playwright, RDP, private source ranges, pairing, and read-write Git/auth defaults |
 
 The default desktop is XFCE. All workstation profiles use Debian's Firefox ESR
 by default. A browser selected with `--browser` becomes the default for the
@@ -69,16 +69,16 @@ infra-tools setup agent_vm 10.0.0.24 agent \
 This installs GitHub CLI, Codex, and the selected runtimes without the broader
 control-plane administrator package set. Remove `--agent-config` or `--repo`
 when those inputs are not needed. Use `tmux` for long-running agent sessions
-over SSH. To use another provider set, repeat `--agent-tool`; any explicit list
-replaces the profile defaults.
+over SSH. To add another provider, use `--agent-tool opencode` or a
+comma-separated list. Use `--no-agent-tool gh` to remove a profile default.
 
 ### High-capability graphical agent VM
 
 Use `agent_code_vm` for the recurring combination of a graphical coding
 desktop, Firefox ESR, Geany, T3 Code's headless web service, Playwright browser
-automation, GitHub CLI, and Codex. Provisioning capacity, project language
-runtimes, RDP exposure, T3 Code exposure, and protected device pairing remain
-operator choices:
+automation, GitHub CLI, Codex, RDP, private management ranges, protected
+pairing, and read-write Git/auth defaults. Provisioning capacity and project
+language runtimes remain operator choices:
 
 ```bash
 infra-tools setup agent_code_vm 10.0.0.25 agent \
@@ -87,20 +87,15 @@ infra-tools setup agent_code_vm 10.0.0.25 agent \
   --memory 4G --balloon-min 1G --cores 4 \
   --storage root local-lvm 32G \
   --node --go \
-  --git-access read --git-auth active --agent-auth active \
-  --web-interface-source 10.0.0.0/24 \
-  --device-pairing t3code \
-  --device-pairing-password "$PAIRING_PASSWORD" \
-  --rdp --password "$RDP_PASSWORD" --rdp-source 10.0.0.0/24
+  --agent-tool opencode
 ```
 
-Without `--web-interface-source`, the profile keeps T3 Code on loopback for
-SSH-tunnel access. RDP is not enabled by the profile because enabling a remote
-login service also requires an explicit account-password and trusted-source
-decision. Device pairing likewise remains explicit because its Basic Auth
-credential is transient. Add `--agent-tool` flags only to replace the default
-`gh` plus `codex` provider set. `--node` is required for this profile's T3 Code
-service; `--go` and other project runtimes remain optional explicit choices.
+The profile supplies `192.168.0.0/24` and `10.0.0.0/8` for both web and RDP
+access. Omitted account and pairing passwords are requested with hidden prompts;
+an empty pairing password reuses the account password. Use
+`--git-access none --git-auth none --agent-auth none`, `--no-rdp`, `--no-web-interface`, or
+`--no-device-pairing` to disable individual defaults. Both `--node` and `--go`
+remain explicit requirements for this profile.
 
 ### Desktop agentic coding workstation with RDP
 

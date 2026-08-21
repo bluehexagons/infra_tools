@@ -15,6 +15,38 @@ from lib.config import (
     MACHINE_TYPES,
     WEB_INTERFACES,
 )
+
+
+class CommaSeparatedChoicesAction(argparse.Action):
+    """Append one or more comma-separated values while preserving order."""
+
+    def __init__(self, option_strings, dest, allowed_values=(), **kwargs):
+        self.allowed_values = tuple(allowed_values)
+        super().__init__(option_strings, dest, **kwargs)
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: str,
+        option_string: str | None = None,
+    ) -> None:
+        selected = list(getattr(namespace, self.dest, None) or [])
+        for raw_value in str(values).split(","):
+            value = raw_value.strip().lower()
+            if not value:
+                parser.error(f"{option_string or self.dest} cannot contain an empty value")
+            if self.allowed_values and value not in self.allowed_values:
+                choices = ", ".join(str(choice) for choice in self.allowed_values)
+                parser.error(
+                    f"argument {option_string or self.dest}: invalid choice: {value!r} "
+                    f"(choose from {choices})"
+                )
+            if value not in selected:
+                selected.append(value)
+        setattr(namespace, self.dest, selected)
+
+
 from lib.plugin_registry import get_system_type_names
 
 
@@ -294,13 +326,20 @@ def add_setup_arguments(
         metavar="IP",
         help="IP address XRDP listens on (default: 0.0.0.0)",
     )
-    parser.add_argument(
+    rdp_source_group = parser.add_mutually_exclusive_group()
+    rdp_source_group.add_argument(
         "--rdp-source",
         dest="rdp_allowed_sources",
         action="append",
         metavar="IP_OR_CIDR",
         help="Allow RDP only from this IP or CIDR; repeat as needed. "
              "Without this flag, RDP remains globally reachable through UFW.",
+    )
+    rdp_source_group.add_argument(
+        "--no-rdp-source",
+        dest="clear_rdp_sources",
+        action="store_true",
+        help="Clear RDP source defaults and allow the normal unrestricted policy",
     )
     parser.add_argument(
         "--rdp-clipboard",
@@ -411,18 +450,26 @@ def add_setup_arguments(
                         default=None if not for_remote else False,
                         help="Install Python tooling (python aliases and uv). For shell autocompletion, use the local completions installer script.")
 
-    # Agent VM tooling. An explicit list replaces the narrow defaults declared
-    # by an agent profile; there is no broad suite that installs every provider.
+    # Agent VM tooling. Values add to narrow profile defaults; --no-agent-tool
+    # provides an explicit opt-out for an individual default.
     parser.add_argument(
         "--agent-tool",
         dest="agent_tools",
-        action="append",
-        choices=AGENT_TOOLS,
+        action=CommaSeparatedChoicesAction,
+        allowed_values=AGENT_TOOLS,
         metavar="TOOL",
         help=(
-            "Install an agent tool; repeat as needed. An explicit list replaces "
+            "Install one or more comma-separated agent tools; values add to "
             "agent-profile defaults"
         ),
+    )
+    parser.add_argument(
+        "--no-agent-tool",
+        dest="no_agent_tools",
+        action=CommaSeparatedChoicesAction,
+        allowed_values=AGENT_TOOLS,
+        metavar="TOOL",
+        help="Disable one or more default agent tools",
     )
     parser.add_argument(
         "--desktop-interface",
@@ -435,7 +482,8 @@ def add_setup_arguments(
             "(currently: t3code)"
         ),
     )
-    parser.add_argument(
+    web_interface_group = parser.add_mutually_exclusive_group()
+    web_interface_group.add_argument(
         "--web-interface",
         dest="web_interfaces",
         action="append",
@@ -445,6 +493,12 @@ def add_setup_arguments(
             "Install an explicit headless web interface; repeat as needed "
             "(currently: t3code)"
         ),
+    )
+    web_interface_group.add_argument(
+        "--no-web-interface",
+        dest="disable_web_interface",
+        action="store_true",
+        help="Disable profile-provided web interfaces",
     )
     parser.add_argument(
         "--web-interface-host",
@@ -463,7 +517,8 @@ def add_setup_arguments(
         metavar="PORT",
         help="TCP port for web interfaces (default: 3773)",
     )
-    parser.add_argument(
+    web_source_group = parser.add_mutually_exclusive_group()
+    web_source_group.add_argument(
         "--web-interface-source",
         dest="web_interface_sources",
         action="append",
@@ -472,6 +527,12 @@ def add_setup_arguments(
             "Allow direct web-interface access only from this private/non-global source; repeat as "
             "needed. Required when binding outside loopback."
         ),
+    )
+    web_source_group.add_argument(
+        "--no-web-interface-source",
+        dest="clear_web_interface_sources",
+        action="store_true",
+        help="Clear web-interface source defaults",
     )
     parser.add_argument(
         "--web-port",
@@ -545,17 +606,24 @@ def add_setup_arguments(
                 "staging (the portal username defaults to the setup username)"
             ),
         )
-    parser.add_argument(
+    browser_automation_group = parser.add_mutually_exclusive_group()
+    browser_automation_group.add_argument(
         "--browser-automation",
         choices=BROWSER_AUTOMATION_PROVIDERS,
         metavar="PROVIDER",
         help="Install and register browser automation for selected compatible agents",
     )
+    browser_automation_group.add_argument(
+        "--no-browser-automation",
+        dest="disable_browser_automation",
+        action="store_true",
+        help="Disable profile-provided browser automation",
+    )
     parser.add_argument(
         "--git-access",
         choices=GIT_ACCESS_POLICIES,
-        default="none",
-        help="Target VM Git policy for agent repositories",
+        default=None if not for_remote else "none",
+        help="Target VM Git policy (none, read, or read-write)",
     )
     parser.add_argument(
         "--git-host",
@@ -574,8 +642,8 @@ def add_setup_arguments(
         git_auth_group.add_argument(
             "--git-auth",
             dest="git_auth_source",
-            choices=("active",),
-            help="Copy GitHub CLI credentials from the active controller user's config",
+            choices=("active", "none"),
+            help="Use active GitHub CLI credentials, or none to disable profile defaults",
         )
         git_auth_group.add_argument(
             "--git-auth-file",
@@ -587,8 +655,8 @@ def add_setup_arguments(
         agent_auth_group.add_argument(
             "--agent-auth",
             dest="agent_auth_source",
-            choices=("active",),
-            help="Copy selected agent credentials from the active controller user's config",
+            choices=("active", "none"),
+            help="Use active agent credentials, or none to disable profile defaults",
         )
         agent_auth_group.add_argument(
             "--agent-auth-file",

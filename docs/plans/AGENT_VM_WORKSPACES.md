@@ -6,11 +6,13 @@ providers and offline snapshot mode remain future work.
 This project makes it straightforward to provision a Debian VM for agentic
 development while keeping Git access, repository setup, and credential
 transfer explicit. The `agent_vm`, `agent_workstation`, and `agent_code_vm`
-system types provide a narrow GitHub CLI plus Codex default; supplying any
-`--agent-tool` options replaces that provider set. The first two are narrow
+system types provide a narrow GitHub CLI plus Codex default; supplying
+`--agent-tool` options adds to that provider set, while `--no-agent-tool`
+removes individual defaults. The first two are narrow
 terminal and graphical bases. `agent_code_vm` composes the separately managed
-Geany, T3 Code web, and Playwright capabilities without selecting every agent,
-language runtime, network boundary, or provisioning setting.
+Geany, T3 Code web, Playwright, RDP, private-source, pairing, and Git/auth
+defaults without selecting every agent, language runtime, or provisioning
+setting.
 
 ## Problem
 
@@ -77,8 +79,8 @@ choices:
 ```
 
 Other supported tools may be selected in the same way. All three agent
-profiles default to `gh` and `codex`; the first explicit tool list replaces
-both defaults rather than adding to them. Selecting one tool installs that tool
+profiles default to `gh` and `codex`; comma-separated values are accepted and
+individual defaults can be disabled explicitly. Selecting one tool installs that tool
 and only the dependencies required by its installer. The narrow `agent_vm` and
 `agent_workstation` profiles do not select language runtimes, browser
 automation, editors, or a large coding-utility bundle. The explicitly

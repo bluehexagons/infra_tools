@@ -15,7 +15,7 @@ infra-tools setup workstation_dev 192.168.0.41 agent \
   --provision-on ts1 --name agent-1 \
   --image-storage ts1-storage \
   --memory 4G --balloon-min 1G --storage root ts1-storage 32G \
-  --agent-tool gh --agent-tool codex --agent-tool opencode \
+  --agent-tool opencode,gh,codex \
   --browser-automation playwright \
   --node --go --rdp --password "$RDP_PASSWORD" \
   --rdp-source 192.168.0.0/24 --rdp-source 10.0.0.0/8

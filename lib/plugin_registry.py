@@ -44,6 +44,12 @@ class SystemTypeDefinition:
     default_agent_tools: tuple[str, ...] = ()
     default_desktop_interfaces: tuple[str, ...] = ()
     default_web_interfaces: tuple[str, ...] = ()
+    default_web_interface_sources: tuple[str, ...] = ()
+    default_rdp_sources: tuple[str, ...] = ()
+    default_device_pairing_providers: tuple[str, ...] = ()
+    default_git_access: str = "none"
+    default_git_auth_source: str | None = None
+    default_agent_auth_source: str | None = None
     default_browser_automation: str | None = None
     required_explicit_runtimes: tuple[str, ...] = ()
     step_builder: str | None = None

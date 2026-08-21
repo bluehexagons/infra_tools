@@ -53,7 +53,9 @@ sudo "$(command -v infra-tools)" setup workstation_dev localhost "$USER" \
 
 `--rdp-existing-password` is local-only. It cannot be combined with
 `--password`, does not create or change the account password, and is rejected
-when the account does not already exist.
+when the account does not already exist. When a terminal prompt is available,
+an empty password for a local setup is treated as this reuse mode; provisioned
+guests must receive a new password.
 
 Restrict access to every network that should connect:
 

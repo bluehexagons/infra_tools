@@ -195,6 +195,7 @@ class SetupConfig:
     rdp_existing_password: bool = False
     rdp_bind_address: str = "0.0.0.0"
     rdp_allowed_sources: Optional[StrList] = None
+    clear_rdp_sources: bool = False
     rdp_clipboard: bool = True
     rdp_drive_redirection: bool = False
     rdp_audio: bool = False
@@ -222,11 +223,14 @@ class SetupConfig:
     install_claude: bool = False
     install_opencode: bool = False
     agent_tools: Optional[StrList] = None
+    agent_tools_removed: Optional[StrList] = None
     desktop_interfaces: Optional[StrList] = None
     web_interfaces: Optional[StrList] = None
+    disable_web_interface: bool = False
     web_interface_host: MaybeStr = None
     web_interface_port: int = 3773
     web_interface_sources: Optional[StrList] = None
+    clear_web_interface_sources: bool = False
     web_ports: Optional[list[int]] = None
     default_web_ports: bool = True
     device_pairing_providers: Optional[StrList] = None
@@ -237,6 +241,7 @@ class SetupConfig:
     device_pairing_payload: bool = False
     disable_device_pairing: bool = False
     browser_automation: MaybeStr = None
+    disable_browser_automation: bool = False
     copy_agent_keys: bool = False
     copy_agent_config: bool = False
     agent_repos: Optional[StrList] = None
@@ -245,8 +250,10 @@ class SetupConfig:
     git_auth_source: MaybeStr = None
     git_auth_file: MaybeStr = None
     git_auth_token: MaybeStr = None
+    disable_git_auth: bool = False
     agent_auth_source: MaybeStr = None
     agent_auth_files: Optional[NestedStrList] = None
+    disable_agent_auth: bool = False
     agent_config_source: MaybeStr = None
     agent_payload: bool = False
     agent_workspace: MaybeStr = None
@@ -337,7 +344,13 @@ class SetupConfig:
             if tool not in AGENT_TOOLS:
                 raise ValueError(f"Unsupported agent tool: {tool}")
         selected = list(dict.fromkeys(selected))
+        removed_tools = list(dict.fromkeys(self.agent_tools_removed or []))
+        for tool in removed_tools:
+            if tool not in AGENT_TOOLS:
+                raise ValueError(f"Unsupported removed agent tool: {tool}")
+        selected = [tool for tool in selected if tool not in removed_tools]
         self.agent_tools = selected or None
+        self.agent_tools_removed = removed_tools or None
         self.install_gh = "gh" in selected or self.install_gh
         self.install_codex = "codex" in selected or self.install_codex
         self.install_claude = "claude" in selected or self.install_claude
@@ -352,6 +365,16 @@ class SetupConfig:
                 raise ValueError(f"Unsupported web interface: {interface}")
         self.desktop_interfaces = desktop_interfaces or None
         self.web_interfaces = web_interfaces or None
+        if self.disable_web_interface:
+            self.web_interfaces = None
+            self.web_interface_sources = None
+            self.clear_web_interface_sources = False
+        if self.clear_web_interface_sources:
+            self.web_interface_sources = None
+        if self.clear_rdp_sources:
+            self.rdp_allowed_sources = None
+        if self.disable_browser_automation:
+            self.browser_automation = None
         pairing_providers = list(dict.fromkeys(self.device_pairing_providers or []))
         if self.disable_device_pairing:
             pairing_providers = []
@@ -841,16 +864,22 @@ class SetupConfig:
             cmd_parts.append(f"--tags {shlex.quote(','.join(self.tags))}")
         
         # Desktop/workstation flags
+        if self.enable_rdp != system_type_defaults.default_enable_rdp:
+            cmd_parts.append("--rdp" if self.enable_rdp else "--no-rdp")
         if self.enable_rdp:
-            cmd_parts.append("--rdp")
             if self.rdp_existing_password:
                 cmd_parts.append("--rdp-existing-password")
             if self.rdp_bind_address != "0.0.0.0":
                 cmd_parts.append(
                     f"--rdp-bind-address {shlex.quote(self.rdp_bind_address)}"
                 )
-            for source in self.rdp_allowed_sources or []:
-                cmd_parts.append(f"--rdp-source {shlex.quote(source)}")
+            if self.clear_rdp_sources:
+                cmd_parts.append("--no-rdp-source")
+            elif list(self.rdp_allowed_sources or []) != list(
+                system_type_defaults.default_rdp_sources
+            ):
+                for source in self.rdp_allowed_sources or []:
+                    cmd_parts.append(f"--rdp-source {shlex.quote(source)}")
             if not self.rdp_clipboard:
                 cmd_parts.append("--no-rdp-clipboard")
             if self.rdp_drive_redirection:
@@ -914,9 +943,13 @@ class SetupConfig:
             cmd_parts.append("--python")
 
         selected_agent_tools = self.selected_agent_tools()
-        if selected_agent_tools != list(system_type_defaults.default_agent_tools):
-            for tool in selected_agent_tools:
+        default_agent_tools = list(system_type_defaults.default_agent_tools)
+        for tool in selected_agent_tools:
+            if tool not in default_agent_tools:
                 cmd_parts.append(f"--agent-tool {shlex.quote(tool)}")
+        for tool in self.agent_tools_removed or []:
+            if tool in default_agent_tools:
+                cmd_parts.append(f"--no-agent-tool {shlex.quote(tool)}")
 
         desktop_interfaces = self.desktop_interfaces or []
         if desktop_interfaces != list(
@@ -928,7 +961,9 @@ class SetupConfig:
         web_interfaces_are_default = web_interfaces == list(
             system_type_defaults.default_web_interfaces
         )
-        if not web_interfaces_are_default:
+        if self.disable_web_interface:
+            cmd_parts.append("--no-web-interface")
+        elif not web_interfaces_are_default:
             for interface in web_interfaces:
                 cmd_parts.append(f"--web-interface {shlex.quote(interface)}")
         if self.web_interfaces:
@@ -944,18 +979,32 @@ class SetupConfig:
                 )
             if not web_interfaces_are_default or self.web_interface_port != 3773:
                 cmd_parts.append(f"--web-interface-port {self.web_interface_port}")
-            for source in self.web_interface_sources or []:
-                cmd_parts.append(f"--web-interface-source {shlex.quote(source)}")
+            if self.clear_web_interface_sources:
+                cmd_parts.append("--no-web-interface-source")
+            elif list(self.web_interface_sources or []) != list(
+                system_type_defaults.default_web_interface_sources
+            ):
+                for source in self.web_interface_sources or []:
+                    cmd_parts.append(f"--web-interface-source {shlex.quote(source)}")
         for port in self.web_ports or []:
             cmd_parts.append(f"--web-port {port}")
         if not self.default_web_ports:
             cmd_parts.append("--no-default-web-ports")
-        for provider in self.device_pairing_providers or []:
-            cmd_parts.append(f"--device-pairing {shlex.quote(provider)}")
+        default_pairing_providers = list(
+            system_type_defaults.default_device_pairing_providers
+        )
+        if self.disable_device_pairing:
+            if default_pairing_providers:
+                cmd_parts.append("--no-device-pairing")
+        elif list(self.device_pairing_providers or []) != default_pairing_providers:
+            for provider in self.device_pairing_providers or []:
+                cmd_parts.append(f"--device-pairing {shlex.quote(provider)}")
         if self.device_pairing_providers and self.device_pairing_port != 3774:
             cmd_parts.append(f"--device-pairing-port {self.device_pairing_port}")
 
-        if (
+        if self.disable_browser_automation:
+            cmd_parts.append("--no-browser-automation")
+        elif (
             self.browser_automation
             and self.browser_automation
             != system_type_defaults.default_browser_automation
@@ -964,8 +1013,12 @@ class SetupConfig:
                 f"--browser-automation {shlex.quote(self.browser_automation)}"
             )
 
-        if self.git_access != "none":
+        if self.git_access != system_type_defaults.default_git_access:
             cmd_parts.append(f"--git-access {shlex.quote(self.git_access)}")
+        if self.disable_git_auth:
+            cmd_parts.append("--git-auth none")
+        if self.disable_agent_auth:
+            cmd_parts.append("--agent-auth none")
         if self.git_host != "github.com":
             cmd_parts.append(f"--git-host {shlex.quote(self.git_host)}")
 
@@ -1155,7 +1208,6 @@ class SetupConfig:
             'device_pairing_auth_username',
             'device_pairing_auth_password',
             'device_pairing_payload',
-            'disable_device_pairing',
         ):
             data.pop(transient_field, None)
         for legacy_field in (
@@ -1166,6 +1218,7 @@ class SetupConfig:
         ):
             data.pop(legacy_field, None)
         data['agent_tools'] = self.selected_agent_tools() or None
+        data['agent_tools_removed'] = list(self.agent_tools_removed or []) or None
         # Live activation is a one-shot controller operation. Persisting it
         # would make a later deploy retry a sensitive address change without
         # the operator explicitly requesting another handoff.
@@ -1191,20 +1244,58 @@ class SetupConfig:
         data['container_storage'] = _normalize_nested_specs(data.get('container_storage'))
         data['storage_mounts'] = _normalize_nested_specs(data.get('storage_mounts'))
         system_defaults = get_system_type_definition(system_type)
-        if not data.get('agent_tools'):
+        if not data.get('agent_tools') and not data.get('agent_tools_removed'):
             data['agent_tools'] = list(system_defaults.default_agent_tools) or None
+        if not data.get('browser') and not data.get('browsers'):
+            data['browser'] = system_defaults.default_browser
         if not data.get('desktop_interfaces'):
             data['desktop_interfaces'] = (
                 list(system_defaults.default_desktop_interfaces) or None
             )
-        if not data.get('web_interfaces'):
+        if data.get('disable_web_interface'):
+            data['web_interfaces'] = None
+        elif not data.get('web_interfaces'):
             data['web_interfaces'] = (
                 list(system_defaults.default_web_interfaces) or None
             )
         if not data.get('editor'):
             data['editor'] = system_defaults.default_editor
-        if not data.get('browser_automation'):
+        if data.get('disable_browser_automation'):
+            data['browser_automation'] = None
+        elif not data.get('browser_automation'):
             data['browser_automation'] = system_defaults.default_browser_automation
+        if 'enable_rdp' not in data or data.get('enable_rdp') is None:
+            data['enable_rdp'] = system_defaults.default_enable_rdp
+        if not data.get('clear_rdp_sources') and not data.get('rdp_allowed_sources'):
+            data['rdp_allowed_sources'] = (
+                list(system_defaults.default_rdp_sources) or None
+            )
+        if not data.get('clear_web_interface_sources') and not data.get(
+            'web_interface_sources'
+        ) and not data.get('disable_web_interface'):
+            data['web_interface_sources'] = (
+                list(system_defaults.default_web_interface_sources) or None
+            )
+        if not data.get('disable_device_pairing') and not data.get(
+            'device_pairing_providers'
+        ):
+            data['device_pairing_providers'] = (
+                list(system_defaults.default_device_pairing_providers) or None
+            )
+        if 'git_access' not in data or data.get('git_access') is None:
+            data['git_access'] = system_defaults.default_git_access
+        if (
+            not data.get('disable_git_auth')
+            and not data.get('git_auth_file')
+            and 'gh' in (data.get('agent_tools') or system_defaults.default_agent_tools)
+        ):
+            data['git_auth_source'] = system_defaults.default_git_auth_source
+        if (
+            not data.get('disable_agent_auth')
+            and not data.get('agent_auth_files')
+            and data.get('agent_tools')
+        ):
+            data['agent_auth_source'] = system_defaults.default_agent_auth_source
         if 'auto_restart' not in data or data.get('auto_restart') is None:
             if 'no_restart' in data and data.get('no_restart') is not None:
                 data['auto_restart'] = not bool(data.pop('no_restart'))
@@ -1325,16 +1416,27 @@ class SetupConfig:
         auto_restart_grace = _validate_non_negative_int('auto_restart_grace', auto_restart_grace)
 
         raw_agent_tools = getattr(args, 'agent_tools', None)
-        agent_tools = (
-            raw_agent_tools
-            if isinstance(raw_agent_tools, list) and raw_agent_tools
-            else list(system_type_definition.default_agent_tools) or None
+        removed_agent_tools = list(
+            getattr(args, 'no_agent_tools', None) or []
         )
+        agent_tools = list(system_type_definition.default_agent_tools)
+        for tool in raw_agent_tools or []:
+            if tool not in agent_tools:
+                agent_tools.append(tool)
+        agent_tools = [tool for tool in agent_tools if tool not in removed_agent_tools]
+        agent_tools = agent_tools or None
         raw_web_ports = getattr(args, 'web_ports', None)
         web_ports = raw_web_ports if isinstance(raw_web_ports, list) else None
+        disable_browser_automation = bool(
+            getattr(args, 'disable_browser_automation', False)
+        )
         browser_automation = (
-            _optional_str_arg(args, 'browser_automation')
-            or system_type_definition.default_browser_automation
+            None
+            if disable_browser_automation
+            else (
+                _optional_str_arg(args, 'browser_automation')
+                or system_type_definition.default_browser_automation
+            )
         )
         editor = (
             _optional_str_arg(args, 'editor')
@@ -1346,15 +1448,22 @@ class SetupConfig:
             if isinstance(raw_desktop_interfaces, list) and raw_desktop_interfaces
             else list(system_type_definition.default_desktop_interfaces) or None
         )
+        disable_web_interface = bool(getattr(args, 'disable_web_interface', False))
         raw_web_interfaces = getattr(args, 'web_interfaces', None)
         web_interfaces = (
-            raw_web_interfaces
-            if isinstance(raw_web_interfaces, list) and raw_web_interfaces
-            else list(system_type_definition.default_web_interfaces) or None
+            None
+            if disable_web_interface
+            else (
+                raw_web_interfaces
+                if isinstance(raw_web_interfaces, list) and raw_web_interfaces
+                else list(system_type_definition.default_web_interfaces) or None
+            )
         )
         raw_agent_repos = getattr(args, 'agent_repos', None)
         agent_repos = raw_agent_repos if isinstance(raw_agent_repos, list) else None
-        raw_git_access = getattr(args, 'git_access', 'none')
+        raw_git_access = getattr(args, 'git_access', None)
+        if raw_git_access is None:
+            raw_git_access = system_type_definition.default_git_access
         git_access = raw_git_access if raw_git_access in GIT_ACCESS_POLICIES else 'none'
         raw_git_host = getattr(args, 'git_host', 'github.com')
         git_host = raw_git_host if isinstance(raw_git_host, str) else 'github.com'
@@ -1362,10 +1471,36 @@ class SetupConfig:
         agent_auth_files = (
             raw_agent_auth_files if isinstance(raw_agent_auth_files, list) else None
         )
-        git_auth_source = _optional_str_arg(args, 'git_auth_source')
+        raw_git_auth_source = _optional_str_arg(args, 'git_auth_source')
+        disable_git_auth = raw_git_auth_source == 'none'
         git_auth_file = _optional_str_arg(args, 'git_auth_file')
         git_auth_token = _optional_str_arg(args, 'git_auth_token')
-        agent_auth_source = _optional_str_arg(args, 'agent_auth_source')
+        git_auth_source = (
+            None
+            if disable_git_auth or git_auth_file or git_auth_token
+            else (
+                raw_git_auth_source
+                or (
+                    system_type_definition.default_git_auth_source
+                    if "gh" in (agent_tools or [])
+                    else None
+                )
+            )
+        )
+        raw_agent_auth_source = _optional_str_arg(args, 'agent_auth_source')
+        disable_agent_auth = raw_agent_auth_source == 'none'
+        agent_auth_source = (
+            None
+            if disable_agent_auth or agent_auth_files
+            else (
+                raw_agent_auth_source
+                or (
+                    system_type_definition.default_agent_auth_source
+                    if agent_tools
+                    else None
+                )
+            )
+        )
         agent_config_source = _optional_str_arg(args, 'agent_config_source')
         device_pairing_port = _optional_int_arg(args, 'device_pairing_port')
         if device_pairing_port is None:
@@ -1373,6 +1508,44 @@ class SetupConfig:
         default_web_ports = _optional_bool_arg(args, 'default_web_ports')
         if default_web_ports is None:
             default_web_ports = True
+
+        clear_rdp_sources = bool(getattr(args, 'clear_rdp_sources', False))
+        raw_rdp_sources = getattr(args, 'rdp_allowed_sources', None)
+        rdp_allowed_sources = (
+            None
+            if clear_rdp_sources
+            else (
+                raw_rdp_sources
+                if isinstance(raw_rdp_sources, list) and raw_rdp_sources
+                else list(system_type_definition.default_rdp_sources) or None
+            )
+        )
+        clear_web_interface_sources = bool(
+            getattr(args, 'clear_web_interface_sources', False)
+        )
+        raw_web_sources = getattr(args, 'web_interface_sources', None)
+        web_interface_sources = (
+            None
+            if clear_web_interface_sources or disable_web_interface
+            else (
+                raw_web_sources
+                if isinstance(raw_web_sources, list) and raw_web_sources
+                else list(system_type_definition.default_web_interface_sources) or None
+            )
+        )
+        disable_device_pairing = bool(
+            getattr(args, 'disable_device_pairing', False)
+        )
+        raw_pairing_providers = getattr(args, 'device_pairing_providers', None)
+        device_pairing_providers = (
+            None
+            if disable_device_pairing
+            else (
+                raw_pairing_providers
+                if isinstance(raw_pairing_providers, list) and raw_pairing_providers
+                else list(system_type_definition.default_device_pairing_providers) or None
+            )
+        )
         
         return cls(
             host=args.host,
@@ -1395,7 +1568,8 @@ class SetupConfig:
             enable_rdp=enable_rdp,
             rdp_existing_password=getattr(args, 'rdp_existing_password', False),
             rdp_bind_address=getattr(args, 'rdp_bind_address', '0.0.0.0'),
-            rdp_allowed_sources=getattr(args, 'rdp_allowed_sources', None),
+            rdp_allowed_sources=rdp_allowed_sources,
+            clear_rdp_sources=clear_rdp_sources,
             rdp_clipboard=getattr(args, 'rdp_clipboard', True),
             rdp_drive_redirection=getattr(args, 'rdp_drive_redirection', False),
             rdp_audio=getattr(args, 'rdp_audio', False),
@@ -1419,14 +1593,17 @@ class SetupConfig:
             install_node=getattr(args, 'install_node', False),
             install_python=getattr(args, 'install_python', False),
             agent_tools=agent_tools,
+            agent_tools_removed=removed_agent_tools or None,
             desktop_interfaces=desktop_interfaces,
             web_interfaces=web_interfaces,
+            disable_web_interface=disable_web_interface,
             web_interface_host=getattr(args, 'web_interface_host', None),
             web_interface_port=getattr(args, 'web_interface_port', 3773),
-            web_interface_sources=getattr(args, 'web_interface_sources', None),
+            web_interface_sources=web_interface_sources,
+            clear_web_interface_sources=clear_web_interface_sources,
             web_ports=web_ports,
             default_web_ports=default_web_ports,
-            device_pairing_providers=getattr(args, 'device_pairing_providers', None),
+            device_pairing_providers=device_pairing_providers,
             device_pairing_port=device_pairing_port,
             device_pairing_auth_file=_optional_str_arg(
                 args, 'device_pairing_auth_file'
@@ -1440,10 +1617,9 @@ class SetupConfig:
             device_pairing_payload=(
                 _optional_bool_arg(args, 'device_pairing_payload') is True
             ),
-            disable_device_pairing=bool(
-                getattr(args, 'disable_device_pairing', False)
-            ),
+            disable_device_pairing=disable_device_pairing,
             browser_automation=browser_automation,
+            disable_browser_automation=disable_browser_automation,
             copy_agent_keys=bool(
                 git_auth_source
                 or git_auth_file
@@ -1458,8 +1634,10 @@ class SetupConfig:
             git_auth_source=git_auth_source,
             git_auth_file=git_auth_file,
             git_auth_token=git_auth_token,
+            disable_git_auth=disable_git_auth,
             agent_auth_source=agent_auth_source,
             agent_auth_files=agent_auth_files,
+            disable_agent_auth=disable_agent_auth,
             agent_config_source=agent_config_source,
             agent_payload=_optional_bool_arg(args, 'agent_payload') is True,
             agent_workspace=_optional_str_arg(args, 'agent_workspace'),

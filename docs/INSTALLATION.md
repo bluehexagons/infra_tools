@@ -134,11 +134,12 @@ configured rate-limited firewall rule. See [XRDP](XRDP.md) for connection and
 firewall details.
 
 The `agent_vm`, `agent_workstation`, and `agent_code_vm` profiles default to
-GitHub CLI and Codex. On any of them, repeat `--agent-tool` to replace that
-provider set. The `agent_code_vm` profile additionally defaults to Geany, T3
-Code web, and Playwright, while leaving provisioning, RDP, trusted network
-sources, and project runtime choices explicit. Its T3 Code service requires an
-explicit `--node`; add Python or Go only when the project needs them. Use
+GitHub CLI and Codex. `--agent-tool` values add to those defaults and accept
+comma-separated lists; use `--no-agent-tool` to remove a default. The
+`agent_code_vm` profile additionally defaults to Geany, T3 Code, Playwright,
+RDP, private source ranges, T3 pairing, read-write Git, and active auth
+sources. Its T3 Code service requires explicit `--node` and `--go`; add Python
+only when the project needs it. Use
 `--agent-config active`, `--git-auth active`, or the specified-file credential
 options when the control plane should transfer selected settings or
 credentials. Active GitHub auth can use the controller's `gh auth token`

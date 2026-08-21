@@ -21,10 +21,10 @@ it, such as a private GitHub repository or an agent account.
 ## The basic setup model
 
 The `agent_vm`, `agent_workstation`, and `agent_code_vm` profiles default
-narrowly to GitHub CLI and Codex. Supply repeatable `--agent-tool` options when
-the VM needs a different provider set; an explicit list replaces those
-defaults. `agent_code_vm` adds interfaces and local capabilities, not every
-supported provider CLI. For example:
+narrowly to GitHub CLI and Codex. `--agent-tool` values add to those defaults
+and accept comma-separated lists; use `--no-agent-tool` to remove a default.
+`agent_code_vm` also defaults to read-write Git, active Git/agent auth sources,
+T3 Code, private web/RDP source ranges, and T3 pairing. For example:
 
 ```bash
 infra-tools setup agent_workstation 192.168.0.41 \
@@ -32,9 +32,7 @@ infra-tools setup agent_workstation 192.168.0.41 \
   --image-storage ts1-storage \
   --memory 4G --balloon-min 1G \
   --storage root ts1-storage 32G \
-  --agent-tool gh \
-  --agent-tool codex \
-  --agent-tool opencode \
+  --agent-tool opencode,gh,codex \
   --git-access read \
   --repo https://github.com/example/project.git \
   --agent-config active
@@ -78,10 +76,17 @@ and is not a persistent agent credential.
 
 ## Selecting agent tools
 
-Use one `--agent-tool` option for each tool to install:
+Use one repeatable or comma-separated `--agent-tool` option to add tools:
 
 ```bash
---agent-tool gh --agent-tool codex --agent-tool opencode
+--agent-tool opencode,gh,codex
+```
+
+Profile defaults can be disabled explicitly, for example:
+
+```text
+--no-agent-tool gh --git-access none --git-auth none --agent-auth none
+```
 ```
 
 The currently supported tool names are:
@@ -153,6 +158,12 @@ The active user is the invoking user, or the original user when setup is run
 through `sudo`. The options are convenience sources, not VM-specific
 credentials: using them for several VMs can give every VM the same provider
 identity.
+
+The high-capability `agent_code_vm` profile selects active GitHub and agent
+credential sources automatically. If either identity should be omitted, use
+`--git-auth none` and/or `--agent-auth none`. A missing RDP account password or
+pairing password is requested with a hidden terminal prompt; an empty pairing
+password reuses the account password entered for the target.
 
 Do not combine an active source with its specified-file alternative:
 

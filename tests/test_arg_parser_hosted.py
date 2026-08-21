@@ -164,6 +164,19 @@ class TestHostedFlagParsing(unittest.TestCase):
             "https://gitlab.com/user/two.git",
         ])
 
+    def test_agent_tool_accepts_comma_separated_values_and_opt_outs(self):
+        args = self.parser.parse_args([
+            "10.0.0.50",
+            "--agent-tool", "opencode,gh,codex",
+            "--no-agent-tool", "gh",
+            "--git-auth", "none",
+            "--agent-auth", "none",
+        ])
+        self.assertEqual(args.agent_tools, ["opencode", "gh", "codex"])
+        self.assertEqual(args.no_agent_tools, ["gh"])
+        self.assertEqual(args.git_auth_source, "none")
+        self.assertEqual(args.agent_auth_source, "none")
+
     def test_rdp_policy_flags(self):
         args = self.parser.parse_args([
             "10.0.0.50",

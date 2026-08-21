@@ -129,9 +129,9 @@ tools, not for an LXC container.
 | Flag | Description |
 |------|-------------|
 | `--rdp` / `--no-rdp` | Enable or disable XRDP |
-| `--rdp-existing-password` | Local setup only: reuse the existing password of an existing non-root desktop account without putting it in process arguments |
+| `--rdp-existing-password` | Local setup only: reuse an existing non-root desktop account password; a missing profile password is requested securely |
 | `--rdp-bind-address IP` | Bind XRDP to one local IP; defaults to all IPv4 interfaces (`0.0.0.0`) |
-| `--rdp-source IP_OR_CIDR` | Restrict UFW RDP ingress to a source; repeatable |
+| `--rdp-source IP_OR_CIDR` | Restrict UFW RDP ingress to a source; repeatable; `--no-rdp-source` clears profile sources |
 | `--rdp-clipboard` / `--no-rdp-clipboard` | Control clipboard redirection; enabled by default |
 | `--rdp-drive-redirection` / `--no-rdp-drive-redirection` | Control drive, printer, and device redirection; disabled by default |
 | `--rdp-audio` / `--no-rdp-audio` | Control audio redirection; disabled by default |
@@ -244,12 +244,13 @@ Selecting a language runtime also installs its managed update timer. See
 These flags prepare a Debian VM or local control plane for agentic coding. They
 work with any setup type. `agent_vm` is the recommended terminal-only profile,
 `agent_workstation` adds a desktop and Firefox ESR, and `agent_code_vm` adds
-the common T3 Code web service, Playwright automation, and Geany stack. All
-three default to GitHub CLI and Codex; an explicit `--agent-tool` list replaces
-those defaults. The full profile does not choose Proxmox capacity, language
-runtimes, network exposure, RDP, or device-pairing credentials. It requires
-the explicit `--node` flag because its T3 Code service uses that runtime; Go
-and other project runtimes remain optional explicit selections.
+the common T3 Code web service, Playwright automation, Geany, RDP, private
+source ranges, protected T3 pairing, read-write Git, and active auth sources.
+All three default to GitHub CLI and Codex. `--agent-tool` values add to those
+defaults and accept comma-separated lists; use `--no-agent-tool` to remove a
+default. The full profile does not choose Proxmox capacity and requires
+explicit `--node` and `--go` flags. Missing account and pairing passwords are
+requested securely from a terminal.
 `server_lite` omits the standard firewall and generic CLI bundle, so use it
 only when that lighter profile is intentional.
 
@@ -267,16 +268,21 @@ infra-tools setup agent_vm 10.0.0.10 agentuser \
 ```
 
 For a provisioned graphical coding VM, use the full profile while keeping
-capacity, project runtimes, and trusted network boundaries explicit:
+capacity and project runtimes explicit:
 
 ```bash
 infra-tools setup agent_code_vm 10.0.0.11 agentuser \
   --provision-on pve1 --name agent-1 \
   --memory 4G --cores 4 --storage root local-lvm 32G \
-  --node --go \
-  --web-interface-source 10.0.0.0/24 \
-  --rdp --password "$RDP_PASSWORD" --rdp-source 10.0.0.0/24
+  --node --go --agent-tool opencode
 ```
+
+The profile supplies T3 Code, Playwright, Geany, RDP, `192.168.0.0/24` and
+`10.0.0.0/8` source ranges, read-write Git, active auth sources, and T3
+pairing. Passwords omitted from the command are requested with hidden prompts;
+an empty pairing password reuses the target account password. Use
+`--git-access none --git-auth none --agent-auth none` or the `--no-*` switches
+when a deployment needs a narrower posture.
 
 For the local machine, the installer can select the control-plane profile and
 run it immediately:
@@ -301,12 +307,15 @@ rm -f "$HOME/.infra_tools-install.sh"
 
 | Flag | Description |
 |------|-------------|
-| `--agent-tool TOOL` | Install one provider tool (`gh`, `codex`, `claude`, or `opencode`); repeatable, and an explicit list replaces agent-profile defaults |
+| `--agent-tool TOOL[,TOOL...]` | Add one or more provider tools (`gh`, `codex`, `claude`, or `opencode`) to profile defaults |
+| `--no-agent-tool TOOL[,TOOL...]` | Disable one or more profile-default provider tools |
 | `--desktop-interface INTERFACE` | Install an explicit desktop interface; currently `t3code` |
 | `--web-interface INTERFACE` | Install an explicit headless web interface; currently `t3code` |
 | `--web-interface-host IP` | Bind address for the selected web interface; defaults to loopback, or `0.0.0.0` when a source is supplied |
 | `--web-interface-port PORT` | TCP port for the selected web interface; default `3773` |
 | `--web-interface-source IP_OR_CIDR` | Permit direct web-interface access from this private source; repeatable and required for non-loopback binds |
+| `--no-web-interface` | Disable profile-provided web interfaces |
+| `--no-web-interface-source` | Clear profile-provided web-interface source ranges |
 | `--web-port PORT` | Allow an additional global TCP web port through guest UFW; repeatable |
 | `--no-default-web-ports` | Disable the agent-VM defaults of TCP 80, 443, 8080, and 8081 |
 | `--device-pairing PROVIDER` | Install the protected browser enrollment portal for a provider; repeatable, currently `t3code` |
@@ -315,12 +324,13 @@ rm -f "$HOME/.infra_tools-install.sh"
 | `--device-pairing-password PASS` | Controller-local portal password; hashed locally, transient, and not saved; the portal username defaults to the setup username |
 | `--no-device-pairing` | Remove the pairing broker, Nginx site, firewall rule, and installed portal password file from a saved host |
 | `--browser-automation PROVIDER` | Install and register explicit agent browser automation; currently `playwright`, with selected Codex and/or OpenCode required |
+| `--no-browser-automation` | Disable profile-provided browser automation |
 | `--refresh-packages` | Force the APT update/upgrade and versioned runtime checks that normal reruns skip when their completion state is already present |
 | `--git-access POLICY` | Set the VM's declared agent Git policy: `none`, `read`, or `read-write` |
 | `--git-host HOST` | Select the Git host for credentials; GitHub auth currently uses `github.com` |
-| `--git-auth active` | Copy the active controller user's selected GitHub CLI host entry; if its token is keyring-backed, retrieve it with the controller's `gh auth token` |
+| `--git-auth active\|none` | Copy active GitHub CLI credentials, or disable a profile auth default |
 | `--git-auth-file PATH` | Copy a selected-host `hosts.yml` entry or a one-line GitHub token from a controller-local file |
-| `--agent-auth active` | Copy selected file-backed agent credentials from the active controller user's known files; active `gh` also uses the `gh auth token` fallback |
+| `--agent-auth active\|none` | Copy selected active agent credentials, or disable a profile auth default |
 | `--agent-auth-file TOOL PATH` | Copy one selected agent credential from a specified controller-local file to its canonical target path; `gh` accepts a hosts file or one-line token; repeatable |
 | `--agent-config active` | Copy known non-secret config from the active controller; does not copy auth files |
 | `--interactive` | Prompt for tools, HTTPS repositories, Git policy, and credential sources |
@@ -351,10 +361,10 @@ are shown with `127.0.0.1` and are marked as requiring an SSH tunnel. For
 example, a T3 Code setup with device pairing reports both the direct T3 port
 (`3773` by default) and the Basic Auth enrollment portal (`3774` by default).
 
-Agent tools are selected individually with repeatable `--agent-tool` flags.
-The three agent profiles provide the narrow `gh` plus `codex` default;
-supplying any `--agent-tool` flags replaces that provider set. Other profiles
-retain no implicit agents. Add unrelated packages explicitly with
+Agent tools are selected with repeatable or comma-separated `--agent-tool`
+flags. The three agent profiles provide the narrow `gh` plus `codex` default;
+supplied tools add to that set, while `--no-agent-tool` removes selected
+defaults. Other profiles retain no implicit agents. Add unrelated packages with
 `--apt-install`, and add language runtimes with their individual flags.
 
 Any setup with agent features installs a managed `~/.local/bin/infra-tools`

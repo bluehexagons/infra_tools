@@ -11,6 +11,7 @@ from lib.config import (
     BROWSER_AUTOMATION_PROVIDERS,
     GIT_ACCESS_POLICIES,
 )
+from lib.plugin_registry import get_system_type_definition
 
 
 def _prompt(prompt: str, default: str = "") -> str:
@@ -48,6 +49,75 @@ def _prompt_device_pairing_credentials(args: Any) -> None:
     if not password or password != confirmation:
         raise ValueError("Device-pairing portal passwords did not match")
     args.device_pairing_auth_password = password
+
+
+def prompt_for_missing_passwords(args: Any, system_type: str) -> None:
+    """Prompt for passwords implied by a setup profile when they are absent.
+
+    Passwords are never persisted in the reconstructed command. An empty
+    device-pairing password reuses the target account password when one was
+    supplied; for a local setup, an empty RDP password selects the existing
+    account password path.
+    """
+
+    if getattr(args, "dry_run", False):
+        return
+
+    system_defaults = get_system_type_definition(system_type)
+    enable_rdp = getattr(args, "enable_rdp", None)
+    if enable_rdp is None:
+        enable_rdp = system_defaults.default_enable_rdp
+
+    if enable_rdp and not getattr(args, "rdp_existing_password", False):
+        password = getattr(args, "password", None)
+        if not isinstance(password, str) or not password.strip():
+            if not sys.stdin.isatty() or not sys.stdout.isatty():
+                raise ValueError(
+                    "--rdp requires --password, or run from a terminal to enter it securely"
+                )
+            password = getpass.getpass(
+                f"Password for {getattr(args, 'username', None) or 'target user'} "
+                "(hidden; blank reuses an existing local password): "
+            )
+            if password:
+                args.password = password
+            else:
+                if getattr(args, "hosted_node", None):
+                    raise ValueError(
+                        "An existing account password can only be reused by a local "
+                        "setup; provisioned guests need a new --password"
+                    )
+                args.rdp_existing_password = True
+
+    pairing_providers = getattr(args, "device_pairing_providers", None)
+    if getattr(args, "disable_device_pairing", False):
+        pairing_providers = None
+    elif not pairing_providers:
+        pairing_providers = system_defaults.default_device_pairing_providers
+    pairing_auth_supplied = bool(
+        getattr(args, "device_pairing_auth_file", None)
+        or getattr(args, "device_pairing_auth_username", None)
+        or getattr(args, "device_pairing_auth_password", None)
+    )
+    if pairing_providers and not pairing_auth_supplied:
+        if not sys.stdin.isatty() or not sys.stdout.isatty():
+            raise ValueError(
+                "Device pairing requires credentials, or run from a terminal to enter them securely"
+            )
+        args.device_pairing_auth_username = _prompt(
+            "Device-pairing portal username",
+            getattr(args, "username", None) or "agent",
+        )
+        pairing_password = getpass.getpass(
+            "Device-pairing portal password (hidden; blank reuses the account password): "
+        )
+        if not pairing_password:
+            pairing_password = getattr(args, "password", None)
+        if not pairing_password:
+            raise ValueError(
+                "Device-pairing password was empty and no target account password is available"
+            )
+        args.device_pairing_auth_password = pairing_password
 
 
 def run_interactive_setup(args: Any) -> None:

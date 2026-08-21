@@ -71,7 +71,11 @@ from lib.display import (
 from lib.interactive_shell import run_interactive_shell
 from lib.notifications import validate_notification_args
 from lib.orchestrator_bootstrap import LAUNCHER_NAME, run_orchestrator_bootstrap
-from lib.plugin_registry import format_system_type_help, get_system_type_names
+from lib.plugin_registry import (
+    format_system_type_help,
+    get_system_type_definition,
+    get_system_type_names,
+)
 from lib.network_cli import add_network_subparser, run_network_command
 from lib.local_cli import add_local_subparser, run_local_command
 from lib.proxmox_guest import (
@@ -94,6 +98,7 @@ from lib.setup_common import (
     remove_replaced_setup_cache,
     run_remote_setup,
 )
+from lib.interactive_setup import prompt_for_missing_passwords
 from lib.system_utils import get_current_username
 from lib.types import Deployments, JSONDict, JSONList, StrList
 from lib.validators import validate_host, validate_username
@@ -959,6 +964,43 @@ def _patch_preserve_keys(args: argparse.Namespace) -> set[str]:
         preserve_keys.add("device_pairing_port")
     if getattr(args, "default_web_ports", None) is None:
         preserve_keys.add("default_web_ports")
+    if not getattr(args, "agent_tools", None) and not getattr(args, "no_agent_tools", None):
+        preserve_keys.update({"agent_tools", "agent_tools_removed"})
+    if (
+        not getattr(args, "web_interfaces", None)
+        and not getattr(args, "disable_web_interface", False)
+    ):
+        preserve_keys.update({"web_interfaces", "disable_web_interface"})
+    if (
+        not getattr(args, "web_interface_sources", None)
+        and not getattr(args, "clear_web_interface_sources", False)
+    ):
+        preserve_keys.update({"web_interface_sources", "clear_web_interface_sources"})
+    if (
+        not getattr(args, "rdp_allowed_sources", None)
+        and not getattr(args, "clear_rdp_sources", False)
+    ):
+        preserve_keys.update({"rdp_allowed_sources", "clear_rdp_sources"})
+    if (
+        not getattr(args, "browser_automation", None)
+        and not getattr(args, "disable_browser_automation", False)
+    ):
+        preserve_keys.update({"browser_automation", "disable_browser_automation"})
+    if (
+        not getattr(args, "git_auth_source", None)
+        and not getattr(args, "git_auth_file", None)
+        and not getattr(args, "git_auth_token", None)
+    ):
+        preserve_keys.update({"git_auth_source", "disable_git_auth"})
+    if (
+        not getattr(args, "agent_auth_source", None)
+        and not getattr(args, "agent_auth_files", None)
+    ):
+        preserve_keys.update({"agent_auth_source", "disable_agent_auth"})
+    if not getattr(args, "device_pairing_providers", None) and not getattr(
+        args, "disable_device_pairing", False
+    ):
+        preserve_keys.update({"device_pairing_providers", "disable_device_pairing"})
     return preserve_keys
 
 
@@ -1213,6 +1255,12 @@ def run_setup_command(args: argparse.Namespace) -> int:
         )
         return 1
 
+    try:
+        prompt_for_missing_passwords(args, args.system_type)
+    except (EOFError, KeyboardInterrupt, ValueError) as exc:
+        print(f"Error: {exc}")
+        return 1
+
     config = SetupConfig.from_args(args, args.system_type)
 
     reuse_cached_provisioning = _reuse_cached_provisioning_metadata(config, args)
@@ -1365,7 +1413,18 @@ def run_patch_command(args: argparse.Namespace) -> int:
         print(f"Error: No cached setup found for {args.host}")
         print(f"Please run the initial setup first using 'infra-tools setup <system_type> {args.host}'")
         return 1
-    
+
+    # Profile defaults are required for an initial setup, but a patch without
+    # an explicit override must retain the cached runtime and access policy.
+    profile_defaults = get_system_type_definition(cached_config.system_type)
+    for runtime in profile_defaults.required_explicit_runtimes:
+        if getattr(args, f"install_{runtime}", None) is None:
+            setattr(args, f"install_{runtime}", getattr(cached_config, f"install_{runtime}"))
+    if getattr(args, "enable_rdp", None) is None:
+        args.enable_rdp = cached_config.enable_rdp
+    if getattr(args, "git_access", None) is None:
+        args.git_access = cached_config.git_access
+
     new_config = SetupConfig.from_args(args, cached_config.system_type)
     merged_config = merge_setup_configs(
         cached_config,

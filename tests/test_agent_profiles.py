@@ -54,7 +54,7 @@ class TestAgentProfiles(unittest.TestCase):
 
     def test_agent_code_vm_adds_t3_playwright_and_geany(self) -> None:
         config = SetupConfig.from_args(
-            _setup_args(install_node=True),
+            _setup_args(install_node=True, install_go=True),
             "agent_code_vm",
         )
 
@@ -64,8 +64,11 @@ class TestAgentProfiles(unittest.TestCase):
         self.assertEqual(config.web_interfaces, ["t3code"])
         self.assertEqual(config.browser_automation, "playwright")
         self.assertTrue(config.include_desktop)
-        self.assertFalse(config.enable_rdp)
-        self.assertFalse(config.install_go)
+        self.assertTrue(config.enable_rdp)
+        self.assertTrue(config.install_go)
+        self.assertEqual(config.git_access, "read-write")
+        self.assertEqual(config.web_interface_sources, ["192.168.0.0/24", "10.0.0.0/8"])
+        self.assertEqual(config.device_pairing_providers, ["t3code"])
 
         step_names = [name for name, _step in get_steps_for_system_type(config)]
         self.assertIn("Installing workstation editor", step_names)
@@ -80,31 +83,40 @@ class TestAgentProfiles(unittest.TestCase):
     def test_agent_code_vm_keeps_node_runtime_explicit(self) -> None:
         with self.assertRaisesRegex(
             ValueError,
-            "agent_code_vm requires explicit runtime selection: --node",
+            "agent_code_vm requires explicit runtime selection: --node --go",
         ):
             SetupConfig.from_args(_setup_args(), "agent_code_vm")
 
     def test_agent_code_vm_explicit_editor_replaces_geany(self) -> None:
         config = SetupConfig.from_args(
-            _setup_args(editor="vscode", install_node=True),
+            _setup_args(editor="vscode", install_node=True, install_go=True),
             "agent_code_vm",
         )
 
         self.assertEqual(config.editor, "vscode")
         self.assertIn("--editor vscode", " ".join(config.to_setup_command()))
 
-    def test_explicit_agent_tool_list_replaces_profile_defaults(self) -> None:
+    def test_explicit_agent_tool_list_augments_profile_defaults(self) -> None:
         config = SetupConfig.from_args(
             _setup_args(agent_tools=["claude", "opencode"]),
             "agent_vm",
         )
 
-        self.assertEqual(config.selected_agent_tools(), ["claude", "opencode"])
+        self.assertEqual(config.selected_agent_tools(), ["gh", "codex", "claude", "opencode"])
         command = " ".join(config.to_setup_command())
         self.assertIn("--agent-tool claude", command)
         self.assertIn("--agent-tool opencode", command)
         self.assertNotIn("--agent-tool gh", command)
         self.assertNotIn("--agent-tool codex", command)
+
+    def test_agent_tool_defaults_can_be_disabled(self) -> None:
+        config = SetupConfig.from_args(
+            _setup_args(agent_tools=["opencode"], no_agent_tools=["gh"]),
+            "agent_vm",
+        )
+
+        self.assertEqual(config.selected_agent_tools(), ["codex", "opencode"])
+        self.assertIn("--no-agent-tool gh", " ".join(config.to_setup_command()))
 
     def test_empty_agent_tool_list_keeps_profile_defaults(self) -> None:
         config = SetupConfig.from_args(
