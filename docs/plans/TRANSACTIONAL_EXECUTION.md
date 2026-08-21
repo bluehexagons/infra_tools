@@ -22,7 +22,9 @@ ARCH-08 from the [architectural risk review](ARCHITECTURAL_RISK_REVIEW_2026-08-0
 
 - `lib.remote_utils.run(check=True)` now raises `CommandExecutionError` with a
   bounded stderr diagnostic; callers that intentionally inspect failure use
-  explicit `check=False`.
+  explicit `check=False`. Commands have a one-hour default timeout,
+  caller-specific overrides, typed timeout diagnostics, and shell process-group
+  termination.
 - `remote_setup.py` no longer removes all managed services before setup steps.
 - `DeploymentOrchestrator.deploy_manifest()` builds and validates a sibling
   release before stopping app-scoped services. Failed activation restores the
@@ -92,8 +94,11 @@ raise, best-effort failures remain inspectable, and result-inspecting database,
 release-fetch, and host-metric callers explicitly request `check=False`.
 Diagnostic redaction was completed on 2026-08-21 for quoted, escaped,
 delimiter-bearing, and unterminated secret values in command and stderr text.
-The helper still has no timeout contract; the full caller classification and an
-argv-native command API remain open.
+Bounded execution was completed the same day: commands default to one hour,
+callers may select a positive override or explicitly opt out with `None`, and
+timeouts always raise `CommandTimeoutError`. Shell commands are isolated in a
+new session so TERM/KILL cleanup covers descendants. The full caller
+classification and an argv-native command API remain open.
 
 ## Phase 2: Atomic persistent state
 

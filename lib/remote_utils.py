@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import math
 import os
 import pwd
 import re
 import secrets
 import shlex
+import signal
 import string
 import subprocess
 import sys
@@ -16,6 +18,10 @@ from lib.validation import validate_package_name
 
 
 _dry_run = False
+
+
+DEFAULT_COMMAND_TIMEOUT_SECONDS = 60 * 60
+_TIMEOUT_TERMINATION_GRACE_SECONDS = 5.0
 
 
 _SECRET_ASSIGNMENT_PREFIX_RE = re.compile(
@@ -118,6 +124,24 @@ class CommandExecutionError(RuntimeError):
         super().__init__(message)
 
 
+class CommandTimeoutError(TimeoutError):
+    """Raised when a command exceeds its caller-visible execution bound."""
+
+    def __init__(
+        self,
+        command: str,
+        timeout: float,
+        stderr: Optional[str] = None,
+    ) -> None:
+        self.command = _redact_command(command)
+        self.timeout = timeout
+        self.stderr = _redact_command(stderr) if stderr else stderr
+        message = f"Command timed out after {timeout:g} seconds: {self.command}"
+        if self.stderr:
+            message += f"\n{self.stderr[:500]}"
+        super().__init__(message)
+
+
 def set_dry_run(enabled: bool) -> None:
     """Set dry-run mode globally."""
     global _dry_run
@@ -134,6 +158,50 @@ def generate_password(length: int = 16) -> str:
     return ''.join(secrets.choice(alphabet) for _ in range(length))
 
 
+def _validate_timeout(timeout: Optional[float]) -> Optional[float]:
+    """Validate a command timeout while retaining an explicit unbounded option."""
+
+    if timeout is None:
+        return None
+    if (
+        isinstance(timeout, bool)
+        or not isinstance(timeout, (int, float))
+        or not math.isfinite(timeout)
+        or timeout <= 0
+    ):
+        raise ValueError("Command timeout must be a positive number or None")
+    return float(timeout)
+
+
+def _terminate_timed_out_process(
+    process: subprocess.Popen[str],
+    *,
+    process_group: bool,
+) -> None:
+    """Terminate a timed-out process and any shell descendants."""
+
+    if process_group:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+        try:
+            process.wait(timeout=_TIMEOUT_TERMINATION_GRACE_SECONDS)
+        except subprocess.TimeoutExpired:
+            pass
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        return
+
+    try:
+        process.kill()
+    except ProcessLookupError:
+        return
+    process.wait()
+
+
 def run(
     cmd: str,
     check: bool = True,
@@ -142,7 +210,9 @@ def run(
     text: bool = True,
     display_cmd: Optional[str] = None,
     input_data: Optional[str] = None,
+    timeout: Optional[float] = DEFAULT_COMMAND_TIMEOUT_SECONDS,
 ) -> subprocess.CompletedProcess[str]:
+    validated_timeout = _validate_timeout(timeout)
     log_cmd = _redact_command(display_cmd if display_cmd is not None else cmd)
     print(f"  Running: {log_cmd[:80]}..." if len(log_cmd) > 80 else f"  Running: {log_cmd}")
     sys.stdout.flush()
@@ -152,15 +222,36 @@ def run(
         # CompletedProcess.args expects a sequence; provide a one-element list for consistency
         return subprocess.CompletedProcess(args=[cmd], returncode=0, stdout="", stderr="")
 
-    command = ["/bin/bash", "-lc", cmd] if _requires_shell(cmd) else shlex.split(cmd)
-    run_kwargs = {
-        "capture_output": capture_output,
-        "text": text,
-        "cwd": cwd,
-    }
-    if input_data is not None:
-        run_kwargs["input"] = input_data
-    result = subprocess.run(command, **run_kwargs)
+    requires_shell = _requires_shell(cmd)
+    command = ["/bin/bash", "-lc", cmd] if requires_shell else shlex.split(cmd)
+    process = subprocess.Popen(
+        command,
+        stdin=subprocess.PIPE if input_data is not None else None,
+        stdout=subprocess.PIPE if capture_output else None,
+        stderr=subprocess.PIPE if capture_output else None,
+        text=text,
+        cwd=cwd,
+        start_new_session=requires_shell,
+    )
+    try:
+        stdout, stderr = process.communicate(input=input_data, timeout=validated_timeout)
+    except subprocess.TimeoutExpired as exc:
+        assert validated_timeout is not None
+        _terminate_timed_out_process(process, process_group=requires_shell)
+        stdout, stderr = process.communicate()
+        diagnostic = stderr or exc.stderr
+        raise CommandTimeoutError(
+            log_cmd,
+            validated_timeout,
+            diagnostic if isinstance(diagnostic, str) else None,
+        ) from exc
+
+    result = subprocess.CompletedProcess(
+        args=command,
+        returncode=process.returncode,
+        stdout=stdout,
+        stderr=stderr,
+    )
     if check and result.returncode != 0:
         if getattr(result, 'stderr', None):
             warning = _redact_command(result.stderr) if isinstance(result.stderr, str) else result.stderr

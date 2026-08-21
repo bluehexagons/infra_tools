@@ -178,7 +178,7 @@ quotes, and unterminated quoted input. Regression tests cover both command and
 stderr diagnostics. A future argv-native command API can further reduce string
 reconstruction, but the demonstrated suffix disclosure is closed.
 
-### AUD-11: The shared command runner has no timeout contract
+### AUD-11: The shared command runner has no timeout contract (resolved)
 
 **Severity: Medium — hung setup/deployment operations**
 
@@ -189,10 +189,14 @@ hold the operation indefinitely. A few specialized paths add their own shell
 timeouts, but the shared helper does not expose or enforce a caller-visible
 timeout policy.
 
-**Follow-up:** add an optional timeout with a typed timeout error and define
-long-running command overrides. Ensure timeout handling terminates the process
-group where shell execution is used, and add tests for propagation and
-diagnostics.
+**Resolution (2026-08-21):** `run()` now applies a one-hour default bound and
+accepts an explicit positive timeout or `None` for a deliberately unbounded
+operation. Timeouts raise `CommandTimeoutError` regardless of `check`, because
+there is no completed result for best-effort callers to inspect. Shell commands
+start in a separate session; timeout cleanup sends TERM and then KILL to the
+whole process group. Tests cover the default, invalid values, secret-safe
+diagnostics, best-effort propagation, and process-group cleanup. Commands known
+to require more than an hour must opt into a larger bound at the call site.
 
 ### AUD-12: Active agent config staging follows source symlinks
 

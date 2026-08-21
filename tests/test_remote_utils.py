@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import string
 import subprocess
 import sys
@@ -15,6 +16,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.remote_utils import (
     CommandExecutionError,
+    CommandTimeoutError,
+    DEFAULT_COMMAND_TIMEOUT_SECONDS,
     set_dry_run,
     is_dry_run,
     generate_password,
@@ -65,33 +68,57 @@ class TestRunDryRun(unittest.TestCase):
 
 
 class TestRunCommandDispatch(unittest.TestCase):
-    @patch("lib.remote_utils.subprocess.run")
-    def test_simple_commands_use_argument_list(self, mock_run):
-        mock_run.return_value = subprocess.CompletedProcess(args=["echo", "hello"], returncode=0)
+    @staticmethod
+    def _completed_process(mock_popen, *, returncode=0, stdout=None, stderr=None):
+        process = mock_popen.return_value
+        process.communicate.return_value = (stdout, stderr)
+        process.returncode = returncode
+        process.pid = 1234
+        return process
+
+    @patch("lib.remote_utils.subprocess.Popen")
+    def test_simple_commands_use_argument_list(self, mock_popen):
+        process = self._completed_process(mock_popen)
         run("echo hello")
-        mock_run.assert_called_once_with(
+        mock_popen.assert_called_once_with(
             ["echo", "hello"],
-            capture_output=False,
+            stdin=None,
+            stdout=None,
+            stderr=None,
             text=True,
             cwd=None,
+            start_new_session=False,
+        )
+        process.communicate.assert_called_once_with(
+            input=None,
+            timeout=float(DEFAULT_COMMAND_TIMEOUT_SECONDS),
         )
 
-    @patch("lib.remote_utils.subprocess.run")
-    def test_piped_commands_use_explicit_shell_process(self, mock_run):
-        mock_run.return_value = subprocess.CompletedProcess(args=["/bin/bash", "-lc", "echo test | cat"], returncode=0)
+    @patch("lib.remote_utils.subprocess.Popen")
+    def test_piped_commands_use_explicit_shell_process(self, mock_popen):
+        self._completed_process(mock_popen)
         run("echo test | cat")
-        mock_run.assert_called_once_with(
+        mock_popen.assert_called_once_with(
             ["/bin/bash", "-lc", "echo test | cat"],
-            capture_output=False,
+            stdin=None,
+            stdout=None,
+            stderr=None,
             text=True,
             cwd=None,
+            start_new_session=True,
         )
 
-    @patch("lib.remote_utils.subprocess.run")
-    def test_check_true_raises_for_failed_command(self, mock_run):
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=["false"], returncode=17, stderr="permission denied"
-        )
+    @patch("lib.remote_utils.subprocess.Popen")
+    def test_explicit_none_allows_deliberately_unbounded_command(self, mock_popen):
+        process = self._completed_process(mock_popen)
+
+        run("echo hello", timeout=None)
+
+        process.communicate.assert_called_once_with(input=None, timeout=None)
+
+    @patch("lib.remote_utils.subprocess.Popen")
+    def test_check_true_raises_for_failed_command(self, mock_popen):
+        self._completed_process(mock_popen, returncode=17, stderr="permission denied")
 
         with self.assertRaises(CommandExecutionError) as raised:
             run("false", display_cmd="false (sanitized)")
@@ -100,21 +127,21 @@ class TestRunCommandDispatch(unittest.TestCase):
         self.assertEqual(error.command, "false (sanitized)")
         self.assertEqual(error.returncode, 17)
         self.assertEqual(error.stderr, "permission denied")
-        self.assertIs(error.result, mock_run.return_value)
+        self.assertEqual(error.result.args, ["false"])
 
-    @patch("lib.remote_utils.subprocess.run")
-    def test_check_false_returns_failed_result(self, mock_run):
-        failed = subprocess.CompletedProcess(args=["false"], returncode=17, stderr="failed")
-        mock_run.return_value = failed
+    @patch("lib.remote_utils.subprocess.Popen")
+    def test_check_false_returns_failed_result(self, mock_popen):
+        self._completed_process(mock_popen, returncode=17, stderr="failed")
 
         result = run("false", check=False)
 
-        self.assertIs(result, failed)
+        self.assertEqual(result.returncode, 17)
+        self.assertEqual(result.stderr, "failed")
 
-    @patch("lib.remote_utils.subprocess.run")
-    def test_failure_diagnostics_redact_secret_values(self, mock_run):
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=["deploy"],
+    @patch("lib.remote_utils.subprocess.Popen")
+    def test_failure_diagnostics_redact_secret_values(self, mock_popen):
+        self._completed_process(
+            mock_popen,
             returncode=1,
             stderr="SECRET_KEY_BASE=stderr-secret --token cli-secret",
         )
@@ -129,10 +156,10 @@ class TestRunCommandDispatch(unittest.TestCase):
         self.assertNotIn("cli-secret", message)
         self.assertIn("SECRET_KEY_BASE=<redacted>", message)
 
-    @patch("lib.remote_utils.subprocess.run")
-    def test_failure_diagnostics_redact_complete_quoted_secret_values(self, mock_run):
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=["deploy"],
+    @patch("lib.remote_utils.subprocess.Popen")
+    def test_failure_diagnostics_redact_complete_quoted_secret_values(self, mock_popen):
+        self._completed_process(
+            mock_popen,
             returncode=1,
             stderr=(
                 "API_KEY='stderr secret;with|delimiters' "
@@ -161,10 +188,10 @@ class TestRunCommandDispatch(unittest.TestCase):
             self.assertNotIn(secret_fragment, message)
         self.assertEqual(message.count("<redacted>"), 5)
 
-    @patch("lib.remote_utils.subprocess.run")
-    def test_failure_diagnostics_redact_escaped_and_unterminated_values(self, mock_run):
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=["deploy"],
+    @patch("lib.remote_utils.subprocess.Popen")
+    def test_failure_diagnostics_redact_escaped_and_unterminated_values(self, mock_popen):
+        self._completed_process(
+            mock_popen,
             returncode=1,
             stderr="--token 'unterminated secret phrase",
         )
@@ -176,6 +203,48 @@ class TestRunCommandDispatch(unittest.TestCase):
         self.assertNotIn("escaped\\ secret", message)
         self.assertNotIn("unterminated secret phrase", message)
         self.assertIn("--name 'public value'", message)
+
+    @patch("lib.remote_utils.subprocess.Popen")
+    def test_non_shell_timeout_raises_typed_error_even_when_best_effort(self, mock_popen):
+        process = self._completed_process(mock_popen)
+        process.communicate.side_effect = [
+            subprocess.TimeoutExpired(["deploy"], 2, stderr="--token timeout-secret"),
+            (None, None),
+        ]
+
+        with self.assertRaises(CommandTimeoutError) as raised:
+            run("deploy --token command-secret", check=False, timeout=2)
+
+        error = raised.exception
+        self.assertEqual(error.timeout, 2)
+        self.assertNotIn("command-secret", str(error))
+        self.assertNotIn("timeout-secret", str(error))
+        process.kill.assert_called_once_with()
+        process.wait.assert_called_once_with()
+
+    @patch("lib.remote_utils.os.killpg")
+    @patch("lib.remote_utils.subprocess.Popen")
+    def test_shell_timeout_terminates_process_group(self, mock_popen, mock_killpg):
+        process = self._completed_process(mock_popen)
+        process.communicate.side_effect = [
+            subprocess.TimeoutExpired(["/bin/bash"], 3),
+            (None, None),
+        ]
+
+        with self.assertRaises(CommandTimeoutError):
+            run("deploy | cat", timeout=3)
+
+        self.assertEqual(
+            mock_killpg.call_args_list,
+            [unittest.mock.call(1234, signal.SIGTERM), unittest.mock.call(1234, signal.SIGKILL)],
+        )
+        process.wait.assert_called_once_with(timeout=5.0)
+
+    def test_rejects_invalid_timeout(self):
+        for timeout in (0, -1, True, float("inf"), float("nan"), "30"):
+            with self.subTest(timeout=timeout):
+                with self.assertRaisesRegex(ValueError, "positive number"):
+                    run("echo hello", timeout=timeout)
 
 
 class TestRemoteValidateUsername(unittest.TestCase):

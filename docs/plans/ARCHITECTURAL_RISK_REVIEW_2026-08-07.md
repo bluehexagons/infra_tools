@@ -194,8 +194,9 @@ Validation was performed by static evidence checks (no behavior-altering actions
   `CommandExecutionError` on non-zero exit, with bounded diagnostics, while
   `check=False` remains an explicit result-returning contract. Tests cover both
   paths, and common secret assignment/option values are redacted from command
-  output and exception text. Complete shell-word redaction landed on 2026-08-21;
-  caller inventory and bounded command execution remain follow-up work.
+  output and exception text. Complete shell-word redaction and bounded command
+  execution landed on 2026-08-21; caller inventory and an argv-native command
+  API remain follow-up work.
 - **2026-08-19 — ARCH-05 resolved:** removed global service teardown from
   remote setup. Manifest deployments now build and validate before stopping
   app-scoped units, then restore the prior release and units after activation
