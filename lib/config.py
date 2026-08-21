@@ -913,8 +913,10 @@ class SetupConfig:
         if self.install_python:
             cmd_parts.append("--python")
 
-        for tool in self.selected_agent_tools():
-            cmd_parts.append(f"--agent-tool {shlex.quote(tool)}")
+        selected_agent_tools = self.selected_agent_tools()
+        if selected_agent_tools != list(system_type_defaults.default_agent_tools):
+            for tool in selected_agent_tools:
+                cmd_parts.append(f"--agent-tool {shlex.quote(tool)}")
 
         for interface in self.desktop_interfaces or []:
             cmd_parts.append(f"--desktop-interface {shlex.quote(interface)}")
@@ -1168,6 +1170,8 @@ class SetupConfig:
         data['container_storage'] = _normalize_nested_specs(data.get('container_storage'))
         data['storage_mounts'] = _normalize_nested_specs(data.get('storage_mounts'))
         system_defaults = get_system_type_definition(system_type)
+        if not data.get('agent_tools'):
+            data['agent_tools'] = list(system_defaults.default_agent_tools) or None
         if 'auto_restart' not in data or data.get('auto_restart') is None:
             if 'no_restart' in data and data.get('no_restart') is not None:
                 data['auto_restart'] = not bool(data.pop('no_restart'))
@@ -1276,7 +1280,11 @@ class SetupConfig:
         auto_restart_grace = _validate_non_negative_int('auto_restart_grace', auto_restart_grace)
 
         raw_agent_tools = getattr(args, 'agent_tools', None)
-        agent_tools = raw_agent_tools if isinstance(raw_agent_tools, list) else None
+        agent_tools = (
+            raw_agent_tools
+            if isinstance(raw_agent_tools, list) and raw_agent_tools
+            else list(system_type_definition.default_agent_tools) or None
+        )
         raw_web_ports = getattr(args, 'web_ports', None)
         web_ports = raw_web_ports if isinstance(raw_web_ports, list) else None
         browser_automation = _optional_str_arg(args, 'browser_automation')

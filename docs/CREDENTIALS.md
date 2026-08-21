@@ -20,12 +20,13 @@ it, such as a private GitHub repository or an agent account.
 
 ## The basic setup model
 
-Select exactly the tools needed by the VM with repeatable `--agent-tool`
-options. There are no agent-suite presets that install an unrelated bundle of
-tools. For example:
+The `agent_vm` and `agent_workstation` profiles default narrowly to GitHub CLI
+and Codex. Supply repeatable `--agent-tool` options when the VM needs a
+different provider set; an explicit list replaces those defaults. There are no
+broad agent-suite presets that install every supported tool. For example:
 
 ```bash
-infra-tools setup workstation_dev 192.168.0.41 \
+infra-tools setup agent_workstation 192.168.0.41 \
   --provision-on ts1 --name agent-1 \
   --image-storage ts1-storage \
   --memory 4G --balloon-min 1G \
@@ -324,11 +325,11 @@ reachable Git host:
 --repo https://git.example.net/public/tools.git
 ```
 
-A private GitHub repository needs all of the relevant pieces: `gh` selected as
-an agent tool, GitHub auth supplied through `--git-auth`, `--agent-auth` for
-`gh`, or the interactive flow, an appropriate `--git-access` value, and a
-token authorized for that repository. For example, a per-VM setup can use
-protected files that are different for each VM:
+A private GitHub repository needs all of the relevant pieces: `gh` selected by
+an agent profile or explicit tool list, GitHub auth supplied through
+`--git-auth`, `--agent-auth` for `gh`, or the interactive flow, an appropriate
+`--git-access` value, and a token authorized for that repository. For example,
+a per-VM setup can use protected files that are different for each VM:
 
 ```bash
 --agent-tool gh \

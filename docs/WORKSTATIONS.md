@@ -10,8 +10,8 @@ and Codex CLI in this example):
 
 ```bash
 wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
-sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup workstation_dev \
-  --control-plane --agent-tool gh --agent-tool codex --desktop xfce --rdp --rdp-existing-password
+sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup agent_workstation \
+  --control-plane --desktop xfce --rdp --rdp-existing-password
 rm -f "$HOME/.infra_tools-install.sh"
 ```
 
@@ -42,6 +42,7 @@ desktop interface when both local RDP and remote clients are useful.
 | `workstation_desktop` | Desktop, Firefox ESR, and CLI tools |
 | `pc_dev` | Desktop, Firefox ESR, LibreOffice, SMB client packages, Remmina, and CLI tools |
 | `workstation_dev` | Desktop, Firefox ESR, and CLI tools including Neovim |
+| `agent_workstation` | Developer workstation defaults plus GitHub CLI and Codex |
 
 The default desktop is XFCE. All workstation profiles use Debian's Firefox ESR
 by default. A browser selected with `--browser` becomes the default for the
@@ -54,19 +55,20 @@ are explicit: select Geany or Visual Studio Code with `--editor geany` or
 ### Headless agentic coding host
 
 For a Debian VM or server that should run coding agents from SSH or a terminal,
-without a desktop or RDP, use the control-plane profile. Add only the language
-runtimes your projects need:
+without a desktop or RDP, use `agent_vm`. Add only the language runtimes your
+projects need:
 
 ```bash
-infra-tools setup control_plane 10.0.0.24 agent \
-  --agent-tool gh --agent-tool codex --agent-tool claude --agent-tool opencode \
+infra-tools setup agent_vm 10.0.0.24 agent \
   --node --python --go --agent-config active \
   --git-access read --repo https://github.com/user/project.git
 ```
 
-This installs the explicitly selected agents, administrator tools, and selected
-runtimes. Remove `--agent-config` or `--repo` when those inputs are not needed.
-Use `tmux` for long-running agent sessions over SSH.
+This installs GitHub CLI, Codex, and the selected runtimes without the broader
+control-plane administrator package set. Remove `--agent-config` or `--repo`
+when those inputs are not needed. Use `tmux` for long-running agent sessions
+over SSH. To use another provider set, repeat `--agent-tool`; any explicit list
+replaces the profile defaults.
 
 ### Desktop agentic coding workstation with RDP
 
@@ -74,10 +76,10 @@ For a graphical Debian workstation, keep the default desktop profile, select
 XFCE for the RDP session, and restrict RDP to the management network:
 
 ```bash
-infra-tools setup workstation_dev 10.0.0.25 agent \
+infra-tools setup agent_workstation 10.0.0.25 agent \
   --control-plane --desktop xfce --rdp \
   --password "$RDP_PASSWORD" --rdp-source 10.0.0.0/24 \
-  --agent-tool gh --agent-tool codex --agent-config active \
+  --agent-config active \
   --browser-automation playwright \
   --repo https://github.com/user/project.git
 ```

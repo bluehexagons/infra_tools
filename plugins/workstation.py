@@ -49,6 +49,17 @@ PLUGIN = PluginDefinition(
             default_browser="firefox",
             step_builder="plugins.workstation:build_workstation_steps",
         ),
+        SystemTypeDefinition(
+            name="agent_workstation",
+            description="Graphical agent coding workstation",
+            order=32,
+            include_desktop=True,
+            include_cli_tools=True,
+            include_workstation_dev_apps=True,
+            default_browser="firefox",
+            default_agent_tools=("gh", "codex"),
+            step_builder="plugins.workstation:build_workstation_steps",
+        ),
     ),
 )
 

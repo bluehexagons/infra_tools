@@ -26,6 +26,14 @@ PLUGIN = PluginDefinition(
             step_builder="plugins.server:build_server_steps",
         ),
         SystemTypeDefinition(
+            name="agent_vm",
+            description="Headless agent coding VM",
+            order=38,
+            include_cli_tools=True,
+            default_agent_tools=("gh", "codex"),
+            step_builder="plugins.server:build_server_steps",
+        ),
+        SystemTypeDefinition(
             name="server_dev",
             description="Development server",
             order=40,

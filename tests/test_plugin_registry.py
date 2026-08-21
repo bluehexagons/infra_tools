@@ -30,7 +30,9 @@ class TestPluginRegistry(unittest.TestCase):
                 "workstation_desktop",
                 "pc_dev",
                 "workstation_dev",
+                "agent_workstation",
                 "control_plane",
+                "agent_vm",
                 "server_dev",
                 "server_web",
                 "server_lite",
@@ -78,6 +80,14 @@ class TestPluginRegistry(unittest.TestCase):
             get_system_type_definition("workstation_dev").step_builder,
             "plugins.workstation:build_workstation_steps",
         )
+        self.assertEqual(
+            get_system_type_definition("agent_vm").step_builder,
+            "plugins.server:build_server_steps",
+        )
+        self.assertEqual(
+            get_system_type_definition("agent_workstation").step_builder,
+            "plugins.workstation:build_workstation_steps",
+        )
 
     def test_system_type_metadata_drives_defaults(self):
         system_type = get_system_type_definition("pc_dev")
@@ -90,10 +100,21 @@ class TestPluginRegistry(unittest.TestCase):
         self.assertIsNotNone(system_type.step_builder)
 
     def test_workstation_profiles_use_debian_browser_default(self):
-        for profile in ("workstation_desktop", "pc_dev", "workstation_dev"):
+        for profile in (
+            "workstation_desktop",
+            "pc_dev",
+            "workstation_dev",
+            "agent_workstation",
+        ):
             with self.subTest(profile=profile):
                 system_type = get_system_type_definition(profile)
                 self.assertEqual(system_type.default_browser, "firefox")
+
+    def test_agent_profiles_declare_narrow_provider_defaults(self):
+        for profile in ("agent_vm", "agent_workstation"):
+            with self.subTest(profile=profile):
+                system_type = get_system_type_definition(profile)
+                self.assertEqual(system_type.default_agent_tools, ("gh", "codex"))
 
     def test_control_plane_profile_adds_administrator_tools(self):
         config = SetupConfig(

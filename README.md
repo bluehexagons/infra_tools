@@ -42,13 +42,13 @@ rm -f "$HOME/.infra_tools-install.sh"
 ```
 
 Set up a standard Debian GNOME desktop as a graphical control plane. This keeps
-GNOME for local logins, uses XFCE for RDP, and installs the selected agent tools
-(GitHub CLI and Codex CLI in this example):
+GNOME for local logins, uses XFCE for RDP, and installs the agent-workstation
+defaults (GitHub CLI and Codex CLI):
 
 ```bash
 wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
-sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup workstation_dev \
-  --control-plane --agent-tool gh --agent-tool codex --desktop xfce --rdp --rdp-existing-password
+sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup agent_workstation \
+  --control-plane --desktop xfce --rdp --rdp-existing-password
 rm -f "$HOME/.infra_tools-install.sh"
 ```
 
@@ -157,10 +157,11 @@ infra-tools vm autostart agent-dev-01
 Use the [documentation index](docs/README.md) for the complete command and
 feature map.
 
-Agent VM setup supports explicit tools, target-side HTTPS repository clones,
-VM-level Git policy, transient credential sources, and credential rotation via
-`infra-tools agent auth set/status`; see the [credential guide](docs/CREDENTIALS.md)
-and [command reference](docs/COMMAND_LINE.md). Codex and OpenCode can receive an
+Agent VM setup supports narrow profile defaults or explicit tool lists,
+target-side HTTPS repository clones, VM-level Git policy, transient credential
+sources, and credential rotation via `infra-tools agent auth set/status`; see
+the [credential guide](docs/CREDENTIALS.md) and
+[command reference](docs/COMMAND_LINE.md). Codex and OpenCode can receive an
 explicit, isolated Playwright capability described in the
 [browser automation guide](docs/BROWSER_AUTOMATION.md).
 New browsers and T3 clients can be enrolled without live terminal access by

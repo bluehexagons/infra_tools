@@ -115,8 +115,8 @@ installs the selected agent tools (GitHub CLI and Codex CLI in this example):
 
 ```bash
 wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
-sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup workstation_dev \
-  --control-plane --agent-tool gh --agent-tool codex --desktop xfce --rdp --rdp-existing-password
+sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup agent_workstation \
+  --control-plane --desktop xfce --rdp --rdp-existing-password
 rm -f "$HOME/.infra_tools-install.sh"
 ```
 
@@ -133,15 +133,16 @@ Without `--rdp-source`, RDP is available on all local interfaces with the
 configured rate-limited firewall rule. See [XRDP](XRDP.md) for connection and
 firewall details.
 
-There are no agent-suite presets. On a headless host or desktop, repeat
-`--agent-tool` for exactly the tools needed. Add Node.js, Python, or Go with
-their individual flags. Use `--agent-config active`, `--git-auth active`, or
-the specified-file credential options when the control plane should transfer
-selected settings or credentials. Active GitHub auth can use the controller's
-`gh auth token` command when the token is stored in the controller's keyring;
-file-backed Codex, Claude Code, and OpenCode credentials must be supplied as
-files. Use `--repo GIT_URL` for target-side HTTPS clones; public repositories
-on any reachable Git host are supported.
+The `agent_vm` and `agent_workstation` profiles default to GitHub CLI and
+Codex. On either profile, repeat `--agent-tool` to replace that provider set.
+Add Node.js, Python, or Go with their individual flags. Use `--agent-config
+active`, `--git-auth active`, or the specified-file credential options when
+the control plane should transfer selected settings or credentials. Active
+GitHub auth can use the controller's `gh auth token` command when the token is
+stored in the controller's keyring; file-backed Codex, Claude Code, and
+OpenCode credentials must be supplied as files. Use `--repo GIT_URL` for
+target-side HTTPS clones; public repositories on any reachable Git host are
+supported.
 The [credentials guide](CREDENTIALS.md) explains the difference between
 workspace passwords, GitHub auth, agent auth, and non-secret agent config.
 
@@ -179,8 +180,8 @@ run. Local setup preflight still needs root, so use `sudo`; the dry run
 validates arguments and prints the steps without changing the target:
 
 ```bash
-sudo "$(command -v infra-tools)" setup workstation_dev localhost "$USER" \
-  --control-plane --agent-tool gh --agent-tool codex --desktop xfce --rdp \
+sudo "$(command -v infra-tools)" setup agent_workstation localhost "$USER" \
+  --control-plane --desktop xfce --rdp \
   --rdp-existing-password --dry-run
 ```
 

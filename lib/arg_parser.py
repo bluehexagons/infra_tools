@@ -411,15 +411,18 @@ def add_setup_arguments(
                         default=None if not for_remote else False,
                         help="Install Python tooling (python aliases and uv). For shell autocompletion, use the local completions installer script.")
 
-    # Agent VM tooling. Tools are deliberately explicit; there is no suite that
-    # silently installs unrelated runtimes or a common package baseline.
+    # Agent VM tooling. An explicit list replaces the narrow defaults declared
+    # by an agent profile; there is no broad suite that installs every provider.
     parser.add_argument(
         "--agent-tool",
         dest="agent_tools",
         action="append",
         choices=AGENT_TOOLS,
         metavar="TOOL",
-        help="Install an explicit agent tool; repeat as needed",
+        help=(
+            "Install an agent tool; repeat as needed. An explicit list replaces "
+            "agent-profile defaults"
+        ),
     )
     parser.add_argument(
         "--desktop-interface",

@@ -82,6 +82,8 @@ tools, not for an LXC container.
 | Type | Description |
 |------|-------------|
 | `control_plane` | Debian infrastructure control plane with administrator tools |
+| `agent_vm` | Headless agent coding VM; defaults to GitHub CLI and Codex |
+| `agent_workstation` | Graphical agent coding workstation; adds Firefox ESR |
 | `workstation_desktop` | Desktop workstation with GUI |
 | `workstation_dev` | Developer workstation |
 | `pc_dev` | PC development environment |
@@ -239,10 +241,11 @@ Selecting a language runtime also installs its managed update timer. See
 ### Agent host flags
 
 These flags prepare a Debian VM or local control plane for agentic coding. They
-work with any setup type; `workstation_dev` is recommended when the agent needs
-a desktop/browser, and `control_plane` is the recommended terminal-only
-profile. `server_lite` omits the standard firewall and generic CLI bundle, so
-use it only when that lighter profile is intentional.
+work with any setup type. `agent_vm` is the recommended terminal-only profile,
+and `agent_workstation` adds a desktop and Firefox ESR. Both default to GitHub
+CLI and Codex; an explicit `--agent-tool` list replaces those defaults.
+`server_lite` omits the standard firewall and generic CLI bundle, so use it
+only when that lighter profile is intentional.
 
 The agent setup model separates explicit tool installation, VM-level Git
 policy, authentication payloads, and non-secret agent configuration. See
@@ -252,8 +255,8 @@ See [`BROWSER_AUTOMATION.md`](./BROWSER_AUTOMATION.md) for the separate
 Playwright runtime, MCP registration, and browser security model.
 
 ```bash
-infra-tools setup server_dev 10.0.0.10 agentuser \
-  --agent-tool gh --agent-tool codex --agent-config active \
+infra-tools setup agent_vm 10.0.0.10 agentuser \
+  --agent-config active \
   --git-access read --repo https://github.com/user/my_codebase.git
 ```
 
@@ -280,7 +283,7 @@ rm -f "$HOME/.infra_tools-install.sh"
 
 | Flag | Description |
 |------|-------------|
-| `--agent-tool TOOL` | Install one explicit provider tool (`gh`, `codex`, `claude`, or `opencode`); repeatable |
+| `--agent-tool TOOL` | Install one provider tool (`gh`, `codex`, `claude`, or `opencode`); repeatable, and an explicit list replaces agent-profile defaults |
 | `--desktop-interface INTERFACE` | Install an explicit desktop interface; currently `t3code` |
 | `--web-interface INTERFACE` | Install an explicit headless web interface; currently `t3code` |
 | `--web-interface-host IP` | Bind address for the selected web interface; defaults to loopback, or `0.0.0.0` when a source is supplied |
@@ -330,10 +333,11 @@ are shown with `127.0.0.1` and are marked as requiring an SSH tunnel. For
 example, a T3 Code setup with device pairing reports both the direct T3 port
 (`3773` by default) and the Basic Auth enrollment portal (`3774` by default).
 
-Agent tools are selected individually with repeatable `--agent-tool` flags. There
-is no agent-suite preset or implicit coding-package baseline; add unrelated
-packages explicitly with `--apt-install`, and add language runtimes with their
-individual flags.
+Agent tools are selected individually with repeatable `--agent-tool` flags.
+The two agent profiles provide the narrow `gh` plus `codex` default; supplying
+any `--agent-tool` flags replaces that provider set. Other profiles retain no
+implicit agents. Add unrelated packages explicitly with `--apt-install`, and
+add language runtimes with their individual flags.
 
 Any setup with agent features installs a managed `~/.local/bin/infra-tools`
 launcher for the target user. On a remote setup the launcher uses the source

@@ -4,10 +4,11 @@ Status: implemented in the current release. Authenticated non-GitHub
 providers and offline snapshot mode remain future work.
 
 This project makes it straightforward to provision a Debian VM for agentic
-development while keeping tool selection, Git access, repository setup, and
-credential transfer explicit. It replaces the bundled agent-suite
-model with a small set of deliberate setup choices. This is an intentional
-CLI redesign: old suite flags and compatibility aliases are not retained.
+development while keeping Git access, repository setup, and credential
+transfer explicit. The `agent_vm` and `agent_workstation` system types provide
+a narrow GitHub CLI plus Codex default; supplying any `--agent-tool` options
+replaces that provider set. This avoids the former large agent-suite model
+while reducing boilerplate for the most common configuration.
 
 ## Problem
 
@@ -28,7 +29,8 @@ values in a saved command.
 
 ## Goals
 
-- Install exactly the agent tools explicitly selected by the operator.
+- Install either a profile's documented narrow default or exactly the agent
+  tools explicitly selected by the operator.
 - Treat Git credentials and their access level as a VM/user-level policy.
 - Let repeated repository declarations inherit that VM-level Git policy.
 - Clone public HTTPS repositories from any Git host without requiring
@@ -60,7 +62,7 @@ values in a saved command.
 
 ## Design decisions
 
-### Explicit tools
+### Narrow profile defaults and explicit tools
 
 The release removes `agent_suite` and its `terminal`, `desktop`, and `full`
 presets. Agent installation uses one repeatable option with a closed set of
@@ -72,12 +74,13 @@ choices:
 --agent-tool opencode
 ```
 
-Other supported tools may be selected in the same way. Selecting one tool
-installs that tool and only the dependencies required by its installer. It
-does not select other agents, language runtimes, desktop applications, or a
-large coding-utility bundle. The current common coding-tool baseline is not
-installed implicitly; optional packages remain available through the normal
-package options.
+Other supported tools may be selected in the same way. `agent_vm` and
+`agent_workstation` default to `gh` and `codex`; the first explicit tool list
+replaces both defaults rather than adding to them. Selecting one tool installs
+that tool and only the dependencies required by its installer. It does not
+select other agents, language runtimes, browser automation, editors, or a
+large coding-utility bundle. Optional packages remain available through the
+normal package options.
 
 The implementation uses one tool registry. A tool entry owns its
 installer, target configuration paths, credential path/format, authentication
@@ -111,11 +114,11 @@ be prepared with `git-access none`; no credential adapter is needed. The first
 authenticated integration is GitHub: HTTPS Git credentials are represented by
 the selected GitHub CLI identity and configured with `gh auth setup-git`.
 
-For private GitHub repositories, `gh` must be explicitly selected as an agent
-tool. Selecting Git credentials must not silently install GitHub CLI. The
-controller still does not need `gh`; the target does. Authenticated
-non-GitHub hosts are a later provider-adapter project, not a reason to limit
-public repository support now.
+For private GitHub repositories, `gh` must be selected by the agent profile or
+an explicit tool list. Selecting Git credentials must not silently install
+GitHub CLI. The controller still does not need `gh`; the target does.
+Authenticated non-GitHub hosts are a later provider-adapter project, not a
+reason to limit public repository support now.
 
 The first authenticated GitHub implementation should support a fine-grained
 token or equivalent `hosts.yml` identity scoped to the repositories that the
@@ -137,7 +140,8 @@ API operations available to the agent.
 
 The normal repository path should be target-side cloning:
 
-1. Install Git and the explicitly selected agent tools.
+1. Install Git and the agent tools resolved from the selected profile or
+   explicit replacement list.
 2. Install and validate the requested GitHub credentials, if private GitHub
    repositories are declared.
 3. If private GitHub repositories are declared, configure HTTPS Git
@@ -286,9 +290,8 @@ authentication result; never credential contents.
 A normal public-repository setup should read approximately as follows:
 
 ```bash
-infra-tools setup server_dev 10.0.0.10 agent \
-  --agent-tool codex \
-  --agent-tool opencode \
+infra-tools setup agent_vm 10.0.0.10 agent \
+  --agent-tool codex --agent-tool opencode \
   --repo https://github.com/acme/application.git \
   --repo https://gitlab.com/acme/documentation.git
 ```
@@ -297,9 +300,7 @@ For private GitHub repositories, GitHub CLI and a one-host credential source
 are explicit:
 
 ```bash
-infra-tools setup server_dev 10.0.0.10 agent \
-  --agent-tool gh \
-  --agent-tool codex \
+infra-tools setup agent_vm 10.0.0.10 agent \
   --git-access read \
   --git-host github.com \
   --git-auth active \
@@ -310,9 +311,7 @@ An operator using mounted secret files could instead select an individual
 GitHub credential file:
 
 ```bash
-infra-tools setup server_dev 10.0.0.10 agent \
-  --agent-tool gh \
-  --agent-tool codex \
+infra-tools setup agent_vm 10.0.0.10 agent \
   --git-access read \
   --git-host github.com \
   --git-auth-file /run/secrets/github-hosts.yml \
@@ -345,6 +344,8 @@ explicitly deferred as stated above.
   input model separate from saved `SetupConfig`.
 - Updated command help, saved-command serialization, summaries, completion,
   and documentation.
+- Added `agent_vm` and `agent_workstation` as narrow `gh` plus `codex`
+  shorthands while preserving explicit-list replacement behavior.
 
 ### Phase 2: VM-level Git credentials and target-side repositories — complete
 
@@ -407,13 +408,15 @@ they must not change the host-neutral public repository contract.
 
 ## Acceptance criteria
 
-- A setup can install only `gh`, Codex, and OpenCode without selecting a suite
-  or installing unrelated agents and runtimes.
+- A setup can use the narrow `gh` plus Codex profile default or install only
+  `gh`, Codex, and OpenCode through an explicit replacement list without
+  installing unrelated agents and runtimes.
 - A controller without `gh`, Codex, or OpenCode can provision public HTTPS
   repositories from any reachable Git host.
 - A controller without `gh`, Codex, or OpenCode can provision private GitHub
   repositories using explicitly supplied or active-user credential files;
-  `gh` is installed only on the target when explicitly selected.
+  `gh` is installed only on the target when selected by the profile or an
+  explicit tool list.
 - Git access is selected once for the VM/user and applies to all declared
   repositories unless snapshot mode is explicitly requested.
 - Private repositories are cloned on the target after credentials are

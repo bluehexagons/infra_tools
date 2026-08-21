@@ -3,7 +3,8 @@
 Status: active follow-up plan. Small correctness and documentation fixes from
 this audit landed with the document. The first explicit tool-update slice has
 also landed; version policy, workload-aware restarts, and fleet observability
-still require larger design work.
+still require larger design work. The narrow `agent_vm` and
+`agent_workstation` profile shorthands have also landed.
 
 ## Scope and recommended baseline
 
@@ -15,24 +16,23 @@ systemd jobs.
 The recommended CLI-only profile is now:
 
 ```bash
-infra-tools setup server_dev 10.0.0.10 agent \
-  --agent-tool gh --agent-tool codex --agent-tool claude --agent-tool opencode \
+infra-tools setup agent_vm 10.0.0.10 agent \
   --agent-config active --git-access read \
   --repo https://github.com/user/project.git
 ```
 
-`server_dev` supplies the normal firewall and CLI profile. `server_lite` omits
-the firewall and generic CLI bundle, so it should be selected only when that
-lighter security/packaging boundary is intentional.
+`agent_vm` supplies the normal firewall and CLI profile plus GitHub CLI and
+Codex. `server_lite` omits the firewall and generic CLI bundle, so it should be
+selected only when that lighter security/packaging boundary is intentional.
 
-The explicit `--agent-tool` flags enable GitHub CLI, Codex CLI, Claude Code, and
-OpenCode. No common coding-tool package set or language runtime is implicit;
-add packages and runtimes with their individual flags.
+An explicit `--agent-tool` list replaces the profile's GitHub CLI and Codex
+defaults, allowing any supported provider combination. No language runtime is
+implicit; add packages and runtimes with their individual flags.
 
 ## Maintenance currently applied
 
-On a Debian VM or bare-metal `server_dev` target, an explicitly selected
-terminal-agent setup inherits these host jobs:
+On a Debian VM or bare-metal `agent_vm` target, the terminal-agent setup
+inherits these host jobs:
 
 | Unit | Behavior | Agent-specific effect |
 | --- | --- | --- |
@@ -59,10 +59,11 @@ for the exact target-specific boundary.
 ### AGT-01: The documented bootstrap used the lightweight server profile
 
 The install and command-reference bootstrap examples used `server_lite`, even
-though the agent documentation identifies `server_dev` as the terminal-only
+though the agent documentation identified `server_dev` as the terminal-only
 development profile. That path omitted the standard firewall and generic CLI
-steps. The examples now use `server_dev`, and the profile difference is
-explicit in the agent documentation.
+steps. The examples first moved to `server_dev`; they now use `agent_vm`, which
+keeps that server boundary while adding the narrow GitHub CLI and Codex
+defaults. The profile difference remains explicit in the agent documentation.
 
 ### AGT-02: Security monitoring was a no-op without notification targets
 
@@ -224,7 +225,7 @@ needs the real-VM validation described above.
 
 - Unit tests cover no-notification local monitoring and every required timer
   verification failure.
-- A Debian VM smoke test verifies the canonical `server_dev` explicit-agent setup,
+- A Debian VM smoke test verifies the canonical `agent_vm` setup,
   firewall access, all five host timers, and `agent doctor` as the setup user.
 - Upgrade tests cover interrupted download, bad digest/signature, failed smoke
   test, and rollback for each supported agent tool.
