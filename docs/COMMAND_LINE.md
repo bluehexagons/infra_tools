@@ -54,6 +54,11 @@ infra-tools proxmox ...
 infra-tools ssh-key enroll <host> [--port PORT] [--yes]
 ```
 
+Use `infra-tools agent doctor --capability t3code` to check the managed T3
+service, provider authentication, Git identity, pairing helper, endpoint, and
+agent skill. Add `--fix` to configure the GitHub HTTPS credential helper after
+a successful login and restart an inactive managed service.
+
 ### Bootstrap and self-setup flags
 
 `bootstrap` and its `self-setup` alias prepare the local orchestration host.
@@ -295,6 +300,11 @@ per-VM credential guidance, interactive setup, and rotation details.
 See [`BROWSER_AUTOMATION.md`](./BROWSER_AUTOMATION.md) for the separate
 Playwright runtime, MCP registration, and browser security model.
 
+For a headless T3 Code VM without selecting a broader profile, use
+`--t3code-ready`. It adds GitHub CLI and Codex, read-write Git, the T3 web
+service, and protected pairing. Credentials remain opt-in through the normal
+`--git-auth` and `--agent-auth` options.
+
 ```bash
 infra-tools setup agent_vm 10.0.0.10 agentuser \
   --agent-config active \
@@ -343,6 +353,7 @@ rm -f "$HOME/.infra_tools-install.sh"
 
 | Flag | Description |
 |------|-------------|
+| `--t3code-ready` | Add the headless T3 Code-ready profile: GitHub CLI, Codex, read-write Git, T3 web service, and protected pairing |
 | `--agent-tool TOOL[,TOOL...]` | Add one or more provider tools (`gh`, `codex`, `claude`, or `opencode`) to profile defaults |
 | `--no-agent-tool TOOL[,TOOL...]` | Disable one or more profile-default provider tools |
 | `--desktop-interface INTERFACE` | Install an explicit desktop interface; currently `t3code` |
@@ -448,7 +459,8 @@ Credential/config copy is intentionally tool-scoped and transient:
 - `--git-auth`/`--git-auth-file` copy only the selected GitHub host entry, merge it into the target user's existing `gh` hosts file, and run `gh auth setup-git`.
 - `--agent-auth`/`--agent-auth-file` copy Codex, Claude Code, or OpenCode credentials without requiring those tools on the controller; active `gh` requires controller `gh` only when its token is keyring-backed.
 - `--agent-config active` copies known non-secret configuration from the active controller user.
-- T3 Code receives only a command wrapper and desktop entry; infra-tools does not copy T3 Code credentials.
+- T3 Code receives only managed launchers and the non-secret T3 workflow skill;
+  infra-tools does not copy T3 Code credentials.
 
 The root-only upload payload is removed after the selected config and credentials
 are copied. Repositories are never cloned or cached on the controller: the
@@ -465,6 +477,7 @@ infra-tools agent doctor
 infra-tools agent doctor --tool codex --tool claude --json
 infra-tools agent doctor --tool codex --tool opencode --capability browser
 infra-tools agent doctor --capability browser
+infra-tools agent doctor --capability t3code --fix
 infra-tools agent doctor 10.0.0.10 agent --tool codex --json
 infra-tools agent update --dry-run
 infra-tools agent update --tool codex --tool claude
@@ -478,6 +491,10 @@ otherwise installed tool unhealthy.
 `--capability browser` additionally verifies managed launchers, MCP registration
 for installed compatible agents, and a local Chromium interaction/rendering
 smoke test.
+`--capability t3code` checks the managed service, runtime, pairing helper,
+endpoint, provider authentication, Git identity and credential helper, and the
+managed agent skill. Its `--fix` mode only configures the GitHub HTTPS helper
+after a successful login and restarts an inactive managed service.
 When `--capability` is supplied without `--tool`, doctor checks only the
 requested capability instead of requiring the default set of terminal agents.
 Supplying `HOST USER` runs the same doctor through managed SSH from the control

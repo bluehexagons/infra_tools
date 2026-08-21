@@ -262,6 +262,7 @@ class SetupConfig:
     agent_tools_removed: Optional[StrList] = None
     desktop_interfaces: Optional[StrList] = None
     web_interfaces: Optional[StrList] = None
+    t3code_ready: bool = False
     disable_web_interface: bool = False
     web_interface_host: MaybeStr = None
     web_interface_port: int = 3773
@@ -357,6 +358,24 @@ class SetupConfig:
         # the requested full redeploy.
         if self.deployment_mode == "full":
             self.full_deploy = True
+
+        if self.t3code_ready:
+            if self.disable_web_interface:
+                raise ValueError("--t3code-ready cannot be combined with --no-web-interface")
+            ready_tools = list(self.agent_tools or [])
+            removed_tools = set(self.agent_tools_removed or [])
+            for tool in ("gh", "codex"):
+                if tool not in removed_tools and tool not in ready_tools:
+                    ready_tools.append(tool)
+            self.agent_tools = ready_tools or None
+            ready_interfaces = list(self.web_interfaces or [])
+            if "t3code" not in ready_interfaces:
+                ready_interfaces.append("t3code")
+            self.web_interfaces = ready_interfaces
+            if self.git_access == "none":
+                self.git_access = "read-write"
+            if not self.disable_device_pairing and not self.device_pairing_providers:
+                self.device_pairing_providers = ["t3code"]
 
         from lib.validation import validate_godot_bundle_settings
 
@@ -552,6 +571,9 @@ class SetupConfig:
     def to_remote_args(self) -> StrList:
         """Generate command line arguments for remote execution."""
         args: StrList = []
+
+        if self.t3code_ready:
+            args.append("--t3code-ready")
         
         args.append(f"--system-type {shlex.quote(self.system_type)}")
         args.append(f"--username {shlex.quote(self.username)}")
@@ -861,6 +883,9 @@ class SetupConfig:
             f"infra-tools setup {shlex.quote(self.system_type)}",
             shlex.quote(setup_host),
         ]
+
+        if self.t3code_ready:
+            cmd_parts.append("--t3code-ready")
         
         # Add username if different from current user or if requested
         if include_username:
@@ -1709,6 +1734,7 @@ class SetupConfig:
             agent_tools_removed=removed_agent_tools or None,
             desktop_interfaces=desktop_interfaces,
             web_interfaces=web_interfaces,
+            t3code_ready=_optional_bool_arg(args, 't3code_ready') is True,
             disable_web_interface=disable_web_interface,
             web_interface_host=getattr(args, 'web_interface_host', None),
             web_interface_port=getattr(args, 'web_interface_port', 3773),

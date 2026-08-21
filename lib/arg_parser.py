@@ -528,6 +528,16 @@ def add_setup_arguments(
             "(currently: t3code)"
         ),
     )
+    parser.add_argument(
+        "--t3code-ready",
+        dest="t3code_ready",
+        action="store_true",
+        default=False,
+        help=(
+            "Enable a headless T3 Code-ready profile with GitHub CLI, Codex, "
+            "read-write Git, and device pairing"
+        ),
+    )
     web_interface_group = parser.add_mutually_exclusive_group()
     web_interface_group.add_argument(
         "--web-interface",

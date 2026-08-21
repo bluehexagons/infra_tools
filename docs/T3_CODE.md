@@ -11,7 +11,13 @@ T3 Code has two explicit deployment targets:
 Both modes use the provider CLIs and their credentials on the VM. The client
 device does not need the VM's Codex, Claude Code, or OpenCode credentials.
 Select at least one provider explicitly; infra-tools does not install an
-agent suite implicitly.
+agent suite implicitly unless the `--t3code-ready` preset is selected.
+
+For a headless VM that should be ready for remote T3 use, the shorthand
+`--t3code-ready` selects GitHub CLI, Codex, read-write Git, the T3 web service,
+and protected device pairing. It does not copy credentials automatically;
+provide the explicit Git and agent authentication options when credentials
+should be staged.
 
 For the usual remote workflow, install the T3 Code desktop or mobile client
 on the device you will use and select only `--web-interface t3code` on the VM.
@@ -36,6 +42,16 @@ infra-tools setup server_dev 192.168.0.41 agent \
   --agent-workspace /srv/agent-workspace \
   --git-access read
 ```
+
+The equivalent minimal ready profile is:
+
+```bash
+infra-tools setup server_dev 192.168.0.41 agent --t3code-ready
+```
+
+Add `--lan-access` when another device should reach the VM directly. Without
+an access source, T3 remains loopback-only and can be reached through SSH or a
+managed HTTPS forward.
 
 T3 Code also enables the Node.js runtime automatically because its headless
 CLI requires Node. The service runs as the setup user, starts at boot, and
@@ -70,27 +86,12 @@ The service wrapper explicitly adds the T3 runtime, setup user's `~/.local/bin`,
 `~/.opencode/bin`, and the standard system executable directories to `PATH`.
 This is required because systemd does not load the user's interactive shell
 startup files. It lets the service discover user-scoped T3, Codex, Claude Code,
-and OpenCode installations as well as system packages such as GitHub CLI. A
-shell opened in T3 can otherwise find `gh` after initializing its own `PATH`
-even while T3's direct Source Control probe reports it as unavailable. The
-wrapper also sets `GH_CONFIG_DIR` to the managed `~/.config/gh` directory.
-During setup, selected agent configuration and credentials are copied before
-T3 starts so its initial Source Control probe sees the same GitHub identity as
-the target user's terminal. T3's current strict discovery schema rejects the
-null `error` field emitted for a healthy account by GitHub CLI 2.98. The managed
-service therefore puts a T3-only `gh` compatibility shim first on its `PATH`.
-The shim removes that null field from T3's exact auth-discovery command. If a
-valid token-only GitHub CLI entry reports success without an account name, the
-shim asks the authenticated GitHub API for that account's login and supplies it
-to T3. It also normalizes T3's exact repository lookup response. If GitHub CLI
-cannot complete that lookup for a syntactically valid `owner/repo`, the shim
-supplies the deterministic GitHub clone URLs and leaves `git clone` to verify
-access. T3 0.0.33 always selects the returned SSH field; when GitHub CLI is
-configured for HTTPS, the shim supplies the HTTPS URL in that field so private
-clones use the installed `gh` credential helper instead of requiring a separate
-SSH key. All other GitHub CLI arguments execute the installed binary unchanged,
-and normal user shells do not use the shim. The launcher records the helper's
-digest so a setup rerun restarts T3 whenever this compatibility behavior changes.
+and OpenCode installations as well as system packages such as GitHub CLI. The
+wrapper also sets `GH_CONFIG_DIR` to the managed `~/.config/gh` directory, so
+T3 invokes the real system `gh` binary with the same credentials as the target
+user's terminal. The compatibility shim previously used for T3 discovery is no
+longer installed; use the upstream T3 release and the readiness doctor when
+diagnosing provider issues.
 
 During setup, infra-tools installs `build-essential` and `python3`, then
 installs T3 and its native dependencies as the target user under
@@ -107,6 +108,19 @@ contain pairing material. Errors remain in the journal. When device pairing is
 selected, a separate `infra-tools-device-pairing.service` runs a generic local
 broker over a Unix socket and Nginx exposes its Basic-Auth-protected enrollment
 page on port `3774` by default.
+
+Setup prints the service endpoint and the readiness command. Run the latter as
+the target user after authentication or a service change:
+
+```bash
+infra-tools agent doctor --capability t3code
+infra-tools agent doctor --capability t3code --fix
+```
+
+The diagnostic checks the service, runtime, pairing helper, local endpoint,
+GitHub authentication, Git identity and credential helper, and the managed
+T3 agent skill. `--fix` only configures the GitHub HTTPS helper after a valid
+`gh` login and restarts an inactive managed service.
 
 ## Pair a client or browser
 

@@ -36,6 +36,7 @@ from lib.agent_cli import (
     _tool_path,
     add_agent_subparser,
     inspect_agent_tools,
+    inspect_t3code,
     run_agent_command,
     update_agent_tools,
 )
@@ -305,6 +306,32 @@ class TestOfficialAgentInstallers(unittest.TestCase):
 
 
 class TestAgentDoctor(unittest.TestCase):
+    def test_t3code_doctor_reports_managed_checks_without_secrets(self):
+        with tempfile.TemporaryDirectory() as home:
+            runtime = os.path.join(
+                home, '.local', 'share', 'infra-tools', 't3code', 'node_modules', '.bin'
+            )
+            os.makedirs(runtime)
+            t3_binary = os.path.join(runtime, 't3')
+            with open(t3_binary, 'w', encoding='utf-8') as file_obj:
+                file_obj.write('#!/bin/sh\necho t3 0.0.1\n')
+            os.chmod(t3_binary, 0o755)
+            wrapper = os.path.join(home, '.local', 'bin', 'infra-tools-t3code-web')
+            os.makedirs(os.path.dirname(wrapper))
+            with open(wrapper, 'w', encoding='utf-8') as file_obj:
+                file_obj.write('T3CODE_PORT=3773\n')
+            os.chmod(wrapper, 0o755)
+            with (
+                patch('lib.agent_cli._tool_path', side_effect=lambda tool, _home: t3_binary if tool == 't3' else None),
+                patch('lib.agent_cli._run_check', return_value=type('Completed', (), {'returncode': 1, 'stdout': '', 'stderr': ''})()),
+                patch('lib.agent_cli._t3_endpoint_reachable', return_value=False),
+            ):
+                result = inspect_t3code(home)
+
+        self.assertFalse(result['healthy'])
+        self.assertIn('git_identity', result['checks'])
+        self.assertNotIn('secret', str(result))
+
     def test_inspects_user_tool_and_credentials_without_contents(self):
         with tempfile.TemporaryDirectory() as home:
             bin_dir = os.path.join(home, '.local', 'bin')
@@ -348,12 +375,13 @@ class TestAgentDoctor(unittest.TestCase):
 
         args = parser.parse_args([
             'agent', 'doctor', 'vm.example', 'agent',
-            '--tool', 'codex', '--capability', 'browser', '--json',
+            '--tool', 'codex', '--capability', 't3code', '--fix', '--json',
         ])
 
         self.assertEqual(args.agent_doctor_host, 'vm.example')
         self.assertEqual(args.agent_doctor_username, 'agent')
         self.assertEqual(args.agent_doctor_tools, ['codex'])
+        self.assertTrue(args.fix)
 
     def test_remote_doctor_runs_target_copy_with_selected_checks(self):
         args = argparse.Namespace(

@@ -8,7 +8,11 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from common.t3code_steps import _configure_firewall, install_t3code_web
+from common.t3code_steps import (
+    _configure_firewall,
+    _remove_legacy_t3_shim,
+    install_t3code_web,
+)
 from lib.config import SetupConfig
 from lib.validation import validate_web_interface_settings
 
@@ -92,6 +96,24 @@ class T3CodeWebTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Unmanaged UFW allow rules"):
                 _configure_firewall(config, 3773, "0.0.0.0")
 
+    def test_legacy_shim_is_removed_but_unmanaged_launcher_is_preserved(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            shim_dir = os.path.join(
+                temporary, ".local", "share", "infra-tools", "t3code", "shims"
+            )
+            os.makedirs(shim_dir)
+            shim = os.path.join(shim_dir, "gh")
+            with open(shim, "w", encoding="utf-8") as file_obj:
+                file_obj.write("t3code_gh_shim.py\n")
+            self.assertTrue(_remove_legacy_t3_shim(temporary))
+            self.assertFalse(os.path.exists(shim))
+
+            os.makedirs(shim_dir)
+            with open(shim, "w", encoding="utf-8") as file_obj:
+                file_obj.write("#!/bin/sh\nexec /usr/bin/gh \"$@\"\n")
+            self.assertFalse(_remove_legacy_t3_shim(temporary))
+            self.assertTrue(os.path.isfile(shim))
+
     def test_web_step_writes_service_and_pairing_wrappers(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             account = SimpleNamespace(pw_dir=temporary, pw_uid=os.getuid(), pw_gid=os.getgid())
@@ -106,17 +128,6 @@ class T3CodeWebTest(unittest.TestCase):
                 "service_tools",
                 "t3code_admin_pair.py",
             )
-            gh_shim_script = os.path.join(
-                os.path.dirname(os.path.dirname(__file__)),
-                "common",
-                "service_tools",
-                "t3code_gh_shim.py",
-            )
-            gh_binary = os.path.join(temporary, "gh")
-            with open(gh_binary, "w", encoding="utf-8") as file_obj:
-                file_obj.write("#!/bin/sh\nexit 0\n")
-            os.chmod(gh_binary, 0o755)
-
             def run_command(command: str, **_kwargs):
                 if command == "ufw status numbered":
                     return SimpleNamespace(
@@ -145,11 +156,6 @@ class T3CodeWebTest(unittest.TestCase):
                     "common.t3code_steps.T3_ADMIN_PAIR_SCRIPT",
                     admin_pair_script,
                 ),
-                patch(
-                    "common.t3code_steps.T3_GH_SHIM_SCRIPT",
-                    gh_shim_script,
-                ),
-                patch("common.t3code_steps.shutil.which", return_value=gh_binary),
                 patch("common.t3code_steps.remove_nginx_auth_failure_ban"),
             ):
                 install_t3code_web(config)
@@ -178,10 +184,7 @@ class T3CodeWebTest(unittest.TestCase):
                 "$HOME/.local/share/infra-tools/t3code/node_modules/.bin:",
                 content,
             )
-            self.assertIn(
-                "$HOME/.local/share/infra-tools/t3code/shims:",
-                content,
-            )
+            self.assertNotIn("t3code/shims", content)
             self.assertIn(
                 "$PATH:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
                 content,
@@ -197,20 +200,6 @@ class T3CodeWebTest(unittest.TestCase):
                 'export GH_CONFIG_DIR="$HOME/.config/gh"',
                 cli_content,
             )
-            gh_shim = os.path.join(
-                temporary,
-                ".local",
-                "share",
-                "infra-tools",
-                "t3code",
-                "shims",
-                "gh",
-            )
-            with open(gh_shim, encoding="utf-8") as file_obj:
-                gh_shim_content = file_obj.read()
-            self.assertIn("# helper-sha256:", gh_shim_content)
-            self.assertIn("t3code_gh_shim.py", gh_shim_content)
-            self.assertIn(f"--gh-binary {gh_binary}", gh_shim_content)
             with open(pair_wrapper, encoding="utf-8") as file_obj:
                 pairing_content = file_obj.read()
             self.assertIn("t3code_admin_pair.py", pairing_content)
@@ -219,6 +208,16 @@ class T3CodeWebTest(unittest.TestCase):
             with open(os.path.join(temporary, ".bashrc"), encoding="utf-8") as file_obj:
                 bashrc = file_obj.read()
             self.assertIn("infra-tools T3 Code runtime", bashrc)
+            skill = os.path.join(
+                temporary,
+                ".agents",
+                "skills",
+                "infra-tools-t3code",
+                "SKILL.md",
+            )
+            self.assertTrue(os.path.isfile(skill))
+            with open(skill, encoding="utf-8") as file_obj:
+                self.assertIn("managed-by: infra_tools", file_obj.read())
             with open(service_path, encoding="utf-8") as file_obj:
                 service = file_obj.read()
             self.assertIn("User=agent", service)

@@ -24,7 +24,7 @@ from lib.validators import validate_host, validate_username
 
 
 AGENT_DOCTOR_TOOLS = ("gh", "codex", "claude", "opencode")
-AGENT_DOCTOR_CAPABILITIES = ("browser",)
+AGENT_DOCTOR_CAPABILITIES = ("browser", "t3code")
 DEFAULT_DOCTOR_TOOLS = ("gh", "codex", "claude", "opencode")
 AGENT_UPDATE_TOOLS = ("codex", "claude", "opencode")
 DEFAULT_UPDATE_TOOLS = AGENT_UPDATE_TOOLS
@@ -41,6 +41,14 @@ _UPDATE_TIMEOUT_SECONDS = 600
 _BROWSER_MCP_WRAPPER = "/usr/local/bin/infra-tools-playwright-mcp"
 _BROWSER_DOCTOR_WRAPPER = "/usr/local/bin/infra-tools-playwright-doctor"
 _BROWSER_MCP_SERVER_NAME = "infra-tools-playwright"
+_T3_SERVICE_NAME = "infra-tools-t3code.service"
+_T3_RUNTIME_RELATIVE = os.path.join(
+    ".local", "share", "infra-tools", "t3code"
+)
+_T3_SKILL_RELATIVE = os.path.join(
+    ".agents", "skills", "infra-tools-t3code", "SKILL.md"
+)
+_T3_DEFAULT_PORT = 3773
 _REMOTE_INFRA_TOOLS_PATH = "/opt/infra_tools/infra_tools.py"
 
 _CREDENTIAL_PATHS = {
@@ -111,6 +119,11 @@ def add_agent_subparser(subparsers: argparse._SubParsersAction) -> None:
         "--json",
         action="store_true",
         help="Output machine-readable JSON",
+    )
+    doctor.add_argument(
+        "--fix",
+        action="store_true",
+        help="Apply safe T3 Code/Git repairs while checking readiness",
     )
     doctor.add_argument("-k", "--key", dest="ssh_key", help="SSH private key path")
     update = commands.add_parser(
@@ -765,6 +778,174 @@ def inspect_browser_automation(home: Optional[str] = None) -> JSONDict:
     }
 
 
+def _t3_environment(home: str) -> dict[str, str]:
+    environment = os.environ.copy()
+    runtime = os.path.join(home, _T3_RUNTIME_RELATIVE)
+    environment.update(
+        {
+            "HOME": home,
+            "GH_CONFIG_DIR": os.path.join(home, ".config", "gh"),
+            "PATH": os.pathsep.join(
+                (
+                    os.path.join(runtime, "node_modules", ".bin"),
+                    os.path.join(home, ".opencode", "bin"),
+                    os.path.join(home, ".local", "bin"),
+                    _UPDATE_SYSTEM_PATH,
+                )
+            ),
+        }
+    )
+    return environment
+
+
+def _run_check(
+    command: list[str],
+    *,
+    environment: Optional[dict[str, str]] = None,
+    cwd: Optional[str] = None,
+    timeout: int = 15,
+) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=environment,
+            cwd=cwd,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return subprocess.CompletedProcess(command, 1, "", "")
+
+
+def _t3_port(wrapper: str) -> int:
+    try:
+        with open(wrapper, encoding="utf-8") as file_obj:
+            match = re.search(r"T3CODE_PORT=(\d+)", file_obj.read())
+    except OSError:
+        match = None
+    return int(match.group(1)) if match else _T3_DEFAULT_PORT
+
+
+def _t3_endpoint_reachable(port: int) -> bool:
+    import urllib.error
+
+    try:
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/", timeout=5
+        ) as response:
+            return response.status < 500
+    except urllib.error.HTTPError as exc:
+        return exc.code < 500
+    except (OSError, urllib.error.URLError, TimeoutError):
+        return False
+
+
+def inspect_t3code(home: Optional[str] = None, *, fix: bool = False) -> JSONDict:
+    """Verify the managed T3 service, Git integration, and user onboarding."""
+
+    user_home = os.path.abspath(home or os.path.expanduser("~"))
+    runtime = os.path.join(user_home, _T3_RUNTIME_RELATIVE)
+    t3_binary = os.path.join(runtime, "node_modules", ".bin", "t3")
+    wrapper = os.path.join(user_home, ".local", "bin", "infra-tools-t3code-web")
+    pair_wrapper = os.path.join(user_home, ".local", "bin", "t3code-pair")
+    skill = os.path.join(user_home, _T3_SKILL_RELATIVE)
+    environment = _t3_environment(user_home)
+    gh_path = _tool_path("gh", user_home)
+    git_path = _tool_path("git", user_home) or shutil.which("git")
+    skill_required = bool(
+        _tool_path("codex", user_home) or _tool_path("opencode", user_home)
+    )
+    fixes: list[str] = []
+
+    service = _run_check(["systemctl", "is-active", "--quiet", _T3_SERVICE_NAME])
+    gh_auth = (
+        _run_check(
+            [gh_path, "auth", "status", "--hostname", "github.com"],
+            environment=environment,
+        ).returncode
+        == 0
+        if gh_path
+        else False
+    )
+    git_name = ""
+    git_email = ""
+    credential_helper = False
+    if git_path:
+        git_name_result = _run_check(
+            [git_path, "config", "--global", "--get", "user.name"],
+            environment=environment,
+        )
+        git_email_result = _run_check(
+            [git_path, "config", "--global", "--get", "user.email"],
+            environment=environment,
+        )
+        helper_result = _run_check(
+            [
+                git_path,
+                "config",
+                "--global",
+                "--get-regexp",
+                r"^credential(\..+)?\.helper$",
+            ],
+            environment=environment,
+        )
+        git_name = (git_name_result.stdout or "").strip()
+        git_email = (git_email_result.stdout or "").strip()
+        credential_helper = helper_result.returncode == 0 and bool(
+            (helper_result.stdout or "").strip()
+        )
+
+    if fix and gh_path and gh_auth:
+        setup_git = _run_check(
+            [gh_path, "auth", "setup-git", "--hostname", "github.com"],
+            environment=environment,
+        )
+        if setup_git.returncode == 0:
+            fixes.append("configured GitHub HTTPS credential helper")
+            credential_helper = True
+    if fix and os.path.isfile(wrapper) and service.returncode != 0:
+        restart_command = ["systemctl", "restart", _T3_SERVICE_NAME]
+        if os.geteuid() != 0:
+            restart_command.insert(0, "-n")
+            restart_command.insert(0, "sudo")
+        restarted = _run_check(restart_command)
+        if restarted.returncode == 0:
+            fixes.append("restarted inactive T3 Code service")
+            service = _run_check(
+                ["systemctl", "is-active", "--quiet", _T3_SERVICE_NAME]
+            )
+
+    checks = {
+        "service_active": service.returncode == 0,
+        "runtime": os.path.isfile(t3_binary) and os.access(t3_binary, os.X_OK),
+        "wrapper": os.path.isfile(wrapper) and os.access(wrapper, os.X_OK),
+        "pairing_helper": os.path.isfile(pair_wrapper)
+        and os.access(pair_wrapper, os.X_OK),
+        "endpoint": _t3_endpoint_reachable(_t3_port(wrapper)),
+        "git_identity": bool(git_name and git_email),
+        "t3_agent_skill": not skill_required or os.path.isfile(skill),
+    }
+    if gh_path:
+        checks["gh_authenticated"] = gh_auth
+        checks["git_credential_helper"] = credential_helper
+    return {
+        "capability": "t3code",
+        "healthy": all(checks.values()),
+        "checks": checks,
+        "runtime": t3_binary,
+        "version": _tool_version("t3", t3_binary)
+        if checks["runtime"]
+        else None,
+        "git_identity": {
+            "name": git_name or None,
+            "email": git_email or None,
+        },
+        "fixes": fixes,
+    }
+
+
 def run_agent_web_pair(args: argparse.Namespace) -> int:
     """Ask a remote T3 Code service to mint a one-time pairing URL."""
 
@@ -969,6 +1150,8 @@ def run_agent_command(args: argparse.Namespace) -> int:
             remote_arguments.extend(("--tool", tool))
         for capability in requested_capabilities:
             remote_arguments.extend(("--capability", capability))
+        if getattr(args, "fix", False):
+            remote_arguments.append("--fix")
         if args.json:
             remote_arguments.append("--json")
         return _run_remote_agent_lifecycle(
@@ -989,6 +1172,11 @@ def run_agent_command(args: argparse.Namespace) -> int:
         for capability in requested_capabilities
         if capability == "browser"
     ]
+    capability_results.extend(
+        inspect_t3code(fix=getattr(args, "fix", False))
+        for capability in requested_capabilities
+        if capability == "t3code"
+    )
     if args.json:
         print(json.dumps([*results, *capability_results], indent=2))
     else:
@@ -1008,7 +1196,17 @@ def run_agent_command(args: argparse.Namespace) -> int:
                 print("      credentials: not found; run the tool to sign in")
 
         for result in capability_results:
-            if result["healthy"]:
+            if result["capability"] == "t3code":
+                if result["healthy"]:
+                    print("  ✓ t3code: service, Git, pairing, and skill are ready")
+                else:
+                    print("  ✗ t3code: readiness checks failed")
+                    for check, healthy in result["checks"].items():
+                        if not healthy:
+                            print(f"      {check}: failed")
+                for fix in result.get("fixes", []):
+                    print(f"      repaired: {fix}")
+            elif result["healthy"]:
                 print(f"  ✓ browser: {result['path']} (smoke test passed)")
             elif not result["installed"]:
                 print("  ✗ browser: Playwright launchers are not installed")

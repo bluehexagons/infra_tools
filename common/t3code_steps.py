@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import ipaddress
 import json
 import os
@@ -11,8 +10,10 @@ import re
 import shlex
 import shutil
 import tempfile
+from typing import Sequence
 
 from common.common_steps import _run_as_login_user
+from lib.atomic_io import write_text_atomic
 from lib.auth_failure_bans import (
     configure_nginx_auth_failure_ban,
     remove_nginx_auth_failure_ban,
@@ -41,7 +42,10 @@ DEVICE_PAIRING_SCRIPT = (
 T3_ADMIN_PAIR_SCRIPT = (
     "/opt/infra_tools/common/service_tools/t3code_admin_pair.py"
 )
-T3_GH_SHIM_SCRIPT = "/opt/infra_tools/common/service_tools/t3code_gh_shim.py"
+T3_AGENT_SKILLS_ROOT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "agent_skills"
+)
+T3_AGENT_SKILL_NAME = "infra-tools-t3code"
 DEVICE_PAIRING_NGINX_SITE = "/etc/nginx/sites-available/infra-tools-device-pairing"
 DEVICE_PAIRING_NGINX_LINK = "/etc/nginx/sites-enabled/infra-tools-device-pairing"
 DEVICE_PAIRING_AUTH_FAILURE_LOG = (
@@ -52,8 +56,7 @@ _T3_RUNTIME_RELATIVE_PATH = (".local", "share", "infra-tools", "t3code")
 # Keep the NVM path injected into the inherited PATH ahead of system Node while
 # making system package locations deterministic for direct T3 child processes.
 _T3_PATH_EXPORT = (
-    'export PATH="$HOME/.local/share/infra-tools/t3code/shims:'
-    '$HOME/.local/share/infra-tools/t3code/node_modules/.bin:'
+    'export PATH="$HOME/.local/share/infra-tools/t3code/node_modules/.bin:'
     '$HOME/.opencode/bin:$HOME/.local/bin:$PATH:'
     '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"'
 )
@@ -389,20 +392,26 @@ def _write_passthrough_wrapper(path: str, home: str, t3_binary: str) -> bool:
     return _write_executable_if_changed(path, content)
 
 
-def _write_gh_shim(path: str, gh_binary: str) -> bool:
-    """Write a T3-only gh launcher that leaves all non-discovery calls intact."""
+def _remove_legacy_t3_shim(home: str) -> bool:
+    """Remove only the obsolete infra-tools T3 GitHub shim from old installs."""
 
-    digest = hashlib.sha256()
-    with open(T3_GH_SHIM_SCRIPT, "rb") as file_obj:
-        for chunk in iter(lambda: file_obj.read(1024 * 1024), b""):
-            digest.update(chunk)
-    content = (
-        "#!/bin/sh\n"
-        f"# helper-sha256: {digest.hexdigest()}\n"
-        f"exec /usr/bin/python3 {shlex.quote(T3_GH_SHIM_SCRIPT)} "
-        f'--gh-binary {shlex.quote(gh_binary)} "$@"\n'
-    )
-    return _write_executable_if_changed(path, content)
+    shim = os.path.join(_t3_runtime_path(home), "shims", "gh")
+    if not os.path.isfile(shim) or os.path.islink(shim):
+        return False
+    try:
+        with open(shim, encoding="utf-8") as file_obj:
+            content = file_obj.read()
+    except OSError:
+        return False
+    if "t3code_gh_shim.py" not in content:
+        return False
+    os.remove(shim)
+    shim_dir = os.path.dirname(shim)
+    try:
+        os.rmdir(shim_dir)
+    except OSError:
+        pass
+    return True
 
 
 def _url_host(host: str) -> str:
@@ -459,6 +468,52 @@ def _write_text_if_changed(path: str, content: str, mode: int) -> bool:
         with open(path, "w", encoding="utf-8") as file_obj:
             file_obj.write(content)
     os.chmod(path, mode)
+    return changed
+
+
+def _ensure_t3_agent_skill(username: str, agent_tools: Sequence[str]) -> bool:
+    """Install the managed T3 workflow skill for compatible terminal agents."""
+
+    if not {"codex", "opencode"}.intersection(agent_tools):
+        return False
+    if not validate_username(username):
+        raise ValueError(f"Invalid T3 Code agent-skill username: {username}")
+    account = pwd.getpwnam(username)
+    home = account.pw_dir
+    validate_filesystem_path(home, must_exist=True)
+    source = os.path.join(T3_AGENT_SKILLS_ROOT, T3_AGENT_SKILL_NAME, "SKILL.md")
+    if os.path.islink(source) or not os.path.isfile(source):
+        raise RuntimeError(f"Managed T3 Code agent skill is missing: {source}")
+    skills_dir = os.path.join(home, ".agents", "skills", T3_AGENT_SKILL_NAME)
+    parent = os.path.dirname(skills_dir)
+    for directory in (os.path.dirname(parent), parent, skills_dir):
+        if os.path.lexists(directory):
+            if os.path.islink(directory) or not os.path.isdir(directory):
+                raise RuntimeError(f"Refusing unsafe T3 Code skill directory: {directory}")
+            if os.stat(directory).st_uid != account.pw_uid:
+                raise RuntimeError(
+                    f"Refusing T3 Code skill directory owned by another user: {directory}"
+                )
+        else:
+            os.mkdir(directory, mode=0o755)
+            os.chown(directory, account.pw_uid, account.pw_gid)
+    destination = os.path.join(skills_dir, "SKILL.md")
+    if os.path.islink(destination):
+        raise RuntimeError(f"Refusing symlinked managed T3 Code skill: {destination}")
+    with open(source, encoding="utf-8") as file_obj:
+        content = file_obj.read()
+    if os.path.exists(destination):
+        with open(destination, encoding="utf-8") as file_obj:
+            previous = file_obj.read()
+        if "managed-by: infra_tools" not in previous:
+            raise RuntimeError(f"Refusing to replace unmanaged T3 Code skill: {destination}")
+    else:
+        previous = None
+    changed = previous != content
+    if changed:
+        write_text_atomic(destination, content, mode=0o644)
+    os.chmod(destination, 0o644)
+    os.chown(destination, account.pw_uid, account.pw_gid)
     return changed
 
 
@@ -806,26 +861,6 @@ def install_t3code_web(config: SetupConfig) -> None:
         account.pw_gid,
         refresh=config.refresh_packages,
     )
-    gh_shim_changed = False
-    if config.install_gh:
-        gh_binary = shutil.which("gh")
-        if not gh_binary:
-            raise RuntimeError("GitHub CLI is selected but its executable is missing")
-        validate_filesystem_path(gh_binary, must_exist=True)
-        if os.path.islink(T3_GH_SHIM_SCRIPT) or not os.path.isfile(
-            T3_GH_SHIM_SCRIPT
-        ):
-            raise RuntimeError(
-                "T3 GitHub compatibility helper is missing: "
-                f"{T3_GH_SHIM_SCRIPT}"
-            )
-        shim_dir = os.path.join(_t3_runtime_path(home), "shims")
-        os.makedirs(shim_dir, mode=0o700, exist_ok=True)
-        os.chmod(shim_dir, 0o700)
-        os.chown(shim_dir, account.pw_uid, account.pw_gid)
-        gh_shim = os.path.join(shim_dir, "gh")
-        gh_shim_changed = _write_gh_shim(gh_shim, gh_binary)
-        os.chown(gh_shim, account.pw_uid, account.pw_gid)
     wrapper = os.path.join(home, ".local", "bin", "infra-tools-t3code-web")
     pair_wrapper = os.path.join(home, ".local", "bin", "t3code-pair")
     t3_cli_wrapper = os.path.join(
@@ -839,6 +874,7 @@ def install_t3code_web(config: SetupConfig) -> None:
         home,
         t3_binary,
     )
+    legacy_shim_removed = _remove_legacy_t3_shim(home)
     wrapper_changed = _write_wrapper(
         wrapper,
         home,
@@ -861,6 +897,10 @@ def install_t3code_web(config: SetupConfig) -> None:
     os.chown(pair_wrapper, account.pw_uid, account.pw_gid)
     os.chown(t3_cli_wrapper, account.pw_uid, account.pw_gid)
     os.chown(workspace, account.pw_uid, account.pw_gid)
+    skill_changed = _ensure_t3_agent_skill(
+        config.username,
+        config.selected_agent_tools(),
+    )
 
     service_content = f"""[Unit]
 Description=T3 Code headless agentic coding service
@@ -909,7 +949,8 @@ WantedBy=multi-user.target
         or pair_wrapper_changed
         or t3_cli_wrapper_changed
         or runtime_changed
-        or gh_shim_changed
+        or skill_changed
+        or legacy_shim_removed
     ):
         run(f"systemctl restart {T3_SERVICE_NAME}.service")
     else:
@@ -924,6 +965,8 @@ WantedBy=multi-user.target
     else:
         _remove_device_pairing()
     print(f"  T3 Code web service listening on {host}:{port}")
+    print(f"  T3 Code endpoint: {base_url}")
+    print("  Readiness check: infra-tools agent doctor --capability t3code")
     if config.device_pairing_providers:
         print(
             "  Protected device enrollment listening on "
@@ -938,6 +981,11 @@ WantedBy=multi-user.target
         "  Use the full one-time pairing URL; the bare web address intentionally "
         "shows a pairing-key form"
     )
+    if config.install_gh:
+        print(
+            "  GitHub authentication is server-side; use 'gh auth status' as the "
+            "target user and keep repository URLs on HTTPS"
+        )
 
 
 __all__ = ["install_t3code_web"]

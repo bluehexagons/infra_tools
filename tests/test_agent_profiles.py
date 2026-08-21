@@ -107,6 +107,33 @@ class TestAgentProfiles(unittest.TestCase):
             config.effective_rdp_sources(),
         )
 
+    def test_t3code_ready_adds_headless_runtime_defaults(self) -> None:
+        config = SetupConfig.from_args(
+            _setup_args(t3code_ready=True),
+            "server_dev",
+        )
+
+        self.assertEqual(config.selected_agent_tools(), ["gh", "codex"])
+        self.assertEqual(config.web_interfaces, ["t3code"])
+        self.assertEqual(config.device_pairing_providers, ["t3code"])
+        self.assertEqual(config.git_access, "read-write")
+        self.assertTrue(config.install_node)
+        self.assertIn("--t3code-ready", config.to_remote_args())
+
+    def test_t3code_ready_respects_explicit_agent_and_pairing_opt_outs(self) -> None:
+        config = SetupConfig.from_args(
+            _setup_args(
+                t3code_ready=True,
+                no_agent_tools=["gh"],
+                disable_device_pairing=True,
+            ),
+            "server_dev",
+        )
+
+        self.assertEqual(config.selected_agent_tools(), ["codex"])
+        self.assertIsNone(config.device_pairing_providers)
+        self.assertTrue(config.install_node)
+
     def test_agent_code_vm_explicit_editor_replaces_geany(self) -> None:
         config = SetupConfig.from_args(
             _setup_args(editor="vscode"),

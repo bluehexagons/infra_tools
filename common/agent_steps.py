@@ -374,6 +374,9 @@ def install_t3code_desktop(config: SetupConfig) -> None:
     if platform.machine().lower() not in {"x86_64", "amd64"}:
         raise RuntimeError("T3 Code currently publishes a Linux AppImage only for x86_64")
     if _tool_available(config, "t3code"):
+        from common.t3code_steps import _ensure_t3_agent_skill
+
+        _ensure_t3_agent_skill(config.username, config.selected_agent_tools())
         print("  T3 Code already installed")
         return
 
@@ -415,6 +418,9 @@ def install_t3code_desktop(config: SetupConfig) -> None:
     _chown_path(config, bin_dir)
     _chown_path(config, applications_dir)
     _ensure_agent_shell_path(config)
+    from common.t3code_steps import _ensure_t3_agent_skill
+
+    _ensure_t3_agent_skill(config.username, config.selected_agent_tools())
     print("  T3 Code installed")
 
 
