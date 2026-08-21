@@ -18,6 +18,7 @@ from lib.ssh_utils import (
     build_ssh_command,
     ensure_remote_sudo,
     get_ssh_control_path,
+    get_workspace_known_hosts_path,
     ssh_batch_mode,
 )
 from lib.types import StrList
@@ -44,6 +45,7 @@ def get_provisioned_guest_ssh_user(machine_type: str, setup_username: str) -> st
 def _ssh_opts(hosted_key: Optional[str] = None) -> StrList:
     """Build SSH options list for Proxmox node connections."""
     opts = [
+        "-o", f"UserKnownHostsFile={get_workspace_known_hosts_path()}",
         "-o", "StrictHostKeyChecking=yes",
         "-o", f"BatchMode={'yes' if ssh_batch_mode() else 'no'}",
         "-o", "ConnectTimeout=30",

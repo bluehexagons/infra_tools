@@ -40,10 +40,10 @@ ARCH-08 from the [architectural risk review](ARCHITECTURAL_RISK_REVIEW_2026-08-0
   restrictive permissions.
 - Readers still fall back on corrupt JSON in several paths; schema versions and
   actionable remediation remain open work.
-- Shared SSH/SCP/rsync builders use `StrictHostKeyChecking=yes` with the
-  workspace enrollment file. The Proxmox guest helper does not yet pass that
-  file, and build-server deployment targets are still populated from an
-  unauthenticated `ssh-keyscan`.
+- Shared SSH/SCP/rsync and Proxmox node builders use
+  `StrictHostKeyChecking=yes` with the workspace enrollment file. Build-server
+  deployment targets are still populated from an unauthenticated
+  `ssh-keyscan`.
 
 The former `lib/transaction.py` callback framework was removed on 2026-08-21.
 It reran completed steps, could report success after continue-on-error failures,
@@ -170,8 +170,8 @@ entry.
 Interactive convenience commands may offer a clearly labelled trust-on-first-
 use mode, but automated privileged paths should not enable it by default.
 
-The remaining implementation slice must cover every SSH constructor, including
-the Proxmox guest helper and CI/CD deploy-target enrollment. A successful
+The Proxmox guest helper now uses the workspace enrollment file. The remaining
+implementation slice is CI/CD deploy-target enrollment. A successful
 `ssh-keyscan` is discovery data, not operator approval; deployment must not be
 enabled until the expected fingerprint is explicitly verified.
 

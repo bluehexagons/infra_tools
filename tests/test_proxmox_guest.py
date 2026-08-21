@@ -109,12 +109,18 @@ class TestProxmoxSshRun(unittest.TestCase):
         _ssh_run(
             "192.0.2.10",
             "root",
-            ["-i", "/keys/proxmox"],
+            [
+                "-o",
+                "UserKnownHostsFile=/workspace/known_hosts",
+                "-i",
+                "/keys/proxmox",
+            ],
             "cat > /tmp/payload",
             input_data="payload",
         )
 
         command = mock_run.call_args.args[0]
+        self.assertIn("UserKnownHostsFile=/workspace/known_hosts", command)
         self.assertIn("ControlMaster=auto", command)
         self.assertIn("ControlPath=/tmp/control.sock", command)
         self.assertEqual(mock_run.call_args.kwargs["input"], "payload")

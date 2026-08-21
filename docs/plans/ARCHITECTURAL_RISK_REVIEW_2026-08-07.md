@@ -69,16 +69,16 @@ Each finding lists: severity, evidence, validation outcome, and direct follow-up
 - **Evidence**
   - `lib/ssh_utils.py` now sets `StrictHostKeyChecking=yes` and points shared
     builders at the workspace `known_hosts` file.
-  - `lib/proxmox_guest.py::_ssh_opts()` sets strict checking but omits the
-    workspace file.
+  - `lib/proxmox_guest.py::_ssh_opts()` now uses the workspace file; this
+    bypass was resolved on 2026-08-21.
   - `web/build_server_steps.py::configure_deploy_known_hosts()` appends
     `ssh-keyscan` output without authenticating the fingerprint first.
 - **Validation**
   - Confirmed by comparing the shared builders, the separate Proxmox constructor,
     and the CI/CD deployment-target bootstrap path.
 - **Impact**
-- Shared paths are strict, but bypasses and unauthenticated enrollment leave
-  privileged Proxmox and deployment paths exposed to incorrect host-key trust.
+- Shared and Proxmox paths are strict. Unauthenticated CI/CD enrollment still
+  leaves deployment paths exposed to incorrect host-key trust.
 
 ### ARCH-04: CI/CD executes repo-authored scripts with broad execution scope
 
@@ -182,11 +182,10 @@ Validation was performed by static evidence checks (no behavior-altering actions
 - **2026-08-09 — historical revalidation:** at that point setup still removed
   managed services before running steps, manifest deploy replaced the active
   tree before building, and health failures only warned. Those deployment
-  findings were resolved on 2026-08-19. Shared SSH builders still use
-  The shared SSH builders now use strict workspace enrollment, but the Proxmox
-  and CI/CD helper gaps described in ARCH-03 remain; plugin discovery still
-  imports every built-in plugin eagerly, and corrupt-state handling remains
-  permissive.
+  findings were resolved on 2026-08-19. Shared SSH builders use strict workspace
+  enrollment, but the Proxmox and CI/CD gaps described in ARCH-03 remained at
+  that point; plugin discovery still imports every built-in plugin eagerly, and
+  corrupt-state handling remains permissive.
 - **2026-08-09 — ARCH-06 resolved:** introduced the shared writer and migrated
   all JSON state/configuration paths, including secret-bearing files with mode
   `0600`. Tests cover complete writes, replacement failure preservation, and
@@ -201,6 +200,9 @@ Validation was performed by static evidence checks (no behavior-altering actions
   remote setup. Manifest deployments now build and validate before stopping
   app-scoped units, then restore the prior release and units after activation
   or health failure. Durable interruption markers remain open work.
+- **2026-08-21 — ARCH-03 partially resolved:** Proxmox node connections now use
+  strict workspace host-key enrollment, including multiplexed control-socket
+  paths. CI/CD deploy-target enrollment remains unauthenticated.
 - ARCH-01, ARCH-03, and ARCH-08 are sequenced in
   [Transactional execution and reconciliation](TRANSACTIONAL_EXECUTION.md).
   ARCH-02 remains a P3 startup-isolation task in [the roadmap](ROADMAP.md), and

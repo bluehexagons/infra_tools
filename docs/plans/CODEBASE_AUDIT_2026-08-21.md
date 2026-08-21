@@ -59,7 +59,7 @@ fingerprints afterward, but the trust decision has already been staged.
 step, validate the resulting key before enabling deployment, and record key
 rotation as an auditable action.
 
-### AUD-03: Proxmox node SSH bypasses the workspace known-hosts policy
+### AUD-03: Proxmox node SSH bypasses the workspace known-hosts policy (resolved)
 
 **Severity: High — inconsistent SSH enforcement**
 
@@ -69,9 +69,10 @@ rotation as an auditable action.
 `UserKnownHostsFile`, so Proxmox node connections consult OpenSSH's normal host
 files instead of the enrollment store described by the SSH documentation.
 
-**Follow-up:** converge the Proxmox helper on the shared host-key option and add
-a regression assertion for the workspace file, including guest provisioning and
-control-socket paths.
+**Resolution (2026-08-21):** the Proxmox SSH option builder now uses the shared
+workspace `known_hosts` path. Guest provisioning, node probes, and multiplexed
+control-socket commands all consume that option list, and focused tests assert
+the workspace path with and without a dedicated identity key.
 
 ### AUD-04: Target setup state is saved before setup steps execute
 

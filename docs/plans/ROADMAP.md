@@ -45,9 +45,9 @@ The ordering remains justified by the current implementation:
   and restored on failure without overwriting unmanaged same-name sites;
 - persistent JSON state/configuration now uses the shared atomic writer, but
   corrupt-state readers still fall back permissively;
-- shared SSH/SCP/rsync builders require strict checking against the workspace
-  enrollment file, while the Proxmox helper bypasses that file and CI/CD target
-  setup still stages unauthenticated `ssh-keyscan` results;
+- shared SSH/SCP/rsync and Proxmox node builders require strict checking against
+  the workspace enrollment file, while CI/CD target setup still stages
+  unauthenticated `ssh-keyscan` results;
 - remote setup writes target remembered state before its step loop and has no
   durable in-progress marker;
 - the declared wheel is incomplete, and release CI does not build or smoke-test
