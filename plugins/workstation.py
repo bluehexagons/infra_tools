@@ -24,7 +24,7 @@ PLUGIN = PluginDefinition(
             include_desktop=True,
             include_cli_tools=True,
             include_desktop_apps=True,
-            default_browser="librewolf",
+            default_browser="firefox",
             step_builder="plugins.workstation:build_workstation_steps",
         ),
         SystemTypeDefinition(
@@ -36,7 +36,7 @@ PLUGIN = PluginDefinition(
             include_pc_dev_apps=True,
             default_install_office=True,
             default_enable_smbclient=True,
-            default_browser="librewolf",
+            default_browser="firefox",
             step_builder="plugins.workstation:build_workstation_steps",
         ),
         SystemTypeDefinition(

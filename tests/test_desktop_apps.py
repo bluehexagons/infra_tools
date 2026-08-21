@@ -9,68 +9,8 @@ from lib.config import SetupConfig
 
 
 class TestDesktopApps(unittest.TestCase):
-    @patch("desktop.apps_steps.install_office_apps")
-    @patch("desktop.apps_steps.install_browser")
-    @patch("desktop.apps_steps.run")
-    @patch("desktop.apps_steps.is_package_installed")
-    def test_desktop_apps_do_not_install_vscodium(self, mock_package, mock_run, mock_browser, mock_office):
-        """Default desktop app bundle should not install VSCodium."""
-        from desktop.apps_steps import install_desktop_apps
-
-        mock_package.side_effect = lambda package: package == "discord"
-        config = SetupConfig(
-            host="test.example.com",
-            username="testuser",
-            system_type="workstation_desktop",
-            use_flatpak=False,
-        )
-
-        install_desktop_apps(config)
-
-        commands = " ".join(call.args[0] for call in mock_run.call_args_list)
-        self.assertNotIn("codium", commands)
-        self.assertNotIn("vscodium", commands.lower())
-
-    @patch("desktop.apps_steps.install_office_apps")
-    @patch("desktop.apps_steps.install_browser")
-    @patch("desktop.apps_steps.run")
-    @patch("desktop.apps_steps.is_package_installed")
-    def test_discord_package_uses_private_temporary_directory(
-        self,
-        mock_package,
-        mock_run,
-        _mock_browser,
-        _mock_office,
-    ):
-        from desktop.apps_steps import install_desktop_apps
-
-        mock_package.side_effect = [False, True]
-        mock_run.return_value = Mock(returncode=0)
-        config = SetupConfig(
-            host="test.example.com",
-            username="testuser",
-            system_type="workstation_desktop",
-            use_flatpak=False,
-        )
-
-        install_desktop_apps(config)
-
-        commands = [call.args[0] for call in mock_run.call_args_list]
-        download_command = next(
-            command for command in commands if command.startswith("wget --https-only -qO ")
-        )
-        self.assertIn("/infra-tools-discord-", download_command)
-        self.assertNotIn("-qO /tmp/discord.deb", download_command)
-        self.assertTrue(
-            any(
-                command.startswith("apt-get install -y -qq ")
-                and "/infra-tools-discord-" in command
-                for command in commands
-            )
-        )
-
-    def test_desktop_steps_exports_librewolf_default_browser_config(self):
-        """desktop.steps should expose the browser implementation with LibreWolf support."""
+    def test_desktop_steps_exports_librewolf_browser_config(self):
+        """desktop.steps should expose browser configuration with LibreWolf support."""
         from desktop import steps
         from desktop.browser_steps import configure_default_browser
 
@@ -228,7 +168,7 @@ class TestBrowserSteps(unittest.TestCase):
         mock_makedirs,
         mock_run,
     ):
-        """LibreWolf is the default browser for workstation setups and should be configurable."""
+        """LibreWolf remains available as an explicitly selected browser."""
         from desktop.browser_steps import configure_default_browser
 
         mock_run.return_value = Mock(returncode=0, stdout="", stderr="")

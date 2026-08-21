@@ -20,7 +20,6 @@ PLUGIN = PluginDefinition(
         "install_desktop",
         "install_xrdp",
         "harden_xrdp",
-        "install_desktop_apps",
         "configure_default_browser",
         "install_editor",
         "install_smbclient",
@@ -62,20 +61,20 @@ def extend_desktop_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]])
 
 
 def extend_desktop_app_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -> None:
-    """Append workstation application bundles in the established order."""
+    """Append the applications declared by a workstation profile."""
 
     from desktop.steps import (
         configure_default_browser,
         install_browser,
-        install_desktop_apps,
         install_editor,
+        install_office_apps,
         install_remmina,
     )
 
     if config.include_desktop_apps:
         steps.extend(
             [
-                ("Installing desktop applications", install_desktop_apps),
+                ("Installing browser", install_browser),
                 ("Configuring default browser", configure_default_browser),
             ]
         )
@@ -83,7 +82,8 @@ def extend_desktop_app_steps(config: SetupConfig, steps: list[tuple[str, StepFun
         steps.extend(
             [
                 ("Installing Remmina", install_remmina),
-                ("Installing desktop applications", install_desktop_apps),
+                ("Installing browser", install_browser),
+                ("Installing Office", install_office_apps),
                 ("Configuring default browser", configure_default_browser),
             ]
         )
@@ -113,7 +113,7 @@ def extend_desktop_browser_and_office_steps(
         steps.append(("Installing browser", install_browser))
         steps.append(("Configuring default browser", configure_default_browser))
 
-    if config.install_office and not (config.include_desktop_apps or config.include_pc_dev_apps):
+    if config.install_office and not config.include_pc_dev_apps:
         steps.append(("Installing Office", install_office_apps))
 
 
@@ -127,7 +127,6 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         harden_xrdp,
         install_browser,
         install_desktop,
-        install_desktop_apps,
         install_editor,
         install_office_apps,
         install_remmina,
@@ -139,7 +138,6 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "install_desktop": install_desktop,
         "install_xrdp": install_xrdp,
         "harden_xrdp": harden_xrdp,
-        "install_desktop_apps": install_desktop_apps,
         "configure_default_browser": configure_default_browser,
         "install_editor": install_editor,
         "install_smbclient": install_smbclient,

@@ -39,15 +39,15 @@ desktop interface when both local RDP and remote clients are useful.
 
 | Profile | Adds by default |
 | --- | --- |
-| `workstation_desktop` | Desktop, CLI tools, browser, and Discord |
-| `pc_dev` | Desktop, browser, LibreOffice, SMB client packages, Remmina, and Discord |
+| `workstation_desktop` | Desktop, Firefox ESR, and CLI tools |
+| `pc_dev` | Desktop, Firefox ESR, LibreOffice, SMB client packages, Remmina, and CLI tools |
 | `workstation_dev` | Desktop, Firefox ESR, and CLI tools including Neovim |
 
-The default desktop is XFCE. `workstation_dev` uses Debian's Firefox ESR by
-default; the other workstation profiles retain LibreWolf. A browser selected
-with `--browser` becomes the default for the setup user; repeat the flag to
-install more than one browser. Graphical editors are explicit: select Geany or
-Visual Studio Code with `--editor geany` or `--editor vscode`.
+The default desktop is XFCE. All workstation profiles use Debian's Firefox ESR
+by default. A browser selected with `--browser` becomes the default for the
+setup user; repeat the flag to install more than one browser. Graphical editors
+are explicit: select Geany or Visual Studio Code with `--editor geany` or
+`--editor vscode`.
 
 ## Common setups
 
@@ -144,9 +144,10 @@ infra-tools setup workstation_desktop 10.0.0.27 alice \
 ```
 
 Use `--apt-install PACKAGE` or repeat `--flatpak-install PACKAGE` for
-additional packages. Flatpak is enabled with `--flatpak`; the built-in desktop
-bundles use it for Discord and LibreOffice when possible. Explicit editor
-selection remains APT-managed so its behavior is independent of Flatpak.
+additional packages. For example, Discord is an explicit choice with
+`--flatpak-install com.discordapp.Discord`. `--flatpak` selects Flatpak for
+supported built-in applications such as LibreOffice; explicit editor selection
+remains APT-managed so its behavior is independent of Flatpak.
 
 ## Browser choices
 
@@ -175,9 +176,9 @@ run on successful reruns. It does not remove or rewrite manually managed files u
 unrelated third-party source error, repair or disable that source separately
 before rerunning setup.
 
-Native Discord, Helium, and Browsh packages are staged in private, randomly
-named temporary directories and removed after installation. Setup does not
-leave uninstalled browser-extension packages in the shared `/tmp` directory.
+Native Helium and Browsh packages are staged in private, randomly named
+temporary directories and removed after installation. Setup does not leave
+uninstalled browser-extension packages in the shared `/tmp` directory.
 
 The first browser in a repeated list is written to the setup user's
 `~/.config/mimeapps.list` as the HTTP/HTTPS default. Text-only browsers do not

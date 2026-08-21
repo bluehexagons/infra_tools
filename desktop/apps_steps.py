@@ -11,7 +11,7 @@ from lib.config import SetupConfig
 from lib.machine_state import is_container
 from lib.remote_utils import install_package, is_package_installed, run
 from lib.validation import validate_filesystem_path
-from desktop.browser_steps import install_browser, is_flatpak_app_installed
+from desktop.browser_steps import is_flatpak_app_installed
 
 
 FLATPAK_REMOTE = "flathub"
@@ -93,56 +93,6 @@ def install_office_apps(config: SetupConfig) -> None:
     run("apt-get install -y -qq libreoffice", check=False)
     if is_package_installed("libreoffice"):
         print("  ✓ LibreOffice installed")
-
-
-def install_desktop_apps(config: SetupConfig) -> None:
-    install_browser(config)
-    install_office_apps(config)
-    
-    use_flatpak = config.use_flatpak
-    if use_flatpak:
-        if not install_flatpak_if_needed():
-            print("  Falling back to apt for desktop app installation")
-            use_flatpak = False
-    
-    if use_flatpak:
-        if is_flatpak_app_installed("com.discordapp.Discord"):
-            print("  ✓ Other desktop apps already installed via Flatpak")
-            return
-        
-        print("  Installing other desktop apps via Flatpak...")
-
-        if not is_flatpak_app_installed("com.discordapp.Discord"):
-            print("  Installing Discord...")
-            run(f"flatpak install -y {FLATPAK_REMOTE} com.discordapp.Discord", check=False)
-        
-        if is_flatpak_app_installed("com.discordapp.Discord"):
-            print("  ✓ Other desktop apps installed via Flatpak (Discord)")
-    else:
-        discord_installed = is_package_installed("discord")
-
-        if discord_installed:
-            print("  ✓ Other desktop apps already installed")
-            return
-
-        print("  Installing Discord...")
-        with tempfile.TemporaryDirectory(prefix="infra-tools-discord-") as temporary_dir:
-            package_path = os.path.join(temporary_dir, "discord.deb")
-            download_result = run(
-                "wget --https-only -qO "
-                f"{shlex.quote(package_path)} "
-                "'https://discord.com/api/download?platform=linux&format=deb'",
-                check=False,
-            )
-            if download_result.returncode != 0:
-                print("  ⚠ Failed to download Discord")
-                return
-            os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-            run(f"apt-get install -y -qq {shlex.quote(package_path)}", check=False)
-        discord_installed = is_package_installed("discord")
-
-        if discord_installed:
-            print("  ✓ Other desktop apps installed (Discord)")
 
 
 def _microsoft_key_fingerprints(output: str) -> set[str]:

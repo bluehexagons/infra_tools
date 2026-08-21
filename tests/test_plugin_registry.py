@@ -86,13 +86,14 @@ class TestPluginRegistry(unittest.TestCase):
         self.assertTrue(system_type.include_pc_dev_apps)
         self.assertTrue(system_type.default_install_office)
         self.assertTrue(system_type.default_enable_smbclient)
-        self.assertEqual(system_type.default_browser, "librewolf")
+        self.assertEqual(system_type.default_browser, "firefox")
         self.assertIsNotNone(system_type.step_builder)
 
-    def test_workstation_dev_metadata_uses_debian_browser_default(self):
-        system_type = get_system_type_definition("workstation_dev")
-
-        self.assertEqual(system_type.default_browser, "firefox")
+    def test_workstation_profiles_use_debian_browser_default(self):
+        for profile in ("workstation_desktop", "pc_dev", "workstation_dev"):
+            with self.subTest(profile=profile):
+                system_type = get_system_type_definition(profile)
+                self.assertEqual(system_type.default_browser, "firefox")
 
     def test_control_plane_profile_adds_administrator_tools(self):
         config = SetupConfig(
@@ -262,6 +263,43 @@ class TestPluginRegistry(unittest.TestCase):
         self.assertIn("Installing browser", minimal_steps)
         self.assertNotIn("Installing workstation editor", minimal_steps)
         self.assertIn("Installing workstation editor", selected_steps)
+
+    def test_workstation_desktop_uses_explicit_browser_step(self):
+        config = SetupConfig(
+            host="host",
+            username="user",
+            system_type="workstation_desktop",
+            include_desktop=True,
+            include_desktop_apps=True,
+            browser="firefox",
+        )
+
+        step_names = [name for name, _ in get_steps_for_system_type(config)]
+
+        self.assertIn("Installing browser", step_names)
+        self.assertNotIn("Installing desktop applications", step_names)
+        self.assertNotIn("Installing Office", step_names)
+        self.assertNotIn("Installing Remmina", step_names)
+
+    def test_pc_dev_keeps_productivity_steps_without_app_bundle(self):
+        config = SetupConfig(
+            host="host",
+            username="user",
+            system_type="pc_dev",
+            include_desktop=True,
+            include_pc_dev_apps=True,
+            install_office=True,
+            enable_smbclient=True,
+            browser="firefox",
+        )
+
+        step_names = [name for name, _ in get_steps_for_system_type(config)]
+
+        self.assertIn("Installing browser", step_names)
+        self.assertIn("Installing Office", step_names)
+        self.assertIn("Installing Remmina", step_names)
+        self.assertIn("Installing SMB client packages", step_names)
+        self.assertNotIn("Installing desktop applications", step_names)
 
     def test_duplicate_plugin_names_fail(self):
         plugin = PluginDefinition(name="dup", module="plugins.one")

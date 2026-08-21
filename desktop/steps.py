@@ -25,7 +25,6 @@ from .apps_steps import (
     is_flatpak_app_installed,
     install_remmina,
     install_office_apps,
-    install_desktop_apps,
     install_editor,
 )
 
@@ -43,6 +42,5 @@ __all__ = [
     'is_flatpak_app_installed',
     'install_remmina',
     'install_office_apps',
-    'install_desktop_apps',
     'install_editor',
 ]

@@ -77,8 +77,8 @@ The default behavior configures the browser for the local desktop user. Use
 `--no-default` when installing a secondary browser. Supported browsers are
 `brave`, `firefox`, `librewolf`, `helium`, `browsh`, and `lynx`.
 
-For LibreOffice, an explicit graphical editor, Discord, or Remmina, use the
-workstation profile's existing flags and inspect the plan first:
+For LibreOffice or an explicit graphical editor, use the workstation profile's
+existing flags and inspect the plan first:
 
 ```bash
 sudo infra-tools setup workstation_dev localhost "$USER" \
@@ -87,7 +87,9 @@ sudo infra-tools setup workstation_dev localhost "$USER" \
 
 `workstation_dev` already includes Firefox ESR and Neovim. Use `--editor
 geany` for the lightweight Debian IDE or `--editor vscode` for the explicitly
-scoped Microsoft repository.
+scoped Microsoft repository. The `pc_dev` profile adds LibreOffice, SMB client
+support, and Remmina. Third-party GUI applications such as Discord are
+explicit; install them by package identifier with `--flatpak-install`.
 
 ## Hostname, IP address, and DNS
 

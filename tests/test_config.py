@@ -632,7 +632,7 @@ class TestSetupConfigFromArgs(unittest.TestCase):
         self.assertTrue(config.include_desktop)
         self.assertTrue(config.include_cli_tools)
         self.assertTrue(config.include_desktop_apps)
-        self.assertEqual(config.browser, 'librewolf')
+        self.assertEqual(config.browser, 'firefox')
 
     def test_workstation_rdp_can_be_enabled_explicitly(self):
         config = SetupConfig.from_args(self._make_args(enable_rdp=True), 'workstation_desktop')
@@ -694,6 +694,7 @@ class TestSetupConfigFromArgs(unittest.TestCase):
         self.assertTrue(config.install_office)
         self.assertTrue(config.enable_smbclient)
         self.assertTrue(config.include_pc_dev_apps)
+        self.assertEqual(config.browser, 'firefox')
 
     def test_server_web_defaults_to_auto_detection(self):
         config = SetupConfig.from_args(self._make_args(), 'server_web')
