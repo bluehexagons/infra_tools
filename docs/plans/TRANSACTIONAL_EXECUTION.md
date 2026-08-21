@@ -52,6 +52,9 @@ ARCH-08 from the [architectural risk review](ARCHITECTURAL_RISK_REVIEW_2026-08-0
 - Manifest deployment creates that marker before staging, records deterministic
   staging/backup paths and units before activation, clears it after success or
   verified rollback, and retains recovery errors when rollback is incomplete.
+- Target setup records its current step before mutation, finalizes remembered
+  machine/setup state only after the full operation succeeds, and retains
+  interrupted or failed state for the next invocation.
 
 The former `lib/transaction.py` callback framework was removed on 2026-08-21.
 It reran completed steps, could report success after continue-on-error failures,
@@ -206,9 +209,9 @@ enabled until the expected fingerprint is explicitly verified.
 ## Recommended first delivery slice
 
 The atomic persistence, execution-contract, transaction-framework retirement,
-and manifest operation-marker slices are complete. The next delivery should use
-the marker for target setup, add phase-specific recovery where it can be proven
-safe, and finish the `remote_utils.run()` caller inventory.
+and setup/deployment operation-marker slices are complete. The next delivery
+should add phase-specific recovery where it can be proven safe, tighten corrupt
+state readers, and finish the `remote_utils.run()` caller inventory.
 
 ## Non-goals
 

@@ -155,4 +155,12 @@ default.
 
 ## State Persistence
 
-Machine type is saved to `/opt/infra_tools/state/machine.json` on target systems, allowing service scripts to adapt behavior automatically.
+Machine type is saved to `/opt/infra_tools/state/machine.json` only after every
+requested setup mutation succeeds. The recalled setup is finalized at the same
+time in `setup.json`.
+
+A real setup first creates `/opt/infra_tools/state/setup-operation.json`. It
+records the current step and blocks another setup if execution is interrupted.
+Ordinary failures mark it `recovery_required`; inspect and reconcile the named
+step before moving the marker aside. Dry runs do not create or change these
+state files.

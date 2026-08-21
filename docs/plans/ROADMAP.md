@@ -48,9 +48,9 @@ The ordering remains justified by the current implementation:
 - shared SSH/SCP/rsync and Proxmox node builders require strict checking against
   the workspace enrollment file, while CI/CD target setup still stages
   unauthenticated `ssh-keyscan` results;
-- remote setup writes target remembered state before its step loop and has no
-  durable in-progress marker; manifest activation now has a versioned marker
-  that blocks overlapping work and preserves interruption/recovery context;
+- remote setup and manifest activation now use versioned markers that block
+  overlapping work and preserve interruption/recovery context; remembered
+  target state is finalized only after setup succeeds;
 - package metadata now produces a self-contained wheel, and tagged-release CI
   installs, smoke-tests, and publishes the artifact;
 - signed webhook deliveries have no delivery-ID replay protection;
@@ -73,9 +73,9 @@ The best next work packets are:
 1. Complete the `remote_utils.run()` caller inventory and move suitable callers
    toward an argv-native API (strict, secret-safe, and bounded execution are now
    landed).
-2. Integrate the versioned durable operation-record primitive into target setup
-   recovery. Manifest activation integration is landed; diagnostic event
-   logging remains separate from this authoritative state.
+2. Add safe phase-specific recovery actions to the landed target-setup and
+   manifest operation markers; diagnostic event logging remains separate from
+   this authoritative state.
 3. Replace permissive corrupt-state fallbacks with schema/version checks and
    actionable remediation, then extend durable markers to remaining mutations.
 4. Replace automatic SSH first-use trust with explicit enrollment before

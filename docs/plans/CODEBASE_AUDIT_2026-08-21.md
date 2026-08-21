@@ -76,7 +76,7 @@ workspace `known_hosts` path. Guest provisioning, node probes, and multiplexed
 control-socket commands all consume that option list, and focused tests assert
 the workspace path with and without a dedicated identity key.
 
-### AUD-04: Target setup state is saved before setup steps execute
+### AUD-04: Target setup state is saved before setup steps execute (resolved)
 
 **Severity: Medium-High — recovery and reconciliation**
 
@@ -86,9 +86,13 @@ retains the new remembered configuration without a durable in-progress marker or
 success record. The controller's setup history does not make that target-local
 state safe to replay after interruption.
 
-**Follow-up:** write a versioned operation marker before mutation, finalize
-remembered state only after successful verification, and make interrupted or
-failed runs visible to the next invocation.
+**Resolution (2026-08-21):** real target setup now writes a versioned operation
+marker before its step loop and records each current step. Machine state and
+the recalled setup configuration are finalized only after all setup,
+deployment, share, and storage work succeeds. Success removes the marker;
+ordinary failure marks it `recovery_required`, hard interruption leaves the
+last in-progress phase, and either state blocks the next invocation until an
+operator inspects and reconciles it. Dry runs remain state-free.
 
 ### AUD-05: Required setup mutations still have weak failure contracts
 

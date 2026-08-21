@@ -15,8 +15,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib.arg_parser import create_setup_argument_parser
 from lib.config import SetupConfig
 from lib.display import print_setup_summary
-from lib.machine_state import resolve_machine_type, save_machine_state, save_setup_config
+from lib.machine_state import STATE_DIR, resolve_machine_type, save_machine_state, save_setup_config
 from lib.notifications import send_setup_notification
+from lib.operation_state import OperationRecord, OperationStateStore
 from lib.remote_utils import detect_os, is_dry_run, set_dry_run
 from lib.validation import (
     validate_agent_repositories,
@@ -41,6 +42,56 @@ from lib.types import Deployments, StepFunc
 
 REMOTE_AGENT_PAYLOAD_DIR = "/opt/infra_tools/agent_payload"
 REMOTE_DEVICE_PAIRING_PAYLOAD_DIR = "/opt/infra_tools/device_pairing_payload"
+SETUP_OPERATION_FILE = os.path.join(STATE_DIR, "setup-operation.json")
+_active_setup_operation: Optional[tuple[OperationStateStore, OperationRecord]] = None
+
+
+def _begin_setup_operation(config: SetupConfig) -> None:
+    global _active_setup_operation
+    store = OperationStateStore(SETUP_OPERATION_FILE)
+    record = store.begin(
+        "target_setup",
+        config.system_type,
+        "applying",
+        context={
+            "machine_type": config.machine_type,
+            "system_type": config.system_type,
+            "username": config.username,
+        },
+    )
+    _active_setup_operation = (store, record)
+
+
+def _transition_setup_operation(phase: str, context: dict[str, object]) -> None:
+    global _active_setup_operation
+    if _active_setup_operation is None:
+        return
+    store, record = _active_setup_operation
+    updated = store.transition(record.operation_id, phase, context=context)
+    _active_setup_operation = (store, updated)
+
+
+def _complete_setup_operation() -> None:
+    global _active_setup_operation
+    if _active_setup_operation is None:
+        return
+    store, record = _active_setup_operation
+    store.complete(record.operation_id)
+    _active_setup_operation = None
+
+
+def _record_setup_failure(error: Exception) -> None:
+    global _active_setup_operation
+    if _active_setup_operation is None:
+        return
+    store, record = _active_setup_operation
+    updated = store.transition(
+        record.operation_id,
+        "recovery",
+        status="recovery_required",
+        context={**record.context, "error_type": type(error).__name__},
+    )
+    _active_setup_operation = (store, updated)
 
 
 def _remove_secret_payloads() -> None:
@@ -311,26 +362,8 @@ def _run_main() -> int:
         preflight_antistatic_releases(config)
         sys.stdout.flush()
     
-    # Save machine state and setup configuration only after a real setup.
-    # Keep the preflight state-free so dry-run planning does not overwrite the
-    # target's remembered setup before any steps have executed.
     print(f"Machine type: {config.machine_type}")
     sys.stdout.flush()
-
-    if not args.dry_run:
-        save_machine_state(
-            machine_type=config.machine_type,
-            system_type=config.system_type,
-            username=config.username
-        )
-
-        # Save setup configuration for later recall
-        try:
-            config_dict = config.to_dict()
-            config_dict['system_type'] = config.system_type
-            save_setup_config(config_dict)
-        except OSError as e:
-            print(f"Warning: Failed to save setup configuration: {e}", file=sys.stderr)
     
     steps = get_steps_for_system_type(config)
 
@@ -340,11 +373,24 @@ def _run_main() -> int:
         print("✓ Remote setup dry-run complete!")
         print("=" * 60)
         return 0
+
+    _begin_setup_operation(config)
     
     setup_errors: list[str] = []
     
     total_steps = len(steps)
     for i, (name, func) in enumerate(steps, 1):
+        _transition_setup_operation(
+            "applying",
+            {
+                "machine_type": config.machine_type,
+                "system_type": config.system_type,
+                "username": config.username,
+                "step": name,
+                "step_index": i,
+                "step_count": total_steps,
+            },
+        )
         bar = progress_bar(i, total_steps)
         print(f"\n{bar} [{i}/{total_steps}] {name}")
         sys.stdout.flush()
@@ -547,6 +593,24 @@ def _run_main() -> int:
         else:
             create_storage_ops_service(config)
             schedule_storage_ops_update()
+
+    _transition_setup_operation(
+        "finalizing",
+        {
+            "machine_type": config.machine_type,
+            "system_type": config.system_type,
+            "username": config.username,
+        },
+    )
+    save_machine_state(
+        machine_type=config.machine_type,
+        system_type=config.system_type,
+        username=config.username,
+    )
+    config_dict = config.to_dict()
+    config_dict["system_type"] = config.system_type
+    save_setup_config(config_dict)
+    _complete_setup_operation()
     
     print("\n" + "=" * 60)
     print("✓ Remote setup complete!")
@@ -567,6 +631,9 @@ def _run_main() -> int:
 def main() -> int:
     try:
         return _run_main()
+    except Exception as exc:
+        _record_setup_failure(exc)
+        raise
     finally:
         _remove_secret_payloads()
 

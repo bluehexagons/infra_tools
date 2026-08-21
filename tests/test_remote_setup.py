@@ -13,10 +13,88 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import remote_setup
 from lib.config import SetupConfig
+from lib.operation_state import OperationStateStore
 from lib.remote_utils import set_dry_run
 
 
 class TestRemoteSetupArgsFile(unittest.TestCase):
+    def tearDown(self):
+        remote_setup._active_setup_operation = None
+
+    def test_remembered_state_is_finalized_only_after_steps_succeed(self):
+        args = SimpleNamespace(
+            deploy_latest=False,
+            dry_run=False,
+            custom_steps=None,
+            system_type="server_lite",
+        )
+        config = SetupConfig(
+            host="localhost",
+            username="root",
+            system_type="server_lite",
+        )
+        save_machine = MagicMock()
+        save_config = MagicMock()
+
+        def step(_config):
+            save_machine.assert_not_called()
+            save_config.assert_not_called()
+
+        with tempfile.TemporaryDirectory() as tmpdir, patch.object(
+            remote_setup,
+            "SETUP_OPERATION_FILE",
+            os.path.join(tmpdir, "setup-operation.json"),
+        ), patch.object(
+            remote_setup, "create_setup_argument_parser"
+        ) as create_parser, patch.object(
+            remote_setup, "config_from_remote_args", return_value=config
+        ), patch.object(
+            remote_setup, "detect_os", return_value="Debian"
+        ), patch.object(
+            remote_setup, "print_setup_summary"
+        ), patch.object(
+            remote_setup, "get_steps_for_system_type", return_value=[("Apply", step)]
+        ), patch.object(
+            remote_setup, "save_machine_state", save_machine
+        ), patch.object(
+            remote_setup, "save_setup_config", save_config
+        ):
+            create_parser.return_value.parse_args.return_value = args
+            self.assertEqual(remote_setup._run_main(), 0)
+            self.assertIsNone(OperationStateStore(remote_setup.SETUP_OPERATION_FILE).load())
+
+        save_machine.assert_called_once()
+        save_config.assert_called_once()
+
+    def test_main_records_failed_setup_for_next_invocation(self):
+        config = SetupConfig(
+            host="localhost",
+            username="root",
+            system_type="server_lite",
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            marker_path = os.path.join(tmpdir, "setup-operation.json")
+
+            def fail_after_begin():
+                remote_setup._begin_setup_operation(config)
+                remote_setup._transition_setup_operation(
+                    "applying",
+                    {"step": "Firewall", "step_index": 2, "step_count": 4},
+                )
+                raise RuntimeError("failed")
+
+            with patch.object(remote_setup, "SETUP_OPERATION_FILE", marker_path), patch.object(
+                remote_setup, "_run_main", side_effect=fail_after_begin
+            ), patch.object(remote_setup, "_remove_secret_payloads"):
+                with self.assertRaisesRegex(RuntimeError, "failed"):
+                    remote_setup.main()
+
+            record = OperationStateStore(marker_path).load()
+            self.assertIsNotNone(record)
+            self.assertEqual(record.status, "recovery_required")
+            self.assertEqual(record.context["step"], "Firewall")
+            self.assertEqual(record.context["error_type"], "RuntimeError")
+
     def test_dry_run_prints_plan_without_invoking_setup_steps(self):
         self.addCleanup(lambda: set_dry_run(False))
         args = SimpleNamespace(
@@ -77,6 +155,12 @@ class TestRemoteSetupArgsFile(unittest.TestCase):
             remote_setup, "save_machine_state"
         ), patch.object(
             remote_setup, "save_setup_config"
+        ), patch.object(
+            remote_setup, "_begin_setup_operation"
+        ), patch.object(
+            remote_setup, "_transition_setup_operation"
+        ), patch.object(
+            remote_setup, "_complete_setup_operation"
         ), patch.object(
             remote_setup, "get_steps_for_system_type", return_value=[]
         ), patch(
