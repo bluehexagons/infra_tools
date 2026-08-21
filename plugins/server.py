@@ -108,7 +108,12 @@ def build_server_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
 
     if config.include_web_firewall:
         steps.extend(get_web_firewall_steps())
-    elif config.system_type == "server_lite" and config.web_ports:
+    elif config.system_type == "server_lite" and (
+        config.web_ports
+        or config.effective_access_sources()
+        or config.clear_access_sources
+        or config.clear_lan_access
+    ):
         from security.steps import configure_firewall
 
         steps.append(

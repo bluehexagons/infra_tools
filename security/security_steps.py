@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shlex
 import shutil
+from urllib.parse import quote
 
 from lib.maintenance_systemd import configure_maintenance_timer
 from lib.config import SetupConfig
@@ -29,8 +31,10 @@ _FAILLOCK_CONF = "/etc/security/faillock.conf"
 _PAM_FAILLOCK_PROFILE = "/usr/share/pam-configs/faillock-infra-tools"
 _ISSUE_BANNER = "Authorized access only. All activity is monitored and logged.\n"
 _SECURITY_MONITOR_SCRIPT = "/opt/infra_tools/security/service_tools/security_monitor.py"
+_SSH_RULE_COMMENT_PREFIX = "infra_tools SSH"
 _RDP_RULE_COMMENT_PREFIX = "infra_tools RDP"
 _WEB_RULE_COMMENT_PREFIX = "infra_tools web TCP"
+_PROXMOX_MANAGEMENT_COMMENT_PREFIX = "infra_tools access source"
 _UFW_NUMBERED_RULE_RE = re.compile(r"^\[\s*(\d+)\]")
 _APPARMOR_USERNS_PROFILE = "/etc/apparmor.d/unprivileged_userns"
 _APPARMOR_USERNS_RESTRICTION = (
@@ -97,7 +101,7 @@ def _rdp_firewall_rules(config: SetupConfig) -> list[tuple[str, str]]:
     """Return validated UFW comment/command pairs for the requested RDP policy."""
     sources = [
         validate_network_ip_or_cidr(source, "RDP source")
-        for source in config.rdp_allowed_sources or []
+        for source in config.effective_rdp_sources()
     ]
     if not sources:
         comment = f"{_RDP_RULE_COMMENT_PREFIX} global"
@@ -147,7 +151,7 @@ def _remove_stale_managed_rules(
 def _configure_rdp_firewall(config: SetupConfig) -> None:
     """Apply RDP rules without removing broad access before replacements exist."""
     rules = _rdp_firewall_rules(config)
-    has_restricted_sources = bool(config.rdp_allowed_sources)
+    has_restricted_sources = bool(config.effective_rdp_sources())
 
     if not has_restricted_sources:
         # A legacy untagged limit rule is indistinguishable from the desired
@@ -175,28 +179,75 @@ def _configure_rdp_firewall(config: SetupConfig) -> None:
     )
 
 
-def _configure_managed_web_ports(config: SetupConfig) -> list[int]:
-    """Reconcile globally allowed, infra_tools-managed TCP web ports."""
+def _configure_ssh_firewall(config: SetupConfig) -> None:
+    """Reconcile SSH source rules before removing broad legacy access."""
 
-    ports = config.effective_web_ports()
-    # The server_web profile retains its established untagged HTTP/HTTPS rules.
-    # Manage only its additional ports here so existing operator rules are not
-    # mistaken for legacy infra_tools state.
-    managed_ports = [
-        port
-        for port in ports
-        if not (config.include_web_firewall and port in {80, 443})
+    sources = [
+        validate_network_ip_or_cidr(source, "SSH source")
+        for source in config.effective_access_sources()
     ]
+    if not sources:
+        result = run("ufw limit ssh", check=False)
+        if result.returncode != 0:
+            raise RuntimeError("Failed to install the requested SSH firewall rule")
+        _remove_stale_managed_rules(_SSH_RULE_COMMENT_PREFIX, set())
+        return
+
     desired_comments: set[str] = set()
-    for port in managed_ports:
-        comment = f"{_WEB_RULE_COMMENT_PREFIX} {port}"
+    for source in sources:
+        comment = f"{_SSH_RULE_COMMENT_PREFIX} source {source}"
         result = run(
-            f"ufw allow {port}/tcp comment {shlex.quote(comment)}",
+            "ufw limit from "
+            f"{shlex.quote(source)} to any port 22 proto tcp "
+            f"comment {shlex.quote(comment)}",
             check=False,
         )
         if result.returncode != 0:
-            raise RuntimeError(f"Failed to install web firewall rule for TCP {port}")
+            raise RuntimeError("Failed to install the requested SSH firewall rule")
         desired_comments.add(comment)
+
+    for broad_rule in ("allow ssh", "limit ssh", "allow 22/tcp", "limit 22/tcp"):
+        run(f"ufw delete {broad_rule}", check=False)
+    _remove_stale_managed_rules(_SSH_RULE_COMMENT_PREFIX, desired_comments)
+
+
+def _configure_managed_web_ports(config: SetupConfig) -> list[int]:
+    """Reconcile infra_tools-managed TCP web ports."""
+
+    ports = config.effective_web_ports()
+    sources = [
+        validate_network_ip_or_cidr(source, "web port source")
+        for source in config.effective_access_sources()
+    ]
+    desired_comments: set[str] = set()
+    for port in ports:
+        if sources:
+            for source in sources:
+                comment = f"{_WEB_RULE_COMMENT_PREFIX} {port} source {source}"
+                result = run(
+                    "ufw allow from "
+                    f"{shlex.quote(source)} to any port {port} proto tcp "
+                    f"comment {shlex.quote(comment)}",
+                    check=False,
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(
+                        f"Failed to install web firewall rule for TCP {port}"
+                    )
+                desired_comments.add(comment)
+            # Replacements are active before the old broad rule is removed.
+            run(f"ufw delete allow {port}/tcp", check=False)
+        else:
+            comment = f"{_WEB_RULE_COMMENT_PREFIX} {port}"
+            result = run(
+                f"ufw allow {port}/tcp comment {shlex.quote(comment)}",
+                check=False,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"Failed to install web firewall rule for TCP {port}"
+                )
+            desired_comments.add(comment)
 
     _remove_stale_managed_rules(_WEB_RULE_COMMENT_PREFIX, desired_comments)
     return ports
@@ -211,7 +262,7 @@ def configure_firewall(config: SetupConfig) -> None:
         run("apt-get install -y -qq ufw")
         run("ufw default deny incoming", check=True)
         run("ufw default allow outgoing", check=True)
-        run("ufw limit ssh", check=True)
+    _configure_ssh_firewall(config)
     if config.enable_rdp:
         _configure_rdp_firewall(config)
     web_ports = _configure_managed_web_ports(config)
@@ -241,7 +292,7 @@ def configure_firewall(config: SetupConfig) -> None:
             + ")"
         )
     elif config.enable_rdp:
-        if config.rdp_allowed_sources:
+        if config.effective_rdp_sources():
             print("  ✓ Firewall configured (SSH rate-limited; RDP source-restricted)")
         else:
             print("  ✓ Firewall configured (SSH and global RDP rate-limited)")
@@ -760,9 +811,7 @@ def configure_firewall_web(config: SetupConfig) -> None:
         run("apt-get install -y -qq ufw")
         run("ufw default deny incoming", check=True)
         run("ufw default allow outgoing", check=True)
-        run("ufw limit ssh", check=True)
-    run("ufw allow 80/tcp", check=True)
-    run("ufw allow 443/tcp", check=True)
+    _configure_ssh_firewall(config)
     web_ports = _configure_managed_web_ports(config)
 
     if firewall_active:
@@ -790,15 +839,18 @@ def configure_firewall_web(config: SetupConfig) -> None:
 def configure_firewall_ssh_only(config: SetupConfig) -> None:
     """Configure firewall to allow only SSH (for servers without web/RDP)."""
     result = run("ufw status 2>/dev/null | grep -q 'Status: active'", check=False)
-    if result.returncode == 0:
+    firewall_active = result.returncode == 0
+
+    if not firewall_active:
+        os.environ["DEBIAN_FRONTEND"] = "noninteractive"
+        run("apt-get install -y -qq ufw")
+        run("ufw default deny incoming", check=True)
+        run("ufw default allow outgoing", check=True)
+    _configure_ssh_firewall(config)
+
+    if firewall_active:
         print("  ✓ Firewall already configured")
         return
-
-    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    run("apt-get install -y -qq ufw")
-    run("ufw default deny incoming", check=True)
-    run("ufw default allow outgoing", check=True)
-    run("ufw limit ssh", check=True)
     
     result = run("ufw --force enable", check=False)
     if result.returncode != 0:
@@ -809,6 +861,101 @@ def configure_firewall_ssh_only(config: SetupConfig) -> None:
         return
 
     print("  ✓ Firewall configured (SSH rate-limited)")
+
+
+def _proxmox_management_entries() -> list[dict[str, object]] | None:
+    result = run(
+        "pvesh get /cluster/firewall/ipset/management --output-format json",
+        check=False,
+        capture_output=True,
+    )
+    stdout = getattr(result, "stdout", None)
+    if result.returncode != 0 or not isinstance(stdout, str):
+        return None
+    try:
+        payload = json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Could not parse the Proxmox management IP set") from exc
+    if not isinstance(payload, list) or not all(
+        isinstance(entry, dict) for entry in payload
+    ):
+        raise RuntimeError("Proxmox returned an invalid management IP set")
+    return payload
+
+
+def configure_proxmox_management_firewall(config: SetupConfig) -> None:
+    """Reconcile native Proxmox management sources and enable its firewall."""
+
+    desired_sources = [
+        validate_network_ip_or_cidr(source, "Proxmox management source")
+        for source in config.effective_access_sources()
+    ]
+    existing_entries = _proxmox_management_entries()
+    if existing_entries is None:
+        if not desired_sources:
+            print("  ✓ Proxmox management access filter not requested")
+            return
+        result = run(
+            "pvesh create /cluster/firewall/ipset --name management "
+            "--comment 'Proxmox standard management access set'",
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError("Could not create the Proxmox management IP set")
+        existing_entries = []
+
+    existing_by_cidr = {
+        str(entry.get("cidr")): entry
+        for entry in existing_entries
+        if isinstance(entry.get("cidr"), str)
+    }
+    for source in desired_sources:
+        if source in existing_by_cidr:
+            continue
+        comment = f"{_PROXMOX_MANAGEMENT_COMMENT_PREFIX} {source}"
+        result = run(
+            "pvesh create /cluster/firewall/ipset/management "
+            f"--cidr {shlex.quote(source)} --comment {shlex.quote(comment)}",
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Could not add Proxmox management source {source}"
+            )
+
+    desired_set = set(desired_sources)
+    for cidr, entry in existing_by_cidr.items():
+        comment = entry.get("comment")
+        if (
+            not isinstance(comment, str)
+            or not comment.startswith(_PROXMOX_MANAGEMENT_COMMENT_PREFIX)
+            or cidr in desired_set
+        ):
+            continue
+        encoded_cidr = quote(cidr, safe="")
+        result = run(
+            f"pvesh delete /cluster/firewall/ipset/management/{encoded_cidr}",
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Could not remove stale Proxmox management source {cidr}"
+            )
+
+    if not desired_sources:
+        print("  ✓ Proxmox managed access sources cleared; firewall state preserved")
+        return
+
+    result = run(
+        "pvesh set /cluster/firewall/options --enable 1",
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("Could not enable the Proxmox cluster firewall")
+    print(
+        "  ✓ Proxmox management access restricted to: "
+        + ", ".join(desired_sources)
+    )
 
 
 def configure_auto_restart(config: SetupConfig) -> None:

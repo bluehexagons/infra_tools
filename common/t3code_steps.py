@@ -96,7 +96,7 @@ def _remove_managed_rules(
 def _configure_firewall(config: SetupConfig, port: int, host: str) -> None:
     sources = [
         validate_network_ip_or_cidr(source, "T3 Code web source")
-        for source in config.web_interface_sources or []
+        for source in config.effective_web_interface_sources()
     ]
 
     active = run(
@@ -109,7 +109,8 @@ def _configure_firewall(config: SetupConfig, port: int, host: str) -> None:
         return
     if not sources:
         raise RuntimeError(
-            "A non-loopback T3 Code web bind requires --web-interface-source"
+            "A non-loopback T3 Code web bind requires --access-source or "
+            "--web-interface-source"
         )
     if not active:
         raise RuntimeError(

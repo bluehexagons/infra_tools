@@ -105,7 +105,9 @@ def _gogs_public_host(config: SetupConfig, domain: str) -> str:
 
 def _gogs_external_url(config: SetupConfig, domain: str, port: int) -> str:
     scheme = "https" if domain and (config.enable_ssl or config.enable_cloudflare) else "http"
-    host = domain or (config.host if config.gogs_sources else "127.0.0.1")
+    host = domain or (
+        config.host if config.effective_gogs_sources() else "127.0.0.1"
+    )
     if domain:
         return f"{scheme}://{host}/"
     default_port = 443 if scheme == "https" else 80
@@ -336,7 +338,11 @@ def generate_gogs_app_ini(
     """Return app.ini contents for a minimal self-hosted Gogs service."""
     public_host = _gogs_public_host(config, domain)
     external_url = _gogs_external_url(config, domain, port)
-    http_addr = "0.0.0.0" if config.gogs_sources and not domain else "127.0.0.1"
+    http_addr = (
+        "0.0.0.0"
+        if config.effective_gogs_sources() and not domain
+        else "127.0.0.1"
+    )
     secret_key = _load_or_create_gogs_secret_key()
     return f"""APP_NAME = Gogs
 RUN_USER = {GOGS_GIT_USER}
@@ -577,7 +583,10 @@ def _reconcile_gogs_direct_firewall(config: SetupConfig, port: int) -> None:
         "ufw status 2>/dev/null | grep -q 'Status: active'",
         check=False,
     ).returncode == 0
-    sources = config.gogs_sources or []
+    domain = ""
+    if config.gogs:
+        domain, _configured_port = parse_gogs_spec(str(config.gogs[0]))
+    sources = config.effective_gogs_sources() if not domain else []
     if not active:
         if sources:
             raise RuntimeError(
@@ -647,6 +656,11 @@ def _maybe_configure_firewall(config: SetupConfig, domain: str, port: int) -> No
         if config.enable_cloudflare:
             print("  ✓ Cloudflare tunnel enabled; not exposing public HTTP/HTTPS ports for Gogs")
             return
+        if config.effective_access_sources():
+            print(
+                "  ✓ Gogs web access follows the generic access-source filter"
+            )
+            return
         for rule_port in (80, 443):
             rule = run(
                 f"ufw allow {rule_port}/tcp comment 'gogs web'",
@@ -659,10 +673,11 @@ def _maybe_configure_firewall(config: SetupConfig, domain: str, port: int) -> No
         print("  ✓ Firewall allows Gogs web access on 80/tcp and 443/tcp")
         return
 
-    if config.gogs_sources:
+    sources = config.effective_gogs_sources()
+    if sources:
         print(
             f"  ✓ Firewall restricts Gogs {port}/tcp to "
-            f"{', '.join(config.gogs_sources)}"
+            f"{', '.join(sources)}"
         )
 
 
@@ -927,7 +942,7 @@ def _complete_gogs_setup(
     _run_gogs_post_setup_commands(config_path)
     check_gogs_storage_health(data_path)
     _maybe_configure_firewall(config, domain, port)
-    if not domain and not config.gogs_sources:
+    if not domain and not config.effective_gogs_sources():
         print(
             f"  Connect with: ssh -L {port}:127.0.0.1:{port} "
             f"{config.username}@{config.host}"
@@ -981,7 +996,7 @@ def setup_gogs(config: SetupConfig) -> None:
     data_path = _gogs_data_path(config)
     if domain:
         listen_label = f"{domain} -> 127.0.0.1:{port}"
-    elif config.gogs_sources:
+    elif config.effective_gogs_sources():
         listen_label = f"private sources -> :{port}"
     else:
         listen_label = f"127.0.0.1:{port} (SSH tunnel only)"

@@ -967,6 +967,13 @@ def _patch_preserve_keys(args: argparse.Namespace) -> set[str]:
     if not getattr(args, "agent_tools", None) and not getattr(args, "no_agent_tools", None):
         preserve_keys.update({"agent_tools", "agent_tools_removed"})
     if (
+        not getattr(args, "access_sources", None)
+        and not getattr(args, "clear_access_sources", False)
+    ):
+        preserve_keys.update({"access_sources", "clear_access_sources"})
+    if getattr(args, "lan_access", None) is None:
+        preserve_keys.update({"lan_access", "clear_lan_access"})
+    if (
         not getattr(args, "web_interfaces", None)
         and not getattr(args, "disable_web_interface", False)
     ):

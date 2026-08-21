@@ -30,6 +30,7 @@ PLUGIN = PluginDefinition(
         "configure_auditd",
         "configure_pam_lockout",
         "configure_security_monitor",
+        "configure_proxmox_management_firewall",
     ),
     custom_step_provider="plugins.security:get_custom_step_functions",
 )
@@ -97,6 +98,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         configure_firewall_web,
         configure_login_banners,
         configure_pam_lockout,
+        configure_proxmox_management_firewall,
         configure_security_monitor,
         create_remoteusers_group,
         harden_kernel,
@@ -118,4 +120,5 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "configure_auditd": configure_auditd,
         "configure_pam_lockout": configure_pam_lockout,
         "configure_security_monitor": configure_security_monitor,
+        "configure_proxmox_management_firewall": configure_proxmox_management_firewall,
     }

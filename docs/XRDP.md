@@ -12,7 +12,7 @@ use Xvnc or a Proxmox emulated display as the RDP display.
 | Rendering | Glamor acceleration when a supported, accessible DRM render node is detected; software fallback otherwise |
 | Desktop | XFCE is the recommended RDP desktop |
 | Listener | All IPv4 addresses on TCP 3389 |
-| Firewall | Globally rate-limited access unless `--rdp-source` is supplied |
+| Firewall | Globally rate-limited access unless a generic or RDP-specific source is supplied |
 | Sessions | Ten concurrent sessions |
 | Disconnected sessions | Retained indefinitely |
 | Idle sessions | Not disconnected automatically |
@@ -40,7 +40,7 @@ For a remote target, provide the Unix account password through a secret source:
 ```bash
 infra-tools setup workstation_dev 10.0.0.25 agent \
   --desktop xfce --rdp --password "$RDP_PASSWORD" \
-  --rdp-source 10.0.0.0/24
+  --lan-access
 ```
 
 For local setup of an existing non-root desktop account, reuse its password
@@ -57,16 +57,18 @@ when the account does not already exist. When a terminal prompt is available,
 an empty password for a local setup is treated as this reuse mode; provisioned
 guests must receive a new password.
 
-Restrict access to every network that should connect:
+Restrict all managed services to several explicit networks with one flag:
 
 ```bash
---rdp-source 10.0.0.0/24 --rdp-source 100.64.0.0/10
+--access-source 10.0.0.0/24 100.64.0.0/10
 ```
 
-Without `--rdp-source`, XRDP remains reachable through the globally
-rate-limited rule. Use `--rdp-bind-address IP` to bind the listener to one
-local address. The firewall reconciles only rules tagged `infra_tools RDP` and
-does not remove unrelated UFW rules.
+Add `--rdp-source IP_OR_CIDR` when a source should reach RDP without being
+added to the generic policy; RDP uses the union of both lists. Without either
+kind of source, XRDP remains reachable through the globally rate-limited rule.
+Use `--rdp-bind-address IP` to bind the listener to one local address. The
+firewall reconciles only rules tagged `infra_tools RDP` and does not remove
+unrelated UFW rules.
 
 Session and channel controls:
 

@@ -20,9 +20,9 @@ local graphical/RDP T3 Code session.
 
 ## Headless VM setup
 
-For a private LAN workflow, use a source CIDR. The source option automatically
-changes the default bind from loopback to all IPv4 interfaces and adds a UFW
-rule for only the requested network:
+For a private LAN workflow, use the generic LAN preset. It automatically
+changes the default bind from loopback to all IPv4 interfaces and adds UFW
+rules for the RFC 1918 IPv4 ranges and IPv6 ULA:
 
 ```bash
 infra-tools setup server_dev 192.168.0.41 agent \
@@ -30,7 +30,7 @@ infra-tools setup server_dev 192.168.0.41 agent \
   --agent-tool codex \
   --agent-tool opencode \
   --web-interface t3code \
-  --web-interface-source 192.168.0.0/24 \
+  --lan-access \
   --device-pairing t3code \
   --device-pairing-auth-file /run/secrets/agent-1-pairing.htpasswd \
   --agent-workspace /srv/agent-workspace \
@@ -49,8 +49,11 @@ The current T3 Code server requires a compatible Node.js release (currently
 the VM. infra-tools installs the selected provider CLIs and its Node LTS
 runtime; authentication remains an explicit credential setup step.
 
-Without `--web-interface-source`, the service binds to `127.0.0.1`. This is a
-good default for an SSH tunnel:
+Use `--access-source 192.168.0.0/24 100.64.0.0/10` when the preset is broader
+than desired. `--web-interface-source` remains available for sources that
+should reach only T3 Code and is combined with generic sources. Without either
+kind of source, the service binds to `127.0.0.1`. This is a good default for an
+SSH tunnel:
 
 ```bash
 ssh -N -L 3773:127.0.0.1:3773 agent@192.168.0.41

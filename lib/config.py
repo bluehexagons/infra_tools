@@ -36,6 +36,34 @@ BROWSER_AUTOMATION_PROVIDERS = ("playwright",)
 EDITORS = ("geany", "vscode")
 GIT_ACCESS_POLICIES = ("none", "read", "read-write")
 DEFAULT_AGENT_WEB_PORTS = (80, 443, 8080, 8081)
+LAN_ACCESS_SOURCES = (
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "fc00::/7",
+)
+
+
+def _merge_network_sources(*source_lists: Optional[StrList]) -> StrList:
+    """Combine address lists in order, deduplicating canonical equivalents."""
+
+    merged: StrList = []
+    seen: set[str] = set()
+    for sources in source_lists:
+        for source in sources or []:
+            try:
+                canonical = (
+                    str(ipaddress.ip_network(source, strict=False))
+                    if "/" in source
+                    else str(ipaddress.ip_address(source))
+                )
+            except (TypeError, ValueError):
+                canonical = source
+            if canonical in seen:
+                continue
+            seen.add(canonical)
+            merged.append(canonical)
+    return merged
 
 
 def _resolve_machine_type(
@@ -191,6 +219,10 @@ class SetupConfig:
     activate_network: bool = False
     friendly_name: MaybeStr = None
     tags: Optional[StrList] = None
+    access_sources: Optional[StrList] = None
+    clear_access_sources: bool = False
+    lan_access: bool = False
+    clear_lan_access: bool = False
     enable_rdp: bool = False
     rdp_existing_password: bool = False
     rdp_bind_address: str = "0.0.0.0"
@@ -365,6 +397,12 @@ class SetupConfig:
                 raise ValueError(f"Unsupported web interface: {interface}")
         self.desktop_interfaces = desktop_interfaces or None
         self.web_interfaces = web_interfaces or None
+        if self.clear_access_sources:
+            self.access_sources = None
+        if self.lan_access:
+            self.clear_lan_access = False
+        elif self.clear_lan_access:
+            self.lan_access = False
         if self.disable_web_interface:
             self.web_interfaces = None
             self.web_interface_sources = None
@@ -403,7 +441,9 @@ class SetupConfig:
         if self.web_interfaces:
             if self.web_interface_host is None:
                 self.web_interface_host = (
-                    "0.0.0.0" if self.web_interface_sources else "127.0.0.1"
+                    "0.0.0.0"
+                    if self.effective_web_interface_sources()
+                    else "127.0.0.1"
                 )
             if not 1 <= self.web_interface_port <= 65535:
                 raise ValueError("web_interface_port must be between 1 and 65535")
@@ -451,7 +491,7 @@ class SetupConfig:
         )
 
     def effective_web_ports(self) -> list[int]:
-        """Return globally allowed TCP web ports for this resolved target."""
+        """Return managed TCP web ports for this resolved target."""
 
         ports = list(self.web_ports or [])
         if self.include_web_firewall:
@@ -464,6 +504,36 @@ class SetupConfig:
         ):
             ports.extend(DEFAULT_AGENT_WEB_PORTS)
         return sorted(set(ports))
+
+    def effective_access_sources(self) -> StrList:
+        """Return generic sources, including the optional private-LAN preset."""
+
+        lan_sources = list(LAN_ACCESS_SOURCES) if self.lan_access else None
+        return _merge_network_sources(lan_sources, self.access_sources)
+
+    def effective_rdp_sources(self) -> StrList:
+        """Return generic sources plus RDP-specific additions."""
+
+        return _merge_network_sources(
+            self.effective_access_sources(),
+            self.rdp_allowed_sources,
+        )
+
+    def effective_web_interface_sources(self) -> StrList:
+        """Return generic sources plus web-interface-specific additions."""
+
+        return _merge_network_sources(
+            self.effective_access_sources(),
+            self.web_interface_sources,
+        )
+
+    def effective_gogs_sources(self) -> StrList:
+        """Return generic sources plus direct-Gogs-specific additions."""
+
+        return _merge_network_sources(
+            self.effective_access_sources(),
+            self.gogs_sources,
+        )
 
     def to_remote_args(self) -> StrList:
         """Generate command line arguments for remote execution."""
@@ -515,6 +585,15 @@ class SetupConfig:
         
         if self.friendly_name:
             args.append(f"--name {shlex.quote(self.friendly_name)}")
+
+        if self.lan_access:
+            args.append("--lan-access")
+        elif self.clear_lan_access:
+            args.append("--no-lan-access")
+        for source in self.access_sources or []:
+            args.append(f"--access-source {shlex.quote(source)}")
+        if self.clear_access_sources:
+            args.append("--no-access-source")
         
         if self.enable_rdp:
             args.append("--rdp")
@@ -862,6 +941,15 @@ class SetupConfig:
         
         if self.tags and len(self.tags) > 0:
             cmd_parts.append(f"--tags {shlex.quote(','.join(self.tags))}")
+
+        if self.lan_access:
+            cmd_parts.append("--lan-access")
+        elif self.clear_lan_access:
+            cmd_parts.append("--no-lan-access")
+        for source in self.access_sources or []:
+            cmd_parts.append(f"--access-source {shlex.quote(source)}")
+        if self.clear_access_sources:
+            cmd_parts.append("--no-access-source")
         
         # Desktop/workstation flags
         if self.enable_rdp != system_type_defaults.default_enable_rdp:
@@ -968,7 +1056,9 @@ class SetupConfig:
                 cmd_parts.append(f"--web-interface {shlex.quote(interface)}")
         if self.web_interfaces:
             inferred_web_host = (
-                "0.0.0.0" if self.web_interface_sources else "127.0.0.1"
+                "0.0.0.0"
+                if self.effective_web_interface_sources()
+                else "127.0.0.1"
             )
             if (
                 not web_interfaces_are_default
@@ -1509,6 +1599,21 @@ class SetupConfig:
         if default_web_ports is None:
             default_web_ports = True
 
+        clear_access_sources = bool(getattr(args, 'clear_access_sources', False))
+        raw_access_sources = getattr(args, 'access_sources', None)
+        access_sources = (
+            None
+            if clear_access_sources
+            else (
+                raw_access_sources
+                if isinstance(raw_access_sources, list) and raw_access_sources
+                else None
+            )
+        )
+        raw_lan_access = _optional_bool_arg(args, 'lan_access')
+        lan_access = raw_lan_access is True
+        clear_lan_access = raw_lan_access is False
+
         clear_rdp_sources = bool(getattr(args, 'clear_rdp_sources', False))
         raw_rdp_sources = getattr(args, 'rdp_allowed_sources', None)
         rdp_allowed_sources = (
@@ -1565,6 +1670,10 @@ class SetupConfig:
             activate_network=getattr(args, 'activate_network', False),
             friendly_name=getattr(args, 'friendly_name', None),
             tags=tags,
+            access_sources=access_sources,
+            clear_access_sources=clear_access_sources,
+            lan_access=lan_access,
+            clear_lan_access=clear_lan_access,
             enable_rdp=enable_rdp,
             rdp_existing_password=getattr(args, 'rdp_existing_password', False),
             rdp_bind_address=getattr(args, 'rdp_bind_address', '0.0.0.0'),

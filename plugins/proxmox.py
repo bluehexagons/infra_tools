@@ -31,7 +31,7 @@ PLUGIN = PluginDefinition(
 )
 
 
-def build_server_proxmox_steps(_: SetupConfig) -> list[tuple[str, StepFunc]]:
+def build_server_proxmox_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
     """Build the dedicated Proxmox hardening flow."""
 
     from common.steps import check_restart_required, configure_swap
@@ -41,12 +41,13 @@ def build_server_proxmox_steps(_: SetupConfig) -> list[tuple[str, StepFunc]]:
         configure_cleanup_maintenance,
         configure_fail2ban,
         configure_security_monitor,
+        configure_proxmox_management_firewall,
         create_remoteusers_group,
         harden_kernel,
         harden_ssh,
     )
 
-    return [
+    steps = [
         ("Creating remoteusers group", create_remoteusers_group),
         ("Configuring swap", configure_swap),
         ("Hardening SSH configuration", harden_ssh),
@@ -58,3 +59,16 @@ def build_server_proxmox_steps(_: SetupConfig) -> list[tuple[str, StepFunc]]:
         ("Configuring automatic restart service", configure_auto_restart),
         ("Checking if restart required", check_restart_required),
     ]
+    if (
+        config.effective_access_sources()
+        or config.clear_access_sources
+        or config.clear_lan_access
+    ):
+        steps.insert(
+            2,
+            (
+                "Configuring Proxmox management access filter",
+                configure_proxmox_management_firewall,
+            ),
+        )
+    return steps

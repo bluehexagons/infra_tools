@@ -181,6 +181,33 @@ def add_setup_arguments(
         action="store_true",
         help="Install common administrator and Linux control-plane tools in addition to the selected profile",
     )
+    access_source_group = parser.add_mutually_exclusive_group()
+    access_source_group.add_argument(
+        "--access-source",
+        dest="access_sources",
+        action="extend",
+        nargs="+",
+        metavar="IP_OR_CIDR",
+        help=(
+            "Allow managed inbound services only from one or more IPs/CIDRs; "
+            "accepts multiple values and may be repeated"
+        ),
+    )
+    access_source_group.add_argument(
+        "--no-access-source",
+        dest="clear_access_sources",
+        action="store_true",
+        help="Clear saved generic access sources",
+    )
+    parser.add_argument(
+        "--lan-access",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Allow managed inbound services from RFC 1918 IPv4 and IPv6 ULA "
+            "private networks"
+        ),
+    )
 
     parser.add_argument(
         "--storage",
@@ -506,7 +533,7 @@ def add_setup_arguments(
         metavar="IP",
         help=(
             "Bind address for web interfaces (default: loopback; a non-loopback "
-            "address requires --web-interface-source)"
+            "address requires --access-source or --web-interface-source)"
         ),
     )
     parser.add_argument(

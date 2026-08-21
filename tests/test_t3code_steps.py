@@ -33,7 +33,10 @@ class T3CodeWebTest(unittest.TestCase):
 
     def test_non_loopback_bind_requires_private_source(self) -> None:
         config = self._config(web_interface_host="0.0.0.0", web_interface_sources=None)
-        with self.assertRaisesRegex(ValueError, "requires --web-interface-source"):
+        with self.assertRaisesRegex(
+            ValueError,
+            "requires --access-source or --web-interface-source",
+        ):
             validate_web_interface_settings(config)
 
     def test_loopback_bind_rejects_redundant_source_allowlist(self) -> None:

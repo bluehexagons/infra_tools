@@ -6,9 +6,10 @@ from lib.config import SetupConfig
 
 
 def _rdp_access_summary(config: SetupConfig) -> str:
-    if config.rdp_allowed_sources:
-        return ", ".join(config.rdp_allowed_sources)
-    return "global (rate-limited; use --rdp-source to restrict)"
+    sources = config.effective_rdp_sources()
+    if sources:
+        return ", ".join(sources)
+    return "global (rate-limited; use --access-source or --rdp-source to restrict)"
 
 
 def _url_host(host: str) -> str:
@@ -137,7 +138,7 @@ def print_service_access_summary(config: SetupConfig) -> None:
             gogs_spec,
             3000,
             scheme=scheme,
-            source_restricted=bool(config.gogs_sources),
+            source_restricted=bool(config.effective_gogs_sources()),
         )
         note = "loopback-only, use an SSH tunnel" if loopback_only else None
         lines.append(("Gogs web", gogs_url, note))
@@ -205,6 +206,10 @@ def print_setup_summary(config: SetupConfig, description: Optional[str] = None) 
         print(f"User: {config.username}")
     
     print(f"Timezone: {config.timezone}")
+
+    access_sources = config.effective_access_sources()
+    if access_sources:
+        print(f"General access sources: {', '.join(access_sources)}")
 
     if config.system_hostname:
         print(f"System hostname: {config.system_hostname}")
@@ -274,8 +279,9 @@ def print_setup_summary(config: SetupConfig, description: Optional[str] = None) 
         print(f"Agent tools: {', '.join(config.selected_agent_tools())}")
     effective_web_ports = config.effective_web_ports()
     if effective_web_ports:
+        exposure = "source-restricted" if access_sources else "global"
         print(
-            "Globally allowed web TCP ports: "
+            f"Managed web TCP ports ({exposure}): "
             + ", ".join(str(port) for port in effective_web_ports)
         )
     if config.browser_automation:
@@ -302,10 +308,11 @@ def print_setup_summary(config: SetupConfig, description: Optional[str] = None) 
             f"Web interfaces: {', '.join(config.web_interfaces)} "
             f"({bind}:{config.web_interface_port})"
         )
-        if config.web_interface_sources:
+        web_sources = config.effective_web_interface_sources()
+        if web_sources:
             print(
                 "Web interface sources: "
-                + ", ".join(config.web_interface_sources)
+                + ", ".join(web_sources)
             )
         else:
             print("Web interface sources: loopback only")

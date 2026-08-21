@@ -475,11 +475,17 @@ def validate_backup_specs(backup_specs: Optional[list[list[str]]]) -> None:
 def validate_web_interface_settings(config: Any) -> None:
     """Validate explicit headless web-interface exposure settings."""
 
+    validate_access_source_settings(config)
     validate_web_port_settings(config)
 
     interfaces = getattr(config, "web_interfaces", None) or []
     host = getattr(config, "web_interface_host", None)
-    sources = getattr(config, "web_interface_sources", None) or []
+    service_sources = getattr(config, "web_interface_sources", None) or []
+    effective_sources = (
+        config.effective_web_interface_sources()
+        if hasattr(config, "effective_web_interface_sources")
+        else service_sources
+    )
     port = getattr(config, "web_interface_port", 3773)
     pairing_providers = getattr(config, "device_pairing_providers", None) or []
     pairing_port = getattr(config, "device_pairing_port", 3774)
@@ -488,7 +494,7 @@ def validate_web_interface_settings(config: Any) -> None:
     pairing_auth_password = getattr(config, "device_pairing_auth_password", None)
     pairing_payload = bool(getattr(config, "device_pairing_payload", False))
     if not interfaces:
-        if host is not None or sources:
+        if host is not None or service_sources:
             raise ValueError(
                 "--web-interface-host and --web-interface-source require --web-interface"
             )
@@ -569,17 +575,18 @@ def validate_web_interface_settings(config: Any) -> None:
     if normalized_host != "localhost":
         normalized_host = validate_network_ip_or_cidr(host, "web interface bind address")
     loopback = normalized_host in {"127.0.0.1", "::1", "localhost"}
-    if loopback and sources:
+    if loopback and service_sources:
         raise ValueError(
             "--web-interface-source requires a non-loopback web interface bind"
         )
-    if not loopback and not sources:
+    if not loopback and not effective_sources:
         raise ValueError(
-            "A non-loopback web interface bind requires --web-interface-source"
+            "A non-loopback web interface bind requires --access-source or "
+            "--web-interface-source"
         )
 
     seen_sources: set[str] = set()
-    for source in sources:
+    for source in effective_sources:
         normalized = validate_network_ip_or_cidr(source, "web interface source")
         network = ipaddress.ip_network(
             normalized if "/" in normalized else f"{normalized}/32",
@@ -595,8 +602,29 @@ def validate_web_interface_settings(config: Any) -> None:
         seen_sources.add(canonical)
 
 
+def validate_access_source_settings(config: Any) -> None:
+    """Validate the generic inbound-service source policy."""
+
+    sources = getattr(config, "access_sources", None)
+    if sources is None:
+        sources = []
+    if not isinstance(sources, list):
+        raise ValueError("--access-source must contain one or more IPs or CIDRs")
+    if not isinstance(getattr(config, "lan_access", False), bool):
+        raise ValueError("lan_access must be a boolean")
+
+    normalized_sources: set[str] = set()
+    for source in sources:
+        if not isinstance(source, str):
+            raise ValueError("--access-source requires an IP address or CIDR")
+        normalized = validate_network_ip_or_cidr(source, "access source")
+        if normalized in normalized_sources:
+            raise ValueError(f"Duplicate --access-source: {normalized}")
+        normalized_sources.add(normalized)
+
+
 def validate_web_port_settings(config: Any) -> None:
-    """Validate globally allowed TCP web ports and their default policy."""
+    """Validate managed TCP web ports and their default policy."""
 
     ports = getattr(config, "web_ports", None)
     default_ports = getattr(config, "default_web_ports", True)

@@ -17,6 +17,7 @@ from .security_steps import (
     configure_auditd,
     configure_pam_lockout,
     configure_security_monitor,
+    configure_proxmox_management_firewall,
 )
 
 __all__ = [
@@ -34,4 +35,5 @@ __all__ = [
     'configure_auditd',
     'configure_pam_lockout',
     'configure_security_monitor',
+    'configure_proxmox_management_firewall',
 ]

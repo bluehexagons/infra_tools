@@ -92,12 +92,22 @@ use `infra-tools ssh-key enroll HOST` when enrollment is required.
 
 ## Host-safety defaults
 
-The `server_proxmox` flow deliberately leaves firewall policy to Proxmox and
+The `server_proxmox` flow uses Proxmox's native firewall rather than UFW and
 does not create a generic `/swapfile`: Proxmox storage (especially ZFS) must
 own its swap layout. It retains the host's permissive reverse-path filtering
 because strict filtering can drop valid routed, NATed, or bridged guest
-traffic. Configure host/guest firewall rules through the Proxmox firewall
-workflow after confirming management-network access.
+traffic.
+
+By default, setup does not change Proxmox firewall state. Supplying
+`--lan-access` or `--access-source` reconciles only infra-tools-commented
+entries in Proxmox's standard cluster-wide `management` IP set, preserves
+operator entries, then enables the cluster firewall after the replacement
+sources exist. That standard set covers the Proxmox web GUI, SSH, VNC, and
+SPICE, while Proxmox automatically includes the local cluster network. Because
+enabling the firewall is cluster-wide, keep a recovery SSH or console session
+open for the first rollout. `--no-access-source` and `--no-lan-access` remove
+the corresponding saved policy and tool-owned set entries but deliberately do
+not disable a firewall that may contain other policy.
 
 Automatic host restarts and forced restart deadlines are disabled by default.
 The setup reports pending restarts, but schedule any hypervisor reboot around

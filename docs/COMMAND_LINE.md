@@ -128,6 +128,9 @@ tools, not for an LXC container.
 
 | Flag | Description |
 |------|-------------|
+| `--lan-access` / `--no-lan-access` | Add or remove the private-LAN preset: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, and IPv6 ULA `fc00::/7` |
+| `--access-source IP_OR_CIDR [IP_OR_CIDR ...]` | Restrict managed inbound services to one or more sources; accepts multiple values and may be repeated |
+| `--no-access-source` | Clear saved custom generic access sources; use `--no-lan-access` separately to remove the LAN preset |
 | `--rdp` / `--no-rdp` | Enable or disable XRDP |
 | `--rdp-existing-password` | Local setup only: reuse an existing non-root desktop account password; a missing profile password is requested securely |
 | `--rdp-bind-address IP` | Bind XRDP to one local IP; defaults to all IPv4 interfaces (`0.0.0.0`) |
@@ -213,10 +216,30 @@ before guest persistence. Newly provisioned guests receive their initial
 address from cloud-init or `pct`, so initial provisioned setup rejects
 `--activate-network`.
 
-Without `--rdp-source`, enabling RDP keeps a globally rate-limited UFW rule.
-Prefer one or more management, VPN, or trusted LAN CIDRs. On rerun,
-infra-tools installs the requested source rules before removing the broad rule
-and reconciles only its own comment-tagged RDP rules.
+Use `--lan-access` when every managed administrative service should be private:
+
+```bash
+infra-tools setup workstation_dev 192.168.0.25 agent \
+  --lan-access --rdp
+```
+
+For a narrower or mixed policy, one flag accepts several sources:
+
+```bash
+--access-source 192.168.0.0/24 10.0.0.0/8 100.64.0.0/10
+```
+
+Generic sources apply to managed SSH, RDP, TCP web ports, T3 Code web and
+pairing endpoints, direct Gogs, and Samba ingress. On `server_proxmox`, they
+populate Proxmox's standard `management` IP set, which covers the web GUI,
+SSH, VNC, and SPICE. Service-specific `--rdp-source`,
+`--web-interface-source`, and `--gogs-source` values remain available and are
+added to the generic set for that service. Cloudflare tunnels and intentionally
+public Antistatic endpoints retain their own exposure policy.
+
+Without a generic source or `--rdp-source`, enabling RDP keeps a globally
+rate-limited UFW rule. On rerun, infra-tools installs requested source rules
+before removing broad rules and reconciles only its own comment-tagged rules.
 Disconnected sessions are retained indefinitely by default so a transient RDP
 disconnect does not destroy agent work. A positive disconnected timeout is
 accepted only with `--rdp-kill-disconnected`, making destructive cleanup an
@@ -313,10 +336,10 @@ rm -f "$HOME/.infra_tools-install.sh"
 | `--web-interface INTERFACE` | Install an explicit headless web interface; currently `t3code` |
 | `--web-interface-host IP` | Bind address for the selected web interface; defaults to loopback, or `0.0.0.0` when a source is supplied |
 | `--web-interface-port PORT` | TCP port for the selected web interface; default `3773` |
-| `--web-interface-source IP_OR_CIDR` | Permit direct web-interface access from this private source; repeatable and required for non-loopback binds |
+| `--web-interface-source IP_OR_CIDR` | Add a private source specifically for direct web-interface access; repeatable; either this or a compatible generic source enables a non-loopback bind |
 | `--no-web-interface` | Disable profile-provided web interfaces |
 | `--no-web-interface-source` | Clear profile-provided web-interface source ranges |
-| `--web-port PORT` | Allow an additional global TCP web port through guest UFW; repeatable |
+| `--web-port PORT` | Manage an additional TCP web port through guest UFW; repeatable and source-restricted when generic sources are set |
 | `--no-default-web-ports` | Disable the agent-VM defaults of TCP 80, 443, 8080, and 8081 |
 | `--device-pairing PROVIDER` | Install the protected browser enrollment portal for a provider; repeatable, currently `t3code` |
 | `--device-pairing-port PORT` | Pairing portal port; default `3774` and must differ from the web-interface port |
@@ -339,12 +362,13 @@ rm -f "$HOME/.infra_tools-install.sh"
 | `--agent-workspace PATH` | Set the repository clone root; defaults to the target user's `~/repos` and may use a verified named-disk mount |
 | `--backup SOURCE DESTINATION INTERVAL` | Configure a generic rsync-backed path mirror through the existing storage-ops service; repeatable |
 
-On VM targets with agent features selected, guest UFW allows TCP ports 80,
+On VM targets with agent features selected, guest UFW manages TCP ports 80,
 443, 8080, and 8081 by default. Repeat `--web-port` for additional development
 servers. `--no-default-web-ports` removes those agent defaults while retaining
-explicit `--web-port` values. These rules are global ingress rules; applications
-must still bind a reachable interface and provide their own authentication and
-transport security. Local control planes, hardware, containers, and
+explicit `--web-port` values. The rules are global when no generic access
+source is set and source-restricted otherwise; applications must still bind a
+reachable interface and provide their own authentication and transport
+security. Local control planes, hardware, containers, and
 `server_lite` do not receive the defaults. An explicit `--web-port` still
 enables the standard SSH-rate-limited UFW policy for `server_lite`.
 

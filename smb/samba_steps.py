@@ -14,6 +14,7 @@ from lib.validation import validate_samba_share_specs
 SMB_CONF_PATH = "/etc/samba/smb.conf"
 MANAGED_SHARES_BEGIN = "# BEGIN infra_tools managed Samba shares"
 MANAGED_SHARES_END = "# END infra_tools managed Samba shares"
+SAMBA_FIREWALL_COMMENT_PREFIX = "infra_tools Samba 445/tcp source"
 
 
 def parse_share_credentials(
@@ -61,12 +62,52 @@ def configure_samba_firewall(config: SetupConfig) -> None:
     for rule in cleanup_rules:
         run(rule, check=False)
 
-    result = run("ufw allow 445/tcp comment 'Samba SMB'", check=False)
-    if result.returncode != 0:
-        print("  Warning: Failed to add firewall rule for SMB (445/tcp)")
+    sources = config.effective_access_sources()
+    desired_comments: set[str] = set()
+    if sources:
+        for source in sources:
+            comment = f"{SAMBA_FIREWALL_COMMENT_PREFIX} {source}"
+            desired_comments.add(comment)
+            result = run(
+                "ufw allow from "
+                f"{shlex.quote(source)} to any port 445 proto tcp "
+                f"comment {shlex.quote(comment)}",
+                check=False,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"Failed to restrict Samba to access source {source}"
+                )
+        run("ufw delete allow 445/tcp", check=False)
+    else:
+        result = run("ufw allow 445/tcp comment 'Samba SMB'", check=False)
+        if result.returncode != 0:
+            print("  Warning: Failed to add firewall rule for SMB (445/tcp)")
+
+    status = run("ufw status numbered", check=False, capture_output=True)
+    stale_numbers: list[int] = []
+    if status.returncode == 0 and isinstance(status.stdout, str):
+        for line in status.stdout.splitlines():
+            match = re.match(r"^\[\s*(\d+)\]", line.strip())
+            if not match or "#" not in line:
+                continue
+            comment = line.split("#", 1)[1].strip()
+            if (
+                comment.startswith(SAMBA_FIREWALL_COMMENT_PREFIX)
+                and comment not in desired_comments
+            ):
+                stale_numbers.append(int(match.group(1)))
+    for number in sorted(stale_numbers, reverse=True):
+        run(f"ufw --force delete {number}", check=False)
 
     run("ufw reload", check=False)
-    print("  ✓ Firewall configured for Samba (445/tcp)")
+    if sources:
+        print(
+            "  ✓ Firewall restricts Samba (445/tcp) to "
+            + ", ".join(sources)
+        )
+    else:
+        print("  ✓ Firewall configured for Samba (445/tcp)")
 
 
 def parse_share_spec(
