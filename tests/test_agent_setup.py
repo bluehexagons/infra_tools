@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -15,6 +16,76 @@ from lib.setup_common import prepare_agent_payload
 
 
 class TestAgentPayloadPreparation(unittest.TestCase):
+    def test_github_credentials_stage_only_global_git_identity(self):
+        with (
+            tempfile.TemporaryDirectory() as home,
+            tempfile.TemporaryDirectory() as payload_dir,
+        ):
+            gh_config_dir = os.path.join(home, '.config', 'gh')
+            os.makedirs(gh_config_dir)
+            with open(
+                os.path.join(gh_config_dir, 'hosts.yml'),
+                'w',
+                encoding='utf-8',
+            ) as file_obj:
+                file_obj.write('github.com:\n  oauth_token: secret\n')
+            os.chmod(os.path.join(gh_config_dir, 'hosts.yml'), 0o600)
+            config = SetupConfig(
+                host='10.0.0.10',
+                username='agentuser',
+                system_type='server_dev',
+                install_gh=True,
+                git_access='read-write',
+                git_auth_source='active',
+                copy_agent_keys=True,
+            )
+            responses = [
+                type(
+                    'Completed',
+                    (),
+                    {'returncode': 0, 'stdout': 'Octo Cat\n', 'stderr': ''},
+                )(),
+                type(
+                    'Completed',
+                    (),
+                    {
+                        'returncode': 0,
+                        'stdout': 'octo@example.test\n',
+                        'stderr': '',
+                    },
+                )(),
+            ]
+
+            with (
+                patch.dict(os.environ, {'HOME': home, 'SUDO_USER': ''}),
+                patch('lib.setup_common.shutil.which', return_value='/usr/bin/git'),
+                patch(
+                    'lib.setup_common.subprocess.run',
+                    side_effect=responses,
+                ) as run_command,
+            ):
+                prepare_agent_payload(config, payload_dir)
+
+            identity_path = os.path.join(
+                payload_dir,
+                'config',
+                'git',
+                'identity.json',
+            )
+            with open(identity_path, encoding='utf-8') as file_obj:
+                self.assertEqual(
+                    json.load(file_obj),
+                    {'name': 'Octo Cat', 'email': 'octo@example.test'},
+                )
+            self.assertEqual(os.stat(identity_path).st_mode & 0o777, 0o600)
+            self.assertEqual(
+                [call.args[0] for call in run_command.call_args_list],
+                [
+                    ['/usr/bin/git', 'config', '--global', '--get', 'user.name'],
+                    ['/usr/bin/git', 'config', '--global', '--get', 'user.email'],
+                ],
+            )
+
     def test_stages_selected_config_and_credentials(self):
         with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as payload_dir:
             opencode_skill_dir = os.path.join(home, '.config', 'opencode', 'skills', 'review')

@@ -17,7 +17,12 @@ from typing import cast
 from lib.config import SetupConfig
 from lib.remote_utils import install_package, is_dry_run, run
 from lib.types import JSONDict, JSONList
-from lib.validation import validate_filesystem_path
+from lib.validation import (
+    validate_filesystem_path,
+    validate_git_author_email,
+    validate_git_author_name,
+)
+from lib.validators import validate_github_login
 
 from .common_steps import _run_as_login_user
 
@@ -27,6 +32,8 @@ AGENT_CLI_SOURCE = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "infra_tools.py")
 )
 _AGENT_CLI_MARKER = "# Managed by infra_tools agent setup"
+_GIT_IDENTITY_PAYLOAD_PATH = os.path.join("config", "git", "identity.json")
+_MAX_GIT_IDENTITY_PAYLOAD_BYTES = 16 * 1024
 
 
 def _user_home(config: SetupConfig) -> str:
@@ -547,6 +554,149 @@ def _configure_github_git_credentials(config: SetupConfig) -> None:
         print("  Warning: failed to configure git for GitHub CLI credentials")
 
 
+def _git_identity_payload() -> dict[str, str]:
+    """Load the validated controller identity without accepting Git config."""
+
+    source = _payload_path(*_GIT_IDENTITY_PAYLOAD_PATH.split(os.path.sep))
+    if not os.path.exists(source):
+        return {}
+    validate_filesystem_path(source, must_exist=True)
+    if (
+        os.path.islink(source)
+        or not os.path.isfile(source)
+        or os.path.getsize(source) > _MAX_GIT_IDENTITY_PAYLOAD_BYTES
+    ):
+        raise RuntimeError(f"Refusing unsafe Git identity payload: {source}")
+    try:
+        with open(source, encoding="utf-8") as file_obj:
+            payload = json.load(file_obj)
+    except (OSError, ValueError) as exc:
+        raise RuntimeError("Could not read the Git identity payload") from exc
+    if not isinstance(payload, dict) or not payload or not set(payload).issubset(
+        {"name", "email"}
+    ):
+        raise RuntimeError("Git identity payload has invalid fields")
+
+    identity: dict[str, str] = {}
+    try:
+        if "name" in payload:
+            identity["name"] = validate_git_author_name(payload["name"])
+        if "email" in payload:
+            identity["email"] = validate_git_author_email(payload["email"])
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("Git identity payload has invalid values") from exc
+    return identity
+
+
+def _configured_git_identity_value(config: SetupConfig, key: str) -> str | None:
+    """Read an effective target-user Git identity value from the home directory."""
+
+    result = _run_as_login_user(
+        config.username,
+        _user_home(config),
+        f"git config --get {shlex.quote(key)}",
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode == 1:
+        return None
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "git config failed").strip()
+        raise RuntimeError(f"Could not inspect target Git identity: {detail}")
+    value = (result.stdout or "").rstrip("\r\n")
+    return value or None
+
+
+def _github_git_identity(config: SetupConfig) -> dict[str, str]:
+    """Derive a commit identity from the authenticated GitHub account."""
+
+    result = _run_as_login_user(
+        config.username,
+        _user_home(config),
+        'export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH" && '
+        f"gh api user --hostname {shlex.quote(config.git_host)}",
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "GitHub API request failed").strip()
+        raise RuntimeError(
+            "Git credentials were copied, but a Git author identity could not be "
+            f"resolved: {detail}"
+        )
+    try:
+        payload = json.loads(result.stdout)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("GitHub returned invalid account identity data") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("GitHub returned invalid account identity data")
+
+    login = payload.get("login")
+    account_id = payload.get("id")
+    if not isinstance(login, str) or not validate_github_login(login):
+        raise RuntimeError("GitHub did not return a valid account login")
+
+    name = payload.get("name")
+    try:
+        validated_name = validate_git_author_name(name)
+    except (TypeError, ValueError):
+        validated_name = validate_git_author_name(login)
+
+    email = payload.get("email")
+    try:
+        validated_email = validate_git_author_email(email)
+    except (TypeError, ValueError):
+        if (
+            not isinstance(account_id, int)
+            or isinstance(account_id, bool)
+            or account_id <= 0
+        ):
+            raise RuntimeError(
+                "GitHub did not return an email address or account ID for Git identity"
+            )
+        validated_email = validate_git_author_email(
+            f"{account_id}+{login}@users.noreply.github.com"
+        )
+    return {"name": validated_name, "email": validated_email}
+
+
+def _set_git_identity_value(config: SetupConfig, key: str, value: str) -> None:
+    result = _run_as_login_user(
+        config.username,
+        _user_home(config),
+        f"git config --global {shlex.quote(key)} {shlex.quote(value)}",
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "git config failed").strip()
+        raise RuntimeError(f"Could not configure target Git identity: {detail}")
+
+
+def _configure_git_identity(config: SetupConfig) -> None:
+    """Fill missing target Git author fields from controller or GitHub identity."""
+
+    existing = {
+        "name": _configured_git_identity_value(config, "user.name"),
+        "email": _configured_git_identity_value(config, "user.email"),
+    }
+    missing = [field for field, value in existing.items() if value is None]
+    if not missing:
+        print("  Existing Git author identity retained")
+        return
+
+    identity = _git_identity_payload()
+    if any(field not in identity for field in missing):
+        github_identity = _github_git_identity(config)
+        for field in missing:
+            identity.setdefault(field, github_identity[field])
+
+    keys = {"name": "user.name", "email": "user.email"}
+    for field in missing:
+        _set_git_identity_value(config, keys[field], identity[field])
+    print("  Configured Git author identity")
+
+
 def _payload_host_entry(source: str, host: str) -> str:
     with open(source, encoding="utf-8") as file_obj:
         lines = file_obj.readlines()
@@ -689,6 +839,7 @@ def copy_agent_tooling_payload(config: SetupConfig) -> None:
         if config.install_gh and os.path.isfile(gh_credentials):
             if _merge_github_credentials(config, gh_credentials):
                 _configure_github_git_credentials(config)
+                _configure_git_identity(config)
     finally:
         if os.path.isdir(REMOTE_AGENT_PAYLOAD_DIR):
             shutil.rmtree(REMOTE_AGENT_PAYLOAD_DIR)

@@ -221,7 +221,13 @@ During initial VM setup, the selected GitHub host entry is merged into the
 target user's existing `gh` hosts file, preserving entries for other hosts.
 When the target can authenticate successfully, setup also runs `gh auth
 setup-git` for that host so HTTPS Git operations use the GitHub CLI
-credential.
+credential. Setup also fills missing global Git `user.name` and `user.email`
+values so terminal and web-interface commits work immediately. It copies only
+those two values from the controller user's global Git configuration, not the
+complete `.gitconfig`. Existing target values take precedence. When a value is
+not configured on the controller, setup derives it from the authenticated
+GitHub account and uses GitHub's no-reply address when the account has no
+public email.
 
 Do not put tokens directly in a saved setup command, shell history, issue, or
 documentation. Prefer a protected file path or the interactive token prompt.

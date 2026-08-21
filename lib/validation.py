@@ -867,6 +867,32 @@ _PROXMOX_STORAGE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _VM_STORAGE_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,16}$")
 _HOSTNAME_LABEL_PATTERN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
 _SAFE_REPO_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_GIT_AUTHOR_EMAIL_PATTERN = re.compile(r"^[^<>@\s]+@[^<>@\s]+$")
+
+
+def validate_git_author_name(value: str) -> str:
+    """Validate a Git author name copied into target-user configuration."""
+
+    if not isinstance(value, str) or not value or value != value.strip():
+        raise ValueError("Git user.name must be a non-empty trimmed string")
+    validate_no_control_characters(value, "Git user.name")
+    if len(value) > 256 or "<" in value or ">" in value:
+        raise ValueError("Git user.name is invalid")
+    return value
+
+
+def validate_git_author_email(value: str) -> str:
+    """Validate a Git author email copied into target-user configuration."""
+
+    if (
+        not isinstance(value, str)
+        or len(value) > 320
+        or value != value.strip()
+        or not _GIT_AUTHOR_EMAIL_PATTERN.fullmatch(value)
+    ):
+        raise ValueError("Git user.email must be a valid email address")
+    validate_no_control_characters(value, "Git user.email")
+    return value
 
 
 def validate_memory_string(value: str, name: str = "memory") -> None:

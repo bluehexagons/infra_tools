@@ -20,6 +20,7 @@ from common.agent_steps import (
     _latest_t3code_asset,
     _copy_payload_directory,
     _copy_secret_file,
+    _configure_git_identity,
     _user_home,
     copy_agent_tooling_payload,
     clone_agent_repositories,
@@ -830,6 +831,151 @@ class TestAgentUpdate(unittest.TestCase):
 
 
 class TestAgentPayloadInstallation(unittest.TestCase):
+    def test_git_identity_fills_missing_fields_from_staged_controller_values(self):
+        config = SetupConfig(
+            host='host',
+            username='agent',
+            system_type='server_dev',
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            payload_dir = os.path.join(directory, 'payload')
+            identity_path = os.path.join(
+                payload_dir,
+                'config',
+                'git',
+                'identity.json',
+            )
+            os.makedirs(os.path.dirname(identity_path))
+            with open(identity_path, 'w', encoding='utf-8') as file_obj:
+                json.dump({'name': 'Octo Cat', 'email': 'octo@example.test'}, file_obj)
+            completed = type(
+                'Completed',
+                (),
+                {'returncode': 0, 'stdout': '', 'stderr': ''},
+            )()
+            responses = [
+                type(
+                    'Completed',
+                    (),
+                    {'returncode': 1, 'stdout': '', 'stderr': ''},
+                )(),
+                type(
+                    'Completed',
+                    (),
+                    {'returncode': 1, 'stdout': '', 'stderr': ''},
+                )(),
+                completed,
+                completed,
+            ]
+            with (
+                patch('common.agent_steps.REMOTE_AGENT_PAYLOAD_DIR', payload_dir),
+                patch('common.agent_steps._user_home', return_value='/home/agent'),
+                patch(
+                    'common.agent_steps._run_as_login_user',
+                    side_effect=responses,
+                ) as run_as_user,
+            ):
+                _configure_git_identity(config)
+
+        commands = [call.args[2] for call in run_as_user.call_args_list]
+        self.assertEqual(
+            commands,
+            [
+                'git config --get user.name',
+                'git config --get user.email',
+                "git config --global user.name 'Octo Cat'",
+                'git config --global user.email octo@example.test',
+            ],
+        )
+
+    def test_git_identity_preserves_existing_target_values(self):
+        config = SetupConfig(
+            host='host',
+            username='agent',
+            system_type='server_dev',
+        )
+        responses = [
+            type(
+                'Completed',
+                (),
+                {'returncode': 0, 'stdout': 'Target Name\n', 'stderr': ''},
+            )(),
+            type(
+                'Completed',
+                (),
+                {
+                    'returncode': 0,
+                    'stdout': 'target@example.test\n',
+                    'stderr': '',
+                },
+            )(),
+        ]
+        with (
+            patch('common.agent_steps._user_home', return_value='/home/agent'),
+            patch(
+                'common.agent_steps._run_as_login_user',
+                side_effect=responses,
+            ) as run_as_user,
+        ):
+            _configure_git_identity(config)
+
+        self.assertEqual(run_as_user.call_count, 2)
+
+    def test_git_identity_falls_back_to_authenticated_github_account(self):
+        config = SetupConfig(
+            host='host',
+            username='agent',
+            system_type='server_dev',
+        )
+        completed = type(
+            'Completed',
+            (),
+            {'returncode': 0, 'stdout': '', 'stderr': ''},
+        )()
+        responses = [
+            type(
+                'Completed',
+                (),
+                {'returncode': 1, 'stdout': '', 'stderr': ''},
+            )(),
+            type(
+                'Completed',
+                (),
+                {'returncode': 1, 'stdout': '', 'stderr': ''},
+            )(),
+            type(
+                'Completed',
+                (),
+                {
+                    'returncode': 0,
+                    'stdout': json.dumps(
+                        {'login': 'octocat', 'id': 1234, 'name': None, 'email': None}
+                    ),
+                    'stderr': '',
+                },
+            )(),
+            completed,
+            completed,
+        ]
+        with tempfile.TemporaryDirectory() as payload_dir:
+            with (
+                patch('common.agent_steps.REMOTE_AGENT_PAYLOAD_DIR', payload_dir),
+                patch('common.agent_steps._user_home', return_value='/home/agent'),
+                patch(
+                    'common.agent_steps._run_as_login_user',
+                    side_effect=responses,
+                ) as run_as_user,
+            ):
+                _configure_git_identity(config)
+
+        commands = [call.args[2] for call in run_as_user.call_args_list]
+        self.assertIn('gh api user --hostname github.com', commands[2])
+        self.assertEqual(commands[3], 'git config --global user.name octocat')
+        self.assertEqual(
+            commands[4],
+            'git config --global user.email 1234+octocat@users.noreply.github.com',
+        )
+
     def test_existing_codex_runtime_symlinks_do_not_block_secret_copy(self):
         config = SetupConfig(
             host='host',

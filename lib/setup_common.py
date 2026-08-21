@@ -34,6 +34,8 @@ from lib.validation import (
     validate_apt_packages,
     validate_agent_repositories,
     validate_agent_git_settings,
+    validate_git_author_email,
+    validate_git_author_name,
     validate_browser_automation_settings,
     validate_antistatic_settings,
     validate_deploy_specs,
@@ -83,6 +85,7 @@ DEVICE_PAIRING_PAYLOAD_DIRNAME = "device_pairing_payload"
 LEGACY_SETUP_OPERATION_FILENAME = "setup-operation.pre-persistence.json"
 MAX_AGENT_CREDENTIAL_BYTES = 4 * 1024 * 1024
 MAX_DEVICE_PAIRING_AUTH_BYTES = 64 * 1024
+_GIT_IDENTITY_PAYLOAD_PATH = os.path.join("config", "git", "identity.json")
 
 
 def _repository_cache_path(cache_dir: str, git_url: str, repo_name: str) -> str:
@@ -756,6 +759,54 @@ def _stage_github_auth(config: SetupConfig, payload_dir: str, local_home: str) -
     print("  Staged GitHub CLI credentials")
 
 
+def _active_git_identity(local_home: str) -> dict[str, str]:
+    """Read only the controller user's global Git author identity."""
+
+    git_path = shutil.which("git")
+    if not git_path:
+        return {}
+    environment = os.environ.copy()
+    environment["HOME"] = local_home
+    if os.environ.get("SUDO_USER"):
+        environment["XDG_CONFIG_HOME"] = os.path.join(local_home, ".config")
+
+    identity: dict[str, str] = {}
+    for field, key, validator in (
+        ("name", "user.name", validate_git_author_name),
+        ("email", "user.email", validate_git_author_email),
+    ):
+        try:
+            result = subprocess.run(
+                [git_path, "config", "--global", "--get", key],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                env=environment,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        value = (result.stdout or "").rstrip("\r\n")
+        if result.returncode == 0 and value:
+            identity[field] = validator(value)
+    return identity
+
+
+def _stage_git_identity(payload_dir: str, local_home: str) -> None:
+    """Stage the minimal non-secret Git identity paired with GitHub auth."""
+
+    identity = _active_git_identity(local_home)
+    if not identity:
+        return
+    write_json_atomic(
+        os.path.join(payload_dir, _GIT_IDENTITY_PAYLOAD_PATH),
+        identity,
+        mode=0o600,
+        sort_keys=True,
+    )
+    print("  Staged Git author identity")
+
+
 def _copy_existing_path_value(value: bytes, destination: str) -> None:
     os.makedirs(os.path.dirname(destination), mode=0o700, exist_ok=True)
     with open(destination, "wb") as file_obj:
@@ -831,6 +882,9 @@ def prepare_agent_payload(config: SetupConfig, payload_dir: str) -> None:
                 os.path.join(payload_dir, "secrets", tool, _AGENT_AUTH_FILENAMES[tool]),
                 f"{tool} credentials",
             )
+
+    if os.path.isfile(os.path.join(payload_dir, "secrets", "gh", "hosts.yml")):
+        _stage_git_identity(payload_dir, local_home)
 
 
 def create_tar_from_dir(source_dir: str) -> bytes:
