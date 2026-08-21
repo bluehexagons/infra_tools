@@ -199,10 +199,14 @@ class TestGodotWebPublisher(unittest.TestCase):
             self.assertIn("Web", command)
 
     def test_publish_rejects_unsafe_game_name_before_running_godot(self) -> None:
-        with patch.object(godot_web_publish.subprocess, "run") as run_export:
+        with (
+            patch.object(godot_web_publish, "_current_account") as current_account,
+            patch.object(godot_web_publish.subprocess, "run") as run_export,
+        ):
             result = godot_web_publish.main(["../escape"])
 
         self.assertEqual(result, 2)
+        current_account.assert_not_called()
         run_export.assert_not_called()
 
     def test_publish_derives_slug_from_project_name(self) -> None:

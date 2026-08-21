@@ -303,7 +303,6 @@ def _write_metadata(path: str, value: dict[str, object]) -> None:
 
 def _publish(args: argparse.Namespace) -> tuple[str, str, dict[str, object]]:
     preset = _validate_preset(args.preset)
-    account = _current_account()
     if args.game is not None and not _GAME_NAME_PATTERN.fullmatch(args.game):
         raise ValueError(
             "game must use lowercase letters, digits, '-' or '_' and start "
@@ -316,6 +315,7 @@ def _publish(args: argparse.Namespace) -> tuple[str, str, dict[str, object]]:
         raise ValueError(f"no project.godot found in {project_dir}")
 
     game = args.game or _slugify(_project_display_name(project_file, project_dir))
+    account = _current_account()
     user_root = os.path.join(GAMES_ROOT, account.pw_name)
     if os.path.islink(user_root) or not os.path.isdir(user_root):
         raise RuntimeError(f"managed publishing directory is unavailable: {user_root}")
