@@ -435,6 +435,27 @@ class TestDeployManifest(unittest.TestCase):
             if os.path.exists(path):
                 shutil.rmtree(path)
 
+    @patch('lib.deployment.run')
+    def test_stop_requires_unit_to_be_inactive(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=0, stdout="", stderr=""),
+        ]
+
+        with self.assertRaisesRegex(RuntimeError, "remained active"):
+            self.orch._stop_app_unit("app-example_com-api")
+
+    @patch('lib.deployment.run')
+    def test_restart_requires_unit_to_be_active(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(returncode=3, stdout="", stderr=""),
+        ]
+
+        with self.assertRaisesRegex(RuntimeError, "not active after restart"):
+            self.orch._restart_app_units(["app-example_com-api"])
+
     @patch.object(DeploymentOrchestrator, '_poll_health')
     @patch('lib.deployment.create_managed_service')
     @patch('lib.deployment.save_deployment_metadata')
@@ -626,7 +647,21 @@ class TestDeployManifest(unittest.TestCase):
     def test_service_failure_restores_previous_release(
         self, mock_run, mock_meta, _mock_service, _mock_health
     ):
-        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        active_checks = 0
+
+        def run_side_effect(command, *args, **kwargs):
+            nonlocal active_checks
+            del args, kwargs
+            if "is-active --quiet" in command:
+                active_checks += 1
+                return MagicMock(
+                    returncode=0 if active_checks == 1 else 3,
+                    stdout="",
+                    stderr="",
+                )
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = run_side_effect
         active = os.path.join(self.base_dir, "example_com")
         os.makedirs(active)
         marker = os.path.join(active, "previous.txt")
@@ -634,6 +669,94 @@ class TestDeployManifest(unittest.TestCase):
             handle.write("previous")
 
         with self.assertRaisesRegex(RuntimeError, "service failed"):
+            self.orch.deploy_manifest(
+                manifest=self.manifest,
+                source_path=self.source,
+                domain="example.com",
+                path="/",
+                git_url="https://git.example.com/shop.git",
+                commit_hash="abc123",
+                keep_source=True,
+            )
+
+        self.assertTrue(os.path.exists(marker))
+        mock_meta.assert_not_called()
+
+    @patch.object(
+        DeploymentOrchestrator,
+        '_app_unit_snapshots',
+        return_value={'app-example_com-api': 'old unit'},
+    )
+    @patch.object(DeploymentOrchestrator, '_poll_health')
+    @patch('lib.deployment.create_managed_service')
+    @patch('lib.deployment.save_deployment_metadata')
+    @patch('lib.deployment.run')
+    def test_stop_failure_aborts_before_release_activation(
+        self,
+        mock_run,
+        mock_meta,
+        mock_service,
+        _mock_health,
+        _mock_snapshots,
+    ):
+        active = os.path.join(self.base_dir, "example_com")
+        os.makedirs(active)
+        marker = os.path.join(active, "previous.txt")
+        with open(marker, "w", encoding="utf-8") as handle:
+            handle.write("previous")
+
+        def run_side_effect(command, *args, **kwargs):
+            del args, kwargs
+            return MagicMock(
+                returncode=1 if "systemctl stop" in command else 0,
+                stdout="",
+                stderr="permission denied" if "systemctl stop" in command else "",
+            )
+
+        mock_run.side_effect = run_side_effect
+
+        with self.assertRaisesRegex(RuntimeError, "Could not stop"):
+            self.orch.deploy_manifest(
+                manifest=self.manifest,
+                source_path=self.source,
+                domain="example.com",
+                path="/",
+                git_url="https://git.example.com/shop.git",
+                commit_hash="abc123",
+                keep_source=True,
+            )
+
+        self.assertTrue(os.path.exists(marker))
+        mock_service.assert_not_called()
+        mock_meta.assert_not_called()
+
+    @patch.object(
+        DeploymentOrchestrator,
+        '_poll_health',
+    )
+    @patch('lib.deployment.create_managed_service', side_effect=RuntimeError("service failed"))
+    @patch('lib.deployment.save_deployment_metadata')
+    @patch('lib.deployment.run')
+    def test_rollback_stop_failure_is_reported_after_release_restore(
+        self, mock_run, mock_meta, _mock_service, _mock_health
+    ):
+        active = os.path.join(self.base_dir, "example_com")
+        os.makedirs(active)
+        marker = os.path.join(active, "previous.txt")
+        with open(marker, "w", encoding="utf-8") as handle:
+            handle.write("previous")
+
+        def run_side_effect(command, *args, **kwargs):
+            del args, kwargs
+            return MagicMock(
+                returncode=1 if "systemctl stop" in command else 0,
+                stdout="",
+                stderr="permission denied" if "systemctl stop" in command else "",
+            )
+
+        mock_run.side_effect = run_side_effect
+
+        with self.assertRaisesRegex(RuntimeError, "service recovery was incomplete"):
             self.orch.deploy_manifest(
                 manifest=self.manifest,
                 source_path=self.source,

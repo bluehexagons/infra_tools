@@ -216,7 +216,7 @@ also rejected. Temporary-directory tests cover symlinked config files,
 symlinked config roots, and directory symlinks nested below a real config root.
 Credential-specific regular-file validation remains in place.
 
-### AUD-13: Manifest activation proceeds after service-stop failure
+### AUD-13: Manifest activation proceeds after service-stop failure (resolved)
 
 **Severity: Medium-High — release/process split-brain**
 
@@ -227,9 +227,14 @@ definition and active tree are changed. The later rollback path also treats
 stop/restart failures as best effort, which can leave the operator with a
 partially restored process set even when the release tree is restored.
 
-**Follow-up:** make the stop phase required, verify units are inactive before
-the rename, and record/verify rollback stop and restart outcomes. Add fault
-injection tests for stop failure before activation and during rollback.
+**Resolution (2026-08-21):** manifest deployment now stops existing app units
+before the release rename and verifies each unit became inactive. A failed stop
+aborts activation; units already stopped earlier in that phase are restarted
+and verified against the unchanged release. Post-activation rollback continues
+restoring the release tree even when a unit stop fails, verifies every restored
+unit restart, and reports incomplete service recovery instead of claiming a
+clean rollback. Fault-injection tests cover stop failure before activation,
+rollback stop failure, and inactive/active verification failures.
 
 ## Positive controls verified
 

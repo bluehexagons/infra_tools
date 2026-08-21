@@ -16,7 +16,7 @@ import sys
 import tempfile
 from dataclasses import replace
 from datetime import datetime
-from typing import Optional, Any
+from typing import Any, Iterable, Optional
 
 from lib.remote_utils import run
 from lib.update_policy import npm_freshness_args
@@ -855,10 +855,70 @@ class DeploymentOrchestrator:
         for service_name, content in snapshots.items():
             with open(f"/etc/systemd/system/{service_name}.service", "w", encoding="utf-8") as handle:
                 handle.write(content)
-        run("systemctl daemon-reload", check=False)
+        run("systemctl daemon-reload")
         for service_name in snapshots:
-            run(f"systemctl enable {shlex.quote(service_name)}.service", check=False)
-            run(f"systemctl restart {shlex.quote(service_name)}.service", check=False)
+            run(f"systemctl enable {shlex.quote(service_name)}.service")
+        self._restart_app_units(snapshots)
+
+    @staticmethod
+    def _unit_command(unit_name: str, action: str) -> str:
+        return f"systemctl {action} {shlex.quote(unit_name)}.service"
+
+    def _stop_app_unit(self, unit_name: str) -> bool:
+        """Stop one active unit and verify it became inactive."""
+
+        status = run(
+            self._unit_command(unit_name, "is-active --quiet"),
+            check=False,
+            capture_output=True,
+        )
+        if status.returncode in {3, 4}:
+            return False
+        if status.returncode != 0:
+            raise RuntimeError(f"Could not determine whether {unit_name}.service is active")
+
+        result = run(
+            self._unit_command(unit_name, "stop"),
+            check=False,
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            error = self._get_command_error(result, "systemctl stop failed")
+            raise RuntimeError(f"Could not stop {unit_name}.service: {error}")
+        status = run(
+            self._unit_command(unit_name, "is-active --quiet"),
+            check=False,
+            capture_output=True,
+        )
+        if status.returncode == 0:
+            raise RuntimeError(f"Unit remained active after stop: {unit_name}.service")
+        if status.returncode not in {3, 4}:
+            raise RuntimeError(f"Could not verify that {unit_name}.service stopped")
+        return True
+
+    def _restart_app_units(self, unit_names: Iterable[str]) -> None:
+        """Restart units and verify every restored process is active."""
+
+        errors: list[str] = []
+        for unit_name in sorted(unit_names):
+            result = run(
+                self._unit_command(unit_name, "restart"),
+                check=False,
+                capture_output=True,
+            )
+            if result.returncode != 0:
+                error = self._get_command_error(result, "systemctl restart failed")
+                errors.append(f"{unit_name}.service restart failed: {error}")
+                continue
+            status = run(
+                self._unit_command(unit_name, "is-active --quiet"),
+                check=False,
+                capture_output=True,
+            )
+            if status.returncode != 0:
+                errors.append(f"{unit_name}.service is not active after restart")
+        if errors:
+            raise RuntimeError("; ".join(errors))
 
     def _backup_component_sqlite(
         self,
@@ -947,6 +1007,7 @@ class DeploymentOrchestrator:
         staging_path = ""
         backup_path: Optional[str] = None
         activated = False
+        stopped_units: list[str] = []
         unit_snapshots: dict[str, str] = {}
         desired_units: set[str] = set()
         try:
@@ -998,8 +1059,15 @@ class DeploymentOrchestrator:
                     self._backup_component_sqlite(component, dest_path, domain)
 
             # Stop services only for the short release swap window.
-            for unit_name in sorted(set(unit_snapshots) | desired_units):
-                run(f"systemctl stop {shlex.quote(unit_name)}.service", check=False)
+            for unit_name in sorted(unit_snapshots):
+                try:
+                    if self._stop_app_unit(unit_name):
+                        stopped_units.append(unit_name)
+                except RuntimeError:
+                    # A failed stop or status check can leave the unit's state
+                    # uncertain. Reconcile it against the unchanged release.
+                    stopped_units.append(unit_name)
+                    raise
 
             if os.path.exists(dest_path):
                 backup_path = tempfile.mkdtemp(
@@ -1061,10 +1129,14 @@ class DeploymentOrchestrator:
                 backup_path = None
             print(f"  ✓ Manifest deployed to {dest_path}")
             return deps
-        except Exception:
+        except Exception as deployment_error:
+            rollback_errors: list[str] = []
             if activated:
                 for unit_name in sorted(desired_units):
-                    run(f"systemctl stop {shlex.quote(unit_name)}.service", check=False)
+                    try:
+                        self._stop_app_unit(unit_name)
+                    except RuntimeError as exc:
+                        rollback_errors.append(str(exc))
                 failed_path = tempfile.mkdtemp(
                     prefix=f".{os.path.basename(dest_path)}.failed-",
                     dir=parent_dir or None,
@@ -1076,8 +1148,22 @@ class DeploymentOrchestrator:
                     os.rename(backup_path, dest_path)
                     backup_path = None
                 shutil.rmtree(failed_path, ignore_errors=True)
-                self._restore_app_units(dest_path, unit_snapshots)
-                print("  ✓ Restored previous release after failed activation")
+                try:
+                    self._restore_app_units(dest_path, unit_snapshots)
+                except RuntimeError as exc:
+                    rollback_errors.append(str(exc))
+                if not rollback_errors:
+                    print("  ✓ Restored previous release after failed activation")
+            elif stopped_units:
+                try:
+                    self._restart_app_units(stopped_units)
+                except RuntimeError as exc:
+                    rollback_errors.append(str(exc))
+            if rollback_errors:
+                raise RuntimeError(
+                    "Deployment failed and service recovery was incomplete: "
+                    + "; ".join(rollback_errors)
+                ) from deployment_error
             raise
         finally:
             if staging_path and os.path.exists(staging_path):

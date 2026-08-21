@@ -123,12 +123,12 @@ state where they are valid.
 ## Phase 3: Staged service reconciliation
 
 Manifest deployments now record application units, build and validate before
-stopping app-scoped services, remove obsolete units only after activation, and
-restore the previous release and units on failure. Unit preparation still
-occurs during activation, but stop calls still use best-effort execution and
-must fail closed before the release rename. The remaining work is to apply the
-broader contract to non-manifest setup services and persist
-interruption/recovery markers.
+stopping app-scoped services, require and verify successful stops before the
+release rename, remove obsolete units only after activation, and restore the
+previous release and units on failure. Rollback stop/restart failures are
+reported as incomplete recovery. The remaining work is to apply the broader
+contract to non-manifest setup services and persist interruption/recovery
+markers.
 
 Replace cleanup-first setup with a staged reconciliation model:
 

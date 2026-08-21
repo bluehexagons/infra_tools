@@ -200,7 +200,8 @@ Validation was performed by static evidence checks (no behavior-altering actions
 - **2026-08-19 — ARCH-05 resolved:** removed global service teardown from
   remote setup. Manifest deployments now build and validate before stopping
   app-scoped units, then restore the prior release and units after activation
-  or health failure. Durable interruption markers remain open work.
+  or health failure. App-unit stops and rollback restarts became required and
+  verified on 2026-08-21. Durable interruption markers remain open work.
 - **2026-08-21 — ARCH-03 partially resolved:** Proxmox node connections now use
   strict workspace host-key enrollment, including multiplexed control-socket
   paths. CI/CD deploy-target enrollment remains unauthenticated.
