@@ -426,6 +426,54 @@ class TestGodotSetup(unittest.TestCase):
             ],
         )
 
+    def test_missing_state_reverifies_matching_active_release(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            releases_dir = os.path.join(temporary_dir, "releases")
+            current_dir = os.path.join(temporary_dir, "current")
+            release_dir = os.path.join(
+                releases_dir,
+                f"4.7.2-stable-{'a' * 12}",
+            )
+            os.makedirs(current_dir)
+            current_binary = os.path.join(current_dir, "godot")
+            with open(current_binary, "wb") as binary_file:
+                binary_file.write(b"previously installed")
+
+            with (
+                patch.object(godot_steps, "GODOT_RELEASES_DIR", releases_dir),
+                patch.object(godot_steps, "GODOT_CURRENT_DIR", current_dir),
+                patch.object(godot_steps, "detect_release_arch", return_value="amd64"),
+                patch.object(
+                    godot_steps,
+                    "fetch_latest_godot_release",
+                    return_value=(
+                        "4.7.2-stable",
+                        "https://example.test/godot.zip",
+                        "a" * 64,
+                    ),
+                ),
+                patch.object(godot_steps, "read_godot_state", return_value={}),
+                patch.object(
+                    godot_steps,
+                    "_managed_current_release",
+                    return_value=os.path.realpath(release_dir),
+                ),
+                patch.object(
+                    godot_steps,
+                    "_extract_verified_binary",
+                    return_value=current_binary,
+                ) as extract_binary,
+                patch.object(godot_steps, "_install_godot_links"),
+                patch.object(godot_steps, "_install_godot_desktop_entry"),
+                patch.object(godot_steps, "write_godot_state") as write_state,
+                patch.object(godot_steps, "run"),
+            ):
+                result = godot_steps.install_or_update_godot_release()
+
+            self.assertEqual(result, ("4.7.2-stable", True, "a" * 64))
+            extract_binary.assert_called_once()
+            write_state.assert_called_once_with("4.7.2-stable", "a" * 64)
+
 
 class TestGodotAutoUpdater(unittest.TestCase):
     @patch(

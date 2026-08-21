@@ -75,10 +75,12 @@ LIB_DIR = SCRIPT_DIR
 CONFIG_DIR = os.path.join(SCRIPT_DIR, "..", "config")
 SERVICE_TOOLS_DIR = os.path.join(SCRIPT_DIR, "..", "service_tools")
 REMOTE_INSTALL_DIR = "/opt/infra_tools"
+PERSISTENT_STATE_DIR = "/var/lib/infra_tools"
 GIT_CACHE_DIR = os.path.expanduser("~/.cache/infra_tools/git_repos")
 REMOTE_ARGS_FILENAME = ".remote_setup_args.json"
 AGENT_PAYLOAD_DIRNAME = "agent_payload"
 DEVICE_PAIRING_PAYLOAD_DIRNAME = "device_pairing_payload"
+LEGACY_SETUP_OPERATION_FILENAME = "setup-operation.pre-persistence.json"
 MAX_AGENT_CREDENTIAL_BYTES = 4 * 1024 * 1024
 MAX_DEVICE_PAIRING_AUTH_BYTES = 64 * 1024
 
@@ -270,12 +272,100 @@ def _is_managed_local_install(install_dir: str) -> bool:
         return False
 
 
+def _runtime_state_path() -> str:
+    """Return the compatibility path exposed inside the runtime tree."""
+    return os.path.join(REMOTE_INSTALL_DIR, "state")
+
+
+def _migrate_local_runtime_state() -> None:
+    """Move legacy local runtime state into its durable host directory."""
+    legacy_state_dir = _runtime_state_path()
+    if os.path.islink(PERSISTENT_STATE_DIR):
+        raise RuntimeError(
+            f"Refusing symlinked infra_tools state directory: {PERSISTENT_STATE_DIR}"
+        )
+    os.makedirs(PERSISTENT_STATE_DIR, mode=0o700, exist_ok=True)
+
+    migrated_legacy_state = False
+    if os.path.lexists(legacy_state_dir):
+        if os.path.islink(legacy_state_dir):
+            if os.path.realpath(legacy_state_dir) != os.path.realpath(
+                PERSISTENT_STATE_DIR
+            ):
+                raise RuntimeError(
+                    f"Refusing unexpected infra_tools state link: {legacy_state_dir}"
+                )
+        elif os.path.isdir(legacy_state_dir):
+            _copy_existing_path(legacy_state_dir, PERSISTENT_STATE_DIR)
+            migrated_legacy_state = True
+        else:
+            raise RuntimeError(
+                f"infra_tools state path is not a directory: {legacy_state_dir}"
+            )
+    if migrated_legacy_state:
+        operation_marker = os.path.join(
+            PERSISTENT_STATE_DIR,
+            "setup-operation.json",
+        )
+        legacy_marker = os.path.join(
+            PERSISTENT_STATE_DIR,
+            LEGACY_SETUP_OPERATION_FILENAME,
+        )
+        if os.path.isfile(operation_marker) and not os.path.lexists(legacy_marker):
+            os.replace(operation_marker, legacy_marker)
+    os.chmod(PERSISTENT_STATE_DIR, 0o700)
+
+
+def _install_local_runtime_state_link() -> None:
+    """Expose durable state at the historical runtime-relative path."""
+    legacy_state_dir = _runtime_state_path()
+    if os.path.lexists(legacy_state_dir):
+        if (
+            os.path.islink(legacy_state_dir)
+            and os.path.realpath(legacy_state_dir)
+            == os.path.realpath(PERSISTENT_STATE_DIR)
+        ):
+            return
+        if os.path.isdir(legacy_state_dir) and not os.path.islink(legacy_state_dir):
+            shutil.rmtree(legacy_state_dir)
+        else:
+            os.unlink(legacy_state_dir)
+    os.symlink(PERSISTENT_STATE_DIR, legacy_state_dir, target_is_directory=True)
+
+
+def _remote_state_migration_command() -> list[str]:
+    """Return a fixed shell command that preserves state before source replacement."""
+    legacy_state_dir = _runtime_state_path()
+    script = (
+        "set -eu; "
+        f"if [ -L {shlex.quote(PERSISTENT_STATE_DIR)} ]; then exit 1; fi; "
+        f"install -d -m 0700 {shlex.quote(PERSISTENT_STATE_DIR)}; "
+        f"if [ -L {shlex.quote(legacy_state_dir)} ]; then "
+        f"test \"$(readlink -f {shlex.quote(legacy_state_dir)})\" = "
+        f"{shlex.quote(PERSISTENT_STATE_DIR)}; "
+        f"elif [ -d {shlex.quote(legacy_state_dir)} ]; then "
+        f"cp -a {shlex.quote(legacy_state_dir)}/. "
+        f"{shlex.quote(PERSISTENT_STATE_DIR)}/; "
+        f"if [ -f {shlex.quote(PERSISTENT_STATE_DIR)}/setup-operation.json ] "
+        f"&& [ ! -e {shlex.quote(PERSISTENT_STATE_DIR)}/"
+        f"{shlex.quote(LEGACY_SETUP_OPERATION_FILENAME)} ]; then "
+        f"mv {shlex.quote(PERSISTENT_STATE_DIR)}/setup-operation.json "
+        f"{shlex.quote(PERSISTENT_STATE_DIR)}/"
+        f"{shlex.quote(LEGACY_SETUP_OPERATION_FILENAME)}; fi; "
+        f"elif [ -e {shlex.quote(legacy_state_dir)} ]; then exit 1; fi; "
+        f"chmod 0700 {shlex.quote(PERSISTENT_STATE_DIR)}"
+    )
+    return ["/bin/sh", "-c", script]
+
+
 def _activate_local_runtime(build_dir: str) -> None:
     """Stage local setup payloads without destroying a managed Git worktree."""
+    _migrate_local_runtime_state()
     if not _is_managed_local_install(REMOTE_INSTALL_DIR):
         if os.path.exists(REMOTE_INSTALL_DIR):
             shutil.rmtree(REMOTE_INSTALL_DIR)
         shutil.copytree(build_dir, REMOTE_INSTALL_DIR, symlinks=True)
+        _install_local_runtime_state_link()
         os.chmod(REMOTE_INSTALL_DIR, 0o755)
         return
 
@@ -297,6 +387,7 @@ def _activate_local_runtime(build_dir: str) -> None:
         elif os.path.exists(source):
             shutil.copy2(source, destination)
 
+    _install_local_runtime_state_link()
     os.chmod(REMOTE_INSTALL_DIR, 0o755)
 
 
@@ -1105,9 +1196,18 @@ def run_remote_setup(config: SetupConfig) -> int:
             remote_cmd_args = [remote_python, remote_script, "--args-file", remote_args_path]
             remote_shell_cmd = chain_remote_commands(
                 [
+                    privileged(_remote_state_migration_command()),
                     privileged(["rm", "-rf", REMOTE_INSTALL_DIR]),
                     privileged(["mkdir", "-p", REMOTE_INSTALL_DIR]),
                     privileged(["tar", "xzf", "-", "-C", REMOTE_INSTALL_DIR]),
+                    privileged(
+                        [
+                            "ln",
+                            "-s",
+                            PERSISTENT_STATE_DIR,
+                            _runtime_state_path(),
+                        ]
+                    ),
                     privileged(["chmod", "0755", REMOTE_INSTALL_DIR]),
                     privileged(remote_cmd_args),
                 ]

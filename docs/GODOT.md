@@ -99,6 +99,9 @@ sudo journalctl -u auto-update-godot.service -n 100 --no-pager
 ```
 
 Engine activation failures leave the previously activated version in place.
+If an older setup refresh already removed Godot's state metadata, the next run
+downloads and verifies the matching official engine archive again before
+repairing that state; it does not trust the release-directory name alone.
 Bundle failures preserve already installed bundle files, fail the maintenance
 job, and can use the normal `--notify` targets; if the engine already advanced,
 the next successful run installs its matching web templates. Rerunning the

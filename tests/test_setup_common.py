@@ -239,7 +239,7 @@ class TestRunRemoteSetupArgumentSecurity(unittest.TestCase):
         self.assertIn("--args-file", remote_command)
         self.assertNotIn("supersecret", remote_command)
 
-    def test_remote_ssh_command_clears_install_dir_before_upload_extract(self):
+    def test_remote_ssh_command_preserves_state_before_replacing_runtime(self):
         from lib import setup_common
 
         config = _make_config(host="example.com")
@@ -256,8 +256,29 @@ class TestRunRemoteSetupArgumentSecurity(unittest.TestCase):
 
         self.assertEqual(result, 0)
         remote_command = mock_build_ssh.call_args.kwargs["remote_command"]
+        self.assertIn("install -d -m 0700 /var/lib/infra_tools", remote_command)
+        self.assertIn(
+            "cp -a /opt/infra_tools/state/. /var/lib/infra_tools/",
+            remote_command,
+        )
+        self.assertIn(
+            "setup-operation.pre-persistence.json",
+            remote_command,
+        )
         self.assertIn("rm -rf /opt/infra_tools && mkdir -p /opt/infra_tools", remote_command)
+        self.assertLess(
+            remote_command.index("cp -a /opt/infra_tools/state/."),
+            remote_command.index("rm -rf /opt/infra_tools"),
+        )
         self.assertLess(remote_command.index("rm -rf"), remote_command.index("tar xzf -"))
+        self.assertIn(
+            "ln -s /var/lib/infra_tools /opt/infra_tools/state",
+            remote_command,
+        )
+        self.assertLess(
+            remote_command.index("tar xzf -"),
+            remote_command.index("ln -s /var/lib/infra_tools"),
+        )
         self.assertIn("chmod 0755 /opt/infra_tools", remote_command)
         self.assertLess(
             remote_command.index("tar xzf -"),
@@ -354,7 +375,9 @@ class TestRunRemoteSetupArgumentSecurity(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             install_dir = os.path.join(temp_dir, "infra_tools")
+            state_dir = os.path.join(temp_dir, "state")
             with patch.object(setup_common, "REMOTE_INSTALL_DIR", install_dir), \
+                 patch.object(setup_common, "PERSISTENT_STATE_DIR", state_dir), \
                  patch.object(setup_common, "copy_project_files"), \
                  patch.object(setup_common.os, "geteuid", return_value=0), \
                  patch("subprocess.Popen", return_value=process) as mock_popen:
@@ -369,6 +392,7 @@ class TestRunRemoteSetupArgumentSecurity(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             managed_dir = os.path.join(temp_dir, "infra_tools")
+            state_dir = os.path.join(temp_dir, "state")
             os.makedirs(os.path.join(managed_dir, ".git"))
             with open(os.path.join(managed_dir, "keep-me"), "w", encoding="utf-8") as file_obj:
                 file_obj.write("managed")
@@ -381,13 +405,118 @@ class TestRunRemoteSetupArgumentSecurity(unittest.TestCase):
                 file_obj.write("[]")
 
             with patch.object(setup_common, "SCRIPT_DIR", os.path.join(managed_dir, "lib")), \
-                 patch.object(setup_common, "REMOTE_INSTALL_DIR", managed_dir):
+                 patch.object(setup_common, "REMOTE_INSTALL_DIR", managed_dir), \
+                 patch.object(setup_common, "PERSISTENT_STATE_DIR", state_dir):
                 setup_common._activate_local_runtime(build_dir)
 
             self.assertTrue(os.path.isdir(os.path.join(managed_dir, ".git")))
             self.assertTrue(os.path.isfile(os.path.join(managed_dir, "keep-me")))
             self.assertTrue(os.path.isfile(os.path.join(managed_dir, "deployments", "repo")))
             self.assertTrue(os.path.isfile(os.path.join(managed_dir, setup_common.REMOTE_ARGS_FILENAME)))
+            self.assertTrue(os.path.islink(os.path.join(managed_dir, "state")))
+
+    def test_local_runtime_migrates_state_before_replacing_source_tree(self):
+        from lib import setup_common
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            install_dir = os.path.join(temp_dir, "infra_tools")
+            legacy_state_dir = os.path.join(install_dir, "state")
+            persistent_state_dir = os.path.join(temp_dir, "persistent-state")
+            build_dir = os.path.join(temp_dir, "build")
+            os.makedirs(legacy_state_dir)
+            os.makedirs(build_dir)
+            with open(
+                os.path.join(legacy_state_dir, "godot.json"),
+                "w",
+                encoding="utf-8",
+            ) as file_obj:
+                file_obj.write('{"tag_name":"4.7.2-stable"}')
+            with open(
+                os.path.join(legacy_state_dir, "setup-operation.json"),
+                "w",
+                encoding="utf-8",
+            ) as file_obj:
+                file_obj.write('{"status":"recovery_required"}')
+            with open(
+                os.path.join(build_dir, "remote_setup.py"),
+                "w",
+                encoding="utf-8",
+            ) as file_obj:
+                file_obj.write("# replacement runtime\n")
+
+            with (
+                patch.object(setup_common, "REMOTE_INSTALL_DIR", install_dir),
+                patch.object(
+                    setup_common,
+                    "PERSISTENT_STATE_DIR",
+                    persistent_state_dir,
+                ),
+            ):
+                setup_common._activate_local_runtime(build_dir)
+
+            state_link = os.path.join(install_dir, "state")
+            self.assertTrue(os.path.islink(state_link))
+            self.assertEqual(os.path.realpath(state_link), persistent_state_dir)
+            with open(
+                os.path.join(persistent_state_dir, "godot.json"),
+                encoding="utf-8",
+            ) as file_obj:
+                self.assertEqual(file_obj.read(), '{"tag_name":"4.7.2-stable"}')
+            self.assertFalse(
+                os.path.exists(
+                    os.path.join(persistent_state_dir, "setup-operation.json")
+                )
+            )
+            self.assertTrue(
+                os.path.isfile(
+                    os.path.join(
+                        persistent_state_dir,
+                        setup_common.LEGACY_SETUP_OPERATION_FILENAME,
+                    )
+                )
+            )
+
+    def test_local_runtime_preserves_new_durable_operation_marker(self):
+        from lib import setup_common
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            install_dir = os.path.join(temp_dir, "infra_tools")
+            persistent_state_dir = os.path.join(temp_dir, "persistent-state")
+            build_dir = os.path.join(temp_dir, "build")
+            os.makedirs(install_dir)
+            os.makedirs(persistent_state_dir)
+            os.makedirs(build_dir)
+            os.symlink(
+                persistent_state_dir,
+                os.path.join(install_dir, "state"),
+                target_is_directory=True,
+            )
+            operation_marker = os.path.join(
+                persistent_state_dir,
+                "setup-operation.json",
+            )
+            with open(operation_marker, "w", encoding="utf-8") as file_obj:
+                file_obj.write('{"status":"recovery_required"}')
+
+            with (
+                patch.object(setup_common, "REMOTE_INSTALL_DIR", install_dir),
+                patch.object(
+                    setup_common,
+                    "PERSISTENT_STATE_DIR",
+                    persistent_state_dir,
+                ),
+            ):
+                setup_common._activate_local_runtime(build_dir)
+
+            self.assertTrue(os.path.isfile(operation_marker))
+            self.assertFalse(
+                os.path.exists(
+                    os.path.join(
+                        persistent_state_dir,
+                        setup_common.LEGACY_SETUP_OPERATION_FILENAME,
+                    )
+                )
+            )
 
 
 class TestAgentCredentialStaging(unittest.TestCase):

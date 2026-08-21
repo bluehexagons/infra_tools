@@ -155,9 +155,16 @@ default.
 
 ## State Persistence
 
-Machine type is saved to `/opt/infra_tools/state/machine.json` only after every
-requested setup mutation succeeds. The recalled setup is finalized at the same
-time in `setup.json`.
+Machine type is saved through `/opt/infra_tools/state/machine.json` only after
+every requested setup mutation succeeds. The runtime path is a compatibility
+link to durable root-owned storage under `/var/lib/infra_tools`, so refreshing
+the uploaded infra_tools source does not discard release metadata, bundle
+registrations, or maintenance state. Legacy state is migrated automatically.
+An unfinished marker from the old non-persistent layout is retained once as
+`setup-operation.pre-persistence.json` for diagnosis without blocking the
+explicit migration rerun; subsequent operation markers remain durable and
+retain their normal recovery guard.
+The recalled setup is finalized at the same time in `setup.json`.
 
 A real setup first creates `/opt/infra_tools/state/setup-operation.json`. It
 records the current step and blocks another setup if execution is interrupted.
