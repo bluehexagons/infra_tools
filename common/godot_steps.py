@@ -24,7 +24,7 @@ from lib.release_management import (
     write_json_state,
 )
 from lib.remote_utils import get_user_home, is_dry_run, run
-from lib.validation import validate_filesystem_path
+from lib.validation import validate_filesystem_path, validate_network_ip_or_cidr
 from lib.validators import validate_username
 
 from .common_steps import _run_as_login_user
@@ -160,6 +160,7 @@ def write_godot_bundle_state(
     bundles: list[str],
     users: list[str],
     web_identities: list[str],
+    web_access_sources: list[str] | None = None,
 ) -> None:
     """Persist bundle selections used by recurring maintenance."""
     write_json_state(
@@ -167,6 +168,7 @@ def write_godot_bundle_state(
         {
             "bundles": bundles,
             "users": users,
+            "web_access_sources": web_access_sources or [],
             "web_identities": web_identities,
         },
         mode=0o600,
@@ -1184,10 +1186,28 @@ def _validated_registered_bundles() -> tuple[list[str], list[str], list[str]]:
     return bundles, users, web_identities
 
 
+def _validated_registered_web_access_sources() -> list[str]:
+    """Return the saved source policy for managed HTTPS forwarding."""
+
+    state = read_godot_bundle_state()
+    raw_sources = state.get("web_access_sources", [])
+    if not isinstance(raw_sources, list) or not all(
+        isinstance(source, str) for source in raw_sources
+    ):
+        raise RuntimeError("Invalid Godot web access sources in saved state")
+    return list(
+        dict.fromkeys(
+            validate_network_ip_or_cidr(source, "Godot web access source")
+            for source in raw_sources
+        )
+    )
+
+
 def _install_selected_godot_bundles(
     bundles: list[str],
     users: list[str],
     web_identities: list[str],
+    web_access_sources: list[str] | None = None,
 ) -> bool:
     """Install or update selected bundles for their registered users."""
     changed = False
@@ -1196,7 +1216,11 @@ def _install_selected_godot_bundles(
             changed = install_or_update_godot_web_bundle(username) or changed
         from common.godot_web_steps import configure_godot_web_host
 
-        changed = configure_godot_web_host(web_identities, users) or changed
+        changed = configure_godot_web_host(
+            web_identities,
+            users,
+            web_access_sources or [],
+        ) or changed
     if "publishing" in bundles:
         _butler_tag, butler_changed, _butler_sha256 = (
             install_or_update_butler_release()
@@ -1234,7 +1258,12 @@ def _register_godot_bundles(
     for identity in identities_for_config(config.host, config.system_hostname):
         if identity not in web_identities:
             web_identities.append(identity)
-    write_godot_bundle_state(bundles, users, web_identities)
+    write_godot_bundle_state(
+        bundles,
+        users,
+        web_identities,
+        config.effective_access_sources(),
+    )
     return bundles, users, web_identities
 
 
@@ -1249,7 +1278,20 @@ def install_godot_bundles(config: SetupConfig) -> None:
     from common.godot_web_steps import identities_for_config
 
     web_identities = identities_for_config(config.host, config.system_hostname)
-    _install_selected_godot_bundles(bundles, [config.username], web_identities)
+    web_access_sources = config.effective_access_sources()
+    _install_selected_godot_bundles(
+        bundles,
+        [config.username],
+        web_identities,
+        web_access_sources,
+    )
+    if "web" in bundles:
+        from common.godot_web_steps import configure_godot_agent_skills
+
+        configure_godot_agent_skills(
+            config.username,
+            config.selected_agent_tools(),
+        )
     _register_godot_bundles(config)
 
 
@@ -1258,14 +1300,25 @@ def update_registered_godot_bundles() -> bool:
     from common.godot_web_steps import discover_local_web_identities
 
     bundles, users, web_identities = _validated_registered_bundles()
+    web_access_sources = _validated_registered_web_access_sources()
     if not bundles:
         return False
     if not users:
         raise RuntimeError("Godot bundles are registered without a target user")
     if "web" in bundles and not web_identities:
         web_identities = discover_local_web_identities()
-        write_godot_bundle_state(bundles, users, web_identities)
-    return _install_selected_godot_bundles(bundles, users, web_identities)
+        write_godot_bundle_state(
+            bundles,
+            users,
+            web_identities,
+            web_access_sources,
+        )
+    return _install_selected_godot_bundles(
+        bundles,
+        users,
+        web_identities,
+        web_access_sources,
+    )
 
 
 def configure_auto_update_godot(config: SetupConfig) -> None:

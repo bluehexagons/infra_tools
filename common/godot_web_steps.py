@@ -5,17 +5,19 @@ from __future__ import annotations
 import hashlib
 import html
 import ipaddress
+import json
 import os
 import pwd
 import secrets
 import shlex
 import socket
 import tempfile
+from collections.abc import Sequence
 
 from lib.atomic_io import write_text_atomic
 from lib.config import GODOT_WEB_HTTPS_PORT
 from lib.remote_utils import install_package, is_package_installed, is_service_active, run
-from lib.validation import validate_filesystem_path
+from lib.validation import validate_filesystem_path, validate_network_ip_or_cidr
 from lib.validators import validate_host, validate_username
 
 
@@ -34,6 +36,16 @@ GODOT_WEB_NGINX_LINK = "/etc/nginx/sites-enabled/infra-tools-godot-web"
 GODOT_WEB_URL_FILE = "/etc/infra-tools/internal-web/base-url"
 GODOT_WEB_PUBLISHER = "/opt/infra_tools/common/service_tools/godot_web_publish.py"
 GODOT_WEB_PUBLISHER_LINK = "/usr/local/bin/godot-web-publish"
+GODOT_WEB_UTILITY = "/opt/infra_tools/common/service_tools/infra_web.py"
+GODOT_WEB_UTILITY_LINK = "/usr/local/bin/infra-web"
+GODOT_WEB_POLICY_FILE = "/etc/infra-tools/internal-web/policy.json"
+GODOT_WEB_FORWARD_PORT_MIN = 8444
+GODOT_WEB_FORWARD_PORT_MAX = 8999
+GODOT_AGENT_SKILLS_ROOT = "/opt/infra_tools/common/agent_skills"
+GODOT_AGENT_SKILLS = (
+    "infra-tools-godot-web",
+    "infra-tools-web-gateway",
+)
 
 _NGINX_MARKER = "# Managed by infra_tools Godot web hosting"
 _LOCAL_CA_COMMON_NAME = "infra_tools VM-local Web CA"
@@ -344,6 +356,10 @@ server {{
     index index.html;
     charset utf-8;
     autoindex off;
+    gzip on;
+    gzip_static on;
+    gzip_vary on;
+    gzip_types application/wasm application/octet-stream;
 
     location = / {{
         try_files /index.html =404;
@@ -372,7 +388,7 @@ server {{
 """
 
 
-def _landing_page(base_url: str, local_ca: bool) -> str:
+def _landing_page(base_url: str, local_ca: bool, users: Sequence[str]) -> str:
     trust_note = (
         '<p>This VM uses its own certificate authority. It is already trusted by '
         'software on the VM. For another computer, install '
@@ -380,6 +396,12 @@ def _landing_page(base_url: str, local_ca: bool) -> str:
         if local_ca
         else "<p>This endpoint is using an existing publicly trusted certificate.</p>"
     )
+    user_items = "".join(
+        f'<li><a href="/games/{html.escape(username)}/">'
+        f"{html.escape(username)} games</a></li>"
+        for username in users
+    )
+    catalogs = f"<ul>{user_items}</ul>" if user_items else ""
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -387,7 +409,8 @@ def _landing_page(base_url: str, local_ca: bool) -> str:
 <style>body{{font:16px system-ui,sans-serif;max-width:48rem;margin:3rem auto;padding:0 1rem;line-height:1.5}}code{{background:#eef1f4;padding:.15rem .3rem;border-radius:.2rem}}</style>
 </head><body><main><h1>Internal web host</h1>
 <p>Godot exports are available under <a href="/games/">/games/</a>.</p>
-<p>Publish the current project with <code>godot-web-publish GAME_NAME</code>.</p>
+{catalogs}
+<p>Publish the current project with <code>infra-web publish godot</code>.</p>
 {trust_note}
 <p>Base URL: <code>{html.escape(base_url)}</code></p>
 </main></body></html>
@@ -448,21 +471,133 @@ def _configure_user_roots(users: list[str]) -> bool:
     return changed
 
 
-def _install_publisher_link() -> bool:
-    if not os.path.isfile(GODOT_WEB_PUBLISHER):
-        raise RuntimeError(f"Godot web publisher is missing: {GODOT_WEB_PUBLISHER}")
-    os.chmod(GODOT_WEB_PUBLISHER, 0o755)
-    if os.path.lexists(GODOT_WEB_PUBLISHER_LINK):
+def _install_managed_link(source: str, destination: str, label: str) -> bool:
+    if not os.path.isfile(source):
+        raise RuntimeError(f"{label} is missing: {source}")
+    os.chmod(source, 0o755)
+    if os.path.lexists(destination):
         if (
-            os.path.islink(GODOT_WEB_PUBLISHER_LINK)
-            and os.path.realpath(GODOT_WEB_PUBLISHER_LINK) == GODOT_WEB_PUBLISHER
+            os.path.islink(destination)
+            and os.path.realpath(destination) == source
         ):
             return False
-        raise RuntimeError(
-            f"Refusing to replace unmanaged publisher: {GODOT_WEB_PUBLISHER_LINK}"
-        )
-    os.symlink(GODOT_WEB_PUBLISHER, GODOT_WEB_PUBLISHER_LINK)
+        raise RuntimeError(f"Refusing to replace unmanaged {label}: {destination}")
+    os.symlink(source, destination)
     return True
+
+
+def _install_publisher_links() -> bool:
+    changed = _install_managed_link(
+        GODOT_WEB_PUBLISHER,
+        GODOT_WEB_PUBLISHER_LINK,
+        "Godot web publisher",
+    )
+    return _install_managed_link(
+        GODOT_WEB_UTILITY,
+        GODOT_WEB_UTILITY_LINK,
+        "infra-web utility",
+    ) or changed
+
+
+def _configure_web_policy(
+    base_url: str,
+    cert_path: str,
+    key_path: str,
+    local_ca: bool,
+    users: list[str],
+    access_sources: Sequence[str],
+) -> bool:
+    sources = [
+        validate_network_ip_or_cidr(source, "internal HTTPS access source")
+        for source in access_sources
+    ]
+    content = json.dumps(
+        {
+            "access_sources": list(dict.fromkeys(sources)),
+            "base_url": base_url,
+            "ca_certificate": GODOT_WEB_CA_CERT if local_ca else None,
+            "certificate": cert_path,
+            "certificate_key": key_path,
+            "forward_port_max": GODOT_WEB_FORWARD_PORT_MAX,
+            "forward_port_min": GODOT_WEB_FORWARD_PORT_MIN,
+            "users": list(dict.fromkeys(users)),
+            "version": 1,
+        },
+        indent=2,
+        sort_keys=True,
+    ) + "\n"
+    changed = _write_if_changed(GODOT_WEB_POLICY_FILE, content, 0o644)
+    result = run(
+        f"{shlex.quote(GODOT_WEB_UTILITY_LINK)} forward reconcile",
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "forward reconciliation failed").strip()
+        raise RuntimeError(f"Could not reconcile HTTPS forwards: {detail}")
+    return changed
+
+
+def _ensure_user_skill_directory(path: str, uid: int, gid: int) -> bool:
+    if os.path.lexists(path):
+        if os.path.islink(path) or not os.path.isdir(path):
+            raise RuntimeError(f"Refusing unsafe agent skill directory: {path}")
+        if os.stat(path).st_uid != uid:
+            raise RuntimeError(f"Refusing agent skill directory owned by another user: {path}")
+        return False
+    os.mkdir(path, mode=0o755)
+    os.chown(path, uid, gid)
+    return True
+
+
+def configure_godot_agent_skills(username: str, agent_tools: Sequence[str]) -> bool:
+    """Install shared Godot workflow skills for selected Codex/OpenCode users."""
+
+    if not {"codex", "opencode"}.intersection(agent_tools):
+        return False
+    if not validate_username(username):
+        raise ValueError(f"Invalid Godot agent-skill username: {username}")
+    account = pwd.getpwnam(username)
+    home = account.pw_dir
+    validate_filesystem_path(home, must_exist=True)
+    agents_dir = os.path.join(home, ".agents")
+    skills_dir = os.path.join(agents_dir, "skills")
+    changed = _ensure_user_skill_directory(agents_dir, account.pw_uid, account.pw_gid)
+    changed = (
+        _ensure_user_skill_directory(skills_dir, account.pw_uid, account.pw_gid)
+        or changed
+    )
+    for skill_name in GODOT_AGENT_SKILLS:
+        source = os.path.join(GODOT_AGENT_SKILLS_ROOT, skill_name, "SKILL.md")
+        if not os.path.isfile(source):
+            raise RuntimeError(f"Managed Godot agent skill is missing: {source}")
+        destination_dir = os.path.join(skills_dir, skill_name)
+        changed = (
+            _ensure_user_skill_directory(
+                destination_dir,
+                account.pw_uid,
+                account.pw_gid,
+            )
+            or changed
+        )
+        destination = os.path.join(destination_dir, "SKILL.md")
+        if os.path.islink(destination):
+            raise RuntimeError(f"Refusing symlinked managed agent skill: {destination}")
+        with open(source, encoding="utf-8") as file_obj:
+            content = file_obj.read()
+        previous = None
+        try:
+            with open(destination, encoding="utf-8") as file_obj:
+                previous = file_obj.read()
+        except FileNotFoundError:
+            pass
+        if previous is not None and "managed-by: infra_tools" not in previous:
+            raise RuntimeError(f"Refusing to replace unmanaged agent skill: {destination}")
+        if previous != content:
+            write_text_atomic(destination, content, mode=0o644)
+            os.chown(destination, account.pw_uid, account.pw_gid)
+            changed = True
+    return changed
 
 
 def _configure_nginx_site(content: str, *, reload_required: bool = False) -> bool:
@@ -510,7 +645,11 @@ def _configure_nginx_site(content: str, *, reload_required: bool = False) -> boo
     return changed
 
 
-def configure_godot_web_host(identities: list[str], users: list[str]) -> bool:
+def configure_godot_web_host(
+    identities: list[str],
+    users: list[str],
+    access_sources: Sequence[str] = (),
+) -> bool:
     """Reconcile a ready-to-publish HTTPS origin for registered Godot users."""
 
     normalized_identities = validate_web_identities(identities)
@@ -525,7 +664,7 @@ def configure_godot_web_host(identities: list[str], users: list[str]) -> bool:
     base_url = _base_url(normalized_identities)
     changed = _write_if_changed(
         os.path.join(GODOT_WEB_ROOT, "index.html"),
-        _landing_page(base_url, local_ca),
+        _landing_page(base_url, local_ca, normalized_users),
         0o644,
     ) or changed
     if local_ca:
@@ -541,10 +680,18 @@ def configure_godot_web_host(identities: list[str], users: list[str]) -> bool:
             os.unlink(ca_download)
             changed = True
     changed = _write_if_changed(GODOT_WEB_URL_FILE, base_url + "\n", 0o644) or changed
-    changed = _install_publisher_link() or changed
+    changed = _install_publisher_links() or changed
     changed = _configure_nginx_site(
         render_nginx_config(cert_path, key_path),
         reload_required=certificate_changed or not local_ca,
+    ) or changed
+    changed = _configure_web_policy(
+        base_url,
+        cert_path,
+        key_path,
+        local_ca,
+        normalized_users,
+        access_sources,
     ) or changed
     fingerprint = hashlib.sha256()
     if local_ca:
@@ -561,6 +708,7 @@ def configure_godot_web_host(identities: list[str], users: list[str]) -> bool:
 
 __all__ = [
     "GODOT_WEB_GAMES_ROOT",
+    "configure_godot_agent_skills",
     "configure_godot_web_host",
     "discover_local_web_identities",
     "identities_for_config",

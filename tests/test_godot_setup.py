@@ -119,6 +119,11 @@ class TestGodotSetup(unittest.TestCase):
                 "_validated_registered_bundles",
                 return_value=(["web"], ["agent"], []),
             ),
+            patch.object(
+                godot_steps,
+                "_validated_registered_web_access_sources",
+                return_value=["192.0.2.0/24"],
+            ),
             patch(
                 "common.godot_web_steps.discover_local_web_identities",
                 return_value=["godot-vm", "127.0.0.1"],
@@ -134,10 +139,16 @@ class TestGodotSetup(unittest.TestCase):
 
         self.assertTrue(changed)
         write_state.assert_called_once_with(
-            ["web"], ["agent"], ["godot-vm", "127.0.0.1"]
+            ["web"],
+            ["agent"],
+            ["godot-vm", "127.0.0.1"],
+            ["192.0.2.0/24"],
         )
         install_bundles.assert_called_once_with(
-            ["web"], ["agent"], ["godot-vm", "127.0.0.1"]
+            ["web"],
+            ["agent"],
+            ["godot-vm", "127.0.0.1"],
+            ["192.0.2.0/24"],
         )
 
     def test_agent_profile_can_add_graphical_and_headless_godot_steps(self):

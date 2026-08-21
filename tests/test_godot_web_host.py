@@ -24,6 +24,8 @@ class TestGodotWebHost(unittest.TestCase):
         self.assertIn("Cross-Origin-Embedder-Policy \"require-corp\"", content)
         self.assertIn("application/x-x509-ca-cert", content)
         self.assertIn("autoindex on", content)
+        self.assertIn("gzip_static on", content)
+        self.assertIn("application/wasm", content)
 
     def test_certificate_identities_include_remote_and_loopback_access(self) -> None:
         self.assertEqual(
@@ -56,8 +58,9 @@ class TestGodotWebHost(unittest.TestCase):
                     "_certificate_for_identities",
                     return_value=("/cert", "/key", True, True),
                 ),
-                patch.object(godot_web_steps, "_install_publisher_link", return_value=True),
+                patch.object(godot_web_steps, "_install_publisher_links", return_value=True),
                 patch.object(godot_web_steps, "_configure_nginx_site", return_value=True) as nginx,
+                patch.object(godot_web_steps, "_configure_web_policy", return_value=True),
                 patch.object(godot_web_steps.pwd, "getpwnam", return_value=account),
             ):
                 changed = godot_web_steps.configure_godot_web_host(
@@ -68,10 +71,52 @@ class TestGodotWebHost(unittest.TestCase):
             self.assertTrue(changed)
             self.assertTrue(os.path.isdir(os.path.join(games_root, "agent")))
             with open(os.path.join(web_root, "index.html"), encoding="utf-8") as page:
-                self.assertIn("godot-web-publish", page.read())
+                content = page.read()
+                self.assertIn("infra-web publish godot", content)
+                self.assertIn("agent games", content)
             with open(url_file, encoding="utf-8") as base_url:
                 self.assertEqual(base_url.read(), "https://192.0.2.10:8443\n")
             nginx.assert_called_once()
+
+    def test_installs_shared_agent_skills_for_codex_or_opencode(self) -> None:
+        with tempfile.TemporaryDirectory() as home:
+            account = SimpleNamespace(
+                pw_dir=home,
+                pw_uid=os.getuid(),
+                pw_gid=os.getgid(),
+            )
+            source_root = os.path.join(
+                os.path.dirname(godot_web_steps.__file__),
+                "agent_skills",
+            )
+            with (
+                patch.object(godot_web_steps, "GODOT_AGENT_SKILLS_ROOT", source_root),
+                patch.object(godot_web_steps.pwd, "getpwnam", return_value=account),
+            ):
+                changed = godot_web_steps.configure_godot_agent_skills(
+                    "agent",
+                    ["codex"],
+                )
+
+            self.assertTrue(changed)
+            for skill_name in godot_web_steps.GODOT_AGENT_SKILLS:
+                skill_path = os.path.join(
+                    home,
+                    ".agents",
+                    "skills",
+                    skill_name,
+                    "SKILL.md",
+                )
+                self.assertTrue(os.path.isfile(skill_path))
+                with open(skill_path, encoding="utf-8") as file_obj:
+                    self.assertIn("managed-by: infra_tools", file_obj.read())
+
+    def test_does_not_install_agent_skills_without_supported_agent(self) -> None:
+        with patch.object(godot_web_steps.pwd, "getpwnam") as getpwnam:
+            changed = godot_web_steps.configure_godot_agent_skills("agent", ["gh"])
+
+        self.assertFalse(changed)
+        getpwnam.assert_not_called()
 
 
 class TestGodotWebPublisher(unittest.TestCase):
@@ -122,6 +167,10 @@ class TestGodotWebPublisher(unittest.TestCase):
                 export_path = command[-1]
                 with open(export_path, "w", encoding="utf-8") as export_file:
                     export_file.write("game")
+                with open(os.path.join(os.path.dirname(export_path), "demo.wasm"), "wb") as wasm:
+                    wasm.write(b"wasm" * 1024)
+                with open(os.path.join(os.path.dirname(export_path), "demo.pck"), "wb") as pack:
+                    pack.write(b"pack" * 1024)
                 return SimpleNamespace(returncode=0)
 
             with (
@@ -141,6 +190,9 @@ class TestGodotWebPublisher(unittest.TestCase):
             self.assertTrue(os.path.isfile(published_file))
             self.assertEqual(os.stat(os.path.dirname(published_file)).st_mode & 0o777, 0o755)
             self.assertEqual(os.stat(published_file).st_mode & 0o777, 0o644)
+            self.assertTrue(os.path.isfile(os.path.join(user_root, "demo", "demo.wasm.gz")))
+            self.assertTrue(os.path.isfile(os.path.join(user_root, "demo", ".infra-tools.json")))
+            self.assertTrue(os.path.isfile(os.path.join(user_root, "index.html")))
             command = run_export.call_args.args[0]
             self.assertEqual(command[:2], ["godot", "--headless"])
             self.assertIn("--export-release", command)
@@ -152,6 +204,35 @@ class TestGodotWebPublisher(unittest.TestCase):
 
         self.assertEqual(result, 2)
         run_export.assert_not_called()
+
+    def test_publish_derives_slug_from_project_name(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            project_dir = os.path.join(temporary_dir, "project")
+            games_root = os.path.join(temporary_dir, "games")
+            user_root = os.path.join(games_root, "agent")
+            os.makedirs(project_dir)
+            os.makedirs(user_root)
+            with open(os.path.join(project_dir, "project.godot"), "w", encoding="utf-8") as project:
+                project.write('[application]\nconfig/name="My Great Game!"\n')
+            account = SimpleNamespace(pw_uid=os.getuid(), pw_name="agent")
+
+            def create_export(command: list[str], **_kwargs: object) -> SimpleNamespace:
+                with open(command[-1], "w", encoding="utf-8") as export_file:
+                    export_file.write("game")
+                return SimpleNamespace(returncode=0)
+
+            with (
+                patch.object(godot_web_publish, "GAMES_ROOT", games_root),
+                patch.object(godot_web_publish, "BASE_URL_FILE", os.path.join(temporary_dir, "url")),
+                patch.object(godot_web_publish, "_current_account", return_value=account),
+                patch.object(godot_web_publish.subprocess, "run", side_effect=create_export),
+            ):
+                result = godot_web_publish.main(
+                    ["--no-precompress", "--project", project_dir]
+                )
+
+            self.assertEqual(result, 0)
+            self.assertTrue(os.path.isfile(os.path.join(user_root, "my-great-game", "index.html")))
 
 
 if __name__ == "__main__":

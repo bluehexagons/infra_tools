@@ -49,15 +49,15 @@ and agents running as that account see the same export targets.
 The web bundle also installs an isolated Nginx origin on TCP 8443. Setup opens
 that port through the same UFW and `--access-source` policy as other managed
 web ports, creates a publishing directory for the configured account, and
-installs `godot-web-publish` system-wide. A project with a `Web` export preset
-can be exported and activated without writing a game-specific service or
-Nginx configuration:
+installs `infra-web` plus the `godot-web-publish` compatibility command
+system-wide. A project with a `Web` export preset can be exported and activated
+without writing a game-specific service or Nginx configuration:
 
 ```bash
 cd ~/repos/my-game
-godot-web-publish my-game
+infra-web publish godot
 # Use another preset or create a debug export when needed:
-godot-web-publish my-game --preset "Web Threads" --debug
+infra-web publish godot my-game --preset "Web Threads" --debug
 ```
 
 The resulting URL is
@@ -70,10 +70,58 @@ Cross-Origin-Opener-Policy: same-origin
 Cross-Origin-Embedder-Policy: require-corp
 ```
 
-The same endpoint works for Godot's default single-threaded exports. Published
-games are replaced only after Godot completes a new export, so a failed build
-does not remove the last working copy. Agents and interactive users share the
-same command and user-owned publishing root.
+The same endpoint works for Godot's default single-threaded exports. The
+publisher derives a URL-safe name from `application/config/name` when a name is
+not supplied, creates deterministic gzip copies of `.wasm` and `.pck` files,
+and updates a per-user game catalog. Nginx serves those precompressed files
+when the browser accepts gzip. Published games are replaced only after Godot
+completes a new export, with a per-game lock so unrelated games may publish in
+parallel without conflicting updates. A failed build does not remove the last
+working copy.
+
+Use the same utility for inspection and cleanup:
+
+```bash
+infra-web list
+infra-web url my-game
+infra-web doctor my-game
+infra-web remove my-game --yes
+```
+
+`doctor` verifies trusted HTTPS, the secure-context and cross-origin isolation
+headers, and the `application/wasm` content type. `--json` is available on
+publish, list, and doctor for agent automation. `--open` opens a successful
+publication in the user's default browser.
+
+### Live HTTPS forwarding
+
+Static game exports share port 8443 and do not consume one port per game. For a
+live development server, API, or WebSocket service, bind the process to a
+loopback address and register a separate managed HTTPS listener:
+
+```bash
+# In one shell, the application listens only inside the VM.
+my-preview-server --host 127.0.0.1 --port 3000
+
+# In another shell, allocate HTTPS and apply Godot's required headers.
+sudo infra-web forward add my-preview \
+  --listen auto \
+  --to 127.0.0.1:3000 \
+  --profile godot
+
+infra-web forward list
+infra-web doctor my-preview
+sudo infra-web forward remove my-preview
+```
+
+The configured account already has the VM setup's non-interactive sudo access;
+only forward mutations require it. `infra-web` allocates TCP 8444–8999 by
+default, restricts upstreams to unprivileged loopback ports, reuses the managed
+certificate, enables WebSocket proxying, inherits the saved `--access-source`
+policy, and reconciles comment-tagged UFW rules. It validates Nginx before a
+reload and restores the previous generated configuration and state when a
+mutation fails. Raw Nginx directives, non-loopback targets, and source-policy
+overrides are not accepted.
 
 If a current Let's Encrypt certificate already exists for a configured DNS
 name, the origin reuses it. Otherwise setup creates a VM-local certificate
@@ -88,6 +136,11 @@ fingerprint, and the certificate is available on the VM at:
 ```text
 /var/lib/infra_tools/internal-web-pki/ca.crt
 ```
+
+Run `infra-web ca` to print the active CA path and SHA-256 fingerprint. When an
+existing publicly trusted certificate is in use, the command reports that no
+private CA enrollment is required. Never use an insecure TLS bypass for an
+agent or browser check.
 
 The private CA key remains root-only. Re-running setup preserves the CA and
 renews the server certificate when its names change or it approaches expiry.
@@ -116,6 +169,14 @@ Combine `web` with an explicit browser or the existing Playwright integration
 when exported games need browser smoke tests. The origin and publisher are
 system-wide, so browser-capable agents can test the same URL shown after
 publishing without a separate server process.
+
+When Codex or OpenCode is selected on the target, the web bundle also installs
+the `infra-tools-godot-web` and `infra-tools-web-gateway` skills under
+`~/.agents/skills`. Both agents discover that shared standard location. The
+skills teach agents to publish and diagnose the managed origin, use loopback
+for live servers, and avoid direct Nginx/UFW edits or TLS verification bypasses.
+They contain no credentials and are not installed for a profile that selects
+neither agent.
 
 ## Release and integrity policy
 
