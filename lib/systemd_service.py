@@ -186,8 +186,8 @@ def cleanup_all_infra_services(dry_run: bool = False) -> None:
         r"^app-.*\.service$",
         # Auto-update units created by infra_tools. Keep this explicit so an
         # unrelated unit with a similar name cannot be removed.
-        r"^auto-update-(?:apt|gogs|node|ruby|uv)\.service$",
-        r"^auto-update-(?:apt|gogs|node|ruby|uv)\.timer$",
+        r"^auto-update-(?:apt|godot|gogs|node|ruby|uv)\.service$",
+        r"^auto-update-(?:apt|godot|gogs|node|ruby|uv)\.timer$",
         # Auto-restart service
         r"^auto-restart-if-needed\.service$",
         r"^auto-restart-if-needed\.timer$",

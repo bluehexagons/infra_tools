@@ -21,6 +21,7 @@ PLUGIN = PluginDefinition(
         "install_go",
         "install_node",
         "install_python",
+        "install_godot",
         "install_github_cli",
         "install_codex",
         "install_claude",
@@ -34,6 +35,7 @@ PLUGIN = PluginDefinition(
         "install_git_lfs_for_agent_repositories",
         "clone_agent_repositories",
         "configure_auto_update_uv",
+        "configure_auto_update_godot",
         "update_and_upgrade_packages",
         "check_debian_package_sources",
         "ensure_sudo_installed",
@@ -156,6 +158,11 @@ def extend_runtime_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]])
     if config.install_python:
         steps.append(("Installing Python tooling (aliases + uv)", install_python))
         steps.append(("Configuring uv auto-update", configure_auto_update_uv))
+    if config.install_godot:
+        from common.godot_steps import configure_auto_update_godot, install_godot
+
+        steps.append(("Installing Godot Engine (latest stable)", install_godot))
+        steps.append(("Configuring Godot auto-update", configure_auto_update_godot))
 
 
 def extend_package_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -> None:
@@ -280,12 +287,14 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
     )
     from common.t3code_steps import install_t3code_web
     from common.browser_automation_steps import install_browser_automation
+    from common.godot_steps import configure_auto_update_godot, install_godot
 
     return {
         "install_ruby": install_ruby,
         "install_go": install_go,
         "install_node": install_node,
         "install_python": install_python,
+        "install_godot": install_godot,
         "install_github_cli": install_github_cli,
         "install_codex": install_codex,
         "install_claude": install_claude,
@@ -299,6 +308,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "install_git_for_agent_repositories": install_git_for_agent_repositories,
         "install_git_lfs_for_agent_repositories": install_git_lfs_for_agent_repositories,
         "configure_auto_update_uv": configure_auto_update_uv,
+        "configure_auto_update_godot": configure_auto_update_godot,
         "update_and_upgrade_packages": update_and_upgrade_packages,
         "check_debian_package_sources": check_debian_package_sources,
         "ensure_sudo_installed": ensure_sudo_installed,

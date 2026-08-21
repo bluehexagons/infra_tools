@@ -29,6 +29,7 @@ from .common_steps import (
 
 from .swap_steps import configure_swap
 from .network_steps import configure_static_network, configure_system_hostname
+from .godot_steps import configure_auto_update_godot, install_godot
 
 __all__ = [
     'check_debian_package_sources',
@@ -47,9 +48,11 @@ __all__ = [
     'install_go',
     'install_node',
     'install_python',
+    'install_godot',
     'configure_auto_update_ruby',
     'configure_auto_update_gogs',
     'configure_auto_update_uv',
+    'configure_auto_update_godot',
     'install_mail_utils',
     'configure_swap',
     'install_apt_packages',

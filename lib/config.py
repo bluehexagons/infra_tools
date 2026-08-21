@@ -250,6 +250,7 @@ class SetupConfig:
     install_go: bool = False
     install_node: bool = False
     install_python: bool = False
+    install_godot: bool = False
     install_gh: bool = False
     install_codex: bool = False
     install_claude: bool = False
@@ -664,6 +665,9 @@ class SetupConfig:
         if self.install_python:
             args.append("--python")
 
+        if self.install_godot:
+            args.append("--godot")
+
         for tool in self.selected_agent_tools():
             args.append(f"--agent-tool {shlex.quote(tool)}")
 
@@ -1027,6 +1031,9 @@ class SetupConfig:
         
         if self.install_python:
             cmd_parts.append("--python")
+
+        if self.install_godot:
+            cmd_parts.append("--godot")
 
         selected_agent_tools = self.selected_agent_tools()
         default_agent_tools = list(system_type_defaults.default_agent_tools)
@@ -1687,6 +1694,7 @@ class SetupConfig:
             install_go=getattr(args, 'install_go', False),
             install_node=getattr(args, 'install_node', False),
             install_python=getattr(args, 'install_python', False),
+            install_godot=getattr(args, 'install_godot', False),
             agent_tools=agent_tools,
             agent_tools_removed=removed_agent_tools or None,
             desktop_interfaces=desktop_interfaces,

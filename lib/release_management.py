@@ -219,6 +219,48 @@ def fetch_preferred_verified_github_release_asset(
     )
 
 
+def fetch_latest_verified_github_release_asset(
+    repo: str,
+    *,
+    asset_matches: Callable[[str, str], bool],
+    missing_asset_description: str,
+    per_page: int = 20,
+) -> tuple[str, str, str]:
+    """Fetch the newest stable release asset and its publisher SHA-256."""
+    releases = fetch_github_releases(repo, per_page=per_page)
+    for release in releases:
+        if bool(release.get("draft")) or bool(release.get("prerelease")):
+            continue
+        tag_name = release.get("tag_name")
+        assets = release.get("assets")
+        if not isinstance(tag_name, str) or not isinstance(assets, list):
+            continue
+        for asset in assets:
+            if not isinstance(asset, dict):
+                continue
+            asset_name = asset.get("name")
+            download_url = asset.get("browser_download_url")
+            digest = asset.get("digest")
+            if not (
+                isinstance(asset_name, str)
+                and isinstance(download_url, str)
+                and isinstance(digest, str)
+                and asset_matches(tag_name, asset_name)
+            ):
+                continue
+            try:
+                return (
+                    validate_release_tag(tag_name),
+                    validate_release_download_url(download_url),
+                    validate_release_sha256_digest(digest),
+                )
+            except ValueError:
+                continue
+    raise RuntimeError(
+        f"{missing_asset_description}; a publisher-provided SHA-256 is required"
+    )
+
+
 def fetch_latest_github_release_asset(
     repo: str,
     *,

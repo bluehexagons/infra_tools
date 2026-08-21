@@ -476,6 +476,13 @@ def add_setup_arguments(
                         action=argparse.BooleanOptionalAction if not for_remote else "store_true",
                         default=None if not for_remote else False,
                         help="Install Python tooling (python aliases and uv). For shell autocompletion, use the local completions installer script.")
+    parser.add_argument(
+        "--godot",
+        dest="install_godot",
+        action=argparse.BooleanOptionalAction if not for_remote else "store_true",
+        default=None if not for_remote else False,
+        help="Install the latest stable Godot Engine for graphical and headless use",
+    )
 
     # Agent VM tooling. Values add to narrow profile defaults; --no-agent-tool
     # provides an explicit opt-out for an individual default.

@@ -11,6 +11,7 @@ Related pages:
 - [`NETWORKING.md`](./NETWORKING.md) for workspace network inventory
 - [`CICD.md`](./CICD.md) for webhook CI/CD setup
 - [`WORKSTATIONS.md`](./WORKSTATIONS.md) for desktop profiles and application choices
+- [`GODOT.md`](./GODOT.md) for graphical/headless Godot installation and updates
 - [`MACHINE_TYPES.md`](./MACHINE_TYPES.md) for machine type behavior
 - [`CREDENTIALS.md`](./CREDENTIALS.md) for workspace passwords, Git access,
   agent auth/config sources, sharing, and credential rotation
@@ -258,8 +259,12 @@ the local desktop installer path.
 | `--node` | Install nvm + Node.js + PNPM |
 | `--go` | Install Go |
 | `--python` | Install Python aliases + uv |
+| `--godot` | Install the newest stable verified Godot Engine release for graphical or headless use |
 
-Selecting a language runtime also installs its managed update timer. See
+Selecting a managed runtime also installs its update timer. Godot is fetched
+from the official release channel rather than Debian's package version and is
+placed on the system `PATH` as `godot` and `godot4`, including for agent users.
+See [`GODOT.md`](./GODOT.md) for the artifact and headless-use contract, and
 [`MAINTENANCE.md`](./MAINTENANCE.md) for schedules and update policy.
 
 ### Agent host flags
@@ -391,7 +396,9 @@ Agent tools are selected with repeatable or comma-separated `--agent-tool`
 flags. The three agent profiles provide the narrow `gh` plus `codex` default;
 supplied tools add to that set, while `--no-agent-tool` removes selected
 defaults. Other profiles retain no implicit agents. Add unrelated packages with
-`--apt-install`, and add language runtimes with their individual flags.
+`--apt-install`, and add runtimes with their individual flags. `--godot` works
+with every profile, including the headless `agent_vm`; its system-wide launchers
+make the engine available in SSH, desktop, T3 Code, and coding-agent shells.
 
 Any setup with agent features installs a managed `~/.local/bin/infra-tools`
 launcher for the target user. On a remote setup the launcher uses the source

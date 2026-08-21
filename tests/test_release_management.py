@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from lib.release_management import (
+    fetch_latest_verified_github_release_asset,
     install_binary_release,
     validate_release_download_url,
     validate_release_sha256_digest,
@@ -14,6 +15,36 @@ from lib.release_management import (
 
 
 class TestReleaseValidation(unittest.TestCase):
+    @patch("lib.release_management.fetch_github_releases")
+    def test_latest_verified_asset_skips_prereleases_and_requires_digest(self, mock_fetch):
+        mock_fetch.return_value = [
+            {
+                "tag_name": "4.8-beta1",
+                "prerelease": True,
+                "assets": [],
+            },
+            {
+                "tag_name": "4.7.2-stable",
+                "prerelease": False,
+                "assets": [
+                    {
+                        "name": "Godot_v4.7.2-stable_linux.x86_64.zip",
+                        "browser_download_url": "https://example.test/godot.zip",
+                        "digest": f"sha256:{'a' * 64}",
+                    }
+                ],
+            },
+        ]
+
+        self.assertEqual(
+            fetch_latest_verified_github_release_asset(
+                "godotengine/godot",
+                asset_matches=lambda _tag, name: name.endswith("linux.x86_64.zip"),
+                missing_asset_description="missing Godot asset",
+            ),
+            ("4.7.2-stable", "https://example.test/godot.zip", "a" * 64),
+        )
+
     def test_release_tag_is_safe_as_path_component(self):
         self.assertEqual(validate_release_tag("v1.2.3-rc.1"), "v1.2.3-rc.1")
         for invalid in ("../../etc", "release/name", "v1\nnext", "", "."):
