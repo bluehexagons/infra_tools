@@ -97,6 +97,12 @@ class T3CodeWebTest(unittest.TestCase):
             account = SimpleNamespace(pw_dir=temporary, pw_uid=os.getuid(), pw_gid=os.getgid())
             config = self._config(agent_workspace=os.path.join(temporary, "repos"))
             service_path = os.path.join(temporary, "t3code.service")
+            admin_pair_script = os.path.join(
+                os.path.dirname(os.path.dirname(__file__)),
+                "common",
+                "service_tools",
+                "t3code_admin_pair.py",
+            )
 
             def run_command(command: str, **_kwargs):
                 if command == "ufw status numbered":
@@ -122,14 +128,25 @@ class T3CodeWebTest(unittest.TestCase):
                     return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
                 ),
                 patch("common.t3code_steps.T3_SERVICE_FILE", service_path),
+                patch(
+                    "common.t3code_steps.T3_ADMIN_PAIR_SCRIPT",
+                    admin_pair_script,
+                ),
                 patch("common.t3code_steps.remove_nginx_auth_failure_ban"),
             ):
                 install_t3code_web(config)
 
             wrapper = os.path.join(temporary, ".local", "bin", "infra-tools-t3code-web")
             pair_wrapper = os.path.join(temporary, ".local", "bin", "t3code-pair")
+            cli_wrapper = os.path.join(
+                temporary,
+                ".local",
+                "bin",
+                "infra-tools-t3code-pairing-provider",
+            )
             self.assertTrue(os.path.exists(wrapper))
             self.assertTrue(os.path.exists(pair_wrapper))
+            self.assertTrue(os.path.exists(cli_wrapper))
             with open(wrapper, encoding="utf-8") as file_obj:
                 content = file_obj.read()
             self.assertIn("serve --host 0.0.0.0 --port 3773 --no-browser", content)
@@ -143,6 +160,11 @@ class T3CodeWebTest(unittest.TestCase):
                 'export PATH="$HOME/.local/share/infra-tools/t3code/node_modules/.bin:',
                 content,
             )
+            with open(pair_wrapper, encoding="utf-8") as file_obj:
+                pairing_content = file_obj.read()
+            self.assertIn("t3code_admin_pair.py", pairing_content)
+            self.assertIn("--server-url http://127.0.0.1:3773", pairing_content)
+            self.assertIn("--base-url http://target:3773", pairing_content)
             with open(os.path.join(temporary, ".bashrc"), encoding="utf-8") as file_obj:
                 bashrc = file_obj.read()
             self.assertIn("infra-tools T3 Code runtime", bashrc)

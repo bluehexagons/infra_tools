@@ -423,10 +423,12 @@ pairing, client choices, and the loopback/HTTPS boundary. The optional
 `--device-pairing t3code` portal lets a new device request its own one-time
 link through Nginx Basic Auth; see [DEVICE_PAIRING.md](DEVICE_PAIRING.md).
 
-After a LAN T3 Code service is installed, obtain its one-time authenticated
+After a LAN T3 Code service is installed, obtain its one-time administrative
 pairing URL from the control system with `infra-tools agent web pair HOST USER`
-(add `--key PATH` when needed). Opening the bare service address is expected to
-show T3's pairing-key form; it is not an authenticated session.
+(add `--key PATH` when needed). The resulting app session includes T3's
+`access:write` scope for pairing-link and client-session management. Opening the
+bare service address is expected to show T3's pairing-key form; it is not an
+authenticated session.
 
 When the protected portal is selected, open `http://HOST:3774/`, answer the
 Basic Auth challenge, and pair the current browser or create a link for a

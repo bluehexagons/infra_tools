@@ -103,11 +103,20 @@ http://192.168.0.41:3774/
 ```
 
 After the Nginx Basic Auth prompt, **Create a link for this browser** creates a
-ten-minute, one-time T3 credential and displays a button that opens the
-authenticated T3 session. The explicit second click avoids browser-dependent
-cross-port redirect behavior. **Create a link for another T3 client** displays
-a link that can be copied into the desktop or mobile client. New devices
-therefore do not require terminal access at enrollment time.
+short-lived, one-time administrative T3 credential and displays a button that
+opens the authenticated T3 session. The explicit second click avoids
+browser-dependent cross-port redirect behavior. **Create a link for another T3
+client** displays a link that can be copied into the desktop or mobile client.
+New devices therefore do not require terminal access at enrollment time.
+
+Administrative enrollment is intentional for the VM owner's app: in addition
+to normal project, agent, terminal, and review capabilities, the resulting
+session has T3's `access:read` and `access:write` scopes. Settings → Connections
+can therefore create pairing links, inspect authorized clients, and revoke
+sessions. T3 does not upgrade a previously paired standard session in place;
+if that page reports that administrative access is unavailable, remove the
+saved environment from the client and pair it again with a newly issued
+infra-tools link.
 
 The pairing portal is separate from T3's port. Basic Auth protects credential
 issuance; T3's native pairing exchange and per-device session protect the
@@ -124,12 +133,11 @@ infra-tools agent web pair 192.168.0.41 agent
 ```
 
 Add `--key /path/to/ssh_key` when the saved SSH identity is not the default.
-The command runs the target user's `t3code-pair` helper over SSH and prints
-T3's one-time URL, token, and QR information. Use the complete pairing URL in
-the T3 Code desktop or mobile client, or scan the QR code where supported. For
-a browser, open the complete direct LAN pairing URL from that output—not the
-bare service address—and then add the VM projects from T3's normal project
-picker. Treat the URL and token as passwords.
+The command runs the target user's `t3code-pair` helper over SSH and prints an
+administrative one-time URL. Use the complete pairing URL in the T3 Code
+desktop or mobile client. For a browser, open the complete direct LAN pairing
+URL from that output—not the bare service address—and then add the VM projects
+from T3's normal project picker. Treat the URL and token as passwords.
 
 The equivalent target-side command is:
 
@@ -137,7 +145,12 @@ The equivalent target-side command is:
 t3code-pair
 ```
 
-After pairing, use T3's authentication commands to inspect or revoke sessions:
+The helper briefly issues a two-minute administrative bearer session through
+T3's supported CLI, uses it only against the VM-local T3 API to delegate a
+one-time administrative pairing credential, and immediately revokes the
+temporary session. Neither credential is saved by infra-tools or written to
+the service journal. After pairing, use T3's authentication commands to inspect
+or revoke sessions:
 
 ```bash
 t3 auth --help
@@ -169,9 +182,23 @@ endpoint. A browser page served over HTTPS, including `https://app.t3.codes`,
 cannot connect to a plain HTTP/WebSocket backend because of mixed-content
 restrictions. For that workflow, put the service behind an HTTPS reverse proxy
 or an HTTPS tailnet endpoint and pair with the resulting `https://` URL.
-infra-tools currently does not create that public reverse-proxy exposure
-automatically; keep the backend private until TLS, WebSocket proxying, and any
-desired outer access control are configured.
+When the Godot web bundle's managed HTTPS gateway is installed, a loopback T3
+backend can be exposed with WebSocket support and the same source policy:
+
+```bash
+sudo infra-web forward add t3code --listen auto --to 127.0.0.1:3773
+```
+
+Use the resulting HTTPS origin as the pairing base URL. Otherwise, keep the
+backend private until TLS, WebSocket proxying, and any desired outer access
+control are configured.
+
+When generating the app enrollment link over SSH, pass that HTTPS origin to
+the target-side helper so the app receives the externally reachable address:
+
+```bash
+t3code-pair --base-url https://HOST:PORT
+```
 
 T3's native pairing remains the service authentication boundary. CIDR firewall
 rules limit which machines can reach the endpoint, but they do not replace

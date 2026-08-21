@@ -37,6 +37,9 @@ DEVICE_PAIRING_SOCKET = "/run/infra-tools-device-pairing/http.sock"
 DEVICE_PAIRING_SCRIPT = (
     "/opt/infra_tools/common/service_tools/device_pairing_service.py"
 )
+T3_ADMIN_PAIR_SCRIPT = (
+    "/opt/infra_tools/common/service_tools/t3code_admin_pair.py"
+)
 DEVICE_PAIRING_NGINX_SITE = "/etc/nginx/sites-available/infra-tools-device-pairing"
 DEVICE_PAIRING_NGINX_LINK = "/etc/nginx/sites-enabled/infra-tools-device-pairing"
 DEVICE_PAIRING_AUTH_FAILURE_LOG = (
@@ -266,7 +269,8 @@ def _install_t3_runtime(
             'export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH" && '
             f"cd {safe_runtime} && test -x {safe_binary} && "
             "node -e 'require(\"node-pty\")' && "
-            f"{safe_binary} --version >/dev/null 2>&1",
+            f"{safe_binary} --version >/dev/null 2>&1 && "
+            f"{safe_binary} auth session issue --help >/dev/null 2>&1",
             check=False,
             capture_output=True,
         )
@@ -370,6 +374,48 @@ def _write_passthrough_wrapper(path: str, home: str, t3_binary: str) -> bool:
         'export PATH="$HOME/.local/share/infra-tools/t3code/node_modules/.bin:'
         '$HOME/.opencode/bin:$HOME/.local/bin:$PATH"\n'
         f'exec {shlex.quote(t3_binary)} "$@"\n'
+    )
+    return _write_executable_if_changed(path, content)
+
+
+def _url_host(host: str) -> str:
+    return f"[{host}]" if ":" in host and not host.startswith("[") else host
+
+
+def _t3_pairing_urls(target_host: str, bind_host: str, port: int) -> tuple[str, str]:
+    if bind_host == "0.0.0.0":
+        local_host = "127.0.0.1"
+        public_host = target_host
+    elif bind_host in {"::", "[::]"}:
+        local_host = "::1"
+        public_host = target_host
+    else:
+        local_host = bind_host
+        public_host = bind_host
+    return (
+        f"http://{_url_host(local_host)}:{port}",
+        f"http://{_url_host(public_host)}:{port}",
+    )
+
+
+def _write_admin_pair_wrapper(
+    path: str,
+    home: str,
+    workspace: str,
+    t3_cli_wrapper: str,
+    server_url: str,
+    base_url: str,
+) -> bool:
+    content = (
+        "#!/bin/bash\n"
+        "set -eu\n"
+        f"export HOME={shlex.quote(home)}\n"
+        f"cd {shlex.quote(workspace)}\n"
+        f"exec /usr/bin/python3 {shlex.quote(T3_ADMIN_PAIR_SCRIPT)} "
+        f"--t3-binary {shlex.quote(t3_cli_wrapper)} "
+        f"--base-dir {shlex.quote(os.path.join(home, '.t3'))} "
+        f"--server-url {shlex.quote(server_url)} "
+        f'--base-url {shlex.quote(base_url)} "$@"\n'
     )
     return _write_executable_if_changed(path, content)
 
@@ -500,7 +546,7 @@ def _nginx_listen_address(host: str, port: int) -> str:
 def _configure_device_pairing(
     config: SetupConfig,
     home: str,
-    t3_binary: str,
+    t3_cli_wrapper: str,
     host: str,
     t3_port: int,
 ) -> None:
@@ -513,12 +559,7 @@ def _configure_device_pairing(
     os.makedirs(t3_state_dir, mode=0o700, exist_ok=True)
     account = pwd.getpwnam(config.username)
     os.chown(t3_state_dir, account.pw_uid, account.pw_gid)
-    provider_wrapper = os.path.join(
-        home, ".local", "bin", "infra-tools-t3code-pairing-provider"
-    )
-    os.makedirs(os.path.dirname(provider_wrapper), mode=0o755, exist_ok=True)
-    _write_passthrough_wrapper(provider_wrapper, home, t3_binary)
-    os.chown(provider_wrapper, account.pw_uid, account.pw_gid)
+    server_url, _default_base_url = _t3_pairing_urls(config.host, host, t3_port)
 
     providers = {
         "version": 1,
@@ -526,14 +567,14 @@ def _configure_device_pairing(
             "t3code": {
                 "label": "T3 Code",
                 "command": [
-                    provider_wrapper,
-                    "auth",
-                    "pairing",
-                    "create",
+                    "/usr/bin/python3",
+                    T3_ADMIN_PAIR_SCRIPT,
+                    "--t3-binary",
+                    t3_cli_wrapper,
                     "--base-dir",
                     t3_state_dir,
-                    "--ttl",
-                    "10m",
+                    "--server-url",
+                    server_url,
                     "--label",
                     "infra-tools device enrollment",
                     "--json",
@@ -574,7 +615,7 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths={t3_state_dir}
-RestrictAddressFamilies=AF_UNIX
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 StandardOutput=null
 StandardError=journal
 
@@ -740,6 +781,17 @@ def install_t3code_web(config: SetupConfig) -> None:
     )
     wrapper = os.path.join(home, ".local", "bin", "infra-tools-t3code-web")
     pair_wrapper = os.path.join(home, ".local", "bin", "t3code-pair")
+    t3_cli_wrapper = os.path.join(
+        home, ".local", "bin", "infra-tools-t3code-pairing-provider"
+    )
+    if os.path.islink(T3_ADMIN_PAIR_SCRIPT) or not os.path.isfile(T3_ADMIN_PAIR_SCRIPT):
+        raise RuntimeError(f"T3 administrative pairing helper is missing: {T3_ADMIN_PAIR_SCRIPT}")
+    os.chmod(T3_ADMIN_PAIR_SCRIPT, 0o755)
+    t3_cli_wrapper_changed = _write_passthrough_wrapper(
+        t3_cli_wrapper,
+        home,
+        t3_binary,
+    )
     wrapper_changed = _write_wrapper(
         wrapper,
         home,
@@ -749,11 +801,18 @@ def install_t3code_web(config: SetupConfig) -> None:
         port,
         f"serve --host {shlex.quote(host)} --port {port} --no-browser",
     )
-    pair_wrapper_changed = _write_wrapper(
-        pair_wrapper, home, workspace, t3_binary, host, port, "pair"
+    server_url, base_url = _t3_pairing_urls(config.host, host, port)
+    pair_wrapper_changed = _write_admin_pair_wrapper(
+        pair_wrapper,
+        home,
+        workspace,
+        t3_cli_wrapper,
+        server_url,
+        base_url,
     )
     os.chown(wrapper, account.pw_uid, account.pw_gid)
     os.chown(pair_wrapper, account.pw_uid, account.pw_gid)
+    os.chown(t3_cli_wrapper, account.pw_uid, account.pw_gid)
     os.chown(workspace, account.pw_uid, account.pw_gid)
 
     service_content = f"""[Unit]
@@ -797,7 +856,13 @@ WantedBy=multi-user.target
     if enabled.returncode != 0:
         run(f"systemctl enable {T3_SERVICE_NAME}.service")
 
-    if service_changed or wrapper_changed or pair_wrapper_changed or runtime_changed:
+    if (
+        service_changed
+        or wrapper_changed
+        or pair_wrapper_changed
+        or t3_cli_wrapper_changed
+        or runtime_changed
+    ):
         run(f"systemctl restart {T3_SERVICE_NAME}.service")
     else:
         active = run(
@@ -807,7 +872,7 @@ WantedBy=multi-user.target
         if active.returncode != 0:
             run(f"systemctl start {T3_SERVICE_NAME}.service")
     if config.device_pairing_providers:
-        _configure_device_pairing(config, home, t3_binary, host, port)
+        _configure_device_pairing(config, home, t3_cli_wrapper, host, port)
     else:
         _remove_device_pairing()
     print(f"  T3 Code web service listening on {host}:{port}")

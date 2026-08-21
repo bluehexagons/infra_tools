@@ -277,7 +277,9 @@ Code is an interface, not a provider credential source: its headless server
 uses the provider credentials already installed for the target user, and its
 pairing/session credentials are created and managed on the VM with
 `t3code-pair` (or `infra-tools agent web pair HOST USER`) and `t3 auth`.
-The optional protected enrollment portal can also issue one-time T3 links
+The infra-tools helpers issue administrative one-time links so the paired app
+can manage authorized clients; their temporary bootstrap session is revoked
+immediately. The optional protected enrollment portal provides the same flow
 without terminal access. Its Basic Auth file is an infra-tools/Nginx secret,
 not a T3 or coding-provider credential; see
 [DEVICE_PAIRING.md](DEVICE_PAIRING.md).

@@ -1,0 +1,200 @@
+"""Tests for administrative T3 Code remote-environment pairing."""
+
+from __future__ import annotations
+
+import json
+import os
+import tempfile
+import unittest
+from unittest.mock import MagicMock, patch
+
+from common.service_tools import t3code_admin_pair
+
+
+class T3CodeAdministrativePairingTest(unittest.TestCase):
+    def test_issues_admin_link_and_revokes_temporary_session(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            t3_binary = os.path.join(temporary, "t3")
+            base_dir = os.path.join(temporary, "state")
+            os.mkdir(base_dir)
+            with open(t3_binary, "w", encoding="utf-8") as file_obj:
+                file_obj.write("#!/bin/sh\n")
+
+            with (
+                patch.object(
+                    t3code_admin_pair,
+                    "_issue_temporary_session",
+                    return_value=("session-1", "temporary-secret"),
+                ),
+                patch.object(
+                    t3code_admin_pair,
+                    "_request_pairing_link",
+                    return_value={
+                        "id": "pairing-1",
+                        "credential": "one-time-secret",
+                        "expiresAt": "2026-08-21T20:00:00Z",
+                    },
+                ) as request_pairing,
+                patch.object(
+                    t3code_admin_pair,
+                    "_revoke_session",
+                    return_value=True,
+                ) as revoke_session,
+            ):
+                result = t3code_admin_pair.issue_administrative_pairing(
+                    t3_binary,
+                    base_dir,
+                    "http://127.0.0.1:3773",
+                    "https://agent.example:3773",
+                    "Remote app",
+                )
+
+        self.assertEqual(
+            result["pairUrl"],
+            "https://agent.example:3773/pair#token=one-time-secret",
+        )
+        self.assertIn("access:write", result["scopes"])
+        request_pairing.assert_called_once_with(
+            "http://127.0.0.1:3773",
+            "temporary-secret",
+            "Remote app",
+        )
+        revoke_session.assert_called_once_with(t3_binary, base_dir, "session-1")
+
+    def test_api_request_delegates_all_administrative_scopes(self) -> None:
+        response = MagicMock()
+        response.read.return_value = json.dumps(
+            {
+                "id": "pairing-1",
+                "credential": "one-time-secret",
+                "expiresAt": "2026-08-21T20:00:00Z",
+            }
+        ).encode("utf-8")
+        opener = MagicMock()
+        opener.open.return_value.__enter__.return_value = response
+
+        with patch.object(
+            t3code_admin_pair.urllib.request,
+            "build_opener",
+            return_value=opener,
+        ) as build_opener:
+            result = t3code_admin_pair._request_pairing_link(
+                "http://127.0.0.1:3773",
+                "temporary-secret",
+                "Remote app",
+            )
+
+        request = opener.open.call_args.args[0]
+        payload = json.loads(request.data.decode("utf-8"))
+        self.assertEqual(request.full_url, "http://127.0.0.1:3773/api/auth/pairing-token")
+        self.assertEqual(request.get_header("Authorization"), "Bearer temporary-secret")
+        self.assertEqual(payload["scopes"], list(t3code_admin_pair.ADMINISTRATIVE_SCOPES))
+        self.assertEqual(result["id"], "pairing-1")
+        self.assertTrue(
+            any(
+                isinstance(handler, t3code_admin_pair._NoRedirectHandler)
+                for handler in build_opener.call_args.args
+            )
+        )
+
+    def test_rejects_standard_session_and_revokes_it(self) -> None:
+        issued = MagicMock(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "sessionId": "session-1",
+                    "token": "temporary-secret",
+                    "scopes": ["orchestration:read", "orchestration:operate"],
+                }
+            ),
+        )
+        with (
+            patch.object(t3code_admin_pair, "_run_t3", return_value=issued),
+            patch.object(
+                t3code_admin_pair,
+                "_revoke_session",
+                return_value=True,
+            ) as revoke_session,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "required administrative"):
+                t3code_admin_pair._issue_temporary_session("/opt/t3", "/tmp/state")
+
+        revoke_session.assert_called_once_with("/opt/t3", "/tmp/state", "session-1")
+
+    def test_discards_pairing_link_when_temporary_session_cleanup_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            t3_binary = os.path.join(temporary, "t3")
+            base_dir = os.path.join(temporary, "state")
+            os.mkdir(base_dir)
+            with open(t3_binary, "w", encoding="utf-8") as file_obj:
+                file_obj.write("#!/bin/sh\n")
+
+            with (
+                patch.object(
+                    t3code_admin_pair,
+                    "_issue_temporary_session",
+                    return_value=("session-1", "temporary-secret"),
+                ),
+                patch.object(
+                    t3code_admin_pair,
+                    "_request_pairing_link",
+                    return_value={
+                        "id": "pairing-1",
+                        "credential": "one-time-secret",
+                        "expiresAt": "2026-08-21T20:00:00Z",
+                    },
+                ),
+                patch.object(
+                    t3code_admin_pair,
+                    "_revoke_session",
+                    return_value=False,
+                ),
+                patch.object(t3code_admin_pair, "_revoke_pairing_link") as revoke_pairing,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "temporary T3 administrative"):
+                    t3code_admin_pair.issue_administrative_pairing(
+                        t3_binary,
+                        base_dir,
+                        "http://127.0.0.1:3773",
+                        "http://agent.example:3773",
+                        "Remote app",
+                    )
+
+        revoke_pairing.assert_called_once_with(t3_binary, base_dir, "pairing-1")
+
+    def test_discards_incomplete_pairing_link(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            t3_binary = os.path.join(temporary, "t3")
+            base_dir = os.path.join(temporary, "state")
+            os.mkdir(base_dir)
+            with open(t3_binary, "w", encoding="utf-8") as file_obj:
+                file_obj.write("#!/bin/sh\n")
+
+            with (
+                patch.object(
+                    t3code_admin_pair,
+                    "_issue_temporary_session",
+                    return_value=("session-1", "temporary-secret"),
+                ),
+                patch.object(
+                    t3code_admin_pair,
+                    "_request_pairing_link",
+                    return_value={"id": "pairing-1"},
+                ),
+                patch.object(t3code_admin_pair, "_revoke_session", return_value=True),
+                patch.object(t3code_admin_pair, "_revoke_pairing_link") as revoke_pairing,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "incomplete"):
+                    t3code_admin_pair.issue_administrative_pairing(
+                        t3_binary,
+                        base_dir,
+                        "http://127.0.0.1:3773",
+                        "https://agent.example",
+                        "Remote app",
+                    )
+
+        revoke_pairing.assert_called_once_with(t3_binary, base_dir, "pairing-1")
+
+
+if __name__ == "__main__":
+    unittest.main()

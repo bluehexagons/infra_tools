@@ -12,8 +12,8 @@ browser or app
     -> Nginx Basic Auth portal on port 3774
     -> local infra-tools pairing broker
     -> provider's supported pairing command
-    -> one-time T3 link for port 3773
-    -> provider-native device session
+    -> one-time administrative T3 link for port 3773
+    -> provider-native administrative device session
 ```
 
 Basic Auth protects the ability to issue a link. T3 still authenticates the
@@ -85,13 +85,13 @@ portal actions:
 - **Create a link for another T3 client** displays the short-lived URL so it
   can be copied into a desktop or mobile T3 Code client.
 
-The broker uses T3's supported `auth pairing create` command with a ten-minute
-TTL and JSON output. The pairing service sets `T3CODE_PORT` to the configured
-T3 port while issuing a credential; this prevents T3's CLI from probing for a
-free port inside the broker's Unix-socket-only sandbox. Pairing URLs are
-returned only to the authenticated
-request. They are not written to setup output, Nginx access logs, the broker
-journal, provider configuration, or saved infra-tools commands.
+The broker uses T3's supported administrative-session CLI and authenticated
+pairing API to issue a five-minute link with the standard client capabilities
+plus `access:read`, `access:write`, and `relay:write`. Its temporary two-minute
+administrative bearer session is revoked immediately after the pairing link is
+created. Pairing URLs are returned only to the authenticated request. They are
+not written to setup output, Nginx access logs, the broker journal, provider
+configuration, or saved infra-tools commands.
 
 The original SSH-based path remains available:
 
@@ -100,7 +100,9 @@ infra-tools agent web pair 192.168.0.41 agent
 ```
 
 It is useful for recovery, for a loopback-only service, or when the pairing
-portal was not selected.
+portal was not selected. It uses the same administrative flow. Sessions paired
+before this support was installed remain standard sessions; remove and re-pair
+the environment when T3 reports that `access:write` is unavailable.
 
 ## Credentials, reruns, and removal
 
@@ -172,8 +174,9 @@ source address, timestamp, and a fixed marker; it never contains the Basic Auth
 header or a pairing URL. After authentication, requests use a single-use
 same-site form nonce, and the broker independently limits pairing issuance to
 five requests per minute per source. Provider commands are fixed in a
-root-managed configuration, executed without a shell, and required to return a
-link for the expected T3 origin.
+root-managed configuration, executed without a shell, restricted to the
+configured local T3 endpoint, and required to return a link for the expected
+T3 origin.
 
 ## Files and services
 

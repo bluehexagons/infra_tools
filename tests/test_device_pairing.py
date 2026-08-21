@@ -494,21 +494,18 @@ class DevicePairingRemoteSetupTest(unittest.TestCase):
             ) as file_obj:
                 providers = json.load(file_obj)
             command = providers["providers"]["t3code"]["command"]
-            self.assertIn("pairing", command)
-            self.assertIn("create", command)
+            self.assertTrue(any(item.endswith("/t3code_admin_pair.py") for item in command))
+            self.assertIn("--t3-binary", command)
+            self.assertIn("--server-url", command)
             self.assertNotIn("--port", command)
             self.assertIn("--json", command)
             self.assertNotIn("$6$salt$hash", json.dumps(providers))
-            provider_wrapper = command[0]
-            with open(provider_wrapper, encoding="utf-8") as file_obj:
-                wrapper = file_obj.read()
-            self.assertIn('export NVM_DIR="$HOME/.nvm"', wrapper)
-            self.assertIn('"$@"', wrapper)
             with open(
                 os.path.join(temporary, "pairing.service"), encoding="utf-8"
             ) as file_obj:
                 service = file_obj.read()
             self.assertIn("Environment=T3CODE_PORT=3773", service)
+            self.assertIn("RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6", service)
             configure_ban.assert_called_once_with(
                 "device-pairing",
                 "/var/log/nginx/infra-tools-device-pairing-auth-failures.log",
