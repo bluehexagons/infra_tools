@@ -28,7 +28,7 @@ Priorities are ordered by these principles:
 5. New providers and platforms should reuse these guarantees rather than add
    parallel execution models.
 
-## Verification snapshot (2026-08-19)
+## Verification snapshot (2026-08-21)
 
 The ordering remains justified by the current implementation:
 
@@ -44,8 +44,19 @@ The ordering remains justified by the current implementation:
 - deployment-owned Nginx files are snapshotted, validated, atomically written,
   and restored on failure without overwriting unmanaged same-name sites;
 - persistent JSON state/configuration now uses the shared atomic writer, but
-  corrupt-state readers still fall back permissively; and
-- privileged shared SSH command builders still accept first-seen host keys.
+  corrupt-state readers still fall back permissively;
+- shared SSH/SCP/rsync builders require strict checking against the workspace
+  enrollment file, while the Proxmox helper bypasses that file and CI/CD target
+  setup still stages unauthenticated `ssh-keyscan` results;
+- remote setup writes target remembered state before its step loop and has no
+  durable in-progress marker;
+- the declared wheel is incomplete, and release CI does not build or smoke-test
+  the artifact; and
+- signed webhook deliveries have no delivery-ID replay protection;
+- command diagnostics can leak suffixes of quoted secrets, and the shared
+  command runner has no timeout contract; and
+- active agent config staging follows source symlinks, while manifest release
+  activation does not stop when an app unit stop fails.
 
 The manifest environment-key injection finding is resolved. CI now tests
 Python 3.13, the interpreter shipped by Debian Trixie, and `make compile`
@@ -55,14 +66,20 @@ work.
 
 The best next work packets are:
 
-1. Complete the `remote_utils.run()` caller inventory and define strict versus
-   best-effort contracts (the strict helper slice is now landed).
+1. Complete the `remote_utils.run()` caller inventory, define strict versus
+   best-effort contracts, and add secret-safe bounded execution (the strict
+   helper slice is now landed).
 2. Decide whether to redesign or remove the currently unused
    `lib/transaction.py` framework; do not build a parallel transaction layer.
 3. Replace permissive corrupt-state fallbacks with schema/version checks and
    actionable remediation, then define durable operation markers.
 4. Replace automatic SSH first-use trust with explicit enrollment before
    privileged setup/deploy operations.
+5. Repair package metadata and add clean-environment artifact tests before
+   publishing releases; reject source symlinks during agent staging, require
+   successful service stops before release activation, and standardize
+   destructive CLI confirmations and updater trust policy after the P0
+   state/failure work.
 
 ## Planning portfolio and GitHub issue alignment (2026-08-17)
 

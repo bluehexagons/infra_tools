@@ -42,9 +42,11 @@ infra-tools setup server_web build.example.com deploy \
 The build setup creates the deploy key at
 `/var/lib/infra_tools/cicd/.ssh/deploy_key`. Copy its `.pub` file into
 `/home/deploy/.ssh/authorized_keys` on every app server. The setup also writes
-`/etc/infra_tools/cicd/deploy_targets.json` and scans each target into
-`/var/lib/infra_tools/cicd/known_hosts`; verify those host fingerprints before
-the first production deployment.
+`/etc/infra_tools/cicd/deploy_targets.json` and currently scans each target into
+`/var/lib/infra_tools/cicd/known_hosts`. Treat those scan results as unverified:
+display and verify every target fingerprint through an independent channel
+before enabling the first production deployment. Re-enrollment and key rotation
+remain an open hardening task.
 
 The target entries default to the `deploy` user, SSH port 22, and `/var/www`.
 Edit the JSON only when a target needs a different port, base directory, or
@@ -110,6 +112,9 @@ event only verifies webhook connectivity and does not build a repository.
   executor, so the receiver does not need systemd or polkit privileges
 - jobs are consumed after one attempt, including malformed or failed jobs, so
   one bad payload cannot retrigger forever
+- delivery IDs are not yet persisted, so a repeated valid GitHub delivery can
+  create another job for the same commit; monitor webhook retries until delivery
+  idempotency is implemented
 
 Quick checks:
 

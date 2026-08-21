@@ -59,7 +59,9 @@ infra-tools scans the guest's ED25519 key from the authenticated Proxmox node,
 replaces any stale entry for that address in the workspace `known_hosts`, and
 then uses strict checking for the direct guest connection. It does not do this
 for existing guests; enroll those explicitly with `infra-tools ssh-key enroll`
-after verifying the displayed fingerprint.
+after verifying the displayed fingerprint. The current Proxmox node helper
+does not yet pass the workspace `known_hosts` path for the node connection
+itself; that policy inconsistency is tracked in the codebase audit.
 
 Hosted VM setup also needs the guest setup account to run privileged staging
 commands. The upload itself uses SSH standard input for a tar stream, so

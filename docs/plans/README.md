@@ -65,6 +65,7 @@ queue and listed as closure candidates in the
 | [CLI-only agent host audit](AGENT_CLI_MAINTENANCE_AUDIT_2026-08-09.md) | Active roadmap input | Agent update lifecycle, maintenance windows, audit output, and cache/credential lifecycle. |
 | [RDP desktop agent audit](DESKTOP_AGENT_MAINTENANCE_AUDIT_2026-08-09.md) | Active roadmap input | XRDP identity, configuration rollback, workload safety, and live smoke coverage. |
 | [Test slop audit](TEST_SLOP_AUDIT_2026-08-09.md) | Complete reference | Records test-retention decisions; it is not active project work. |
+| [Codebase audit](CODEBASE_AUDIT_2026-08-21.md) | Active roadmap input | Cross-cutting packaging, host-key, state, failure-contract, webhook, and destructive-CLI findings verified against the current tree. |
 
 ## Keeping the portfolio current
 

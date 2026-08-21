@@ -62,17 +62,23 @@ Each finding lists: severity, evidence, validation outcome, and direct follow-up
 - **Impact**
   - A bad plugin definition can abort unrelated startup paths before command logic can present a controlled, recoverable failure.
 
-### ARCH-03: SSH trust configuration still permits first-connect risk
+### ARCH-03: SSH trust configuration is inconsistently enforced
 
 **Severity: High**
 
 - **Evidence**
-  - `lib/ssh_utils.py:50`, `86`, `113` set `StrictHostKeyChecking=accept-new`.
-  - `lib/remote_deploy.py` carries same policy plus explicit warning in `push_artifact` lines 103-107.
+  - `lib/ssh_utils.py` now sets `StrictHostKeyChecking=yes` and points shared
+    builders at the workspace `known_hosts` file.
+  - `lib/proxmox_guest.py::_ssh_opts()` sets strict checking but omits the
+    workspace file.
+  - `web/build_server_steps.py::configure_deploy_known_hosts()` appends
+    `ssh-keyscan` output without authenticating the fingerprint first.
 - **Validation**
-  - Confirmed in all three SSH helper constructors (`build_ssh_command`, `build_scp_command`, `build_rsync_ssh_transport`) and caller path in deploy module.
+  - Confirmed by comparing the shared builders, the separate Proxmox constructor,
+    and the CI/CD deployment-target bootstrap path.
 - **Impact**
-  - First-time host-key acceptance on privileged deploy paths remains MITM-sensitive.
+- Shared paths are strict, but bypasses and unauthenticated enrollment leave
+  privileged Proxmox and deployment paths exposed to incorrect host-key trust.
 
 ### ARCH-04: CI/CD executes repo-authored scripts with broad execution scope
 
@@ -158,7 +164,9 @@ Validation was performed by static evidence checks (no behavior-altering actions
 
 1. Make execution helper semantics explicit (`run` should either raise or return a structured failure contract; avoid ambiguous `check=True` behavior).
 2. Add import-time fault isolation for plugin/validator discovery (cache and quarantine malformed plugin modules).
-3. Replace `accept-new` in production deploy paths with managed known-host bootstrapping and `yes/no` policy enforcement.
+3. Route every SSH constructor through managed known-hosts and replace
+   unauthenticated `ssh-keyscan` bootstrapping with explicit fingerprint
+   enrollment.
 4. Make setup teardown transaction-like (snapshot, apply, rollback marker) so cleanup failures are reversible.
 5. Tighten corrupted-state behavior with schema versions and explicit
    remediation; audit remaining non-JSON configuration writes for the same
@@ -175,8 +183,10 @@ Validation was performed by static evidence checks (no behavior-altering actions
   managed services before running steps, manifest deploy replaced the active
   tree before building, and health failures only warned. Those deployment
   findings were resolved on 2026-08-19. Shared SSH builders still use
-  `accept-new`, plugin discovery still imports every built-in plugin eagerly,
-  and corrupt-state handling remains permissive.
+  The shared SSH builders now use strict workspace enrollment, but the Proxmox
+  and CI/CD helper gaps described in ARCH-03 remain; plugin discovery still
+  imports every built-in plugin eagerly, and corrupt-state handling remains
+  permissive.
 - **2026-08-09 — ARCH-06 resolved:** introduced the shared writer and migrated
   all JSON state/configuration paths, including secret-bearing files with mode
   `0600`. Tests cover complete writes, replacement failure preservation, and

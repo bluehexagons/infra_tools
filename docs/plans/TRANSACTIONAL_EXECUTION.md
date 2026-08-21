@@ -39,8 +39,10 @@ ARCH-08 from the [architectural risk review](ARCHITECTURAL_RISK_REVIEW_2026-08-0
   restrictive permissions.
 - Readers still fall back on corrupt JSON in several paths; schema versions and
   actionable remediation remain open work.
-- All shared SSH/SCP/rsync builders still use
-  `StrictHostKeyChecking=accept-new`.
+- Shared SSH/SCP/rsync builders use `StrictHostKeyChecking=yes` with the
+  workspace enrollment file. The Proxmox guest helper does not yet pass that
+  file, and build-server deployment targets are still populated from an
+  unauthenticated `ssh-keyscan`.
 
 There is also an existing `lib/transaction.py` and `lib/operation_log.py` pair,
 but production apply paths do not use the transaction manager. Its state is
@@ -86,8 +88,9 @@ The first execution-contract slice landed on 2026-08-09: strict failures now
 raise, best-effort failures remain inspectable, and result-inspecting database,
 release-fetch, and host-metric callers explicitly request `check=False`. The
 helper also redacts common secret assignment and option values from command
-output and exception text. The full caller classification and complete
-secret-display audit remain open.
+output and exception text. Quoted or delimiter-bearing values can still leak
+suffixes, and the helper has no timeout contract; the full caller
+classification and complete secret-display audit remain open.
 
 ## Phase 2: Atomic persistent state
 
@@ -114,8 +117,10 @@ state where they are valid.
 Manifest deployments now record application units, build and validate before
 stopping app-scoped services, remove obsolete units only after activation, and
 restore the previous release and units on failure. Unit preparation still
-occurs during activation. The remaining work is to apply the broader contract
-to non-manifest setup services and persist interruption/recovery markers.
+occurs during activation, but stop calls still use best-effort execution and
+must fail closed before the release rename. The remaining work is to apply the
+broader contract to non-manifest setup services and persist
+interruption/recovery markers.
 
 Replace cleanup-first setup with a staged reconciliation model:
 
@@ -161,6 +166,11 @@ entry.
 
 Interactive convenience commands may offer a clearly labelled trust-on-first-
 use mode, but automated privileged paths should not enable it by default.
+
+The remaining implementation slice must cover every SSH constructor, including
+the Proxmox guest helper and CI/CD deploy-target enrollment. A successful
+`ssh-keyscan` is discovery data, not operator approval; deployment must not be
+enabled until the expected fingerprint is explicitly verified.
 
 ## Acceptance criteria
 
