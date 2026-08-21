@@ -159,7 +159,7 @@ check; no pinned digest, signature, or release-channel policy is enforced.
 digest manifest, or an explicitly documented rolling-channel exception—and make
 the policy visible in the update result and maintenance documentation.
 
-### AUD-10: Command redaction leaks quoted secret suffixes
+### AUD-10: Command redaction leaks quoted secret suffixes (resolved)
 
 **Severity: High — diagnostic secret exposure**
 
@@ -171,10 +171,12 @@ the normal command log and `CommandExecutionError` diagnostics. It is relevant
 to generated passwords because the supported password alphabet includes shell
 metacharacters.
 
-**Follow-up:** redact parsed shell words or, preferably, carry argv and secret
-argument positions separately so diagnostics never reconstruct raw secret
-command strings. Add regression tests for quoted whitespace, quotes, and shell
-delimiters.
+**Resolution (2026-08-21):** diagnostic redaction now consumes complete
+shell-style values without evaluating them. It handles single and double
+quotes, escaped whitespace, concatenated word segments, shell delimiters inside
+quotes, and unterminated quoted input. Regression tests cover both command and
+stderr diagnostics. A future argv-native command API can further reduce string
+reconstruction, but the demonstrated suffix disclosure is closed.
 
 ### AUD-11: The shared command runner has no timeout contract
 

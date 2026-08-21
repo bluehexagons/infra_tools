@@ -18,13 +18,12 @@ from lib.validation import validate_package_name
 _dry_run = False
 
 
-_SECRET_ASSIGNMENT_RE = re.compile(
+_SECRET_ASSIGNMENT_PREFIX_RE = re.compile(
     r"(?i)(?P<key>\b[A-Za-z_][A-Za-z0-9_-]*)(?P<separator>\s*=\s*)"
-    r"(?P<value>[^\s;&|]+)"
 )
-_SECRET_OPTION_RE = re.compile(
+_SECRET_OPTION_PREFIX_RE = re.compile(
     r"(?i)(?<![A-Za-z0-9_-])(--?(?:password|passwd|secret|token|api[-_]?key|private[-_]?key|"
-    r"credentials?)(?:=|\s+))([^\s;&|]+)"
+    r"credentials?)(?:=|\s+))"
 )
 _SECRET_KEY_MARKERS = (
     "password",
@@ -39,16 +38,63 @@ _SECRET_KEY_MARKERS = (
 )
 
 
-def _redact_command(value: str) -> str:
-    """Redact common secret assignments and command-line option values."""
-    def replace_assignment(match: re.Match[str]) -> str:
-        key = match.group("key")
-        if not any(marker in key.lower() for marker in _SECRET_KEY_MARKERS):
-            return match.group(0)
-        return f"{key}{match.group('separator')}<redacted>"
+def _shell_word_end(value: str, start: int) -> int:
+    """Return the end of one shell-style word without evaluating it."""
 
-    redacted = _SECRET_ASSIGNMENT_RE.sub(replace_assignment, value)
-    return _SECRET_OPTION_RE.sub(r"\1<redacted>", redacted)
+    index = start
+    quote: Optional[str] = None
+    while index < len(value):
+        character = value[index]
+        if quote is not None:
+            if character == quote:
+                quote = None
+            elif character == "\\" and quote == '"' and index + 1 < len(value):
+                index += 1
+        elif character in {"'", '"'}:
+            quote = character
+        elif character == "\\" and index + 1 < len(value):
+            index += 1
+        elif character.isspace() or character in ";&|":
+            break
+        index += 1
+    return index
+
+
+def _secret_value_spans(value: str) -> list[tuple[int, int]]:
+    """Locate shell-style values belonging to recognized secret keys/options."""
+
+    starts: list[int] = []
+    for match in _SECRET_ASSIGNMENT_PREFIX_RE.finditer(value):
+        key = match.group("key").lower()
+        if any(marker in key for marker in _SECRET_KEY_MARKERS):
+            starts.append(match.end())
+    starts.extend(match.end() for match in _SECRET_OPTION_PREFIX_RE.finditer(value))
+
+    spans: list[tuple[int, int]] = []
+    for start in sorted(set(starts)):
+        end = _shell_word_end(value, start)
+        if end > start:
+            spans.append((start, end))
+    return spans
+
+
+def _redact_command(value: str) -> str:
+    """Redact complete shell-style secret values without evaluating the text."""
+
+    spans = _secret_value_spans(value)
+    if not spans:
+        return value
+
+    parts: list[str] = []
+    previous_end = 0
+    for start, end in spans:
+        if start < previous_end:
+            continue
+        parts.append(value[previous_end:start])
+        parts.append("<redacted>")
+        previous_end = end
+    parts.append(value[previous_end:])
+    return "".join(parts)
 
 
 class CommandExecutionError(RuntimeError):

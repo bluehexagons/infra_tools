@@ -53,8 +53,8 @@ The ordering remains justified by the current implementation:
 - package metadata now produces a self-contained wheel, and tagged-release CI
   installs, smoke-tests, and publishes the artifact;
 - signed webhook deliveries have no delivery-ID replay protection;
-- command diagnostics can leak suffixes of quoted secrets, and the shared
-  command runner has no timeout contract; and
+- command diagnostics now redact complete quoted shell values, while the shared
+  command runner still has no timeout contract; and
 - active agent config staging follows source symlinks, while manifest release
   activation does not stop when an app unit stop fails.
 - the old callback-based transaction framework has been removed; sync and scrub
@@ -70,8 +70,8 @@ work.
 The best next work packets are:
 
 1. Complete the `remote_utils.run()` caller inventory, define strict versus
-   best-effort contracts, and add secret-safe bounded execution (the strict
-   helper slice is now landed).
+   best-effort contracts, and add bounded execution (the strict and secret-safe
+   diagnostic slices are now landed).
 2. Define the versioned durable operation-record schema; keep diagnostic event
    logging separate from authoritative recovery state.
 3. Replace permissive corrupt-state fallbacks with schema/version checks and

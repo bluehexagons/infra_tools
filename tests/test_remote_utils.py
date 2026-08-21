@@ -129,6 +129,54 @@ class TestRunCommandDispatch(unittest.TestCase):
         self.assertNotIn("cli-secret", message)
         self.assertIn("SECRET_KEY_BASE=<redacted>", message)
 
+    @patch("lib.remote_utils.subprocess.run")
+    def test_failure_diagnostics_redact_complete_quoted_secret_values(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=["deploy"],
+            returncode=1,
+            stderr=(
+                "API_KEY='stderr secret;with|delimiters' "
+                '--private-key "stderr key phrase"'
+            ),
+        )
+
+        with self.assertRaises(CommandExecutionError) as raised:
+            run(
+                "deploy --password 'command secret phrase' "
+                '--token "command;token|suffix" '
+                "--credentials 'quoted secret'concatenated"
+            )
+
+        message = str(raised.exception)
+        for secret_fragment in (
+            "command secret phrase",
+            "command;token|suffix",
+            "stderr secret;with|delimiters",
+            "stderr key phrase",
+            "token|suffix",
+            "key phrase",
+            "quoted secret",
+            "concatenated",
+        ):
+            self.assertNotIn(secret_fragment, message)
+        self.assertEqual(message.count("<redacted>"), 5)
+
+    @patch("lib.remote_utils.subprocess.run")
+    def test_failure_diagnostics_redact_escaped_and_unterminated_values(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=["deploy"],
+            returncode=1,
+            stderr="--token 'unterminated secret phrase",
+        )
+
+        with self.assertRaises(CommandExecutionError) as raised:
+            run(r"deploy --password escaped\ secret --name 'public value'")
+
+        message = str(raised.exception)
+        self.assertNotIn("escaped\\ secret", message)
+        self.assertNotIn("unterminated secret phrase", message)
+        self.assertIn("--name 'public value'", message)
+
 
 class TestRemoteValidateUsername(unittest.TestCase):
     def test_valid(self):

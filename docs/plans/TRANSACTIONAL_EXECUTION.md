@@ -89,11 +89,11 @@ verification-based installers and probes intentionally inspect failed results.
 
 The first execution-contract slice landed on 2026-08-09: strict failures now
 raise, best-effort failures remain inspectable, and result-inspecting database,
-release-fetch, and host-metric callers explicitly request `check=False`. The
-helper also redacts common secret assignment and option values from command
-output and exception text. Quoted or delimiter-bearing values can still leak
-suffixes, and the helper has no timeout contract; the full caller
-classification and complete secret-display audit remain open.
+release-fetch, and host-metric callers explicitly request `check=False`.
+Diagnostic redaction was completed on 2026-08-21 for quoted, escaped,
+delimiter-bearing, and unterminated secret values in command and stderr text.
+The helper still has no timeout contract; the full caller classification and an
+argv-native command API remain open.
 
 ## Phase 2: Atomic persistent state
 
