@@ -525,11 +525,10 @@ def destroy_container(
     from backup/HA configs as well. Pass ``force`` to skip stop verification
     and use ``pct stop`` instead of shutdown.
     """
-    try:
-        guest_type, current = _get_guest_status(host, vmid)
-    except ProxmoxManageError:
-        guest_type = "lxc"
-        current = "unknown"
+    # Status must be known before choosing the provider-specific destructive
+    # command.  Treating an unavailable host as an LXC guest could otherwise
+    # turn a transient SSH failure into an unsafe `pct destroy` attempt.
+    guest_type, current = _get_guest_status(host, vmid)
     if current == "running":
         stop_container(host, vmid, force=force)
     flags: StrList = []

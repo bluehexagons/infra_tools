@@ -506,6 +506,20 @@ class TestDestroy(unittest.TestCase):
         self.assertIn("qm destroy 100", mock_run.call_args_list[-1].args[3])
         self.assertIn("--purge 1", mock_run.call_args_list[-1].args[3])
 
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_destroy_fails_closed_when_status_cannot_be_read(
+        self, mock_run: MagicMock
+    ) -> None:
+        mock_run.return_value = _completed(
+            stderr="ssh: connect to host 10.0.0.10 port 22: Network is unreachable",
+            returncode=255,
+        )
+
+        with self.assertRaisesRegex(ProxmoxManageError, "pct status 100 failed"):
+            destroy_container(_host(), 100)
+
+        mock_run.assert_called_once()
+
 
 class TestWebhookNotifications(unittest.TestCase):
     def test_builds_native_pvesh_endpoint_and_matcher_commands(self) -> None:
