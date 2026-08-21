@@ -40,8 +40,8 @@ infra-tools self-setup [options]
 infra-tools local [subcommand]
 infra-tools channel [CHANNEL]
 infra-tools upgrade
-infra-tools agent doctor
-infra-tools agent update [options]
+infra-tools agent doctor [HOST USER] [options]
+infra-tools agent update [HOST USER] [options]
 infra-tools agent auth set HOST USER --tool TOOL --file PATH
 infra-tools agent auth status HOST USER [--tool TOOL]
 infra-tools agent web pair HOST USER [-k PATH]
@@ -334,6 +334,13 @@ is no agent-suite preset or implicit coding-package baseline; add unrelated
 packages explicitly with `--apt-install`, and add language runtimes with their
 individual flags.
 
+Any setup with agent features installs a managed `~/.local/bin/infra-tools`
+launcher for the target user. On a remote setup the launcher uses the source
+deployed under `/opt/infra_tools`, so diagnostics and deliberate agent updates
+work directly from an SSH, desktop, or T3 Code terminal without a separate
+infra-tools installation on the VM. An existing executable with that name is
+retained; setup never overwrites an unmanaged user launcher.
+
 T3 Code is selected explicitly as either `--desktop-interface t3code` or
 `--web-interface t3code`; it is no longer an `--agent-tool` provider. The
 desktop path installs the verified AppImage. The web path installs Node and a
@@ -379,12 +386,14 @@ On the configured VM, check selected tools without exposing credential contents:
 
 ```bash
 infra-tools agent doctor
-  infra-tools agent doctor --tool codex --tool claude --json
+infra-tools agent doctor --tool codex --tool claude --json
 infra-tools agent doctor --tool codex --tool opencode --capability browser
 infra-tools agent doctor --capability browser
+infra-tools agent doctor 10.0.0.10 agent --tool codex --json
 infra-tools agent update --dry-run
 infra-tools agent update --tool codex --tool claude
 infra-tools agent update --json
+infra-tools agent update 10.0.0.10 agent --tool codex --dry-run
 ```
 
 The default doctor check covers GitHub CLI, Codex CLI, Claude Code, and OpenCode.
@@ -395,6 +404,10 @@ for installed compatible agents, and a local Chromium interaction/rendering
 smoke test.
 When `--capability` is supplied without `--tool`, doctor checks only the
 requested capability instead of requiring the default set of terminal agents.
+Supplying `HOST USER` runs the same doctor through managed SSH from the control
+system and preserves its text or JSON output and exit status. The target must
+have been configured by infra-tools so `/opt/infra_tools` is present. Add
+`--key PATH` when the VM uses a non-default SSH identity.
 
 `agent update` deliberately updates the three user-installed terminal agents;
 it is never run by an automatic host timer. The command uses each vendor's
@@ -414,6 +427,12 @@ downloaded before execution with a size limit and their observed SHA-256 is
 recorded, but upstream does not publish a pinned digest through this installer
 contract, so the hash is audit evidence rather than independent publisher
 verification.
+
+The optional `HOST USER` form runs that update as the target VM user. Run
+`infra-tools agent update HOST USER --dry-run`, then repeat it without
+`--dry-run` to apply. It does not use sudo or update another user's
+installation. Remote doctor and update use the workspace `known_hosts` file
+with strict host-key checking, like other managed SSH operations.
 
 Rerunning setup skips an already available command. Use
 `infra-tools agent update` when you want to update the user-installed terminal

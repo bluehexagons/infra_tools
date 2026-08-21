@@ -17,7 +17,7 @@ from typing import Optional
 
 from lib.atomic_io import write_json_atomic
 from lib.agent_auth import AGENT_AUTH_TOOLS
-from lib.ssh_utils import build_ssh_command, ssh_batch_mode
+from lib.ssh_utils import build_ssh_command, shell_join, ssh_batch_mode
 from lib.types import JSONDict, StrList
 from lib.validation import validate_filesystem_path, validate_package_name
 from lib.validators import validate_host, validate_username
@@ -41,6 +41,7 @@ _UPDATE_TIMEOUT_SECONDS = 600
 _BROWSER_MCP_WRAPPER = "/usr/local/bin/infra-tools-playwright-mcp"
 _BROWSER_DOCTOR_WRAPPER = "/usr/local/bin/infra-tools-playwright-doctor"
 _BROWSER_MCP_SERVER_NAME = "infra-tools-playwright"
+_REMOTE_INFRA_TOOLS_PATH = "/opt/infra_tools/infra_tools.py"
 
 _CREDENTIAL_PATHS = {
     "gh": ".config/gh/hosts.yml",
@@ -81,6 +82,18 @@ def add_agent_subparser(subparsers: argparse._SubParsersAction) -> None:
         help="Check installed agent tools and local credential files",
     )
     doctor.add_argument(
+        "agent_doctor_host",
+        nargs="?",
+        metavar="HOST",
+        help="Remote agent VM to inspect; omit HOST and USER for a local check",
+    )
+    doctor.add_argument(
+        "agent_doctor_username",
+        nargs="?",
+        metavar="USER",
+        help="Remote agent VM user",
+    )
+    doctor.add_argument(
         "--tool",
         dest="agent_doctor_tools",
         action="append",
@@ -99,9 +112,22 @@ def add_agent_subparser(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Output machine-readable JSON",
     )
+    doctor.add_argument("-k", "--key", dest="ssh_key", help="SSH private key path")
     update = commands.add_parser(
         "update",
         help="Deliberately update user-installed terminal agents",
+    )
+    update.add_argument(
+        "agent_update_host",
+        nargs="?",
+        metavar="HOST",
+        help="Remote agent VM to update; omit HOST and USER for a local update",
+    )
+    update.add_argument(
+        "agent_update_username",
+        nargs="?",
+        metavar="USER",
+        help="Remote agent VM user",
     )
     update.add_argument(
         "--tool",
@@ -120,6 +146,7 @@ def add_agent_subparser(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Output machine-readable JSON",
     )
+    update.add_argument("-k", "--key", dest="ssh_key", help="SSH private key path")
     auth = commands.add_parser(
         "auth",
         help="Rotate or inspect credentials on an agent VM",
@@ -770,8 +797,75 @@ def run_agent_web_pair(args: argparse.Namespace) -> int:
     return 0
 
 
+def _remote_agent_target(
+    args: argparse.Namespace,
+    *,
+    host_attribute: str,
+    username_attribute: str,
+) -> tuple[str, str, Optional[str]] | None:
+    host_value = getattr(args, host_attribute, None)
+    username_value = getattr(args, username_attribute, None)
+    ssh_key_value = getattr(args, "ssh_key", None)
+    if host_value is None and username_value is None:
+        if ssh_key_value:
+            raise ValueError("--key requires a remote HOST and USER")
+        return None
+    if host_value is None or username_value is None:
+        raise ValueError("remote agent operations require both HOST and USER")
+
+    host = str(host_value)
+    username = str(username_value)
+    if not validate_host(host):
+        raise ValueError(f"Invalid IP address or hostname: {host}")
+    if not validate_username(username):
+        raise ValueError(f"Invalid username: {username}")
+
+    ssh_key: Optional[str] = None
+    if ssh_key_value:
+        ssh_key = os.path.abspath(os.path.expanduser(str(ssh_key_value)))
+        validate_filesystem_path(ssh_key, must_exist=True)
+        if not os.path.isfile(ssh_key) or not os.access(ssh_key, os.R_OK):
+            raise ValueError(f"SSH private key is not a readable file: {ssh_key}")
+    return host, username, ssh_key
+
+
+def _run_remote_agent_lifecycle(
+    target: tuple[str, str, Optional[str]],
+    subcommand: str,
+    remote_arguments: StrList,
+    *,
+    timeout: int,
+) -> int:
+    """Run one target-user agent lifecycle command over managed SSH."""
+    host, username, ssh_key = target
+    remote_command = shell_join(
+        [
+            "python3",
+            _REMOTE_INFRA_TOOLS_PATH,
+            "agent",
+            subcommand,
+            *remote_arguments,
+        ]
+    )
+    command = build_ssh_command(
+        host,
+        username,
+        ssh_key,
+        batch_mode=ssh_batch_mode(),
+        remote_command=remote_command,
+        connect_timeout=30,
+        server_alive_interval=30,
+    )
+    try:
+        result = subprocess.run(command, check=False, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        print(f"Error: remote agent {subcommand} failed: {exc}")
+        return 1
+    return result.returncode
+
+
 def run_agent_command(args: argparse.Namespace) -> int:
-    """Run a local agent-tool command."""
+    """Run a local or remote agent-tool command."""
     if args.agent_command == "web":
         if args.agent_web_command == "pair":
             return run_agent_web_pair(args)
@@ -794,6 +888,29 @@ def run_agent_command(args: argparse.Namespace) -> int:
 
     if args.agent_command == "update":
         selected = list(args.agent_update_tools or DEFAULT_UPDATE_TOOLS)
+        try:
+            target = _remote_agent_target(
+                args,
+                host_attribute="agent_update_host",
+                username_attribute="agent_update_username",
+            )
+        except ValueError as exc:
+            print(f"Error: {exc}")
+            return 1
+        if target is not None:
+            remote_arguments: StrList = []
+            for tool in args.agent_update_tools or []:
+                remote_arguments.extend(("--tool", tool))
+            if args.dry_run:
+                remote_arguments.append("--dry-run")
+            if args.json:
+                remote_arguments.append("--json")
+            return _run_remote_agent_lifecycle(
+                target,
+                "update",
+                remote_arguments,
+                timeout=(_UPDATE_TIMEOUT_SECONDS * len(selected)) + 60,
+            )
         try:
             results = update_agent_tools(selected, dry_run=args.dry_run)
         except (OSError, RuntimeError, ValueError) as exc:
@@ -837,6 +954,29 @@ def run_agent_command(args: argparse.Namespace) -> int:
 
     requested_tools = getattr(args, "agent_doctor_tools", None)
     requested_capabilities = getattr(args, "agent_doctor_capabilities", None) or []
+    try:
+        target = _remote_agent_target(
+            args,
+            host_attribute="agent_doctor_host",
+            username_attribute="agent_doctor_username",
+        )
+    except ValueError as exc:
+        print(f"Error: {exc}")
+        return 1
+    if target is not None:
+        remote_arguments = []
+        for tool in requested_tools or []:
+            remote_arguments.extend(("--tool", tool))
+        for capability in requested_capabilities:
+            remote_arguments.extend(("--capability", capability))
+        if args.json:
+            remote_arguments.append("--json")
+        return _run_remote_agent_lifecycle(
+            target,
+            "doctor",
+            remote_arguments,
+            timeout=180,
+        )
     if requested_tools:
         selected = list(requested_tools)
     elif requested_capabilities:

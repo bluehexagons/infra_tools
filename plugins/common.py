@@ -25,6 +25,7 @@ PLUGIN = PluginDefinition(
         "install_codex",
         "install_claude",
         "install_opencode",
+        "install_agent_cli_launcher",
         "install_t3code_desktop",
         "install_t3code_web",
         "copy_agent_tooling_payload",
@@ -178,6 +179,7 @@ def extend_agent_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -
     from common.agent_steps import (
         copy_agent_tooling_payload,
         clone_agent_repositories,
+        install_agent_cli_launcher,
         install_git_for_agent_repositories,
         install_git_lfs_for_agent_repositories,
         install_claude,
@@ -187,6 +189,11 @@ def extend_agent_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -
         install_t3code_desktop,
     )
     from common.t3code_steps import install_t3code_web
+
+    if config.has_agent_features():
+        steps.append(
+            ("Installing agent VM management command", install_agent_cli_launcher)
+        )
 
     if config.install_gh:
         steps.append(("Installing GitHub CLI", install_github_cli))
@@ -262,6 +269,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
     from common.agent_steps import (
         copy_agent_tooling_payload,
         clone_agent_repositories,
+        install_agent_cli_launcher,
         install_git_for_agent_repositories,
         install_git_lfs_for_agent_repositories,
         install_claude,
@@ -282,6 +290,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "install_codex": install_codex,
         "install_claude": install_claude,
         "install_opencode": install_opencode,
+        "install_agent_cli_launcher": install_agent_cli_launcher,
         "install_t3code_desktop": install_t3code_desktop,
         "install_t3code_web": install_t3code_web,
         "copy_agent_tooling_payload": copy_agent_tooling_payload,

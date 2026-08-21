@@ -71,6 +71,13 @@ executable, automatic rollback after a broken update, and a private audit
 record. The update environment is reset to that account's home so a caller's
 working directory and PATH cannot redirect the vendor installer. Setup still
 skips an installer when its command is already present.
+
+From the control system, the equivalent remote workflow is
+`infra-tools agent update HOST USER --dry-run` followed by the same command
+without `--dry-run`; use `--tool` to narrow either operation. Agent-enabled
+setups install the target-user launcher needed for local VM maintenance as
+part of the normal reconciliation.
+
 If a vendor command is run directly, use the same account and working
 directory, such as `sudo -u agent -H sh -lc 'cd /home/agent && codex update'`.
 

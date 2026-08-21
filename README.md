@@ -163,6 +163,9 @@ explicit, isolated Playwright capability described in the
 [browser automation guide](docs/BROWSER_AUTOMATION.md).
 New browsers and T3 clients can be enrolled without live terminal access by
 using the [protected device-pairing portal](docs/DEVICE_PAIRING.md).
+Agent-enabled targets also receive a user-scoped management launcher, and the
+control system can run health checks or deliberate terminal-agent updates with
+`infra-tools agent doctor HOST USER` and `infra-tools agent update HOST USER`.
 
 ## Development checks
 

@@ -17,11 +17,16 @@ from typing import cast
 from lib.config import SetupConfig
 from lib.remote_utils import install_package, is_dry_run, run
 from lib.types import JSONDict, JSONList
+from lib.validation import validate_filesystem_path
 
 from .common_steps import _run_as_login_user
 
 
 REMOTE_AGENT_PAYLOAD_DIR = "/opt/infra_tools/agent_payload"
+AGENT_CLI_SOURCE = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "infra_tools.py")
+)
+_AGENT_CLI_MARKER = "# Managed by infra_tools agent setup"
 
 
 def _user_home(config: SetupConfig) -> str:
@@ -45,6 +50,74 @@ def _chown_path(config: SetupConfig, path: str) -> None:
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "ownership change failed").strip()
         raise RuntimeError(f"Could not set ownership for {path}: {detail}")
+
+
+def install_agent_cli_launcher(config: SetupConfig) -> None:
+    """Install a target-user launcher for agent diagnostics and maintenance."""
+    if is_dry_run():
+        print("  [DRY-RUN] Would install the agent VM management command")
+        return
+
+    validate_filesystem_path(AGENT_CLI_SOURCE, must_exist=True)
+    if os.path.islink(AGENT_CLI_SOURCE) or not os.path.isfile(AGENT_CLI_SOURCE):
+        raise RuntimeError(
+            f"Agent management source is not a regular file: {AGENT_CLI_SOURCE}"
+        )
+
+    user_home = _user_home(config)
+    bin_dir = os.path.join(user_home, ".local", "bin")
+    launcher_path = os.path.join(bin_dir, "infra-tools")
+    _ensure_agent_directory(bin_dir, mode=0o755)
+    _reject_symlinked_agent_destination(launcher_path)
+
+    content = (
+        "#!/bin/sh\n"
+        f"{_AGENT_CLI_MARKER}\n"
+        f"exec /usr/bin/python3 {shlex.quote(AGENT_CLI_SOURCE)} \"$@\"\n"
+    )
+    if os.path.lexists(launcher_path):
+        if not os.path.isfile(launcher_path):
+            raise RuntimeError(f"Refusing unsafe agent launcher: {launcher_path}")
+        try:
+            with open(launcher_path, encoding="utf-8") as file_obj:
+                existing = file_obj.read()
+        except OSError as exc:
+            raise RuntimeError(
+                f"Could not inspect agent launcher: {launcher_path}"
+            ) from exc
+        if _AGENT_CLI_MARKER not in existing:
+            if not os.access(launcher_path, os.X_OK):
+                raise RuntimeError(
+                    f"Existing unmanaged agent launcher is not executable: {launcher_path}"
+                )
+            _ensure_agent_shell_path(config)
+            print(f"  Existing infra-tools launcher retained: {launcher_path}")
+            return
+        if existing == content:
+            os.chmod(launcher_path, 0o755)
+            _chown_path(config, launcher_path)
+            _ensure_agent_shell_path(config)
+            print(f"  Agent VM management command already installed: {launcher_path}")
+            return
+
+    descriptor, temporary = tempfile.mkstemp(dir=bin_dir, prefix=".infra-tools-")
+    try:
+        os.fchmod(descriptor, 0o755)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as file_obj:
+            descriptor = -1
+            file_obj.write(content)
+            file_obj.flush()
+            os.fsync(file_obj.fileno())
+        os.replace(temporary, launcher_path)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+    _chown_path(config, launcher_path)
+    _ensure_agent_shell_path(config)
+    print(f"  Installed agent VM management command: {launcher_path}")
 
 
 def install_github_cli(config: SetupConfig) -> None:

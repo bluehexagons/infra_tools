@@ -25,6 +25,7 @@ from common.agent_steps import (
     clone_agent_repositories,
     install_claude,
     install_codex,
+    install_agent_cli_launcher,
     install_git_lfs_for_agent_repositories,
     install_opencode,
     install_t3code_desktop,
@@ -215,6 +216,46 @@ class TestOfficialAgentInstallers(unittest.TestCase):
         self.assertIn('--git-lfs', self.config.to_setup_command())
         self.assertTrue(self.config.to_dict()['install_git_lfs'])
 
+    def test_agent_vm_gets_managed_user_launcher(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = os.path.join(directory, 'infra_tools.py')
+            home = os.path.join(directory, 'home')
+            os.makedirs(home)
+            with open(source, 'w', encoding='utf-8') as file_obj:
+                file_obj.write('# target source\n')
+
+            with (
+                patch('common.agent_steps.AGENT_CLI_SOURCE', source),
+                patch('common.agent_steps._user_home', return_value=home),
+                patch('common.agent_steps._chown_path'),
+                patch('common.agent_steps._ensure_agent_shell_path'),
+            ):
+                install_agent_cli_launcher(self.config)
+
+            launcher = os.path.join(home, '.local', 'bin', 'infra-tools')
+            with open(launcher, encoding='utf-8') as file_obj:
+                content = file_obj.read()
+            self.assertIn('# Managed by infra_tools agent setup', content)
+            self.assertIn(f'exec /usr/bin/python3 {source} "$@"', content)
+            self.assertEqual(os.stat(launcher).st_mode & 0o777, 0o755)
+
+    def test_agent_vm_launcher_refuses_symlink_destination(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = os.path.join(directory, 'infra_tools.py')
+            home = os.path.join(directory, 'home')
+            bin_dir = os.path.join(home, '.local', 'bin')
+            os.makedirs(bin_dir)
+            with open(source, 'w', encoding='utf-8') as file_obj:
+                file_obj.write('# target source\n')
+            os.symlink('/bin/true', os.path.join(bin_dir, 'infra-tools'))
+
+            with (
+                patch('common.agent_steps.AGENT_CLI_SOURCE', source),
+                patch('common.agent_steps._user_home', return_value=home),
+            ):
+                with self.assertRaisesRegex(RuntimeError, 'symlinked agent destination'):
+                    install_agent_cli_launcher(self.config)
+
 
 class TestAgentDoctor(unittest.TestCase):
     def test_inspects_user_tool_and_credentials_without_contents(self):
@@ -252,6 +293,57 @@ class TestAgentDoctor(unittest.TestCase):
             }
         ]):
             self.assertEqual(run_agent_command(args), 1)
+
+    def test_parser_accepts_remote_doctor_target(self):
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers(dest='command')
+        add_agent_subparser(subparsers)
+
+        args = parser.parse_args([
+            'agent', 'doctor', 'vm.example', 'agent',
+            '--tool', 'codex', '--capability', 'browser', '--json',
+        ])
+
+        self.assertEqual(args.agent_doctor_host, 'vm.example')
+        self.assertEqual(args.agent_doctor_username, 'agent')
+        self.assertEqual(args.agent_doctor_tools, ['codex'])
+
+    def test_remote_doctor_runs_target_copy_with_selected_checks(self):
+        args = argparse.Namespace(
+            agent_command='doctor',
+            agent_doctor_host='vm.example',
+            agent_doctor_username='agent',
+            agent_doctor_tools=['codex'],
+            agent_doctor_capabilities=['browser'],
+            ssh_key=None,
+            json=True,
+        )
+        completed = argparse.Namespace(returncode=0)
+        with (
+            patch('lib.agent_cli.build_ssh_command', return_value=['ssh']) as builder,
+            patch('lib.agent_cli.subprocess.run', return_value=completed),
+        ):
+            self.assertEqual(run_agent_command(args), 0)
+
+        self.assertEqual(
+            builder.call_args.kwargs['remote_command'],
+            'python3 /opt/infra_tools/infra_tools.py agent doctor '
+            '--tool codex --capability browser --json',
+        )
+
+    def test_remote_doctor_requires_complete_target(self):
+        args = argparse.Namespace(
+            agent_command='doctor',
+            agent_doctor_host='vm.example',
+            agent_doctor_username=None,
+            agent_doctor_tools=None,
+            agent_doctor_capabilities=None,
+            ssh_key=None,
+            json=False,
+        )
+        with patch('lib.agent_cli.subprocess.run') as run_command:
+            self.assertEqual(run_agent_command(args), 1)
+        run_command.assert_not_called()
 
 
 class TestAgentCredentialRotation(unittest.TestCase):
@@ -666,6 +758,29 @@ class TestAgentUpdate(unittest.TestCase):
             with patch('lib.agent_cli.os.geteuid', return_value=os.geteuid() + 1):
                 with self.assertRaisesRegex(RuntimeError, 'must run as'):
                     update_agent_tools(['codex'], home=home)
+
+    def test_remote_update_runs_as_target_user_with_requested_policy(self):
+        args = argparse.Namespace(
+            agent_command='update',
+            agent_update_host='vm.example',
+            agent_update_username='agent',
+            agent_update_tools=['codex'],
+            ssh_key=None,
+            dry_run=True,
+            json=True,
+        )
+        completed = argparse.Namespace(returncode=0)
+        with (
+            patch('lib.agent_cli.build_ssh_command', return_value=['ssh']) as builder,
+            patch('lib.agent_cli.subprocess.run', return_value=completed),
+        ):
+            self.assertEqual(run_agent_command(args), 0)
+
+        self.assertEqual(
+            builder.call_args.kwargs['remote_command'],
+            'python3 /opt/infra_tools/infra_tools.py agent update '
+            '--tool codex --dry-run --json',
+        )
 
 
 class TestAgentPayloadInstallation(unittest.TestCase):

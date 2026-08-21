@@ -173,6 +173,7 @@ class TestPluginRegistry(unittest.TestCase):
         )
         step_names = [name for name, _ in get_steps_for_system_type(config)]
         self.assertIn("Installing GitHub CLI", step_names)
+        self.assertIn("Installing agent VM management command", step_names)
         self.assertIn("Installing Codex CLI", step_names)
         self.assertIn("Installing Claude Code", step_names)
         self.assertIn("Installing OpenCode", step_names)
@@ -220,6 +221,7 @@ class TestPluginRegistry(unittest.TestCase):
         )
         step_names = [name for name, _ in get_steps_for_system_type(config)]
         self.assertIn("Installing GitHub CLI", step_names)
+        self.assertIn("Installing agent VM management command", step_names)
         self.assertIn("Installing Codex CLI", step_names)
         self.assertIn("Installing Claude Code", step_names)
         self.assertIn("Installing OpenCode", step_names)
