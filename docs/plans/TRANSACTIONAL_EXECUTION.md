@@ -46,6 +46,9 @@ ARCH-08 from the [architectural risk review](ARCHITECTURAL_RISK_REVIEW_2026-08-0
   `StrictHostKeyChecking=yes` with the workspace enrollment file. Build-server
   deployment targets are still populated from an unauthenticated
   `ssh-keyscan`.
+- `lib.operation_state` defines a schema-versioned, atomically persisted marker
+  with explicit in-progress and recovery-required states. It rejects corrupt,
+  unsupported, symlinked, and stale-ID updates rather than replacing them.
 
 The former `lib/transaction.py` callback framework was removed on 2026-08-21.
 It reran completed steps, could report success after continue-on-error failures,
@@ -65,8 +68,9 @@ Before changing broad execution behavior:
 2. **Complete:** retire `lib/transaction.py`, preserve operation logging as
    diagnostic evidence, and require explicit orchestration code to own apply,
    verification, and recovery behavior.
-3. Define the durable operation-marker schema, ownership, location, and
-   recovery behavior before wiring setup or deploy to it.
+3. **Complete:** define the durable operation-marker schema and crash-safe
+   storage primitive. Integration owns marker location and recovery behavior at
+   each setup or deployment boundary.
 4. Add fault-injection tests at the orchestration boundary, not only unit tests
    of transaction primitives.
 
@@ -196,11 +200,11 @@ enabled until the expected fingerprint is explicitly verified.
 
 ## Recommended first delivery slice
 
-The atomic persistence, initial execution-contract, and transaction-framework
-retirement slices are complete. The next delivery should finish the
-`remote_utils.run()` caller inventory and define the durable operation-record
-schema, then use the shared writer for setup/deployment markers and add
-fault-injection tests around interruption.
+The atomic persistence, execution-contract, transaction-framework retirement,
+and durable operation-record primitive slices are complete. The next delivery
+should use the marker for manifest activation and target setup, add
+fault-injection tests around interruption, and finish the `remote_utils.run()`
+caller inventory.
 
 ## Non-goals
 

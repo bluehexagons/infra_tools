@@ -72,10 +72,11 @@ The best next work packets are:
 1. Complete the `remote_utils.run()` caller inventory and move suitable callers
    toward an argv-native API (strict, secret-safe, and bounded execution are now
    landed).
-2. Define the versioned durable operation-record schema; keep diagnostic event
-   logging separate from authoritative recovery state.
+2. Integrate the versioned durable operation-record primitive into setup and
+   deployment recovery; diagnostic event logging remains separate from this
+   authoritative state.
 3. Replace permissive corrupt-state fallbacks with schema/version checks and
-   actionable remediation, then define durable operation markers.
+   actionable remediation, then extend durable markers to remaining mutations.
 4. Replace automatic SSH first-use trust with explicit enrollment before
    privileged setup/deploy operations.
 5. Standardize destructive CLI confirmations and updater trust policy after the

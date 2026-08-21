@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from lib.atomic_io import write_json_atomic, write_text_atomic
+from lib.atomic_io import remove_file_durable, write_json_atomic, write_text_atomic
 
 
 class TestAtomicIO(unittest.TestCase):
@@ -46,6 +46,15 @@ class TestAtomicIO(unittest.TestCase):
             with open(path, encoding="utf-8") as file_obj:
                 self.assertEqual(file_obj.read(), "content\n")
             self.assertEqual(os.stat(path).st_mode & 0o777, 0o640)
+
+    def test_durable_remove_reports_presence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "state.json")
+            write_text_atomic(path, "content\n")
+
+            self.assertTrue(remove_file_durable(path))
+            self.assertFalse(remove_file_durable(path))
+            self.assertFalse(os.path.exists(path))
 
 
 if __name__ == "__main__":

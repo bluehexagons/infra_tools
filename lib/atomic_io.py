@@ -59,6 +59,18 @@ def write_json_atomic(
     write_text_atomic(path, content, mode=mode)
 
 
+def remove_file_durable(path: str) -> bool:
+    """Remove one file and sync its directory so deletion survives a crash."""
+
+    target_path = os.path.abspath(path)
+    try:
+        os.unlink(target_path)
+    except FileNotFoundError:
+        return False
+    _fsync_directory(os.path.dirname(target_path))
+    return True
+
+
 def _fsync_directory(path: str) -> None:
     """Flush directory metadata after an atomic replacement."""
 
