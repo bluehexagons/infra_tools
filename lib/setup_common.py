@@ -611,6 +611,40 @@ def _github_token_entry(token: str, host: str) -> str:
     return f"{host}:\n    oauth_token: {json.dumps(normalized)}\n    git_protocol: https\n"
 
 
+def _github_entry_with_token(entry: Optional[str], token: str, host: str) -> str:
+    """Add a retrieved token without discarding host identity metadata."""
+    if entry is None:
+        return _github_token_entry(token, host)
+
+    normalized = token.strip()
+    if not normalized or any(character.isspace() for character in normalized):
+        raise ValueError("GitHub token must be a non-empty single-line value")
+    lines = entry.splitlines(keepends=True)
+    if not lines:
+        return _github_token_entry(normalized, host)
+
+    if not lines[0].endswith(("\n", "\r")):
+        lines[0] += "\n"
+    indentation = "    "
+    token_index = None
+    for index, line in enumerate(lines[1:], start=1):
+        stripped = line.lstrip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        candidate = line[: len(line) - len(stripped)]
+        if candidate:
+            indentation = candidate
+        if stripped.startswith("oauth_token:"):
+            token_index = index
+            break
+    token_line = f"{indentation}oauth_token: {json.dumps(normalized)}\n"
+    if token_index is None:
+        lines.insert(1, token_line)
+    else:
+        lines[token_index] = token_line
+    return "".join(lines)
+
+
 def _github_auth_payload_from_file(source: str, host: str) -> bytes:
     """Read a selected GitHub hosts entry or a one-line token file."""
     try:
@@ -663,7 +697,7 @@ def _github_auth_payload_from_active(hosts_path: str, host: str) -> bytes:
             "gh could not read the active GitHub token; authenticate gh or use "
             "--git-auth-file PATH"
         )
-    return _github_token_entry(result.stdout, host).encode("utf-8")
+    return _github_entry_with_token(entry, result.stdout, host).encode("utf-8")
 
 
 def _github_host_entry_from_validated_path(hosts_path: str, host: str) -> Optional[str]:

@@ -80,6 +80,65 @@ class T3CodeGitHubShimTest(unittest.TestCase):
             [binary, "pr", "list", "--limit", "10"],
         )
 
+    def test_discovery_resolves_login_for_authenticated_token_only_entry(self) -> None:
+        payload = {
+            "hosts": {
+                "github.com": [
+                    {
+                        "active": True,
+                        "error": None,
+                        "host": "github.com",
+                        "login": "",
+                        "state": "success",
+                    }
+                ]
+            }
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            binary = self._binary(temporary)
+            responses = [
+                SimpleNamespace(
+                    returncode=0,
+                    stdout=json.dumps(payload) + "\n",
+                    stderr="",
+                ),
+                SimpleNamespace(
+                    returncode=0,
+                    stdout="bluehexagons\n",
+                    stderr="",
+                ),
+            ]
+            with (
+                patch.object(
+                    t3code_gh_shim.subprocess,
+                    "run",
+                    side_effect=responses,
+                ) as run_command,
+                redirect_stdout(io.StringIO()) as stdout,
+                redirect_stderr(io.StringIO()),
+            ):
+                result = t3code_gh_shim.run(
+                    binary,
+                    ["auth", "status", "--json", "hosts"],
+                )
+
+        self.assertEqual(result, 0)
+        account = json.loads(stdout.getvalue())["hosts"]["github.com"][0]
+        self.assertEqual(account["login"], "bluehexagons")
+        self.assertNotIn("error", account)
+        self.assertEqual(
+            run_command.call_args_list[1].args[0],
+            [
+                binary,
+                "api",
+                "user",
+                "--hostname",
+                "github.com",
+                "--jq",
+                ".login",
+            ],
+        )
+
     def test_cli_preserves_leading_github_options(self) -> None:
         with patch.object(
             t3code_gh_shim.sys,

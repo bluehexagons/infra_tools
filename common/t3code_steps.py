@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import json
 import os
@@ -391,8 +392,13 @@ def _write_passthrough_wrapper(path: str, home: str, t3_binary: str) -> bool:
 def _write_gh_shim(path: str, gh_binary: str) -> bool:
     """Write a T3-only gh launcher that leaves all non-discovery calls intact."""
 
+    digest = hashlib.sha256()
+    with open(T3_GH_SHIM_SCRIPT, "rb") as file_obj:
+        for chunk in iter(lambda: file_obj.read(1024 * 1024), b""):
+            digest.update(chunk)
     content = (
         "#!/bin/sh\n"
+        f"# helper-sha256: {digest.hexdigest()}\n"
         f"exec /usr/bin/python3 {shlex.quote(T3_GH_SHIM_SCRIPT)} "
         f'--gh-binary {shlex.quote(gh_binary)} "$@"\n'
     )

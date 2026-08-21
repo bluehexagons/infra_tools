@@ -208,6 +208,7 @@ class T3CodeWebTest(unittest.TestCase):
             )
             with open(gh_shim, encoding="utf-8") as file_obj:
                 gh_shim_content = file_obj.read()
+            self.assertIn("# helper-sha256:", gh_shim_content)
             self.assertIn("t3code_gh_shim.py", gh_shim_content)
             self.assertIn(f"--gh-binary {gh_binary}", gh_shim_content)
             with open(pair_wrapper, encoding="utf-8") as file_obj:

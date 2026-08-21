@@ -79,9 +79,12 @@ T3 starts so its initial Source Control probe sees the same GitHub identity as
 the target user's terminal. T3's current strict discovery schema rejects the
 null `error` field emitted for a healthy account by GitHub CLI 2.98. The managed
 service therefore puts a T3-only `gh` compatibility shim first on its `PATH`.
-The shim removes only that null field from T3's exact auth-discovery command;
-all other GitHub CLI arguments execute the installed binary unchanged, and
-normal user shells do not use the shim.
+The shim removes that null field from T3's exact auth-discovery command. If a
+valid token-only GitHub CLI entry reports success without an account name, the
+shim asks the authenticated GitHub API for that account's login and supplies it
+to T3. All other GitHub CLI arguments execute the installed binary unchanged,
+and normal user shells do not use the shim. The launcher records the helper's
+digest so a setup rerun restarts T3 whenever this compatibility behavior changes.
 
 During setup, infra-tools installs `build-essential` and `python3`, then
 installs T3 and its native dependencies as the target user under

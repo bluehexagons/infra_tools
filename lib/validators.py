@@ -24,3 +24,9 @@ def validate_host(host: str) -> bool:
 def validate_username(username: str) -> bool:
     pattern = r'^[a-z_][a-z0-9_-]{0,31}$'
     return bool(re.match(pattern, username))
+
+
+def validate_github_login(login: str) -> bool:
+    """Return whether a login follows GitHub's public account-name rules."""
+    pattern = r"^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$"
+    return bool(re.fullmatch(pattern, login))

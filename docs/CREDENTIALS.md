@@ -144,9 +144,10 @@ configuration in its standard location:
 choice when the VM needs private GitHub repositories. It first uses a token in
 the selected `hosts.yml` entry. If the entry has no token because `gh` uses an
 OS credential store, it runs `gh auth token --hostname github.com` on the
-controller and stages the returned token. This requires `gh` to be installed
-and already authenticated on the controller; infra-tools does not force
-GitHub CLI into insecure plaintext storage.
+controller and stages the returned token while preserving the selected host's
+account name and Git protocol metadata. This requires `gh` to be installed and
+already authenticated on the controller; infra-tools does not force GitHub CLI
+into insecure plaintext storage.
 
 `--agent-auth active` copies known credentials for the selected supported
 agent tools. Codex, Claude Code, and OpenCode use their standard file-backed

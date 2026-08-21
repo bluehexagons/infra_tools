@@ -535,7 +535,12 @@ class TestAgentCredentialStaging(unittest.TestCase):
             hosts_path = os.path.join(home, ".config", "gh", "hosts.yml")
             os.makedirs(os.path.dirname(hosts_path))
             with open(hosts_path, "w", encoding="utf-8") as file_obj:
-                file_obj.write("github.com:\n    user: octocat\n    git_protocol: https\n")
+                file_obj.write(
+                    "github.com:\n"
+                    "    user: octocat\n"
+                    "    oauth_token: null\n"
+                    "    git_protocol: https\n"
+                )
             os.chmod(hosts_path, 0o600)
             result = type(
                 "Completed",
@@ -553,6 +558,8 @@ class TestAgentCredentialStaging(unittest.TestCase):
             with open(payload_path, encoding="utf-8") as file_obj:
                 payload = file_obj.read()
             self.assertIn("keyring-token", payload)
+            self.assertIn("user: octocat", payload)
+            self.assertEqual(payload.count("oauth_token:"), 1)
             run.assert_called_once_with(
                 ["/usr/bin/gh", "auth", "token", "--hostname", "github.com"],
                 check=False,

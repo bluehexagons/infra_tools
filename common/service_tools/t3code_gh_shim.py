@@ -17,6 +17,7 @@ if SOURCE_ROOT not in sys.path:
     sys.path.insert(0, SOURCE_ROOT)
 
 from lib.validation import validate_filesystem_path
+from lib.validators import validate_github_login, validate_host
 
 
 _T3_DISCOVERY_ARGS = ("auth", "status", "--json", "hosts")
@@ -31,8 +32,28 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _sanitize_discovery_output(output: str) -> str:
-    """Remove null error fields that T3's current strict schema rejects."""
+def _resolve_login(gh_binary: str, host: str) -> str | None:
+    """Resolve the account name for an authenticated token-only hosts entry."""
+    if not validate_host(host):
+        return None
+    try:
+        result = subprocess.run(
+            [gh_binary, "api", "user", "--hostname", host, "--jq", ".login"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    login = result.stdout.strip()
+    if result.returncode != 0 or not validate_github_login(login):
+        return None
+    return login
+
+
+def _sanitize_discovery_output(output: str, gh_binary: str | None = None) -> str:
+    """Normalize healthy GitHub records for T3's current strict schema."""
 
     try:
         payload = json.loads(output)
@@ -42,13 +63,36 @@ def _sanitize_discovery_output(output: str) -> str:
         return output
 
     changed = False
-    for accounts in payload["hosts"].values():
+    resolved_logins: dict[str, str | None] = {}
+    for configured_host, accounts in payload["hosts"].items():
         if not isinstance(accounts, list):
             continue
         for account in accounts:
-            if isinstance(account, dict) and account.get("error", object()) is None:
+            if not isinstance(account, dict):
+                continue
+            if account.get("error", object()) is None:
                 account.pop("error")
                 changed = True
+            login = account.get("login")
+            if (
+                gh_binary
+                and account.get("state") == "success"
+                and (not isinstance(login, str) or not login.strip())
+            ):
+                account_host = account.get("host")
+                host = (
+                    account_host
+                    if isinstance(account_host, str) and validate_host(account_host)
+                    else configured_host
+                )
+                if not isinstance(host, str):
+                    continue
+                if host not in resolved_logins:
+                    resolved_logins[host] = _resolve_login(gh_binary, host)
+                resolved_login = resolved_logins[host]
+                if resolved_login:
+                    account["login"] = resolved_login
+                    changed = True
     if not changed:
         return output
     return json.dumps(payload, separators=(",", ":")) + (
@@ -74,7 +118,7 @@ def run(gh_binary: str, arguments: list[str]) -> int:
         text=True,
         timeout=30,
     )
-    sys.stdout.write(_sanitize_discovery_output(result.stdout))
+    sys.stdout.write(_sanitize_discovery_output(result.stdout, gh_binary))
     sys.stderr.write(result.stderr)
     return result.returncode
 
