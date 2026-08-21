@@ -66,7 +66,7 @@ before changing the project.
 infra-tools officially supports Debian on:
 
 - bare-metal systems;
-- virtual machines, including Proxmox VMs; and
+- virtual machines, including Proxmox-provisioned VMs; and
 - unprivileged Debian LXC containers on Proxmox.
 
 The installer and setup preflight also recognize Ubuntu and Linux Mint as
