@@ -16,6 +16,7 @@ from lib.proxmox_hosts import ProxmoxHost
 from lib.proxmox_manage import (
     ContainerInfo,
     DEFAULT_NOTIFICATION_ENDPOINT,
+    GuestAutostart,
     HealthReport,
     ProxmoxManageError,
     SnapshotInfo,
@@ -23,12 +24,15 @@ from lib.proxmox_manage import (
     _parse_listsnapshot,
     _parse_pct_list,
     _parse_qm_list,
+    configure_guest_autostart,
     delete_snapshot,
     destroy_container,
     get_container_config,
     get_container_ip,
     get_container_pending,
     get_container_status,
+    get_guest_autostart,
+    get_guest_stats,
     health_check,
     install_webhook_notifications,
     list_containers,
@@ -192,6 +196,120 @@ class TestStatus(unittest.TestCase):
             _completed("status: running\n"),
         ]
         self.assertEqual(get_container_status(_host(), 100), "running")
+
+
+class TestGuestStats(unittest.TestCase):
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_parses_verbose_container_status(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = _completed(
+            "status: running\n"
+            "cpu: 0.375\n"
+            "cpus: 2\n"
+            "mem: 3221225472\n"
+            "maxmem: 4294967296\n"
+            "swap: 134217728\n"
+            "maxswap: 1073741824\n"
+            "disk: 10737418240\n"
+            "maxdisk: 34359738368\n"
+            "diskread: 123456\n"
+            "diskwrite: 654321\n"
+            "netin: 111\n"
+            "netout: 222\n"
+            "uptime: 3661\n"
+        )
+
+        stats = get_guest_stats(_host(), 100)
+
+        self.assertEqual(stats.guest_type, "lxc")
+        self.assertEqual(stats.status, "running")
+        self.assertEqual(stats.cpu_usage, 0.375)
+        self.assertEqual(stats.cpu_count, 2)
+        self.assertEqual(stats.memory_used, 3221225472)
+        self.assertEqual(stats.network_out, 222)
+        self.assertEqual(stats.uptime_seconds, 3661)
+        self.assertIn("pct status 100 --verbose", mock_run.call_args.args[3])
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_falls_back_to_verbose_qm_status(self, mock_run: MagicMock) -> None:
+        mock_run.side_effect = [
+            _completed(stderr="CT 100 does not exist", returncode=2),
+            _completed("status: stopped\ncpu: unavailable\nmaxmem: 4294967296\n"),
+        ]
+
+        stats = get_guest_stats(_host(), 100)
+
+        self.assertEqual(stats.guest_type, "vm")
+        self.assertEqual(stats.status, "stopped")
+        self.assertEqual(stats.cpu_usage, 0.0)
+        self.assertEqual(stats.memory_total, 4294967296)
+        self.assertIn("qm status 100 --verbose", mock_run.call_args.args[3])
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_raises_when_verbose_status_fails(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = _completed(stderr="locked", returncode=1)
+
+        with self.assertRaisesRegex(ProxmoxManageError, "status 100 --verbose"):
+            get_guest_stats(_host(), 100)
+
+
+class TestGuestAutostart(unittest.TestCase):
+    @patch("lib.proxmox_manage.get_container_config")
+    def test_parses_autostart_and_ordering(self, mock_config: MagicMock) -> None:
+        mock_config.return_value = {
+            "onboot": "1",
+            "startup": "order=2,up=45,down=120",
+        }
+
+        settings = get_guest_autostart(_host(), 100)
+
+        self.assertEqual(
+            settings,
+            GuestAutostart(
+                enabled=True,
+                order=2,
+                start_delay=45,
+                shutdown_timeout=120,
+            ),
+        )
+
+    @patch("lib.proxmox_manage.reconfigure_container")
+    def test_enables_autostart_without_replacing_schedule(
+        self,
+        mock_reconfigure: MagicMock,
+    ) -> None:
+        configure_guest_autostart(_host(), 100, enabled=True)
+
+        mock_reconfigure.assert_called_once_with(_host(), 100, {"onboot": "1"})
+
+    @patch("lib.proxmox_manage.reconfigure_container")
+    @patch("lib.proxmox_manage.get_guest_autostart")
+    def test_updates_one_schedule_field_and_preserves_others(
+        self,
+        mock_current: MagicMock,
+        mock_reconfigure: MagicMock,
+    ) -> None:
+        mock_current.return_value = GuestAutostart(
+            enabled=True,
+            order=3,
+            start_delay=30,
+            shutdown_timeout=90,
+        )
+
+        configure_guest_autostart(_host(), 100, enabled=True, order=1)
+
+        mock_reconfigure.assert_called_once_with(
+            _host(),
+            100,
+            {"onboot": "1", "startup": "order=1,up=30,down=90"},
+        )
+
+    def test_rejects_schedule_when_disabling(self) -> None:
+        with self.assertRaisesRegex(ValueError, "require enabled=True"):
+            configure_guest_autostart(_host(), 100, enabled=False, order=1)
+
+    def test_rejects_negative_schedule_value(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must be >= 0"):
+            configure_guest_autostart(_host(), 100, enabled=True, start_delay=-1)
 
 
 class TestStartStop(unittest.TestCase):

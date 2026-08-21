@@ -24,7 +24,7 @@ to the detailed setup and operations guides.
 
 | Guide | Use it for |
 | --- | --- |
-| [Proxmox workflows](PROXMOX.md) | Host registration, VM/LXC provisioning, guest lifecycle, and smoke tests |
+| [Proxmox workflows](PROXMOX.md) | Host registration, VM/LXC provisioning, lifecycle, resource pressure, boot ordering, backups, and smoke tests |
 | [Saved configuration operations](OPERATIONS.md) | `list`, `info`, `cmd`, `deploy`, `recall`, the shell, and testing |
 | [Sysadmin shortcuts](SYSADMIN.md) | SSH, transfers, health, services, logs, upgrades, and reachability |
 | [Network inventory](NETWORKING.md) | Network profiles and read-only Proxmox firewall planning |

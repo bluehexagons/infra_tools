@@ -772,6 +772,7 @@ infra-tools vm show <local-name> [--json]
 infra-tools vm show <host> <id> [--json]
 infra-tools vm health <local-name> [--no-ssh] [--json]
 infra-tools vm health <host> <id> [--no-ssh] [--json]
+infra-tools vm stats <target> [<id>] [--json]
 infra-tools vm status <target> [<id>] [--json]
 infra-tools vm start <target> [<id>] [--json]
 infra-tools vm pause <target> [<id>] [--json]  # alias: suspend
@@ -779,6 +780,9 @@ infra-tools vm resume <target> [<id>] [--json]
 infra-tools vm shutdown <target> [<id>] [--timeout SECONDS] [--json]
 infra-tools vm stop <target> [<id>] [--json]
 infra-tools vm reboot <target> [<id>] [--timeout SECONDS] [--json]  # alias: restart
+infra-tools vm autostart <target> [<id>] [--json]
+infra-tools vm autostart <target> [<id>] --enable [--order N] [--start-delay SECONDS] [--shutdown-timeout SECONDS] [--json]
+infra-tools vm autostart <target> [<id>] --disable [--json]
 infra-tools vm snapshot list <local-name> [--json]
 infra-tools vm snapshot list <host> <id> [--json]
 infra-tools vm backup list <local-name> [--json]
@@ -821,6 +825,21 @@ loss. Shutdown and reboot accept the native provider `--timeout`; every
 lifecycle command queries and reports the resulting provider state. The
 provider-specific `proxmox` lifecycle paths remain available for compatibility
 with scripts that use an explicit host and VMID.
+
+`vm stats` reports the provider's live CPU and memory use, allocated/used disk
+counters, cumulative disk and network I/O, and uptime without requiring a
+guest agent. Text output calls out CPU at 90%, memory at 85%, any reported swap
+use, and disk usage at 90%; JSON includes the same messages in `warnings`.
+Counters for a stopped guest may be zero, and a single sample is a diagnostic
+starting point rather than a capacity trend.
+
+`vm autostart` without a mode is read-only. Use `--enable` or `--disable` to
+change start-at-boot behavior. With `--enable`, `--order` sets priority (lower
+starts first and stops last), `--start-delay` staggers later guests, and
+`--shutdown-timeout` gives the guest time for a clean shutdown. Unspecified
+ordering values are preserved. Staggering storage, database, and application
+VMs avoids having every guest saturate an older host's disks immediately after
+a power outage.
 
 `vm destroy` prints the observed name, VMID, provider host, and local name
 before asking the operator to type `yes`; `--yes` skips only that prompt and

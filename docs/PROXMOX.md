@@ -4,10 +4,10 @@ infra-tools can register Proxmox hosts, cache their capabilities, provision
 Debian VMs or unprivileged LXCs, and manage guest lifecycle operations.
 [Machine types](MACHINE_TYPES.md) explains the guest capability differences.
 Provider-specific host operations and advanced mutations remain under
-`infra-tools proxmox ...`. Common guest observations, power-state lifecycle,
-and confirmed QEMU VM destruction are available through the provider-neutral
-`infra-tools vm ...` commands; see the command reference for the stable JSON
-shape.
+`infra-tools proxmox ...`. Common guest observations, resource statistics,
+power-state lifecycle, boot ordering, and confirmed QEMU VM destruction are
+available through the provider-neutral `infra-tools vm ...` commands; see the
+command reference for the stable JSON shape.
 
 These workflows target Proxmox VE 9.2 and use its current `qm` and `pct`
 interfaces. Bridge discovery identifies Linux bridge interfaces by type, so
@@ -307,6 +307,56 @@ node, preferring bridge-specific resolvers; when the node exposes only a local
 stub resolver, the inferred gateway is used.
 
 ## Guest lifecycle
+
+### Resource pressure and boot recovery
+
+Start troubleshooting a slow or memory-constrained host with the node summary,
+then inspect the guests contributing to the load:
+
+```bash
+infra-tools proxmox top pve1
+infra-tools vm stats fileserver
+infra-tools vm stats build-agent --json
+```
+
+`vm stats` reads Proxmox's provider-side counters and does not require the QEMU
+guest agent. It shows current CPU and memory use, disk allocation, cumulative
+disk/network I/O, and uptime. Warnings highlight high CPU, memory, disk, or
+reported swap use. Treat one sample as a clue: compare several samples before
+resizing a VM, and check `proxmox top` to retain enough host memory for
+Proxmox itself.
+
+After a power outage, starting every VM together can overwhelm an older disk
+or a small CPU. Inspect and configure typed boot settings with the saved local
+VM name:
+
+```bash
+infra-tools vm autostart fileserver
+infra-tools vm autostart fileserver \
+  --enable --order 1 --start-delay 30 --shutdown-timeout 120
+infra-tools vm autostart database \
+  --enable --order 2 --start-delay 45 --shutdown-timeout 180
+infra-tools vm autostart build-agent --disable
+```
+
+Lower order values start first and stop last. Put infrastructure dependencies
+such as storage and DNS first, give slow services enough delay, and leave
+disposable build or test VMs disabled. Unspecified order and delay values are
+preserved when autostart is enabled again.
+
+For a small host, a practical routine is:
+
+1. Run `proxmox audit` and `proxmox top` before maintenance.
+2. Use `vm stats` on the busiest guests before adding CPU or memory.
+3. Keep host memory and disk headroom instead of allocating every available
+   unit to guests.
+4. Stagger essential autostart guests and disable nonessential ones.
+5. Keep verified backups; a VM snapshot is convenient rollback state, not a
+   substitute for a backup on separate storage.
+6. Prefer `vm shutdown` to `vm stop`; immediate power-off can damage guest
+   filesystems and application data.
+
+### Power-state commands
 
 For an infra-tools-provisioned VM, prefer its saved local name:
 

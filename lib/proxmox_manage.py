@@ -3,8 +3,9 @@
 
 Provides helpers for:
 - Listing guests (``pct list`` + ``qm list``).
-- Querying status, config, and uptime for a single guest.
+- Querying status, config, and resource usage for a single guest.
 - Starting, rebooting, pausing, resuming, and stopping guests.
+- Inspecting and configuring guest startup order.
 - Destroying guests (caller is expected to handle confirmation).
 - Health-checking a guest (status + ping + optional SSH probe).
 - Reconfiguring guests (CPU, memory, arbitrary ``pct``/``qm`` options).
@@ -46,6 +47,38 @@ class ContainerInfo:
     guest_type: str = "lxc"
     lock: Optional[str] = None
     ip: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class GuestStats:
+    """Live resource counters returned by ``pct/qm status --verbose``."""
+
+    vmid: int
+    guest_type: str
+    status: str
+    cpu_usage: float = 0.0
+    cpu_count: int = 0
+    memory_used: int = 0
+    memory_total: int = 0
+    swap_used: int = 0
+    swap_total: int = 0
+    disk_used: int = 0
+    disk_total: int = 0
+    disk_read: int = 0
+    disk_written: int = 0
+    network_in: int = 0
+    network_out: int = 0
+    uptime_seconds: int = 0
+
+
+@dataclass(frozen=True)
+class GuestAutostart:
+    """Typed Proxmox guest boot and shutdown ordering settings."""
+
+    enabled: bool
+    order: Optional[int] = None
+    start_delay: Optional[int] = None
+    shutdown_timeout: Optional[int] = None
 
 
 @dataclass
@@ -319,6 +352,57 @@ def get_container_status(host: ProxmoxHost, vmid: int) -> str:
     return status
 
 
+def _nonnegative_number(data: dict[str, str], key: str) -> int:
+    try:
+        return max(0, int(float(data.get(key, "0"))))
+    except (TypeError, ValueError):
+        return 0
+
+
+def get_guest_stats(host: ProxmoxHost, vmid: int) -> GuestStats:
+    """Return live CPU, memory, disk, network, and uptime counters."""
+    result, guest_type = _run_guest_command(
+        host,
+        vmid,
+        f"pct status {int(vmid)} --verbose",
+        f"qm status {int(vmid)} --verbose",
+    )
+    if result.returncode != 0:
+        tool = "qm" if guest_type == "vm" else "pct"
+        raise ProxmoxManageError(
+            f"{tool} status {vmid} --verbose failed on {host.address}: "
+            f"{(result.stderr or result.stdout or '').strip() or 'unknown error'}"
+        )
+    values: dict[str, str] = {}
+    for line in (result.stdout or "").splitlines():
+        if ":" not in line:
+            continue
+        key, _, value = line.partition(":")
+        values[key.strip().lower()] = value.strip()
+    try:
+        cpu_usage = max(0.0, float(values.get("cpu", "0")))
+    except (TypeError, ValueError):
+        cpu_usage = 0.0
+    return GuestStats(
+        vmid=int(vmid),
+        guest_type=guest_type,
+        status=values.get("status", "unknown"),
+        cpu_usage=cpu_usage,
+        cpu_count=_nonnegative_number(values, "cpus"),
+        memory_used=_nonnegative_number(values, "mem"),
+        memory_total=_nonnegative_number(values, "maxmem"),
+        swap_used=_nonnegative_number(values, "swap"),
+        swap_total=_nonnegative_number(values, "maxswap"),
+        disk_used=_nonnegative_number(values, "disk"),
+        disk_total=_nonnegative_number(values, "maxdisk"),
+        disk_read=_nonnegative_number(values, "diskread"),
+        disk_written=_nonnegative_number(values, "diskwrite"),
+        network_in=_nonnegative_number(values, "netin"),
+        network_out=_nonnegative_number(values, "netout"),
+        uptime_seconds=_nonnegative_number(values, "uptime"),
+    )
+
+
 def start_container(host: ProxmoxHost, vmid: int) -> None:
     """Start a guest on ``host``; idempotent if already running."""
     guest_type, current = _get_guest_status(host, vmid)
@@ -497,6 +581,76 @@ def get_container_config(
             key, _, value = line.partition(":")
             config[key.strip()] = value.strip()
     return config
+
+
+def _parse_startup_config(value: str) -> dict[str, int]:
+    parsed: dict[str, int] = {}
+    for item in value.split(","):
+        key, separator, raw_value = item.strip().partition("=")
+        if separator and key in {"order", "up", "down"}:
+            try:
+                parsed[key] = max(0, int(raw_value))
+            except ValueError:
+                continue
+    return parsed
+
+
+def get_guest_autostart(host: ProxmoxHost, vmid: int) -> GuestAutostart:
+    """Return typed guest start-at-boot and ordering settings."""
+    config = get_container_config(host, vmid)
+    startup = _parse_startup_config(config.get("startup", ""))
+    enabled = config.get("onboot", "0").strip().lower() in {
+        "1",
+        "on",
+        "true",
+        "yes",
+    }
+    return GuestAutostart(
+        enabled=enabled,
+        order=startup.get("order"),
+        start_delay=startup.get("up"),
+        shutdown_timeout=startup.get("down"),
+    )
+
+
+def configure_guest_autostart(
+    host: ProxmoxHost,
+    vmid: int,
+    *,
+    enabled: bool,
+    order: Optional[int] = None,
+    start_delay: Optional[int] = None,
+    shutdown_timeout: Optional[int] = None,
+) -> None:
+    """Set typed start-at-boot and optional staggered startup settings."""
+    schedule = {
+        "order": order,
+        "up": start_delay,
+        "down": shutdown_timeout,
+    }
+    if any(value is not None and value < 0 for value in schedule.values()):
+        raise ValueError("autostart order and delays must be >= 0")
+    if not enabled and any(value is not None for value in schedule.values()):
+        raise ValueError("autostart order and delays require enabled=True")
+
+    options = {"onboot": "1" if enabled else "0"}
+    if any(value is not None for value in schedule.values()):
+        current = get_guest_autostart(host, vmid)
+        merged = {
+            "order": current.order,
+            "up": current.start_delay,
+            "down": current.shutdown_timeout,
+        }
+        for key, value in schedule.items():
+            if value is not None:
+                merged[key] = value
+        startup = ",".join(
+            f"{key}={merged[key]}"
+            for key in ("order", "up", "down")
+            if merged[key] is not None
+        )
+        options["startup"] = startup
+    reconfigure_container(host, vmid, options)
 
 
 def get_container_pending(

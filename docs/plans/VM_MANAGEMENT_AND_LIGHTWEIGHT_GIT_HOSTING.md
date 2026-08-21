@@ -1,11 +1,11 @@
 # Generic VM Management, Agent Interfaces, and Lightweight Git Hosting
 
 Status: active. The provisioning-only portion of Lane A3, the IPv4 scope of
-Lane B1, the first provider-neutral VM observation and power-state lifecycle
-surface, confirmed destruction path, explicit T3 Code desktop/headless setup,
-and generic path-backup composition are implemented on `main`; broader VM
-mutation, HTTPS proxying, recovery, and additional provider support remain
-subject to the gates below.
+Lane B1, the first provider-neutral VM observation, resource statistics,
+power-state lifecycle, and boot-ordering surface, confirmed destruction path,
+explicit T3 Code desktop/headless setup, and generic path-backup composition
+are implemented on `main`; broader VM mutation, HTTPS proxying, recovery, and
+additional provider support remain subject to the gates below.
 Reviewed against `main` and upstream T3 Code, Nginx, Samba, and Git LFS
 documentation on 2026-08-21.
 
@@ -36,8 +36,8 @@ avoid abstraction whose only purpose is a hypothetical provider or service.
 
 | Lane | State | Next boundary |
 | --- | --- | --- |
-| A1: VM terminology and observation commands | Observation, power lifecycle, and destroy slice implemented | `vm list/show/health/status/snapshot list/backup list` emit versioned provider-neutral output; single-VM commands resolve saved local names; legacy Proxmox guest paths remain during migration |
-| A2: existing VM mutations | Single-step power lifecycle and destroy implemented; broader work dependency-gated | Complete durable operation markers and the staged mutation contract before restore, rollback, or multi-step mutation paths |
+| A1: VM terminology and observation commands | Observation, stats, power lifecycle, autostart, and destroy slice implemented | `vm list/show/health/stats/status/snapshot list/backup list` emit versioned provider-neutral output; single-VM commands resolve saved local names; legacy Proxmox guest paths remain during migration |
+| A2: existing VM mutations | Single-step power lifecycle, typed autostart, and destroy implemented; broader work dependency-gated | Complete durable operation markers and the staged mutation contract before restore, rollback, or multi-step mutation paths |
 | A3: declarative VM data disks and guest mounts | Provisioning slice implemented | Live Proxmox validation, read-only mount status, then coordinated grow-only resize; existing-disk adoption, detach, and `/home` migration remain rejected |
 | A4: clone and restore | Dependency-gated | Shared transaction and recovery contracts |
 | B1: explicit and safe Gogs LFS | Implemented (IPv4) | Verified releases, local LFS layout, required mounts, safe hostless exposure, reusable health/status, and agent Git LFS setup are complete; IPv6 exposure remains explicitly deferred |
@@ -438,13 +438,13 @@ A managed VM reference consists of:
   provider-specific kind.
 
 The CLI accepts `HOST ID` as separate arguments. For an infra-tools-provisioned
-QEMU VM, single-resource observation, power-state lifecycle, and `destroy`
-commands also accept the exact saved local friendly name or saved IP address.
-That shorthand resolves the provider host from the saved setup and requires
-the observed Proxmox name and configured IPv4 address to match before use;
-tags are deliberately not VM identifiers. The provider adapter validates the
-ID; the common parser must not assume every future provider uses an integer.
-Provider hosts must declare their provider explicitly when persisted.
+QEMU VM, single-resource observation, power-state lifecycle, autostart, and
+`destroy` commands also accept the exact saved local friendly name or saved IP
+address. That shorthand resolves the provider host from the saved setup and
+requires the observed Proxmox name and configured IPv4 address to match before
+use; tags are deliberately not VM identifiers. The provider adapter validates
+the ID; the common parser must not assume every future provider uses an
+integer. Provider hosts must declare their provider explicitly when persisted.
 Incompatible records written by development builds should be rejected with a
 command to re-register the Proxmox host under `provider = proxmox`; they should
 not be interpreted through a permanent legacy branch.
@@ -463,6 +463,7 @@ noun. Do not retain flat aliases for the development-era command names:
 infra-tools vm list HOST [--json]
 infra-tools vm show TARGET [ID] [--json]
 infra-tools vm health TARGET [ID] [--json]
+infra-tools vm stats TARGET [ID] [--json]
 infra-tools vm status TARGET [ID] [--json]
 infra-tools vm start TARGET [ID] [--json]
 infra-tools vm shutdown TARGET [ID] [--timeout SECONDS] [--json]
@@ -470,6 +471,7 @@ infra-tools vm stop TARGET [ID] [--json]
 infra-tools vm reboot TARGET [ID] [--timeout SECONDS] [--json]
 infra-tools vm pause TARGET [ID] [--json]
 infra-tools vm resume TARGET [ID] [--json]
+infra-tools vm autostart TARGET [ID] [--enable|--disable] [--order N] [--start-delay SECONDS] [--shutdown-timeout SECONDS] [--json]
 infra-tools vm modify HOST ID [--cores N] [--memory SIZE] [--balloon-min SIZE] [--dry-run]
 infra-tools vm disk list HOST ID [--json]
 infra-tools vm disk attach HOST ID NAME --storage POOL --size SIZE [--dry-run]
@@ -1217,14 +1219,15 @@ public command surface; no release should contain both old and new aliases.
 The shared roadmap imposes two gates:
 
 1. Parser, validation, pure rendering, read-only observation, and removal of
-   dead development APIs may proceed immediately. Single-guest power-state
-   operations may use the synchronous provider command with exact setup/guest
-   identity checks and a resulting-state observation. The existing Proxmox
-   destroy operation additionally requires explicit confirmation and an
-   absence check afterward; it remains intentionally non-recoverable. Restore,
-   rollback, destructive reconfiguration, and multi-file service/firewall
-   reconciliation must use the durable operation markers and staged activation
-   contract from [transactional execution](TRANSACTIONAL_EXECUTION.md).
+   dead development APIs may proceed immediately. Single-guest power-state and
+   typed, reversible boot-policy operations may use the synchronous provider
+   command with exact setup/guest identity checks and a resulting-state
+   observation. The existing Proxmox destroy operation additionally requires
+   explicit confirmation and an absence check afterward; it remains
+   intentionally non-recoverable. Restore, rollback, destructive
+   reconfiguration, and multi-file service/firewall reconciliation must use
+   the durable operation markers and staged activation contract from
+   [transactional execution](TRANSACTIONAL_EXECUTION.md).
 2. VM restore and claims of recoverable Gogs or T3 state depend on the shared
    recovery project choosing an archive/storage mechanism. Data inventory,
    consistency rules, and restore smoke tests can land before that backend.
@@ -1234,8 +1237,9 @@ The shared roadmap imposes two gates:
 Implementation status: newly written Proxmox host records carry an explicit
 schema version and provider identity, and incompatible development records
 fail with re-registration guidance. The first neutral VM observation/result
-types, setup-backed local-name resolution, power-state lifecycle, and confirmed
-QEMU destroy command are implemented.
+types, setup-backed local-name resolution, resource statistics, typed autostart
+ordering, power-state lifecycle, and confirmed QEMU destroy command are
+implemented.
 
 - Add provider and schema-version fields to registered infrastructure hosts;
   reject incompatible development records without mutating them and document
@@ -1251,9 +1255,9 @@ QEMU destroy command are implemented.
 ### Lane A2: existing VM mutations
 
 - Move typed modification, disk resize, snapshots, migration, unlock, and
-  backup creation through the provider boundary. Power-state lifecycle and
-  confirmed QEMU destruction are implemented with local-name/identity
-  resolution and post-operation state observation.
+  backup creation through the provider boundary. Power-state lifecycle, typed
+  autostart, and confirmed QEMU destruction are implemented with
+  local-name/identity resolution and post-operation state observation.
 - Add generalized bounded polling, capability preflights, provider task IDs,
   durable operation results, and stronger post-operation verification.
 - Remove arbitrary `--set KEY=VALUE` reconfiguration and expose only validated

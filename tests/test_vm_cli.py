@@ -13,7 +13,13 @@ from unittest.mock import patch
 from lib.config import SetupConfig
 from lib.proxmox_backup import BackupInfo
 from lib.proxmox_hosts import ProxmoxHost, add_proxmox_host
-from lib.proxmox_manage import ContainerInfo, HealthReport, SnapshotInfo
+from lib.proxmox_manage import (
+    ContainerInfo,
+    GuestAutostart,
+    GuestStats,
+    HealthReport,
+    SnapshotInfo,
+)
 from lib.vm_cli import add_vm_subparser, run_vm_command
 
 
@@ -209,6 +215,207 @@ class VMCLITest(unittest.TestCase):
         host, vmid = mock_start.call_args.args
         self.assertEqual(host.name, "pve1")
         self.assertEqual(vmid, 101)
+
+    @patch("lib.vm_cli.get_guest_stats")
+    @patch("lib.vm_cli.get_container_ip", return_value="10.0.0.50")
+    @patch("lib.vm_cli.list_containers")
+    @patch("lib.vm_cli.load_all_setup_commands")
+    def test_stats_reports_resource_pressure_for_saved_local_name(
+        self,
+        mock_load,
+        mock_list,
+        _mock_ip,
+        mock_stats,
+    ) -> None:
+        mock_load.return_value = [self.saved_vm]
+        mock_list.return_value = [
+            ContainerInfo(
+                vmid=101,
+                status="running",
+                name="agent-node",
+                guest_type="vm",
+            )
+        ]
+        mock_stats.return_value = GuestStats(
+            vmid=101,
+            guest_type="vm",
+            status="running",
+            cpu_usage=0.91,
+            cpu_count=2,
+            memory_used=7 * 1024 ** 3,
+            memory_total=8 * 1024 ** 3,
+            disk_used=29 * 1024 ** 3,
+            disk_total=32 * 1024 ** 3,
+            disk_read=2 * 1024 ** 3,
+            disk_written=1024 ** 3,
+            network_in=512 * 1024 ** 2,
+            network_out=256 * 1024 ** 2,
+            uptime_seconds=90061,
+        )
+
+        result, output = self._run("stats", "agent-dev-01", "--json")
+
+        self.assertEqual(result, 0)
+        payload = json.loads(output)
+        self.assertEqual(payload["operation"], "stats")
+        resource = payload["resources"][0]
+        self.assertEqual(resource["memory_total"], 8 * 1024 ** 3)
+        self.assertIn("CPU usage is at or above 90%", resource["warnings"])
+        self.assertIn("Memory usage is at or above 85%", resource["warnings"])
+        self.assertIn("Guest disk usage is at or above 90%", resource["warnings"])
+
+    @patch("lib.vm_cli.get_guest_autostart")
+    @patch("lib.vm_cli.get_container_ip", return_value="10.0.0.50")
+    @patch("lib.vm_cli.list_containers")
+    @patch("lib.vm_cli.load_all_setup_commands")
+    def test_autostart_shows_saved_vm_settings(
+        self,
+        mock_load,
+        mock_list,
+        _mock_ip,
+        mock_autostart,
+    ) -> None:
+        mock_load.return_value = [self.saved_vm]
+        mock_list.return_value = [
+            ContainerInfo(
+                vmid=101,
+                status="running",
+                name="agent-node",
+                guest_type="vm",
+            )
+        ]
+        mock_autostart.return_value = GuestAutostart(
+            enabled=True,
+            order=1,
+            start_delay=30,
+            shutdown_timeout=120,
+        )
+
+        result, output = self._run("autostart", "agent-dev-01", "--json")
+
+        self.assertEqual(result, 0)
+        payload = json.loads(output)
+        self.assertEqual(payload["operation"], "autostart.show")
+        self.assertTrue(payload["resources"][0]["enabled"])
+        self.assertEqual(payload["resources"][0]["start_delay"], 30)
+
+    @patch("lib.vm_cli.get_guest_autostart")
+    @patch("lib.vm_cli.configure_guest_autostart")
+    @patch("lib.vm_cli.list_containers")
+    def test_autostart_enable_configures_typed_startup_order(
+        self,
+        mock_list,
+        mock_configure,
+        mock_autostart,
+    ) -> None:
+        mock_list.return_value = [
+            ContainerInfo(
+                vmid=101,
+                status="stopped",
+                name="agent-node",
+                guest_type="vm",
+            )
+        ]
+        mock_autostart.return_value = GuestAutostart(
+            enabled=True,
+            order=2,
+            start_delay=45,
+            shutdown_timeout=120,
+        )
+
+        result, output = self._run(
+            "autostart",
+            "pve1",
+            "101",
+            "--enable",
+            "--order",
+            "2",
+            "--start-delay",
+            "45",
+            "--shutdown-timeout",
+            "120",
+            "--json",
+        )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(json.loads(output)["operation"], "autostart.configure")
+        mock_configure.assert_called_once()
+        self.assertEqual(
+            mock_configure.call_args.kwargs,
+            {
+                "enabled": True,
+                "order": 2,
+                "start_delay": 45,
+                "shutdown_timeout": 120,
+            },
+        )
+
+    @patch("lib.vm_cli.get_guest_autostart")
+    @patch("lib.vm_cli.configure_guest_autostart")
+    @patch("lib.vm_cli.list_containers")
+    def test_autostart_disable_preserves_existing_schedule(
+        self,
+        mock_list,
+        mock_configure,
+        mock_autostart,
+    ) -> None:
+        mock_list.return_value = [
+            ContainerInfo(
+                vmid=101,
+                status="stopped",
+                name="agent-node",
+                guest_type="vm",
+            )
+        ]
+        mock_autostart.return_value = GuestAutostart(
+            enabled=False,
+            order=2,
+            start_delay=45,
+            shutdown_timeout=120,
+        )
+
+        result, output = self._run(
+            "autostart",
+            "pve1",
+            "101",
+            "--disable",
+            "--json",
+        )
+
+        self.assertEqual(result, 0)
+        self.assertFalse(json.loads(output)["resources"][0]["enabled"])
+        mock_configure.assert_called_once()
+        self.assertEqual(
+            mock_configure.call_args.kwargs,
+            {
+                "enabled": False,
+                "order": None,
+                "start_delay": None,
+                "shutdown_timeout": None,
+            },
+        )
+
+    @patch("lib.vm_cli.configure_guest_autostart")
+    @patch("lib.vm_cli.list_containers")
+    def test_autostart_schedule_requires_enable(
+        self,
+        mock_list,
+        mock_configure,
+    ) -> None:
+        mock_list.return_value = [
+            ContainerInfo(
+                vmid=101,
+                status="stopped",
+                name="agent-node",
+                guest_type="vm",
+            )
+        ]
+
+        result, output = self._run("autostart", "pve1", "101", "--order", "2")
+
+        self.assertEqual(result, 1)
+        self.assertIn("require --enable", output)
+        mock_configure.assert_not_called()
 
     def test_lifecycle_commands_use_provider_backend(self) -> None:
         guest = ContainerInfo(
