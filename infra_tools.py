@@ -80,6 +80,7 @@ from lib.network_cli import add_network_subparser, run_network_command
 from lib.local_cli import add_local_subparser, run_local_command
 from lib.proxmox_guest import (
     ProvisionError,
+    _build_guest_hostname,
     ensure_guest_ipv4_route,
     get_provisioned_guest_ssh_user,
 )
@@ -1091,9 +1092,18 @@ def _reuse_cached_provisioning_metadata(
     )
     config.system_hostname = desired_system_hostname
     config.friendly_name = desired_friendly_name
-    explicit_vm_identity = config.machine_type == "vm" and (
-        requested_system_hostname is not None
-        or requested_friendly_name is not None
+    cached_vm_name = cached_config.system_hostname or _build_guest_hostname(
+        cache_target,
+        cached_config.friendly_name,
+        default_prefix="vm",
+    )
+    desired_vm_name = desired_system_hostname or _build_guest_hostname(
+        cache_target,
+        desired_friendly_name,
+        default_prefix="vm",
+    )
+    vm_identity_changed = (
+        config.machine_type == "vm" and desired_vm_name != cached_vm_name
     )
 
     for field in _CACHED_PROVISIONING_FIELDS:
@@ -1130,9 +1140,9 @@ def _reuse_cached_provisioning_metadata(
     ):
         return False
 
-    if explicit_vm_identity:
-        # The cache cannot prove the provider-side name still matches. An
-        # explicit name is also the repair path for older misnamed VMs.
+    if vm_identity_changed:
+        # A changed provider-side name must be reconciled against Proxmox.
+        # Repeating the saved identity is an ordinary idempotent setup rerun.
         return False
 
     return True

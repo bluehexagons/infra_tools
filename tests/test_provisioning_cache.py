@@ -177,7 +177,7 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
         self.assertEqual(current.hosted_node, cached.hosted_node)
         self.assertEqual(current.static_ipv4, "10.0.0.50/24")
 
-    def test_explicit_cached_vm_name_still_checks_provider_for_drift(self) -> None:
+    def test_explicit_cached_vm_identity_reuses_metadata(self) -> None:
         current = _config(friendly_name="agent-min-2")
         cached = _config(
             friendly_name="agent-min-2",
@@ -192,7 +192,7 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
                 _args(friendly_name="agent-min-2"),
             )
 
-        self.assertFalse(reused)
+        self.assertTrue(reused)
 
     def test_friendly_label_change_preserves_explicit_system_hostname(self) -> None:
         current = _config(friendly_name="new-label")
@@ -210,9 +210,26 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
                 _args(friendly_name="new-label"),
             )
 
-        self.assertFalse(reused)
+        self.assertTrue(reused)
         self.assertEqual(current.friendly_name, "new-label")
         self.assertEqual(current.system_hostname, "stable-vm-name")
+
+    def test_changed_system_hostname_requires_proxmox_reconciliation(self) -> None:
+        current = _config(system_hostname="new-host")
+        cached = _config(
+            system_hostname="old-host",
+            static_ipv4="10.0.0.50/24",
+            network_gateway4="10.0.0.1",
+            network_dns=["1.1.1.1"],
+        )
+
+        with patch("infra_tools.load_setup_command", return_value=cached):
+            reused = infra_tools._reuse_cached_provisioning_metadata(
+                current,
+                _args(system_hostname="new-host"),
+            )
+
+        self.assertFalse(reused)
 
     def test_omitted_names_are_preserved_from_cached_metadata(self) -> None:
         current = _config()
@@ -281,16 +298,24 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
         _mock_register,
         mock_provision,
     ) -> None:
-        current = _config()
+        current = _config(
+            friendly_name="agent-min-1",
+            system_hostname="agent-host",
+        )
         cached = _config(
             hosted_node="10.0.0.10",
+            friendly_name="agent-min-1",
+            system_hostname="agent-host",
             container_memory="4G",
             container_storage=[["root", "local-lvm", "32G"]],
             static_ipv4="10.0.0.50/24",
             network_gateway4="10.0.0.1",
             network_dns=["1.1.1.1"],
         )
-        args = _args()
+        args = _args(
+            friendly_name="agent-min-1",
+            system_hostname="agent-host",
+        )
 
         with patch("infra_tools.SetupConfig.from_args", return_value=current), \
              patch("infra_tools.load_setup_command", return_value=cached), \
