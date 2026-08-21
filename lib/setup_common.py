@@ -332,14 +332,33 @@ def _local_user_home() -> str:
 
 
 def _copy_existing_path(source: str, destination: str) -> bool:
-    if not os.path.exists(source):
+    if not os.path.lexists(source):
         return False
+    if os.path.islink(source):
+        raise ValueError(f"Refusing to stage symlinked source path: {source}")
 
     os.makedirs(os.path.dirname(destination), exist_ok=True)
     if os.path.isdir(source):
-        shutil.copytree(source, destination, symlinks=True, dirs_exist_ok=True)
-    else:
+        def reject_symlinks(directory: str, names: list[str]) -> list[str]:
+            for name in names:
+                path = os.path.join(directory, name)
+                if os.path.islink(path):
+                    raise ValueError(
+                        f"Refusing to stage symlinked source path: {path}"
+                    )
+            return []
+
+        shutil.copytree(
+            source,
+            destination,
+            symlinks=False,
+            ignore=reject_symlinks,
+            dirs_exist_ok=True,
+        )
+    elif os.path.isfile(source):
         shutil.copy2(source, destination)
+    else:
+        raise ValueError(f"Source path must be a regular file or directory: {source}")
     return True
 
 

@@ -127,6 +127,85 @@ class TestAgentPayloadPreparation(unittest.TestCase):
             with open(canonical, encoding='utf-8') as file_obj:
                 self.assertEqual(file_obj.read(), '{"token":"secret"}\n')
 
+    def test_rejects_symlinked_agent_config_file(self):
+        with (
+            tempfile.TemporaryDirectory() as home,
+            tempfile.TemporaryDirectory() as payload_dir,
+        ):
+            codex_dir = os.path.join(home, '.codex')
+            os.makedirs(codex_dir)
+            outside = os.path.join(home, 'outside-config.toml')
+            with open(outside, 'w', encoding='utf-8') as file_obj:
+                file_obj.write('secret = "must-not-stage"\n')
+            os.symlink(outside, os.path.join(codex_dir, 'config.toml'))
+            config = SetupConfig(
+                host='10.0.0.10',
+                username='agentuser',
+                system_type='server_dev',
+                agent_tools=['codex'],
+                copy_agent_config=True,
+            )
+
+            with patch.dict(os.environ, {'HOME': home, 'SUDO_USER': ''}):
+                with self.assertRaisesRegex(ValueError, 'symlinked source path'):
+                    prepare_agent_payload(config, payload_dir)
+
+            self.assertFalse(
+                os.path.exists(
+                    os.path.join(payload_dir, 'config', 'codex', 'config.toml')
+                )
+            )
+
+    def test_rejects_symlinks_nested_in_agent_config_directory(self):
+        with (
+            tempfile.TemporaryDirectory() as home,
+            tempfile.TemporaryDirectory() as payload_dir,
+        ):
+            opencode_dir = os.path.join(home, '.config', 'opencode')
+            os.makedirs(os.path.join(opencode_dir, 'skills'))
+            outside_dir = os.path.join(home, 'outside-skills')
+            os.makedirs(outside_dir)
+            with open(
+                os.path.join(outside_dir, 'SKILL.md'),
+                'w',
+                encoding='utf-8',
+            ) as file_obj:
+                file_obj.write('must not stage\n')
+            os.symlink(outside_dir, os.path.join(opencode_dir, 'skills', 'linked'))
+            config = SetupConfig(
+                host='10.0.0.10',
+                username='agentuser',
+                system_type='server_dev',
+                agent_tools=['opencode'],
+                copy_agent_config=True,
+            )
+
+            with patch.dict(os.environ, {'HOME': home, 'SUDO_USER': ''}):
+                with self.assertRaisesRegex(ValueError, 'symlinked source path'):
+                    prepare_agent_payload(config, payload_dir)
+
+    def test_rejects_symlinked_agent_config_directory(self):
+        with (
+            tempfile.TemporaryDirectory() as home,
+            tempfile.TemporaryDirectory() as payload_dir,
+        ):
+            outside_dir = os.path.join(home, 'outside-opencode')
+            os.makedirs(outside_dir)
+            config_root = os.path.join(home, '.config')
+            os.makedirs(config_root)
+            os.symlink(outside_dir, os.path.join(config_root, 'opencode'))
+            config = SetupConfig(
+                host='10.0.0.10',
+                username='agentuser',
+                system_type='server_dev',
+                agent_tools=['opencode'],
+                copy_agent_config=True,
+            )
+
+            with patch.dict(os.environ, {'HOME': home, 'SUDO_USER': ''}):
+                with self.assertRaisesRegex(ValueError, 'symlinked source path'):
+                    prepare_agent_payload(config, payload_dir)
+
 
 if __name__ == '__main__':
     unittest.main()

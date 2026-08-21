@@ -55,8 +55,8 @@ The ordering remains justified by the current implementation:
 - signed webhook deliveries have no delivery-ID replay protection;
 - command diagnostics redact complete quoted shell values, and the shared
   command runner now enforces a caller-overridable one-hour bound; and
-- active agent config staging follows source symlinks, while manifest release
-  activation does not stop when an app unit stop fails.
+- active agent config staging now rejects source symlinks, while manifest
+  release activation still does not stop when an app unit stop fails.
 - the old callback-based transaction framework has been removed; sync and scrub
   now fail explicitly, while durable setup/deployment operation records remain
   to be implemented.
@@ -78,9 +78,9 @@ The best next work packets are:
    actionable remediation, then define durable operation markers.
 4. Replace automatic SSH first-use trust with explicit enrollment before
    privileged setup/deploy operations.
-5. Reject source symlinks during agent staging, require successful service stops
-   before release activation, and standardize destructive CLI confirmations and
-   updater trust policy after the P0 state/failure work.
+5. Require successful service stops before release activation, and standardize
+   destructive CLI confirmations and updater trust policy after the P0
+   state/failure work. Source-symlink rejection during agent staging is landed.
 
 ## Planning portfolio and GitHub issue alignment (2026-08-17)
 

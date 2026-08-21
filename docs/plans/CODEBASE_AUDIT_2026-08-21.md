@@ -198,7 +198,7 @@ whole process group. Tests cover the default, invalid values, secret-safe
 diagnostics, best-effort propagation, and process-group cleanup. Commands known
 to require more than an hour must opt into a larger bound at the call site.
 
-### AUD-12: Active agent config staging follows source symlinks
+### AUD-12: Active agent config staging follows source symlinks (resolved)
 
 **Severity: Medium-High — local file disclosure boundary**
 
@@ -209,9 +209,12 @@ and GitHub CLI config. The credential-specific path rejects symlink sources,
 but the general config path does not, so a user-selected config copy can stage
 content outside the expected home/config tree into the remote payload.
 
-**Follow-up:** reject source symlinks for both files and directories, walk
-directory entries with `follow_symlinks=False`, and add tests for file and
-directory symlink sources. Keep the existing destination-side symlink checks.
+**Resolution (2026-08-21):** agent config staging now fails closed when the
+selected source file or directory is a symlink, and checks every directory
+entry before copying without following links. Non-regular top-level sources are
+also rejected. Temporary-directory tests cover symlinked config files,
+symlinked config roots, and directory symlinks nested below a real config root.
+Credential-specific regular-file validation remains in place.
 
 ### AUD-13: Manifest activation proceeds after service-stop failure
 
