@@ -47,6 +47,13 @@ DEVICE_PAIRING_AUTH_FAILURE_LOG = (
 )
 _UFW_NUMBERED_RULE_RE = re.compile(r"^\[\s*(\d+)\]\s+(.*)$")
 _T3_RUNTIME_RELATIVE_PATH = (".local", "share", "infra-tools", "t3code")
+# Keep the NVM path injected into the inherited PATH ahead of system Node while
+# making system package locations deterministic for direct T3 child processes.
+_T3_PATH_EXPORT = (
+    'export PATH="$HOME/.local/share/infra-tools/t3code/node_modules/.bin:'
+    '$HOME/.opencode/bin:$HOME/.local/bin:$PATH:'
+    '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"'
+)
 
 
 def _user_home(config: SetupConfig) -> str:
@@ -266,7 +273,7 @@ def _install_t3_runtime(
             home,
             "export NVM_DIR=\"$HOME/.nvm\" && "
             '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && '
-            'export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH" && '
+            f"{_T3_PATH_EXPORT} && "
             f"cd {safe_runtime} && test -x {safe_binary} && "
             "node -e 'require(\"node-pty\")' && "
             f"{safe_binary} --version >/dev/null 2>&1 && "
@@ -284,7 +291,7 @@ def _install_t3_runtime(
             home,
             "export NVM_DIR=\"$HOME/.nvm\" && "
             '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && '
-            'export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH" && '
+            f"{_T3_PATH_EXPORT} && "
             f"cd {safe_runtime} && "
             "npm install --no-fund --no-audit --dangerously-allow-all-scripts "
             "t3@latest && "
@@ -352,8 +359,7 @@ def _write_wrapper(
         f"export HOME={shlex.quote(home)}\n"
         'export NVM_DIR="$HOME/.nvm"\n'
         '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"\n'
-        'export PATH="$HOME/.local/share/infra-tools/t3code/node_modules/.bin:'
-        '$HOME/.opencode/bin:$HOME/.local/bin:$PATH"\n'
+        f"{_T3_PATH_EXPORT}\n"
         f"export T3CODE_HOST={shlex.quote(host)}\n"
         f"export T3CODE_PORT={port}\n"
         f"cd {shlex.quote(workspace)}\n"
@@ -371,8 +377,7 @@ def _write_passthrough_wrapper(path: str, home: str, t3_binary: str) -> bool:
         f"export HOME={shlex.quote(home)}\n"
         'export NVM_DIR="$HOME/.nvm"\n'
         '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"\n'
-        'export PATH="$HOME/.local/share/infra-tools/t3code/node_modules/.bin:'
-        '$HOME/.opencode/bin:$HOME/.local/bin:$PATH"\n'
+        f"{_T3_PATH_EXPORT}\n"
         f'exec {shlex.quote(t3_binary)} "$@"\n'
     )
     return _write_executable_if_changed(path, content)

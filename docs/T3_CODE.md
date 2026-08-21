@@ -67,10 +67,12 @@ sudo journalctl -u infra-tools-t3code.service -n 100 --no-pager
 ```
 
 The service wrapper explicitly adds the T3 runtime, setup user's `~/.local/bin`,
-and `~/.opencode/bin` directories to `PATH`. This is required because systemd
-does not load the user's interactive shell startup files, and it lets the
-service discover user-scoped T3, Codex, Claude Code, and OpenCode
-installations.
+`~/.opencode/bin`, and the standard system executable directories to `PATH`.
+This is required because systemd does not load the user's interactive shell
+startup files. It lets the service discover user-scoped T3, Codex, Claude Code,
+and OpenCode installations as well as system packages such as GitHub CLI. A
+shell opened in T3 can otherwise find `gh` after initializing its own `PATH`
+even while T3's direct Source Control probe reports it as unavailable.
 
 During setup, infra-tools installs `build-essential` and `python3`, then
 installs T3 and its native dependencies as the target user under

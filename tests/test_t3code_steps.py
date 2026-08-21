@@ -160,6 +160,16 @@ class T3CodeWebTest(unittest.TestCase):
                 'export PATH="$HOME/.local/share/infra-tools/t3code/node_modules/.bin:',
                 content,
             )
+            self.assertIn(
+                "$PATH:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                content,
+            )
+            with open(cli_wrapper, encoding="utf-8") as file_obj:
+                cli_content = file_obj.read()
+            self.assertIn(
+                "$PATH:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                cli_content,
+            )
             with open(pair_wrapper, encoding="utf-8") as file_obj:
                 pairing_content = file_obj.read()
             self.assertIn("t3code_admin_pair.py", pairing_content)
