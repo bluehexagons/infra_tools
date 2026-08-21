@@ -42,7 +42,7 @@ def get_node_summary(host: ProxmoxHost) -> NodeSummary:
     """Fetch CPU, memory, storage, and guest counts for a Proxmox node."""
     result = _run(
         host,
-        "pvesh get /nodes/$(hostname -s)/summary --output-format json 2>/dev/null",
+        "pvesh get /nodes/$(hostname -s)/status --output-format json",
     )
     if result.returncode != 0 or not result.stdout.strip():
         raise ProxmoxSummaryError(

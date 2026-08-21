@@ -21,6 +21,7 @@ from lib.proxmox_vm import (
     _parse_memory_mb,
     _preflight_data_disk_capacity,
     _render_user_data,
+    _reconcile_existing_vm,
     _resolve_image,
     _destroy_vm_best_effort,
     _upload_user_data,
@@ -596,8 +597,8 @@ class TestCheckVMExists(unittest.TestCase):
         # Third call: qm config 101 (match).
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout="VMID NAME STATUS\n100 a running\n101 b running\n"),
-            MagicMock(returncode=0, stdout="net0: virtio,bridge=vmbr0\nipconfig0: ip=10.0.0.1/24,gw=10.0.0.254\n"),
-            MagicMock(returncode=0, stdout="ipconfig0: ip=10.0.0.50/24,gw=10.0.0.254\n"),
+            MagicMock(returncode=0, stdout="name: a\nnet0: virtio,bridge=vmbr0\nipconfig0: ip=10.0.0.1/24,gw=10.0.0.254\n"),
+            MagicMock(returncode=0, stdout="name: b\nipconfig0: ip=10.0.0.50/24,gw=10.0.0.254\n"),
             MagicMock(returncode=0, stdout="status: running\n"),
             MagicMock(returncode=0, stdout="READY\n"),
         ]
@@ -637,6 +638,95 @@ class TestCheckVMExists(unittest.TestCase):
     def test_dry_run_returns_false_without_calls(self, mock_run):
         self.assertFalse(check_vm_exists("10.0.0.1", "10.0.0.50", "root", [], dry_run=True))
         mock_run.assert_not_called()
+
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_existing_target_is_renamed_and_verified(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="VMID NAME STATUS\n112 agent-min-1 running\n"),
+            MagicMock(
+                returncode=0,
+                stdout="name: agent-min-1\nipconfig0: ip=10.0.0.50/24,gw=10.0.0.1\n",
+            ),
+            MagicMock(returncode=0, stdout="status: running\n"),
+            MagicMock(returncode=0, stdout="READY\n"),
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(
+                returncode=0,
+                stdout="name: agent-min-2\nipconfig0: ip=10.0.0.50/24,gw=10.0.0.1\n",
+            ),
+        ]
+
+        self.assertTrue(
+            _reconcile_existing_vm(
+                "10.0.0.1", "10.0.0.50", "agent-min-2", "root", []
+            )
+        )
+        self.assertEqual(
+            mock_run.call_args_list[4].args[3],
+            "qm set 112 --name agent-min-2",
+        )
+        self.assertEqual(mock_run.call_args_list[5].args[3], "qm config 112")
+
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_duplicate_desired_name_stops_before_creation(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="VMID NAME STATUS\n112 agent-min-1 running\n"),
+            MagicMock(
+                returncode=0,
+                stdout="name: agent-min-1\nipconfig0: ip=10.0.0.40/24,gw=10.0.0.1\n",
+            ),
+        ]
+
+        with self.assertRaisesRegex(ProvisionError, "already exists.*VMIDs: 112"):
+            _reconcile_existing_vm(
+                "10.0.0.1", "10.0.0.50", "agent-min-1", "root", []
+            )
+
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_rename_refuses_name_owned_by_another_vm(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(
+                returncode=0,
+                stdout=(
+                    "VMID NAME STATUS\n"
+                    "112 agent-min-2 running\n"
+                    "113 agent-min-1 running\n"
+                ),
+            ),
+            MagicMock(
+                returncode=0,
+                stdout="name: agent-min-2\nipconfig0: ip=10.0.0.40/24,gw=10.0.0.1\n",
+            ),
+            MagicMock(
+                returncode=0,
+                stdout="name: agent-min-1\nipconfig0: ip=10.0.0.50/24,gw=10.0.0.1\n",
+            ),
+        ]
+
+        with self.assertRaisesRegex(ProvisionError, "already used.*112"):
+            _reconcile_existing_vm(
+                "10.0.0.1", "10.0.0.50", "agent-min-2", "root", []
+            )
+
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_duplicate_target_ip_is_ambiguous(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(
+                returncode=0,
+                stdout="VMID NAME STATUS\n112 one running\n113 two running\n",
+            ),
+            MagicMock(
+                returncode=0,
+                stdout="name: one\nipconfig0: ip=10.0.0.50/24,gw=10.0.0.1\n",
+            ),
+            MagicMock(
+                returncode=0,
+                stdout="name: two\nipconfig0: ip=10.0.0.50/24,gw=10.0.0.1\n",
+            ),
+        ]
+
+        with self.assertRaisesRegex(ProvisionError, "Multiple VMs.*112, 113"):
+            check_vm_exists("10.0.0.1", "10.0.0.50", "root", [])
 
 
 if __name__ == "__main__":

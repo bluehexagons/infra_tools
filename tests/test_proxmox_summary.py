@@ -64,6 +64,10 @@ class TestGetNodeSummary(unittest.TestCase):
         self.assertEqual(summary.memory_total, 16 * 1024 ** 3)
         self.assertEqual(summary.guests_running, 2)  # 1 pct + 1 qm
         self.assertEqual(summary.guests_stopped, 1)
+        self.assertEqual(
+            mock_run.call_args_list[0].args[3],
+            "pvesh get /nodes/$(hostname -s)/status --output-format json",
+        )
 
     @patch("lib.proxmox_summary._ssh_run")
     def test_load_avg_parsed(self, mock_run: MagicMock) -> None:

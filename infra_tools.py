@@ -1028,6 +1028,25 @@ def _reuse_cached_provisioning_metadata(
     if _provisioning_changes_requested(config, cached_config, args):
         return False
 
+    requested_system_hostname = getattr(args, "system_hostname", None)
+    requested_friendly_name = getattr(args, "friendly_name", None)
+    desired_system_hostname = (
+        requested_system_hostname
+        if requested_system_hostname is not None
+        else cached_config.system_hostname
+    )
+    desired_friendly_name = (
+        requested_friendly_name
+        if requested_friendly_name is not None
+        else cached_config.friendly_name
+    )
+    config.system_hostname = desired_system_hostname
+    config.friendly_name = desired_friendly_name
+    explicit_vm_identity = config.machine_type == "vm" and (
+        requested_system_hostname is not None
+        or requested_friendly_name is not None
+    )
+
     for field in _CACHED_PROVISIONING_FIELDS:
         setattr(config, field, getattr(cached_config, field))
 
@@ -1060,6 +1079,11 @@ def _reuse_cached_provisioning_metadata(
     if config.static_ipv4 and (
         not config.network_gateway4 or not config.network_dns
     ):
+        return False
+
+    if explicit_vm_identity:
+        # The cache cannot prove the provider-side name still matches. An
+        # explicit name is also the repair path for older misnamed VMs.
         return False
 
     return True

@@ -213,6 +213,16 @@ command are also accepted when they match that metadata. Changing any of
 instead. A target without saved provisioning metadata still requires
 `--memory` and root `--storage` on its first run.
 
+During a provisioning check, the configured IPv4 address is the stable guest
+identity. If that VM already exists and the corrected declaration changes its
+Proxmox name, infra-tools applies and verifies the rename before continuing
+setup. A desired name already owned by a different VM is rejected rather than
+creating an ambiguous duplicate. Supplying `--name` or `--hostname` explicitly
+on a VM setup rerun performs this identity check even when the requested name
+matches saved metadata, because local state cannot prove the provider name has
+not drifted. Use the explicit host and VMID forms to inspect or repair
+duplicates created by older releases.
+
 ## Graphical VM hardware baseline
 
 Provisioned VMs that include a desktop or enable RDP are created with both a

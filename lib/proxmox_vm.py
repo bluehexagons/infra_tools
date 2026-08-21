@@ -71,6 +71,15 @@ class _ResolvedImage:
     storage_ref: Optional[str]
 
 
+@dataclass(frozen=True)
+class _ExistingVM:
+    """Identity fields read from one existing Proxmox VM configuration."""
+
+    vmid: int
+    name: str
+    ipv4_addresses: tuple[str, ...]
+
+
 _UNIT_TO_KIB = {"K": 1, "M": 1024, "G": 1024 * 1024, "T": 1024 * 1024 * 1024}
 
 
@@ -164,6 +173,171 @@ def _needs_graphical_console(config: SetupConfig) -> bool:
     return config.include_desktop or config.enable_rdp
 
 
+def _parse_existing_vm(vmid: int, config_text: str) -> _ExistingVM:
+    """Extract the provider name and configured IPv4 addresses for a VM."""
+
+    name = ""
+    addresses: list[str] = []
+    for line in config_text.splitlines():
+        key, separator, value = line.partition(":")
+        if not separator:
+            continue
+        if key.strip() == "name":
+            name = value.strip()
+            continue
+        if not key.strip().startswith("ipconfig"):
+            continue
+        for item in value.split(","):
+            option, equals, option_value = item.strip().partition("=")
+            if option != "ip" or not equals:
+                continue
+            try:
+                interface = ipaddress.ip_interface(option_value)
+            except ValueError:
+                continue
+            if isinstance(interface, ipaddress.IPv4Interface):
+                addresses.append(str(interface.ip))
+    return _ExistingVM(vmid=vmid, name=name, ipv4_addresses=tuple(addresses))
+
+
+def _list_existing_vms(
+    node_ip: str,
+    user: str,
+    ssh_opts: StrList,
+) -> list[_ExistingVM]:
+    """Return identity data for every QEMU VM on ``node_ip``."""
+
+    result = _ssh_run(node_ip, user, ssh_opts, "qm list", dry_run=False)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip() or "unknown error"
+        raise ProvisionError(f"Failed to query VMs on {node_ip}: {detail}")
+    vmids: list[int] = []
+    for line in (result.stdout or "").splitlines()[1:]:
+        parts = line.split()
+        if not parts:
+            continue
+        try:
+            vmids.append(int(parts[0]))
+        except ValueError:
+            continue
+    existing: list[_ExistingVM] = []
+    for vmid in vmids:
+        cfg = _ssh_run(node_ip, user, ssh_opts, f"qm config {vmid}", dry_run=False)
+        if cfg.returncode != 0:
+            detail = (cfg.stderr or cfg.stdout or "").strip() or "unknown error"
+            raise ProvisionError(f"Failed to inspect VM {vmid} on {node_ip}: {detail}")
+        existing.append(_parse_existing_vm(vmid, cfg.stdout or ""))
+    return existing
+
+
+def _reconcile_existing_vm(
+    node_ip: str,
+    target_ip: str,
+    desired_name: Optional[str],
+    user: str,
+    ssh_opts: StrList,
+    *,
+    dry_run: bool = False,
+) -> bool:
+    """Reuse the VM at ``target_ip`` and reconcile its provider-side name.
+
+    A desired name owned by another VM is rejected before provisioning so a
+    typo or copied setup command cannot create ambiguous duplicate names.
+    """
+
+    if dry_run:
+        return False
+    existing = _list_existing_vms(node_ip, user, ssh_opts)
+    ip_matches = [vm for vm in existing if target_ip in vm.ipv4_addresses]
+    if len(ip_matches) > 1:
+        ids = ", ".join(str(vm.vmid) for vm in ip_matches)
+        raise ProvisionError(
+            f"Multiple VMs on {node_ip} are configured with IP {target_ip} "
+            f"(VMIDs: {ids}); repair the duplicate addresses before provisioning"
+        )
+
+    name_matches = [
+        vm
+        for vm in existing
+        if desired_name and vm.name.lower() == desired_name.lower()
+    ]
+    if not ip_matches:
+        if name_matches:
+            ids = ", ".join(str(vm.vmid) for vm in name_matches)
+            raise ProvisionError(
+                f"VM name '{desired_name}' already exists on {node_ip} "
+                f"(VMIDs: {ids}) but is not configured with IP {target_ip}; "
+                "choose a unique name or repair the existing VM explicitly"
+            )
+        return False
+
+    matched = ip_matches[0]
+    conflicting_names = [vm for vm in name_matches if vm.vmid != matched.vmid]
+    if conflicting_names:
+        ids = ", ".join(str(vm.vmid) for vm in conflicting_names)
+        raise ProvisionError(
+            f"Cannot rename VM {matched.vmid} to '{desired_name}': that name is "
+            f"already used on {node_ip} by VMID(s) {ids}"
+        )
+
+    status = _ssh_run(
+        node_ip, user, ssh_opts, f"qm status {matched.vmid}", dry_run=False
+    )
+    probe = _ssh_run(
+        node_ip,
+        user,
+        ssh_opts,
+        f"timeout 3 bash -c '</dev/tcp/{shlex.quote(target_ip)}/22' && echo READY",
+        dry_run=False,
+    )
+    if not (
+        status.returncode == 0
+        and "status: running" in (status.stdout or "")
+        and "READY" in (probe.stdout or "")
+    ):
+        raise ProvisionError(
+            f"VM {matched.vmid} is configured with IP {target_ip} but is not "
+            "reachable on SSH; remove or repair it before retrying provisioning"
+        )
+
+    if desired_name and matched.name.lower() != desired_name.lower():
+        rename = _ssh_run(
+            node_ip,
+            user,
+            ssh_opts,
+            f"qm set {matched.vmid} --name {shlex.quote(desired_name)}",
+            dry_run=False,
+        )
+        if rename.returncode != 0:
+            detail = (rename.stderr or rename.stdout or "").strip() or "unknown error"
+            raise ProvisionError(
+                f"Failed to rename VM {matched.vmid} from "
+                f"'{matched.name or '<unnamed>'}' to '{desired_name}': {detail}"
+            )
+        verify = _ssh_run(
+            node_ip,
+            user,
+            ssh_opts,
+            f"qm config {matched.vmid}",
+            dry_run=False,
+        )
+        observed = _parse_existing_vm(matched.vmid, verify.stdout or "")
+        if verify.returncode != 0 or observed.name.lower() != desired_name.lower():
+            raise ProvisionError(
+                f"Proxmox did not preserve the requested name '{desired_name}' "
+                f"for VM {matched.vmid}"
+            )
+        print(
+            f"  ✓ Renamed existing VM {matched.vmid} from "
+            f"'{matched.name or '<unnamed>'}' to '{desired_name}'"
+        )
+
+    print(
+        f"  ✓ VM {matched.vmid} already exists and is reachable at IP {target_ip}"
+    )
+    return True
+
+
 def check_vm_exists(
     node_ip: str,
     target_ip: str,
@@ -172,44 +346,16 @@ def check_vm_exists(
     *,
     dry_run: bool = False,
 ) -> bool:
-    """Return True if any VM on ``node_ip`` is configured with ``target_ip``."""
-    if dry_run:
-        return False
-    result = _ssh_run(node_ip, user, ssh_opts, "qm list", dry_run=False)
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "").strip() or "unknown error"
-        raise ProvisionError(f"Failed to query VMs on {node_ip}: {detail}")
-    vmids: StrList = []
-    for line in (result.stdout or "").splitlines()[1:]:
-        parts = line.split()
-        if not parts:
-            continue
-        try:
-            vmids.append(str(int(parts[0])))
-        except ValueError:
-            continue
-    for vmid in vmids:
-        cfg = _ssh_run(node_ip, user, ssh_opts, f"qm config {vmid}", dry_run=False)
-        if cfg.returncode != 0:
-            detail = (cfg.stderr or cfg.stdout or "").strip() or "unknown error"
-            raise ProvisionError(f"Failed to inspect VM {vmid} on {node_ip}: {detail}")
-        if f"ip={target_ip}/" in (cfg.stdout or "") or f"ip={target_ip}," in (cfg.stdout or ""):
-            status = _ssh_run(node_ip, user, ssh_opts, f"qm status {vmid}", dry_run=False)
-            probe = _ssh_run(
-                node_ip,
-                user,
-                ssh_opts,
-                f"timeout 3 bash -c '</dev/tcp/{shlex.quote(target_ip)}/22' && echo READY",
-                dry_run=False,
-            )
-            if status.returncode == 0 and "status: running" in (status.stdout or "") and "READY" in (probe.stdout or ""):
-                print(f"  ✓ VM {vmid} already exists and is reachable at IP {target_ip}")
-                return True
-            raise ProvisionError(
-                f"VM {vmid} is configured with IP {target_ip} but is not reachable on SSH; "
-                "remove or repair it before retrying provisioning"
-            )
-    return False
+    """Return True if a reachable VM is configured with ``target_ip``."""
+
+    return _reconcile_existing_vm(
+        node_ip,
+        target_ip,
+        None,
+        user,
+        ssh_opts,
+        dry_run=dry_run,
+    )
 
 
 def _resolve_image(
@@ -915,7 +1061,13 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
         else _get_bridge_prefix_length(node_ip, user, ssh_opts, bridge)
     )
 
-    if check_vm_exists(node_ip, target_ip, user, ssh_opts):
+    if _reconcile_existing_vm(
+        node_ip,
+        target_ip,
+        hostname,
+        user,
+        ssh_opts,
+    ):
         raise VMAlreadyExists(
             f"VM with IP {target_ip} already exists on {node_ip}"
         )
