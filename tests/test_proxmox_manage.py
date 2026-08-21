@@ -34,6 +34,7 @@ from lib.proxmox_manage import (
     list_containers,
     list_snapshots,
     modify_container,
+    reboot_guest,
     reconfigure_container,
     resize_container_disk,
     rollback_guest,
@@ -264,6 +265,73 @@ class TestStartStop(unittest.TestCase):
         ]
         stop_container(_host(), 100, force=True)
         self.assertIn("qm stop 100", mock_run.call_args_list[-1][0][3])
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_shutdown_passes_timeout(self, mock_run: MagicMock) -> None:
+        mock_run.side_effect = [
+            _completed("status: running\n"),
+            _completed(""),
+        ]
+        stop_container(_host(), 100, timeout=45)
+        self.assertEqual(
+            mock_run.call_args_list[-1].args[3],
+            "pct shutdown 100 --timeout 45",
+        )
+
+    def test_shutdown_rejects_negative_timeout(self) -> None:
+        with self.assertRaisesRegex(ValueError, "timeout must be >= 0"):
+            stop_container(_host(), 100, timeout=-1)
+
+
+class TestReboot(unittest.TestCase):
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_reboots_running_container(self, mock_run: MagicMock) -> None:
+        mock_run.side_effect = [
+            _completed("status: running\n"),
+            _completed(""),
+        ]
+
+        reboot_guest(_host(), 100)
+
+        self.assertEqual(mock_run.call_args_list[-1].args[3], "pct reboot 100")
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_reboots_running_vm_with_timeout(self, mock_run: MagicMock) -> None:
+        mock_run.side_effect = [
+            _completed(stderr="CT 100 does not exist", returncode=2),
+            _completed("status: running\n"),
+            _completed(""),
+        ]
+
+        reboot_guest(_host(), 100, timeout=30)
+
+        self.assertEqual(
+            mock_run.call_args_list[-1].args[3],
+            "qm reboot 100 --timeout 30",
+        )
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_refuses_to_reboot_stopped_guest(self, mock_run: MagicMock) -> None:
+        mock_run.return_value = _completed("status: stopped\n")
+
+        with self.assertRaisesRegex(ProxmoxManageError, "use the start command"):
+            reboot_guest(_host(), 100)
+
+        self.assertEqual(mock_run.call_count, 1)
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_reboot_raises_on_command_failure(self, mock_run: MagicMock) -> None:
+        mock_run.side_effect = [
+            _completed("status: running\n"),
+            _completed(stderr="locked", returncode=1),
+        ]
+
+        with self.assertRaisesRegex(ProxmoxManageError, "pct reboot 100 failed"):
+            reboot_guest(_host(), 100)
+
+    def test_reboot_rejects_negative_timeout(self) -> None:
+        with self.assertRaisesRegex(ValueError, "timeout must be >= 0"):
+            reboot_guest(_host(), 100, timeout=-1)
 
 
 class TestDestroy(unittest.TestCase):

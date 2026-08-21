@@ -150,6 +150,122 @@ class VMCLITest(unittest.TestCase):
         self.assertEqual(json.loads(output)["resources"][0]["id"], "101")
         mock_load.assert_called_once_with(self.workspace)
 
+    @patch("lib.vm_cli.get_container_status", return_value="running")
+    @patch("lib.vm_cli.get_container_ip", return_value="10.0.0.50")
+    @patch("lib.vm_cli.list_containers")
+    @patch("lib.vm_cli.load_all_setup_commands")
+    def test_status_resolves_saved_local_vm_name(
+        self,
+        mock_load,
+        mock_list,
+        _mock_ip,
+        _mock_status,
+    ) -> None:
+        mock_load.return_value = [self.saved_vm]
+        mock_list.return_value = [
+            ContainerInfo(
+                vmid=101,
+                status="running",
+                name="agent-node",
+                guest_type="vm",
+            )
+        ]
+
+        result, output = self._run("status", "agent-dev-01", "--json")
+
+        self.assertEqual(result, 0)
+        payload = json.loads(output)
+        self.assertEqual(payload["operation"], "status")
+        self.assertEqual(payload["resources"][0]["id"], "101")
+        self.assertEqual(payload["resources"][0]["state"], "running")
+
+    @patch("lib.vm_cli.get_container_status", return_value="running")
+    @patch("lib.vm_cli.start_container")
+    @patch("lib.vm_cli.get_container_ip", return_value="10.0.0.50")
+    @patch("lib.vm_cli.list_containers")
+    @patch("lib.vm_cli.load_all_setup_commands")
+    def test_start_resolves_saved_local_vm_name(
+        self,
+        mock_load,
+        mock_list,
+        _mock_ip,
+        mock_start,
+        _mock_status,
+    ) -> None:
+        mock_load.return_value = [self.saved_vm]
+        mock_list.return_value = [
+            ContainerInfo(
+                vmid=101,
+                status="stopped",
+                name="agent-node",
+                guest_type="vm",
+            )
+        ]
+
+        result, output = self._run("start", "agent-dev-01", "--json")
+
+        self.assertEqual(result, 0)
+        self.assertEqual(json.loads(output)["operation"], "start")
+        host, vmid = mock_start.call_args.args
+        self.assertEqual(host.name, "pve1")
+        self.assertEqual(vmid, 101)
+
+    def test_lifecycle_commands_use_provider_backend(self) -> None:
+        guest = ContainerInfo(
+            vmid=101,
+            status="running",
+            name="agent-node",
+            guest_type="vm",
+        )
+        cases = [
+            (("pause", "pve1", "101", "--json"), "suspend_guest", {}, "pause", "paused"),
+            (("resume", "pve1", "101", "--json"), "resume_guest", {}, "resume", "running"),
+            (
+                ("shutdown", "pve1", "101", "--timeout", "45", "--json"),
+                "stop_container",
+                {"force": False, "timeout": 45},
+                "shutdown",
+                "stopped",
+            ),
+            (
+                ("stop", "pve1", "101", "--json"),
+                "stop_container",
+                {"force": True},
+                "stop",
+                "stopped",
+            ),
+            (
+                ("reboot", "pve1", "101", "--timeout", "30", "--json"),
+                "reboot_guest",
+                {"timeout": 30},
+                "reboot",
+                "running",
+            ),
+        ]
+
+        for argv, backend_name, expected_kwargs, operation, state in cases:
+            with self.subTest(command=argv[0]):
+                with (
+                    patch("lib.vm_cli.list_containers", return_value=[guest]),
+                    patch("lib.vm_cli.get_container_status", return_value=state),
+                    patch(f"lib.vm_cli.{backend_name}") as mock_backend,
+                ):
+                    result, output = self._run(*argv)
+
+                self.assertEqual(result, 0)
+                payload = json.loads(output)
+                self.assertEqual(payload["operation"], operation)
+                self.assertEqual(payload["resources"][0]["state"], state)
+                self.assertEqual(mock_backend.call_args.args[1], 101)
+                self.assertEqual(mock_backend.call_args.kwargs, expected_kwargs)
+
+    def test_lifecycle_aliases_select_expected_handlers(self) -> None:
+        suspend = self.parser.parse_args(["vm", "suspend", "pve1", "101"])
+        restart = self.parser.parse_args(["vm", "restart", "pve1", "101"])
+
+        self.assertEqual(suspend._handler.__name__, "_cmd_pause")
+        self.assertEqual(restart._handler.__name__, "_cmd_reboot")
+
     @patch("lib.vm_cli.destroy_container")
     @patch("lib.vm_cli.get_container_ip", return_value="10.0.0.50")
     @patch("lib.vm_cli.list_containers")
@@ -309,6 +425,12 @@ class VMCLITest(unittest.TestCase):
     def test_invalid_id_is_rejected_by_argparse(self) -> None:
         with self.assertRaises(SystemExit):
             self.parser.parse_args(["vm", "show", "pve1", "0"])
+
+    def test_negative_lifecycle_timeout_is_rejected_by_argparse(self) -> None:
+        with self.assertRaises(SystemExit):
+            self.parser.parse_args(
+                ["vm", "shutdown", "pve1", "100", "--timeout", "-1"]
+            )
 
 
 if __name__ == "__main__":

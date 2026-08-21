@@ -3,10 +3,11 @@
 infra-tools can register Proxmox hosts, cache their capabilities, provision
 Debian VMs or unprivileged LXCs, and manage guest lifecycle operations.
 [Machine types](MACHINE_TYPES.md) explains the guest capability differences.
-Provider-specific host operations and most mutations remain under
-`infra-tools proxmox ...`. Common guest observations and confirmed QEMU VM
-destruction are available through the provider-neutral `infra-tools vm ...`
-commands; see the command reference for the stable JSON shape.
+Provider-specific host operations and advanced mutations remain under
+`infra-tools proxmox ...`. Common guest observations, power-state lifecycle,
+and confirmed QEMU VM destruction are available through the provider-neutral
+`infra-tools vm ...` commands; see the command reference for the stable JSON
+shape.
 
 These workflows target Proxmox VE 9.2 and use its current `qm` and `pct`
 interfaces. Bridge discovery identifies Linux bridge interfaces by type, so
@@ -307,6 +308,26 @@ stub resolver, the inferred gateway is used.
 
 ## Guest lifecycle
 
+For an infra-tools-provisioned VM, prefer its saved local name:
+
+```bash
+infra-tools vm status agent-dev-01
+infra-tools vm start agent-dev-01
+infra-tools vm pause agent-dev-01       # alias: suspend
+infra-tools vm resume agent-dev-01
+infra-tools vm shutdown agent-dev-01 --timeout 60
+infra-tools vm stop agent-dev-01        # immediate; may cause data loss
+infra-tools vm reboot agent-dev-01      # alias: restart
+```
+
+These commands also accept an explicit registered provider host and VMID, and
+`--json` returns the provider-neutral result envelope. `shutdown` is the clean
+power-off path; `stop` exits the guest immediately. Shutdown and reboot pass
+an optional timeout to Proxmox and all lifecycle commands report the observed
+state after the provider operation completes.
+
+The provider-specific forms remain available for compatibility:
+
 ```bash
 infra-tools proxmox status pve1 101
 infra-tools proxmox start pve1 101
@@ -315,6 +336,10 @@ infra-tools proxmox pause pve1 101
 infra-tools proxmox resume pve1 101
 infra-tools proxmox health pve1 101
 ```
+
+For compatibility, the older `proxmox stop` command keeps its original
+behavior: it requests a graceful shutdown unless `--force` is supplied. New
+automation should use the explicit generic `vm shutdown` or `vm stop` form.
 
 Show a summary for one or more nodes:
 

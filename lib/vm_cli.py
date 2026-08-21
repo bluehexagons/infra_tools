@@ -24,6 +24,11 @@ from lib.proxmox_manage import (
     health_check,
     list_containers,
     list_snapshots,
+    reboot_guest,
+    resume_guest,
+    start_container,
+    stop_container,
+    suspend_guest,
 )
 from lib.vm_models import VMHealth, VMRecord, envelope
 
@@ -73,6 +78,67 @@ def add_vm_subparser(subparsers: argparse._SubParsersAction) -> argparse.Argumen
     )
     health_parser.add_argument("--json", action="store_true", help="Output JSON")
     health_parser.set_defaults(_handler=_cmd_health)
+
+    status_parser = commands.add_parser("status", help="Show one guest's power state")
+    _add_vm_target_arguments(status_parser)
+    status_parser.add_argument("--json", action="store_true", help="Output JSON")
+    status_parser.set_defaults(_handler=_cmd_status)
+
+    start_parser = commands.add_parser("start", help="Start a stopped guest")
+    _add_vm_target_arguments(start_parser)
+    start_parser.add_argument("--json", action="store_true", help="Output JSON")
+    start_parser.set_defaults(_handler=_cmd_start)
+
+    pause_parser = commands.add_parser(
+        "pause",
+        aliases=["suspend"],
+        help="Pause/suspend a running guest",
+    )
+    _add_vm_target_arguments(pause_parser)
+    pause_parser.add_argument("--json", action="store_true", help="Output JSON")
+    pause_parser.set_defaults(_handler=_cmd_pause)
+
+    resume_parser = commands.add_parser("resume", help="Resume a paused guest")
+    _add_vm_target_arguments(resume_parser)
+    resume_parser.add_argument("--json", action="store_true", help="Output JSON")
+    resume_parser.set_defaults(_handler=_cmd_resume)
+
+    shutdown_parser = commands.add_parser(
+        "shutdown",
+        help="Request a graceful guest shutdown",
+    )
+    _add_vm_target_arguments(shutdown_parser)
+    shutdown_parser.add_argument(
+        "--timeout",
+        type=_nonnegative_seconds,
+        metavar="SECONDS",
+        help="Maximum seconds to wait for graceful shutdown",
+    )
+    shutdown_parser.add_argument("--json", action="store_true", help="Output JSON")
+    shutdown_parser.set_defaults(_handler=_cmd_shutdown)
+
+    stop_parser = commands.add_parser(
+        "stop",
+        help="Immediately stop a guest (like pulling its power plug)",
+    )
+    _add_vm_target_arguments(stop_parser)
+    stop_parser.add_argument("--json", action="store_true", help="Output JSON")
+    stop_parser.set_defaults(_handler=_cmd_stop)
+
+    reboot_parser = commands.add_parser(
+        "reboot",
+        aliases=["restart"],
+        help="Cleanly reboot a running guest",
+    )
+    _add_vm_target_arguments(reboot_parser)
+    reboot_parser.add_argument(
+        "--timeout",
+        type=_nonnegative_seconds,
+        metavar="SECONDS",
+        help="Maximum seconds to wait for shutdown during reboot",
+    )
+    reboot_parser.add_argument("--json", action="store_true", help="Output JSON")
+    reboot_parser.set_defaults(_handler=_cmd_reboot)
 
     snapshot_parser = commands.add_parser("snapshot", help="Inspect guest snapshots")
     snapshot_commands = snapshot_parser.add_subparsers(
@@ -136,6 +202,18 @@ def _positive_id(value: str) -> int:
     if vmid < 1:
         raise argparse.ArgumentTypeError("ID must be a positive integer")
     return vmid
+
+
+def _nonnegative_seconds(value: str) -> int:
+    try:
+        seconds = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "SECONDS must be a non-negative integer"
+        ) from exc
+    if seconds < 0:
+        raise argparse.ArgumentTypeError("SECONDS must be a non-negative integer")
+    return seconds
 
 
 def _resolve_host(target: str, workspace: Optional[str]) -> ProxmoxHost:
@@ -330,6 +408,135 @@ def _cmd_show(args: argparse.Namespace, workspace: Optional[str]) -> int:
         for key, value in config.items():
             print(f"{key}: {value}")
     return 0
+
+
+def _vm_state_resource(resolved: _ResolvedVM, state: str) -> dict:
+    guest = resolved.guest
+    return VMRecord(
+        id=str(guest.vmid),
+        kind=guest.guest_type,
+        name=guest.name,
+        state=state,
+        lock=guest.lock,
+    ).to_dict()
+
+
+def _print_vm_state(
+    resolved: _ResolvedVM,
+    *,
+    operation: str,
+    state: str,
+    json_output: bool,
+) -> None:
+    host = resolved.host
+    guest = resolved.guest
+    payload = envelope(
+        provider=host.provider,
+        host=host.name,
+        operation=operation,
+        resources=[_vm_state_resource(resolved, state)],
+    )
+    _print_result(payload, json_output=json_output)
+    if not json_output:
+        suffix = "" if operation == "status" else f" ({operation} complete)"
+        print(
+            f"{host.name}/{guest.vmid} {guest.guest_type} "
+            f"'{guest.name}': {state}{suffix}"
+        )
+
+
+def _complete_lifecycle(
+    resolved: _ResolvedVM,
+    *,
+    operation: str,
+    json_output: bool,
+) -> int:
+    state = get_container_status(resolved.host, resolved.guest.vmid)
+    _print_vm_state(
+        resolved,
+        operation=operation,
+        state=state,
+        json_output=json_output,
+    )
+    return 0
+
+
+def _cmd_status(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    resolved = _resolve_vm(args.target, args.vmid, workspace)
+    return _complete_lifecycle(
+        resolved,
+        operation="status",
+        json_output=args.json,
+    )
+
+
+def _cmd_start(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    resolved = _resolve_vm(args.target, args.vmid, workspace)
+    start_container(resolved.host, resolved.guest.vmid)
+    return _complete_lifecycle(
+        resolved,
+        operation="start",
+        json_output=args.json,
+    )
+
+
+def _cmd_pause(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    resolved = _resolve_vm(args.target, args.vmid, workspace)
+    suspend_guest(resolved.host, resolved.guest.vmid)
+    return _complete_lifecycle(
+        resolved,
+        operation="pause",
+        json_output=args.json,
+    )
+
+
+def _cmd_resume(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    resolved = _resolve_vm(args.target, args.vmid, workspace)
+    resume_guest(resolved.host, resolved.guest.vmid)
+    return _complete_lifecycle(
+        resolved,
+        operation="resume",
+        json_output=args.json,
+    )
+
+
+def _cmd_shutdown(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    resolved = _resolve_vm(args.target, args.vmid, workspace)
+    stop_container(
+        resolved.host,
+        resolved.guest.vmid,
+        force=False,
+        timeout=args.timeout,
+    )
+    return _complete_lifecycle(
+        resolved,
+        operation="shutdown",
+        json_output=args.json,
+    )
+
+
+def _cmd_stop(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    resolved = _resolve_vm(args.target, args.vmid, workspace)
+    stop_container(resolved.host, resolved.guest.vmid, force=True)
+    return _complete_lifecycle(
+        resolved,
+        operation="stop",
+        json_output=args.json,
+    )
+
+
+def _cmd_reboot(args: argparse.Namespace, workspace: Optional[str]) -> int:
+    resolved = _resolve_vm(args.target, args.vmid, workspace)
+    reboot_guest(
+        resolved.host,
+        resolved.guest.vmid,
+        timeout=args.timeout,
+    )
+    return _complete_lifecycle(
+        resolved,
+        operation="reboot",
+        json_output=args.json,
+    )
 
 
 def _health_model(report: HealthReport) -> VMHealth:

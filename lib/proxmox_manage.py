@@ -4,7 +4,7 @@
 Provides helpers for:
 - Listing guests (``pct list`` + ``qm list``).
 - Querying status, config, and uptime for a single guest.
-- Starting, pausing, resuming, and stopping guests.
+- Starting, rebooting, pausing, resuming, and stopping guests.
 - Destroying guests (caller is expected to handle confirmation).
 - Health-checking a guest (status + ping + optional SSH probe).
 - Reconfiguring guests (CPU, memory, arbitrary ``pct``/``qm`` options).
@@ -335,13 +335,20 @@ def start_container(host: ProxmoxHost, vmid: int) -> None:
 
 
 def stop_container(
-    host: ProxmoxHost, vmid: int, *, force: bool = False
+    host: ProxmoxHost,
+    vmid: int,
+    *,
+    force: bool = False,
+    timeout: Optional[int] = None,
 ) -> None:
     """Stop a guest.
 
-    By default uses guest shutdown (graceful). When ``force`` is True it falls
-    back to the immediate stop command. Idempotent if already stopped.
+    By default uses guest shutdown (graceful). When ``force`` is True it uses
+    the immediate stop command. ``timeout`` is passed to graceful shutdown.
+    Idempotent if already stopped.
     """
+    if timeout is not None and timeout < 0:
+        raise ValueError("timeout must be >= 0")
     guest_type, current = _get_guest_status(host, vmid)
     if current == "stopped":
         return
@@ -349,11 +356,39 @@ def stop_container(
         cmd = f"qm stop {int(vmid)}" if force else f"qm shutdown {int(vmid)}"
     else:
         cmd = f"pct stop {int(vmid)}" if force else f"pct shutdown {int(vmid)}"
+    if timeout is not None and not force:
+        cmd += f" --timeout {timeout}"
     result = _run_on_host(host, cmd)
     if result.returncode != 0:
         raise ProxmoxManageError(
             f"{cmd} failed on {host.address}: "
             f"{(result.stderr or '').strip() or 'unknown error'}"
+        )
+
+
+def reboot_guest(
+    host: ProxmoxHost,
+    vmid: int,
+    *,
+    timeout: Optional[int] = None,
+) -> None:
+    """Cleanly reboot a running guest and apply pending configuration."""
+    if timeout is not None and timeout < 0:
+        raise ValueError("timeout must be >= 0")
+    guest_type, current = _get_guest_status(host, vmid)
+    if current == "stopped":
+        raise ProxmoxManageError(
+            f"Guest {vmid} is stopped; use the start command instead."
+        )
+    tool = "qm" if guest_type == "vm" else "pct"
+    cmd = f"{tool} reboot {int(vmid)}"
+    if timeout is not None:
+        cmd += f" --timeout {timeout}"
+    result = _run_on_host(host, cmd)
+    if result.returncode != 0:
+        raise ProxmoxManageError(
+            f"{cmd} failed on {host.address}: "
+            f"{(result.stderr or result.stdout or '').strip() or 'unknown error'}"
         )
 
 

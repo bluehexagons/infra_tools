@@ -772,6 +772,13 @@ infra-tools vm show <local-name> [--json]
 infra-tools vm show <host> <id> [--json]
 infra-tools vm health <local-name> [--no-ssh] [--json]
 infra-tools vm health <host> <id> [--no-ssh] [--json]
+infra-tools vm status <target> [<id>] [--json]
+infra-tools vm start <target> [<id>] [--json]
+infra-tools vm pause <target> [<id>] [--json]  # alias: suspend
+infra-tools vm resume <target> [<id>] [--json]
+infra-tools vm shutdown <target> [<id>] [--timeout SECONDS] [--json]
+infra-tools vm stop <target> [<id>] [--json]
+infra-tools vm reboot <target> [<id>] [--timeout SECONDS] [--json]  # alias: restart
 infra-tools vm snapshot list <local-name> [--json]
 infra-tools vm snapshot list <host> <id> [--json]
 infra-tools vm backup list <local-name> [--json]
@@ -797,13 +804,23 @@ infra-tools proxmox add pve1 10.0.0.10 --user root --key ~/.ssh/proxmox_ed25519
 ```
 
 The provider-neutral `infra-tools vm ...` commands provide stable inventory,
-inspection, health, snapshot, and backup-list output, plus confirmed QEMU VM
-destruction. Their JSON envelope includes `schema_version`, `provider`, `host`,
-`operation`, and `resources`. Commands for one VM accept either `<host> <id>`
-or the exact friendly `--name` (or saved IP address) of an infra-tools setup.
-Name resolution is fail-closed: the saved setup must identify a QEMU VM and a
-registered provider host, and both its expected Proxmox name and configured
-IPv4 address must match the observed guest. Tags are not accepted as VM names.
+inspection, health, power-state lifecycle, snapshot, and backup-list output,
+plus confirmed QEMU VM destruction. Their JSON envelope includes
+`schema_version`, `provider`, `host`, `operation`, and `resources`. In the
+command shapes above, `<target> [<id>]` means either `<host> <id>` or the exact
+friendly `--name` (or saved IP address) of an infra-tools setup with the ID
+omitted. Name resolution is fail-closed: the saved setup must identify a QEMU
+VM and a registered provider host, and both its expected Proxmox name and
+configured IPv4 address must match the observed guest. Tags are not accepted
+as VM names.
+
+Use `start`, `pause`/`suspend`, `resume`, `shutdown`, `stop`, and
+`reboot`/`restart` for power-state lifecycle. `shutdown` requests a clean guest
+shutdown, while `stop` immediately powers off the guest and can cause data
+loss. Shutdown and reboot accept the native provider `--timeout`; every
+lifecycle command queries and reports the resulting provider state. The
+provider-specific `proxmox` lifecycle paths remain available for compatibility
+with scripts that use an explicit host and VMID.
 
 `vm destroy` prints the observed name, VMID, provider host, and local name
 before asking the operator to type `yes`; `--yes` skips only that prompt and
@@ -811,7 +828,7 @@ before asking the operator to type `yes`; `--yes` skips only that prompt and
 destroy is verified with a fresh provider inventory. The saved setup is
 retained so it remains available as a reconstruction/reprovisioning
 declaration; remove it separately with `infra-tools rm NAME` when it is no
-longer wanted. Other Proxmox-specific lifecycle and host-administration
+longer wanted. Other Proxmox-specific guest mutations and host-administration
 operations remain under `infra-tools proxmox ...` until their command paths
 are migrated.
 
