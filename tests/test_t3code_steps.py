@@ -112,6 +112,10 @@ class T3CodeWebTest(unittest.TestCase):
                 "service_tools",
                 "t3code_gh_shim.py",
             )
+            gh_binary = os.path.join(temporary, "gh")
+            with open(gh_binary, "w", encoding="utf-8") as file_obj:
+                file_obj.write("#!/bin/sh\nexit 0\n")
+            os.chmod(gh_binary, 0o755)
 
             def run_command(command: str, **_kwargs):
                 if command == "ufw status numbered":
@@ -145,7 +149,7 @@ class T3CodeWebTest(unittest.TestCase):
                     "common.t3code_steps.T3_GH_SHIM_SCRIPT",
                     gh_shim_script,
                 ),
-                patch("common.t3code_steps.shutil.which", return_value="/usr/bin/gh"),
+                patch("common.t3code_steps.shutil.which", return_value=gh_binary),
                 patch("common.t3code_steps.remove_nginx_auth_failure_ban"),
             ):
                 install_t3code_web(config)
@@ -205,7 +209,7 @@ class T3CodeWebTest(unittest.TestCase):
             with open(gh_shim, encoding="utf-8") as file_obj:
                 gh_shim_content = file_obj.read()
             self.assertIn("t3code_gh_shim.py", gh_shim_content)
-            self.assertIn("--gh-binary /usr/bin/gh", gh_shim_content)
+            self.assertIn(f"--gh-binary {gh_binary}", gh_shim_content)
             with open(pair_wrapper, encoding="utf-8") as file_obj:
                 pairing_content = file_obj.read()
             self.assertIn("t3code_admin_pair.py", pairing_content)
