@@ -41,12 +41,13 @@ desktop interface when both local RDP and remote clients are useful.
 | --- | --- |
 | `workstation_desktop` | Desktop, CLI tools, browser, and Discord |
 | `pc_dev` | Desktop, browser, LibreOffice, SMB client packages, Remmina, and Discord |
-| `workstation_dev` | Desktop, browser, CLI tools, and Visual Studio Code |
+| `workstation_dev` | Desktop, Firefox ESR, and CLI tools including Neovim |
 
-The default desktop is XFCE and the default browser is LibreWolf. The local
-control-plane example selects XFCE explicitly. A browser selected with
-`--browser` becomes the default for the setup user; repeat the flag to install
-more than one browser.
+The default desktop is XFCE. `workstation_dev` uses Debian's Firefox ESR by
+default; the other workstation profiles retain LibreWolf. A browser selected
+with `--browser` becomes the default for the setup user; repeat the flag to
+install more than one browser. Graphical editors are explicit: select Geany or
+Visual Studio Code with `--editor geany` or `--editor vscode`.
 
 ## Common setups
 
@@ -81,8 +82,10 @@ infra-tools setup workstation_dev 10.0.0.25 agent \
   --repo https://github.com/user/project.git
 ```
 
-This adds the selected agent tools, Playwright browser automation, desktop
-browser, Visual Studio Code, administrator tools, and the selected repository.
+This adds the selected agent tools, Playwright browser automation, Firefox ESR,
+administrator tools, and the selected repository. Neovim is part of the CLI
+bundle; add `--editor geany` or `--editor vscode` only when the VM needs a
+graphical development editor.
 Repeat `--agent-tool` for any combination
 of `gh`, `codex`, `claude`, and `opencode`. Add `--desktop-interface t3code`
 for the graphical T3 Code client. The RDP password is
@@ -103,9 +106,28 @@ Minimal developer workstation with RDP:
 
 ```bash
 infra-tools setup workstation_dev 10.0.0.25 alice \
-  --desktop xfce --browser firefox --rdp --password "$RDP_PASSWORD" \
+  --desktop xfce --rdp --password "$RDP_PASSWORD" \
   --rdp-source 10.0.0.0/24
 ```
+
+Add a lightweight graphical IDE using Debian's package:
+
+```bash
+infra-tools setup workstation_dev 10.0.0.25 alice --editor geany
+```
+
+Or explicitly select Visual Studio Code:
+
+```bash
+infra-tools setup workstation_dev 10.0.0.25 alice --editor vscode
+```
+
+The VS Code choice verifies Microsoft's published signing-key fingerprint and
+uses an infra-tools-owned keyring plus a source restricted to
+`https://packages.microsoft.com/repos/code`. It does not enable Extrepo's
+global `non-free` policy. Because the editor was explicitly requested, a key,
+repository, or package failure stops setup instead of reporting a completed
+editor step.
 
 PC with office and SMB tools:
 
@@ -123,7 +145,8 @@ infra-tools setup workstation_desktop 10.0.0.27 alice \
 
 Use `--apt-install PACKAGE` or repeat `--flatpak-install PACKAGE` for
 additional packages. Flatpak is enabled with `--flatpak`; the built-in desktop
-bundles use it for Discord, LibreOffice, and VS Code when possible.
+bundles use it for Discord and LibreOffice when possible. Explicit editor
+selection remains APT-managed so its behavior is independent of Flatpak.
 
 ## Browser choices
 
@@ -143,10 +166,10 @@ Supported `--browser` values are `brave`, `firefox`, `librewolf`, `helium`,
 - Lynx installs the Debian terminal browser and does not become a graphical
   default.
 
-For an extrepo-based browser or VS Code install, setup first refreshes APT
-normally. If that refresh fails, it makes one bounded attempt to refresh any
-existing extrepo-managed definitions for Brave, LibreWolf, and VS Code, then
-retries APT. The extrepo repair has a 30-second per-source timeout and does not
+For an extrepo-based browser install, setup first refreshes APT normally. If
+that refresh fails, it makes one bounded attempt to refresh existing
+extrepo-managed definitions for Brave, LibreWolf, and legacy VS Code installs,
+then retries APT. The extrepo repair has a 30-second per-source timeout and does not
 run on successful reruns. It does not remove or rewrite manually managed files under
 `/etc/apt/sources.list` or `/etc/apt/sources.list.d`. If APT still reports an
 unrelated third-party source error, repair or disable that source separately
@@ -246,7 +269,7 @@ can install it through the explicit custom step `install_remmina` when using
 After setup, inspect installed applications as the target user:
 
 ```bash
-command -v firefox librewolf brave-browser code remmina
+command -v firefox librewolf brave-browser nvim geany code remmina
 flatpak list --app
 xdg-mime query default x-scheme-handler/https
 xdg-settings get default-web-browser

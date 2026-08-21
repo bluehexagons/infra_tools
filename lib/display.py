@@ -255,6 +255,9 @@ def print_setup_summary(config: SetupConfig, description: Optional[str] = None) 
     
     if config.browser and config.browser != "brave" and (config.include_desktop or config.include_desktop_apps or config.include_pc_dev_apps or config.include_workstation_dev_apps):
         print(f"Browser: {config.browser}")
+
+    if config.editor:
+        print(f"Editor: {config.editor}")
     
     if config.use_flatpak:
         print("Flatpak: Yes")

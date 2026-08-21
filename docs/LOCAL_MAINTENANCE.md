@@ -77,13 +77,17 @@ The default behavior configures the browser for the local desktop user. Use
 `--no-default` when installing a secondary browser. Supported browsers are
 `brave`, `firefox`, `librewolf`, `helium`, `browsh`, and `lynx`.
 
-For bundled applications such as LibreOffice, VS Code, Discord, or Remmina,
-use the workstation profile's existing flags and inspect the plan first:
+For LibreOffice, an explicit graphical editor, Discord, or Remmina, use the
+workstation profile's existing flags and inspect the plan first:
 
 ```bash
 sudo infra-tools setup workstation_dev localhost "$USER" \
-  --office --browser firefox --dry-run
+  --office --editor geany --dry-run
 ```
+
+`workstation_dev` already includes Firefox ESR and Neovim. Use `--editor
+geany` for the lightweight Debian IDE or `--editor vscode` for the explicitly
+scoped Microsoft repository.
 
 ## Hostname, IP address, and DNS
 

@@ -138,6 +138,7 @@ tools, not for an LXC container.
 | `--rdp-idle-timeout SECONDS` | Disconnect an idle session after this interval; 0 disables |
 | `--desktop [xfce\|i3\|cinnamon\|lxqt]` | Desktop environment |
 | `--browser NAME` | Browser to install |
+| `--editor [geany\|vscode]` | Install an explicit graphical editor; requires a desktop-capable setup or `--rdp` |
 | `--flatpak` | Install desktop apps via Flatpak |
 | `--office` | Install LibreOffice |
 | `--apt-install PACKAGE` | Install a package via apt |

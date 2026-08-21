@@ -33,6 +33,7 @@ DESKTOP_INTERFACES = ("t3code",)
 WEB_INTERFACES = ("t3code",)
 DEVICE_PAIRING_PROVIDERS = ("t3code",)
 BROWSER_AUTOMATION_PROVIDERS = ("playwright",)
+EDITORS = ("geany", "vscode")
 GIT_ACCESS_POLICIES = ("none", "read", "read-write")
 DEFAULT_AGENT_WEB_PORTS = (80, 443, 8080, 8081)
 
@@ -204,6 +205,7 @@ class SetupConfig:
     desktop: str = "xfce"
     browser: Optional[str] = "librewolf"  # Primary browser, or first from browsers list
     browsers: Optional[StrList] = None  # List of browsers to install
+    editor: MaybeStr = None
     use_flatpak: bool = False
     install_office: bool = False
     apt_packages: Optional[StrList] = None
@@ -321,6 +323,14 @@ class SetupConfig:
             character.isspace() or ord(character) < 32 for character in self.git_host
         ):
             raise ValueError("git_host must be a non-empty hostname")
+
+        if self.editor is not None:
+            if self.editor not in EDITORS:
+                raise ValueError(f"editor must be one of: {', '.join(EDITORS)}")
+            if not self.include_desktop:
+                raise ValueError(
+                    "--editor requires a desktop-capable setup or --rdp"
+                )
 
         selected = list(self.agent_tools or [])
         for tool in selected:
@@ -513,6 +523,9 @@ class SetupConfig:
                 args.append(f"--browser {shlex.quote(browser)}")
         elif self.browser:
             args.append(f"--browser {shlex.quote(self.browser)}")
+
+        if self.editor:
+            args.append(f"--editor {shlex.quote(self.editor)}")
         
         if self.use_flatpak:
             args.append("--flatpak")
@@ -862,8 +875,13 @@ class SetupConfig:
         if self.browsers:
             for browser in self.browsers:
                 cmd_parts.append(f"--browser {shlex.quote(browser)}")
-        elif self.browser and self.browser != "librewolf":
+        elif self.browser and self.browser != (
+            system_type_defaults.default_browser or "librewolf"
+        ):
             cmd_parts.append(f"--browser {shlex.quote(self.browser)}")
+
+        if self.editor:
+            cmd_parts.append(f"--editor {shlex.quote(self.editor)}")
         
         if self.use_flatpak:
             cmd_parts.append("--flatpak")
@@ -1316,6 +1334,7 @@ class SetupConfig:
             desktop=desktop,
             browser=browser,
             browsers=browsers,
+            editor=_optional_str_arg(args, 'editor'),
             use_flatpak=getattr(args, 'use_flatpak', False),
             install_office=install_office,
             apt_packages=getattr(args, 'apt_packages', None),

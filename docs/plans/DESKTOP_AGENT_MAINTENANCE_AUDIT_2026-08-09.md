@@ -3,7 +3,10 @@
 Status: active follow-up plan. Password persistence, managed X.Org deployment,
 unsupported session cleanup, RDP source/bind policy, channel defaults, and the
 Proxmox emulated-display profile, and TLS pair/expiry monitoring have been
-addressed. Native session lifecycle controls are now saved and validated.
+addressed. Native session lifecycle controls are now saved and validated. The
+developer workstation now defaults to Debian's Firefox ESR and Neovim; Geany
+and Visual Studio Code are explicit editor choices, with VS Code using a
+fingerprint-verified, narrowly scoped Microsoft APT source.
 Trusted certificate enrollment/rotation, workload-aware maintenance,
 configuration compatibility, physical-GPU acceleration, and live desktop
 verification remain larger work.
@@ -26,8 +29,9 @@ infra-tools setup workstation_dev 10.0.0.25 agent \
   --repo https://github.com/user/project.git
 ```
 
-`workstation_dev` adds XFCE, a browser, Visual Studio Code, and the shared CLI
-bundle. Agent tools are selected individually; add T3 Code with
+`workstation_dev` adds XFCE, Firefox ESR, and the shared CLI bundle, including
+Neovim. Select a graphical editor with `--editor geany` or `--editor vscode`.
+Agent tools are selected individually; add T3 Code with
 `--desktop-interface t3code`, `--web-interface t3code`, and language runtimes
 with their individual flags.
 

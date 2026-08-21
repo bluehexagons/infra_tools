@@ -6,13 +6,26 @@ import os
 import shlex
 import tempfile
 
+from lib.atomic_io import write_text_atomic
 from lib.config import SetupConfig
 from lib.machine_state import is_container
-from lib.remote_utils import run, is_package_installed
+from lib.remote_utils import install_package, is_package_installed, run
+from lib.validation import validate_filesystem_path
 from desktop.browser_steps import install_browser, is_flatpak_app_installed
 
 
 FLATPAK_REMOTE = "flathub"
+MICROSOFT_KEY_URL = "https://packages.microsoft.com/keys/microsoft.asc"
+MICROSOFT_KEY_FINGERPRINT = "BC528686B50D79E339D3721CEB3E94ADBE1229CF"
+VSCODE_KEYRING = "/usr/share/keyrings/infra-tools-microsoft.gpg"
+VSCODE_SOURCES = "/etc/apt/sources.list.d/infra-tools-vscode.sources"
+VSCODE_SOURCE_CONTENT = f"""Types: deb
+URIs: https://packages.microsoft.com/repos/code
+Suites: stable
+Components: main
+Architectures: amd64 arm64 armhf
+Signed-By: {VSCODE_KEYRING}
+"""
 
 
 def is_flatpak_installed() -> bool:
@@ -132,33 +145,102 @@ def install_desktop_apps(config: SetupConfig) -> None:
             print("  ✓ Other desktop apps installed (Discord)")
 
 
-def install_workstation_dev_apps(config: SetupConfig) -> None:
-    install_browser(config)
-    
-    use_flatpak = config.use_flatpak
-    if use_flatpak:
-        if not install_flatpak_if_needed():
-            print("  Falling back to apt for VS Code installation")
-            use_flatpak = False
-    
-    if use_flatpak:
-        if is_flatpak_app_installed("com.visualstudio.code"):
-            print("  ✓ Workstation dev apps already installed via Flatpak")
-            return
-        
-        print("  Installing workstation dev apps via Flatpak...")
-        
-        if not is_flatpak_app_installed("com.visualstudio.code"):
-            print("  Installing Visual Studio Code...")
-            run(f"flatpak install -y {FLATPAK_REMOTE} com.visualstudio.code", check=False)
-        
-        print("  ✓ Workstation dev apps installed via Flatpak (VS Code)")
-    else:
-        if is_package_installed("code") or os.path.exists("/usr/bin/code"):
-            print("  ✓ Workstation dev apps already installed")
-            return
+def _microsoft_key_fingerprints(output: str) -> set[str]:
+    """Extract normalized fingerprints from GnuPG colon output."""
 
-        print("  Installing Visual Studio Code...")
-        from desktop.browser_steps import _install_via_extrepo
-        if _install_via_extrepo("VS Code", "vscode", "code"):
-            print("  ✓ Workstation dev apps installed (VS Code)")
+    fingerprints: set[str] = set()
+    for line in output.splitlines():
+        fields = line.split(":")
+        if fields[0] == "fpr" and len(fields) > 9 and fields[9]:
+            fingerprints.add(fields[9].upper())
+    return fingerprints
+
+
+def _install_vscode() -> None:
+    """Install VS Code from Microsoft's explicitly scoped signed APT source."""
+
+    if is_package_installed("code") or os.path.exists("/usr/bin/code"):
+        print("  ✓ Visual Studio Code already installed")
+        return
+
+    for path in (VSCODE_KEYRING, VSCODE_SOURCES):
+        validate_filesystem_path(path)
+        if os.path.islink(path):
+            raise RuntimeError(
+                f"refusing symlinked VS Code configuration path: {path}"
+            )
+
+    dependencies = run(
+        "apt-get install -y -qq ca-certificates wget gpg",
+        check=False,
+    )
+    if dependencies.returncode != 0:
+        raise RuntimeError("Visual Studio Code repository dependencies failed")
+
+    with tempfile.TemporaryDirectory(prefix="infra-tools-vscode-") as temporary_dir:
+        key_path = os.path.join(temporary_dir, "microsoft.asc")
+        dearmored_path = os.path.join(temporary_dir, "microsoft.gpg")
+        download = run(
+            f"wget --https-only -qO {shlex.quote(key_path)} "
+            f"{shlex.quote(MICROSOFT_KEY_URL)}",
+            check=False,
+        )
+        if download.returncode != 0:
+            raise RuntimeError("could not download the Microsoft repository key")
+
+        inspection = run(
+            f"gpg --batch --with-colons --show-keys {shlex.quote(key_path)}",
+            check=False,
+            capture_output=True,
+        )
+        if (
+            inspection.returncode != 0
+            or MICROSOFT_KEY_FINGERPRINT
+            not in _microsoft_key_fingerprints(inspection.stdout or "")
+        ):
+            raise RuntimeError("Microsoft repository key fingerprint did not match")
+
+        dearmor = run(
+            "gpg --batch --yes --dearmor "
+            f"--output {shlex.quote(dearmored_path)} {shlex.quote(key_path)}",
+            check=False,
+        )
+        if dearmor.returncode != 0:
+            raise RuntimeError("could not prepare the Microsoft repository key")
+
+        install_key = run(
+            "install -o root -g root -m 0644 "
+            f"{shlex.quote(dearmored_path)} {shlex.quote(VSCODE_KEYRING)}",
+            check=False,
+        )
+        if install_key.returncode != 0:
+            raise RuntimeError("could not install the Microsoft repository key")
+
+    write_text_atomic(VSCODE_SOURCES, VSCODE_SOURCE_CONTENT, mode=0o644)
+    update = run("apt-get update -qq", check=False)
+    if update.returncode != 0:
+        raise RuntimeError("could not refresh the Visual Studio Code repository")
+
+    install = run("apt-get install -y -qq code", check=False)
+    if install.returncode != 0 or not (
+        is_package_installed("code") or os.path.exists("/usr/bin/code")
+    ):
+        raise RuntimeError("Visual Studio Code installation failed")
+    print("  ✓ Visual Studio Code installed")
+
+
+def install_editor(config: SetupConfig) -> None:
+    """Install the explicitly selected graphical editor."""
+
+    if config.editor == "geany":
+        if not install_package(
+            "Geany",
+            "geany",
+            "apt-get install -y -qq geany",
+        ):
+            raise RuntimeError("Geany installation failed")
+        return
+    if config.editor == "vscode":
+        _install_vscode()
+        return
+    raise RuntimeError("No supported graphical editor was selected")

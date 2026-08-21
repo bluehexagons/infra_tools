@@ -36,6 +36,7 @@ class TestSetupConfigDefaults(unittest.TestCase):
         self.assertFalse(config.dry_run)
         self.assertFalse(config.refresh_packages)
         self.assertEqual(config.desktop, 'xfce')
+        self.assertIsNone(config.editor)
 
     def test_custom_values(self):
         config = self._make_config(timezone='America/New_York', enable_rdp=True, dry_run=True)
@@ -203,6 +204,11 @@ class TestSetupConfigToRemoteArgs(unittest.TestCase):
         args_str = ' '.join(args)
         self.assertIn('--browser firefox', args_str)
 
+    def test_explicit_editor_is_sent_to_remote(self):
+        config = self._make_config(editor='geany', include_desktop=True)
+
+        self.assertIn('--editor geany', config.to_remote_args())
+
     def test_browsers_list(self):
         config = self._make_config(browsers=['firefox', 'brave'])
         args = config.to_remote_args()
@@ -256,6 +262,12 @@ class TestSetupConfigToRemoteArgs(unittest.TestCase):
     def test_invalid_agent_tool_fails(self):
         with self.assertRaisesRegex(ValueError, 'Unsupported agent tool'):
             self._make_config(agent_tools=['everything'])
+
+    def test_editor_requires_supported_desktop_setup(self):
+        with self.assertRaisesRegex(ValueError, 'desktop-capable setup'):
+            self._make_config(editor='geany')
+        with self.assertRaisesRegex(ValueError, 'editor must be one of'):
+            self._make_config(editor='emacs', include_desktop=True)
 
     def test_deployment_mode_flags(self):
         deploy_specs = [['example.com/', 'https://github.com/user/repo.git']]
@@ -503,6 +515,11 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
         parts = config.to_setup_command()
         self.assertIn('--python', parts)
 
+    def test_editor_flag_is_reconstructed(self):
+        config = self._make_config(editor='vscode', include_desktop=True)
+
+        self.assertIn('--editor vscode', config.to_setup_command())
+
     def test_agent_tool_flags_included(self):
         config = self._make_config(
             install_gh=True,
@@ -544,6 +561,7 @@ class TestSetupConfigFromArgs(unittest.TestCase):
             desktop=None,
             browsers=None,
             browser=None,
+            editor=None,
             install_office=None,
             enable_rdp=None,
             rdp_bind_address='0.0.0.0',
@@ -620,6 +638,22 @@ class TestSetupConfigFromArgs(unittest.TestCase):
         config = SetupConfig.from_args(self._make_args(enable_rdp=True), 'workstation_desktop')
         self.assertTrue(config.enable_rdp)
         self.assertTrue(config.include_desktop)
+
+    def test_workstation_dev_defaults_to_firefox_without_an_editor(self):
+        config = SetupConfig.from_args(self._make_args(), 'workstation_dev')
+
+        self.assertEqual(config.browser, 'firefox')
+        self.assertIsNone(config.editor)
+        self.assertNotIn('--browser firefox', config.to_setup_command())
+
+    def test_workstation_dev_accepts_an_explicit_editor(self):
+        config = SetupConfig.from_args(
+            self._make_args(editor='geany'),
+            'workstation_dev',
+        )
+
+        self.assertEqual(config.editor, 'geany')
+        self.assertIn('--editor geany', config.to_remote_args())
 
     def test_workstation_rdp_can_reuse_existing_local_password(self):
         config = SetupConfig.from_args(

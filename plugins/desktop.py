@@ -22,7 +22,7 @@ PLUGIN = PluginDefinition(
         "harden_xrdp",
         "install_desktop_apps",
         "configure_default_browser",
-        "install_workstation_dev_apps",
+        "install_editor",
         "install_smbclient",
         "configure_dark_theme",
         "install_browser",
@@ -66,9 +66,10 @@ def extend_desktop_app_steps(config: SetupConfig, steps: list[tuple[str, StepFun
 
     from desktop.steps import (
         configure_default_browser,
+        install_browser,
         install_desktop_apps,
+        install_editor,
         install_remmina,
-        install_workstation_dev_apps,
     )
 
     if config.include_desktop_apps:
@@ -89,10 +90,13 @@ def extend_desktop_app_steps(config: SetupConfig, steps: list[tuple[str, StepFun
     elif config.include_workstation_dev_apps:
         steps.extend(
             [
-                ("Installing workstation dev applications", install_workstation_dev_apps),
+                ("Installing browser", install_browser),
                 ("Configuring default browser", configure_default_browser),
             ]
         )
+
+    if config.editor:
+        steps.append(("Installing workstation editor", install_editor))
 
 
 def extend_desktop_browser_and_office_steps(
@@ -124,10 +128,10 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         install_browser,
         install_desktop,
         install_desktop_apps,
+        install_editor,
         install_office_apps,
         install_remmina,
         install_smbclient,
-        install_workstation_dev_apps,
         install_xrdp,
     )
 
@@ -137,7 +141,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "harden_xrdp": harden_xrdp,
         "install_desktop_apps": install_desktop_apps,
         "configure_default_browser": configure_default_browser,
-        "install_workstation_dev_apps": install_workstation_dev_apps,
+        "install_editor": install_editor,
         "install_smbclient": install_smbclient,
         "configure_dark_theme": configure_dark_theme,
         "install_browser": install_browser,

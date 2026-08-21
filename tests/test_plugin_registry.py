@@ -89,6 +89,11 @@ class TestPluginRegistry(unittest.TestCase):
         self.assertEqual(system_type.default_browser, "librewolf")
         self.assertIsNotNone(system_type.step_builder)
 
+    def test_workstation_dev_metadata_uses_debian_browser_default(self):
+        system_type = get_system_type_definition("workstation_dev")
+
+        self.assertEqual(system_type.default_browser, "firefox")
+
     def test_control_plane_profile_adds_administrator_tools(self):
         config = SetupConfig(
             host="localhost",
@@ -231,6 +236,32 @@ class TestPluginRegistry(unittest.TestCase):
             step_names.index("Installing CLI tools"),
             step_names.index("Installing GitHub CLI"),
         )
+
+    def test_workstation_dev_editor_is_explicit(self):
+        minimal = SetupConfig(
+            host="host",
+            username="user",
+            system_type="workstation_dev",
+            include_desktop=True,
+            include_workstation_dev_apps=True,
+            browser="firefox",
+        )
+        selected = SetupConfig(
+            host="host",
+            username="user",
+            system_type="workstation_dev",
+            include_desktop=True,
+            include_workstation_dev_apps=True,
+            browser="firefox",
+            editor="geany",
+        )
+
+        minimal_steps = [name for name, _ in get_steps_for_system_type(minimal)]
+        selected_steps = [name for name, _ in get_steps_for_system_type(selected)]
+
+        self.assertIn("Installing browser", minimal_steps)
+        self.assertNotIn("Installing workstation editor", minimal_steps)
+        self.assertIn("Installing workstation editor", selected_steps)
 
     def test_duplicate_plugin_names_fail(self):
         plugin = PluginDefinition(name="dup", module="plugins.one")

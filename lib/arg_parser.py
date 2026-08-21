@@ -10,6 +10,7 @@ from lib.config import (
     BROWSER_AUTOMATION_PROVIDERS,
     DEVICE_PAIRING_PROVIDERS,
     DESKTOP_INTERFACES,
+    EDITORS,
     GIT_ACCESS_POLICIES,
     MACHINE_TYPES,
     WEB_INTERFACES,
@@ -352,7 +353,13 @@ def add_setup_arguments(
     parser.add_argument("--browser", dest="browsers", 
                        action="append",
                        choices=["brave", "firefox", "browsh", "helium", "lynx", "librewolf"], 
-                       help="Web browser to install (can be used multiple times, default: librewolf for desktop setups)")
+                       help="Web browser to install (can be used multiple times; profile defaults vary)")
+    parser.add_argument(
+        "--editor",
+        choices=EDITORS,
+        metavar="EDITOR",
+        help="Install an explicit graphical editor (geany or vscode; desktop setups only)",
+    )
     parser.add_argument("--flatpak", dest="use_flatpak", 
                        action=argparse.BooleanOptionalAction if not for_remote else "store_true", 
                        default=None if not for_remote else False,

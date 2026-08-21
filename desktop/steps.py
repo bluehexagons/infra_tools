@@ -26,7 +26,7 @@ from .apps_steps import (
     install_remmina,
     install_office_apps,
     install_desktop_apps,
-    install_workstation_dev_apps,
+    install_editor,
 )
 
 __all__ = [
@@ -44,5 +44,5 @@ __all__ = [
     'install_remmina',
     'install_office_apps',
     'install_desktop_apps',
-    'install_workstation_dev_apps',
+    'install_editor',
 ]

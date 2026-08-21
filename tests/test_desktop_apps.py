@@ -76,6 +76,139 @@ class TestDesktopApps(unittest.TestCase):
 
         self.assertIs(steps.configure_default_browser, configure_default_browser)
 
+    @patch("desktop.apps_steps.install_package", return_value=True)
+    def test_geany_editor_uses_debian_package(self, mock_install_package):
+        from desktop.apps_steps import install_editor
+
+        config = SetupConfig(
+            host="test.example.com",
+            username="testuser",
+            system_type="workstation_dev",
+            include_desktop=True,
+            editor="geany",
+        )
+
+        install_editor(config)
+
+        mock_install_package.assert_called_once_with(
+            "Geany",
+            "geany",
+            "apt-get install -y -qq geany",
+        )
+
+    @patch("desktop.apps_steps.install_package", return_value=False)
+    def test_explicit_geany_failure_stops_the_step(self, _mock_install_package):
+        from desktop.apps_steps import install_editor
+
+        config = SetupConfig(
+            host="test.example.com",
+            username="testuser",
+            system_type="workstation_dev",
+            include_desktop=True,
+            editor="geany",
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "Geany installation failed"):
+            install_editor(config)
+
+    @patch("desktop.apps_steps.write_text_atomic")
+    @patch("desktop.apps_steps.os.path.exists", return_value=False)
+    @patch("desktop.apps_steps.is_package_installed", side_effect=[False, True])
+    @patch("desktop.apps_steps.run")
+    def test_vscode_uses_scoped_microsoft_repository(
+        self,
+        mock_run,
+        _mock_package,
+        _mock_exists,
+        mock_write,
+    ):
+        from desktop.apps_steps import (
+            MICROSOFT_KEY_FINGERPRINT,
+            VSCODE_SOURCES,
+            VSCODE_SOURCE_CONTENT,
+            install_editor,
+        )
+
+        success = Mock(returncode=0, stdout="", stderr="")
+        fingerprint = Mock(
+            returncode=0,
+            stdout=f"fpr:::::::::{MICROSOFT_KEY_FINGERPRINT}:\n",
+            stderr="",
+        )
+        mock_run.side_effect = [
+            success,
+            success,
+            fingerprint,
+            success,
+            success,
+            success,
+            success,
+        ]
+        config = SetupConfig(
+            host="test.example.com",
+            username="testuser",
+            system_type="workstation_dev",
+            include_desktop=True,
+            editor="vscode",
+        )
+
+        install_editor(config)
+
+        commands = [call.args[0] for call in mock_run.call_args_list]
+        self.assertTrue(
+            any(
+                "packages.microsoft.com/keys/microsoft.asc" in command
+                for command in commands
+            )
+        )
+        self.assertFalse(any("extrepo" in command for command in commands))
+        self.assertIn("apt-get update -qq", commands)
+        self.assertIn("apt-get install -y -qq code", commands)
+        mock_write.assert_called_once_with(
+            VSCODE_SOURCES,
+            VSCODE_SOURCE_CONTENT,
+            mode=0o644,
+        )
+
+    @patch("desktop.apps_steps.write_text_atomic")
+    @patch("desktop.apps_steps.os.path.exists", return_value=False)
+    @patch("desktop.apps_steps.is_package_installed", return_value=False)
+    @patch("desktop.apps_steps.run")
+    def test_explicit_vscode_repository_failure_stops_the_step(
+        self,
+        mock_run,
+        _mock_package,
+        _mock_exists,
+        _mock_write,
+    ):
+        from desktop.apps_steps import MICROSOFT_KEY_FINGERPRINT, install_editor
+
+        success = Mock(returncode=0, stdout="", stderr="")
+        fingerprint = Mock(
+            returncode=0,
+            stdout=f"fpr:::::::::{MICROSOFT_KEY_FINGERPRINT}:\n",
+            stderr="",
+        )
+        failed = Mock(returncode=1, stdout="", stderr="repository unavailable")
+        mock_run.side_effect = [
+            success,
+            success,
+            fingerprint,
+            success,
+            success,
+            failed,
+        ]
+        config = SetupConfig(
+            host="test.example.com",
+            username="testuser",
+            system_type="workstation_dev",
+            include_desktop=True,
+            editor="vscode",
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "could not refresh"):
+            install_editor(config)
+
 
 class TestBrowserSteps(unittest.TestCase):
     def setUp(self):
