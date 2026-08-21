@@ -99,11 +99,12 @@ allowed LAN device:
 http://192.168.0.41:3774/
 ```
 
-After the Nginx Basic Auth prompt, **Pair this browser** creates a ten-minute,
-one-time T3 credential and redirects that browser into the authenticated T3
-session. **Create a link for another T3 client** displays a link that can be
-copied into the desktop or mobile client. New devices therefore do not require
-terminal access at enrollment time.
+After the Nginx Basic Auth prompt, **Create a link for this browser** creates a
+ten-minute, one-time T3 credential and displays a button that opens the
+authenticated T3 session. The explicit second click avoids browser-dependent
+cross-port redirect behavior. **Create a link for another T3 client** displays
+a link that can be copied into the desktop or mobile client. New devices
+therefore do not require terminal access at enrollment time.
 
 The pairing portal is separate from T3's port. Basic Auth protects credential
 issuance; T3's native pairing exchange and per-device session protect the

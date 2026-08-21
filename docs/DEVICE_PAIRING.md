@@ -79,8 +79,9 @@ http://192.168.0.41:3774/
 Enter the configured Basic Auth username and password, then choose one of the
 portal actions:
 
-- **Pair this browser** creates a one-time credential and redirects the current
-  browser to T3's pairing page.
+- **Create a link for this browser** creates a one-time credential, then shows
+  a button that opens T3's pairing page. The explicit second click avoids
+  browser-dependent cross-port redirect behavior.
 - **Create a link for another T3 client** displays the short-lived URL so it
   can be copied into a desktop or mobile T3 Code client.
 

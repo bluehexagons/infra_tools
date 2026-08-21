@@ -350,10 +350,10 @@ class PairingBrokerTest(unittest.TestCase):
         self.assertFalse(state.allow_request("192.168.0.12"))
         self.assertTrue(state.allow_request("192.168.0.13"))
 
-    def test_http_portal_redirects_with_single_use_provider_link(self) -> None:
+    def test_http_portal_renders_explicit_single_use_provider_link(self) -> None:
         state = PairingState({"t3code": self._provider()})
         nonce = state.new_nonce()
-        body = urlencode({"nonce": nonce}).encode("utf-8")
+        body = urlencode({"nonce": nonce, "intent": "current"}).encode("utf-8")
         headers = Message()
         headers["Content-Type"] = "application/x-www-form-urlencoded"
         headers["Content-Length"] = str(len(body))
@@ -363,10 +363,10 @@ class PairingBrokerTest(unittest.TestCase):
         headers["X-Real-IP"] = "192.168.0.12"
         handler = PairingRequestHandler.__new__(PairingRequestHandler)
         handler.server = SimpleNamespace(pairing_state=state)
-        handler.path = "/pair/t3code?redirect=1"
+        handler.path = "/pair/t3code"
         handler.command = "POST"
         handler.request_version = "HTTP/1.1"
-        handler.requestline = "POST /pair/t3code?redirect=1 HTTP/1.1"
+        handler.requestline = "POST /pair/t3code HTTP/1.1"
         handler.headers = headers
         handler.rfile = BytesIO(body)
         handler.wfile = BytesIO()
@@ -380,9 +380,36 @@ class PairingBrokerTest(unittest.TestCase):
             handler.do_POST()
 
         response = handler.wfile.getvalue().decode("iso-8859-1")
-        self.assertIn(" 303 ", response)
-        self.assertIn(f"Location: {pairing_url}\r\n", response)
+        self.assertIn(" 200 ", response)
+        self.assertNotIn("Location:", response)
+        self.assertIn(f'href="{pairing_url}"', response)
+        self.assertIn("Pair this browser with T3 Code", response)
         issue.assert_called_once_with("t3code", "http://agent-vm:3773")
+
+    def test_http_portal_rejects_missing_pairing_intent(self) -> None:
+        state = PairingState({"t3code": self._provider()})
+        nonce = state.new_nonce()
+        body = urlencode({"nonce": nonce}).encode("utf-8")
+        headers = Message()
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
+        headers["Content-Length"] = str(len(body))
+        headers["Cookie"] = f"infra_tools_pairing_nonce={nonce}"
+        handler = PairingRequestHandler.__new__(PairingRequestHandler)
+        handler.server = SimpleNamespace(pairing_state=state)
+        handler.path = "/pair/t3code"
+        handler.command = "POST"
+        handler.request_version = "HTTP/1.1"
+        handler.requestline = "POST /pair/t3code HTTP/1.1"
+        handler.headers = headers
+        handler.rfile = BytesIO(body)
+        handler.wfile = BytesIO()
+
+        with patch.object(state, "issue") as issue:
+            handler.do_POST()
+
+        response = handler.wfile.getvalue().decode("iso-8859-1")
+        self.assertIn(" 403 ", response)
+        issue.assert_not_called()
 
 
 class DevicePairingRemoteSetupTest(unittest.TestCase):

@@ -281,12 +281,14 @@ class PairingRequestHandler(BaseHTTPRequestHandler):
             escaped_nonce = html.escape(nonce, quote=True)
             escaped_label = html.escape(provider["label"])
             buttons.append(
-                f'<form method="post" action="/pair/{escaped_name}?redirect=1">'
+                f'<form method="post" action="/pair/{escaped_name}">'
                 f'<input type="hidden" name="nonce" value="{escaped_nonce}">'
-                f'<button type="submit">Pair this browser with {escaped_label}</button>'
+                '<input type="hidden" name="intent" value="current">'
+                f'<button type="submit">Create a link for this browser with {escaped_label}</button>'
                 "</form>"
-                f'<form method="post" action="/pair/{escaped_name}?redirect=0">'
+                f'<form method="post" action="/pair/{escaped_name}">'
                 f'<input type="hidden" name="nonce" value="{escaped_nonce}">'
+                '<input type="hidden" name="intent" value="other">'
                 f'<button type="submit">Create a link for another {escaped_label} client</button>'
                 "</form>"
             )
@@ -324,9 +326,11 @@ class PairingRequestHandler(BaseHTTPRequestHandler):
             self.send_error(HTTPStatus.BAD_REQUEST)
             return
         submitted_nonce = (form.get("nonce") or [""])[0]
+        intent = (form.get("intent") or [""])[0]
         if (
             not secrets.compare_digest(submitted_nonce, self._nonce_cookie())
             or not self.state.consume_nonce(submitted_nonce)
+            or intent not in {"current", "other"}
         ):
             self._send_html(
                 HTTPStatus.FORBIDDEN,
@@ -361,17 +365,16 @@ class PairingRequestHandler(BaseHTTPRequestHandler):
                 f'<p class="error">{html.escape(str(exc))}</p>',
             )
             return
-        redirect = parse_qs(parsed_path.query).get("redirect") == ["1"]
-        if redirect:
-            self.send_response(HTTPStatus.SEE_OTHER)
-            self.send_header("Location", pair_url)
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Referrer-Policy", "no-referrer")
-            self.end_headers()
-            return
         encoded_url = html.escape(pair_url, quote=True)
+        link_label = (
+            f"Pair this browser with {html.escape(provider['label'])}"
+            if intent == "current"
+            else "Open pairing link"
+        )
         body = (
-            f'<p><a class="button" href="{encoded_url}">Pair this device</a></p>'
+            '<p>Use the button below to continue. This explicit browser navigation '
+            'preserves the one-time pairing credential across the service port change.</p>'
+            f'<p><a class="button" href="{encoded_url}">{link_label}</a></p>'
             f"<p><code>{html.escape(pair_url)}</code></p>"
             f'<p class="muted">Expires {html.escape(expires)}.</p>'
         )
