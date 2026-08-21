@@ -250,8 +250,10 @@ rollback stop failure, and inactive/active verification failures.
 - The callback-based transaction framework was retired after this audit.
   Sync/scrub operations now use explicit fail-fast control flow, while the
   operation logger remains diagnostic evidence. The main setup/deployment paths
-  still need a small durable operation marker rather than another callback
-  abstraction.
+  use a small versioned state primitive rather than another callback
+  abstraction. Manifest deployment now records its build/activation phases and
+  retains incomplete rollback state; target setup integration remains open
+  under AUD-04.
 
 ## Recommended order
 

@@ -49,6 +49,9 @@ ARCH-08 from the [architectural risk review](ARCHITECTURAL_RISK_REVIEW_2026-08-0
 - `lib.operation_state` defines a schema-versioned, atomically persisted marker
   with explicit in-progress and recovery-required states. It rejects corrupt,
   unsupported, symlinked, and stale-ID updates rather than replacing them.
+- Manifest deployment creates that marker before staging, records deterministic
+  staging/backup paths and units before activation, clears it after success or
+  verified rollback, and retains recovery errors when rollback is incomplete.
 
 The former `lib/transaction.py` callback framework was removed on 2026-08-21.
 It reran completed steps, could report success after continue-on-error failures,
@@ -165,8 +168,10 @@ files cannot always reverse a schema change. Record the migration boundary,
 create and verify backups before migration, and clearly report when application
 rollback also requires database restoration.
 
-The remaining manifest work is durable operation history and explicit recovery
-when a process or machine is interrupted during the short activation window.
+Manifest activation now leaves a durable, versioned marker when a process or
+machine is interrupted and blocks another deployment until the operator
+reconciles it. Automated recovery from every recorded phase and longer-term
+operation history remain open.
 
 ## Phase 5: Managed SSH trust
 
@@ -201,10 +206,9 @@ enabled until the expected fingerprint is explicitly verified.
 ## Recommended first delivery slice
 
 The atomic persistence, execution-contract, transaction-framework retirement,
-and durable operation-record primitive slices are complete. The next delivery
-should use the marker for manifest activation and target setup, add
-fault-injection tests around interruption, and finish the `remote_utils.run()`
-caller inventory.
+and manifest operation-marker slices are complete. The next delivery should use
+the marker for target setup, add phase-specific recovery where it can be proven
+safe, and finish the `remote_utils.run()` caller inventory.
 
 ## Non-goals
 

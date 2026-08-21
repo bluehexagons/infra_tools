@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.deployment import DeploymentOrchestrator
 from lib.nginx_config import generate_merged_nginx_config
+from lib.operation_state import OperationStateError, OperationStateStore
 from lib.project_manifest import Component, Manifest, parse_manifest
 from lib.systemd_service import generate_managed_service
 
@@ -435,6 +436,14 @@ class TestDeployManifest(unittest.TestCase):
             if os.path.exists(path):
                 shutil.rmtree(path)
 
+    def _operation_marker_path(self) -> str:
+        return os.path.join(
+            self.base_dir,
+            ".infra_tools_shared",
+            "example_com",
+            "manifest-operation.json",
+        )
+
     @patch('lib.deployment.run')
     def test_stop_requires_unit_to_be_inactive(self, mock_run):
         mock_run.side_effect = [
@@ -516,6 +525,7 @@ class TestDeployManifest(unittest.TestCase):
         # Metadata persisted, and the deployed tree is in place.
         mock_meta.assert_called_once()
         self.assertTrue(os.path.exists(os.path.join(dest, "infra.json")))
+        self.assertFalse(os.path.exists(self._operation_marker_path()))
 
     @patch.object(DeploymentOrchestrator, '_poll_health')
     @patch('lib.deployment.create_managed_service')
@@ -537,6 +547,45 @@ class TestDeployManifest(unittest.TestCase):
                 keep_source=True,
             )
         self.assertIn("build failed", str(ctx.exception))
+        self.assertFalse(os.path.exists(self._operation_marker_path()))
+
+    @patch.object(
+        DeploymentOrchestrator,
+        '_run_component_build',
+        side_effect=KeyboardInterrupt,
+    )
+    @patch('lib.deployment.run')
+    def test_interruption_leaves_marker_for_next_invocation(
+        self, mock_run, _mock_build
+    ):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        with self.assertRaises(KeyboardInterrupt):
+            self.orch.deploy_manifest(
+                manifest=self.manifest,
+                source_path=self.source,
+                domain="example.com",
+                path="/",
+                git_url="https://git.example.com/shop.git",
+                commit_hash="abc123",
+                keep_source=True,
+            )
+
+        record = OperationStateStore(self._operation_marker_path()).load()
+        self.assertIsNotNone(record)
+        self.assertEqual(record.phase, "building")
+        self.assertIn("staging_path", record.context)
+
+        with self.assertRaisesRegex(OperationStateError, "Unfinished manifest_deploy"):
+            self.orch.deploy_manifest(
+                manifest=self.manifest,
+                source_path=self.source,
+                domain="example.com",
+                path="/",
+                git_url="https://git.example.com/shop.git",
+                commit_hash="abc123",
+                keep_source=True,
+            )
 
     @patch.object(DeploymentOrchestrator, '_poll_health')
     @patch('lib.deployment.create_managed_service')
@@ -681,6 +730,7 @@ class TestDeployManifest(unittest.TestCase):
 
         self.assertTrue(os.path.exists(marker))
         mock_meta.assert_not_called()
+        self.assertFalse(os.path.exists(self._operation_marker_path()))
 
     @patch.object(
         DeploymentOrchestrator,
@@ -769,6 +819,10 @@ class TestDeployManifest(unittest.TestCase):
 
         self.assertTrue(os.path.exists(marker))
         mock_meta.assert_not_called()
+        record = OperationStateStore(self._operation_marker_path()).load()
+        self.assertIsNotNone(record)
+        self.assertEqual(record.status, "recovery_required")
+        self.assertTrue(record.context["errors"])
 
     @patch.object(DeploymentOrchestrator, '_poll_health')
     @patch('lib.deployment.create_managed_service')

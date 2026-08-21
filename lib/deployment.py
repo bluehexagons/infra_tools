@@ -19,6 +19,7 @@ from datetime import datetime
 from typing import Any, Iterable, Optional
 
 from lib.remote_utils import run
+from lib.operation_state import OperationRecord, OperationStateStore
 from lib.update_policy import npm_freshness_args
 from lib.deploy_utils import (
     create_safe_directory_name,
@@ -1010,7 +1011,20 @@ class DeploymentOrchestrator:
         stopped_units: list[str] = []
         unit_snapshots: dict[str, str] = {}
         desired_units: set[str] = set()
+        operation_store = OperationStateStore(
+            os.path.join(
+                self._get_persistent_root(os.path.basename(dest_path)),
+                "manifest-operation.json",
+            )
+        )
+        operation: Optional[OperationRecord] = None
         try:
+            operation = operation_store.begin(
+                "manifest_deploy",
+                dest_path,
+                "preparing",
+                context={"commit": commit_hash or "unknown"},
+            )
             manifest = self._resolve_manifest_ports(manifest, dest_path)
             self._validate_manifest_routes(manifest, domain)
             print(f"Deploying manifest ({len(manifest.components)} component(s)) to {dest_path}...")
@@ -1028,6 +1042,14 @@ class DeploymentOrchestrator:
             staging_path = tempfile.mkdtemp(
                 prefix=f".{os.path.basename(dest_path)}.build-",
                 dir=parent_dir or None,
+            )
+            operation = operation_store.transition(
+                operation.operation_id,
+                "building",
+                context={
+                    "commit": commit_hash or "unknown",
+                    "staging_path": staging_path,
+                },
             )
             if keep_source:
                 shutil.copytree(source_path, staging_path, dirs_exist_ok=True)
@@ -1058,6 +1080,23 @@ class DeploymentOrchestrator:
                 if component.is_service:
                     self._backup_component_sqlite(component, dest_path, domain)
 
+            if os.path.exists(dest_path):
+                backup_path = tempfile.mkdtemp(
+                    prefix=f".{os.path.basename(dest_path)}.previous-",
+                    dir=parent_dir or None,
+                )
+                os.rmdir(backup_path)
+            operation = operation_store.transition(
+                operation.operation_id,
+                "activating",
+                context={
+                    "commit": commit_hash or "unknown",
+                    "staging_path": staging_path,
+                    "backup_path": backup_path or "",
+                    "units": sorted(unit_snapshots),
+                },
+            )
+
             # Stop services only for the short release swap window.
             for unit_name in sorted(unit_snapshots):
                 try:
@@ -1070,11 +1109,7 @@ class DeploymentOrchestrator:
                     raise
 
             if os.path.exists(dest_path):
-                backup_path = tempfile.mkdtemp(
-                    prefix=f".{os.path.basename(dest_path)}.previous-",
-                    dir=parent_dir or None,
-                )
-                os.rmdir(backup_path)
+                assert backup_path is not None
                 os.rename(dest_path, backup_path)
             try:
                 os.rename(staging_path, dest_path)
@@ -1084,6 +1119,15 @@ class DeploymentOrchestrator:
                 raise
             staging_path = ""
             activated = True
+            operation = operation_store.transition(
+                operation.operation_id,
+                "verifying",
+                context={
+                    "commit": commit_hash or "unknown",
+                    "backup_path": backup_path or "",
+                    "units": sorted(desired_units),
+                },
+            )
 
             print(f"  ✓ Activated release at {dest_path}")
 
@@ -1124,6 +1168,8 @@ class DeploymentOrchestrator:
             save_deployment_metadata(dest_path, git_url, commit_hash)
             if not keep_source and os.path.exists(source_path):
                 shutil.rmtree(source_path)
+            operation_store.complete(operation.operation_id)
+            operation = None
             if backup_path:
                 shutil.rmtree(backup_path)
                 backup_path = None
@@ -1160,10 +1206,24 @@ class DeploymentOrchestrator:
                 except RuntimeError as exc:
                     rollback_errors.append(str(exc))
             if rollback_errors:
+                if operation is not None:
+                    operation_store.transition(
+                        operation.operation_id,
+                        "recovery",
+                        status="recovery_required",
+                        context={
+                            "backup_path": backup_path or "",
+                            "errors": rollback_errors,
+                            "units": sorted(set(unit_snapshots) | desired_units),
+                        },
+                    )
                 raise RuntimeError(
                     "Deployment failed and service recovery was incomplete: "
                     + "; ".join(rollback_errors)
                 ) from deployment_error
+            if operation is not None:
+                operation_store.complete(operation.operation_id)
+                operation = None
             raise
         finally:
             if staging_path and os.path.exists(staging_path):

@@ -18,6 +18,9 @@ know.
   a deployment lock. Existing services continue running during the build.
 - A manifest release is rolled back when service activation or a declared 2xx
   health check fails. Previous systemd units are restored with the release.
+- Manifest activation writes a versioned operation marker before staging or
+  service interruption. A clean deployment or verified rollback removes it;
+  interrupted and incomplete-recovery markers block another deployment.
 - Deployment-owned Nginx files are snapshotted and restored when `nginx -t`
   rejects a generated configuration.
 - Services that declare `sqlite_backup` receive a consistent online backup
@@ -47,6 +50,18 @@ Manifest SQLite backups live under the component instead:
 ```text
 /var/www/.infra_tools_shared/<app_name>/<component>/backups/
 ```
+
+Interrupted manifest state is recorded at:
+
+```text
+/var/www/.infra_tools_shared/<app_name>/manifest-operation.json
+```
+
+If a later deployment reports an unfinished operation, inspect the marker and
+the `staging_path`, `backup_path`, `units`, and `errors` recorded in its
+`context`. Verify which release is active and reconcile the named services
+before moving the marker aside for audit. Do not remove or replace a
+`recovery_required` marker merely to make deployment proceed.
 
 Restore the latest backup by stopping the service, copying the database back,
 and starting the service again:
