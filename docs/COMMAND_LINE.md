@@ -768,10 +768,16 @@ infra-tools proxmox notifications test-webhook <host>
 infra-tools proxmox [shell]
 
 infra-tools vm list <host> [--json]
+infra-tools vm show <local-name> [--json]
 infra-tools vm show <host> <id> [--json]
+infra-tools vm health <local-name> [--no-ssh] [--json]
 infra-tools vm health <host> <id> [--no-ssh] [--json]
+infra-tools vm snapshot list <local-name> [--json]
 infra-tools vm snapshot list <host> <id> [--json]
+infra-tools vm backup list <local-name> [--json]
 infra-tools vm backup list <host> <id> [--json]
+infra-tools vm destroy <local-name> [-y] [--force]
+infra-tools vm destroy <host> <id> [-y] [--force]
 ```
 
 `probe` caches bridge, gateway, DNS, and storage recommendations. `audit` is
@@ -790,11 +796,24 @@ infra-tools proxmox remove pve1
 infra-tools proxmox add pve1 10.0.0.10 --user root --key ~/.ssh/proxmox_ed25519
 ```
 
-The provider-neutral `infra-tools vm ...` commands provide stable read-only
-inventory, inspection, health, snapshot, and backup-list output. Their JSON
-envelope includes `schema_version`, `provider`, `host`, `operation`, and
-`resources`. Proxmox-specific lifecycle and host administration remain under
-`infra-tools proxmox ...` until the mutation boundary is migrated.
+The provider-neutral `infra-tools vm ...` commands provide stable inventory,
+inspection, health, snapshot, and backup-list output, plus confirmed QEMU VM
+destruction. Their JSON envelope includes `schema_version`, `provider`, `host`,
+`operation`, and `resources`. Commands for one VM accept either `<host> <id>`
+or the exact friendly `--name` (or saved IP address) of an infra-tools setup.
+Name resolution is fail-closed: the saved setup must identify a QEMU VM and a
+registered provider host, and both its expected Proxmox name and configured
+IPv4 address must match the observed guest. Tags are not accepted as VM names.
+
+`vm destroy` prints the observed name, VMID, provider host, and local name
+before asking the operator to type `yes`; `--yes` skips only that prompt and
+`--force` uses an immediate stop rather than graceful shutdown. A successful
+destroy is verified with a fresh provider inventory. The saved setup is
+retained so it remains available as a reconstruction/reprovisioning
+declaration; remove it separately with `infra-tools rm NAME` when it is no
+longer wanted. Other Proxmox-specific lifecycle and host-administration
+operations remain under `infra-tools proxmox ...` until their command paths
+are migrated.
 
 `rolling-update` uses saved setup commands and workspace credentials. It audits
 all targets before making changes, audits each node again after its update and

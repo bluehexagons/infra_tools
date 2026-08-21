@@ -3,10 +3,10 @@
 infra-tools can register Proxmox hosts, cache their capabilities, provision
 Debian VMs or unprivileged LXCs, and manage guest lifecycle operations.
 [Machine types](MACHINE_TYPES.md) explains the guest capability differences.
-The provider-specific host and mutation operations remain under
-`infra-tools proxmox ...`. Common read-only guest observations are also
-available through the provider-neutral `infra-tools vm ...` commands; see the
-command reference for the stable JSON shape.
+Provider-specific host operations and most mutations remain under
+`infra-tools proxmox ...`. Common guest observations and confirmed QEMU VM
+destruction are available through the provider-neutral `infra-tools vm ...`
+commands; see the command reference for the stable JSON shape.
 
 These workflows target Proxmox VE 9.2 and use its current `qm` and `pct`
 interfaces. Bridge discovery identifies Linux bridge interfaces by type, so
@@ -181,12 +181,19 @@ for the deferred lifecycle work. Idempotent reruns are supported when the VM's
 saved provisioning metadata matches the declaration; an existing unsaved VM
 is not treated as permission to adopt disks.
 
-Find the assigned VMID and inspect it:
+Inspect a provisioned VM by its saved local `--name`:
+
+```bash
+infra-tools vm show agent-dev-01
+infra-tools vm health agent-dev-01
+```
+
+The explicit provider host and VMID form remains available:
 
 ```bash
 infra-tools proxmox ls pve1
-infra-tools proxmox config pve1 100
-infra-tools proxmox health pve1 100
+infra-tools vm show pve1 100
+infra-tools vm health pve1 100
 ```
 
 Replace `100` with the VMID returned by `proxmox ls`.
@@ -361,12 +368,25 @@ infra-tools proxmox rollback pve1 101 pre-upgrade
 infra-tools proxmox delsnapshot pve1 101 pre-upgrade
 ```
 
-`destroy` is permanent and asks for confirmation:
+`vm destroy` is permanent and asks for confirmation. For an infra-tools
+provisioned VM, use its exact saved local name; infra-tools resolves the
+registered provider host and VMID, then verifies the observed QEMU name and
+configured IPv4 address before prompting:
 
 ```bash
-infra-tools proxmox destroy pve1 101
-infra-tools proxmox destroy pve1 101 -y
+infra-tools vm destroy agent-dev-01
+infra-tools vm destroy agent-dev-01 --yes
+infra-tools vm destroy pve1 101
 ```
+
+The provider host/VMID form is useful for a QEMU VM without saved local setup
+metadata. `--yes` skips only confirmation, while `--force` force-stops a
+running VM before destruction. The command verifies that the VM is absent
+afterward and retains the saved setup declaration for deliberate
+reprovisioning; remove that declaration separately with
+`infra-tools rm agent-dev-01` when appropriate. The legacy
+`infra-tools proxmox destroy` path remains available during the broader guest
+command migration.
 
 ## Placement, backups, and migration
 

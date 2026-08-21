@@ -10,6 +10,7 @@ import unittest
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
+from lib.config import SetupConfig
 from lib.proxmox_backup import BackupInfo
 from lib.proxmox_hosts import ProxmoxHost, add_proxmox_host
 from lib.proxmox_manage import ContainerInfo, HealthReport, SnapshotInfo
@@ -27,6 +28,15 @@ class VMCLITest(unittest.TestCase):
         subparsers = parser.add_subparsers(dest="command")
         add_vm_subparser(subparsers)
         self.parser = parser
+        self.saved_vm = SetupConfig(
+            host="10.0.0.50",
+            username="agent",
+            system_type="server_dev",
+            machine_type="vm",
+            system_hostname="agent-node",
+            friendly_name="agent-dev-01",
+            hosted_node="10.0.0.10",
+        )
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
@@ -67,11 +77,17 @@ class VMCLITest(unittest.TestCase):
         self.assertEqual(payload["resources"][0]["config"], {"cores": "2"})
 
     @patch("lib.vm_cli.health_check")
-    def test_unhealthy_health_check_returns_failure(self, mock_health) -> None:
+    @patch("lib.vm_cli.list_containers")
+    def test_unhealthy_health_check_returns_failure(
+        self, mock_list, mock_health
+    ) -> None:
+        mock_list.return_value = [
+            ContainerInfo(vmid=100, status="stopped", name="web", guest_type="vm")
+        ]
         mock_health.return_value = HealthReport(
             vmid=100,
             status="stopped",
-            guest_type="lxc",
+            guest_type="vm",
             notes=["Guest is not running (status=stopped)"],
         )
         result, output = self._run("health", "pve1", "100", "--json")
@@ -79,14 +95,22 @@ class VMCLITest(unittest.TestCase):
         self.assertFalse(json.loads(output)["resources"][0]["healthy"])
 
     @patch("lib.vm_cli.list_snapshots")
-    def test_snapshot_list(self, mock_snapshots) -> None:
+    @patch("lib.vm_cli.list_containers")
+    def test_snapshot_list(self, mock_list, mock_snapshots) -> None:
+        mock_list.return_value = [
+            ContainerInfo(vmid=100, status="running", name="web", guest_type="vm")
+        ]
         mock_snapshots.return_value = [SnapshotInfo("before", "initial")]
         result, output = self._run("snapshot", "list", "pve1", "100", "--json")
         self.assertEqual(result, 0)
         self.assertEqual(json.loads(output)["resources"][0]["name"], "before")
 
     @patch("lib.vm_cli.list_backups")
-    def test_backup_list(self, mock_backups) -> None:
+    @patch("lib.vm_cli.list_containers")
+    def test_backup_list(self, mock_list, mock_backups) -> None:
+        mock_list.return_value = [
+            ContainerInfo(vmid=100, status="running", name="web", guest_type="vm")
+        ]
         mock_backups.return_value = [
             BackupInfo("local:backup/vzdump-qemu-100.vma.zst", 100, 123)
         ]
@@ -96,6 +120,191 @@ class VMCLITest(unittest.TestCase):
             json.loads(output)["resources"][0]["storage"],
             "local",
         )
+
+    @patch("lib.vm_cli.get_container_config", return_value={"cores": "4"})
+    @patch("lib.vm_cli.get_container_status", return_value="running")
+    @patch("lib.vm_cli.get_container_ip", return_value="10.0.0.50")
+    @patch("lib.vm_cli.list_containers")
+    @patch("lib.vm_cli.load_all_setup_commands")
+    def test_show_resolves_saved_local_vm_name(
+        self,
+        mock_load,
+        mock_list,
+        _mock_ip,
+        _mock_status,
+        _mock_config,
+    ) -> None:
+        mock_load.return_value = [self.saved_vm]
+        mock_list.return_value = [
+            ContainerInfo(
+                vmid=101,
+                status="running",
+                name="agent-node",
+                guest_type="vm",
+            )
+        ]
+
+        result, output = self._run("show", "agent-dev-01", "--json")
+
+        self.assertEqual(result, 0)
+        self.assertEqual(json.loads(output)["resources"][0]["id"], "101")
+        mock_load.assert_called_once_with(self.workspace)
+
+    @patch("lib.vm_cli.destroy_container")
+    @patch("lib.vm_cli.get_container_ip", return_value="10.0.0.50")
+    @patch("lib.vm_cli.list_containers")
+    @patch("lib.vm_cli.load_all_setup_commands")
+    def test_destroy_resolves_saved_local_vm_name(
+        self,
+        mock_load,
+        mock_list,
+        _mock_ip,
+        mock_destroy,
+    ) -> None:
+        guest = ContainerInfo(
+            vmid=101,
+            status="running",
+            name="agent-node",
+            guest_type="vm",
+        )
+        mock_load.return_value = [self.saved_vm]
+        mock_list.side_effect = [[guest], []]
+
+        result, output = self._run("destroy", "agent-dev-01", "--yes", "--force")
+
+        self.assertEqual(result, 0)
+        self.assertIn("Destroyed QEMU VM 101 ('agent-node') on pve1", output)
+        mock_destroy.assert_called_once()
+        host, vmid = mock_destroy.call_args.args
+        self.assertEqual(host.name, "pve1")
+        self.assertEqual(vmid, 101)
+        self.assertEqual(mock_destroy.call_args.kwargs, {"force": True})
+
+    @patch("lib.vm_cli.destroy_container")
+    @patch("lib.vm_cli.get_container_ip", return_value="10.0.0.99")
+    @patch("lib.vm_cli.list_containers")
+    @patch("lib.vm_cli.load_all_setup_commands")
+    def test_destroy_refuses_saved_name_when_guest_address_does_not_match(
+        self,
+        mock_load,
+        mock_list,
+        _mock_ip,
+        mock_destroy,
+    ) -> None:
+        mock_load.return_value = [self.saved_vm]
+        mock_list.return_value = [
+            ContainerInfo(
+                vmid=101,
+                status="running",
+                name="agent-node",
+                guest_type="vm",
+            )
+        ]
+
+        result, output = self._run("destroy", "agent-dev-01", "--yes")
+
+        self.assertEqual(result, 1)
+        self.assertIn("Refusing saved setup 'agent-dev-01'", output)
+        self.assertIn("expected 10.0.0.50", output)
+        mock_destroy.assert_not_called()
+
+    @patch("lib.vm_cli.destroy_container")
+    @patch("lib.vm_cli.get_container_ip", return_value="10.0.0.50")
+    @patch("lib.vm_cli.list_containers")
+    @patch("lib.vm_cli.load_all_setup_commands")
+    def test_destroy_fails_when_vm_remains_after_provider_command(
+        self,
+        mock_load,
+        mock_list,
+        _mock_ip,
+        mock_destroy,
+    ) -> None:
+        guest = ContainerInfo(
+            vmid=101,
+            status="stopped",
+            name="agent-node",
+            guest_type="vm",
+        )
+        mock_load.return_value = [self.saved_vm]
+        mock_list.side_effect = [[guest], [guest]]
+
+        result, output = self._run("destroy", "agent-dev-01", "--yes")
+
+        self.assertEqual(result, 1)
+        self.assertIn("still exists on pve1 after destroy completed", output)
+        mock_destroy.assert_called_once()
+
+    @patch("lib.vm_cli.destroy_container")
+    @patch("lib.vm_cli.load_all_setup_commands")
+    def test_destroy_rejects_ambiguous_saved_vm_name(
+        self,
+        mock_load,
+        mock_destroy,
+    ) -> None:
+        second = SetupConfig(
+            host="10.0.0.51",
+            username="agent",
+            system_type="server_dev",
+            machine_type="vm",
+            friendly_name="agent-dev-01",
+            hosted_node="10.0.0.10",
+        )
+        mock_load.return_value = [self.saved_vm, second]
+
+        result, output = self._run("destroy", "agent-dev-01", "--yes")
+
+        self.assertEqual(result, 1)
+        self.assertIn("is ambiguous across: 10.0.0.50, 10.0.0.51", output)
+        mock_destroy.assert_not_called()
+
+    @patch("lib.vm_cli.destroy_container")
+    @patch("lib.vm_cli.list_containers")
+    def test_destroy_rejects_lxc_from_explicit_host_id(
+        self,
+        mock_list,
+        mock_destroy,
+    ) -> None:
+        mock_list.return_value = [
+            ContainerInfo(vmid=100, status="stopped", name="web", guest_type="lxc")
+        ]
+
+        result, output = self._run("destroy", "pve1", "100", "--yes")
+
+        self.assertEqual(result, 1)
+        self.assertIn("is lxc, not a QEMU VM", output)
+        mock_destroy.assert_not_called()
+
+    @patch("lib.vm_cli.destroy_container")
+    @patch("lib.vm_cli.get_container_ip", return_value="10.0.0.50")
+    @patch("lib.vm_cli.list_containers")
+    @patch("lib.vm_cli.load_all_setup_commands")
+    @patch("builtins.input", return_value="no")
+    def test_destroy_saved_name_prompts_and_aborts(
+        self,
+        _mock_input,
+        mock_load,
+        mock_list,
+        _mock_ip,
+        mock_destroy,
+    ) -> None:
+        mock_load.return_value = [self.saved_vm]
+        mock_list.return_value = [
+            ContainerInfo(
+                vmid=101,
+                status="running",
+                name="agent-node",
+                guest_type="vm",
+            )
+        ]
+
+        result, output = self._run("destroy", "agent-dev-01")
+
+        self.assertEqual(result, 1)
+        self.assertIn("Aborted", output)
+        prompt = _mock_input.call_args.args[0]
+        self.assertIn("VM 101 ('agent-node', saved as 'agent-dev-01')", prompt)
+        self.assertIn("pve1 (10.0.0.10)", prompt)
+        mock_destroy.assert_not_called()
 
     def test_invalid_id_is_rejected_by_argparse(self) -> None:
         with self.assertRaises(SystemExit):

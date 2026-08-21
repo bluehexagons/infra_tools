@@ -177,9 +177,9 @@ def load_setup_command(host: str) -> Optional[SetupConfig]:
     return _find_cache_by_name(host)
 
 
-def load_all_setup_commands() -> list[SetupConfig]:
+def load_all_setup_commands(workspace: Optional[str] = None) -> list[SetupConfig]:
     """Load every saved setup command from the workspace cache directory."""
-    cache_dir = get_setup_cache_dir()
+    cache_dir = get_setup_cache_dir(workspace)
     if not os.path.exists(cache_dir):
         return []
 
