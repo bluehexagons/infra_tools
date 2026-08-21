@@ -34,14 +34,15 @@ currently accepts these bundles:
 | `web` | Version-matched web export templates for regular, single-threaded, and GDExtension-enabled debug/release exports |
 | `publishing` | Butler for itch.io and, on x86_64, the SteamCMD command-line publisher |
 
-The web bundle downloads the official export-template TPZ matching the active
-engine release, verifies its publisher-provided GitHub SHA-256, and extracts
-only `version.txt` and the web template files. The verified cache is kept under
-`/opt/godot/export_templates`; files are copied into the configured account's
+The web bundle selects the official export-template TPZ matching the active
+engine release and uses the same bounded HTTP range approach as Godot 4.7's
+Export Template Manager. It reads the ZIP directory, downloads only
+`version.txt` and the web template members, and verifies each member through
+the ZIP CRC while extracting it. This avoids staging or transferring the full
+all-platform archive. The cache is kept under `/opt/godot/export_templates`;
+files are copied into the configured account's
 `~/.local/share/godot/export_templates/VERSION` directory so graphical users
-and agents running as that account see the same export targets. Godot publishes
-the templates as one combined archive, so the initial download is much larger
-than the extracted web-only files.
+and agents running as that account see the same export targets.
 
 The publishing bundle installs verified Butler GitHub releases system-wide as
 `butler`. It also installs Valve's pinned SteamCMD bootstrap in the configured

@@ -202,7 +202,7 @@ class TestGodotSetup(unittest.TestCase):
             self.assertTrue(os.stat(binary_path).st_mode & 0o111)
             self.assertFalse(os.path.exists(os.path.join(release_dir, "unrelated")))
 
-    def test_verified_web_template_archive_extracts_only_web_files(self):
+    def test_web_templates_are_range_downloaded_without_full_archive(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
             archive_path = os.path.join(temporary_dir, "templates.tpz")
             releases_dir = os.path.join(temporary_dir, "releases")
@@ -211,18 +211,48 @@ class TestGodotSetup(unittest.TestCase):
                 archive.writestr("templates/version.txt", "4.7.2.stable\n")
                 for file_name in godot_steps._GODOT_WEB_TEMPLATE_FILES:
                     archive.writestr(f"templates/{file_name}", file_name.encode())
-                archive.writestr("templates/linux_release.x86_64", b"not-installed")
-            with open(archive_path, "rb") as archive_file:
-                expected_sha256 = hashlib.sha256(archive_file.read()).hexdigest()
+                archive.writestr(
+                    "templates/linux_release.x86_64",
+                    b"not-installed" * (256 * 1024),
+                )
+            archive_size = os.path.getsize(archive_path)
+            requested_ranges: list[tuple[int, int]] = []
 
-            with patch.object(
-                godot_steps,
-                "GODOT_EXPORT_TEMPLATE_RELEASES_DIR",
-                releases_dir,
+            def copy_range(
+                _download_url: str,
+                start: int,
+                end: int,
+                destination_path: str,
+                *,
+                label: str,
+            ) -> None:
+                del label
+                requested_ranges.append((start, end))
+                with open(archive_path, "rb") as source:
+                    source.seek(start)
+                    payload = source.read(end - start + 1)
+                with open(destination_path, "wb") as destination:
+                    destination.write(payload)
+
+            with (
+                patch.object(
+                    godot_steps,
+                    "GODOT_EXPORT_TEMPLATE_RELEASES_DIR",
+                    releases_dir,
+                ),
+                patch.object(
+                    godot_steps,
+                    "_remote_https_content_length",
+                    return_value=archive_size,
+                ),
+                patch.object(
+                    godot_steps,
+                    "_download_https_range",
+                    side_effect=copy_range,
+                ),
             ):
-                godot_steps._extract_verified_web_templates(
-                    archive_path,
-                    expected_sha256=expected_sha256,
+                godot_steps._download_remote_web_templates(
+                    "https://example.test/templates.tpz",
                     expected_version="4.7.2.stable",
                     release_dir=release_dir,
                 )
@@ -231,6 +261,42 @@ class TestGodotSetup(unittest.TestCase):
             self.assertFalse(
                 os.path.exists(os.path.join(release_dir, "linux_release.x86_64"))
             )
+            self.assertTrue(requested_ranges)
+            self.assertTrue(
+                all(end - start + 1 < archive_size for start, end in requested_ranges)
+            )
+
+    @patch("common.godot_steps.run")
+    def test_template_content_length_uses_final_redirect_header(self, mock_run):
+        mock_run.return_value.stdout = (
+            "HTTP/2 302\r\ncontent-length: 0\r\n\r\n"
+            "HTTP/2 200\r\ncontent-length: 1281349702\r\n\r\n"
+        )
+
+        self.assertEqual(
+            godot_steps._remote_https_content_length(
+                "https://example.test/templates.tpz"
+            ),
+            1281349702,
+        )
+
+    def test_template_range_rejects_server_ignoring_range(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            destination_path = os.path.join(temporary_dir, "range.bin")
+
+            def write_oversized_response(*_args, **_kwargs):
+                with open(destination_path, "wb") as destination:
+                    destination.write(b"not one byte")
+
+            with patch("common.godot_steps.run", side_effect=write_oversized_response):
+                with self.assertRaisesRegex(RuntimeError, "did not honor"):
+                    godot_steps._download_https_range(
+                        "https://example.test/templates.tpz",
+                        0,
+                        0,
+                        destination_path,
+                        label="test range",
+                    )
 
     @patch("common.godot_steps.fetch_latest_verified_github_release_asset")
     def test_butler_selector_matches_linux_architecture(self, mock_fetch):

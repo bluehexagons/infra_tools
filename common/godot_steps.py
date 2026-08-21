@@ -7,6 +7,7 @@ import os
 import shlex
 import shutil
 import stat
+import struct
 import tarfile
 import tempfile
 import zipfile
@@ -65,6 +66,11 @@ _GODOT_WEB_TEMPLATE_FILES = (
     "web_dlink_nothreads_debug.zip",
     "web_dlink_nothreads_release.zip",
 )
+_REMOTE_ZIP_TAIL_SIZE = 128 * 1024
+_REMOTE_ZIP_MAX_SIZE = (1 << 32) - 1
+_ZIP_CENTRAL_DIRECTORY_SIGNATURE = b"PK\x01\x02"
+_ZIP_END_OF_CENTRAL_DIRECTORY_SIGNATURE = b"PK\x05\x06"
+_ZIP_LOCAL_FILE_SIGNATURE = b"PK\x03\x04"
 _STEAMCMD_BOOTSTRAP_FILES = {
     "steamcmd.sh": 0o755,
     "linux32/steamcmd": 0o755,
@@ -248,7 +254,7 @@ def _godot_template_version(tag_name: str) -> str:
 
 
 def fetch_godot_export_templates(tag_name: str) -> tuple[str, str, str]:
-    """Return the verified official template package matching an engine tag."""
+    """Return the official template package and digest matching an engine tag."""
     safe_tag = validate_release_tag(tag_name)
     return fetch_latest_verified_github_release_asset(
         GODOT_GITHUB_REPO,
@@ -266,7 +272,7 @@ def _godot_web_template_release_dir(
     template_version: str,
     archive_sha256: str,
 ) -> str:
-    """Return the immutable cache directory for verified web templates."""
+    """Return the immutable cache directory for official web templates."""
     validate_release_tag(template_version)
     if len(archive_sha256) != 64 or any(
         character not in "0123456789abcdef" for character in archive_sha256
@@ -284,15 +290,336 @@ def _web_template_release_complete(release_dir: str) -> bool:
     return all(os.path.isfile(os.path.join(release_dir, name)) for name in expected_files)
 
 
-def _extract_verified_web_templates(
-    archive_path: str,
+def _remote_https_content_length(download_url: str) -> int:
+    """Return the positive content length reported by an HTTPS download."""
+    result = run(
+        "curl -fsSIL --proto '=https' --proto-redir '=https' "
+        f"{shlex.quote(download_url)}",
+        check=True,
+        capture_output=True,
+        display_cmd=(
+            "curl -fsSIL --proto '=https' --proto-redir '=https' "
+            "<template URL>"
+        ),
+    )
+    content_lengths: list[int] = []
+    for line in (result.stdout or "").splitlines():
+        name, separator, value = line.partition(":")
+        if separator and name.strip().lower() == "content-length":
+            try:
+                content_length = int(value.strip())
+            except ValueError:
+                continue
+            if content_length > 0:
+                content_lengths.append(content_length)
+    if not content_lengths:
+        raise RuntimeError("Godot template server did not report an archive size")
+    archive_size = content_lengths[-1]
+    if archive_size > _REMOTE_ZIP_MAX_SIZE:
+        raise RuntimeError("Godot template archive requires unsupported ZIP64 ranges")
+    return archive_size
+
+
+def _download_https_range(
+    download_url: str,
+    start: int,
+    end: int,
+    destination_path: str,
     *,
-    expected_sha256: str,
+    label: str,
+) -> None:
+    """Download exactly one bounded byte range from an HTTPS resource."""
+    if start < 0 or end < start:
+        raise ValueError("Invalid Godot template download range")
+    expected_size = end - start + 1
+    run(
+        "curl -fLsS --proto '=https' --proto-redir '=https' "
+        f"--range {start}-{end} --max-filesize {expected_size} "
+        f"-o {shlex.quote(destination_path)} {shlex.quote(download_url)}",
+        check=True,
+        display_cmd=(
+            "curl -fLsS --proto '=https' --proto-redir '=https' "
+            f"--range {start}-{end} --max-filesize {expected_size} "
+            f"-o {destination_path} <template URL> ({label})"
+        ),
+    )
+    try:
+        downloaded_size = os.path.getsize(destination_path)
+    except OSError as exc:
+        raise RuntimeError(f"Godot template range was not written: {label}") from exc
+    if downloaded_size != expected_size:
+        raise RuntimeError(
+            "Godot template server did not honor the requested byte range "
+            f"for {label} (received {downloaded_size}, expected {expected_size})"
+        )
+
+
+def _find_zip_end_record(tail: bytes) -> int:
+    """Locate a valid ZIP end record whose comment reaches the archive end."""
+    search_end = len(tail)
+    while True:
+        position = tail.rfind(
+            _ZIP_END_OF_CENTRAL_DIRECTORY_SIGNATURE,
+            0,
+            search_end,
+        )
+        if position < 0:
+            raise RuntimeError("Godot template archive has no ZIP end record")
+        if position + 22 <= len(tail):
+            comment_length = struct.unpack_from("<H", tail, position + 20)[0]
+            if position + 22 + comment_length == len(tail):
+                return position
+        search_end = position
+
+
+def _parse_zip_central_directory(
+    central_directory: bytes,
+    *,
+    total_entries: int,
+    expected_members: set[str],
+) -> dict[str, tuple[int, int, bytes]]:
+    """Return local offsets, compressed sizes, and records for selected files."""
+    selected: dict[str, tuple[int, int, bytes]] = {}
+    position = 0
+    for _entry_index in range(total_entries):
+        if (
+            position + 46 > len(central_directory)
+            or central_directory[position : position + 4]
+            != _ZIP_CENTRAL_DIRECTORY_SIGNATURE
+        ):
+            raise RuntimeError("Godot template archive has an invalid ZIP directory")
+        flags = struct.unpack_from("<H", central_directory, position + 8)[0]
+        compression_method = struct.unpack_from(
+            "<H", central_directory, position + 10
+        )[0]
+        compressed_size = struct.unpack_from(
+            "<I", central_directory, position + 20
+        )[0]
+        uncompressed_size = struct.unpack_from(
+            "<I", central_directory, position + 24
+        )[0]
+        name_length, extra_length, comment_length = struct.unpack_from(
+            "<HHH", central_directory, position + 28
+        )
+        disk_number = struct.unpack_from("<H", central_directory, position + 34)[0]
+        local_offset = struct.unpack_from("<I", central_directory, position + 42)[0]
+        record_length = 46 + name_length + extra_length + comment_length
+        record_end = position + record_length
+        if record_end > len(central_directory):
+            raise RuntimeError("Godot template ZIP directory record is truncated")
+        encoding = "utf-8" if flags & 0x800 else "cp437"
+        try:
+            member_name = central_directory[
+                position + 46 : position + 46 + name_length
+            ].decode(encoding)
+        except UnicodeDecodeError as exc:
+            raise RuntimeError("Godot template ZIP member name is invalid") from exc
+        if member_name in expected_members:
+            if flags & 0x1:
+                raise RuntimeError(
+                    f"Godot template member is unexpectedly encrypted: {member_name}"
+                )
+            if compression_method not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+                raise RuntimeError(
+                    "Godot template member uses an unsupported ZIP compression "
+                    f"method: {member_name}"
+                )
+            if member_name in selected:
+                raise RuntimeError(
+                    f"Godot template archive contains a duplicate member: {member_name}"
+                )
+            if (
+                disk_number != 0
+                or compressed_size == 0xFFFFFFFF
+                or uncompressed_size == 0xFFFFFFFF
+                or local_offset == 0xFFFFFFFF
+            ):
+                raise RuntimeError("Godot template archive uses unsupported ZIP64 data")
+            selected[member_name] = (
+                local_offset,
+                compressed_size,
+                central_directory[position:record_end],
+            )
+        position = record_end
+
+    missing_members = sorted(expected_members - selected.keys())
+    if missing_members:
+        raise RuntimeError(
+            "Godot export-template archive is missing " + ", ".join(missing_members)
+        )
+    return selected
+
+
+def _read_remote_zip_directory(
+    download_url: str,
+    workspace_dir: str,
+    expected_members: set[str],
+) -> tuple[int, dict[str, tuple[int, int, bytes]]]:
+    """Read only a remote ZIP's tail and directory using bounded ranges."""
+    archive_size = _remote_https_content_length(download_url)
+    tail_start = max(0, archive_size - _REMOTE_ZIP_TAIL_SIZE)
+    tail_path = os.path.join(workspace_dir, "archive-tail.bin")
+    _download_https_range(
+        download_url,
+        tail_start,
+        archive_size - 1,
+        tail_path,
+        label="ZIP directory tail",
+    )
+    with open(tail_path, "rb") as tail_file:
+        tail = tail_file.read()
+    end_record = _find_zip_end_record(tail)
+    disk_number, directory_disk, entries_on_disk, total_entries = struct.unpack_from(
+        "<HHHH", tail, end_record + 4
+    )
+    directory_size, directory_offset = struct.unpack_from(
+        "<II", tail, end_record + 12
+    )
+    if (
+        disk_number != 0
+        or directory_disk != 0
+        or entries_on_disk != total_entries
+        or total_entries == 0xFFFF
+        or directory_size == 0xFFFFFFFF
+        or directory_offset == 0xFFFFFFFF
+    ):
+        raise RuntimeError(
+            "Godot template archive uses unsupported multi-disk or ZIP64 data"
+        )
+    if (
+        directory_size <= 0
+        or directory_offset + directory_size > archive_size
+    ):
+        raise RuntimeError("Godot template archive has an invalid ZIP directory range")
+
+    relative_directory_offset = directory_offset - tail_start
+    if (
+        relative_directory_offset >= 0
+        and relative_directory_offset + directory_size <= len(tail)
+    ):
+        central_directory = tail[
+            relative_directory_offset : relative_directory_offset + directory_size
+        ]
+    else:
+        directory_path = os.path.join(workspace_dir, "central-directory.bin")
+        _download_https_range(
+            download_url,
+            directory_offset,
+            directory_offset + directory_size - 1,
+            directory_path,
+            label="ZIP central directory",
+        )
+        with open(directory_path, "rb") as directory_file:
+            central_directory = directory_file.read()
+    return archive_size, _parse_zip_central_directory(
+        central_directory,
+        total_entries=total_entries,
+        expected_members=expected_members,
+    )
+
+
+def _extract_remote_zip_member(
+    download_url: str,
+    archive_size: int,
+    member_name: str,
+    member_record: tuple[int, int, bytes],
+    workspace_dir: str,
+    destination_path: str,
+) -> None:
+    """Range-download one ZIP member and extract it with CRC verification."""
+    local_offset, compressed_size, central_record = member_record
+    maximum_local_record_size = 30 + (2 * 0xFFFF) + compressed_size
+    range_end = min(
+        archive_size - 1,
+        local_offset + maximum_local_record_size - 1,
+    )
+    if local_offset >= archive_size or range_end < local_offset:
+        raise RuntimeError(f"Godot template member has an invalid offset: {member_name}")
+    mini_zip_path = os.path.join(workspace_dir, "member.zip")
+    _download_https_range(
+        download_url,
+        local_offset,
+        range_end,
+        mini_zip_path,
+        label=member_name,
+    )
+    with open(mini_zip_path, "r+b") as mini_zip:
+        local_header = mini_zip.read(30)
+        if (
+            len(local_header) != 30
+            or local_header[:4] != _ZIP_LOCAL_FILE_SIGNATURE
+        ):
+            raise RuntimeError(
+                f"Godot template member has an invalid ZIP header: {member_name}"
+            )
+        local_name_length, local_extra_length = struct.unpack_from(
+            "<HH", local_header, 26
+        )
+        local_record_size = (
+            30 + local_name_length + local_extra_length + compressed_size
+        )
+        if local_record_size > range_end - local_offset + 1:
+            raise RuntimeError(
+                f"Godot template member range is truncated: {member_name}"
+            )
+        mini_zip.truncate(local_record_size)
+        mini_zip.seek(0, os.SEEK_END)
+        rewritten_central_record = bytearray(central_record)
+        struct.pack_into("<I", rewritten_central_record, 42, 0)
+        mini_zip.write(rewritten_central_record)
+        mini_zip.write(
+            struct.pack(
+                "<IHHHHIIH",
+                0x06054B50,
+                0,
+                0,
+                1,
+                1,
+                len(rewritten_central_record),
+                local_record_size,
+                0,
+            )
+        )
+        mini_zip.flush()
+        os.fsync(mini_zip.fileno())
+
+    try:
+        with zipfile.ZipFile(mini_zip_path) as archive:
+            try:
+                member = archive.getinfo(member_name)
+            except KeyError as exc:
+                raise RuntimeError(
+                    f"Godot template range does not contain {member_name}"
+                ) from exc
+            member_mode = member.external_attr >> 16
+            member_type = stat.S_IFMT(member_mode)
+            if member.is_dir() or member_type not in (0, stat.S_IFREG):
+                raise RuntimeError(
+                    f"Godot export-template member is not a regular file: {member_name}"
+                )
+            with archive.open(member) as source, open(destination_path, "wb") as dest:
+                shutil.copyfileobj(source, dest)
+                dest.flush()
+                os.fsync(dest.fileno())
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise RuntimeError(
+            f"Godot template member failed ZIP CRC validation: {member_name}"
+        ) from exc
+    finally:
+        try:
+            os.unlink(mini_zip_path)
+        except FileNotFoundError:
+            pass
+    os.chmod(destination_path, 0o644)
+
+
+def _download_remote_web_templates(
+    download_url: str,
+    *,
     expected_version: str,
     release_dir: str,
 ) -> None:
-    """Verify a TPZ and atomically cache only its web export templates."""
-    _validate_archive_digest(archive_path, expected_sha256, "Godot export-template")
+    """Selectively download and atomically cache official web templates."""
     expected_members = {
         "templates/version.txt": "version.txt",
         **{
@@ -302,31 +629,27 @@ def _extract_verified_web_templates(
     }
 
     os.makedirs(GODOT_EXPORT_TEMPLATE_RELEASES_DIR, mode=0o755, exist_ok=True)
-    staging_dir = tempfile.mkdtemp(
-        prefix=".web-templates-",
+    workspace_dir = tempfile.mkdtemp(
+        prefix=".web-template-download-",
         dir=GODOT_EXPORT_TEMPLATE_RELEASES_DIR,
     )
+    staging_dir = os.path.join(workspace_dir, "templates")
+    os.mkdir(staging_dir, mode=0o755)
     try:
-        with zipfile.ZipFile(archive_path) as archive:
-            for member_name, destination_name in expected_members.items():
-                try:
-                    member = archive.getinfo(member_name)
-                except KeyError as exc:
-                    raise RuntimeError(
-                        f"Godot export-template archive is missing {member_name}"
-                    ) from exc
-                member_mode = member.external_attr >> 16
-                member_type = stat.S_IFMT(member_mode)
-                if member.is_dir() or member_type not in (0, stat.S_IFREG):
-                    raise RuntimeError(
-                        f"Godot export-template member is not a regular file: {member_name}"
-                    )
-                destination_path = os.path.join(staging_dir, destination_name)
-                with archive.open(member) as source, open(destination_path, "wb") as dest:
-                    shutil.copyfileobj(source, dest)
-                    dest.flush()
-                    os.fsync(dest.fileno())
-                os.chmod(destination_path, 0o644)
+        archive_size, member_records = _read_remote_zip_directory(
+            download_url,
+            workspace_dir,
+            set(expected_members),
+        )
+        for member_name, destination_name in expected_members.items():
+            _extract_remote_zip_member(
+                download_url,
+                archive_size,
+                member_name,
+                member_records[member_name],
+                workspace_dir,
+                os.path.join(staging_dir, destination_name),
+            )
 
         version_path = os.path.join(staging_dir, "version.txt")
         with open(version_path, encoding="utf-8") as version_file:
@@ -344,8 +667,7 @@ def _extract_verified_web_templates(
         os.replace(staging_dir, release_dir)
         staging_dir = ""
     finally:
-        if staging_dir:
-            shutil.rmtree(staging_dir, ignore_errors=True)
+        shutil.rmtree(workspace_dir, ignore_errors=True)
 
 
 def _install_web_templates_for_user(
@@ -401,7 +723,7 @@ def _install_web_templates_for_user(
 
 
 def install_or_update_godot_web_bundle(username: str) -> bool:
-    """Install verified web templates matching the active Godot release."""
+    """Install official web templates matching the active Godot release."""
     godot_state = read_godot_state()
     tag_name = godot_state.get("tag_name")
     if not isinstance(tag_name, str):
@@ -416,25 +738,11 @@ def install_or_update_godot_web_bundle(username: str) -> bool:
     )
     cache_changed = not _web_template_release_complete(release_dir)
     if cache_changed:
-        with tempfile.TemporaryDirectory(
-            prefix="infra-tools-godot-templates-"
-        ) as temporary_dir:
-            archive_path = os.path.join(temporary_dir, "export_templates.tpz")
-            run(
-                "curl -fL --proto '=https' --proto-redir '=https' "
-                f"-o {shlex.quote(archive_path)} {shlex.quote(download_url)}",
-                check=True,
-                display_cmd=(
-                    "curl -fL --proto '=https' --proto-redir '=https' "
-                    f"-o {archive_path} <template URL>"
-                ),
-            )
-            _extract_verified_web_templates(
-                archive_path,
-                expected_sha256=expected_sha256,
-                expected_version=template_version,
-                release_dir=release_dir,
-            )
+        _download_remote_web_templates(
+            download_url,
+            expected_version=template_version,
+            release_dir=release_dir,
+        )
     user_changed = _install_web_templates_for_user(
         username,
         template_version,
