@@ -125,6 +125,20 @@ class TestProxmoxSshRun(unittest.TestCase):
         self.assertIn("ControlPath=/tmp/control.sock", command)
         self.assertEqual(mock_run.call_args.kwargs["input"], "payload")
 
+    @patch("lib.proxmox_guest.ssh_batch_mode", return_value=False)
+    @patch("lib.proxmox_guest.get_ssh_control_path", return_value="/tmp/control.sock")
+    @patch("lib.proxmox_guest.subprocess.run")
+    def test_interactive_node_passphrase_prompt_has_no_wall_clock_timeout(
+        self, mock_run, _mock_control_path, _mock_batch_mode
+    ) -> None:
+        mock_run.return_value = subprocess.CompletedProcess(
+            ["ssh"], 0, stdout="", stderr=""
+        )
+
+        _ssh_run("192.0.2.10", "root", [], "hostname -s")
+
+        self.assertIsNone(mock_run.call_args.kwargs["timeout"])
+
 
 class TestProvisionedGuestHostKeyEnrollment(unittest.TestCase):
     @patch(
@@ -219,6 +233,30 @@ class TestGuestRouteRepair(unittest.TestCase):
             _mock_build.call_args.kwargs["remote_command"],
         )
         mock_run.assert_called_once()
+
+    @patch("lib.proxmox_guest.ssh_batch_mode", return_value=False)
+    @patch("lib.proxmox_guest.ensure_remote_sudo", return_value=True)
+    @patch("lib.proxmox_guest.build_ssh_command", return_value=["ssh"])
+    @patch("lib.proxmox_guest.subprocess.run")
+    def test_interactive_guest_passphrase_prompt_has_no_wall_clock_timeout(
+        self,
+        mock_run,
+        _mock_build,
+        _mock_sudo,
+        _mock_batch_mode,
+    ) -> None:
+        mock_run.return_value = subprocess.CompletedProcess(
+            ["ssh"], 0, stdout="already\n", stderr=""
+        )
+
+        ensure_guest_ipv4_route(
+            "192.168.0.41/24",
+            "192.168.0.1",
+            "agent",
+            "/keys/agent",
+        )
+
+        self.assertIsNone(mock_run.call_args.kwargs["timeout"])
 
     @patch("lib.proxmox_guest.ensure_remote_sudo", return_value=True)
     @patch("lib.proxmox_guest.build_ssh_command", return_value=["ssh"])

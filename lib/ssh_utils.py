@@ -26,6 +26,23 @@ def ssh_batch_mode() -> bool:
     return not sys.stdin.isatty()
 
 
+def ssh_process_timeout(
+    timeout: int | float | None,
+    *,
+    batch_mode: bool | None = None,
+) -> int | float | None:
+    """Return a subprocess timeout appropriate for an OpenSSH invocation.
+
+    A wall-clock subprocess timeout also counts time spent at OpenSSH's
+    controlling-terminal passphrase prompt. Interactive commands should wait
+    for the operator and remain interruptible with Ctrl-C. Non-interactive
+    commands retain their bounded timeout and already use SSH batch mode.
+    """
+
+    resolved_batch_mode = ssh_batch_mode() if batch_mode is None else batch_mode
+    return timeout if resolved_batch_mode else None
+
+
 def shell_join(argv: Sequence[str]) -> str:
     """Quote an argv sequence for remote shell execution."""
 
@@ -136,12 +153,13 @@ def ensure_remote_sudo(
     if username == "root":
         return True
 
+    batch_mode = ssh_batch_mode()
     probe = build_ssh_command(
         host,
         username,
         ssh_key,
         remote_command="sudo -n true",
-        batch_mode=ssh_batch_mode(),
+        batch_mode=batch_mode,
         connect_timeout=30,
         server_alive_interval=30,
         control_path=control_path,
@@ -152,7 +170,7 @@ def ensure_remote_sudo(
             check=False,
             capture_output=True,
             text=True,
-            timeout=timeout,
+            timeout=ssh_process_timeout(timeout, batch_mode=batch_mode),
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         print(f"Error: could not verify remote sudo for {username}@{host}: {exc}")

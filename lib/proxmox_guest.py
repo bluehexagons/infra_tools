@@ -20,6 +20,7 @@ from lib.ssh_utils import (
     get_ssh_control_path,
     get_workspace_known_hosts_path,
     ssh_batch_mode,
+    ssh_process_timeout,
 )
 from lib.types import StrList
 from lib.validators import validate_username
@@ -96,7 +97,7 @@ def _ssh_run(
         input=input_data,
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=ssh_process_timeout(120, batch_mode=ssh_batch_mode()),
     )
     if result.returncode != 0:
         stderr = result.stderr.strip()
@@ -941,12 +942,13 @@ def ensure_guest_ipv4_route(
             "echo repaired",
         ]
     )
+    batch_mode = ssh_batch_mode()
     command = build_ssh_command(
         target_ip,
         username,
         ssh_key,
         remote_command=remote_script,
-        batch_mode=ssh_batch_mode(),
+        batch_mode=batch_mode,
         connect_timeout=30,
         server_alive_interval=30,
         control_path=control_path,
@@ -955,7 +957,7 @@ def ensure_guest_ipv4_route(
         command,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=ssh_process_timeout(60, batch_mode=batch_mode),
     )
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip() or "unknown SSH error"

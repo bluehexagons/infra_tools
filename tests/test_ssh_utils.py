@@ -19,6 +19,7 @@ from lib.ssh_utils import (
     get_ssh_control_path,
     shell_join,
     ssh_batch_mode,
+    ssh_process_timeout,
 )
 
 
@@ -30,6 +31,16 @@ class TestSshUtils(unittest.TestCase):
     @patch("lib.ssh_utils.sys.stdin.isatty", return_value=False)
     def test_ssh_batch_mode_requires_agent_without_terminal(self, _mock_isatty):
         self.assertTrue(ssh_batch_mode())
+
+    @patch("lib.ssh_utils.sys.stdin.isatty", return_value=True)
+    def test_interactive_ssh_waits_for_passphrase_without_wall_clock_timeout(
+        self, _mock_isatty
+    ):
+        self.assertIsNone(ssh_process_timeout(60))
+
+    @patch("lib.ssh_utils.sys.stdin.isatty", return_value=False)
+    def test_noninteractive_ssh_keeps_bounded_timeout(self, _mock_isatty):
+        self.assertEqual(ssh_process_timeout(60), 60)
 
     def test_control_path_is_private_and_identity_specific(self):
         first = get_ssh_control_path("10.0.0.10", "root", "/tmp/key")
@@ -135,6 +146,18 @@ class TestSshUtils(unittest.TestCase):
             self.assertFalse(ensure_remote_sudo("192.0.2.40", "agent"))
 
         mock_run.assert_called_once()
+
+    @patch("lib.ssh_utils.ssh_batch_mode", return_value=False)
+    @patch("lib.ssh_utils.subprocess.run")
+    def test_remote_sudo_passphrase_prompt_is_not_timed_out(
+        self, mock_run, _mock_batch_mode
+    ):
+        mock_run.return_value = subprocess.CompletedProcess([], 0, "", "")
+
+        with patch("lib.ssh_utils.build_ssh_command", return_value=["ssh"]):
+            self.assertTrue(ensure_remote_sudo("192.0.2.40", "agent"))
+
+        self.assertIsNone(mock_run.call_args.kwargs["timeout"])
 
     @patch("lib.ssh_utils.ensure_workspace_dir")
     @patch("lib.ssh_utils.get_known_hosts_path", return_value="/tmp/workspace/known_hosts")
