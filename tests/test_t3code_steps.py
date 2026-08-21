@@ -95,13 +95,22 @@ class T3CodeWebTest(unittest.TestCase):
     def test_web_step_writes_service_and_pairing_wrappers(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             account = SimpleNamespace(pw_dir=temporary, pw_uid=os.getuid(), pw_gid=os.getgid())
-            config = self._config(agent_workspace=os.path.join(temporary, "repos"))
+            config = self._config(
+                agent_tools=["gh", "codex"],
+                agent_workspace=os.path.join(temporary, "repos"),
+            )
             service_path = os.path.join(temporary, "t3code.service")
             admin_pair_script = os.path.join(
                 os.path.dirname(os.path.dirname(__file__)),
                 "common",
                 "service_tools",
                 "t3code_admin_pair.py",
+            )
+            gh_shim_script = os.path.join(
+                os.path.dirname(os.path.dirname(__file__)),
+                "common",
+                "service_tools",
+                "t3code_gh_shim.py",
             )
 
             def run_command(command: str, **_kwargs):
@@ -132,6 +141,11 @@ class T3CodeWebTest(unittest.TestCase):
                     "common.t3code_steps.T3_ADMIN_PAIR_SCRIPT",
                     admin_pair_script,
                 ),
+                patch(
+                    "common.t3code_steps.T3_GH_SHIM_SCRIPT",
+                    gh_shim_script,
+                ),
+                patch("common.t3code_steps.shutil.which", return_value="/usr/bin/gh"),
                 patch("common.t3code_steps.remove_nginx_auth_failure_ban"),
             ):
                 install_t3code_web(config)
@@ -157,7 +171,11 @@ class T3CodeWebTest(unittest.TestCase):
             self.assertIn(f"cd {os.path.join(temporary, 'repos')}", content)
             self.assertNotIn("npx", content)
             self.assertIn(
-                'export PATH="$HOME/.local/share/infra-tools/t3code/node_modules/.bin:',
+                "$HOME/.local/share/infra-tools/t3code/node_modules/.bin:",
+                content,
+            )
+            self.assertIn(
+                "$HOME/.local/share/infra-tools/t3code/shims:",
                 content,
             )
             self.assertIn(
@@ -175,6 +193,19 @@ class T3CodeWebTest(unittest.TestCase):
                 'export GH_CONFIG_DIR="$HOME/.config/gh"',
                 cli_content,
             )
+            gh_shim = os.path.join(
+                temporary,
+                ".local",
+                "share",
+                "infra-tools",
+                "t3code",
+                "shims",
+                "gh",
+            )
+            with open(gh_shim, encoding="utf-8") as file_obj:
+                gh_shim_content = file_obj.read()
+            self.assertIn("t3code_gh_shim.py", gh_shim_content)
+            self.assertIn("--gh-binary /usr/bin/gh", gh_shim_content)
             with open(pair_wrapper, encoding="utf-8") as file_obj:
                 pairing_content = file_obj.read()
             self.assertIn("t3code_admin_pair.py", pairing_content)

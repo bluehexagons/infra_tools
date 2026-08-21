@@ -40,6 +40,7 @@ DEVICE_PAIRING_SCRIPT = (
 T3_ADMIN_PAIR_SCRIPT = (
     "/opt/infra_tools/common/service_tools/t3code_admin_pair.py"
 )
+T3_GH_SHIM_SCRIPT = "/opt/infra_tools/common/service_tools/t3code_gh_shim.py"
 DEVICE_PAIRING_NGINX_SITE = "/etc/nginx/sites-available/infra-tools-device-pairing"
 DEVICE_PAIRING_NGINX_LINK = "/etc/nginx/sites-enabled/infra-tools-device-pairing"
 DEVICE_PAIRING_AUTH_FAILURE_LOG = (
@@ -50,7 +51,8 @@ _T3_RUNTIME_RELATIVE_PATH = (".local", "share", "infra-tools", "t3code")
 # Keep the NVM path injected into the inherited PATH ahead of system Node while
 # making system package locations deterministic for direct T3 child processes.
 _T3_PATH_EXPORT = (
-    'export PATH="$HOME/.local/share/infra-tools/t3code/node_modules/.bin:'
+    'export PATH="$HOME/.local/share/infra-tools/t3code/shims:'
+    '$HOME/.local/share/infra-tools/t3code/node_modules/.bin:'
     '$HOME/.opencode/bin:$HOME/.local/bin:$PATH:'
     '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"'
 )
@@ -382,6 +384,17 @@ def _write_passthrough_wrapper(path: str, home: str, t3_binary: str) -> bool:
         f"{_T3_PATH_EXPORT}\n"
         f"{_T3_GH_CONFIG_EXPORT}\n"
         f'exec {shlex.quote(t3_binary)} "$@"\n'
+    )
+    return _write_executable_if_changed(path, content)
+
+
+def _write_gh_shim(path: str, gh_binary: str) -> bool:
+    """Write a T3-only gh launcher that leaves all non-discovery calls intact."""
+
+    content = (
+        "#!/bin/sh\n"
+        f"exec /usr/bin/python3 {shlex.quote(T3_GH_SHIM_SCRIPT)} "
+        f'--gh-binary {shlex.quote(gh_binary)} "$@"\n'
     )
     return _write_executable_if_changed(path, content)
 
@@ -787,6 +800,26 @@ def install_t3code_web(config: SetupConfig) -> None:
         account.pw_gid,
         refresh=config.refresh_packages,
     )
+    gh_shim_changed = False
+    if config.install_gh:
+        gh_binary = shutil.which("gh")
+        if not gh_binary:
+            raise RuntimeError("GitHub CLI is selected but its executable is missing")
+        validate_filesystem_path(gh_binary, must_exist=True)
+        if os.path.islink(T3_GH_SHIM_SCRIPT) or not os.path.isfile(
+            T3_GH_SHIM_SCRIPT
+        ):
+            raise RuntimeError(
+                "T3 GitHub compatibility helper is missing: "
+                f"{T3_GH_SHIM_SCRIPT}"
+            )
+        shim_dir = os.path.join(_t3_runtime_path(home), "shims")
+        os.makedirs(shim_dir, mode=0o700, exist_ok=True)
+        os.chmod(shim_dir, 0o700)
+        os.chown(shim_dir, account.pw_uid, account.pw_gid)
+        gh_shim = os.path.join(shim_dir, "gh")
+        gh_shim_changed = _write_gh_shim(gh_shim, gh_binary)
+        os.chown(gh_shim, account.pw_uid, account.pw_gid)
     wrapper = os.path.join(home, ".local", "bin", "infra-tools-t3code-web")
     pair_wrapper = os.path.join(home, ".local", "bin", "t3code-pair")
     t3_cli_wrapper = os.path.join(
@@ -870,6 +903,7 @@ WantedBy=multi-user.target
         or pair_wrapper_changed
         or t3_cli_wrapper_changed
         or runtime_changed
+        or gh_shim_changed
     ):
         run(f"systemctl restart {T3_SERVICE_NAME}.service")
     else:

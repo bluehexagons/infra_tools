@@ -76,7 +76,12 @@ even while T3's direct Source Control probe reports it as unavailable. The
 wrapper also sets `GH_CONFIG_DIR` to the managed `~/.config/gh` directory.
 During setup, selected agent configuration and credentials are copied before
 T3 starts so its initial Source Control probe sees the same GitHub identity as
-the target user's terminal.
+the target user's terminal. T3's current strict discovery schema rejects the
+null `error` field emitted for a healthy account by GitHub CLI 2.98. The managed
+service therefore puts a T3-only `gh` compatibility shim first on its `PATH`.
+The shim removes only that null field from T3's exact auth-discovery command;
+all other GitHub CLI arguments execute the installed binary unchanged, and
+normal user shells do not use the shim.
 
 During setup, infra-tools installs `build-essential` and `python3`, then
 installs T3 and its native dependencies as the target user under
