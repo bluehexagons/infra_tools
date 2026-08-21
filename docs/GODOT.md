@@ -12,12 +12,57 @@ infra-tools setup agent_workstation 192.168.1.40 agent --godot
 # Headless editor/runtime on an SSH-only agent VM
 infra-tools setup agent_vm 192.168.1.41 agent --godot
 ssh agent@192.168.1.41 'godot --headless --version'
+
+# Web export and itch.io/Steam publishing tools
+infra-tools setup agent_workstation 192.168.1.42 agent \
+  --godot-bundle web \
+  --godot-bundle publishing
 ```
 
 The standard Linux editor binary supports both windowed use and the
 `--headless` display/audio drivers. The setup also installs a desktop entry, so
 a graphical session can launch the editor without a separate build. .NET/C#
-builds and export templates are not installed by this flag.
+builds and export templates are not installed by `--godot` alone.
+
+## Workflow bundles
+
+`--godot-bundle BUNDLE` is repeatable, automatically enables `--godot`, and
+currently accepts these bundles:
+
+| Bundle | Installed tooling |
+| --- | --- |
+| `web` | Version-matched web export templates for regular, single-threaded, and GDExtension-enabled debug/release exports |
+| `publishing` | Butler for itch.io and, on x86_64, the SteamCMD command-line publisher |
+
+The web bundle downloads the official export-template TPZ matching the active
+engine release, verifies its publisher-provided GitHub SHA-256, and extracts
+only `version.txt` and the web template files. The verified cache is kept under
+`/opt/godot/export_templates`; files are copied into the configured account's
+`~/.local/share/godot/export_templates/VERSION` directory so graphical users
+and agents running as that account see the same export targets. Godot publishes
+the templates as one combined archive, so the initial download is much larger
+than the extracted web-only files.
+
+The publishing bundle installs verified Butler GitHub releases system-wide as
+`butler`. It also installs Valve's pinned SteamCMD bootstrap in the configured
+account's `~/.local/share/infra_tools/steamcmd` directory and exposes it as
+`~/.local/bin/steamcmd`. SteamCMD performs its supported self-update when setup
+or weekly maintenance runs. Valve does not provide a Linux ARM64 SteamCMD
+client, so ARM64 targets receive Butler and report that SteamCMD was skipped.
+Because SteamCMD updates its own user-owned installation, the publishing
+bundle requires a non-root setup account.
+
+infra-tools does not collect, stage, or persist publishing credentials. Sign in
+as the configured account only when needed:
+
+```bash
+butler login
+steamcmd +login YOUR_STEAM_ACCOUNT
+```
+
+Combine `web` with an explicit browser or the existing Playwright integration
+when exported games need browser smoke tests; the bundle itself does not alter
+browser or agent configuration.
 
 ## Release and integrity policy
 
@@ -40,8 +85,11 @@ headless version command before activation.
 
 `--godot` installs `auto-update-godot.timer`. It checks the official stable
 release channel each Sunday at 06:30, with the standard randomized delay, and
-activates a newer verified release. This check deliberately uses the newest
-stable Godot release rather than the general dependency freshness delay.
+activates a newer verified release. The same run installs matching web
+templates for every registered bundle user, updates Butler from its verified
+stable release channel, and invokes SteamCMD's self-update for publishing
+users. This check deliberately uses newest stable releases rather than the
+general dependency freshness delay.
 
 ```bash
 sudo systemctl status auto-update-godot.timer
@@ -49,6 +97,12 @@ sudo systemctl start auto-update-godot.service
 sudo journalctl -u auto-update-godot.service -n 100 --no-pager
 ```
 
-Update failures leave the previously activated version in place and can use
-the normal `--notify` targets. Rerunning the saved setup reconciles the same
-installation and timer configuration.
+Engine activation failures leave the previously activated version in place.
+Bundle failures preserve already installed bundle files, fail the maintenance
+job, and can use the normal `--notify` targets; if the engine already advanced,
+the next successful run installs its matching web templates. Rerunning the
+saved setup reconciles the same installation and timer configuration.
+
+The roadmap reserves later bundle implementations for `dotnet`, `android`,
+`gdextension`, and `assets`; these names are not accepted by the CLI until
+their installation and update contracts are implemented.

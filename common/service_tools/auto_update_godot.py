@@ -9,7 +9,11 @@ from logging import ERROR
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../.."))
 
-from common.godot_steps import GODOT_BINARY_LINK, install_or_update_godot_release
+from common.godot_steps import (
+    GODOT_BINARY_LINK,
+    install_or_update_godot_release,
+    update_registered_godot_bundles,
+)
 from lib.logging_utils import get_service_logger, log_event
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
 
@@ -25,7 +29,8 @@ def main() -> int:
         return 0
 
     try:
-        tag_name, changed, _archive_sha256 = install_or_update_godot_release()
+        tag_name, engine_changed, _archive_sha256 = install_or_update_godot_release()
+        bundle_changed = update_registered_godot_bundles()
     except Exception as exc:
         details = str(exc)
         log_event(logger, "Godot update failed", level=ERROR, stderr=details)
@@ -40,17 +45,17 @@ def main() -> int:
         )
         return 1
 
-    if not changed:
-        log_event(logger, "Godot already up to date", target_version=tag_name)
+    if not engine_changed and not bundle_changed:
+        log_event(logger, "Godot tooling already up to date", target_version=tag_name)
         return 0
 
-    log_event(logger, "Godot updated successfully", target_version=tag_name)
+    log_event(logger, "Godot tooling updated successfully", target_version=tag_name)
     send_notification_safe(
         notification_configs,
         subject="Success: Godot updated",
         job="auto_update_godot",
         status="success",
-        message=f"Godot updated to {tag_name}",
+        message=f"Godot tooling updated to {tag_name}",
         logger=logger,
     )
     return 0

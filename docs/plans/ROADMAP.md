@@ -229,6 +229,15 @@ Once the lifecycle work is established:
 Broad operating-system support is not currently worth the extra branching in
 security, package, service, and networking behavior.
 
+The Godot workflow-bundle surface is intentionally incremental. The delivered
+`web` and `publishing` bundles establish repeatable selection, user-scoped
+tooling, verified release artifacts where publishers provide digests, and
+weekly reconciliation. Later P3 slices may add `dotnet`, `android`,
+`gdextension`, and `assets` once each bundle has a
+version-compatibility contract, architecture policy, bounded installation,
+headless verification, and an update path. Until then those names remain
+documented roadmap values rather than accepted CLI choices.
+
 ## Small improvements to land continuously
 
 Small, well-contained fixes should not wait for a larger phase. Good follow-ups

@@ -1111,6 +1111,24 @@ def validate_browser_automation_settings(config: Any) -> None:
         )
 
 
+def validate_godot_bundle_settings(config: Any) -> None:
+    """Validate repeatable Godot workflow bundle selections."""
+    from lib.config import GODOT_BUNDLES
+
+    bundles = getattr(config, "godot_bundles", None)
+    if bundles is None:
+        return
+    if not isinstance(bundles, list):
+        raise ValueError("--godot-bundle must be a repeatable option")
+    for bundle in bundles:
+        if not isinstance(bundle, str) or bundle not in GODOT_BUNDLES:
+            raise ValueError(
+                "--godot-bundle must be one of: " + ", ".join(GODOT_BUNDLES)
+            )
+    if "publishing" in bundles and getattr(config, "username", None) == "root":
+        raise ValueError("--godot-bundle publishing requires a non-root setup user")
+
+
 def validate_network_name(value: str, name: str = "network name") -> str:
     """Validate a generic network inventory name or role label."""
 

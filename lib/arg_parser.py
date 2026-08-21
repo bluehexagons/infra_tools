@@ -12,6 +12,7 @@ from lib.config import (
     DESKTOP_INTERFACES,
     EDITORS,
     GIT_ACCESS_POLICIES,
+    GODOT_BUNDLES,
     MACHINE_TYPES,
     WEB_INTERFACES,
 )
@@ -482,6 +483,17 @@ def add_setup_arguments(
         action=argparse.BooleanOptionalAction if not for_remote else "store_true",
         default=None if not for_remote else False,
         help="Install the latest stable Godot Engine for graphical and headless use",
+    )
+    parser.add_argument(
+        "--godot-bundle",
+        dest="godot_bundles",
+        action="append",
+        choices=GODOT_BUNDLES,
+        metavar="BUNDLE",
+        help=(
+            "Install a Godot workflow bundle; repeat as needed "
+            "(currently: web, publishing; also enables --godot)"
+        ),
     )
 
     # Agent VM tooling. Values add to narrow profile defaults; --no-agent-tool

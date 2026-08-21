@@ -260,10 +260,16 @@ the local desktop installer path.
 | `--go` | Install Go |
 | `--python` | Install Python aliases + uv |
 | `--godot` | Install the newest stable verified Godot Engine release for graphical or headless use |
+| `--godot-bundle BUNDLE` | Add `web` or `publishing`; repeatable and automatically enables `--godot` |
 
 Selecting a managed runtime also installs its update timer. Godot is fetched
 from the official release channel rather than Debian's package version and is
 placed on the system `PATH` as `godot` and `godot4`, including for agent users.
+The `web` bundle adds verified, version-matched web export templates for the
+configured account. The `publishing` bundle adds Butler and, on x86_64,
+user-owned SteamCMD; publishing credentials remain user-managed and are never
+copied by setup. Planned `dotnet`, `android`, `gdextension`, and `assets`
+bundles remain roadmap items and are not accepted yet.
 See [`GODOT.md`](./GODOT.md) for the artifact and headless-use contract, and
 [`MAINTENANCE.md`](./MAINTENANCE.md) for schedules and update policy.
 
@@ -399,6 +405,8 @@ defaults. Other profiles retain no implicit agents. Add unrelated packages with
 `--apt-install`, and add runtimes with their individual flags. `--godot` works
 with every profile, including the headless `agent_vm`; its system-wide launchers
 make the engine available in SSH, desktop, T3 Code, and coding-agent shells.
+Repeat `--godot-bundle` to give that same target account web-export and
+publishing commands without changing its agent configuration.
 
 Any setup with agent features installs a managed `~/.local/bin/infra-tools`
 launcher for the target user. On a remote setup the launcher uses the source

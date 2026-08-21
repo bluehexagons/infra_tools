@@ -18,7 +18,7 @@ same job at the same instant.
 | `auto-update-ruby.timer` | Sunday at 04:00 | Setups with Ruby and `gem` |
 | `auto-update-uv.timer` | Sunday at 05:00 | Setups with Python and uv |
 | `auto-update-gogs.timer` | Sunday at 05:30 | Setups with Gogs |
-| `auto-update-godot.timer` | Sunday at 06:30 | Setups with Godot |
+| `auto-update-godot.timer` | Sunday at 06:30 | Setups with Godot; also reconciles selected Godot bundles |
 | `cleanup-maintenance.timer` | Sunday at 03:30 | Security-enabled setups |
 | `user-cache-maintenance.timer` | Monday at 03:00 | Security-enabled setups with a non-root setup user |
 
@@ -61,7 +61,10 @@ Node.js, Ruby, and uv use a conservative default policy:
   previous release when post-update commands or restart fail.
 - Godot follows the newest stable upstream release without the general
   seven-day freshness delay. The publisher-provided SHA-256 is verified before
-  a versioned release is activated through the system-wide launchers.
+  a versioned release is activated through the system-wide launchers. Its web
+  bundle installs matching verified export templates for registered users;
+  the publishing bundle updates verified Butler releases and invokes the
+  user-owned SteamCMD self-updater.
 
 GitHub CLI is installed from its APT repository and therefore follows the APT
 job. Explicitly selected Codex CLI, Claude Code, and OpenCode installations
@@ -95,9 +98,10 @@ artifacts at least seven days old. Change the policy with
 The deployment flag `--deploy-latest DOMAIN_OR_PATH GIT_URL` explicitly bypasses
 the deployment freshness policy for that repository.
 
-Privileged Go, Godot, Gogs, and managed binary downloads use private, randomly
-named temporary directories. They never download through a predictable public
-`/tmp` filename that another local account could replace with a symbolic link.
+Privileged Go, Godot, Butler, Gogs, and managed binary downloads use private,
+randomly named temporary directories. They never download through a
+predictable public `/tmp` filename that another local account could replace
+with a symbolic link.
 Release tags are restricted to safe path components, release assets require
 credential-free HTTPS URLs without protocol-downgrade redirects, and Go
 archives require the official feed's full SHA-256 digest before extraction.

@@ -22,6 +22,7 @@ PLUGIN = PluginDefinition(
         "install_node",
         "install_python",
         "install_godot",
+        "install_godot_bundles",
         "install_github_cli",
         "install_codex",
         "install_claude",
@@ -159,9 +160,18 @@ def extend_runtime_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]])
         steps.append(("Installing Python tooling (aliases + uv)", install_python))
         steps.append(("Configuring uv auto-update", configure_auto_update_uv))
     if config.install_godot:
-        from common.godot_steps import configure_auto_update_godot, install_godot
+        from common.godot_steps import (
+            configure_auto_update_godot,
+            install_godot,
+            install_godot_bundles,
+        )
 
         steps.append(("Installing Godot Engine (latest stable)", install_godot))
+        if config.godot_bundles:
+            bundle_names = ", ".join(config.godot_bundles)
+            steps.append(
+                (f"Installing Godot bundles ({bundle_names})", install_godot_bundles)
+            )
         steps.append(("Configuring Godot auto-update", configure_auto_update_godot))
 
 
@@ -287,7 +297,11 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
     )
     from common.t3code_steps import install_t3code_web
     from common.browser_automation_steps import install_browser_automation
-    from common.godot_steps import configure_auto_update_godot, install_godot
+    from common.godot_steps import (
+        configure_auto_update_godot,
+        install_godot,
+        install_godot_bundles,
+    )
 
     return {
         "install_ruby": install_ruby,
@@ -295,6 +309,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "install_node": install_node,
         "install_python": install_python,
         "install_godot": install_godot,
+        "install_godot_bundles": install_godot_bundles,
         "install_github_cli": install_github_cli,
         "install_codex": install_codex,
         "install_claude": install_claude,

@@ -35,6 +35,7 @@ DEVICE_PAIRING_PROVIDERS = ("t3code",)
 BROWSER_AUTOMATION_PROVIDERS = ("playwright",)
 EDITORS = ("geany", "vscode")
 GIT_ACCESS_POLICIES = ("none", "read", "read-write")
+GODOT_BUNDLES = ("web", "publishing")
 DEFAULT_AGENT_WEB_PORTS = (80, 443, 8080, 8081)
 LAN_ACCESS_SOURCES = (
     "10.0.0.0/8",
@@ -251,6 +252,7 @@ class SetupConfig:
     install_node: bool = False
     install_python: bool = False
     install_godot: bool = False
+    godot_bundles: Optional[StrList] = None
     install_gh: bool = False
     install_codex: bool = False
     install_claude: bool = False
@@ -354,6 +356,14 @@ class SetupConfig:
         # the requested full redeploy.
         if self.deployment_mode == "full":
             self.full_deploy = True
+
+        from lib.validation import validate_godot_bundle_settings
+
+        validate_godot_bundle_settings(self)
+        selected_godot_bundles = list(dict.fromkeys(self.godot_bundles or []))
+        self.godot_bundles = selected_godot_bundles or None
+        if self.godot_bundles:
+            self.install_godot = True
 
         if self.git_access not in GIT_ACCESS_POLICIES:
             raise ValueError(
@@ -667,6 +677,8 @@ class SetupConfig:
 
         if self.install_godot:
             args.append("--godot")
+        for bundle in self.godot_bundles or []:
+            args.append(f"--godot-bundle {shlex.quote(bundle)}")
 
         for tool in self.selected_agent_tools():
             args.append(f"--agent-tool {shlex.quote(tool)}")
@@ -1034,6 +1046,8 @@ class SetupConfig:
 
         if self.install_godot:
             cmd_parts.append("--godot")
+        for bundle in self.godot_bundles or []:
+            cmd_parts.append(f"--godot-bundle {shlex.quote(bundle)}")
 
         selected_agent_tools = self.selected_agent_tools()
         default_agent_tools = list(system_type_defaults.default_agent_tools)
@@ -1695,6 +1709,11 @@ class SetupConfig:
             install_node=getattr(args, 'install_node', False),
             install_python=getattr(args, 'install_python', False),
             install_godot=getattr(args, 'install_godot', False),
+            godot_bundles=(
+                getattr(args, 'godot_bundles', None)
+                if isinstance(getattr(args, 'godot_bundles', None), list)
+                else None
+            ),
             agent_tools=agent_tools,
             agent_tools_removed=removed_agent_tools or None,
             desktop_interfaces=desktop_interfaces,

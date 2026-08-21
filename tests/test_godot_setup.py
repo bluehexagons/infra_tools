@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import os
+import tarfile
 import tempfile
 import unittest
 import zipfile
@@ -38,6 +40,62 @@ class TestGodotSetup(unittest.TestCase):
         )
         self.assertTrue(restored.install_godot)
 
+    def test_repeatable_bundle_selection_enables_godot_and_round_trips(self):
+        parser = create_setup_argument_parser("test")
+        args = parser.parse_args(
+            [
+                "example.com",
+                "--godot-bundle",
+                "web",
+                "--godot-bundle",
+                "publishing",
+            ]
+        )
+        self.assertEqual(args.godot_bundles, ["web", "publishing"])
+        with (
+            patch("lib.system_utils.get_current_username", return_value="agent"),
+            patch("lib.system_utils.get_local_timezone", return_value="UTC"),
+        ):
+            parsed_config = SetupConfig.from_args(args, "agent_vm")
+        self.assertTrue(parsed_config.install_godot)
+        self.assertEqual(parsed_config.godot_bundles, ["web", "publishing"])
+
+        config = SetupConfig(
+            host="example.com",
+            username="agent",
+            system_type="agent_vm",
+            godot_bundles=["web", "publishing", "web"],
+        )
+        self.assertTrue(config.install_godot)
+        self.assertEqual(config.godot_bundles, ["web", "publishing"])
+        self.assertIn("--godot-bundle web", config.to_remote_args())
+        self.assertIn("--godot-bundle publishing", config.to_setup_command())
+        restored = SetupConfig.from_dict(
+            "example.com",
+            "agent_vm",
+            config.to_dict(),
+        )
+        self.assertEqual(restored.godot_bundles, ["web", "publishing"])
+        self.assertTrue(restored.install_godot)
+
+    def test_unsupported_bundle_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "--godot-bundle must be one of"):
+            SetupConfig(
+                host="example.com",
+                username="agent",
+                system_type="agent_vm",
+                godot_bundles=["android"],
+            )
+
+    def test_publishing_bundle_rejects_root_account(self):
+        with self.assertRaisesRegex(ValueError, "requires a non-root setup user"):
+            SetupConfig(
+                host="example.com",
+                username="root",
+                system_type="agent_vm",
+                godot_bundles=["publishing"],
+            )
+
     def test_agent_profile_can_add_graphical_and_headless_godot_steps(self):
         for system_type in ("agent_vm", "agent_workstation"):
             with self.subTest(system_type=system_type):
@@ -52,6 +110,22 @@ class TestGodotSetup(unittest.TestCase):
                 ]
                 self.assertIn("Installing Godot Engine (latest stable)", step_names)
                 self.assertIn("Configuring Godot auto-update", step_names)
+
+    def test_bundle_step_runs_after_engine_and_before_auto_update(self):
+        config = SetupConfig(
+            host="host",
+            username="agent",
+            system_type="agent_vm",
+            godot_bundles=["web", "publishing"],
+        )
+        step_names = [name for name, _step in get_steps_for_system_type(config)]
+        engine_index = step_names.index("Installing Godot Engine (latest stable)")
+        bundle_index = step_names.index(
+            "Installing Godot bundles (web, publishing)"
+        )
+        updater_index = step_names.index("Configuring Godot auto-update")
+        self.assertLess(engine_index, bundle_index)
+        self.assertLess(bundle_index, updater_index)
 
     @patch("common.godot_steps.fetch_latest_verified_github_release_asset")
     def test_release_selector_matches_official_linux_asset(self, mock_fetch):
@@ -79,6 +153,32 @@ class TestGodotSetup(unittest.TestCase):
             )
         )
 
+    @patch("common.godot_steps.fetch_latest_verified_github_release_asset")
+    def test_web_template_selector_matches_exact_engine_release(self, mock_fetch):
+        mock_fetch.return_value = (
+            "4.7.2-stable",
+            "https://github.com/godotengine/godot/releases/download/templates.tpz",
+            "b" * 64,
+        )
+
+        self.assertEqual(
+            godot_steps.fetch_godot_export_templates("4.7.2-stable"),
+            mock_fetch.return_value,
+        )
+        matcher = mock_fetch.call_args.kwargs["asset_matches"]
+        self.assertTrue(
+            matcher(
+                "4.7.2-stable",
+                "Godot_v4.7.2-stable_export_templates.tpz",
+            )
+        )
+        self.assertFalse(
+            matcher(
+                "4.7.1-stable",
+                "Godot_v4.7.1-stable_export_templates.tpz",
+            )
+        )
+
     def test_verified_archive_extracts_only_expected_binary(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
             archive_path = os.path.join(temporary_dir, "godot.zip")
@@ -101,6 +201,128 @@ class TestGodotSetup(unittest.TestCase):
                 self.assertEqual(binary_file.read(), b"godot-binary")
             self.assertTrue(os.stat(binary_path).st_mode & 0o111)
             self.assertFalse(os.path.exists(os.path.join(release_dir, "unrelated")))
+
+    def test_verified_web_template_archive_extracts_only_web_files(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            archive_path = os.path.join(temporary_dir, "templates.tpz")
+            releases_dir = os.path.join(temporary_dir, "releases")
+            release_dir = os.path.join(releases_dir, "4.7.2.stable-digest")
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("templates/version.txt", "4.7.2.stable\n")
+                for file_name in godot_steps._GODOT_WEB_TEMPLATE_FILES:
+                    archive.writestr(f"templates/{file_name}", file_name.encode())
+                archive.writestr("templates/linux_release.x86_64", b"not-installed")
+            with open(archive_path, "rb") as archive_file:
+                expected_sha256 = hashlib.sha256(archive_file.read()).hexdigest()
+
+            with patch.object(
+                godot_steps,
+                "GODOT_EXPORT_TEMPLATE_RELEASES_DIR",
+                releases_dir,
+            ):
+                godot_steps._extract_verified_web_templates(
+                    archive_path,
+                    expected_sha256=expected_sha256,
+                    expected_version="4.7.2.stable",
+                    release_dir=release_dir,
+                )
+
+            self.assertTrue(os.path.isfile(os.path.join(release_dir, "web_release.zip")))
+            self.assertFalse(
+                os.path.exists(os.path.join(release_dir, "linux_release.x86_64"))
+            )
+
+    @patch("common.godot_steps.fetch_latest_verified_github_release_asset")
+    def test_butler_selector_matches_linux_architecture(self, mock_fetch):
+        mock_fetch.return_value = (
+            "v15.30.0",
+            "https://github.com/itchio/butler/releases/download/butler.zip",
+            "c" * 64,
+        )
+        self.assertEqual(
+            godot_steps.fetch_latest_butler_release("arm64"),
+            mock_fetch.return_value,
+        )
+        matcher = mock_fetch.call_args.kwargs["asset_matches"]
+        self.assertTrue(matcher("v15.30.0", "butler-linux-arm64.zip"))
+        self.assertFalse(matcher("v15.30.0", "butler-linux-amd64.zip"))
+
+    def test_verified_butler_archive_extracts_only_runtime_files(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            archive_path = os.path.join(temporary_dir, "butler.zip")
+            releases_dir = os.path.join(temporary_dir, "releases")
+            release_dir = os.path.join(releases_dir, "v15.30.0-digest")
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                for file_name in ("butler", "7z.so", "libc7zip.so"):
+                    archive.writestr(f"linux-amd64/{file_name}", file_name.encode())
+                archive.writestr("linux-amd64/unrelated", b"not-installed")
+            with open(archive_path, "rb") as archive_file:
+                expected_sha256 = hashlib.sha256(archive_file.read()).hexdigest()
+
+            with patch.object(godot_steps, "BUTLER_RELEASES_DIR", releases_dir):
+                godot_steps._extract_verified_butler_archive(
+                    archive_path,
+                    expected_sha256=expected_sha256,
+                    asset_arch="amd64",
+                    release_dir=release_dir,
+                )
+
+            self.assertTrue(os.access(os.path.join(release_dir, "butler"), os.X_OK))
+            self.assertFalse(os.path.exists(os.path.join(release_dir, "unrelated")))
+
+    def test_pinned_steamcmd_bootstrap_extracts_expected_files(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            archive_path = os.path.join(temporary_dir, "steamcmd.tar.gz")
+            with tarfile.open(archive_path, "w:gz") as archive:
+                for member_name in godot_steps._STEAMCMD_BOOTSTRAP_FILES:
+                    payload = member_name.encode()
+                    member = tarfile.TarInfo(member_name)
+                    member.size = len(payload)
+                    archive.addfile(member, io.BytesIO(payload))
+            with open(archive_path, "rb") as archive_file:
+                archive_sha256 = hashlib.sha256(archive_file.read()).hexdigest()
+            destination = os.path.join(temporary_dir, "destination")
+
+            with patch.object(
+                godot_steps,
+                "STEAMCMD_BOOTSTRAP_SHA256",
+                archive_sha256,
+            ):
+                godot_steps._extract_steamcmd_bootstrap(archive_path, destination)
+
+            self.assertTrue(
+                os.access(os.path.join(destination, "steamcmd.sh"), os.X_OK)
+            )
+            self.assertTrue(
+                os.path.isfile(os.path.join(destination, "linux32", "steamcmd"))
+            )
+
+    def test_pinned_steamcmd_bootstrap_rejects_unexpected_members(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            archive_path = os.path.join(temporary_dir, "steamcmd.tar.gz")
+            with tarfile.open(archive_path, "w:gz") as archive:
+                for member_name in godot_steps._STEAMCMD_BOOTSTRAP_FILES:
+                    payload = member_name.encode()
+                    member = tarfile.TarInfo(member_name)
+                    member.size = len(payload)
+                    archive.addfile(member, io.BytesIO(payload))
+                payload = b"unexpected"
+                member = tarfile.TarInfo("unexpected")
+                member.size = len(payload)
+                archive.addfile(member, io.BytesIO(payload))
+            with open(archive_path, "rb") as archive_file:
+                archive_sha256 = hashlib.sha256(archive_file.read()).hexdigest()
+
+            with patch.object(
+                godot_steps,
+                "STEAMCMD_BOOTSTRAP_SHA256",
+                archive_sha256,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "unexpected contents"):
+                    godot_steps._extract_steamcmd_bootstrap(
+                        archive_path,
+                        os.path.join(temporary_dir, "destination"),
+                    )
 
     @patch("common.godot_steps.configure_maintenance_timer", return_value=True)
     def test_auto_update_timer_tracks_non_apt_release(self, mock_configure):
@@ -140,6 +362,10 @@ class TestGodotSetup(unittest.TestCase):
 
 
 class TestGodotAutoUpdater(unittest.TestCase):
+    @patch(
+        "common.service_tools.auto_update_godot.update_registered_godot_bundles",
+        return_value=False,
+    )
     @patch("common.service_tools.auto_update_godot.send_notification_safe")
     @patch("common.service_tools.auto_update_godot.log_event")
     @patch(
@@ -158,6 +384,34 @@ class TestGodotAutoUpdater(unittest.TestCase):
         _load_notifications,
         _log_event,
         mock_notify,
+        _update_bundles,
+    ):
+        self.assertEqual(auto_update_godot.main(), 0)
+        self.assertEqual(mock_notify.call_args.kwargs["status"], "success")
+
+    @patch(
+        "common.service_tools.auto_update_godot.update_registered_godot_bundles",
+        return_value=True,
+    )
+    @patch("common.service_tools.auto_update_godot.send_notification_safe")
+    @patch("common.service_tools.auto_update_godot.log_event")
+    @patch(
+        "common.service_tools.auto_update_godot.load_notification_configs_from_state",
+        return_value=[],
+    )
+    @patch("common.service_tools.auto_update_godot.os.path.exists", return_value=True)
+    @patch(
+        "common.service_tools.auto_update_godot.install_or_update_godot_release",
+        return_value=("4.7.2-stable", False, "a" * 64),
+    )
+    def test_bundle_only_update_notifies(
+        self,
+        _install_release,
+        _exists,
+        _load_notifications,
+        _log_event,
+        mock_notify,
+        _update_bundles,
     ):
         self.assertEqual(auto_update_godot.main(), 0)
         self.assertEqual(mock_notify.call_args.kwargs["status"], "success")
