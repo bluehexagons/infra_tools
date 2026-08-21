@@ -50,13 +50,13 @@ class TestCICDSteps(unittest.TestCase):
     @patch('web.cicd_steps.run')
     def test_install_cicd_dependencies_missing(self, mock_run, mock_is_installed):
         """Test that we install missing dependencies."""
-        mock_is_installed.return_value = False
+        mock_is_installed.side_effect = [False, True]
         mock_config = MagicMock()
         
         install_cicd_dependencies(mock_config)
         
         # Should install git
-        mock_run.assert_called_once()
+        mock_run.assert_called_once_with("apt-get install -y -qq git", check=True)
         call_args = mock_run.call_args[0][0]
         self.assertIn('apt-get install', call_args)
         self.assertIn('git', call_args)

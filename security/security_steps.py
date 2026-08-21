@@ -209,9 +209,9 @@ def configure_firewall(config: SetupConfig) -> None:
     if not firewall_active:
         os.environ["DEBIAN_FRONTEND"] = "noninteractive"
         run("apt-get install -y -qq ufw")
-        run("ufw default deny incoming", check=False)
-        run("ufw default allow outgoing", check=False)
-        run("ufw limit ssh", check=False)
+        run("ufw default deny incoming", check=True)
+        run("ufw default allow outgoing", check=True)
+        run("ufw limit ssh", check=True)
     if config.enable_rdp:
         _configure_rdp_firewall(config)
     web_ports = _configure_managed_web_ports(config)
@@ -231,7 +231,7 @@ def configure_firewall(config: SetupConfig) -> None:
         if is_container():
             print("  ⚠ Firewall could not be enabled (container may lack capabilities)")
         else:
-            print("  ⚠ Firewall could not be enabled (check logs)")
+            raise RuntimeError("Firewall could not be enabled (check command output)")
         return
 
     if web_ports:
@@ -410,7 +410,7 @@ AllowGroups remoteusers
         print("  ⚠ sshd -t failed after hardening drop-in; restored previous configuration")
         return
 
-    run("systemctl reload sshd || systemctl reload ssh", check=False)
+    run("systemctl reload sshd || systemctl reload ssh", check=True)
 
     print("  ✓ SSH hardened (drop-in: key-only auth, timeouts, AllowGroups remoteusers)")
 
@@ -758,11 +758,11 @@ def configure_firewall_web(config: SetupConfig) -> None:
     if not firewall_active:
         os.environ["DEBIAN_FRONTEND"] = "noninteractive"
         run("apt-get install -y -qq ufw")
-        run("ufw default deny incoming", check=False)
-        run("ufw default allow outgoing", check=False)
-        run("ufw limit ssh", check=False)
-    run("ufw allow 80/tcp", check=False)
-    run("ufw allow 443/tcp", check=False)
+        run("ufw default deny incoming", check=True)
+        run("ufw default allow outgoing", check=True)
+        run("ufw limit ssh", check=True)
+    run("ufw allow 80/tcp", check=True)
+    run("ufw allow 443/tcp", check=True)
     web_ports = _configure_managed_web_ports(config)
 
     if firewall_active:
@@ -777,7 +777,7 @@ def configure_firewall_web(config: SetupConfig) -> None:
         if is_container():
             print("  ⚠ Firewall could not be enabled (container may lack capabilities)")
         else:
-            print("  ⚠ Firewall could not be enabled (check logs)")
+            raise RuntimeError("Firewall could not be enabled (check command output)")
         return
     
     print(
@@ -796,16 +796,16 @@ def configure_firewall_ssh_only(config: SetupConfig) -> None:
 
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get install -y -qq ufw")
-    run("ufw default deny incoming", check=False)
-    run("ufw default allow outgoing", check=False)
-    run("ufw limit ssh", check=False)
+    run("ufw default deny incoming", check=True)
+    run("ufw default allow outgoing", check=True)
+    run("ufw limit ssh", check=True)
     
     result = run("ufw --force enable", check=False)
     if result.returncode != 0:
         if is_container():
             print("  ⚠ Firewall could not be enabled (container may lack capabilities)")
         else:
-            print("  ⚠ Firewall could not be enabled (check logs)")
+            raise RuntimeError("Firewall could not be enabled (check command output)")
         return
 
     print("  ✓ Firewall configured (SSH rate-limited)")

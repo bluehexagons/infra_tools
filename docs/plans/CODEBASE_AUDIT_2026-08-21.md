@@ -96,7 +96,7 @@ ordinary failure marks it `recovery_required`, hard interruption leaves the
 last in-progress phase, and either state blocks the next invocation until an
 operator inspects and reconciles it. Dry runs remain state-free.
 
-### AUD-05: Required setup mutations still have weak failure contracts
+### AUD-05: Required setup mutations still have weak failure contracts (partially resolved)
 
 **Severity: Medium-High — partial apply**
 
@@ -107,11 +107,20 @@ CI/CD prerequisite installation in `web/cicd_steps.py`. This is distinct from
 intentional probes and cleanup calls, which should remain explicit
 `check=False` operations.
 
-**Follow-up:** finish the caller inventory from
+**Resolution progress (2026-08-21):** the named high-impact setup paths now
+fail the operation when required work does not complete. Nginx package,
+enable/start, ownership, symlink, reload, and configuration-validation failures
+propagate after restoring prior configuration where applicable. CI/CD dependency
+installation is verified, and its service-user ownership/permission setup no
+longer reports success after failure. Required UFW policy and allow-rule
+mutations are strict; failed activation stops non-container setup while the
+documented container-capability exception remains best-effort. Focused tests
+cover these contracts.
+
+**Remaining follow-up:** finish the caller inventory from
 [Transactional execution](TRANSACTIONAL_EXECUTION.md), classify each command as
-required, optional, probe, or cleanup, and add step-level tests that prove a
-required package, firewall rule, service, or configuration failure reaches the
-top-level result.
+required, optional, probe, or cleanup, and add step-level tests for remaining
+required callers outside these setup paths.
 
 ### AUD-06: Corrupt state is hidden by permissive readers
 
@@ -264,7 +273,8 @@ rollback stop failure, and inactive/active verification failures.
 
 ## Current recommended order
 
-1. Finish required-command caller classification and step-level failure tests.
+1. Continue required-command caller classification beyond the completed nginx,
+   firewall, and CI/CD prerequisite paths.
 2. Add lightweight inspection and rerun guidance for the landed operation
    markers.
 3. Make corrupt-state failures actionable without silently resetting state.

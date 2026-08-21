@@ -27,10 +27,12 @@ def install_cicd_dependencies(config: SetupConfig) -> None:
         return
     
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    run(f"apt-get install -y -qq {' '.join(packages)}", check=False)
+    run(f"apt-get install -y -qq {' '.join(packages)}", check=True)
     
     if all_installed():
         print("  ✓ CI/CD dependencies installed")
+        return
+    raise RuntimeError("CI/CD dependencies were not present after installation")
 
 
 def create_cicd_user(config: SetupConfig) -> None:
@@ -39,7 +41,7 @@ def create_cicd_user(config: SetupConfig) -> None:
     
     result = run(f"id {user}", check=False)
     if result.returncode == 0:
-        run(f"usermod --home {CICD_HOME} {user}", check=False)
+        run(f"usermod --home {CICD_HOME} {user}", check=True)
         print(f"  ✓ User '{user}' already exists")
         return
     
@@ -64,15 +66,11 @@ def create_cicd_directories(config: SetupConfig) -> None:
     # Ensure the 'webhook' user exists before attempting chown
     user_check = run(f"id {CICD_USER}", check=False)
     if user_check.returncode != 0:
-        print(f"  ⚠ Warning: Cannot set ownership for CI/CD directories because user '{CICD_USER}' does not exist.")
-        print("    Please run the user creation step before creating CI/CD directories.")
-    else:
-        try:
-            run(f"chown -R {CICD_USER}:{CICD_USER} {CICD_HOME}")
-            run(f"chmod -R 750 {CICD_HOME}")
-        except Exception as e:
-            print(f"  ⚠ Warning: Failed to set directory permissions: {e}")
-            print("  This may cause security or permission issues.")
+        raise RuntimeError(
+            f"Cannot secure CI/CD directories because user '{CICD_USER}' does not exist"
+        )
+    run(f"chown -R {CICD_USER}:{CICD_USER} {CICD_HOME}", check=True)
+    run(f"chmod -R 750 {CICD_HOME}", check=True)
     
     print("  ✓ Created CI/CD directories")
 

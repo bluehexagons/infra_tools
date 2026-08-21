@@ -38,7 +38,9 @@ until actual usage or incidents justify them.
 The ordering remains justified by the current implementation:
 
 - required command failures now raise from `remote_utils.run(check=True)`;
-  caller classification and recovery orchestration remain incomplete;
+  nginx setup, firewall initialization, SSH reload, and CI/CD prerequisite
+  paths propagate required failures with focused coverage, while the broader
+  caller classification remains incomplete;
 - full setup no longer tears down all managed services before replacement
   steps run;
 - manifest deployment builds and validates a sibling release before stopping
@@ -76,10 +78,11 @@ work.
 
 The best next work packets are:
 
-1. Complete the `remote_utils.run()` caller inventory and move required setup
-   callers toward strict, argv-native execution. Strict, secret-safe, and
-   bounded execution are already landed; intentional probes and cleanup remain
-   best-effort.
+1. Continue the `remote_utils.run()` caller inventory beyond the completed
+   nginx, firewall, SSH reload, and CI/CD prerequisite paths, moving remaining
+   required setup callers toward strict, argv-native execution. Strict,
+   secret-safe, and bounded execution are already landed; intentional probes
+   and cleanup remain best-effort.
 2. Add lightweight, phase-specific recovery inspection and rerun guidance to
    the landed target-setup and manifest markers; do not build a generalized
    transaction coordinator.

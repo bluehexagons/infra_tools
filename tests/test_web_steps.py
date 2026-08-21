@@ -30,7 +30,8 @@ class TestNginxBaseConfiguration(unittest.TestCase):
             returncode=1 if command == "nginx -t" else 0
         )
 
-        web_steps.configure_nginx_security(_config())
+        with self.assertRaisesRegex(RuntimeError, "failed validation"):
+            web_steps.configure_nginx_security(_config())
 
         commands = [call.args[0] for call in mock_run.call_args_list]
         self.assertIn("nginx -t", commands)
@@ -48,7 +49,8 @@ class TestNginxBaseConfiguration(unittest.TestCase):
             returncode=1 if command == "nginx -t" else 0
         )
 
-        web_steps.configure_default_site(_config())
+        with self.assertRaisesRegex(RuntimeError, "failed validation"):
+            web_steps.configure_default_site(_config())
 
         commands = [call.args[0] for call in mock_run.call_args_list]
         self.assertIn("nginx -t", commands)
@@ -66,6 +68,31 @@ class TestNginxBaseConfiguration(unittest.TestCase):
 
         commands = [call.args[0] for call in mock_run.call_args_list]
         self.assertLess(commands.index("nginx -t"), commands.index("systemctl reload nginx"))
+
+    @patch("web.web_steps.run")
+    @patch("web.web_steps.install_package", return_value=False)
+    @patch("web.web_steps.is_service_active", return_value=False)
+    @patch("web.web_steps.is_package_installed", return_value=False)
+    def test_install_failure_stops_nginx_setup(
+        self, _installed, _active, _install, mock_run
+    ) -> None:
+        with self.assertRaisesRegex(RuntimeError, "required nginx package"):
+            web_steps.install_nginx(_config())
+
+        mock_run.assert_not_called()
+
+    @patch("web.web_steps.run")
+    @patch("web.web_steps.install_package", return_value=True)
+    @patch("web.web_steps.is_service_active", return_value=False)
+    @patch("web.web_steps.is_package_installed", return_value=False)
+    def test_inactive_service_stops_nginx_setup(
+        self, _installed, _active, _install, mock_run
+    ) -> None:
+        with self.assertRaisesRegex(RuntimeError, "did not become active"):
+            web_steps.install_nginx(_config())
+
+        mock_run.assert_any_call("systemctl enable nginx", check=True)
+        mock_run.assert_any_call("systemctl start nginx", check=True)
 
 
 if __name__ == "__main__":

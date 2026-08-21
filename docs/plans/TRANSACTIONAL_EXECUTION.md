@@ -56,6 +56,10 @@ ARCH-08 from the [architectural risk review](ARCHITECTURAL_RISK_REVIEW_2026-08-0
 - Target setup records its current step before mutation, finalizes remembered
   machine/setup state only after the full operation succeeds, and retains
   interrupted or failed state for the next invocation.
+- Nginx setup, firewall initialization, SSH reload, and CI/CD prerequisite
+  setup now propagate required command and verification failures. Probes,
+  stale-rule cleanup, and the container-capability firewall exception remain
+  explicitly best-effort.
 
 The former `lib/transaction.py` callback framework was removed on 2026-08-21.
 It reran completed steps, could report success after continue-on-error failures,
@@ -210,12 +214,13 @@ fingerprint is explicitly verified.
 
 ## Recommended first delivery slice
 
-The atomic persistence, execution-contract, transaction-framework retirement,
-and setup/deployment operation-marker slices are complete. The next delivery
-should finish the `remote_utils.run()` caller inventory, add lightweight
-phase-specific recovery guidance, and tighten corrupt-state readers. Broader
-recovery automation should wait until real operational experience identifies a
-repeated need.
+The atomic persistence, core execution contract, transaction-framework
+retirement, setup/deployment operation markers, and the first high-impact
+required-caller migration are complete. The next delivery should continue the
+`remote_utils.run()` caller inventory outside nginx, firewall, SSH reload, and
+CI/CD prerequisites, add lightweight phase-specific recovery guidance, and
+tighten corrupt-state readers. Broader recovery automation should wait until
+real operational experience identifies a repeated need.
 
 ## Non-goals
 
