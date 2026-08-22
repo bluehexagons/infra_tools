@@ -125,6 +125,7 @@ from lib.validation import (
     validate_timezone_name,
     validate_workspace_dir,
 )
+from lib.vm_storage import has_home_mount
 from lib.workspace import get_setup_cache_dir, get_workspace_dir, set_workspace_dir
 
 
@@ -753,8 +754,6 @@ def show_info(pattern: Optional[str] = None, *, compact: bool = False) -> int:
             features.append("SSL")
         if args.get("enable_cloudflare"):
             features.append("Cloudflare")
-        if args.get("install_ruby"):
-            features.append("Ruby")
         if args.get("install_node"):
             features.append("Node")
         if args.get("install_go"):
@@ -1453,7 +1452,11 @@ def run_setup_command(args: argparse.Namespace) -> int:
             ensure_guest_ipv4_route(
                 config.static_ipv4,
                 config.network_gateway4,
-                get_provisioned_guest_ssh_user(config.machine_type, config.username),
+                get_provisioned_guest_ssh_user(
+                    config.machine_type,
+                    config.username,
+                    setup_user_deferred=has_home_mount(config),
+                ),
                 config.ssh_key,
                 dry_run=config.dry_run,
             )

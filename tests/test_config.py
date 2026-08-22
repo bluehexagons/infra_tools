@@ -147,6 +147,20 @@ class TestSetupConfigFromDict(unittest.TestCase):
         config = SetupConfig.from_dict('h', 'server_lite', data)
         self.assertIsNone(config.friendly_name)
 
+    def test_from_dict_ignores_removed_ruby_fields(self):
+        data = {
+            'username': 'u',
+            'install_ruby': True,
+            'reset_migrations': True,
+            'api_subdomain': True,
+        }
+
+        config = SetupConfig.from_dict('h', 'server_web', data)
+
+        self.assertNotIn('install_ruby', config.to_dict())
+        self.assertNotIn('reset_migrations', config.to_dict())
+        self.assertNotIn('api_subdomain', config.to_dict())
+
 
 class TestSetupConfigToRemoteArgs(unittest.TestCase):
     def _make_config(self, **kwargs):
@@ -588,14 +602,12 @@ class TestSetupConfigFromArgs(unittest.TestCase):
             flatpak_packages=None,
             dark_theme=False,
             dry_run=False,
-            install_ruby=False,
             install_go=False,
             install_node=False,
             install_python=False,
             custom_steps=None,
             deploy_specs=None,
             full_deploy=False,
-            reset_migrations=False,
             enable_ssl=False,
             ssl_email=None,
             enable_cloudflare=False,
@@ -603,7 +615,6 @@ class TestSetupConfigFromArgs(unittest.TestCase):
             is_build_server=False,
             is_app_server=False,
             deploy_targets=None,
-            api_subdomain=False,
             enable_samba=False,
             samba_shares=None,
             share_credentials=None,

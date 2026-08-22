@@ -15,7 +15,6 @@ same job at the same instant.
 | `auto-update-apt.timer` | Daily at 06:00 | Security-enabled setups |
 | `auto-restart-if-needed.timer` | Daily at 02:00 and 30 minutes after boot | Kernel-capable machines; saved policy chooses restart or deferral |
 | `auto-update-node.timer` | Sunday at 03:00 | Setups with Node.js/nvm |
-| `auto-update-ruby.timer` | Sunday at 04:00 | Setups with Ruby and `gem` |
 | `auto-update-uv.timer` | Sunday at 05:00 | Setups with Python and uv |
 | `auto-update-gogs.timer` | Sunday at 05:30 | Setups with Gogs |
 | `auto-update-godot.timer` | Sunday at 06:30 | Setups with Godot; also reconciles selected Godot bundles |
@@ -49,12 +48,11 @@ scheduled update, infra-tools repairs CD-ROM-only entries and stale official
 Debian suites using the installed release codename. The distro timers
 are disabled only after the replacement timer is enabled, started, and verified.
 
-Node.js, Ruby, and uv use a conservative default policy:
+Node.js and uv use a conservative default policy:
 
 - Node.js follows the LTS track by default. An already-installed non-LTS track
   is treated as an explicit choice and remains on that track. Global npm
   package versions are preserved when the runtime changes.
-- Ruby updates the managed global gems only when ecosystem upgrades are enabled.
 - uv updates the uv executable itself, but uv-managed tools are upgraded only
   when ecosystem upgrades are enabled.
 - Gogs validates a downloaded release before activation and rolls back the
@@ -65,6 +63,9 @@ Node.js, Ruby, and uv use a conservative default policy:
   bundle installs matching verified export templates for registered users;
   the publishing bundle updates verified Butler releases and invokes the
   user-owned SteamCMD self-updater.
+
+Upgrading a host retires the old `auto-update-ruby` service and timer. It does
+not uninstall the Ruby packages or stop an existing legacy Rails application.
 
 GitHub CLI is installed from its APT repository and therefore follows the APT
 job. Explicitly selected Codex CLI, Claude Code, and OpenCode installations
@@ -89,7 +90,7 @@ If a vendor command is run directly, use the same account and working
 directory, such as `sudo -u agent -H sh -lc 'cd /home/agent && codex update'`.
 
 Set `INFRA_TOOLS_ECOSYSTEM_AUTO_UPGRADE=1` in the relevant service environment
-to allow global npm packages, gems, and uv-managed tools to advance. The default
+to allow global npm packages and uv-managed tools to advance. The default
 is `0`.
 
 Dependency-resolving npm and uv commands, and GitHub release selection, prefer
@@ -152,7 +153,7 @@ sudo -u USER /usr/bin/python3 \
   /opt/infra_tools/common/service_tools/user_cache_maintenance.py --dry-run
 ```
 
-Cleanup never removes installed gem or nvm runtime versions, Proxmox backups,
+Cleanup never removes installed language runtime versions, Proxmox backups,
 templates, ISOs, guest volumes, container/image stores, crash-report
 directories, or arbitrary files. Proxmox boot entries and pinned kernels remain
 under APT and `proxmox-boot-tool` retention policy.

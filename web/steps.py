@@ -21,7 +21,6 @@ from .cloudflare_steps import (
 
 from .dev_tools_steps import (
     configure_auto_update_node,
-    configure_auto_update_ruby,
 )
 
 from .cicd_steps import (
@@ -68,7 +67,6 @@ __all__ = [
     'install_cloudflared_service_helper',
     'run_cloudflare_tunnel_setup',
     'configure_auto_update_node',
-    'configure_auto_update_ruby',
     'install_cicd_dependencies',
     'create_cicd_user',
     'create_cicd_directories',

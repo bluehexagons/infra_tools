@@ -28,6 +28,7 @@ from lib.config import DEFAULT_MACHINE_TYPE, SetupConfig, _normalize_nested_spec
 from lib.credentials import prepare_runtime_config, store_cli_credentials
 from lib.network_transition import finish_network_transition
 from lib.proxmox_guest import get_provisioned_guest_ssh_user
+from lib.vm_storage import has_home_mount
 from lib.proxmox_hosts import ProxmoxHost, find_proxmox_host, sync_proxmox_host
 from lib.validators import validate_host, validate_username
 from lib.validation import (
@@ -404,15 +405,24 @@ def prepare_deployments(config: SetupConfig, target_dir: str) -> None:
     
     for _deploy_spec, git_url in config.deploy_specs:
         result = clone_repository(git_url, target_dir, cache_dir=GIT_CACHE_DIR, dry_run=config.dry_run)
-        if result is not None:
-            clone_path, commit_hash = result
-            if commit_hash and not config.dry_run:
-                repo_name = os.path.basename(clone_path)
-                commit_file = os.path.join(target_dir, f"{repo_name}.commit")
-                with open(commit_file, 'w') as f:
-                    f.write(commit_hash)
-        else:
-            print(f"Warning: Failed to clone {git_url}, skipping...")
+        if result is None:
+            raise RuntimeError(
+                f"Failed to stage {git_url}; no target changes were started"
+            )
+        clone_path, commit_hash = result
+        if not config.dry_run:
+            from lib.deploy_utils import is_ruby_project
+
+            if is_ruby_project(clone_path):
+                raise RuntimeError(
+                    f"Ruby/Rails repository {git_url} is unsupported by this "
+                    "infra-tools version; use its pinned legacy release"
+                )
+        if commit_hash and not config.dry_run:
+            repo_name = os.path.basename(clone_path)
+            commit_file = os.path.join(target_dir, f"{repo_name}.commit")
+            with open(commit_file, 'w') as f:
+                f.write(commit_hash)
 
 
 def _local_user_home() -> str:
@@ -1172,7 +1182,11 @@ def run_remote_setup(config: SetupConfig) -> int:
     control_path: Optional[str] = None
     if not is_local:
         remote_user = (
-            get_provisioned_guest_ssh_user(config.machine_type, config.username)
+            get_provisioned_guest_ssh_user(
+                config.machine_type,
+                config.username,
+                setup_user_deferred=has_home_mount(config),
+            )
             if config.hosted_node
             else "root"
         )

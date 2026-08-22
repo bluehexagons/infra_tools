@@ -250,7 +250,6 @@ class SetupConfig:
     dark_theme: bool = False
     dry_run: bool = False
     refresh_packages: bool = False
-    install_ruby: bool = False
     install_go: bool = False
     install_node: bool = False
     install_python: bool = False
@@ -303,7 +302,6 @@ class SetupConfig:
     deployment_mode: str = "default"  # "default" (smart cache), "lite" (cached only), "full" (always fresh)
     full_deploy: bool = False
     deploy_latest: bool = False
-    reset_migrations: bool = False
     enable_ssl: bool = False
     ssl_email: Optional[str] = None
     enable_cloudflare: bool = False
@@ -311,7 +309,6 @@ class SetupConfig:
     is_build_server: bool = False
     is_app_server: bool = False
     deploy_targets: Optional[StrList] = None
-    api_subdomain: bool = False
     enable_samba: bool = False
     samba_shares: Optional[NestedStrList] = None
     share_credentials: Optional[NestedStrList] = None
@@ -706,9 +703,6 @@ class SetupConfig:
         if self.dry_run:
             args.append("--dry-run")
         
-        if self.install_ruby:
-            args.append("--ruby")
-        
         if self.install_go:
             args.append("--go")
         
@@ -790,9 +784,6 @@ class SetupConfig:
             # deploy_latest without specs doesn't make sense, but keep for backward compat
             args.append("--deploy-latest")
         
-        if self.reset_migrations:
-            args.append("--reset-migrations")
-        
         if self.enable_ssl:
             args.append("--ssl")
             if self.ssl_email:
@@ -813,9 +804,6 @@ class SetupConfig:
         if self.deploy_targets:
             for target in self.deploy_targets:
                 args.append(f"--deploy-target {shlex.quote(target)}")
-        
-        if self.api_subdomain:
-            args.append("--api-subdomain")
         
         if self.enable_samba:
             args.append("--samba")
@@ -1097,9 +1085,6 @@ class SetupConfig:
             cmd_parts.append("--dark")
 
         # Development tools
-        if self.install_ruby:
-            cmd_parts.append("--ruby")
-        
         if self.install_go:
             cmd_parts.append("--go")
         
@@ -1226,9 +1211,6 @@ class SetupConfig:
             # deploy_latest without specs doesn't make sense, but keep for backward compat
             cmd_parts.append("--deploy-latest")
         
-        if self.reset_migrations:
-            cmd_parts.append("--reset-migrations")
-        
         # SSL
         if self.enable_ssl:
             cmd_parts.append("--ssl")
@@ -1253,9 +1235,6 @@ class SetupConfig:
         if self.deploy_targets:
             for target in self.deploy_targets:
                 cmd_parts.append(f"--deploy-target {shlex.quote(target)}")
-        
-        if self.api_subdomain:
-            cmd_parts.append("--api-subdomain")
         
         # Samba
         if self.enable_samba:
@@ -1416,6 +1395,10 @@ class SetupConfig:
         # sensitive live handoff merely because a saved configuration is
         # loaded for deploy, patch, or reconstruction.
         data.pop('activate_network', None)
+        # These fields belonged to the removed Ruby/Rails integration. Ignore
+        # them when loading older saved setup state so upgrades remain usable.
+        for removed_field in ('install_ruby', 'reset_migrations', 'api_subdomain'):
+            data.pop(removed_field, None)
         tags_str = data.get('tags')
         if tags_str and isinstance(tags_str, str):
             data['tags'] = [tag.strip() for tag in tags_str.split(',') if tag.strip()]
@@ -1772,7 +1755,6 @@ class SetupConfig:
             dark_theme=getattr(args, 'dark_theme', False),
             dry_run=getattr(args, 'dry_run', False),
             refresh_packages=getattr(args, 'refresh_packages', False),
-            install_ruby=getattr(args, 'install_ruby', False),
             install_go=getattr(args, 'install_go', False),
             install_node=getattr(args, 'install_node', False),
             install_python=getattr(args, 'install_python', False),
@@ -1841,7 +1823,6 @@ class SetupConfig:
             deployment_mode=getattr(args, 'deployment_mode', 'default'),
             full_deploy=getattr(args, 'full_deploy', False),
             deploy_latest=getattr(args, 'deploy_latest', False),
-            reset_migrations=getattr(args, 'reset_migrations', False),
             enable_ssl=getattr(args, 'enable_ssl', False),
             ssl_email=getattr(args, 'ssl_email', None),
             enable_cloudflare=getattr(args, 'enable_cloudflare', False),
@@ -1849,7 +1830,6 @@ class SetupConfig:
             is_build_server=is_build_server,
             is_app_server=is_app_server,
             deploy_targets=getattr(args, 'deploy_targets', None),
-            api_subdomain=getattr(args, 'api_subdomain', False),
             enable_samba=getattr(args, 'enable_samba', False),
             samba_shares=getattr(args, 'samba_shares', None),
             share_credentials=getattr(args, 'share_credentials', None),

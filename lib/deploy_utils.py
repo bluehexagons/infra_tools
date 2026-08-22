@@ -37,22 +37,7 @@ def create_safe_directory_name(domain: Optional[str], path: str) -> str:
 
 
 def detect_project_type(repo_path: str) -> str:
-    """Detect project type: rails, node, static, or unknown."""
-    if os.path.exists(os.path.join(repo_path, ".ruby-version")):
-        return "rails"
-
-    gemfile = os.path.join(repo_path, "Gemfile")
-    if os.path.exists(gemfile):
-        try:
-            with open(gemfile, 'r') as f:
-                content = f.read()
-                if 'rails' in content:
-                    return 'rails'
-        except OSError:
-            pass
-
-    if os.path.exists(os.path.join(repo_path, 'config', 'environment.rb')) or os.path.exists(os.path.join(repo_path, 'config.ru')):
-        return 'rails'
+    """Detect a supported legacy project type: node, static, or unknown."""
 
     if os.path.exists(os.path.join(repo_path, "package.json")):
         return "node"
@@ -60,23 +45,30 @@ def detect_project_type(repo_path: str) -> str:
     if os.path.exists(os.path.join(repo_path, "index.html")) or os.path.exists(os.path.join(repo_path, "public", "index.html")):
         return "static"
 
-    if os.path.exists(os.path.join(repo_path, 'public')):
-        return 'rails'
-
     return "unknown"
+
+
+def is_ruby_project(repo_path: str) -> bool:
+    """Return whether a source tree contains Ruby/Rails project markers.
+
+    Ruby support was removed, but a narrow detector remains so current releases
+    can refuse legacy deployments before modifying the target.
+    """
+    return any(
+        os.path.exists(path)
+        for path in (
+            os.path.join(repo_path, ".ruby-version"),
+            os.path.join(repo_path, "Gemfile"),
+            os.path.join(repo_path, "config.ru"),
+            os.path.join(repo_path, "config", "environment.rb"),
+            os.path.join(repo_path, "bin", "rails"),
+        )
+    )
 
 
 def get_project_root(repo_path: str, project_type: str) -> str:
     """Get the root directory for serving the project."""
-    if project_type == "rails":
-        public_dir = os.path.join(repo_path, "public")
-        if os.path.exists(public_dir):
-            return public_dir
-        if os.path.exists(os.path.join(repo_path, 'index.html')):
-            return repo_path
-        return repo_path
-    
-    elif project_type == "node":
+    if project_type == "node":
         # Check for build output directories first
         for build_dir in ["dist", "build", "out"]:
             full_path = os.path.join(repo_path, build_dir)
@@ -95,11 +87,6 @@ def get_project_root(repo_path: str, project_type: str) -> str:
             return full_path
 
     return repo_path
-
-
-def should_reverse_proxy(project_type: str) -> bool:
-    """Determine if project should be reverse proxied (Rails) or served statically."""
-    return project_type == "rails"
 
 
 def get_git_commit_hash(repo_path: str) -> Optional[str]:

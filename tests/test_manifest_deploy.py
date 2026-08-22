@@ -120,7 +120,7 @@ class TestComponentDescriptor(unittest.TestCase):
         self.assertEqual(dep['backend_port'], 8090)
         self.assertEqual(dep['proxy_port'], 8090)
         self.assertEqual(dep['domain'], "api.example.com")
-        self.assertFalse(dep['api_subdomain'])
+        self.assertNotIn('api_subdomain', dep)
         self.assertTrue(dep['preserve_path'])
 
     def test_deploy_domain_placeholder(self):

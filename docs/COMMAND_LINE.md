@@ -261,7 +261,6 @@ the local desktop installer path.
 
 | Flag | Description |
 |------|-------------|
-| `--ruby` | Install Ruby + Bundler |
 | `--node` | Install nvm + Node.js + PNPM |
 | `--go` | Install Go |
 | `--python` | Install Python aliases + uv |
@@ -610,12 +609,23 @@ Notes:
   name must have exactly one mount declaration; logical names use lowercase
   letters, numbers, and hyphens and are at most 17 characters.
 - Automated mounting accepts only a confirmed blank disk and an empty `/data`
-  path or a path below `/srv`, `/var/lib`, `/opt`, or `/mnt`. It rejects
-  populated-path migration, `/home`, existing-disk adoption, detach, and
-  data-disk resize in this release.
+  path, a path below `/srv`, `/var/lib`, `/opt`, or `/mnt`, or `/home` while
+  provisioning a new QEMU VM. The `/home` case mounts the disk before the
+  setup user is created. Populated-path migration, existing-disk adoption,
+  detach, and data-disk resize remain unsupported.
 - Guest mounts are required UUID-based systemd mounts. Missing or mismatched
   storage stops dependent Gogs and agent repository setup instead of writing
   to the root filesystem.
+- To give a newly provisioned VM a separate `/home` disk, use a logical disk
+  name and mount it at `/home`:
+
+  ```bash
+  --storage home-data local-lvm 32G \
+  --storage-mount home-data /home ext4 empty
+  ```
+
+  The VM setup user is created only after this blank disk is mounted. This is
+  available for new VMs only; it does not migrate `/home` on an existing VM.
 - Provisioned VMs automatically use a matching key from the registered
   Proxmox host or the local `~/.ssh/id_ed25519`, `id_ecdsa`, or `id_rsa`
   identity. Use `--key PATH` when the guest should use a different identity;
@@ -658,14 +668,16 @@ Notes:
 | `--deployment-lite` | Use cached/pre-uploaded repository files only |
 | `--deployment-full` | Pull fresh repositories and rebuild everything |
 | `--full-deploy` | Always rebuild deployments even if unchanged |
-| `--reset-migrations` | Rebuild a Rails database schema when migration history was squashed or reset |
 | `--ssl` | Enable Let's Encrypt SSL |
 | `--ssl-email EMAIL` | Email for SSL registration |
-| `--cloudflare` | Configure Cloudflare Tunnel |
-| `--api-subdomain` | Deploy Rails API to `api.domain.com` |
+| `--cloudflare` | Configure Cloudflare Tunnel; close direct HTTP/HTTPS only after the tunnel is verified active |
 
 Repos can also ship `infra.json` manifests for multi-component deploys; see
 [Deployments and manifests](./DEPLOYMENTS.md) for the schema and examples.
+Ruby/Rails repositories are rejected before remote setup begins. Use a pinned
+legacy infra-tools release to maintain an existing Rails deployment; current
+setup does not remove its old systemd unit or same-domain generated Nginx site
+when that whole domain is omitted from the current deployment set.
 
 ## CI/CD and Build / App Servers
 

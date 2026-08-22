@@ -460,6 +460,56 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
             dry_run=False,
         )
 
+    @patch("lib.proxmox_vm.provision_vm")
+    @patch("infra_tools.register_proxmox_setup_host")
+    @patch("infra_tools.save_setup_command")
+    @patch("infra_tools.store_cli_credentials")
+    @patch("infra_tools.print_setup_summary")
+    @patch("infra_tools.run_remote_setup", return_value=0)
+    @patch("infra_tools.validate_host", return_value=True)
+    @patch("infra_tools.validate_username", return_value=True)
+    def test_home_storage_uses_root_for_initial_network_repair(
+        self,
+        _mock_username,
+        _mock_host,
+        _mock_remote,
+        _mock_summary,
+        _mock_credentials,
+        _mock_save,
+        _mock_register,
+        _mock_provision,
+    ) -> None:
+        current = _config(
+            hosted_node="10.0.0.10",
+            container_memory="4G",
+            container_storage=[
+                ["root", "local-lvm", "32G"],
+                ["home-data", "local-lvm", "32G"],
+            ],
+            storage_mounts=[["home-data", "/home"]],
+            static_ipv4="10.0.0.50/24",
+            network_gateway4="10.0.0.1",
+            network_dns=["1.1.1.1"],
+        )
+
+        with patch("infra_tools.SetupConfig.from_args", return_value=current), \
+             patch("infra_tools.load_setup_command", return_value=None), \
+             patch(
+                 "infra_tools._prepare_runtime_config_for_cli",
+                 side_effect=lambda config: config,
+             ), \
+             patch("infra_tools.ensure_guest_ipv4_route") as mock_route:
+            result = infra_tools.run_setup_command(_args())
+
+        self.assertEqual(result, 0)
+        mock_route.assert_called_once_with(
+            "10.0.0.50/24",
+            "10.0.0.1",
+            "root",
+            current.ssh_key,
+            dry_run=False,
+        )
+
     def test_existing_cached_vm_refreshes_host_key_after_provisioning_check(
         self,
     ) -> None:

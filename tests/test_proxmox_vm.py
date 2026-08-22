@@ -240,6 +240,17 @@ class TestRenderUserData(unittest.TestCase):
         # SSH key is added under both root and alice.
         self.assertEqual(out.count("ssh-ed25519 KEY"), 2)
 
+    def test_can_defer_setup_user_until_home_is_mounted(self):
+        out = _render_user_data(
+            username="alice",
+            pubkey_contents="ssh-ed25519 KEY",
+            create_setup_user=False,
+        )
+
+        self.assertNotIn("- name: alice", out)
+        self.assertNotIn("infra-tools-alice", out)
+        self.assertEqual(out.count("ssh-ed25519 KEY"), 1)
+
     def test_no_pubkey(self):
         out = _render_user_data(username="root", pubkey_contents=None)
         self.assertNotIn("ssh_authorized_keys", out)

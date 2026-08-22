@@ -1436,8 +1436,8 @@ def _nested_string_specs(value: Any, flag: str) -> list[list[str]]:
     return specs
 
 
-def _validate_vm_mount_path(path: str) -> str:
-    """Validate an empty-path mount target supported by the first VM slice."""
+def _validate_vm_mount_path(path: str, *, allow_home: bool = False) -> str:
+    """Validate an empty-path mount target supported by VM storage setup."""
 
     if not isinstance(path, str) or not os.path.isabs(path):
         raise ValueError(f"--storage-mount PATH must be absolute: {path}")
@@ -1452,13 +1452,15 @@ def _validate_vm_mount_path(path: str) -> str:
             "--storage-mount PATH components may contain only letters, numbers, "
             "'.', '_', or '-'"
         )
-    if path == "/home" or path.startswith("/home/"):
+    if (path == "/home" or path.startswith("/home/")) and not allow_home:
         raise ValueError(
             "/home storage migration is not implemented; use an empty tool-owned "
             "path such as /srv/agent-workspace"
         )
-    if path not in _VM_MOUNT_EXACT_PATHS and not path.startswith(
-        _VM_MOUNT_ALLOWED_PREFIXES
+    if (
+        path not in _VM_MOUNT_EXACT_PATHS
+        and not (allow_home and path == "/home")
+        and not path.startswith(_VM_MOUNT_ALLOWED_PREFIXES)
     ):
         raise ValueError(
             "--storage-mount PATH must be /data or below /srv, /var/lib, /opt, or /mnt"
@@ -1526,6 +1528,7 @@ def validate_vm_storage_settings(
 
     mount_names: set[str] = set()
     mount_paths: list[str] = []
+    machine_type = getattr(config, "machine_type", None)
     for spec in mount_specs:
         if not 2 <= len(spec) <= 4:
             raise ValueError(
@@ -1545,7 +1548,12 @@ def validate_vm_storage_settings(
                 "--storage-mount currently supports only the empty policy; "
                 "populated-path migration is not implemented"
             )
-        mount_paths.append(_validate_vm_mount_path(path))
+        mount_paths.append(
+            _validate_vm_mount_path(
+                path,
+                allow_home=machine_type == "vm",
+            )
+        )
 
     for index, path in enumerate(mount_paths):
         for other in mount_paths[index + 1:]:
@@ -1568,7 +1576,6 @@ def validate_vm_storage_settings(
             + ", ".join(sorted(unknown_mounts))
         )
 
-    machine_type = getattr(config, "machine_type", None)
     if (data_names or mount_names) and machine_type != "vm":
         raise ValueError("Named data disks and --storage-mount require --machine vm")
 

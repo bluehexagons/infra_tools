@@ -39,10 +39,6 @@ STALE_USER_TOOL_TMP_MAX_AGE_DAYS = 7
 # cleaned up by finally blocks, but interrupted setup/deploy/provision runs can
 # leave them behind.
 #
-# The Bundler pattern is included because Rails deployments (see lib/deployment.py)
-# force ``TMPDIR=/var/tmp`` for ``bundle install``, which can leave
-# ``bundlerYYYYMMDD-PID-RANDOM`` build directories behind when a deploy is
-# interrupted. These are always safe to remove once they are a week old.
 STALE_INFRA_TMP_MAX_AGE_DAYS = 7
 INFRA_TMP_PATTERNS = (
     r"infra_setup_build_[A-Za-z0-9_-]+",
@@ -50,9 +46,9 @@ INFRA_TMP_PATTERNS = (
     r"infra_deploy_[A-Za-z0-9_-]+",
     r"infra_tools_pubkey\.[A-Za-z0-9]+",
     r"antistatic-(?:server|db)-linux-(?:amd64|arm64)\.v[A-Za-z0-9._-]+",
+    # Clean up temp directories left by interrupted deployments from releases
+    # that still managed Bundler. This does not install or update Ruby.
     r"bundler\d{8}-\d+-[A-Za-z0-9_-]+",
 )
-# Stale infra_tools temp cleanup scans both /tmp and /var/tmp because Rails
-# deploys redirect bundler/gem build temp files to /var/tmp to avoid filling
-# up small tmpfs-backed /tmp partitions.
+# Build tools use /var/tmp to avoid filling small tmpfs-backed /tmp partitions.
 INFRA_TMP_DIRS = ("/tmp", "/var/tmp")

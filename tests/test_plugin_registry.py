@@ -162,13 +162,15 @@ class TestPluginRegistry(unittest.TestCase):
             host="host",
             username="user",
             system_type="custom_steps",
-            custom_steps="install_ruby",
+            custom_steps="install_node",
         )
         steps = get_steps_for_system_type(config)
-        self.assertEqual([name for name, _ in steps], ["Running install_ruby"])
+        self.assertEqual([name for name, _ in steps], ["Running install_node"])
 
     def test_custom_step_resolution_is_plugin_owned(self):
-        self.assertIs(resolve_custom_step("install_ruby"), resolve_custom_step("install_ruby"))
+        self.assertIs(resolve_custom_step("install_node"), resolve_custom_step("install_node"))
+        with self.assertRaisesRegex(ValueError, "Unknown step: install_ruby"):
+            resolve_custom_step("install_ruby")
         self.assertTrue(callable(resolve_custom_step("configure_smb_mount")))
 
     def test_plugin_validator_resolution_is_plugin_owned(self):
@@ -277,6 +279,25 @@ class TestPluginRegistry(unittest.TestCase):
         self.assertLess(
             storage_index,
             step_names.index("Cloning agent repositories on target"),
+        )
+
+    def test_home_storage_is_prepared_before_setup_user(self):
+        config = SetupConfig(
+            host="host",
+            username="agent",
+            system_type="server_dev",
+            machine_type="vm",
+            container_storage=[
+                ["root", "local-lvm", "32G"],
+                ["home-data", "local-lvm", "32G"],
+            ],
+            storage_mounts=[["home-data", "/home"]],
+        )
+
+        step_names = [name for name, _ in get_steps_for_system_type(config)]
+        self.assertLess(
+            step_names.index("Preparing VM data storage"),
+            step_names.index("Setting up user"),
         )
 
     def test_workstation_dev_adds_agent_vm_steps(self):
@@ -406,13 +427,13 @@ class TestPluginRegistry(unittest.TestCase):
         plugin_one = PluginDefinition(
             name="one",
             module="plugins.one",
-            custom_steps=("install_ruby",),
+            custom_steps=("duplicate_step",),
             custom_step_provider="plugins.one:get_custom_step_functions",
         )
         plugin_two = PluginDefinition(
             name="two",
             module="plugins.two",
-            custom_steps=("install_ruby",),
+            custom_steps=("duplicate_step",),
             custom_step_provider="plugins.two:get_custom_step_functions",
         )
         with self.assertRaisesRegex(ValueError, "Duplicate custom step"):

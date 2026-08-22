@@ -138,12 +138,10 @@ class TestDataAnalysisReconstruction(unittest.TestCase):
     @patch("lib.reconstruct.detect_python", return_value=False)
     @patch("lib.reconstruct.detect_node", return_value=False)
     @patch("lib.reconstruct.detect_go", return_value=False)
-    @patch("lib.reconstruct.detect_ruby", return_value=False)
     @patch("lib.reconstruct.check_package_installed", return_value=True)
     def test_reconstruct_restores_analysis_and_python_flags(
         self,
         mock_check_package,
-        _mock_ruby,
         _mock_go,
         _mock_node,
         _mock_python,

@@ -368,14 +368,13 @@ class TestRepositorySourcePath(unittest.TestCase):
 
         self.assertEqual(result, (repo_path, "abc123"))
 
-    def test_missing_uploaded_repository_skips_without_clone(self):
+    def test_missing_uploaded_repository_aborts_without_clone(self):
         with patch.object(remote_setup.os.path, "exists", return_value=False):
-            result = remote_setup.get_repository_source_path(
-                "https://github.com/owner/app.git",
-                "default",
-            )
-
-        self.assertIsNone(result)
+            with self.assertRaisesRegex(RuntimeError, "Uploaded repository files not found"):
+                remote_setup.get_repository_source_path(
+                    "https://github.com/owner/app.git",
+                    "default",
+                )
 
 
 class TestBuildRuntimeDetection(unittest.TestCase):
@@ -429,7 +428,7 @@ class TestBuildRuntimeDetection(unittest.TestCase):
 
         self.assertFalse(config.install_go)
 
-    def test_enables_node_python_and_ruby_from_uploaded_source(self):
+    def test_enables_node_and_python_from_uploaded_source(self):
         config = SetupConfig(
             host="localhost",
             username="root",
@@ -438,14 +437,13 @@ class TestBuildRuntimeDetection(unittest.TestCase):
         )
 
         def isfile(path: str) -> bool:
-            return os.path.basename(path) in {"package.json", "pyproject.toml", "Gemfile"}
+            return os.path.basename(path) in {"package.json", "pyproject.toml"}
 
         with patch.object(remote_setup.os.path, "isfile", side_effect=isfile):
             remote_setup.enable_detected_build_runtimes(config)
 
         self.assertTrue(config.install_node)
         self.assertTrue(config.install_python)
-        self.assertTrue(config.install_ruby)
 
 
 class TestAgentPayloadCleanup(unittest.TestCase):

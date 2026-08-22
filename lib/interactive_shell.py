@@ -504,10 +504,9 @@ class InteractiveShell:
             )
             if system_type == "workstation_dev":
                 install_dev_tools = self._prompt_yes_no(
-                    "Install common dev tools (Ruby, Node, Go, Python)",
+                    "Install common dev tools (Node, Go, Python)",
                     default=(
-                        template.install_ruby
-                        and template.install_node
+                        template.install_node
                         and template.install_go
                         and template.install_python
                     )
@@ -515,7 +514,6 @@ class InteractiveShell:
                     else True,
                 )
                 if install_dev_tools:
-                    config.install_ruby = True
                     config.install_node = True
                     config.install_go = True
                     config.install_python = True
@@ -531,10 +529,6 @@ class InteractiveShell:
                     config.install_python = True
 
         if system_type == "server_web":
-            config.install_ruby = self._prompt_yes_no(
-                "Install Ruby",
-                default=template.install_ruby if template else True,
-            )
             config.install_node = self._prompt_yes_no(
                 "Install Node.js",
                 default=template.install_node if template else True,

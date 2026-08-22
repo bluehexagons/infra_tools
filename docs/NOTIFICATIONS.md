@@ -61,7 +61,7 @@ configuration, not workspace passwords.
 
 Configured targets are reused by:
 
-- APT, Node.js, Ruby, uv, and Gogs update jobs;
+- APT, Node.js, uv, and Gogs update jobs;
 - restart checks, security monitoring, and cleanup maintenance;
 - sync, parity, and storage-operation summaries; and
 - CI/CD executor success and failure reporting.

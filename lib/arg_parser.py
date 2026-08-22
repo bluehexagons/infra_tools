@@ -252,7 +252,7 @@ def add_setup_arguments(
         metavar="MOUNT",
         help=(
             "Prepare a named VM data disk at an empty path: NAME PATH "
-            "[ext4|xfs] [empty]; repeat as needed"
+            "[ext4|xfs] [empty]; /home is supported for new VMs; repeat as needed"
             if not for_remote
             else argparse.SUPPRESS
         ),
@@ -379,7 +379,7 @@ def add_setup_arguments(
     
     if allow_steps or for_remote:
         parser.add_argument("--steps", dest="custom_steps", 
-                           help="Space-separated list of steps to run (e.g., 'install_ruby install_node')")
+                           help="Space-separated list of steps to run (e.g., 'install_node install_python')")
     parser.add_argument("--rdp", dest="enable_rdp", 
                        action=argparse.BooleanOptionalAction, 
                        default=None if not for_remote else False,
@@ -502,10 +502,6 @@ def add_setup_arguments(
     )
     
     # Development tools
-    parser.add_argument("--ruby", dest="install_ruby", 
-                       action=argparse.BooleanOptionalAction if not for_remote else "store_true", 
-                       default=None if not for_remote else False,
-                       help="Install Ruby + Bundler from apt packages")
     parser.add_argument("--go", dest="install_go", 
                        action=argparse.BooleanOptionalAction if not for_remote else "store_true", 
                        default=None if not for_remote else False,
@@ -819,8 +815,6 @@ def add_setup_arguments(
     parser.add_argument("--deploy-latest", action=DeployLatestSpecAction, nargs=2, 
                         metavar=("DOMAIN_OR_PATH", "GIT_URL"),
                         help="Deploy latest packages and releases (bypassing age policy); requires DOMAIN_OR_PATH and GIT_URL")
-    parser.add_argument("--reset-migrations", dest="reset_migrations", action="store_true",
-                       help="Reset Rails database schema using db:schema:load (use when migrations were squashed or reset)")
     parser.add_argument("--ssl", dest="enable_ssl", 
                        action=argparse.BooleanOptionalAction if not for_remote else "store_true", 
                        default=None if not for_remote else False,
@@ -830,12 +824,7 @@ def add_setup_arguments(
     parser.add_argument("--cloudflare", dest="enable_cloudflare", 
                        action=argparse.BooleanOptionalAction if not for_remote else "store_true", 
                        default=None if not for_remote else False,
-                       help="Preconfigure server for Cloudflare tunnel (disables public HTTP/HTTPS ports)")
-    parser.add_argument("--api-subdomain", dest="api_subdomain", 
-                       action=argparse.BooleanOptionalAction if not for_remote else "store_true", 
-                       default=None if not for_remote else False,
-                       help="Deploy Rails API as a subdomain (api.domain.com) instead of a subdirectory (domain.com/api)")
-    
+                       help="Preconfigure Cloudflare Tunnel; close public HTTP/HTTPS after activation")
     parser.add_argument("--cicd", dest="enable_cicd", 
                        action=argparse.BooleanOptionalAction if not for_remote else "store_true", 
                        default=None if not for_remote else False,

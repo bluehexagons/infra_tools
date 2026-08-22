@@ -5,13 +5,15 @@ know.
 
 ## Automatic safeguards
 
-- Creates timestamped database backups before Rails migrations when an existing
-  production database is present and migrations are pending.
-- Skips or allows seeds based on simple idempotency checks so existing data is
-  not overwritten by accident.
-- Supports `--reset-migrations` for squashed or reset migration histories.
-- Keeps persistent Rails state under `.infra_tools_shared` so redeployments do
-  not discard data.
+- Stages every requested repository on the control system before starting
+  remote setup. A failed fetch aborts the complete run, preventing a partial
+  desired set from removing an existing Nginx route.
+- Refuses repositories or existing release trees with common Ruby/Rails markers.
+  Ruby support belongs to pinned legacy infra-tools releases; current setup
+  leaves existing legacy Rails units and their generated Nginx routes alone.
+- Legacy automatic static and Node builds run beside the active release and
+  switch directories atomically only after a successful build. A failed build
+  leaves the previous release active.
 - Manifest service components get dedicated runtime users and per-component
   writable state under `.infra_tools_shared/<app>/<component>`.
 - Manifest builds use per-application build users, stable automatic ports, and
@@ -27,7 +29,7 @@ know.
   before replacement, with manifest-controlled retention.
 - Installs a weekly cleanup timer and caps journal growth on server-style
   setups.
-- Uses conservative package-update policy for Node, Ruby, and uv by default.
+- Uses conservative package-update policy for Node and uv by default.
 - Installs recurring maintenance unit files atomically and verifies that each
   timer is enabled and active without first deleting the working timer.
 - Validates Nginx hardening and default-site changes before reload, restoring
@@ -38,12 +40,6 @@ know.
 ## Recovery Path
 
 Replace the angle-bracket placeholders in these command templates with values for the target application and host.
-
-Backups live at:
-
-```text
-/var/www/.infra_tools_shared/<app_name>/backups/
-```
 
 Manifest SQLite backups live under the component instead:
 
@@ -63,30 +59,14 @@ the `staging_path`, `backup_path`, `units`, and `errors` recorded in its
 before moving the marker aside for audit. Do not remove or replace a
 `recovery_required` marker merely to make deployment proceed.
 
-Restore the latest backup by stopping the service, copying the database back,
-and starting the service again:
+Restore a manifest component's latest SQLite backup by stopping its service,
+copying the database back, and starting the service again:
 
 ```text
-sudo systemctl stop rails-<app_name>.service
-sudo cp /var/www/.infra_tools_shared/<app_name>/backups/<backup_file> \
-       /var/www/.infra_tools_shared/<app_name>/db/production.sqlite3
-sudo systemctl start rails-<app_name>.service
-```
-
-If seeds are safe to run manually, use the runtime user from the service unit:
-
-```text
-cd /var/www/<app_directory>
-APP_USER=$(systemctl show -p User --value rails-<app_name>.service)
-sudo -u "$APP_USER" RAILS_ENV=production bundle exec rake db:seed
-```
-
-For a squashed or reset migration history, rerun with:
-
-```text
-infra-tools setup server_web <host> \
-  --deploy <deploy-spec> <git-url> \
-  --reset-migrations
+sudo systemctl stop app-<app_name>-<component>.service
+sudo cp /var/www/.infra_tools_shared/<app_name>/<component>/backups/<backup_file> \
+       /var/www/.infra_tools_shared/<app_name>/<component>/data/<database>.sqlite3
+sudo systemctl start app-<app_name>-<component>.service
 ```
 
 ## Maintenance

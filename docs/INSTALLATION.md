@@ -210,8 +210,12 @@ privileges required by the selected profile:
 
 ```bash
 infra-tools setup server_web example.com admin \
-  --ruby --node --ssl --ssl-email admin@example.com
+  --node --ssl --ssl-email admin@example.com
 ```
+
+Ruby/Rails setup and deployment support has been removed. Keep a pinned older
+infra-tools installation for a legacy Rails host; current releases refuse Ruby
+repositories rather than attempting an in-place migration.
 
 For agentic coding targets, use the [headless terminal example](WORKSTATIONS.md#headless-agentic-coding-host)
 when no desktop or RDP is wanted, or the [desktop/RDP example](WORKSTATIONS.md#desktop-agentic-coding-workstation-with-rdp)

@@ -1068,14 +1068,22 @@ class TestValidateVMStorageSettings(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Duplicate --storage-mount'):
             validate_vm_storage_settings(config, require_provisioning=False)
 
-    def test_unsafe_and_overlapping_mount_paths_are_rejected(self):
+    def test_home_mount_is_allowed_for_a_new_vm(self):
         config = _MockConfig(
             machine_type='vm',
             container_storage=[['one', 'local-lvm', '32G']],
             storage_mounts=[['one', '/home']],
         )
-        with self.assertRaisesRegex(ValueError, '/home storage migration'):
-            validate_vm_storage_settings(config, require_provisioning=False)
+
+        config.hosted_node = '10.0.0.1'
+        validate_vm_storage_settings(config, require_provisioning=True)
+
+    def test_unsafe_and_overlapping_mount_paths_are_rejected(self):
+        config = _MockConfig(
+            machine_type='vm',
+            container_storage=[['one', 'local-lvm', '32G']],
+            storage_mounts=[['one', '/srv/data']],
+        )
 
         config.container_storage = [
             ['one', 'local-lvm', '32G'],

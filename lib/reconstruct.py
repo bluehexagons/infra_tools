@@ -68,11 +68,6 @@ def check_package_installed(package: str) -> bool:
     return result.returncode == 0 and "install ok installed" in result.stdout
 
 
-def detect_ruby() -> bool:
-    """Detect Ruby installed via apt packages."""
-    return check_command_exists("ruby") and check_command_exists("bundler")
-
-
 def detect_go() -> bool:
     return check_command_exists("go")
 
@@ -215,7 +210,6 @@ def reconstruct_configuration(host: str = "localhost", username: str = "root") -
     """Reconstruct setup configuration by analyzing the server."""
     config_dict: dict[str, Any] = {
         "username": username,
-        "install_ruby": detect_ruby(),
         "install_go": detect_go(),
         "install_node": detect_node(),
         "install_python": detect_python(),
@@ -256,7 +250,6 @@ def run_reconstruct_command(compact: bool) -> int:
     try:
         config, extras = reconstruct_configuration()
         output = {
-            "install_ruby": config.install_ruby,
             "install_go": config.install_go,
             "install_node": config.install_node,
             "install_python": config.install_python,

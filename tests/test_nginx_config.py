@@ -137,7 +137,7 @@ class TestGenerateMergedNginxConfig(unittest.TestCase):
         config = generate_merged_nginx_config('example.com', deployments)
         self.assertIn('proxy_pass', config)
 
-    def test_rails_proxy_uses_backend_port_when_proxy_port_missing(self):
+    def test_proxy_uses_backend_port_when_proxy_port_missing(self):
         deployments = [{
             'path': '/',
             'needs_proxy': True,
@@ -210,44 +210,6 @@ class TestGenerateMergedNginxConfig(unittest.TestCase):
         self.assertIn('root /var/www/html', http_block)
         self.assertIn('acme-challenge', http_block)
 
-    def test_cloudflare_tunnel_disables_api_subdomain_http_redirect(self):
-        deployments = [{
-            'path': '/',
-            'needs_proxy': True,
-            'backend_port': 3007,
-            'frontend_port': 5173,
-            'api_subdomain': True,
-        }]
-        config = generate_merged_nginx_config('example.com', deployments, enable_https_redirect=False)
-        self.assertNotIn('return 301 https://$host$request_uri', config)
-        self.assertIn('server_name api.example.com', config)
-        self.assertIn('proxy_pass http://127.0.0.1:3007', config)
-
-    def test_cloudflare_tunnel_proxies_api_path_without_redirect(self):
-        deployments = [{
-            'path': '/',
-            'needs_proxy': True,
-            'backend_port': 3007,
-            'frontend_port': 5173,
-            'api_subdomain': False,
-        }]
-        config = generate_merged_nginx_config('example.com', deployments, enable_https_redirect=False)
-        self.assertNotIn('return 301 /api/', config)
-        self.assertIn('location = /api', config)
-        self.assertIn('proxy_set_header X-Forwarded-Proto https', config)
-
-    def test_standard_api_path_still_redirects_to_trailing_slash(self):
-        deployments = [{
-            'path': '/',
-            'needs_proxy': True,
-            'backend_port': 3007,
-            'frontend_port': 5173,
-            'api_subdomain': False,
-        }]
-        config = generate_merged_nginx_config('example.com', deployments)
-        self.assertIn('return 301 /api/', config)
-        self.assertIn('proxy_set_header X-Forwarded-Proto $scheme', config)
-
     def test_hsts_header_present(self):
         deployments = [{
             'path': '/',
@@ -261,6 +223,23 @@ class TestGenerateMergedNginxConfig(unittest.TestCase):
 
 
 class TestReconcileDeploymentSites(unittest.TestCase):
+    def test_preserves_legacy_rails_site_owned_by_existing_unit(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            available = os.path.join(temp_dir, 'sites-available')
+            enabled = os.path.join(temp_dir, 'sites-enabled')
+            os.makedirs(available)
+            os.makedirs(enabled)
+            legacy_site = os.path.join(available, 'legacy_example_com')
+            with open(legacy_site, 'w', encoding='utf-8') as handle:
+                handle.write(f"{GENERATED_CONFIG_MARKER}\n")
+
+            with patch('lib.nginx_config.NGINX_SITES_AVAILABLE_DIR', available), \
+                 patch('lib.nginx_config.NGINX_SITES_ENABLED_DIR', enabled), \
+                 patch('lib.nginx_config._is_legacy_rails_site', return_value=True):
+                _reconcile_deployment_sites(set())
+
+            self.assertTrue(os.path.exists(legacy_site))
+
     def test_removes_stale_deployment_sites_only(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             available = os.path.join(temp_dir, 'sites-available')

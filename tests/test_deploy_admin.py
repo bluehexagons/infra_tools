@@ -17,12 +17,12 @@ class TestDeployAdminValidation(unittest.TestCase):
                 validate_config_name(invalid)
 
     def test_service_name_is_limited_to_generated_app_units(self):
-        self.assertEqual(validate_service_name("rails-shop.service"), "rails-shop.service")
         self.assertEqual(validate_service_name("node-api.service"), "node-api.service")
-        self.assertEqual(validate_service_name("rails-shop"), "rails-shop.service")
+        self.assertEqual(validate_service_name("node-shop"), "node-shop.service")
         for invalid in (
             "nginx.service",
             "rails-../../ssh.service",
+            "rails-shop.service",
             "rails-shop.service.service",
             "node-.service",
         ):

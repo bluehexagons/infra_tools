@@ -83,3 +83,9 @@ def storage_mounts(config: SetupConfig) -> list[VMStorageMount]:
             )
         )
     return result
+
+
+def has_home_mount(config: SetupConfig) -> bool:
+    """Return whether provisioning will mount a dedicated filesystem at /home."""
+
+    return any(mount.path == "/home" for mount in storage_mounts(config))

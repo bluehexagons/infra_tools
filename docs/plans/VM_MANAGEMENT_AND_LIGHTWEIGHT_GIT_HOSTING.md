@@ -38,7 +38,7 @@ avoid abstraction whose only purpose is a hypothetical provider or service.
 | --- | --- | --- |
 | A1: VM terminology and observation commands | Observation, stats, power lifecycle, autostart, and destroy slice implemented | `vm list/show/health/stats/status/snapshot list/backup list` emit versioned provider-neutral output; single-VM commands resolve saved local names; legacy Proxmox guest paths remain during migration |
 | A2: existing VM mutations | Single-step power lifecycle, typed autostart, and destroy implemented; broader work dependency-gated | Complete durable operation markers and the staged mutation contract before restore, rollback, or multi-step mutation paths |
-| A3: declarative VM data disks and guest mounts | Provisioning slice implemented | Live Proxmox validation, read-only mount status, then coordinated grow-only resize; existing-disk adoption, detach, and `/home` migration remain rejected |
+| A3: declarative VM data disks and guest mounts | Provisioning slice implemented | Live Proxmox validation, read-only mount status, then coordinated grow-only resize; existing-disk adoption, detach, and populated-path migration remain rejected |
 | A4: clone and restore | Dependency-gated | Shared transaction and recovery contracts |
 | B1: explicit and safe Gogs LFS | Implemented (IPv4) | Verified releases, local LFS layout, required mounts, safe hostless exposure, reusable health/status, and agent Git LFS setup are complete; IPv6 exposure remains explicitly deferred |
 | B2: Gogs recovery | Dependency-gated | Shared recovery mechanism and authenticated restore smoke test |
@@ -106,10 +106,12 @@ avoid abstraction whose only purpose is a hypothetical provider or service.
   empty directory on the root filesystem to receive data.
 - Common paths are supported by policy, not by silently mounting over them.
   Tool-owned empty paths such as `/srv/gogs` and
-  `/srv/agent-workspace` are the first slice. A populated path such as
-  `/home` requires an explicit migration policy, backup or snapshot checks,
-  and a verified copy before cutover. Broad system paths such as `/`, `/etc`,
-  `/usr`, and `/boot` are outside the first storage contract.
+  `/srv/agent-workspace` are supported, as is an empty `/home` during new VM
+  provisioning. Provisioning defers setup-user creation until `/home` is
+  mounted. A populated path such as `/home` still requires an explicit
+  migration policy, backup or snapshot checks, and a verified copy before
+  cutover. Broad system paths such as `/`, `/etc`, `/usr`, and `/boot` are
+  outside the storage contract.
 - `--backup SOURCE DESTINATION INTERVAL` is a generic path-mirror declaration,
   not a Samba feature. It composes with the existing root-owned rsync and
   par2 storage-operations service; a destination may be a local path, a
@@ -211,8 +213,10 @@ or XFS filesystem, mounts it through a required UUID-based systemd unit, and
 stores versioned state plus a health marker on the mounted filesystem. Gogs
 and agent repository setup verify that marker and active UUID before writing.
 `--agent-workspace` can place clones on the mounted disk. Existing-disk
-adoption, LXC data disks, attach-only disks, detach, resize, populated-path
-migration, and `/home` remain deferred and rejected by validation.
+adoption, LXC data disks, attach-only disks, detach, resize, and populated-path
+migration remain deferred and rejected by validation. An empty `/home` is
+supported only during new VM provisioning; cloud-init defers setup-user
+creation until that mount is active.
 
 ### Planned VM storage contract
 

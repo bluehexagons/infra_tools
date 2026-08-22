@@ -54,6 +54,21 @@ def _is_infra_tools_deployment_site(path: str) -> bool:
     ))
 
 
+def _is_legacy_rails_site(config_name: str) -> bool:
+    """Preserve an unsupported legacy Rails route owned by its old unit."""
+    systemd_dir = "/etc/systemd/system"
+    direct_unit = f"rails-{config_name}.service"
+    subpath_prefix = f"rails-{config_name}__"
+    try:
+        return any(
+            filename == direct_unit
+            or (filename.startswith(subpath_prefix) and filename.endswith(".service"))
+            for filename in os.listdir(systemd_dir)
+        )
+    except OSError:
+        return False
+
+
 def _write_config_atomic(path: str, content: bytes, mode: int = 0o644) -> None:
     """Replace a config file without exposing a partial write."""
     fd, temporary_path = tempfile.mkstemp(
@@ -95,7 +110,11 @@ def _reconcile_deployment_sites(current_config_names: set[str]) -> None:
             continue
 
         for name in os.listdir(directory):
-            if name in current_config_names or name.startswith(PRESERVED_SITE_PREFIXES):
+            if (
+                name in current_config_names
+                or name.startswith(PRESERVED_SITE_PREFIXES)
+                or _is_legacy_rails_site(name)
+            ):
                 continue
 
             path = os.path.join(directory, name)
@@ -294,74 +313,6 @@ def _make_static_location(path: str, serve_path: str, index_file: str, try_files
     }}"""
 
 
-def _make_api_server_block(
-    domain: str,
-    port: int,
-    enable_https_redirect: bool = True,
-    forwarded_proto: str = "$scheme",
-) -> str:
-    """Generate a separate server block for API subdomain (HTTP redirect + HTTPS)."""
-    cert, key = get_ssl_cert_path(domain)
-    redirect_block = """
-    location / {
-        return 301 https://$host$request_uri;
-    }
-""" if enable_https_redirect else f"""
-    location / {{
-        proxy_pass http://127.0.0.1:{port};
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto {forwarded_proto};
-        proxy_buffering on;
-        proxy_http_version 1.1;
-        proxy_set_header Connection "";
-        proxy_intercept_errors off;
-    }}
-"""
-    return f"""server {{
-    listen 80;
-    listen [::]:80;
-    server_name {domain};
-
-    location /.well-known/acme-challenge/ {{
-        root /var/www/letsencrypt;
-    }}
-{redirect_block}
-}}
-
-server {{
-    listen 443 ssl;
-    listen [::]:443 ssl;
-    http2 on;
-
-    server_name {domain};
-    
-    ssl_certificate {cert};
-    ssl_certificate_key {key};
-    ssl_protocols {SSL_PROTOCOLS};
-    ssl_prefer_server_ciphers on;
-    ssl_ciphers {SSL_CIPHERS};
-    
-    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
-    
-    location / {{
-        proxy_pass http://127.0.0.1:{port};
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto {forwarded_proto};
-
-        # Performance optimizations for API backends
-        proxy_buffering on;
-        proxy_http_version 1.1;
-        proxy_set_header Connection "";
-        proxy_intercept_errors off;
-    }}
-}}
-"""
-
-
 def generate_merged_nginx_config(
     domain: Optional[str],
     deployments: Deployments,
@@ -380,21 +331,6 @@ def generate_merged_nginx_config(
     
     sorted_deployments = sorted(deployments, key=lambda d: len(d['path']), reverse=True)
     
-    api_configs: StrList = []
-    if domain:
-        for dep in sorted_deployments:
-            if dep.get('backend_port') and (dep.get('frontend_port') or dep.get('frontend_serve_path')):
-                use_subdomain = dep.get('api_subdomain', False)
-                
-                if (dep['path'] == '/' or not dep['path']) and use_subdomain:
-                    api_domain = f"api.{domain}"
-                    api_configs.append(_make_api_server_block(
-                        api_domain,
-                        dep['backend_port'],
-                        enable_https_redirect=enable_https_redirect,
-                        forwarded_proto=forwarded_proto,
-                    ))
-
     locations: StrList = []
     
     locations.append("""    location /.well-known/acme-challenge/ {
@@ -407,61 +343,13 @@ def generate_merged_nginx_config(
         
         if dep['needs_proxy']:
             backend_port = dep.get('backend_port')
-            frontend_port = dep.get('frontend_port')
             proxy_port = dep.get('proxy_port') or backend_port or 3000
-            frontend_serve_path = dep.get('frontend_serve_path')
-            
-            if backend_port and (frontend_port or frontend_serve_path):
-                use_subdomain_api = domain and (path == '/' or not path) and dep.get('api_subdomain', False)
-                
-                if use_subdomain_api:
-                    if frontend_serve_path:
-                        try_files = "$uri $uri.html $uri/ /index.html" if location_path == '/' else f"$uri $uri.html $uri/ {location_path}/index.html"
-                        locations.append(_make_static_location(
-                            location_path, frontend_serve_path, "index.html", try_files, f"# Frontend for {path}",
-                            expires_var=expires_var, cc_var=cc_var
-                        ))
-                    else:
-                        if frontend_port is not None:
-                            locations.append(_make_proxy_location(
-                                location_path, frontend_port, f"# Frontend for {path}", enable_websocket=True,
-                                expires_var=expires_var, cc_var=cc_var,
-                                forwarded_proto=forwarded_proto, enable_path_redirect=enable_path_redirect
-                            ))
-                        else:
-                            raise ValueError("frontend_port must be set to create proxy location")
-                else:
-                    # Subpath strategy: Backend at /path/api, Frontend at /path
-                    
-                    api_path = "/api" if location_path == '/' else f"{location_path}/api"
-                    locations.append(_make_proxy_location(
-                        api_path, backend_port, f"# Backend for {path}",
-                        expires_var=expires_var, cc_var=cc_var,
-                        forwarded_proto=forwarded_proto, enable_path_redirect=enable_path_redirect
-                    ))
-
-                    if frontend_serve_path:
-                        try_files = "$uri $uri.html $uri/ /index.html" if location_path == '/' else f"$uri $uri.html $uri/ {location_path}/index.html"
-                        locations.append(_make_static_location(
-                            location_path, frontend_serve_path, "index.html", try_files, f"# Frontend for {path}",
-                            expires_var=expires_var, cc_var=cc_var
-                        ))
-                    else:
-                        if frontend_port is not None:
-                            locations.append(_make_proxy_location(
-                                location_path, frontend_port, f"# Frontend for {path}", enable_websocket=True,
-                                expires_var=expires_var, cc_var=cc_var,
-                                forwarded_proto=forwarded_proto, enable_path_redirect=enable_path_redirect
-                            ))
-                        else:
-                            raise ValueError("frontend_port must be set to create proxy location")
-            else:
-                locations.append(_make_proxy_location(
-                    location_path, proxy_port, f"# Proxy for {path}",
-                    expires_var=expires_var, cc_var=cc_var,
-                    forwarded_proto=forwarded_proto, enable_path_redirect=enable_path_redirect,
-                    preserve_path=dep.get('preserve_path', False)
-                ))
+            locations.append(_make_proxy_location(
+                location_path, proxy_port, f"# Proxy for {path}",
+                expires_var=expires_var, cc_var=cc_var,
+                forwarded_proto=forwarded_proto, enable_path_redirect=enable_path_redirect,
+                preserve_path=dep.get('preserve_path', False)
+            ))
         else:
             serve_path = dep['serve_path']
             index_file = "index.html index.htm"
@@ -524,7 +412,7 @@ server {{
 }}
 """
     
-    return "\n".join([GENERATED_CONFIG_MARKER, cache_maps] + api_configs + [main_config])
+    return "\n".join([GENERATED_CONFIG_MARKER, cache_maps, main_config])
 
 
 def _create_nginx_sites_for_groups(
@@ -542,12 +430,6 @@ def _create_nginx_sites_for_groups(
         generate_self_signed_cert(cert_domain)
         
         if domain:
-            # Check for API subdomains
-            for dep in deployments:
-                if dep.get('backend_port') and (dep.get('frontend_port') or dep.get('frontend_serve_path')):
-                    if dep.get('api_subdomain', False):
-                        generate_self_signed_cert(f"api.{domain}")
-            
             config_name = _config_name_for_domain(domain)
         else:
             config_name = _config_name_for_domain(domain)

@@ -15,6 +15,7 @@ from lib.config import SetupConfig
 from web.cloudflare_steps import (
     configure_cloudflare_firewall,
     configure_nginx_for_cloudflare,
+    run_cloudflare_tunnel_setup,
 )
 
 
@@ -37,6 +38,11 @@ class TestConfigureCloudflareFirewall(unittest.TestCase):
 
         mock_run.assert_has_calls(
             [
+                call(
+                    "systemctl is-active --quiet cloudflared",
+                    check=False,
+                    capture_output=True,
+                ),
                 call("ufw status 2>/dev/null | grep -q 'Status: active'", check=False),
                 call("ufw default deny incoming"),
                 call("ufw default allow outgoing"),
@@ -62,6 +68,11 @@ class TestConfigureCloudflareFirewall(unittest.TestCase):
 
         mock_run.assert_has_calls(
             [
+                call(
+                    "systemctl is-active --quiet cloudflared",
+                    check=False,
+                    capture_output=True,
+                ),
                 call("ufw status 2>/dev/null | grep -q 'Status: active'", check=False),
                 call("ufw default deny incoming"),
                 call("ufw default allow outgoing"),
@@ -76,6 +87,19 @@ class TestConfigureCloudflareFirewall(unittest.TestCase):
                 call("ufw allow 3478/udp comment 'antistatic STUN'", check=False),
                 call("ufw --force enable"),
             ]
+        )
+
+    @patch("web.cloudflare_steps.run")
+    def test_inactive_tunnel_refuses_firewall_changes(self, mock_run):
+        mock_run.return_value = SimpleNamespace(returncode=3)
+
+        with self.assertRaisesRegex(RuntimeError, "before cloudflared is active"):
+            configure_cloudflare_firewall(_make_config())
+
+        mock_run.assert_called_once_with(
+            "systemctl is-active --quiet cloudflared",
+            check=False,
+            capture_output=True,
         )
 
 
@@ -111,6 +135,29 @@ class TestConfigureNginxForCloudflare(unittest.TestCase):
                     configure_nginx_for_cloudflare(_make_config())
             with open(conf_path, encoding="utf-8") as restored:
                 self.assertEqual(restored.read(), "old config\n")
+
+
+class TestRunCloudflareTunnelSetup(unittest.TestCase):
+    @patch("web.cloudflare_steps.os.path.exists")
+    @patch("web.cloudflare_steps.run")
+    def test_missing_tunnel_state_retains_direct_ports(self, mock_run, mock_exists):
+        mock_exists.side_effect = lambda path: not path.endswith("tunnel-state.json")
+
+        self.assertFalse(run_cloudflare_tunnel_setup(_make_config()))
+
+        mock_run.assert_not_called()
+
+    @patch("web.cloudflare_steps.os.path.exists", return_value=True)
+    @patch("web.cloudflare_steps.run")
+    def test_failed_refresh_is_fatal(self, mock_run, _mock_exists):
+        mock_run.return_value = SimpleNamespace(
+            returncode=1,
+            stdout="",
+            stderr="service inactive",
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "service inactive"):
+            run_cloudflare_tunnel_setup(_make_config())
 
 
 if __name__ == "__main__":

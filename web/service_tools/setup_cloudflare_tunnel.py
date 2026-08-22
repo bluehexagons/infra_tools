@@ -378,6 +378,23 @@ def _ensure_service_running() -> bool:
     return True
 
 
+def _close_public_web_ports() -> None:
+    """Close direct HTTP/HTTPS only after cloudflared is verified active."""
+    if not shutil.which("ufw"):
+        run_command(["apt-get", "update"])
+        run_command(["apt-get", "install", "-y", "ufw"])
+
+    run_command(["ufw", "default", "deny", "incoming"])
+    run_command(["ufw", "default", "allow", "outgoing"])
+    run_command(["ufw", "delete", "allow", "ssh"], check=False)
+    run_command(["ufw", "delete", "allow", "22/tcp"], check=False)
+    run_command(["ufw", "limit", "ssh"])
+    for rule in ("80/tcp", "443/tcp", "80", "443"):
+        run_command(["ufw", "delete", "allow", rule], check=False)
+    run_command(["ufw", "--force", "enable"])
+    print("✓ Direct HTTP/HTTPS ports closed after tunnel verification")
+
+
 def install_and_start_service():
     """Install and start the cloudflared service."""
     print("\nInstalling cloudflared service...")
@@ -559,6 +576,11 @@ def main(interactive: bool = True, auto_update: bool = False):
     
     if proceed == 'y':
         install_and_start_service()
+        if not _ensure_service_running():
+            raise RuntimeError(
+                "cloudflared did not become active; direct HTTP/HTTPS ports remain open"
+            )
+        _close_public_web_ports()
         
         print("\n" + "=" * 50)
         print("Setup Complete!")

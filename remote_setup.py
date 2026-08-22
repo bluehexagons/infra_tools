@@ -162,7 +162,7 @@ def get_repository_source_path(
     git_url: str,
     deployment_mode: str,
     dry_run: bool = False
-) -> Optional[tuple[str, str]]:
+) -> tuple[str, str]:
     """
     Get the uploaded source path for a repository.
 
@@ -171,14 +171,16 @@ def get_repository_source_path(
     from Git directly; deployment modes control rebuild behavior, not source
     acquisition.
 
-    Returns: (source_path, commit_hash) or None if deployment should be skipped.
+    Returns: (source_path, commit_hash). Missing uploads are fatal because
+    continuing would make Nginx reconciliation remove otherwise-live routes.
     """
     repo_name = extract_repo_name(git_url)
     cache_path = f'/opt/infra_tools/deployments/{repo_name}'
 
     if not os.path.exists(cache_path):
-        print(f"\n⚠ Uploaded repository files not found at {cache_path}, skipping {git_url}")
-        return None
+        raise RuntimeError(
+            f"Uploaded repository files not found at {cache_path} for {git_url}"
+        )
 
     commit_hash = ""
     commit_file = f'{cache_path}.commit'
@@ -218,9 +220,6 @@ def enable_detected_build_runtimes(config: SetupConfig) -> None:
         if project_files["python"] and not config.install_python:
             config.install_python = True
             print(f"Detected Python project in {repo_name}; enabling target Python runtime")
-        if project_files["ruby"] and not config.install_ruby:
-            config.install_ruby = True
-            print(f"Detected Ruby project in {repo_name}; enabling target Ruby runtime")
         if project_files["go"]:
             if not config.install_go:
                 config.install_go = True
@@ -249,7 +248,6 @@ def _find_project_runtime_files(repo_path: str) -> dict[str, list[str]]:
         "go": {"go.mod"},
         "node": {"package.json"},
         "python": {"pyproject.toml", "uv.lock", "requirements.txt"},
-        "ruby": {"Gemfile"},
     }
     found: dict[str, list[str]] = {runtime: [] for runtime in markers}
     if not os.path.isdir(repo_path):
@@ -458,7 +456,6 @@ def _run_main() -> int:
     
     if config.enable_cloudflare:
         from web.cloudflare_steps import (
-            configure_cloudflare_firewall,
             create_cloudflared_config_directory,
             configure_nginx_for_cloudflare,
             install_cloudflared_service_helper
@@ -468,20 +465,18 @@ def _run_main() -> int:
         print("Configuring Cloudflare tunnel support...")
         print("=" * 60)
         
-        print("\n[1/4] Configuring firewall for Cloudflare tunnel")
-        configure_cloudflare_firewall(config)
-        
-        print("\n[2/4] Creating cloudflared configuration directory")
+        print("\n[1/3] Creating cloudflared configuration directory")
         create_cloudflared_config_directory(config)
         
-        print("\n[3/4] Configuring nginx for Cloudflare")
+        print("\n[2/3] Configuring nginx for Cloudflare")
         configure_nginx_for_cloudflare(config)
         
-        print("\n[4/4] Installing cloudflared setup helper")
+        print("\n[3/3] Installing cloudflared setup helper")
         install_cloudflared_service_helper(config)
         
         print("\n✓ Cloudflare tunnel preconfiguration complete")
-        print("  Run 'sudo setup-cloudflare-tunnel' to install cloudflared")
+        print("  Public HTTP/HTTPS remain open until cloudflared is verified active")
+        print("  Run 'sudo setup-cloudflare-tunnel' to create a tunnel")
     
     if config.deploy_specs:
         from deploy.deploy_steps import deploy_repository
@@ -494,9 +489,6 @@ def _run_main() -> int:
         
         for deploy_specs_str, git_url in config.deploy_specs:
             repo_result = get_repository_source_path(git_url, config.deployment_mode, config.dry_run)
-            if repo_result is None:
-                continue
-            
             source_path, commit_hash = repo_result
             
             for deploy_spec in deploy_specs_str.split(','):
@@ -511,8 +503,6 @@ def _run_main() -> int:
                     commit_hash=commit_hash,
                     full_deploy=config.full_deploy,
                     keep_source=True,
-                    api_subdomain=config.api_subdomain,
-                    reset_migrations=config.reset_migrations
                 )
                 if infos:
                     deployments.extend(infos)
@@ -548,13 +538,19 @@ def _run_main() -> int:
                     enable_https_redirect=not config.enable_cloudflare,
                 )
             
-            if config.enable_cloudflare:
-                from web.cloudflare_steps import run_cloudflare_tunnel_setup
-                
-                print("\n" + "=" * 60)
-                print("Updating cloudflared config for deployments...")
-                print("=" * 60)
-                run_cloudflare_tunnel_setup(config)
+    if config.enable_cloudflare:
+        from web.cloudflare_steps import (
+            configure_cloudflare_firewall,
+            run_cloudflare_tunnel_setup,
+        )
+
+        print("\n" + "=" * 60)
+        print("Verifying Cloudflare tunnel activation...")
+        print("=" * 60)
+        if run_cloudflare_tunnel_setup(config):
+            configure_cloudflare_firewall(config)
+        else:
+            print("  ℹ Direct HTTP/HTTPS access retained until a tunnel is configured")
     
     if config.enable_samba:
         from smb.samba_steps import (

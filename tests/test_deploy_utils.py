@@ -14,7 +14,7 @@ from lib.deploy_utils import (
     create_safe_directory_name,
     detect_project_type,
     get_project_root,
-    should_reverse_proxy,
+    is_ruby_project,
     get_deployment_metadata_path,
     save_deployment_metadata,
     load_deployment_metadata,
@@ -67,23 +67,26 @@ class TestCreateSafeDirectoryName(unittest.TestCase):
 
 
 class TestDetectProjectType(unittest.TestCase):
-    def test_rails_ruby_version(self):
+    def test_ruby_markers_are_unsupported_not_a_project_type(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with open(os.path.join(tmpdir, '.ruby-version'), 'w') as f:
                 f.write('3.2.0')
-            self.assertEqual(detect_project_type(tmpdir), 'rails')
+            self.assertTrue(is_ruby_project(tmpdir))
+            self.assertEqual(detect_project_type(tmpdir), 'unknown')
 
-    def test_rails_gemfile(self):
+    def test_gemfile_is_detected_by_unsupported_guard(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with open(os.path.join(tmpdir, 'Gemfile'), 'w') as f:
                 f.write("gem 'rails'\n")
-            self.assertEqual(detect_project_type(tmpdir), 'rails')
+            self.assertTrue(is_ruby_project(tmpdir))
+            self.assertEqual(detect_project_type(tmpdir), 'unknown')
 
-    def test_rails_config_ru(self):
+    def test_config_ru_is_detected_by_unsupported_guard(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with open(os.path.join(tmpdir, 'config.ru'), 'w') as f:
                 f.write('run Rails.application')
-            self.assertEqual(detect_project_type(tmpdir), 'rails')
+            self.assertTrue(is_ruby_project(tmpdir))
+            self.assertEqual(detect_project_type(tmpdir), 'unknown')
 
     def test_node_project(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -101,19 +104,13 @@ class TestDetectProjectType(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             self.assertEqual(detect_project_type(tmpdir), 'unknown')
 
-    def test_rails_public_dir(self):
+    def test_public_directory_is_static_fallback(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             os.makedirs(os.path.join(tmpdir, 'public'))
-            self.assertEqual(detect_project_type(tmpdir), 'rails')
+            self.assertEqual(detect_project_type(tmpdir), 'unknown')
 
 
 class TestGetProjectRoot(unittest.TestCase):
-    def test_rails_with_public(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            public_dir = os.path.join(tmpdir, 'public')
-            os.makedirs(public_dir)
-            self.assertEqual(get_project_root(tmpdir, 'rails'), public_dir)
-
     def test_node_with_dist(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             dist_dir = os.path.join(tmpdir, 'dist')
@@ -129,18 +126,6 @@ class TestGetProjectRoot(unittest.TestCase):
     def test_static_fallback(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             self.assertEqual(get_project_root(tmpdir, 'static'), tmpdir)
-
-
-class TestShouldReverseProxy(unittest.TestCase):
-    def test_rails_needs_proxy(self):
-        self.assertTrue(should_reverse_proxy('rails'))
-
-    def test_node_no_proxy(self):
-        self.assertFalse(should_reverse_proxy('node'))
-
-    def test_static_no_proxy(self):
-        self.assertFalse(should_reverse_proxy('static'))
-
 
 class TestDeploymentMetadata(unittest.TestCase):
     def test_save_and_load(self):

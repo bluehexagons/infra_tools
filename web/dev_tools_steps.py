@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from common.common_steps import configure_auto_update_ruby as _configure_auto_update_ruby_common
 from lib.maintenance_systemd import configure_maintenance_timer
 from lib.config import SetupConfig
 from lib.remote_utils import get_user_home
@@ -26,8 +25,3 @@ def configure_auto_update_node(config: SetupConfig) -> None:
         environment={ECOSYSTEM_AUTO_UPGRADE_ENV: "0"},
         purpose="auto-update",
     )
-
-
-def configure_auto_update_ruby(config: SetupConfig) -> None:
-    """Configure automatic updates for Ruby via apt packages."""
-    _configure_auto_update_ruby_common(config)

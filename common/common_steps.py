@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 from typing import Optional
 
+from lib.atomic_io import write_text_atomic
 from lib.maintenance_systemd import configure_maintenance_timer
 from lib.apt_sources import ensure_debian_package_sources
 from lib.config import SetupConfig
@@ -403,22 +404,58 @@ def generate_ssh_key(config: SetupConfig) -> None:
 
 def copy_ssh_keys_to_user(config: SetupConfig) -> None:
     safe_username = shlex.quote(config.username)
-    user_home = f"/home/{config.username}"
+    user_home = get_user_home(config.username)
     ssh_dir = f"{user_home}/.ssh"
     authorized_keys = f"{ssh_dir}/authorized_keys"
     
     if not os.path.exists("/root/.ssh/authorized_keys"):
         print("  ℹ No SSH keys found in /root/.ssh/authorized_keys to copy")
         return
+    if os.path.islink("/root/.ssh/authorized_keys") or not os.path.isfile(
+        "/root/.ssh/authorized_keys"
+    ):
+        raise RuntimeError("Refusing non-regular root authorized_keys path")
+
+    if os.path.abspath(authorized_keys) == "/root/.ssh/authorized_keys":
+        run("chmod 700 /root/.ssh", check=False)
+        run("chmod 600 /root/.ssh/authorized_keys", check=False)
+        print("  ✓ Root SSH keys already available")
+        return
     
+    if os.path.lexists(ssh_dir) and (
+        os.path.islink(ssh_dir) or not os.path.isdir(ssh_dir)
+    ):
+        raise RuntimeError(f"Refusing non-directory SSH path: {ssh_dir}")
+    if os.path.lexists(authorized_keys) and (
+        os.path.islink(authorized_keys) or not os.path.isfile(authorized_keys)
+    ):
+        raise RuntimeError(f"Refusing non-regular authorized_keys path: {authorized_keys}")
+
     run(f"mkdir -p {shlex.quote(ssh_dir)}")
     run(f"chmod 700 {shlex.quote(ssh_dir)}")
-    
-    run(f"cp /root/.ssh/authorized_keys {shlex.quote(authorized_keys)}")
+
+    existing_lines: list[str] = []
+    if os.path.exists(authorized_keys):
+        with open(authorized_keys, "r", encoding="utf-8") as file_obj:
+            existing_lines = file_obj.read().splitlines()
+    with open("/root/.ssh/authorized_keys", "r", encoding="utf-8") as file_obj:
+        root_lines = file_obj.read().splitlines()
+
+    merged_lines: list[str] = []
+    seen: set[str] = set()
+    for line in existing_lines + root_lines:
+        if line in seen:
+            continue
+        seen.add(line)
+        merged_lines.append(line)
+    content = "\n".join(merged_lines)
+    if merged_lines:
+        content += "\n"
+    write_text_atomic(authorized_keys, content, mode=0o600)
     run(f"chown -R {safe_username}:{safe_username} {shlex.quote(ssh_dir)}")
     run(f"chmod 600 {shlex.quote(authorized_keys)}")
     
-    print(f"  ✓ SSH keys copied to {config.username}")
+    print(f"  ✓ SSH keys merged for {config.username}")
 
 
 def configure_time_sync(config: SetupConfig) -> None:
@@ -572,17 +609,6 @@ def check_restart_required(config: SetupConfig) -> None:
         print("  Run 'sudo reboot' when convenient")
     else:
         print("  ✓ No restart required")
-
-
-def install_ruby(config: SetupConfig) -> None:
-    if shutil.which("ruby") and (shutil.which("bundle") or shutil.which("bundler")):
-        print("  ✓ Ruby + bundler already installed")
-        return
-    run("apt-get -o DPkg::Lock::Timeout=60 install -y -qq ruby ruby-dev bundler", check=False)
-    if shutil.which("ruby") and (shutil.which("bundle") or shutil.which("bundler")):
-        print("  ✓ Ruby + bundler installed from apt packages")
-    elif shutil.which("ruby"):
-        print("  ⚠ Ruby installed, but bundled apt package was unavailable")
 
 
 def _run_as_login_user(
@@ -1014,23 +1040,6 @@ def install_python(config: SetupConfig) -> None:
         raise RuntimeError("uv installation failed")
 
     print("  ℹ Remote systems skip shell autocompletion setup")
-
-
-def configure_auto_update_ruby(config: SetupConfig) -> None:
-    """Configure automatic updates for global Ruby gems."""
-    gem_path = shutil.which("gem") or "/usr/bin/gem"
-
-    configure_maintenance_timer(
-        service_name="auto-update-ruby",
-        service_desc="Auto-update global Ruby gems",
-        timer_desc="Auto-update Ruby gems weekly",
-        script_path="/opt/infra_tools/common/service_tools/auto_update_ruby.py",
-        schedule="Sun *-*-* 04:00:00",
-        check_path=gem_path,
-        check_name="Ruby gems",
-        environment={ECOSYSTEM_AUTO_UPGRADE_ENV: "0"},
-        purpose="auto-update",
-    )
 
 
 def configure_auto_update_uv(config: SetupConfig) -> None:

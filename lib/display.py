@@ -360,8 +360,6 @@ def print_setup_summary(config: SetupConfig, description: Optional[str] = None) 
                 print(f"SSL Email: {config.ssl_email}")
         if config.enable_cloudflare:
             print("Cloudflare: Yes (tunnel preconfiguration)")
-            if config.api_subdomain:
-                print("  - API subdomain support enabled")
     
     if config.enable_samba:
         print("Samba: Yes")

@@ -63,7 +63,7 @@ from lib.proxmox_memory import (
 from lib.types import NestedStrList, StrList
 from lib.validation import parse_memory_mib
 from lib.validators import validate_username
-from lib.vm_storage import VMDataDisk, data_disks, storage_size_kib
+from lib.vm_storage import VMDataDisk, data_disks, has_home_mount, storage_size_kib
 
 
 class VMAlreadyExists(Exception):
@@ -788,11 +788,13 @@ def _render_user_data(
     *,
     username: str,
     pubkey_contents: Optional[str],
+    create_setup_user: bool = True,
 ) -> str:
     """Build a minimal cloud-init user-data document.
 
-    Creates ``username`` (with sudo NOPASSWD) and installs the SSH key. The
-    rest of infra_tools' setup runs over SSH afterward, so we keep this short.
+    Optionally creates ``username`` (with sudo NOPASSWD) and installs the SSH
+    key. The rest of infra_tools' setup runs over SSH afterward, so we keep
+    this short.
     """
     if not validate_username(username):
         raise ProvisionError(f"Invalid VM setup username: {username!r}")
@@ -821,7 +823,7 @@ def _render_user_data(
         "    content: |",
         "      virtio_balloon",
     ]
-    if username and username != "root":
+    if create_setup_user and username and username != "root":
         lines.extend([
             "  - path: /etc/sudoers.d/infra-tools-" + username,
             "    owner: root:root",
@@ -837,7 +839,7 @@ def _render_user_data(
     if pubkey_yaml:
         lines.append("    ssh_authorized_keys:")
         lines.append(f"      - {pubkey_yaml}")
-    if username and username != "root":
+    if create_setup_user and username and username != "root":
         lines.extend([
             f"  - name: {username}",
             "    groups: sudo",
@@ -1397,6 +1399,7 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
 
     user_data = _render_user_data(
         username=config.username, pubkey_contents=pubkey_contents,
+        create_setup_user=not has_home_mount(config),
     )
     user_data_path = _upload_user_data(
         user_data, hostname, snippet_pool, node_ip, user, ssh_opts, dry_run=dry_run

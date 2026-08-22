@@ -43,6 +43,16 @@ def _allow_antistatic_direct_access_for_cloudflare(config: SetupConfig) -> bool:
 
 def configure_cloudflare_firewall(config: SetupConfig) -> None:
     """Configure firewall for Cloudflare tunnel and preserve required direct-access rules."""
+    tunnel_status = run(
+        "systemctl is-active --quiet cloudflared",
+        check=False,
+        capture_output=True,
+    )
+    if tunnel_status.returncode != 0:
+        raise RuntimeError(
+            "Refusing to close public HTTP/HTTPS ports before cloudflared is active"
+        )
+
     result = run("ufw status 2>/dev/null | grep -q 'Status: active'", check=False)
     if result.returncode != 0:
         os.environ["DEBIAN_FRONTEND"] = "noninteractive"
@@ -154,25 +164,34 @@ def install_cloudflared_service_helper(config: SetupConfig) -> None:
     print(f"  Run 'sudo setup-cloudflare-tunnel' to configure the tunnel")
 
 
-def run_cloudflare_tunnel_setup(config: SetupConfig) -> None:
-    """Run Cloudflare tunnel setup in non-interactive mode to update configuration."""
+def run_cloudflare_tunnel_setup(config: SetupConfig) -> bool:
+    """Update and verify an existing tunnel; return False when none exists."""
+    del config
     helper_script = "/opt/infra_tools/web/service_tools/setup_cloudflare_tunnel.py"
     
     if not os.path.exists(helper_script):
-        print(f"  ⚠ Setup script not found: {helper_script}")
-        return
+        raise RuntimeError(f"Cloudflare setup script not found: {helper_script}")
     
     state_file = "/etc/cloudflared/tunnel-state.json"
     if not os.path.exists(state_file):
         print("  ⚠ No existing Cloudflare tunnel found")
         print("  Run 'sudo setup-cloudflare-tunnel' interactively to create a tunnel first")
-        return
+        return False
     
     print("  Updating Cloudflare tunnel configuration...")
     
-    result = run(f"python3 {helper_script} --non-interactive", check=False)
+    result = run(
+        f"python3 {shlex.quote(helper_script)} --non-interactive",
+        check=False,
+        capture_output=True,
+    )
     
     if result.returncode == 0:
         print("  ✓ Cloudflare tunnel configuration updated")
-    else:
-        print("  ⚠ Cloudflare tunnel update skipped (no changes or not configured)")
+        return True
+
+    detail = getattr(result, "stderr", "") or getattr(result, "stdout", "")
+    raise RuntimeError(
+        "Cloudflare tunnel update or activation failed: "
+        f"{detail.strip() or f'exit code {result.returncode}'}"
+    )

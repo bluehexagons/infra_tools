@@ -193,6 +193,13 @@ active, accepts VM images, and reports enough aggregate free capacity. It then
 attaches the disks as `scsi1`, `scsi2`, and so on with stable `it-NAME`
 serials.
 
+For a separate home filesystem on a newly provisioned VM:
+
+```bash
+--storage home-data local-lvm 32G \
+--storage-mount home-data /home ext4 empty
+```
+
 After SSH becomes ready, target setup identifies each disk by serial and
 declared capacity, partitions and formats it only when it is confirmed blank,
 and creates a required UUID-based systemd mount. Existing signatures, an
@@ -205,11 +212,13 @@ Observed mount state is stored root-only in
 `.infra-tools-storage.json` for fail-closed verification.
 
 This first slice is deliberately provisioning-only. It does not adopt an
-existing disk, attach data storage to LXC, detach or resize a data disk,
-migrate populated paths such as `/home`, or manage a manually attached VPS
-volume. Supported empty mount targets are `/data` or paths below `/srv`,
-`/var/lib`, `/opt`, and `/mnt`. `--image-storage` remains only the staging pool
-for the VM image; it is not guest data storage. See the
+existing disk, attach data storage to LXC, detach or resize a data disk, or
+manage a manually attached VPS volume. Supported empty mount targets are
+`/data`, `/home` on a newly provisioned QEMU VM, or paths below `/srv`,
+`/var/lib`, `/opt`, and `/mnt`. For `/home`, cloud-init defers creation of the
+setup user until the blank disk has been mounted. Populated-path migration is
+still rejected. `--image-storage` remains only the staging pool for the VM
+image; it is not guest data storage. See the
 [VM management and lightweight Git hosting plan](plans/VM_MANAGEMENT_AND_LIGHTWEIGHT_GIT_HOSTING.md)
 for the deferred lifecycle work. Idempotent reruns are supported when the VM's
 saved provisioning metadata matches the declaration; an existing unsaved VM
@@ -333,7 +342,7 @@ provisioning profile.
 ```bash
 infra-tools setup server_web 10.0.0.50 admin \
   --provision-on pve1 --memory 4G --storage root 32G --cores 2 \
-  --base debian --name web-01-vm --ruby --node \
+  --base debian --name web-01-vm --node \
   --ssl --ssl-email admin@example.com \
   --deploy example.com https://github.com/user/repo.git
 ```
@@ -347,7 +356,7 @@ storage:
 infra-tools setup server_web 10.0.0.50 admin \
   --machine unprivileged --provision-on pve1 \
   --memory 4G --cores 2 --storage root 20G --storage template \
-  --base debian --name web-01-lxc --ruby --node \
+  --base debian --name web-01-lxc --node \
   --ssl --ssl-email admin@example.com \
   --deploy example.com https://github.com/user/repo.git
 ```

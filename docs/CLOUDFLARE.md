@@ -12,13 +12,18 @@ infra-tools setup server_web example.com deploy \
   --deploy example.com https://github.com/example/site.git
 ```
 
-The setup flow:
+The setup flow first:
 
-- installs or enables UFW with default-deny incoming policy and rate-limited SSH access;
-- removes public 80/tcp and 443/tcp firewall allowances;
 - configures Nginx to trust Cloudflare source ranges;
 - creates `/etc/cloudflared/README.md`; and
 - installs `/usr/local/bin/setup-cloudflare-tunnel`.
+
+Direct HTTP and HTTPS stay open during preconfiguration. If existing tunnel
+state is present, setup refreshes the ingress configuration and verifies that
+`cloudflared` is active. Only after that verification does it enable UFW's
+default-deny incoming policy, rate-limit SSH, and remove public 80/tcp and
+443/tcp allowances. A missing tunnel, failed refresh, or inactive service
+cannot trigger the port closure.
 
 Because the Cloudflare edge provides public HTTPS, Nginx serves the tunnel
 origin over local HTTP without forcing an HTTP-to-HTTPS redirect. Proxied
@@ -37,7 +42,8 @@ sudo setup-cloudflare-tunnel
 The helper installs `cloudflared` from Cloudflare's signed APT repository when needed, runs Cloudflare authentication,
 creates or reuses a tunnel, discovers hostnames from enabled Nginx sites, writes
 `/etc/cloudflared/config.yml`, and can install and enable the `cloudflared`
-systemd service. Tunnel credentials and state are stored under
+systemd service. After verifying the service is active, the helper closes
+direct public HTTP/HTTPS access. Tunnel credentials and state are stored under
 `/etc/cloudflared` with restrictive permissions.
 
 Generated tunnel and Nginx configurations are validated before activation. A
@@ -76,13 +82,15 @@ ports. See [Antistatic services](./ANTISTATIC.md).
 
 ## Limitations and recovery
 
-- `--cloudflare` changes firewall and Nginx behavior; do not use it until the
-  tunnel path and SSH management route are ready. SSH is rate-limited with UFW;
+- `--cloudflare` changes Nginx behavior immediately and firewall behavior only
+  after a tunnel becomes active. Ensure the SSH management route is ready.
+  SSH is rate-limited with UFW;
   add a management-network-specific rule separately if your policy needs one.
 - Tunnel creation requires an interactive browser login and Cloudflare account
   access; unattended setup cannot create the initial tunnel.
-- If a tunnel is unavailable, inspect `cloudflared` and Nginx journals and use
-  the host's local port 80 for origin testing.
+- If initial tunnel creation has not completed, direct port 80 remains
+  available for origin testing. If a previously verified tunnel later becomes
+  unavailable, inspect `cloudflared` and Nginx journals before reopening ports.
 - To stop using the tunnel, restore the desired 80/443 firewall policy and
   remove or disable the Cloudflare-specific Nginx config after validating the
   replacement configuration.

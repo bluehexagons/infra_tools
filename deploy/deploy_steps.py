@@ -31,16 +31,21 @@ def ensure_deploy_user(username: str) -> None:
 def deploy_repository(source_path: str, deploy_spec: str, git_url: str,
                       commit_hash: Optional[str] = None, full_deploy: bool = True,
                       deploy_user: str = DEPLOY_USER, deploy_group: str = DEPLOY_GROUP,
-                      keep_source: bool = False, api_subdomain: bool = False,
-                      reset_migrations: bool = False, **_ : Any) -> list[dict[str, Any]]:
+                      keep_source: bool = False, **_ : Any) -> list[dict[str, Any]]:
     """Deploy a repository, returning one nginx descriptor per served component.
 
     A repo with an ``infra.json`` manifest yields one descriptor per component
     (e.g. a static site plus a reverse-proxied API). Without a manifest the
     legacy single-project detection path runs and yields one descriptor.
     """
-    from lib.deploy_utils import parse_deploy_spec
+    from lib.deploy_utils import is_ruby_project, parse_deploy_spec
     from lib.project_manifest import infer_manifest, load_manifest
+
+    if is_ruby_project(source_path):
+        raise RuntimeError(
+            "Ruby/Rails deployments are no longer supported by this infra-tools "
+            "version; use a pinned older release for this repository"
+        )
 
     ensure_deploy_user(deploy_user)
 
@@ -82,8 +87,6 @@ def deploy_repository(source_path: str, deploy_spec: str, git_url: str,
         commit_hash=commit_hash,
         full_deploy=full_deploy,
         keep_source=keep_source,
-        api_subdomain=api_subdomain,
-        reset_migrations=reset_migrations
     )
 
     return [deployment_info] if deployment_info else []

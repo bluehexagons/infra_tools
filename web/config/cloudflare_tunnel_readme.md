@@ -13,7 +13,9 @@ sudo setup-cloudflare-tunnel
 
 It installs `cloudflared` when needed, authenticates with Cloudflare, creates
 or reuses a tunnel, discovers enabled Nginx sites, writes the tunnel
-configuration, and can install and enable the systemd service.
+configuration, and can install and enable the systemd service. Direct public
+HTTP/HTTPS remains open until the helper verifies that service is active; only
+then does it close ports 80 and 443 with UFW.
 
 The helper stores configuration and tunnel credentials under
 `/etc/cloudflared`. Its state file is

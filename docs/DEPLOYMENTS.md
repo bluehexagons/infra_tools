@@ -14,8 +14,8 @@ infra-tools setup server_web web.example.com deploy \
   --deploy web.example.com https://github.com/example/web.git
 ```
 
-Without a manifest, the repository is classified as Rails, Node, static, or
-unknown by the automatic detection rules. A conventional Go module with
+Without a manifest, the repository is classified as Node, static, or unknown
+by the automatic detection rules. A conventional Go module with
 `cmd/server/main.go` (or a root `main.go`) is also inferred as a service: it is
 built with `go build`, stored as `.infra_tools/bin/app`, and given a stable,
 automatically allocated internal port. Infra_tools supplies the conventional
@@ -27,10 +27,17 @@ for backup, persistent-state, rollback, and update-policy behavior.
 
 For target-VM builds, infra_tools inspects uploaded sources before running
 setup steps. It enables Go for `go.mod`, Node.js for `package.json`, Python for
-`pyproject.toml`, `uv.lock`, or `requirements.txt`, and Ruby for `Gemfile`.
+`pyproject.toml`, `uv.lock`, or `requirements.txt`.
 Separate runtime flags are therefore unnecessary for ordinary deployments.
 Explicit flags remain useful when a repository generates those files later or
 uses a non-standard layout.
+
+Ruby and Rails deployments are not supported. Current releases detect common
+Ruby project markers and stop locally before uploading setup files or changing
+the target. Keep a pinned older infra-tools release for a legacy Rails site;
+current setup runs leave its existing `rails-*.service` unit and same-domain
+generated Nginx site in place when that whole domain is omitted from the new
+deployment set.
 
 The planned versioned convention for zero-config root Go services, inactive
 nested-module discovery, standard health/state behavior, and compact monorepo
@@ -159,6 +166,12 @@ previous release and service units.
   service is stopped. A declared binary must exist and be executable.
 - Existing release files are replaced only after services are stopped. Static
   files are owned by the deployment user.
+- Legacy automatic static and Node deployments also build in a temporary
+  sibling directory and replace the active tree atomically. A fetch,
+  dependency, or build failure leaves the active release untouched.
+- Every requested repository must be staged successfully before remote setup
+  begins; one failed fetch aborts the complete setup instead of silently
+  dropping that route from the desired deployment set.
 - Each service receives a dedicated system user and persistent writable state
   under `/var/www/.infra_tools_shared/<app>/<component>`.
 - Service state remains outside the release directory, so replacing a release

@@ -49,14 +49,13 @@ class TestWorkspaceCli(unittest.TestCase):
             "server_web",
             "example.com",
             "testuser",
-            "--ruby",
             "--node",
             "--deploy-latest",
             "hexagonalhomelab.com/,/",
             "https://github.com/bluehexagons/bluehexagons.git",
             "--deploy-latest",
             "clicker.hexagonalhomelab.com",
-            "https://github.com/bluehexagons/rails_test.git",
+            "https://github.com/bluehexagons/clicker.git",
             "--deploy-latest",
             "foodguide.hexagonalhomelab.com,/foodguide,hexagonalhomelab.com/foodguide",
             "https://github.com/bluehexagons/foodguide.git",
@@ -65,7 +64,7 @@ class TestWorkspaceCli(unittest.TestCase):
         self.assertTrue(args.deploy_latest)
         self.assertEqual(args.deploy_specs, [
             ["hexagonalhomelab.com/,/", "https://github.com/bluehexagons/bluehexagons.git"],
-            ["clicker.hexagonalhomelab.com", "https://github.com/bluehexagons/rails_test.git"],
+            ["clicker.hexagonalhomelab.com", "https://github.com/bluehexagons/clicker.git"],
             ["foodguide.hexagonalhomelab.com,/foodguide,hexagonalhomelab.com/foodguide", "https://github.com/bluehexagons/foodguide.git"],
         ])
 

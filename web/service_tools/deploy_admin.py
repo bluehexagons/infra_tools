@@ -21,7 +21,7 @@ STAGED_CONFIG_PREFIX = "/tmp/infra-tools-nginx-"
 MAX_NGINX_CONFIG_BYTES = 1024 * 1024
 
 _CONFIG_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,253}$")
-_SERVICE_NAME_PATTERN = re.compile(r"^(?:rails|node)-[a-z0-9][a-z0-9_.-]{0,126}$")
+_SERVICE_NAME_PATTERN = re.compile(r"^node-[a-z0-9][a-z0-9_.-]{0,126}$")
 
 
 def validate_config_name(value: str) -> str:
@@ -33,7 +33,7 @@ def validate_config_name(value: str) -> str:
 
 
 def validate_service_name(value: str) -> str:
-    """Limit service management to generated Rails and Node units."""
+    """Limit service management to generated Node units."""
 
     base_name = value[:-8] if value.endswith(".service") else value
     if base_name.endswith(".service") or not _SERVICE_NAME_PATTERN.fullmatch(base_name):

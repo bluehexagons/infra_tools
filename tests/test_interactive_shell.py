@@ -145,7 +145,6 @@ class TestInteractiveShellDispatch(unittest.TestCase):
                 tags=["dev"],
                 enable_rdp=True,
                 desktop="i3",
-                install_ruby=True,
                 install_node=True,
                 install_go=True,
                 install_python=True,
@@ -192,7 +191,6 @@ class TestInteractiveShellDispatch(unittest.TestCase):
         self.assertEqual(saved_config.system_type, "workstation_dev")
         self.assertEqual(saved_config.hosted_node, "pve1")
         self.assertEqual(saved_config.container_storage, [["root", "40G"]])
-        self.assertFalse(saved_config.install_ruby)
         self.assertFalse(saved_config.install_node)
         self.assertFalse(saved_config.install_go)
         self.assertTrue(saved_config.install_python)
@@ -221,7 +219,6 @@ class TestInteractiveShellDispatch(unittest.TestCase):
                 "3",                 # server_web
                 "admin",             # username
                 "web,prod",          # tags
-                "",                  # ruby default yes
                 "",                  # node default yes
                 "y",                 # enable ssl
                 "admin@example.com", # ssl email
@@ -236,7 +233,6 @@ class TestInteractiveShellDispatch(unittest.TestCase):
         self.assertEqual(saved_config.machine_type, "hardware")
         self.assertEqual(saved_config.system_type, "server_web")
         self.assertIsNone(saved_config.hosted_node)
-        self.assertTrue(saved_config.install_ruby)
         self.assertTrue(saved_config.install_node)
         self.assertTrue(saved_config.enable_ssl)
         self.assertEqual(saved_config.ssl_email, "admin@example.com")

@@ -45,7 +45,7 @@ http {
     open_file_cache_min_uses 2;
     open_file_cache_errors on;
     
-    # Proxy Buffer Settings (for Rails/dynamic backends)
+    # Proxy Buffer Settings (for dynamic backends)
     proxy_buffering on;
     proxy_buffer_size 4k;
     proxy_buffers 8 4k;

@@ -17,7 +17,6 @@ PLUGIN = PluginDefinition(
     plugin_kind="capability",
     dependencies=("core",),
     custom_steps=(
-        "install_ruby",
         "install_go",
         "install_node",
         "install_python",
@@ -52,7 +51,6 @@ PLUGIN = PluginDefinition(
         "install_cli_tools",
         "install_control_plane_tools",
         "check_restart_required",
-        "configure_auto_update_ruby",
         "configure_auto_update_gogs",
         "install_mail_utils",
         "configure_swap",
@@ -80,19 +78,22 @@ def get_common_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
     )
     from security.steps import create_remoteusers_group
     from common.storage_steps import setup_vm_storage
+    from lib.vm_storage import has_home_mount
 
+    storage_step = (
+        [("Preparing VM data storage", setup_vm_storage)]
+        if config.storage_mounts
+        else []
+    )
     steps: list[tuple[str, StepFunc]] = [
         ("Updating and upgrading packages", update_and_upgrade_packages),
         ("Ensuring sudo is installed", ensure_sudo_installed),
         ("Configuring UTF-8 locale", configure_locale),
         ("Configuring IPv4 preference", configure_ipv4_preference),
         ("Creating remoteusers group", create_remoteusers_group),
+        *(storage_step if has_home_mount(config) else []),
         ("Setting up user", setup_user),
-        *(
-            [("Preparing VM data storage", setup_vm_storage)]
-            if config.storage_mounts
-            else []
-        ),
+        *(storage_step if not has_home_mount(config) else []),
         ("Copying SSH keys to user", copy_ssh_keys_to_user),
         ("Generating SSH key for user", generate_ssh_key),
         ("Configuring time synchronization", configure_time_sync),
@@ -140,19 +141,14 @@ def extend_runtime_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]])
     """Append optional language-runtime steps in the established order."""
 
     from common.steps import (
-        configure_auto_update_ruby,
         configure_auto_update_uv,
         install_data_analysis_tools,
         install_go,
         install_node,
         install_python,
-        install_ruby,
     )
     from web.steps import configure_auto_update_node
 
-    if config.install_ruby:
-        steps.append(("Installing Ruby (apt packages)", install_ruby))
-        steps.append(("Configuring Ruby auto-update", configure_auto_update_ruby))
     if config.install_go:
         steps.append(("Installing Go (latest version)", install_go))
     if config.install_node:
@@ -281,7 +277,6 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
     from common.steps import (
         check_restart_required,
         configure_auto_update_gogs,
-        configure_auto_update_ruby,
         configure_auto_update_uv,
         configure_ipv4_preference,
         configure_locale,
@@ -302,7 +297,6 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         install_mail_utils,
         install_node,
         install_python,
-        install_ruby,
         setup_user,
         update_and_upgrade_packages,
     )
@@ -327,7 +321,6 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
     )
 
     return {
-        "install_ruby": install_ruby,
         "install_go": install_go,
         "install_node": install_node,
         "install_python": install_python,
@@ -362,7 +355,6 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "install_cli_tools": install_cli_tools,
         "install_control_plane_tools": install_control_plane_tools,
         "check_restart_required": check_restart_required,
-        "configure_auto_update_ruby": configure_auto_update_ruby,
         "configure_auto_update_gogs": configure_auto_update_gogs,
         "install_mail_utils": install_mail_utils,
         "configure_swap": configure_swap,

@@ -413,7 +413,12 @@ def perform_remote_deployment(
         reload_nginx,
         restart_service,
     )
-    from lib.deploy_utils import parse_deploy_spec, detect_project_type, get_project_root
+    from lib.deploy_utils import (
+        detect_project_type,
+        get_project_root,
+        is_ruby_project,
+        parse_deploy_spec,
+    )
     from lib.nginx_config import generate_merged_nginx_config
     
     target = get_deploy_target(deploy_target)
@@ -428,6 +433,17 @@ def perform_remote_deployment(
     if deploy_spec:
         domain, path = parse_deploy_spec(deploy_spec)
     
+    if is_ruby_project(workspace):
+        log_event(
+            logger,
+            "Ruby/Rails remote deployment is unsupported",
+            level=40,
+            deploy_target=deploy_target,
+        )
+        with open(log_file, 'a') as log:
+            log.write("\n✗ Ruby/Rails deployment requires a pinned legacy infra-tools release\n")
+        return False
+
     project_type = detect_project_type(workspace)
     log_event(logger, "Detected project type", deploy_target=deploy_target, project_type=project_type)
     
@@ -460,7 +476,7 @@ def perform_remote_deployment(
             'path': path,
             'serve_path': remote_path,
             'project_type': project_type,
-            'needs_proxy': project_type == 'rails',
+            'needs_proxy': False,
             'domain': domain,
         }
         

@@ -77,13 +77,14 @@ TEST_SUITES: dict[str, list[str]] = {
     ],
     "integration": [
         "tests.test_cicd",
-        "tests.test_deployment_backup",
         "tests.test_deploy_utils",
+        "tests.test_legacy_deployment",
         "tests.test_orchestrator_bootstrap",
         "tests.test_remote_setup",
         "tests.test_remote_utils",
         "tests.test_setup_common",
         "tests.test_proxmox_node",
+        "tests.test_upgrade_safety",
     ],
     "all": [],
 }

@@ -30,15 +30,21 @@ class ProvisionError(Exception):
     """Raised when guest provisioning fails."""
 
 
-def get_provisioned_guest_ssh_user(machine_type: str, setup_username: str) -> str:
+def get_provisioned_guest_ssh_user(
+    machine_type: str,
+    setup_username: str,
+    *,
+    setup_user_deferred: bool = False,
+) -> str:
     """Return the account infra-tools can use after guest provisioning.
 
     Cloud-init creates the configured setup account with passwordless sudo for
-    VMs. LXC provisioning bootstraps only root SSH access because the setup
-    account is created by the first remote setup run.
+    normal VMs. When a new VM needs a dedicated /home filesystem, setup-user
+    creation is deferred until the first remote setup run mounts that disk.
+    LXC provisioning always bootstraps only root SSH access.
     """
 
-    if machine_type == "vm":
+    if machine_type == "vm" and not setup_user_deferred:
         return setup_username
     return "root"
 

@@ -95,7 +95,6 @@ def reconstruct_remote_config(
             reconstructed = json.loads(result.stdout)
             config_dict: dict[str, Any] = {
                 "username": username,
-                "install_ruby": reconstructed.get("install_ruby", False),
                 "install_go": reconstructed.get("install_go", False),
                 "install_node": reconstructed.get("install_node", False),
                 "install_python": reconstructed.get("install_python", False),

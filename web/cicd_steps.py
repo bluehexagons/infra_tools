@@ -256,7 +256,7 @@ TimeoutStartSec=2h
 
 # Security hardening (executor must run user-supplied scripts so we cannot
 # apply MemoryDenyWriteExecute or SystemCallFilter without breaking common
-# CI tooling like Node/Ruby/JIT'd languages)
+# CI tooling such as Node and other JIT-compiled languages)
 NoNewPrivileges=true
 PrivateTmp=true
 PrivateDevices=true
