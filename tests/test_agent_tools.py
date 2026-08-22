@@ -1101,6 +1101,7 @@ class TestAgentPayloadInstallation(unittest.TestCase):
 
             with (
                 patch('common.agent_steps._user_home', return_value=home),
+                patch('common.agent_steps._chown_user_directory_chain'),
                 patch('common.agent_steps._chown_path'),
             ):
                 _copy_secret_file(
@@ -1170,6 +1171,7 @@ class TestAgentPayloadInstallation(unittest.TestCase):
             with (
                 patch('common.agent_steps.REMOTE_AGENT_PAYLOAD_DIR', payload_dir),
                 patch('common.agent_steps._user_home', return_value=home),
+                patch('common.agent_steps._chown_user_directory_chain'),
                 patch('common.agent_steps._chown_path'),
             ):
                 copy_agent_tooling_payload(config)

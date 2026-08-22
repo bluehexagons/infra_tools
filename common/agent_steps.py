@@ -592,9 +592,9 @@ def _copy_payload_directory(config: SetupConfig, source: str, destination: str, 
 
     _reject_symlinked_agent_destination(destination)
     _ensure_agent_directory(destination)
-    _chown_user_directory_chain(config, _user_home(config), destination)
     _validate_agent_payload_tree(source, destination)
     _reject_symlinked_agent_destination(destination)
+    _chown_user_directory_chain(config, _user_home(config), destination)
     shutil.copytree(source, destination, symlinks=True, dirs_exist_ok=True)
     _reject_symlinked_agent_destination(destination)
     _chown_path(config, destination)
@@ -609,8 +609,8 @@ def _copy_secret_file(config: SetupConfig, source: str, destination: str, label:
     destination_parent = os.path.dirname(destination)
     _reject_symlinked_agent_destination(destination_parent)
     _ensure_agent_directory(destination_parent)
-    _chown_user_directory_chain(config, _user_home(config), destination_parent)
     _reject_symlinked_agent_destination(destination)
+    _chown_user_directory_chain(config, _user_home(config), destination_parent)
 
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
     file_descriptor = os.open(destination, flags, 0o600)
