@@ -63,9 +63,13 @@ class TestConfigureBalloonTarget(unittest.TestCase):
     @patch("common.proxmox_steps._host_total_memory_mib", return_value=32768)
     def test_materializes_implicit_default(self, _mock_memory, mock_run, _mock_dry):
         mock_run.side_effect = [
-            "{}",
-            "",
-            '{"ballooning-target": 80}',
+            MagicMock(returncode=0, stdout="{}", stderr=""),
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(
+                returncode=0,
+                stdout='{"ballooning-target": 80}',
+                stderr="",
+            ),
         ]
         config = SetupConfig(
             username="root",
@@ -85,9 +89,17 @@ class TestConfigureBalloonTarget(unittest.TestCase):
     @patch("common.proxmox_steps._host_total_memory_mib", return_value=8192)
     def test_changes_and_verifies_target(self, _mock_memory, mock_run, _mock_dry):
         mock_run.side_effect = [
-            '{"ballooning-target": 80}',
-            "",
-            '{"ballooning-target": 75}',
+            MagicMock(
+                returncode=0,
+                stdout='{"ballooning-target": 80}',
+                stderr="",
+            ),
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(
+                returncode=0,
+                stdout='{"ballooning-target": 75}',
+                stderr="",
+            ),
         ]
         config = SetupConfig(
             username="root",
@@ -101,12 +113,12 @@ class TestConfigureBalloonTarget(unittest.TestCase):
             mock_run.call_args_list,
             [
                 call(
-                    "pvenode config get --output-format json",
+                    "pvesh get /nodes/$(hostname -s)/config --output-format json",
                     capture_output=True,
                 ),
                 call("pvenode config set --ballooning-target 75"),
                 call(
-                    "pvenode config get --output-format json",
+                    "pvesh get /nodes/$(hostname -s)/config --output-format json",
                     capture_output=True,
                 ),
             ],
@@ -116,7 +128,11 @@ class TestConfigureBalloonTarget(unittest.TestCase):
     @patch("common.proxmox_steps.run")
     @patch("common.proxmox_steps._host_total_memory_mib", return_value=16384)
     def test_override_is_idempotent(self, _mock_memory, mock_run, _mock_dry):
-        mock_run.return_value = '{"ballooning-target": 70}'
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout='{"ballooning-target": 70}',
+            stderr="",
+        )
         config = SetupConfig(
             username="root",
             host="pve1",
@@ -127,7 +143,7 @@ class TestConfigureBalloonTarget(unittest.TestCase):
         configure_proxmox_balloon_target(config)
 
         mock_run.assert_called_once_with(
-            "pvenode config get --output-format json",
+            "pvesh get /nodes/$(hostname -s)/config --output-format json",
             capture_output=True,
         )
 
@@ -291,6 +307,10 @@ class TestGuestMemoryCapacity(unittest.TestCase):
             proposed_maximum_mib=6144,
         )
 
+        self.assertEqual(
+            mock_run.call_args_list[2].args[3],
+            "pvesh get /nodes/pve1/config --output-format json",
+        )
         output = "\n".join(
             " ".join(str(arg) for arg in printed.args)
             for printed in mock_print.call_args_list

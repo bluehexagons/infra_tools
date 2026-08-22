@@ -229,7 +229,7 @@ def _report_memory_capacity(
             node_ip,
             user,
             ssh_opts,
-            "pvenode config get --output-format json",
+            f"pvesh get /nodes/{shlex.quote(node_name)}/config --output-format json",
         )
         if not isinstance(status, dict) or not isinstance(node_config, dict):
             raise ProvisionError("Proxmox node memory response was not an object")

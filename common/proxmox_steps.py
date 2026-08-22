@@ -25,6 +25,9 @@ _PROXMOX_SWAPPINESS = 10
 _APPLY_SWAPPINESS_COMMAND = (
     "/usr/lib/systemd/systemd-sysctl --prefix=/vm/swappiness"
 )
+_NODE_CONFIG_COMMAND = (
+    "pvesh get /nodes/$(hostname -s)/config --output-format json"
+)
 
 
 def configure_proxmox_host_memory_safety(config: SetupConfig) -> None:
@@ -177,21 +180,15 @@ def configure_proxmox_balloon_target(config: SetupConfig) -> None:
         run(set_command)
         return
 
-    current = run(
-        "pvenode config get --output-format json",
-        capture_output=True,
-    )
-    current_target = _configured_balloon_target(current)
+    current = run(_NODE_CONFIG_COMMAND, capture_output=True)
+    current_target = _configured_balloon_target(current.stdout or "")
     if current_target == policy.target_percent:
         print(f"  ✓ Balloon target already set to {current_target}%")
         return
 
     run(set_command)
-    verified = run(
-        "pvenode config get --output-format json",
-        capture_output=True,
-    )
-    verified_target = _configured_balloon_target(verified)
+    verified = run(_NODE_CONFIG_COMMAND, capture_output=True)
+    verified_target = _configured_balloon_target(verified.stdout or "")
     if verified_target != policy.target_percent:
         raise RuntimeError(
             "Proxmox balloon target verification failed: "
