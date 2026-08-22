@@ -11,10 +11,14 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from common.common_steps import (
+    CLI_TOOL_PACKAGES,
     CONTROL_PLANE_PACKAGES,
+    DATA_ANALYSIS_PACKAGES,
     _ensure_vm_setup_user_sudoers,
     _run_as_login_user,
     check_debian_package_sources,
+    install_cli_tools,
+    install_data_analysis_tools,
     update_and_upgrade_packages,
 )
 from lib.config import SetupConfig
@@ -80,6 +84,74 @@ class TestControlPlanePackages(unittest.TestCase):
     def test_uses_debian_trixie_dns_package_name(self):
         self.assertIn("bind9-dnsutils", CONTROL_PLANE_PACKAGES)
         self.assertNotIn("dnsutils", CONTROL_PLANE_PACKAGES)
+
+
+class TestDevelopmentToolPackages(unittest.TestCase):
+    def test_cli_baseline_contains_small_agent_tools(self):
+        self.assertTrue(
+            {"ripgrep", "jq", "sqlite3", "file", "tree"}.issubset(
+                CLI_TOOL_PACKAGES
+            )
+        )
+
+    def test_large_analysis_packages_are_not_in_cli_baseline(self):
+        self.assertTrue(
+            {
+                "jupyterlab",
+                "python3-matplotlib",
+                "python3-numpy",
+                "python3-pandas",
+                "python3-scipy",
+            }.issubset(DATA_ANALYSIS_PACKAGES)
+        )
+        self.assertTrue(set(CLI_TOOL_PACKAGES).isdisjoint(DATA_ANALYSIS_PACKAGES))
+
+    @patch("common.common_steps.run")
+    @patch("common.common_steps.is_package_installed")
+    def test_cli_installer_requests_every_missing_baseline_package(
+        self, mock_is_installed, mock_run
+    ):
+        mock_is_installed.side_effect = (
+            [False] * len(CLI_TOOL_PACKAGES) + [True] * len(CLI_TOOL_PACKAGES)
+        )
+        mock_run.return_value = MagicMock(returncode=0)
+
+        install_cli_tools(
+            SetupConfig(host="testhost", username="agent", system_type="agent_vm")
+        )
+
+        command = mock_run.call_args.args[0]
+        for package in CLI_TOOL_PACKAGES:
+            with self.subTest(package=package):
+                self.assertIn(f" {package}", command)
+
+    @patch("common.common_steps.run")
+    @patch("common.common_steps.is_package_installed")
+    def test_data_analysis_installer_requests_only_opt_in_bundle(
+        self, mock_is_installed, mock_run
+    ):
+        mock_is_installed.side_effect = (
+            [False] * len(DATA_ANALYSIS_PACKAGES)
+            + [True] * len(DATA_ANALYSIS_PACKAGES)
+        )
+        mock_run.return_value = MagicMock(returncode=0)
+
+        install_data_analysis_tools(
+            SetupConfig(
+                host="testhost",
+                username="agent",
+                system_type="agent_vm",
+                install_data_analysis_tools=True,
+            )
+        )
+
+        command = mock_run.call_args.args[0]
+        for package in DATA_ANALYSIS_PACKAGES:
+            with self.subTest(package=package):
+                self.assertIn(f" {package}", command)
+        for package in CLI_TOOL_PACKAGES:
+            with self.subTest(default_package=package):
+                self.assertNotIn(f" {package}", command)
 
 
 class TestUserCommandEnvironment(unittest.TestCase):

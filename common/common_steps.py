@@ -50,6 +50,34 @@ _USER_COMMAND_SYSTEM_PATH = (
 )
 PACKAGE_UPDATE_MARKER = "/var/lib/infra_tools/state/package-update-complete"
 VM_SETUP_SUDOERS_DIR = "/etc/sudoers.d"
+CLI_TOOL_PACKAGES = (
+    "bc",
+    "btop",
+    "curl",
+    "file",
+    "git",
+    "htop",
+    "jq",
+    "less",
+    "neovim",
+    "ripgrep",
+    "rsync",
+    "sqlite3",
+    "tmux",
+    "tree",
+    "unzip",
+    "wget",
+    "xdg-utils",
+    "zip",
+)
+DATA_ANALYSIS_PACKAGES = (
+    "csvkit",
+    "jupyterlab",
+    "python3-matplotlib",
+    "python3-numpy",
+    "python3-pandas",
+    "python3-scipy",
+)
 
 
 def _go_release_arch(machine: Optional[str] = None) -> Optional[str]:
@@ -416,19 +444,53 @@ def configure_time_sync(config: SetupConfig) -> None:
 
 
 def install_cli_tools(config: SetupConfig) -> None:
-    tools = ["neovim", "btop", "htop", "curl", "wget", "git", "tmux", "unzip", "xdg-utils", "rsync"]
-    all_installed = all(is_package_installed(t) for t in tools)
-    if all_installed:
-        print("  ✓ CLI tools already installed (neovim, btop, htop, curl, wget, git, tmux, unzip, rsync)")
+    """Install the small command-line baseline shared by development profiles."""
+
+    del config
+    missing = [
+        package for package in CLI_TOOL_PACKAGES if not is_package_installed(package)
+    ]
+    if not missing:
+        print("  ✓ CLI tools already installed")
         return
 
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    run("apt-get install -y -qq neovim btop htop curl wget git tmux unzip xdg-utils rsync", check=False)
-    
-    if all(is_package_installed(t) for t in tools):
-        print("  ✓ CLI tools installed (neovim, btop, htop, curl, wget, git, tmux, unzip, rsync)")
-    else:
-        print("  ⚠ Some CLI tools may not have installed correctly")
+    package_args = " ".join(shlex.quote(package) for package in missing)
+    result = run(f"apt-get install -y -qq {package_args}", check=False)
+    remaining = [
+        package for package in missing if not is_package_installed(package)
+    ]
+    if result.returncode != 0 or remaining:
+        failed = ", ".join(remaining or missing)
+        raise RuntimeError(f"CLI tool installation failed: {failed}")
+
+    print(f"  ✓ Installed CLI tools: {', '.join(missing)}")
+
+
+def install_data_analysis_tools(config: SetupConfig) -> None:
+    """Install the opt-in Python data-analysis and notebook bundle."""
+
+    del config
+    missing = [
+        package
+        for package in DATA_ANALYSIS_PACKAGES
+        if not is_package_installed(package)
+    ]
+    if not missing:
+        print("  ✓ Data-analysis tools already installed")
+        return
+
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
+    package_args = " ".join(shlex.quote(package) for package in missing)
+    result = run(f"apt-get install -y -qq {package_args}", check=False)
+    remaining = [
+        package for package in missing if not is_package_installed(package)
+    ]
+    if result.returncode != 0 or remaining:
+        failed = ", ".join(remaining or missing)
+        raise RuntimeError(f"Data-analysis tool installation failed: {failed}")
+
+    print(f"  ✓ Installed data-analysis tools: {', '.join(missing)}")
 
 
 CONTROL_PLANE_PACKAGES = (

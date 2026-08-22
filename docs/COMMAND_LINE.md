@@ -265,6 +265,7 @@ the local desktop installer path.
 | `--node` | Install nvm + Node.js + PNPM |
 | `--go` | Install Go |
 | `--python` | Install Python aliases + uv |
+| `--data-analysis` | Install the larger Python analysis bundle: NumPy, pandas, SciPy, Matplotlib, JupyterLab, and csvkit; also enables `--python` |
 | `--godot` | Install the newest stable verified Godot Engine release for graphical or headless use |
 | `--godot-bundle BUNDLE` | Add `web` or `publishing`; repeatable and automatically enables `--godot` |
 
@@ -290,6 +291,9 @@ All three default to GitHub CLI and Codex. `--agent-tool` values add to those
 defaults and accept comma-separated lists; use `--no-agent-tool` to remove a
 default. The full profile does not choose Proxmox capacity. It installs Node.js
 automatically for T3 Code, while Go and other project runtimes remain optional.
+The shared CLI baseline includes small coding and inspection tools such as
+`ripgrep` (`rg`), `jq`, SQLite, `file`, and `tree`. The substantially larger
+Python analysis/notebook stack remains opt-in through `--data-analysis`.
 Missing account and pairing passwords are requested securely from a terminal.
 `server_lite` omits the standard firewall and generic CLI bundle, so use it
 only when that lighter profile is intentional.

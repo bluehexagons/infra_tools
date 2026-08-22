@@ -254,6 +254,7 @@ class SetupConfig:
     install_go: bool = False
     install_node: bool = False
     install_python: bool = False
+    install_data_analysis_tools: bool = False
     install_godot: bool = False
     godot_bundles: Optional[StrList] = None
     install_gh: bool = False
@@ -363,6 +364,9 @@ class SetupConfig:
         # the requested full redeploy.
         if self.deployment_mode == "full":
             self.full_deploy = True
+
+        if self.install_data_analysis_tools:
+            self.install_python = True
 
         if self.t3code_ready:
             if self.disable_web_interface:
@@ -713,6 +717,9 @@ class SetupConfig:
         
         if self.install_python:
             args.append("--python")
+
+        if self.install_data_analysis_tools:
+            args.append("--data-analysis")
 
         if self.install_godot:
             args.append("--godot")
@@ -1101,6 +1108,9 @@ class SetupConfig:
         
         if self.install_python:
             cmd_parts.append("--python")
+
+        if self.install_data_analysis_tools:
+            cmd_parts.append("--data-analysis")
 
         if self.install_godot:
             cmd_parts.append("--godot")
@@ -1760,6 +1770,9 @@ class SetupConfig:
             install_go=getattr(args, 'install_go', False),
             install_node=getattr(args, 'install_node', False),
             install_python=getattr(args, 'install_python', False),
+            install_data_analysis_tools=getattr(
+                args, 'install_data_analysis_tools', False
+            ),
             install_godot=getattr(args, 'install_godot', False),
             godot_bundles=(
                 getattr(args, 'godot_bundles', None)

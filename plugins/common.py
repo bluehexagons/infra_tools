@@ -142,6 +142,7 @@ def extend_runtime_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]])
     from common.steps import (
         configure_auto_update_ruby,
         configure_auto_update_uv,
+        install_data_analysis_tools,
         install_go,
         install_node,
         install_python,
@@ -160,6 +161,8 @@ def extend_runtime_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]])
     if config.install_python:
         steps.append(("Installing Python tooling (aliases + uv)", install_python))
         steps.append(("Configuring uv auto-update", configure_auto_update_uv))
+    if config.install_data_analysis_tools:
+        steps.append(("Installing data-analysis tools", install_data_analysis_tools))
     if config.install_godot:
         from common.godot_steps import (
             configure_auto_update_godot,

@@ -63,6 +63,7 @@ class TestAgentProfiles(unittest.TestCase):
         self.assertTrue(config.include_desktop)
         self.assertTrue(config.enable_rdp)
         self.assertTrue(config.install_node)
+        self.assertFalse(config.install_data_analysis_tools)
         self.assertFalse(config.install_go)
         self.assertEqual(config.git_access, "read-write")
         self.assertIsNone(config.web_interface_sources)
@@ -74,6 +75,7 @@ class TestAgentProfiles(unittest.TestCase):
         self.assertIn("Installing workstation editor", step_names)
         self.assertIn("Installing T3 Code web interface", step_names)
         self.assertIn("Installing agent browser automation", step_names)
+        self.assertNotIn("Installing data-analysis tools", step_names)
 
         command = " ".join(config.to_setup_command())
         self.assertNotIn("--editor", command)
@@ -90,6 +92,20 @@ class TestAgentProfiles(unittest.TestCase):
 
         self.assertTrue(config.install_node)
         self.assertTrue(config.install_go)
+
+    def test_agent_code_vm_accepts_opt_in_data_analysis_bundle(self) -> None:
+        config = SetupConfig.from_args(
+            _setup_args(install_data_analysis_tools=True),
+            "agent_code_vm",
+        )
+
+        self.assertTrue(config.install_data_analysis_tools)
+        self.assertTrue(config.install_python)
+        step_names = [name for name, _step in get_steps_for_system_type(config)]
+        self.assertIn("Installing Python tooling (aliases + uv)", step_names)
+        self.assertIn("Installing data-analysis tools", step_names)
+        self.assertIn("--data-analysis", config.to_remote_args())
+        self.assertIn("--data-analysis", config.to_setup_command())
 
     def test_agent_code_vm_lan_access_is_explicit(self) -> None:
         config = SetupConfig.from_args(

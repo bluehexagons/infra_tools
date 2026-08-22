@@ -516,6 +516,16 @@ def add_setup_arguments(
                         default=None if not for_remote else False,
                         help="Install Python tooling (python aliases and uv). For shell autocompletion, use the local completions installer script.")
     parser.add_argument(
+        "--data-analysis",
+        dest="install_data_analysis_tools",
+        action=argparse.BooleanOptionalAction if not for_remote else "store_true",
+        default=None if not for_remote else False,
+        help=(
+            "Install the larger Python data-analysis bundle (NumPy, pandas, "
+            "SciPy, Matplotlib, JupyterLab, and csvkit); also enables --python"
+        ),
+    )
+    parser.add_argument(
         "--godot",
         dest="install_godot",
         action=argparse.BooleanOptionalAction if not for_remote else "store_true",
