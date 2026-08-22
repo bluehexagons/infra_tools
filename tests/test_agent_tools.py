@@ -33,6 +33,7 @@ from common.agent_steps import (
 )
 from lib.agent_auth import get_agent_auth_status, set_agent_credential
 from lib.agent_cli import (
+    _t3_port,
     _tool_path,
     add_agent_subparser,
     inspect_agent_tools,
@@ -90,6 +91,16 @@ class TestOfficialAgentInstallers(unittest.TestCase):
             _url, digest = _latest_t3code_asset()
         self.assertEqual(digest, 'a' * 64)
 
+    def test_latest_t3code_asset_rejects_non_https_downloads(self):
+        response = io.BytesIO(
+            b'{"assets":[{"name":"T3-Code-1.2.3-x86_64.AppImage",'
+            b'"browser_download_url":"http://github.com/pingdotgg/t3code/releases/download/v1/file",'
+            b'"digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}'
+        )
+        with patch('urllib.request.urlopen', return_value=response):
+            with self.assertRaisesRegex(RuntimeError, 'verified'):
+                _latest_t3code_asset()
+
     def test_user_home_comes_from_account_database(self):
         account = type('Account', (), {'pw_dir': '/srv/agent'})()
         with patch('common.agent_steps.pwd.getpwnam', return_value=account):
@@ -135,6 +146,19 @@ class TestOfficialAgentInstallers(unittest.TestCase):
                 _download_verified_file('https://github.com/example', expected, destination)
             with open(destination, 'rb') as file_obj:
                 self.assertEqual(file_obj.read(), payload)
+
+    def test_verified_download_rejects_symlink_destination(self):
+        with tempfile.TemporaryDirectory() as directory:
+            destination = os.path.join(directory, 'tool.AppImage')
+            victim = os.path.join(directory, 'victim')
+            with open(victim, 'wb') as file_obj:
+                file_obj.write(b'unchanged')
+            os.symlink(victim, destination)
+            with patch('urllib.request.urlopen', return_value=io.BytesIO(b'payload')):
+                with self.assertRaisesRegex(RuntimeError, 'symlinked'):
+                    _download_verified_file('https://github.com/example', 'wrong', destination)
+            with open(victim, 'rb') as file_obj:
+                self.assertEqual(file_obj.read(), b'unchanged')
 
     def test_t3code_install_adds_minimal_wrapper_and_desktop_entry(self):
         with tempfile.TemporaryDirectory() as home:
@@ -306,6 +330,17 @@ class TestOfficialAgentInstallers(unittest.TestCase):
 
 
 class TestAgentDoctor(unittest.TestCase):
+    def test_t3_port_rejects_malformed_or_out_of_range_values(self):
+        with tempfile.TemporaryDirectory() as home:
+            wrapper = os.path.join(home, 'wrapper')
+            with open(wrapper, 'w', encoding='utf-8') as file_obj:
+                file_obj.write('T3CODE_PORT=99999\n')
+            self.assertIsNone(_t3_port(wrapper))
+
+            with open(wrapper, 'w', encoding='utf-8') as file_obj:
+                file_obj.write('T3CODE_PORT=not-a-port\n')
+            self.assertEqual(_t3_port(wrapper), 3773)
+
     def test_t3code_doctor_reports_managed_checks_without_secrets(self):
         with tempfile.TemporaryDirectory() as home:
             runtime = os.path.join(

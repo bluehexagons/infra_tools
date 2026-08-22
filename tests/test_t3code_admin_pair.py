@@ -12,6 +12,22 @@ from common.service_tools import t3code_admin_pair
 
 
 class T3CodeAdministrativePairingTest(unittest.TestCase):
+    def test_local_server_url_rejects_dns_hosts(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Invalid local T3 server URL"):
+            t3code_admin_pair._validated_url(
+                "http://attacker.example:3773",
+                "local T3 server URL",
+                local_only=True,
+            )
+
+    def test_url_rejects_invalid_port(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Invalid local T3 server URL"):
+            t3code_admin_pair._validated_url(
+                "http://127.0.0.1:65536",
+                "local T3 server URL",
+                local_only=True,
+            )
+
     def test_issues_admin_link_and_revokes_temporary_session(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             t3_binary = os.path.join(temporary, "t3")

@@ -819,18 +819,26 @@ def _run_check(
         return subprocess.CompletedProcess(command, 1, "", "")
 
 
-def _t3_port(wrapper: str) -> int:
+def _t3_port(wrapper: str) -> int | None:
     try:
         with open(wrapper, encoding="utf-8") as file_obj:
             match = re.search(r"T3CODE_PORT=(\d+)", file_obj.read())
     except OSError:
         match = None
-    return int(match.group(1)) if match else _T3_DEFAULT_PORT
+    if match is None:
+        return _T3_DEFAULT_PORT
+    try:
+        port = int(match.group(1))
+    except ValueError:
+        return None
+    return port if 1 <= port <= 65535 else None
 
 
-def _t3_endpoint_reachable(port: int) -> bool:
+def _t3_endpoint_reachable(port: int | None) -> bool:
     import urllib.error
 
+    if port is None:
+        return False
     try:
         with urllib.request.urlopen(
             f"http://127.0.0.1:{port}/", timeout=5
@@ -838,7 +846,17 @@ def _t3_endpoint_reachable(port: int) -> bool:
             return response.status < 500
     except urllib.error.HTTPError as exc:
         return exc.code < 500
-    except (OSError, urllib.error.URLError, TimeoutError):
+    except (OSError, urllib.error.URLError, TimeoutError, ValueError):
+        return False
+
+
+def _t3_skill_ready(path: str) -> bool:
+    if os.path.islink(path) or not os.path.isfile(path):
+        return False
+    try:
+        with open(path, encoding="utf-8") as file_obj:
+            return "managed-by: infra_tools" in file_obj.read()
+    except OSError:
         return False
 
 
@@ -925,7 +943,7 @@ def inspect_t3code(home: Optional[str] = None, *, fix: bool = False) -> JSONDict
         and os.access(pair_wrapper, os.X_OK),
         "endpoint": _t3_endpoint_reachable(_t3_port(wrapper)),
         "git_identity": bool(git_name and git_email),
-        "t3_agent_skill": not skill_required or os.path.isfile(skill),
+        "t3_agent_skill": not skill_required or _t3_skill_ready(skill),
     }
     if gh_path:
         checks["gh_authenticated"] = gh_auth

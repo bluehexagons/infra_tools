@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import subprocess
@@ -67,6 +68,13 @@ def _validated_url(value: str, label: str, *, local_only: bool = False) -> str:
         port = parsed.port
     except ValueError as exc:
         raise ValueError(f"Invalid {label}") from exc
+    if local_only:
+        try:
+            local_host = ipaddress.ip_address(parsed.hostname or "")
+        except ValueError:
+            local_host = None
+        if local_host is None and (parsed.hostname or "").lower() != "localhost":
+            raise ValueError(f"Invalid {label}")
     if (
         parsed.scheme not in ({"http"} if local_only else {"http", "https"})
         or not parsed.hostname
@@ -77,6 +85,7 @@ def _validated_url(value: str, label: str, *, local_only: bool = False) -> str:
         or parsed.query
         or parsed.fragment
         or (local_only and port is None)
+        or (port is not None and not 1 <= port <= 65535)
     ):
         raise ValueError(f"Invalid {label}")
     return value.rstrip("/")

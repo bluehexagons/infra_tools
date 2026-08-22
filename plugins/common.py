@@ -229,6 +229,17 @@ def extend_agent_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -
     if config.agent_payload:
         steps.append(("Copying agent tool configuration", copy_agent_tooling_payload))
 
+    git_needed = bool(
+        config.agent_repos
+        or config.install_git_lfs
+        or (
+            (config.web_interfaces or config.desktop_interfaces)
+            and config.git_access != "none"
+        )
+    )
+    if git_needed:
+        steps.append(("Installing Git for agent repositories", install_git_for_agent_repositories))
+
     if "t3code" in (config.desktop_interfaces or []):
         steps.append(("Installing T3 Code desktop interface", install_t3code_desktop))
 
@@ -239,9 +250,6 @@ def extend_agent_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -
         from common.browser_automation_steps import install_browser_automation
 
         steps.append(("Installing agent browser automation", install_browser_automation))
-
-    if config.agent_repos or config.install_git_lfs:
-        steps.append(("Installing Git for agent repositories", install_git_for_agent_repositories))
 
     if config.install_git_lfs:
         steps.append(

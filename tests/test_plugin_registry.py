@@ -239,6 +239,23 @@ class TestPluginRegistry(unittest.TestCase):
             step_names.index("Installing T3 Code web interface"),
         )
 
+    def test_t3_web_with_git_access_installs_git_without_cli_bundle(self):
+        config = SetupConfig(
+            host="host",
+            username="user",
+            system_type="server_lite",
+            agent_tools=["codex"],
+            install_codex=True,
+            web_interfaces=["t3code"],
+            git_access="read-write",
+        )
+        step_names = [name for name, _ in get_steps_for_system_type(config)]
+        self.assertIn("Installing Git for agent repositories", step_names)
+        self.assertLess(
+            step_names.index("Installing Git for agent repositories"),
+            step_names.index("Installing T3 Code web interface"),
+        )
+
     def test_vm_storage_is_prepared_before_agent_repository_clones(self):
         config = SetupConfig(
             host="host",

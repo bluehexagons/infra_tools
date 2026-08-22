@@ -14,6 +14,7 @@ import urllib.parse
 import urllib.request
 from typing import cast
 
+from lib.atomic_io import write_text_atomic
 from lib.config import SetupConfig
 from lib.remote_utils import install_package, is_dry_run, run
 from lib.types import JSONDict, JSONList
@@ -328,6 +329,12 @@ def _latest_t3code_asset() -> tuple[str, str]:
         name = item.get("name")
         url = item.get("browser_download_url")
         digest = item.get("digest")
+        parsed_url = None
+        if isinstance(url, str):
+            try:
+                parsed_url = urllib.parse.urlsplit(url)
+            except ValueError:
+                parsed_url = None
         if (
             isinstance(name, str)
             and name.endswith("-x86_64.AppImage")
@@ -339,29 +346,60 @@ def _latest_t3code_asset() -> tuple[str, str]:
                 character in "0123456789abcdef"
                 for character in digest.removeprefix("sha256:").lower()
             )
-            and urllib.parse.urlparse(url).hostname == "github.com"
+            and parsed_url is not None
+            and parsed_url.scheme == "https"
+            and parsed_url.hostname == "github.com"
+            and parsed_url.username is None
+            and parsed_url.password is None
+            and not parsed_url.query
+            and not parsed_url.fragment
         ):
             return url, digest.removeprefix("sha256:").lower()
     raise RuntimeError("The latest official T3 Code release has no verified x86_64 AppImage")
 
 
 def _download_verified_file(url: str, expected_sha256: str, destination: str) -> None:
+    try:
+        parsed_url = urllib.parse.urlsplit(url)
+    except ValueError as exc:
+        raise RuntimeError("T3 Code download URL is invalid") from exc
+    if (
+        parsed_url.scheme != "https"
+        or parsed_url.username is not None
+        or parsed_url.password is not None
+        or not parsed_url.hostname
+    ):
+        raise RuntimeError("T3 Code downloads must use an HTTPS URL")
     request = urllib.request.Request(url, headers={"User-Agent": "infra_tools-agent-vm"})
     digest = hashlib.sha256()
-    temporary = f"{destination}.download"
+    destination = os.path.abspath(destination)
+    parent = os.path.dirname(destination)
+    _reject_symlinked_agent_destination(parent)
+    if os.path.lexists(destination) and os.path.islink(destination):
+        raise RuntimeError(f"Refusing symlinked download destination: {destination}")
+    descriptor, temporary = tempfile.mkstemp(
+        dir=parent,
+        prefix=f".{os.path.basename(destination)}-",
+    )
+    descriptor_open = True
     try:
-        with urllib.request.urlopen(request, timeout=120) as response:
-            with open(temporary, "wb") as file_obj:
+        with os.fdopen(descriptor, "wb") as file_obj:
+            descriptor_open = False
+            with urllib.request.urlopen(request, timeout=120) as response:
                 while True:
                     chunk = response.read(1024 * 1024)
                     if not chunk:
                         break
                     digest.update(chunk)
                     file_obj.write(chunk)
+            file_obj.flush()
+            os.fsync(file_obj.fileno())
         if digest.hexdigest() != expected_sha256:
             raise RuntimeError("T3 Code AppImage checksum verification failed")
         os.replace(temporary, destination)
     finally:
+        if descriptor_open:
+            os.close(descriptor)
         if os.path.exists(temporary):
             os.remove(temporary)
 
@@ -384,9 +422,9 @@ def install_t3code_desktop(config: SetupConfig) -> None:
     app_dir = os.path.join(user_home, ".local", "share", "t3code")
     bin_dir = os.path.join(user_home, ".local", "bin")
     applications_dir = os.path.join(user_home, ".local", "share", "applications")
-    os.makedirs(app_dir, exist_ok=True)
-    os.makedirs(bin_dir, exist_ok=True)
-    os.makedirs(applications_dir, exist_ok=True)
+    _ensure_agent_directory(app_dir, mode=0o755)
+    _ensure_agent_directory(bin_dir, mode=0o755)
+    _ensure_agent_directory(applications_dir, mode=0o755)
 
     asset_url, expected_sha256 = _latest_t3code_asset()
     appimage_path = os.path.join(app_dir, "t3code.AppImage")
@@ -394,26 +432,28 @@ def install_t3code_desktop(config: SetupConfig) -> None:
     os.chmod(appimage_path, 0o755)
 
     wrapper_path = os.path.join(bin_dir, "t3code")
-    with open(wrapper_path, "w", encoding="utf-8") as file_obj:
-        file_obj.write(
-            "#!/bin/sh\n"
-            'export APPIMAGE_EXTRACT_AND_RUN="${APPIMAGE_EXTRACT_AND_RUN:-1}"\n'
-            'exec "$HOME/.local/share/t3code/t3code.AppImage" "$@"\n'
-        )
-    os.chmod(wrapper_path, 0o755)
+    _reject_symlinked_agent_destination(wrapper_path)
+    write_text_atomic(
+        wrapper_path,
+        "#!/bin/sh\n"
+        'export APPIMAGE_EXTRACT_AND_RUN="${APPIMAGE_EXTRACT_AND_RUN:-1}"\n'
+        'exec "$HOME/.local/share/t3code/t3code.AppImage" "$@"\n',
+        mode=0o755,
+    )
 
     desktop_path = os.path.join(applications_dir, "t3code.desktop")
-    with open(desktop_path, "w", encoding="utf-8") as file_obj:
-        file_obj.write(
-            "[Desktop Entry]\n"
-            "Type=Application\n"
-            "Name=T3 Code\n"
-            "Comment=Agentic coding desktop\n"
-            f"Exec={wrapper_path}\n"
-            "Terminal=false\n"
-            "Categories=Development;\n"
-        )
-    os.chmod(desktop_path, 0o644)
+    _reject_symlinked_agent_destination(desktop_path)
+    write_text_atomic(
+        desktop_path,
+        "[Desktop Entry]\n"
+        "Type=Application\n"
+        "Name=T3 Code\n"
+        "Comment=Agentic coding desktop\n"
+        f"Exec={wrapper_path}\n"
+        "Terminal=false\n"
+        "Categories=Development;\n",
+        mode=0o644,
+    )
     _chown_path(config, app_dir)
     _chown_path(config, bin_dir)
     _chown_path(config, applications_dir)

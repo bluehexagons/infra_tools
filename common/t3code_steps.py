@@ -9,6 +9,7 @@ import pwd
 import re
 import shlex
 import shutil
+import stat
 import tempfile
 from typing import Sequence
 
@@ -205,6 +206,10 @@ def _ensure_t3_shell_path(home: str, uid: int, gid: int) -> None:
     """Make the installed T3 CLI available in target-user login shells."""
 
     bashrc = os.path.join(home, ".bashrc")
+    if os.path.lexists(bashrc) and (
+        os.path.islink(bashrc) or not os.path.isfile(bashrc)
+    ):
+        raise RuntimeError(f"Refusing unsafe target shell configuration: {bashrc}")
     path_line = (
         'export PATH="$HOME/.local/share/infra-tools/t3code/'
         'node_modules/.bin:$PATH"\n'
@@ -214,11 +219,13 @@ def _ensure_t3_shell_path(home: str, uid: int, gid: int) -> None:
         with open(bashrc, "r", encoding="utf-8") as file_obj:
             existing = file_obj.read()
     if path_line not in existing:
-        with open(bashrc, "a", encoding="utf-8") as file_obj:
-            if existing and not existing.endswith("\n"):
-                file_obj.write("\n")
-            file_obj.write("# infra-tools T3 Code runtime\n")
-            file_obj.write(path_line)
+        updated = existing
+        if updated and not updated.endswith("\n"):
+            updated += "\n"
+        updated += "# infra-tools T3 Code runtime\n"
+        updated += path_line
+        mode = stat.S_IMODE(os.stat(bashrc).st_mode) if os.path.exists(bashrc) else 0o644
+        write_text_atomic(bashrc, updated, mode=mode)
     os.chown(bashrc, uid, gid)
 
 
@@ -246,22 +253,31 @@ def _install_t3_runtime(
             raise RuntimeError(f"Could not install {package}, required by T3 Code")
 
     runtime = _t3_runtime_path(home)
+    if os.path.lexists(runtime) and (
+        os.path.islink(runtime) or not os.path.isdir(runtime)
+    ):
+        raise RuntimeError(f"Refusing unsafe T3 runtime directory: {runtime}")
     os.makedirs(runtime, mode=0o700, exist_ok=True)
     os.chmod(runtime, 0o700)
     os.chown(runtime, uid, gid)
 
     package_json = os.path.join(runtime, "package.json")
+    if os.path.lexists(package_json) and (
+        os.path.islink(package_json) or not os.path.isfile(package_json)
+    ):
+        raise RuntimeError(f"Refusing unsafe T3 runtime manifest: {package_json}")
     if not os.path.exists(package_json):
-        with open(package_json, "w", encoding="utf-8") as file_obj:
-            json.dump(
+        write_text_atomic(
+            package_json,
+            json.dumps(
                 {
                     "name": "infra-tools-t3code-runtime",
                     "private": True,
-                },
-                file_obj,
+                }
             )
-            file_obj.write("\n")
-        os.chmod(package_json, 0o600)
+            + "\n",
+            mode=0o600,
+        )
         os.chown(package_json, uid, gid)
 
     t3_binary = os.path.join(runtime, "node_modules", ".bin", "t3")
@@ -465,9 +481,9 @@ def _write_text_if_changed(path: str, content: str, mode: int) -> bool:
     except OSError:
         changed = True
     if changed:
-        with open(path, "w", encoding="utf-8") as file_obj:
-            file_obj.write(content)
-    os.chmod(path, mode)
+        write_text_atomic(path, content, mode=mode)
+    else:
+        os.chmod(path, mode)
     return changed
 
 
@@ -761,7 +777,7 @@ server {{
 }}
 """
     previous_nginx_content = None
-    if os.path.exists(DEVICE_PAIRING_NGINX_SITE):
+    if os.path.lexists(DEVICE_PAIRING_NGINX_SITE):
         if os.path.islink(DEVICE_PAIRING_NGINX_SITE) or not os.path.isfile(
             DEVICE_PAIRING_NGINX_SITE
         ):
@@ -772,9 +788,7 @@ server {{
             previous_nginx_content = file_obj.read()
     nginx_changed = previous_nginx_content != nginx_content
     if nginx_changed:
-        with open(DEVICE_PAIRING_NGINX_SITE, "w", encoding="utf-8") as file_obj:
-            file_obj.write(nginx_content)
-        os.chmod(DEVICE_PAIRING_NGINX_SITE, 0o644)
+        write_text_atomic(DEVICE_PAIRING_NGINX_SITE, nginx_content, mode=0o644)
     link_created = False
     if not os.path.islink(DEVICE_PAIRING_NGINX_LINK):
         if os.path.lexists(DEVICE_PAIRING_NGINX_LINK):
@@ -790,9 +804,11 @@ server {{
             if os.path.exists(DEVICE_PAIRING_NGINX_SITE):
                 os.remove(DEVICE_PAIRING_NGINX_SITE)
         else:
-            with open(DEVICE_PAIRING_NGINX_SITE, "w", encoding="utf-8") as file_obj:
-                file_obj.write(previous_nginx_content)
-            os.chmod(DEVICE_PAIRING_NGINX_SITE, 0o644)
+            write_text_atomic(
+                DEVICE_PAIRING_NGINX_SITE,
+                previous_nginx_content,
+                mode=0o644,
+            )
         if link_created and os.path.islink(DEVICE_PAIRING_NGINX_LINK):
             os.unlink(DEVICE_PAIRING_NGINX_LINK)
         if auth_changed:
@@ -923,6 +939,8 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target
 """
+    if os.path.islink(T3_SERVICE_FILE):
+        raise RuntimeError(f"Refusing symlinked managed service file: {T3_SERVICE_FILE}")
     service_changed = True
     try:
         with open(T3_SERVICE_FILE, encoding="utf-8") as file_obj:
@@ -930,9 +948,7 @@ WantedBy=multi-user.target
     except OSError:
         pass
     if service_changed:
-        with open(T3_SERVICE_FILE, "w", encoding="utf-8") as file_obj:
-            file_obj.write(service_content)
-        os.chmod(T3_SERVICE_FILE, 0o644)
+        _write_text_if_changed(T3_SERVICE_FILE, service_content, 0o644)
 
     if service_changed:
         run("systemctl daemon-reload")
