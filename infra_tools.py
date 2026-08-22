@@ -753,6 +753,8 @@ def show_info(pattern: Optional[str] = None, *, compact: bool = False) -> int:
             features.append("Go")
         if args.get("install_python"):
             features.append("Python")
+        if args.get("install_data_analysis_tools"):
+            features.append("Data analysis")
         if args.get("install_gh"):
             features.append("GitHub CLI")
         if args.get("install_codex"):

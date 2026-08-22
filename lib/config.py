@@ -1394,6 +1394,12 @@ class SetupConfig:
             data.pop(legacy_field, None)
         data['agent_tools'] = self.selected_agent_tools() or None
         data['agent_tools_removed'] = list(self.agent_tools_removed or []) or None
+        # argparse uses None to distinguish an omitted BooleanOptionalAction
+        # during patch merges. Persist a concrete boolean once the setup state
+        # is saved so the cache schema does not retain that transient sentinel.
+        data['install_data_analysis_tools'] = bool(
+            self.install_data_analysis_tools
+        )
         # Live activation is a one-shot controller operation. Persisting it
         # would make a later deploy retry a sensitive address change without
         # the operator explicitly requesting another handoff.

@@ -100,8 +100,8 @@ an empty pairing password reuses the account password. Use
 `--no-device-pairing` to disable individual defaults. Node.js is installed
 automatically because T3 Code requires it. Go and other project runtimes remain
 optional and can be selected with their runtime flags. The shared CLI baseline
-includes `ripgrep` (`rg`), `jq`, SQLite, `file`, and `tree`. Add
-`--data-analysis` only when the VM needs the larger NumPy, pandas, SciPy,
+includes `ripgrep` (`rg`), `jq`, SQLite, `file`, `tree`, `make`, and `patch`.
+Add `--data-analysis` only when the VM needs the larger NumPy, pandas, SciPy,
 Matplotlib, JupyterLab, and csvkit stack; the flag also enables Python tooling.
 
 ### Desktop agentic coding workstation with RDP

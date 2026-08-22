@@ -7,6 +7,13 @@ import subprocess
 from typing import Any
 
 from lib.config import SetupConfig
+from lib.validation import validate_package_name
+
+
+DATA_ANALYSIS_MARKER_PACKAGES = (
+    "jupyterlab",
+    "python3-pandas",
+)
 
 
 def check_command_exists(command: str) -> bool:
@@ -45,6 +52,22 @@ def check_file_exists(path: str) -> bool:
     return os.path.isfile(path)
 
 
+def check_package_installed(package: str) -> bool:
+    """Return whether a validated Debian package is fully installed."""
+
+    try:
+        safe_package = validate_package_name(package)
+        result = subprocess.run(
+            ["dpkg-query", "-W", "-f=${Status}", safe_package],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (ValueError, subprocess.SubprocessError, OSError):
+        return False
+    return result.returncode == 0 and "install ok installed" in result.stdout
+
+
 def detect_ruby() -> bool:
     """Detect Ruby installed via apt packages."""
     return check_command_exists("ruby") and check_command_exists("bundler")
@@ -66,6 +89,15 @@ def detect_python() -> bool:
     home_dir = os.path.expanduser("~")
     uv_path = os.path.join(home_dir, ".local", "bin", "uv")
     return check_file_exists(uv_path) or check_command_exists("uv")
+
+
+def detect_data_analysis_tools() -> bool:
+    """Detect the distinctive packages from the managed analysis bundle."""
+
+    return all(
+        check_package_installed(package)
+        for package in DATA_ANALYSIS_MARKER_PACKAGES
+    )
 
 
 def detect_deployments() -> list[tuple[str, str]]:
@@ -187,6 +219,7 @@ def reconstruct_configuration(host: str = "localhost", username: str = "root") -
         "install_go": detect_go(),
         "install_node": detect_node(),
         "install_python": detect_python(),
+        "install_data_analysis_tools": detect_data_analysis_tools(),
         "enable_samba": detect_samba(),
     }
 
@@ -227,6 +260,7 @@ def run_reconstruct_command(compact: bool) -> int:
             "install_go": config.install_go,
             "install_node": config.install_node,
             "install_python": config.install_python,
+            "install_data_analysis_tools": config.install_data_analysis_tools,
             "enable_samba": config.enable_samba,
         }
         output.update(extras)

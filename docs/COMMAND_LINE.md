@@ -292,8 +292,9 @@ defaults and accept comma-separated lists; use `--no-agent-tool` to remove a
 default. The full profile does not choose Proxmox capacity. It installs Node.js
 automatically for T3 Code, while Go and other project runtimes remain optional.
 The shared CLI baseline includes small coding and inspection tools such as
-`ripgrep` (`rg`), `jq`, SQLite, `file`, and `tree`. The substantially larger
-Python analysis/notebook stack remains opt-in through `--data-analysis`.
+`ripgrep` (`rg`), `jq`, SQLite, `file`, `tree`, `make`, and `patch`. The
+substantially larger Python analysis/notebook stack remains opt-in through
+`--data-analysis`.
 Missing account and pairing passwords are requested securely from a terminal.
 `server_lite` omits the standard firewall and generic CLI bundle, so use it
 only when that lighter profile is intentional.

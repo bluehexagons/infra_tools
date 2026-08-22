@@ -89,7 +89,15 @@ class TestControlPlanePackages(unittest.TestCase):
 class TestDevelopmentToolPackages(unittest.TestCase):
     def test_cli_baseline_contains_small_agent_tools(self):
         self.assertTrue(
-            {"ripgrep", "jq", "sqlite3", "file", "tree"}.issubset(
+            {
+                "ripgrep",
+                "jq",
+                "sqlite3",
+                "file",
+                "tree",
+                "make",
+                "patch",
+            }.issubset(
                 CLI_TOOL_PACKAGES
             )
         )
@@ -152,6 +160,25 @@ class TestDevelopmentToolPackages(unittest.TestCase):
         for package in CLI_TOOL_PACKAGES:
             with self.subTest(default_package=package):
                 self.assertNotIn(f" {package}", command)
+
+    @patch("common.common_steps.run")
+    @patch("common.common_steps.is_package_installed")
+    def test_cli_installer_fails_when_a_package_remains_missing(
+        self, mock_is_installed, mock_run
+    ):
+        mock_is_installed.side_effect = (
+            [False] * len(CLI_TOOL_PACKAGES) + [False] * len(CLI_TOOL_PACKAGES)
+        )
+        mock_run.return_value = MagicMock(returncode=100)
+
+        with self.assertRaisesRegex(RuntimeError, "CLI tool installation failed"):
+            install_cli_tools(
+                SetupConfig(
+                    host="testhost",
+                    username="agent",
+                    system_type="agent_vm",
+                )
+            )
 
 
 class TestUserCommandEnvironment(unittest.TestCase):
