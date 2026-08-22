@@ -69,6 +69,12 @@ def _configure_librewolf_apparmor_profile() -> None:
     """
     if not os.path.isfile(_LIBREWOLF_APPARMOR_PROFILE):
         return
+    if not shutil.which("aa-enabled") or not shutil.which("apparmor_parser"):
+        print(
+            "  ⚠ AppArmor tooling is unavailable; "
+            "skipping LibreWolf profile reload"
+        )
+        return
     if run("aa-enabled -q", check=False).returncode != 0:
         return
     run(

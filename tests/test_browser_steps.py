@@ -100,10 +100,11 @@ class TestBrowserSteps(unittest.TestCase):
         self.assertFalse(is_flatpak_app_installed("com.brave.Browser"))
 
     @patch("desktop.browser_steps.os.path.isfile", return_value=True)
+    @patch("desktop.browser_steps.shutil.which", return_value="/usr/bin/apparmor-tool")
     @patch("desktop.browser_steps.run")
     @patch("builtins.open", new_callable=unittest.mock.mock_open)
     def test_recreates_and_reloads_librewolf_apparmor_profile(
-        self, mock_open, mock_run, _isfile
+        self, mock_open, mock_run, _which, _isfile
     ):
         mock_run.side_effect = [
             subprocess.CompletedProcess(args=["aa-enabled"], returncode=0),
@@ -131,9 +132,10 @@ class TestBrowserSteps(unittest.TestCase):
         )
 
     @patch("desktop.browser_steps.os.path.isfile", return_value=True)
+    @patch("desktop.browser_steps.shutil.which", return_value="/usr/bin/apparmor-tool")
     @patch("desktop.browser_steps.run")
     def test_skips_librewolf_profile_reload_when_apparmor_is_inactive(
-        self, mock_run, _isfile
+        self, mock_run, _which, _isfile
     ):
         mock_run.return_value = subprocess.CompletedProcess(
             args=["aa-enabled"], returncode=1
@@ -142,6 +144,16 @@ class TestBrowserSteps(unittest.TestCase):
         _configure_librewolf_apparmor_profile()
 
         mock_run.assert_called_once_with("aa-enabled -q", check=False)
+
+    @patch("desktop.browser_steps.os.path.isfile", return_value=True)
+    @patch("desktop.browser_steps.shutil.which", return_value=None)
+    @patch("desktop.browser_steps.run")
+    def test_skips_librewolf_profile_reload_when_apparmor_tools_are_missing(
+        self, mock_run, _which, _isfile
+    ):
+        _configure_librewolf_apparmor_profile()
+
+        mock_run.assert_not_called()
 
     @patch("desktop.browser_steps.os.path.isfile")
     @patch("desktop.browser_steps.run")

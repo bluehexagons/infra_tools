@@ -223,9 +223,13 @@ class TestBrowserSteps(unittest.TestCase):
         mock_package.return_value = False
         mock_extrepo.return_value = True
 
-        install_single_browser("librewolf", use_flatpak=False)
+        with patch(
+            "desktop.browser_steps._configure_librewolf_apparmor_profile"
+        ) as mock_profile:
+            install_single_browser("librewolf", use_flatpak=False)
 
         mock_extrepo.assert_called_once_with("LibreWolf", "librewolf", "librewolf")
+        mock_profile.assert_called_once_with()
 
     @patch("desktop.browser_steps._install_helium_browser")
     def test_installs_helium_browser(self, mock_install_helium):

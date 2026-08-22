@@ -122,6 +122,7 @@ class T3CodeWebTest(unittest.TestCase):
                 agent_workspace=os.path.join(temporary, "repos"),
             )
             service_path = os.path.join(temporary, "t3code.service")
+            pairing_config_dir = os.path.join(temporary, "device-pairing")
             admin_pair_script = os.path.join(
                 os.path.dirname(os.path.dirname(__file__)),
                 "common",
@@ -152,6 +153,40 @@ class T3CodeWebTest(unittest.TestCase):
                     return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
                 ),
                 patch("common.t3code_steps.T3_SERVICE_FILE", service_path),
+                patch(
+                    "common.t3code_steps.DEVICE_PAIRING_SERVICE_FILE",
+                    os.path.join(temporary, "infra-tools-device-pairing.service"),
+                ),
+                patch(
+                    "common.t3code_steps.DEVICE_PAIRING_CONFIG_DIR",
+                    pairing_config_dir,
+                ),
+                patch(
+                    "common.t3code_steps.DEVICE_PAIRING_AUTH_FILE",
+                    os.path.join(pairing_config_dir, "htpasswd"),
+                ),
+                patch(
+                    "common.t3code_steps.DEVICE_PAIRING_PROVIDERS_FILE",
+                    os.path.join(pairing_config_dir, "providers.json"),
+                ),
+                patch(
+                    "common.t3code_steps.DEVICE_PAIRING_NGINX_SITE",
+                    os.path.join(
+                        temporary,
+                        "nginx",
+                        "sites-available",
+                        "device-pairing",
+                    ),
+                ),
+                patch(
+                    "common.t3code_steps.DEVICE_PAIRING_NGINX_LINK",
+                    os.path.join(
+                        temporary,
+                        "nginx",
+                        "sites-enabled",
+                        "device-pairing",
+                    ),
+                ),
                 patch(
                     "common.t3code_steps.T3_ADMIN_PAIR_SCRIPT",
                     admin_pair_script,
