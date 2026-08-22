@@ -124,6 +124,7 @@ class TestInteractiveShellDispatch(unittest.TestCase):
         shell.run()
         mock_run_shell.assert_called_once_with(None)
 
+    @patch("lib.proxmox_network.suggest_free_ips", return_value=[])
     @patch("lib.cache.save_setup_command")
     @patch("lib.proxmox_hosts.load_proxmox_hosts")
     @patch("lib.cache.load_all_setup_commands")
@@ -132,6 +133,7 @@ class TestInteractiveShellDispatch(unittest.TestCase):
         mock_load_templates,
         mock_load_proxmox_hosts,
         mock_save_setup,
+        _mock_suggest_free_ips,
     ):
         mock_load_templates.return_value = [
             SetupConfig(
@@ -147,6 +149,7 @@ class TestInteractiveShellDispatch(unittest.TestCase):
                 install_node=True,
                 install_go=True,
                 install_python=True,
+                install_data_analysis_tools=True,
                 hosted_node="pve1",
                 container_memory="8G",
                 container_cores=4,
@@ -170,7 +173,8 @@ class TestInteractiveShellDispatch(unittest.TestCase):
                 "",           # tags default
                 "",           # desktop default
                 "",           # rdp default
-                "",           # dev tools default
+                "n",          # skip the combined dev-runtime bundle
+                "",           # data-analysis tools default
                 "",           # memory default
                 "",           # cores default
                 "",           # disk default
@@ -188,10 +192,11 @@ class TestInteractiveShellDispatch(unittest.TestCase):
         self.assertEqual(saved_config.system_type, "workstation_dev")
         self.assertEqual(saved_config.hosted_node, "pve1")
         self.assertEqual(saved_config.container_storage, [["root", "40G"]])
-        self.assertTrue(saved_config.install_ruby)
-        self.assertTrue(saved_config.install_node)
-        self.assertTrue(saved_config.install_go)
+        self.assertFalse(saved_config.install_ruby)
+        self.assertFalse(saved_config.install_node)
+        self.assertFalse(saved_config.install_go)
         self.assertTrue(saved_config.install_python)
+        self.assertTrue(saved_config.install_data_analysis_tools)
 
     @patch("lib.cache.save_setup_command")
     @patch("lib.proxmox_hosts.load_proxmox_hosts")

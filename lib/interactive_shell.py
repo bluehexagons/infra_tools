@@ -519,6 +519,16 @@ class InteractiveShell:
                     config.install_node = True
                     config.install_go = True
                     config.install_python = True
+                config.install_data_analysis_tools = self._prompt_yes_no(
+                    "Install data analysis tools (Jupyter, NumPy, pandas, SciPy)",
+                    default=(
+                        bool(template.install_data_analysis_tools)
+                        if template
+                        else False
+                    ),
+                )
+                if config.install_data_analysis_tools:
+                    config.install_python = True
 
         if system_type == "server_web":
             config.install_ruby = self._prompt_yes_no(
