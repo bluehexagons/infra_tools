@@ -27,7 +27,7 @@ from typing import Optional
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../..'))
 
 from lib.logging_utils import get_service_logger, log_event
-from lib.notifications import load_notification_configs_from_state, send_notification
+from lib.notifications import load_notification_configs_from_state, send_notification_safe
 from web.service_tools.cicd_security import (
     MAX_JOB_FILE_BYTES,
     get_workspace_name,
@@ -532,7 +532,7 @@ def perform_remote_deployment(
 def notify_success(repo_url: str, commit_sha: str, log_file: str, notification_configs: list) -> None:
     """Send success notification."""
     try:
-        send_notification(
+        send_notification_safe(
             notification_configs,
             subject=f"CI/CD Success: {repo_url}",
             job="cicd_executor",
@@ -562,7 +562,7 @@ def notify_failure(repo_url: str, commit_sha: str, reason: str, notification_con
     
     if notification_configs:
         try:
-            send_notification(
+            send_notification_safe(
                 notification_configs,
                 subject=f"CI/CD Failed: {repo_url}",
                 job="cicd_executor",

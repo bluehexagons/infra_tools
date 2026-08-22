@@ -94,7 +94,7 @@ class TestSyncRsyncLogging(unittest.TestCase):
         )
         self.assertIn("Rsync error output | stderr='rsync exploded'", output)
 
-    @patch("lib.notifications.send_notification", side_effect=RuntimeError("notify boom"))
+    @patch("lib.notifications.send_notification_safe", side_effect=RuntimeError("notify boom"))
     @patch("lib.notifications.parse_notification_args", return_value=["cfg"])
     @patch("lib.machine_state.load_setup_config", return_value={"notify_specs": [["mailbox", "ops@example.com"]]})
     @patch("sync.service_tools.sync_rsync.datetime")

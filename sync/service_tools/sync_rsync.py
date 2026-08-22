@@ -242,7 +242,7 @@ def run_rsync_with_notifications(source: str, destination: str, suppress_notific
         # Send success notification
         if notification_configs:
             try:
-                from lib.notifications import send_notification
+                from lib.notifications import send_notification_safe
                 name_prefix = f"[{friendly_name}] " if friendly_name else ""
                 message = f"Synced {files_transferred} files"
                 if total_size > 0:
@@ -257,7 +257,7 @@ Total size: {total_size // BYTES_TO_MB} MB
 Duration: {duration:.1f}s
 """
                 
-                send_notification(
+                send_notification_safe(
                     notification_configs,
                     subject=f"{name_prefix}Success: Sync completed",
                     job="sync",
@@ -292,10 +292,10 @@ Duration: {duration:.1f}s
         # Send error notification
         if notification_configs:
             try:
-                from lib.notifications import send_notification
+                from lib.notifications import send_notification_safe
                 name_prefix = f"[{friendly_name}] " if friendly_name else ""
                 error_msg = e.stderr or e.stdout or str(e)
-                send_notification(
+                send_notification_safe(
                     notification_configs,
                     subject=f"{name_prefix}Error: Sync failed",
                     job="sync",
@@ -327,9 +327,9 @@ Duration: {duration:.1f}s
         # Send error notification
         if notification_configs:
             try:
-                from lib.notifications import send_notification
+                from lib.notifications import send_notification_safe
                 name_prefix = f"[{friendly_name}] " if friendly_name else ""
-                send_notification(
+                send_notification_safe(
                     notification_configs,
                     subject=f"{name_prefix}Error: Sync failed",
                     job="sync",

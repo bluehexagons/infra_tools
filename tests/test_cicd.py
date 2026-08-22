@@ -747,7 +747,7 @@ class TestExecutorStructuredLogging(unittest.TestCase):
         self.assertIn(f"Running script | script_path='{script_path}'", output)
         self.assertIn(f"Script completed successfully | script_path='{script_path}'", output)
 
-    @patch("web.service_tools.cicd_executor.send_notification", side_effect=RuntimeError("notify boom"))
+    @patch("web.service_tools.cicd_executor.send_notification_safe", side_effect=RuntimeError("notify boom"))
     def test_notify_success_logs_structured_failure(self, _mock_notify):
         with self.assertLogs(cicd_executor.logger, level="WARNING") as logs:
             cicd_executor.notify_success("https://github.com/org/repo.git", "abcdef123456", "/tmp/build.log", ["cfg"])
@@ -757,7 +757,7 @@ class TestExecutorStructuredLogging(unittest.TestCase):
             "\n".join(logs.output),
         )
 
-    @patch("web.service_tools.cicd_executor.send_notification", side_effect=RuntimeError("notify boom"))
+    @patch("web.service_tools.cicd_executor.send_notification_safe", side_effect=RuntimeError("notify boom"))
     def test_notify_failure_logs_structured_failure(self, _mock_notify):
         with self.assertLogs(cicd_executor.logger, level="WARNING") as logs:
             cicd_executor.notify_failure("https://github.com/org/repo.git", "abcdef123456", "Build failed", ["cfg"])

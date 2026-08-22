@@ -644,7 +644,7 @@ class TestOperationLogging(unittest.TestCase):
 
 
 class TestOperationNotifications(unittest.TestCase):
-    @patch("sync.service_tools.storage_ops.send_notification", side_effect=RuntimeError("notify boom"))
+    @patch("sync.service_tools.storage_ops.send_notification_safe", side_effect=RuntimeError("notify boom"))
     def test_logs_structured_operation_notification_failure(self, _mock_send):
         logger = MagicMock()
         results = {
@@ -663,7 +663,7 @@ class TestOperationNotifications(unittest.TestCase):
 
 
 class TestStorageOpsMain(unittest.TestCase):
-    @patch("sync.service_tools.storage_ops.send_notification", side_effect=RuntimeError("notify boom"))
+    @patch("sync.service_tools.storage_ops.send_notification_safe", side_effect=RuntimeError("notify boom"))
     @patch("sync.service_tools.storage_ops.parse_notification_args", return_value=["cfg"])
     @patch("sync.service_tools.storage_ops.load_setup_config", return_value={"notify_specs": [["mailbox", "ops@example.com"]]})
     @patch("sync.service_tools.storage_ops.get_service_logger")

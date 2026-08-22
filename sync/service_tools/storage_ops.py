@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../
 
 from lib.logging_utils import get_service_logger, log_event
 from lib.atomic_io import write_json_atomic
-from lib.notifications import send_notification, parse_notification_args
+from lib.notifications import send_notification_safe, parse_notification_args
 from lib.machine_state import load_setup_config
 from lib.mount_utils import get_mount_ancestor
 from lib.task_utils import needs_mount_check
@@ -556,7 +556,7 @@ Parity Update Operations:
 """
     
     try:
-        send_notification(
+        send_notification_safe(
             notification_configs,
             subject=subject,
             job="storage-ops",
@@ -623,7 +623,7 @@ def main():
             if notification_configs:
                 name_prefix = f"[{friendly_name}] " if friendly_name else ""
                 try:
-                    send_notification(
+                    send_notification_safe(
                         notification_configs,
                         subject=f"{name_prefix}Storage operations skipped",
                         job="storage-ops",

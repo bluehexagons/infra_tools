@@ -48,7 +48,8 @@ identify the job. Routine scheduled-operation starts and successful sync,
 scrub, Node update, and CI/CD runs are retained in local logs by default;
 failure, warning, repair, and recovery events remain externally actionable.
 Producers can opt into success delivery for workflows that need completion
-proof.
+proof. Cleanup storage-pressure warnings are sent on threshold transitions and
+once again when pressure recovers, rather than on every maintenance run.
 
 Security-monitor notifications are summarized for people as a time window,
 overall status, categorized findings, evidence, and suggested actions. Routine

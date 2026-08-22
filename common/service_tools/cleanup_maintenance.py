@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../
 
 from lib.disk_utils import get_disk_usage_details
 from lib.logging_utils import get_service_logger, log_event
+from lib.atomic_io import write_json_atomic
 from lib.maintenance_defaults import (
     APT_LOCK_OPTIONS,
     CLEANUP_COMMAND_TIMEOUT_SECONDS,
@@ -37,6 +38,7 @@ from lib.validation import validate_filesystem_path, validate_positive_integer
 
 
 logger = get_service_logger('cleanup_maintenance', 'common', use_syslog=True)
+STATE_FILE = "/var/lib/infra_tools/cleanup_maintenance_state.json"
 _INFRA_TMP_RE = re.compile(rf"^(?:{'|'.join(INFRA_TMP_PATTERNS)})$")
 _CRASH_REPORT_RE = re.compile(rf"^(?:{'|'.join(CRASH_REPORT_PATTERNS)})$")
 _REMOTE_FILESYSTEM_TYPES = {
@@ -49,6 +51,34 @@ _REMOTE_FILESYSTEM_TYPES = {
     "smb3",
     "sshfs",
 }
+
+
+def _load_state() -> dict[str, object]:
+    """Load notification state used to suppress repeated storage alerts."""
+    try:
+        with open(STATE_FILE, "r", encoding="utf-8") as handle:
+            state = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def _save_state(state: dict[str, object]) -> None:
+    """Persist cleanup notification state atomically."""
+    validate_filesystem_path(STATE_FILE, must_exist=False)
+    write_json_atomic(STATE_FILE, state, mode=0o600, sort_keys=True)
+
+
+def _storage_pressure_fingerprint(crowded: dict[str, dict[str, int]]) -> str:
+    """Return a stable threshold-based identity for current pressure."""
+    pressure: dict[str, str] = {}
+    for mount_point, usage in sorted(crowded.items()):
+        critical = (
+            usage.get("usage_percent", 0) >= STORAGE_CRITICAL_PERCENT
+            or usage.get("inode_usage_percent", 0) >= STORAGE_CRITICAL_PERCENT
+        )
+        pressure[mount_point] = "critical" if critical else "warning"
+    return json.dumps(pressure, sort_keys=True, separators=(",", ":"))
 
 
 def run_command(
@@ -481,7 +511,7 @@ def collect_local_storage_usage() -> dict[str, dict[str, int]]:
 
 
 def notify_if_storage_still_low(notification_configs) -> None:
-    """Notify when any local filesystem remains crowded after cleanup."""
+    """Notify on storage-pressure transitions, not every maintenance run."""
     usage_by_mount = collect_local_storage_usage()
     crowded = {
         mount_point: usage
@@ -489,7 +519,38 @@ def notify_if_storage_still_low(notification_configs) -> None:
         if usage.get("usage_percent", 0) >= STORAGE_WARNING_PERCENT
         or usage.get("inode_usage_percent", 0) >= STORAGE_WARNING_PERCENT
     }
+    state = _load_state() if notification_configs else {}
+    previous_fingerprint = state.get("storage_pressure_fingerprint")
+    if not isinstance(previous_fingerprint, str):
+        previous_fingerprint = ""
+
     if not crowded:
+        if previous_fingerprint:
+            delivered = send_notification_safe(
+                notification_configs,
+                subject="Info: storage pressure recovered",
+                job="cleanup_maintenance",
+                status="info",
+                message="All monitored local filesystems are below storage thresholds after cleanup.",
+                details="Previous storage pressure has cleared.",
+                logger=logger,
+                event_type="maintenance.storage",
+                state="resolved",
+                dedup_key="cleanup:storage-pressure",
+            )
+            if delivered:
+                state.pop("storage_pressure_fingerprint", None)
+                state.pop("storage_pressure_since", None)
+                _save_state(state)
+        return
+
+    fingerprint = _storage_pressure_fingerprint(crowded)
+    if fingerprint == previous_fingerprint:
+        log_event(
+            logger,
+            "Storage pressure remains unchanged; notification suppressed",
+            fingerprint=fingerprint,
+        )
         return
 
     critical = any(
@@ -522,7 +583,7 @@ def notify_if_storage_still_low(notification_configs) -> None:
         affected_mounts=len(crowded),
         critical=critical,
     )
-    send_notification_safe(
+    delivered = send_notification_safe(
         notification_configs,
         subject=subject,
         job="cleanup_maintenance",
@@ -530,7 +591,15 @@ def notify_if_storage_still_low(notification_configs) -> None:
         message=message,
         details=details,
         logger=logger,
+        event_type="maintenance.storage",
+        state="firing",
+        dedup_key="cleanup:storage-pressure",
+        actions=["Free space or inodes on the affected filesystems and review large consumers."],
     )
+    if delivered and notification_configs:
+        state["storage_pressure_fingerprint"] = fingerprint
+        state["storage_pressure_since"] = state.get("storage_pressure_since") or time.time()
+        _save_state(state)
 
 
 def main() -> int:
@@ -579,6 +648,15 @@ def main() -> int:
             message="One or more cleanup maintenance tasks failed",
             details="\n".join(failures),
             logger=logger,
+            event_type="maintenance.cleanup",
+            state="firing",
+            dedup_key="cleanup:failure",
+            actions=["Review the failed maintenance tasks and their underlying system errors."],
+            data={
+                "schema_version": 1,
+                "failure_count": len(failures),
+                "failures": failures,
+            },
         )
         return 1
 

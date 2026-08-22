@@ -566,13 +566,74 @@ class TestCleanupHelpers(unittest.TestCase):
             },
         }
 
-        cleanup_maintenance.notify_if_storage_still_low(["cfg"])
+        with tempfile.TemporaryDirectory() as state_dir:
+            with patch.object(
+                cleanup_maintenance,
+                "STATE_FILE",
+                os.path.join(state_dir, "cleanup-state.json"),
+            ):
+                cleanup_maintenance.notify_if_storage_still_low(["cfg"])
 
         mock_notify.assert_called_once()
         self.assertIn("storage still low after cleanup", mock_notify.call_args.kwargs["subject"].lower())
         self.assertEqual(mock_notify.call_args.kwargs["status"], "error")
         self.assertIn("/var/lib/vz", mock_notify.call_args.kwargs["details"])
         self.assertIn("inodes=85%", mock_notify.call_args.kwargs["details"])
+
+    @patch("common.service_tools.cleanup_maintenance.send_notification_safe", return_value=True)
+    @patch(
+        "common.service_tools.cleanup_maintenance.collect_local_storage_usage",
+        return_value={
+            "/": {
+                "total_mb": 1000,
+                "used_mb": 920,
+                "free_mb": 80,
+                "usage_percent": 92,
+                "inode_usage_percent": 40,
+            },
+        },
+    )
+    def test_repeated_storage_pressure_is_suppressed(self, _usage, mock_notify):
+        with tempfile.TemporaryDirectory() as state_dir:
+            with patch.object(
+                cleanup_maintenance,
+                "STATE_FILE",
+                os.path.join(state_dir, "cleanup-state.json"),
+            ):
+                cleanup_maintenance.notify_if_storage_still_low(["cfg"])
+                cleanup_maintenance.notify_if_storage_still_low(["cfg"])
+
+        mock_notify.assert_called_once()
+
+    @patch("common.service_tools.cleanup_maintenance.send_notification_safe", return_value=True)
+    @patch(
+        "common.service_tools.cleanup_maintenance.collect_local_storage_usage",
+        side_effect=[
+            {
+                "/": {
+                    "total_mb": 1000,
+                    "used_mb": 920,
+                    "free_mb": 80,
+                    "usage_percent": 92,
+                    "inode_usage_percent": 40,
+                },
+            },
+            {},
+        ],
+    )
+    def test_storage_pressure_recovery_is_reported(self, _usage, mock_notify):
+        with tempfile.TemporaryDirectory() as state_dir:
+            with patch.object(
+                cleanup_maintenance,
+                "STATE_FILE",
+                os.path.join(state_dir, "cleanup-state.json"),
+            ):
+                cleanup_maintenance.notify_if_storage_still_low(["cfg"])
+                cleanup_maintenance.notify_if_storage_still_low(["cfg"])
+
+        self.assertEqual(mock_notify.call_count, 2)
+        self.assertEqual(mock_notify.call_args_list[0].kwargs["state"], "firing")
+        self.assertEqual(mock_notify.call_args_list[1].kwargs["state"], "resolved")
 
     @patch("common.service_tools.cleanup_maintenance.send_notification_safe")
     @patch(

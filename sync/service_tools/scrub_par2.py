@@ -428,10 +428,10 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
             # Send validation failure notification
             if notification_configs:
                 try:
-                    from lib.notifications import send_notification
+                    from lib.notifications import send_notification_safe
                     # Reuse existing logger from _LOGGERS cache
                     notif_logger = _LOGGERS.get(log_file)
-                    send_notification(
+                    send_notification_safe(
                         notification_configs,
                         subject="Error: Scrub validation failed",
                         job="scrub",
@@ -615,7 +615,7 @@ def scrub_directory(directory: str, database: str, redundancy: int, log_file: st
         # Send completion notification (escalate to error if any files could not be repaired)
         if notification_configs:
             try:
-                from lib.notifications import send_notification
+                from lib.notifications import send_notification_safe
                 name_prefix = f"[{friendly_name}] " if friendly_name else ""
                 if files_failed or files_unrepairable:
                     status = "error"
@@ -661,7 +661,7 @@ Redundancy: {redundancy}%
 
                 # Reuse existing logger from _LOGGERS cache
                 notif_logger = _LOGGERS.get(log_file)
-                send_notification(
+                send_notification_safe(
                     notification_configs,
                     subject=f"{name_prefix}{subject_state}: Scrub completed",
                     job="scrub",
@@ -695,11 +695,11 @@ Redundancy: {redundancy}%
         # Send error notification
         if notification_configs:
             try:
-                from lib.notifications import send_notification
+                from lib.notifications import send_notification_safe
                 name_prefix = f"[{friendly_name}] " if friendly_name else ""
                 # Reuse existing logger from _LOGGERS cache
                 notif_logger = _LOGGERS.get(log_file)
-                send_notification(
+                send_notification_safe(
                     notification_configs,
                     subject=f"{name_prefix}Error: Scrub failed",
                     job="scrub",
