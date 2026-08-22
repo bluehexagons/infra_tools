@@ -243,6 +243,12 @@ command are also accepted when they match that metadata. Changing any of
 saved provisioning metadata still requires `--memory` and root `--storage` on
 its first run.
 
+Use `--verify-provider` to check a cached provisioned guest against Proxmox even
+when its declaration matches saved local metadata. If the provider-side vCPU
+count differs, setup applies and verifies `--cores`. A running VM may need to
+be restarted before the guest observes the change; setup reports that
+requirement without interrupting the guest automatically.
+
 During a provisioning check, the configured IPv4 address is the stable guest
 identity. If that VM already exists and the corrected declaration changes its
 Proxmox name, infra-tools applies and verifies the rename before continuing

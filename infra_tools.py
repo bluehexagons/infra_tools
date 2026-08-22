@@ -264,6 +264,14 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
         epilog="Run 'infra-tools setup --help' for full options"
     )
     add_setup_arguments(setup_parser, allow_steps=True, include_system_type=True)
+    setup_parser.add_argument(
+        "--verify-provider",
+        action="store_true",
+        help=(
+            "Verify a cached provisioned guest against Proxmox and reconcile "
+            "supported provider-side settings"
+        ),
+    )
     
     # Patch subcommand
     patch_parser = subparsers.add_parser(
@@ -1167,9 +1175,9 @@ def _reuse_cached_provisioning_metadata(
     ):
         return False
 
-    if vm_identity_changed:
-        # A changed provider-side name must be reconciled against Proxmox.
-        # Repeating the saved identity is an ordinary idempotent setup rerun.
+    if vm_identity_changed or getattr(args, "verify_provider", False):
+        # Provider-side names and explicit verification requests must be
+        # checked against Proxmox instead of trusted from local metadata.
         return False
 
     return True
@@ -1340,6 +1348,9 @@ def run_setup_command(args: argparse.Namespace) -> int:
         config = SetupConfig.from_args(args, args.system_type)
     except ValueError as exc:
         print(f"Error: {exc}")
+        return 1
+    if getattr(args, "verify_provider", False) and not config.hosted_node:
+        print("Error: --verify-provider requires --provision-on")
         return 1
 
     cached_provisioning = _load_cached_provisioning_metadata(config)

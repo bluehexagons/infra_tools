@@ -85,6 +85,7 @@ class _ExistingVM:
     vmid: int
     name: str
     ipv4_addresses: tuple[str, ...]
+    cores: Optional[int]
 
 
 _UNIT_TO_KIB = {"K": 1, "M": 1024, "G": 1024 * 1024, "T": 1024 * 1024 * 1024}
@@ -373,18 +374,27 @@ def _needs_graphical_console(config: SetupConfig) -> bool:
 
 
 def _parse_existing_vm(vmid: int, config_text: str) -> _ExistingVM:
-    """Extract the provider name and configured IPv4 addresses for a VM."""
+    """Extract provider identity and reconciled hardware fields for a VM."""
 
     name = ""
     addresses: list[str] = []
+    cores: Optional[int] = None
     for line in config_text.splitlines():
         key, separator, value = line.partition(":")
         if not separator:
             continue
-        if key.strip() == "name":
+        normalized_key = key.strip()
+        if normalized_key == "name":
             name = value.strip()
             continue
-        if not key.strip().startswith("ipconfig"):
+        if normalized_key == "cores":
+            try:
+                parsed_cores = int(value.strip())
+            except ValueError:
+                continue
+            cores = parsed_cores if parsed_cores > 0 else None
+            continue
+        if not normalized_key.startswith("ipconfig"):
             continue
         for item in value.split(","):
             option, equals, option_value = item.strip().partition("=")
@@ -396,7 +406,12 @@ def _parse_existing_vm(vmid: int, config_text: str) -> _ExistingVM:
                 continue
             if isinstance(interface, ipaddress.IPv4Interface):
                 addresses.append(str(interface.ip))
-    return _ExistingVM(vmid=vmid, name=name, ipv4_addresses=tuple(addresses))
+    return _ExistingVM(
+        vmid=vmid,
+        name=name,
+        ipv4_addresses=tuple(addresses),
+        cores=cores,
+    )
 
 
 def _list_existing_vms(
@@ -436,9 +451,10 @@ def _reconcile_existing_vm(
     user: str,
     ssh_opts: StrList,
     *,
+    desired_cores: Optional[int] = None,
     dry_run: bool = False,
 ) -> bool:
-    """Reuse the VM at ``target_ip`` and reconcile its provider-side name.
+    """Reuse the VM at ``target_ip`` and reconcile safe provider settings.
 
     A desired name owned by another VM is rejected before provisioning so a
     typo or copied setup command cannot create ambiguous duplicate names.
@@ -446,6 +462,8 @@ def _reconcile_existing_vm(
 
     if dry_run:
         return False
+    if desired_cores is not None and desired_cores < 1:
+        raise ProvisionError("VM cores must be at least 1")
     existing = _list_existing_vms(node_ip, user, ssh_opts)
     ip_matches = [vm for vm in existing if target_ip in vm.ipv4_addresses]
     if len(ip_matches) > 1:
@@ -499,19 +517,30 @@ def _reconcile_existing_vm(
             "reachable on SSH; remove or repair it before retrying provisioning"
         )
 
-    if desired_name and matched.name.lower() != desired_name.lower():
-        rename = _ssh_run(
+    name_changed = bool(
+        desired_name and matched.name.lower() != desired_name.lower()
+    )
+    cores_changed = bool(
+        desired_cores is not None and matched.cores != desired_cores
+    )
+    set_options: list[str] = []
+    if name_changed:
+        set_options.extend(["--name", shlex.quote(cast(str, desired_name))])
+    if cores_changed:
+        set_options.extend(["--cores", str(desired_cores)])
+
+    if set_options:
+        update = _ssh_run(
             node_ip,
             user,
             ssh_opts,
-            f"qm set {matched.vmid} --name {shlex.quote(desired_name)}",
+            f"qm set {matched.vmid} {' '.join(set_options)}",
             dry_run=False,
         )
-        if rename.returncode != 0:
-            detail = (rename.stderr or rename.stdout or "").strip() or "unknown error"
+        if update.returncode != 0:
+            detail = (update.stderr or update.stdout or "").strip() or "unknown error"
             raise ProvisionError(
-                f"Failed to rename VM {matched.vmid} from "
-                f"'{matched.name or '<unnamed>'}' to '{desired_name}': {detail}"
+                f"Failed to reconcile VM {matched.vmid} provider settings: {detail}"
             )
         verify = _ssh_run(
             node_ip,
@@ -521,14 +550,30 @@ def _reconcile_existing_vm(
             dry_run=False,
         )
         observed = _parse_existing_vm(matched.vmid, verify.stdout or "")
-        if verify.returncode != 0 or observed.name.lower() != desired_name.lower():
+        name_verified = (
+            not name_changed
+            or observed.name.lower() == cast(str, desired_name).lower()
+        )
+        cores_verified = not cores_changed or observed.cores == desired_cores
+        if verify.returncode != 0 or not name_verified or not cores_verified:
             raise ProvisionError(
-                f"Proxmox did not preserve the requested name '{desired_name}' "
+                f"Proxmox did not preserve the requested provider settings "
                 f"for VM {matched.vmid}"
             )
+
+    if name_changed:
         print(
             f"  ✓ Renamed existing VM {matched.vmid} from "
             f"'{matched.name or '<unnamed>'}' to '{desired_name}'"
+        )
+    if cores_changed:
+        print(
+            f"  ✓ Reconfigured existing VM {matched.vmid} from "
+            f"{matched.cores or 'an unspecified number of'} to {desired_cores} cores"
+        )
+        print(
+            f"  ⚠ VM {matched.vmid} is running; restart it for the vCPU "
+            "change to take effect in the guest"
         )
 
     print(
@@ -1270,6 +1315,7 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
         hostname,
         user,
         ssh_opts,
+        desired_cores=config.container_cores,
     ):
         raise VMAlreadyExists(
             f"VM with IP {target_ip} already exists on {node_ip}"

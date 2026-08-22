@@ -45,6 +45,39 @@ def _args(**overrides: object) -> Namespace:
 
 
 class TestCachedProvisioningMetadata(unittest.TestCase):
+    def test_setup_parser_accepts_force_provider_verification(self) -> None:
+        parser, _setup_parser, _patch_parser = infra_tools.create_infra_tools_parser()
+
+        args = parser.parse_args(
+            [
+                "setup",
+                "agent_code_vm",
+                "10.0.0.50",
+                "agent",
+                "--provision-on",
+                "pve1",
+                "--verify-provider",
+            ]
+        )
+
+        self.assertTrue(args.verify_provider)
+
+    def test_force_provider_verification_requires_provisioning_host(self) -> None:
+        args = _args(verify_provider=True)
+
+        with patch("infra_tools.prompt_for_missing_passwords"), \
+             patch(
+                 "infra_tools.SetupConfig.from_args",
+                 return_value=_config(hosted_node=None),
+             ), \
+             patch("builtins.print") as mock_print:
+            result = infra_tools.run_setup_command(args)
+
+        self.assertEqual(result, 1)
+        mock_print.assert_called_once_with(
+            "Error: --verify-provider requires --provision-on"
+        )
+
     def test_setup_reports_configuration_errors_without_a_traceback(self) -> None:
         args = _args()
 
@@ -178,6 +211,25 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
             reused = infra_tools._reuse_cached_provisioning_metadata(current, args)
 
         self.assertTrue(reused)
+        self.assertEqual(current.hosted_node, "10.0.0.10")
+
+    def test_force_provider_verification_bypasses_matching_cache(self) -> None:
+        current = _config(container_cores=3)
+        cached = _config(
+            hosted_node="10.0.0.10",
+            container_cores=3,
+            static_ipv4="10.0.0.50/24",
+            network_gateway4="10.0.0.1",
+            network_dns=["1.1.1.1"],
+        )
+
+        with patch("infra_tools.load_setup_command", return_value=cached):
+            reused = infra_tools._reuse_cached_provisioning_metadata(
+                current,
+                _args(container_cores=3, verify_provider=True),
+            )
+
+        self.assertFalse(reused)
         self.assertEqual(current.hosted_node, "10.0.0.10")
 
     def test_missing_local_metadata_requires_proxmox(self) -> None:

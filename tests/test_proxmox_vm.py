@@ -668,6 +668,115 @@ class TestCheckVMExists(unittest.TestCase):
         self.assertEqual(mock_run.call_args_list[5].args[3], "qm config 112")
 
     @patch("lib.proxmox_vm._ssh_run")
+    def test_existing_target_cores_are_reconciled_and_verified(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="VMID NAME STATUS\n112 agent-2 running\n"),
+            MagicMock(
+                returncode=0,
+                stdout=(
+                    "name: agent-2\n"
+                    "cores: 2\n"
+                    "ipconfig0: ip=10.0.0.50/24,gw=10.0.0.1\n"
+                ),
+            ),
+            MagicMock(returncode=0, stdout="status: running\n"),
+            MagicMock(returncode=0, stdout="READY\n"),
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(
+                returncode=0,
+                stdout=(
+                    "name: agent-2\n"
+                    "cores: 3\n"
+                    "ipconfig0: ip=10.0.0.50/24,gw=10.0.0.1\n"
+                ),
+            ),
+        ]
+
+        with patch("builtins.print") as mock_print:
+            self.assertTrue(
+                _reconcile_existing_vm(
+                    "10.0.0.1",
+                    "10.0.0.50",
+                    "agent-2",
+                    "root",
+                    [],
+                    desired_cores=3,
+                )
+            )
+
+        self.assertEqual(
+            mock_run.call_args_list[4].args[3],
+            "qm set 112 --cores 3",
+        )
+        output = "\n".join(str(call.args[0]) for call in mock_print.call_args_list)
+        self.assertIn("from 2 to 3 cores", output)
+        self.assertIn("restart it", output)
+
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_existing_target_matching_cores_are_not_rewritten(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="VMID NAME STATUS\n112 agent-2 running\n"),
+            MagicMock(
+                returncode=0,
+                stdout=(
+                    "name: agent-2\n"
+                    "cores: 3\n"
+                    "ipconfig0: ip=10.0.0.50/24,gw=10.0.0.1\n"
+                ),
+            ),
+            MagicMock(returncode=0, stdout="status: running\n"),
+            MagicMock(returncode=0, stdout="READY\n"),
+        ]
+
+        self.assertTrue(
+            _reconcile_existing_vm(
+                "10.0.0.1",
+                "10.0.0.50",
+                "agent-2",
+                "root",
+                [],
+                desired_cores=3,
+            )
+        )
+
+        self.assertEqual(len(mock_run.call_args_list), 4)
+
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_existing_target_rejects_unverified_core_update(self, mock_run):
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="VMID NAME STATUS\n112 agent-2 running\n"),
+            MagicMock(
+                returncode=0,
+                stdout=(
+                    "name: agent-2\n"
+                    "cores: 2\n"
+                    "ipconfig0: ip=10.0.0.50/24,gw=10.0.0.1\n"
+                ),
+            ),
+            MagicMock(returncode=0, stdout="status: running\n"),
+            MagicMock(returncode=0, stdout="READY\n"),
+            MagicMock(returncode=0, stdout="", stderr=""),
+            MagicMock(
+                returncode=0,
+                stdout=(
+                    "name: agent-2\n"
+                    "cores: 2\n"
+                    "ipconfig0: ip=10.0.0.50/24,gw=10.0.0.1\n"
+                ),
+            ),
+        ]
+
+        with self.assertRaisesRegex(ProvisionError, "did not preserve"):
+            _reconcile_existing_vm(
+                "10.0.0.1",
+                "10.0.0.50",
+                "agent-2",
+                "root",
+                [],
+                desired_cores=3,
+            )
+
+    @patch("lib.proxmox_vm._ssh_run")
     def test_duplicate_desired_name_stops_before_creation(self, mock_run):
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout="VMID NAME STATUS\n112 agent-min-1 running\n"),
