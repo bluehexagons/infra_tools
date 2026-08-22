@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import unittest
@@ -33,6 +34,33 @@ class TestGodotWebHost(unittest.TestCase):
             ["games.example", "godot-vm", "localhost", "127.0.0.1", "::1"],
         )
 
+    def test_discovers_active_addresses_before_local_hostnames(self) -> None:
+        with (
+            patch.object(
+                godot_web_steps,
+                "run",
+                return_value=SimpleNamespace(
+                    returncode=0,
+                    stdout="192.0.2.10 fd00::10\n",
+                ),
+            ),
+            patch.object(godot_web_steps.socket, "getfqdn", return_value="godot-vm"),
+            patch.object(godot_web_steps.socket, "gethostname", return_value="godot-vm"),
+        ):
+            identities = godot_web_steps.discover_local_web_identities()
+
+        self.assertEqual(
+            identities,
+            [
+                "192.0.2.10",
+                "fd00::10",
+                "godot-vm",
+                "localhost",
+                "127.0.0.1",
+                "::1",
+            ],
+        )
+
     def test_invalid_certificate_identity_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "Invalid internal HTTPS identity"):
             godot_web_steps.validate_web_identities(["bad host name"])
@@ -43,6 +71,7 @@ class TestGodotWebHost(unittest.TestCase):
             games_root = os.path.join(web_root, "games")
             url_file = os.path.join(temporary_dir, "config", "base-url")
             ca_cert = os.path.join(temporary_dir, "ca.crt")
+            ca_download = os.path.join(web_root, "infra-tools-ca.crt")
             with open(ca_cert, "w", encoding="utf-8") as cert_file:
                 cert_file.write("test CA\n")
 
@@ -52,12 +81,27 @@ class TestGodotWebHost(unittest.TestCase):
                 patch.object(godot_web_steps, "GODOT_WEB_GAMES_ROOT", games_root),
                 patch.object(godot_web_steps, "GODOT_WEB_URL_FILE", url_file),
                 patch.object(godot_web_steps, "GODOT_WEB_CA_CERT", ca_cert),
+                patch.object(
+                    godot_web_steps,
+                    "GODOT_WEB_CA_DOWNLOAD",
+                    ca_download,
+                ),
                 patch.object(godot_web_steps, "_ensure_nginx"),
                 patch.object(
                     godot_web_steps,
                     "_certificate_for_identities",
                     return_value=("/cert", "/key", True, True),
+                ) as certificate,
+                patch.object(
+                    godot_web_steps,
+                    "discover_local_web_identities",
+                    return_value=["198.51.100.20", "godot-vm"],
                 ),
+                patch.object(
+                    godot_web_steps,
+                    "_install_chromium_ca_trust",
+                    return_value=True,
+                ) as chromium_trust,
                 patch.object(godot_web_steps, "_install_publisher_links", return_value=True),
                 patch.object(godot_web_steps, "_configure_nginx_site", return_value=True) as nginx,
                 patch.object(godot_web_steps, "_configure_web_policy", return_value=True),
@@ -76,7 +120,107 @@ class TestGodotWebHost(unittest.TestCase):
                 self.assertIn("agent games", content)
             with open(url_file, encoding="utf-8") as base_url:
                 self.assertEqual(base_url.read(), "https://192.0.2.10:8443\n")
+            certificate.assert_called_once_with(
+                ["192.0.2.10", "localhost", "198.51.100.20", "godot-vm"]
+            )
+            chromium_trust.assert_called_once_with(["agent"])
             nginx.assert_called_once()
+
+    def test_web_policy_exposes_the_user_readable_ca_copy(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            policy_file = os.path.join(temporary_dir, "policy.json")
+            ca_download = "/srv/infra-tools/web/infra-tools-ca.crt"
+            with (
+                patch.object(godot_web_steps, "GODOT_WEB_POLICY_FILE", policy_file),
+                patch.object(
+                    godot_web_steps,
+                    "GODOT_WEB_CA_DOWNLOAD",
+                    ca_download,
+                ),
+                patch.object(
+                    godot_web_steps,
+                    "run",
+                    return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
+                ),
+            ):
+                changed = godot_web_steps._configure_web_policy(
+                    "https://192.0.2.10:8443",
+                    "/cert",
+                    "/key",
+                    True,
+                    ["agent"],
+                    ["192.0.2.0/24"],
+                )
+
+            self.assertTrue(changed)
+            with open(policy_file, encoding="utf-8") as file_obj:
+                policy = json.load(file_obj)
+            self.assertEqual(policy["ca_certificate"], ca_download)
+
+    def test_installs_local_ca_in_managed_users_chromium_database(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            home = os.path.join(temporary_dir, "home")
+            os.mkdir(home)
+            trust_cert = os.path.join(temporary_dir, "ca.crt")
+            with open(trust_cert, "w", encoding="utf-8") as cert_file:
+                cert_file.write(
+                    "-----BEGIN CERTIFICATE-----\nmanaged-ca\n"
+                    "-----END CERTIFICATE-----\n"
+                )
+            account = SimpleNamespace(pw_dir=home)
+
+            def run_command(command: str, **_kwargs: object) -> SimpleNamespace:
+                if " certutil -L " in command:
+                    return SimpleNamespace(returncode=255, stdout="", stderr="missing")
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            with (
+                patch.object(godot_web_steps, "GODOT_WEB_TRUST_CERT", trust_cert),
+                patch.object(godot_web_steps, "is_package_installed", return_value=True),
+                patch.object(godot_web_steps.pwd, "getpwnam", return_value=account),
+                patch.object(godot_web_steps, "run", side_effect=run_command) as run,
+            ):
+                changed = godot_web_steps._install_chromium_ca_trust(["agent"])
+
+            self.assertTrue(changed)
+            commands = [call.args[0] for call in run.call_args_list]
+            self.assertTrue(any(" certutil -N " in command for command in commands))
+            self.assertTrue(any(" certutil -A " in command for command in commands))
+            self.assertFalse(any(" certutil -D " in command for command in commands))
+
+    def test_existing_chromium_ca_is_not_readded(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            home = os.path.join(temporary_dir, "home")
+            database = os.path.join(home, ".local", "share", "pki", "nssdb")
+            os.makedirs(database)
+            with open(os.path.join(database, "cert9.db"), "w", encoding="utf-8"):
+                pass
+            trust_cert = os.path.join(temporary_dir, "ca.crt")
+            certificate = (
+                "-----BEGIN CERTIFICATE-----\nmanaged-ca\n"
+                "-----END CERTIFICATE-----\n"
+            )
+            with open(trust_cert, "w", encoding="utf-8") as cert_file:
+                cert_file.write(certificate)
+            account = SimpleNamespace(pw_dir=home)
+
+            def run_command(command: str, **_kwargs: object) -> SimpleNamespace:
+                stdout = certificate if " certutil -L " in command else ""
+                return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+
+            with (
+                patch.object(godot_web_steps, "GODOT_WEB_TRUST_CERT", trust_cert),
+                patch.object(godot_web_steps, "is_package_installed", return_value=True),
+                patch.object(godot_web_steps.pwd, "getpwnam", return_value=account),
+                patch.object(godot_web_steps, "run", side_effect=run_command) as run,
+            ):
+                changed = godot_web_steps._install_chromium_ca_trust(["agent"])
+
+            self.assertFalse(changed)
+            commands = [call.args[0] for call in run.call_args_list]
+            self.assertTrue(any(" certutil -M " in command for command in commands))
+            self.assertFalse(any(" certutil -N " in command for command in commands))
+            self.assertFalse(any(" certutil -A " in command for command in commands))
 
     def test_installs_shared_agent_skills_for_codex_or_opencode(self) -> None:
         with tempfile.TemporaryDirectory() as home:

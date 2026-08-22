@@ -14,7 +14,8 @@ verification.
 ## Choose the hosting mode
 
 - For a Godot web export, use `infra-web publish godot` and the
-  `infra-tools-godot-web` skill. Static games do not need dedicated ports.
+  `infra-tools-godot-web` skill. Nginx serves all static games on the shared
+  HTTPS port 8443; static games do not need dedicated ports.
 - For a live HTTP or WebSocket service, bind the service to `127.0.0.1` or
   `::1` on an unprivileged port, then register a managed forward.
 
@@ -30,6 +31,11 @@ Add `--profile godot` for a Godot preview that needs secure-context and
 cross-origin isolation headers. The command chooses a permitted HTTPS port,
 applies the VM's existing access-source policy, validates Nginx, reconciles
 UFW, and prints the URL.
+
+Treat the two ports as distinct: `--to` is the private loopback HTTP upstream;
+`--listen` is the externally reachable Nginx HTTPS port. Only the Nginx
+listener receives a managed UFW rule. Use the URL printed by `infra-web`
+instead of substituting the upstream port or scheme.
 
 Use `infra-web forward list`, `infra-web doctor NAME`, and `infra-web ca` for
 inspection. Remove a route when the associated service is no longer intended

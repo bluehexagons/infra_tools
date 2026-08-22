@@ -91,7 +91,9 @@ infra-web remove my-game --yes
 `doctor` verifies trusted HTTPS, the secure-context and cross-origin isolation
 headers, and the `application/wasm` content type. `--json` is available on
 publish, list, and doctor for agent automation. `--open` opens a successful
-publication in the user's default browser.
+publication in the user's default browser. Treat the URL returned by
+`infra-web` as authoritative: static games are paths behind the shared Nginx
+HTTPS listener, not processes bound to game-specific ports.
 
 ### Live HTTPS forwarding
 
@@ -121,20 +123,24 @@ certificate, enables WebSocket proxying, inherits the saved `--access-source`
 policy, and reconciles comment-tagged UFW rules. It validates Nginx before a
 reload and restores the previous generated configuration and state when a
 mutation fails. Raw Nginx directives, non-loopback targets, and source-policy
-overrides are not accepted.
+overrides are not accepted. The `--to` port is private HTTP on loopback; the
+allocated `--listen` port is public HTTPS on Nginx, and only that listener is
+opened through the managed firewall policy.
 
 If a current Let's Encrypt certificate already exists for a configured DNS
 name, the origin reuses it. Otherwise setup creates a VM-local certificate
 authority, installs it into the VM's system trust store, and issues a server
-certificate covering the setup host, configured system hostname, and loopback
-names. Browsers and agents running inside the VM therefore trust the origin
-without per-game configuration. A browser on another computer must trust that
-VM CA once; a publicly trusted certificate cannot be issued automatically for
-a private IP or an unowned internal hostname. Setup prints the CA file
-fingerprint, and the certificate is available on the VM at:
+certificate covering the configured identities, active non-loopback interface
+addresses, system hostname, and loopback names. It also enrolls the CA in each
+managed user's Chromium NSS database, so Playwright and Chromium-based agents
+on the VM trust the same origin as system tools. A browser on another computer
+must trust that VM CA once; a publicly trusted certificate cannot be issued
+automatically for a private IP or an unowned internal hostname. Setup prints
+the CA file fingerprint, and the user-readable certificate is available on the
+VM at:
 
 ```text
-/var/lib/infra_tools/internal-web-pki/ca.crt
+/srv/infra-tools/web/infra-tools-ca.crt
 ```
 
 Run `infra-web ca` to print the active CA path and SHA-256 fingerprint. When an

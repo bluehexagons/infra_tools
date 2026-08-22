@@ -23,6 +23,7 @@ from lib.validators import validate_host, validate_username
 
 GODOT_WEB_ROOT = "/srv/infra-tools/web"
 GODOT_WEB_GAMES_ROOT = f"{GODOT_WEB_ROOT}/games"
+GODOT_WEB_CA_DOWNLOAD = f"{GODOT_WEB_ROOT}/infra-tools-ca.crt"
 GODOT_WEB_PKI_DIR = "/var/lib/infra_tools/internal-web-pki"
 GODOT_WEB_CA_CERT = f"{GODOT_WEB_PKI_DIR}/ca.crt"
 GODOT_WEB_CA_KEY = f"{GODOT_WEB_PKI_DIR}/ca.key"
@@ -49,6 +50,9 @@ GODOT_AGENT_SKILLS = (
 
 _NGINX_MARKER = "# Managed by infra_tools Godot web hosting"
 _LOCAL_CA_COMMON_NAME = "infra_tools VM-local Web CA"
+_CHROMIUM_CA_NICKNAME = "infra_tools internal web CA"
+_CHROMIUM_NSS_DB_RELATIVE = (".local", "share", "pki", "nssdb")
+_CHROMIUM_NSS_LEGACY_DB_RELATIVE = (".pki", "nssdb")
 _CERTIFICATE_RENEWAL_SECONDS = 30 * 24 * 60 * 60
 
 
@@ -98,10 +102,27 @@ def identities_for_config(host: str, system_hostname: str | None = None) -> list
 
 
 def discover_local_web_identities() -> list[str]:
-    """Return conservative local identities for legacy bundle registrations."""
+    """Return active interface addresses and hostnames for HTTPS access."""
 
-    values = [socket.getfqdn(), socket.gethostname(), "localhost", "127.0.0.1", "::1"]
-    return validate_web_identities([value for value in values if value])
+    values: list[str] = []
+    result = run("hostname -I", check=False, capture_output=True)
+    if result.returncode == 0:
+        values.extend((result.stdout or "").split())
+    values.extend(
+        (socket.getfqdn(), socket.gethostname(), "localhost", "127.0.0.1", "::1")
+    )
+
+    identities: list[str] = []
+    for value in values:
+        if not value:
+            continue
+        try:
+            normalized = validate_web_identities([value])[0]
+        except ValueError:
+            continue
+        if normalized not in identities:
+            identities.append(normalized)
+    return identities
 
 
 def _certificate_name_check(cert_path: str, identity: str) -> bool:
@@ -284,6 +305,103 @@ def _install_local_ca_trust() -> bool:
     write_text_atomic(GODOT_WEB_TRUST_CERT, content, mode=0o644)
     run("update-ca-certificates", check=True)
     return True
+
+
+def _pem_payload(content: str) -> str:
+    """Return normalized base64 content from one PEM certificate."""
+
+    return "".join(
+        line.strip()
+        for line in content.splitlines()
+        if line.strip() and not line.startswith("-----")
+    )
+
+
+def _install_chromium_ca_trust(users: list[str]) -> bool:
+    """Trust the VM-local CA in each managed user's Chromium NSS database."""
+
+    if not is_package_installed("libnss3-tools") and not install_package(
+        "NSS certificate tools",
+        "libnss3-tools",
+        "apt-get -o DPkg::Lock::Timeout=60 install -y -qq libnss3-tools",
+    ):
+        raise RuntimeError("Failed to install Chromium certificate trust tools")
+
+    with open(GODOT_WEB_TRUST_CERT, encoding="utf-8") as cert_file:
+        expected_payload = _pem_payload(cert_file.read())
+    changed = False
+    for username in users:
+        if not validate_username(username):
+            raise ValueError(f"Invalid Chromium trust username: {username}")
+        account = pwd.getpwnam(username)
+        home = account.pw_dir
+        validate_filesystem_path(home, must_exist=True)
+        legacy_database = os.path.join(home, *_CHROMIUM_NSS_LEGACY_DB_RELATIVE)
+        database_dir = (
+            legacy_database
+            if os.path.isdir(legacy_database)
+            else os.path.join(home, *_CHROMIUM_NSS_DB_RELATIVE)
+        )
+        validate_filesystem_path(database_dir, must_exist=False)
+        if os.path.lexists(database_dir) and (
+            os.path.islink(database_dir) or not os.path.isdir(database_dir)
+        ):
+            raise RuntimeError(
+                f"Refusing unsafe Chromium certificate database: {database_dir}"
+            )
+
+        safe_username = shlex.quote(username)
+        safe_home = shlex.quote(home)
+        safe_database_dir = shlex.quote(database_dir)
+        database = shlex.quote(f"sql:{database_dir}")
+        user_command = f"runuser -u {safe_username} -- env HOME={safe_home}"
+        run(
+            f"{user_command} mkdir -p -- {safe_database_dir}",
+            check=True,
+        )
+        run(
+            f"{user_command} chmod 700 -- {safe_database_dir}",
+            check=True,
+        )
+        database_created = not os.path.isfile(os.path.join(database_dir, "cert9.db"))
+        if database_created:
+            run(
+                f"{user_command} certutil -N --empty-password -d {database}",
+                check=True,
+            )
+
+        safe_nickname = shlex.quote(_CHROMIUM_CA_NICKNAME)
+        existing = run(
+            f"{user_command} certutil -L -d {database} -n {safe_nickname} "
+            "-a -f /dev/null",
+            check=False,
+            capture_output=True,
+        )
+        same_certificate = (
+            existing.returncode == 0
+            and _pem_payload(existing.stdout or "") == expected_payload
+        )
+        if same_certificate:
+            run(
+                f"{user_command} certutil -M -d {database} -n {safe_nickname} "
+                "-t 'C,,' -f /dev/null",
+                check=True,
+            )
+            changed = database_created or changed
+            continue
+        if existing.returncode == 0:
+            run(
+                f"{user_command} certutil -D -d {database} -n {safe_nickname} "
+                "-f /dev/null",
+                check=True,
+            )
+        run(
+            f"{user_command} certutil -A -d {database} -n {safe_nickname} "
+            f"-t 'C,,' -i {shlex.quote(GODOT_WEB_TRUST_CERT)} -f /dev/null",
+            check=True,
+        )
+        changed = True
+    return changed
 
 
 def _letsencrypt_certificate(identities: list[str]) -> tuple[str, str] | None:
@@ -515,7 +633,7 @@ def _configure_web_policy(
         {
             "access_sources": list(dict.fromkeys(sources)),
             "base_url": base_url,
-            "ca_certificate": GODOT_WEB_CA_CERT if local_ca else None,
+            "ca_certificate": GODOT_WEB_CA_DOWNLOAD if local_ca else None,
             "certificate": cert_path,
             "certificate_key": key_path,
             "forward_port_max": GODOT_WEB_FORWARD_PORT_MAX,
@@ -652,7 +770,9 @@ def configure_godot_web_host(
 ) -> bool:
     """Reconcile a ready-to-publish HTTPS origin for registered Godot users."""
 
-    normalized_identities = validate_web_identities(identities)
+    normalized_identities = validate_web_identities(
+        [*identities, *discover_local_web_identities()]
+    )
     normalized_users = list(dict.fromkeys(users))
     _ensure_nginx()
     _ensure_managed_directory(GODOT_WEB_ROOT, 0o755)
@@ -661,6 +781,8 @@ def configure_godot_web_host(
         normalized_identities
     )
     changed = certificate_changed or changed
+    if local_ca:
+        changed = _install_chromium_ca_trust(normalized_users) or changed
     base_url = _base_url(normalized_identities)
     changed = _write_if_changed(
         os.path.join(GODOT_WEB_ROOT, "index.html"),
@@ -670,14 +792,13 @@ def configure_godot_web_host(
     if local_ca:
         with open(GODOT_WEB_CA_CERT, encoding="utf-8") as cert_file:
             changed = _write_if_changed(
-                os.path.join(GODOT_WEB_ROOT, "infra-tools-ca.crt"),
+                GODOT_WEB_CA_DOWNLOAD,
                 cert_file.read(),
                 0o644,
             ) or changed
     else:
-        ca_download = os.path.join(GODOT_WEB_ROOT, "infra-tools-ca.crt")
-        if os.path.exists(ca_download):
-            os.unlink(ca_download)
+        if os.path.exists(GODOT_WEB_CA_DOWNLOAD):
+            os.unlink(GODOT_WEB_CA_DOWNLOAD)
             changed = True
     changed = _write_if_changed(GODOT_WEB_URL_FILE, base_url + "\n", 0o644) or changed
     changed = _install_publisher_links() or changed
@@ -707,6 +828,7 @@ def configure_godot_web_host(
 
 
 __all__ = [
+    "GODOT_WEB_CA_DOWNLOAD",
     "GODOT_WEB_GAMES_ROOT",
     "configure_godot_agent_skills",
     "configure_godot_web_host",
