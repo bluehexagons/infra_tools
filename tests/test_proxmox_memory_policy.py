@@ -9,14 +9,23 @@ from unittest.mock import MagicMock, call, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from common.proxmox_steps import configure_proxmox_balloon_target
+from common.proxmox_steps import (
+    configure_proxmox_balloon_target,
+    configure_proxmox_host_memory_safety,
+)
 from lib.arg_parser import create_setup_argument_parser
 from lib.config import SetupConfig
 from lib.proxmox_memory import (
     calculate_balloon_target,
+    parse_swapon_output,
     parse_guest_memory_config,
 )
-from lib.proxmox_vm import _create_vm, _report_memory_capacity
+from lib.proxmox_vm import (
+    ProvisionError,
+    _create_vm,
+    _enforce_memory_floor,
+    _report_memory_capacity,
+)
 from lib.validation import validate_hosted_flags
 
 
@@ -123,6 +132,90 @@ class TestConfigureBalloonTarget(unittest.TestCase):
         )
 
 
+class TestHostMemorySafety(unittest.TestCase):
+    def test_parses_partition_and_zfs_swap_devices(self):
+        devices = parse_swapon_output(
+            "/dev/dm-0 partition 8053063680 0\n"
+            "/dev/zvol/rpool/swap partition 2147483648 1024\n"
+        )
+
+        self.assertEqual(len(devices), 2)
+        self.assertFalse(devices[0].zfs_backed)
+        self.assertTrue(devices[1].zfs_backed)
+
+    @patch("common.proxmox_steps.is_dry_run", return_value=False)
+    @patch("common.proxmox_steps.run")
+    def test_persists_and_verifies_low_swappiness(self, mock_run, _mock_dry):
+        mock_run.side_effect = [
+            MagicMock(
+                returncode=0,
+                stdout="/dev/dm-0 partition 8053063680 0\n",
+            ),
+            MagicMock(returncode=0, stdout="60\n"),
+            MagicMock(returncode=1, stdout=""),
+            MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=0, stdout="10\n"),
+        ]
+
+        configure_proxmox_host_memory_safety(
+            SetupConfig(
+                username="root",
+                host="pve1",
+                system_type="server_proxmox",
+            )
+        )
+
+        commands = [printed.args[0] for printed in mock_run.call_args_list]
+        self.assertIn(
+            "/usr/lib/systemd/systemd-sysctl --prefix=/vm/swappiness",
+            commands,
+        )
+        tee_call = next(
+            printed
+            for printed in mock_run.call_args_list
+            if printed.args[0].startswith("tee ")
+        )
+        self.assertEqual(
+            tee_call.kwargs["input_data"],
+            "# Managed by infra-tools for Proxmox hosts.\nvm.swappiness = 10\n",
+        )
+
+    @patch("common.proxmox_steps.is_dry_run", return_value=False)
+    @patch("common.proxmox_steps.run")
+    def test_host_memory_policy_is_idempotent(self, mock_run, _mock_dry):
+        content = (
+            "# Managed by infra-tools for Proxmox hosts.\n"
+            "vm.swappiness = 10\n"
+        )
+        mock_run.side_effect = [
+            MagicMock(
+                returncode=0,
+                stdout="/dev/dm-0 partition 8053063680 0\n",
+            ),
+            MagicMock(returncode=0, stdout="10\n"),
+            MagicMock(returncode=0, stdout=content),
+            MagicMock(returncode=0, stdout="10\n"),
+        ]
+
+        configure_proxmox_host_memory_safety(
+            SetupConfig(
+                username="root",
+                host="pve1",
+                system_type="server_proxmox",
+            )
+        )
+
+        commands = [printed.args[0] for printed in mock_run.call_args_list]
+        self.assertFalse(any(command.startswith("tee ") for command in commands))
+        self.assertNotIn(
+            "/usr/lib/systemd/systemd-sysctl --prefix=/vm/swappiness",
+            commands,
+        )
+
+
 class TestGuestMemoryCapacity(unittest.TestCase):
     def test_qemu_balloon_minimum_is_the_floor(self):
         allocation = parse_guest_memory_config(
@@ -190,7 +283,7 @@ class TestGuestMemoryCapacity(unittest.TestCase):
             ),
         ]
 
-        _report_memory_capacity(
+        safe = _report_memory_capacity(
             node_ip="192.0.2.10",
             user="root",
             ssh_opts=[],
@@ -206,6 +299,17 @@ class TestGuestMemoryCapacity(unittest.TestCase):
         self.assertIn("floors 4.0 GiB (66% of target)", output)
         self.assertIn("burst maxima 10.0 GiB (166% of target)", output)
         self.assertIn("Guest burst maxima exceed", output)
+        self.assertTrue(safe)
+
+    def test_floor_over_target_requires_explicit_override(self):
+        with self.assertRaisesRegex(ProvisionError, "allow-memory-overcommit"):
+            _enforce_memory_floor(False, False)
+
+        with patch("builtins.print") as mock_print:
+            _enforce_memory_floor(False, True)
+        self.assertTrue(
+            any("Continuing" in str(item) for item in mock_print.call_args_list)
+        )
 
     @patch("lib.proxmox_vm._ssh_run")
     def test_vm_creation_sets_relative_balloon_shares(self, mock_run):
@@ -252,11 +356,13 @@ class TestBalloonFlags(unittest.TestCase):
                 "70",
                 "--balloon-shares",
                 "2500",
+                "--allow-memory-overcommit",
             ]
         )
 
         self.assertEqual(args.proxmox_balloon_target, 70)
         self.assertEqual(args.vm_balloon_shares, 2500)
+        self.assertTrue(args.allow_memory_overcommit)
 
     def test_remote_parser_accepts_host_target(self):
         parser = create_setup_argument_parser("Test", for_remote=True)
@@ -274,6 +380,33 @@ class TestBalloonFlags(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "server_proxmox"):
             validate_hosted_flags(config)
+
+    def test_memory_overcommit_requires_hosted_vm(self):
+        config = SetupConfig(
+            username="root",
+            host="server1",
+            system_type="server_lite",
+            allow_memory_overcommit=True,
+        )
+
+        with self.assertRaisesRegex(ValueError, "provision-on"):
+            validate_hosted_flags(config)
+
+    def test_overcommit_override_is_reconstructed(self):
+        config = SetupConfig(
+            username="agent",
+            host="192.0.2.50",
+            system_type="agent_vm",
+            hosted_node="pve1",
+            container_memory="8G",
+            vm_balloon_min="2G",
+            allow_memory_overcommit=True,
+        )
+
+        self.assertIn(
+            "--allow-memory-overcommit",
+            config.to_setup_command(),
+        )
 
     def test_host_target_is_forwarded_to_remote_setup(self):
         config = SetupConfig(

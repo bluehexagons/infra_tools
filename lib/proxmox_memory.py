@@ -10,6 +10,10 @@ DEFAULT_BALLOON_TARGET_PERCENT = 80
 MAX_AUTOMATIC_BALLOON_TARGET_PERCENT = 80
 MIN_AUTOMATIC_BALLOON_TARGET_PERCENT = 50
 MIN_HOST_RESERVE_MIB = 2048
+SWAPON_STATUS_COMMAND = (
+    "swapon --show --bytes --noheadings --raw "
+    "--output NAME,TYPE,SIZE,USED"
+)
 
 
 @dataclass(frozen=True)
@@ -30,6 +34,25 @@ class GuestMemoryAllocation:
     vmid: int
     minimum_mib: int
     maximum_mib: int
+
+
+@dataclass(frozen=True)
+class HostSwapDevice:
+    """One active host swap device from stable ``swapon`` columns."""
+
+    name: str
+    device_type: str
+    size_bytes: int
+    used_bytes: int
+
+    @property
+    def zfs_backed(self) -> bool:
+        """Return whether the path directly identifies a ZFS zvol."""
+        direct_zvol = self.name.startswith("/dev/zvol/")
+        zvol_block_device = (
+            self.name.startswith("/dev/zd") and self.name[7:].isdigit()
+        )
+        return direct_zvol or zvol_block_device
 
 
 def calculate_balloon_target(
@@ -68,6 +91,29 @@ def memory_value_mib(value: Any) -> int:
         return max(0, int(value))
     except (TypeError, ValueError):
         return 0
+
+
+def parse_swapon_output(output: str) -> list[HostSwapDevice]:
+    """Parse ``NAME,TYPE,SIZE,USED`` output produced with ``--bytes``."""
+    devices: list[HostSwapDevice] = []
+    for line in output.splitlines():
+        fields = line.split()
+        if len(fields) != 4:
+            continue
+        try:
+            size_bytes = int(fields[2])
+            used_bytes = int(fields[3])
+        except ValueError:
+            continue
+        devices.append(
+            HostSwapDevice(
+                name=fields[0],
+                device_type=fields[1],
+                size_bytes=size_bytes,
+                used_bytes=used_bytes,
+            )
+        )
+    return devices
 
 
 def parse_guest_memory_config(

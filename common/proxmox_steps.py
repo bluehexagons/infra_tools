@@ -7,13 +7,117 @@ from typing import TYPE_CHECKING, Any
 
 from lib.proxmox_memory import (
     DEFAULT_BALLOON_TARGET_PERCENT,
+    SWAPON_STATUS_COMMAND,
     calculate_balloon_target,
     format_gib,
+    parse_swapon_output,
 )
 from lib.remote_utils import is_dry_run, run
 
 if TYPE_CHECKING:
     from lib.config import SetupConfig
+
+
+_PROXMOX_MEMORY_SYSCTL_FILE = (
+    "/etc/sysctl.d/99-zz-infra-tools-proxmox-memory.conf"
+)
+_PROXMOX_SWAPPINESS = 10
+_APPLY_SWAPPINESS_COMMAND = (
+    "/usr/lib/systemd/systemd-sysctl --prefix=/vm/swappiness"
+)
+
+
+def configure_proxmox_host_memory_safety(config: SetupConfig) -> None:
+    """Audit host swap topology and apply Proxmox's low swappiness policy."""
+    del config
+    sysctl_content = (
+        "# Managed by infra-tools for Proxmox hosts.\n"
+        f"vm.swappiness = {_PROXMOX_SWAPPINESS}\n"
+    )
+
+    if is_dry_run():
+        run(SWAPON_STATUS_COMMAND, check=False, capture_output=True)
+        run("install -d -m 0755 /etc/sysctl.d")
+        run(
+            f"tee {_PROXMOX_MEMORY_SYSCTL_FILE}",
+            capture_output=True,
+            input_data=sysctl_content,
+        )
+        run(f"chmod 0644 {_PROXMOX_MEMORY_SYSCTL_FILE}")
+        run(_APPLY_SWAPPINESS_COMMAND)
+        return
+
+    swap_result = run(SWAPON_STATUS_COMMAND, check=False, capture_output=True)
+    if swap_result.returncode != 0:
+        print("  ⚠ Could not inspect Proxmox host swap devices")
+    else:
+        devices = parse_swapon_output(swap_result.stdout or "")
+        if not devices:
+            print(
+                "  ⚠ No host swap is active; memory spikes have no emergency "
+                "reclaim cushion"
+            )
+        for device in devices:
+            size = format_gib(device.size_bytes // (1024 * 1024))
+            used = format_gib(device.used_bytes // (1024 * 1024))
+            print(
+                f"  Host swap: {device.name} ({device.device_type}), "
+                f"{used} used of {size}"
+            )
+            if device.zfs_backed:
+                print(
+                    "  ⚠ Swap appears to be backed by a ZFS zvol; Proxmox "
+                    "warns this can block the host under memory pressure"
+                )
+
+    current_result = run(
+        "sysctl -n vm.swappiness",
+        check=False,
+        capture_output=True,
+    )
+    try:
+        previous_swappiness = int((current_result.stdout or "").strip())
+    except ValueError:
+        previous_swappiness = None
+
+    existing = run(
+        f"cat {_PROXMOX_MEMORY_SYSCTL_FILE}",
+        check=False,
+        capture_output=True,
+    )
+    file_changed = existing.returncode != 0 or existing.stdout != sysctl_content
+    if file_changed:
+        run("install -d -m 0755 /etc/sysctl.d")
+        run(
+            f"tee {_PROXMOX_MEMORY_SYSCTL_FILE}",
+            capture_output=True,
+            input_data=sysctl_content,
+        )
+        run(f"chmod 0644 {_PROXMOX_MEMORY_SYSCTL_FILE}")
+
+    if file_changed or previous_swappiness != _PROXMOX_SWAPPINESS:
+        run(_APPLY_SWAPPINESS_COMMAND)
+
+    verified = run(
+        "sysctl -n vm.swappiness",
+        capture_output=True,
+    )
+    try:
+        verified_swappiness = int((verified.stdout or "").strip())
+    except ValueError as exc:
+        raise RuntimeError("Unable to verify Proxmox host swappiness") from exc
+    if verified_swappiness != _PROXMOX_SWAPPINESS:
+        raise RuntimeError(
+            "Proxmox swappiness verification failed: "
+            f"expected {_PROXMOX_SWAPPINESS}, found {verified_swappiness}"
+        )
+    if previous_swappiness == verified_swappiness:
+        print(f"  ✓ Host swappiness already set to {verified_swappiness}")
+    else:
+        previous = (
+            "unknown" if previous_swappiness is None else str(previous_swappiness)
+        )
+        print(f"  ✓ Changed host swappiness from {previous} to {verified_swappiness}")
 
 
 def _host_total_memory_mib(meminfo_path: str = "/proc/meminfo") -> int:

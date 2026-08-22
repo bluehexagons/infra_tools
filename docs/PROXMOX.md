@@ -98,6 +98,13 @@ own its swap layout. It retains the host's permissive reverse-path filtering
 because strict filtering can drop valid routed, NATed, or bridged guest
 traffic.
 
+Setup inspects active host swap without resizing or replacing it, reports each
+device's type, size, and current use, and warns when no swap is active. A
+direct `/dev/zvol/` or `/dev/zd*` swap device receives a prominent warning but
+is not changed. The managed host policy persists `vm.swappiness=10` in a
+late-order sysctl drop-in, applies the complete boot-time precedence for that
+setting, and verifies the live result.
+
 Every `server_proxmox` setup also reconciles the node's Proxmox balloon target.
 The automatic target reserves the larger of 20% of physical RAM or 2 GiB for
 the host, never raises the target above Proxmox's 80% default, and uses a 50%
@@ -228,9 +235,10 @@ reuses its recorded Proxmox details and skips contacting the Proxmox host
 before updating the guest. Guest-shape options emitted by a saved reconstructed
 command are also accepted when they match that metadata. Changing any of
 `--machine`, `--bridge`, `--memory`, `--balloon-min`, `--balloon-shares`,
-`--storage`, `--cores`, `--base`, `--image`, or `--image-storage` requests a
-provisioning check instead. A target without saved provisioning metadata still
-requires `--memory` and root `--storage` on its first run.
+`--allow-memory-overcommit`, `--storage`, `--cores`, `--base`, `--image`, or
+`--image-storage` requests a provisioning check instead. A target without
+saved provisioning metadata still requires `--memory` and root `--storage` on
+its first run.
 
 During a provisioning check, the configured IPv4 address is the stable guest
 identity. If that VM already exists and the corrected declaration changes its
@@ -286,9 +294,11 @@ ballooned guests compete, but does not reserve RAM or permit the host to exceed
 physical capacity. Before creating a VM, infra-tools reports the node's total
 and currently used RAM, balloon target, running guest floors and burst maxima,
 and the corresponding totals after the proposed VM. A floor-over-target or
-burst-over-target warning is advisory so intentional overcommit remains
-possible, but it includes the GiB excess and percentage of target. Imported
-images retain the native format selected by the destination storage backend,
+burst-over-target report includes the GiB excess and percentage of target.
+Burst-only overcommit remains advisory. An unreclaimable floor over the target
+stops provisioning unless `--allow-memory-overcommit` explicitly accepts it.
+Imported images retain the native format selected by the destination storage
+backend,
 and provisioning rejects a requested disk smaller than the source image. The
 cloud-init snippet is detached from the VM before its temporary file is
 removed, preventing a stale `cicustom` reference. See the current
@@ -446,9 +456,14 @@ infra-tools proxmox audit pve1 --json
 
 The audit checks core Proxmox services, quorum on clustered nodes, active tasks,
 configured storage, at least 4 GiB of free root space, guest locks, running
-guests, and whether a reboot is pending. Text output distinguishes general
-health from reboot safety; JSON output is intended for automation. The command
-is read-only and exits nonzero when a health check fails.
+guests, and whether a reboot is pending. It also reports host RAM and swap use,
+swap devices, swappiness, and whether the previous boot journal is retained.
+The previous kernel journal is scanned for OOM kills, blocked tasks, lockups,
+watchdogs, storage timeouts, thermal events, and hardware-error indicators;
+matching lines are included directly in text and JSON output. ZFS zvol-backed
+swap is a failing audit condition, while no swap, swappiness above 10, high
+memory/swap use, and missing prior-boot evidence are warnings. The command is
+read-only and exits nonzero when a health check fails.
 
 Proxmox SSH inspection commands reuse a short-lived OpenSSH control connection.
 With an encrypted key, the first connection prompts for its passphrase and the

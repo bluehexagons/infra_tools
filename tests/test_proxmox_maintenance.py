@@ -31,6 +31,23 @@ def _active_services() -> str:
     return "active\nactive\nactive\nactive\nactive\n"
 
 
+def _healthy_memory_diagnostics() -> list[subprocess.CompletedProcess[str]]:
+    return [
+        _result(
+            json.dumps(
+                {
+                    "memory": {"used": 4 * 1024 ** 3, "total": 8 * 1024 ** 3},
+                    "swap": {"used": 0, "total": 8 * 1024 ** 3},
+                }
+            )
+        ),
+        _result(f"/dev/dm-0 partition {8 * 1024 ** 3} 0\n"),
+        _result("10\n"),
+        _result("-1 boot-old\n 0 boot-current\n"),
+        _result(),
+    ]
+
+
 class TestCollectMaintenanceReport(unittest.TestCase):
     def setUp(self) -> None:
         self.host = ProxmoxHost(name="pve1", address="10.0.0.10")
@@ -47,7 +64,7 @@ class TestCollectMaintenanceReport(unittest.TestCase):
             _result("Name Type Status Total Used Available %\nlocal dir active 1 1 1 1%\n"),
             _result("5000000\n"),
             _result(returncode=1),
-        ]
+        ] + _healthy_memory_diagnostics()
 
         report = collect_maintenance_report(self.host)
 
@@ -93,7 +110,7 @@ class TestCollectMaintenanceReport(unittest.TestCase):
             _result("Name Type Status\nlocal dir active\n"),
             _result("5000000\n"),
             _result(),
-        ]
+        ] + _healthy_memory_diagnostics()
 
         report = collect_maintenance_report(self.host)
 
@@ -117,7 +134,7 @@ class TestCollectMaintenanceReport(unittest.TestCase):
             _result("Name Type Status\nbackup nfs inactive\n"),
             _result("1000\n"),
             _result(returncode=1),
-        ]
+        ] + _healthy_memory_diagnostics()
 
         report = collect_maintenance_report(self.host)
 
@@ -128,6 +145,48 @@ class TestCollectMaintenanceReport(unittest.TestCase):
         self.assertTrue(any("locked guest" in error for error in report.errors))
         self.assertTrue(any("Storage backup" in error for error in report.errors))
         self.assertTrue(any("less than 4 GiB" in error for error in report.errors))
+
+    @patch("lib.proxmox_maintenance._run")
+    def test_reports_memory_and_previous_boot_risks(self, mock_run) -> None:
+        mock_run.side_effect = [
+            _result("pve1\n"),
+            _result(_active_services()),
+            _result(returncode=1),
+            _result("[]\n"),
+            _result("VMID Status Name\n"),
+            _result("VMID NAME STATUS\n"),
+            _result("Name Type Status\nlocal dir active\n"),
+            _result("5000000\n"),
+            _result(returncode=1),
+            _result(
+                json.dumps(
+                    {
+                        "memory": {
+                            "used": 7800 * 1024 ** 2,
+                            "total": 8192 * 1024 ** 2,
+                        },
+                        "swap": {
+                            "used": 5 * 1024 ** 3,
+                            "total": 8 * 1024 ** 3,
+                        },
+                    }
+                )
+            ),
+            _result(f"/dev/zvol/rpool/swap partition {8 * 1024 ** 3} 0\n"),
+            _result("60\n"),
+            _result(" 0 boot-current\n"),
+            _result("[10.0] Out of memory: Killed process 123 (qemu)\n"),
+        ]
+
+        report = collect_maintenance_report(self.host)
+
+        self.assertFalse(report.healthy)
+        self.assertEqual(report.swappiness, 60)
+        self.assertFalse(report.previous_boot_available)
+        self.assertEqual(len(report.previous_boot_findings), 1)
+        self.assertTrue(any("ZFS zvol-backed swap" in error for error in report.errors))
+        self.assertTrue(any("at least 90%" in warning for warning in report.warnings))
+        self.assertTrue(any("at least 50%" in warning for warning in report.warnings))
 
     @patch("lib.proxmox_maintenance._run")
     def test_ssh_failure_stops_further_probes(self, mock_run) -> None:
@@ -149,6 +208,12 @@ class TestFormatMaintenanceReport(unittest.TestCase):
             clustered=False,
             root_free_bytes=8 * 1024 ** 3,
             reboot_required=False,
+            memory_used_bytes=4 * 1024 ** 3,
+            memory_total_bytes=8 * 1024 ** 3,
+            swap_used_bytes=0,
+            swap_total_bytes=8 * 1024 ** 3,
+            swappiness=10,
+            previous_boot_available=True,
         )
 
         output = format_maintenance_report(report)
@@ -157,6 +222,8 @@ class TestFormatMaintenanceReport(unittest.TestCase):
         self.assertIn("READY", output)
         self.assertIn("standalone", output)
         self.assertIn("8.0 GiB", output)
+        self.assertIn("4.0 GiB / 8.0 GiB", output)
+        self.assertIn("swappiness:     10", output)
 
 
 if __name__ == "__main__":

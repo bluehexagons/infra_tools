@@ -309,6 +309,15 @@ def add_setup_arguments(
             help="Relative memory priority for a ballooned VM (1-50000; default: 1000)",
         )
         parser.add_argument(
+            "--allow-memory-overcommit",
+            action="store_true",
+            default=argparse.SUPPRESS,
+            help=(
+                "Allow running VM memory floors to exceed the Proxmox node "
+                "balloon target"
+            ),
+        )
+        parser.add_argument(
             "--cores",
             dest="container_cores",
             type=int,

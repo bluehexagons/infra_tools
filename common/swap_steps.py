@@ -26,10 +26,9 @@ def configure_swap(config: SetupConfig) -> None:
     """Configure a swap file when the host owns its root filesystem.
 
     Proxmox manages swap as part of its storage layout.  In particular, a
-    generic file is not a safe fallback on ZFS-backed installations, where a
-    dedicated zvol is required.  Leave existing Proxmox swap untouched and
-    require an operator to provision any missing swap through Proxmox-aware
-    storage tooling.
+    generic file is not a safe fallback on ZFS-backed installations. Leave
+    existing Proxmox swap untouched and require an operator to provision any
+    missing swap on suitable non-zvol storage.
     """
     if config.system_type == "server_proxmox":
         print("  ✓ Skipping swap-file setup (Proxmox storage manages swap)")

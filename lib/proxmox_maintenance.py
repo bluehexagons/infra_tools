@@ -10,6 +10,11 @@ from typing import Optional
 
 from lib.proxmox_hosts import ProxmoxHost
 from lib.proxmox_manage import ContainerInfo, _parse_pct_list, _parse_qm_list
+from lib.proxmox_memory import (
+    SWAPON_STATUS_COMMAND,
+    HostSwapDevice,
+    parse_swapon_output,
+)
 from lib.ssh_utils import build_ssh_command, get_ssh_control_path, ssh_batch_mode
 
 
@@ -20,6 +25,12 @@ CORE_SERVICES = (
     "pveproxy",
     "pvestatd",
     "pvescheduler",
+)
+_PREVIOUS_BOOT_PATTERN = (
+    "oom-kill|out of memory|killed process|blocked for more than|"
+    "soft lockup|hard lockup|watchdog|i/o error|timed out|timeout|"
+    "nvme.*reset|ata.*error|zfs.*(error|fault)|mce|edac|"
+    "hardware error|thermal"
 )
 
 
@@ -39,6 +50,14 @@ class ProxmoxMaintenanceReport:
     storage_states: dict[str, str] = field(default_factory=dict)
     root_free_bytes: Optional[int] = None
     reboot_required: Optional[bool] = None
+    memory_used_bytes: Optional[int] = None
+    memory_total_bytes: Optional[int] = None
+    swap_used_bytes: Optional[int] = None
+    swap_total_bytes: Optional[int] = None
+    swap_devices: list[HostSwapDevice] = field(default_factory=list)
+    swappiness: Optional[int] = None
+    previous_boot_available: Optional[bool] = None
+    previous_boot_findings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
@@ -80,6 +99,14 @@ class ProxmoxMaintenanceReport:
             "storage_states": dict(self.storage_states),
             "root_free_bytes": self.root_free_bytes,
             "reboot_required": self.reboot_required,
+            "memory_used_bytes": self.memory_used_bytes,
+            "memory_total_bytes": self.memory_total_bytes,
+            "swap_used_bytes": self.swap_used_bytes,
+            "swap_total_bytes": self.swap_total_bytes,
+            "swap_devices": [asdict(device) for device in self.swap_devices],
+            "swappiness": self.swappiness,
+            "previous_boot_available": self.previous_boot_available,
+            "previous_boot_findings": list(self.previous_boot_findings),
             "errors": list(self.errors),
             "warnings": list(self.warnings),
         }
@@ -128,6 +155,109 @@ def _parse_storage_states(stdout: str) -> dict[str, str]:
         if len(parts) >= 3:
             states[parts[0]] = parts[2].lower()
     return states
+
+
+def _collect_memory_diagnostics(
+    host: ProxmoxHost,
+    report: ProxmoxMaintenanceReport,
+) -> None:
+    """Add read-only host memory and previous-boot diagnostics to an audit."""
+    node_status = _run(
+        host,
+        "pvesh get /nodes/$(hostname -s)/status --output-format json",
+    )
+    if node_status.returncode != 0:
+        report.warnings.append(
+            f"Could not inspect host memory: {_failure_detail(node_status)}"
+        )
+    else:
+        try:
+            status_data = json.loads(node_status.stdout or "{}")
+            memory_data = status_data.get("memory") or {}
+            swap_data = status_data.get("swap") or {}
+            report.memory_used_bytes = int(memory_data.get("used") or 0)
+            report.memory_total_bytes = int(memory_data.get("total") or 0)
+            report.swap_used_bytes = int(swap_data.get("used") or 0)
+            report.swap_total_bytes = int(swap_data.get("total") or 0)
+        except (AttributeError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            report.warnings.append(f"Could not parse host memory status: {exc}")
+        else:
+            if (
+                report.memory_total_bytes
+                and report.memory_used_bytes is not None
+                and report.memory_used_bytes / report.memory_total_bytes >= 0.9
+            ):
+                report.warnings.append("Host memory use is at least 90%")
+            if (
+                report.swap_total_bytes
+                and report.swap_used_bytes is not None
+                and report.swap_used_bytes / report.swap_total_bytes >= 0.5
+            ):
+                report.warnings.append("Host swap use is at least 50%")
+
+    swap_status = _run(host, SWAPON_STATUS_COMMAND)
+    if swap_status.returncode != 0:
+        report.warnings.append(
+            f"Could not inspect host swap devices: {_failure_detail(swap_status)}"
+        )
+    else:
+        report.swap_devices = parse_swapon_output(swap_status.stdout or "")
+        if not report.swap_devices:
+            report.warnings.append("No active host swap")
+        zfs_devices = [
+            device.name for device in report.swap_devices if device.zfs_backed
+        ]
+        if zfs_devices:
+            report.errors.append(
+                "ZFS zvol-backed swap can block the host under memory pressure: "
+                + ", ".join(zfs_devices)
+            )
+
+    swappiness = _run(host, "sysctl -n vm.swappiness")
+    if swappiness.returncode != 0:
+        report.warnings.append(
+            f"Could not inspect vm.swappiness: {_failure_detail(swappiness)}"
+        )
+    else:
+        try:
+            report.swappiness = int(swappiness.stdout.strip())
+        except ValueError:
+            report.warnings.append("Could not parse vm.swappiness")
+        else:
+            if report.swappiness > 10:
+                report.warnings.append(
+                    f"vm.swappiness is {report.swappiness}; Proxmox host policy is 10"
+                )
+
+    boots = _run(host, "journalctl --list-boots --no-pager")
+    if boots.returncode != 0:
+        report.previous_boot_available = None
+        report.warnings.append(
+            f"Could not inspect persistent boot journals: {_failure_detail(boots)}"
+        )
+    else:
+        report.previous_boot_available = any(
+            line.lstrip().startswith("-1 ")
+            for line in boots.stdout.splitlines()
+        )
+        if not report.previous_boot_available:
+            report.warnings.append(
+                "Previous boot journal is unavailable; forced-lockup evidence may be lost"
+            )
+
+    findings = _run(
+        host,
+        "journalctl -b -1 -k --no-pager -o short-monotonic "
+        f"| grep -Ei '{_PREVIOUS_BOOT_PATTERN}' | tail -n 40",
+    )
+    if findings.stdout.strip():
+        report.previous_boot_findings = [
+            line.strip() for line in findings.stdout.splitlines() if line.strip()
+        ]
+        report.warnings.append(
+            f"Previous boot kernel log has {len(report.previous_boot_findings)} "
+            "possible lockup indicator(s)"
+        )
 
 
 def collect_maintenance_report(host: ProxmoxHost) -> ProxmoxMaintenanceReport:
@@ -254,6 +384,7 @@ def collect_maintenance_report(host: ProxmoxHost) -> ProxmoxMaintenanceReport:
             report.errors.append(
                 f"Could not check reboot-required state: {_failure_detail(reboot_required)}"
             )
+        _collect_memory_diagnostics(host, report)
     except (OSError, subprocess.TimeoutExpired) as exc:
         report.errors.append(f"Maintenance probe failed: {exc}")
 
@@ -292,8 +423,26 @@ def format_maintenance_report(report: ProxmoxMaintenanceReport) -> str:
         f"  locked guests:  {len(report.locked_guests)}",
         f"  storage:        {storage_text}",
         f"  root free:      {_format_bytes(report.root_free_bytes)}",
+        "  host memory:    "
+        f"{_format_bytes(report.memory_used_bytes)} / "
+        f"{_format_bytes(report.memory_total_bytes)}",
+        "  host swap:      "
+        f"{_format_bytes(report.swap_used_bytes)} / "
+        f"{_format_bytes(report.swap_total_bytes)}",
+        "  swappiness:     "
+        + ("unknown" if report.swappiness is None else str(report.swappiness)),
+        "  prior boot log: "
+        + (
+            "unknown"
+            if report.previous_boot_available is None
+            else ("available" if report.previous_boot_available else "unavailable")
+        ),
         "  reboot needed:  "
-        + ("unknown" if report.reboot_required is None else str(report.reboot_required).lower()),
+        + (
+            "unknown"
+            if report.reboot_required is None
+            else str(report.reboot_required).lower()
+        ),
     ]
     if report.active_tasks:
         lines.append("  tasks:          " + ", ".join(report.active_tasks))
@@ -303,6 +452,8 @@ def format_maintenance_report(report: ProxmoxMaintenanceReport) -> str:
             for guest in report.running_guests
         )
         lines.append(f"  guests:         {guests}")
+    for finding in report.previous_boot_findings:
+        lines.append(f"  PRIOR BOOT: {finding}")
     for error in report.errors:
         lines.append(f"  ERROR: {error}")
     for warning in report.warnings:

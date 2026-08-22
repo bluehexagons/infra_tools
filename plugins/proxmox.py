@@ -34,7 +34,10 @@ PLUGIN = PluginDefinition(
 def build_server_proxmox_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
     """Build the dedicated Proxmox hardening flow."""
 
-    from common.proxmox_steps import configure_proxmox_balloon_target
+    from common.proxmox_steps import (
+        configure_proxmox_balloon_target,
+        configure_proxmox_host_memory_safety,
+    )
     from common.steps import check_restart_required, configure_swap
     from security.steps import (
         configure_auto_restart,
@@ -51,6 +54,10 @@ def build_server_proxmox_steps(config: SetupConfig) -> list[tuple[str, StepFunc]
     steps = [
         ("Creating remoteusers group", create_remoteusers_group),
         ("Configuring swap", configure_swap),
+        (
+            "Configuring Proxmox host memory safety",
+            configure_proxmox_host_memory_safety,
+        ),
         (
             "Configuring Proxmox memory balloon target",
             configure_proxmox_balloon_target,

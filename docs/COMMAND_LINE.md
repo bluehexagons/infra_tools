@@ -586,6 +586,7 @@ be fully disabled, then manage pending security reboots explicitly.
 | `--memory SIZE` | Guest memory |
 | `--balloon-min SIZE` | VM-only minimum memory for dynamic ballooning; defaults to `--memory` |
 | `--balloon-shares N` | VM-only relative memory priority during balloon contention (1-50000; default 1000) |
+| `--allow-memory-overcommit` | Explicitly allow running VM memory floors to exceed the node balloon target |
 | `--storage root POOL AMOUNT` | Required root storage spec |
 | `--storage root AMOUNT` | Root storage shorthand using saved defaults or `auto` |
 | `--storage NAME POOL AMOUNT` | Provision a named non-root QEMU data disk; repeatable |
@@ -618,12 +619,17 @@ Notes:
   device for guest-memory telemetry. Set `--balloon-min` below `--memory` to
   opt into dynamic ballooning; the minimum cannot exceed the maximum. Provisioning
   reports running-guest floors and burst maxima before creation and warns when
-  either total exceeds the node balloon target. `--balloon-shares` changes
-  relative priority during contention; it is not a reservation.
+  either total exceeds the node balloon target. Burst maxima may exceed the
+  target with a warning; a floor-over-target configuration is refused unless
+  `--allow-memory-overcommit` is supplied. `--balloon-shares` changes relative
+  priority during contention; it is not a reservation.
 - `server_proxmox` setup always reconciles a node balloon target. Automatic mode
   reserves at least 20% or 2 GiB (whichever is larger), caps the target at 80%,
   and prints the resulting values. `--proxmox-balloon-target` explicitly
   overrides that policy and is accepted only for `server_proxmox`.
+- `server_proxmox` setup preserves the existing swap layout, reports active
+  swap devices, warns for absent or direct ZFS zvol-backed swap, and persists
+  and verifies `vm.swappiness=10`.
 - The positional target is the guest IPv4 address. A bare address defaults to
   `/24`; use `ADDRESS/PREFIX` for another prefix. Do not repeat it with `--ip`.
 - `template` storage is LXC-only.

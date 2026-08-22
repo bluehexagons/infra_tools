@@ -337,6 +337,7 @@ class SetupConfig:
     container_memory: MaybeStr = None
     vm_balloon_min: MaybeStr = None
     vm_balloon_shares: int = 1000
+    allow_memory_overcommit: bool = False
     container_storage: Optional[NestedStrList] = None  # [[name, pool, amount?], ...]
     storage_mounts: Optional[NestedStrList] = None  # [[name, path, filesystem?, policy?], ...]
     container_cores: int = 1
@@ -924,6 +925,8 @@ class SetupConfig:
                 cmd_parts.append(f"--balloon-min {shlex.quote(self.vm_balloon_min)}")
             if self.vm_balloon_shares != 1000:
                 cmd_parts.append(f"--balloon-shares {self.vm_balloon_shares}")
+            if self.allow_memory_overcommit:
+                cmd_parts.append("--allow-memory-overcommit")
             for storage_spec in _normalize_nested_specs(self.container_storage) or []:
                 escaped_spec = " ".join(shlex.quote(str(part)) for part in storage_spec)
                 cmd_parts.append(f"--storage {escaped_spec}")
@@ -1853,6 +1856,7 @@ class SetupConfig:
             container_memory=getattr(args, 'container_memory', None),
             vm_balloon_min=getattr(args, 'vm_balloon_min', None),
             vm_balloon_shares=getattr(args, 'vm_balloon_shares', 1000),
+            allow_memory_overcommit=getattr(args, 'allow_memory_overcommit', False),
             container_storage=_normalize_nested_specs(getattr(args, 'container_storage', None)),
             storage_mounts=_normalize_nested_specs(getattr(args, 'storage_mounts', None)),
             container_cores=getattr(args, 'container_cores', 1),

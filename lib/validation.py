@@ -1578,6 +1578,7 @@ def validate_hosted_flags(config: Any) -> None:
     validate_proxmox_balloon_settings(config)
     balloon_min = getattr(config, "vm_balloon_min", None)
     balloon_shares = getattr(config, "vm_balloon_shares", 1000)
+    allow_memory_overcommit = getattr(config, "allow_memory_overcommit", False)
     image_storage = getattr(config, "vm_image_storage", None)
     image_sha512 = getattr(config, "vm_image_sha512", None)
     validate_vm_storage_settings(config, require_provisioning=True)
@@ -1586,6 +1587,8 @@ def validate_hosted_flags(config: Any) -> None:
             raise ValueError("--balloon-min requires --provision-on")
         if balloon_shares != 1000:
             raise ValueError("--balloon-shares requires --provision-on")
+        if allow_memory_overcommit:
+            raise ValueError("--allow-memory-overcommit requires --provision-on")
         if image_storage:
             raise ValueError("--image-storage requires --provision-on")
         if image_sha512:
@@ -1755,6 +1758,8 @@ def validate_hosted_flags(config: Any) -> None:
             raise ValueError("--balloon-min requires --machine vm")
         if balloon_shares != 1000:
             raise ValueError("--balloon-shares requires --machine vm")
+        if allow_memory_overcommit:
+            raise ValueError("--allow-memory-overcommit requires --machine vm")
         if vm_image:
             raise ValueError("--image requires --machine vm")
         if image_storage:

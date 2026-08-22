@@ -201,7 +201,7 @@ def _report_memory_capacity(
     ssh_opts: StrList,
     proposed_minimum_mib: int,
     proposed_maximum_mib: int,
-) -> None:
+) -> bool:
     """Print advisory host-capacity comparisons before creating a VM."""
     try:
         hostname = _ssh_run(
@@ -249,7 +249,7 @@ def _report_memory_capacity(
         )
     except (ProvisionError, TypeError, ValueError) as exc:
         print(f"  ⚠ Could not calculate Proxmox memory capacity: {exc}")
-        return
+        return True
 
     target_mib = (total_mib * target_percent) // 100
     current_minimum_mib = sum(item.minimum_mib for item in allocations)
@@ -294,6 +294,24 @@ def _report_memory_capacity(
             f"{format_gib(after_maximum_mib - target_mib)}; simultaneous peaks "
             "will contend for memory"
         )
+    return after_minimum_mib <= target_mib
+
+
+def _enforce_memory_floor(memory_floor_safe: bool, allow_overcommit: bool) -> None:
+    """Require explicit authorization for an unreclaimable floor over target."""
+    if memory_floor_safe:
+        return
+    if allow_overcommit:
+        print(
+            "  ⚠ Continuing because --allow-memory-overcommit explicitly "
+            "permits the unsafe floor"
+        )
+        return
+    raise ProvisionError(
+        "Refusing to provision a VM whose running memory floor would exceed "
+        "the Proxmox balloon target; lower --balloon-min, stop another guest, "
+        "or use --allow-memory-overcommit"
+    )
 
 
 def _preflight_data_disk_capacity(
@@ -1257,12 +1275,16 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
             f"VM with IP {target_ip} already exists on {node_ip}"
         )
 
-    _report_memory_capacity(
+    memory_floor_safe = _report_memory_capacity(
         node_ip=node_ip,
         user=user,
         ssh_opts=ssh_opts,
         proposed_minimum_mib=balloon_min_mb,
         proposed_maximum_mib=memory_mb,
+    )
+    _enforce_memory_floor(
+        memory_floor_safe,
+        getattr(config, "allow_memory_overcommit", False),
     )
 
     root_pool = _resolve_storage_pool(
