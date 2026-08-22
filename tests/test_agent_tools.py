@@ -21,6 +21,7 @@ from common.agent_steps import (
     _copy_payload_directory,
     _copy_secret_file,
     _configure_git_identity,
+    _merge_github_credentials,
     _user_home,
     copy_agent_tooling_payload,
     clone_agent_repositories,
@@ -894,6 +895,48 @@ class TestAgentUpdate(unittest.TestCase):
 
 
 class TestAgentPayloadInstallation(unittest.TestCase):
+    def test_github_credentials_make_private_config_directories_user_owned(self):
+        config = SetupConfig(
+            host='host',
+            username='agent',
+            system_type='server_dev',
+        )
+        account = type(
+            'Account',
+            (),
+            {'pw_dir': '/home/agent', 'pw_uid': 1000, 'pw_gid': 1001},
+        )()
+        completed = type(
+            'Completed',
+            (),
+            {'returncode': 0, 'stdout': '', 'stderr': ''},
+        )()
+        with tempfile.TemporaryDirectory() as directory:
+            home = os.path.join(directory, 'home')
+            source = os.path.join(directory, 'hosts.yml')
+            os.makedirs(home)
+            with open(source, 'w', encoding='utf-8') as file_obj:
+                file_obj.write('github.com:\n  oauth_token: secret\n')
+
+            with (
+                patch('common.agent_steps._user_home', return_value=home),
+                patch('common.agent_steps.pwd.getpwnam', return_value=account),
+                patch('common.agent_steps.run', return_value=completed) as run_command,
+            ):
+                self.assertTrue(_merge_github_credentials(config, source))
+
+            destination = os.path.join(home, '.config', 'gh', 'hosts.yml')
+            commands = [call.args[0] for call in run_command.call_args_list]
+            self.assertEqual(
+                commands,
+                [
+                    f'chown 1000:1001 {os.path.join(home, ".config")}',
+                    f'chown 1000:1001 {os.path.join(home, ".config", "gh")}',
+                    f'chown -R 1000:1001 {destination}',
+                ],
+            )
+            self.assertEqual(os.stat(destination).st_mode & 0o777, 0o600)
+
     def test_git_identity_fills_missing_fields_from_staged_controller_values(self):
         config = SetupConfig(
             host='host',
@@ -1103,8 +1146,9 @@ class TestAgentPayloadInstallation(unittest.TestCase):
                 file_obj.write('model = "test"\n')
             os.symlink(os.path.join(directory, 'outside'), os.path.join(destination, 'config.toml'))
 
-            with self.assertRaisesRegex(RuntimeError, 'symlinked agent destination'):
-                _copy_payload_directory(config, source, destination, 'Codex')
+            with patch('common.agent_steps._user_home', return_value=home):
+                with self.assertRaisesRegex(RuntimeError, 'symlinked agent destination'):
+                    _copy_payload_directory(config, source, destination, 'Codex')
 
     def test_copied_credentials_are_removed_from_uploaded_payload(self):
         config = SetupConfig(

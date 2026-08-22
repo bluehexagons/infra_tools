@@ -60,6 +60,52 @@ def _chown_path(config: SetupConfig, path: str) -> None:
         raise RuntimeError(f"Could not set ownership for {path}: {detail}")
 
 
+def _chown_user_directory_chain(
+    config: SetupConfig,
+    user_home: str,
+    path: str,
+) -> None:
+    """Make every directory from ``user_home`` to ``path`` user-traversable.
+
+    Payload setup runs as root and may create a private directory hierarchy
+    before copying a single credential file. Chown only the directory entries,
+    not unrelated contents in an existing user configuration tree.
+    """
+
+    try:
+        account = pwd.getpwnam(config.username)
+    except KeyError as exc:
+        raise RuntimeError(f"Target user does not exist: {config.username}") from exc
+
+    absolute_home = os.path.abspath(user_home)
+    absolute_path = os.path.abspath(path)
+    try:
+        inside_home = os.path.commonpath((absolute_home, absolute_path)) == absolute_home
+    except ValueError:
+        inside_home = False
+    if not inside_home:
+        raise RuntimeError(f"Agent directory is outside the target user home: {path}")
+
+    current = absolute_home
+    relative_path = os.path.relpath(absolute_path, absolute_home)
+    if relative_path == ".":
+        return
+    for component in relative_path.split(os.path.sep):
+        current = os.path.join(current, component)
+        if os.path.islink(current) or not os.path.isdir(current):
+            raise RuntimeError(f"Refusing unsafe agent destination: {current}")
+        result = run(
+            f"chown {account.pw_uid}:{account.pw_gid} {shlex.quote(current)}",
+            check=False,
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            detail = (
+                result.stderr or result.stdout or "ownership change failed"
+            ).strip()
+            raise RuntimeError(f"Could not set ownership for {current}: {detail}")
+
+
 def install_agent_cli_launcher(config: SetupConfig) -> None:
     """Install a target-user launcher for agent diagnostics and maintenance."""
     if is_dry_run():
@@ -546,6 +592,7 @@ def _copy_payload_directory(config: SetupConfig, source: str, destination: str, 
 
     _reject_symlinked_agent_destination(destination)
     _ensure_agent_directory(destination)
+    _chown_user_directory_chain(config, _user_home(config), destination)
     _validate_agent_payload_tree(source, destination)
     _reject_symlinked_agent_destination(destination)
     shutil.copytree(source, destination, symlinks=True, dirs_exist_ok=True)
@@ -562,6 +609,7 @@ def _copy_secret_file(config: SetupConfig, source: str, destination: str, label:
     destination_parent = os.path.dirname(destination)
     _reject_symlinked_agent_destination(destination_parent)
     _ensure_agent_directory(destination_parent)
+    _chown_user_directory_chain(config, _user_home(config), destination_parent)
     _reject_symlinked_agent_destination(destination)
 
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
@@ -767,6 +815,7 @@ def _merge_github_credentials(config: SetupConfig, source: str) -> bool:
     destination = os.path.join(user_home, ".config", "gh", "hosts.yml")
     _reject_symlinked_agent_destination(os.path.dirname(destination))
     _ensure_agent_directory(os.path.dirname(destination))
+    _chown_user_directory_chain(config, user_home, os.path.dirname(destination))
     new_entry = _payload_host_entry(source, config.git_host)
     existing = ""
     if os.path.exists(destination):
