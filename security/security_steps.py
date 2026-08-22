@@ -187,7 +187,7 @@ def _configure_rdp_firewall(config: SetupConfig) -> None:
 
 
 def _configure_ssh_firewall(config: SetupConfig) -> None:
-    """Reconcile SSH source rules before removing broad legacy access."""
+    """Allow trusted SSH sources or rate-limit unrestricted SSH access."""
 
     sources = [
         validate_network_ip_or_cidr(source, "SSH source")
@@ -202,9 +202,9 @@ def _configure_ssh_firewall(config: SetupConfig) -> None:
 
     desired_comments: set[str] = set()
     for source in sources:
-        comment = f"{_SSH_RULE_COMMENT_PREFIX} source {source}"
+        comment = f"{_SSH_RULE_COMMENT_PREFIX} trusted source {source}"
         result = run(
-            "ufw limit from "
+            "ufw allow from "
             f"{shlex.quote(source)} to any port 22 proto tcp "
             f"comment {shlex.quote(comment)}",
             check=False,
@@ -320,19 +320,28 @@ def configure_firewall(config: SetupConfig) -> None:
             raise RuntimeError("Firewall could not be enabled (check command output)")
         return
 
+    ssh_policy = (
+        "SSH source-restricted"
+        if config.effective_access_sources()
+        else "SSH rate-limited"
+    )
     if web_ports:
         print(
-            "  ✓ Firewall configured (SSH rate-limited; web TCP ports: "
+            f"  ✓ Firewall configured ({ssh_policy}; web TCP ports: "
             + ", ".join(str(port) for port in web_ports)
             + ")"
         )
     elif config.enable_rdp:
         if config.effective_rdp_sources():
-            print("  ✓ Firewall configured (SSH rate-limited; RDP source-restricted)")
+            print(
+                f"  ✓ Firewall configured ({ssh_policy}; RDP source-restricted)"
+            )
         else:
-            print("  ✓ Firewall configured (SSH and global RDP rate-limited)")
+            print(
+                f"  ✓ Firewall configured ({ssh_policy}; global RDP rate-limited)"
+            )
     else:
-        print("  ✓ Firewall configured (SSH rate-limited)")
+        print(f"  ✓ Firewall configured ({ssh_policy})")
 
 
 def configure_fail2ban(config: SetupConfig) -> None:
@@ -897,7 +906,12 @@ def configure_firewall_ssh_only(config: SetupConfig) -> None:
             raise RuntimeError("Firewall could not be enabled (check command output)")
         return
 
-    print("  ✓ Firewall configured (SSH rate-limited)")
+    ssh_policy = (
+        "SSH source-restricted"
+        if config.effective_access_sources()
+        else "SSH rate-limited"
+    )
+    print(f"  ✓ Firewall configured ({ssh_policy})")
 
 
 def _proxmox_management_entries() -> list[dict[str, object]] | None:

@@ -126,7 +126,16 @@ def enroll_host_key(
         raise ValueError("SSH port must be between 1 and 65535")
 
     result = subprocess.run(
-        ["ssh-keyscan", "-T", "10", "-p", str(port), host],
+        [
+            "ssh-keyscan",
+            "-T",
+            "10",
+            "-t",
+            "ed25519",
+            "-p",
+            str(port),
+            host,
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -155,4 +164,8 @@ def enroll_host_key(
 
     known_hosts = _persist_scan(host, normalized_scan, port)
     print(f"Enrolled host key in {known_hosts}")
+    print(
+        "Plain ssh uses ~/.ssh/known_hosts unless configured to use the "
+        "infra-tools workspace file."
+    )
     return 0

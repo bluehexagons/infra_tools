@@ -129,8 +129,8 @@ class TestGenericUfwFiltering(unittest.TestCase):
 
         commands = [call.args[0] for call in mock_run.call_args_list]
         ssh_rule = (
-            "ufw limit from 192.168.1.0/24 to any port 22 proto tcp "
-            "comment 'infra_tools SSH source 192.168.1.0/24'"
+            "ufw allow from 192.168.1.0/24 to any port 22 proto tcp "
+            "comment 'infra_tools SSH trusted source 192.168.1.0/24'"
         )
         self.assertIn(ssh_rule, commands)
         self.assertLess(commands.index(ssh_rule), commands.index("ufw delete limit ssh"))
@@ -150,6 +150,47 @@ class TestGenericUfwFiltering(unittest.TestCase):
         )
         self.assertIn(web_rule, commands)
         self.assertLess(commands.index(web_rule), commands.index("ufw delete allow 8080/tcp"))
+
+    @patch("security.security_steps.is_container", return_value=False)
+    @patch("security.security_steps.run")
+    def test_trusted_ssh_source_replaces_legacy_rate_limit(
+        self,
+        mock_run,
+        _container,
+    ) -> None:
+        status = """Status: active
+[ 1] 22/tcp LIMIT IN 192.168.1.0/24 # infra_tools SSH source 192.168.1.0/24
+[ 2] 22/tcp ALLOW IN 198.51.100.10 # operator rule
+[ 3] 22/tcp ALLOW IN 192.168.1.0/24 # infra_tools SSH trusted source 192.168.1.0/24
+"""
+
+        def run_side_effect(command: str, **_kwargs: object) -> SimpleNamespace:
+            if command.startswith("ufw status 2>"):
+                return SimpleNamespace(returncode=0, stdout="")
+            return SimpleNamespace(
+                returncode=0,
+                stdout=status if command == "ufw status numbered" else "",
+            )
+
+        mock_run.side_effect = run_side_effect
+        configure_firewall(
+            SetupConfig(
+                host="host.example.test",
+                username="admin",
+                system_type="server_lite",
+                access_sources=["192.168.1.0/24"],
+            )
+        )
+
+        commands = [call.args[0] for call in mock_run.call_args_list]
+        self.assertIn(
+            "ufw allow from 192.168.1.0/24 to any port 22 proto tcp "
+            "comment 'infra_tools SSH trusted source 192.168.1.0/24'",
+            commands,
+        )
+        self.assertIn("ufw --force delete 1", commands)
+        self.assertNotIn("ufw --force delete 2", commands)
+        self.assertNotIn("ufw --force delete 3", commands)
 
     @patch("smb.samba_steps.run")
     def test_generic_source_restricts_samba_and_removes_stale_rules(self, mock_run) -> None:

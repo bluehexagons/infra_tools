@@ -43,6 +43,19 @@ class TestSshEnrollment(unittest.TestCase):
                 "example.com ssh-ed25519 AAAA\n",
             )
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(
+                run.call_args_list[0].args[0],
+                [
+                    "ssh-keyscan",
+                    "-T",
+                    "10",
+                    "-t",
+                    "ed25519",
+                    "-p",
+                    "22",
+                    "example.com",
+                ],
+            )
 
     @patch("lib.ssh_enrollment.subprocess.run")
     def test_decline_does_not_write_key(self, run):
