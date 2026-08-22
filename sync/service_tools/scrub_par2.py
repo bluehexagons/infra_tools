@@ -668,7 +668,11 @@ Redundancy: {redundancy}%
                     status=status,
                     message=message,
                     details=details,
-                    logger=notif_logger
+                    logger=notif_logger,
+                    event_type="scrub.completed",
+                    state="success" if status == "good" else "firing",
+                    dedup_key=f"scrub:{directory}:{database}",
+                    delivery_policy="signal",
                 )
             except Exception as notify_err:
                 log(f"Warning: Failed to send notification: {notify_err}", log_file)

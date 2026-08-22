@@ -79,6 +79,39 @@ class TestNotification(unittest.TestCase):
         n = Notification(subject='Test', job='sync', status='good', message='ok')
         self.assertEqual(n.hostname, socket.gethostname())
 
+    def test_to_dict_includes_structured_data(self):
+        n = Notification(
+            subject='Test',
+            job='security_monitor',
+            status='warning',
+            message='event',
+            data={'schema_version': 1, 'events': [{'type': 'fail2ban'}]},
+        )
+
+        self.assertEqual(n.to_dict()['data']['schema_version'], 1)
+        self.assertEqual(n.to_dict()['data']['events'][0]['type'], 'fail2ban')
+
+    def test_to_dict_includes_common_event_envelope(self):
+        n = Notification(
+            subject='Source recovered',
+            job='security_monitor',
+            status='info',
+            message='Auditd is readable again',
+            event_type='security.source_health',
+            state='resolved',
+            dedup_key='security_monitor:source-health',
+            actions=['No action is required'],
+        )
+
+        payload = n.to_dict()
+
+        self.assertEqual(payload['schema_version'], 1)
+        self.assertEqual(payload['event_type'], 'security.source_health')
+        self.assertEqual(payload['state'], 'resolved')
+        self.assertEqual(payload['dedup_key'], 'security_monitor:source-health')
+        self.assertEqual(payload['actions'], ['No action is required'])
+        self.assertNotIn('delivery_policy', payload)
+
     def test_hostname_can_be_overridden(self):
         n = Notification(subject='Test', job='sync', status='good', message='ok', hostname='custom-host')
         self.assertEqual(n.hostname, 'custom-host')
@@ -90,6 +123,36 @@ class TestNotificationSender(unittest.TestCase):
         sender = NotificationSender([])
         notification = Notification(subject='Test', job='sync', status='good', message='ok')
         self.assertTrue(sender.send(notification))
+
+    def test_signal_policy_suppresses_routine_success(self):
+        sender = NotificationSender([NotificationConfig(type='webhook', target='https://example.com/hook')])
+        notification = Notification(
+            subject='Sync completed',
+            job='sync',
+            status='good',
+            message='No files changed',
+            delivery_policy='signal',
+        )
+
+        with patch.object(sender, '_send_webhook') as mock_send:
+            self.assertTrue(sender.send(notification))
+
+        mock_send.assert_not_called()
+
+    def test_signal_policy_delivers_warning(self):
+        sender = NotificationSender([NotificationConfig(type='webhook', target='https://example.com/hook')])
+        notification = Notification(
+            subject='Sync failed',
+            job='sync',
+            status='error',
+            message='The source was unavailable',
+            delivery_policy='signal',
+        )
+
+        with patch.object(sender, '_send_webhook') as mock_send:
+            self.assertTrue(sender.send(notification))
+
+        mock_send.assert_called_once()
 
     @patch('subprocess.run')
     def test_mailbox_body_includes_hostname(self, mock_run):
@@ -117,6 +180,23 @@ class TestNotificationSender(unittest.TestCase):
         body = kwargs['input'].decode('utf-8')
         self.assertIn('Details:', body)
         self.assertIn('movies/film.mkv', body)
+
+    @patch('subprocess.run')
+    def test_mailbox_body_includes_structured_data(self, mock_run):
+        mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout=b'', stderr=b'')
+        sender = NotificationSender([NotificationConfig(type='mailbox', target='admin@example.com')])
+        notification = Notification(
+            subject='Test',
+            job='security_monitor',
+            status='warning',
+            message='Security event',
+            data={'events': [{'type': 'ssh_authentication', 'failure_count': 7}]},
+        )
+
+        sender.send(notification)
+        body = mock_run.call_args.kwargs['input'].decode('utf-8')
+        self.assertIn('Machine-readable event data (JSON):', body)
+        self.assertIn('ssh_authentication', body)
 
     @patch('subprocess.run')
     def test_mailbox_body_omits_details_section_when_absent(self, mock_run):
@@ -392,7 +472,7 @@ class TestSendSetupNotification(unittest.TestCase):
 class TestSendNotificationSafe(unittest.TestCase):
     @patch('lib.notifications.send_notification')
     def test_returns_without_configs(self, mock_send):
-        send_notification_safe([], "Subject", "job", "info", "msg")
+        self.assertTrue(send_notification_safe([], "Subject", "job", "info", "msg"))
         mock_send.assert_not_called()
 
     @patch('lib.notifications.send_notification', side_effect=RuntimeError('boom'))
@@ -428,6 +508,39 @@ class TestSendNotificationSafe(unittest.TestCase):
         self.assertIn('Notification send suppressed after delivery failure', output)
         self.assertIn("job='job'", output)
         self.assertIn("error='boom'", output)
+
+    @patch('lib.notifications.send_notification', return_value=False)
+    def test_logs_incomplete_delivery_when_sender_reports_failure(self, _mock_send):
+        log_stream = io.StringIO()
+        logger = logging.getLogger('test.notifications.incomplete')
+        logger.handlers = []
+        logger.propagate = False
+        handler = logging.StreamHandler(log_stream)
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+
+        send_notification_safe(
+            [NotificationConfig(type='webhook', target='https://example.com/hook')],
+            'Subject',
+            'job',
+            'warning',
+            'msg',
+            logger=logger,
+        )
+
+        self.assertIn('Notification delivery incomplete', log_stream.getvalue())
+
+    @patch('lib.notifications.send_notification', return_value=True)
+    def test_returns_delivery_result(self, _mock_send):
+        self.assertTrue(
+            send_notification_safe(
+                [NotificationConfig(type='webhook', target='https://example.com/hook')],
+                'Subject',
+                'job',
+                'info',
+                'msg',
+            )
+        )
 
 
 class TestLoadNotificationConfigsFromState(unittest.TestCase):

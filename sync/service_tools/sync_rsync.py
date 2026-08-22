@@ -264,7 +264,11 @@ Duration: {duration:.1f}s
                     status="good",
                     message=message,
                     details=details,
-                    logger=logger
+                    logger=logger,
+                    event_type="sync.completed",
+                    state="success",
+                    dedup_key=f"sync:{source}:{destination}",
+                    delivery_policy="signal",
                 )
             except Exception as e:
                 log_event(logger, "Failed to send success notification", level=ERROR, error=str(e))
@@ -298,7 +302,10 @@ Duration: {duration:.1f}s
                     status="error",
                     message=f"Sync failed: {source} -> {destination}",
                     details=f"Error:\n{error_msg}",
-                    logger=logger
+                    logger=logger,
+                    event_type="sync.failed",
+                    state="firing",
+                    dedup_key=f"sync:{source}:{destination}",
                 )
             except Exception as notify_error:
                 log_event(logger, "Failed to send failure notification", level=ERROR, error=str(notify_error))
@@ -329,7 +336,10 @@ Duration: {duration:.1f}s
                     status="error",
                     message=f"Sync failed with unexpected error: {source} -> {destination}",
                     details=str(e),
-                    logger=logger
+                    logger=logger,
+                    event_type="sync.failed",
+                    state="firing",
+                    dedup_key=f"sync:{source}:{destination}",
                 )
             except Exception as notify_error:
                 log_event(logger, "Failed to send failure notification", level=ERROR, error=str(notify_error))

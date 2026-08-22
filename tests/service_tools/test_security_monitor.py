@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 import sys
 import tempfile
 import unittest
@@ -77,15 +78,119 @@ class TestSecurityMonitor(unittest.TestCase):
     @patch("security.service_tools.security_monitor._check_fail2ban", return_value=([], [], None))
     @patch("security.service_tools.security_monitor._load_state", return_value={})
     @patch("security.service_tools.security_monitor.load_notification_configs_from_state", return_value=["cfg"])
-    def test_collection_failure_retains_cursor_and_returns_failure(
+    def test_collection_failure_notifies_once_and_retains_cursor(
         self, _configs, _state, _fail2ban, _audit, _ssh, mock_notify, mock_save,
         _certificate,
     ):
         self.assertEqual(security_monitor.main(), 1)
 
-        mock_save.assert_not_called()
+        saved_state = mock_save.call_args.args[0]
+        saved_cursor = datetime.fromisoformat(saved_state["last_run"])
+        self.assertLess(saved_cursor, datetime.now())
+        self.assertGreater(saved_cursor, datetime.now() - timedelta(minutes=16))
+        self.assertEqual(saved_state["collection_errors"], ["SSH journal: denied"])
         self.assertEqual(mock_notify.call_args.kwargs["status"], "error")
         self.assertIn("SSH journal: denied", mock_notify.call_args.kwargs["details"])
+        self.assertEqual(
+            mock_notify.call_args.kwargs["data"]["events"][0]["type"],
+            "source_health",
+        )
+
+    @patch(
+        "security.service_tools.security_monitor.inspect_xrdp_certificate",
+        return_value=XrdpCertificateHealth("not_configured", "", ""),
+    )
+    @patch("security.service_tools.security_monitor._save_state")
+    @patch("security.service_tools.security_monitor.send_notification_safe")
+    @patch("security.service_tools.security_monitor._check_ssh_failures", return_value=(0, "SSH journal: denied"))
+    @patch("security.service_tools.security_monitor._check_auditd", return_value=([], False, []))
+    @patch("security.service_tools.security_monitor._check_fail2ban", return_value=([], [], None))
+    @patch(
+        "security.service_tools.security_monitor._load_state",
+        return_value={"last_run": "2026-08-22T06:00:00", "collection_errors": ["SSH journal: denied"]},
+    )
+    @patch("security.service_tools.security_monitor.load_notification_configs_from_state", return_value=["cfg"])
+    def test_repeated_collection_failure_is_not_resent(
+        self, _configs, _state, _fail2ban, _audit, _ssh, mock_notify, mock_save,
+        _certificate,
+    ):
+        self.assertEqual(security_monitor.main(), 1)
+
+        mock_notify.assert_not_called()
+        self.assertEqual(
+            mock_save.call_args.args[0]["collection_errors"],
+            ["SSH journal: denied"],
+        )
+
+    @patch(
+        "security.service_tools.security_monitor.inspect_xrdp_certificate",
+        return_value=XrdpCertificateHealth("not_configured", "", ""),
+    )
+    @patch("security.service_tools.security_monitor._save_state")
+    @patch("security.service_tools.security_monitor.send_notification_safe")
+    @patch("security.service_tools.security_monitor._check_ssh_failures", return_value=(0, None))
+    @patch("security.service_tools.security_monitor._check_auditd", return_value=([], False, []))
+    @patch("security.service_tools.security_monitor._check_fail2ban", return_value=([], [], None))
+    @patch(
+        "security.service_tools.security_monitor._load_state",
+        return_value={"last_run": "2026-08-22T06:00:00", "collection_errors": ["SSH journal: denied"]},
+    )
+    @patch("security.service_tools.security_monitor.load_notification_configs_from_state", return_value=["cfg"])
+    def test_collection_recovery_is_reported_and_clears_error_state(
+        self, _configs, _state, _fail2ban, _audit, _ssh, mock_notify, mock_save,
+        _certificate,
+    ):
+        self.assertEqual(security_monitor.main(), 0)
+
+        self.assertIn("monitor recovered", mock_notify.call_args.kwargs["subject"])
+        self.assertEqual(
+            mock_notify.call_args.kwargs["data"]["events"][0]["type"],
+            "monitor_recovery",
+        )
+        self.assertNotIn("collection_errors", mock_save.call_args.args[0])
+
+    @patch(
+        "security.service_tools.security_monitor.inspect_xrdp_certificate",
+        return_value=XrdpCertificateHealth("not_configured", "", ""),
+    )
+    @patch("security.service_tools.security_monitor._save_state")
+    @patch("security.service_tools.security_monitor.send_notification_safe")
+    @patch("security.service_tools.security_monitor._check_ssh_failures", return_value=(0, None))
+    @patch("security.service_tools.security_monitor._check_auditd", return_value=(['privileged'], False, []))
+    @patch("security.service_tools.security_monitor._check_fail2ban", return_value=([], [], None))
+    @patch("security.service_tools.security_monitor._load_state", return_value={})
+    @patch("security.service_tools.security_monitor.load_notification_configs_from_state", return_value=["cfg"])
+    def test_routine_privileged_audit_event_does_not_notify(
+        self, _configs, _state, _fail2ban, _audit, _ssh, mock_notify, mock_save,
+        _certificate,
+    ):
+        self.assertEqual(security_monitor.main(), 0)
+
+        mock_notify.assert_not_called()
+        mock_save.assert_called_once()
+
+    @patch(
+        "security.service_tools.security_monitor.inspect_xrdp_certificate",
+        return_value=XrdpCertificateHealth("not_configured", "", ""),
+    )
+    @patch("security.service_tools.security_monitor._save_state")
+    @patch("security.service_tools.security_monitor.send_notification_safe")
+    @patch("security.service_tools.security_monitor._check_ssh_failures", return_value=(0, None))
+    @patch("security.service_tools.security_monitor._check_auditd", return_value=([], False, []))
+    @patch(
+        "security.service_tools.security_monitor._check_fail2ban",
+        return_value=([], [{"type": "fail2ban", "action": "unban", "jail": "sshd", "source_ip": "192.0.2.4"}], None),
+    )
+    @patch("security.service_tools.security_monitor._load_state", return_value={})
+    @patch("security.service_tools.security_monitor.load_notification_configs_from_state", return_value=["cfg"])
+    def test_unban_event_is_logged_without_external_notification(
+        self, _configs, _state, _fail2ban, _audit, _ssh, mock_notify, mock_save,
+        _certificate,
+    ):
+        self.assertEqual(security_monitor.main(), 0)
+
+        mock_notify.assert_not_called()
+        mock_save.assert_called_once()
 
     @patch(
         "security.service_tools.security_monitor.inspect_xrdp_certificate",
@@ -124,6 +229,94 @@ class TestSecurityMonitor(unittest.TestCase):
 
         self.assertFalse(has_events)
         self.assertIsNone(error)
+
+    def test_audit_events_include_evidence_summary(self):
+        output = """----
+type=PATH msg=audit(123): name=\"/etc/sudoers\"\ntype=SYSCALL msg=audit(123): syscall=openat auid=1000 uid=0 exe=\"/usr/bin/visudo\"
+----
+type=PATH msg=audit(124): name=\"/etc/sudoers.d/ops\"\ntype=SYSCALL msg=audit(124): syscall=rename auid=1000 uid=0 exe=\"/usr/bin/install\"
+"""
+
+        events = security_monitor._parse_audit_events("sudoers", output)
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["event_count"], 2)
+        self.assertEqual(events[0]["paths"], ["/etc/sudoers", "/etc/sudoers.d/ops"])
+        self.assertIn("1000", events[0]["actors"])
+        self.assertIn("/usr/bin/visudo", events[0]["executables"])
+
+    @patch("security.service_tools.security_monitor.shutil.which")
+    def test_missing_ausearch_is_reported_when_auditd_is_installed(self, mock_which):
+        mock_which.side_effect = lambda command: "/usr/sbin/auditd" if command == "auditd" else None
+
+        events, critical, errors = security_monitor._check_auditd(datetime.now())
+
+        self.assertEqual(events, [])
+        self.assertFalse(critical)
+        self.assertEqual(errors, ["auditd: ausearch command unavailable"])
+
+    @patch("security.service_tools.security_monitor.subprocess.run")
+    def test_ssh_failures_are_aggregated_by_source_user_and_method(self, mock_run):
+        mock_run.return_value = SimpleNamespace(
+            returncode=0,
+            stderr="",
+            stdout="\n".join([
+                json.dumps({
+                    "MESSAGE": "Failed password for root from 192.0.2.4 port 22 ssh2",
+                    "_SOURCE_REALTIME_TIMESTAMP": "1766400000000000",
+                }),
+                json.dumps({
+                    "MESSAGE": "Failed publickey for deploy from 192.0.2.4 port 22 ssh2",
+                    "_SOURCE_REALTIME_TIMESTAMP": "1766400001000000",
+                }),
+                json.dumps({
+                    "MESSAGE": "Invalid user admin from 198.51.100.8 port 22",
+                }),
+            ]),
+        )
+
+        summary, error = security_monitor._check_ssh_failures(datetime.now())
+
+        self.assertIsNone(error)
+        self.assertEqual(summary["failure_count"], 3)
+        self.assertEqual(summary["sources"][0]["source_ip"], "192.0.2.4")
+        self.assertEqual(summary["sources"][0]["count"], 1)
+        self.assertEqual(
+            {source["method"] for source in summary["sources"]},
+            {"password", "publickey", "unknown"},
+        )
+
+    def test_ssh_account_lockout_is_structured(self):
+        event = security_monitor._parse_ssh_lockout(
+            "pam_faillock(sshd:auth): user=root rhost=198.51.100.8 account temporarily locked",
+            "2026-08-22T12:00:00",
+        )
+
+        self.assertIsNotNone(event)
+        assert event is not None
+        self.assertEqual(event["username"], "root")
+        self.assertEqual(event["source_ip"], "198.51.100.8")
+
+    def test_fail2ban_events_are_structured_and_include_unbans(self):
+        with tempfile.TemporaryDirectory() as log_dir:
+            log_path = os.path.join(log_dir, "fail2ban.log")
+            with open(log_path, "w", encoding="utf-8") as log_file:
+                log_file.write(
+                    "2026-08-22 12:01:02,123 fail2ban.actions [1]: "
+                    "WARNING [nginx-http-auth] Ban 192.0.2.4\n"
+                    "2026-08-22 12:02:03,456 fail2ban.actions [1]: "
+                    "NOTICE [sshd] Unban 192.0.2.4\n"
+                )
+
+            with patch("security.service_tools.security_monitor._FAIL2BAN_LOG", log_path):
+                bans, unbans, error = security_monitor._check_fail2ban(
+                    datetime(2026, 8, 22, 12, 0, 0)
+                )
+
+        self.assertIsNone(error)
+        self.assertEqual(bans[0]["jail"], "nginx-http-auth")
+        self.assertEqual(bans[0]["source_ip"], "192.0.2.4")
+        self.assertEqual(unbans[0]["action"], "unban")
 
     def test_state_roundtrip_uses_atomic_writer(self):
         with tempfile.TemporaryDirectory() as state_dir:

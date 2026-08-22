@@ -357,21 +357,8 @@ def execute_storage_operations() -> dict:
     else:
         log_event(logger, "No operations due at this time")
     
-    # Execute syncs first (always run if due)
-    if total_syncs > 0 and notification_configs:
-        try:
-            send_notification(
-                notification_configs,
-                subject=f"{'[' + config.friendly_name + '] ' if config.friendly_name else ''}Starting sync operations",
-                job="storage-ops",
-                status="info",
-                message=f"Processing {total_syncs} sync operation(s)",
-                details=None,
-                logger=logger
-            )
-        except Exception as e:
-            log_event(logger, "Failed to send sync start notification", level=ERROR, error=str(e))
-    
+    # Execute syncs first (always run if due).  Starts are logged locally;
+    # external targets receive the completion/failure summary only.
     for spec in sync_specs:
         if len(spec) != 3:
             log_event(logger, "Invalid sync spec", level=ERROR, spec=spec)
@@ -419,21 +406,8 @@ def execute_storage_operations() -> dict:
         else:
             results["success"] = False
     
-    # Execute full scrubs if due (send start notification for long-running operations)
-    if total_scrubs > 0 and notification_configs:
-        try:
-            send_notification(
-                notification_configs,
-                subject=f"{'[' + config.friendly_name + '] ' if config.friendly_name else ''}Starting scrub operations",
-                job="storage-ops",
-                status="info",
-                message=f"Processing {total_scrubs} full scrub operation(s)",
-                details="This may take a while for large datasets",
-                logger=logger
-            )
-        except Exception as e:
-            log_event(logger, "Failed to send scrub start notification", level=ERROR, error=str(e))
-    
+    # Execute full scrubs if due.  Long-running progress remains in the local
+    # journal; the final summary contains the actionable result.
     for spec in config.scrub_specs:
         if len(spec) != 4:
             log_event(logger, "Invalid scrub spec", level=ERROR, spec=spec)
@@ -589,7 +563,11 @@ Parity Update Operations:
             status=status,
             message=message,
             details=details,
-            logger=logger
+            logger=logger,
+            event_type="storage.operations",
+            state="success" if results["success"] else "firing",
+            dedup_key="storage-ops:latest-run",
+            delivery_policy="signal",
         )
     except Exception as e:
         log_event(logger, "Failed to send operation notification", level=ERROR, error=str(e))

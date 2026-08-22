@@ -538,7 +538,11 @@ def notify_success(repo_url: str, commit_sha: str, log_file: str, notification_c
             job="cicd_executor",
             status="good",
             message=f"Build succeeded for commit {commit_sha[:8]}\nLog: {log_file}",
-            logger=logger
+            logger=logger,
+            event_type="cicd.completed",
+            state="success",
+            dedup_key=f"cicd:{repo_url}:{commit_sha}",
+            delivery_policy="signal",
         )
     except Exception as e:
         log_event(
@@ -564,7 +568,10 @@ def notify_failure(repo_url: str, commit_sha: str, reason: str, notification_con
                 job="cicd_executor",
                 status="error",
                 message=f"Build failed for commit {commit_sha[:8]}\nReason: {reason}",
-                logger=logger
+                logger=logger,
+                event_type="cicd.failed",
+                state="firing",
+                dedup_key=f"cicd:{repo_url}:{commit_sha}",
             )
         except Exception as e:
             log_event(

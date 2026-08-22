@@ -17,10 +17,14 @@ import urllib.error
 import urllib.parse
 
 from lib.logging_utils import log_event
+from lib.types import JSONDict
 
 NotificationStatus = Literal["good", "info", "warning", "error"]
+NotificationState = Literal["firing", "resolved", "success"]
+NotificationDeliveryPolicy = Literal["always", "signal"]
 
 NETWORK_TIMEOUT_SECONDS = 30
+NOTIFICATION_SCHEMA_VERSION = 1
 _MAILBOX_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
@@ -60,10 +64,26 @@ class Notification:
     message: str
     details: Optional[str] = None
     hostname: str = field(default_factory=lambda: socket.gethostname())
-    
+    data: Optional[JSONDict] = None
+    event_type: Optional[str] = None
+    state: Optional[NotificationState] = None
+    dedup_key: Optional[str] = None
+    actions: Optional[list[str]] = None
+    delivery_policy: NotificationDeliveryPolicy = "always"
+
+    def __post_init__(self) -> None:
+        """Fill common envelope fields while preserving legacy call sites."""
+        if self.event_type is None:
+            self.event_type = self.job
+        if self.state is None:
+            self.state = "success" if self.status in ("good", "info") else "firing"
+
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
-        return {k: v for k, v in asdict(self).items() if v is not None}
+        payload = asdict(self)
+        payload["schema_version"] = NOTIFICATION_SCHEMA_VERSION
+        payload.pop("delivery_policy", None)
+        return {k: v for k, v in payload.items() if v is not None}
 
 
 class NotificationSender:
@@ -87,6 +107,18 @@ class NotificationSender:
             Returns True if no targets are configured (nothing to fail).
         """
         if not self.configs:
+            return True
+
+        if not _should_deliver(notification):
+            if self.logger:
+                log_event(
+                    self.logger,
+                    "Notification suppressed by delivery policy",
+                    level=INFO,
+                    job=notification.job,
+                    event_type=notification.event_type,
+                    status=notification.status,
+                )
             return True
         
         all_succeeded = True
@@ -143,14 +175,32 @@ class NotificationSender:
     def _send_mailbox(self, email: str, notification: Notification) -> None:
         """Send email notification."""
         body_parts = [
+            f"[{notification.status.upper()}] {notification.subject}",
             f"Job: {notification.job}",
             f"Status: {notification.status.upper()}",
             f"System: {notification.hostname}",
+            f"Event: {notification.event_type}",
+            f"State: {notification.state}",
             "",
+            "What happened:",
             notification.message,
         ]
+        if notification.actions:
+            body_parts.extend([
+                "",
+                "Suggested action:",
+                *[f"- {action}" for action in notification.actions],
+            ])
         if notification.details:
             body_parts.extend(["", "Details:", notification.details])
+        if notification.dedup_key:
+            body_parts.extend(["", f"Deduplication key: {notification.dedup_key}"])
+        if notification.data:
+            body_parts.extend([
+                "",
+                "Machine-readable event data (JSON):",
+                json.dumps(notification.data, indent=2, sort_keys=True),
+            ])
         body_parts.extend([
             "",
             "---",
@@ -191,7 +241,13 @@ def send_notification(
     status: NotificationStatus,
     message: str,
     details: Optional[str] = None,
-    logger: Optional[Logger] = None
+    logger: Optional[Logger] = None,
+    data: Optional[JSONDict] = None,
+    event_type: Optional[str] = None,
+    state: Optional[NotificationState] = None,
+    dedup_key: Optional[str] = None,
+    actions: Optional[list[str]] = None,
+    delivery_policy: NotificationDeliveryPolicy = "always",
 ) -> bool:
     """Send a notification to configured targets."""
     notification = Notification(
@@ -199,7 +255,13 @@ def send_notification(
         job=job,
         status=status,
         message=message,
-        details=details
+        details=details,
+        data=data,
+        event_type=event_type,
+        state=state,
+        dedup_key=dedup_key,
+        actions=actions,
+        delivery_policy=delivery_policy,
     )
     
     sender = NotificationSender(configs, logger=logger)
@@ -213,21 +275,42 @@ def send_notification_safe(
     status: NotificationStatus,
     message: str,
     details: Optional[str] = None,
-    logger: Optional[Logger] = None
-) -> None:
+    logger: Optional[Logger] = None,
+    data: Optional[JSONDict] = None,
+    event_type: Optional[str] = None,
+    state: Optional[NotificationState] = None,
+    dedup_key: Optional[str] = None,
+    actions: Optional[list[str]] = None,
+    delivery_policy: NotificationDeliveryPolicy = "always",
+) -> bool:
     """Send a notification and suppress delivery errors."""
     if not configs:
-        return
+        return True
     try:
-        send_notification(
-            configs,
-            subject=subject,
-            job=job,
-            status=status,
-            message=message,
-            details=details,
-            logger=logger
-        )
+        notification_kwargs: dict[str, object] = {
+            "subject": subject,
+            "job": job,
+            "status": status,
+            "message": message,
+            "details": details,
+            "logger": logger,
+            "event_type": event_type,
+            "state": state,
+            "dedup_key": dedup_key,
+            "actions": actions,
+            "delivery_policy": delivery_policy,
+        }
+        if data is not None:
+            notification_kwargs["data"] = data
+        delivered = send_notification(configs, **notification_kwargs)  # type: ignore[arg-type]
+        if delivered is False and logger:
+            log_event(
+                logger,
+                "Notification delivery incomplete",
+                level=WARNING,
+                job=job,
+            )
+        return delivered
     except Exception as e:
         if logger:
             log_event(
@@ -237,6 +320,7 @@ def send_notification_safe(
                 job=job,
                 error=str(e),
             )
+        return False
 
 
 def parse_notification_args(notify_args: Optional[list[list[str]]]) -> list[NotificationConfig]:
@@ -388,7 +472,20 @@ def send_setup_notification(
         status=status,
         message=message,
         details=details,
-        logger=logger
+        logger=logger,
+        event_type="setup",
+        state="success" if success else "firing",
+        dedup_key=f"setup:{system_type}:{host}",
+    )
+
+
+def _should_deliver(notification: Notification) -> bool:
+    """Return whether a signal-only notification has operator value."""
+    if notification.delivery_policy == "always":
+        return True
+    return notification.status in ("warning", "error") or notification.state in (
+        "firing",
+        "resolved",
     )
 
 

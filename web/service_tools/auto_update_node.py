@@ -514,7 +514,11 @@ def main() -> int:
             f"global package auto-upgrades "
             f"{'enabled' if ecosystem_auto_upgrade_enabled() else 'skipped by policy'}"
         ),
-        logger=logger
+        logger=logger,
+        event_type="maintenance.node_update",
+        state="success",
+        dedup_key="maintenance:node-update",
+        delivery_policy="signal",
     )
     
     return 0
