@@ -12,7 +12,13 @@ from urllib.parse import quote
 from lib.maintenance_systemd import configure_maintenance_timer
 from lib.config import SetupConfig
 from lib.maintenance_defaults import JOURNAL_MAX_USE
-from lib.machine_state import can_modify_kernel, is_container, is_hardware, is_vm
+from lib.machine_state import (
+    can_manage_mdns,
+    can_modify_kernel,
+    is_container,
+    is_hardware,
+    is_vm,
+)
 from lib.remote_utils import is_dry_run, run
 from lib.validation import validate_network_ip_or_cidr
 
@@ -34,6 +40,7 @@ _SECURITY_MONITOR_SCRIPT = "/opt/infra_tools/security/service_tools/security_mon
 _SSH_RULE_COMMENT_PREFIX = "infra_tools SSH"
 _RDP_RULE_COMMENT_PREFIX = "infra_tools RDP"
 _WEB_RULE_COMMENT_PREFIX = "infra_tools web TCP"
+_MDNS_RULE_COMMENT_PREFIX = "infra_tools mDNS UDP"
 _PROXMOX_MANAGEMENT_COMMENT_PREFIX = "infra_tools access source"
 _UFW_NUMBERED_RULE_RE = re.compile(r"^\[\s*(\d+)\]")
 _APPARMOR_USERNS_PROFILE = "/etc/apparmor.d/unprivileged_userns"
@@ -253,6 +260,33 @@ def _configure_managed_web_ports(config: SetupConfig) -> list[int]:
     return ports
 
 
+def _configure_mdns_firewall(config: SetupConfig) -> None:
+    """Allow Avahi's local-network multicast traffic through UFW."""
+
+    if not (config.enable_mdns or config.clear_mdns):
+        return
+
+    if config.enable_mdns and not can_manage_mdns():
+        print(
+            "  ✓ Skipping mDNS firewall rule "
+            "(OCI containers cannot run a target system service)"
+        )
+        return
+
+    if not config.enable_mdns:
+        _remove_stale_managed_rules(_MDNS_RULE_COMMENT_PREFIX, set())
+        return
+
+    comment = _MDNS_RULE_COMMENT_PREFIX
+    result = run(
+        f"ufw allow 5353/udp comment {shlex.quote(comment)}",
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("Failed to install the mDNS firewall rule")
+    _remove_stale_managed_rules(_MDNS_RULE_COMMENT_PREFIX, {comment})
+
+
 def configure_firewall(config: SetupConfig) -> None:
     result = run("ufw status 2>/dev/null | grep -q 'Status: active'", check=False)
     firewall_active = result.returncode == 0
@@ -266,6 +300,7 @@ def configure_firewall(config: SetupConfig) -> None:
     if config.enable_rdp:
         _configure_rdp_firewall(config)
     web_ports = _configure_managed_web_ports(config)
+    _configure_mdns_firewall(config)
 
     if firewall_active:
         if web_ports:
@@ -813,6 +848,7 @@ def configure_firewall_web(config: SetupConfig) -> None:
         run("ufw default allow outgoing", check=True)
     _configure_ssh_firewall(config)
     web_ports = _configure_managed_web_ports(config)
+    _configure_mdns_firewall(config)
 
     if firewall_active:
         print(
@@ -847,6 +883,7 @@ def configure_firewall_ssh_only(config: SetupConfig) -> None:
         run("ufw default deny incoming", check=True)
         run("ufw default allow outgoing", check=True)
     _configure_ssh_firewall(config)
+    _configure_mdns_firewall(config)
 
     if firewall_active:
         print("  ✓ Firewall already configured")

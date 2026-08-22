@@ -28,7 +28,11 @@ from .common_steps import (
 )
 
 from .swap_steps import configure_swap
-from .network_steps import configure_static_network, configure_system_hostname
+from .network_steps import (
+    configure_mdns,
+    configure_static_network,
+    configure_system_hostname,
+)
 from .godot_steps import (
     configure_auto_update_godot,
     install_godot,
@@ -64,4 +68,5 @@ __all__ = [
     'install_flatpak_packages',
     'configure_static_network',
     'configure_system_hostname',
+    'configure_mdns',
 ]

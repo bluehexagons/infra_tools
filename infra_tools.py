@@ -973,6 +973,8 @@ def _patch_preserve_keys(args: argparse.Namespace) -> set[str]:
         preserve_keys.update({"access_sources", "clear_access_sources"})
     if getattr(args, "lan_access", None) is None:
         preserve_keys.update({"lan_access", "clear_lan_access"})
+    if getattr(args, "enable_mdns", None) is None:
+        preserve_keys.update({"enable_mdns", "clear_mdns"})
     if (
         not getattr(args, "web_interfaces", None)
         and not getattr(args, "disable_web_interface", False)

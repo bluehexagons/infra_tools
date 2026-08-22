@@ -113,6 +113,8 @@ def build_server_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
         or config.effective_access_sources()
         or config.clear_access_sources
         or config.clear_lan_access
+        or config.enable_mdns
+        or config.clear_mdns
     ):
         from security.steps import configure_firewall
 

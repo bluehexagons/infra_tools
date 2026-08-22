@@ -16,7 +16,8 @@ from dataclasses import dataclass
 
 from lib.atomic_io import write_json_atomic, write_text_atomic
 from lib.config import SetupConfig
-from lib.remote_utils import is_dry_run, run
+from lib.machine_state import can_manage_mdns
+from lib.remote_utils import install_package, is_dry_run, run
 from lib.types import JSONDict, MaybeStr, StrList
 from lib.validation import (
     validate_filesystem_path,
@@ -35,6 +36,8 @@ CLOUD_INIT_NETWORK_CONFIG_PATH = "/etc/cloud/cloud.cfg.d/99-infra-tools-network.
 CLOUD_INIT_HOSTNAME_CONFIG_PATH = "/etc/cloud/cloud.cfg.d/99-infra-tools-hostname.cfg"
 NETWORK_TRANSITION_PATH = "/run/infra-tools-network-transition.json"
 NETWORK_TRANSITION_VERSION = 2
+MDNS_PACKAGES = ("avahi-daemon", "libnss-mdns")
+MDNS_SERVICE = "avahi-daemon"
 POLICY_TABLE_RANGE = range(20000, 20100)
 NETWORK_TRANSITION_STATES = {"prepared", "committed"}
 NETWORKMANAGER_ROLLBACK_PROPERTIES = (
@@ -87,6 +90,46 @@ def configure_system_hostname(config: SetupConfig) -> None:
             mode=0o644,
         )
     print(f"  ✓ System hostname set to {hostname}")
+
+
+def configure_mdns(config: SetupConfig) -> None:
+    """Install and reconcile Avahi-based hostname discovery on the LAN."""
+
+    if not (config.enable_mdns or config.clear_mdns):
+        return
+
+    if not can_manage_mdns():
+        print(
+            "  ✓ Skipping mDNS setup "
+            "(OCI containers cannot run a target system service)"
+        )
+        return
+
+    if config.clear_mdns:
+        if config.dry_run or is_dry_run():
+            print(f"  [DRY-RUN] Would disable {MDNS_SERVICE} mDNS service")
+            return
+        run(f"systemctl disable --now {MDNS_SERVICE}", check=False)
+        print("  ✓ mDNS hostname advertising disabled")
+        return
+
+    if config.dry_run or is_dry_run():
+        print(
+            "  [DRY-RUN] Would install Avahi mDNS support and enable "
+            f"{MDNS_SERVICE}"
+        )
+        return
+
+    for package in MDNS_PACKAGES:
+        if not install_package(
+            f"{package} for mDNS hostname discovery",
+            package,
+            f"apt-get install -y -qq {shlex.quote(package)}",
+        ):
+            raise RuntimeError(f"mDNS package installation failed: {package}")
+
+    run(f"systemctl enable --now {MDNS_SERVICE}")
+    print("  ✓ mDNS hostname advertising enabled (use <hostname>.local on the LAN)")
 
 
 def _interface_from_route_output(output: str) -> MaybeStr:

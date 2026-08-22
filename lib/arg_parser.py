@@ -128,6 +128,16 @@ def add_setup_arguments(
         help="Set the target system hostname",
     )
     parser.add_argument(
+        "--mdns",
+        dest="enable_mdns",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Advertise the target hostname on the local network as NAME.local "
+            "using Avahi/mDNS"
+        ),
+    )
+    parser.add_argument(
         "--ip",
         dest="static_ipv4",
         metavar="ADDRESS/PREFIX",

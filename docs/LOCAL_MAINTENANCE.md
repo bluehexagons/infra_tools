@@ -99,6 +99,23 @@ Set the persistent hostname without rerunning the full setup:
 sudo infra-tools local hostname workstation-01
 ```
 
+Advertise a server hostname on the local network with Avahi/mDNS. This enables
+names such as `fileserver.local` for SSH and other LAN clients:
+
+```bash
+infra-tools setup server_lite 192.168.1.50 admin \
+  --hostname fileserver --mdns --dry-run
+infra-tools setup server_lite 192.168.1.50 admin \
+  --hostname fileserver --mdns
+```
+
+The flag installs and enables `avahi-daemon`, installs `libnss-mdns`, and adds
+the managed UDP 5353 UFW rule. Use `infra-tools patch HOST --no-mdns` to stop
+the managed Avahi service and remove its managed firewall rule. Clients must
+support mDNS; Debian/Ubuntu clients can install `libnss-mdns`. mDNS is limited
+to the local Layer-2 network and normally does not cross VLANs or routed
+subnets.
+
 View current interface addresses:
 
 ```bash

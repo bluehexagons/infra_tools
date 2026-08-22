@@ -43,6 +43,7 @@ PLUGIN = PluginDefinition(
         "configure_locale",
         "configure_ipv4_preference",
         "configure_system_hostname",
+        "configure_mdns",
         "configure_static_network",
         "setup_user",
         "copy_ssh_keys_to_user",
@@ -178,10 +179,18 @@ def extend_runtime_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]])
 def extend_package_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -> None:
     """Append optional package-install and notification steps."""
 
-    from common.steps import install_apt_packages, install_flatpak_packages, install_mail_utils
+    from common.steps import (
+        configure_mdns,
+        install_apt_packages,
+        install_flatpak_packages,
+        install_mail_utils,
+    )
 
     if config.apt_packages:
         steps.append(("Installing custom apt packages", install_apt_packages))
+
+    if config.enable_mdns or config.clear_mdns:
+        steps.append(("Configuring mDNS hostname discovery", configure_mdns))
 
     if config.flatpak_packages:
         steps.append(("Installing custom flatpak packages", install_flatpak_packages))
@@ -273,6 +282,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         configure_auto_update_uv,
         configure_ipv4_preference,
         configure_locale,
+        configure_mdns,
         configure_static_network,
         configure_system_hostname,
         configure_swap,
@@ -340,6 +350,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "configure_locale": configure_locale,
         "configure_ipv4_preference": configure_ipv4_preference,
         "configure_system_hostname": configure_system_hostname,
+        "configure_mdns": configure_mdns,
         "configure_static_network": configure_static_network,
         "setup_user": setup_user,
         "copy_ssh_keys_to_user": copy_ssh_keys_to_user,

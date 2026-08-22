@@ -233,6 +233,11 @@ def can_manage_time_sync() -> bool:
     return get_machine_type() in ("vm", "privileged", "hardware")
 
 
+def can_manage_mdns() -> bool:
+    """Check if a target can run a system mDNS daemon."""
+    return get_machine_type() != "oci"
+
+
 def can_restart_system() -> bool:
     """Check if system restart is possible.
     

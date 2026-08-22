@@ -212,6 +212,8 @@ class SetupConfig:
     ssh_key: MaybeStr = None
     timezone: str = "UTC"
     system_hostname: MaybeStr = None
+    enable_mdns: bool = False
+    clear_mdns: bool = False
     static_ipv4: MaybeStr = None
     static_ipv6: MaybeStr = None
     network_gateway4: MaybeStr = None
@@ -434,6 +436,10 @@ class SetupConfig:
             self.clear_lan_access = False
         elif self.clear_lan_access:
             self.lan_access = False
+        if self.enable_mdns:
+            self.clear_mdns = False
+        elif self.clear_mdns:
+            self.enable_mdns = False
         if self.disable_web_interface:
             self.web_interfaces = None
             self.web_interface_sources = None
@@ -597,6 +603,11 @@ class SetupConfig:
 
         if self.system_hostname:
             args.append(f"--hostname {shlex.quote(self.system_hostname)}")
+
+        if self.enable_mdns:
+            args.append("--mdns")
+        elif self.clear_mdns:
+            args.append("--no-mdns")
 
         if self.static_ipv4:
             args.append(f"--ip {shlex.quote(self.static_ipv4)}")
@@ -938,6 +949,11 @@ class SetupConfig:
 
         if self.system_hostname:
             cmd_parts.append(f"--hostname {shlex.quote(self.system_hostname)}")
+
+        if self.enable_mdns:
+            cmd_parts.append("--mdns")
+        elif self.clear_mdns:
+            cmd_parts.append("--no-mdns")
 
         if self.static_ipv4 and not provisioned_ipv4:
             cmd_parts.append(f"--ip {shlex.quote(self.static_ipv4)}")
@@ -1637,6 +1653,10 @@ class SetupConfig:
         lan_access = raw_lan_access is True
         clear_lan_access = raw_lan_access is False
 
+        raw_mdns = _optional_bool_arg(args, 'enable_mdns')
+        enable_mdns = raw_mdns is True
+        clear_mdns = raw_mdns is False
+
         clear_rdp_sources = bool(getattr(args, 'clear_rdp_sources', False))
         raw_rdp_sources = getattr(args, 'rdp_allowed_sources', None)
         rdp_allowed_sources = (
@@ -1684,6 +1704,8 @@ class SetupConfig:
             ssh_key=getattr(args, 'ssh_key', None),
             timezone=timezone,
             system_hostname=getattr(args, 'system_hostname', None),
+            enable_mdns=enable_mdns,
+            clear_mdns=clear_mdns,
             static_ipv4=getattr(args, 'static_ipv4', None),
             static_ipv6=getattr(args, 'static_ipv6', None),
             network_gateway4=getattr(args, 'network_gateway4', None),
