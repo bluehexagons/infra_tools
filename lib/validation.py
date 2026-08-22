@@ -1546,6 +1546,26 @@ def validate_vm_storage_settings(
     if (data_names or mount_names) and machine_type != "vm":
         raise ValueError("Named data disks and --storage-mount require --machine vm")
 
+def validate_proxmox_balloon_settings(config: Any) -> None:
+    """Validate host target and per-VM balloon priority settings."""
+    target = getattr(config, "proxmox_balloon_target", None)
+    if target is not None:
+        if isinstance(target, bool) or not isinstance(target, int):
+            raise ValueError("--proxmox-balloon-target must be an integer")
+        if not 1 <= target <= 95:
+            raise ValueError("--proxmox-balloon-target must be between 1 and 95")
+        if getattr(config, "system_type", None) != "server_proxmox":
+            raise ValueError(
+                "--proxmox-balloon-target requires setup type server_proxmox"
+            )
+
+    shares = getattr(config, "vm_balloon_shares", 1000)
+    if isinstance(shares, bool) or not isinstance(shares, int):
+        raise ValueError("--balloon-shares must be an integer")
+    if not 1 <= shares <= 50000:
+        raise ValueError("--balloon-shares must be between 1 and 50000")
+
+
 def validate_hosted_flags(config: Any) -> None:
     """Validate Proxmox guest options used with ``--provision-on``.
 
@@ -1555,13 +1575,17 @@ def validate_hosted_flags(config: Any) -> None:
     Raises:
         ValueError: If required flags are missing or invalid
     """
+    validate_proxmox_balloon_settings(config)
     balloon_min = getattr(config, "vm_balloon_min", None)
+    balloon_shares = getattr(config, "vm_balloon_shares", 1000)
     image_storage = getattr(config, "vm_image_storage", None)
     image_sha512 = getattr(config, "vm_image_sha512", None)
     validate_vm_storage_settings(config, require_provisioning=True)
     if not config.hosted_node:
         if balloon_min:
             raise ValueError("--balloon-min requires --provision-on")
+        if balloon_shares != 1000:
+            raise ValueError("--balloon-shares requires --provision-on")
         if image_storage:
             raise ValueError("--image-storage requires --provision-on")
         if image_sha512:
@@ -1729,6 +1753,8 @@ def validate_hosted_flags(config: Any) -> None:
     else:
         if balloon_min:
             raise ValueError("--balloon-min requires --machine vm")
+        if balloon_shares != 1000:
+            raise ValueError("--balloon-shares requires --machine vm")
         if vm_image:
             raise ValueError("--image requires --machine vm")
         if image_storage:

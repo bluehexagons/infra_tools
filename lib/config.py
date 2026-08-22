@@ -328,6 +328,7 @@ class SetupConfig:
     auto_restart: bool = True
     auto_restart_force_days: int = 7
     auto_restart_grace: int = 5
+    proxmox_balloon_target: Optional[int] = None
     # Proxmox guest provisioning
     hosted_node: MaybeStr = None
     hosted_user: str = "root"
@@ -335,6 +336,7 @@ class SetupConfig:
     hosted_bridge: MaybeStr = None
     container_memory: MaybeStr = None
     vm_balloon_min: MaybeStr = None
+    vm_balloon_shares: int = 1000
     container_storage: Optional[NestedStrList] = None  # [[name, pool, amount?], ...]
     storage_mounts: Optional[NestedStrList] = None  # [[name, path, filesystem?, policy?], ...]
     container_cores: int = 1
@@ -869,6 +871,8 @@ class SetupConfig:
             args.append("--no-auto-restart")
         args.append(f"--auto-restart-force-days {self.auto_restart_force_days}")
         args.append(f"--auto-restart-grace {self.auto_restart_grace}")
+        if self.proxmox_balloon_target is not None:
+            args.append(f"--proxmox-balloon-target {self.proxmox_balloon_target}")
                 
         return args
     
@@ -918,6 +922,8 @@ class SetupConfig:
                 cmd_parts.append(f"--memory {shlex.quote(self.container_memory)}")
             if self.vm_balloon_min:
                 cmd_parts.append(f"--balloon-min {shlex.quote(self.vm_balloon_min)}")
+            if self.vm_balloon_shares != 1000:
+                cmd_parts.append(f"--balloon-shares {self.vm_balloon_shares}")
             for storage_spec in _normalize_nested_specs(self.container_storage) or []:
                 escaped_spec = " ".join(shlex.quote(str(part)) for part in storage_spec)
                 cmd_parts.append(f"--storage {escaped_spec}")
@@ -938,6 +944,11 @@ class SetupConfig:
                 cmd_parts.append(
                     f"--image-storage {shlex.quote(self.vm_image_storage)}"
                 )
+
+        if self.proxmox_balloon_target is not None:
+            cmd_parts.append(
+                f"--proxmox-balloon-target {self.proxmox_balloon_target}"
+            )
         
         # Password is intentionally not included in the command line for security reasons.
         # If a password is required, it should be provided interactively or via a secure
@@ -1834,12 +1845,14 @@ class SetupConfig:
             auto_restart=auto_restart,
             auto_restart_force_days=auto_restart_force_days,
             auto_restart_grace=auto_restart_grace,
+            proxmox_balloon_target=getattr(args, 'proxmox_balloon_target', None),
             hosted_node=getattr(args, 'hosted_node', None),
             hosted_user=getattr(args, 'hosted_user', 'root'),
             hosted_key=getattr(args, 'hosted_key', None),
             hosted_bridge=getattr(args, 'hosted_bridge', None),
             container_memory=getattr(args, 'container_memory', None),
             vm_balloon_min=getattr(args, 'vm_balloon_min', None),
+            vm_balloon_shares=getattr(args, 'vm_balloon_shares', 1000),
             container_storage=_normalize_nested_specs(getattr(args, 'container_storage', None)),
             storage_mounts=_normalize_nested_specs(getattr(args, 'storage_mounts', None)),
             container_cores=getattr(args, 'container_cores', 1),

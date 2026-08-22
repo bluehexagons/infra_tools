@@ -942,6 +942,8 @@ def _execute_patch_config(config: SetupConfig) -> int:
 
 def _patch_preserve_keys(args: argparse.Namespace) -> set[str]:
     preserve_keys: set[str] = set()
+    if getattr(args, "proxmox_balloon_target", None) is None:
+        preserve_keys.add("proxmox_balloon_target")
     if getattr(args, "machine_type", None) is None:
         preserve_keys.add("machine_type")
     if getattr(args, "hosted_node", None) is None:
@@ -953,6 +955,7 @@ def _patch_preserve_keys(args: argparse.Namespace) -> set[str]:
                 "hosted_bridge",
                 "container_memory",
                 "vm_balloon_min",
+                "vm_balloon_shares",
                 "container_storage",
                 "storage_mounts",
                 "container_cores",
@@ -1018,6 +1021,7 @@ _PROVISIONING_CHANGE_ARGS = (
     "hosted_bridge",
     "container_memory",
     "vm_balloon_min",
+    "vm_balloon_shares",
     "container_storage",
     "storage_mounts",
     "container_cores",
@@ -1034,6 +1038,7 @@ _CACHED_PROVISIONING_FIELDS = (
     "hosted_bridge",
     "container_memory",
     "vm_balloon_min",
+    "vm_balloon_shares",
     "container_storage",
     "storage_mounts",
     "container_cores",

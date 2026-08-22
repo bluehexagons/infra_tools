@@ -188,6 +188,17 @@ def add_setup_arguments(
                        help="Machine type override. Defaults to auto-detection "
                             "on the target; Proxmox provisioning defaults to a VM.")
     parser.add_argument(
+        "--proxmox-balloon-target",
+        dest="proxmox_balloon_target",
+        type=int,
+        default=argparse.SUPPRESS,
+        metavar="PERCENT",
+        help=(
+            "Override the automatic Proxmox node balloon target (1-95; "
+            "automatic policy reserves at least 20%% or 2 GiB)"
+        ),
+    )
+    parser.add_argument(
         "--control-plane",
         action="store_true",
         help="Install common administrator and Linux control-plane tools in addition to the selected profile",
@@ -288,6 +299,14 @@ def add_setup_arguments(
             dest="vm_balloon_min",
             metavar="SIZE",
             help="Provisioned VM balloon minimum; defaults to --memory for fixed allocation",
+        )
+        parser.add_argument(
+            "--balloon-shares",
+            dest="vm_balloon_shares",
+            type=int,
+            default=argparse.SUPPRESS,
+            metavar="N",
+            help="Relative memory priority for a ballooned VM (1-50000; default: 1000)",
         )
         parser.add_argument(
             "--cores",

@@ -98,6 +98,15 @@ own its swap layout. It retains the host's permissive reverse-path filtering
 because strict filtering can drop valid routed, NATed, or bridged guest
 traffic.
 
+Every `server_proxmox` setup also reconciles the node's Proxmox balloon target.
+The automatic target reserves the larger of 20% of physical RAM or 2 GiB for
+the host, never raises the target above Proxmox's 80% default, and uses a 50%
+floor on hosts too small to preserve the full 2 GiB reserve. Setup prints the
+host total, selected percentage, and resulting headroom for comparison. Use
+`--proxmox-balloon-target PERCENT` to override the calculation with a value
+from 1 through 95; this changes the node policy, so reserve enough memory for
+Proxmox services, storage, and QEMU overhead.
+
 By default, setup does not change Proxmox firewall state. Supplying
 `--lan-access` or `--access-source` reconciles only infra-tools-commented
 entries in Proxmox's standard cluster-wide `management` IP set, preserves
@@ -218,10 +227,10 @@ After a guest has been provisioned, a later `setup` invocation can retain
 reuses its recorded Proxmox details and skips contacting the Proxmox host
 before updating the guest. Guest-shape options emitted by a saved reconstructed
 command are also accepted when they match that metadata. Changing any of
-`--machine`, `--bridge`, `--memory`, `--balloon-min`, `--storage`, `--cores`,
-`--base`, `--image`, or `--image-storage` requests a provisioning check
-instead. A target without saved provisioning metadata still requires
-`--memory` and root `--storage` on its first run.
+`--machine`, `--bridge`, `--memory`, `--balloon-min`, `--balloon-shares`,
+`--storage`, `--cores`, `--base`, `--image`, or `--image-storage` requests a
+provisioning check instead. A target without saved provisioning metadata still
+requires `--memory` and root `--storage` on its first run.
 
 During a provisioning check, the configured IPv4 address is the stable guest
 identity. If that VM already exists and the corrected declaration changes its
@@ -261,7 +270,7 @@ The resulting Proxmox baseline is:
 | Network | VirtIO | Lowest-overhead normal Linux guest path. Multiqueue is normally unnecessary for interactive RDP traffic. |
 | Guest agent | Enabled and installed | Supports clean lifecycle and guest inspection from Proxmox. |
 | Entropy | VirtIO RNG backed by `/dev/urandom` | Gives Linux guests a reliable entropy source during early boot and key generation. |
-| Memory | Fixed requested allocation with VirtIO balloon device enabled | Start around 8 GiB for the documented coding desktop and size for browsers, editors, builds, and agents. Use `--balloon-min SIZE` below `--memory` only when dynamic reclamation is intentional. |
+| Memory | Fixed requested allocation with VirtIO balloon device enabled | Start around 8 GiB for the documented coding desktop and size for browsers, editors, builds, and agents. Use `--balloon-min SIZE` below `--memory` only when dynamic reclamation is intentional; `--balloon-shares N` sets relative priority during contention. |
 
 These choices follow Proxmox's documented VirtIO network and VirtIO-SCSI
 performance guidance and its warning that `host` CPU trades migration
@@ -271,7 +280,14 @@ ensures Linux loads `virtio_balloon`. Keeping the balloon minimum equal to the
 maximum preserves fixed allocation while allowing Proxmox to collect detailed
 guest memory information. A lower minimum lets Proxmox reclaim memory under
 host pressure, which can force guest swapping or out-of-memory handling; size
-it for the VM's working set rather than treating it as free overcommit. Imported
+it for the VM's working set rather than treating it as free overcommit. Shares
+default to 1000 and are relative: a higher value gives that VM more weight when
+ballooned guests compete, but does not reserve RAM or permit the host to exceed
+physical capacity. Before creating a VM, infra-tools reports the node's total
+and currently used RAM, balloon target, running guest floors and burst maxima,
+and the corresponding totals after the proposed VM. A floor-over-target or
+burst-over-target warning is advisory so intentional overcommit remains
+possible, but it includes the GiB excess and percentage of target. Imported
 images retain the native format selected by the destination storage backend,
 and provisioning rejects a requested disk smaller than the source image. The
 cloud-init snippet is detached from the VM before its temporary file is

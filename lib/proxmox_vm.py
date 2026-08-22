@@ -24,6 +24,7 @@ The flow is:
 from __future__ import annotations
 
 import ipaddress
+import json
 import os
 import re
 import shlex
@@ -52,6 +53,12 @@ from lib.proxmox_guest import (
     _wait_for_guest_ssh,
     auto_detect_bridge,
     enroll_provisioned_guest_host_keys,
+)
+from lib.proxmox_memory import (
+    DEFAULT_BALLOON_TARGET_PERCENT,
+    GuestMemoryAllocation,
+    format_gib,
+    parse_guest_memory_config,
 )
 from lib.types import NestedStrList, StrList
 from lib.validators import validate_username
@@ -113,6 +120,180 @@ def _parse_disk_size_gib(value: str) -> int:
         raise ProvisionError(f"VM disk must be at least 1G (got {value!r})")
     gib = (size_kib + (1024 * 1024) - 1) // (1024 * 1024)
     return gib
+
+
+def _json_command(
+    node_ip: str,
+    user: str,
+    ssh_opts: StrList,
+    command: str,
+) -> object:
+    """Run a Proxmox JSON command or raise a capacity-inspection error."""
+    result = _ssh_run(node_ip, user, ssh_opts, command, dry_run=False)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip() or "unknown error"
+        raise ProvisionError(f"{command} failed: {detail}")
+    try:
+        return json.loads(result.stdout or "")
+    except json.JSONDecodeError as exc:
+        raise ProvisionError(f"{command} returned invalid JSON") from exc
+
+
+def _running_guest_memory(
+    node_ip: str,
+    user: str,
+    ssh_opts: StrList,
+    node_name: str,
+) -> list[GuestMemoryAllocation]:
+    """Return balloon floors and ceilings for running guests on one node."""
+    resources = _json_command(
+        node_ip,
+        user,
+        ssh_opts,
+        "pvesh get /cluster/resources --type vm --output-format json",
+    )
+    if not isinstance(resources, list):
+        raise ProvisionError("Proxmox cluster resources response was not a list")
+
+    allocations: list[GuestMemoryAllocation] = []
+    for raw_resource in resources:
+        if not isinstance(raw_resource, dict):
+            continue
+        if raw_resource.get("node") != node_name:
+            continue
+        if raw_resource.get("status") != "running":
+            continue
+        guest_type = str(raw_resource.get("type", ""))
+        if guest_type not in {"qemu", "lxc"}:
+            continue
+        try:
+            vmid = int(raw_resource["vmid"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        command = "qm" if guest_type == "qemu" else "pct"
+        result = _ssh_run(
+            node_ip,
+            user,
+            ssh_opts,
+            f"{command} config {vmid}",
+            dry_run=False,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip() or "unknown error"
+            raise ProvisionError(
+                f"Could not inspect memory for running {guest_type} guest "
+                f"{vmid}: {detail}"
+            )
+        allocation = parse_guest_memory_config(
+            result.stdout or "",
+            guest_type=guest_type,
+            vmid=vmid,
+        )
+        if allocation:
+            allocations.append(allocation)
+    return allocations
+
+
+def _report_memory_capacity(
+    *,
+    node_ip: str,
+    user: str,
+    ssh_opts: StrList,
+    proposed_minimum_mib: int,
+    proposed_maximum_mib: int,
+) -> None:
+    """Print advisory host-capacity comparisons before creating a VM."""
+    try:
+        hostname = _ssh_run(
+            node_ip,
+            user,
+            ssh_opts,
+            "hostname -s",
+            dry_run=False,
+        )
+        if hostname.returncode != 0 or not (hostname.stdout or "").strip():
+            raise ProvisionError("Could not determine the Proxmox node name")
+        node_name = (hostname.stdout or "").strip()
+        status = _json_command(
+            node_ip,
+            user,
+            ssh_opts,
+            f"pvesh get /nodes/{shlex.quote(node_name)}/status --output-format json",
+        )
+        node_config = _json_command(
+            node_ip,
+            user,
+            ssh_opts,
+            "pvenode config get --output-format json",
+        )
+        if not isinstance(status, dict) or not isinstance(node_config, dict):
+            raise ProvisionError("Proxmox node memory response was not an object")
+        memory = status.get("memory")
+        if not isinstance(memory, dict):
+            raise ProvisionError("Proxmox node status did not include memory values")
+        total_mib = int(memory.get("total", 0)) // (1024 * 1024)
+        used_mib = int(memory.get("used", 0)) // (1024 * 1024)
+        if total_mib <= 0:
+            raise ProvisionError("Proxmox reported zero total host memory")
+        target_percent = int(
+            node_config.get(
+                "ballooning-target",
+                DEFAULT_BALLOON_TARGET_PERCENT,
+            )
+        )
+        allocations = _running_guest_memory(
+            node_ip,
+            user,
+            ssh_opts,
+            node_name,
+        )
+    except (ProvisionError, TypeError, ValueError) as exc:
+        print(f"  ⚠ Could not calculate Proxmox memory capacity: {exc}")
+        return
+
+    target_mib = (total_mib * target_percent) // 100
+    current_minimum_mib = sum(item.minimum_mib for item in allocations)
+    current_maximum_mib = sum(item.maximum_mib for item in allocations)
+    after_minimum_mib = current_minimum_mib + proposed_minimum_mib
+    after_maximum_mib = current_maximum_mib + proposed_maximum_mib
+
+    def target_ratio(value: int) -> int:
+        return (value * 100) // target_mib if target_mib else 0
+
+    print("  Proxmox memory capacity:")
+    print(
+        f"    Host: {format_gib(total_mib)} total, {format_gib(used_mib)} used; "
+        f"target {target_percent}% = {format_gib(target_mib)}"
+    )
+    print(
+        f"    Running guests ({len(allocations)}): "
+        f"floors {format_gib(current_minimum_mib)}, "
+        f"burst maxima {format_gib(current_maximum_mib)}"
+    )
+    print(
+        "    After proposed VM: "
+        f"floors {format_gib(after_minimum_mib)} "
+        f"({target_ratio(after_minimum_mib)}% of target), "
+        f"burst maxima {format_gib(after_maximum_mib)} "
+        f"({target_ratio(after_maximum_mib)}% of target)"
+    )
+    if used_mib > target_mib:
+        print(
+            "  ⚠ Current host memory use is already above the balloon target by "
+            f"{format_gib(used_mib - target_mib)}"
+        )
+    if after_minimum_mib > target_mib:
+        print(
+            "  ⚠ Running guest floors plus this VM exceed the balloon target by "
+            f"{format_gib(after_minimum_mib - target_mib)}; ballooning cannot "
+            "reclaim below those floors"
+        )
+    elif after_maximum_mib > target_mib:
+        print(
+            "  ⚠ Guest burst maxima exceed the balloon target by "
+            f"{format_gib(after_maximum_mib - target_mib)}; simultaneous peaks "
+            "will contend for memory"
+        )
 
 
 def _preflight_data_disk_capacity(
@@ -697,6 +878,7 @@ def _create_vm(
     storage_ref: Optional[str],
     memory_mb: int,
     balloon_min_mb: int,
+    balloon_shares: int = 1000,
     cores: int,
     root_pool: str,
     disk_size_gib: int,
@@ -731,6 +913,7 @@ def _create_vm(
         f"--name {shlex.quote(hostname)}",
         f"--memory {memory_mb}",
         f"--balloon {balloon_min_mb}",
+        f"--shares {balloon_shares}",
         f"--cores {cores}",
         "--cpu host",
         "--ostype l26",
@@ -958,6 +1141,7 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
         if config.vm_balloon_min
         else memory_mb
     )
+    balloon_shares = getattr(config, "vm_balloon_shares", 1000)
     disk_size_gib = _parse_disk_size_gib(disk_amount)
 
     hostname = config.system_hostname or _build_guest_hostname(
@@ -1002,6 +1186,7 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
         print(f"  Memory: {memory_mb} MiB")
         if balloon_min_mb < memory_mb:
             print(f"  Balloon minimum: {balloon_min_mb} MiB (dynamic)")
+            print(f"  Balloon shares: {balloon_shares} (relative priority)")
         else:
             print(f"  Balloon minimum: {balloon_min_mb} MiB (fixed allocation)")
         print(f"  Cores: {config.container_cores}")
@@ -1071,6 +1256,14 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
         raise VMAlreadyExists(
             f"VM with IP {target_ip} already exists on {node_ip}"
         )
+
+    _report_memory_capacity(
+        node_ip=node_ip,
+        user=user,
+        ssh_opts=ssh_opts,
+        proposed_minimum_mib=balloon_min_mb,
+        proposed_maximum_mib=memory_mb,
+    )
 
     root_pool = _resolve_storage_pool(
         root_pool_arg, node_ip, user, ssh_opts, "images"
@@ -1149,6 +1342,7 @@ def provision_vm(config: SetupConfig, *, image: Optional[str] = None) -> None:
             "storage_ref": storage_ref,
             "memory_mb": memory_mb,
             "balloon_min_mb": balloon_min_mb,
+            "balloon_shares": balloon_shares,
             "cores": config.container_cores,
             "root_pool": root_pool,
             "disk_size_gib": disk_size_gib,

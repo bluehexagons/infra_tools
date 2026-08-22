@@ -1,0 +1,293 @@
+"""Tests for Proxmox host and guest memory safety policy."""
+
+from __future__ import annotations
+
+import os
+import sys
+import unittest
+from unittest.mock import MagicMock, call, patch
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from common.proxmox_steps import configure_proxmox_balloon_target
+from lib.arg_parser import create_setup_argument_parser
+from lib.config import SetupConfig
+from lib.proxmox_memory import (
+    calculate_balloon_target,
+    parse_guest_memory_config,
+)
+from lib.proxmox_vm import _create_vm, _report_memory_capacity
+from lib.validation import validate_hosted_flags
+
+
+class TestAutomaticBalloonTarget(unittest.TestCase):
+    def test_large_host_keeps_twenty_percent_headroom(self):
+        policy = calculate_balloon_target(32768)
+
+        self.assertEqual(policy.target_percent, 80)
+        self.assertEqual(policy.reserve_mib, 6554)
+        self.assertTrue(policy.automatic)
+
+    def test_eight_gib_host_keeps_two_gib_headroom(self):
+        policy = calculate_balloon_target(8192)
+
+        self.assertEqual(policy.target_percent, 75)
+        self.assertEqual(policy.reserve_mib, 2048)
+
+    def test_small_host_uses_fifty_percent_safety_floor(self):
+        policy = calculate_balloon_target(3072)
+
+        self.assertEqual(policy.target_percent, 50)
+        self.assertEqual(policy.reserve_mib, 1536)
+
+    def test_override_is_preserved(self):
+        policy = calculate_balloon_target(16384, 65)
+
+        self.assertEqual(policy.target_percent, 65)
+        self.assertEqual(policy.reserve_mib, 5735)
+        self.assertFalse(policy.automatic)
+
+
+class TestConfigureBalloonTarget(unittest.TestCase):
+    @patch("common.proxmox_steps.is_dry_run", return_value=False)
+    @patch("common.proxmox_steps.run")
+    @patch("common.proxmox_steps._host_total_memory_mib", return_value=32768)
+    def test_materializes_implicit_default(self, _mock_memory, mock_run, _mock_dry):
+        mock_run.side_effect = [
+            "{}",
+            "",
+            '{"ballooning-target": 80}',
+        ]
+        config = SetupConfig(
+            username="root",
+            host="pve1",
+            system_type="server_proxmox",
+        )
+
+        configure_proxmox_balloon_target(config)
+
+        self.assertIn(
+            call("pvenode config set --ballooning-target 80"),
+            mock_run.call_args_list,
+        )
+
+    @patch("common.proxmox_steps.is_dry_run", return_value=False)
+    @patch("common.proxmox_steps.run")
+    @patch("common.proxmox_steps._host_total_memory_mib", return_value=8192)
+    def test_changes_and_verifies_target(self, _mock_memory, mock_run, _mock_dry):
+        mock_run.side_effect = [
+            '{"ballooning-target": 80}',
+            "",
+            '{"ballooning-target": 75}',
+        ]
+        config = SetupConfig(
+            username="root",
+            host="pve1",
+            system_type="server_proxmox",
+        )
+
+        configure_proxmox_balloon_target(config)
+
+        self.assertEqual(
+            mock_run.call_args_list,
+            [
+                call(
+                    "pvenode config get --output-format json",
+                    capture_output=True,
+                ),
+                call("pvenode config set --ballooning-target 75"),
+                call(
+                    "pvenode config get --output-format json",
+                    capture_output=True,
+                ),
+            ],
+        )
+
+    @patch("common.proxmox_steps.is_dry_run", return_value=False)
+    @patch("common.proxmox_steps.run")
+    @patch("common.proxmox_steps._host_total_memory_mib", return_value=16384)
+    def test_override_is_idempotent(self, _mock_memory, mock_run, _mock_dry):
+        mock_run.return_value = '{"ballooning-target": 70}'
+        config = SetupConfig(
+            username="root",
+            host="pve1",
+            system_type="server_proxmox",
+            proxmox_balloon_target=70,
+        )
+
+        configure_proxmox_balloon_target(config)
+
+        mock_run.assert_called_once_with(
+            "pvenode config get --output-format json",
+            capture_output=True,
+        )
+
+
+class TestGuestMemoryCapacity(unittest.TestCase):
+    def test_qemu_balloon_minimum_is_the_floor(self):
+        allocation = parse_guest_memory_config(
+            "memory: 8192\nballoon: 2048\n",
+            guest_type="qemu",
+            vmid=101,
+        )
+
+        self.assertIsNotNone(allocation)
+        assert allocation is not None
+        self.assertEqual(allocation.minimum_mib, 2048)
+        self.assertEqual(allocation.maximum_mib, 8192)
+
+    def test_disabled_ballooning_is_fixed_memory(self):
+        allocation = parse_guest_memory_config(
+            "memory: 4096\nballoon: 0\n",
+            guest_type="qemu",
+            vmid=102,
+        )
+
+        self.assertIsNotNone(allocation)
+        assert allocation is not None
+        self.assertEqual(allocation.minimum_mib, 4096)
+        self.assertEqual(allocation.maximum_mib, 4096)
+
+    def test_lxc_memory_is_a_ceiling_not_a_floor(self):
+        allocation = parse_guest_memory_config(
+            "memory: 2048\n",
+            guest_type="lxc",
+            vmid=103,
+        )
+
+        self.assertIsNotNone(allocation)
+        assert allocation is not None
+        self.assertEqual(allocation.minimum_mib, 0)
+        self.assertEqual(allocation.maximum_mib, 2048)
+
+    @patch("builtins.print")
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_capacity_report_compares_floors_and_bursts(self, mock_run, mock_print):
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout="pve1\n", stderr=""),
+            MagicMock(
+                returncode=0,
+                stdout='{"memory": {"total": 8589934592, "used": 4294967296}}',
+                stderr="",
+            ),
+            MagicMock(
+                returncode=0,
+                stdout='{"ballooning-target": 75}',
+                stderr="",
+            ),
+            MagicMock(
+                returncode=0,
+                stdout=(
+                    '[{"node": "pve1", "status": "running", '
+                    '"type": "qemu", "vmid": 100}]'
+                ),
+                stderr="",
+            ),
+            MagicMock(
+                returncode=0,
+                stdout="memory: 4096\nballoon: 2048\n",
+                stderr="",
+            ),
+        ]
+
+        _report_memory_capacity(
+            node_ip="192.0.2.10",
+            user="root",
+            ssh_opts=[],
+            proposed_minimum_mib=2048,
+            proposed_maximum_mib=6144,
+        )
+
+        output = "\n".join(
+            " ".join(str(arg) for arg in printed.args)
+            for printed in mock_print.call_args_list
+        )
+        self.assertIn("Host: 8.0 GiB total, 4.0 GiB used", output)
+        self.assertIn("floors 4.0 GiB (66% of target)", output)
+        self.assertIn("burst maxima 10.0 GiB (166% of target)", output)
+        self.assertIn("Guest burst maxima exceed", output)
+
+    @patch("lib.proxmox_vm._ssh_run")
+    def test_vm_creation_sets_relative_balloon_shares(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        _create_vm(
+            vmid=101,
+            target_ip="192.0.2.50",
+            image_remote_path="/var/lib/vz/import/debian.qcow2",
+            storage_ref=None,
+            memory_mb=8192,
+            balloon_min_mb=2048,
+            balloon_shares=2500,
+            cores=4,
+            root_pool="local-lvm",
+            disk_size_gib=32,
+            data_disk_specs=[],
+            cidr_prefix="24",
+            bridge="vmbr0",
+            gateway="192.0.2.1",
+            nameservers=["192.0.2.1"],
+            hostname="dynamic-vm",
+            user_data_path=None,
+            user_data_ref=None,
+            graphical_console=False,
+            node_ip="192.0.2.10",
+            user="root",
+            ssh_opts=[],
+        )
+
+        create_command = mock_run.call_args_list[0].args[3]
+        self.assertIn("--memory 8192", create_command)
+        self.assertIn("--balloon 2048", create_command)
+        self.assertIn("--shares 2500", create_command)
+
+
+class TestBalloonFlags(unittest.TestCase):
+    def test_local_parser_accepts_host_target_and_vm_shares(self):
+        parser = create_setup_argument_parser("Test", for_remote=False)
+        args = parser.parse_args(
+            [
+                "pve1",
+                "--proxmox-balloon-target",
+                "70",
+                "--balloon-shares",
+                "2500",
+            ]
+        )
+
+        self.assertEqual(args.proxmox_balloon_target, 70)
+        self.assertEqual(args.vm_balloon_shares, 2500)
+
+    def test_remote_parser_accepts_host_target(self):
+        parser = create_setup_argument_parser("Test", for_remote=True)
+        args = parser.parse_args(["--proxmox-balloon-target", "70"])
+
+        self.assertEqual(args.proxmox_balloon_target, 70)
+
+    def test_host_target_rejects_non_proxmox_setup(self):
+        config = SetupConfig(
+            username="root",
+            host="server1",
+            system_type="server_lite",
+            proxmox_balloon_target=70,
+        )
+
+        with self.assertRaisesRegex(ValueError, "server_proxmox"):
+            validate_hosted_flags(config)
+
+    def test_host_target_is_forwarded_to_remote_setup(self):
+        config = SetupConfig(
+            username="root",
+            host="pve1",
+            system_type="server_proxmox",
+            proxmox_balloon_target=70,
+        )
+
+        self.assertIn(
+            "--proxmox-balloon-target 70",
+            config.to_remote_args(),
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

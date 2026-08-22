@@ -118,6 +118,7 @@ tools, not for an LXC container.
 | `--activate-network` | Safely make requested addresses live, verify SSH on each address, then persist the configuration |
 | `--workspace PATH` | Workspace root for config, credentials, known_hosts, and history |
 | `--machine TYPE` | Machine type override; defaults to `auto` on the target |
+| `--proxmox-balloon-target PERCENT` | Override the automatic `server_proxmox` node balloon target (1-95) |
 | `--control-plane` | Add the common administrator/Linux tool bundle to any profile |
 | `--name NAME` | Friendly name for the configuration |
 | `--tags TAG1,TAG2` | Comma-separated tags |
@@ -584,6 +585,7 @@ be fully disabled, then manage pending security reboots explicitly.
 | `--bridge NAME` | Proxmox bridge for the new guest; defaults to the node's default-route bridge |
 | `--memory SIZE` | Guest memory |
 | `--balloon-min SIZE` | VM-only minimum memory for dynamic ballooning; defaults to `--memory` |
+| `--balloon-shares N` | VM-only relative memory priority during balloon contention (1-50000; default 1000) |
 | `--storage root POOL AMOUNT` | Required root storage spec |
 | `--storage root AMOUNT` | Root storage shorthand using saved defaults or `auto` |
 | `--storage NAME POOL AMOUNT` | Provision a named non-root QEMU data disk; repeatable |
@@ -614,7 +616,14 @@ Notes:
   the matching `PATH.pub` is installed by cloud-init for the SSH handoff.
 - Provisioned VMs keep fixed memory by default while retaining the VirtIO balloon
   device for guest-memory telemetry. Set `--balloon-min` below `--memory` to
-  opt into dynamic ballooning; the minimum cannot exceed the maximum.
+  opt into dynamic ballooning; the minimum cannot exceed the maximum. Provisioning
+  reports running-guest floors and burst maxima before creation and warns when
+  either total exceeds the node balloon target. `--balloon-shares` changes
+  relative priority during contention; it is not a reservation.
+- `server_proxmox` setup always reconciles a node balloon target. Automatic mode
+  reserves at least 20% or 2 GiB (whichever is larger), caps the target at 80%,
+  and prints the resulting values. `--proxmox-balloon-target` explicitly
+  overrides that policy and is accepted only for `server_proxmox`.
 - The positional target is the guest IPv4 address. A bare address defaults to
   `/24`; use `ADDRESS/PREFIX` for another prefix. Do not repeat it with `--ip`.
 - `template` storage is LXC-only.
