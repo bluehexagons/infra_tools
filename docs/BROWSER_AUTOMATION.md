@@ -72,7 +72,11 @@ pages, inspect rendered content, click controls, fill forms, and capture
 screenshots. Browser traffic originates from the VM and is subject to its DNS,
 routing, firewall, proxy, and destination-site controls. The provisioning smoke
 test does not require internet access: it launches Chromium, interacts with a
-local in-memory page, verifies rendering, and closes the browser.
+local in-memory page, verifies rendering, and closes the browser. The doctor
+allows slow browser operations up to two minutes, with a three-minute hard
+process limit, so a cold browser can complete while a small ballooned VM is
+temporarily swapping. Exceeding that limit reports likely memory, swap, or
+storage pressure instead of an ambiguous locator timeout.
 
 Website authentication is deliberately not part of infra-tools credential
 copying. Supply site-specific credentials through the application or a scoped

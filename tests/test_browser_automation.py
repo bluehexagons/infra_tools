@@ -281,8 +281,63 @@ class BrowserAutomationProvisioningTests(unittest.TestCase):
         self.assertNotIn("--no-sandbox", content)
         self.assertIn('PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright"', content)
 
+    def test_smoke_test_has_slow_target_budget_and_hard_process_limit(self) -> None:
+        self.assertIn(
+            f"timeout: {browser_automation_steps.PLAYWRIGHT_SMOKE_ACTION_TIMEOUT_MS}",
+            browser_automation_steps._SMOKE_SCRIPT_CONTENT,
+        )
+        self.assertIn(
+            "setDefaultNavigationTimeout",
+            browser_automation_steps._SMOKE_SCRIPT_CONTENT,
+        )
+        self.assertIn(
+            "viewport: { width: 640, height: 480 }",
+            browser_automation_steps._SMOKE_SCRIPT_CONTENT,
+        )
+        self.assertIn(
+            f"{browser_automation_steps.PLAYWRIGHT_SMOKE_PROCESS_TIMEOUT_SECONDS}s",
+            browser_automation_steps._DOCTOR_WRAPPER_CONTENT,
+        )
+
+    def test_smoke_test_reports_resource_pressure_on_process_timeout(self) -> None:
+        config = _config("opencode")
+        timed_out = SimpleNamespace(returncode=124, stdout="", stderr="")
+        with (
+            patch.object(browser_automation_steps, "_user_home", return_value="/home/agent"),
+            patch.object(
+                browser_automation_steps,
+                "_run_as_login_user",
+                return_value=timed_out,
+            ) as run_as_user,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "memory, swap, or storage pressure"):
+                browser_automation_steps._run_smoke_test(config)
+
+        self.assertFalse(run_as_user.call_args.kwargs["check"])
+
 
 class BrowserAutomationDoctorTests(unittest.TestCase):
+    def test_agent_doctor_allows_managed_smoke_process_to_finish(self) -> None:
+        completed = SimpleNamespace(returncode=0, stdout="browser-ready\n", stderr="")
+        with (
+            patch.object(agent_cli.os.path, "isfile", return_value=True),
+            patch.object(agent_cli.os, "access", return_value=True),
+            patch.object(
+                agent_cli,
+                "_tool_path",
+                side_effect=lambda tool, _home: "/tmp/codex" if tool == "codex" else None,
+            ),
+            patch.object(agent_cli, "_codex_browser_registration", return_value=True),
+            patch.object(agent_cli.subprocess, "run", return_value=completed) as run,
+        ):
+            result = agent_cli.inspect_browser_automation("/home/agent")
+
+        self.assertTrue(result["healthy"])
+        self.assertGreater(
+            run.call_args.kwargs["timeout"],
+            browser_automation_steps.PLAYWRIGHT_SMOKE_PROCESS_TIMEOUT_SECONDS,
+        )
+
     def test_doctor_checks_registration_and_local_browser_smoke_test(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)

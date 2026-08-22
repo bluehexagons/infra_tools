@@ -41,6 +41,8 @@ _UPDATE_TIMEOUT_SECONDS = 600
 _BROWSER_MCP_WRAPPER = "/usr/local/bin/infra-tools-playwright-mcp"
 _BROWSER_DOCTOR_WRAPPER = "/usr/local/bin/infra-tools-playwright-doctor"
 _BROWSER_MCP_SERVER_NAME = "infra-tools-playwright"
+_BROWSER_DOCTOR_TIMEOUT_SECONDS = 210
+_REMOTE_DOCTOR_TIMEOUT_SECONDS = _BROWSER_DOCTOR_TIMEOUT_SECONDS + 90
 _T3_SERVICE_NAME = "infra-tools-t3code.service"
 _T3_RUNTIME_RELATIVE = os.path.join(
     ".local", "share", "infra-tools", "t3code"
@@ -754,7 +756,7 @@ def inspect_browser_automation(home: Optional[str] = None) -> JSONDict:
                 check=False,
                 capture_output=True,
                 text=True,
-                timeout=120,
+                timeout=_BROWSER_DOCTOR_TIMEOUT_SECONDS,
                 env=environment,
                 cwd=user_home,
             )
@@ -1176,7 +1178,7 @@ def run_agent_command(args: argparse.Namespace) -> int:
             target,
             "doctor",
             remote_arguments,
-            timeout=180,
+            timeout=_REMOTE_DOCTOR_TIMEOUT_SECONDS,
         )
     if requested_tools:
         selected = list(requested_tools)

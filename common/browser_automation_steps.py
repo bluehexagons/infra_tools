@@ -56,6 +56,9 @@ PLAYWRIGHT_SMOKE_SCRIPT = os.path.join(PLAYWRIGHT_ROOT, "browser-smoke.js")
 PLAYWRIGHT_MCP_WRAPPER = "/usr/local/bin/infra-tools-playwright-mcp"
 PLAYWRIGHT_DOCTOR_WRAPPER = "/usr/local/bin/infra-tools-playwright-doctor"
 SYSTEM_NODE = "/usr/bin/node"
+SYSTEM_TIMEOUT = "/usr/bin/timeout"
+PLAYWRIGHT_SMOKE_ACTION_TIMEOUT_MS = 120_000
+PLAYWRIGHT_SMOKE_PROCESS_TIMEOUT_SECONDS = 180
 PLAYWRIGHT_DEPS_MARKER = (
     f"/var/lib/infra_tools/state/playwright-deps-{PLAYWRIGHT_VERSION}"
 )
@@ -67,20 +70,30 @@ export PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright"
 exec {SYSTEM_NODE} {PLAYWRIGHT_MCP_CLI} --headless --isolated "$@"
 """
 
-_DOCTOR_WRAPPER_CONTENT = f"""#!/bin/sh
-set -eu
-export PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright"
-exec {SYSTEM_NODE} {PLAYWRIGHT_SMOKE_SCRIPT}
-"""
+_DOCTOR_WRAPPER_CONTENT = (
+    "#!/bin/sh\n"
+    "set -eu\n"
+    'export PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright"\n'
+    f"exec {SYSTEM_TIMEOUT} --signal=TERM --kill-after=10s "
+    f"{PLAYWRIGHT_SMOKE_PROCESS_TIMEOUT_SECONDS}s "
+    f"{SYSTEM_NODE} {PLAYWRIGHT_SMOKE_SCRIPT}\n"
+)
 
 _SMOKE_SCRIPT_CONTENT = f"""'use strict';
 
 const {{ chromium }} = require('{PLAYWRIGHT_ROOT}/node_modules/playwright');
 
 (async () => {{
-  const browser = await chromium.launch({{ headless: true }});
+  const browser = await chromium.launch({{
+    headless: true,
+    timeout: {PLAYWRIGHT_SMOKE_ACTION_TIMEOUT_MS},
+  }});
   try {{
-    const page = await browser.newPage();
+    const page = await browser.newPage({{
+      viewport: {{ width: 640, height: 480 }},
+    }});
+    page.setDefaultTimeout({PLAYWRIGHT_SMOKE_ACTION_TIMEOUT_MS});
+    page.setDefaultNavigationTimeout({PLAYWRIGHT_SMOKE_ACTION_TIMEOUT_MS});
     await page.setContent(`
       <button id="verify" onclick="this.textContent='browser-ready'">verify</button>
     `);
@@ -417,8 +430,18 @@ def _run_smoke_test(config: SetupConfig) -> None:
         config.username,
         _user_home(config),
         PLAYWRIGHT_DOCTOR_WRAPPER,
+        check=False,
         capture_output=True,
     )
+    if result.returncode == 124:
+        raise RuntimeError(
+            "Playwright browser smoke test timed out after "
+            f"{PLAYWRIGHT_SMOKE_PROCESS_TIMEOUT_SECONDS} seconds; the target may "
+            "be under memory, swap, or storage pressure"
+        )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "browser check failed").strip()
+        raise RuntimeError(f"Playwright browser smoke test failed: {detail}")
     if result.stdout.strip() != "browser-ready":
         raise RuntimeError("Playwright browser smoke test did not return browser-ready")
     print("  Playwright browser smoke test passed")
