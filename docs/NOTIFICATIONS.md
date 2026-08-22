@@ -18,14 +18,37 @@ Supported target types are:
 - `mailbox`: an email address delivered through the target's `mail` command
   and local mail transport.
 
-Webhook payloads use a versioned common envelope containing `schema_version`,
-`event_type`, `state` (`firing`, `resolved`, or `success`), `dedup_key` when
-available, `subject`, `job`, `status`, `message`, `details` when present, and
-the sending `hostname`. Optional `actions` and producer-specific `data` carry
-operator guidance and machine-readable facts. Security-monitor `data` includes
-the collection `window`, event counts, source-health state, SSH source/user/
-method summaries, and audit evidence. Consumers should route and deduplicate
-using the typed fields rather than parsing the human-readable message.
+Webhook payloads use schema version 2 and deliberately separate event metadata,
+operator-facing content, and producer-specific facts:
+
+```json
+{
+  "schema_version": 2,
+  "event": {
+    "type": "security.source_health",
+    "state": "resolved",
+    "status": "info",
+    "deduplication_key": "security_monitor:source-health"
+  },
+  "operator": {
+    "subject": "Security source recovered",
+    "job": "security_monitor",
+    "system": "fileserver",
+    "what_happened": "Auditd is readable again",
+    "suggested_actions": ["No action is required"],
+    "details": ""
+  },
+  "data": {}
+}
+```
+
+Together, the `event` and `operator` objects mirror the mailbox's subject, job,
+status context, system, event state, explanation, suggested actions, and details
+in stable fields. Empty actions and details are represented consistently, so
+consumers can render the REST notification directly without parsing prose.
+Route and deduplicate using the typed `event` fields. Security-monitor `data`
+includes the collection `window`, event counts, source-health state, SSH
+source/user/method summaries, and audit evidence.
 Successful HTTP responses are 200, 201, 202, or 204. Requests time out after
 30 seconds.
 

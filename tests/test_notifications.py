@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import logging
 import os
 import socket
@@ -53,27 +54,33 @@ class TestNotification(unittest.TestCase):
     def test_to_dict(self):
         n = Notification(subject='Test', job='sync', status='good', message='All ok')
         d = n.to_dict()
-        self.assertEqual(d['subject'], 'Test')
-        self.assertEqual(d['job'], 'sync')
-        self.assertEqual(d['status'], 'good')
-        self.assertEqual(d['message'], 'All ok')
+        self.assertEqual(d['schema_version'], 2)
+        self.assertEqual(d['event']['type'], 'sync')
+        self.assertEqual(d['event']['state'], 'success')
+        self.assertEqual(d['event']['status'], 'good')
+        self.assertEqual(d['operator']['subject'], 'Test')
+        self.assertEqual(d['operator']['job'], 'sync')
+        self.assertEqual(d['operator']['what_happened'], 'All ok')
+        self.assertEqual(d['operator']['suggested_actions'], [])
+        self.assertEqual(d['operator']['details'], '')
+        self.assertEqual(d['data'], {})
 
-    def test_to_dict_excludes_none_details(self):
+    def test_to_dict_includes_empty_details_when_absent(self):
         n = Notification(subject='Test', job='sync', status='good', message='ok', details=None)
         d = n.to_dict()
-        self.assertNotIn('details', d)
+        self.assertEqual(d['operator']['details'], '')
 
     def test_to_dict_includes_details(self):
         n = Notification(subject='Test', job='sync', status='error', message='fail', details='traceback')
         d = n.to_dict()
-        self.assertEqual(d['details'], 'traceback')
+        self.assertEqual(d['operator']['details'], 'traceback')
 
     def test_to_dict_includes_hostname(self):
         n = Notification(subject='Test', job='sync', status='good', message='ok')
         d = n.to_dict()
-        self.assertIn('hostname', d)
-        self.assertIsInstance(d['hostname'], str)
-        self.assertTrue(d['hostname'])  # hostname should be non-empty
+        self.assertIn('system', d['operator'])
+        self.assertIsInstance(d['operator']['system'], str)
+        self.assertTrue(d['operator']['system'])  # system should be non-empty
 
     def test_hostname_default_is_gethostname(self):
         n = Notification(subject='Test', job='sync', status='good', message='ok')
@@ -105,17 +112,24 @@ class TestNotification(unittest.TestCase):
 
         payload = n.to_dict()
 
-        self.assertEqual(payload['schema_version'], 1)
-        self.assertEqual(payload['event_type'], 'security.source_health')
-        self.assertEqual(payload['state'], 'resolved')
-        self.assertEqual(payload['dedup_key'], 'security_monitor:source-health')
-        self.assertEqual(payload['actions'], ['No action is required'])
+        self.assertEqual(payload['schema_version'], 2)
+        self.assertEqual(payload['event']['type'], 'security.source_health')
+        self.assertEqual(payload['event']['state'], 'resolved')
+        self.assertEqual(payload['event']['status'], 'info')
+        self.assertEqual(
+            payload['event']['deduplication_key'],
+            'security_monitor:source-health',
+        )
+        self.assertEqual(
+            payload['operator']['suggested_actions'],
+            ['No action is required'],
+        )
         self.assertNotIn('delivery_policy', payload)
 
     def test_hostname_can_be_overridden(self):
         n = Notification(subject='Test', job='sync', status='good', message='ok', hostname='custom-host')
         self.assertEqual(n.hostname, 'custom-host')
-        self.assertEqual(n.to_dict()['hostname'], 'custom-host')
+        self.assertEqual(n.to_dict()['operator']['system'], 'custom-host')
 
 
 class TestNotificationSender(unittest.TestCase):
@@ -261,6 +275,14 @@ class TestNotificationSender(unittest.TestCase):
         self.assertIn("target='hooks.example.com'", output)
         self.assertNotIn('token=secret', output)
         self.assertNotIn('/path', output)
+
+        request = mock_urlopen.call_args.args[0]
+        payload = json.loads(request.data.decode('utf-8'))
+        self.assertEqual(payload['schema_version'], 2)
+        self.assertEqual(payload['operator']['subject'], 'Test')
+        self.assertEqual(payload['operator']['what_happened'], 'ok')
+        self.assertEqual(payload['operator']['suggested_actions'], [])
+        self.assertEqual(payload['operator']['details'], '')
 
 
 class TestParseNotificationArgs(unittest.TestCase):

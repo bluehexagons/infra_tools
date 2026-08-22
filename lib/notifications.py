@@ -10,7 +10,7 @@ import re
 import socket
 import subprocess
 from typing import Optional, Literal, cast
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, field
 from logging import ERROR, INFO, Logger, WARNING
 import urllib.request
 import urllib.error
@@ -24,7 +24,7 @@ NotificationState = Literal["firing", "resolved", "success"]
 NotificationDeliveryPolicy = Literal["always", "signal"]
 
 NETWORK_TIMEOUT_SECONDS = 30
-NOTIFICATION_SCHEMA_VERSION = 1
+NOTIFICATION_SCHEMA_VERSION = 2
 _MAILBOX_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
@@ -72,18 +72,32 @@ class Notification:
     delivery_policy: NotificationDeliveryPolicy = "always"
 
     def __post_init__(self) -> None:
-        """Fill common envelope fields while preserving legacy call sites."""
+        """Fill the common event fields used by every notification target."""
         if self.event_type is None:
             self.event_type = self.job
         if self.state is None:
             self.state = "success" if self.status in ("good", "info") else "firing"
 
-    def to_dict(self) -> dict:
-        """Convert to dictionary for JSON serialization."""
-        payload = asdict(self)
-        payload["schema_version"] = NOTIFICATION_SCHEMA_VERSION
-        payload.pop("delivery_policy", None)
-        return {k: v for k, v in payload.items() if v is not None}
+    def to_dict(self) -> JSONDict:
+        """Return a descriptive REST payload with separate event and operator data."""
+        return {
+            "schema_version": NOTIFICATION_SCHEMA_VERSION,
+            "event": {
+                "type": self.event_type,
+                "state": self.state,
+                "status": self.status,
+                "deduplication_key": self.dedup_key,
+            },
+            "operator": {
+                "subject": self.subject,
+                "job": self.job,
+                "system": self.hostname,
+                "what_happened": self.message,
+                "suggested_actions": list(self.actions or []),
+                "details": self.details or "",
+            },
+            "data": self.data or {},
+        }
 
 
 class NotificationSender:
