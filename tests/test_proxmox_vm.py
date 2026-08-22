@@ -507,9 +507,10 @@ class TestVMDataDisks(unittest.TestCase):
 
         commands = [call.args[3] for call in mock_run.call_args_list]
         self.assertIn(
-            "qm set 101 --scsi1 bulk-lvm:128G,iothread=1,serial=it-agent-data",
+            "qm set 101 --scsi1 bulk-lvm:128,iothread=1,serial=it-agent-data",
             commands,
         )
+        self.assertNotIn("bulk-lvm:128G", "\n".join(commands))
         self.assertLess(commands.index("qm config 101"), commands.index("qm start 101"))
 
     @patch("lib.proxmox_vm._ssh_run")

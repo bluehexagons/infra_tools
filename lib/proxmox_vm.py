@@ -1066,8 +1066,11 @@ def _create_vm(
 
     for index, disk in enumerate(data_disk_specs, 1):
         data_size_gib = _parse_disk_size_gib(disk.size)
+        # For a newly allocated volume, qm's STORAGE:SIZE syntax takes a bare
+        # GiB count. A suffix such as ``32G`` is parsed as an existing LVM
+        # volume name instead of a requested size.
         disk_option = (
-            f"{disk.pool}:{data_size_gib}G,iothread=1,serial={disk.serial}"
+            f"{disk.pool}:{data_size_gib},iothread=1,serial={disk.serial}"
         )
         attach_result = _ssh_run(
             node_ip,
