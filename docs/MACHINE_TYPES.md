@@ -168,6 +168,9 @@ The recalled setup is finalized at the same time in `setup.json`.
 
 A real setup first creates `/opt/infra_tools/state/setup-operation.json`. It
 records the current step and blocks another setup if execution is interrupted.
-Ordinary failures mark it `recovery_required`; inspect and reconcile the named
-step before moving the marker aside. Dry runs do not create or change these
-state files.
+Ordinary failures mark it `recovery_required`. Rerunning the same system type,
+machine type, and setup user resumes that operation and safely reapplies the
+idempotent setup plan. A marker from a different setup identity, a corrupt
+marker, or an `in_progress` marker still blocks setup for inspection; do not
+remove it until the recorded operation is known to have stopped. Dry runs do
+not create or change these state files.

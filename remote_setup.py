@@ -49,16 +49,54 @@ _active_setup_operation: Optional[tuple[OperationStateStore, OperationRecord]] =
 def _begin_setup_operation(config: SetupConfig) -> None:
     global _active_setup_operation
     store = OperationStateStore(SETUP_OPERATION_FILE)
-    record = store.begin(
-        "target_setup",
-        config.system_type,
-        "applying",
-        context={
-            "machine_type": config.machine_type,
-            "system_type": config.system_type,
-            "username": config.username,
-        },
+    context = {
+        "machine_type": config.machine_type,
+        "system_type": config.system_type,
+        "username": config.username,
+    }
+    existing = store.load()
+    matching_recovery = bool(
+        existing is not None
+        and existing.operation_type == "target_setup"
+        and existing.resource == config.system_type
+        and existing.status == "recovery_required"
+        and existing.context.get("machine_type") == config.machine_type
+        and existing.context.get("system_type") == config.system_type
+        and existing.context.get("username") == config.username
     )
+    if matching_recovery and existing is not None:
+        prior_attempts = existing.context.get("recovery_attempt", 0)
+        recovery_attempt = (
+            prior_attempts + 1
+            if isinstance(prior_attempts, int) and not isinstance(prior_attempts, bool)
+            else 1
+        )
+        prior_step = existing.context.get("step")
+        print(
+            f"  Recovering failed setup operation {existing.operation_id}"
+            + (f" after step {prior_step!r}" if isinstance(prior_step, str) else "")
+            + "; rerunning the idempotent setup plan"
+        )
+        record = store.transition(
+            existing.operation_id,
+            "applying",
+            context={
+                **context,
+                "recovery_attempt": recovery_attempt,
+                "recovered_from": {
+                    "error_type": existing.context.get("error_type"),
+                    "phase": existing.phase,
+                    "step": prior_step,
+                },
+            },
+        )
+    else:
+        record = store.begin(
+            "target_setup",
+            config.system_type,
+            "applying",
+            context=context,
+        )
     _active_setup_operation = (store, record)
 
 

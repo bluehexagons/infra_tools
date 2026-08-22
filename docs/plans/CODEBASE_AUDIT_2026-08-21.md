@@ -93,8 +93,11 @@ marker before its step loop and records each current step. Machine state and
 the recalled setup configuration are finalized only after all setup,
 deployment, share, and storage work succeeds. Success removes the marker;
 ordinary failure marks it `recovery_required`, hard interruption leaves the
-last in-progress phase, and either state blocks the next invocation until an
-operator inspects and reconciles it. Dry runs remain state-free.
+last in-progress phase, and dry runs remain state-free. A matching setup rerun
+now resumes a `recovery_required` operation under the same ID and reapplies the
+idempotent plan, retaining the failed step and error type as recovery context.
+An `in_progress`, corrupt, or different-identity marker still blocks automatic
+recovery for operator inspection.
 
 ### AUD-05: Required setup mutations still have weak failure contracts (partially resolved)
 
@@ -268,8 +271,8 @@ rollback stop failure, and inactive/active verification failures.
   operation logger remains diagnostic evidence. The main setup/deployment paths
   use a small versioned state primitive rather than another callback
   abstraction. Manifest deployment now records its build/activation phases and
-  retains incomplete rollback state; target setup integration remains open
-  under AUD-04.
+  retains incomplete rollback state; target setup records failed steps and
+  supports guarded, same-identity recovery reruns under AUD-04.
 
 ## Current recommended order
 

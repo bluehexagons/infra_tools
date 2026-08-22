@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import remote_setup
 from lib.config import SetupConfig
-from lib.operation_state import OperationStateStore
+from lib.operation_state import OperationStateError, OperationStateStore
 from lib.remote_utils import set_dry_run
 
 
@@ -94,6 +94,117 @@ class TestRemoteSetupArgsFile(unittest.TestCase):
             self.assertEqual(record.status, "recovery_required")
             self.assertEqual(record.context["step"], "Firewall")
             self.assertEqual(record.context["error_type"], "RuntimeError")
+
+    def test_matching_failed_setup_is_resumed_for_idempotent_rerun(self):
+        config = SetupConfig(
+            host="localhost",
+            username="agent",
+            system_type="agent_code_vm",
+            machine_type="vm",
+        )
+        with tempfile.TemporaryDirectory() as tmpdir, patch.object(
+            remote_setup,
+            "SETUP_OPERATION_FILE",
+            os.path.join(tmpdir, "setup-operation.json"),
+        ):
+            store = OperationStateStore(remote_setup.SETUP_OPERATION_FILE)
+            started = store.begin(
+                "target_setup",
+                "agent_code_vm",
+                "applying",
+                context={
+                    "machine_type": "vm",
+                    "system_type": "agent_code_vm",
+                    "username": "agent",
+                    "step": "Installing agent browser automation",
+                },
+            )
+            failed = store.transition(
+                started.operation_id,
+                "recovery",
+                status="recovery_required",
+                context={
+                    **started.context,
+                    "step": "Installing agent browser automation",
+                    "error_type": "CommandExecutionError",
+                },
+            )
+
+            remote_setup._begin_setup_operation(config)
+
+            resumed = store.load()
+            self.assertIsNotNone(resumed)
+            self.assertEqual(resumed.operation_id, failed.operation_id)
+            self.assertEqual(resumed.status, "in_progress")
+            self.assertEqual(resumed.phase, "applying")
+            self.assertEqual(resumed.context["recovery_attempt"], 1)
+            self.assertEqual(
+                resumed.context["recovered_from"],
+                {
+                    "error_type": "CommandExecutionError",
+                    "phase": "recovery",
+                    "step": "Installing agent browser automation",
+                },
+            )
+
+    def test_failed_setup_for_different_identity_remains_blocked(self):
+        config = SetupConfig(
+            host="localhost",
+            username="other-user",
+            system_type="agent_code_vm",
+            machine_type="vm",
+        )
+        with tempfile.TemporaryDirectory() as tmpdir, patch.object(
+            remote_setup,
+            "SETUP_OPERATION_FILE",
+            os.path.join(tmpdir, "setup-operation.json"),
+        ):
+            store = OperationStateStore(remote_setup.SETUP_OPERATION_FILE)
+            started = store.begin(
+                "target_setup",
+                "agent_code_vm",
+                "applying",
+                context={
+                    "machine_type": "vm",
+                    "system_type": "agent_code_vm",
+                    "username": "agent",
+                },
+            )
+            store.transition(
+                started.operation_id,
+                "recovery",
+                status="recovery_required",
+            )
+
+            with self.assertRaisesRegex(OperationStateError, started.operation_id):
+                remote_setup._begin_setup_operation(config)
+
+    def test_in_progress_setup_remains_blocked(self):
+        config = SetupConfig(
+            host="localhost",
+            username="agent",
+            system_type="agent_code_vm",
+            machine_type="vm",
+        )
+        with tempfile.TemporaryDirectory() as tmpdir, patch.object(
+            remote_setup,
+            "SETUP_OPERATION_FILE",
+            os.path.join(tmpdir, "setup-operation.json"),
+        ):
+            store = OperationStateStore(remote_setup.SETUP_OPERATION_FILE)
+            started = store.begin(
+                "target_setup",
+                "agent_code_vm",
+                "applying",
+                context={
+                    "machine_type": "vm",
+                    "system_type": "agent_code_vm",
+                    "username": "agent",
+                },
+            )
+
+            with self.assertRaisesRegex(OperationStateError, started.operation_id):
+                remote_setup._begin_setup_operation(config)
 
     def test_dry_run_prints_plan_without_invoking_setup_steps(self):
         self.addCleanup(lambda: set_dry_run(False))
