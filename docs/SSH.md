@@ -59,14 +59,16 @@ agent avoids both prompts. SSHFS mounts may detach or reconnect after the
 original terminal is gone, so an agent is the reliable choice for a long-lived
 mount.
 
-New Proxmox guests are a special host-key enrollment case. After provisioning,
+Proxmox guests are a special host-key enrollment case. After provisioning,
 infra-tools scans the guest's ED25519 key from the authenticated Proxmox node,
 replaces any stale entry for that address in the workspace `known_hosts`, and
-then uses strict checking for the direct guest connection. It does not do this
-for existing guests; enroll those explicitly with `infra-tools ssh-key enroll`
-after verifying the displayed fingerprint. The current Proxmox node helper
-does not yet pass the workspace `known_hosts` path for the node connection
-itself; that policy inconsistency is tracked in the codebase audit.
+then uses strict checking for the direct guest connection. It also refreshes
+the key when a provisioning recheck confirms an existing guest whose saved
+infra-tools metadata matches the address, machine type, and Proxmox node.
+Existing guests without that matching saved identity are not enrolled
+automatically; enroll those explicitly with `infra-tools ssh-key enroll` after
+verifying the displayed fingerprint. Proxmox node and guest connections both
+use strict checking against the workspace `known_hosts` file.
 
 Hosted VM setup also needs the guest setup account to run privileged staging
 commands. The upload itself uses SSH standard input for a tar stream, so

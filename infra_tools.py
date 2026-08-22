@@ -82,6 +82,7 @@ from lib.proxmox_guest import (
     _build_guest_hostname,
     ensure_guest_ipv4_route,
     get_provisioned_guest_ssh_user,
+    refresh_managed_guest_host_keys,
 )
 from lib.proxmox_cli import add_proxmox_subparser, run_proxmox_command
 from lib.vm_cli import add_vm_subparser, run_vm_command
@@ -1064,25 +1065,40 @@ def _provisioning_changes_requested(
     )
 
 
+def _provisioning_cache_target(host: str) -> str:
+    """Return the address used to look up saved provisioning metadata."""
+    if "/" not in host:
+        return host
+    try:
+        return str(ipaddress.ip_interface(host).ip)
+    except ValueError:
+        return host
+
+
+def _load_cached_provisioning_metadata(
+    config: SetupConfig,
+) -> Optional[SetupConfig]:
+    """Return saved provisioning metadata for this guest, when available."""
+    if not config.hosted_node:
+        return None
+    cached_config = load_setup_command(_provisioning_cache_target(config.host))
+    if cached_config is None or not cached_config.hosted_node:
+        return None
+    return cached_config
+
+
 def _reuse_cached_provisioning_metadata(
     config: SetupConfig,
     args: argparse.Namespace,
+    cached_config: Optional[SetupConfig] = None,
 ) -> bool:
     """Hydrate an existing guest from local state and skip Proxmox discovery."""
     if not config.hosted_node:
         return False
 
-    cache_target = config.host
-    if "/" in cache_target:
-        try:
-            target_interface = ipaddress.ip_interface(cache_target)
-        except ValueError:
-            pass
-        else:
-            cache_target = str(target_interface.ip)
-
-    cached_config = load_setup_command(cache_target)
-    if cached_config is None or not cached_config.hosted_node:
+    cache_target = _provisioning_cache_target(config.host)
+    cached_config = cached_config or _load_cached_provisioning_metadata(config)
+    if cached_config is None:
         return False
     if _provisioning_changes_requested(config, cached_config, args):
         return False
@@ -1155,6 +1171,37 @@ def _reuse_cached_provisioning_metadata(
         return False
 
     return True
+
+
+def _is_same_cached_provisioned_guest(
+    config: SetupConfig,
+    cached_config: Optional[SetupConfig],
+) -> bool:
+    """Return whether current Proxmox discovery targets the saved guest."""
+    if cached_config is None:
+        return False
+    return (
+        _provisioning_cache_target(config.host)
+        == _provisioning_cache_target(cached_config.host)
+        and config.machine_type == cached_config.machine_type
+        and config.hosted_node == cached_config.hosted_node
+    )
+
+
+def _refresh_existing_managed_guest_host_keys(
+    config: SetupConfig,
+    cached_config: Optional[SetupConfig],
+) -> None:
+    """Refresh SSH trust only for an existing guest known in local metadata."""
+    if not _is_same_cached_provisioned_guest(config, cached_config):
+        return
+    refresh_managed_guest_host_keys(
+        _provisioning_cache_target(config.host),
+        cast(str, config.hosted_node),
+        config.hosted_user,
+        config.hosted_key,
+        dry_run=config.dry_run,
+    )
 
 
 def _prepare_runtime_config_for_cli(config: SetupConfig) -> SetupConfig:
@@ -1293,7 +1340,12 @@ def run_setup_command(args: argparse.Namespace) -> int:
         print(f"Error: {exc}")
         return 1
 
-    reuse_cached_provisioning = _reuse_cached_provisioning_metadata(config, args)
+    cached_provisioning = _load_cached_provisioning_metadata(config)
+    reuse_cached_provisioning = _reuse_cached_provisioning_metadata(
+        config,
+        args,
+        cached_provisioning,
+    )
 
     if not validate_username(config.username):
         print(f"Error: Invalid username: {config.username}")
@@ -1337,6 +1389,17 @@ def run_setup_command(args: argparse.Namespace) -> int:
                         "refusing to adopt disks on an existing unsaved VM"
                     )
                     return 1
+                try:
+                    _refresh_existing_managed_guest_host_keys(
+                        config,
+                        cached_provisioning,
+                    )
+                except ProvisionError as exc:
+                    print(
+                        "\n✗ Failed to refresh the managed guest SSH host key: "
+                        f"{exc}"
+                    )
+                    return 1
                 print("  ✓ VM already provisioned, skipping creation")
             except Exception as e:
                 print(f"\n✗ Failed to provision VM: {e}")
@@ -1350,6 +1413,17 @@ def run_setup_command(args: argparse.Namespace) -> int:
             try:
                 provision_container(config)
             except ContainerAlreadyExists:
+                try:
+                    _refresh_existing_managed_guest_host_keys(
+                        config,
+                        cached_provisioning,
+                    )
+                except ProvisionError as exc:
+                    print(
+                        "\n✗ Failed to refresh the managed guest SSH host key: "
+                        f"{exc}"
+                    )
+                    return 1
                 print("  ✓ Container already provisioned, skipping creation")
             except Exception as e:
                 print(f"\n✗ Failed to provision container: {e}")

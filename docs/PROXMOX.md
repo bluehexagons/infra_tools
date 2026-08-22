@@ -84,11 +84,14 @@ hashes automatically.
 
 After a newly created VM or LXC begins accepting SSH, infra-tools scans its
 ED25519 host key from the already authenticated Proxmox node and records it in
-the workspace `known_hosts` file before the first direct guest login. A stale
-entry for that guest address is replaced only in this new-provisioning path;
-all following guest SSH still uses `StrictHostKeyChecking=yes`. Existing or
-adopted guests are not trusted automatically. Verify them independently and
-use `infra-tools ssh-key enroll HOST` when enrollment is required.
+the workspace `known_hosts` file before the first direct guest login. The same
+refresh occurs when a later provisioning check confirms a guest whose saved
+infra-tools metadata still identifies the same address, machine type, and
+Proxmox node. This lets a managed guest recover from a legitimate host-key
+change before the first direct SSH check. All following guest SSH still uses
+`StrictHostKeyChecking=yes`. Existing or adopted guests without matching saved
+metadata are not trusted automatically; verify them independently and use
+`infra-tools ssh-key enroll HOST` when enrollment is required.
 
 ## Host-safety defaults
 
@@ -247,8 +250,12 @@ setup. A desired name already owned by a different VM is rejected rather than
 creating an ambiguous duplicate. Repeating the saved `--name` and `--hostname`
 values is an ordinary idempotent rerun and does not contact Proxmox. Changing
 `--hostname`, or changing `--name` when it supplies the VM hostname, performs
-the identity check. Use the explicit host and VMID forms to inspect or repair
-provider-side drift and duplicates created by older releases.
+the identity check. Once the authenticated Proxmox node confirms the saved
+guest, infra-tools refreshes its workspace SSH host key before checking the
+guest route or starting remote setup. A guest without matching saved metadata
+still requires explicit host-key enrollment. Use the explicit host and VMID
+forms to inspect or repair provider-side drift and duplicates created by older
+releases.
 
 ## Graphical VM hardware baseline
 

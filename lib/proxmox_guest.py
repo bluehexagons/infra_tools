@@ -1034,16 +1034,17 @@ def enroll_provisioned_guest_host_keys(
     *,
     dry_run: bool = False,
 ) -> None:
-    """Enroll a new guest's SSH key through its trusted Proxmox node.
+    """Enroll a provisioned guest's SSH key through its trusted Proxmox node.
 
-    This is only for guests created by the current provisioning run. Scanning
-    from the already authenticated Proxmox node keeps the discovery on the
-    guest's bridge and lets strict workspace host-key checking remain enabled
-    for every subsequent guest connection.
+    Callers must first establish that the guest is either newly created or
+    matches saved infra-tools provisioning metadata. Scanning from the already
+    authenticated Proxmox node keeps the discovery on the guest's bridge and
+    lets strict workspace host-key checking remain enabled for every subsequent
+    guest connection.
     """
     if dry_run:
         print(
-            f"  [DRY-RUN] Would enroll the new guest SSH host key for {target_ip}"
+            f"  [DRY-RUN] Would enroll the guest SSH host key for {target_ip}"
         )
         return
 
@@ -1059,15 +1060,38 @@ def enroll_provisioned_guest_host_keys(
     if scan_result.returncode != 0 or not scan:
         detail = (scan_result.stderr or "").strip() or "no ED25519 key was returned"
         raise ProvisionError(
-            f"Could not read the new guest SSH host key for {target_ip}: {detail}"
+            f"Could not read the guest SSH host key for {target_ip}: {detail}"
         )
     try:
         known_hosts = replace_scanned_host_keys(target_ip, scan)
     except (OSError, RuntimeError, ValueError) as exc:
         raise ProvisionError(
-            f"Could not enroll the new guest SSH host key for {target_ip}: {exc}"
+            f"Could not enroll the guest SSH host key for {target_ip}: {exc}"
         ) from exc
-    print(f"  ✓ Enrolled new guest SSH host key in {known_hosts}")
+    print(f"  ✓ Enrolled guest SSH host key in {known_hosts}")
+
+
+def refresh_managed_guest_host_keys(
+    target_ip: str,
+    node_ip: str,
+    user: str,
+    hosted_key: Optional[str],
+    *,
+    dry_run: bool = False,
+) -> None:
+    """Refresh a saved guest's host key through its authenticated Proxmox node.
+
+    The caller is responsible for matching the guest and node against saved
+    provisioning metadata before using this helper. Unsaved or adopted guests
+    must continue through explicit operator-confirmed host-key enrollment.
+    """
+    enroll_provisioned_guest_host_keys(
+        target_ip,
+        node_ip,
+        user,
+        _ssh_opts(hosted_key),
+        dry_run=dry_run,
+    )
 
 
 __all__ = [
@@ -1094,6 +1118,7 @@ __all__ = [
     "_storage_pool_supports_content",
     "ensure_guest_ipv4_route",
     "enroll_provisioned_guest_host_keys",
+    "refresh_managed_guest_host_keys",
     "_wait_for_guest_ssh",
     "auto_detect_bridge",
     "probe_proxmox_cluster",

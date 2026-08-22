@@ -24,6 +24,7 @@ from lib.proxmox_guest import (
     _wait_for_guest_ssh,
     probe_proxmox_cluster,
     probe_proxmox_host,
+    refresh_managed_guest_host_keys,
     resolve_guest_ssh_key,
 )
 
@@ -180,6 +181,29 @@ class TestProvisionedGuestHostKeyEnrollment(unittest.TestCase):
             )
 
         mock_replace.assert_not_called()
+
+    @patch("lib.proxmox_guest.enroll_provisioned_guest_host_keys")
+    @patch("lib.proxmox_guest._ssh_opts", return_value=["node-options"])
+    def test_refresh_builds_authenticated_node_options(
+        self,
+        mock_opts,
+        mock_enroll,
+    ) -> None:
+        refresh_managed_guest_host_keys(
+            "192.0.2.40",
+            "192.0.2.10",
+            "root",
+            "/keys/proxmox",
+        )
+
+        mock_opts.assert_called_once_with("/keys/proxmox")
+        mock_enroll.assert_called_once_with(
+            "192.0.2.40",
+            "192.0.2.10",
+            "root",
+            ["node-options"],
+            dry_run=False,
+        )
 
 
 class TestGuestRouteRepair(unittest.TestCase):

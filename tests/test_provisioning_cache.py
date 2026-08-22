@@ -310,6 +310,46 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
         self.assertTrue(reused)
         mock_load.assert_called_once_with("10.0.0.50")
 
+    def test_managed_guest_refresh_requires_the_same_saved_identity(self) -> None:
+        cached = _config(
+            host="10.0.0.50",
+            hosted_node="10.0.0.10",
+            machine_type="vm",
+        )
+
+        self.assertTrue(
+            infra_tools._is_same_cached_provisioned_guest(
+                _config(
+                    host="10.0.0.50/24",
+                    hosted_node="10.0.0.10",
+                    machine_type="vm",
+                ),
+                cached,
+            )
+        )
+        self.assertFalse(
+            infra_tools._is_same_cached_provisioned_guest(
+                _config(host="10.0.0.51", hosted_node="10.0.0.10"),
+                cached,
+            )
+        )
+        self.assertFalse(
+            infra_tools._is_same_cached_provisioned_guest(
+                _config(host="10.0.0.50", hosted_node="10.0.0.11"),
+                cached,
+            )
+        )
+        self.assertFalse(
+            infra_tools._is_same_cached_provisioned_guest(
+                _config(
+                    host="10.0.0.50",
+                    hosted_node="10.0.0.10",
+                    machine_type="unprivileged",
+                ),
+                cached,
+            )
+        )
+
     @patch("lib.proxmox_vm.provision_vm")
     @patch("infra_tools.register_proxmox_setup_host")
     @patch("infra_tools.save_setup_command")
@@ -367,6 +407,103 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
             current.ssh_key,
             dry_run=False,
         )
+
+    def test_existing_cached_vm_refreshes_host_key_after_provisioning_check(
+        self,
+    ) -> None:
+        from lib.proxmox_vm import VMAlreadyExists
+
+        current = _config(
+            hosted_node="10.0.0.10",
+            hosted_user="root",
+            hosted_key="/keys/proxmox",
+            container_memory="8G",
+            container_storage=[["root", "local-lvm", "32G"]],
+            static_ipv4="10.0.0.50/24",
+            network_gateway4="10.0.0.1",
+            network_dns=["1.1.1.1"],
+        )
+        cached = _config(
+            hosted_node="10.0.0.10",
+            hosted_user="root",
+            hosted_key="/keys/proxmox",
+            container_memory="4G",
+            container_storage=[["root", "local-lvm", "32G"]],
+            static_ipv4="10.0.0.50/24",
+            network_gateway4="10.0.0.1",
+            network_dns=["1.1.1.1"],
+        )
+        args = _args(container_memory="8G")
+
+        with patch("infra_tools.SetupConfig.from_args", return_value=current), \
+             patch("infra_tools.load_setup_command", return_value=cached), \
+             patch(
+                 "infra_tools._prepare_runtime_config_for_cli",
+                 side_effect=lambda config: config,
+             ), \
+             patch("infra_tools.validate_host", return_value=True), \
+             patch("infra_tools.validate_username", return_value=True), \
+             patch("infra_tools.print_setup_summary"), \
+             patch("infra_tools.store_cli_credentials"), \
+             patch("infra_tools.save_setup_command"), \
+             patch("infra_tools.register_proxmox_setup_host"), \
+             patch("infra_tools.run_remote_setup", return_value=0), \
+             patch("infra_tools.ensure_guest_ipv4_route"), \
+             patch(
+                 "lib.proxmox_vm.provision_vm",
+                 side_effect=VMAlreadyExists(),
+             ), \
+             patch(
+                 "infra_tools.refresh_managed_guest_host_keys",
+             ) as mock_refresh:
+            result = infra_tools.run_setup_command(args)
+
+        self.assertEqual(result, 0)
+        mock_refresh.assert_called_once_with(
+            "10.0.0.50",
+            "10.0.0.10",
+            "root",
+            "/keys/proxmox",
+            dry_run=False,
+        )
+
+    def test_existing_unsaved_vm_does_not_refresh_host_key(self) -> None:
+        from lib.proxmox_vm import VMAlreadyExists
+
+        current = _config(
+            hosted_node="10.0.0.10",
+            container_memory="4G",
+            container_storage=[["root", "local-lvm", "32G"]],
+            static_ipv4="10.0.0.50/24",
+            network_gateway4="10.0.0.1",
+            network_dns=["1.1.1.1"],
+        )
+
+        with patch("infra_tools.SetupConfig.from_args", return_value=current), \
+             patch("infra_tools.load_setup_command", return_value=None), \
+             patch(
+                 "infra_tools._prepare_runtime_config_for_cli",
+                 side_effect=lambda config: config,
+             ), \
+             patch("infra_tools.validate_host", return_value=True), \
+             patch("infra_tools.validate_username", return_value=True), \
+             patch("infra_tools.print_setup_summary"), \
+             patch("infra_tools.store_cli_credentials"), \
+             patch("infra_tools.save_setup_command"), \
+             patch("infra_tools.register_proxmox_setup_host"), \
+             patch("infra_tools.run_remote_setup", return_value=0), \
+             patch("infra_tools.ensure_guest_ipv4_route"), \
+             patch(
+                 "lib.proxmox_vm.provision_vm",
+                 side_effect=VMAlreadyExists(),
+             ), \
+             patch(
+                 "infra_tools.refresh_managed_guest_host_keys",
+             ) as mock_refresh:
+            result = infra_tools.run_setup_command(_args())
+
+        self.assertEqual(result, 0)
+        mock_refresh.assert_not_called()
 
 
 if __name__ == "__main__":
