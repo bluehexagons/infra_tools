@@ -292,13 +292,16 @@ def add_setup_arguments(
             "--memory",
             dest="container_memory",
             metavar="SIZE",
-            help="Provisioned guest memory (e.g. 2G, 512M)",
+            help="Provisioned guest memory (e.g. 2G, 1.5G, 512M)",
         )
         parser.add_argument(
             "--balloon-min",
             dest="vm_balloon_min",
             metavar="SIZE",
-            help="Provisioned VM balloon minimum; defaults to --memory for fixed allocation",
+            help=(
+                "Provisioned VM balloon minimum (decimals allowed); defaults "
+                "to --memory for fixed allocation"
+            ),
         )
         parser.add_argument(
             "--balloon-shares",

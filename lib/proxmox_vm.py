@@ -61,6 +61,7 @@ from lib.proxmox_memory import (
     parse_guest_memory_config,
 )
 from lib.types import NestedStrList, StrList
+from lib.validation import parse_memory_mib
 from lib.validators import validate_username
 from lib.vm_storage import VMDataDisk, data_disks, storage_size_kib
 
@@ -111,7 +112,10 @@ def _parse_size_kib(value: str, *, label: str) -> int:
 
 def _parse_memory_mb(value: str) -> int:
     """Convert a memory string like ``2G`` / ``512M`` to mebibytes."""
-    return max(1, _parse_size_kib(value, label="VM memory") // 1024)
+    try:
+        return parse_memory_mib(value, "VM memory")
+    except ValueError as exc:
+        raise ProvisionError(str(exc)) from exc
 
 
 def _parse_disk_size_gib(value: str) -> int:

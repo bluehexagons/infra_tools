@@ -45,9 +45,10 @@ class TestHostedFlagParsing(unittest.TestCase):
 
     def test_memory_flag(self):
         args = self.parser.parse_args([
-            "10.0.0.50", "--memory", "2G"
+            "10.0.0.50", "--memory", "1.5G", "--balloon-min", "0.5G"
         ])
-        self.assertEqual(args.container_memory, "2G")
+        self.assertEqual(args.container_memory, "1.5G")
+        self.assertEqual(args.vm_balloon_min, "0.5G")
 
     def test_balloon_min_flag(self):
         args = self.parser.parse_args([

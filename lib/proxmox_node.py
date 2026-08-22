@@ -32,6 +32,7 @@ from lib.proxmox_guest import (
     enroll_provisioned_guest_host_keys,
 )
 from lib.types import NestedStrList, StrList
+from lib.validation import parse_memory_mib
 
 
 class ContainerAlreadyExists(Exception):
@@ -360,7 +361,7 @@ def _create_container(
     vmid: int,
     target_ip: str,
     template_path: str,
-    memory: str,
+    memory_mb: int,
     cores: int,
     root_pool: str,
     storage_amount: str,
@@ -396,7 +397,7 @@ def _create_container(
     cmd_parts = [
         f"pct create {vmid} {shlex.quote(template_path)}",
         f"--hostname {shlex.quote(hostname)}",
-        f"--memory {shlex.quote(memory)}",
+        f"--memory {memory_mb}",
         f"--cores {cores}",
         f"--rootfs {shlex.quote(root_pool)}:{shlex.quote(storage_amount)}",
         f"--net0 {shlex.quote(','.join(network_parts))}",
@@ -443,7 +444,13 @@ def provision_container(config: SetupConfig) -> None:
         ProvisionError: If provisioning fails at any step.
     """
     node_ip = cast(str, config.hosted_node)
-    memory = cast(str, config.container_memory)
+    try:
+        memory_mb = parse_memory_mib(
+            cast(str, config.container_memory),
+            "LXC memory",
+        )
+    except ValueError as exc:
+        raise ProvisionError(str(exc)) from exc
     storage_specs = cast(NestedStrList, config.container_storage)
     user: str = config.hosted_user
     static_ipv4 = ipaddress.ip_interface(config.static_ipv4) if config.static_ipv4 else None
@@ -477,7 +484,7 @@ def provision_container(config: SetupConfig) -> None:
         else:
             print("  DNS servers: auto-detect from Proxmox node")
         print(f"  Hostname: {hostname}")
-        print(f"  Memory: {memory}")
+        print(f"  Memory: {memory_mb} MiB")
         print(f"  Cores: {config.container_cores}")
         print(f"  Container type: {'privileged' if privileged else 'unprivileged'}")
         print(f"  Root storage: {root_spec[1] if root_spec else 'N/A'} ({root_spec[2] if root_spec else 'N/A'})")
@@ -599,7 +606,7 @@ def provision_container(config: SetupConfig) -> None:
             vmid=vmid,
             target_ip=target_ip,
             template_path=template_path,
-            memory=memory,
+            memory_mb=memory_mb,
             cores=config.container_cores,
             root_pool=root_pool,
             storage_amount=storage_amount,

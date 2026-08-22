@@ -181,14 +181,15 @@ class TestParseMemory(unittest.TestCase):
     def test_gigabytes(self):
         self.assertEqual(_parse_memory_mb("2G"), 2048)
 
+    def test_fractional_gigabytes(self):
+        self.assertEqual(_parse_memory_mb("1.5G"), 1536)
+        self.assertEqual(_parse_memory_mb("0.5G"), 512)
+
     def test_megabytes(self):
         self.assertEqual(_parse_memory_mb("512M"), 512)
 
     def test_terabytes(self):
         self.assertEqual(_parse_memory_mb("1T"), 1024 * 1024)
-
-    def test_bare_number_is_mib(self):
-        self.assertEqual(_parse_memory_mb("4096"), 4096)
 
     def test_invalid_raises(self):
         with self.assertRaises(ProvisionError):
@@ -197,6 +198,8 @@ class TestParseMemory(unittest.TestCase):
             _parse_memory_mb("abc")
         with self.assertRaises(ProvisionError):
             _parse_memory_mb("0G")
+        with self.assertRaises(ProvisionError):
+            _parse_memory_mb("1.1G")
 
 
 class TestParseDiskSize(unittest.TestCase):

@@ -169,6 +169,10 @@ infra-tools setup workstation_dev 10.0.0.50 agent \
   --node --go --python
 ```
 
+Memory values use binary units and may include decimals when they resolve to a
+whole MiB. For example, `--memory 1.5G --balloon-min 0.5G` becomes 1536 MiB
+with a 512 MiB balloon floor. Values are converted exactly rather than rounded.
+
 For a newly provisioned QEMU VM, add named data disks and required guest
 mounts in the same declaration:
 

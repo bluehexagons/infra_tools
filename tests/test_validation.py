@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.config import SetupConfig
 from lib.validation import (
+    parse_memory_mib,
     validate_apt_packages,
     validate_agent_repositories,
     validate_agent_git_settings,
@@ -652,6 +653,17 @@ class TestValidateMemoryString(unittest.TestCase):
     def test_case_insensitive(self):
         validate_memory_string('2g')  # should not raise
 
+    def test_fractional_gigabytes_convert_exactly(self):
+        self.assertEqual(parse_memory_mib('1.5G'), 1536)
+        self.assertEqual(parse_memory_mib('0.5G'), 512)
+        validate_memory_string('1.25G')
+
+    def test_fraction_must_resolve_to_whole_mebibytes(self):
+        with self.assertRaisesRegex(ValueError, 'whole MiB'):
+            validate_memory_string('1.1G')
+        with self.assertRaisesRegex(ValueError, 'whole MiB'):
+            validate_memory_string('0.5M')
+
     def test_invalid_suffix(self):
         with self.assertRaises(ValueError):
             validate_memory_string('2GB')
@@ -768,7 +780,8 @@ class TestValidateHostedFlags(unittest.TestCase):
         config = _MockConfig(
             machine_type='vm',
             hosted_node='10.0.0.1',
-            container_memory='2G',
+            container_memory='1.5G',
+            vm_balloon_min='0.5G',
             container_storage=[['root', 'auto', '10G']],
         )
         with tempfile.TemporaryDirectory() as tmp:
@@ -889,6 +902,15 @@ class TestValidateHostedFlags(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             validate_hosted_flags(config)
+
+    def test_fractional_memory_is_accepted(self):
+        config = _MockConfig(
+            hosted_node='10.0.0.1',
+            container_memory='1.5G',
+            container_storage=[['root', 'auto', '10G']],
+        )
+
+        validate_hosted_flags(config)
 
     def test_balloon_min_must_not_exceed_vm_memory(self):
         config = _MockConfig(

@@ -851,7 +851,8 @@ def validate_positive_integer(value: str, name: str = "value") -> int:
     return value_int
 
 
-_MEMORY_PATTERN = re.compile(r'^\d+[KMGT]$', re.IGNORECASE)
+_MEMORY_PATTERN = re.compile(r'^\d+(?:\.\d+)?[KMGT]$', re.IGNORECASE)
+_INTEGER_SIZE_PATTERN = re.compile(r'^\d+[KMGT]$', re.IGNORECASE)
 _MEMORY_UNIT_TO_KIB = {
     "K": 1,
     "M": 1024,
@@ -895,8 +896,34 @@ def validate_git_author_email(value: str) -> str:
     return value
 
 
+def parse_memory_mib(value: str, name: str = "memory") -> int:
+    """Validate a binary memory size and return an exact whole-MiB value."""
+
+    if not value:
+        raise ValueError(f"{name} must be a non-empty string")
+    if not _MEMORY_PATTERN.fullmatch(value):
+        raise ValueError(
+            f"Invalid {name} value '{value}' (e.g. 2G, 1.5G, 512M, 1T)"
+        )
+
+    whole, separator, fraction = value[:-1].partition(".")
+    scale = 10 ** len(fraction) if separator else 1
+    amount_numerator = int(whole + fraction)
+    memory_kib_numerator = (
+        amount_numerator * _MEMORY_UNIT_TO_KIB[value[-1].upper()]
+    )
+    if memory_kib_numerator <= 0:
+        raise ValueError(f"{name} must be positive")
+    mib_denominator = scale * 1024
+    if memory_kib_numerator % mib_denominator:
+        raise ValueError(
+            f"{name} value '{value}' must resolve to a whole MiB"
+        )
+    return memory_kib_numerator // mib_denominator
+
+
 def validate_memory_string(value: str, name: str = "memory") -> None:
-    """Validate a memory/size string like '2G', '512M', '1024K'.
+    """Validate a memory string like '2G', '1.5G', '512M', or '1024K'.
 
     Args:
         value: Memory string to validate
@@ -905,13 +932,7 @@ def validate_memory_string(value: str, name: str = "memory") -> None:
     Raises:
         ValueError: If validation fails
     """
-    if not value:
-        raise ValueError(f"{name} must be a non-empty string")
-
-    if not _MEMORY_PATTERN.match(value):
-        raise ValueError(
-            f"Invalid {name} value '{value}' (e.g. 2G, 512M, 1T)"
-        )
+    parse_memory_mib(value, name)
 
 
 def validate_proxmox_storage_name(
@@ -941,8 +962,13 @@ def validate_vm_storage_name(value: str) -> str:
 
 
 def _memory_string_kib(value: str, name: str) -> int:
-    """Validate a size string and return its value in KiB."""
-    validate_memory_string(value, name)
+    """Validate an integer storage-size string and return its value in KiB."""
+    if not value:
+        raise ValueError(f"{name} must be a non-empty string")
+    if not _INTEGER_SIZE_PATTERN.fullmatch(value):
+        raise ValueError(
+            f"Invalid {name} value '{value}' (e.g. 2G, 512M, 1T)"
+        )
     amount = int(value[:-1])
     if amount <= 0:
         raise ValueError(f"{name} must be positive")
@@ -1650,7 +1676,7 @@ def validate_hosted_flags(config: Any) -> None:
     if not root_seen:
         raise ValueError("--storage root [POOL] AMOUNT is required with --provision-on")
 
-    memory_kib = _memory_string_kib(config.container_memory, "--memory")
+    memory_mib = parse_memory_mib(config.container_memory, "--memory")
 
     for spec in storage_specs:
         if spec[0] == "template":
@@ -1671,8 +1697,8 @@ def validate_hosted_flags(config: Any) -> None:
         if image_storage:
             validate_proxmox_storage_name(image_storage)
         if balloon_min:
-            balloon_kib = _memory_string_kib(balloon_min, "--balloon-min")
-            if balloon_kib > memory_kib:
+            balloon_mib = parse_memory_mib(balloon_min, "--balloon-min")
+            if balloon_mib > memory_mib:
                 raise ValueError("--balloon-min cannot exceed --memory")
         ssh_key = getattr(config, "ssh_key", None)
         if not ssh_key:

@@ -223,7 +223,7 @@ class TestCreateContainer(unittest.TestCase):
                 vmid=100,
                 target_ip="10.0.0.50",
                 template_path="/var/lib/vz/template/cache/debian.tar.zst",
-                memory="2G",
+                memory_mb=2048,
                 cores=1,
                 root_pool="local-lvm",
                 storage_amount="10G",
@@ -555,7 +555,7 @@ class TestCreateContainerInjectsPubkey(unittest.TestCase):
             vmid=200,
             target_ip="10.0.0.51",
             template_path="local:vztmpl/debian.tar.zst",
-            memory="2G",
+            memory_mb=1536,
             cores=2,
             root_pool="local-lvm",
             storage_amount="20G",
@@ -572,6 +572,7 @@ class TestCreateContainerInjectsPubkey(unittest.TestCase):
             gateway6="2001:db8::1",
         )
         pct_cmd = mock_run.call_args_list[0].args[3]
+        self.assertIn("--memory 1536", pct_cmd)
         self.assertIn("--ssh-public-keys", pct_cmd)
         self.assertIn("/tmp/infra_tools_pubkey.abc", pct_cmd)
         self.assertIn("ip6=2001:db8::51/64", pct_cmd)
@@ -588,7 +589,7 @@ class TestCreateContainerInjectsPubkey(unittest.TestCase):
             vmid=200,
             target_ip="10.0.0.51",
             template_path="local:vztmpl/debian.tar.zst",
-            memory="2G",
+            memory_mb=2048,
             cores=2,
             root_pool="local-lvm",
             storage_amount="20G",
