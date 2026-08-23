@@ -64,6 +64,7 @@ def _load_provider_config(path: str) -> dict[str, dict[str, Any]]:
             not isinstance(command, list)
             or not command
             or not all(isinstance(part, str) and part for part in command)
+            or any("\x00" in part for part in command if isinstance(part, str))
             or not os.path.isabs(command[0])
         ):
             raise ValueError(f"Provider {name} must use an absolute command")
@@ -92,6 +93,11 @@ def _load_provider_config(path: str) -> dict[str, dict[str, Any]]:
                     not isinstance(command_value, list)
                     or not command_value
                     or not all(isinstance(part, str) and part for part in command_value)
+                    or any(
+                        "\x00" in part
+                        for part in command_value
+                        if isinstance(part, str)
+                    )
                     or not os.path.isabs(command_value[0])
                 ):
                     raise ValueError(f"Provider {name} has an invalid T3 Connect {key}")
@@ -147,8 +153,11 @@ def _safe_pairing_url(value: object, expected_base: str) -> str:
         or any(ord(character) < 32 or ord(character) == 127 for character in value)
     ):
         raise PairingError("The provider did not return a pairing URL")
-    parsed = urlsplit(value)
-    expected = urlsplit(expected_base)
+    try:
+        parsed = urlsplit(value)
+        expected = urlsplit(expected_base)
+    except ValueError as exc:
+        raise PairingError("The provider returned an unexpected pairing URL") from exc
     fragment = parse_qs(parsed.fragment, keep_blank_values=True)
     tokens = fragment.get("token") or []
     if (
@@ -240,11 +249,12 @@ class ConnectJob:
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
+                    errors="replace",
                     bufsize=1,
                     env=os.environ.copy(),
                     start_new_session=True,
                 )
-            except OSError as exc:
+            except (OSError, ValueError) as exc:
                 raise PairingError("T3 Connect could not be started") from exc
             self._process = process
         threading.Thread(target=self._watch, args=(process,), daemon=True).start()
@@ -300,7 +310,10 @@ def _connect_output_html(output: str) -> str:
     cursor = 0
     for match in _CONNECT_URL_RE.finditer(output):
         value = match.group(0).rstrip(".,)")
-        parsed = urlsplit(value)
+        try:
+            parsed = urlsplit(value)
+        except ValueError:
+            continue
         if (
             parsed.scheme not in {"http", "https"}
             or not parsed.hostname
@@ -427,6 +440,7 @@ class PairingState:
                 check=False,
                 capture_output=True,
                 text=True,
+                errors="replace",
                 timeout=10,
                 env=os.environ.copy(),
             )
@@ -449,7 +463,7 @@ class PairingState:
                         if isinstance(payload.get(key), (bool, str))
                         or payload.get(key) is None
                     }
-        except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        except (OSError, ValueError, subprocess.TimeoutExpired):
             pass
         return snapshot
 
@@ -478,10 +492,11 @@ class PairingState:
                 check=False,
                 capture_output=True,
                 text=True,
+                errors="replace",
                 timeout=30,
                 env=os.environ.copy(),
             )
-        except (OSError, subprocess.TimeoutExpired) as exc:
+        except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
             raise PairingError("T3 Connect could not be disabled") from exc
         if result.returncode != 0:
             raise PairingError("T3 Connect could not be disabled")

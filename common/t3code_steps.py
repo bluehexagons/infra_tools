@@ -656,15 +656,22 @@ def _configure_device_pairing(
     host: str,
     t3_port: int,
 ) -> None:
+    t3_state_dir = os.path.join(home, ".t3")
+    if os.path.lexists(t3_state_dir) and (
+        os.path.islink(t3_state_dir) or not os.path.isdir(t3_state_dir)
+    ):
+        raise RuntimeError(
+            f"Refusing unsafe T3 Connect state directory: {t3_state_dir}"
+        )
     from web.web_steps import install_nginx
 
     install_nginx(config)
-    auth_changed, previous_auth = _install_pairing_auth_file()
-    web_account = pwd.getpwnam("www-data")
-    t3_state_dir = os.path.join(home, ".t3")
     os.makedirs(t3_state_dir, mode=0o700, exist_ok=True)
+    os.chmod(t3_state_dir, 0o700)
     account = pwd.getpwnam(config.username)
     os.chown(t3_state_dir, account.pw_uid, account.pw_gid)
+    auth_changed, previous_auth = _install_pairing_auth_file()
+    web_account = pwd.getpwnam("www-data")
     server_url, _default_base_url = _t3_pairing_urls(config.host, host, t3_port)
 
     providers = {
@@ -894,6 +901,10 @@ def _remove_device_pairing() -> None:
 def _configure_connect_restart_units(state_dir: str) -> None:
     """Install a root-owned path trigger for safe T3 service reconciliation."""
 
+    if os.path.lexists(state_dir) and (
+        os.path.islink(state_dir) or not os.path.isdir(state_dir)
+    ):
+        raise RuntimeError(f"Refusing unsafe T3 Connect state directory: {state_dir}")
     request_path = os.path.join(state_dir, "infra-tools-connect-restart")
     path_content = f"""[Unit]
 Description=Watch for T3 Connect service reconciliation requests
@@ -941,6 +952,10 @@ ExecStart=/usr/bin/systemctl restart {T3_SERVICE_NAME}.service
 
 
 def _remove_connect_restart_units(state_dir: str | None = None) -> None:
+    if state_dir is not None and os.path.lexists(state_dir) and (
+        os.path.islink(state_dir) or not os.path.isdir(state_dir)
+    ):
+        raise RuntimeError(f"Refusing unsafe T3 Connect state directory: {state_dir}")
     changed = False
     for unit_name, unit_path in (
         (T3_CONNECT_RESTART_PATH_UNIT, T3_CONNECT_RESTART_PATH_FILE),
@@ -1193,8 +1208,8 @@ WantedBy=multi-user.target
         if active.returncode != 0:
             run(f"systemctl start {T3_SERVICE_NAME}.service")
     if config.device_pairing_providers:
-        _configure_connect_restart_units(os.path.join(home, ".t3"))
         _configure_device_pairing(config, home, t3_cli_wrapper, host, port)
+        _configure_connect_restart_units(os.path.join(home, ".t3"))
         https_urls = _configure_t3_https(
             config,
             port,

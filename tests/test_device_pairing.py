@@ -348,6 +348,10 @@ class PairingBrokerTest(unittest.TestCase):
         )
         self.assertNotIn("<script", rendered)
 
+    def test_connect_output_ignores_malformed_urls(self) -> None:
+        rendered = _connect_output_html("Output https://[malformed and continue")
+        self.assertIn("https://[malformed and continue", rendered)
+
     def test_rejects_provider_redirect_to_another_origin(self) -> None:
         with self.assertRaises(PairingError):
             _safe_pairing_url(
@@ -360,6 +364,13 @@ class PairingBrokerTest(unittest.TestCase):
             _safe_pairing_url(
                 "http://192.168.0.41:3773/pair#token=secret\r\nX-Bad: yes",
                 "http://192.168.0.41:3773",
+            )
+
+    def test_rejects_malformed_provider_url(self) -> None:
+        with self.assertRaises(PairingError):
+            _safe_pairing_url(
+                "https://[malformed/pair#token=secret",
+                "https://agent-vm:8444",
             )
 
     def test_nonce_is_single_use(self) -> None:
@@ -474,6 +485,22 @@ class PairingBrokerTest(unittest.TestCase):
 
 
 class DevicePairingRemoteSetupTest(unittest.TestCase):
+    def test_pairing_rejects_symlinked_t3_state_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            home = os.path.join(temporary, "home")
+            os.mkdir(home)
+            os.symlink(temporary, os.path.join(home, ".t3"))
+            with self.assertRaisesRegex(
+                RuntimeError, "unsafe T3 Connect state directory"
+            ):
+                _configure_device_pairing(
+                    _config(),
+                    home,
+                    "/opt/t3",
+                    "127.0.0.1",
+                    3773,
+                )
+
     def test_provider_wrapper_refuses_symlink_destination(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             victim = os.path.join(temporary, "victim")
@@ -534,6 +561,11 @@ class DevicePairingRemoteSetupTest(unittest.TestCase):
                     "0.0.0.0",
                     3773,
                 )
+
+            self.assertEqual(
+                os.stat(os.path.join(temporary, ".t3")).st_mode & 0o777,
+                0o700,
+            )
 
             with open(nginx_available, encoding="utf-8") as file_obj:
                 nginx = file_obj.read()
