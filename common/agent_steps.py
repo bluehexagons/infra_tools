@@ -25,7 +25,7 @@ from lib.validation import (
 )
 from lib.validators import validate_github_login
 
-from .common_steps import _run_as_login_user
+from .common_steps import _ensure_user_tool_shell_environment, _run_as_login_user
 
 
 REMOTE_AGENT_PAYLOAD_DIR = "/opt/infra_tools/agent_payload"
@@ -271,20 +271,7 @@ def _tool_available(config: SetupConfig, command: str, extra_path: str = "") -> 
 
 def _ensure_agent_shell_path(config: SetupConfig) -> None:
     user_home = _user_home(config)
-    bashrc_path = os.path.join(user_home, ".bashrc")
-    marker = "# infra_tools agent tool paths"
-    block = f'\n{marker}\nexport PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"\n'
-
-    content = ""
-    if os.path.exists(bashrc_path):
-        with open(bashrc_path, "r", encoding="utf-8") as file_obj:
-            content = file_obj.read()
-
-    if marker not in content:
-        with open(bashrc_path, "a", encoding="utf-8") as file_obj:
-            file_obj.write(block)
-
-    _chown_path(config, bashrc_path)
+    _ensure_user_tool_shell_environment(config.username, user_home)
 
 
 def _install_script_tool(

@@ -26,6 +26,7 @@ from lib.remote_utils import (
     run,
 )
 from lib.update_policy import ECOSYSTEM_AUTO_UPGRADE_ENV, npm_freshness_args
+from lib.validation import validate_filesystem_path
 from lib.validators import validate_username
 
 
@@ -49,6 +50,29 @@ _APT_DPKG_NONINTERACTIVE_OPTIONS = (
 _USER_COMMAND_SYSTEM_PATH = (
     "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 )
+_USER_TOOL_SHELL_ENV_RELATIVE_PATH = (
+    ".local",
+    "share",
+    "infra-tools",
+    "shell-env.sh",
+)
+_USER_TOOL_SHELL_MARKER = "# infra-tools user tool environment"
+_USER_TOOL_SHELL_ENV = '''# Managed by infra-tools for interactive and agent shells.
+case ":$PATH:" in
+    *":$HOME/.local/bin:"*) ;;
+    *) PATH="$HOME/.local/bin:$PATH" ;;
+esac
+case ":$PATH:" in
+    *":$HOME/.opencode/bin:"*) ;;
+    *) PATH="$HOME/.opencode/bin:$PATH" ;;
+esac
+export PATH
+
+export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+if [ -s "$NVM_DIR/nvm.sh" ] && ! command -v nvm >/dev/null 2>&1; then
+    . "$NVM_DIR/nvm.sh"
+fi
+'''
 PACKAGE_UPDATE_MARKER = "/var/lib/infra_tools/state/package-update-complete"
 VM_SETUP_SUDOERS_DIR = "/etc/sudoers.d"
 CLI_TOOL_PACKAGES = (
@@ -661,36 +685,116 @@ def _user_tool_paths(user_home: str) -> list[str]:
     ]
 
 
-def _ensure_nvm_shell_init(username: str, user_home: str) -> None:
-    """Add nvm initialization to the user's .bashrc when missing."""
+def _user_tool_shell_env_path(user_home: str) -> str:
+    """Return the managed environment file used by target-user Bash shells."""
+    return os.path.join(user_home, *_USER_TOOL_SHELL_ENV_RELATIVE_PATH)
+
+
+def _ensure_directory_chain(user_home: str, directory: str) -> list[str]:
+    """Create a home-relative directory without traversing symlinked components."""
+    relative = os.path.relpath(directory, user_home)
+    if relative == os.pardir or relative.startswith(f"{os.pardir}{os.path.sep}"):
+        raise RuntimeError(f"User tool environment is outside the user home: {directory}")
+
+    current = user_home
+    directories = []
+    for component in relative.split(os.path.sep):
+        current = os.path.join(current, component)
+        directories.append(current)
+        if os.path.lexists(current):
+            if os.path.islink(current) or not os.path.isdir(current):
+                raise RuntimeError(f"Refusing unsafe user tool directory: {current}")
+            continue
+        os.mkdir(current, mode=0o755)
+    return directories
+
+
+def _shell_startup_content(path: str) -> tuple[str, int]:
+    """Read one regular shell startup file and retain its permissions."""
+    if os.path.lexists(path):
+        if os.path.islink(path) or not os.path.isfile(path):
+            raise RuntimeError(f"Refusing unsafe shell startup file: {path}")
+        with open(path, "r", encoding="utf-8") as file_obj:
+            return file_obj.read(), stat.S_IMODE(os.stat(path).st_mode)
+
+    skeleton = os.path.join("/etc/skel", os.path.basename(path))
+    if os.path.isfile(skeleton) and not os.path.islink(skeleton):
+        with open(skeleton, "r", encoding="utf-8") as file_obj:
+            return file_obj.read(), stat.S_IMODE(os.stat(skeleton).st_mode)
+    return "", 0o644
+
+
+def _ensure_shell_startup_block(path: str, *, prepend: bool) -> bool:
+    """Source the managed user-tool environment from one Bash startup file."""
+    content, mode = _shell_startup_content(path)
+    if _USER_TOOL_SHELL_MARKER in content:
+        return False
+
+    block = (
+        f"{_USER_TOOL_SHELL_MARKER}\n"
+        'export BASH_ENV="$HOME/.local/share/infra-tools/shell-env.sh"\n'
+        '[ -r "$BASH_ENV" ] && . "$BASH_ENV"\n'
+    )
+    if prepend:
+        updated = block + ("\n" if content else "") + content
+    else:
+        updated = content
+        if updated and not updated.endswith("\n"):
+            updated += "\n"
+        if updated:
+            updated += "\n"
+        updated += block
+    write_text_atomic(path, updated, mode=mode)
+    return True
+
+
+def _ensure_user_tool_shell_environment(username: str, user_home: str) -> None:
+    """Expose user-scoped developer tools to interactive and agent Bash shells."""
+    if not validate_username(username):
+        raise ValueError(f"Invalid shell environment username: {username}")
+    validate_filesystem_path(user_home, must_exist=True)
     if is_dry_run():
-        print("  [DRY-RUN] Would update the user's nvm shell initialization")
+        print("  [DRY-RUN] Would update the user's tool shell environment")
         return
 
-    bashrc_path = f"{user_home}/.bashrc"
-    nvm_init = '''
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-[ -s "$NVM_DIR/bash_completion" ] && . "$NVM_DIR/bash_completion"
-'''
-
-    if os.path.exists(bashrc_path):
-        with open(bashrc_path, "r") as f:
-            bashrc_content = f.read()
-        if 'export NVM_DIR="$HOME/.nvm"' not in bashrc_content:
-            with open(bashrc_path, "a") as f:
-                f.write(nvm_init)
+    environment_path = _user_tool_shell_env_path(user_home)
+    environment_dir = os.path.dirname(environment_path)
+    environment_dirs = _ensure_directory_chain(user_home, environment_dir)
+    if os.path.lexists(environment_path) and (
+        os.path.islink(environment_path) or not os.path.isfile(environment_path)
+    ):
+        raise RuntimeError(f"Refusing unsafe user tool environment: {environment_path}")
+    existing_environment = ""
+    if os.path.exists(environment_path):
+        with open(environment_path, "r", encoding="utf-8") as file_obj:
+            existing_environment = file_obj.read()
+    if existing_environment != _USER_TOOL_SHELL_ENV:
+        write_text_atomic(environment_path, _USER_TOOL_SHELL_ENV, mode=0o644)
     else:
-        skel_bashrc = "/etc/skel/.bashrc"
-        if os.path.exists(skel_bashrc):
-            run(f"cp {shlex.quote(skel_bashrc)} {shlex.quote(bashrc_path)}")
-            with open(bashrc_path, "a") as f:
-                f.write(nvm_init)
-        else:
-            with open(bashrc_path, "w") as f:
-                f.write(nvm_init)
+        os.chmod(environment_path, 0o644)
 
-    run(f"chown {shlex.quote(username)}:{shlex.quote(username)} {shlex.quote(bashrc_path)}")
+    bashrc_path = os.path.join(user_home, ".bashrc")
+    _ensure_shell_startup_block(bashrc_path, prepend=True)
+
+    login_path = os.path.join(user_home, ".profile")
+    for name in (".bash_profile", ".bash_login"):
+        candidate = os.path.join(user_home, name)
+        if os.path.lexists(candidate):
+            login_path = candidate
+            break
+    _ensure_shell_startup_block(login_path, prepend=False)
+
+    safe_username = shlex.quote(username)
+    owned_paths = (*environment_dirs, environment_path, bashrc_path, login_path)
+    run(
+        f"chown {safe_username}:{safe_username} "
+        + " ".join(shlex.quote(path) for path in owned_paths)
+    )
+
+
+def _ensure_nvm_shell_init(username: str, user_home: str) -> None:
+    """Make nvm available to interactive, login, and non-interactive Bash."""
+    _ensure_user_tool_shell_environment(username, user_home)
 
 
 def install_go(config: SetupConfig) -> None:

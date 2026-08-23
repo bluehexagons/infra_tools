@@ -61,7 +61,10 @@ class TestNodeSetup(unittest.TestCase):
         mock_run.side_effect = run_command
         config = SetupConfig(host="host", username="user", system_type="server_web", install_node=True)
 
-        with patch.dict(os.environ, {DEPENDENCY_MIN_AGE_DAYS_ENV: "2"}):
+        with (
+            patch.dict(os.environ, {DEPENDENCY_MIN_AGE_DAYS_ENV: "2"}),
+            patch.object(common_steps, "_ensure_user_tool_shell_environment") as shell_env,
+        ):
             common_steps.install_node(config)
 
         commands = [args[0] for args, _ in mock_run.call_args_list]
@@ -70,6 +73,7 @@ class TestNodeSetup(unittest.TestCase):
         self.assertTrue(all("--before=" in command for command in npm_commands))
         self.assertTrue(all("HOME=/home/user USER=user LOGNAME=user" in command for command in npm_commands))
         self.assertTrue(any("nvm-sh/nvm/v0.40.6/install.sh" in command for command in commands))
+        shell_env.assert_called_once_with("user", "/home/user")
 
     @patch("common.common_steps.open", new_callable=mock_open, read_data='export NVM_DIR="$HOME/.nvm"\n')
     @patch("common.common_steps.os.path.exists")
@@ -87,13 +91,18 @@ class TestNodeSetup(unittest.TestCase):
         mock_run.return_value = SimpleNamespace(returncode=0, stdout="", stderr="")
         config = SetupConfig(host="host", username="user", system_type="server_web", install_node=True)
 
-        common_steps.install_node(config)
+        with patch.object(
+            common_steps,
+            "_ensure_user_tool_shell_environment",
+        ) as shell_env:
+            common_steps.install_node(config)
 
         commands = [args[0] for args, _ in mock_run.call_args_list]
         self.assertIn("chown -R user:user /home/user/.nvm", commands)
         self.assertIn("chown -R user:user /home/user/.npm", commands)
         self.assertTrue(any("HOME=/home/user USER=user LOGNAME=user" in command and "nvm --version" in command for command in commands))
         self.assertFalse(any("apt-get install" in command for command in commands))
+        shell_env.assert_called_once_with("user", "/home/user")
 
 
 if __name__ == "__main__":
