@@ -157,8 +157,9 @@ workspace passwords, GitHub auth, agent auth, and non-secret agent config.
 Node and agent-tool setup installs a managed Bash environment under
 `~/.local/share/infra-tools/shell-env.sh`. The active Bash login file and
 `.bashrc` load it, and they export `BASH_ENV` so nested non-interactive Bash
-commands load it as well. This keeps `~/.local/bin`, `~/.opencode/bin`, and an
-installed NVM default Node version available to coding-agent command runners;
+commands load it as well. This keeps the managed T3 runtime, `~/.local/bin`,
+`~/.opencode/bin`, and an installed NVM default Node version available to
+coding-agent command runners;
 it also makes the `nvm` function available so an agent can inspect or switch
 Node versions. Go continues to use `/etc/profile.d/go.sh`, while uv and other
 user-scoped executables use `~/.local/bin`. Start a new agent session after a
