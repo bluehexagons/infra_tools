@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from common.t3code_steps import (
     _configure_firewall,
+    _configure_t3_https,
     _remove_legacy_t3_shim,
     install_t3code_web,
 )
@@ -34,6 +35,14 @@ class T3CodeWebTest(unittest.TestCase):
         config = self._config()
         self.assertEqual(config.web_interface_host, "0.0.0.0")
         validate_web_interface_settings(config)
+
+    def test_https_gateway_is_optional_when_managed_utility_is_unavailable(self) -> None:
+        config = self._config()
+        with patch(
+            "common.t3code_steps.os.path.isfile",
+            return_value=False,
+        ):
+            self.assertEqual(_configure_t3_https(config, 3773, None), [])
 
     def test_non_loopback_bind_requires_private_source(self) -> None:
         config = self._config(web_interface_host="0.0.0.0", web_interface_sources=None)

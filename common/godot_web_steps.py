@@ -552,6 +552,37 @@ def _internal_landing_page(base_url: str, local_ca: bool) -> str:
 """
 
 
+def _existing_internal_web_policy_values() -> tuple[list[str], list[str]]:
+    """Read existing managed gateway owners and source policy for merging."""
+
+    if not os.path.exists(GODOT_WEB_POLICY_FILE):
+        return [], []
+    if os.path.islink(GODOT_WEB_POLICY_FILE):
+        raise RuntimeError(
+            f"Refusing symlinked internal-web policy: {GODOT_WEB_POLICY_FILE}"
+        )
+    try:
+        with open(GODOT_WEB_POLICY_FILE, encoding="utf-8") as file_obj:
+            payload = json.load(file_obj)
+    except (OSError, ValueError) as exc:
+        raise RuntimeError("Could not read the existing internal-web policy") from exc
+    if not isinstance(payload, dict):
+        return [], []
+    raw_users = payload.get("users", [])
+    raw_sources = payload.get("access_sources", [])
+    users = []
+    if isinstance(raw_users, list):
+        users = [
+            value
+            for value in raw_users
+            if isinstance(value, str) and validate_username(value)
+        ]
+    sources = []
+    if isinstance(raw_sources, list):
+        sources = [value for value in raw_sources if isinstance(value, str)]
+    return users, sources
+
+
 def _write_if_changed(path: str, content: str, mode: int) -> bool:
     if os.path.islink(path):
         raise RuntimeError(f"Refusing symlinked managed web file: {path}")
@@ -798,13 +829,18 @@ def configure_godot_web_host(
     normalized_identities = validate_web_identities(
         [*identities, *discover_local_web_identities()]
     )
-    normalized_users = list(dict.fromkeys(users))
+    existing_users, existing_sources = _existing_internal_web_policy_values()
+    normalized_users = list(dict.fromkeys([*existing_users, *users]))
+    normalized_sources = list(dict.fromkeys([*existing_sources, *access_sources]))
+    # The policy reconciliation below invokes infra-web, so install its
+    # managed launcher before reconciling the first policy on a fresh host.
+    changed = _install_publisher_links()
     base_url, local_ca, cert_path, key_path, certificate_changed = configure_internal_web_host(
         normalized_identities,
         normalized_users,
-        access_sources,
+        normalized_sources,
     )
-    changed = _configure_user_roots(normalized_users)
+    changed = _configure_user_roots(normalized_users) or changed
     changed = certificate_changed or changed
     changed = _write_if_changed(
         os.path.join(GODOT_WEB_ROOT, "index.html"),
@@ -823,7 +859,6 @@ def configure_godot_web_host(
             os.unlink(GODOT_WEB_CA_DOWNLOAD)
             changed = True
     changed = _write_if_changed(GODOT_WEB_URL_FILE, base_url + "\n", 0o644) or changed
-    changed = _install_publisher_links() or changed
     changed = _configure_nginx_site(
         render_nginx_config(cert_path, key_path),
         reload_required=certificate_changed or not local_ca,
@@ -834,7 +869,7 @@ def configure_godot_web_host(
         key_path,
         local_ca,
         normalized_users,
-        access_sources,
+        normalized_sources,
     ) or changed
     fingerprint = hashlib.sha256()
     if local_ca:
@@ -855,13 +890,16 @@ def configure_internal_web_host(
     access_sources: Sequence[str] = (),
     *,
     configure_static_site: bool = False,
+    install_utility: bool = False,
 ) -> tuple[str, bool, str, str, bool]:
     """Ensure the shared internal HTTPS origin and forwarding policy exist."""
 
     normalized_identities = validate_web_identities(
         [*identities, *discover_local_web_identities()]
     )
-    normalized_users = list(dict.fromkeys(users))
+    existing_users, existing_sources = _existing_internal_web_policy_values()
+    normalized_users = list(dict.fromkeys([*existing_users, *users]))
+    normalized_sources = list(dict.fromkeys([*existing_sources, *access_sources]))
     _ensure_nginx()
     _ensure_managed_directory(GODOT_WEB_ROOT, 0o755)
     cert_path, key_path, local_ca, certificate_changed = _certificate_for_identities(
@@ -871,13 +909,21 @@ def configure_internal_web_host(
         _install_chromium_ca_trust(normalized_users)
     base_url = _base_url(normalized_identities)
     _write_if_changed(GODOT_WEB_URL_FILE, base_url + "\n", 0o644)
-    _install_infra_web_link()
+    if install_utility:
+        _install_infra_web_link()
     if configure_static_site:
-        _write_if_changed(
-            os.path.join(GODOT_WEB_ROOT, "index.html"),
-            _internal_landing_page(base_url, local_ca),
-            0o644,
-        )
+        index_path = os.path.join(GODOT_WEB_ROOT, "index.html")
+        if os.path.lexists(index_path):
+            if os.path.islink(index_path) or not os.path.isfile(index_path):
+                raise RuntimeError(
+                    f"Refusing unsafe internal web landing page: {index_path}"
+                )
+        else:
+            _write_if_changed(
+                index_path,
+                _internal_landing_page(base_url, local_ca),
+                0o644,
+            )
         _configure_nginx_site(
             render_nginx_config(cert_path, key_path),
             reload_required=certificate_changed or not local_ca,
@@ -888,7 +934,7 @@ def configure_internal_web_host(
         key_path,
         local_ca,
         normalized_users,
-        access_sources,
+        normalized_sources,
     )
     return base_url, local_ca, cert_path, key_path, certificate_changed
 

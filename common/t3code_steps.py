@@ -940,7 +940,7 @@ ExecStart=/usr/bin/systemctl restart {T3_SERVICE_NAME}.service
         run(f"systemctl start {T3_CONNECT_RESTART_PATH_UNIT}")
 
 
-def _remove_connect_restart_units() -> None:
+def _remove_connect_restart_units(state_dir: str | None = None) -> None:
     changed = False
     for unit_name, unit_path in (
         (T3_CONNECT_RESTART_PATH_UNIT, T3_CONNECT_RESTART_PATH_FILE),
@@ -952,6 +952,14 @@ def _remove_connect_restart_units() -> None:
             run(f"systemctl disable --now {unit_name}", check=False)
             os.remove(unit_path)
             changed = True
+    if state_dir is not None:
+        request_path = os.path.join(state_dir, "infra-tools-connect-restart")
+        if os.path.lexists(request_path):
+            if os.path.islink(request_path) or not os.path.isfile(request_path):
+                raise RuntimeError(
+                    f"Refusing unsafe T3 Connect restart request: {request_path}"
+                )
+            os.remove(request_path)
     if changed:
         run("systemctl daemon-reload")
 
@@ -963,9 +971,11 @@ def _configure_t3_https(
 ) -> list[tuple[str, int]]:
     """Publish T3 web and pairing pages through the shared internal HTTPS gateway."""
 
-    if os.geteuid() != 0:
+    if os.geteuid() != 0 or not os.path.isfile(
+        "/opt/infra_tools/common/service_tools/infra_web.py"
+    ):
         # Target setup is root-owned; keeping this a no-op makes dry unit tests
-        # and unprivileged development imports side-effect free.
+        # and installations without the managed gateway side-effect free.
         return []
 
     from common.godot_web_steps import configure_internal_web_host, identities_for_config
@@ -975,6 +985,7 @@ def _configure_t3_https(
         [config.username],
         config.effective_web_interface_sources(),
         configure_static_site=True,
+        install_utility=True,
     )
     utility = "/usr/local/bin/infra-web"
     urls: list[tuple[str, int]] = []
@@ -1192,7 +1203,7 @@ WantedBy=multi-user.target
         if https_urls:
             _set_pairing_https_port(https_urls[0][1])
     else:
-        _remove_connect_restart_units()
+        _remove_connect_restart_units(os.path.join(home, ".t3"))
         _remove_device_pairing()
         _remove_t3_https(config)
         https_urls = _configure_t3_https(config, port, None)
