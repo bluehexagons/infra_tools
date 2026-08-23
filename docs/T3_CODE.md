@@ -206,26 +206,31 @@ For a desktop client, the normal choices are:
 
 For a mobile client, use the pairing URL/QR code or enter the VM address in
 Add Environment. A numeric private-network address uses HTTP for direct LAN
-access; use an explicit `https://` address only after configuring an HTTPS
-endpoint.
+access; T3 web setup also configures an internal HTTPS forward for the web and
+pairing pages. Use the HTTPS URL printed by setup when connecting from a
+browser.
 
 The direct LAN workflow and its optional Basic Auth enrollment portal use HTTP
 and are intended only for a trusted private network. Basic Auth is not
 transport encryption. Direct T3 desktop/mobile clients can use the T3
 endpoint. A browser page served over HTTPS, including `https://app.t3.codes`,
 cannot connect to a plain HTTP/WebSocket backend because of mixed-content
-restrictions. For that workflow, put the service behind an HTTPS reverse proxy
-or an HTTPS tailnet endpoint and pair with the resulting `https://` URL.
-When the Godot web bundle's managed HTTPS gateway is installed, a loopback T3
-backend can be exposed with WebSocket support and the same source policy:
+restrictions. T3 web setup creates a managed HTTPS reverse-proxy forward with
+WebSocket support and the same source policy:
 
 ```bash
 sudo infra-web forward add t3code --listen auto --to 127.0.0.1:3773
 ```
 
-Use the resulting HTTPS origin as the pairing base URL. Otherwise, keep the
-backend private until TLS, WebSocket proxying, and any desired outer access
-control are configured.
+Use the resulting HTTPS origin as the browser endpoint. The pairing portal is
+published through a second managed HTTPS forward when device pairing is
+enabled. The VM-local CA is available from the internal-web landing page for
+LAN clients that do not already trust it.
+
+The pairing portal's T3 Connect section runs `t3 connect link --headless`,
+accepts the relay-install and authorization prompts, and requests a restart of
+the managed T3 service. Its checkbox maps to T3's persisted desired Connect
+state; disabling it runs `t3 connect unlink`.
 
 When generating the app enrollment link over SSH, pass that HTTPS origin to
 the target-side helper so the app receives the externally reachable address:

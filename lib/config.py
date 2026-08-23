@@ -535,6 +535,10 @@ class SetupConfig:
         """Return managed TCP web ports for this resolved target."""
 
         ports = list(self.web_ports or [])
+        if "t3code" in (self.web_interfaces or []):
+            # The shared internal HTTPS host serves the VM CA and landing page
+            # used by the managed T3 HTTPS forwards.
+            ports.append(GODOT_WEB_HTTPS_PORT)
         if "web" in (self.godot_bundles or []):
             ports.append(GODOT_WEB_HTTPS_PORT)
         if self.include_web_firewall:

@@ -37,12 +37,20 @@ infra-tools agent web pair HOST USER
 Use the complete URL in the T3 desktop, mobile, or browser client. A bare T3
 address is expected to show a pairing-key form. Treat pairing URLs as secrets.
 
-Prefer an HTTPS or private-tailnet endpoint for browser-hosted clients. For a
-loopback service, use the managed gateway rather than binding T3 publicly:
+Prefer an HTTPS or private-tailnet endpoint for browser-hosted clients. T3 web
+setup publishes the service through the managed HTTPS gateway and prints the
+resulting URL. For a pre-existing loopback service, use the gateway rather than
+binding T3 publicly:
 
 ```bash
 sudo infra-web forward add t3code --listen auto --to 127.0.0.1:3773
 ```
+
+When the protected pairing page is enabled, its T3 Connect section runs
+`t3 connect link --headless`, handles the relay-install prompt, and restarts
+the managed service after authorization. The page's checkbox maps to
+`t3 connect unlink` and the persisted desired Connect state; do not create a
+separate relay service.
 
 ## Source control
 

@@ -535,6 +535,23 @@ def _landing_page(base_url: str, local_ca: bool, users: Sequence[str]) -> str:
 """
 
 
+def _internal_landing_page(base_url: str, local_ca: bool) -> str:
+    trust_note = (
+        '<p>Install the <a href="/infra-tools-ca.crt">VM CA certificate</a> '
+        "on LAN clients before opening internal HTTPS services.</p>"
+        if local_ca
+        else "<p>This endpoint uses a publicly trusted certificate.</p>"
+    )
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>infra_tools internal web host</title>
+</head><body><main><h1>infra_tools internal web host</h1>
+{trust_note}<p>Base URL: <code>{html.escape(base_url)}</code></p>
+</main></body></html>
+"""
+
+
 def _write_if_changed(path: str, content: str, mode: int) -> bool:
     if os.path.islink(path):
         raise RuntimeError(f"Refusing symlinked managed web file: {path}")
@@ -615,6 +632,14 @@ def _install_publisher_links() -> bool:
         GODOT_WEB_UTILITY_LINK,
         "infra-web utility",
     ) or changed
+
+
+def _install_infra_web_link() -> bool:
+    return _install_managed_link(
+        GODOT_WEB_UTILITY,
+        GODOT_WEB_UTILITY_LINK,
+        "infra-web utility",
+    )
 
 
 def _configure_web_policy(
@@ -774,16 +799,13 @@ def configure_godot_web_host(
         [*identities, *discover_local_web_identities()]
     )
     normalized_users = list(dict.fromkeys(users))
-    _ensure_nginx()
-    _ensure_managed_directory(GODOT_WEB_ROOT, 0o755)
-    changed = _configure_user_roots(normalized_users)
-    cert_path, key_path, local_ca, certificate_changed = _certificate_for_identities(
-        normalized_identities
+    base_url, local_ca, cert_path, key_path, certificate_changed = configure_internal_web_host(
+        normalized_identities,
+        normalized_users,
+        access_sources,
     )
+    changed = _configure_user_roots(normalized_users)
     changed = certificate_changed or changed
-    if local_ca:
-        changed = _install_chromium_ca_trust(normalized_users) or changed
-    base_url = _base_url(normalized_identities)
     changed = _write_if_changed(
         os.path.join(GODOT_WEB_ROOT, "index.html"),
         _landing_page(base_url, local_ca, normalized_users),
@@ -827,10 +849,55 @@ def configure_godot_web_host(
     return changed
 
 
+def configure_internal_web_host(
+    identities: list[str],
+    users: list[str],
+    access_sources: Sequence[str] = (),
+    *,
+    configure_static_site: bool = False,
+) -> tuple[str, bool, str, str, bool]:
+    """Ensure the shared internal HTTPS origin and forwarding policy exist."""
+
+    normalized_identities = validate_web_identities(
+        [*identities, *discover_local_web_identities()]
+    )
+    normalized_users = list(dict.fromkeys(users))
+    _ensure_nginx()
+    _ensure_managed_directory(GODOT_WEB_ROOT, 0o755)
+    cert_path, key_path, local_ca, certificate_changed = _certificate_for_identities(
+        normalized_identities
+    )
+    if local_ca:
+        _install_chromium_ca_trust(normalized_users)
+    base_url = _base_url(normalized_identities)
+    _write_if_changed(GODOT_WEB_URL_FILE, base_url + "\n", 0o644)
+    _install_infra_web_link()
+    if configure_static_site:
+        _write_if_changed(
+            os.path.join(GODOT_WEB_ROOT, "index.html"),
+            _internal_landing_page(base_url, local_ca),
+            0o644,
+        )
+        _configure_nginx_site(
+            render_nginx_config(cert_path, key_path),
+            reload_required=certificate_changed or not local_ca,
+        )
+    _configure_web_policy(
+        base_url,
+        cert_path,
+        key_path,
+        local_ca,
+        normalized_users,
+        access_sources,
+    )
+    return base_url, local_ca, cert_path, key_path, certificate_changed
+
+
 __all__ = [
     "GODOT_WEB_CA_DOWNLOAD",
     "GODOT_WEB_GAMES_ROOT",
     "configure_godot_agent_skills",
+    "configure_internal_web_host",
     "configure_godot_web_host",
     "discover_local_web_identities",
     "identities_for_config",

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
+import time
 import unittest
 from email.message import Message
 from io import BytesIO
@@ -14,10 +16,13 @@ from urllib.parse import urlencode
 
 import remote_setup
 from common.service_tools.device_pairing_service import (
+    ConnectJob,
     PairingError,
     PairingRequestHandler,
     PairingState,
     _safe_pairing_url,
+    _public_base_url,
+    _connect_output_html,
 )
 from common.t3code_steps import (
     _configure_device_pairing,
@@ -323,6 +328,26 @@ class PairingBrokerTest(unittest.TestCase):
         self.assertEqual(pair_url, "http://192.168.0.41:3773/pair#token=ONETIME")
         self.assertEqual(expires, "2026-08-20T18:00:00Z")
 
+    def test_https_pairing_page_uses_the_t3_forward_port(self) -> None:
+        headers = Message()
+        headers["X-Forwarded-Host"] = "agent-vm:8444"
+        headers["X-Forwarded-Proto"] = "https"
+        handler = SimpleNamespace(headers=headers)
+        self.assertEqual(
+            _public_base_url(handler, 3773, 8444),
+            "https://agent-vm:8444",
+        )
+
+    def test_connect_output_links_authorization_url_without_raw_markup(self) -> None:
+        rendered = _connect_output_html(
+            "Authorize at https://connect.example/code?next=1&x=2."
+        )
+        self.assertIn(
+            'href="https://connect.example/code?next=1&amp;x=2"',
+            rendered,
+        )
+        self.assertNotIn("<script", rendered)
+
     def test_rejects_provider_redirect_to_another_origin(self) -> None:
         with self.assertRaises(PairingError):
             _safe_pairing_url(
@@ -349,6 +374,42 @@ class PairingBrokerTest(unittest.TestCase):
             self.assertTrue(state.allow_request("192.168.0.12"))
         self.assertFalse(state.allow_request("192.168.0.12"))
         self.assertTrue(state.allow_request("192.168.0.13"))
+
+    def test_headless_connect_job_accepts_prompt_and_requests_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            restart_request = os.path.join(temporary, "restart")
+            command = [
+                sys.executable,
+                "-c",
+                (
+                    "import sys; print('Authorize at https://connect.example/code', flush=True); "
+                    "value = sys.stdin.readline().strip(); print('received ' + value, flush=True)"
+                ),
+            ]
+            job = ConnectJob(
+                {
+                    "link_command": command,
+                    "status_command": command,
+                    "unlink_command": command,
+                    "restart_request": restart_request,
+                }
+            )
+            job.start()
+            deadline = time.monotonic() + 2
+            while "Authorize" not in str(job.snapshot()["output"]):
+                if time.monotonic() > deadline:
+                    self.fail("Connect prompt was not returned")
+                time.sleep(0.01)
+            job.send_input("approved")
+            deadline = time.monotonic() + 2
+            while job.snapshot()["active"]:
+                if time.monotonic() > deadline:
+                    self.fail("Connect job did not finish")
+                time.sleep(0.01)
+            snapshot = job.snapshot()
+            self.assertEqual(snapshot["returncode"], 0)
+            self.assertIn("received approved", str(snapshot["output"]))
+            self.assertTrue(os.path.isfile(restart_request))
 
     def test_http_portal_renders_explicit_single_use_provider_link(self) -> None:
         state = PairingState({"t3code": self._provider()})

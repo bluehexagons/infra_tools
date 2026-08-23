@@ -27,6 +27,14 @@ from lib.validators import validate_username
 
 T3_SERVICE_NAME = "infra-tools-t3code"
 T3_SERVICE_FILE = f"/etc/systemd/system/{T3_SERVICE_NAME}.service"
+T3_CONNECT_RESTART_PATH_UNIT = f"{T3_SERVICE_NAME}-connect.path"
+T3_CONNECT_RESTART_SERVICE_UNIT = f"{T3_SERVICE_NAME}-connect.service"
+T3_CONNECT_RESTART_PATH_FILE = (
+    f"/etc/systemd/system/{T3_CONNECT_RESTART_PATH_UNIT}"
+)
+T3_CONNECT_RESTART_SERVICE_FILE = (
+    f"/etc/systemd/system/{T3_CONNECT_RESTART_SERVICE_UNIT}"
+)
 T3_UFW_RULE_COMMENT_PREFIX = "infra_tools T3 Code"
 DEVICE_PAIRING_SERVICE_NAME = "infra-tools-device-pairing"
 DEVICE_PAIRING_SERVICE_FILE = (
@@ -681,6 +689,35 @@ def _configure_device_pairing(
                 "url_field": "pairUrl",
                 "expires_field": "expiresAt",
                 "public_port": t3_port,
+                "connect": {
+                    "link_command": [
+                        t3_cli_wrapper,
+                        "connect",
+                        "link",
+                        "--headless",
+                        "--base-dir",
+                        t3_state_dir,
+                    ],
+                    "status_command": [
+                        t3_cli_wrapper,
+                        "connect",
+                        "status",
+                        "--json",
+                        "--base-dir",
+                        t3_state_dir,
+                    ],
+                    "unlink_command": [
+                        t3_cli_wrapper,
+                        "connect",
+                        "unlink",
+                        "--base-dir",
+                        t3_state_dir,
+                    ],
+                    "restart_request": os.path.join(
+                        t3_state_dir,
+                        "infra-tools-connect-restart",
+                    ),
+                },
             }
         },
     }
@@ -854,6 +891,174 @@ def _remove_device_pairing() -> None:
     remove_nginx_auth_failure_ban("device-pairing")
 
 
+def _configure_connect_restart_units(state_dir: str) -> None:
+    """Install a root-owned path trigger for safe T3 service reconciliation."""
+
+    request_path = os.path.join(state_dir, "infra-tools-connect-restart")
+    path_content = f"""[Unit]
+Description=Watch for T3 Connect service reconciliation requests
+
+[Path]
+PathExists={request_path}
+Unit={T3_CONNECT_RESTART_SERVICE_UNIT}
+
+[Install]
+WantedBy=multi-user.target
+"""
+    service_content = f"""[Unit]
+Description=Reconcile the managed T3 Connect service
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/rm -f {request_path}
+ExecStart=/usr/bin/systemctl restart {T3_SERVICE_NAME}.service
+"""
+    path_changed = _write_text_if_changed(
+        T3_CONNECT_RESTART_PATH_FILE,
+        path_content,
+        0o644,
+    )
+    service_changed = _write_text_if_changed(
+        T3_CONNECT_RESTART_SERVICE_FILE,
+        service_content,
+        0o644,
+    )
+    if path_changed or service_changed:
+        run("systemctl daemon-reload")
+    enabled = run(
+        f"systemctl is-enabled {T3_CONNECT_RESTART_PATH_UNIT}",
+        check=False,
+    )
+    if enabled.returncode != 0:
+        run(f"systemctl enable {T3_CONNECT_RESTART_PATH_UNIT}")
+    active = run(
+        f"systemctl is-active {T3_CONNECT_RESTART_PATH_UNIT}",
+        check=False,
+    )
+    if active.returncode != 0:
+        run(f"systemctl start {T3_CONNECT_RESTART_PATH_UNIT}")
+
+
+def _remove_connect_restart_units() -> None:
+    changed = False
+    for unit_name, unit_path in (
+        (T3_CONNECT_RESTART_PATH_UNIT, T3_CONNECT_RESTART_PATH_FILE),
+        (T3_CONNECT_RESTART_SERVICE_UNIT, T3_CONNECT_RESTART_SERVICE_FILE),
+    ):
+        if os.path.lexists(unit_path):
+            if os.path.islink(unit_path):
+                raise RuntimeError(f"Refusing symlinked managed unit: {unit_path}")
+            run(f"systemctl disable --now {unit_name}", check=False)
+            os.remove(unit_path)
+            changed = True
+    if changed:
+        run("systemctl daemon-reload")
+
+
+def _configure_t3_https(
+    config: SetupConfig,
+    port: int,
+    pairing_port: int | None,
+) -> list[tuple[str, int]]:
+    """Publish T3 web and pairing pages through the shared internal HTTPS gateway."""
+
+    if os.geteuid() != 0:
+        # Target setup is root-owned; keeping this a no-op makes dry unit tests
+        # and unprivileged development imports side-effect free.
+        return []
+
+    from common.godot_web_steps import configure_internal_web_host, identities_for_config
+
+    configure_internal_web_host(
+        identities_for_config(config.host, config.system_hostname),
+        [config.username],
+        config.effective_web_interface_sources(),
+        configure_static_site=True,
+    )
+    utility = "/usr/local/bin/infra-web"
+    urls: list[tuple[str, int]] = []
+    routes = [("t3code", port)]
+    if pairing_port is not None:
+        routes.append(("t3code-pairing", pairing_port))
+    for name, target_port in routes:
+        result = run(
+            "SUDO_USER="
+            + shlex.quote(config.username)
+            + " "
+            + shlex.quote(utility)
+            + " forward add "
+            + shlex.quote(name)
+            + " --listen auto --to 127.0.0.1:"
+            + str(target_port)
+            + " --json",
+            check=False,
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "HTTPS forward failed").strip()
+            raise RuntimeError(f"Could not configure HTTPS T3 endpoint: {detail}")
+        try:
+            payload = json.loads(result.stdout)
+            url = payload.get("url")
+            listen = payload.get("listen")
+        except (TypeError, ValueError):
+            url = None
+            listen = None
+        if (
+            not isinstance(url, str)
+            or not url.startswith("https://")
+            or not isinstance(listen, int)
+            or not 1024 <= listen <= 65535
+        ):
+            raise RuntimeError("HTTPS gateway returned an invalid T3 endpoint")
+        urls.append((url, listen))
+    return urls
+
+
+def _set_pairing_https_port(https_port: int) -> None:
+    if os.path.islink(DEVICE_PAIRING_PROVIDERS_FILE):
+        raise RuntimeError(
+            f"Refusing symlinked device-pairing provider configuration: "
+            f"{DEVICE_PAIRING_PROVIDERS_FILE}"
+        )
+    with open(DEVICE_PAIRING_PROVIDERS_FILE, encoding="utf-8") as file_obj:
+        providers = json.load(file_obj)
+    if not isinstance(providers, dict) or not isinstance(providers.get("providers"), dict):
+        raise RuntimeError("Invalid device-pairing provider configuration")
+    t3_provider = providers["providers"].get("t3code")
+    if not isinstance(t3_provider, dict):
+        raise RuntimeError("T3 Code pairing provider is missing")
+    if t3_provider.get("https_public_port") == https_port:
+        return
+    t3_provider["https_public_port"] = https_port
+    _write_text_if_changed(
+        DEVICE_PAIRING_PROVIDERS_FILE,
+        json.dumps(providers, indent=2, sort_keys=True) + "\n",
+        0o640,
+    )
+    web_account = pwd.getpwnam("www-data")
+    os.chown(DEVICE_PAIRING_PROVIDERS_FILE, 0, web_account.pw_gid)
+    os.chmod(DEVICE_PAIRING_PROVIDERS_FILE, 0o640)
+    run(f"systemctl restart {DEVICE_PAIRING_SERVICE_NAME}.service")
+
+
+def _remove_t3_https(config: SetupConfig) -> None:
+    utility = "/usr/local/bin/infra-web"
+    for name in ("t3code-pairing", "t3code"):
+        run(
+            "SUDO_USER="
+            + shlex.quote(config.username)
+            + " "
+            + shlex.quote(utility)
+            + " forward remove "
+            + shlex.quote(name)
+            + " --json",
+            check=False,
+            capture_output=True,
+        )
+
+
 def install_t3code_web(config: SetupConfig) -> None:
     """Install a boot-persistent T3 Code headless service for direct pairing."""
 
@@ -977,11 +1182,24 @@ WantedBy=multi-user.target
         if active.returncode != 0:
             run(f"systemctl start {T3_SERVICE_NAME}.service")
     if config.device_pairing_providers:
+        _configure_connect_restart_units(os.path.join(home, ".t3"))
         _configure_device_pairing(config, home, t3_cli_wrapper, host, port)
+        https_urls = _configure_t3_https(
+            config,
+            port,
+            config.device_pairing_port,
+        )
+        if https_urls:
+            _set_pairing_https_port(https_urls[0][1])
     else:
+        _remove_connect_restart_units()
         _remove_device_pairing()
+        _remove_t3_https(config)
+        https_urls = _configure_t3_https(config, port, None)
     print(f"  T3 Code web service listening on {host}:{port}")
     print(f"  T3 Code endpoint: {base_url}")
+    for https_url, _listen_port in https_urls:
+        print(f"  T3 Code HTTPS endpoint: {https_url}")
     print("  Readiness check: infra-tools agent doctor --capability t3code")
     if config.device_pairing_providers:
         print(

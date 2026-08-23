@@ -52,6 +52,12 @@ portal with `--device-pairing-port PORT`. The two ports must differ. The portal
 inherits the web-interface bind address and source CIDRs, and infra-tools adds
 matching managed UFW rules for both ports.
 
+When T3 Code web setup is installed, infra-tools also configures the shared
+internal HTTPS gateway and publishes the T3 web service and pairing page through
+managed HTTPS forwards. Setup prints their URLs. A VM-local CA is used when a
+publicly trusted certificate is not available; install that CA once on client
+devices before opening the HTTPS URL.
+
 `--interactive` can generate the password file without a pre-existing source.
 When T3 Code web setup is selected, choose device enrollment and enter the
 portal username and password at the hidden prompts. The password is passed to
@@ -103,6 +109,27 @@ It is useful for recovery, for a loopback-only service, or when the pairing
 portal was not selected. It uses the same administrative flow. Sessions paired
 before this support was installed remain standard sessions; remove and re-pair
 the environment when T3 reports that `access:write` is unavailable.
+
+## T3 Connect management
+
+The authenticated portal includes a **T3 Connect** section. Choose **Set up or
+re-authorize T3 Connect** to run T3's supported `t3 connect link --headless`
+flow. The page displays the relay-install prompt and authorization instructions
+and provides an input for the confirmation or code requested by T3. T3 installs
+its pinned relay client; infra-tools does not download or manage a second relay
+service.
+
+After authorization, the portal requests a restart of
+`infra-tools-t3code.service`. T3 then reconciles the saved Connect preference
+and starts the managed tunnel. The checkbox represents that desired startup
+state: clearing it runs `t3 connect unlink`, while enabling it starts the same
+headless authorization flow again. The relay binary may remain installed when
+Connect is disabled, but no tunnel is started.
+
+The Connect operation is held only in the pairing broker's memory, expires
+after fifteen minutes, and its CLI output is never written to the journal or a
+configuration file. A root-owned systemd path trigger accepts only a fixed
+request file from the target user's broker; it cannot run arbitrary commands.
 
 ## Credentials, reruns, and removal
 
@@ -166,6 +193,11 @@ the proxy must preserve that externally reachable mapping. An HTTPS page such
 as `app.t3.codes` cannot connect to the plain HTTP T3 backend because browsers
 block mixed content.
 
+The managed HTTPS forwards preserve the external host and WebSocket upgrade
+headers, so the hosted T3 client can connect to the HTTPS T3 URL without a
+mixed-content failure. They are limited to the configured private/LAN source
+CIDRs by the internal-web policy.
+
 The broker listens only on a local Unix socket shared with Nginx. Nginx limits
 the entire portal, including failed Basic Auth checks, to five requests per
 minute per source with a small burst. Five authentication failures within ten
@@ -183,7 +215,11 @@ T3 origin.
 ```text
 infra-tools-t3code.service
 infra-tools-device-pairing.service
+infra-tools-t3code-connect.path
+infra-tools-t3code-connect.service
 /etc/nginx/sites-available/infra-tools-device-pairing
+/etc/infra-tools/internal-web/policy.json
+/etc/infra-tools/internal-web/forwards.json
 /etc/infra-tools/device-pairing/providers.json
 /etc/infra-tools/device-pairing/htpasswd
 /run/infra-tools-device-pairing/http.sock
