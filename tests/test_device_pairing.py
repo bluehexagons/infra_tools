@@ -352,6 +352,44 @@ class PairingBrokerTest(unittest.TestCase):
         rendered = _connect_output_html("Output https://[malformed and continue")
         self.assertIn("https://[malformed and continue", rendered)
 
+    def test_connect_status_refresh_route_is_not_a_404(self) -> None:
+        provider = self._provider()
+        provider["connect"] = {
+            "link_command": ["/opt/t3", "connect", "link"],
+            "status_command": ["/opt/t3", "connect", "status"],
+            "unlink_command": ["/opt/t3", "connect", "unlink"],
+            "restart_request": "/tmp/t3-connect-restart",
+        }
+        state = PairingState({"t3code": provider})
+        nonce = state.new_nonce()
+        headers = Message()
+        headers["X-Forwarded-Proto"] = "https"
+        headers["Cookie"] = f"infra_tools_pairing_nonce={nonce}"
+        handler = PairingRequestHandler.__new__(PairingRequestHandler)
+        handler.server = SimpleNamespace(pairing_state=state)
+        handler.path = "/connect/t3code"
+        handler.command = "GET"
+        handler.request_version = "HTTP/1.1"
+        handler.requestline = "GET /connect/t3code HTTP/1.1"
+        handler.headers = headers
+        handler.wfile = BytesIO()
+
+        with patch.object(
+            state,
+            "connect_snapshot",
+            return_value={"active": True, "output": "Waiting for authorization"},
+        ):
+            handler.do_GET()
+
+        response = handler.wfile.getvalue().decode("iso-8859-1")
+        self.assertIn(" 200 ", response)
+        self.assertNotIn(" 404 ", response)
+        self.assertIn("Response or authorization code", response)
+        self.assertIn("Refresh status", response)
+        self.assertNotIn('http-equiv="refresh"', response)
+        self.assertIn(f'name="nonce" value="{nonce}"', response)
+        self.assertIn("/connect/t3code", response)
+
     def test_rejects_provider_redirect_to_another_origin(self) -> None:
         with self.assertRaises(PairingError):
             _safe_pairing_url(
@@ -376,7 +414,9 @@ class PairingBrokerTest(unittest.TestCase):
     def test_nonce_is_single_use(self) -> None:
         state = PairingState({"t3code": self._provider()})
         nonce = state.new_nonce()
+        self.assertTrue(state.nonce_is_valid(nonce))
         self.assertTrue(state.consume_nonce(nonce))
+        self.assertFalse(state.nonce_is_valid(nonce))
         self.assertFalse(state.consume_nonce(nonce))
 
     def test_pairing_issuance_is_rate_limited_per_source(self) -> None:
@@ -421,6 +461,38 @@ class PairingBrokerTest(unittest.TestCase):
             self.assertEqual(snapshot["returncode"], 0)
             self.assertIn("received approved", str(snapshot["output"]))
             self.assertTrue(os.path.isfile(restart_request))
+
+    def test_apply_preserves_an_already_enabled_connect_state(self) -> None:
+        provider = self._provider()
+        provider["connect"] = {
+            "link_command": ["/opt/t3", "connect", "link"],
+            "status_command": ["/opt/t3", "connect", "status"],
+            "unlink_command": ["/opt/t3", "connect", "unlink"],
+            "restart_request": "/tmp/t3-connect-restart",
+        }
+        state = PairingState({"t3code": provider})
+        job = state._connect_jobs["t3code"]
+        with (
+            patch.object(
+                state,
+                "connect_snapshot",
+                return_value={"status": {"desired": True}},
+            ),
+            patch.object(job, "start") as start,
+        ):
+            state.set_connect_enabled("t3code", True)
+        start.assert_not_called()
+
+        with (
+            patch.object(
+                state,
+                "connect_snapshot",
+                return_value={"status": {"desired": False}},
+            ),
+            patch.object(state, "unlink_connect") as unlink,
+        ):
+            state.set_connect_enabled("t3code", False)
+        unlink.assert_called_once_with("t3code")
 
     def test_http_portal_renders_explicit_single_use_provider_link(self) -> None:
         state = PairingState({"t3code": self._provider()})

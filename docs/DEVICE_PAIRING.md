@@ -122,12 +122,15 @@ service.
 After authorization, the portal requests a restart of
 `infra-tools-t3code.service`. T3 then reconciles the saved Connect preference
 and starts the managed tunnel. The checkbox represents that desired startup
-state: clearing it runs `t3 connect unlink`, while enabling it starts the same
-headless authorization flow again. The relay binary may remain installed when
-Connect is disabled, but no tunnel is started.
+state: clearing it runs `t3 connect unlink`, while enabling it starts the
+headless authorization flow only when Connect is not already enabled. The
+relay binary may remain installed when Connect is disabled, but no tunnel is
+started.
 
-The Connect operation is held only in the pairing broker's memory, expires
-after fifteen minutes, and its CLI output is never written to the journal or a
+The active Connect operation is held only in the pairing broker's memory and
+expires after fifteen minutes. While it is running, use **Refresh status** to
+see new CLI output; the page does not reload automatically while you are
+entering a response. Its CLI output is never written to the journal or a
 configuration file. A root-owned systemd path trigger accepts only a fixed
 request file from the target user's broker; it cannot run arbitrary commands.
 

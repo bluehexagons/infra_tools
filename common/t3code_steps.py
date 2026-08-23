@@ -901,6 +901,8 @@ def _remove_device_pairing() -> None:
 def _configure_connect_restart_units(state_dir: str) -> None:
     """Install a root-owned path trigger for safe T3 service reconciliation."""
 
+    if os.geteuid() != 0:
+        return
     if os.path.lexists(state_dir) and (
         os.path.islink(state_dir) or not os.path.isdir(state_dir)
     ):
@@ -952,6 +954,8 @@ ExecStart=/usr/bin/systemctl restart {T3_SERVICE_NAME}.service
 
 
 def _remove_connect_restart_units(state_dir: str | None = None) -> None:
+    if os.geteuid() != 0:
+        return
     if state_dir is not None and os.path.lexists(state_dir) and (
         os.path.islink(state_dir) or not os.path.isdir(state_dir)
     ):

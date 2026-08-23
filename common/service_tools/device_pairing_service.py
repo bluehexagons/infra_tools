@@ -231,12 +231,6 @@ class ConnectJob:
         with self._lock:
             if self._process is not None:
                 raise PairingError("A T3 Connect operation is already running")
-            if self._finished_at is not None and (
-                time.monotonic() - self._finished_at < CONNECT_JOB_TTL_SECONDS
-            ):
-                raise PairingError(
-                    "Finish or reload the current T3 Connect operation first"
-                )
             self._output = ""
             self._error = None
             self._returncode = None
@@ -368,6 +362,17 @@ class PairingState:
             created = self._nonces.pop(nonce, None)
         return created is not None and now - created <= NONCE_TTL_SECONDS
 
+    def nonce_is_valid(self, nonce: str) -> bool:
+        now = time.monotonic()
+        with self._lock:
+            created = self._nonces.get(nonce)
+            if created is None:
+                return False
+            if now - created > NONCE_TTL_SECONDS:
+                self._nonces.pop(nonce, None)
+                return False
+            return True
+
     def allow_request(self, source: str) -> bool:
         now = time.monotonic()
         with self._lock:
@@ -473,6 +478,18 @@ class PairingState:
             raise PairingError("T3 Connect is not configured")
         job.start()
 
+    def set_connect_enabled(self, provider_name: str, enabled: bool) -> None:
+        job = self._connect_jobs.get(provider_name)
+        if job is None:
+            raise PairingError("T3 Connect is not configured")
+        status = self.connect_snapshot(provider_name).get("status")
+        desired = bool(isinstance(status, dict) and status.get("desired") is True)
+        if enabled:
+            if not desired:
+                job.start()
+        else:
+            self.unlink_connect(provider_name)
+
     def send_connect_input(self, provider_name: str, value: str) -> None:
         job = self._connect_jobs.get(provider_name)
         if job is None:
@@ -570,6 +587,12 @@ class PairingRequestHandler(BaseHTTPRequestHandler):
         morsel = cookie.get("infra_tools_pairing_nonce")
         return morsel.value if morsel is not None else ""
 
+    def _page_nonce(self) -> str:
+        current = self._nonce_cookie()
+        if current and self.state.nonce_is_valid(current):
+            return current
+        return self.state.new_nonce()
+
     def _connect_section(
         self,
         name: str,
@@ -605,15 +628,22 @@ class PairingRequestHandler(BaseHTTPRequestHandler):
         escaped_name = html.escape(name, quote=True)
         escaped_nonce = html.escape(nonce, quote=True)
         active = bool(snapshot.get("active"))
-        enabled = bool(isinstance(status, dict) and status.get("desired"))
+        enabled = bool(isinstance(status, dict) and status.get("desired") is True)
         if active:
             action = (
+                '<p class="muted">Connect is running. Wait for a prompt or '
+                'authorization URL, then enter the requested response here. '
+                'Use Refresh status to check for new output without losing '
+                'what you have typed.</p>'
                 f'<form method="post" action="/connect/{escaped_name}">'
                 f'<input type="hidden" name="nonce" value="{escaped_nonce}">'
                 '<input type="hidden" name="intent" value="input">'
-                '<label>Next command response or authorization code '
-                '<input name="input" maxlength="512" autocomplete="off" required></label> '
-                '<button type="submit">Send</button></form>'
+                '<label for="connect-input">Response or authorization code</label> '
+                '<input id="connect-input" name="input" maxlength="512" '
+                'autocomplete="off" placeholder="Enter the requested response" required> '
+                '<button type="submit">Send response</button></form>'
+                f'<form method="get" action="/connect/{escaped_name}">'
+                '<button type="submit">Refresh status</button></form>'
             )
         else:
             checked = " checked" if enabled else ""
@@ -624,19 +654,14 @@ class PairingRequestHandler(BaseHTTPRequestHandler):
                 f'<label><input type="checkbox" name="enabled"{checked}> '
                 'Enable T3 Connect tunnel</label> '
                 '<button type="submit">Apply</button></form>'
-            )
-        refresh = '<meta http-equiv="refresh" content="2">' if active else ""
+        )
         return (
-            f"{refresh}<section><h2>T3 Connect</h2>"
+            '<section aria-live="polite"><h2>T3 Connect</h2>'
             "<p>Authorize this machine with T3 Connect. T3 installs its pinned "
             "relay client when requested and the managed T3 service starts the "
             "tunnel after authorization.</p>"
             f"<p class=\"muted\">{status_text}</p>{error_block}{output_block}"
-            + (
-                action
-                if active or not enabled
-                else action
-            )
+            + action
             + (
                 ""
                 if active
@@ -650,11 +675,40 @@ class PairingRequestHandler(BaseHTTPRequestHandler):
             + "</section>"
         )
 
+    def _connect_page(
+        self,
+        name: str,
+        provider: dict[str, Any],
+        nonce: str,
+        *,
+        error: str | None = None,
+    ) -> str:
+        return (
+            self._connect_section(name, provider, nonce, error=error)
+            + '<p><a href="/">Back to device pairing</a></p>'
+        )
+
     def do_GET(self) -> None:
-        if urlsplit(self.path).path != "/":
+        path = urlsplit(self.path).path
+        connect_match = re.fullmatch(r"/connect/([a-z0-9-]{1,32})", path)
+        if connect_match is not None:
+            provider_name = connect_match.group(1)
+            provider = self.state.providers.get(provider_name)
+            if provider is None or provider_name not in self.state._connect_jobs:
+                self.send_error(HTTPStatus.NOT_FOUND)
+                return
+            nonce = self._page_nonce()
+            self._send_html(
+                HTTPStatus.OK,
+                "T3 Connect",
+                self._connect_page(provider_name, provider, nonce),
+                nonce=nonce,
+            )
+            return
+        if path != "/":
             self.send_error(HTTPStatus.NOT_FOUND)
             return
-        nonce = self.state.new_nonce()
+        nonce = self._page_nonce()
         buttons = []
         connect_sections = []
         for name, provider in sorted(self.state.providers.items()):
@@ -754,16 +808,21 @@ class PairingRequestHandler(BaseHTTPRequestHandler):
                         (form.get("input") or [""])[0],
                     )
                 elif intent == "toggle":
-                    if (form.get("enabled") or [""])[0] == "on":
-                        self.state.start_connect(provider_name)
-                    else:
-                        self.state.unlink_connect(provider_name)
+                    self.state.set_connect_enabled(
+                        provider_name,
+                        (form.get("enabled") or [""])[0] == "on",
+                    )
             except PairingError as exc:
                 nonce = self.state.new_nonce()
                 self._send_html(
                     HTTPStatus.BAD_REQUEST,
                     "T3 Connect action failed",
-                    self._connect_section(provider_name, provider, nonce, error=str(exc)),
+                    self._connect_page(
+                        provider_name,
+                        provider,
+                        nonce,
+                        error=str(exc),
+                    ),
                     nonce=nonce,
                 )
                 return
@@ -771,7 +830,7 @@ class PairingRequestHandler(BaseHTTPRequestHandler):
             self._send_html(
                 HTTPStatus.OK,
                 "T3 Connect",
-                self._connect_section(provider_name, provider, nonce),
+                self._connect_page(provider_name, provider, nonce),
                 nonce=nonce,
             )
             return
