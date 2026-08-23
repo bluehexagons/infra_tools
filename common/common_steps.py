@@ -534,6 +534,38 @@ def install_cli_tools(config: SetupConfig) -> None:
     print(f"  ✓ Installed CLI tools: {', '.join(missing)}")
 
 
+def ensure_python_alias(config: SetupConfig) -> str | None:
+    """Expose ``python3`` as ``python`` when the conventional alias is absent."""
+    del config
+    if is_dry_run():
+        print("  [DRY-RUN] Would ensure the python command alias")
+        return None
+
+    python3_path = shutil.which("python3")
+    if not python3_path:
+        print("  ℹ python3 is unavailable; skipping the python command alias")
+        return None
+
+    python_path = shutil.which("python")
+    if python_path:
+        print("  ✓ python command already available")
+        return python3_path
+
+    alias_path = "/usr/local/bin/python"
+    if os.path.lexists(alias_path):
+        raise RuntimeError(
+            f"Cannot create python alias; an unmanaged path already exists: {alias_path}"
+        )
+    if not os.path.isfile(python3_path):
+        raise RuntimeError(f"python3 path is not a regular file: {python3_path}")
+
+    run(f"ln -s {shlex.quote(python3_path)} {shlex.quote(alias_path)}")
+    if not os.path.isfile(alias_path):
+        raise RuntimeError("python alias could not be verified after creation")
+    print("  ✓ Added python alias to python3")
+    return python3_path
+
+
 def install_data_analysis_tools(config: SetupConfig) -> None:
     """Install the opt-in Python data-analysis and notebook bundle."""
 
@@ -1120,15 +1152,7 @@ def install_python(config: SetupConfig) -> None:
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     run("apt-get install -y -qq python3 python3-venv curl")
 
-    python3_path = shutil.which("python3")
-    python_path = shutil.which("python")
-
-    if python3_path and not python_path:
-        run(f"ln -sfn {shlex.quote(python3_path)} /usr/local/bin/python")
-        print("  ✓ Added python alias to python3")
-    elif python_path:
-        print("  ✓ python command already available")
-
+    python3_path = ensure_python_alias(config)
     if python3_path:
         print("  ✓ python3 command already available")
     else:

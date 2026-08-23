@@ -17,6 +17,7 @@ from common.common_steps import (
     _ensure_vm_setup_user_sudoers,
     _run_as_login_user,
     check_debian_package_sources,
+    ensure_python_alias,
     install_cli_tools,
     install_data_analysis_tools,
     update_and_upgrade_packages,
@@ -87,6 +88,29 @@ class TestControlPlanePackages(unittest.TestCase):
 
 
 class TestDevelopmentToolPackages(unittest.TestCase):
+    @patch("common.common_steps.os.path.isfile", return_value=True)
+    @patch("common.common_steps.os.path.lexists", return_value=False)
+    @patch("common.common_steps.shutil.which", side_effect=["/usr/bin/python3", None])
+    @patch("common.common_steps.run")
+    def test_python_alias_is_added_when_missing(
+        self, mock_run, _which, _lexists, _isfile
+    ):
+        ensure_python_alias(
+            SetupConfig(host="testhost", username="agent", system_type="agent_vm")
+        )
+
+        mock_run.assert_called_once_with(
+            "ln -s /usr/bin/python3 /usr/local/bin/python"
+        )
+
+    @patch("common.common_steps.shutil.which", side_effect=["/usr/bin/python3", "/usr/bin/python"])
+    @patch("common.common_steps.run")
+    def test_python_alias_keeps_existing_command(self, mock_run, _which):
+        ensure_python_alias(
+            SetupConfig(host="testhost", username="agent", system_type="agent_vm")
+        )
+        mock_run.assert_not_called()
+
     def test_cli_baseline_contains_small_agent_tools(self):
         self.assertTrue(
             {

@@ -20,6 +20,7 @@ PLUGIN = PluginDefinition(
         "install_go",
         "install_node",
         "install_python",
+        "ensure_python_alias",
         "install_godot",
         "install_godot_bundles",
         "install_github_cli",
@@ -128,11 +129,16 @@ def extend_control_plane_steps(config: SetupConfig, steps: list[tuple[str, StepF
 def get_final_steps(config: SetupConfig) -> list[tuple[str, StepFunc]]:
     """Return the standard final verification steps for built-in setup flows."""
 
-    from common.steps import check_restart_required, configure_static_network
+    from common.steps import (
+        check_restart_required,
+        configure_static_network,
+        ensure_python_alias,
+    )
 
     steps: list[tuple[str, StepFunc]] = []
     if config.static_ipv4 or config.static_ipv6:
         steps.append(("Staging static network configuration", configure_static_network))
+    steps.append(("Ensuring python command alias", ensure_python_alias))
     steps.append(("Checking if restart required", check_restart_required))
     return steps
 
@@ -297,6 +303,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         install_mail_utils,
         install_node,
         install_python,
+        ensure_python_alias,
         setup_user,
         update_and_upgrade_packages,
     )
@@ -324,6 +331,7 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "install_go": install_go,
         "install_node": install_node,
         "install_python": install_python,
+        "ensure_python_alias": ensure_python_alias,
         "install_godot": install_godot,
         "install_godot_bundles": install_godot_bundles,
         "install_github_cli": install_github_cli,
