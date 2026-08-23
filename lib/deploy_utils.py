@@ -51,8 +51,8 @@ def detect_project_type(repo_path: str) -> str:
 def is_ruby_project(repo_path: str) -> bool:
     """Return whether a source tree contains Ruby/Rails project markers.
 
-    Ruby support was removed, but a narrow detector remains so current releases
-    can refuse legacy deployments before modifying the target.
+    Ruby support was removed, but a narrow detector remains so v2.0.0 and later
+    releases can refuse legacy deployments before modifying the target.
     """
     return any(
         os.path.exists(path)

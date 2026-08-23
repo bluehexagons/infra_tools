@@ -1,6 +1,6 @@
 # Command-Line Reference
 
-Reference for the installed `infra-tools` CLI. The code help and
+Reference for the upcoming stable `v2.0.0` `infra-tools` CLI. The code help and
 `lib/arg_parser.py` are the source of truth; this page summarizes the command
 surface and behaviors that are easy to miss.
 
@@ -98,6 +98,7 @@ tools, not for an LXC container.
 | `server_web` | Web server |
 | `server_lite` | Lightweight server |
 | `server_proxmox` | Proxmox host server |
+| `custom_steps` | Run an explicitly selected step list for advanced or development workflows |
 
 ### Core Flags
 
@@ -109,6 +110,7 @@ tools, not for an LXC container.
 | `-p, --password PASS` | SSH password |
 | `-t, --timezone TZ` | Timezone |
 | `--hostname NAME` | Set the target system hostname; distinct from the saved `--name` label |
+| `--mdns` / `--no-mdns` | Enable or disable Avahi/mDNS advertisement of the target hostname as `NAME.local` |
 | `--ip ADDRESS/PREFIX` | Stage a persistent static IPv4 address; CIDR prefix is required |
 | `--ipv6 ADDRESS/PREFIX` | Stage a persistent static IPv6 address; CIDR prefix is required |
 | `--gateway IP` | IPv4 default gateway; requires `--ip` or an IPv4 `--provision-on` target |
@@ -124,6 +126,7 @@ tools, not for an LXC container.
 | `--tags TAG1,TAG2` | Comma-separated tags |
 | `--image SOURCE` | VM HTTPS qcow2 URL or `STORAGE:import/FILE` / `STORAGE:iso/FILE` reference; used with `--machine vm` |
 | `--image-storage STORAGE` | Storage for downloaded VM images; prefers `import`, then falls back to `iso` content |
+| `--verify-provider` | For `setup` with `--provision-on`, verify the cached guest against Proxmox and reconcile supported provider-side settings |
 | `--image-sha512 HEX` | Required 128-character SHA-512 for a custom HTTPS VM image URL |
 | `--steps STEP...` | Run an explicit space-separated step list with `custom_steps` |
 | `--dry-run` | Validate the setup and print its step plan without executing commands or changing target files |
@@ -180,6 +183,11 @@ for the configured private-key passphrase; piped or otherwise non-interactive
 runs require the key to be loaded in an SSH agent. See
 [SSH authentication](SSH.md) for the same behavior across transfers,
 Proxmox operations, maintenance, and agent commands.
+
+`--verify-provider` is a setup-only check and requires `--provision-on`. Use it
+when a cached provisioned guest should be compared with Proxmox even though
+the saved declaration has not changed; supported provider-side drift, such as
+the guest vCPU count, is reconciled and verified.
 
 `--activate-network` uses a retry-safe transaction for an existing host and
 must be run from a separate controller. The remote
@@ -885,6 +893,10 @@ infra-tools proxmox modify <host> <vmid> [--cores N] [--memory N[M|G]]
 infra-tools proxmox resize-disk <host> <vmid> <volume> <size>
 infra-tools proxmox backups <host> <vmid>
 infra-tools proxmox backup <host> <vmid> [--storage POOL] [--mode MODE] [--compress FORMAT]
+infra-tools proxmox snapshots <host> <vmid>
+infra-tools proxmox snapshot <host> <vmid> <name> [--description TEXT] [--dry-run]
+infra-tools proxmox rollback <host> <vmid> <name> [--dry-run]
+infra-tools proxmox delsnapshot <host> <vmid> <name> [--dry-run]
 infra-tools proxmox migrate <host> <vmid> <target> [--online] [--with-local-disks]
 infra-tools proxmox clean-disks <host> [--delete] [--yes] [--dry-run]
 infra-tools proxmox unlock <host> <vmid> [--dry-run]
@@ -923,7 +935,7 @@ marker. It exits nonzero when the host is not healthy and supports stable JSON
 output for automation.
 
 Registered host records contain `schema_version: 1` and `provider: proxmox`.
-The current release rejects incompatible development records rather than
+`v2.0.0` rejects incompatible development records rather than
 guessing how to interpret them. Remove an incompatible record by its stored
 name or address, then register it again:
 

@@ -1,6 +1,6 @@
 # Agent VM Workspaces and Credentials
 
-Status: implemented in the current release. Authenticated non-GitHub
+Status: implemented in `v2.0.0`. Authenticated non-GitHub
 providers and offline snapshot mode remain future work.
 
 This project makes it straightforward to provision a Debian VM for agentic
@@ -26,7 +26,7 @@ Earlier development versions of the agent-host path combined several concerns:
 
 That model is workable when the controller is also the user's development
 machine, but it is a poor fit for a control system that only manages VMs. The
-current release instead lets the controller select explicit target tools,
+The `v2.0.0` release instead lets the controller select explicit target tools,
 operate without those tools installed locally, provide public repositories
 without credentials, and select per-VM credentials without putting secret
 values in a saved command.
@@ -333,7 +333,7 @@ source options are operation-only and are omitted from saved commands.
 
 ## Delivered implementation phases
 
-The phases below are complete in the current release. Their bullets record the
+The phases below are complete in `v2.0.0`. Their bullets record the
 delivered design and security boundaries; they are not an open implementation
 queue. Authenticated non-GitHub providers and offline snapshot mode remain
 explicitly deferred as stated above.

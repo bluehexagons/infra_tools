@@ -32,8 +32,8 @@ Separate runtime flags are therefore unnecessary for ordinary deployments.
 Explicit flags remain useful when a repository generates those files later or
 uses a non-standard layout.
 
-Ruby and Rails deployments are not supported. Current releases detect common
-Ruby project markers and stop locally before uploading setup files or changing
+Ruby and Rails deployments are not supported. `v2.0.0` detects common
+Ruby project markers and stops locally before uploading setup files or changing
 the target. Keep a pinned older infra-tools release for a legacy Rails site;
 current setup runs leave its existing `rails-*.service` unit and same-domain
 generated Nginx site in place when that whole domain is omitted from the new

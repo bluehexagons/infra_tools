@@ -1,6 +1,7 @@
 # Planning and Issue Index
 
-Status: current portfolio index. This file organizes active project plans,
+Status: current portfolio index for the upcoming `v2.0.0` stable release. This
+file organizes active project plans,
 audit inputs, and open GitHub issues without replacing the detailed scope in
 the [project roadmap](ROADMAP.md) or the
 [issue triage](GITHUB_ISSUE_TRIAGE_2026-08-17.md).
@@ -24,6 +25,9 @@ the [project roadmap](ROADMAP.md) or the
 The roadmap owns priority. The issue triage owns issue-to-implementation
 evidence. A detailed project plan owns delivery sequence and acceptance
 criteria.
+
+The live operator contract is maintained under `docs/`; these plans may
+intentionally describe work deferred beyond `v2.0.0`.
 
 ## Project portfolio
 

@@ -8,11 +8,18 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+EXPECTED_RELEASE_VERSION = "2.0.0"
 
 
 def main() -> int:
     with (ROOT / "pyproject.toml").open("rb") as file_obj:
         project = tomllib.load(file_obj)["project"]
+    if project.get("version") != EXPECTED_RELEASE_VERSION:
+        print(
+            "pyproject.toml must declare the upcoming stable release version "
+            f"{EXPECTED_RELEASE_VERSION}"
+        )
+        return 1
     scripts = project.get("scripts", {})
     if scripts.get("infra-tools") != "infra_tools:main":
         print("pyproject.toml must expose infra_tools:main as the infra-tools entry point")

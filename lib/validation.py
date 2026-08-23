@@ -1487,7 +1487,7 @@ def validate_vm_storage_settings(
         config, "hosted_node", None
     ):
         raise ValueError(
-            "--storage and --storage-mount require --provision-on in this release"
+            "--storage and --storage-mount require --provision-on"
         )
 
     if agent_workspace is not None:

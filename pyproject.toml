@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "infra_tools"
-version = "1.0.0"
+version = "2.0.0"
 description = "Automated setup scripts for remote Linux systems"
 requires-python = ">=3.10"
 dependencies = []

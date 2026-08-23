@@ -4,6 +4,9 @@ Use the installer on the machine that will manage your hosts. It keeps a local
 Git worktree, installs the managed `infra-tools` launcher, and can configure
 the same machine immediately.
 
+This guide targets the upcoming stable `v2.0.0` release. Before that tag is
+published, `dev` follows `main` and `stable` selects the latest published tag.
+
 Debian is the only officially supported distribution. Ubuntu and Linux Mint are
 recognized as best-effort Debian-compatible hosts.
 
@@ -214,7 +217,7 @@ infra-tools setup server_web example.com admin \
 ```
 
 Ruby/Rails setup and deployment support has been removed. Keep a pinned older
-infra-tools installation for a legacy Rails host; current releases refuse Ruby
+infra-tools installation for a legacy Rails host; `v2.0.0` refuses Ruby
 repositories rather than attempting an in-place migration.
 
 For agentic coding targets, use the [headless terminal example](WORKSTATIONS.md#headless-agentic-coding-host)
@@ -230,7 +233,7 @@ launcher stays installed while the worktree's channel changes:
 | --- | --- |
 | `stable` | Latest `vMAJOR.MINOR.PATCH` release tag |
 | `dev` | `main` branch |
-| `v<version>` | One release tag, such as `v1.2.3` |
+| `v<version>` | One release tag, such as `v2.0.0` |
 | `branch-<branch>` | Any existing branch |
 | `commit-<hash>` | One exact commit |
 

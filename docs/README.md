@@ -3,6 +3,14 @@
 Use the [root README](../README.md) for the project overview. This index links
 to the detailed setup and operations guides.
 
+## Release target
+
+The operator guides describe the upcoming stable `v2.0.0` command and behavior
+contract. The repository’s `dev` channel may receive changes before that tag is
+published; see [Installation and bootstrap](INSTALLATION.md) for channel
+selection and upgrade guidance. The `plans/` documents are implementation
+references and may describe future work separately from this live contract.
+
 ## Start here
 
 | Guide | Use it for |

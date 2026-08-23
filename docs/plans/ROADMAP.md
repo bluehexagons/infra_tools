@@ -1,6 +1,6 @@
 # Project Roadmap
 
-Status: active planning guidance.
+Status: active planning guidance for the upcoming `v2.0.0` stable release.
 
 This roadmap is intentionally opinionated. `infra-tools` already supports a
 wide range of setup and operations tasks; the next releases should complete
@@ -33,7 +33,7 @@ operating model. Prefer safeguards that reduce operator effort and make
 failures obvious; defer controls that require recurring manual administration
 until actual usage or incidents justify them.
 
-## Verification snapshot (2026-08-21)
+## Verification snapshot (2026-08-23)
 
 The ordering remains justified by the current implementation:
 
@@ -69,6 +69,9 @@ The ordering remains justified by the current implementation:
 - the old callback-based transaction framework has been removed; sync and scrub
   now fail explicitly, while durable setup/deployment operation records are
   landed and retain interruption/recovery context.
+- hosted Proxmox provisioning now accepts fractional memory sizes, reconciles
+  provider-side vCPU drift when requested, and uses the corrected named-disk
+  allocation syntax; these remain covered by focused provider tests.
 
 The manifest environment-key injection finding is resolved. CI now tests
 Python 3.13, the interpreter shipped by Debian Trixie, and `make compile`

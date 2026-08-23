@@ -68,7 +68,7 @@ avoid abstraction whose only purpose is a hypothetical provider or service.
 - Gogs LFS object transfer is supported, but LFS file locking is not. LFS uses
   HTTP/HTTPS authentication even when ordinary Git uses an SSH remote; setup
   and documentation must not imply otherwise.
-- The next release intentionally breaks compatibility with unreleased
+- The `v2.0.0` release intentionally breaks compatibility with unreleased
   development commands, configuration shapes, and internal APIs. A redesign
   must update saved-command rendering, documentation, completions, callers,
   and tests in the same change, then remove the superseded path instead of

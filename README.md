@@ -5,6 +5,10 @@ and Proxmox guests. infra-tools applies repeatable, machine-aware configuration
 over SSH, stores redacted setup state in a workspace, and provides targeted
 operations for hosts that are already configured.
 
+The documentation in this checkout describes the upcoming stable `v2.0.0`
+release. Until that tag is published, the installer’s `dev` channel tracks
+`main`; use `stable` when you need the latest published release.
+
 ## Start here
 
 The supported workflow starts with the installer. It keeps the repository

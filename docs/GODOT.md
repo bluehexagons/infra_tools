@@ -1,9 +1,9 @@
 # Godot Engine
 
 Use `--godot` with any setup profile to install the newest stable standard
-Godot Engine release. Godot 4.7.2 was the current stable release when this
-support was added. The installer resolves the current version at run time, so
-the repository does not need a version bump for later stable releases.
+Godot Engine release. The installer resolves the engine version at run time;
+the `v2.0.0` infra-tools release therefore does not pin a Godot version in its
+operator contract.
 
 ```bash
 # Graphical editor on an agent workstation

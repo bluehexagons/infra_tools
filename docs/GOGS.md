@@ -44,8 +44,8 @@ infra-tools setup server_web 192.168.1.10 deploy \
 
 Source-restricted mode requires active UFW. Setup stops the existing Gogs
 service, installs and verifies replacement source rules, removes obsolete
-infra-tools-managed rules, and only then writes a non-loopback listener. It
-refuses public IPv4 sources, IPv6 sources in this release, and unmanaged allow
+infra-tools-managed rules, and only then writes a non-loopback listener. In
+`v2.0.0`, it refuses public IPv4 sources, IPv6 sources, and unmanaged allow
 rules for the same port. A source rule does not encrypt traffic; use hostname
 mode with `--ssl` or `--cloudflare` across untrusted networks. Hostname mode
 requires one of those encrypted ingress options. Switching between hostless,
