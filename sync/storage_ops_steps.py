@@ -31,17 +31,17 @@ def schedule_storage_ops_update(delay_minutes: int = 2) -> None:
     """Schedule a near-term storage operations run via systemd-run."""
     transient_unit_name = f"storage-ops-initial-update-{os.getpid()}-{int(time.time())}"
     result = run(
-        " ".join(
-            [
-                "systemd-run",
-                "--collect",
-                f"--unit={transient_unit_name}",
-                "--on-active",
-                f"{delay_minutes}m",
-                "--property=Type=oneshot",
-                f"/usr/bin/systemctl start {SERVICE_NAME}.service",
-            ]
-        ),
+        [
+            "systemd-run",
+            "--collect",
+            f"--unit={transient_unit_name}",
+            "--on-active",
+            f"{delay_minutes}m",
+            "--property=Type=oneshot",
+            "/usr/bin/systemctl",
+            "start",
+            f"{SERVICE_NAME}.service",
+        ],
         check=False,
     )
     if result.returncode == 0:
@@ -136,10 +136,10 @@ WantedBy=timers.target
     print(f"    ✓ Created timer: {SERVICE_NAME}.timer (hourly)")
 
     # Reload systemd and enable/start timer
-    run("systemctl daemon-reload")
-    run(f"systemctl enable {SERVICE_NAME}.timer")
-    run(f"systemctl start {SERVICE_NAME}.timer")
-    run(f"systemctl --no-pager status {SERVICE_NAME}.timer", check=False)
+    run(["systemctl", "daemon-reload"])
+    run(["systemctl", "enable", f"{SERVICE_NAME}.timer"])
+    run(["systemctl", "start", f"{SERVICE_NAME}.timer"])
+    run(["systemctl", "--no-pager", "status", f"{SERVICE_NAME}.timer"], check=False)
 
     print(f"    ✓ Storage operations timer started")
     print(f"    ℹ Run 'systemctl status {SERVICE_NAME}.timer' to check status")

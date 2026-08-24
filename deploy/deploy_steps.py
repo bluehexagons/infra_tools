@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 import os
-import shlex
 import sys
 from typing import Any, Optional
 
@@ -16,15 +15,23 @@ DEPLOY_GROUP = "web-deploy"
 
 
 def ensure_deploy_user(username: str) -> None:
-    result = run(f"id {shlex.quote(username)}", check=False)
+    result = run(["id", username], check=False)
     if result.returncode != 0:
         print(f"  Creating deployment owner: {username}")
         home_dir = f"/var/lib/infra_tools/{username}"
-        run("mkdir -p /var/lib/infra_tools")
+        run(["mkdir", "-p", "/var/lib/infra_tools"])
         run(
-            "useradd --system --user-group "
-            f"--home-dir {shlex.quote(home_dir)} --create-home "
-            f"--shell /usr/sbin/nologin {shlex.quote(username)}"
+            [
+                "useradd",
+                "--system",
+                "--user-group",
+                "--home-dir",
+                home_dir,
+                "--create-home",
+                "--shell",
+                "/usr/sbin/nologin",
+                username,
+            ]
         )
 
 

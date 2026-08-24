@@ -19,11 +19,15 @@ class TestDeployUserDefaults(unittest.TestCase):
 
         ensure_deploy_user(DEPLOY_USER)
 
-        self.assertEqual(mock_run.call_args_list[0].args[0], f"id {DEPLOY_USER}")
-        self.assertEqual(mock_run.call_args_list[1].args[0], "mkdir -p /var/lib/infra_tools")
+        self.assertEqual(mock_run.call_args_list[0].args[0], ["id", DEPLOY_USER])
+        self.assertEqual(
+            mock_run.call_args_list[1].args[0],
+            ["mkdir", "-p", "/var/lib/infra_tools"],
+        )
         create_cmd = mock_run.call_args_list[2].args[0]
-        self.assertIn("useradd --system --user-group", create_cmd)
-        self.assertIn("--shell /usr/sbin/nologin", create_cmd)
+        self.assertEqual(create_cmd[:3], ["useradd", "--system", "--user-group"])
+        self.assertIn("--shell", create_cmd)
+        self.assertIn("/usr/sbin/nologin", create_cmd)
         self.assertIn(DEPLOY_USER, create_cmd)
 
     @patch('lib.project_manifest.load_manifest', return_value=None)

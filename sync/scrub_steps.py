@@ -29,7 +29,7 @@ def install_par2(config: SetupConfig) -> None:
         return
     
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    run("apt-get install -y -qq par2")
+    run(["apt-get", "install", "-y", "-qq", "par2"])
     print("  ✓ par2 installed")
 
 def parse_scrub_spec(scrub_spec: list[str]) -> dict[str, Any]:

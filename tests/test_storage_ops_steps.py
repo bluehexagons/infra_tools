@@ -63,10 +63,10 @@ class TestScheduleStorageOpsUpdate(unittest.TestCase):
         schedule_storage_ops_update()
         run_cmd.assert_called_once()
         command = run_cmd.call_args[0][0]
-        self.assertIn("systemd-run --collect", command)
-        self.assertIn("--unit=storage-ops-initial-update-", command)
-        self.assertIn("--on-active 2m", command)
-        self.assertIn("systemctl start storage-ops.service", command)
+        self.assertEqual(command[:2], ["systemd-run", "--collect"])
+        self.assertTrue(any(item.startswith("--unit=storage-ops-initial-update-") for item in command))
+        self.assertEqual(command[command.index("--on-active") + 1], "2m")
+        self.assertEqual(command[-3:], ["/usr/bin/systemctl", "start", "storage-ops.service"])
         self.assertEqual(run_cmd.call_args[1], {"check": False})
 
     @patch(
@@ -77,7 +77,7 @@ class TestScheduleStorageOpsUpdate(unittest.TestCase):
         schedule_storage_ops_update(delay_minutes=7)
         run_cmd.assert_called_once()
         command = run_cmd.call_args[0][0]
-        self.assertIn("--on-active 7m", command)
+        self.assertEqual(command[command.index("--on-active") + 1], "7m")
 
 
 if __name__ == "__main__":

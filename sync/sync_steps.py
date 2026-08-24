@@ -24,7 +24,7 @@ def install_rsync(config: SetupConfig) -> None:
         return
     
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    run("apt-get install -y -qq rsync")
+    run(["apt-get", "install", "-y", "-qq", "rsync"])
     print("  ✓ rsync installed")
 
 def parse_sync_spec(sync_spec: list[str]) -> dict[str, Any]:

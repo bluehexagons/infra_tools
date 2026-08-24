@@ -97,6 +97,32 @@ class TestRunCommandDispatch(unittest.TestCase):
         )
 
     @patch("lib.remote_utils.subprocess.Popen")
+    def test_argv_commands_bypass_shell_parsing(self, mock_popen):
+        self._completed_process(mock_popen)
+
+        run(["printf", "%s", "value with spaces; no shell expansion"])
+
+        mock_popen.assert_called_once_with(
+            ["printf", "%s", "value with spaces; no shell expansion"],
+            stdin=None,
+            stdout=None,
+            stderr=None,
+            text=True,
+            cwd=None,
+            start_new_session=False,
+        )
+
+    @patch("lib.remote_utils.subprocess.Popen")
+    def test_argv_command_redaction_preserves_safe_diagnostics(self, mock_popen):
+        self._completed_process(mock_popen, returncode=2, stderr="invalid token")
+
+        with self.assertRaises(CommandExecutionError) as raised:
+            run(["deploy", "--token", "secret-value", "--name", "public"])
+
+        self.assertNotIn("secret-value", str(raised.exception))
+        self.assertIn("--token <redacted>", str(raised.exception))
+
+    @patch("lib.remote_utils.subprocess.Popen")
     def test_piped_commands_use_explicit_shell_process(self, mock_popen):
         self._completed_process(mock_popen)
         run("echo test | cat")

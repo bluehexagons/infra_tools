@@ -27,7 +27,7 @@ def install_cicd_dependencies(config: SetupConfig) -> None:
         return
     
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    run(f"apt-get install -y -qq {' '.join(packages)}", check=True)
+    run(["apt-get", "install", "-y", "-qq", *packages])
     
     if all_installed():
         print("  ✓ CI/CD dependencies installed")
@@ -39,13 +39,22 @@ def create_cicd_user(config: SetupConfig) -> None:
     """Create dedicated user for webhook receiver service."""
     user = CICD_USER
     
-    result = run(f"id {user}", check=False)
+    result = run(["id", user], check=False)
     if result.returncode == 0:
-        run(f"usermod --home {CICD_HOME} {user}", check=True)
+        run(["usermod", "--home", CICD_HOME, user])
         print(f"  ✓ User '{user}' already exists")
         return
     
-    run(f"useradd --system --home-dir {CICD_HOME} --no-create-home --shell /usr/sbin/nologin {user}")
+    run([
+        "useradd",
+        "--system",
+        "--home-dir",
+        CICD_HOME,
+        "--no-create-home",
+        "--shell",
+        "/usr/sbin/nologin",
+        user,
+    ])
     print(f"  ✓ Created user '{user}'")
 
 
@@ -64,13 +73,13 @@ def create_cicd_directories(config: SetupConfig) -> None:
     
     # Set ownership - critical for security
     # Ensure the 'webhook' user exists before attempting chown
-    user_check = run(f"id {CICD_USER}", check=False)
+    user_check = run(["id", CICD_USER], check=False)
     if user_check.returncode != 0:
         raise RuntimeError(
             f"Cannot secure CI/CD directories because user '{CICD_USER}' does not exist"
         )
-    run(f"chown -R {CICD_USER}:{CICD_USER} {CICD_HOME}", check=True)
-    run(f"chmod -R 750 {CICD_HOME}", check=True)
+    run(["chown", "-R", f"{CICD_USER}:{CICD_USER}", CICD_HOME])
+    run(["chmod", "-R", "750", CICD_HOME])
     
     print("  ✓ Created CI/CD directories")
 
@@ -95,7 +104,7 @@ def generate_webhook_secret(config: SetupConfig) -> str:
     secret = secrets.token_urlsafe(32)
     
     write_text_atomic(secret_file, secret, mode=0o600)
-    run("chown root:root /etc/infra_tools/cicd/webhook_secret")
+    run(["chown", "root:root", "/etc/infra_tools/cicd/webhook_secret"])
     
     _create_env_file(env_file, secret)
     
@@ -112,7 +121,7 @@ def _create_env_file(env_file: str, secret: str) -> None:
         f"WEBHOOK_SECRET={secret}\nWEBHOOK_PORT=8765\n",
         mode=0o600,
     )
-    run(f"chown root:root {env_file}")
+    run(["chown", "root:root", env_file])
 
 
 def create_default_webhook_config(config: SetupConfig) -> None:
@@ -219,9 +228,9 @@ WantedBy=multi-user.target
     with open(service_file, 'w') as f:
         f.write(service_content)
     
-    run("systemctl daemon-reload")
-    run(f"systemctl enable {service_name}.service")
-    run(f"systemctl start {service_name}.service")
+    run(["systemctl", "daemon-reload"])
+    run(["systemctl", "enable", f"{service_name}.service"])
+    run(["systemctl", "start", f"{service_name}.service"])
     
     print(f"  ✓ Created and started {service_name}.service")
 
@@ -310,9 +319,9 @@ WantedBy=multi-user.target
     with open(path_file, 'w') as f:
         f.write(path_content)
     
-    run("systemctl daemon-reload")
-    run(f"systemctl enable {service_name}.path")
-    run(f"systemctl start {service_name}.path")
+    run(["systemctl", "daemon-reload"])
+    run(["systemctl", "enable", f"{service_name}.path"])
+    run(["systemctl", "start", f"{service_name}.path"])
     
     print(f"  ✓ Created {service_name}.service and {service_name}.path")
 
@@ -386,7 +395,7 @@ server {
         return
     
     # Reload nginx
-    run("systemctl reload nginx")
+    run(["systemctl", "reload", "nginx"])
     
     print("  ✓ Configured nginx for webhook endpoint")
 
@@ -427,8 +436,8 @@ def install_webhook_manager_helper(config: SetupConfig) -> None:
         print(f"  ⚠ Source script not found: {source_script}")
         return
     
-    run(f"ln -sf {source_script} {helper_script}")
-    run(f"chmod +x {source_script}")
+    run(["ln", "-sf", source_script, helper_script])
+    run(["chmod", "+x", source_script])
     
     print(f"  ✓ Installed webhook manager: {helper_script}")
     print(f"  Run 'sudo webhook-manager list' to manage configurations")

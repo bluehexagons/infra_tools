@@ -25,7 +25,7 @@ def install_app_server_dependencies(config: SetupConfig) -> None:
         return
     
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    run(f"apt-get install -y -qq {' '.join(packages)}", check=False)
+    run(["apt-get", "install", "-y", "-qq", *packages])
     
     if all_installed():
         print("  ✓ App server dependencies installed")
@@ -35,17 +35,17 @@ def create_deploy_user(config: SetupConfig) -> None:
     """Create deploy user for receiving deployments from build server."""
     user = "deploy"
     
-    result = run(f"id {user}", check=False)
+    result = run(["id", user], check=False)
     if result.returncode == 0:
         print("  ✓ Deploy user already exists")
         return
     
-    run(f"useradd --system --create-home --shell /bin/bash {user}")
+    run(["useradd", "--system", "--create-home", "--shell", "/bin/bash", user])
     
     ssh_dir = f"/home/{user}/.ssh"
-    run(f"mkdir -p {ssh_dir}")
-    run(f"chmod 700 {ssh_dir}")
-    run(f"chown -R {user}:{user} {ssh_dir}")
+    run(["mkdir", "-p", ssh_dir])
+    run(["chmod", "700", ssh_dir])
+    run(["chown", "-R", f"{user}:{user}", ssh_dir])
     
     print("  ✓ Created deploy user")
 
@@ -72,7 +72,7 @@ deploy ALL=(root) NOPASSWD: {DEPLOY_ADMIN_HELPER} *
     
     os.chmod(sudoers_file, 0o440)
     
-    result = run("visudo -c", check=False)
+    result = run(["visudo", "-c"], check=False)
     if result.returncode != 0:
         print("  ⚠ Sudoers validation failed, removing...")
         os.remove(sudoers_file)
@@ -93,8 +93,8 @@ def create_app_directories(config: SetupConfig) -> None:
     for directory in directories:
         os.makedirs(directory, mode=0o755, exist_ok=True)
     
-    run("chown -R deploy:deploy /var/www", check=False)
-    run("chmod -R 775 /var/www", check=False)
+    run(["chown", "-R", "deploy:deploy", "/var/www"])
+    run(["chmod", "-R", "775", "/var/www"])
     
     print("  ✓ Created app directories")
 
@@ -106,12 +106,12 @@ def configure_deploy_ssh_access(config: SetupConfig) -> None:
     
     if not os.path.exists(ssh_dir):
         os.makedirs(ssh_dir, mode=0o700)
-        run(f"chown deploy:deploy {ssh_dir}")
+        run(["chown", "deploy:deploy", ssh_dir])
     
     if not os.path.exists(auth_keys):
-        run(f"touch {auth_keys}")
-        run(f"chmod 600 {auth_keys}")
-        run(f"chown deploy:deploy {auth_keys}")
+        run(["touch", auth_keys])
+        run(["chmod", "600", auth_keys])
+        run(["chown", "deploy:deploy", auth_keys])
     
     print("  ✓ Configured deploy SSH access")
     print(f"  ℹ Add build server public key to: {auth_keys}")
@@ -123,7 +123,7 @@ def configure_app_nginx(config: SetupConfig) -> None:
         print("  ✓ nginx already running")
         return
     
-    run("systemctl enable nginx")
-    run("systemctl start nginx")
+    run(["systemctl", "enable", "nginx"])
+    run(["systemctl", "start", "nginx"])
     
     print("  ✓ nginx configured for app server")

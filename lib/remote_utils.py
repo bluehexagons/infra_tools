@@ -12,7 +12,7 @@ import signal
 import string
 import subprocess
 import sys
-from typing import Callable, Optional
+from typing import Callable, Optional, Sequence
 
 from lib.validation import validate_package_name
 
@@ -104,6 +104,17 @@ def _redact_command(value: str) -> str:
         previous_end = end
     parts.append(value[previous_end:])
     return "".join(parts)
+
+
+Command = str | Sequence[str]
+
+
+def _command_text(cmd: Command) -> str:
+    """Render a command for diagnostics without invoking a shell."""
+
+    if isinstance(cmd, str):
+        return cmd
+    return shlex.join(list(cmd))
 
 
 class CommandExecutionError(RuntimeError):
@@ -217,7 +228,7 @@ def _terminate_timed_out_process(
 
 
 def run(
-    cmd: str,
+    cmd: Command,
     check: bool = True,
     cwd: Optional[str] = None,
     capture_output: bool = False,
@@ -227,18 +238,31 @@ def run(
     timeout: Optional[float] = DEFAULT_COMMAND_TIMEOUT_SECONDS,
 ) -> subprocess.CompletedProcess[str]:
     validated_timeout = _validate_timeout(timeout)
-    log_cmd = _redact_command(display_cmd if display_cmd is not None else cmd)
+    log_cmd = _redact_command(
+        display_cmd if display_cmd is not None else _command_text(cmd)
+    )
     if _verbose_commands_enabled() or is_dry_run():
         print(f"  Running: {log_cmd[:80]}..." if len(log_cmd) > 80 else f"  Running: {log_cmd}")
         sys.stdout.flush()
     
     if is_dry_run():
         print("  [DRY-RUN] Command not executed")
-        # CompletedProcess.args expects a sequence; provide a one-element list for consistency
-        return subprocess.CompletedProcess(args=[cmd], returncode=0, stdout="", stderr="")
+        dry_run_args = [cmd] if isinstance(cmd, str) else list(cmd)
+        return subprocess.CompletedProcess(
+            args=dry_run_args,
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
 
-    requires_shell = _requires_shell(cmd)
-    command = ["/bin/bash", "-lc", cmd] if requires_shell else shlex.split(cmd)
+    requires_shell = isinstance(cmd, str) and _requires_shell(cmd)
+    command = (
+        ["/bin/bash", "-lc", cmd]
+        if requires_shell
+        else list(cmd) if not isinstance(cmd, str) else shlex.split(cmd)
+    )
+    if not command:
+        raise ValueError("Command must not be empty")
     process = subprocess.Popen(
         command,
         stdin=subprocess.PIPE if input_data is not None else None,
@@ -392,7 +416,7 @@ def is_package_installed(package: str) -> bool:
 
 def install_with_verify(
     name: str,
-    install_cmd: str,
+    install_cmd: Command,
     verify_fn: Callable[[], bool],
 ) -> bool:
     """Run install command and verify using provided verification function.
@@ -421,7 +445,7 @@ def install_with_verify(
     return False
 
 
-def install_package(name: str, package: str, install_cmd: str) -> bool:
+def install_package(name: str, package: str, install_cmd: Command) -> bool:
     """Install an apt package and verify success.
     
     Args:
