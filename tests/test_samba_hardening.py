@@ -390,7 +390,7 @@ class TestReconcileSambaShares(unittest.TestCase):
         ]
         self.assertEqual(password_calls[0]["input_data"], "very-secret\nvery-secret\n")
 
-    def test_recursive_permission_changes_preserve_filesystem_root(self) -> None:
+    def test_recursive_permission_changes_preserve_executable_bits(self) -> None:
         _configured, calls = self._run_reconcile(
             "[global]\n",
             [["write", "docs", "/srv/docs", "alice:very-secret"]],
@@ -398,7 +398,22 @@ class TestReconcileSambaShares(unittest.TestCase):
 
         commands = [command for command, _ in calls]
         self.assertIn("chgrp -R --preserve-root smb_docs_write /srv/docs", commands)
-        self.assertIn("chmod -R --preserve-root 2775 /srv/docs", commands)
+        self.assertIn("chmod -R --preserve-root g+rwX /srv/docs", commands)
+        self.assertIn(
+            "find /srv/docs -xdev -type d -exec chmod g+s -- {} +",
+            commands,
+        )
+        self.assertNotIn("chmod -R --preserve-root 2775 /srv/docs", commands)
+
+    def test_read_share_removes_group_write_without_making_files_executable(self) -> None:
+        _configured, calls = self._run_reconcile(
+            "[global]\n",
+            [["read", "docs", "/srv/docs", "alice:very-secret"]],
+        )
+
+        commands = [command for command, _ in calls]
+        self.assertIn("chmod -R --preserve-root g+rX,g-w /srv/docs", commands)
+        self.assertNotIn("chmod -R --preserve-root 2755 /srv/docs", commands)
 
 
 if __name__ == '__main__':

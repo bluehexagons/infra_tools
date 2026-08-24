@@ -337,7 +337,7 @@ def validate_gogs_settings(config: "SetupConfig") -> None:
     if not spec:
         raise ValueError("Gogs target spec must be a non-empty string")
 
-    from web.gogs_steps import parse_gogs_spec
+    from web.gogs_steps import DEFAULT_GOGS_DATA_PATH, parse_gogs_spec
     from lib.validators import validate_host
 
     domain, _port = parse_gogs_spec(spec, strict=True)
@@ -371,11 +371,27 @@ def validate_gogs_settings(config: "SetupConfig") -> None:
             raise ValueError(f"Duplicate --gogs-source: {canonical_source}")
         normalized_sources.add(canonical_source)
 
+    data_path = DEFAULT_GOGS_DATA_PATH
     if len(gogs) == 2:
         data_path = str(gogs[1]).strip()
         if not os.path.isabs(data_path):
             raise ValueError(f"Gogs data path must be absolute: {data_path}")
         validate_filesystem_path(data_path, must_exist=False)
+
+    normalized_data_path = os.path.normpath(data_path)
+    for share_spec in config.samba_shares or []:
+        if len(share_spec) < 3:
+            continue
+        share_name = share_spec[1]
+        normalized_share_path = os.path.normpath(share_spec[2])
+        common_path = os.path.commonpath(
+            (normalized_data_path, normalized_share_path)
+        )
+        if common_path in {normalized_data_path, normalized_share_path}:
+            raise ValueError(
+                f"Samba share '{share_name}' at {share_spec[2]} must not overlap "
+                f"the live Gogs data path {data_path}"
+            )
 
 
 def validate_antistatic_settings(config: "SetupConfig") -> None:

@@ -202,13 +202,14 @@ Keep live application data and active work local:
 | Large non-repository assets | An explicitly mounted share | Optional shared asset storage |
 | Consistent Git/Gogs archives | A restricted backup share | A local backup job or dedicated backup account writes; ordinary agents have no access or read-only access |
 
-Do not make the live Gogs data directory a writable Samba share. Direct SMB
-writes bypass Gogs authentication, hooks, repository policy, and LFS
-reachability checks, while concurrent access can make SQLite and repository
-operations unsafe. A separate share directory may use the same physical data
-disk, but it must not contain the live database, secrets, hooks, repositories,
-or LFS object path. Samba users should have only the read or write access they
-need; `force user` and symlink exceptions are not safe substitutes for that
+Do not make the live Gogs data directory a Samba share. Setup rejects a share
+that is the Gogs data path, contains it, or sits below it. Direct SMB access
+bypasses Gogs authentication, hooks, repository policy, and LFS reachability
+checks, while concurrent access can make SQLite and repository operations
+unsafe. A separate share directory may use the same physical data disk, but it
+must not contain the live database, secrets, hooks, repositories, or LFS object
+path. Samba users should have only the read or write access they need. The
+`force user` setting and symlink exceptions are not safe substitutes for that
 separation.
 
 For a Gogs backup, stop Gogs for the short archive window (or use an

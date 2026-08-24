@@ -279,9 +279,13 @@ def _prepare_samba_share(
     run(f"chgrp -R --preserve-root {safe_group} {safe_primary_path}")
 
     if access_type == "write":
-        run(f"chmod -R --preserve-root 2775 {safe_primary_path}")
+        run(f"chmod -R --preserve-root g+rwX {safe_primary_path}")
     else:
-        run(f"chmod -R --preserve-root 2755 {safe_primary_path}")
+        run(f"chmod -R --preserve-root g+rX,g-w {safe_primary_path}")
+    run(
+        f"find {safe_primary_path} -xdev -type d "
+        "-exec chmod g+s -- {} +"
+    )
 
     print(f"  Set {'write' if access_type == 'write' else 'read-only'} permissions on {primary_path}")
 

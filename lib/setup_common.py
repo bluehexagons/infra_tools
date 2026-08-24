@@ -1200,7 +1200,7 @@ def run_remote_setup(config: SetupConfig) -> int:
     _LAST_REMOTE_ACCESS_URLS.clear()
     is_local = config.host in {"localhost", "127.0.0.1", "::1"}
     
-    if is_local and os.geteuid() != 0:
+    if is_local and not config.dry_run and os.geteuid() != 0:
         print("Error: Local setup requires root privileges. Please run with sudo.")
         return 1
 
@@ -1221,7 +1221,7 @@ def run_remote_setup(config: SetupConfig) -> int:
             remote_user,
             config.ssh_key,
         )
-        if not ensure_remote_sudo(
+        if not config.dry_run and not ensure_remote_sudo(
             config.host,
             remote_user,
             config.ssh_key,

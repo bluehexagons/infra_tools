@@ -957,16 +957,17 @@ def _complete_gogs_setup(
     tag_name: str,
     archive_sha256: str,
 ) -> None:
-    with open(config_path, "w", encoding="utf-8") as file_obj:
-        file_obj.write(
-            generate_gogs_app_ini(
-                config,
-                git_home=git_home,
-                data_path=data_path,
-                domain=domain,
-                port=port,
-            )
-        )
+    write_text_atomic(
+        config_path,
+        generate_gogs_app_ini(
+            config,
+            git_home=git_home,
+            data_path=data_path,
+            domain=domain,
+            port=port,
+        ),
+        mode=0o600,
+    )
     run(f"chown {shlex.quote(GOGS_GIT_USER)}:{shlex.quote(GOGS_GIT_GROUP)} {shlex.quote(config_path)}")
     write_gogs_state(tag_name, data_path, config_path, archive_sha256)
     _configure_git_ssh_access()
