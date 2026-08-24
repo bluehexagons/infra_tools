@@ -8,6 +8,7 @@ import io
 import json
 import os
 import pwd
+import re
 import shlex
 import shutil
 import stat
@@ -87,6 +88,30 @@ LEGACY_SETUP_OPERATION_FILENAME = "setup-operation.pre-persistence.json"
 MAX_AGENT_CREDENTIAL_BYTES = 4 * 1024 * 1024
 MAX_DEVICE_PAIRING_AUTH_BYTES = 64 * 1024
 _GIT_IDENTITY_PAYLOAD_PATH = os.path.join("config", "git", "identity.json")
+_LAST_REMOTE_ACCESS_URLS: dict[str, str] = {}
+
+
+def get_last_remote_access_urls() -> dict[str, str]:
+    """Return HTTPS endpoints announced by the most recent remote setup."""
+
+    return dict(_LAST_REMOTE_ACCESS_URLS)
+
+
+def _record_remote_access_output(line: str) -> None:
+    """Remember generated HTTPS links while preserving live setup output."""
+
+    text = line.strip()
+    prefixes = {
+        "T3 Code HTTPS endpoint:": "t3code",
+        "T3 Code pairing HTTPS endpoint:": "t3code-pairing",
+    }
+    for prefix, name in prefixes.items():
+        if not text.startswith(prefix):
+            continue
+        url = text[len(prefix) :].strip()
+        if re.fullmatch(r"https://[^\s]+", url):
+            _LAST_REMOTE_ACCESS_URLS[name] = url
+        return
 
 
 def _repository_cache_path(cache_dir: str, git_url: str, repo_name: str) -> str:
@@ -1172,6 +1197,7 @@ def remove_replaced_setup_cache(previous_host: Optional[str], current_host: str)
 
 
 def run_remote_setup(config: SetupConfig) -> int:
+    _LAST_REMOTE_ACCESS_URLS.clear()
     is_local = config.host in {"localhost", "127.0.0.1", "::1"}
     
     if is_local and os.geteuid() != 0:
@@ -1279,6 +1305,7 @@ def run_remote_setup(config: SetupConfig) -> int:
                 
                 if process.stdout is not None:
                     for line in process.stdout:
+                        _record_remote_access_output(line)
                         print(line, end='', flush=True)
                     
                 return finish_network_transition(config, process.wait())
@@ -1345,6 +1372,7 @@ def run_remote_setup(config: SetupConfig) -> int:
 
                 if process.stdout is not None:
                     for line in io.TextIOWrapper(process.stdout, encoding='utf-8'):
+                        _record_remote_access_output(line)
                         print(line, end='', flush=True)
 
                 return finish_network_transition(config, process.wait())
@@ -1513,12 +1541,7 @@ def setup_main(system_type: str, description: str, success_msg_fn: Callable[[Set
         if "t3code" in (config.device_pairing_providers or []):
             print("Protected T3 Code device enrollment:")
             print(
-                "  HTTPS endpoint: see the T3 Code pairing HTTPS endpoint in the "
-                "target setup output above"
-            )
-            print(
-                "  HTTP compatibility remains available on "
-                f"port {config.device_pairing_port}; use HTTPS"
+                "  Use the T3 Code pairing HTTPS endpoint shown in setup output."
             )
             print("  Sign in with the configured Basic Auth account, then pair this browser.")
         else:

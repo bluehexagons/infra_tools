@@ -66,7 +66,6 @@ from lib.display import (
     print_name_and_tags,
     print_service_access_summary,
     print_setup_summary,
-    print_success_header,
 )
 from lib.interactive_shell import run_interactive_shell
 from lib.notifications import validate_notification_args
@@ -95,6 +94,7 @@ from lib.setup_common import (
     REMOTE_SCRIPT_PATH,
     _apply_hosted_proxmox_defaults,
     adopt_verified_network_host,
+    get_last_remote_access_urls,
     register_proxmox_setup_host,
     remove_replaced_setup_cache,
     run_remote_setup,
@@ -1508,10 +1508,7 @@ def run_setup_command(args: argparse.Namespace) -> int:
     print("=" * 60)
     print("Setup Complete!")
     print("=" * 60)
-    print_success_header(config)
-    print()
-    print(f"Connect via SSH: ssh {config.username}@{config.host}")
-    print_service_access_summary(config)
+    print_service_access_summary(config, t3_https_urls=get_last_remote_access_urls())
     print("=" * 60)
     
     return 0

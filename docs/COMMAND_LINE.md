@@ -416,14 +416,13 @@ read-write`; `none` is the public/unauthenticated repository mode.
 ### Setup completion access details
 
 After a successful setup, the `Setup Complete!` block includes an `Access:`
-section for selected web interfaces and services. It lists the usable URL or
-port for T3 Code, the optional protected device-pairing portal, the generic
-web server, Gogs, Antistatic services, RDP, and Samba. Loopback-only services
-are shown with `127.0.0.1` and are marked as requiring an SSH tunnel. For
-example, a T3 Code setup with device pairing reports the managed HTTPS
-endpoints as the usable links. It mentions the direct T3 and Basic Auth ports
-(`3773` and `3774` by default) only as HTTP compatibility listeners; do not
-change those ports to `https://`.
+section for selected web interfaces and services. It lists each usable URL or
+endpoint with a one-line description: T3 Code, the optional protected
+device-pairing portal, the generic web server, Gogs, Antistatic services, RDP,
+Samba, and SSH. For example, a T3 Code setup with device pairing reports the
+generated managed HTTPS endpoints as the usable links.
+The direct T3 and Basic Auth listeners are intentionally omitted from this
+completion summary.
 
 Setup step output remains live while it runs. Marked warnings and errors are
 also deduplicated into a final `Run notes:` section so important non-fatal

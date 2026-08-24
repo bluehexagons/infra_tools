@@ -25,6 +25,25 @@ def _make_config(**kwargs) -> SetupConfig:
 class TestSetupMainTimingPersistence(unittest.TestCase):
     """Verify setup_main always saves last_start_time/end_time/success."""
 
+    def test_remote_setup_records_generated_https_access_urls(self):
+        from lib import setup_common
+
+        setup_common._LAST_REMOTE_ACCESS_URLS.clear()
+        setup_common._record_remote_access_output(
+            "  T3 Code HTTPS endpoint: https://192.0.2.10:8444/\n"
+        )
+        setup_common._record_remote_access_output(
+            "  T3 Code pairing HTTPS endpoint: https://192.0.2.10:8445/\n"
+        )
+
+        self.assertEqual(
+            setup_common.get_last_remote_access_urls(),
+            {
+                "t3code": "https://192.0.2.10:8444/",
+                "t3code-pairing": "https://192.0.2.10:8445/",
+            },
+        )
+
     def test_success_saves_timing_and_success_true(self):
         with tempfile.TemporaryDirectory():
             from lib import setup_common

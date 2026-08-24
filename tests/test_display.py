@@ -117,30 +117,31 @@ class TestRdpDisplay(unittest.TestCase):
 
         output = io.StringIO()
         with redirect_stdout(output):
-            print_service_access_summary(config)
+            print_service_access_summary(
+                config,
+                t3_https_urls={
+                    "t3code": "https://192.168.0.41:8444/",
+                    "t3code-pairing": "https://192.168.0.41:8445/",
+                },
+            )
 
         rendered = output.getvalue()
         self.assertIn(
-            "T3 Code (HTTPS): see the HTTPS endpoint printed by target setup",
+            "T3 Code: https://192.168.0.41:8444/ — coding workspace",
             rendered,
         )
         self.assertIn(
-            "T3 Code HTTP compatibility: port 3773",
+            "T3 Code device pairing: https://192.168.0.41:8445/ — protected device enrollment",
             rendered,
         )
-        self.assertIn(
-            "T3 Code device pairing (HTTPS): see the HTTPS endpoint printed by target setup",
-            rendered,
-        )
-        self.assertIn(
-            "T3 Code device-pairing HTTP compatibility: port 3774",
-            rendered,
-        )
+        self.assertIn("SSH: ssh agent@192.168.0.41 — shell access", rendered)
         self.assertNotIn("http://192.168.0.41:3773/", rendered)
         self.assertNotIn("http://192.168.0.41:3774/", rendered)
+        self.assertNotIn("compatibility", rendered)
+        self.assertNotIn("0.0.0.0", rendered)
         self.assertIn("Gogs web: http://git.example.com/", rendered)
         self.assertIn("Gogs Git over SSH: git@git.example.com", rendered)
-        self.assertIn("TCP 22", rendered)
+        self.assertIn("Git access", rendered)
         self.assertIn("Antistatic lobby: http://lobby.example.com/", rendered)
         self.assertIn("Antistatic DB: http://192.168.0.41:8081/", rendered)
         self.assertIn("RDP: 192.168.0.41:3389", rendered)
@@ -157,19 +158,16 @@ class TestRdpDisplay(unittest.TestCase):
 
         output = io.StringIO()
         with redirect_stdout(output):
-            print_service_access_summary(config)
+            print_service_access_summary(
+                config,
+                t3_https_urls={"t3code": "https://agent-vm:8444/"},
+            )
 
         rendered = output.getvalue()
-        self.assertIn(
-            "T3 Code (HTTPS): see the HTTPS endpoint printed by target setup",
-            rendered,
-        )
-        self.assertIn(
-            "T3 Code HTTP compatibility: port 3773",
-            rendered,
-        )
+        self.assertIn("T3 Code: https://agent-vm:8444/ — coding workspace", rendered)
         self.assertNotIn("http://127.0.0.1:3773/", rendered)
-        self.assertIn("loopback-only, use an SSH tunnel", rendered)
+        self.assertNotIn("compatibility", rendered)
+        self.assertNotIn("0.0.0.0", rendered)
         self.assertIn(
             "T3 Code pairing: infra-tools agent web pair agent-vm agent",
             rendered,

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Optional
 from lib.config import GODOT_WEB_HTTPS_PORT, SetupConfig
 
@@ -78,14 +79,6 @@ def print_name_and_tags(config: SetupConfig) -> None:
         print(f"Tags: {', '.join(config.tags)}")
 
 
-def print_success_header(config: SetupConfig) -> None:
-    print(f"Host: {config.host}")
-    print(f"Username: {config.username}")
-    if config.friendly_name or config.tags:
-        print()
-        print_name_and_tags(config)
-
-
 def print_rdp_info(config: SetupConfig) -> None:
     if config.enable_rdp:
         print(f"RDP: {config.host}:3389")
@@ -94,14 +87,23 @@ def print_rdp_info(config: SetupConfig) -> None:
         print(f"  Client: Remmina, Microsoft Remote Desktop")
 
 
-def print_service_access_summary(config: SetupConfig) -> None:
-    """Print the most useful links and ports for services selected by a setup."""
+def print_service_access_summary(
+    config: SetupConfig,
+    *,
+    t3_https_urls: Mapping[str, str] | None = None,
+) -> None:
+    """Print concise access links and one-line descriptions."""
 
     lines: list[tuple[str, str, str | None]] = []
+    t3_urls = t3_https_urls or {}
+
+    lines.append(("SSH", f"ssh {config.username}@{config.host}", "shell access"))
 
     if config.system_type == "server_web":
         scheme = "https" if config.enable_ssl else "http"
-        lines.append(("Web server", _http_url(config.host, scheme=scheme), None))
+        lines.append(
+            ("Web server", _http_url(config.host, scheme=scheme), "web interface")
+        )
 
     if "web" in (config.godot_bundles or []):
         game_root = _http_url(
@@ -113,83 +115,54 @@ def print_service_access_summary(config: SetupConfig) -> None:
             (
                 "Godot web exports",
                 game_root,
-                "publish with godot-web-publish GAME_NAME",
+                "publish games with godot-web-publish GAME_NAME",
             )
         )
 
     if config.web_interfaces:
         bind = config.web_interface_host or "127.0.0.1"
-        access_host, loopback_only = _access_host(config, bind)
+        access_host, _loopback_only = _access_host(config, bind)
         web_url = _http_url(access_host, config.web_interface_port)
         for interface in config.web_interfaces:
             label = "T3 Code web" if interface == "t3code" else f"{interface} web"
-            note = f"bind {bind}"
-            if loopback_only:
-                note += "; loopback-only, use an SSH tunnel"
             if interface == "t3code":
-                lines.append(
-                    (
-                        "T3 Code (HTTPS)",
-                        "see the HTTPS endpoint printed by target setup",
-                        "managed internal HTTPS gateway",
-                    )
-                )
-                lines.append(
-                    (
-                        "T3 Code HTTP compatibility",
-                        f"port {config.web_interface_port}",
-                        f"{note}; use the printed HTTPS endpoint",
-                    )
-                )
+                if t3_urls.get("t3code"):
+                    lines.append(("T3 Code", t3_urls["t3code"], "coding workspace"))
             else:
-                lines.append((label, web_url, note))
+                lines.append((label, web_url, "web interface"))
 
         if "t3code" in config.web_interfaces:
-            if config.device_pairing_providers:
-                note = (
-                    "Nginx Basic Auth; use the printed HTTPS endpoint; "
-                    "creates one-time T3 client links"
-                )
-                if loopback_only:
-                    note += "; loopback-only, use an SSH tunnel"
+            if config.device_pairing_providers and t3_urls.get("t3code-pairing"):
                 lines.append(
                     (
-                        "T3 Code device pairing (HTTPS)",
-                        "see the HTTPS endpoint printed by target setup",
-                        note,
+                        "T3 Code device pairing",
+                        t3_urls["t3code-pairing"],
+                        "protected device enrollment",
                     )
                 )
-                lines.append(
-                    (
-                        "T3 Code device-pairing HTTP compatibility",
-                        f"port {config.device_pairing_port}",
-                        "use the printed HTTPS endpoint",
-                    )
-                )
-            else:
+            elif not config.device_pairing_providers:
                 lines.append(
                     (
                         "T3 Code pairing",
                         f"infra-tools agent web pair {config.host} {config.username}",
-                        "run from the control system",
+                        "create a one-time client link",
                     )
                 )
 
     if config.gogs:
         gogs_spec = str(config.gogs[0])
         scheme = "https" if config.enable_ssl or config.enable_cloudflare else "http"
-        gogs_url, loopback_only = _service_url(
+        gogs_url, _loopback_only = _service_url(
             config,
             gogs_spec,
             3000,
             scheme=scheme,
             source_restricted=bool(config.effective_gogs_sources()),
         )
-        note = "loopback-only, use an SSH tunnel" if loopback_only else None
-        lines.append(("Gogs web", gogs_url, note))
+        lines.append(("Gogs web", gogs_url, "web interface"))
         domain, _port = _split_service_spec(gogs_spec, 3000)
         lines.append(
-            ("Gogs Git over SSH", f"git@{domain or config.host}", "TCP 22")
+            ("Gogs Git over SSH", f"git@{domain or config.host}", "Git access")
         )
 
     if config.antistatic_server:
@@ -201,8 +174,14 @@ def print_service_access_summary(config: SetupConfig) -> None:
             scheme=scheme,
             direct_host=config.host,
         )
-        lines.append(("Antistatic lobby", server_url, None))
-        lines.append(("Antistatic STUN", f"{config.host}:3478/udp", None))
+        lines.append(("Antistatic lobby", server_url, "game lobby"))
+        lines.append(
+            (
+                "Antistatic STUN",
+                f"{config.host}:3478/udp",
+                "voice/game networking",
+            )
+        )
 
     if config.antistatic_db:
         scheme = "https" if config.enable_ssl or config.enable_cloudflare else "http"
@@ -213,19 +192,19 @@ def print_service_access_summary(config: SetupConfig) -> None:
             scheme=scheme,
             direct_host=config.host,
         )
-        lines.append(("Antistatic DB", db_url, None))
+        lines.append(("Antistatic DB", db_url, "game database"))
 
     if config.enable_rdp:
         lines.append(
             (
                 "RDP",
                 f"{_url_host(config.host)}:3389",
-                f"bind {config.rdp_bind_address}",
+                "remote desktop",
             )
         )
 
     if config.enable_samba:
-        lines.append(("Samba/SMB", f"//{_url_host(config.host)}", "TCP 445"))
+        lines.append(("Samba/SMB", f"//{_url_host(config.host)}", "file sharing"))
 
     if not lines:
         return
@@ -236,19 +215,17 @@ def print_service_access_summary(config: SetupConfig) -> None:
         "Gogs web",
         "Antistatic lobby",
         "Antistatic DB",
-        "T3 Code (HTTPS)",
-        "T3 Code HTTP compatibility",
-        "T3 Code device pairing (HTTPS)",
-        "T3 Code device-pairing HTTP compatibility",
+        "T3 Code",
+        "T3 Code device pairing",
         "T3 Code pairing",
     }
     sections: list[tuple[str, list[tuple[str, str, str | None]]]] = [
-        ("Web and HTTPS", []),
-        ("Network access", []),
+        ("Web", []),
+        ("Network", []),
     ]
     section_map = {title: entries for title, entries in sections}
     for line in lines:
-        section = "Web and HTTPS" if line[0] in web_labels else "Network access"
+        section = "Web" if line[0] in web_labels else "Network"
         section_map[section].append(line)
 
     print("Access:")
@@ -257,9 +234,8 @@ def print_service_access_summary(config: SetupConfig) -> None:
             continue
         print(f"  {title}:")
         for label, address, note in entries:
-            print(f"    {label}: {address}")
-            if note:
-                print(f"      {note}")
+            suffix = f" — {note}" if note else ""
+            print(f"    {label}: {address}{suffix}")
 
 
 def print_setup_summary(config: SetupConfig, description: Optional[str] = None) -> None:
