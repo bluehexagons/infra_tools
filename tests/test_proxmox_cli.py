@@ -66,6 +66,14 @@ class TestProxmoxCliHosts(_CliFixture):
         self.assertIn("10.0.0.10", out)
         self.assertIn("primary", out)
 
+    def test_hosts_json_uses_common_envelope(self) -> None:
+        self._run("add", "pve1", "10.0.0.10")
+        rc, out = self._run("hosts", "--json")
+        self.assertEqual(rc, 0)
+        payload = json.loads(out)
+        self.assertEqual(payload["operation"], "hosts")
+        self.assertEqual(payload["resources"][0]["name"], "pve1")
+
     def test_add_duplicate_without_replace_errors(self) -> None:
         self._run("add", "pve1", "10.0.0.10")
         rc, out = self._run("add", "pve1", "10.0.0.99")
@@ -183,11 +191,36 @@ class TestProxmoxCliContainerOps(_CliFixture):
         self.assertIn("lxc", out)
 
     @patch("lib.proxmox_manage._ssh_run")
+    def test_ls_json_uses_common_envelope(self, mock_run) -> None:
+        mock_run.side_effect = [
+            _completed("VMID Status Name\n100 running web\n"),
+            _completed("VMID NAME STATUS MEM(MB) BOOTDISK(GB) PID\n"),
+        ]
+        rc, out = self._run("ls", "pve1", "--json")
+        self.assertEqual(rc, 0)
+        payload = json.loads(out)
+        self.assertEqual(payload["operation"], "list")
+        self.assertEqual(payload["resources"][0]["id"], "100")
+
+    @patch("lib.proxmox_manage._ssh_run")
     def test_status_prints_value(self, mock_run) -> None:
         mock_run.return_value = _completed("status: running\n")
         rc, out = self._run("status", "pve1", "100")
         self.assertEqual(rc, 0)
         self.assertIn("running", out)
+
+    @patch("lib.proxmox_manage._ssh_run")
+    def test_status_json_uses_common_envelope(self, mock_run) -> None:
+        mock_run.side_effect = [
+            _completed("status: running\n"),
+            _completed("VMID Status Name\n100 running web\n"),
+            _completed("VMID NAME STATUS MEM(MB) BOOTDISK(GB) PID\n"),
+        ]
+        rc, out = self._run("status", "pve1", "100", "--json")
+        self.assertEqual(rc, 0)
+        payload = json.loads(out)
+        self.assertEqual(payload["operation"], "status")
+        self.assertEqual(payload["resources"][0]["state"], "running")
 
     @patch("lib.proxmox_manage._ssh_run")
     def test_start_runs_pct_start(self, mock_run) -> None:
@@ -286,6 +319,19 @@ class TestProxmoxCliContainerOps(_CliFixture):
         self.assertIn("HEALTHY", out)
 
     @patch("lib.proxmox_manage._ssh_run")
+    def test_health_json_uses_common_envelope(self, mock_run) -> None:
+        mock_run.side_effect = [
+            _completed("status: running\n"),
+            _completed("net0: name=eth0,bridge=vmbr0,ip=10.0.0.50/24\n"),
+            _completed("OK\n"),
+            _completed("OK\n"),
+        ]
+        rc, out = self._run("health", "pve1", "100", "--json")
+        self.assertEqual(rc, 0)
+        payload = json.loads(out)
+        self.assertTrue(payload["resources"][0]["healthy"])
+
+    @patch("lib.proxmox_manage._ssh_run")
     def test_health_returns_one_when_unhealthy(self, mock_run) -> None:
         mock_run.return_value = _completed(returncode=2)
         rc, out = self._run("health", "pve1", "100")
@@ -339,8 +385,9 @@ class TestProxmoxCliAudit(_CliFixture):
 
         self.assertEqual(rc, 1)
         payload = json.loads(out)
-        self.assertFalse(payload[0]["healthy"])
-        self.assertEqual(payload[0]["errors"], ["Cluster is not quorate"])
+        self.assertEqual(payload["operation"], "audit")
+        self.assertFalse(payload["resources"][0]["healthy"])
+        self.assertEqual(payload["resources"][0]["errors"], ["Cluster is not quorate"])
 
 
 class TestProxmoxPlanRebalanceApply(_CliFixture):

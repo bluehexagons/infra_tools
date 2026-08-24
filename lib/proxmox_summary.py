@@ -33,6 +33,25 @@ class NodeSummary:
     guests_stopped: int = 0
     load_avg: list[float] = field(default_factory=list)
 
+    def to_dict(self) -> dict[str, object]:
+        """Return a JSON-serializable resource record."""
+
+        return {
+            "node_name": self.node_name,
+            "cpu_usage": self.cpu_usage,
+            "cpu_count": self.cpu_count,
+            "memory_used": self.memory_used,
+            "memory_total": self.memory_total,
+            "swap_used": self.swap_used,
+            "swap_total": self.swap_total,
+            "disk_used": self.disk_used,
+            "disk_total": self.disk_total,
+            "uptime_seconds": self.uptime_seconds,
+            "guests_running": self.guests_running,
+            "guests_stopped": self.guests_stopped,
+            "load_avg": list(self.load_avg),
+        }
+
 
 def _run(host: ProxmoxHost, cmd: str) -> subprocess.CompletedProcess[str]:
     return _ssh_run(host.address, host.user, _ssh_opts(host.ssh_key), cmd)

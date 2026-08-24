@@ -24,7 +24,7 @@ help:
 	@echo "  make test TEST=service_tools/test_storage_ops"
 
 # Run the same checks as continuous integration.
-check: compile docs-check package-check test
+check: compile docs-check package-check artifact-check test
 
 docs-check:
 	@python3 scripts/check_cli_docs.py

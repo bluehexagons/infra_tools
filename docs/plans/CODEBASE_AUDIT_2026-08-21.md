@@ -281,7 +281,10 @@ rollback stop failure, and inactive/active verification failures.
 2. Add lightweight inspection and rerun guidance for the landed operation
    markers.
 3. Make corrupt-state failures actionable without silently resetting state.
-4. Add the local package-install smoke test and improve status/`--json` output.
+4. ~~Add the local package-install smoke test and improve status/`--json` output.~~
+   The wheel smoke test now runs as part of local `make check`, and Proxmox
+   read-only status/list/health/top/audit commands share the versioned JSON
+   envelope used by the provider-neutral VM commands.
 5. Complete explicit SSH enrollment for CI/CD targets when that deployment path
    is next maintained.
 6. Standardize destructive CLI confirmation where a command still lacks it.

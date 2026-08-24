@@ -66,6 +66,7 @@ from lib.proxmox_manage import (
     unlock_guest,
 )
 from lib.proxmox_shell import ProxmoxShell, run_proxmox_shell
+from lib.vm_models import VMHealth, VMRecord, envelope
 
 
 def add_proxmox_subparser(subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
@@ -90,6 +91,7 @@ def add_proxmox_subparser(subparsers: argparse._SubParsersAction) -> argparse.Ar
     shell.set_defaults(_handler=_cmd_shell)
 
     hosts = sub.add_parser("hosts", help="List registered Proxmox hosts")
+    hosts.add_argument("--json", action="store_true", help="Output JSON")
     hosts.set_defaults(_handler=_cmd_hosts_list)
 
     add = sub.add_parser("add", help="Register a Proxmox host")
@@ -169,11 +171,13 @@ def add_proxmox_subparser(subparsers: argparse._SubParsersAction) -> argparse.Ar
 
     ls = sub.add_parser("ls", aliases=["list"], help="List guests on a host")
     ls.add_argument("host", help="Registered host name or address")
+    ls.add_argument("--json", action="store_true", help="Output JSON")
     ls.set_defaults(_handler=_cmd_containers_ls)
 
     status = sub.add_parser("status", help="Show guest status")
     status.add_argument("host", help="Registered host name or address")
     status.add_argument("vmid", type=int, help="Guest VMID")
+    status.add_argument("--json", action="store_true", help="Output JSON")
     status.set_defaults(_handler=_cmd_status)
 
     start = sub.add_parser("start", help="Start a guest")
@@ -220,6 +224,7 @@ def add_proxmox_subparser(subparsers: argparse._SubParsersAction) -> argparse.Ar
     health.add_argument(
         "--no-ssh", action="store_true", help="Skip the SSH:22 reachability probe"
     )
+    health.add_argument("--json", action="store_true", help="Output JSON")
     health.set_defaults(_handler=_cmd_health)
 
     config_cmd = sub.add_parser("config", help="Show guest configuration")
@@ -309,6 +314,7 @@ def add_proxmox_subparser(subparsers: argparse._SubParsersAction) -> argparse.Ar
         nargs="+",
         help="Registered host name(s) or address(es)",
     )
+    top.add_argument("--json", action="store_true", help="Output JSON")
     top.set_defaults(_handler=_cmd_top)
 
     audit = sub.add_parser(
@@ -698,6 +704,15 @@ def _cmd_shell(args: argparse.Namespace, workspace: Optional[str]) -> int:
 
 def _cmd_hosts_list(args: argparse.Namespace, workspace: Optional[str]) -> int:
     hosts = load_proxmox_hosts(workspace)
+    if args.json:
+        payload = envelope(
+            provider="proxmox",
+            host="workspace",
+            operation="hosts",
+            resources=[host.to_dict() for host in hosts],
+        )
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
     if not hosts:
         print("No Proxmox hosts registered.")
         return 0
@@ -820,6 +835,24 @@ def _cmd_rolling_update(args: argparse.Namespace, workspace: Optional[str]) -> i
 def _cmd_containers_ls(args: argparse.Namespace, workspace: Optional[str]) -> int:
     host = _resolve_host(args.host, workspace)
     rows = list_containers(host)
+    if args.json:
+        payload = envelope(
+            provider=host.provider,
+            host=host.name,
+            operation="list",
+            resources=[
+                VMRecord(
+                    id=str(row.vmid),
+                    kind=row.guest_type,
+                    name=row.name,
+                    state=row.status,
+                    lock=row.lock,
+                ).to_dict()
+                for row in rows
+            ],
+        )
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
     if not rows:
         print(f"No guests on {host.name} ({host.address}).")
         return 0
@@ -835,7 +868,26 @@ def _cmd_containers_ls(args: argparse.Namespace, workspace: Optional[str]) -> in
 
 def _cmd_status(args: argparse.Namespace, workspace: Optional[str]) -> int:
     host = _resolve_host(args.host, workspace)
-    print(get_container_status(host, args.vmid))
+    state = get_container_status(host, args.vmid)
+    if args.json:
+        guests = list_containers(host)
+        guest = next((item for item in guests if item.vmid == args.vmid), None)
+        resource = VMRecord(
+            id=str(args.vmid),
+            kind=guest.guest_type if guest else "unknown",
+            name=guest.name if guest else "",
+            state=state,
+            lock=guest.lock if guest else None,
+        ).to_dict()
+        payload = envelope(
+            provider=host.provider,
+            host=host.name,
+            operation="status",
+            resources=[resource],
+        )
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+    print(state)
     return 0
 
 
@@ -892,6 +944,26 @@ def _cmd_destroy(args: argparse.Namespace, workspace: Optional[str]) -> int:
 def _cmd_health(args: argparse.Namespace, workspace: Optional[str]) -> int:
     host = _resolve_host(args.host, workspace)
     report = health_check(host, args.vmid, probe_ssh=not args.no_ssh)
+    if args.json:
+        payload = envelope(
+            provider=host.provider,
+            host=host.name,
+            operation="health",
+            resources=[
+                VMHealth(
+                    id=str(report.vmid),
+                    kind=report.guest_type,
+                    state=report.status,
+                    healthy=report.healthy,
+                    address=report.ip,
+                    pingable=report.pingable,
+                    ssh_open=report.ssh_open,
+                    notes=list(report.notes),
+                ).to_dict()
+            ],
+        )
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0 if report.healthy else 1
     print(f"VMID {report.vmid} on {host.name} ({host.address}):")
     print(f"  status:  {report.status}")
     print(f"  ip:      {report.ip or 'n/a'}")
@@ -1009,6 +1081,7 @@ def _cmd_resize_disk(args: argparse.Namespace, workspace: Optional[str]) -> int:
 
 def _cmd_top(args: argparse.Namespace, workspace: Optional[str]) -> int:
     any_error = False
+    summaries: list[dict[str, object]] = []
     for name in args.hosts:
         host = _resolve_host(name, workspace)
         try:
@@ -1017,9 +1090,20 @@ def _cmd_top(args: argparse.Namespace, workspace: Optional[str]) -> int:
             print(f"Error ({host.name}): {exc}")
             any_error = True
             continue
+        summaries.append({"host": host.name, **summary.to_dict()})
+        if args.json:
+            continue
         print(format_node_summary(summary))
         if len(args.hosts) > 1:
             print()
+    if args.json:
+        payload = envelope(
+            provider="proxmox",
+            host="multiple" if len(args.hosts) > 1 else args.hosts[0],
+            operation="top",
+            resources=summaries,
+        )
+        print(json.dumps(payload, indent=2, sort_keys=True))
     return 1 if any_error else 0
 
 
@@ -1029,7 +1113,13 @@ def _cmd_audit(args: argparse.Namespace, workspace: Optional[str]) -> int:
         for name in args.hosts
     ]
     if args.json:
-        print(json.dumps([report.to_dict() for report in reports], indent=2, sort_keys=True))
+        payload = envelope(
+            provider="proxmox",
+            host="multiple" if len(reports) > 1 else reports[0].host_name,
+            operation="audit",
+            resources=[report.to_dict() for report in reports],
+        )
+        print(json.dumps(payload, indent=2, sort_keys=True))
     else:
         for index, report in enumerate(reports):
             if index:

@@ -176,7 +176,9 @@ control system can run health checks or deliberate terminal-agent updates with
 
 ## Development checks
 
-Run the default test suite from a checkout:
+Run the default checks from a checkout. This includes building a wheel in a
+temporary directory, installing it into an isolated virtual environment, and
+smoke-testing both installed launchers outside the source tree:
 
 ```bash
 make check

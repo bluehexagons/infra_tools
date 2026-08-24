@@ -37,7 +37,7 @@ jobs:
       - name: Install dependencies
         run: |
           python3 -m pip install --upgrade pip
-          pip install argcomplete
+          pip install argcomplete build
 
       - name: Run checks
         run: make check
