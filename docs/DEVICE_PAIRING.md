@@ -76,7 +76,9 @@ inspection. Prefer a password file when that exposure matters.
 
 ## Enroll a device
 
-From a permitted device, visit:
+From a permitted device, open the **T3 Code pairing HTTPS endpoint printed by
+setup**. The direct listener below is HTTP-only compatibility; do not use
+`https://` with it:
 
 ```text
 http://192.168.0.41:3774/

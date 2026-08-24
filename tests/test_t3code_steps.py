@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import io
 import os
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -149,7 +151,9 @@ class T3CodeWebTest(unittest.TestCase):
                     )
                 return SimpleNamespace(returncode=0, stdout="")
 
+            output = io.StringIO()
             with (
+                redirect_stdout(output),
                 patch("common.t3code_steps.pwd.getpwnam", return_value=account),
                 patch("common.t3code_steps.os.chown"),
                 patch(
@@ -207,6 +211,11 @@ class T3CodeWebTest(unittest.TestCase):
                 patch("common.t3code_steps.remove_nginx_auth_failure_ban"),
             ):
                 install_t3code_web(config)
+
+            rendered = output.getvalue()
+            self.assertIn("T3 Code HTTPS endpoint: https://target:8444/", rendered)
+            self.assertIn("T3 Code HTTP compatibility: port 3773", rendered)
+            self.assertNotIn("http://target:3773/", rendered)
 
             wrapper = os.path.join(temporary, ".local", "bin", "infra-tools-t3code-web")
             pair_wrapper = os.path.join(temporary, ".local", "bin", "t3code-pair")

@@ -19,6 +19,7 @@ from lib.machine_state import STATE_DIR, resolve_machine_type, save_machine_stat
 from lib.notifications import send_setup_notification
 from lib.operation_state import OperationRecord, OperationStateStore
 from lib.remote_utils import detect_os, is_dry_run, set_dry_run
+from lib.setup_report import SetupReport, get_setup_report
 from lib.validation import (
     validate_agent_repositories,
     validate_agent_git_settings,
@@ -413,9 +414,12 @@ def _run_main() -> int:
     _begin_setup_operation(config)
     
     setup_errors: list[str] = []
+    report = get_setup_report()
     
     total_steps = len(steps)
     for i, (name, func) in enumerate(steps, 1):
+        if report is not None:
+            report.set_step(name)
         _transition_setup_operation(
             "applying",
             {
@@ -437,6 +441,8 @@ def _run_main() -> int:
             error_msg = f"Step '{name}' failed: {e}"
             elapsed = time.monotonic() - step_started
             print(f"  ✗ {error_msg} ({elapsed:.1f}s)")
+            if report is not None:
+                report.error(error_msg, step=name)
             setup_errors.append(error_msg)
             if config.notify_specs:
                 send_setup_notification(
@@ -450,6 +456,8 @@ def _run_main() -> int:
             raise
         elapsed = time.monotonic() - step_started
         print(f"  ✓ Step completed in {elapsed:.1f}s")
+        if report is not None:
+            report.set_step(None)
     
     bar = progress_bar(total_steps, total_steps)
     print(f"\n{bar} Complete!")
@@ -663,13 +671,19 @@ def _run_main() -> int:
 
 
 def main() -> int:
+    report = SetupReport()
     try:
-        return _run_main()
-    except Exception as exc:
-        _record_setup_failure(exc)
-        raise
+        with report.activate(), report.capture():
+            try:
+                result = _run_main()
+            except Exception as exc:
+                _record_setup_failure(exc)
+                raise
+            finally:
+                _remove_secret_payloads()
     finally:
-        _remove_secret_payloads()
+        report.render()
+    return result
 
 
 if __name__ == "__main__":

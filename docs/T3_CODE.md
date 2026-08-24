@@ -124,13 +124,16 @@ T3 agent skill. `--fix` only configures the GitHub HTTPS helper after a valid
 
 ## Pair a client or browser
 
-The bare service address is intentionally not an authenticated web session. If
-you browse to `http://192.168.0.41:3773/`, T3 Code will show a field for a
-pairing key. That is expected: the pairing key is the one-time authentication
-step, not a setup failure. Do not remove pairing or publish the bare endpoint.
+The bare service address is intentionally not an authenticated web session. Use
+the **T3 Code HTTPS endpoint printed by setup**. T3 Code will show a field for
+a pairing key. That is expected: the pairing key is the one-time
+authentication step, not a setup failure. Do not remove pairing or publish the
+bare endpoint. The direct `3773` listener remains HTTP-only for compatibility;
+do not prepend `https://` to it.
 
-With `--device-pairing t3code`, visit the protected enrollment portal from an
-allowed LAN device:
+With `--device-pairing t3code`, open the **T3 Code pairing HTTPS endpoint
+printed by setup** from an allowed LAN device. The direct `3774` listener is
+HTTP-only compatibility and is not an HTTPS endpoint:
 
 ```text
 http://192.168.0.41:3774/

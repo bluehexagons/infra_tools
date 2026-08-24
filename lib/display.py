@@ -95,7 +95,7 @@ def print_rdp_info(config: SetupConfig) -> None:
 
 
 def print_service_access_summary(config: SetupConfig) -> None:
-    """Print links and ports for services selected by a setup."""
+    """Print the most useful links and ports for services selected by a setup."""
 
     lines: list[tuple[str, str, str | None]] = []
 
@@ -129,16 +129,16 @@ def print_service_access_summary(config: SetupConfig) -> None:
             if interface == "t3code":
                 lines.append(
                     (
-                        "T3 Code HTTPS endpoint",
-                        "printed by target setup",
+                        "T3 Code (HTTPS)",
+                        "see the HTTPS endpoint printed by target setup",
                         "managed internal HTTPS gateway",
                     )
                 )
                 lines.append(
                     (
-                        "T3 Code direct HTTP compatibility endpoint",
-                        web_url,
-                        f"{note}; use the HTTPS endpoint by default",
+                        "T3 Code HTTP compatibility",
+                        f"port {config.web_interface_port}",
+                        f"{note}; use the printed HTTPS endpoint",
                     )
                 )
             else:
@@ -146,25 +146,24 @@ def print_service_access_summary(config: SetupConfig) -> None:
 
         if "t3code" in config.web_interfaces:
             if config.device_pairing_providers:
-                pairing_url = _http_url(access_host, config.device_pairing_port)
                 note = (
-                    "Nginx Basic Auth; HTTPS endpoint is printed by target setup; "
+                    "Nginx Basic Auth; use the printed HTTPS endpoint; "
                     "creates one-time T3 client links"
                 )
                 if loopback_only:
                     note += "; loopback-only, use an SSH tunnel"
                 lines.append(
                     (
-                        "T3 Code device-pairing HTTPS endpoint",
-                        "printed by target setup",
+                        "T3 Code device pairing (HTTPS)",
+                        "see the HTTPS endpoint printed by target setup",
                         note,
                     )
                 )
                 lines.append(
                     (
-                        "T3 Code device-pairing direct HTTP compatibility endpoint",
-                        pairing_url,
-                        "use the HTTPS endpoint by default",
+                        "T3 Code device-pairing HTTP compatibility",
+                        f"port {config.device_pairing_port}",
+                        "use the printed HTTPS endpoint",
                     )
                 )
             else:
@@ -231,11 +230,36 @@ def print_service_access_summary(config: SetupConfig) -> None:
     if not lines:
         return
 
+    web_labels = {
+        "Web server",
+        "Godot web exports",
+        "Gogs web",
+        "Antistatic lobby",
+        "Antistatic DB",
+        "T3 Code (HTTPS)",
+        "T3 Code HTTP compatibility",
+        "T3 Code device pairing (HTTPS)",
+        "T3 Code device-pairing HTTP compatibility",
+        "T3 Code pairing",
+    }
+    sections: list[tuple[str, list[tuple[str, str, str | None]]]] = [
+        ("Web and HTTPS", []),
+        ("Network access", []),
+    ]
+    section_map = {title: entries for title, entries in sections}
+    for line in lines:
+        section = "Web and HTTPS" if line[0] in web_labels else "Network access"
+        section_map[section].append(line)
+
     print("Access:")
-    for label, address, note in lines:
-        print(f"  {label}: {address}")
-        if note:
-            print(f"    {note}")
+    for title, entries in sections:
+        if not entries:
+            continue
+        print(f"  {title}:")
+        for label, address, note in entries:
+            print(f"    {label}: {address}")
+            if note:
+                print(f"      {note}")
 
 
 def print_setup_summary(config: SetupConfig, description: Optional[str] = None) -> None:

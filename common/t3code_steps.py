@@ -1255,12 +1255,15 @@ WantedBy=multi-user.target
         if index == 1:
             label = "T3 Code pairing HTTPS endpoint"
         print(f"  {label}: {https_url}")
-    print(f"  T3 Code direct HTTP compatibility endpoint: {base_url}")
+    print(
+        "  T3 Code HTTP compatibility: "
+        f"port {port} ({host}); use the printed HTTPS endpoint"
+    )
     print("  Readiness check: infra-tools agent doctor --capability t3code")
     if config.device_pairing_providers:
         print(
-            "  Protected device enrollment listening on "
-            f"{host}:{config.device_pairing_port}"
+            "  Protected device enrollment HTTP compatibility: "
+            f"port {config.device_pairing_port} ({host}); use the printed HTTPS endpoint"
         )
     else:
         print(

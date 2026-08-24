@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import os
 import sys
 import tempfile
@@ -20,6 +21,19 @@ from lib.remote_utils import set_dry_run
 class TestRemoteSetupArgsFile(unittest.TestCase):
     def tearDown(self):
         remote_setup._active_setup_operation = None
+
+    def test_main_prints_run_notes_after_success(self):
+        def fake_run() -> int:
+            print("  ⚠ optional browser check was skipped")
+            return 0
+
+        with patch.object(remote_setup, "_run_main", side_effect=fake_run), patch.object(
+            remote_setup, "_remove_secret_payloads"
+        ), patch("sys.stdout", new_callable=io.StringIO) as output:
+            self.assertEqual(remote_setup.main(), 0)
+
+        self.assertIn("Run notes:", output.getvalue())
+        self.assertIn("optional browser check was skipped", output.getvalue())
 
     def test_remembered_state_is_finalized_only_after_steps_succeed(self):
         args = SimpleNamespace(

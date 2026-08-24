@@ -120,20 +120,24 @@ class TestRdpDisplay(unittest.TestCase):
             print_service_access_summary(config)
 
         rendered = output.getvalue()
-        self.assertIn("T3 Code HTTPS endpoint: printed by target setup", rendered)
         self.assertIn(
-            "T3 Code direct HTTP compatibility endpoint: http://192.168.0.41:3773/",
+            "T3 Code (HTTPS): see the HTTPS endpoint printed by target setup",
             rendered,
         )
         self.assertIn(
-            "T3 Code device-pairing HTTPS endpoint: printed by target setup",
+            "T3 Code HTTP compatibility: port 3773",
             rendered,
         )
         self.assertIn(
-            "T3 Code device-pairing direct HTTP compatibility endpoint: "
-            "http://192.168.0.41:3774/",
+            "T3 Code device pairing (HTTPS): see the HTTPS endpoint printed by target setup",
             rendered,
         )
+        self.assertIn(
+            "T3 Code device-pairing HTTP compatibility: port 3774",
+            rendered,
+        )
+        self.assertNotIn("http://192.168.0.41:3773/", rendered)
+        self.assertNotIn("http://192.168.0.41:3774/", rendered)
         self.assertIn("Gogs web: http://git.example.com/", rendered)
         self.assertIn("Gogs Git over SSH: git@git.example.com", rendered)
         self.assertIn("TCP 22", rendered)
@@ -156,11 +160,15 @@ class TestRdpDisplay(unittest.TestCase):
             print_service_access_summary(config)
 
         rendered = output.getvalue()
-        self.assertIn("T3 Code HTTPS endpoint: printed by target setup", rendered)
         self.assertIn(
-            "T3 Code direct HTTP compatibility endpoint: http://127.0.0.1:3773/",
+            "T3 Code (HTTPS): see the HTTPS endpoint printed by target setup",
             rendered,
         )
+        self.assertIn(
+            "T3 Code HTTP compatibility: port 3773",
+            rendered,
+        )
+        self.assertNotIn("http://127.0.0.1:3773/", rendered)
         self.assertIn("loopback-only, use an SSH tunnel", rendered)
         self.assertIn(
             "T3 Code pairing: infra-tools agent web pair agent-vm agent",
