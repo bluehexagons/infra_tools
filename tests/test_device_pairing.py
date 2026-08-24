@@ -23,6 +23,7 @@ from common.service_tools.device_pairing_service import (
     _safe_pairing_url,
     _public_base_url,
     _connect_output_html,
+    _sanitize_connect_output,
 )
 from common.t3code_steps import (
     _configure_device_pairing,
@@ -352,6 +353,10 @@ class PairingBrokerTest(unittest.TestCase):
         rendered = _connect_output_html("Output https://[malformed and continue")
         self.assertIn("https://[malformed and continue", rendered)
 
+    def test_connect_output_sanitizer_hides_partial_terminal_sequences(self) -> None:
+        self.assertEqual(_sanitize_connect_output("\x1b[2"), "")
+        self.assertEqual(_sanitize_connect_output("\x1b]progress"), "")
+
     def test_connect_status_refresh_route_is_not_a_404(self) -> None:
         provider = self._provider()
         provider["connect"] = {
@@ -387,6 +392,7 @@ class PairingBrokerTest(unittest.TestCase):
         self.assertIn("Response or authorization code", response)
         self.assertIn("Refresh status", response)
         self.assertIn("Authorization in progress", response)
+        self.assertIn("relay-install confirmation is accepted automatically", response)
         self.assertIn("Show T3 command output", response)
         self.assertNotIn('http-equiv="refresh"', response)
         self.assertIn(f'name="nonce" value="{nonce}"', response)
@@ -550,6 +556,45 @@ class PairingBrokerTest(unittest.TestCase):
             snapshot = job.snapshot()
             self.assertEqual(snapshot["returncode"], 0)
             self.assertIn("received approved", str(snapshot["output"]))
+            self.assertTrue(os.path.isfile(restart_request))
+
+    def test_headless_connect_job_accepts_relay_install_and_cleans_terminal_output(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            restart_request = os.path.join(temporary, "restart")
+            command = [
+                sys.executable,
+                "-c",
+                (
+                    "import sys; "
+                    "sys.stdout.write('\\x1b[2K\\rThe T3 relay client is required for T3 Connect. "
+                    "Download and install version 1.2.3? (y/N)\\n'); sys.stdout.flush(); "
+                    "value = sys.stdin.readline().strip(); "
+                    "print('received ' + value, flush=True)"
+                ),
+            ]
+            job = ConnectJob(
+                {
+                    "link_command": command,
+                    "status_command": command,
+                    "unlink_command": command,
+                    "restart_request": restart_request,
+                }
+            )
+            job.start()
+            deadline = time.monotonic() + 2
+            while job.snapshot()["active"]:
+                if time.monotonic() > deadline:
+                    self.fail("Connect job did not accept the relay-install prompt")
+                time.sleep(0.01)
+            snapshot = job.snapshot()
+            output = str(snapshot["output"])
+            self.assertEqual(snapshot["returncode"], 0)
+            self.assertTrue(output.startswith("The T3 relay client is required"))
+            self.assertIn("received y", output)
+            self.assertNotIn("\x1b", output)
+            self.assertNotIn("\r", output)
             self.assertTrue(os.path.isfile(restart_request))
 
     def test_apply_preserves_an_already_enabled_connect_state(self) -> None:

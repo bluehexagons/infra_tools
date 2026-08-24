@@ -232,11 +232,12 @@ enabled. The VM-local CA is available from the internal-web landing page for
 LAN clients that do not already trust it.
 
 The pairing portal's T3 Connect section runs `t3 connect link --headless`,
-accepts the relay-install and authorization prompts, and requests a restart of
-the managed T3 service. Its checkbox maps to T3's persisted desired Connect
-state; applying an already-enabled checkbox preserves that state, while
-clearing it runs `t3 connect unlink`. Use **Refresh status** to see new prompt
-output without interrupting text entry.
+automatically accepts the known relay-install confirmation, and requests a
+restart of the managed T3 service. It cleans terminal control sequences from
+the displayed output so authorization prompts remain readable. Its checkbox
+maps to T3's persisted desired Connect state; applying an already-enabled
+checkbox preserves that state, while clearing it runs `t3 connect unlink`. Use
+**Refresh status** to see new prompt output without interrupting text entry.
 
 When generating the app enrollment link over SSH, pass that HTTPS origin to
 the target-side helper so the app receives the externally reachable address:

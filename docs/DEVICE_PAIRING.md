@@ -116,10 +116,11 @@ the environment when T3 reports that `access:write` is unavailable.
 
 The authenticated portal includes a **T3 Connect** section. Choose **Start
 authorization** to run T3's supported `t3 connect link --headless` flow. The
-page displays the relay-install prompt and authorization instructions and
-provides an input for the confirmation or code requested by T3. T3 installs its
-pinned relay client; infra-tools does not download or manage a second relay
-service.
+page cleans up terminal control sequences and displays readable installation
+progress and authorization instructions. The known relay-install confirmation
+is accepted automatically; use the input only for an authorization code or
+other response requested by T3. T3 installs its pinned relay client;
+infra-tools does not download or manage a second relay service.
 
 After authorization, the portal shows a completion message and requests a
 restart of `infra-tools-t3code.service`. T3 then reconciles the saved Connect

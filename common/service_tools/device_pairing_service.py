@@ -36,8 +36,19 @@ _HOSTNAME_RE = re.compile(
     r"^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*"
     r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$"
 )
-_ANSI_ESCAPE_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+_ANSI_ESCAPE_RE = re.compile(
+    r"(?:\x1b\][^\x07]*(?:\x07|\x1b\\)|"
+    r"\x1b(?:[@-Z\\^_]|\[[0-?]*[ -/]*[@-~]))"
+)
+_INCOMPLETE_ANSI_ESCAPE_RE = re.compile(
+    r"\x1b(?:\[[0-?]*[ -/]*|\][^\x07]*)?$"
+)
 _CONNECT_URL_RE = re.compile(r"https?://[^\s<>]+")
+_RELAY_INSTALL_PROMPT_RE = re.compile(
+    r"The T3 relay client is required for T3 Connect\.\s+"
+    r"Download and install version [^?\r\n]{1,128}\?",
+    re.IGNORECASE,
+)
 _PAGE_STYLE = """
 :root {
   color-scheme: light;
@@ -102,7 +113,8 @@ input[type=text] { width: min(100%, 32rem); min-height: 2.7rem; margin-top: .45r
 .output { margin: 1rem 0; border: 1px solid #d9e1ec; border-radius: .6rem; background: #fbfcfe; }
 .output summary { padding: .75rem 1rem; color: #344054; font-weight: 650; cursor: pointer; }
 pre { max-height: 20rem; margin: 0; padding: .9rem 1rem; overflow: auto; border-top: 1px solid #e4e7ec;
-  background: #101828; color: #e6edf7; font: .85rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
+  background: #101828; color: #e6edf7; font: .9rem/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 4; }
 .link-box { margin: 1rem 0; padding: .8rem; border: 1px solid #d9e1ec; border-radius: .6rem; background: #f8fafc; }
 .link-box code { display: block; margin-top: .35rem; overflow-wrap: anywhere; }
 .footer-nav { margin-top: 1.25rem; }
@@ -119,6 +131,28 @@ a.text-link:hover { text-decoration: underline; }
 
 class PairingError(RuntimeError):
     """A safe provider failure that may be shown without secret output."""
+
+
+def _sanitize_connect_output(value: str) -> str:
+    """Turn terminal-oriented CLI output into readable plain text."""
+
+    cleaned = _ANSI_ESCAPE_RE.sub("", value)
+    cleaned = _INCOMPLETE_ANSI_ESCAPE_RE.sub("", cleaned)
+    cleaned = cleaned.replace("\x1b", "").replace("\r\n", "\n")
+    readable: list[str] = []
+    for character in cleaned:
+        codepoint = ord(character)
+        if character == "\r":
+            if readable and readable[-1] != "\n":
+                readable.append("\n")
+            continue
+        if character == "\b":
+            if readable and readable[-1] not in {"\n", "\t"}:
+                readable.pop()
+            continue
+        if character in {"\n", "\t"} or (32 <= codepoint < 127) or codepoint > 159:
+            readable.append(character)
+    return "".join(readable).lstrip("\n")
 
 
 def _load_provider_config(path: str) -> dict[str, dict[str, Any]]:
@@ -260,16 +294,36 @@ class ConnectJob:
         self.config = config
         self._lock = threading.Lock()
         self._process: subprocess.Popen[str] | None = None
+        self._raw_output = ""
         self._output = ""
+        self._relay_install_confirmed = False
         self._started_at = 0.0
         self._finished_at: float | None = None
         self._returncode: int | None = None
         self._error: str | None = None
 
     def _append_output(self, text: str) -> None:
-        clean = _ANSI_ESCAPE_RE.sub("", text).replace("\r", "")
+        process: subprocess.Popen[str] | None = None
         with self._lock:
-            self._output = (self._output + clean)[-MAX_CONNECT_OUTPUT_BYTES:]
+            self._raw_output = (self._raw_output + text)[-MAX_CONNECT_OUTPUT_BYTES:]
+            self._output = _sanitize_connect_output(self._raw_output)
+            if (
+                not self._relay_install_confirmed
+                and _RELAY_INSTALL_PROMPT_RE.search(self._output)
+            ):
+                self._relay_install_confirmed = True
+                process = self._process
+        if process is None or process.stdin is None:
+            return
+        with self._lock:
+            if self._process is not process or process.stdin is None:
+                return
+            try:
+                process.stdin.write("y\n")
+                process.stdin.flush()
+            except (BrokenPipeError, OSError, ValueError):
+                if self._process is process:
+                    self._error = "T3 relay installation confirmation could not be sent"
 
     def _watch(self, process: subprocess.Popen[str]) -> None:
         assert process.stdout is not None
@@ -282,8 +336,9 @@ class ConnectJob:
             returncode = process.poll()
         finally:
             process.stdout.close()
-            if process.stdin is not None:
-                process.stdin.close()
+            with self._lock:
+                if process.stdin is not None:
+                    process.stdin.close()
         with self._lock:
             self._returncode = returncode if returncode is not None else 1
             self._finished_at = time.monotonic()
@@ -308,7 +363,9 @@ class ConnectJob:
         with self._lock:
             if self._process is not None:
                 raise PairingError("A T3 Connect operation is already running")
+            self._raw_output = ""
             self._output = ""
+            self._relay_install_confirmed = False
             self._error = None
             self._returncode = None
             self._finished_at = None
@@ -343,15 +400,15 @@ class ConnectJob:
             raise PairingError("T3 Connect input is invalid")
         with self._lock:
             process = self._process
-        if process is None or process.stdin is None:
-            raise PairingError("No T3 Connect operation is waiting for input")
-        try:
-            process.stdin.write(value + "\n")
-            process.stdin.flush()
-        except (BrokenPipeError, OSError) as exc:
-            raise PairingError(
-                "The T3 Connect operation is no longer running"
-            ) from exc
+            if process is None or process.stdin is None:
+                raise PairingError("No T3 Connect operation is waiting for input")
+            try:
+                process.stdin.write(value + "\n")
+                process.stdin.flush()
+            except (BrokenPipeError, OSError, ValueError) as exc:
+                raise PairingError(
+                    "The T3 Connect operation is no longer running"
+                ) from exc
 
     def snapshot(self) -> dict[str, object]:
         with self._lock:
@@ -738,8 +795,8 @@ class PairingRequestHandler(BaseHTTPRequestHandler):
         if active:
             progress_block = (
                 '<div class="notice info"><strong>Authorization in progress</strong>'
-                "<p>Follow the T3 prompt below. When it asks for a code or response, "
-                "enter it here.</p></div>"
+                "<p>The known relay-install confirmation is accepted automatically. "
+                "When T3 asks for an authorization code or response, enter it here.</p></div>"
             )
         elif finished and returncode == 0:
             progress_block = (
