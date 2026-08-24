@@ -37,7 +37,7 @@ jobs:
       - name: Install dependencies
         run: |
           python3 -m pip install --upgrade pip
-          pip install argcomplete build
+          python3 -m pip install argcomplete build
 
       - name: Run checks
         run: make check
@@ -58,7 +58,7 @@ jobs:
       - name: Build wheel
         run: |
           python3 -m pip install --upgrade pip
-          pip install build
+          python3 -m pip install build
           python3 -m build --wheel --outdir dist
 
       - name: Smoke-test installed wheel
