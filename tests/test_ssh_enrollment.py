@@ -7,10 +7,36 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from lib.ssh_enrollment import enroll_host_key, replace_scanned_host_keys
+from lib.ssh_enrollment import (
+    enroll_host_key,
+    is_host_key_enrolled,
+    replace_scanned_host_keys,
+)
 
 
 class TestSshEnrollment(unittest.TestCase):
+    @patch("lib.ssh_enrollment.subprocess.run")
+    def test_reports_enrolled_host_key(self, run):
+        run.return_value = type(
+            "Result",
+            (),
+            {"returncode": 0, "stdout": "example.com ssh-ed25519 AAAA\n", "stderr": ""},
+        )()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "known_hosts"
+            path.write_text("example.com ssh-ed25519 AAAA\n", encoding="utf-8")
+            self.assertTrue(
+                is_host_key_enrolled("example.com", known_hosts_path=str(path))
+            )
+
+    def test_reports_missing_known_hosts_file(self):
+        self.assertFalse(
+            is_host_key_enrolled(
+                "example.com",
+                known_hosts_path="/tmp/infra-tools-missing-known-hosts",
+            )
+        )
+
     @patch("lib.ssh_enrollment.get_workspace_known_hosts_path")
     @patch("lib.ssh_enrollment.subprocess.run")
     def test_enrolls_after_noninteractive_confirmation(self, run, known_hosts):

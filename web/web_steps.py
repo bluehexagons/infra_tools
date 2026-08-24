@@ -15,11 +15,11 @@ def install_nginx(config: SetupConfig) -> None:
             return
     
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    if not install_package("nginx", "nginx", "apt-get install -y -qq nginx"):
+    if not install_package("nginx", "nginx", ["apt-get", "install", "-y", "-qq", "nginx"]):
         raise RuntimeError("Failed to install required nginx package")
     
-    run("systemctl enable nginx", check=True)
-    run("systemctl start nginx", check=True)
+    run(["systemctl", "enable", "nginx"])
+    run(["systemctl", "start", "nginx"])
     
     if is_service_active("nginx"):
         print("  ✓ nginx installed and started")
@@ -38,7 +38,7 @@ def configure_nginx_security(config: SetupConfig) -> None:
         previous_content = file_obj.read()
 
     if not os.path.exists("/etc/nginx/nginx.conf.bak"):
-        run("cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.bak")
+        run(["cp", "/etc/nginx/nginx.conf", "/etc/nginx/nginx.conf.bak"])
     
     config_template_dir = os.path.join(os.path.dirname(__file__), '..', 'web', 'config')
     template_path = os.path.join(config_template_dir, 'nginx.conf.template')
@@ -55,7 +55,7 @@ def configure_nginx_security(config: SetupConfig) -> None:
         print("  ⚠ nginx security configuration test failed; restored the previous configuration")
         raise RuntimeError("nginx security configuration failed validation")
 
-    run("systemctl reload nginx")
+    run(["systemctl", "reload", "nginx"])
     
     print("  ✓ nginx security configuration applied")
 
@@ -87,8 +87,8 @@ def create_hello_world_site(config: SetupConfig) -> None:
     with open(index_html, "w") as f:
         f.write(html_content)
     
-    run("chown -R www-data:www-data /var/www/html", check=True)
-    run("chmod -R 755 /var/www/html")
+    run(["chown", "-R", "www-data:www-data", "/var/www/html"])
+    run(["chmod", "-R", "755", "/var/www/html"])
     
     print("  ✓ Hello World website created")
 
@@ -112,7 +112,7 @@ def configure_default_site(config: SetupConfig) -> None:
     with open(site_conf, "w", encoding="utf-8") as f:
         f.write(default_site)
     
-    run(f"ln -sf {site_conf} {enabled_link}", check=True)
+    run(["ln", "-sf", site_conf, enabled_link])
     
     result = run("nginx -t", check=False)
     if result.returncode != 0:
@@ -126,6 +126,6 @@ def configure_default_site(config: SetupConfig) -> None:
         print("  ⚠ nginx default-site configuration test failed; restored the previous site")
         raise RuntimeError("nginx default-site configuration failed validation")
     
-    run("systemctl reload nginx")
+    run(["systemctl", "reload", "nginx"])
     
     print("  ✓ Default site configured (static files only, no scripting)")

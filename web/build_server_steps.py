@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import os
 import json
-import shlex
 
 from common.common_steps import install_node_for_user, install_or_update_uv
 from lib.atomic_io import write_json_atomic
 from lib.config import SetupConfig
 from lib.remote_utils import run, is_package_installed
+from lib.ssh_enrollment import is_host_key_enrolled
 from lib.workspace import get_known_hosts_path
 
 
@@ -28,12 +28,15 @@ def generate_deploy_ssh_key(config: SetupConfig) -> None:
     
     os.makedirs(ssh_dir, mode=0o700, exist_ok=True)
     
-    run(f"ssh-keygen -t ed25519 -f {key_file} -N '' -C 'deploy@build-server'")
-    
-    run(f"chown -R webhook:webhook {ssh_dir}")
-    run(f"chmod 700 {ssh_dir}")
-    run(f"chmod 600 {key_file}")
-    run(f"chmod 644 {key_file}.pub")
+    run([
+        "ssh-keygen", "-t", "ed25519", "-f", key_file, "-N", "",
+        "-C", "deploy@build-server",
+    ])
+
+    run(["chown", "-R", "webhook:webhook", ssh_dir])
+    run(["chmod", "700", ssh_dir])
+    run(["chmod", "600", key_file])
+    run(["chmod", "644", f"{key_file}.pub"])
     
     print("  ✓ Generated deploy SSH key")
     print(f"  ℹ Public key at: {key_file}.pub")
@@ -74,7 +77,7 @@ def configure_deploy_targets(config: SetupConfig) -> None:
 
 
 def configure_deploy_known_hosts(config: SetupConfig) -> None:
-    """Add deploy targets to known_hosts for non-interactive SSH."""
+    """Require explicitly enrolled deploy-target keys for non-interactive SSH."""
     if not config.deploy_targets:
         print("  ℹ No deploy targets to add to known_hosts")
         return
@@ -84,21 +87,29 @@ def configure_deploy_known_hosts(config: SetupConfig) -> None:
     
     os.makedirs(os.path.dirname(known_hosts), mode=0o700, exist_ok=True)
     
-    for target_host in config.deploy_targets:
-        result = run(
-            f"ssh-keyscan -H {shlex.quote(target_host)} 2>/dev/null",
-            capture_output=True,
-            check=False
+    missing = [
+        target_host
+        for target_host in config.deploy_targets
+        if not is_host_key_enrolled(
+            target_host,
+            known_hosts_path=known_hosts,
         )
-        if result.returncode == 0 and result.stdout:
-            with open(known_hosts, 'a') as f:
-                f.write(result.stdout)
+    ]
+    if missing:
+        targets = ", ".join(missing)
+        raise RuntimeError(
+            "Deploy target host keys are not enrolled: "
+            f"{targets}. Verify each fingerprint and run "
+            "'sudo -n /usr/bin/python3 /opt/infra_tools/infra_tools.py "
+            "--workspace /var/lib/infra_tools/cicd "
+            "ssh-key enroll HOST' before enabling CI/CD deployment."
+        )
     
     if os.path.exists(known_hosts):
-        run(f"chown webhook:webhook {known_hosts}")
-        run(f"chmod 644 {known_hosts}")
+        run(["chown", "webhook:webhook", known_hosts])
+        run(["chmod", "644", known_hosts])
     
-    print("  ✓ Added deploy targets to known_hosts")
+    print("  ✓ Verified explicitly enrolled deploy-target host keys")
 
 
 def create_build_workspace_dirs(config: SetupConfig) -> None:
@@ -113,8 +124,8 @@ def create_build_workspace_dirs(config: SetupConfig) -> None:
     for directory in directories:
         os.makedirs(directory, mode=0o755, exist_ok=True)
     
-    run("chown -R webhook:webhook /var/lib/infra_tools/cicd")
-    run("chmod -R 750 /var/lib/infra_tools/cicd")
+    run(["chown", "-R", "webhook:webhook", "/var/lib/infra_tools/cicd"])
+    run(["chmod", "-R", "750", "/var/lib/infra_tools/cicd"])
     
     print("  ✓ Created build workspace directories")
 
@@ -127,7 +138,7 @@ def install_build_node(config: SetupConfig) -> None:
 def install_build_python_tools(config: SetupConfig) -> None:
     """Install uv for the CI/CD build user."""
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    run("apt-get install -y -qq python3 python3-venv curl")
+    run(["apt-get", "install", "-y", "-qq", "python3", "python3-venv", "curl"])
 
     if install_or_update_uv(user_home=CICD_HOME, username=CICD_USER):
         print("  ✓ uv installed for build user")
@@ -147,7 +158,9 @@ def install_build_dependencies(config: SetupConfig) -> None:
         return
     
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    run(f"apt-get install -y -qq {' '.join(packages)}", check=False)
-    
+    run(["apt-get", "install", "-y", "-qq", *packages])
+
     if all_installed():
         print("  ✓ Build dependencies installed")
+        return
+    raise RuntimeError("Build dependencies were not present after installation")

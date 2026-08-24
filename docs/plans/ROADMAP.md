@@ -33,14 +33,16 @@ operating model. Prefer safeguards that reduce operator effort and make
 failures obvious; defer controls that require recurring manual administration
 until actual usage or incidents justify them.
 
-## Verification snapshot (2026-08-23)
+## Verification snapshot (2026-08-24)
 
 The ordering remains justified by the current implementation:
 
 - required command failures now raise from `remote_utils.run(check=True)`;
   nginx setup, firewall initialization, SSH reload, and CI/CD prerequisite
-  paths propagate required failures with focused coverage, while the broader
-  caller classification remains incomplete;
+  paths propagate required failures with focused coverage. The argv-native
+  command API and high-impact required-caller migrations now cover deployment,
+  storage, app-server, build-server, and CI/CD setup paths; the broader caller
+  classification remains incomplete;
 - full setup no longer tears down all managed services before replacement
   steps run;
 - manifest deployment builds and validates a sibling release before stopping
@@ -52,14 +54,16 @@ The ordering remains justified by the current implementation:
   and restored on failure without overwriting unmanaged same-name sites;
 - persistent JSON state/configuration now uses the shared atomic writer, but
   corrupt-state readers still fall back permissively;
-- shared SSH/SCP/rsync and Proxmox node builders require strict checking against
-  the workspace enrollment file, while CI/CD target setup still stages
-  unauthenticated `ssh-keyscan` results;
+- shared SSH/SCP/rsync, Proxmox node builders, and CI/CD deployment targets
+  require strict checking against explicitly enrolled workspace host keys;
 - remote setup and manifest activation now use versioned markers that block
   overlapping work and preserve interruption/recovery context; remembered
   target state is finalized only after setup succeeds;
-- package metadata now produces a self-contained wheel, and tagged-release CI
-  installs, smoke-tests, and publishes the artifact;
+- package metadata now produces a self-contained wheel, local `make check`
+  builds and installs it in an isolated smoke environment, and tagged-release
+  CI installs, smoke-tests, and publishes the artifact;
+- Proxmox read-only status/list/health/top/audit commands share the versioned
+  JSON envelope used by provider-neutral VM commands;
 - signed webhook deliveries have no delivery-ID replay protection; this is
   intentionally deferred until CI/CD work resumes;
 - command diagnostics redact complete quoted shell values, and the shared
@@ -79,6 +83,14 @@ propagates compilation failures.
 Those completed items should remain regression coverage, not active roadmap
 work.
 
+The following work packets are complete as of this snapshot:
+
+- the first high-impact `remote_utils.run()` caller migration, including the
+  argv-native API and focused setup coverage;
+- the local wheel-install smoke test and consistent Proxmox status/`--json`
+  output; and
+- explicit CI/CD deployment-target SSH enrollment with fail-closed setup.
+
 The best next work packets are:
 
 1. Continue the `remote_utils.run()` caller inventory beyond the completed
@@ -91,11 +103,8 @@ The best next work packets are:
    transaction coordinator.
 3. Replace permissive corrupt-state fallbacks with schema/version checks and
    actionable remediation.
-4. Add low-administration release and operator improvements: a local package
-   install smoke test, consistent status/`--json` output, and documentation of
-   the supported recovery path.
-5. Replace automatic SSH first-use trust with a documented one-time enrollment
-   step before privileged setup/deploy operations.
+4. Add low-administration release and operator improvements around the
+   supported recovery path and command-level diagnostics.
 
 ## Planning portfolio and GitHub issue alignment (2026-08-24)
 
@@ -244,9 +253,9 @@ documented roadmap values rather than accepted CLI choices.
 ## Small improvements to land continuously
 
 Small, well-contained fixes should not wait for a larger phase. Good follow-ups
-include plugin import fault isolation, consistent `--json` support for
-read-only commands, and auditing remaining non-JSON configuration writes for
-atomic replacement and permissions.
+include plugin import fault isolation, extending consistent `--json` support to
+remaining read-only commands, and auditing remaining non-JSON configuration
+writes for atomic replacement and permissions.
 
 ## Deliberately deferred
 

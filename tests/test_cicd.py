@@ -9,7 +9,7 @@ import hashlib
 import subprocess
 import tempfile
 import time
-from unittest.mock import patch, mock_open, MagicMock
+from unittest.mock import call, patch, mock_open, MagicMock
 import sys
 import os
 
@@ -56,9 +56,9 @@ class TestCICDSteps(unittest.TestCase):
         install_cicd_dependencies(mock_config)
         
         # Should install git
-        mock_run.assert_called_once_with("apt-get install -y -qq git", check=True)
+        mock_run.assert_called_once_with(["apt-get", "install", "-y", "-qq", "git"])
         call_args = mock_run.call_args[0][0]
-        self.assertIn('apt-get install', call_args)
+        self.assertEqual(call_args[:2], ['apt-get', 'install'])
         self.assertIn('git', call_args)
     
     @patch('web.cicd_steps.run')
@@ -71,8 +71,11 @@ class TestCICDSteps(unittest.TestCase):
         create_cicd_user(mock_config)
         
         self.assertEqual(mock_run.call_count, 2)
-        self.assertIn('id webhook', mock_run.call_args_list[0][0][0])
-        self.assertIn('usermod --home /var/lib/infra_tools/cicd webhook', mock_run.call_args_list[1][0][0])
+        self.assertEqual(mock_run.call_args_list[0][0][0], ['id', 'webhook'])
+        self.assertEqual(
+            mock_run.call_args_list[1][0][0],
+            ['usermod', '--home', '/var/lib/infra_tools/cicd', 'webhook'],
+        )
     
     @patch('web.cicd_steps.run')
     def test_create_cicd_user_new(self, mock_run):
@@ -88,8 +91,9 @@ class TestCICDSteps(unittest.TestCase):
         
         # Should call both id and useradd
         self.assertEqual(mock_run.call_count, 2)
-        self.assertIn('useradd', mock_run.call_args_list[1][0][0])
-        self.assertIn('--home-dir /var/lib/infra_tools/cicd', mock_run.call_args_list[1][0][0])
+        self.assertEqual(mock_run.call_args_list[1][0][0][0], 'useradd')
+        self.assertIn('--home-dir', mock_run.call_args_list[1][0][0])
+        self.assertIn('/var/lib/infra_tools/cicd', mock_run.call_args_list[1][0][0])
         self.assertIn('webhook', mock_run.call_args_list[1][0][0])
     
     @patch('web.cicd_steps.os.path.exists')
@@ -109,7 +113,7 @@ class TestCICDSteps(unittest.TestCase):
         self.assertGreaterEqual(mock_makedirs.call_count, 4)
         
         # Should check for webhook user existence
-        user_check_calls = [call for call in mock_run.call_args_list if 'id webhook' in str(call)]
+        user_check_calls = [call for call in mock_run.call_args_list if call.args[0] == ['id', 'webhook']]
         self.assertGreater(len(user_check_calls), 0)
         
         # Should set ownership (when user exists)
@@ -179,7 +183,7 @@ class TestCICDSteps(unittest.TestCase):
         mock_cleanup.assert_called_once_with('webhook-receiver')
         
         # Should reload systemd
-        reload_calls = [call for call in mock_run.call_args_list if 'daemon-reload' in str(call)]
+        reload_calls = [call for call in mock_run.call_args_list if call.args[0] == ['systemctl', 'daemon-reload']]
         self.assertGreater(len(reload_calls), 0)
         
         # Should enable and start service
@@ -217,7 +221,7 @@ class TestCICDSteps(unittest.TestCase):
         self.assertIn('Unit=cicd-executor.service', written_service)
         path_enable_calls = [
             c for c in mock_run.call_args_list
-            if 'enable cicd-executor.path' in str(c)
+            if c.args[0] == ['systemctl', 'enable', 'cicd-executor.path']
         ]
         self.assertGreater(len(path_enable_calls), 0,
                            "cicd-executor.path must be enabled so the webhook receiver "
@@ -257,11 +261,11 @@ class TestCICDSteps(unittest.TestCase):
         self.assertIn('client_max_body_size 1m;', written_config)
         
         # Should test nginx config
-        test_calls = [call for call in mock_run.call_args_list if 'nginx -t' in str(call)]
+        test_calls = [call for call in mock_run.call_args_list if call.args[0] == 'nginx -t']
         self.assertGreater(len(test_calls), 0)
         
         # Should reload nginx
-        reload_calls = [call for call in mock_run.call_args_list if 'reload nginx' in str(call)]
+        reload_calls = [call for call in mock_run.call_args_list if call.args[0] == ['systemctl', 'reload', 'nginx']]
         self.assertGreater(len(reload_calls), 0)
 
 
@@ -354,7 +358,7 @@ class TestAppServerSteps(unittest.TestCase):
         
         mock_run.assert_called_once()
         call_args = mock_run.call_args[0][0]
-        self.assertIn('apt-get install', call_args)
+        self.assertEqual(call_args[:2], ['apt-get', 'install'])
     
     @patch('web.app_server_steps.run')
     def test_create_deploy_user_already_exists(self, mock_run):
@@ -366,7 +370,7 @@ class TestAppServerSteps(unittest.TestCase):
         create_deploy_user(mock_config)
         
         self.assertEqual(mock_run.call_count, 1)
-        self.assertIn('id deploy', mock_run.call_args[0][0])
+        self.assertEqual(mock_run.call_args[0][0], ['id', 'deploy'])
     
     @patch('web.app_server_steps.run')
     def test_create_deploy_user_new(self, mock_run):
@@ -459,7 +463,12 @@ class TestBuildServerSteps(unittest.TestCase):
         from web.build_server_steps import install_build_python_tools
         install_build_python_tools(mock_config)
 
-        self.assertTrue(any('apt-get install' in call.args[0] for call in mock_run.call_args_list))
+        self.assertTrue(
+            any(
+                call.args[0][:2] == ['apt-get', 'install']
+                for call in mock_run.call_args_list
+            )
+        )
         mock_install_uv.assert_called_once_with(user_home='/var/lib/infra_tools/cicd', username='webhook')
     
     @patch('web.build_server_steps.os.path.exists')
@@ -479,26 +488,20 @@ class TestBuildServerSteps(unittest.TestCase):
         self.assertIn('app1.example.com', config_data)
         self.assertIn('app2.example.com', config_data)
 
+    @patch('web.build_server_steps.is_host_key_enrolled', return_value=True)
     @patch('web.build_server_steps.get_known_hosts_path', return_value='/var/lib/infra_tools/cicd/known_hosts')
     @patch('web.build_server_steps.os.path.exists')
     @patch('web.build_server_steps.os.makedirs')
-    @patch('builtins.open', new_callable=mock_open)
     @patch('web.build_server_steps.run')
     def test_configure_deploy_known_hosts_uses_workspace_file(
         self,
         mock_run,
-        mock_file,
         mock_makedirs,
         mock_exists,
+        _mock_enrolled,
         _mock_known_hosts_path,
     ):
         mock_exists.side_effect = lambda path: path == '/var/lib/infra_tools/cicd/known_hosts'
-        mock_run.side_effect = [
-            MagicMock(returncode=0, stdout='app1 ssh-ed25519 AAAA\n'),
-            MagicMock(returncode=0, stdout='app2 ssh-ed25519 BBBB\n'),
-            MagicMock(returncode=0),
-            MagicMock(returncode=0),
-        ]
         mock_config = MagicMock()
         mock_config.deploy_targets = ['app1.example.com', 'app2.example.com']
 
@@ -506,10 +509,28 @@ class TestBuildServerSteps(unittest.TestCase):
         configure_deploy_known_hosts(mock_config)
 
         mock_makedirs.assert_called_once_with('/var/lib/infra_tools/cicd', mode=0o700, exist_ok=True)
-        write_paths = [call.args[0] for call in mock_file.call_args_list]
         self.assertEqual(
-            write_paths,
-            ['/var/lib/infra_tools/cicd/known_hosts', '/var/lib/infra_tools/cicd/known_hosts'],
+            mock_run.call_args_list,
+            [
+                call(['chown', 'webhook:webhook', '/var/lib/infra_tools/cicd/known_hosts']),
+                call(['chmod', '644', '/var/lib/infra_tools/cicd/known_hosts']),
+            ],
+        )
+
+    @patch('web.build_server_steps.is_host_key_enrolled', return_value=False)
+    @patch('web.build_server_steps.get_known_hosts_path', return_value='/var/lib/infra_tools/cicd/known_hosts')
+    @patch('web.build_server_steps.os.makedirs')
+    def test_configure_deploy_known_hosts_requires_explicit_enrollment(
+        self, mock_makedirs, _mock_known_hosts_path, _mock_enrolled
+    ):
+        mock_config = MagicMock()
+        mock_config.deploy_targets = ['app1.example.com']
+
+        from web.build_server_steps import configure_deploy_known_hosts
+        with self.assertRaisesRegex(RuntimeError, 'not enrolled'):
+            configure_deploy_known_hosts(mock_config)
+        mock_makedirs.assert_called_once_with(
+            '/var/lib/infra_tools/cicd', mode=0o700, exist_ok=True
         )
 
 

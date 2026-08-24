@@ -51,8 +51,7 @@ def _chown_path(config: SetupConfig, path: str) -> None:
         raise RuntimeError(f"Target user does not exist: {config.username}") from exc
 
     result = run(
-        f"chown -R {account.pw_uid}:{account.pw_gid} {shlex.quote(path)}",
-        check=False,
+        ["chown", "-R", f"{account.pw_uid}:{account.pw_gid}", path],
         capture_output=True,
     )
     if result.returncode != 0:
@@ -95,8 +94,7 @@ def _chown_user_directory_chain(
         if os.path.islink(current) or not os.path.isdir(current):
             raise RuntimeError(f"Refusing unsafe agent destination: {current}")
         result = run(
-            f"chown {account.pw_uid}:{account.pw_gid} {shlex.quote(current)}",
-            check=False,
+            ["chown", f"{account.pw_uid}:{account.pw_gid}", current],
             capture_output=True,
         )
         if result.returncode != 0:
@@ -185,13 +183,13 @@ def install_github_cli(config: SetupConfig) -> None:
         return
 
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    run("apt-get install -y -qq ca-certificates curl gpg", check=False)
+    run(["apt-get", "install", "-y", "-qq", "ca-certificates", "curl", "gpg"])
     run("install -m 0755 -d /etc/apt/keyrings")
     run(
         "curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg "
         "-o /etc/apt/keyrings/githubcli-archive-keyring.gpg"
     )
-    run("chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg")
+    run(["chmod", "go+r", "/etc/apt/keyrings/githubcli-archive-keyring.gpg"])
 
     arch_result = run("dpkg --print-architecture", capture_output=True)
     arch = arch_result.stdout.strip() or "amd64"
@@ -202,8 +200,8 @@ def install_github_cli(config: SetupConfig) -> None:
     with open("/etc/apt/sources.list.d/github-cli.list", "w", encoding="utf-8") as file_obj:
         file_obj.write(source_line)
 
-    run("apt-get update -qq")
-    if not install_package("GitHub CLI", "gh", "apt-get install -y -qq gh"):
+    run(["apt-get", "update", "-qq"])
+    if not install_package("GitHub CLI", "gh", ["apt-get", "install", "-y", "-qq", "gh"]):
         raise RuntimeError("GitHub CLI installation failed")
 
 
@@ -216,7 +214,7 @@ def install_git_for_agent_repositories(config: SetupConfig) -> None:
         print("  [DRY-RUN] Would install Git for agent repositories")
         return
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    if not install_package("Git", "git", "apt-get install -y -qq git"):
+    if not install_package("Git", "git", ["apt-get", "install", "-y", "-qq", "git"]):
         raise RuntimeError("Git installation failed")
 
 
@@ -228,7 +226,7 @@ def install_git_lfs_for_agent_repositories(config: SetupConfig) -> None:
 
     if not shutil.which("git-lfs"):
         os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-        if not install_package("Git LFS", "git-lfs", "apt-get install -y -qq git-lfs"):
+        if not install_package("Git LFS", "git-lfs", ["apt-get", "install", "-y", "-qq", "git-lfs"]):
             raise RuntimeError("Git LFS installation failed")
 
     result = _run_as_login_user(
@@ -291,12 +289,7 @@ def _install_script_tool(
         return
 
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    dependency_result = run(
-        "apt-get install -y -qq ca-certificates curl bash",
-        check=False,
-    )
-    if dependency_result.returncode != 0:
-        raise RuntimeError(f"{label} installation dependencies failed")
+    run(["apt-get", "install", "-y", "-qq", "ca-certificates", "curl", "bash"])
 
     user_home = _user_home(config)
     _prepare_agent_local_bin(config, user_home)

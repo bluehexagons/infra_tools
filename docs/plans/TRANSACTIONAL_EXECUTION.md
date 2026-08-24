@@ -45,8 +45,8 @@ ARCH-08 from the [architectural risk review](ARCHITECTURAL_RISK_REVIEW_2026-08-0
   actionable remediation remain open work.
 - Shared SSH/SCP/rsync and Proxmox node builders use
   `StrictHostKeyChecking=yes` with the workspace enrollment file. Build-server
-  deployment targets are still populated from an unauthenticated
-  `ssh-keyscan`.
+  deployment targets now require explicit enrollment and no longer populate
+  trust from an unauthenticated `ssh-keyscan`.
 - `lib.operation_state` defines a schema-versioned, atomically persisted marker
   with explicit in-progress and recovery-required states. It rejects corrupt,
   unsupported, symlinked, and stale-ID updates rather than replacing them.
@@ -112,8 +112,10 @@ delimiter-bearing, and unterminated secret values in command and stderr text.
 Bounded execution was completed the same day: commands default to one hour,
 callers may select a positive override or explicitly opt out with `None`, and
 timeouts always raise `CommandTimeoutError`. Shell commands are isolated in a
-new session so TERM/KILL cleanup covers descendants. The full caller
-classification and an argv-native command API remain open.
+new session so TERM/KILL cleanup covers descendants. The argv-native command
+API landed on 2026-08-24, and required callers in deployment, storage,
+app-server, build-server, and CI/CD setup were migrated; the full caller
+classification remains open.
 
 ## Phase 2: Atomic persistent state
 
@@ -192,11 +194,10 @@ entry.
 Interactive convenience commands may offer a clearly labelled trust-on-first-
 use mode, but automated privileged paths should not enable it by default.
 
-The Proxmox guest helper now uses the workspace enrollment file. The remaining
-implementation slice is CI/CD deploy-target enrollment and is deferred until
-that workflow is next maintained. A successful `ssh-keyscan` is discovery data,
-not operator approval; deployment must not be enabled until the expected
-fingerprint is explicitly verified.
+The Proxmox guest helper and CI/CD deploy-target workflow now use the workspace
+enrollment file. A successful `ssh-keyscan` is discovery data, not operator
+approval; deployment must not be enabled until the expected fingerprint is
+explicitly verified. Host-key rotation remains an explicit operator action.
 
 ## Acceptance criteria
 
@@ -215,12 +216,12 @@ fingerprint is explicitly verified.
 ## Recommended first delivery slice
 
 The atomic persistence, core execution contract, transaction-framework
-retirement, setup/deployment operation markers, and the first high-impact
-required-caller migration are complete. The next delivery should continue the
-`remote_utils.run()` caller inventory outside nginx, firewall, SSH reload, and
-CI/CD prerequisites, add lightweight phase-specific recovery guidance, and
-tighten corrupt-state readers. Broader recovery automation should wait until
-real operational experience identifies a repeated need.
+retirement, setup/deployment operation markers, and high-impact required-caller
+migrations are complete. The next delivery should continue the
+`remote_utils.run()` caller inventory outside the migrated setup paths, add
+lightweight phase-specific recovery guidance, and tighten corrupt-state
+readers. Broader recovery automation should wait until real operational
+experience identifies a repeated need.
 
 ## Non-goals
 

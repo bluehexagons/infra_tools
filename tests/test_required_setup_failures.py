@@ -25,8 +25,7 @@ class TestRequiredCICDMutations(unittest.TestCase):
             install_cicd_dependencies(_config())
 
         mock_run.assert_called_once_with(
-            "apt-get install -y -qq git",
-            check=True,
+            ["apt-get", "install", "-y", "-qq", "git"],
         )
 
     @patch("web.cicd_steps.os.path.exists", return_value=True)

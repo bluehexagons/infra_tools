@@ -30,7 +30,26 @@ infra-tools setup server_web app.example.com deploy \
   --app-server --ssl --ssl-email admin@example.com
 ```
 
-Then set up the build server and name each target (repeat
+Bootstrap the build server once without deployment targets so its managed
+runtime and workspace exist:
+
+```bash
+infra-tools setup server_web build.example.com deploy \
+  --build-server --cicd --node --python
+```
+
+Log into the build server and explicitly enroll every app-server host key after
+verifying its fingerprint through an independent channel:
+
+```bash
+ssh deploy@build.example.com
+sudo -n /usr/bin/python3 /opt/infra_tools/infra_tools.py \
+  --workspace /var/lib/infra_tools/cicd \
+  ssh-key enroll app.example.com
+exit
+```
+
+Finally rerun setup and name each target (repeat
 `--deploy-target` for multiple app servers):
 
 ```bash
@@ -39,14 +58,13 @@ infra-tools setup server_web build.example.com deploy \
   --deploy-target app.example.com
 ```
 
-The build setup creates the deploy key at
+Setup refuses to configure a deploy target that has not been enrolled; it does
+not treat an unauthenticated `ssh-keyscan` response as trust. The build setup
+creates the deploy key at
 `/var/lib/infra_tools/cicd/.ssh/deploy_key`. Copy its `.pub` file into
-`/home/deploy/.ssh/authorized_keys` on every app server. The setup also writes
-`/etc/infra_tools/cicd/deploy_targets.json` and currently scans each target into
-`/var/lib/infra_tools/cicd/known_hosts`. Treat those scan results as unverified:
-display and verify every target fingerprint through an independent channel
-before enabling the first production deployment. Re-enrollment and key rotation
-remain an open hardening task.
+`/home/deploy/.ssh/authorized_keys` on every app server. It also writes
+`/etc/infra_tools/cicd/deploy_targets.json` and verifies that every target is
+present in `/var/lib/infra_tools/cicd/known_hosts`.
 
 The target entries default to the `deploy` user, SSH port 22, and `/var/www`.
 Edit the JSON only when a target needs a different port, base directory, or

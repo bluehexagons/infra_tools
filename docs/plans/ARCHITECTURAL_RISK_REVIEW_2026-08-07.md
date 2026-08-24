@@ -62,11 +62,11 @@ Each finding lists: severity, evidence, validation outcome, and direct follow-up
 - **Impact**
   - A bad plugin definition can abort unrelated startup paths before command logic can present a controlled, recoverable failure.
 
-### ARCH-03: SSH trust configuration is inconsistently enforced
+### ARCH-03: SSH trust configuration is inconsistently enforced (resolved)
 
 **Severity: High**
 
-- **Evidence**
+- **Historical evidence**
   - `lib/ssh_utils.py` now sets `StrictHostKeyChecking=yes` and points shared
     builders at the workspace `known_hosts` file.
   - `lib/proxmox_guest.py::_ssh_opts()` now uses the workspace file; this
@@ -77,8 +77,9 @@ Each finding lists: severity, evidence, validation outcome, and direct follow-up
   - Confirmed by comparing the shared builders, the separate Proxmox constructor,
     and the CI/CD deployment-target bootstrap path.
 - **Impact**
-- Shared and Proxmox paths are strict. Unauthenticated CI/CD enrollment still
-  leaves deployment paths exposed to incorrect host-key trust.
+- The historical bypass was closed on 2026-08-24. Shared, Proxmox, and CI/CD
+  paths now require strict checking against explicitly enrolled workspace
+  host keys.
 
 ### ARCH-04: CI/CD executes repo-authored scripts with broad execution scope
 
@@ -162,11 +163,14 @@ Validation was performed by static evidence checks (no behavior-altering actions
 
 ## Suggested next actions (ordered)
 
-1. Make execution helper semantics explicit (`run` should either raise or return a structured failure contract; avoid ambiguous `check=True` behavior).
+1. ~~Make execution helper semantics explicit (`run` should either raise or return a structured failure contract; avoid ambiguous `check=True` behavior).~~
+   Continue the remaining caller classification under the landed strict and
+   argv-native contract.
 2. Add import-time fault isolation for plugin/validator discovery (cache and quarantine malformed plugin modules).
-3. Route every SSH constructor through managed known-hosts and replace
+3. ~~Route every SSH constructor through managed known-hosts and replace
    unauthenticated `ssh-keyscan` bootstrapping with explicit fingerprint
-   enrollment.
+   enrollment.~~ All reviewed shared, Proxmox, and CI/CD paths now use explicit
+   workspace enrollment.
 4. Make setup teardown transaction-like (snapshot, apply, rollback marker) so cleanup failures are reversible.
 5. Tighten corrupted-state behavior with schema versions and explicit
    remediation; audit remaining non-JSON configuration writes for the same
@@ -195,8 +199,9 @@ Validation was performed by static evidence checks (no behavior-altering actions
   `check=False` remains an explicit result-returning contract. Tests cover both
   paths, and common secret assignment/option values are redacted from command
   output and exception text. Complete shell-word redaction and bounded command
-  execution landed on 2026-08-21; caller inventory and an argv-native command
-  API remain follow-up work.
+  execution landed on 2026-08-21. The argv-native command API and high-impact
+  required-caller migrations landed on 2026-08-24; the remaining caller
+  inventory is tracked in the transactional execution plan.
 - **2026-08-19 — ARCH-05 resolved:** removed global service teardown from
   remote setup. Manifest deployments now build and validate before stopping
   app-scoped units, then restore the prior release and units after activation
@@ -204,7 +209,11 @@ Validation was performed by static evidence checks (no behavior-altering actions
   verified on 2026-08-21. Durable interruption markers remain open work.
 - **2026-08-21 — ARCH-03 partially resolved:** Proxmox node connections now use
   strict workspace host-key enrollment, including multiplexed control-socket
-  paths. CI/CD deploy-target enrollment remains unauthenticated.
+  paths.
+- **2026-08-24 — ARCH-03 resolved:** CI/CD deploy-target setup no longer
+  bootstraps trust from `ssh-keyscan`. Operators must verify the displayed
+  fingerprint and explicitly enroll each target in the workspace before setup
+  enables deployment.
 - ARCH-01, ARCH-03, and ARCH-08 are sequenced in
   [Transactional execution and reconciliation](TRANSACTIONAL_EXECUTION.md).
   ARCH-02 remains a P3 startup-isolation task in [the roadmap](ROADMAP.md), and

@@ -82,6 +82,25 @@ def _matching_known_host_lines(path: str, host_name: str) -> set[str]:
     }
 
 
+def is_host_key_enrolled(
+    host: str,
+    *,
+    port: int = 22,
+    known_hosts_path: Optional[str] = None,
+) -> bool:
+    """Return whether a known_hosts file contains an entry for ``host``."""
+
+    if not validate_host(host):
+        raise ValueError(f"Invalid host: {host}")
+    if not 1 <= port <= 65535:
+        raise ValueError("SSH port must be between 1 and 65535")
+
+    path = known_hosts_path or get_workspace_known_hosts_path()
+    if not os.path.isfile(path):
+        return False
+    return bool(_matching_known_host_lines(path, _known_hosts_name(host, port)))
+
+
 def _persist_scan(host: str, scan: str, port: int) -> str:
     known_hosts = get_workspace_known_hosts_path()
     os.makedirs(os.path.dirname(known_hosts), mode=0o700, exist_ok=True)

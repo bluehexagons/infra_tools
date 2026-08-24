@@ -127,7 +127,7 @@ class TestOfficialAgentInstallers(unittest.TestCase):
 
         self.assertEqual(
             run_command.call_args.args[0],
-            'chown -R 1201:1202 /srv/agent/.codex',
+            ['chown', '-R', '1201:1202', '/srv/agent/.codex'],
         )
 
     def test_verified_download_rejects_checksum_mismatch(self):
@@ -215,7 +215,7 @@ class TestOfficialAgentInstallers(unittest.TestCase):
             install_git_lfs_for_agent_repositories(self.config)
 
         install.assert_called_once_with(
-            'Git LFS', 'git-lfs', 'apt-get install -y -qq git-lfs'
+            'Git LFS', 'git-lfs', ['apt-get', 'install', '-y', '-qq', 'git-lfs']
         )
         self.assertEqual(
             [call.args[2] for call in run_as_user.call_args_list],
@@ -930,9 +930,9 @@ class TestAgentPayloadInstallation(unittest.TestCase):
             self.assertEqual(
                 commands,
                 [
-                    f'chown 1000:1001 {os.path.join(home, ".config")}',
-                    f'chown 1000:1001 {os.path.join(home, ".config", "gh")}',
-                    f'chown -R 1000:1001 {destination}',
+                    ['chown', '1000:1001', os.path.join(home, ".config")],
+                    ['chown', '1000:1001', os.path.join(home, ".config", "gh")],
+                    ['chown', '-R', '1000:1001', destination],
                 ],
             )
             self.assertEqual(os.stat(destination).st_mode & 0o777, 0o600)

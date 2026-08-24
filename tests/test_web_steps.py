@@ -67,7 +67,10 @@ class TestNginxBaseConfiguration(unittest.TestCase):
         web_steps.configure_nginx_security(_config())
 
         commands = [call.args[0] for call in mock_run.call_args_list]
-        self.assertLess(commands.index("nginx -t"), commands.index("systemctl reload nginx"))
+        self.assertLess(
+            commands.index("nginx -t"),
+            commands.index(["systemctl", "reload", "nginx"]),
+        )
 
     @patch("web.web_steps.run")
     @patch("web.web_steps.install_package", return_value=False)
@@ -91,8 +94,8 @@ class TestNginxBaseConfiguration(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "did not become active"):
             web_steps.install_nginx(_config())
 
-        mock_run.assert_any_call("systemctl enable nginx", check=True)
-        mock_run.assert_any_call("systemctl start nginx", check=True)
+        mock_run.assert_any_call(["systemctl", "enable", "nginx"])
+        mock_run.assert_any_call(["systemctl", "start", "nginx"])
 
 
 if __name__ == "__main__":

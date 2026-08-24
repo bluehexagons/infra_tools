@@ -59,9 +59,11 @@ appends the result to the service account's `known_hosts` file. The command uses
 first production deployment. `docs/CICD.md` asks an operator to verify the
 fingerprints afterward, but the trust decision has already been staged.
 
-**Follow-up:** require operator-supplied fingerprints or an explicit enrollment
-step, validate the resulting key before enabling deployment, and record key
-rotation as an auditable action.
+**Resolution (2026-08-24):** CI/CD setup no longer scans or appends deploy
+target keys. Operators must run the explicit workspace enrollment command after
+independent fingerprint verification; setup validates that each target has an
+enrolled key before enabling deployment. Re-enrollment replaces the matching
+host entry and remains an explicit operator action.
 
 ### AUD-03: Proxmox node SSH bypasses the workspace known-hosts policy (resolved)
 
@@ -110,15 +112,16 @@ CI/CD prerequisite installation in `web/cicd_steps.py`. This is distinct from
 intentional probes and cleanup calls, which should remain explicit
 `check=False` operations.
 
-**Resolution progress (2026-08-21):** the named high-impact setup paths now
+**Resolution progress (2026-08-24):** the named high-impact setup paths now
 fail the operation when required work does not complete. Nginx package,
 enable/start, ownership, symlink, reload, and configuration-validation failures
 propagate after restoring prior configuration where applicable. CI/CD dependency
 installation is verified, and its service-user ownership/permission setup no
-longer reports success after failure. Required UFW policy and allow-rule
-mutations are strict; failed activation stops non-container setup while the
-documented container-capability exception remains best-effort. Focused tests
-cover these contracts.
+longer reports success after failure. Deployment, storage, app-server, and
+build-server setup callers now use the strict argv-native command contract as
+well. Required UFW policy and allow-rule mutations are strict; failed
+activation stops non-container setup while the documented container-capability
+exception remains best-effort. Focused tests cover these contracts.
 
 **Remaining follow-up:** finish the caller inventory from
 [Transactional execution](TRANSACTIONAL_EXECUTION.md), classify each command as
@@ -194,8 +197,9 @@ metacharacters.
 shell-style values without evaluating them. It handles single and double
 quotes, escaped whitespace, concatenated word segments, shell delimiters inside
 quotes, and unterminated quoted input. Regression tests cover both command and
-stderr diagnostics. A future argv-native command API can further reduce string
-reconstruction, but the demonstrated suffix disclosure is closed.
+stderr diagnostics. The argv-native command API now further reduces string
+reconstruction for required setup paths, while the demonstrated suffix
+disclosure remains closed.
 
 ### AUD-11: The shared command runner has no timeout contract (resolved)
 
@@ -285,8 +289,9 @@ rollback stop failure, and inactive/active verification failures.
    The wheel smoke test now runs as part of local `make check`, and Proxmox
    read-only status/list/health/top/audit commands share the versioned JSON
    envelope used by the provider-neutral VM commands.
-5. Complete explicit SSH enrollment for CI/CD targets when that deployment path
-   is next maintained.
+5. ~~Complete explicit SSH enrollment for CI/CD targets when that deployment
+   path is next maintained.~~ CI/CD target enrollment is now explicit and
+   setup fails closed when a target key is missing.
 6. Standardize destructive CLI confirmation where a command still lacks it.
 
 Webhook replay protection and a stronger updater trust policy remain valid
