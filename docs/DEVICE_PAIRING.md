@@ -177,11 +177,14 @@ The portal can mint access to an environment that owns repositories, terminals,
 Git credentials, and coding-agent credentials. Treat the portal password as an
 administrator credential and use a unique value per VM.
 
-Basic Auth does not encrypt traffic. The direct LAN mode is intended only for a
-trusted private network and is always combined with a private/non-global CIDR
-allowlist. Anyone who can observe that HTTP traffic can recover the Basic Auth
-password and the returned pairing link. For a loopback deployment, forward
-both listeners and open `http://127.0.0.1:3774/`:
+Basic Auth does not encrypt traffic. The direct HTTP compatibility mode is
+intended only for a trusted private network and is always combined with a
+private/non-global CIDR allowlist. Anyone who can observe that HTTP traffic can
+recover the Basic Auth password and the returned pairing link. Setup publishes
+the portal through the managed HTTPS gateway by default; use the printed T3
+Code pairing HTTPS endpoint. For a loopback deployment, use the direct HTTP
+compatibility listeners through an SSH tunnel, or forward the printed HTTPS
+listener port instead:
 
 ```bash
 ssh -N \
@@ -192,9 +195,10 @@ ssh -N \
 
 A separately managed trusted HTTPS endpoint is another option, but the current
 portal constructs T3 links from the request hostname and configured T3 port;
-the proxy must preserve that externally reachable mapping. An HTTPS page such
-as `app.t3.codes` cannot connect to the plain HTTP T3 backend because browsers
-block mixed content.
+the proxy must preserve that externally reachable mapping. The managed HTTPS
+gateway preserves the external host, pairing port, and WebSocket upgrade
+headers, so an HTTPS page such as `app.t3.codes` can connect without mixed
+content.
 
 The managed HTTPS forwards preserve the external host and WebSocket upgrade
 headers, so the hosted T3 client can connect to the HTTPS T3 URL without a

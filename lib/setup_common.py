@@ -1511,12 +1511,15 @@ def setup_main(system_type: str, description: str, success_msg_fn: Callable[[Set
     if "t3code" in (config.web_interfaces or []):
         print()
         if "t3code" in (config.device_pairing_providers or []):
-            scheme = "http"
             display_host = (
                 f"[{config.host}]" if ":" in config.host else config.host
             )
             print("Protected T3 Code device enrollment:")
-            print(f"  {scheme}://{display_host}:{config.device_pairing_port}/")
+            print("  HTTPS endpoint: see the 'T3 Code pairing HTTPS endpoint' line above")
+            print(
+                "  Direct HTTP compatibility endpoint: "
+                f"http://{display_host}:{config.device_pairing_port}/"
+            )
             print("  Sign in with the configured Basic Auth account, then pair this browser.")
         else:
             print("T3 Code pairing (one-time):")

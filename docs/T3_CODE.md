@@ -205,18 +205,16 @@ For a desktop client, the normal choices are:
   projects, provider sessions, and Git credentials on the VM.
 
 For a mobile client, use the pairing URL/QR code or enter the VM address in
-Add Environment. A numeric private-network address uses HTTP for direct LAN
-access; T3 web setup also configures an internal HTTPS forward for the web and
-pairing pages. Use the HTTPS URL printed by setup when connecting from a
-browser.
+Add Environment. T3 web setup configures an internal HTTPS forward for the web
+and pairing pages by default. Use the HTTPS URL printed by setup when
+connecting from a browser or another client that supports HTTPS.
 
-The direct LAN workflow and its optional Basic Auth enrollment portal use HTTP
-and are intended only for a trusted private network. Basic Auth is not
-transport encryption. Direct T3 desktop/mobile clients can use the T3
-endpoint. A browser page served over HTTPS, including `https://app.t3.codes`,
-cannot connect to a plain HTTP/WebSocket backend because of mixed-content
-restrictions. T3 web setup creates a managed HTTPS reverse-proxy forward with
-WebSocket support and the same source policy:
+The direct LAN workflow remains available over HTTP as a compatibility path and
+is intended only for a trusted private network. Basic Auth is not transport
+encryption. Prefer the managed HTTPS endpoints for T3 desktop/mobile clients
+and browser pages, including `https://app.t3.codes`; they provide WebSocket
+support without mixed-content failures. T3 web setup creates managed HTTPS
+reverse-proxy forwards with the same source policy:
 
 ```bash
 sudo infra-web forward add t3code --listen auto --to 127.0.0.1:3773

@@ -1220,16 +1220,42 @@ WantedBy=multi-user.target
             config.device_pairing_port,
         )
         if https_urls:
-            _set_pairing_https_port(https_urls[0][1])
+            if len(https_urls) < 2:
+                raise RuntimeError(
+                    "HTTPS gateway returned no T3 Code pairing endpoint"
+                )
+            pair_wrapper_changed = _write_admin_pair_wrapper(
+                pair_wrapper,
+                home,
+                workspace,
+                t3_cli_wrapper,
+                server_url,
+                https_urls[0][0],
+            ) or pair_wrapper_changed
+            os.chown(pair_wrapper, account.pw_uid, account.pw_gid)
+            _set_pairing_https_port(https_urls[1][1])
     else:
         _remove_connect_restart_units(os.path.join(home, ".t3"))
         _remove_device_pairing()
         _remove_t3_https(config)
         https_urls = _configure_t3_https(config, port, None)
+        if https_urls:
+            pair_wrapper_changed = _write_admin_pair_wrapper(
+                pair_wrapper,
+                home,
+                workspace,
+                t3_cli_wrapper,
+                server_url,
+                https_urls[0][0],
+            ) or pair_wrapper_changed
+            os.chown(pair_wrapper, account.pw_uid, account.pw_gid)
     print(f"  T3 Code web service listening on {host}:{port}")
-    print(f"  T3 Code endpoint: {base_url}")
-    for https_url, _listen_port in https_urls:
-        print(f"  T3 Code HTTPS endpoint: {https_url}")
+    for index, (https_url, _listen_port) in enumerate(https_urls):
+        label = "T3 Code HTTPS endpoint"
+        if index == 1:
+            label = "T3 Code pairing HTTPS endpoint"
+        print(f"  {label}: {https_url}")
+    print(f"  T3 Code direct HTTP compatibility endpoint: {base_url}")
     print("  Readiness check: infra-tools agent doctor --capability t3code")
     if config.device_pairing_providers:
         print(

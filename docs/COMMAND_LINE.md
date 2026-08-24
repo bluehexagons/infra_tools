@@ -420,8 +420,9 @@ section for selected web interfaces and services. It lists the usable URL or
 port for T3 Code, the optional protected device-pairing portal, the generic
 web server, Gogs, Antistatic services, RDP, and Samba. Loopback-only services
 are shown with `127.0.0.1` and are marked as requiring an SSH tunnel. For
-example, a T3 Code setup with device pairing reports both the direct T3 port
-(`3773` by default) and the Basic Auth enrollment portal (`3774` by default).
+example, a T3 Code setup with device pairing reports the managed HTTPS
+endpoints first, followed by the direct T3 and Basic Auth ports (`3773` and
+`3774` by default) as compatibility paths.
 
 Agent tools are selected with repeatable or comma-separated `--agent-tool`
 flags. The three agent profiles provide the narrow `gh` plus `codex` default;
@@ -446,7 +447,8 @@ desktop path installs the verified AppImage. The web path installs Node and a
 boot-persistent headless service; see [T3_CODE.md](T3_CODE.md) for LAN access,
 pairing, client choices, and the loopback/HTTPS boundary. The optional
 `--device-pairing t3code` portal lets a new device request its own one-time
-link through Nginx Basic Auth; see [DEVICE_PAIRING.md](DEVICE_PAIRING.md).
+link through Nginx Basic Auth. Setup publishes the portal through the managed
+HTTPS gateway by default; see [DEVICE_PAIRING.md](DEVICE_PAIRING.md).
 
 After a LAN T3 Code service is installed, obtain its one-time administrative
 pairing URL from the control system with `infra-tools agent web pair HOST USER`
@@ -455,9 +457,9 @@ pairing URL from the control system with `infra-tools agent web pair HOST USER`
 bare service address is expected to show T3's pairing-key form; it is not an
 authenticated session.
 
-When the protected portal is selected, open `http://HOST:3774/`, answer the
-Basic Auth challenge, and pair the current browser or create a link for a
-desktop/mobile client. Basic Auth protects only enrollment; T3 continues to
+When the protected portal is selected, open the printed **T3 Code pairing
+HTTPS endpoint**, answer the Basic Auth challenge, and pair the current browser
+or create a link for a desktop/mobile client. Basic Auth protects only enrollment; T3 continues to
 own and revoke the resulting device session. The direct HTTP mode is limited
 to trusted private source CIDRs and does not encrypt the Basic Auth password.
 

@@ -126,15 +126,47 @@ def print_service_access_summary(config: SetupConfig) -> None:
             note = f"bind {bind}"
             if loopback_only:
                 note += "; loopback-only, use an SSH tunnel"
-            lines.append((label, web_url, note))
+            if interface == "t3code":
+                lines.append(
+                    (
+                        "T3 Code HTTPS endpoint",
+                        "printed by target setup",
+                        "managed internal HTTPS gateway",
+                    )
+                )
+                lines.append(
+                    (
+                        "T3 Code direct HTTP compatibility endpoint",
+                        web_url,
+                        f"{note}; use the HTTPS endpoint by default",
+                    )
+                )
+            else:
+                lines.append((label, web_url, note))
 
         if "t3code" in config.web_interfaces:
             if config.device_pairing_providers:
                 pairing_url = _http_url(access_host, config.device_pairing_port)
-                note = "Nginx Basic Auth; creates one-time T3 client links"
+                note = (
+                    "Nginx Basic Auth; HTTPS endpoint is printed by target setup; "
+                    "creates one-time T3 client links"
+                )
                 if loopback_only:
                     note += "; loopback-only, use an SSH tunnel"
-                lines.append(("T3 Code device-pairing portal", pairing_url, note))
+                lines.append(
+                    (
+                        "T3 Code device-pairing HTTPS endpoint",
+                        "printed by target setup",
+                        note,
+                    )
+                )
+                lines.append(
+                    (
+                        "T3 Code device-pairing direct HTTP compatibility endpoint",
+                        pairing_url,
+                        "use the HTTPS endpoint by default",
+                    )
+                )
             else:
                 lines.append(
                     (

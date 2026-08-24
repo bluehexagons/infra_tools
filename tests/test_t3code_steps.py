@@ -161,6 +161,10 @@ class T3CodeWebTest(unittest.TestCase):
                     "common.t3code_steps._run_as_login_user",
                     return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
                 ),
+                patch(
+                    "common.t3code_steps._configure_t3_https",
+                    return_value=[("https://target:8444/", 8444)],
+                ),
                 patch("common.t3code_steps.T3_SERVICE_FILE", service_path),
                 patch(
                     "common.t3code_steps.DEVICE_PAIRING_SERVICE_FILE",
@@ -248,7 +252,7 @@ class T3CodeWebTest(unittest.TestCase):
                 pairing_content = file_obj.read()
             self.assertIn("t3code_admin_pair.py", pairing_content)
             self.assertIn("--server-url http://127.0.0.1:3773", pairing_content)
-            self.assertIn("--base-url http://target:3773", pairing_content)
+            self.assertIn("--base-url https://target:8444/", pairing_content)
             with open(os.path.join(temporary, ".bashrc"), encoding="utf-8") as file_obj:
                 bashrc = file_obj.read()
             self.assertIn("infra-tools T3 Code runtime", bashrc)
