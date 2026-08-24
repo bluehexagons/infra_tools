@@ -429,10 +429,13 @@ The saved setup username is used as the old name and is checked against the
 target account and both target state files. The command requires
 non-interactive remote `sudo`, a local account, a systemd target, and an
 unambiguous home directory. `root`, existing destination accounts/groups,
-mounted homes, and unmanaged system configuration references are rejected.
-Historical setup records are not rewritten. The target user's SSH session is
-expected to disconnect during the migration; the operation ID can be used to
-resume or inspect recovery.
+mounted or symlinked homes, conflicting cron/mail or managed SMB credential
+files, and unmanaged system configuration references are rejected. Historical
+setup records are not rewritten. The target user's SSH session is expected to
+disconnect during the migration, so the systemd start request is detached
+from that session. On resume, the controller tries both the configured
+administrative identity and the new username; home-selection options and
+`--dry-run` cannot be changed during a resume.
 
 The target must already have the current infra-tools target files installed so
 the migration helper is available under `/opt/infra_tools/lib/`. Run the

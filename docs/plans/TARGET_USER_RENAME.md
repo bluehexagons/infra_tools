@@ -42,7 +42,8 @@ target user's SSH session is terminated.
    configuration paths that will change.
 3. Create a root-owned operation directory and manifest under
    `/var/lib/infra_tools/user-renames/<operation-id>/`. Stage a persistent,
-   self-cleaning systemd oneshot unit that runs the target migration helper.
+   self-cleaning systemd oneshot unit that runs the target migration helper,
+   and submit its start without waiting on the SSH session it will terminate.
 4. Start the unit and return the operation ID. The helper makes the old shell
    unavailable, stops managed services/timers, terminates the user's sessions
    and user manager, waits for all processes with the recorded UID to exit,
@@ -70,16 +71,17 @@ target user's SSH session is terminated.
 
 ## Safety and recovery
 
-- Before the identity phase, failures restore the original shell and leave the
-  old login usable.
+- Failures restore the original shell on whichever account name still owns the
+  recorded UID, leaving either the old or renamed login usable for recovery.
 - After the identity phase, recovery rolls forward from the durable phase
   marker instead of attempting an ambiguous automatic rollback.
 - Account database files and managed configuration receive root-only backups
   for the operation lifetime; they are removed after successful verification.
 - Existing unfinished target setup or rename operations block a new rename.
-- A destination home or account/group collision, non-conventional mounted
-  home, unmanaged `User=`/SSH/sudoers reference, or a process supervisor that
-  recreates the account's processes aborts the operation before cutover.
+- A destination home or account/group collision, mounted or symlinked home,
+  cron/mail or managed SMB credential collision, unmanaged
+  `User=`/SSH/sudoers reference, or a process supervisor that recreates the
+  account's processes aborts the operation before cutover.
 - Old names in logs, journal history, and historical setup records are left
   intact for auditability.
 

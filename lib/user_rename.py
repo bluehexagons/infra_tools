@@ -35,6 +35,9 @@ from lib.validators import validate_username
 RENAME_ROOT = "/var/lib/infra_tools/user-renames"
 SYSTEMD_DIR = "/etc/systemd/system"
 LINGER_DIR = "/var/lib/systemd/linger"
+CRON_DIR = "/var/spool/cron/crontabs"
+MAIL_DIRS = ("/var/mail", "/var/spool/mail")
+SMB_CREDENTIAL_DIR = "/root/.smb"
 STATUS_MODE = 0o644
 ROOT_MODE = 0o700
 _OPERATION_ID_RE = re.compile(r"^[0-9a-f]{16,64}$")
@@ -254,6 +257,8 @@ def _home_for_manifest(manifest: dict[str, Any], account: pwd.struct_passwd) -> 
         raise RenameError(
             f"Manifest home {old_home!r} does not match account home {account.pw_dir!r}"
         )
+    if os.path.islink(old_home):
+        raise RenameError("Account home must not be a symlink")
     keep_home = bool(manifest.get("keep_home", False))
     requested_home = manifest.get("new_home")
     if requested_home is not None:
@@ -520,6 +525,15 @@ def _preflight(manifest: dict[str, Any]) -> dict[str, Any]:
         raise RenameError("User linger marker must be a regular file")
     if os.path.lexists(os.path.join(LINGER_DIR, new_username)):
         raise RenameError("Destination user already has a linger marker")
+    _preflight_cron_and_mail(old_username, new_username)
+    _validate_managed_credentials(
+        {
+            "old_username": old_username,
+            "new_username": new_username,
+            "managed_units": unit_state,
+        },
+        allow_completed=False,
+    )
 
     return {
         "old_uid": old_account.pw_uid,
@@ -822,11 +836,13 @@ def _rewrite_managed_units(manifest: dict[str, Any], old_home: str, new_home: st
     return changed
 
 
-def _rename_managed_credentials(manifest: dict[str, Any]) -> None:
-    """Rename SMB credential files referenced by managed mount units."""
+def _managed_credential_paths(manifest: dict[str, Any]) -> list[tuple[str, str]]:
+    """Return SMB credential renames referenced by managed mount units."""
 
     old_username = manifest["old_username"]
     new_username = manifest["new_username"]
+    paths: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
     for item in manifest.get("managed_units", []):
         path = item.get("path")
         if not isinstance(path, str):
@@ -834,24 +850,67 @@ def _rename_managed_credentials(manifest: dict[str, Any]) -> None:
         try:
             with open(path, encoding="utf-8") as file_obj:
                 content = file_obj.read()
-        except (OSError, UnicodeDecodeError):
-            continue
-        for match in re.finditer(r"credentials=/root/.smb/([^\s]+)", content):
+        except (OSError, UnicodeDecodeError) as exc:
+            raise RenameError(
+                f"Could not inspect managed unit credentials in {path}: {exc}"
+            ) from exc
+        credential_pattern = rf"credentials={re.escape(SMB_CREDENTIAL_DIR)}/([^\s,]+)"
+        for match in re.finditer(credential_pattern, content):
             name = match.group(1)
             if old_username not in name:
                 continue
             if "/" in name or name in {".", ".."}:
                 raise RenameError("Unsafe SMB credential path in managed mount unit")
-            old_path = os.path.join("/root/.smb", name)
-            new_path = os.path.join("/root/.smb", name.replace(old_username, new_username))
-            if os.path.islink(old_path) or os.path.islink(new_path):
-                raise RenameError("SMB credential references must be regular files")
-            if os.path.isfile(new_path) and not os.path.lexists(old_path):
-                continue
-            if os.path.lexists(new_path):
-                raise RenameError(f"Destination SMB credentials already exist: {new_path}")
-            if not os.path.isfile(old_path):
-                raise RenameError(f"Referenced SMB credentials are missing: {old_path}")
+            old_path = os.path.join(SMB_CREDENTIAL_DIR, name)
+            new_path = os.path.join(
+                SMB_CREDENTIAL_DIR,
+                name.replace(old_username, new_username),
+            )
+            rename = (old_path, new_path)
+            if rename not in seen:
+                seen.add(rename)
+                paths.append(rename)
+    return paths
+
+
+def _validate_managed_credentials(
+    manifest: dict[str, Any],
+    *,
+    allow_completed: bool,
+) -> list[tuple[str, str]]:
+    """Validate SMB credential renames before or during an idempotent run."""
+
+    paths = _managed_credential_paths(manifest)
+    for old_path, new_path in paths:
+        if os.path.islink(old_path) or os.path.islink(new_path):
+            raise RenameError("SMB credential references must be regular files")
+        old_exists = os.path.lexists(old_path)
+        new_exists = os.path.lexists(new_path)
+        if old_exists and not os.path.isfile(old_path):
+            raise RenameError(
+                f"Referenced SMB credentials are not a regular file: {old_path}"
+            )
+        if new_exists and not os.path.isfile(new_path):
+            raise RenameError(
+                f"Destination SMB credentials are not a regular file: {new_path}"
+            )
+        if old_exists and new_exists:
+            raise RenameError(f"Destination SMB credentials already exist: {new_path}")
+        if not old_exists and not (allow_completed and new_exists):
+            raise RenameError(f"Referenced SMB credentials are missing: {old_path}")
+        if new_exists and not allow_completed:
+            raise RenameError(f"Destination SMB credentials already exist: {new_path}")
+    return paths
+
+
+def _rename_managed_credentials(manifest: dict[str, Any]) -> None:
+    """Rename SMB credential files referenced by managed mount units."""
+
+    for old_path, new_path in _validate_managed_credentials(
+        manifest,
+        allow_completed=True,
+    ):
+        if os.path.isfile(old_path):
             os.replace(old_path, new_path)
 
 
@@ -902,31 +961,75 @@ def _rewrite_sudoers(old_username: str, new_username: str) -> list[str]:
     return changed
 
 
-def _rename_cron_and_mail(old_username: str, new_username: str, uid: int) -> None:
-    cron_dir = "/var/spool/cron/crontabs"
-    old_cron = os.path.join(cron_dir, old_username)
-    new_cron = os.path.join(cron_dir, new_username)
-    if os.path.islink(old_cron) or os.path.islink(new_cron):
-        raise RenameError("Crontab entries must be regular files")
-    if os.path.lexists(new_cron):
-        raise RenameError(f"Destination crontab already exists: {new_cron}")
-    if os.path.isfile(old_cron) and not os.path.lexists(new_cron):
-        os.replace(old_cron, new_cron)
-        os.chown(new_cron, uid, os.stat(new_cron, follow_symlinks=False).st_gid)
+def _cron_and_mail_paths(
+    old_username: str,
+    new_username: str,
+) -> list[tuple[str, str, str]]:
+    paths = [
+        (
+            "crontab",
+            os.path.join(CRON_DIR, old_username),
+            os.path.join(CRON_DIR, new_username),
+        )
+    ]
     seen_directories: set[str] = set()
-    for directory in ("/var/mail", "/var/spool/mail"):
+    for directory in MAIL_DIRS:
         canonical_directory = os.path.realpath(directory)
         if canonical_directory in seen_directories:
             continue
         seen_directories.add(canonical_directory)
-        old_mail = os.path.join(directory, old_username)
-        new_mail = os.path.join(directory, new_username)
-        if os.path.islink(old_mail) or os.path.islink(new_mail):
-            raise RenameError("Mail spool entries must be regular files")
-        if os.path.lexists(new_mail):
-            raise RenameError(f"Destination mailbox already exists: {new_mail}")
-        if os.path.isfile(old_mail) and not os.path.lexists(new_mail):
-            os.replace(old_mail, new_mail)
+        paths.append(
+            (
+                "mailbox",
+                os.path.join(directory, old_username),
+                os.path.join(directory, new_username),
+            )
+        )
+    return paths
+
+
+def _validate_cron_and_mail_paths(
+    old_username: str,
+    new_username: str,
+    *,
+    allow_completed: bool,
+) -> list[tuple[str, str, str]]:
+    paths = _cron_and_mail_paths(old_username, new_username)
+    for label, old_path, new_path in paths:
+        if os.path.islink(old_path) or os.path.islink(new_path):
+            raise RenameError(f"{label.capitalize()} entries must be regular files")
+        old_exists = os.path.lexists(old_path)
+        new_exists = os.path.lexists(new_path)
+        if old_exists and not os.path.isfile(old_path):
+            raise RenameError(f"Existing {label} is not a regular file: {old_path}")
+        if new_exists and not os.path.isfile(new_path):
+            raise RenameError(f"Destination {label} is not a regular file: {new_path}")
+        if old_exists and new_exists:
+            raise RenameError(f"Destination {label} already exists: {new_path}")
+        if new_exists and not allow_completed:
+            raise RenameError(f"Destination {label} already exists: {new_path}")
+    return paths
+
+
+def _preflight_cron_and_mail(old_username: str, new_username: str) -> None:
+    _validate_cron_and_mail_paths(
+        old_username,
+        new_username,
+        allow_completed=False,
+    )
+
+
+def _rename_cron_and_mail(old_username: str, new_username: str, uid: int) -> None:
+    for label, old_path, new_path in _validate_cron_and_mail_paths(
+        old_username,
+        new_username,
+        allow_completed=True,
+    ):
+        if not os.path.isfile(old_path):
+            continue
+        os.replace(old_path, new_path)
+        if label == "crontab":
+            os.chown(new_path, uid, os.stat(new_path, follow_symlinks=False).st_gid)
 
 
 def _rename_linger(old_username: str, new_username: str, enabled: bool) -> None:
@@ -961,11 +1064,11 @@ def _backup_files(operation_id: str) -> None:
 def _cleanup_operation(operation_id: str) -> None:
     unit = _unit_name(operation_id)
     _run(["systemctl", "disable", unit], check=False)
-    _run(["systemctl", "daemon-reload"], check=False)
     try:
         os.unlink(_unit_path(operation_id))
     except FileNotFoundError:
         pass
+    _run(["systemctl", "daemon-reload"], check=False)
     marker = _marker_path(operation_id)
     try:
         os.unlink(marker)
@@ -995,6 +1098,27 @@ def _run_migration(manifest: dict[str, Any]) -> int:
         return _run_migration_locked(manifest)
     finally:
         _release_target_lock(lock_file)
+
+
+def _restore_login_shell_after_failure(manifest: dict[str, Any]) -> None:
+    """Best-effort restoration of whichever account name owns the old UID."""
+
+    old_shell = manifest.get("old_shell")
+    old_uid = manifest.get("old_uid")
+    if not isinstance(old_shell, str) or not isinstance(old_uid, int):
+        return
+    for key in ("old_username", "new_username"):
+        username = manifest.get(key)
+        if not isinstance(username, str):
+            continue
+        try:
+            account = _account(username)
+        except RenameError:
+            continue
+        if account.pw_uid != old_uid:
+            continue
+        _run(["usermod", "-s", old_shell, username], check=False)
+        return
 
 
 def _run_migration_locked(manifest: dict[str, Any]) -> int:
@@ -1127,6 +1251,7 @@ def _run_migration_locked(manifest: dict[str, Any]) -> int:
 
         completion_details = {
             "old_home": old_home,
+            "old_username": old_username,
             "username": new_username,
             "home": new_home,
         }
@@ -1152,15 +1277,10 @@ def _run_migration_locked(manifest: dict[str, Any]) -> int:
         status = _read_json(_status_path(operation_id)) or {}
         if isinstance(status.get("phase"), str):
             phase = status["phase"]
-        if phase in {"starting", "prepared", "quiescing", "identity-starting"}:
-            old_username = manifest.get("old_username")
-            old_shell = manifest.get("old_shell")
-            if isinstance(old_username, str) and isinstance(old_shell, str):
-                try:
-                    _account(old_username)
-                    _run(["usermod", "-s", old_shell, old_username], check=False)
-                except Exception:
-                    pass
+        try:
+            _restore_login_shell_after_failure(manifest)
+        except Exception:
+            pass
         _write_status(operation_id, phase, "failed", error=str(exc))
         return 1
 

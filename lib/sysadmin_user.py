@@ -274,7 +274,15 @@ def _stage_unit(
                     ],
                     ["rm", "-f", remote_tmp],
                     ["sudo", "-n", "systemctl", "daemon-reload"],
-                    ["sudo", "-n", "systemctl", "enable", "--now", unit_name],
+                    [
+                        "sudo",
+                        "-n",
+                        "systemctl",
+                        "enable",
+                        "--now",
+                        "--no-block",
+                        unit_name,
+                    ],
                 ]
             ),
         )
@@ -372,7 +380,15 @@ def _start_resume_unit(
         chain_remote_commands(
             [
                 ["sudo", "-n", "test", "-f", _remote_unit_path(operation_id)],
-                ["sudo", "-n", "systemctl", "enable", "--now", unit_name],
+                [
+                    "sudo",
+                    "-n",
+                    "systemctl",
+                    "enable",
+                    "--now",
+                    "--no-block",
+                    unit_name,
+                ],
             ]
         ),
     )
@@ -411,6 +427,37 @@ def _wait_for_completion(
 def _verify_new_login(host: str, username: str, ssh_key: Optional[str]) -> bool:
     result = _run_ssh(host, username, ssh_key, "id -u", timeout=30)
     return result.returncode == 0 and bool(result.stdout.strip())
+
+
+def _read_resume_operation(
+    host: str,
+    configured_admin: str,
+    new_username: str,
+    ssh_key: Optional[str],
+    operation_id: str,
+) -> tuple[str, Optional[dict[str, Any]], Optional[dict[str, Any]]]:
+    """Find an identity that can read a staged operation during recovery.
+
+    The controller cache intentionally retains the old username until the
+    migration and new-name SSH login are verified. After identity cutover,
+    that cached login no longer exists, so resume must also try the new name.
+    Reading either root-owned operation file proves SSH and passwordless sudo.
+    """
+
+    usernames = [configured_admin]
+    if new_username not in usernames:
+        usernames.append(new_username)
+    for username in usernames:
+        status = _read_status(host, username, ssh_key, operation_id)
+        if status is not None and status.get("status") == "success":
+            return username, status, None
+        manifest = _read_manifest(host, username, ssh_key, operation_id)
+        if status is not None or manifest is not None:
+            return username, status, manifest
+    raise RuntimeError(
+        "Could not read the staged rename operation as either "
+        f"{configured_admin} or {new_username}"
+    )
 
 
 def _confirm(host: str, old_username: str, new_username: str, new_home: str) -> bool:
@@ -457,43 +504,31 @@ def run_user_rename(
     if keep_home and new_home:
         print("Error: --keep-home cannot be combined with --new-home")
         return 1
+    if resume and not re.fullmatch(r"[0-9a-f]{16,64}", resume):
+        print(f"Error: Invalid operation ID: {resume}")
+        return 1
+    if resume and (dry_run or new_home is not None or keep_home):
+        print("Error: --resume cannot be combined with home options or --dry-run")
+        return 1
     try:
         resolved_admin, resolved_key, config = _resolve_credentials(host, admin_user, ssh_key)
         lock_file = _acquire_host_lock(host)
-        if not ensure_remote_sudo(host, resolved_admin, resolved_key):
-            return 1
         old_username = config.username
         if old_username == new_username:
             print("Error: destination username is already configured")
             return 1
         operation_id = resume or _operation_id()
-        if resume and not re.fullmatch(r"[0-9a-f]{16,64}", resume):
-            print(f"Error: Invalid operation ID: {resume}")
-            return 1
+        operation_admin = resolved_admin
         if resume:
             print(f"Resuming target user rename operation {operation_id}…")
-            existing_status = _read_status(
+            operation_admin, existing_status, existing_manifest = _read_resume_operation(
                 host,
                 resolved_admin,
+                new_username,
                 resolved_key,
                 operation_id,
             )
-            status_reader = resolved_admin
-            if existing_status is None and resolved_admin != new_username:
-                existing_status = _read_status(
-                    host,
-                    new_username,
-                    resolved_key,
-                    operation_id,
-                )
-                status_reader = new_username
             if not existing_status or existing_status.get("status") != "success":
-                existing_manifest = _read_manifest(
-                    host,
-                    status_reader,
-                    resolved_key,
-                    operation_id,
-                )
                 if existing_manifest is None:
                     raise RuntimeError("Could not read the staged rename manifest")
                 if existing_manifest.get("old_username") != old_username:
@@ -502,11 +537,13 @@ def run_user_rename(
                     raise RuntimeError("Rename operation destination does not match the command")
                 _start_resume_unit(
                     host,
-                    resolved_admin,
+                    operation_admin,
                     resolved_key,
                     operation_id,
                 )
         else:
+            if not ensure_remote_sudo(host, resolved_admin, resolved_key):
+                return 1
             manifest: dict[str, Any] = {
                 "operation_id": operation_id,
                 "old_username": old_username,
@@ -550,7 +587,7 @@ def run_user_rename(
 
         status = _wait_for_completion(
             host,
-            resolved_admin,
+            operation_admin,
             new_username,
             resolved_key,
             operation_id,
@@ -578,18 +615,31 @@ def run_user_rename(
             return 1
         manifest_status = status
         if not isinstance(manifest_status.get("details"), dict):
-            manifest_status = _read_status(host, resolved_admin, resolved_key, operation_id)
-        if (manifest_status is None or not isinstance(manifest_status.get("details"), dict)) and resolved_admin != new_username:
+            manifest_status = _read_status(host, operation_admin, resolved_key, operation_id)
+        if (
+            manifest_status is None
+            or not isinstance(manifest_status.get("details"), dict)
+        ) and operation_admin != new_username:
             manifest_status = _read_status(host, new_username, resolved_key, operation_id)
-        details: dict[str, Any] = {}
-        if manifest_status and isinstance(manifest_status.get("details"), dict):
-            details = manifest_status["details"]
+        if manifest_status is None or not isinstance(manifest_status.get("details"), dict):
+            raise RuntimeError("Successful rename status did not include completion details")
+        details = manifest_status["details"]
+        if details.get("old_username") != old_username:
+            raise RuntimeError("Rename status belongs to a different source account")
+        if details.get("username") != new_username:
+            raise RuntimeError("Rename status belongs to a different destination account")
+        old_home = details.get("old_home")
+        completed_home = details.get("home")
+        if not isinstance(old_home, str) or not old_home.startswith("/"):
+            raise RuntimeError("Successful rename status did not include the old home")
+        if not isinstance(completed_home, str) or not completed_home.startswith("/"):
+            raise RuntimeError("Successful rename status did not include the new home")
         rename_setup_command(
             host,
             old_username=old_username,
             new_username=new_username,
-            old_home=str(details.get("old_home", "")),
-            new_home=str(details.get("home", "")),
+            old_home=old_home,
+            new_home=completed_home,
         )
         print(f"✓ Renamed {old_username} to {new_username} on {host}")
         return 0

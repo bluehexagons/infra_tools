@@ -79,6 +79,115 @@ class TestUserRenameHelpers(unittest.TestCase):
         self.assertIn("WorkingDirectory=/srv/olduser-data", content)
         self.assertIn("User=newuser", content)
 
+    def test_home_symlink_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            real_home = os.path.join(tmpdir, "real-home")
+            linked_home = os.path.join(tmpdir, "linked-home")
+            os.mkdir(real_home)
+            os.symlink(real_home, linked_home)
+            account = pwd.struct_passwd(
+                ("olduser", "x", os.getuid(), os.getgid(), "", linked_home, "/bin/bash")
+            )
+
+            with self.assertRaisesRegex(user_rename.RenameError, "symlink"):
+                user_rename._home_for_manifest(
+                    {
+                        "old_username": "olduser",
+                        "new_username": "newuser",
+                        "keep_home": True,
+                    },
+                    account,
+                )
+
+    def test_managed_smb_credentials_stop_at_mount_option_comma(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            credential_dir = os.path.join(tmpdir, "credentials")
+            os.mkdir(credential_dir)
+            old_credential = os.path.join(credential_dir, "credentials-home-olduser")
+            new_credential = os.path.join(credential_dir, "credentials-home-newuser")
+            with open(old_credential, "w", encoding="utf-8") as file_obj:
+                file_obj.write("username=shareuser\npassword=secret\n")
+            unit_path = os.path.join(tmpdir, "home-olduser.mount")
+            with open(unit_path, "w", encoding="utf-8") as file_obj:
+                file_obj.write(
+                    f"Options=credentials={credential_dir}/credentials-home-olduser,"
+                    "uid=olduser,gid=olduser\n"
+                )
+            manifest = {
+                "old_username": "olduser",
+                "new_username": "newuser",
+                "managed_units": [{"path": unit_path}],
+            }
+
+            with patch.object(user_rename, "SMB_CREDENTIAL_DIR", credential_dir):
+                user_rename._rename_managed_credentials(manifest)
+
+            self.assertFalse(os.path.exists(old_credential))
+            self.assertTrue(os.path.isfile(new_credential))
+
+    def test_cron_and_mail_rename_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cron_dir = os.path.join(tmpdir, "cron")
+            mail_dir = os.path.join(tmpdir, "mail")
+            os.mkdir(cron_dir)
+            os.mkdir(mail_dir)
+            for directory in (cron_dir, mail_dir):
+                with open(os.path.join(directory, "olduser"), "w", encoding="utf-8"):
+                    pass
+
+            with (
+                patch.object(user_rename, "CRON_DIR", cron_dir),
+                patch.object(user_rename, "MAIL_DIRS", (mail_dir,)),
+                patch.object(user_rename.os, "chown"),
+            ):
+                user_rename._rename_cron_and_mail("olduser", "newuser", os.getuid())
+                user_rename._rename_cron_and_mail("olduser", "newuser", os.getuid())
+
+            self.assertTrue(os.path.isfile(os.path.join(cron_dir, "newuser")))
+            self.assertTrue(os.path.isfile(os.path.join(mail_dir, "newuser")))
+
+    def test_crontab_collision_is_rejected_before_cutover(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cron_dir = os.path.join(tmpdir, "cron")
+            os.mkdir(cron_dir)
+            with open(os.path.join(cron_dir, "newuser"), "w", encoding="utf-8"):
+                pass
+
+            with (
+                patch.object(user_rename, "CRON_DIR", cron_dir),
+                patch.object(user_rename, "MAIL_DIRS", ()),
+            ):
+                with self.assertRaisesRegex(user_rename.RenameError, "already exists"):
+                    user_rename._preflight_cron_and_mail("olduser", "newuser")
+
+    def test_failure_restores_shell_using_new_account_name(self):
+        renamed_account = pwd.struct_passwd(
+            ("newuser", "x", 1000, 1000, "", "/home/newuser", "/usr/sbin/nologin")
+        )
+
+        def account(username):
+            if username == "newuser":
+                return renamed_account
+            raise user_rename.RenameError("missing")
+
+        with (
+            patch.object(user_rename, "_account", side_effect=account),
+            patch.object(user_rename, "_run") as run,
+        ):
+            user_rename._restore_login_shell_after_failure(
+                {
+                    "old_username": "olduser",
+                    "new_username": "newuser",
+                    "old_uid": 1000,
+                    "old_shell": "/bin/bash",
+                }
+            )
+
+        run.assert_called_once_with(
+            ["usermod", "-s", "/bin/bash", "newuser"],
+            check=False,
+        )
+
     def test_preflight_rejects_root(self):
         account = pwd.struct_passwd(
             ("root", "x", 0, 0, "root", "/root", "/bin/bash")
