@@ -142,11 +142,11 @@ HTTP-only compatibility and is not an HTTPS endpoint:
 http://192.168.0.41:3774/
 ```
 
-After the Nginx Basic Auth prompt, **Create a link for this browser** creates a
+After the Nginx Basic Auth prompt, **Pair this browser** creates a
 short-lived, one-time administrative T3 credential and displays a button that
 opens the authenticated T3 session. The explicit second click avoids
-browser-dependent cross-port redirect behavior. **Create a link for another T3
-client** displays a link that can be copied into the desktop or mobile client.
+browser-dependent cross-port redirect behavior. **Pair another T3 Code client**
+displays a link that can be copied into the desktop or mobile client.
 New devices therefore do not require terminal access at enrollment time.
 
 Administrative enrollment is intentional for the VM owner's app: in addition

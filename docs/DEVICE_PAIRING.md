@@ -87,10 +87,10 @@ http://192.168.0.41:3774/
 Enter the configured Basic Auth username and password, then choose one of the
 portal actions:
 
-- **Create a link for this browser** creates a one-time credential, then shows
+- **Pair this browser** creates a one-time credential, then shows
   a button that opens T3's pairing page. The explicit second click avoids
   browser-dependent cross-port redirect behavior.
-- **Create a link for another T3 client** displays the short-lived URL so it
+- **Pair another T3 Code client** displays the short-lived URL so it
   can be copied into a desktop or mobile T3 Code client.
 
 The broker uses T3's supported administrative-session CLI and authenticated
@@ -114,20 +114,20 @@ the environment when T3 reports that `access:write` is unavailable.
 
 ## T3 Connect management
 
-The authenticated portal includes a **T3 Connect** section. Choose **Set up or
-re-authorize T3 Connect** to run T3's supported `t3 connect link --headless`
-flow. The page displays the relay-install prompt and authorization instructions
-and provides an input for the confirmation or code requested by T3. T3 installs
-its pinned relay client; infra-tools does not download or manage a second relay
+The authenticated portal includes a **T3 Connect** section. Choose **Start
+authorization** to run T3's supported `t3 connect link --headless` flow. The
+page displays the relay-install prompt and authorization instructions and
+provides an input for the confirmation or code requested by T3. T3 installs its
+pinned relay client; infra-tools does not download or manage a second relay
 service.
 
-After authorization, the portal requests a restart of
-`infra-tools-t3code.service`. T3 then reconciles the saved Connect preference
-and starts the managed tunnel. The checkbox represents that desired startup
-state: clearing it runs `t3 connect unlink`, while enabling it starts the
-headless authorization flow only when Connect is not already enabled. The
-relay binary may remain installed when Connect is disabled, but no tunnel is
-started.
+After authorization, the portal shows a completion message and requests a
+restart of `infra-tools-t3code.service`. T3 then reconciles the saved Connect
+preference and starts the managed tunnel. The checkbox represents that desired
+startup state; choose **Apply setting** after changing it. Enabling it starts
+the headless authorization flow only when Connect is not already enabled,
+while clearing it runs `t3 connect unlink`. The relay binary may remain
+installed when Connect is disabled, but no tunnel is started.
 
 The active Connect operation is held only in the pairing broker's memory and
 expires after fifteen minutes. While it is running, use **Refresh status** to

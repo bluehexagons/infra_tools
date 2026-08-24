@@ -38,6 +38,83 @@ _HOSTNAME_RE = re.compile(
 )
 _ANSI_ESCAPE_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 _CONNECT_URL_RE = re.compile(r"https?://[^\s<>]+")
+_PAGE_STYLE = """
+:root {
+  color-scheme: light;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+  color: #172033;
+  background: #f4f7fb;
+}
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; background: #f4f7fb; }
+main { width: min(100% - 2rem, 60rem); margin: 0 auto; padding: 2.5rem 0 4rem; }
+.page-header { margin-bottom: 1.75rem; }
+.eyebrow { margin: 0 0 .4rem; color: #52647d; font-size: .76rem;
+  font-weight: 700; letter-spacing: .11em; text-transform: uppercase; }
+h1, h2, h3 { color: #101828; line-height: 1.2; }
+h1 { margin: 0; font-size: clamp(1.8rem, 4vw, 2.5rem); }
+h2 { margin: 0; font-size: 1.25rem; }
+h3 { margin: 0; font-size: 1rem; }
+p { line-height: 1.55; }
+.lead { margin: .6rem 0 0; color: #475467; font-size: 1.05rem; }
+.muted { color: #667085; }
+.card { margin-top: 1.25rem; padding: 1.35rem; border: 1px solid #d9e1ec;
+  border-radius: .9rem; background: #fff; box-shadow: 0 8px 24px rgba(16,24,40,.05); }
+.card-heading { margin-bottom: 1rem; }
+.card-heading p { margin: .45rem 0 0; }
+.action-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: .8rem; }
+.action-card { display: flex; flex-direction: column; gap: .55rem; padding: 1rem;
+  border: 1px solid #d9e1ec; border-radius: .7rem; background: #fbfcfe; }
+.action-card p { margin: 0; font-size: .9rem; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: .65rem; margin-top: 1rem; }
+form { margin: 0; }
+button, a.button { display: inline-flex; align-items: center; justify-content: center; min-height: 2.7rem;
+  padding: .65rem 1rem; border: 1px solid #155eef; border-radius: .5rem; background: #155eef;
+  color: #fff; font: inherit; font-weight: 650; text-decoration: none; cursor: pointer; }
+button:hover, a.button:hover { background: #004eeb; }
+button.secondary, a.button.secondary { border-color: #b7c4d6; background: #fff; color: #344054; }
+button.secondary:hover, a.button.secondary:hover { background: #f2f4f7; }
+button.danger { border-color: #d92d20; background: #d92d20; }
+button:focus-visible, a.button:focus-visible, a.text-link:focus-visible, input:focus-visible, summary:focus-visible {
+  outline: 3px solid #84adff; outline-offset: 2px; }
+.notice { margin: 1rem 0; padding: .85rem 1rem; border: 1px solid #cbd5e1;
+  border-radius: .65rem; background: #f8fafc; }
+.notice p { margin: .3rem 0 0; }
+.notice.info { border-color: #b8d4fe; background: #eff6ff; }
+.notice.success { border-color: #abefc6; background: #ecfdf3; }
+.notice.error { border-color: #fecdca; background: #fff5f4; color: #912018; }
+.status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: .65rem; margin: 1rem 0; }
+.status-item { margin: 0; padding: .75rem; border: 1px solid #e4e7ec; border-radius: .6rem; background: #fcfcfd; }
+.status-label { display: block; color: #667085; font-size: .78rem; }
+.status-value { display: block; margin-top: .2rem; font-weight: 700; overflow-wrap: anywhere; }
+.status-value.ok { color: #067647; }
+.status-value.off { color: #b42318; }
+.status-empty { margin: 1rem 0; }
+.settings { margin-top: 1.25rem; padding-top: 1.15rem; border-top: 1px solid #eaecf0; }
+.settings p { margin: .4rem 0 0; }
+.checkbox { display: inline-flex; align-items: flex-start; gap: .55rem; color: #344054; }
+.checkbox input { width: 1.1rem; height: 1.1rem; margin: .15rem 0 0; accent-color: #155eef; }
+input[type=text] { width: min(100%, 32rem); min-height: 2.7rem; margin-top: .45rem; padding: .6rem .7rem;
+  border: 1px solid #b7c4d6; border-radius: .5rem; color: #172033; font: inherit; }
+.field { display: flex; flex-direction: column; max-width: 34rem; margin-top: 1rem; color: #344054; font-weight: 600; }
+.output { margin: 1rem 0; border: 1px solid #d9e1ec; border-radius: .6rem; background: #fbfcfe; }
+.output summary { padding: .75rem 1rem; color: #344054; font-weight: 650; cursor: pointer; }
+pre { max-height: 20rem; margin: 0; padding: .9rem 1rem; overflow: auto; border-top: 1px solid #e4e7ec;
+  background: #101828; color: #e6edf7; font: .85rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
+.link-box { margin: 1rem 0; padding: .8rem; border: 1px solid #d9e1ec; border-radius: .6rem; background: #f8fafc; }
+.link-box code { display: block; margin-top: .35rem; overflow-wrap: anywhere; }
+.footer-nav { margin-top: 1.25rem; }
+a.text-link { color: #155eef; font-weight: 650; text-decoration: none; }
+a.text-link:hover { text-decoration: underline; }
+@media (max-width: 38rem) {
+  main { width: min(100% - 1rem, 60rem); padding-top: 1.25rem; }
+  .card { padding: 1rem; }
+  button, a.button { width: 100%; }
+  .actions form { width: 100%; }
+}
+"""
 
 
 class PairingError(RuntimeError):
@@ -319,7 +396,7 @@ def _connect_output_html(output: str) -> str:
         rendered.append(html.escape(output[cursor : match.start()]))
         escaped = html.escape(value, quote=True)
         rendered.append(
-            f'<a href="{escaped}" target="_blank" rel="noopener">'
+            f'<a href="{escaped}" target="_blank" rel="noopener noreferrer">'
             f"{html.escape(value)}</a>"
         )
         if len(value) < len(match.group(0)):
@@ -554,8 +631,10 @@ class PairingRequestHandler(BaseHTTPRequestHandler):
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(title)}</title>
-<style>body{{font:16px system-ui,sans-serif;max-width:44rem;margin:3rem auto;padding:0 1rem;color:#18202a}}main{{border:1px solid #ccd3db;border-radius:.7rem;padding:1.4rem}}button,a.button{{display:inline-block;background:#155eef;color:white;border:0;border-radius:.4rem;padding:.7rem 1rem;text-decoration:none;font:inherit;cursor:pointer}}code{{overflow-wrap:anywhere}}.muted{{color:#596574}}.error{{color:#a10f22}}</style>
-</head><body><main><h1>{html.escape(title)}</h1>{body}</main></body></html>"""
+<style>{_PAGE_STYLE}</style>
+</head><body><main><header class="page-header">
+<p class="eyebrow">infra-tools</p><h1>{html.escape(title)}</h1>
+</header>{body}</main></body></html>"""
         encoded = page.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -604,24 +683,45 @@ class PairingRequestHandler(BaseHTTPRequestHandler):
         snapshot = self.state.connect_snapshot(name)
         status = snapshot.get("status")
         status_items: list[str] = []
+        value_labels = {
+            "desired": ("Enabled", "Disabled"),
+            "authenticated": ("Complete", "Pending"),
+            "linked": ("Linked", "Not linked"),
+            "provisioned": ("Active", "Not active"),
+        }
         if isinstance(status, dict):
             for key, label in (
-                ("authenticated", "Authorized"),
-                ("linked", "Linked"),
-                ("provisioned", "Tunnel active"),
+                ("desired", "Startup"),
+                ("authenticated", "Authorization"),
+                ("linked", "Account"),
+                ("provisioned", "Relay"),
             ):
                 value = status.get(key)
                 if isinstance(value, bool):
-                    status_items.append(f"{label}: {'yes' if value else 'no'}")
+                    value_label = value_labels[key][0 if value else 1]
+                    state_class = "ok" if value else "off"
+                    status_items.append(
+                        '<div class="status-item"><dt class="status-label">'
+                        f"{label}</dt><dd class=\"status-value {state_class}\">"
+                        f"{value_label}</dd></div>"
+                    )
             relay_url = status.get("relayUrl")
             if isinstance(relay_url, str) and relay_url:
-                status_items.append(f"Relay: {html.escape(relay_url)}")
-        status_text = ", ".join(status_items) or "Status is not available yet"
+                status_items.append(
+                    '<div class="status-item"><dt class="status-label">Relay address</dt>'
+                    f'<dd class="status-value">{html.escape(relay_url, quote=True)}</dd></div>'
+                )
+        status_block = (
+            f'<dl class="status-grid" aria-label="T3 Connect status">{"".join(status_items)}</dl>'
+            if status_items
+            else '<p class="status-empty muted">Current status is not available yet. '
+            'Refresh after the authorization flow finishes.</p>'
+        )
         output = str(snapshot.get("output") or "")
-        output_block = f"<pre>{_connect_output_html(output)}</pre>" if output else ""
         error_text = error or snapshot.get("error")
         error_block = (
-            f'<p class="error">{html.escape(str(error_text))}</p>'
+            '<div class="notice error"><strong>Action needs attention</strong>'
+            f"<p>{html.escape(str(error_text))}</p></div>"
             if error_text
             else ""
         )
@@ -629,49 +729,88 @@ class PairingRequestHandler(BaseHTTPRequestHandler):
         escaped_nonce = html.escape(nonce, quote=True)
         active = bool(snapshot.get("active"))
         enabled = bool(isinstance(status, dict) and status.get("desired") is True)
+        returncode = snapshot.get("returncode")
+        finished = (
+            not active
+            and isinstance(returncode, int)
+            and not isinstance(returncode, bool)
+        )
+        if active:
+            progress_block = (
+                '<div class="notice info"><strong>Authorization in progress</strong>'
+                "<p>Follow the T3 prompt below. When it asks for a code or response, "
+                "enter it here.</p></div>"
+            )
+        elif finished and returncode == 0:
+            progress_block = (
+                '<div class="notice success"><strong>Authorization completed</strong>'
+                "<p>The managed service is applying the new relay state. Refresh in "
+                "a moment to confirm that the relay is active.</p></div>"
+            )
+        elif finished:
+            progress_block = (
+                '<div class="notice error"><strong>Authorization did not complete</strong>'
+                "<p>Review the command output below, then try again.</p></div>"
+            )
+        else:
+            progress_block = (
+                '<p class="muted">Start authorization to install or re-authorize the '
+                "T3 Connect relay on this machine.</p>"
+            )
+        output_block = (
+            f'<details class="output"{" open" if active or finished and returncode != 0 else ""}>'
+            "<summary>Show T3 command output</summary>"
+            f"<pre>{_connect_output_html(output)}</pre></details>"
+            if output
+            else ""
+        )
         if active:
             action = (
-                '<p class="muted">Connect is running. Wait for a prompt or '
-                'authorization URL, then enter the requested response here. '
-                'Use Refresh status to check for new output without losing '
-                'what you have typed.</p>'
-                f'<form method="post" action="/connect/{escaped_name}">'
+                f'<form method="post" action="/connect/{escaped_name}" class="field">'
                 f'<input type="hidden" name="nonce" value="{escaped_nonce}">'
                 '<input type="hidden" name="intent" value="input">'
-                '<label for="connect-input">Response or authorization code</label> '
-                '<input id="connect-input" name="input" maxlength="512" '
-                'autocomplete="off" placeholder="Enter the requested response" required> '
+                f'<label for="connect-input-{escaped_name}">Response or authorization code</label>'
+                f'<input id="connect-input-{escaped_name}" type="text" name="input" maxlength="512" '
+                'autocomplete="off" placeholder="Enter the requested response" required>'
                 '<button type="submit">Send response</button></form>'
+                '<div class="actions">'
                 f'<form method="get" action="/connect/{escaped_name}">'
-                '<button type="submit">Refresh status</button></form>'
+                '<button class="secondary" type="submit">Refresh status</button></form>'
+                '</div>'
             )
         else:
             checked = " checked" if enabled else ""
             action = (
-                f'<form method="post" action="/connect/{escaped_name}">'
+                '<div class="settings"><h3>Startup behavior</h3>'
+                '<p class="muted">Keep Connect enabled after a restart. Turning this '
+                'on starts authorization if the machine is not already authorized; '
+                'turning it off stops the tunnel.</p>'
+                f'<form method="post" action="/connect/{escaped_name}" class="actions">'
                 f'<input type="hidden" name="nonce" value="{escaped_nonce}">'
                 '<input type="hidden" name="intent" value="toggle">'
-                f'<label><input type="checkbox" name="enabled"{checked}> '
-                'Enable T3 Connect tunnel</label> '
-                '<button type="submit">Apply</button></form>'
-        )
-        return (
-            '<section aria-live="polite"><h2>T3 Connect</h2>'
-            "<p>Authorize this machine with T3 Connect. T3 installs its pinned "
-            "relay client when requested and the managed T3 service starts the "
-            "tunnel after authorization.</p>"
-            f"<p class=\"muted\">{status_text}</p>{error_block}{output_block}"
-            + action
-            + (
-                ""
-                if active
-                else (
-                    f'<form method="post" action="/connect/{escaped_name}">'
-                    f'<input type="hidden" name="nonce" value="{escaped_nonce}">'
-                    '<input type="hidden" name="intent" value="start">'
-                    '<button type="submit">Set up or re-authorize T3 Connect</button></form>'
-                )
+                f'<label class="checkbox"><input type="checkbox" name="enabled"{checked}> '
+                '<span>Start Connect automatically</span></label>'
+                '<button type="submit">Apply setting</button></form></div>'
+                '<div class="actions">'
+                f'<form method="get" action="/connect/{escaped_name}">'
+                '<button class="secondary" type="submit">Refresh status</button></form>'
+                f'<form method="post" action="/connect/{escaped_name}">'
+                f'<input type="hidden" name="nonce" value="{escaped_nonce}">'
+                '<input type="hidden" name="intent" value="start">'
+                '<button class="secondary" type="submit">Start authorization</button></form>'
+                '</div>'
             )
+        provider_label = html.escape(str(provider.get("label") or "T3 Code"))
+        heading_id = f"connect-heading-{escaped_name}"
+        return (
+            f'<section class="card" aria-labelledby="{heading_id}" aria-live="polite">'
+            '<div class="card-heading"><p class="eyebrow">Relay access</p>'
+            f'<h2 id="{heading_id}">{provider_label} Connect</h2>'
+            '<p class="muted">Authorize this machine with T3 Connect. T3 installs its '
+            'pinned relay client when requested, and infra-tools keeps the tunnel '
+            'managed across restarts.</p></div>'
+            f"{progress_block}{status_block}{error_block}{output_block}"
+            + action
             + "</section>"
         )
 
@@ -685,7 +824,8 @@ class PairingRequestHandler(BaseHTTPRequestHandler):
     ) -> str:
         return (
             self._connect_section(name, provider, nonce, error=error)
-            + '<p><a href="/">Back to device pairing</a></p>'
+            + '<nav class="footer-nav"><a class="text-link" href="/">'
+            "← Back to device pairing</a></nav>"
         )
 
     def do_GET(self) -> None:
@@ -716,27 +856,32 @@ class PairingRequestHandler(BaseHTTPRequestHandler):
             escaped_nonce = html.escape(nonce, quote=True)
             escaped_label = html.escape(provider["label"])
             buttons.append(
+                '<div class="action-card">'
                 f'<form method="post" action="/pair/{escaped_name}">'
                 f'<input type="hidden" name="nonce" value="{escaped_nonce}">'
                 '<input type="hidden" name="intent" value="current">'
-                f'<button type="submit">Create a link for this browser with {escaped_label}</button>'
-                "</form>"
+                f'<button type="submit">Pair this browser</button>'
+                f'<p class="muted">Open an authenticated T3 session here.</p></form>'
                 f'<form method="post" action="/pair/{escaped_name}">'
                 f'<input type="hidden" name="nonce" value="{escaped_nonce}">'
                 '<input type="hidden" name="intent" value="other">'
-                f'<button type="submit">Create a link for another {escaped_label} client</button>'
-                "</form>"
+                f'<button class="secondary" type="submit">Pair another {escaped_label} client</button>'
+                f'<p class="muted">Create a link to copy into the desktop or mobile app.</p></form>'
+                '</div>'
             )
             if name in self.state._connect_jobs:
                 connect_sections.append(
                     self._connect_section(name, provider, nonce)
                 )
         body = (
-            "<p>Create a short-lived, one-time credential for this device. "
-            "The resulting session is managed and revocable by the provider.</p>"
+            '<section class="card"><div class="card-heading">'
+            '<p class="eyebrow">Device enrollment</p><h2>Pair a device</h2>'
+            '<p class="muted">Create a short-lived, one-time T3 Code link. '
+            'Each browser or app should use its own link.</p></div>'
+            '<div class="action-grid">'
             + "".join(buttons)
-            + "<p class=\"muted\">Do not share pairing links. Each new browser or app "
-            "should create its own session.</p>"
+            + "</div><p class=\"muted\">Never share a pairing link. It grants access "
+            "to this machine and expires automatically.</p></section>"
             + "".join(connect_sections)
         )
         self._send_html(HTTPStatus.OK, "Device pairing", body, nonce=nonce)
@@ -775,7 +920,11 @@ class PairingRequestHandler(BaseHTTPRequestHandler):
             self._send_html(
                 HTTPStatus.FORBIDDEN,
                 "Pairing request rejected",
-                '<p class="error">Reload the enrollment page and try again.</p>',
+                '<section class="card"><div class="notice error">'
+                "<strong>This form has expired</strong>"
+                "<p>Reload the enrollment page and try again.</p></div>"
+                '<nav class="footer-nav"><a class="text-link" href="/">'
+                "← Back to device pairing</a></nav></section>",
             )
             return
         raw_source = (self.headers.get("X-Real-IP") or "").strip()
@@ -787,7 +936,11 @@ class PairingRequestHandler(BaseHTTPRequestHandler):
             self._send_html(
                 HTTPStatus.TOO_MANY_REQUESTS,
                 "Pairing temporarily limited",
-                "<p>Wait one minute before requesting another link.</p>",
+                '<section class="card"><div class="notice error">'
+                "<strong>Too many requests</strong>"
+                "<p>Wait one minute before requesting another link.</p></div>"
+                '<nav class="footer-nav"><a class="text-link" href="/">'
+                "← Back to device pairing</a></nav></section>",
             )
             return
         provider_name = match.group(2)
@@ -845,7 +998,11 @@ class PairingRequestHandler(BaseHTTPRequestHandler):
             self._send_html(
                 HTTPStatus.BAD_GATEWAY,
                 "Could not create pairing link",
-                f'<p class="error">{html.escape(str(exc))}</p>',
+                '<section class="card"><div class="notice error">'
+                "<strong>Could not create pairing link</strong>"
+                f"<p>{html.escape(str(exc))}</p></div>"
+                '<nav class="footer-nav"><a class="text-link" href="/">'
+                "← Back to device pairing</a></nav></section>",
             )
             return
         encoded_url = html.escape(pair_url, quote=True)
@@ -855,11 +1012,16 @@ class PairingRequestHandler(BaseHTTPRequestHandler):
             else "Open pairing link"
         )
         body = (
-            '<p>Use the button below to continue. This explicit browser navigation '
-            'preserves the one-time pairing credential across the service port change.</p>'
+            '<section class="card"><p class="eyebrow">One-time link ready</p>'
+            '<h2>Continue in T3 Code</h2>'
+            '<p class="lead">Use this link once to authorize the selected device. '
+            'It expires automatically and cannot be reused.</p>'
             f'<p><a class="button" href="{encoded_url}">{link_label}</a></p>'
-            f"<p><code>{html.escape(pair_url)}</code></p>"
-            f'<p class="muted">Expires {html.escape(expires)}.</p>'
+            '<div class="link-box"><span class="muted">Pairing link</span>'
+            f'<code>{html.escape(pair_url)}</code></div>'
+            f'<p class="muted">Expires {html.escape(expires)}. Keep this link private.</p>'
+            '<nav class="footer-nav"><a class="text-link" href="/">'
+            '← Back to device pairing</a></nav></section>'
         )
         self._send_html(HTTPStatus.OK, "Pairing link created", body)
 

@@ -386,9 +386,99 @@ class PairingBrokerTest(unittest.TestCase):
         self.assertNotIn(" 404 ", response)
         self.assertIn("Response or authorization code", response)
         self.assertIn("Refresh status", response)
+        self.assertIn("Authorization in progress", response)
+        self.assertIn("Show T3 command output", response)
         self.assertNotIn('http-equiv="refresh"', response)
         self.assertIn(f'name="nonce" value="{nonce}"', response)
         self.assertIn("/connect/t3code", response)
+
+    def test_connect_page_explains_completed_authorization(self) -> None:
+        provider = self._provider()
+        provider["connect"] = {
+            "link_command": ["/opt/t3", "connect", "link"],
+            "status_command": ["/opt/t3", "connect", "status"],
+            "unlink_command": ["/opt/t3", "connect", "unlink"],
+            "restart_request": "/tmp/t3-connect-restart",
+        }
+        state = PairingState({"t3code": provider})
+        nonce = state.new_nonce()
+        headers = Message()
+        headers["X-Forwarded-Proto"] = "https"
+        headers["Cookie"] = f"infra_tools_pairing_nonce={nonce}"
+        handler = PairingRequestHandler.__new__(PairingRequestHandler)
+        handler.server = SimpleNamespace(pairing_state=state)
+        handler.path = "/connect/t3code"
+        handler.command = "GET"
+        handler.request_version = "HTTP/1.1"
+        handler.requestline = "GET /connect/t3code HTTP/1.1"
+        handler.headers = headers
+        handler.wfile = BytesIO()
+
+        with patch.object(
+            state,
+            "connect_snapshot",
+            return_value={
+                "active": False,
+                "returncode": 0,
+                "output": "Connect authorization completed",
+                "status": {
+                    "desired": True,
+                    "authenticated": True,
+                    "linked": True,
+                    "provisioned": True,
+                    "relayUrl": "https://relay.example/agent",
+                },
+            },
+        ):
+            handler.do_GET()
+
+        response = handler.wfile.getvalue().decode("iso-8859-1")
+        self.assertIn("Authorization completed", response)
+        self.assertIn("The managed service is applying the new relay state", response)
+        self.assertIn("Startup", response)
+        self.assertIn("Enabled", response)
+        self.assertIn("Relay address", response)
+        self.assertIn("Show T3 command output", response)
+        self.assertIn("Refresh status", response)
+        self.assertNotIn("Authorization did not complete", response)
+
+    def test_pairing_page_uses_clear_device_actions(self) -> None:
+        provider = self._provider()
+        provider["connect"] = {
+            "link_command": ["/opt/t3", "connect", "link"],
+            "status_command": ["/opt/t3", "connect", "status"],
+            "unlink_command": ["/opt/t3", "connect", "unlink"],
+            "restart_request": "/tmp/t3-connect-restart",
+        }
+        state = PairingState({"t3code": provider})
+        nonce = state.new_nonce()
+        headers = Message()
+        headers["X-Forwarded-Proto"] = "https"
+        headers["Cookie"] = f"infra_tools_pairing_nonce={nonce}"
+        handler = PairingRequestHandler.__new__(PairingRequestHandler)
+        handler.server = SimpleNamespace(pairing_state=state)
+        handler.path = "/"
+        handler.command = "GET"
+        handler.request_version = "HTTP/1.1"
+        handler.requestline = "GET / HTTP/1.1"
+        handler.headers = headers
+        handler.wfile = BytesIO()
+
+        with patch.object(
+            state,
+            "connect_snapshot",
+            return_value={"active": False, "status": {"desired": False}},
+        ):
+            handler.do_GET()
+
+        response = handler.wfile.getvalue().decode("iso-8859-1")
+        self.assertIn("Pair a device", response)
+        self.assertIn("Pair this browser", response)
+        self.assertIn("Pair another T3 Code client", response)
+        self.assertIn("Startup behavior", response)
+        self.assertIn("Start authorization", response)
+        self.assertIn("Never share a pairing link", response)
+        self.assertNotIn("Create a link for this browser", response)
 
     def test_rejects_provider_redirect_to_another_origin(self) -> None:
         with self.assertRaises(PairingError):
