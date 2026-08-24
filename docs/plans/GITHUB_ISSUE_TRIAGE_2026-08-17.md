@@ -1,10 +1,11 @@
-# GitHub Issue Triage (2026-08-17)
+# GitHub Issue Triage (reverified 2026-08-24)
 
 Status: current issue-to-implementation map. Public issue metadata and the
-implementation evidence below were reverified on 2026-08-17. The tracker has
-15 open issues: five closure candidates, four active or queued roadmap issues,
-five unscheduled backlog issues, and one deliberately deferred issue. This
-repository-only update did not change GitHub issue state.
+implementation evidence below were reverified on 2026-08-24. The tracker has
+10 open issues: four active or queued roadmap issues, five unscheduled backlog
+issues, and one deliberately deferred issue. Issues #79, #81, #90, #92, and
+#93 were closed on GitHub during this reconciliation with implementation and
+documentation evidence recorded in their closing comments.
 
 Use the [planning and issue index](README.md) for the project portfolio and
 dependency order. This file records what each open issue means against current
@@ -23,15 +24,15 @@ code; it does not replace the issue discussion or acceptance criteria.
 - Give unscheduled work a project brief and roadmap slot before implementation;
   issue age alone does not determine priority.
 
-## Complete in current main
+## Closed during the 2026-08-24 reconciliation
 
 | Issue | Result | Evidence |
 | --- | --- | --- |
-| [#79 — Add simpler self-setup](https://github.com/bluehexagons/infra_tools/issues/79) | Complete; candidate for closure | `bootstrap`/`self-setup` installs the launcher, packages, and completions; `install.sh --local-setup` supports one-command local setup. See [Installation](../INSTALLATION.md). |
-| [#81 — Container lifecycle management](https://github.com/bluehexagons/infra_tools/issues/81) | Complete for the requested lifecycle surface; candidate for closure | `infra-tools proxmox` supports live guest listing, status, start, stop, pause, resume, destroy, resource changes, disk resize, snapshots, health checks, and host registration in the workspace. Explicit desired-state guest inventory remains a separate follow-up under #91/#97. See [Proxmox workflows](../PROXMOX.md). |
-| [#90 — Clean up old kernels](https://github.com/bluehexagons/infra_tools/issues/90) | Complete for Debian package-managed kernels; candidate for closure | `cleanup-maintenance` runs `apt-get autoremove --purge`, allowing APT's kernel-retention policy to remove superseded packages. Proxmox boot entries are intentionally outside this cleanup boundary. See [Recurring Maintenance](../MAINTENANCE.md). |
-| [#92 — Support creating VMs on Proxmox, not just containers](https://github.com/bluehexagons/infra_tools/issues/92) | Complete; candidate for closure | Hosted setup defaults to VMs and provisions them with `qm` and cloud-init; guest management handles both `qm` VMs and `pct` containers. See [Proxmox workflows](../PROXMOX.md). |
-| [#93 — Proxmox setups are auto-restarting](https://github.com/bluehexagons/infra_tools/issues/93) | Fixed; candidate for closure | `server_proxmox` defaults to no automatic restart and no forced restart deadline. Operators must opt in, and the behavior is documented in [Proxmox workflows](../PROXMOX.md). |
+| [#79 — Add simpler self-setup](https://github.com/bluehexagons/infra_tools/issues/79) | Closed | `bootstrap`/`self-setup` installs the launcher, packages, and completions; `install.sh --local-setup` supports one-command local setup. See [Installation](../INSTALLATION.md). |
+| [#81 — Container lifecycle management](https://github.com/bluehexagons/infra_tools/issues/81) | Closed for the requested lifecycle surface | `infra-tools proxmox` supports live guest listing, status, start, stop, pause, resume, destroy, resource changes, disk resize, snapshots, health checks, and host registration in the workspace. Explicit desired-state guest inventory remains a separate follow-up under #91/#97. See [Proxmox workflows](../PROXMOX.md). |
+| [#90 — Clean up old kernels](https://github.com/bluehexagons/infra_tools/issues/90) | Closed for Debian package-managed kernels | `cleanup-maintenance` runs `apt-get autoremove --purge`, allowing APT's kernel-retention policy to remove superseded packages. Proxmox boot entries are intentionally outside this cleanup boundary. See [Recurring Maintenance](../MAINTENANCE.md). |
+| [#92 — Support creating VMs on Proxmox, not just containers](https://github.com/bluehexagons/infra_tools/issues/92) | Closed | Hosted setup defaults to VMs and provisions them with `qm` and cloud-init; guest management handles both `qm` VMs and `pct` containers. See [Proxmox workflows](../PROXMOX.md). |
+| [#93 — Proxmox setups are auto-restarting](https://github.com/bluehexagons/infra_tools/issues/93) | Closed | `server_proxmox` defaults to no automatic restart and no forced restart deadline. Operators must opt in, and the behavior is documented in [Proxmox workflows](../PROXMOX.md). |
 
 ## Open, partially implemented
 

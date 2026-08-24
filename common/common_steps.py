@@ -16,6 +16,7 @@ from lib.atomic_io import write_text_atomic
 from lib.maintenance_systemd import configure_maintenance_timer
 from lib.apt_sources import ensure_debian_package_sources
 from lib.config import SetupConfig
+from lib.maintenance_defaults import APT_LOCK_OPTIONS
 from lib.machine_state import can_manage_time_sync
 from lib.remote_utils import (
     file_contains,
@@ -47,6 +48,7 @@ _APT_DPKG_NONINTERACTIVE_OPTIONS = (
     "-o Dpkg::Options::=--force-confdef "
     "-o Dpkg::Options::=--force-confold"
 )
+_APT_GET = f"apt-get {shlex.join(APT_LOCK_OPTIONS)}"
 _USER_COMMAND_SYSTEM_PATH = (
     "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 )
@@ -204,13 +206,13 @@ def update_and_upgrade_packages(config: SetupConfig) -> None:
 
     print("  Updating package lists (APT may wait for another package operation)...")
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    update_result = run("apt-get -o DPkg::Lock::Timeout=120 -o Dpkg::Use-Pty=0 update -q", check=False)
+    update_result = run(f"{_APT_GET} -o Dpkg::Use-Pty=0 update -q", check=False)
     if update_result.returncode != 0:
         details = getattr(update_result, "stderr", "") or "check network connectivity and APT sources"
         raise RuntimeError(f"APT package list update failed: {str(details).strip()[:300]}")
     print("  Upgrading packages...")
-    run(f"apt-get upgrade -y -qq {_APT_DPKG_NONINTERACTIVE_OPTIONS}")
-    run(f"apt-get autoremove -y -qq {_APT_DPKG_NONINTERACTIVE_OPTIONS}")
+    run(f"{_APT_GET} upgrade -y -qq {_APT_DPKG_NONINTERACTIVE_OPTIONS}")
+    run(f"{_APT_GET} autoremove -y -qq {_APT_DPKG_NONINTERACTIVE_OPTIONS}")
 
     try:
         marker_parent = os.path.dirname(PACKAGE_UPDATE_MARKER)
@@ -235,7 +237,7 @@ def check_debian_package_sources(config: SetupConfig) -> None:
 
 
 def ensure_sudo_installed(config: SetupConfig) -> None:
-    install_package("sudo", "sudo", "apt-get install -y -qq sudo")
+    install_package("sudo", "sudo", f"{_APT_GET} install -y -qq sudo")
 
 
 def configure_ipv4_preference(config: SetupConfig) -> None:
@@ -275,7 +277,7 @@ def configure_locale(config: SetupConfig) -> None:
         print("  [DRY-RUN] Would configure the UTF-8 locale")
         return
     
-    install_package("locales", "locales", "apt-get install -y -qq locales")
+    install_package("locales", "locales", f"{_APT_GET} install -y -qq locales")
     run("sed -i 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen")
     locale_gen_result = run("locale-gen", check=False)
     run("update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8", check=False)
@@ -499,10 +501,10 @@ def configure_time_sync(config: SetupConfig) -> None:
         print("  Migrating from systemd-timesyncd to chrony...")
         run("systemctl stop systemd-timesyncd", check=False)
         run("systemctl disable systemd-timesyncd", check=False)
-        run("apt-get remove -y -qq systemd-timesyncd", check=False)
+        run(f"{_APT_GET} remove -y -qq systemd-timesyncd", check=False)
         print("  ✓ systemd-timesyncd removed")
     
-    install_package("chrony", "chrony", "apt-get install -y -qq chrony")
+    install_package("chrony", "chrony", f"{_APT_GET} install -y -qq chrony")
     
     run("systemctl enable chrony", check=False)
     run("systemctl start chrony", check=False)
@@ -524,7 +526,7 @@ def install_cli_tools(config: SetupConfig) -> None:
 
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     package_args = " ".join(shlex.quote(package) for package in missing)
-    result = run(f"apt-get install -y -qq {package_args}", check=False)
+    result = run(f"{_APT_GET} install -y -qq {package_args}", check=False)
     remaining = [
         package for package in missing if not is_package_installed(package)
     ]
@@ -582,7 +584,7 @@ def install_data_analysis_tools(config: SetupConfig) -> None:
 
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     package_args = " ".join(shlex.quote(package) for package in missing)
-    result = run(f"apt-get install -y -qq {package_args}", check=False)
+    result = run(f"{_APT_GET} install -y -qq {package_args}", check=False)
     remaining = [
         package for package in missing if not is_package_installed(package)
     ]
@@ -646,7 +648,7 @@ def install_control_plane_tools(config: SetupConfig) -> None:
 
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
     package_args = " ".join(shlex.quote(package) for package in missing)
-    result = run(f"apt-get install -y -qq {package_args}", check=False)
+    result = run(f"{_APT_GET} install -y -qq {package_args}", check=False)
     remaining = [
         package
         for package in missing
@@ -840,7 +842,7 @@ def install_go(config: SetupConfig) -> None:
         return
 
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    run("apt-get install -y -qq curl wget")
+    run(f"{_APT_GET} install -y -qq curl wget")
     requested_version = os.environ.get("INFRA_TOOLS_GO_VERSION") or None
     go_binary = "/usr/local/go/bin/go"
     if not os.path.exists(go_binary):
@@ -984,7 +986,7 @@ def install_node_for_user(
         return
     
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    run("apt-get install -y -qq curl")
+    run(f"{_APT_GET} install -y -qq curl")
 
     # Install nvm as the user, explicitly setting NVM_DIR to avoid picking up
     # any system-wide NVM_DIR (e.g. /opt/nvm) from the environment
@@ -1151,7 +1153,7 @@ def install_python(config: SetupConfig) -> None:
     user_home = f"/home/{config.username}"
 
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    run("apt-get install -y -qq python3 python3-venv curl")
+    run(f"{_APT_GET} install -y -qq python3 python3-venv curl")
 
     python3_path = ensure_python_alias(config)
     if python3_path:
@@ -1224,7 +1226,7 @@ def install_mail_utils(config: SetupConfig) -> None:
         return
     
     os.environ["DEBIAN_FRONTEND"] = "noninteractive"
-    run("apt-get install -y -qq bsd-mailx")
+    run(f"{_APT_GET} install -y -qq bsd-mailx")
     
     print("  ✓ Mail utilities installed")
 
@@ -1241,7 +1243,7 @@ def install_apt_packages(config: SetupConfig) -> None:
             print(f"  ✓ {package} already installed")
         else:
             print(f"  Installing {package}...")
-            run(f"apt-get install -y -qq {shlex.quote(package)}", check=False)
+            run(f"{_APT_GET} install -y -qq {shlex.quote(package)}", check=False)
             if is_package_installed(package):
                 print(f"  ✓ {package} installed")
             else:

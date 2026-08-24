@@ -4,7 +4,7 @@ Status: current portfolio index for the upcoming `v2.0.0` stable release. This
 file organizes active project plans,
 audit inputs, and open GitHub issues without replacing the detailed scope in
 the [project roadmap](ROADMAP.md) or the
-[issue triage](GITHUB_ISSUE_TRIAGE_2026-08-17.md).
+[issue triage](GITHUB_ISSUE_TRIAGE_2026-08-17.md), reverified 2026-08-24.
 
 ## Planning model
 
@@ -59,9 +59,8 @@ silently compete with P0/P1 work.
 | [#87 — More default config options](https://github.com/bluehexagons/infra_tools/issues/87) | Backlog | Add a versioned preferences contract only when a supported desktop profile can own it. |
 | [#25 — Multimedia packages](https://github.com/bluehexagons/infra_tools/issues/25) | Deferred | Reconsider after the transactional, audit, and recovery priorities are substantially complete. |
 
-The five issues that appear complete in `main` are kept out of the project
-queue and listed as closure candidates in the
-[issue triage](GITHUB_ISSUE_TRIAGE_2026-08-17.md).
+The five issues completed in `main` were closed during the 2026-08-24 tracker
+reconciliation; the issue triage records their evidence and remaining scope.
 
 ## Audit and decision records
 

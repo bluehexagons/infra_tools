@@ -53,14 +53,22 @@ class TestUpdateAndUpgradePackages(unittest.TestCase):
         mock_check_sources.assert_called_once()
         self.assertEqual(
             order[0],
-            "apt-get -o DPkg::Lock::Timeout=120 -o Dpkg::Use-Pty=0 update -q",
+            "apt-get -o DPkg::Lock::Timeout=300 -o Dpkg::Use-Pty=0 update -q",
         )
         expected_dpkg_options = (
             "-o Dpkg::Options::=--force-confdef "
             "-o Dpkg::Options::=--force-confold"
         )
-        self.assertEqual(order[1], f"apt-get upgrade -y -qq {expected_dpkg_options}")
-        self.assertEqual(order[2], f"apt-get autoremove -y -qq {expected_dpkg_options}")
+        self.assertEqual(
+            order[1],
+            "apt-get -o DPkg::Lock::Timeout=300 "
+            f"upgrade -y -qq {expected_dpkg_options}",
+        )
+        self.assertEqual(
+            order[2],
+            "apt-get -o DPkg::Lock::Timeout=300 "
+            f"autoremove -y -qq {expected_dpkg_options}",
+        )
 
     @patch("common.common_steps.check_debian_package_sources")
     @patch("common.common_steps.run")
@@ -153,6 +161,7 @@ class TestDevelopmentToolPackages(unittest.TestCase):
         )
 
         command = mock_run.call_args.args[0]
+        self.assertIn("-o DPkg::Lock::Timeout=300", command)
         for package in CLI_TOOL_PACKAGES:
             with self.subTest(package=package):
                 self.assertIn(f" {package}", command)

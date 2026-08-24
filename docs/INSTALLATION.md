@@ -288,10 +288,11 @@ base and security entries are reused; the managed file is limited to any
 missing suite, and a redundant managed file from an older installer run is
 removed.
 
-The installer and local setup print APT progress directly. The first run may
-pause briefly while another package operation releases the APT lock (the
-wait is bounded), but it should continue to show package-list or package
-installation output. Keep the terminal open until the installer reports its
+The installer and setup print APT progress directly. Setup package operations
+wait up to five minutes while another package operation releases the APT lock,
+including an automatic update that starts during setup. During that bounded
+wait, setup should continue after the other operation finishes instead of
+failing immediately. Keep the terminal open until the installer reports its
 completion message. If a previously started installer was interrupted, rerun
 the same command after checking that no other `apt` or `dpkg` process is still
 active.

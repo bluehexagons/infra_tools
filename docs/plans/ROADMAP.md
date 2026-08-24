@@ -97,17 +97,17 @@ The best next work packets are:
 5. Replace automatic SSH first-use trust with a documented one-time enrollment
    step before privileged setup/deploy operations.
 
-## Planning portfolio and GitHub issue alignment (2026-08-17)
+## Planning portfolio and GitHub issue alignment (2026-08-24)
 
-The current issue tracker has been reconciled with the implementation and the
-plans in this document. Completed operator-facing requests are identified as
-candidates for closure after their documentation and test evidence was checked.
-Partial requests remain open with their residual scope recorded. The
+The issue tracker was reconciled with the implementation and the plans in this
+document on 2026-08-24. Five completed operator-facing requests were closed
+after their documentation and test evidence was checked. Partial requests
+remain open with their residual scope recorded. The
 [planning index](README.md) separates active projects, queued dependencies,
 unscheduled issue backlog, and completed reference records. See the complete
 [GitHub issue triage](GITHUB_ISSUE_TRIAGE_2026-08-17.md) for issue-by-issue
-evidence and ownership. This repository-only update did not change GitHub
-issue state.
+evidence and ownership. The five closure comments on GitHub link the same
+implementation evidence.
 
 The triage confirms that Proxmox VM provisioning, guest lifecycle management,
 local self-setup, Proxmox restart defaults, and Debian kernel-package cleanup
