@@ -300,6 +300,11 @@ If this step fails, fix network, DNS, proxy, or mirror access and rerun the
 same installer command. Do not work around a failed package-list update by
 leaving a CD-ROM as the only source.
 
+The common CLI-tool bundle also installs `pv`, which is available from Debian
+13's repositories but is not present in a minimal Debian installation by
+default. It is available for explicit byte-stream pipelines; rsync-based
+transfers continue to use rsync's own progress display.
+
 ## Optional local tools
 
 The installer already bootstraps the launcher and shell completion. For a

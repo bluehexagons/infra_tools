@@ -20,6 +20,9 @@ from lib.validation import validate_package_name
 _dry_run = False
 
 
+VERBOSE_ENV_VAR = "INFRA_TOOLS_VERBOSE"
+
+
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 60 * 60
 _TIMEOUT_TERMINATION_GRACE_SECONDS = 5.0
 
@@ -153,6 +156,17 @@ def is_dry_run() -> bool:
     return _dry_run
 
 
+def _verbose_commands_enabled() -> bool:
+    """Return whether individual shell commands should be echoed."""
+
+    return os.environ.get(VERBOSE_ENV_VAR, "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def generate_password(length: int = 16) -> str:
     alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
     return ''.join(secrets.choice(alphabet) for _ in range(length))
@@ -214,8 +228,9 @@ def run(
 ) -> subprocess.CompletedProcess[str]:
     validated_timeout = _validate_timeout(timeout)
     log_cmd = _redact_command(display_cmd if display_cmd is not None else cmd)
-    print(f"  Running: {log_cmd[:80]}..." if len(log_cmd) > 80 else f"  Running: {log_cmd}")
-    sys.stdout.flush()
+    if _verbose_commands_enabled() or is_dry_run():
+        print(f"  Running: {log_cmd[:80]}..." if len(log_cmd) > 80 else f"  Running: {log_cmd}")
+        sys.stdout.flush()
     
     if is_dry_run():
         print("  [DRY-RUN] Command not executed")

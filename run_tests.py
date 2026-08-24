@@ -30,13 +30,12 @@ will be loaded directly.
 from __future__ import annotations
 
 import argparse
-import io
 import os
 import sys
 import time
 import unittest
+from io import StringIO
 from pathlib import Path
-from typing import TextIO
 
 # Make `tests/` importable when running from the repo root.
 _REPO_ROOT = Path(__file__).resolve().parent
@@ -108,6 +107,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-v", "--verbose", action="store_true",
         help="Verbose test output (does not suppress infra_tools console logs).",
+    )
+    parser.add_argument(
+        "--show-output",
+        action="store_true",
+        help="Include captured test stdout/stderr when a test fails.",
     )
     parser.add_argument(
         "--expensive",
@@ -319,28 +323,6 @@ def _build_suite(
     return suite
 
 
-class _Tee:
-    """Tee writes to capture (always) and the original stream (optional)."""
-
-    def __init__(self, original: TextIO, capture: io.StringIO, passthrough: bool) -> None:
-        self.original = original
-        self.capture = capture
-        self.passthrough = passthrough
-
-    def write(self, data: str) -> int:
-        self.capture.write(data)
-        if self.passthrough:
-            return self.original.write(data)
-        return len(data)
-
-    def flush(self) -> None:
-        if self.passthrough:
-            self.original.flush()
-
-    def isatty(self) -> bool:  # pragma: no cover - cosmetic
-        return self.original.isatty()
-
-
 class TimedTextTestResult(unittest.TextTestResult):
     """Text test result that records per-test durations."""
 
@@ -405,13 +387,14 @@ def main(argv: list[str] | None = None) -> int:
         runner = unittest.TextTestRunner(verbosity=2, resultclass=TimedTextTestResult)
         result = runner.run(suite)
     else:
-        capture = io.StringIO()
+        test_output = StringIO()
+        result_output = StringIO()
         old_stdout, old_stderr = sys.stdout, sys.stderr
-        sys.stdout = capture
-        sys.stderr = capture
+        sys.stdout = test_output
+        sys.stderr = test_output
         try:
             runner = unittest.TextTestRunner(
-                stream=capture,
+                stream=result_output,
                 verbosity=0,
                 resultclass=TimedTextTestResult,
             )
@@ -420,7 +403,10 @@ def main(argv: list[str] | None = None) -> int:
             sys.stdout = old_stdout
             sys.stderr = old_stderr
         if not result.wasSuccessful():
-            sys.stdout.write(capture.getvalue())
+            sys.stdout.write(result_output.getvalue())
+            if args.show_output and test_output.getvalue():
+                sys.stdout.write("\nCaptured test output:\n")
+                sys.stdout.write(test_output.getvalue())
 
     _print_durations(result, args.durations)
 

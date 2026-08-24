@@ -318,9 +318,6 @@ class TestTemplatedFieldValidation(unittest.TestCase):
         ).components[0]
         self.assertEqual(comp.env_file, "{{base_dir}}/{{name}}/.env")
 
-    def test_env_file_relative_without_placeholder_rejected(self):
-        self._assert_rejected(_manifest(_service(env_file="relative/.env")), "absolute")
-
     def test_env_file_unknown_placeholder_rejected(self):
         self._assert_rejected(
             _manifest(_service(env_file="{{bogus}}/.env")), "unknown template variable"

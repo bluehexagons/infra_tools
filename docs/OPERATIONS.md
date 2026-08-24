@@ -80,6 +80,13 @@ python3 -m unittest discover -s tests
 ./run_tests.py --durations 20
 ```
 
+The default runner captures test stdout/stderr and reports only the unittest
+failure or error report. Use `--show-output` when diagnosing a noisy failing
+test; use `-v` when you deliberately want every test name and live task log.
+Setup command echoes are also quiet by default because each setup step already
+reports progress. Set `INFRA_TOOLS_VERBOSE=1` to echo every command, and use a
+dry run when you want the complete command plan without executing it.
+
 Live Proxmox and other expensive tests are opt-in. See
 [`tests/expensive_support.py`](../tests/expensive_support.py) and
 [Proxmox workflows](PROXMOX.md) for environment-specific requirements.

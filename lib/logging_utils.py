@@ -18,7 +18,13 @@ from __future__ import annotations
 
 import os
 from logging import (
-    Logger, Formatter, StreamHandler, getLogger, INFO, WARNING
+    Formatter,
+    INFO,
+    Logger,
+    NullHandler,
+    StreamHandler,
+    WARNING,
+    getLogger,
 )
 from logging.handlers import RotatingFileHandler, SysLogHandler
 from pathlib import Path
@@ -33,8 +39,10 @@ DEFAULT_LOG_BACKUP_COUNT = 5
 DEFAULT_LOG_LEVEL = INFO
 DEFAULT_LOG_DIR = "/var/log/infra_tools"
 
-# Check if running in test mode (suppresses console output)
-TEST_MODE = os.environ.get('INFRA_TOOLS_TEST', '0') == '1'
+# Evaluate test mode when handlers are configured rather than only when this
+# module is imported. This keeps test runners quiet if they set the environment
+# after importing application modules.
+TEST_MODE_ENV_VAR = "INFRA_TOOLS_TEST"
 
 # Standard log format for all services
 # Format: timestamp - severity - service - message
@@ -42,17 +50,49 @@ STANDARD_LOG_FORMAT = "%(asctime)s - %(levelname)-8s - %(name)s - %(message)s"
 STANDARD_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
+def _test_mode_enabled() -> bool:
+    """Return whether console logging should be suppressed for test runs."""
+
+    return os.environ.get(TEST_MODE_ENV_VAR, "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _report_logging_error(message: str) -> None:
+    """Report logger setup errors without polluting test output."""
+
+    if not _test_mode_enabled():
+        print(message, file=sys.stderr)
+
+
+def _suppress_test_console_handlers(logger: Logger) -> None:
+    """Remove console handlers left behind before a test run was enabled."""
+
+    if not _test_mode_enabled():
+        return
+    for handler in list(logger.handlers):
+        if isinstance(handler, StreamHandler) and not isinstance(
+            handler, RotatingFileHandler
+        ):
+            logger.removeHandler(handler)
+            handler.close()
+
+
 def _ensure_fallback_handler(logger: Logger, level: int = INFO) -> None:
-    """Add a stderr handler as fallback if no handlers are configured.
+    """Add a fallback handler if no handlers are configured.
     
     Args:
         logger: Logger instance to add fallback handler to
         level: Log level for the handler
     """
+    _suppress_test_console_handlers(logger)
     if logger.handlers:
         return
 
-    handler = StreamHandler(sys.stderr)
+    handler = NullHandler() if _test_mode_enabled() else StreamHandler(sys.stderr)
     handler.setLevel(level)
     handler.setFormatter(Formatter(STANDARD_LOG_FORMAT, STANDARD_DATE_FORMAT))
     logger.addHandler(handler)
@@ -97,6 +137,7 @@ def get_rotating_logger(
         Configured Logger instance with rotating file handler
     """
     logger = getLogger(name)
+    _suppress_test_console_handlers(logger)
     if not logger.handlers:
         logger.setLevel(level)
         logger.propagate = False
@@ -109,7 +150,7 @@ def get_rotating_logger(
     try:
         log_path.parent.mkdir(parents=True, exist_ok=True)
     except (OSError, IOError) as e:
-        print(f"Error creating log directory {log_path.parent}: {e}", file=sys.stderr)
+        _report_logging_error(f"Error creating log directory {log_path.parent}: {e}")
         _ensure_fallback_handler(logger, level)
         return logger
 
@@ -124,7 +165,7 @@ def get_rotating_logger(
         handler.setFormatter(get_standard_formatter())
         logger.addHandler(handler)
     except (OSError, IOError) as e:
-        print(f"Error opening log file {log_file_path}: {e}", file=sys.stderr)
+        _report_logging_error(f"Error opening log file {log_file_path}: {e}")
         _ensure_fallback_handler(logger, level)
         return logger
 
@@ -170,7 +211,7 @@ def get_service_logger(
     log_file = log_dir / f"{service_name}.log"
     
     # In test mode, disable console output (use local variable, don't mutate param)
-    effective_console_output = console_output and not TEST_MODE
+    effective_console_output = console_output and not _test_mode_enabled()
     
     logger = get_rotating_logger(service_name, str(log_file), level=level)
     
@@ -258,7 +299,7 @@ def ensure_log_directory(subdir: Optional[str] = None) -> Path:
     try:
         log_dir.mkdir(parents=True, exist_ok=True)
     except (OSError, IOError) as e:
-        print(f"Error creating log directory {log_dir}: {e}", file=sys.stderr)
+        _report_logging_error(f"Error creating log directory {log_dir}: {e}")
     
     return log_dir
 

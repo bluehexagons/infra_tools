@@ -65,11 +65,21 @@ class TestGetRotatingLogger(unittest.TestCase):
 
     def test_fallback_on_bad_path(self):
         # /proc is not writable, so the logger should fallback to stderr
-        with redirect_stderr(StringIO()):
+        with redirect_stderr(StringIO()), patch.dict(os.environ, {"INFRA_TOOLS_TEST": "1"}):
             logger = get_rotating_logger('test_logger_fallback', '/proc/nonexistent/test.log')
         self.assertIsInstance(logger, logging.Logger)
         # Should have a fallback handler
         self.assertGreater(len(logger.handlers), 0)
+
+    def test_fallback_does_not_write_to_console_in_test_mode(self):
+        output = StringIO()
+        with patch.dict(os.environ, {"INFRA_TOOLS_TEST": "1"}), redirect_stderr(output):
+            logger = get_rotating_logger(
+                'test_logger_quiet_fallback', '/proc/nonexistent/test.log'
+            )
+            logger.error("should stay out of the test log")
+
+        self.assertEqual(output.getvalue(), "")
 
     def test_non_root_does_not_touch_var_log(self):
         log_file = '/var/log/infra_tools/test/non_root.log'

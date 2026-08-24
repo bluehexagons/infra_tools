@@ -9,6 +9,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -245,6 +247,25 @@ class TestRunCommandDispatch(unittest.TestCase):
             with self.subTest(timeout=timeout):
                 with self.assertRaisesRegex(ValueError, "positive number"):
                     run("echo hello", timeout=timeout)
+
+    @patch("lib.remote_utils.subprocess.Popen")
+    def test_command_echo_is_opt_in(self, mock_popen):
+        self._completed_process(mock_popen)
+        output = StringIO()
+
+        with patch.dict(os.environ, {"INFRA_TOOLS_VERBOSE": "0"}, clear=False), \
+             redirect_stdout(output):
+            run("echo hello")
+
+        self.assertNotIn("Running: echo hello", output.getvalue())
+
+        output.seek(0)
+        output.truncate()
+        with patch.dict(os.environ, {"INFRA_TOOLS_VERBOSE": "1"}, clear=False), \
+             redirect_stdout(output):
+            run("echo hello")
+
+        self.assertIn("Running: echo hello", output.getvalue())
 
 
 class TestRemoteValidateUsername(unittest.TestCase):

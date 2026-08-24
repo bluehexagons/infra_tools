@@ -91,6 +91,7 @@ CLI_TOOL_PACKAGES = (
     "make",
     "neovim",
     "patch",
+    "pv",
     "ripgrep",
     "rsync",
     "sqlite3",

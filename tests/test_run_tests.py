@@ -75,6 +75,26 @@ class TestRunTestsDurations(unittest.TestCase):
         self.assertIn("Slowest 1 tests:", stdout.getvalue())
 
 
+class TestRunTestsOutput(unittest.TestCase):
+    def test_failure_report_does_not_include_captured_output_by_default(self) -> None:
+        class NoisyFailure(unittest.TestCase):
+            def test_failure(self) -> None:
+                print("large task log that should stay captured")
+                self.fail("expected failure")
+
+        stdout = io.StringIO()
+        with patch.object(
+            run_tests,
+            "_build_suite",
+            return_value=unittest.TestSuite([NoisyFailure("test_failure")]),
+        ), contextlib.redirect_stdout(stdout):
+            rc = run_tests.main([])
+
+        self.assertEqual(rc, 1)
+        self.assertIn("expected failure", stdout.getvalue())
+        self.assertNotIn("large task log", stdout.getvalue())
+
+
 class _env_unset:
     def __init__(self, key: str) -> None:
         self.key = key
