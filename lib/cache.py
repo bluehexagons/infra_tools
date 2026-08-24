@@ -12,6 +12,7 @@ from typing import Optional, Any
 
 from lib.config import SetupConfig
 from lib.atomic_io import write_json_atomic
+from lib.validators import validate_username
 from lib.workspace import get_history_dir, get_setup_cache_dir
 
 
@@ -117,6 +118,68 @@ def save_setup_command(
             end_time=end_time,
             success=success,
         )
+
+
+def _rewrite_cached_home_paths(value: Any, old_home: str, new_home: str) -> Any:
+    """Rewrite an exact old-home prefix inside cached path-valued data."""
+
+    if isinstance(value, str) and old_home:
+        if value == old_home or value.startswith(old_home + "/"):
+            return new_home + value[len(old_home):]
+        return value
+    if isinstance(value, list):
+        return [_rewrite_cached_home_paths(item, old_home, new_home) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: _rewrite_cached_home_paths(item, old_home, new_home)
+            for key, item in value.items()
+        }
+    return value
+
+
+def rename_setup_command(
+    host: str,
+    *,
+    old_username: str,
+    new_username: str,
+    old_home: str = "",
+    new_home: str = "",
+) -> None:
+    """Update the current workspace cache after a verified remote rename.
+
+    The cache metadata and historical records are preserved. Only the current
+    setup arguments are changed, including path values below the old home.
+    """
+
+    if not validate_username(old_username) or not validate_username(new_username):
+        raise ValueError("Invalid username in setup-cache rename")
+    if old_username == new_username:
+        raise ValueError("Setup-cache rename requires different usernames")
+
+    cached = load_setup_command(host)
+    if cached is None:
+        raise ValueError(f"No cached setup found for {host}")
+    cache_path = get_cache_path_for_host(cached.host)
+    try:
+        with open(cache_path, "r", encoding="utf-8") as file_obj:
+            cache_data = json.load(file_obj)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Could not load setup cache for {cached.host}: {exc}") from exc
+    if not isinstance(cache_data, dict) or not isinstance(cache_data.get("args"), dict):
+        raise ValueError(f"Invalid setup cache for {cached.host}")
+
+    args = cache_data["args"]
+    if args.get("username") != old_username:
+        raise ValueError(
+            f"Setup cache username mismatch: expected {old_username!r}, "
+            f"found {args.get('username')!r}"
+        )
+    updated_args = _rewrite_cached_home_paths(args, old_home, new_home)
+    if not isinstance(updated_args, dict):
+        raise ValueError("Setup cache arguments are not an object")
+    updated_args["username"] = new_username
+    cache_data["args"] = updated_args
+    write_json_atomic(cache_path, cache_data, mode=0o600)
 
 
 def _load_cache_file(cache_path: str, host: str) -> Optional[SetupConfig]:

@@ -16,6 +16,7 @@ from lib.cache import (
     save_setup_command,
     load_setup_command,
     merge_setup_configs,
+    rename_setup_command,
 )
 from lib.config import SetupConfig
 
@@ -218,6 +219,34 @@ class TestSaveAndLoadSetupCommand(unittest.TestCase):
                 save_setup_command(config, operation='setup')
 
                 self.assertEqual(os.listdir(history_dir), [])
+
+    def test_rename_setup_command_preserves_metadata_and_history(self):
+        with tempfile.TemporaryDirectory() as cache_dir, tempfile.TemporaryDirectory() as history_dir:
+            with patch('lib.cache.get_setup_cache_dir', return_value=cache_dir), patch('lib.cache.get_history_dir', return_value=history_dir):
+                config = self._make_config(
+                    username='olduser',
+                    agent_workspace='/home/olduser/repos',
+                    sync_specs=[['/home/olduser/data', '/srv/backup', 'daily']],
+                    friendly_name='My Server',
+                    tags=['prod'],
+                )
+                save_setup_command(config, start_time=1.0, end_time=2.0, success=True)
+                rename_setup_command(
+                    'testhost',
+                    old_username='olduser',
+                    new_username='newuser',
+                    old_home='/home/olduser',
+                    new_home='/home/newuser',
+                )
+
+                loaded = load_setup_command('testhost')
+                assert loaded is not None
+                self.assertEqual(loaded.username, 'newuser')
+                self.assertEqual(loaded.agent_workspace, '/home/newuser/repos')
+                self.assertEqual(loaded.sync_specs[0][0], '/home/newuser/data')
+                self.assertEqual(loaded.friendly_name, 'My Server')
+                self.assertEqual(loaded.tags, ['prod'])
+                self.assertEqual(len(os.listdir(history_dir)), 1)
 
 
 class TestMergeSetupConfigs(unittest.TestCase):

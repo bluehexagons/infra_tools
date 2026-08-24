@@ -28,6 +28,7 @@ connections at once.
 | [`logs`](#logs) | Show or follow journalctl output |
 | [`upgrade`](#upgrade) | Run apt upgrade across one or more hosts |
 | [`reachable`](#reachable) | Check which saved hosts respond via SSH |
+| [`user rename`](#user-rename) | Rename a managed target login and reconcile its configuration |
 
 ---
 
@@ -388,3 +389,51 @@ infra-tools reachable web1 web2 db1        # explicit host list
 
 All probes run concurrently. The summary line lists any unreachable hosts by
 name. Exit code is 1 if any host is unreachable, 0 if all respond.
+
+---
+
+## user rename
+
+Rename the account stored as a target's setup username. The operation runs as
+a detached, root-owned systemd job on the target, logs out the old account,
+moves the conventional home directory, reconciles infra-tools-managed units
+and state, verifies SSH access as the new account, and then updates the current
+controller cache.
+
+```
+infra-tools user rename <host> <new_username> [options]
+```
+
+| Option | Description |
+|--------|-------------|
+| `host` | Remote host with a saved infra-tools setup |
+| `new_username` | New local login name |
+| `--admin-user USER` | Administrative SSH account (defaults to saved target user) |
+| `-i, --key PATH` | SSH identity file |
+| `--new-home PATH` | Explicit absolute destination home |
+| `--keep-home` | Keep the existing home path |
+| `-n, --dry-run` | Run target preflight without changing anything |
+| `-y, --yes` | Skip the destructive-operation confirmation |
+| `--resume OPERATION_ID` | Resume a staged operation after interruption |
+
+Examples:
+
+```bash
+infra-tools user rename myserver newadmin
+infra-tools user rename myserver newadmin --admin-user root --yes
+infra-tools user rename myserver newadmin --dry-run
+infra-tools user rename myserver newadmin --resume 7d4e...
+```
+
+The saved setup username is used as the old name and is checked against the
+target account and both target state files. The command requires
+non-interactive remote `sudo`, a local account, a systemd target, and an
+unambiguous home directory. `root`, existing destination accounts/groups,
+mounted homes, and unmanaged system configuration references are rejected.
+Historical setup records are not rewritten. The target user's SSH session is
+expected to disconnect during the migration; the operation ID can be used to
+resume or inspect recovery.
+
+The target must already have the current infra-tools target files installed so
+the migration helper is available under `/opt/infra_tools/lib/`. Run the
+normal target upgrade first if preflight reports that the helper is missing.

@@ -41,6 +41,7 @@ infra-tools self-setup [options]
 infra-tools local [subcommand]
 infra-tools channel [CHANNEL]
 infra-tools upgrade
+infra-tools user rename <host> <new_username> [options]
 infra-tools agent doctor [HOST USER] [options]
 infra-tools agent update [HOST USER] [options]
 infra-tools agent auth set HOST USER --tool TOOL --file PATH

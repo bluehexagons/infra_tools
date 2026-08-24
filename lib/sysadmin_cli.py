@@ -366,6 +366,55 @@ def _add_reachable_parser(sub: argparse._SubParsersAction) -> None:
     p.set_defaults(_sysadmin_cmd="reachable")
 
 
+def _add_user_parser(sub: argparse._SubParsersAction) -> None:
+    p = sub.add_parser(
+        "user",
+        help="Manage the configured login account on a remote host",
+        description=(
+            "Run administrator operations for the target account. Renaming "
+            "a user logs out the target account, moves its conventional home, "
+            "reconciles infra-tools-managed configuration, and updates the "
+            "saved controller configuration after verification."
+        ),
+    )
+    commands = p.add_subparsers(dest="user_command", help="User command")
+    rename = commands.add_parser(
+        "rename",
+        help="Rename the configured target user",
+        description=(
+            "Rename the saved target login through a detached, root-owned "
+            "remote migration job. The target user will be logged out."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  infra-tools user rename myserver newadmin --yes\n"
+            "  infra-tools user rename myserver newadmin --admin-user root\n"
+            "  infra-tools user rename myserver newadmin --dry-run\n"
+            "  infra-tools user rename myserver newadmin --resume OPERATION_ID"
+        ),
+    )
+    rename.add_argument("host", help="Remote host with a saved setup")
+    rename.add_argument("new_username", help="New login name")
+    rename.add_argument(
+        "--admin-user",
+        help="Administrative SSH username (defaults to the saved target user)",
+    )
+    rename.add_argument("--key", "-i", dest="ssh_key", help="SSH identity file")
+    home = rename.add_mutually_exclusive_group()
+    home.add_argument("--new-home", help="Absolute destination home directory")
+    home.add_argument(
+        "--keep-home",
+        action="store_true",
+        help="Keep the existing home path instead of moving /home/OLD",
+    )
+    rename.add_argument("--dry-run", "-n", action="store_true", help="Run preflight only")
+    rename.add_argument("--yes", "-y", action="store_true", help="Skip confirmation")
+    rename.add_argument("--resume", metavar="OPERATION_ID", help="Resume a staged operation")
+    rename.set_defaults(_sysadmin_cmd="user_rename")
+    p.set_defaults(_sysadmin_cmd="user")
+
+
 def add_sysadmin_subparsers(subparsers: argparse._SubParsersAction) -> None:
     """Register all sysadmin convenience subcommands."""
     _add_mount_parser(subparsers)
@@ -382,6 +431,7 @@ def add_sysadmin_subparsers(subparsers: argparse._SubParsersAction) -> None:
     _add_logs_parser(subparsers)
     _add_upgrade_parser(subparsers)
     _add_reachable_parser(subparsers)
+    _add_user_parser(subparsers)
 
 
 def run_sysadmin_command(args: argparse.Namespace) -> int:
@@ -528,6 +578,20 @@ def run_sysadmin_command(args: argparse.Namespace) -> int:
             hosts=explicit_hosts,
             username=getattr(args, "username", None),
             ssh_key=getattr(args, "ssh_key", None),
+        )
+
+    if cmd == "user_rename":
+        from lib.sysadmin_user import run_user_rename
+        return run_user_rename(
+            args.host,
+            args.new_username,
+            admin_user=getattr(args, "admin_user", None),
+            ssh_key=getattr(args, "ssh_key", None),
+            new_home=getattr(args, "new_home", None),
+            keep_home=getattr(args, "keep_home", False),
+            dry_run=getattr(args, "dry_run", False),
+            assume_yes=getattr(args, "yes", False),
+            resume=getattr(args, "resume", None),
         )
 
     import sys

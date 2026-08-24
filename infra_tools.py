@@ -170,6 +170,7 @@ Sysadmin Shortcuts:
     logs <host> <unit>          Show or follow journalctl output for a service
     upgrade <host> [<host2>…]   Run apt upgrade in parallel; report reboot-required
     reachable [hosts|pattern]   Check which saved hosts are reachable via SSH
+    user rename <host> <new>    Rename the configured remote target user
     ssh-key enroll <host>       Enroll and verify a workspace SSH host key
 
 System Types for setup:
@@ -1745,7 +1746,7 @@ def main() -> int:
         return run_agent_command(args)
     elif args.command == "gogs":
         return run_gogs_command(args)
-    elif args.command in {"mount", "umount", "health", "ssh", "push", "pull", "key", "ssh-key", "df", "fan", "svc", "logs", "upgrade", "reachable"}:
+    elif args.command in {"mount", "umount", "health", "ssh", "push", "pull", "key", "ssh-key", "df", "fan", "svc", "logs", "upgrade", "reachable", "user"}:
         return run_sysadmin_command(args)
     elif args.command == "shell":
         return run_interactive_shell(getattr(args, "workspace", None))
