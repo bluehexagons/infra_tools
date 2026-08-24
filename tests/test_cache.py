@@ -227,6 +227,8 @@ class TestSaveAndLoadSetupCommand(unittest.TestCase):
                     username='olduser',
                     agent_workspace='/home/olduser/repos',
                     sync_specs=[['/home/olduser/data', '/srv/backup', 'daily']],
+                    notify_specs=[['webhook', '/home/olduser/secret-looking-value']],
+                    gogs=['git.example.com:3000', '/home/olduser/gogs'],
                     friendly_name='My Server',
                     tags=['prod'],
                 )
@@ -244,6 +246,11 @@ class TestSaveAndLoadSetupCommand(unittest.TestCase):
                 self.assertEqual(loaded.username, 'newuser')
                 self.assertEqual(loaded.agent_workspace, '/home/newuser/repos')
                 self.assertEqual(loaded.sync_specs[0][0], '/home/newuser/data')
+                self.assertEqual(loaded.gogs[1], '/home/newuser/gogs')
+                self.assertEqual(
+                    loaded.notify_specs[0][1],
+                    '/home/olduser/secret-looking-value',
+                )
                 self.assertEqual(loaded.friendly_name, 'My Server')
                 self.assertEqual(loaded.tags, ['prod'])
                 self.assertEqual(len(os.listdir(history_dir)), 1)

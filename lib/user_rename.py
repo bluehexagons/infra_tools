@@ -10,6 +10,7 @@ processes first.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import grp
 import json
 import os
@@ -59,6 +60,32 @@ class RenameError(RuntimeError):
     """Raised when a target rename cannot safely proceed."""
 
 
+def _acquire_target_lock() -> Any:
+    """Serialize rename jobs even when controllers are on different hosts."""
+
+    try:
+        os.makedirs(RENAME_ROOT, mode=ROOT_MODE, exist_ok=True)
+        os.chmod(RENAME_ROOT, ROOT_MODE)
+        lock_file = open(os.path.join(RENAME_ROOT, ".lock"), "a+", encoding="utf-8")
+    except OSError as exc:
+        raise RenameError(f"Could not create target rename lock: {exc}") from exc
+    try:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (BlockingIOError, OSError) as exc:
+        lock_file.close()
+        if isinstance(exc, BlockingIOError) or getattr(exc, "errno", None) in {11, 35}:
+            raise RenameError("Another target user rename is already running") from exc
+        raise RenameError(f"Could not acquire target rename lock: {exc}") from exc
+    return lock_file
+
+
+def _release_target_lock(lock_file: Any) -> None:
+    try:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+    finally:
+        lock_file.close()
+
+
 def _require_root() -> None:
     if os.geteuid() != 0:
         raise RenameError("target user rename must run as root")
@@ -72,6 +99,9 @@ def _validate_operation_id(operation_id: str) -> None:
 def _load_manifest(path: str) -> dict[str, Any]:
     if not os.path.isabs(path) or os.path.islink(path):
         raise RenameError("Rename manifest must be an absolute regular file")
+    operation_directory = os.path.dirname(path)
+    if os.path.islink(operation_directory):
+        raise RenameError("Rename operation directory must not be a symlink")
     try:
         metadata = os.stat(path, follow_symlinks=False)
     except OSError as exc:
@@ -92,6 +122,9 @@ def _load_manifest(path: str) -> dict[str, Any]:
     if not isinstance(manifest["operation_id"], str):
         raise RenameError("Invalid operation ID")
     _validate_operation_id(manifest["operation_id"])
+    expected_directory = os.path.join(os.path.abspath(RENAME_ROOT), manifest["operation_id"])
+    if os.path.abspath(os.path.dirname(path)) != expected_directory:
+        raise RenameError("Rename manifest is not in its operation directory")
     for key in ("old_username", "new_username"):
         value = manifest[key]
         if not isinstance(value, str) or not validate_username(value):
@@ -131,6 +164,8 @@ def _write_status(
     details: Optional[dict[str, Any]] = None,
 ) -> None:
     directory = _operation_dir(operation_id)
+    if os.path.islink(directory):
+        raise RenameError("Rename operation directory must not be a symlink")
     os.makedirs(directory, mode=ROOT_MODE, exist_ok=True)
     try:
         os.chmod(directory, ROOT_MODE)
@@ -230,6 +265,8 @@ def _home_for_manifest(manifest: dict[str, Any], account: pwd.struct_passwd) -> 
             raise RenameError(f"Invalid new home: {exc}") from exc
         if not requested_home.startswith("/"):
             raise RenameError("New home must be an absolute path")
+        if os.path.normpath(requested_home) != requested_home:
+            raise RenameError("New home must be normalized without '.' or '..' components")
         new_home = requested_home
     elif keep_home:
         new_home = old_home
@@ -284,6 +321,67 @@ def _managed_unit_files(old_username: str, old_home: str) -> tuple[list[str], li
     return sorted(managed), sorted(unmanaged)
 
 
+def _unmanaged_sudoers_references(old_username: str) -> list[str]:
+    """Find sudoers files that mention the account outside our managed entry."""
+
+    paths: list[str] = []
+    if os.path.isfile("/etc/sudoers"):
+        paths.append("/etc/sudoers")
+    try:
+        paths.extend(
+            os.path.join("/etc/sudoers.d", name)
+            for name in os.listdir("/etc/sudoers.d")
+            if name != f"infra-tools-{old_username}"
+        )
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        raise RenameError(f"Could not inspect sudoers.d: {exc}") from exc
+    pattern = re.compile(rf"(?<![A-Za-z0-9_.-]){re.escape(old_username)}(?![A-Za-z0-9_.-])")
+    references: list[str] = []
+    for path in paths:
+        if os.path.islink(path) or not os.path.isfile(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as file_obj:
+                content = file_obj.read()
+        except (OSError, UnicodeDecodeError) as exc:
+            raise RenameError(f"Could not inspect sudoers file {path}: {exc}") from exc
+        if pattern.search(content):
+            references.append(path)
+    return sorted(references)
+
+
+def _unmanaged_ssh_references(old_username: str) -> list[str]:
+    """Find SSH daemon configuration that names the old login explicitly."""
+
+    paths: list[str] = []
+    if os.path.isfile("/etc/ssh/sshd_config"):
+        paths.append("/etc/ssh/sshd_config")
+    try:
+        paths.extend(
+            os.path.join("/etc/ssh/sshd_config.d", name)
+            for name in os.listdir("/etc/ssh/sshd_config.d")
+        )
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        raise RenameError(f"Could not inspect sshd_config.d: {exc}") from exc
+    pattern = re.compile(rf"(?<![A-Za-z0-9_.-]){re.escape(old_username)}(?![A-Za-z0-9_.-])")
+    references: list[str] = []
+    for path in paths:
+        if os.path.islink(path) or not os.path.isfile(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as file_obj:
+                content = file_obj.read()
+        except (OSError, UnicodeDecodeError) as exc:
+            raise RenameError(f"Could not inspect SSH configuration {path}: {exc}") from exc
+        if pattern.search(content):
+            references.append(path)
+    return sorted(references)
+
+
 def _reject_concurrent_operation(operation_id: str) -> None:
     """Refuse a second unfinished rename on the same target."""
 
@@ -329,12 +427,18 @@ def _preflight(manifest: dict[str, Any]) -> dict[str, Any]:
     old_home, new_home = _home_for_manifest(manifest, old_account)
     if old_home == "/":
         raise RenameError("Renaming an account whose home is / is not supported")
+    if old_home != new_home and (
+        new_home.startswith(old_home + "/") or old_home.startswith(new_home + "/")
+    ):
+        raise RenameError("Destination home cannot be nested within the existing home")
     if old_home != new_home and os.path.lexists(new_home):
         raise RenameError(f"Destination home already exists: {new_home}")
     if old_home != new_home and not os.path.isdir(os.path.dirname(new_home)):
         raise RenameError(f"Destination home parent is not a directory: {os.path.dirname(new_home)}")
     if not os.path.isdir(old_home):
         raise RenameError(f"Account home is not a directory: {old_home}")
+    if os.stat(old_home, follow_symlinks=False).st_uid != old_account.pw_uid:
+        raise RenameError("Account home is not owned by the requested account")
     if os.path.ismount(old_home):
         raise RenameError("Moving a mounted home directory is not supported")
     if not os.path.exists("/run/systemd/system") or shutil.which("systemctl") is None:
@@ -353,22 +457,47 @@ def _preflight(manifest: dict[str, Any]) -> dict[str, Any]:
 
     state = _read_json(STATE_FILE)
     setup = _read_json(SETUP_CONFIG_FILE)
-    setup_operation = _read_json(
-        os.path.join(os.path.dirname(STATE_FILE), "setup-operation.json")
-    )
+    setup_operation_path = os.path.join(os.path.dirname(STATE_FILE), "setup-operation.json")
+    setup_operation = _read_json(setup_operation_path)
+    if os.path.exists(setup_operation_path) and setup_operation is None:
+        raise RenameError("Target setup operation marker is invalid; recover it first")
     if setup_operation and setup_operation.get("status") in {"in_progress", "recovery_required"}:
         raise RenameError("Target setup has an unfinished operation; recover it first")
-    if state and state.get("username") not in (None, old_username):
+    if os.path.exists(STATE_FILE) and state is None:
+        raise RenameError("machine.json is not a valid JSON object")
+    if os.path.exists(SETUP_CONFIG_FILE) and setup is None:
+        raise RenameError("setup.json is not a valid JSON object")
+    if state is not None and state.get("username") != old_username:
         raise RenameError("machine.json username does not match the requested account")
-    if setup and setup.get("username") not in (None, old_username):
+    if setup is not None and setup.get("username") != old_username:
         raise RenameError("setup.json username does not match the requested account")
+    existing_group_memberships = _group_member_references(new_username)
+    if existing_group_memberships:
+        raise RenameError(
+            "Destination username already appears in group databases: "
+            + ", ".join(existing_group_memberships)
+        )
     old_sudoers = os.path.join("/etc/sudoers.d", f"infra-tools-{old_username}")
     new_sudoers = os.path.join("/etc/sudoers.d", f"infra-tools-{new_username}")
     if os.path.islink(old_sudoers) or os.path.islink(new_sudoers):
         raise RenameError("infra-tools sudoers entries must be regular files")
     if os.path.isfile(old_sudoers) and os.path.lexists(new_sudoers):
         raise RenameError(f"Destination sudoers entry already exists: {new_sudoers}")
+    unmanaged_sudoers = _unmanaged_sudoers_references(old_username)
+    if unmanaged_sudoers:
+        raise RenameError(
+            "Unmanaged sudoers references to the old account: "
+            + ", ".join(unmanaged_sudoers)
+        )
+    unmanaged_ssh = _unmanaged_ssh_references(old_username)
+    if unmanaged_ssh:
+        raise RenameError(
+            "Unmanaged SSH configuration references to the old account: "
+            + ", ".join(unmanaged_ssh)
+        )
     for subordinate_path in ("/etc/subuid", "/etc/subgid"):
+        if os.path.islink(subordinate_path):
+            raise RenameError(f"Unsafe subordinate ID file: {subordinate_path}")
         try:
             with open(subordinate_path, encoding="utf-8") as file_obj:
                 if any(line.startswith(new_username + ":") for line in file_obj):
@@ -389,7 +518,7 @@ def _preflight(manifest: dict[str, Any]) -> dict[str, Any]:
     linger_path = os.path.join(LINGER_DIR, old_username)
     if os.path.islink(linger_path):
         raise RenameError("User linger marker must be a regular file")
-    if os.path.isfile(linger_path) and os.path.lexists(os.path.join(LINGER_DIR, new_username)):
+    if os.path.lexists(os.path.join(LINGER_DIR, new_username)):
         raise RenameError("Destination user already has a linger marker")
 
     return {
@@ -487,8 +616,48 @@ def _rewrite_value(value: Any, old_home: str, new_home: str) -> Any:
     return value
 
 
+def _rewrite_setup_path_values(config: dict[str, Any], old_home: str, new_home: str) -> dict[str, Any]:
+    """Rewrite only the setup schema fields that contain filesystem paths."""
+
+    updated = dict(config)
+    if "agent_workspace" in updated:
+        updated["agent_workspace"] = _rewrite_value(
+            updated["agent_workspace"], old_home, new_home
+        )
+    gogs = updated.get("gogs")
+    if isinstance(gogs, list) and len(gogs) > 1:
+        gogs = list(gogs)
+        gogs[1] = _rewrite_value(gogs[1], old_home, new_home)
+        updated["gogs"] = gogs
+    path_indexes = {
+        "samba_shares": (2,),
+        "smb_mounts": (0,),
+        "sync_specs": (0, 1),
+        "backup_specs": (0, 1),
+        "scrub_specs": (0, 1),
+        "deploy_specs": (0,),
+        "storage_mounts": (1,),
+    }
+    for field, indexes in path_indexes.items():
+        records = updated.get(field)
+        if not isinstance(records, list):
+            continue
+        rewritten_records = []
+        for record in records:
+            if not isinstance(record, list):
+                rewritten_records.append(record)
+                continue
+            rewritten = list(record)
+            for index in indexes:
+                if index < len(rewritten):
+                    rewritten[index] = _rewrite_value(rewritten[index], old_home, new_home)
+            rewritten_records.append(rewritten)
+        updated[field] = rewritten_records
+    return updated
+
+
 def _rewrite_setup_config(config: dict[str, Any], old_username: str, new_username: str, old_home: str, new_home: str) -> dict[str, Any]:
-    updated = _rewrite_value(config, old_home, new_home)
+    updated = _rewrite_setup_path_values(config, old_home, new_home)
     if not isinstance(updated, dict):
         raise RenameError("Saved setup configuration is not an object")
     if updated.get("username") == old_username:
@@ -502,12 +671,78 @@ def _rewrite_state_files(manifest: dict[str, Any], old_home: str, new_home: str)
     state = _read_json(STATE_FILE)
     if state is not None:
         state["username"] = new_username
-        write_json_atomic(STATE_FILE, _rewrite_value(state, old_home, new_home), mode=0o600, sort_keys=True)
+        write_json_atomic(STATE_FILE, state, mode=0o600, sort_keys=True)
     setup = _read_json(SETUP_CONFIG_FILE)
     if setup is not None:
         updated = _rewrite_setup_config(setup, old_username, new_username, old_home, new_home)
         updated.pop("password", None)
         write_json_atomic(SETUP_CONFIG_FILE, updated, mode=0o600, sort_keys=True)
+
+
+def _rewrite_group_memberships(old_username: str, new_username: str) -> None:
+    """Preserve supplementary group membership under the new login name."""
+
+    for path, member_fields in (("/etc/group", (3,)), ("/etc/gshadow", (2, 3))):
+        if os.path.islink(path):
+            raise RenameError(f"Group database must not be a symlink: {path}")
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as file_obj:
+                lines = file_obj.readlines()
+        except OSError as exc:
+            raise RenameError(f"Could not read group database {path}: {exc}") from exc
+        updated_lines: list[str] = []
+        changed = False
+        for line in lines:
+            newline = "\n" if line.endswith("\n") else ""
+            fields = line[:-1].split(":") if newline else line.split(":")
+            for index in member_fields:
+                if index >= len(fields):
+                    continue
+                members = fields[index].split(",") if fields[index] else []
+                replaced = [new_username if member == old_username else member for member in members]
+                if replaced != members:
+                    fields[index] = ",".join(replaced)
+                    changed = True
+            updated_lines.append(":".join(fields) + newline)
+        if changed:
+            metadata = os.stat(path, follow_symlinks=False)
+            mode = stat.S_IMODE(metadata.st_mode)
+            write_text_atomic(path, "".join(updated_lines), mode=mode)
+            try:
+                os.chown(path, metadata.st_uid, metadata.st_gid)
+            except OSError as exc:
+                raise RenameError(f"Could not preserve group database ownership {path}: {exc}") from exc
+
+
+def _verify_group_memberships(old_username: str) -> None:
+    references = _group_member_references(old_username)
+    if references:
+        raise RenameError(
+            "Group databases still reference the old account: " + ", ".join(references)
+        )
+
+
+def _group_member_references(username: str) -> list[str]:
+    references: list[str] = []
+    for path, member_fields in (("/etc/group", (3,)), ("/etc/gshadow", (2, 3))):
+        if os.path.islink(path):
+            raise RenameError(f"Group database must not be a symlink: {path}")
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as file_obj:
+                lines = file_obj.readlines()
+        except OSError as exc:
+            raise RenameError(f"Could not verify group database {path}: {exc}") from exc
+        for line in lines:
+            fields = line.rstrip("\n").split(":")
+            for index in member_fields:
+                if index < len(fields) and username in fields[index].split(","):
+                    references.append(path)
+                    break
+    return references
 
 
 def _rewrite_subordinate_id_files(old_username: str, new_username: str) -> None:
@@ -528,7 +763,8 @@ def _rewrite_subordinate_id_files(old_username: str, new_username: str) -> None:
             for line in lines
         ]
         if updated != lines:
-            _replace_in_file(path, [(old_username + ":", new_username + ":")])
+            if not _replace_in_file(path, [(old_username + ":", new_username + ":")]):
+                raise RenameError(f"Could not rewrite subordinate ID file: {path}")
 
 
 def _verify_subordinate_id_files(old_username: str) -> None:
@@ -552,9 +788,13 @@ def _replace_in_file(path: str, replacements: list[tuple[str, str]]) -> bool:
         text = raw.decode("utf-8")
     except (OSError, UnicodeDecodeError):
         return False
-    updated = text
-    for old, new in replacements:
-        updated = updated.replace(old, new)
+    replacements_by_old = {old: new for old, new in replacements if old}
+    if not replacements_by_old:
+        return False
+    pattern = re.compile(
+        "|".join(re.escape(old) for old in sorted(replacements_by_old, key=len, reverse=True))
+    )
+    updated = pattern.sub(lambda match: replacements_by_old[match.group(0)], text)
     if updated == text:
         return False
     mode = stat.S_IMODE(os.stat(path, follow_symlinks=False).st_mode)
@@ -567,7 +807,13 @@ def _replace_in_file(path: str, replacements: list[tuple[str, str]]) -> bool:
 
 
 def _rewrite_managed_units(manifest: dict[str, Any], old_home: str, new_home: str) -> list[str]:
-    replacements = [(old_home, new_home), (manifest["old_username"], manifest["new_username"])]
+    # Match the destination home as a whole before the username replacement so
+    # a resumed migration does not rewrite ``olduser`` inside ``/srv/olduser-data``.
+    replacements = [
+        (old_home, new_home),
+        (new_home, new_home),
+        (manifest["old_username"], manifest["new_username"]),
+    ]
     changed: list[str] = []
     for item in manifest.get("managed_units", []):
         path = item.get("path")
@@ -636,7 +882,8 @@ def _verify_managed_rewrites(manifest: dict[str, Any], old_home: str) -> None:
                 content = file_obj.read()
         except (OSError, UnicodeDecodeError) as exc:
             raise RenameError(f"Could not verify managed unit {path}: {exc}") from exc
-        if old_home in content or old_username in content:
+        remaining = content.replace(manifest["new_home"], "")
+        if old_home in remaining or old_username in remaining:
             raise RenameError(f"Managed unit still references the old account: {path}")
 
 
@@ -666,7 +913,12 @@ def _rename_cron_and_mail(old_username: str, new_username: str, uid: int) -> Non
     if os.path.isfile(old_cron) and not os.path.lexists(new_cron):
         os.replace(old_cron, new_cron)
         os.chown(new_cron, uid, os.stat(new_cron, follow_symlinks=False).st_gid)
+    seen_directories: set[str] = set()
     for directory in ("/var/mail", "/var/spool/mail"):
+        canonical_directory = os.path.realpath(directory)
+        if canonical_directory in seen_directories:
+            continue
+        seen_directories.add(canonical_directory)
         old_mail = os.path.join(directory, old_username)
         new_mail = os.path.join(directory, new_username)
         if os.path.islink(old_mail) or os.path.islink(new_mail):
@@ -730,6 +982,22 @@ def _cleanup_operation(operation_id: str) -> None:
 
 
 def _run_migration(manifest: dict[str, Any]) -> int:
+    _require_root()
+    try:
+        lock_file = _acquire_target_lock()
+    except RenameError as exc:
+        try:
+            _write_status(manifest["operation_id"], "starting", "failed", error=str(exc))
+        except OSError:
+            pass
+        return 1
+    try:
+        return _run_migration_locked(manifest)
+    finally:
+        _release_target_lock(lock_file)
+
+
+def _run_migration_locked(manifest: dict[str, Any]) -> int:
     _require_root()
     operation_id = manifest["operation_id"]
     _write_status(operation_id, "starting", "in_progress")
@@ -803,6 +1071,7 @@ def _run_migration(manifest: dict[str, Any]) -> int:
                 new_username,
                 bool(manifest.get("linger_enabled", False)),
             )
+            _rewrite_group_memberships(old_username, new_username)
 
         if phase not in {"configuration-updated", "services-reconciled", "verified"}:
             _write_status(operation_id, "configuration-starting", "in_progress")
@@ -822,7 +1091,6 @@ def _run_migration(manifest: dict[str, Any]) -> int:
             _write_marker(manifest, "services-reconciled")
             _write_status(operation_id, "services-reconciled", "in_progress")
 
-        _write_marker(manifest, "verified")
         _write_status(operation_id, "verified", "in_progress")
         final_account = _account(new_username)
         if final_account.pw_uid != int(manifest["old_uid"]):
@@ -833,11 +1101,11 @@ def _run_migration(manifest: dict[str, Any]) -> int:
             raise RenameError("Renamed account home does not match requested path")
         if os.path.exists(STATE_FILE):
             state = _read_json(STATE_FILE)
-            if state and state.get("username") != new_username:
+            if state is None or state.get("username") != new_username:
                 raise RenameError("machine.json was not updated")
         if os.path.exists(SETUP_CONFIG_FILE):
             setup = _read_json(SETUP_CONFIG_FILE)
-            if setup and setup.get("username") != new_username:
+            if setup is None or setup.get("username") != new_username:
                 raise RenameError("setup.json was not updated")
         try:
             _account(old_username)
@@ -850,36 +1118,50 @@ def _run_migration(manifest: dict[str, Any]) -> int:
         if os.stat(new_home, follow_symlinks=False).st_uid != final_account.pw_uid:
             raise RenameError("Renamed account home is not owned by the account")
         _verify_managed_rewrites(manifest, old_home)
+        _verify_group_memberships(old_username)
         _verify_subordinate_id_files(old_username)
         linger_path = os.path.join(LINGER_DIR, new_username)
         if bool(manifest.get("linger_enabled", False)) != os.path.isfile(linger_path):
             raise RenameError("User linger state was not preserved")
+        _write_marker(manifest, "verified")
 
+        completion_details = {
+            "old_home": old_home,
+            "username": new_username,
+            "home": new_home,
+        }
         _write_status(
             operation_id,
             "complete",
             "success",
-            details={
-                "old_home": old_home,
-                "username": new_username,
-                "home": new_home,
-            },
+            details=completion_details,
         )
-        _cleanup_operation(operation_id)
+        try:
+            _cleanup_operation(operation_id)
+        except Exception as cleanup_error:
+            _write_status(
+                operation_id,
+                "complete",
+                "success",
+                error=f"Cleanup incomplete: {cleanup_error}",
+                details=completion_details,
+            )
         return 0
     except Exception as exc:
         phase = "recovery_required"
         status = _read_json(_status_path(operation_id)) or {}
         if isinstance(status.get("phase"), str):
             phase = status["phase"]
+        if phase in {"starting", "prepared", "quiescing", "identity-starting"}:
+            old_username = manifest.get("old_username")
+            old_shell = manifest.get("old_shell")
+            if isinstance(old_username, str) and isinstance(old_shell, str):
+                try:
+                    _account(old_username)
+                    _run(["usermod", "-s", old_shell, old_username], check=False)
+                except Exception:
+                    pass
         _write_status(operation_id, phase, "failed", error=str(exc))
-        try:
-            # Keep the operation marker, manifest, backup, and unit for an
-            # explicit resume. The caller can inspect the status without the
-            # old account's SSH session remaining open.
-            pass
-        except Exception:
-            pass
         return 1
 
 

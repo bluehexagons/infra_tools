@@ -19,6 +19,8 @@ class TestUserRenameHelpers(unittest.TestCase):
             "agent_workspace": "/home/olduser/repos",
             "sync_specs": [["/home/olduser/data", "/srv/backup", "daily"]],
             "share_credentials": [["olduser", "secret"]],
+            "notify_specs": [["webhook", "/home/olduser/should-not-change"]],
+            "gogs": ["git.example.com:3000", "/home/olduser/gogs"],
         }
 
         updated = user_rename._rewrite_setup_config(
@@ -33,6 +35,8 @@ class TestUserRenameHelpers(unittest.TestCase):
         self.assertEqual(updated["agent_workspace"], "/home/newuser/repos")
         self.assertEqual(updated["sync_specs"][0][0], "/home/newuser/data")
         self.assertEqual(updated["share_credentials"][0][0], "olduser")
+        self.assertEqual(updated["notify_specs"][0][1], "/home/olduser/should-not-change")
+        self.assertEqual(updated["gogs"][1], "/home/newuser/gogs")
 
     def test_managed_unit_detection_rejects_unknown_references(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -50,6 +54,30 @@ class TestUserRenameHelpers(unittest.TestCase):
 
         self.assertEqual(managed_paths, [managed])
         self.assertEqual(unmanaged_paths, [unmanaged])
+
+    def test_managed_unit_rewrite_protects_old_username_in_new_home(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            unit_path = os.path.join(tmpdir, "auto-update-node.service")
+            with open(unit_path, "w", encoding="utf-8") as file_obj:
+                file_obj.write("WorkingDirectory=/srv/olduser-data\nUser=olduser\n")
+            manifest = {
+                "old_username": "olduser",
+                "new_username": "newuser",
+                "new_home": "/srv/olduser-data",
+                "managed_units": [{"path": unit_path}],
+            }
+
+            user_rename._rewrite_managed_units(
+                manifest,
+                "/home/olduser",
+                "/srv/olduser-data",
+            )
+            with open(unit_path, encoding="utf-8") as file_obj:
+                content = file_obj.read()
+            user_rename._verify_managed_rewrites(manifest, "/home/olduser")
+
+        self.assertIn("WorkingDirectory=/srv/olduser-data", content)
+        self.assertIn("User=newuser", content)
 
     def test_preflight_rejects_root(self):
         account = pwd.struct_passwd(
@@ -105,6 +133,16 @@ class TestUserRenameHelpers(unittest.TestCase):
             with patch.object(user_rename, "RENAME_ROOT", tmpdir):
                 with self.assertRaisesRegex(user_rename.RenameError, "unfinished"):
                     user_rename._reject_concurrent_operation(operation_id)
+
+    def test_target_lock_serializes_jobs(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(user_rename, "RENAME_ROOT", tmpdir):
+                first = user_rename._acquire_target_lock()
+                try:
+                    with self.assertRaisesRegex(user_rename.RenameError, "already running"):
+                        user_rename._acquire_target_lock()
+                finally:
+                    user_rename._release_target_lock(first)
 
 
 if __name__ == "__main__":

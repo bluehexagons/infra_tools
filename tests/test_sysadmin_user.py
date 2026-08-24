@@ -70,6 +70,26 @@ class TestSysadminUser(unittest.TestCase):
             new_home="/home/newuser",
         )
 
+    def test_preflight_failure_discards_staged_manifest(self):
+        config = SimpleNamespace(username="olduser", ssh_key=None)
+        with (
+            patch.object(sysadmin_user, "_resolve_credentials", return_value=("root", None, config)),
+            patch.object(sysadmin_user, "_acquire_host_lock", return_value=object()),
+            patch.object(sysadmin_user, "_release_host_lock"),
+            patch.object(sysadmin_user, "ensure_remote_sudo", return_value=True),
+            patch.object(sysadmin_user, "_stage_manifest"),
+            patch.object(sysadmin_user, "_preflight", side_effect=RuntimeError("blocked")),
+            patch.object(sysadmin_user, "_discard_remote_operation") as discard,
+        ):
+            result = sysadmin_user.run_user_rename(
+                "host.example",
+                "newuser",
+                assume_yes=True,
+            )
+
+        self.assertEqual(result, 1)
+        discard.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -114,6 +114,26 @@ def _remote_unit_path(operation_id: str) -> str:
     return f"/etc/systemd/system/infra-tools-user-rename-{operation_id}.service"
 
 
+def _discard_remote_operation(
+    host: str,
+    username: str,
+    ssh_key: Optional[str],
+    operation_id: str,
+) -> None:
+    """Best-effort cleanup before a detached migration job is started."""
+
+    try:
+        _run_ssh(
+            host,
+            username,
+            ssh_key,
+            shell_join(["sudo", "-n", "rm", "-rf", "--", f"{REMOTE_ROOT}/{operation_id}"]),
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
 def _stage_manifest(
     host: str,
     username: str,
@@ -496,19 +516,34 @@ def run_user_rename(
             if new_home:
                 manifest["new_home"] = new_home
             _stage_manifest(host, resolved_admin, resolved_key, operation_id, manifest)
-            details = _preflight(host, resolved_admin, resolved_key, operation_id)
+            try:
+                details = _preflight(host, resolved_admin, resolved_key, operation_id)
+            except Exception:
+                _discard_remote_operation(
+                    host,
+                    resolved_admin,
+                    resolved_key,
+                    operation_id,
+                )
+                raise
             if not isinstance(details.get("old_home"), str) or not isinstance(details.get("new_home"), str):
                 raise RuntimeError("Target preflight did not return home paths")
             if dry_run:
                 print(json.dumps(details, indent=2, sort_keys=True))
-                _run_ssh(
+                _discard_remote_operation(
                     host,
                     resolved_admin,
                     resolved_key,
-                    shell_join(["sudo", "-n", "rm", "-rf", f"{REMOTE_ROOT}/{operation_id}"]),
+                    operation_id,
                 )
                 return 0
             if not assume_yes and not _confirm(host, old_username, new_username, details["new_home"]):
+                _discard_remote_operation(
+                    host,
+                    resolved_admin,
+                    resolved_key,
+                    operation_id,
+                )
                 print("Aborted.")
                 return 0
             _stage_unit(host, resolved_admin, resolved_key, operation_id)
@@ -541,8 +576,10 @@ def run_user_rename(
                 file=sys.stderr,
             )
             return 1
-        manifest_status = _read_status(host, resolved_admin, resolved_key, operation_id)
-        if manifest_status is None and resolved_admin != new_username:
+        manifest_status = status
+        if not isinstance(manifest_status.get("details"), dict):
+            manifest_status = _read_status(host, resolved_admin, resolved_key, operation_id)
+        if (manifest_status is None or not isinstance(manifest_status.get("details"), dict)) and resolved_admin != new_username:
             manifest_status = _read_status(host, new_username, resolved_key, operation_id)
         details: dict[str, Any] = {}
         if manifest_status and isinstance(manifest_status.get("details"), dict):
@@ -556,7 +593,7 @@ def run_user_rename(
         )
         print(f"✓ Renamed {old_username} to {new_username} on {host}")
         return 0
-    except (OSError, RuntimeError, ValueError) as exc:
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
     finally:

@@ -120,21 +120,58 @@ def save_setup_command(
         )
 
 
-def _rewrite_cached_home_paths(value: Any, old_home: str, new_home: str) -> Any:
-    """Rewrite an exact old-home prefix inside cached path-valued data."""
+def _rewrite_cached_home_path(value: Any, old_home: str, new_home: str) -> Any:
+    """Rewrite one schema-approved path value."""
 
-    if isinstance(value, str) and old_home:
-        if value == old_home or value.startswith(old_home + "/"):
-            return new_home + value[len(old_home):]
-        return value
-    if isinstance(value, list):
-        return [_rewrite_cached_home_paths(item, old_home, new_home) for item in value]
-    if isinstance(value, dict):
-        return {
-            key: _rewrite_cached_home_paths(item, old_home, new_home)
-            for key, item in value.items()
-        }
+    if isinstance(value, str) and old_home and (
+        value == old_home or value.startswith(old_home + "/")
+    ):
+        return new_home + value[len(old_home):]
     return value
+
+
+def _rewrite_cached_home_paths(value: Any, old_home: str, new_home: str) -> Any:
+    """Rewrite only path-valued setup fields, leaving metadata and credentials intact."""
+
+    if not isinstance(value, dict):
+        return value
+    updated = dict(value)
+    if "agent_workspace" in updated:
+        updated["agent_workspace"] = _rewrite_cached_home_path(
+            updated["agent_workspace"], old_home, new_home
+        )
+    gogs = updated.get("gogs")
+    if isinstance(gogs, list) and len(gogs) > 1:
+        gogs = list(gogs)
+        gogs[1] = _rewrite_cached_home_path(gogs[1], old_home, new_home)
+        updated["gogs"] = gogs
+    path_indexes = {
+        "samba_shares": (2,),
+        "smb_mounts": (0,),
+        "sync_specs": (0, 1),
+        "backup_specs": (0, 1),
+        "scrub_specs": (0, 1),
+        "deploy_specs": (0,),
+        "storage_mounts": (1,),
+    }
+    for field, indexes in path_indexes.items():
+        records = updated.get(field)
+        if not isinstance(records, list):
+            continue
+        rewritten_records = []
+        for record in records:
+            if not isinstance(record, list):
+                rewritten_records.append(record)
+                continue
+            rewritten = list(record)
+            for index in indexes:
+                if index < len(rewritten):
+                    rewritten[index] = _rewrite_cached_home_path(
+                        rewritten[index], old_home, new_home
+                    )
+            rewritten_records.append(rewritten)
+        updated[field] = rewritten_records
+    return updated
 
 
 def rename_setup_command(
