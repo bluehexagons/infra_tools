@@ -108,6 +108,9 @@ contain pairing material. Errors remain in the journal. When device pairing is
 selected, a separate `infra-tools-device-pairing.service` runs a generic local
 broker over a Unix socket and Nginx exposes its Basic-Auth-protected enrollment
 page on port `3774` by default.
+The broker is ordered after T3 at boot but is intentionally not stopped when the
+T3 service is restarted. This keeps the enrollment page available while a
+successful T3 Connect authorization applies the new relay state.
 
 Setup prints the service endpoint and the readiness command. Run the latter as
 the target user after authentication or a service change:

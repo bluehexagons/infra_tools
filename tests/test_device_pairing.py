@@ -670,6 +670,11 @@ class DevicePairingRemoteSetupTest(unittest.TestCase):
             ) as file_obj:
                 service = file_obj.read()
             self.assertIn("Environment=T3CODE_PORT=3773", service)
+            self.assertIn(
+                "Wants=network-online.target infra-tools-t3code.service",
+                service,
+            )
+            self.assertNotIn("Requires=infra-tools-t3code.service", service)
             self.assertIn("RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6", service)
             configure_ban.assert_called_once_with(
                 "device-pairing",

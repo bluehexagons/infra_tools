@@ -737,8 +737,7 @@ def _configure_device_pairing(
     service_content = f"""[Unit]
 Description=infra-tools protected device-pairing broker
 After=network-online.target {T3_SERVICE_NAME}.service nginx.service
-Wants=network-online.target
-Requires={T3_SERVICE_NAME}.service
+Wants=network-online.target {T3_SERVICE_NAME}.service
 
 [Service]
 Type=simple
