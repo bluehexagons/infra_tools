@@ -257,7 +257,21 @@ def add_setup_arguments(
             else argparse.SUPPRESS
         ),
     )
-    
+    parser.add_argument(
+        "--storage-cache",
+        dest="storage_caches",
+        action="append",
+        nargs="+",
+        metavar="CACHE",
+        help=(
+            "Cache a named VM data disk with another named disk: "
+            "DATA_NAME CACHE_NAME [writethrough|writeback]; cache disks are "
+            "consumed by LVM and are not mounted separately"
+            if not for_remote
+            else argparse.SUPPRESS
+        ),
+    )
+
     if not for_remote:
         parser.add_argument("--name", dest="friendly_name", help="Friendly name for this configuration")
         parser.add_argument("--tags", dest="tags", help="Comma-separated list of tags for this configuration")

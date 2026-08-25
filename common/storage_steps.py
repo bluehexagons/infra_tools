@@ -11,12 +11,19 @@ from typing import Any
 from lib.atomic_io import write_json_atomic, write_text_atomic
 from lib.config import SetupConfig
 from lib.remote_utils import is_dry_run, run
-from lib.vm_storage import VMStorageMount, data_disks, storage_mounts, storage_size_kib
+from lib.vm_storage import (
+    VMStorageCache,
+    VMStorageMount,
+    data_disks,
+    storage_caches,
+    storage_mounts,
+    storage_size_kib,
+)
 
 
 STORAGE_STATE_FILE = "/opt/infra_tools/state/vm-storage.json"
 STORAGE_MARKER = ".infra-tools-storage.json"
-STORAGE_SCHEMA_VERSION = 1
+STORAGE_SCHEMA_VERSION = 2
 
 
 def _run_capture(command: str, *, check: bool = True):
@@ -43,6 +50,31 @@ def _device_path(device: dict[str, Any]) -> str:
     if not isinstance(value, str) or not value.startswith("/dev/"):
         raise RuntimeError("lsblk returned an unsafe block-device path")
     return value
+
+
+def _walk_block_devices(devices: list[dict[str, Any]]):
+    """Yield lsblk records recursively, including LVM mapper children."""
+
+    for device in devices:
+        yield device
+        children = device.get("children") or []
+        if isinstance(children, list):
+            yield from _walk_block_devices(
+                [child for child in children if isinstance(child, dict)]
+            )
+
+
+def _find_device_by_path(device_path: str) -> dict[str, Any] | None:
+    """Return one lsblk record for an exact safe device path."""
+
+    matches = []
+    for device in _walk_block_devices(_lsblk()):
+        value = device.get("path") or device.get("name")
+        if value == device_path:
+            matches.append(device)
+    if len(matches) > 1:
+        raise RuntimeError(f"lsblk returned duplicate device paths: {device_path}")
+    return matches[0] if matches else None
 
 
 def _has_mountpoint(device: dict[str, Any]) -> bool:
@@ -138,17 +170,9 @@ def _filesystem_uuid(device_path: str) -> str:
 
 
 def _ensure_filesystem(device_path: str, filesystem: str) -> str:
-    devices = _lsblk()
-    partition: dict[str, Any] | None = None
-    for disk in devices:
-        for child in disk.get("children") or []:
-            if isinstance(child, dict) and _device_path(child) == device_path:
-                partition = child
-                break
-        if partition is not None:
-            break
+    partition = _find_device_by_path(device_path)
     if partition is None:
-        raise RuntimeError(f"Partition disappeared before formatting: {device_path}")
+        raise RuntimeError(f"Block device disappeared before formatting: {device_path}")
 
     current_filesystem = partition.get("fstype")
     if current_filesystem:
@@ -176,6 +200,133 @@ def _ensure_filesystem(device_path: str, filesystem: str) -> str:
         raise RuntimeError(f"Unsupported VM data filesystem: {filesystem}")
     _run_capture("udevadm settle")
     return _filesystem_uuid(device_path)
+
+
+def _lvm_volume_group(data_name: str) -> str:
+    """Return a collision-free LVM VG name for a validated disk name."""
+
+    return f"it_{data_name.replace('-', '_')}"
+
+
+def _assert_blank_lvm_disk(disk: dict[str, Any], serial: str) -> str:
+    """Return a whole-disk path only when it is safe for first-time pvcreate."""
+
+    disk_path = _device_path(disk)
+    if any(
+        (
+            disk.get("children"),
+            disk.get("fstype"),
+            disk.get("pttype"),
+            _has_mountpoint(disk),
+        )
+    ):
+        raise RuntimeError(
+            f"Refusing nonblank VM cache disk {serial!r} ({disk_path})"
+        )
+    signatures = _wipefs_signatures(disk_path)
+    if signatures:
+        raise RuntimeError(
+            f"Refusing VM cache disk {serial!r}; signatures found: "
+            + ", ".join(signatures)
+        )
+    return disk_path
+
+
+def _verify_lvm_physical_volume(device_path: str, volume_group: str) -> None:
+    result = _run_capture(
+        "pvs --noheadings --readonly --options vg_name -- "
+        f"{shlex.quote(device_path)}",
+        check=False,
+    )
+    observed = (result.stdout or "").strip()
+    if result.returncode != 0 or observed != volume_group:
+        raise RuntimeError(
+            f"LVM cache volume group {volume_group} does not own {device_path}"
+        )
+
+
+def _prepare_lvm_cache(
+    cache: VMStorageCache,
+    *,
+    data_disk: dict[str, Any],
+    cache_disk: dict[str, Any],
+) -> dict[str, Any]:
+    """Create or verify one whole-disk LVM cache mapping."""
+
+    volume_group = _lvm_volume_group(cache.data_name)
+    logical_volume = f"{volume_group}/data"
+    mapped_path = f"/dev/mapper/{volume_group}-data"
+    data_path = _device_path(data_disk)
+    cache_path = _device_path(cache_disk)
+
+    existing = _run_capture(
+        "lvs --noheadings --readonly --options cache_mode -- "
+        f"{shlex.quote(logical_volume)}",
+        check=False,
+    )
+    if existing.returncode == 0:
+        observed_mode = (existing.stdout or "").strip()
+        if observed_mode != cache.mode:
+            raise RuntimeError(
+                f"LVM cache {logical_volume} uses {observed_mode or 'no cache mode'}, "
+                f"expected {cache.mode}"
+            )
+        _verify_lvm_physical_volume(data_path, volume_group)
+        _verify_lvm_physical_volume(cache_path, volume_group)
+    else:
+        data_path = _assert_blank_lvm_disk(data_disk, f"it-{cache.data_name}")
+        cache_path = _assert_blank_lvm_disk(cache_disk, f"it-{cache.cache_name}")
+        created_vg = False
+        try:
+            _run_capture(
+                "pvcreate --yes --zero y -- "
+                f"{shlex.quote(data_path)} {shlex.quote(cache_path)}"
+            )
+            _run_capture(
+                f"vgcreate {shlex.quote(volume_group)} -- "
+                f"{shlex.quote(data_path)} {shlex.quote(cache_path)}"
+            )
+            created_vg = True
+            _run_capture(
+                "lvcreate --yes --name data --extents 100%PVS "
+                f"{shlex.quote(volume_group)} -- {shlex.quote(data_path)}"
+            )
+            _run_capture(
+                "lvcreate --yes --name cache --extents 100%PVS "
+                f"{shlex.quote(volume_group)} -- {shlex.quote(cache_path)}"
+            )
+            _run_capture(
+                "lvconvert --yes --type cache "
+                f"--cachevol {shlex.quote(volume_group + '/cache')} "
+                f"--cachemode {shlex.quote(cache.mode)} "
+                f"{shlex.quote(logical_volume)}"
+            )
+            _run_capture("udevadm settle")
+        except Exception:
+            if created_vg:
+                _run_capture(
+                    f"vgremove --yes --force {shlex.quote(volume_group)}",
+                    check=False,
+                )
+            _run_capture(
+                "pvremove --yes --force --force -- "
+                f"{shlex.quote(data_path)} {shlex.quote(cache_path)}",
+                check=False,
+            )
+            raise
+
+    if _find_device_by_path(mapped_path) is None:
+        raise RuntimeError(f"LVM cache mapping is not visible: {mapped_path}")
+    return {
+        "data_name": cache.data_name,
+        "cache_name": cache.cache_name,
+        "mode": cache.mode,
+        "volume_group": volume_group,
+        "logical_volume": logical_volume,
+        "device": mapped_path,
+        "data_device": data_path,
+        "cache_device": cache_path,
+    }
 
 
 def _reject_symlinked_mount_path(path: str) -> None:
@@ -249,6 +400,8 @@ def _prepare_mount(
     disk_size: str,
     serial: str,
     bus_slot: str,
+    prepared_device: str | None = None,
+    cache_record: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     _reject_symlinked_mount_path(mount.path)
     mounted = _mounted_info(mount.path)
@@ -266,7 +419,11 @@ def _prepare_mount(
             f"Refusing to prepare blank VM data disk {serial!r} while "
             f"{mount.path} is already mounted"
         )
-    partition_path = _partition_for_mount(disk, serial, disk_size)
+    partition_path = prepared_device or _partition_for_mount(
+        disk,
+        serial,
+        disk_size,
+    )
     filesystem_uuid = _ensure_filesystem(partition_path, mount.filesystem)
 
     if mounted is None:
@@ -303,6 +460,8 @@ def _prepare_mount(
         "filesystem": mount.filesystem,
         "mount_path": mount.path,
     }
+    if cache_record is not None:
+        marker["cache"] = cache_record
     write_json_atomic(
         os.path.join(mount.path, STORAGE_MARKER),
         marker,
@@ -324,7 +483,13 @@ def setup_vm_storage(config: SetupConfig) -> None:
     mounts = storage_mounts(config)
     if not mounts:
         return
+    caches = storage_caches(config)
     if is_dry_run():
+        for cache in caches:
+            print(
+                f"  [DRY-RUN] Would cache VM data disk {cache.data_name} "
+                f"with {cache.cache_name} ({cache.mode})"
+            )
         for mount in mounts:
             print(
                 f"  [DRY-RUN] Would prepare VM data disk {mount.name} at "
@@ -337,29 +502,77 @@ def setup_vm_storage(config: SetupConfig) -> None:
         disk.name: f"scsi{index}"
         for index, disk in enumerate(data_disks(config), 1)
     }
+    packages = "parted e2fsprogs xfsprogs util-linux"
+    if caches:
+        packages += " lvm2 thin-provisioning-tools"
     dependencies = _run_capture(
-        "apt-get install -y -qq parted e2fsprogs xfsprogs util-linux"
+        f"apt-get install -y -qq {packages}"
     )
     if dependencies.returncode != 0:
         raise RuntimeError("VM storage setup dependencies could not be installed")
+
+    cache_records: list[dict[str, Any]] = []
+    cache_by_data_name: dict[str, dict[str, Any]] = {}
+    for cache in caches:
+        if cache.mode == "writeback":
+            print(
+                "  ! LVM writeback caching accepts extra data-loss risk if the "
+                "cache device fails; use writethrough unless that risk is intentional"
+            )
+        data_disk = disk_by_name.get(cache.data_name)
+        cache_disk = disk_by_name.get(cache.cache_name)
+        if data_disk is None or cache_disk is None:
+            raise RuntimeError(
+                f"Incomplete VM cache declaration for {cache.data_name}"
+            )
+        cache_record = _prepare_lvm_cache(
+            cache,
+            data_disk=_find_declared_disk(data_disk.serial, data_disk.size),
+            cache_disk=_find_declared_disk(cache_disk.serial, cache_disk.size),
+        )
+        cache_record.update(
+            {
+                "data_pool": data_disk.pool,
+                "cache_pool": cache_disk.pool,
+                "data_requested_size": data_disk.size,
+                "cache_requested_size": cache_disk.size,
+            }
+        )
+        cache_records.append(cache_record)
+        cache_by_data_name[cache.data_name] = cache_record
+        print(
+            f"  Cached VM data disk {cache.data_name} with "
+            f"{cache.cache_name} ({cache.mode})"
+        )
 
     records: list[dict[str, Any]] = []
     for mount in mounts:
         disk = disk_by_name.get(mount.name)
         if disk is None:
             raise RuntimeError(f"No VM data disk declaration exists for {mount.name}")
+        cache_record = cache_by_data_name.get(mount.name)
         record = _prepare_mount(
             mount,
             disk.size,
             disk.serial,
             disk_slots[mount.name],
+            prepared_device=(
+                str(cache_record["device"])
+                if cache_record is not None
+                else None
+            ),
+            cache_record=cache_record,
         )
         records.append({**record, "pool": disk.pool, "requested_size": disk.size})
         print(f"  Mounted VM data disk {mount.name} at {mount.path}")
 
     write_json_atomic(
         STORAGE_STATE_FILE,
-        {"schema_version": STORAGE_SCHEMA_VERSION, "mounts": records},
+        {
+            "schema_version": STORAGE_SCHEMA_VERSION,
+            "mounts": records,
+            "caches": cache_records,
+        },
         mode=0o600,
         sort_keys=True,
     )

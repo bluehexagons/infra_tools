@@ -728,6 +728,7 @@ class _MockConfig:
         self.vm_balloon_min = kwargs.get('vm_balloon_min')
         self.container_storage = kwargs.get('container_storage')
         self.storage_mounts = kwargs.get('storage_mounts')
+        self.storage_caches = kwargs.get('storage_caches')
         self.agent_workspace = kwargs.get('agent_workspace')
         self.container_cores = kwargs.get('container_cores', 1)
         self.vm_image = kwargs.get('vm_image')
@@ -1051,6 +1052,64 @@ class TestValidateVMStorageSettings(unittest.TestCase):
         )
 
         validate_vm_storage_settings(config, require_provisioning=False)
+
+    def test_valid_lvm_block_cache_consumes_unmounted_cache_disk(self):
+        config = _MockConfig(
+            machine_type='vm',
+            container_storage=[
+                ['data', 'ts1-storage', '3T'],
+                ['data-cache', 'local-lvm', '128G'],
+            ],
+            storage_mounts=[['data', '/srv/data', 'xfs']],
+            storage_caches=[['data', 'data-cache']],
+        )
+
+        validate_vm_storage_settings(config, require_provisioning=False)
+
+    def test_cache_rejects_unknown_reused_or_mounted_cache_disks(self):
+        config = _MockConfig(
+            machine_type='vm',
+            container_storage=[
+                ['data', 'ts1-storage', '3T'],
+                ['cache', 'local-lvm', '32G'],
+            ],
+            storage_mounts=[
+                ['data', '/srv/data'],
+                ['cache', '/srv/cache'],
+            ],
+            storage_caches=[['data', 'cache']],
+        )
+        with self.assertRaisesRegex(ValueError, 'must not use --storage-mount'):
+            validate_vm_storage_settings(config, require_provisioning=False)
+
+        config.storage_mounts = [['data', '/srv/data']]
+        config.storage_caches = [['data', 'missing']]
+        with self.assertRaisesRegex(ValueError, 'unknown VM data disk'):
+            validate_vm_storage_settings(config, require_provisioning=False)
+
+        config.storage_caches = [
+            ['data', 'cache'],
+            ['cache', 'data'],
+        ]
+        with self.assertRaisesRegex(ValueError, 'both cache data and cache media'):
+            validate_vm_storage_settings(config, require_provisioning=False)
+
+    def test_cache_mode_and_minimum_size_are_validated(self):
+        config = _MockConfig(
+            machine_type='vm',
+            container_storage=[
+                ['data', 'ts1-storage', '3T'],
+                ['cache', 'local-lvm', '256M'],
+            ],
+            storage_mounts=[['data', '/srv/data']],
+            storage_caches=[['data', 'cache', 'unsafe-mode']],
+        )
+        with self.assertRaisesRegex(ValueError, 'mode must be'):
+            validate_vm_storage_settings(config, require_provisioning=False)
+
+        config.storage_caches = [['data', 'cache']]
+        with self.assertRaisesRegex(ValueError, 'at least 512M'):
+            validate_vm_storage_settings(config, require_provisioning=False)
 
     def test_unknown_disk_and_duplicate_mounts_are_rejected(self):
         config = _MockConfig(

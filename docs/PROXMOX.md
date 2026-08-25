@@ -187,11 +187,31 @@ infra-tools setup workstation_dev 10.0.0.51 agent \
 ```
 
 Each non-root `--storage NAME [POOL] AMOUNT` requires exactly one matching
-`--storage-mount NAME PATH [ext4|xfs] [empty]`. When `POOL` is omitted, the
-root-pool default is used. Provisioning checks that each selected pool is
-active, accepts VM images, and reports enough aggregate free capacity. It then
-attaches the disks as `scsi1`, `scsi2`, and so on with stable `it-NAME`
-serials.
+`--storage-mount NAME PATH [ext4|xfs] [empty]`, unless that disk is consumed as
+cache media by `--storage-cache`. When `POOL` is omitted, the root-pool default
+is used. Provisioning checks that each selected pool is active, accepts VM
+images, and reports enough aggregate free capacity. It then attaches the disks
+as `scsi1`, `scsi2`, and so on with stable `it-NAME` serials.
+
+To accelerate one durable HDD-backed data disk with a separate SSD-backed
+virtual disk, add an LVM cache declaration:
+
+```bash
+--storage data ts1-storage 3T \
+--storage data-cache local-lvm 128G \
+--storage-cache data data-cache writethrough \
+--storage-mount data /srv/data xfs empty
+```
+
+Infra-tools verifies both whole disks are blank, creates a guest-side LVM
+volume group, consumes the entire SSD disk as cache media, and formats and
+mounts the resulting cached logical volume. The cache disk is not mounted and
+must not have a `--storage-mount`. `writethrough` is the default and safer mode:
+a completed write has reached both the cache and the HDD origin. `writeback`
+can reduce write latency but accepts additional data-loss risk if the cache
+volume or SSD fails; use it only with an explicit power-loss and recovery
+plan. Cache creation is provisioning-only. Existing VGs, partitions,
+signatures, or filesystems are rejected rather than adopted.
 
 For a separate home filesystem on a newly provisioned VM:
 
@@ -207,9 +227,12 @@ ambiguous device, a nonempty mount path, a wrong filesystem, or a failed mount
 stops setup. The mount does not use `nofail`, and a marker on the mounted
 filesystem prevents an empty root-disk directory from passing application
 checks. Gogs and agent repository setup verify the mount before writing.
-Observed mount state is stored root-only in
+Observed mount and cache state is stored root-only in
 `/opt/infra_tools/state/vm-storage.json`; each mounted filesystem also carries
-`.infra-tools-storage.json` for fail-closed verification.
+`.infra-tools-storage.json` for fail-closed verification. Gogs, Samba shares,
+and agent repositories verify a matching declared mount before writing, so a
+failed data mount cannot silently redirect application data to the SSD boot
+filesystem.
 
 This first slice is deliberately provisioning-only. It does not adopt an
 existing disk, attach data storage to LXC, detach or resize a data disk, or
@@ -365,9 +388,10 @@ infra-tools setup server_web 10.0.0.50 admin \
 `--storage root POOL AMOUNT` or the shorthand `--storage root AMOUNT`, plus
 named data disks using `--storage NAME POOL AMOUNT` or
 `--storage NAME AMOUNT`. Every named disk requires a matching
-`--storage-mount`. LXC provisioning uses root storage and
+`--storage-mount` unless it is the cache medium named by `--storage-cache`.
+LXC provisioning uses root storage and
 `--storage template` for the saved/default template pool; named disks and
-guest mount declarations are VM-only.
+guest mount and cache declarations are VM-only.
 The guest bridge defaults to the bridge carrying the Proxmox host's default
 route; use `--bridge NAME` when the host has multiple routed bridge networks.
 The positional target is also the guest IPv4 address: a bare address assumes

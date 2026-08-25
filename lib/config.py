@@ -342,6 +342,7 @@ class SetupConfig:
     allow_memory_overcommit: bool = False
     container_storage: Optional[NestedStrList] = None  # [[name, pool, amount?], ...]
     storage_mounts: Optional[NestedStrList] = None  # [[name, path, filesystem?, policy?], ...]
+    storage_caches: Optional[NestedStrList] = None  # [[data_name, cache_name, mode?], ...]
     container_cores: int = 1
     container_base: str = "debian"
     vm_image: MaybeStr = None  # HTTPS URL or 'storage:import/file.qcow2'
@@ -616,6 +617,9 @@ class SetupConfig:
         for mount_spec in _normalize_nested_specs(self.storage_mounts) or []:
             escaped_spec = " ".join(shlex.quote(str(part)) for part in mount_spec)
             args.append(f"--storage-mount {escaped_spec}")
+        for cache_spec in _normalize_nested_specs(self.storage_caches) or []:
+            escaped_spec = " ".join(shlex.quote(str(part)) for part in cache_spec)
+            args.append(f"--storage-cache {escaped_spec}")
         if self.include_control_plane_tools:
             args.append("--control-plane")
         
@@ -960,6 +964,9 @@ class SetupConfig:
             for mount_spec in _normalize_nested_specs(self.storage_mounts) or []:
                 escaped_spec = " ".join(shlex.quote(str(part)) for part in mount_spec)
                 cmd_parts.append(f"--storage-mount {escaped_spec}")
+            for cache_spec in _normalize_nested_specs(self.storage_caches) or []:
+                escaped_spec = " ".join(shlex.quote(str(part)) for part in cache_spec)
+                cmd_parts.append(f"--storage-cache {escaped_spec}")
             if self.container_cores != 1:
                 cmd_parts.append(f"--cores {self.container_cores}")
             if self.container_base != "debian":
@@ -1451,6 +1458,7 @@ class SetupConfig:
 
         data['container_storage'] = _normalize_nested_specs(data.get('container_storage'))
         data['storage_mounts'] = _normalize_nested_specs(data.get('storage_mounts'))
+        data['storage_caches'] = _normalize_nested_specs(data.get('storage_caches'))
         system_defaults = get_system_type_definition(system_type)
         if not data.get('agent_tools') and not data.get('agent_tools_removed'):
             data['agent_tools'] = list(system_defaults.default_agent_tools) or None
@@ -1927,6 +1935,7 @@ class SetupConfig:
             allow_memory_overcommit=getattr(args, 'allow_memory_overcommit', False),
             container_storage=_normalize_nested_specs(getattr(args, 'container_storage', None)),
             storage_mounts=_normalize_nested_specs(getattr(args, 'storage_mounts', None)),
+            storage_caches=_normalize_nested_specs(getattr(args, 'storage_caches', None)),
             container_cores=getattr(args, 'container_cores', 1),
             container_base=getattr(args, 'container_base', 'debian'),
             vm_image=getattr(args, 'vm_image', None),

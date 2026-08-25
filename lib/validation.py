@@ -1550,13 +1550,19 @@ def validate_vm_storage_settings(
     mount_specs = _nested_string_specs(
         getattr(config, "storage_mounts", None), "--storage-mount"
     )
+    cache_specs = _nested_string_specs(
+        getattr(config, "storage_caches", None), "--storage-cache"
+    )
     agent_workspace = getattr(config, "agent_workspace", None)
 
-    if require_provisioning and (storage_specs or mount_specs) and not getattr(
-        config, "hosted_node", None
+    has_storage_declaration = bool(storage_specs or mount_specs or cache_specs)
+    if (
+        require_provisioning
+        and has_storage_declaration
+        and not getattr(config, "hosted_node", None)
     ):
         raise ValueError(
-            "--storage and --storage-mount require --provision-on"
+            "--storage, --storage-mount, and --storage-cache require --provision-on"
         )
 
     if agent_workspace is not None:
@@ -1577,6 +1583,7 @@ def validate_vm_storage_settings(
                 ) from exc
 
     data_names: set[str] = set()
+    data_sizes_kib: dict[str, int] = {}
     for spec in storage_specs:
         if not spec or spec[0] in {"root", "template"}:
             continue
@@ -1591,7 +1598,10 @@ def validate_vm_storage_settings(
             raise ValueError(f"Duplicate --storage NAME '{name}'")
         data_names.add(name)
         validate_proxmox_storage_name(pool, f"--storage {name}")
-        _memory_string_kib(amount, f"--storage {name} AMOUNT")
+        data_sizes_kib[name] = _memory_string_kib(
+            amount,
+            f"--storage {name} AMOUNT",
+        )
     if len(data_names) > 30:
         raise ValueError("A Proxmox VM supports at most 30 declared data disks")
 
@@ -1632,7 +1642,52 @@ def validate_vm_storage_settings(
                     f"Overlapping --storage-mount paths are not supported: {path}, {other}"
                 )
 
-    missing_mounts = data_names - mount_names
+    cache_origins: set[str] = set()
+    cache_devices: set[str] = set()
+    for spec in cache_specs:
+        if not 2 <= len(spec) <= 3:
+            raise ValueError(
+                "--storage-cache requires DATA_NAME CACHE_NAME "
+                "[writethrough|writeback]"
+            )
+        data_name, cache_name = spec[:2]
+        validate_vm_storage_name(data_name)
+        validate_vm_storage_name(cache_name)
+        if data_name == cache_name:
+            raise ValueError("--storage-cache data and cache disks must differ")
+        if data_name in cache_origins:
+            raise ValueError(f"Duplicate --storage-cache data disk '{data_name}'")
+        if cache_name in cache_devices:
+            raise ValueError(f"Duplicate --storage-cache cache disk '{cache_name}'")
+        if data_name in cache_devices or cache_name in cache_origins:
+            raise ValueError("A VM disk cannot be both cache data and cache media")
+        mode = spec[2] if len(spec) == 3 else "writethrough"
+        if mode not in {"writethrough", "writeback"}:
+            raise ValueError(
+                "--storage-cache mode must be writethrough or writeback"
+            )
+        cache_origins.add(data_name)
+        cache_devices.add(cache_name)
+
+    unknown_cache_disks = (cache_origins | cache_devices) - data_names
+    if unknown_cache_disks:
+        raise ValueError(
+            "--storage-cache references unknown VM data disk(s): "
+            + ", ".join(sorted(unknown_cache_disks))
+        )
+    for cache_name in cache_devices:
+        if data_sizes_kib.get(cache_name, 0) < 512 * 1024:
+            raise ValueError(
+                f"--storage-cache disk '{cache_name}' must be at least 512M"
+            )
+    mounted_cache_devices = cache_devices & mount_names
+    if mounted_cache_devices:
+        raise ValueError(
+            "Cache disks are consumed by LVM and must not use --storage-mount: "
+            + ", ".join(sorted(mounted_cache_devices))
+        )
+
+    missing_mounts = data_names - mount_names - cache_devices
     if missing_mounts:
         raise ValueError(
             "Every VM data disk requires --storage-mount; missing: "
@@ -1645,8 +1700,11 @@ def validate_vm_storage_settings(
             + ", ".join(sorted(unknown_mounts))
         )
 
-    if (data_names or mount_names) and machine_type != "vm":
-        raise ValueError("Named data disks and --storage-mount require --machine vm")
+    if (data_names or mount_names or cache_specs) and machine_type != "vm":
+        raise ValueError(
+            "Named data disks, --storage-mount, and --storage-cache require --machine vm"
+        )
+
 
 def validate_proxmox_balloon_settings(config: Any) -> None:
     """Validate host target and per-VM balloon priority settings."""

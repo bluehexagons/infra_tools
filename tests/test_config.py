@@ -818,6 +818,8 @@ class TestSetupConfigHostedFields(unittest.TestCase):
         self.assertIsNone(config.container_memory)
         self.assertIsNone(config.vm_balloon_min)
         self.assertIsNone(config.container_storage)
+        self.assertIsNone(config.storage_mounts)
+        self.assertIsNone(config.storage_caches)
         self.assertEqual(config.container_cores, 1)
         self.assertEqual(config.container_base, 'debian')
 
@@ -829,6 +831,8 @@ class TestSetupConfigHostedFields(unittest.TestCase):
             container_memory='2G',
             vm_balloon_min='1G',
             container_storage=[['root', 'auto', '10G'], ['template', 'local']],
+            storage_mounts=[['data', '/srv/data', 'xfs']],
+            storage_caches=[['data', 'data-cache', 'writethrough']],
             container_cores=4,
             container_base='ubuntu',
             vm_image_storage='fast-files',
@@ -839,6 +843,11 @@ class TestSetupConfigHostedFields(unittest.TestCase):
         self.assertEqual(config.container_memory, '2G')
         self.assertEqual(config.vm_balloon_min, '1G')
         self.assertEqual(config.container_storage, [['root', 'auto', '10G'], ['template', 'local']])
+        self.assertEqual(config.storage_mounts, [['data', '/srv/data', 'xfs']])
+        self.assertEqual(
+            config.storage_caches,
+            [['data', 'data-cache', 'writethrough']],
+        )
         self.assertEqual(config.container_cores, 4)
         self.assertEqual(config.container_base, 'ubuntu')
         self.assertEqual(config.vm_image_storage, 'fast-files')
@@ -849,6 +858,8 @@ class TestSetupConfigHostedFields(unittest.TestCase):
             container_memory='2G',
             vm_balloon_min='1G',
             container_storage=[['root', 'auto', '10G'], ['template', 'local']],
+            storage_mounts=[['data', '/srv/data', 'xfs']],
+            storage_caches=[['data', 'data-cache']],
             vm_image_storage='fast-files',
         )
         d = config.to_dict()
@@ -856,6 +867,8 @@ class TestSetupConfigHostedFields(unittest.TestCase):
         self.assertEqual(d['container_memory'], '2G')
         self.assertEqual(d['vm_balloon_min'], '1G')
         self.assertEqual(d['container_storage'], [['root', 'auto', '10G'], ['template', 'local']])
+        self.assertEqual(d['storage_mounts'], [['data', '/srv/data', 'xfs']])
+        self.assertEqual(d['storage_caches'], [['data', 'data-cache']])
         self.assertEqual(d['vm_image_storage'], 'fast-files')
 
     def test_from_dict_restores_hosted_fields(self):
@@ -865,6 +878,8 @@ class TestSetupConfigHostedFields(unittest.TestCase):
             'container_memory': '4G',
             'vm_balloon_min': '2G',
             'container_storage': [['template', 'local'], ['root', 'auto', '5G']],
+            'storage_mounts': [['data', '/srv/data', 'xfs']],
+            'storage_caches': [['data', 'data-cache']],
             'container_cores': 8,
             'container_base': 'fedora',
             'vm_image_storage': 'fast-files',
@@ -874,6 +889,8 @@ class TestSetupConfigHostedFields(unittest.TestCase):
         self.assertEqual(config.container_memory, '4G')
         self.assertEqual(config.vm_balloon_min, '2G')
         self.assertEqual(config.container_storage, [['template', 'local'], ['root', 'auto', '5G']])
+        self.assertEqual(config.storage_mounts, [['data', '/srv/data', 'xfs']])
+        self.assertEqual(config.storage_caches, [['data', 'data-cache']])
         self.assertEqual(config.container_cores, 8)
         self.assertEqual(config.container_base, 'fedora')
         self.assertEqual(config.vm_image_storage, 'fast-files')
@@ -897,8 +914,10 @@ class TestSetupConfigHostedFields(unittest.TestCase):
             container_storage=[
                 ['root', 'local-lvm', '32G'],
                 ['agent-data', 'fast-lvm', '128G'],
+                ['agent-cache', 'local-lvm', '16G'],
             ],
             storage_mounts=[['agent-data', '/srv/agent-workspace', 'ext4']],
+            storage_caches=[['agent-data', 'agent-cache']],
             agent_workspace='/srv/agent-workspace',
         )
 
@@ -910,6 +929,7 @@ class TestSetupConfigHostedFields(unittest.TestCase):
             '--storage-mount agent-data /srv/agent-workspace ext4',
             args_str,
         )
+        self.assertIn('--storage-cache agent-data agent-cache', args_str)
         self.assertIn('--agent-workspace /srv/agent-workspace', args_str)
 
     def test_vm_data_storage_is_reconstructed_in_setup_command(self):
@@ -919,14 +939,20 @@ class TestSetupConfigHostedFields(unittest.TestCase):
             container_storage=[
                 ['root', 'local-lvm', '32G'],
                 ['git-data', 'bulk-lvm', '256G'],
+                ['git-cache', 'local-lvm', '32G'],
             ],
             storage_mounts=[['git-data', '/srv/gogs', 'xfs']],
+            storage_caches=[['git-data', 'git-cache', 'writethrough']],
         )
 
         command = ' '.join(config.to_setup_command())
 
         self.assertIn('--storage git-data bulk-lvm 256G', command)
         self.assertIn('--storage-mount git-data /srv/gogs xfs', command)
+        self.assertIn(
+            '--storage-cache git-data git-cache writethrough',
+            command,
+        )
 
     def test_provisioning_fields_are_reconstructed_in_setup_command(self):
         config = self._make_config(

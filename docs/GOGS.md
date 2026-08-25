@@ -168,18 +168,34 @@ data mount:
 
 ```bash
 infra-tools setup server_web 192.168.1.10 deploy \
-  --provision-on pve1 --memory 4G --storage root 32G \
-  --storage git-data bulk-lvm 128G \
-  --storage-mount git-data /srv/gogs ext4 \
-  --gogs git.example.com:3000 /srv/gogs \
+  --provision-on pve1 --memory 4G --storage root local-lvm 32G \
+  --storage git-data ts1-storage 3T \
+  --storage git-cache local-lvm 128G \
+  --storage-cache git-data git-cache writethrough \
+  --storage-mount git-data /srv/data xfs \
+  --samba --samba-source 192.168.1.0/24 \
+  --credential alice "$SAMBA_ALICE_PASSWORD" \
+  --credential bob "$SAMBA_BOB_PASSWORD" \
+  --share write projects /srv/data/shares/projects alice,bob \
+  --share read releases /srv/data/shares/releases alice,bob \
+  --gogs git.example.com:3000 /srv/data/gogs \
   --ssl --ssl-email admin@example.com
 ```
 
-The disk is identified by a stable serial, formatted only when confirmed
-blank, and mounted by filesystem UUID before Gogs creates any data. Gogs then
-checks the marker on that mounted filesystem and applies `git:git` ownership.
-A missing or wrong mount stops setup instead of allowing repositories or LFS
-objects to spill onto the root disk.
+This example puts the VM root and the 128 GiB cache disk on `local-lvm`, while
+the durable 3 TiB origin is allocated from `ts1-storage`. It intentionally
+leaves capacity unallocated on a nominal 4 TB disk. Infra-tools identifies
+both data devices by stable serial, requires them to be blank, constructs an
+LVM writethrough cache, and mounts the resulting XFS filesystem before Gogs or
+Samba creates data. Gogs and each Samba share then check the mount marker. A
+missing or wrong mount stops setup instead of allowing repositories, LFS
+objects, or shared files to spill onto the SSD boot filesystem.
+
+Samba's small disposable TDB metadata cache stays at `/var/cache/samba` on the
+root SSD by default. `--samba-metadata-cache PATH` can place it on another
+already mounted SSD filesystem, but it is not a file-data cache and should not
+point inside a share or the Gogs data tree. The LVM cache above accelerates the
+actual repository, LFS, and Samba file workload.
 
 This automation is for blank disks allocated with the new VM. It does not
 adopt an existing disk, migrate populated Gogs data, or put live Gogs data on

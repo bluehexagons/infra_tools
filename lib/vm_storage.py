@@ -40,6 +40,15 @@ class VMStorageMount:
     policy: str = "empty"
 
 
+@dataclass(frozen=True)
+class VMStorageCache:
+    """A validated LVM cache relationship between two named VM disks."""
+
+    data_name: str
+    cache_name: str
+    mode: str = "writethrough"
+
+
 def storage_size_kib(value: str) -> int:
     """Convert a validated binary-size declaration to KiB."""
 
@@ -80,6 +89,23 @@ def storage_mounts(config: SetupConfig) -> list[VMStorageMount]:
                 path=spec[1],
                 filesystem=spec[2] if len(spec) >= 3 else "ext4",
                 policy=spec[3] if len(spec) >= 4 else "empty",
+            )
+        )
+    return result
+
+
+def storage_caches(config: SetupConfig) -> list[VMStorageCache]:
+    """Return normalized VM block-cache declarations in CLI order."""
+
+    result: list[VMStorageCache] = []
+    for spec in config.storage_caches or []:
+        if len(spec) < 2:
+            continue
+        result.append(
+            VMStorageCache(
+                data_name=spec[0],
+                cache_name=spec[1],
+                mode=spec[2] if len(spec) >= 3 else "writethrough",
             )
         )
     return result

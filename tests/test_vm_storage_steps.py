@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from common import storage_steps
 from lib.config import SetupConfig
-from lib.vm_storage import VMStorageMount
+from lib.vm_storage import VMStorageCache, VMStorageMount
 
 
 def _result(*, returncode: int = 0, stdout: str = "", stderr: str = ""):
@@ -94,6 +94,103 @@ class TestDiskPreparationSafety(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "filesystem UUID"):
             storage_steps._filesystem_uuid("/dev/sdb1")
+
+
+class TestLVMCachePreparation(unittest.TestCase):
+    @patch("common.storage_steps._find_device_by_path", return_value={"type": "lvm"})
+    @patch("common.storage_steps._wipefs_signatures", return_value=[])
+    @patch("common.storage_steps._run_capture")
+    def test_creates_writethrough_cache_from_two_blank_disks(
+        self,
+        mock_run,
+        _wipefs,
+        _find_device,
+    ):
+        def run_side_effect(command: str, **_kwargs: object):
+            if command.startswith("lvs "):
+                return _result(returncode=5)
+            return _result()
+
+        mock_run.side_effect = run_side_effect
+        record = storage_steps._prepare_lvm_cache(
+            VMStorageCache("data", "cache"),
+            data_disk={"path": "/dev/sdb", "children": []},
+            cache_disk={"path": "/dev/sdc", "children": []},
+        )
+
+        commands = [item.args[0] for item in mock_run.call_args_list]
+        self.assertIn(
+            "pvcreate --yes --zero y -- /dev/sdb /dev/sdc",
+            commands,
+        )
+        self.assertIn(
+            "lvconvert --yes --type cache --cachevol it_data/cache "
+            "--cachemode writethrough it_data/data",
+            commands,
+        )
+        self.assertEqual(record["device"], "/dev/mapper/it_data-data")
+
+    @patch("common.storage_steps._find_device_by_path", return_value={"type": "lvm"})
+    @patch("common.storage_steps._wipefs_signatures", return_value=[])
+    @patch("common.storage_steps._run_capture")
+    def test_failed_conversion_removes_new_vg_and_pvs(
+        self,
+        mock_run,
+        _wipefs,
+        _find_device,
+    ):
+        def run_side_effect(command: str, **_kwargs: object):
+            if command.startswith("lvs "):
+                return _result(returncode=5)
+            if command.startswith("lvconvert "):
+                raise RuntimeError("conversion failed")
+            return _result()
+
+        mock_run.side_effect = run_side_effect
+
+        with self.assertRaisesRegex(RuntimeError, "conversion failed"):
+            storage_steps._prepare_lvm_cache(
+                VMStorageCache("data", "cache"),
+                data_disk={"path": "/dev/sdb", "children": []},
+                cache_disk={"path": "/dev/sdc", "children": []},
+            )
+
+        commands = [item.args[0] for item in mock_run.call_args_list]
+        self.assertIn("vgremove --yes --force it_data", commands)
+        self.assertIn(
+            "pvremove --yes --force --force -- /dev/sdb /dev/sdc",
+            commands,
+        )
+
+    @patch("common.storage_steps._find_device_by_path", return_value={"type": "lvm"})
+    @patch("common.storage_steps._verify_lvm_physical_volume")
+    @patch("common.storage_steps._run_capture")
+    def test_rerun_verifies_existing_cache_mode_and_pvs(
+        self,
+        mock_run,
+        mock_verify_pv,
+        _find_device,
+    ):
+        mock_run.return_value = _result(stdout=" writethrough \n")
+
+        storage_steps._prepare_lvm_cache(
+            VMStorageCache("data", "cache"),
+            data_disk={"path": "/dev/sdb", "children": [{"type": "lvm"}]},
+            cache_disk={"path": "/dev/sdc", "children": [{"type": "lvm"}]},
+        )
+
+        self.assertEqual(mock_verify_pv.call_count, 2)
+
+    @patch("common.storage_steps._run_capture")
+    def test_rejects_cache_mode_drift(self, mock_run):
+        mock_run.return_value = _result(stdout="writeback\n")
+
+        with self.assertRaisesRegex(RuntimeError, "expected writethrough"):
+            storage_steps._prepare_lvm_cache(
+                VMStorageCache("data", "cache"),
+                data_disk={"path": "/dev/sdb"},
+                cache_disk={"path": "/dev/sdc"},
+            )
 
 
 class TestPrepareMount(unittest.TestCase):
@@ -212,6 +309,64 @@ class TestPrepareMount(unittest.TestCase):
                     "it-git-data",
                     "scsi2",
                 )
+
+
+class TestSetupVMStorage(unittest.TestCase):
+    def test_cached_origin_mount_uses_mapper_and_records_cache_state(self):
+        config = SetupConfig(
+            host="host",
+            username="deploy",
+            system_type="server_web",
+            machine_type="vm",
+            container_storage=[
+                ["root", "local-lvm", "32G"],
+                ["data", "ts1-storage", "3T"],
+                ["data-cache", "local-lvm", "128G"],
+            ],
+            storage_mounts=[["data", "/srv/data", "xfs"]],
+            storage_caches=[["data", "data-cache"]],
+        )
+        disks = {
+            "it-data": {"path": "/dev/sdb"},
+            "it-data-cache": {"path": "/dev/sdc"},
+        }
+        cache_record = {
+            "data_name": "data",
+            "cache_name": "data-cache",
+            "device": "/dev/mapper/it_data-data",
+        }
+
+        with (
+            patch("common.storage_steps.is_dry_run", return_value=False),
+            patch("common.storage_steps._run_capture", return_value=_result()),
+            patch(
+                "common.storage_steps._find_declared_disk",
+                side_effect=lambda serial, _size: disks[serial],
+            ),
+            patch(
+                "common.storage_steps._prepare_lvm_cache",
+                return_value=cache_record.copy(),
+            ) as prepare_cache,
+            patch(
+                "common.storage_steps._prepare_mount",
+                return_value={"name": "data"},
+            ) as prepare_mount,
+            patch("common.storage_steps.write_json_atomic") as write_state,
+        ):
+            storage_steps.setup_vm_storage(config)
+
+        prepare_cache.assert_called_once()
+        self.assertEqual(
+            prepare_mount.call_args.kwargs["prepared_device"],
+            "/dev/mapper/it_data-data",
+        )
+        self.assertEqual(
+            prepare_mount.call_args.kwargs["cache_record"]["cache_pool"],
+            "local-lvm",
+        )
+        state = write_state.call_args.args[1]
+        self.assertEqual(state["schema_version"], 2)
+        self.assertEqual(state["caches"][0]["data_pool"], "ts1-storage")
 
 
 class TestDeclaredMountAssertion(unittest.TestCase):

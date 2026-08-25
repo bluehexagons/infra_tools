@@ -1462,9 +1462,9 @@ def setup_main(system_type: str, description: str, success_msg_fn: Callable[[Set
             try:
                 provision_vm(config, image=config.vm_image)
             except VMAlreadyExists:
-                if config.storage_mounts:
+                if config.storage_mounts or config.storage_caches:
                     print(
-                        "Error: named VM data disks are provisioning-only; "
+                        "Error: named VM data disks and caches are provisioning-only; "
                         "refusing to adopt disks on an existing unsaved VM"
                     )
                     return 1

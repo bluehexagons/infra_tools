@@ -343,8 +343,11 @@ class TestReconcileSambaShares(unittest.TestCase):
             config = _make_config(samba_shares=shares)
             with patch.object(samba_steps, "SMB_CONF_PATH", smb_conf), \
                  patch.object(samba_steps, "run", side_effect=fake_run), \
+                 patch.object(samba_steps, "assert_declared_storage_mount") as assert_mount, \
                  patch.object(samba_steps.os, "makedirs"):
                 samba_steps.reconcile_samba_shares(config)
+            for share in shares or []:
+                assert_mount.assert_any_call(config, share[2])
             with open(smb_conf, encoding="utf-8") as file_obj:
                 return file_obj.read(), calls
 

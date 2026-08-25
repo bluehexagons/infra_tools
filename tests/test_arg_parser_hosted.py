@@ -91,6 +91,20 @@ class TestHostedFlagParsing(unittest.TestCase):
         )
         self.assertEqual(args.agent_workspace, "/srv/agent-workspace")
 
+    def test_named_vm_block_cache(self):
+        args = self.parser.parse_args([
+            "10.0.0.50",
+            "--storage", "data", "bulk-lvm", "3T",
+            "--storage", "data-cache", "local-lvm", "128G",
+            "--storage-mount", "data", "/srv/data", "xfs",
+            "--storage-cache", "data", "data-cache", "writethrough",
+        ])
+
+        self.assertEqual(
+            args.storage_caches,
+            [["data", "data-cache", "writethrough"]],
+        )
+
     def test_cores_default_is_deferred_to_setup_config(self):
         args = self.parser.parse_args(["10.0.0.50"])
         self.assertFalse(hasattr(args, "container_cores"))
@@ -298,13 +312,22 @@ class TestHostedFlagsNotInRemoteParser(unittest.TestCase):
             "--machine", "vm",
             "--storage", "agent-data", "fast-lvm", "128G",
             "--storage-mount", "agent-data", "/srv/agent-workspace", "ext4",
+            "--storage", "agent-cache", "fast-lvm", "16G",
+            "--storage-cache", "agent-data", "agent-cache",
             "--agent-workspace", "/srv/agent-workspace",
         ])
-        self.assertEqual(args.container_storage, [["agent-data", "fast-lvm", "128G"]])
+        self.assertEqual(
+            args.container_storage,
+            [
+                ["agent-data", "fast-lvm", "128G"],
+                ["agent-cache", "fast-lvm", "16G"],
+            ],
+        )
         self.assertEqual(
             args.storage_mounts,
             [["agent-data", "/srv/agent-workspace", "ext4"]],
         )
+        self.assertEqual(args.storage_caches, [["agent-data", "agent-cache"]])
 
 
 if __name__ == '__main__':

@@ -612,6 +612,7 @@ be fully disabled, then manage pending security reboots explicitly.
 | `--storage NAME POOL AMOUNT` | Provision a named non-root QEMU data disk; repeatable |
 | `--storage NAME AMOUNT` | Named-disk shorthand using the root-pool default |
 | `--storage-mount NAME PATH [FILESYSTEM] [empty]` | Prepare the matching blank data disk at an empty guest path; filesystem defaults to `ext4` and may be `ext4` or `xfs` |
+| `--storage-cache DATA_NAME CACHE_NAME [MODE]` | Consume a second named VM disk as an LVM cache for a mounted data disk; mode defaults to `writethrough` and may be `writethrough` or `writeback` |
 | `--storage template POOL` | LXC template storage spec |
 | `--storage template` | LXC shorthand for the saved/default template pool |
 | `--cores N` | Guest vCPU count |
@@ -622,8 +623,17 @@ Notes:
 - `--storage` is repeatable.
 - `root` storage is required when `--provision-on` is used.
 - Named data disks are available only while provisioning a new QEMU VM. Every
-  name must have exactly one mount declaration; logical names use lowercase
-  letters, numbers, and hyphens and are at most 17 characters.
+  name must have exactly one mount declaration unless it is consumed as the
+  cache device in `--storage-cache`; logical names use lowercase letters,
+  numbers, and hyphens and are at most 17 characters.
+- `--storage-cache` builds a guest-side LVM cache from two entire blank disks.
+  Put the data disk on the durable pool and the cache disk on SSD storage. The
+  data disk retains its normal `--storage-mount`; the cache disk must not have
+  one. `writethrough` is the safer default because writes reach both the cache
+  and origin before completion. `writeback` can improve write latency but
+  accepts additional data-loss risk if the cache volume or its backing SSD is
+  lost. This declaration is provisioning-only and does not adopt an existing
+  VG, partitioned disk, or populated filesystem.
 - Automated mounting accepts only a confirmed blank disk and an empty `/data`
   path, a path below `/srv`, `/var/lib`, `/opt`, or `/mnt`, or `/home` while
   provisioning a new QEMU VM. The `/home` case mounts the disk before the

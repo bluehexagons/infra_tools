@@ -34,6 +34,7 @@ def _args(**overrides: object) -> Namespace:
         "vm_balloon_min": None,
         "container_storage": None,
         "storage_mounts": None,
+        "storage_caches": None,
         "vm_image": None,
         "vm_image_storage": None,
         "static_ipv4": None,
@@ -121,6 +122,7 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
                 ["agent-data", "bulk-lvm", "128G"],
             ],
             storage_mounts=[["agent-data", "/srv/agent-workspace"]],
+            storage_caches=[["agent-data", "agent-cache"]],
             container_cores=4,
             static_ipv4="10.0.0.50/24",
             network_gateway4="10.0.0.1",
@@ -145,6 +147,10 @@ class TestCachedProvisioningMetadata(unittest.TestCase):
         self.assertEqual(
             current.storage_mounts,
             [["agent-data", "/srv/agent-workspace"]],
+        )
+        self.assertEqual(
+            current.storage_caches,
+            [["agent-data", "agent-cache"]],
         )
         self.assertEqual(current.static_ipv4, "10.0.0.50/24")
         self.assertEqual(current.network_gateway4, "10.0.0.1")

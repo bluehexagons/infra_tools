@@ -5,6 +5,7 @@ import shlex
 import re
 from typing import Any, Optional, cast
 
+from common.storage_steps import assert_declared_storage_mount
 from lib.config import SetupConfig
 from lib.mount_utils import is_path_under_mnt, get_mount_ancestor
 from lib.remote_utils import run, is_package_installed
@@ -393,6 +394,8 @@ def reconcile_samba_shares(config: SetupConfig, **_: Any) -> None:
     desired_groups: set[str] = set()
     sections: list[str] = []
     for share_config in share_configs:
+        for share_path in cast(list[str], share_config["paths"]):
+            assert_declared_storage_mount(config, share_path)
         group_name, section = _prepare_samba_share(config, share_config)
         desired_groups.add(group_name)
         sections.append(section)

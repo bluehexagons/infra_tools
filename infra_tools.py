@@ -113,6 +113,7 @@ from lib.validation import (
     validate_hosted_flags,
     validate_network_setup_settings,
     validate_rdp_settings,
+    validate_samba_settings,
     validate_samba_share_credentials,
     validate_samba_share_name,
     validate_samba_share_specs,
@@ -970,6 +971,7 @@ def _patch_preserve_keys(args: argparse.Namespace) -> set[str]:
                 "allow_memory_overcommit",
                 "container_storage",
                 "storage_mounts",
+                "storage_caches",
                 "container_cores",
                 "container_base",
                 "vm_image",
@@ -1037,6 +1039,7 @@ _PROVISIONING_CHANGE_ARGS = (
     "allow_memory_overcommit",
     "container_storage",
     "storage_mounts",
+    "storage_caches",
     "container_cores",
     "container_base",
     "vm_image",
@@ -1055,6 +1058,7 @@ _CACHED_PROVISIONING_FIELDS = (
     "allow_memory_overcommit",
     "container_storage",
     "storage_mounts",
+    "storage_caches",
     "container_cores",
     "container_base",
     "vm_image",
@@ -1229,6 +1233,7 @@ def _prepare_runtime_config_for_cli(config: SetupConfig) -> SetupConfig:
     validate_scrub_specs(runtime_config.scrub_specs)
     validate_web_interface_settings(runtime_config)
     validate_smb_mount_specs(runtime_config.smb_mounts)
+    validate_samba_settings(runtime_config)
     validate_samba_share_specs(
         runtime_config.samba_shares,
         runtime_config.share_credentials,
@@ -1396,9 +1401,9 @@ def run_setup_command(args: argparse.Namespace) -> int:
             try:
                 provision_vm(config, image=config.vm_image)
             except VMAlreadyExists:
-                if config.storage_mounts:
+                if config.storage_mounts or config.storage_caches:
                     print(
-                        "Error: named VM data disks are provisioning-only; "
+                        "Error: named VM data disks and caches are provisioning-only; "
                         "refusing to adopt disks on an existing unsaved VM"
                     )
                     return 1
