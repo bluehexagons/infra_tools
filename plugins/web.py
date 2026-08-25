@@ -90,7 +90,10 @@ def extend_cicd_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) ->
         update_cloudflare_tunnel_for_webhook,
     )
 
-    if not config.enable_cicd:
+    # The build-server extension already contains the complete receiver and
+    # executor setup.  Treat --cicd as redundant in that mode so the documented
+    # combination never runs the same service and directory steps twice.
+    if not config.enable_cicd or config.is_build_server:
         return
 
     steps.extend(

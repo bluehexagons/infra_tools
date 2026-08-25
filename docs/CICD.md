@@ -30,13 +30,36 @@ infra-tools setup server_web app.example.com deploy \
   --app-server --ssl --ssl-email admin@example.com
 ```
 
-Bootstrap the build server once without deployment targets so its managed
-runtime and workspace exist:
+For a provisioned VM, keep the OS and language tooling on SSD-backed root
+storage and mount the bulk disk directly at the CI state directory. A nominal
+4 TB disk provides about 3.64 TiB before pool overhead, so this example requests
+3500 GiB rather than assuming the full advertised capacity is allocatable:
 
 ```bash
-infra-tools setup server_web build.example.com deploy \
-  --build-server --cicd --node --python
+infra-tools setup server_web 192.168.1.60 deploy \
+  --provision-on pve1 --hostname build \
+  --memory 16G --cores 8 \
+  --storage root local-lvm 96G \
+  --storage cicd-data ts1-storage 3500G \
+  --storage-mount cicd-data /var/lib/infra_tools/cicd xfs empty \
+  --build-server --node --python --go
 ```
+
+Replace the address, Proxmox host, memory, and CPU values for the environment.
+Run the same command with `--dry-run` first. The `ts1-storage` pool must support
+Proxmox VM disk images and report at least the requested free capacity. The
+mount is fail-closed: setup prepares only the newly attached blank disk and
+will not fall back to putting builds on the root volume. `--build-server`
+already includes the webhook receiver and executor, so adding `--cicd` is
+supported but redundant.
+
+For an existing Debian server rather than a newly provisioned VM, omit the
+`--provision-on`, capacity, and `--storage*` flags and mount the bulk disk at
+`/var/lib/infra_tools/cicd` before setup.
+
+Bootstrap the build server once without deployment targets so its managed
+runtime and workspace exist. The storage-aware command above already performs
+this phase.
 
 Log into the build server and explicitly enroll every app-server host key after
 verifying its fingerprint through an independent channel:
@@ -53,8 +76,8 @@ Finally rerun setup and name each target (repeat
 `--deploy-target` for multiple app servers):
 
 ```bash
-infra-tools setup server_web build.example.com deploy \
-  --build-server --cicd --node --python \
+infra-tools setup server_web 192.168.1.60 deploy \
+  --build-server --node --python --go \
   --deploy-target app.example.com
 ```
 

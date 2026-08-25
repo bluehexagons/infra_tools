@@ -119,6 +119,10 @@ class TestCICDSteps(unittest.TestCase):
         # Should set ownership (when user exists)
         ownership_calls = [call for call in mock_run.call_args_list if 'chown' in str(call)]
         self.assertGreater(len(ownership_calls), 0)
+        self.assertFalse(
+            any("-R" in call.args[0] for call in mock_run.call_args_list),
+            "CI/CD directory setup must preserve private-key and credential file modes",
+        )
     
     @patch('web.cicd_steps.os.path.exists')
     @patch('web.cicd_steps.secrets.token_urlsafe')
@@ -420,31 +424,54 @@ class TestAppServerSteps(unittest.TestCase):
 class TestBuildServerSteps(unittest.TestCase):
     """Test build server setup steps."""
     
-    @patch('web.build_server_steps.os.path.exists')
     @patch('web.build_server_steps.run')
-    def test_generate_deploy_ssh_key_existing(self, mock_run, mock_exists):
-        """Test that we skip key generation if key already exists."""
-        mock_exists.return_value = True
+    def test_generate_deploy_ssh_key_existing(self, mock_run):
+        """Existing keys have their required modes repaired on every run."""
         mock_config = MagicMock()
-        
+
         from web.build_server_steps import generate_deploy_ssh_key
-        generate_deploy_ssh_key(mock_config)
-        
-        mock_run.assert_not_called()
+        with patch('web.build_server_steps.os.path.lexists', return_value=True), \
+             patch('web.build_server_steps.os.path.islink', return_value=False), \
+             patch('web.build_server_steps.os.path.isfile', return_value=True), \
+             patch('web.build_server_steps.os.makedirs'):
+            generate_deploy_ssh_key(mock_config)
+
+        self.assertNotIn(
+            "ssh-keygen",
+            " ".join(str(call.args[0]) for call in mock_run.call_args_list),
+        )
+        self.assertIn(
+            call(["chmod", "600", "/var/lib/infra_tools/cicd/.ssh/deploy_key"]),
+            mock_run.call_args_list,
+        )
+        self.assertFalse(any("-R" in c.args[0] for c in mock_run.call_args_list))
     
-    @patch('web.build_server_steps.os.path.exists')
     @patch('web.build_server_steps.os.makedirs')
     @patch('web.build_server_steps.run')
-    def test_generate_deploy_ssh_key_new(self, mock_run, mock_makedirs, mock_exists):
+    def test_generate_deploy_ssh_key_new(self, mock_run, mock_makedirs):
         """Test that we generate a new SSH key."""
-        mock_exists.return_value = False
         mock_config = MagicMock()
-        
+
         from web.build_server_steps import generate_deploy_ssh_key
-        generate_deploy_ssh_key(mock_config)
+        with patch('web.build_server_steps.os.path.lexists', return_value=False):
+            generate_deploy_ssh_key(mock_config)
         
         ssh_keygen_calls = [call for call in mock_run.call_args_list if 'ssh-keygen' in str(call)]
         self.assertEqual(len(ssh_keygen_calls), 1)
+
+    @patch('web.build_server_steps.secure_cicd_directories')
+    @patch('web.build_server_steps.os.makedirs')
+    def test_build_workspace_setup_preserves_file_modes(
+        self,
+        mock_makedirs,
+        mock_secure_directories,
+    ):
+        from web.build_server_steps import create_build_workspace_dirs
+
+        create_build_workspace_dirs(MagicMock())
+
+        self.assertEqual(mock_makedirs.call_count, 5)
+        mock_secure_directories.assert_called_once()
 
     @patch('web.build_server_steps.install_node_for_user')
     def test_install_build_node_targets_cicd_home(self, mock_install_node):

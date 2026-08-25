@@ -28,21 +28,24 @@ class TestRequiredCICDMutations(unittest.TestCase):
             ["apt-get", "install", "-y", "-qq", "git"],
         )
 
-    @patch("web.cicd_steps.os.path.exists", return_value=True)
+    @patch("web.cicd_steps.os.makedirs")
     @patch("web.cicd_steps.run", return_value=SimpleNamespace(returncode=1))
     def test_missing_service_user_stops_directory_setup(
-        self, _run, _exists
+        self, _run, _makedirs
     ) -> None:
         with self.assertRaisesRegex(RuntimeError, "user 'webhook' does not exist"):
             create_cicd_directories(_config())
 
-    @patch("web.cicd_steps.os.path.exists", return_value=True)
+    @patch("web.cicd_steps.os.makedirs")
     @patch("web.cicd_steps.run")
     def test_directory_permission_failure_reaches_caller(
-        self, mock_run, _exists
+        self, mock_run, _makedirs
     ) -> None:
-        def run_side_effect(command: str, **_kwargs: object) -> SimpleNamespace:
-            if command == "id webhook":
+        def run_side_effect(
+            command: str | list[str],
+            **_kwargs: object,
+        ) -> SimpleNamespace:
+            if command == ["id", "webhook"]:
                 return SimpleNamespace(returncode=0)
             raise RuntimeError("permission mutation failed")
 

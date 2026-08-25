@@ -201,6 +201,28 @@ class TestPluginRegistry(unittest.TestCase):
             step_names.index("Installing build-user Node.js"),
         )
 
+    def test_build_server_with_cicd_does_not_duplicate_shared_steps(self):
+        config = SetupConfig(
+            host="host",
+            username="user",
+            system_type="server_web",
+            enable_cicd=True,
+            is_build_server=True,
+        )
+
+        step_names = [name for name, _ in get_steps_for_system_type(config)]
+        for shared_step in (
+            "Installing CI/CD dependencies",
+            "Creating CI/CD user",
+            "Generating webhook secret",
+            "Creating default webhook configuration",
+            "Creating webhook receiver service",
+            "Creating CI/CD executor service",
+            "Configuring nginx for webhook endpoint",
+        ):
+            with self.subTest(step=shared_step):
+                self.assertEqual(step_names.count(shared_step), 1)
+
     def test_server_dev_adds_agent_vm_steps(self):
         config = SetupConfig(
             host="host",

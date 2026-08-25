@@ -11,6 +11,7 @@ from lib.config import SetupConfig
 from lib.remote_utils import run, is_package_installed
 from lib.ssh_enrollment import is_host_key_enrolled
 from lib.workspace import get_known_hosts_path
+from web.cicd_steps import secure_cicd_directories
 
 
 CICD_USER = "webhook"
@@ -19,26 +20,49 @@ CICD_HOME = "/var/lib/infra_tools/cicd"
 
 def generate_deploy_ssh_key(config: SetupConfig) -> None:
     """Generate SSH key for deploying to app servers."""
+    del config
     ssh_dir = "/var/lib/infra_tools/cicd/.ssh"
     key_file = f"{ssh_dir}/deploy_key"
-    
-    if os.path.exists(key_file):
-        print("  ✓ Deploy SSH key already exists")
-        return
-    
-    os.makedirs(ssh_dir, mode=0o700, exist_ok=True)
-    
-    run([
-        "ssh-keygen", "-t", "ed25519", "-f", key_file, "-N", "",
-        "-C", "deploy@build-server",
-    ])
+    public_key_file = f"{key_file}.pub"
 
-    run(["chown", "-R", "webhook:webhook", ssh_dir])
-    run(["chmod", "700", ssh_dir])
-    run(["chmod", "600", key_file])
-    run(["chmod", "644", f"{key_file}.pub"])
-    
-    print("  ✓ Generated deploy SSH key")
+    os.makedirs(ssh_dir, mode=0o700, exist_ok=True)
+
+    if os.path.lexists(key_file):
+        if os.path.islink(key_file) or not os.path.isfile(key_file):
+            raise RuntimeError(f"Deploy SSH private key is not a regular file: {key_file}")
+        if (
+            not os.path.lexists(public_key_file)
+            or os.path.islink(public_key_file)
+            or not os.path.isfile(public_key_file)
+        ):
+            raise RuntimeError(
+                f"Deploy SSH public key is missing or invalid: {public_key_file}"
+            )
+        created = False
+    else:
+        if os.path.lexists(public_key_file):
+            raise RuntimeError(
+                f"Deploy SSH public key exists without its private key: {public_key_file}"
+            )
+        run([
+            "ssh-keygen", "-t", "ed25519", "-f", key_file, "-N", "",
+            "-C", "deploy@build-server",
+        ])
+        created = True
+
+    for path, mode in (
+        (ssh_dir, "700"),
+        (key_file, "600"),
+        (public_key_file, "644"),
+    ):
+        run(["chown", f"{CICD_USER}:{CICD_USER}", path])
+        run(["chmod", mode, path])
+
+    print(
+        "  ✓ Generated deploy SSH key"
+        if created
+        else "  ✓ Deploy SSH key already exists"
+    )
     print(f"  ℹ Public key at: {key_file}.pub")
     print("  ℹ Add this key to app servers' /home/deploy/.ssh/authorized_keys")
 
@@ -114,19 +138,20 @@ def configure_deploy_known_hosts(config: SetupConfig) -> None:
 
 def create_build_workspace_dirs(config: SetupConfig) -> None:
     """Create workspace directories for builds and artifacts."""
+    del config
     directories = [
-        "/var/lib/infra_tools/cicd/workspaces",
-        "/var/lib/infra_tools/cicd/artifacts",
-        "/var/lib/infra_tools/cicd/logs",
-        "/var/lib/infra_tools/cicd/jobs",
+        CICD_HOME,
+        f"{CICD_HOME}/workspaces",
+        f"{CICD_HOME}/artifacts",
+        f"{CICD_HOME}/logs",
+        f"{CICD_HOME}/jobs",
     ]
-    
+
     for directory in directories:
-        os.makedirs(directory, mode=0o755, exist_ok=True)
-    
-    run(["chown", "-R", "webhook:webhook", "/var/lib/infra_tools/cicd"])
-    run(["chmod", "-R", "750", "/var/lib/infra_tools/cicd"])
-    
+        os.makedirs(directory, mode=0o750, exist_ok=True)
+
+    secure_cicd_directories(directories)
+
     print("  ✓ Created build workspace directories")
 
 

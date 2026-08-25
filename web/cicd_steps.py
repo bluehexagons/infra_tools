@@ -15,6 +15,26 @@ CICD_USER = "webhook"
 CICD_HOME = "/var/lib/infra_tools/cicd"
 
 
+def secure_cicd_directories(directories: list[str]) -> None:
+    """Reconcile CI/CD directory ownership without changing file modes.
+
+    Build-user homes contain SSH private keys and other files whose modes must
+    remain narrower than the surrounding directories.  Applying ``chmod -R``
+    here would make those files group-readable and can make OpenSSH reject the
+    deploy key on a subsequent setup run.
+    """
+
+    user_check = run(["id", CICD_USER], check=False)
+    if user_check.returncode != 0:
+        raise RuntimeError(
+            f"Cannot secure CI/CD directories because user '{CICD_USER}' does not exist"
+        )
+
+    for directory in directories:
+        run(["chown", f"{CICD_USER}:{CICD_USER}", directory])
+        run(["chmod", "750", directory])
+
+
 def install_cicd_dependencies(config: SetupConfig) -> None:
     """Install dependencies required for CI/CD system."""
     packages = ['git']
@@ -60,26 +80,19 @@ def create_cicd_user(config: SetupConfig) -> None:
 
 def create_cicd_directories(config: SetupConfig) -> None:
     """Create directories for CI/CD system."""
-    directories = [
-        "/etc/infra_tools/cicd",
+    del config
+    state_directories = [
+        CICD_HOME,
         f"{CICD_HOME}/jobs",
         f"{CICD_HOME}/workspaces",
         f"{CICD_HOME}/logs",
     ]
-    
-    for directory in directories:
-        if not os.path.exists(directory):
-            os.makedirs(directory, mode=0o755, exist_ok=True)
-    
-    # Set ownership - critical for security
-    # Ensure the 'webhook' user exists before attempting chown
-    user_check = run(["id", CICD_USER], check=False)
-    if user_check.returncode != 0:
-        raise RuntimeError(
-            f"Cannot secure CI/CD directories because user '{CICD_USER}' does not exist"
-        )
-    run(["chown", "-R", f"{CICD_USER}:{CICD_USER}", CICD_HOME])
-    run(["chmod", "-R", "750", CICD_HOME])
+
+    os.makedirs("/etc/infra_tools/cicd", mode=0o755, exist_ok=True)
+    for directory in state_directories:
+        os.makedirs(directory, mode=0o750, exist_ok=True)
+
+    secure_cicd_directories(state_directories)
     
     print("  ✓ Created CI/CD directories")
 
