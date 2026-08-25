@@ -9,9 +9,14 @@ from unittest.mock import patch
 
 from lib.ssh_enrollment import (
     enroll_host_key,
+    get_enrolled_host_key_lines,
     is_host_key_enrolled,
     replace_scanned_host_keys,
 )
+
+
+EXPECTED_FINGERPRINT = "SHA256:" + "a" * 43
+OBSERVED_FINGERPRINT = "SHA256:" + "b" * 43
 
 
 class TestSshEnrollment(unittest.TestCase):
@@ -37,6 +42,32 @@ class TestSshEnrollment(unittest.TestCase):
             )
         )
 
+    @patch("lib.ssh_enrollment.subprocess.run")
+    def test_returns_enrolled_host_key_lines(self, run):
+        run.return_value = type(
+            "Result",
+            (),
+            {
+                "returncode": 0,
+                "stdout": (
+                    "# Host example.com found: line 1\n"
+                    "example.com ssh-ed25519 AAAA\n"
+                ),
+                "stderr": "",
+            },
+        )()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "known_hosts"
+            path.write_text("example.com ssh-ed25519 AAAA\n", encoding="utf-8")
+
+            self.assertEqual(
+                get_enrolled_host_key_lines(
+                    "example.com",
+                    known_hosts_path=str(path),
+                ),
+                ["example.com ssh-ed25519 AAAA"],
+            )
+
     @patch("lib.ssh_enrollment.get_workspace_known_hosts_path")
     @patch("lib.ssh_enrollment.subprocess.run")
     def test_enrolls_after_noninteractive_confirmation(self, run, known_hosts):
@@ -55,7 +86,7 @@ class TestSshEnrollment(unittest.TestCase):
                 (),
                 {
                     "returncode": 0,
-                    "stdout": "256 SHA256:fingerprint host (ED25519)",
+                    "stdout": f"256 {EXPECTED_FINGERPRINT} host (ED25519)",
                     "stderr": "",
                 },
             )(),
@@ -100,7 +131,7 @@ class TestSshEnrollment(unittest.TestCase):
                 (),
                 {
                     "returncode": 0,
-                    "stdout": "256 SHA256:fingerprint host (ED25519)",
+                    "stdout": f"256 {EXPECTED_FINGERPRINT} host (ED25519)",
                     "stderr": "",
                 },
             )(),
@@ -108,6 +139,81 @@ class TestSshEnrollment(unittest.TestCase):
         with patch("lib.ssh_enrollment.get_workspace_known_hosts_path") as known_hosts:
             known_hosts.return_value = "/tmp/should-not-be-written"
             self.assertEqual(enroll_host_key("example.com", input_fn=lambda _: "n"), 1)
+
+    @patch("lib.ssh_enrollment.get_workspace_known_hosts_path")
+    @patch("lib.ssh_enrollment.subprocess.run")
+    def test_pinned_fingerprint_enrolls_without_prompt(self, run, known_hosts):
+        run.side_effect = [
+            type(
+                "Result",
+                (),
+                {
+                    "returncode": 0,
+                    "stdout": "example.com ssh-ed25519 AAAA",
+                    "stderr": "",
+                },
+            )(),
+            type(
+                "Result",
+                (),
+                {
+                    "returncode": 0,
+                    "stdout": f"256 {EXPECTED_FINGERPRINT} host (ED25519)",
+                    "stderr": "",
+                },
+            )(),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "known_hosts"
+            known_hosts.return_value = str(path)
+
+            self.assertEqual(
+                enroll_host_key(
+                    "example.com",
+                    expected_fingerprint=EXPECTED_FINGERPRINT,
+                ),
+                0,
+            )
+
+    @patch("lib.ssh_enrollment.get_workspace_known_hosts_path")
+    @patch("lib.ssh_enrollment.subprocess.run")
+    def test_pinned_fingerprint_mismatch_does_not_write(self, run, known_hosts):
+        run.side_effect = [
+            type(
+                "Result",
+                (),
+                {
+                    "returncode": 0,
+                    "stdout": "example.com ssh-ed25519 AAAA",
+                    "stderr": "",
+                },
+            )(),
+            type(
+                "Result",
+                (),
+                {
+                    "returncode": 0,
+                    "stdout": f"256 {OBSERVED_FINGERPRINT} host (ED25519)",
+                    "stderr": "",
+                },
+            )(),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "known_hosts"
+            known_hosts.return_value = str(path)
+
+            self.assertEqual(
+                enroll_host_key(
+                    "example.com",
+                    expected_fingerprint=EXPECTED_FINGERPRINT,
+                ),
+                1,
+            )
+            self.assertFalse(path.exists())
+
+    def test_rejects_malformed_pinned_fingerprint_before_scanning(self):
+        with self.assertRaisesRegex(ValueError, "OpenSSH SHA256"):
+            enroll_host_key("example.com", expected_fingerprint="SHA256:short")
 
     @patch("lib.ssh_enrollment.get_workspace_known_hosts_path")
     @patch("lib.ssh_enrollment.subprocess.run")

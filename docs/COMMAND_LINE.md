@@ -48,6 +48,9 @@ infra-tools agent auth set HOST USER --tool TOOL --file PATH
 infra-tools agent auth status HOST USER [--tool TOOL]
 infra-tools agent web pair HOST USER [-k PATH]
 infra-tools gogs health HOST [--json] [--min-free-bytes N] [--min-free-inodes N]
+infra-tools cicd connect BUILD APP [options]
+infra-tools cicd status BUILD [--json]
+infra-tools cicd test BUILD TARGET
 infra-tools maintenance github [--root PATH] <audit|prune> [options]
 infra-tools shell
 infra-tools network ...
@@ -716,6 +719,26 @@ when that whole domain is omitted from the current deployment set.
 
 See [`CICD.md`](./CICD.md) for webhook configuration, service units, and
 deployment-boundary behavior.
+
+After saving one `--build-server` setup and one `--app-server` setup, connect
+them from the controller without copying keys manually:
+
+```bash
+infra-tools cicd connect build app --target-name production
+infra-tools cicd status build
+infra-tools cicd test build production
+```
+
+`BUILD` and `APP` accept saved hosts, friendly names, or exact tags. The
+controller reuses its already enrolled app-server host key, installs only the
+build server's public deploy key, writes the dedicated build-user
+`known_hosts` and target JSON atomically, and verifies the connection as the
+unprivileged `webhook` account. If the app key is not enrolled yet, the command
+shows its fingerprint and requires confirmation. For unattended enrollment,
+provide an independently obtained value with `--fingerprint SHA256:...`.
+`--port` and `--base-dir` customize the target connection; setup defaults are
+port 22, user `deploy`, and `/var/www`. A custom base directory must already
+exist as a real directory and be writable by `deploy`.
 
 ## Antistatic
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from typing import Callable, Optional
 
@@ -18,6 +19,7 @@ _SUPPORTED_HOST_KEY_TYPES = {
     "ssh-ed25519",
     "ssh-rsa",
 }
+_SHA256_FINGERPRINT_PATTERN = re.compile(r"^SHA256:[A-Za-z0-9+/]{43}$")
 
 
 def _fingerprint(scan: str) -> str:
@@ -31,6 +33,12 @@ def _fingerprint(scan: str) -> str:
     if result.returncode != 0 or not result.stdout.strip():
         raise RuntimeError("could not calculate the SSH host-key fingerprint")
     return result.stdout.strip()
+
+
+def fingerprint_host_keys(scan: str) -> str:
+    """Return OpenSSH fingerprints for validated known-host key lines."""
+
+    return _fingerprint(scan)
 
 
 def _known_hosts_name(host: str, port: int) -> str:
@@ -101,6 +109,24 @@ def is_host_key_enrolled(
     return bool(_matching_known_host_lines(path, _known_hosts_name(host, port)))
 
 
+def get_enrolled_host_key_lines(
+    host: str,
+    *,
+    port: int = 22,
+    known_hosts_path: Optional[str] = None,
+) -> list[str]:
+    """Return enrolled key lines for one host in stable order."""
+
+    if not validate_host(host):
+        raise ValueError(f"Invalid host: {host}")
+    if not 1 <= port <= 65535:
+        raise ValueError("SSH port must be between 1 and 65535")
+    path = known_hosts_path or get_workspace_known_hosts_path()
+    if not os.path.isfile(path):
+        return []
+    return sorted(_matching_known_host_lines(path, _known_hosts_name(host, port)))
+
+
 def _persist_scan(host: str, scan: str, port: int) -> str:
     known_hosts = get_workspace_known_hosts_path()
     os.makedirs(os.path.dirname(known_hosts), mode=0o700, exist_ok=True)
@@ -136,6 +162,7 @@ def enroll_host_key(
     *,
     port: int = 22,
     assume_yes: bool = False,
+    expected_fingerprint: Optional[str] = None,
     input_fn: Optional[Callable[[str], str]] = None,
 ) -> int:
     """Scan, display, and optionally persist a host key after confirmation."""
@@ -143,6 +170,11 @@ def enroll_host_key(
         raise ValueError(f"Invalid host: {host}")
     if not 1 <= port <= 65535:
         raise ValueError("SSH port must be between 1 and 65535")
+    if (
+        expected_fingerprint is not None
+        and not _SHA256_FINGERPRINT_PATTERN.fullmatch(expected_fingerprint)
+    ):
+        raise ValueError("Expected fingerprint must use the OpenSSH SHA256:... format")
 
     result = subprocess.run(
         [
@@ -173,7 +205,20 @@ def enroll_host_key(
 
     print(f"SSH host-key fingerprint for {host}:{port}:")
     print(fingerprints)
-    if not assume_yes:
+    if expected_fingerprint is not None:
+        observed = {
+            field
+            for line in fingerprints.splitlines()
+            for field in line.split()
+            if field.startswith("SHA256:")
+        }
+        if expected_fingerprint not in observed:
+            print(
+                f"Error enrolling {host}: pinned fingerprint mismatch "
+                f"(expected {expected_fingerprint})"
+            )
+            return 1
+    elif not assume_yes:
         response = (input_fn or input)(
             "Verify this fingerprint out of band and enroll it? [y/N] "
         )

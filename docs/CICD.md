@@ -59,39 +59,38 @@ For an existing Debian server rather than a newly provisioned VM, omit the
 
 Bootstrap the build server once without deployment targets so its managed
 runtime and workspace exist. The storage-aware command above already performs
-this phase.
-
-Log into the build server and explicitly enroll every app-server host key after
-verifying its fingerprint through an independent channel:
+this phase. Then connect the two saved setups from the controller:
 
 ```bash
-ssh deploy@build.example.com
-sudo -n /usr/bin/python3 /opt/infra_tools/infra_tools.py \
-  --workspace /var/lib/infra_tools/cicd \
-  ssh-key enroll app.example.com
-exit
+infra-tools cicd connect 192.168.1.60 app.example.com
 ```
 
-Finally rerun setup and name each target (repeat
-`--deploy-target` for multiple app servers):
+Saved host names, friendly `--name` values, and exact tags are accepted. If the
+controller does not already trust the app server, the command displays its SSH
+fingerprint for independent verification. Non-interactive automation can pin
+that verified identity explicitly:
 
 ```bash
-infra-tools setup server_web 192.168.1.60 deploy \
-  --build-server --node --python --go \
-  --deploy-target app.example.com
+infra-tools cicd connect 192.168.1.60 app.example.com \
+  --target-name production \
+  --fingerprint SHA256:REPLACE_WITH_VERIFIED_FINGERPRINT
 ```
 
-Setup refuses to configure a deploy target that has not been enrolled; it does
-not treat an unauthenticated `ssh-keyscan` response as trust. The build setup
-creates the deploy key at
-`/var/lib/infra_tools/cicd/.ssh/deploy_key`. Copy its `.pub` file into
-`/home/deploy/.ssh/authorized_keys` on every app server. It also writes
-`/etc/infra_tools/cicd/deploy_targets.json` and verifies that every target is
-present in `/var/lib/infra_tools/cicd/known_hosts`.
+The command validates both saved roles, transfers only the public half of the
+build deploy key, deduplicates the app server's `authorized_keys`, installs the
+verified host key and target definition atomically on the build server, and
+tests SSH as the unprivileged `webhook` build user. It is safe to rerun. Inspect
+or retest connections with:
+
+```bash
+infra-tools cicd status 192.168.1.60
+infra-tools cicd test 192.168.1.60 app.example.com
+```
 
 The target entries default to the `deploy` user, SSH port 22, and `/var/www`.
-Edit the JSON only when a target needs a different port, base directory, or
-key path. The target name used by a repository must match its JSON key.
+Use `cicd connect --port` or `--base-dir` when a target differs. The target name
+used by a repository must match its JSON key. A custom base directory must
+already exist as a real directory and be writable by the `deploy` account.
 
 ## Repository configuration
 

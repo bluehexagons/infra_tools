@@ -51,6 +51,7 @@ from lib.channel_manager import (
     switch_channel,
     upgrade_channel,
 )
+from lib.cicd_cli import add_cicd_subparser, run_cicd_command
 from lib.completions import run_completion_setup
 from lib.config_cleanup import run_cleanup
 from lib.config import SetupConfig
@@ -156,6 +157,7 @@ def _build_infra_tools_epilog() -> str:
     vm [subcommand]             Manage guests through a provider-neutral command surface
     shell                       Interactive REPL for managing saved configurations
     credentials                 Manage workspace credentials
+    cicd connect|status|test    Connect and inspect build/app deployment trust
 
 Sysadmin Shortcuts:
     mount <host:path> <local>   Mount a remote directory via sshfs
@@ -567,6 +569,7 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
     add_sysadmin_subparsers(subparsers)
     add_agent_subparser(subparsers)
     add_gogs_subparser(subparsers)
+    add_cicd_subparser(subparsers)
 
     shell_parser = subparsers.add_parser(
         "shell",
@@ -1748,6 +1751,8 @@ def main() -> int:
         return run_agent_command(args)
     elif args.command == "gogs":
         return run_gogs_command(args)
+    elif args.command == "cicd":
+        return run_cicd_command(args)
     elif args.command in {"mount", "umount", "health", "ssh", "push", "pull", "key", "ssh-key", "df", "fan", "svc", "logs", "upgrade", "reachable", "user"}:
         return run_sysadmin_command(args)
     elif args.command == "shell":
