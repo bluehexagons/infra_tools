@@ -103,6 +103,229 @@ class TestInfraWebForwarding(unittest.TestCase):
         self.assertFalse(infra_web._ufw_rule_matches_port(line, 8444))
         self.assertTrue(infra_web._ufw_rule_matches_port(line, 18444))
 
+    def test_forward_waits_for_http_readiness_before_apply(self) -> None:
+        with (
+            patch.object(infra_web, "_load_policy", return_value=_policy()),
+            patch.object(infra_web, "_load_forwards", return_value=[]),
+            patch.object(infra_web, "_requesting_username", return_value="agent"),
+            patch.object(infra_web, "_select_listen_port", return_value=8444),
+            patch.object(infra_web, "_wait_for_upstream") as wait,
+            patch.object(infra_web, "_apply_forwards"),
+        ):
+            result = infra_web.main(
+                [
+                    "forward",
+                    "add",
+                    "preview",
+                    "--to",
+                    "127.0.0.1:3000",
+                    "--wait",
+                    "10",
+                    "--health",
+                    "/ready",
+                ]
+            )
+
+        self.assertEqual(result, 0)
+        wait.assert_called_once_with("127.0.0.1", 3000, "/ready", 10.0)
+
+    def test_forward_prune_preserves_managed_preview_routes(self) -> None:
+        route = {
+            "listen": 8444,
+            "name": "preview",
+            "owner": "agent",
+            "profile": "general",
+            "target_host": "127.0.0.1",
+            "target_port": 4173,
+        }
+        preview = {
+            "name": "preview",
+            "owner": "agent",
+        }
+        with (
+            patch.object(infra_web, "_load_policy", return_value=_policy()),
+            patch.object(infra_web, "_load_forwards", return_value=[route]),
+            patch.object(infra_web, "_load_previews", return_value=[preview]),
+            patch.object(infra_web, "_requesting_username", return_value="agent"),
+            patch.object(infra_web, "_tcp_ready", return_value=False),
+            patch.object(infra_web, "_apply_forwards") as apply_forwards,
+        ):
+            result = infra_web.main(["forward", "prune", "--yes", "--json"])
+
+        self.assertEqual(result, 0)
+        apply_forwards.assert_not_called()
+
+
+class TestInfraWebPreviews(unittest.TestCase):
+    def test_automatic_vite_command_is_loopback_only_and_strict(self) -> None:
+        with tempfile.TemporaryDirectory() as project:
+            with open(os.path.join(project, "package.json"), "w", encoding="utf-8") as file_obj:
+                json.dump(
+                    {
+                        "scripts": {"dev": "vite"},
+                        "devDependencies": {"vite": "1.0.0"},
+                    },
+                    file_obj,
+                )
+
+            command = infra_web._automatic_preview_command(project, 4173)
+
+        self.assertEqual(command[:3], ["npm", "run", "dev"])
+        self.assertIn("127.0.0.1", command)
+        self.assertIn("4173", command)
+        self.assertIn("--strictPort", command)
+
+    def test_relative_preview_executable_is_resolved_from_project(self) -> None:
+        with tempfile.TemporaryDirectory() as project:
+            executable = os.path.join(project, "serve-preview")
+            with open(executable, "w", encoding="utf-8") as file_obj:
+                file_obj.write("#!/bin/sh\n")
+            os.chmod(executable, 0o755)
+            account = SimpleNamespace(pw_dir="/home/agent")
+
+            command = infra_web._resolve_preview_executable(
+                ["./serve-preview", "--port", "4173"],
+                account,
+                project,
+            )
+
+        self.assertEqual(command[0], executable)
+        self.assertEqual(command[1:], ["--port", "4173"])
+
+    def test_rendered_preview_unit_runs_as_owner_with_resource_bounds(self) -> None:
+        account = SimpleNamespace(
+            pw_dir="/home/agent",
+            pw_gid=os.getgid(),
+            pw_name="agent",
+        )
+        group = SimpleNamespace(gr_name="agent")
+        with patch.object(infra_web.grp, "getgrgid", return_value=group):
+            content = infra_web.render_preview_unit(
+                "demo",
+                account,
+                "/home/agent/repos/demo",
+                "/var/lib/infra_tools/internal-web-previews/agent-demo.sh",
+            )
+
+        self.assertIn("User=agent", content)
+        self.assertIn("Group=agent", content)
+        self.assertIn("NoNewPrivileges=true", content)
+        self.assertIn("MemoryMax=1G", content)
+        self.assertNotIn("WantedBy=", content)
+
+    def test_missing_preview_dependencies_install_as_requesting_user(self) -> None:
+        with tempfile.TemporaryDirectory() as project:
+            with open(os.path.join(project, "package-lock.json"), "w", encoding="utf-8"):
+                pass
+            account = SimpleNamespace(pw_dir="/home/agent", pw_name="agent")
+            completed = SimpleNamespace(returncode=0)
+            with (
+                patch.object(
+                    infra_web,
+                    "_resolve_preview_executable",
+                    return_value=["/home/agent/.nvm/current/bin/npm", "ci"],
+                ),
+                patch.object(infra_web.subprocess, "run", return_value=completed) as run,
+            ):
+                infra_web._install_preview_dependencies(project, account)
+
+        command = run.call_args.args[0]
+        self.assertEqual(command[:4], ["runuser", "-u", "agent", "--"])
+        self.assertIn("HOME=/home/agent", command)
+        self.assertEqual(command[-2:], ["/home/agent/.nvm/current/bin/npm", "ci"])
+
+    def test_preview_start_waits_then_applies_route_and_records_state(self) -> None:
+        with tempfile.TemporaryDirectory() as project:
+            account = SimpleNamespace(
+                pw_dir=os.path.dirname(project),
+                pw_gid=os.getgid(),
+                pw_name="agent",
+                pw_uid=os.getuid(),
+            )
+            with (
+                patch.object(infra_web.os, "geteuid", return_value=0),
+                patch.object(infra_web, "_load_policy", return_value=_policy()),
+                patch.object(infra_web, "_requesting_username", return_value="agent"),
+                patch.object(infra_web.pwd, "getpwnam", return_value=account),
+                patch.object(infra_web, "_load_forwards", return_value=[]),
+                patch.object(infra_web, "_load_previews", return_value=[]),
+                patch.object(infra_web, "_select_target_port", return_value=4173),
+                patch.object(infra_web, "_select_listen_port", return_value=8444),
+                patch.object(
+                    infra_web,
+                    "_resolve_preview_executable",
+                    return_value=["/usr/bin/true", "4173"],
+                ),
+                patch.object(
+                    infra_web,
+                    "_write_preview_service",
+                    return_value=("infra-web-preview-agent-demo.service", "/launcher"),
+                ),
+                patch.object(infra_web, "_wait_for_upstream") as wait,
+                patch.object(infra_web, "_apply_forwards") as apply_forwards,
+                patch.object(infra_web, "_write_preview_state") as write_state,
+            ):
+                result = infra_web.main(
+                    [
+                        "preview",
+                        "start",
+                        "demo",
+                        "--project",
+                        project,
+                        "--json",
+                        "--",
+                        "/usr/bin/true",
+                        "{port}",
+                    ]
+                )
+
+        self.assertEqual(result, 0)
+        wait.assert_called_once_with("127.0.0.1", 4173, "/", 30)
+        routes = apply_forwards.call_args.args[0]
+        self.assertEqual(routes[0]["target_port"], 4173)
+        self.assertEqual(routes[0]["listen"], 8444)
+        state = write_state.call_args.args[0]
+        self.assertEqual(state[0]["unit"], "infra-web-preview-agent-demo.service")
+        self.assertNotIn("command", state[0])
+
+    def test_preview_stop_removes_route_service_and_state(self) -> None:
+        record = {
+            "created_at": "2026-01-01T00:00:00Z",
+            "health": "/",
+            "listen": 8444,
+            "name": "demo",
+            "owner": "agent",
+            "profile": "general",
+            "project": "/home/agent/demo",
+            "target_host": "127.0.0.1",
+            "target_port": 4173,
+            "unit": "infra-web-preview-agent-demo.service",
+        }
+        route = {
+            "listen": 8444,
+            "name": "demo",
+            "owner": "agent",
+            "profile": "general",
+            "target_host": "127.0.0.1",
+            "target_port": 4173,
+        }
+        with (
+            patch.object(infra_web.os, "geteuid", return_value=0),
+            patch.object(infra_web, "_load_policy", return_value=_policy()),
+            patch.object(infra_web, "_requesting_username", return_value="agent"),
+            patch.object(infra_web, "_load_forwards", return_value=[route]),
+            patch.object(infra_web, "_load_previews", return_value=[record]),
+            patch.object(infra_web, "_apply_forwards") as apply_forwards,
+            patch.object(infra_web, "_remove_preview_service") as remove_service,
+            patch.object(infra_web, "_write_preview_state") as write_state,
+        ):
+            result = infra_web.main(["preview", "stop", "demo", "--json"])
+
+        self.assertEqual(result, 0)
+        apply_forwards.assert_called_once_with([], _policy())
+        remove_service.assert_called_once_with(record)
+        write_state.assert_called_once_with([])
+
 
 class TestInfraWebGames(unittest.TestCase):
     def test_remove_deletes_only_confirmed_owned_game(self) -> None:

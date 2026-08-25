@@ -4,28 +4,32 @@
 from __future__ import annotations
 
 import argparse
+import grp
 import hashlib
 import ipaddress
 import json
 import os
 import pwd
 import re
+import shlex
 import shutil
 import socket
 import ssl
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import webbrowser
 
 
 SOURCE_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 if SOURCE_ROOT not in sys.path:
     sys.path.insert(0, SOURCE_ROOT)
 
-from common.service_tools import godot_web_publish
+from common.service_tools import godot_web_publish, static_web_publish
 
 
 POLICY_FILE = "/etc/infra-tools/internal-web/policy.json"
@@ -33,8 +37,12 @@ FORWARD_STATE_FILE = "/etc/infra-tools/internal-web/forwards.json"
 FORWARD_NGINX_SITE = "/etc/nginx/sites-available/infra-tools-web-forwards"
 FORWARD_NGINX_LINK = "/etc/nginx/sites-enabled/infra-tools-web-forwards"
 GAMES_ROOT = "/srv/infra-tools/web/games"
+PREVIEW_STATE_FILE = "/etc/infra-tools/internal-web/previews.json"
+PREVIEW_RUNTIME_ROOT = "/var/lib/infra_tools/internal-web-previews"
+SYSTEMD_ROOT = "/etc/systemd/system"
 _FORWARD_MARKER = "# Managed by infra_tools HTTPS forwarding"
 _FORWARD_RULE_PREFIX = "infra_tools HTTPS forward"
+_PREVIEW_UNIT_PREFIX = "infra-web-preview"
 _NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
 _USERNAME_PATTERN = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 _SAFE_PATH_PATTERN = re.compile(r"^/[A-Za-z0-9_./-]+$")
@@ -59,6 +67,25 @@ def _parser() -> argparse.ArgumentParser:
     godot.add_argument("--no-precompress", action="store_true")
     godot.add_argument("--json", action="store_true")
     godot.add_argument("--open", action="store_true")
+    site_publish = publish_commands.add_parser(
+        "site",
+        help="Build and publish a generic static site",
+    )
+    static_web_publish.add_publish_arguments(site_publish)
+
+    site = commands.add_parser("site", help="Manage published static sites")
+    site_commands = site.add_subparsers(dest="site_command", required=True)
+    site_list = site_commands.add_parser("list", aliases=["ls"], help="List sites")
+    site_list.add_argument("--json", action="store_true")
+    site_url = site_commands.add_parser("url", help="Print a published site URL")
+    site_url.add_argument("name")
+    site_doctor = site_commands.add_parser("doctor", help="Verify a published site")
+    site_doctor.add_argument("name")
+    site_doctor.add_argument("--json", action="store_true")
+    site_remove = site_commands.add_parser("remove", help="Remove a published site")
+    site_remove.add_argument("name")
+    site_remove.add_argument("--yes", action="store_true")
+    site_remove.add_argument("--json", action="store_true")
 
     list_command = commands.add_parser("list", aliases=["ls"], help="List published games")
     list_command.add_argument("--json", action="store_true")
@@ -70,7 +97,7 @@ def _parser() -> argparse.ArgumentParser:
     remove.add_argument("game")
     remove.add_argument("--yes", action="store_true", help="Confirm permanent removal")
 
-    doctor = commands.add_parser("doctor", help="Verify HTTPS and Godot headers")
+    doctor = commands.add_parser("doctor", help="Verify a managed HTTPS endpoint")
     doctor.add_argument("name")
     doctor.add_argument("--json", action="store_true")
 
@@ -93,17 +120,73 @@ def _parser() -> argparse.ArgumentParser:
         help="Loopback HTTP upstream, such as 127.0.0.1:3000",
     )
     forward_add.add_argument("--profile", choices=_PROFILES, default="general")
+    forward_add.add_argument(
+        "--wait",
+        type=float,
+        default=0,
+        metavar="SECONDS",
+        help="Wait for the upstream HTTP endpoint before exposing it",
+    )
+    forward_add.add_argument(
+        "--health",
+        default="/",
+        metavar="PATH",
+        help="HTTP readiness path used with --wait (default: /)",
+    )
+    forward_add.add_argument("--open", action="store_true")
     forward_add.add_argument("--json", action="store_true")
     forward_remove = forward_commands.add_parser("remove", help="Remove a forward")
     forward_remove.add_argument("name")
     forward_remove.add_argument("--json", action="store_true")
     forward_list = forward_commands.add_parser("list", aliases=["ls"], help="List forwards")
     forward_list.add_argument("--json", action="store_true")
+    forward_url = forward_commands.add_parser("url", help="Print a forward URL")
+    forward_url.add_argument("name")
+    forward_prune = forward_commands.add_parser(
+        "prune",
+        help="Remove confirmed dead forwards owned by the requesting user",
+    )
+    forward_prune.add_argument("--yes", action="store_true")
+    forward_prune.add_argument("--json", action="store_true")
     forward_reconcile = forward_commands.add_parser(
         "reconcile",
         help="Reconcile generated Nginx and UFW state",
     )
     forward_reconcile.add_argument("--json", action="store_true")
+
+    preview = commands.add_parser("preview", help="Manage supervised live previews")
+    preview_commands = preview.add_subparsers(dest="preview_command", required=True)
+    preview_start = preview_commands.add_parser(
+        "start",
+        help="Start and expose a preview",
+        epilog=(
+            "Append -- COMMAND [ARGS...] to override automatic Vite detection; "
+            "use {host} and {port} placeholders when needed."
+        ),
+    )
+    preview_start.add_argument("name")
+    preview_start.add_argument("--project", default=".")
+    preview_start.add_argument("--port", default="auto")
+    preview_start.add_argument("--listen", default="auto")
+    preview_start.add_argument("--profile", choices=_PROFILES, default="general")
+    preview_start.add_argument("--wait", type=float, default=30)
+    preview_start.add_argument("--health", default="/")
+    preview_start.add_argument("--replace", action="store_true")
+    preview_start.add_argument("--open", action="store_true")
+    preview_start.add_argument("--json", action="store_true")
+    preview_stop = preview_commands.add_parser("stop", help="Stop and remove a preview")
+    preview_stop.add_argument("name")
+    preview_stop.add_argument("--json", action="store_true")
+    preview_list = preview_commands.add_parser("list", aliases=["ls"], help="List previews")
+    preview_list.add_argument("--json", action="store_true")
+    preview_url = preview_commands.add_parser("url", help="Print a preview URL")
+    preview_url.add_argument("name")
+    preview_logs = preview_commands.add_parser("logs", help="Show preview service logs")
+    preview_logs.add_argument("name")
+    preview_logs.add_argument("--lines", type=int, default=100)
+    preview_prune = preview_commands.add_parser("prune", help="Remove stopped previews")
+    preview_prune.add_argument("--yes", action="store_true")
+    preview_prune.add_argument("--json", action="store_true")
     return parser
 
 
@@ -692,6 +775,42 @@ def _remove_game(game: str, confirmed: bool) -> int:
     return 0
 
 
+def _print_sites(as_json: bool) -> int:
+    account = _game_account()
+    records = static_web_publish.list_sites(account)
+    if as_json:
+        print(json.dumps({"sites": records}, sort_keys=True))
+    elif not records:
+        print("No sites published")
+    else:
+        for record in records:
+            print(f"{record['site']}\t{record.get('url') or '-'}")
+    return 0
+
+
+def _print_site_url(name: str) -> int:
+    _validate_name(name, "site name")
+    account = _game_account()
+    path = os.path.join(static_web_publish.SITES_ROOT, account.pw_name, name)
+    if os.path.islink(path) or not os.path.isdir(path):
+        raise RuntimeError(f"Published site does not exist: {name}")
+    url = static_web_publish.published_url(account.pw_name, name)
+    if not url:
+        raise RuntimeError("Internal-web base URL is unavailable")
+    print(url)
+    return 0
+
+
+def _remove_site(name: str, confirmed: bool, as_json: bool) -> int:
+    account = _game_account()
+    static_web_publish.remove_site(account, name, confirmed)
+    if as_json:
+        print(json.dumps({"name": name, "removed": True}, sort_keys=True))
+    else:
+        print(f"Removed published site {name}")
+    return 0
+
+
 def _https_headers(url: str) -> tuple[int, dict[str, str]]:
     request = urllib.request.Request(
         url,
@@ -708,6 +827,97 @@ def _https_headers(url: str) -> tuple[int, dict[str, str]]:
         return exc.code, {key.lower(): value for key, value in exc.headers.items()}
     except (OSError, urllib.error.URLError) as exc:
         raise RuntimeError(f"HTTPS request failed for {url}: {exc}") from exc
+
+
+def _validate_health_path(value: str) -> str:
+    if (
+        not value.startswith("/")
+        or value.startswith("//")
+        or any(ord(character) < 32 or ord(character) == 127 for character in value)
+    ):
+        raise ValueError("Health path must start with one '/' and contain no controls")
+    parsed = urllib.parse.urlsplit(value)
+    if parsed.scheme or parsed.netloc or parsed.fragment:
+        raise ValueError("Health path must be a relative HTTP path")
+    return value
+
+
+def _tcp_ready(host: str, port: int, timeout: float = 0.25) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _http_ready(host: str, port: int, path: str, timeout: float = 1.0) -> bool:
+    url_host = f"[{host}]" if ":" in host else host
+    request = urllib.request.Request(
+        f"http://{url_host}:{port}{path}",
+        headers={"User-Agent": "infra-web-readiness/1"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.status < 500
+    except urllib.error.HTTPError as exc:
+        return exc.code < 500
+    except (OSError, urllib.error.URLError):
+        return False
+
+
+def _wait_for_upstream(host: str, port: int, path: str, seconds: float) -> None:
+    if not 0 < seconds <= 300:
+        raise ValueError("Wait duration must be greater than 0 and at most 300 seconds")
+    health_path = _validate_health_path(path)
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if _http_ready(host, port, health_path):
+            return
+        time.sleep(0.2)
+    raise RuntimeError(
+        f"Upstream did not become ready at http://{host}:{port}{health_path} "
+        f"within {seconds:g} seconds"
+    )
+
+
+def _open_url(url: str, username: str | None = None) -> None:
+    if username and os.geteuid() == 0:
+        subprocess.Popen(
+            ["runuser", "-u", username, "--", "xdg-open", url],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    else:
+        webbrowser.open(url)
+
+
+def _site_doctor(name: str, as_json: bool) -> int:
+    _validate_name(name, "site name")
+    account = _game_account()
+    site_path = os.path.join(static_web_publish.SITES_ROOT, account.pw_name, name)
+    if os.path.islink(site_path) or not os.path.isdir(site_path):
+        raise RuntimeError(f"Published site does not exist: {name}")
+    url = static_web_publish.published_url(account.pw_name, name)
+    if not url:
+        raise RuntimeError("Internal-web base URL is unavailable")
+    status, headers = _https_headers(url)
+    errors = [f"HTTPS endpoint returned {status}"] if status >= 400 else []
+    result = {
+        "errors": errors,
+        "headers": headers,
+        "name": name,
+        "ok": not errors,
+        "status": status,
+        "url": url,
+    }
+    if as_json:
+        print(json.dumps(result, sort_keys=True))
+    elif errors:
+        print(f"{name}: failed ({'; '.join(errors)})")
+    else:
+        print(f"{name}: healthy ({url})")
+    return 0 if not errors else 1
 
 
 def _doctor(name: str, as_json: bool) -> int:
@@ -787,13 +997,17 @@ def _print_ca(as_json: bool) -> int:
             "ca_certificate": path,
             "publicly_trusted": False,
             "sha256": digest.hexdigest(),
+            "url": f"{str(policy['base_url']).rstrip('/')}/infra-tools-ca.crt",
         }
     if as_json:
         print(json.dumps(result, sort_keys=True))
     elif result["publicly_trusted"]:
         print("The internal-web endpoint uses a publicly trusted certificate")
     else:
-        print(f"{result['ca_certificate']}\nSHA-256 {result['sha256']}")
+        print(
+            f"{result['ca_certificate']}\n{result['url']}\n"
+            f"SHA-256 {result['sha256']}"
+        )
     return 0
 
 
@@ -806,6 +1020,11 @@ def _forward_add(args: argparse.Namespace) -> int:
     if existing is not None and existing["owner"] != owner:
         raise RuntimeError(f"HTTPS forward is owned by another user: {name}")
     target_host, target_port = _parse_upstream(args.to)
+    if args.wait < 0 or args.wait > 300:
+        raise ValueError("--wait must be from 0 through 300 seconds")
+    _validate_health_path(args.health)
+    if args.wait:
+        _wait_for_upstream(target_host, target_port, args.health, args.wait)
     listen = _select_listen_port(args.listen, routes, policy, existing)
     route = {
         "listen": listen,
@@ -827,6 +1046,8 @@ def _forward_add(args: argparse.Namespace) -> int:
             f"{name}: {result['url']} -> http://{target_host}:{target_port} "
             f"({args.profile})"
         )
+    if args.open:
+        _open_url(str(result["url"]), owner)
     return 0
 
 
@@ -853,7 +1074,11 @@ def _forward_list(as_json: bool) -> int:
     account = pwd.getpwuid(os.getuid())
     username = account.pw_name
     routes = [
-        {**route, "url": _forward_url(str(policy["base_url"]), int(route["listen"]))}
+        {
+            **route,
+            "ready": _tcp_ready(str(route["target_host"]), int(route["target_port"])),
+            "url": _forward_url(str(policy["base_url"]), int(route["listen"])),
+        }
         for route in _load_forwards(policy)
         if os.geteuid() == 0 or route["owner"] == username
     ]
@@ -865,8 +1090,59 @@ def _forward_list(as_json: bool) -> int:
         for route in routes:
             print(
                 f"{route['name']}\t{route['url']}\thttp://"
-                f"{route['target_host']}:{route['target_port']}\t{route['profile']}"
+                f"{route['target_host']}:{route['target_port']}\t{route['profile']}\t"
+                f"{'ready' if route['ready'] else 'down'}"
             )
+    return 0
+
+
+def _forward_route(name: str) -> tuple[dict[str, object], dict[str, object]]:
+    _validate_name(name, "forward name")
+    policy = _load_policy()
+    routes = _load_forwards(policy)
+    route = next((item for item in routes if item["name"] == name), None)
+    if route is None:
+        raise RuntimeError(f"HTTPS forward does not exist: {name}")
+    account = pwd.getpwuid(os.getuid())
+    if os.geteuid() != 0 and route["owner"] != account.pw_name:
+        raise RuntimeError(f"HTTPS forward is owned by another user: {name}")
+    return policy, route
+
+
+def _forward_print_url(name: str) -> int:
+    policy, route = _forward_route(name)
+    print(_forward_url(str(policy["base_url"]), int(route["listen"])))
+    return 0
+
+
+def _forward_prune(confirmed: bool, as_json: bool) -> int:
+    if not confirmed:
+        raise ValueError("Pruning dead HTTPS forwards requires --yes")
+    policy = _load_policy()
+    owner = _requesting_username(policy)
+    routes = _load_forwards(policy)
+    preview_names = {
+        str(preview["name"])
+        for preview in _load_previews(policy)
+        if preview["owner"] == owner
+    }
+    removed = [
+        str(route["name"])
+        for route in routes
+        if route["owner"] == owner
+        and route["name"] not in preview_names
+        and not _tcp_ready(str(route["target_host"]), int(route["target_port"]))
+    ]
+    updated = [route for route in routes if str(route["name"]) not in removed]
+    if removed:
+        _apply_forwards(updated, policy)
+    result = {"removed": removed}
+    if as_json:
+        print(json.dumps(result, sort_keys=True))
+    elif removed:
+        print(f"Removed {len(removed)} dead forward(s): {', '.join(removed)}")
+    else:
+        print("No dead forwards found")
     return 0
 
 
@@ -878,6 +1154,639 @@ def _forward_reconcile(as_json: bool) -> int:
         print(json.dumps({"forwards": len(routes), "reconciled": True}, sort_keys=True))
     else:
         print(f"Reconciled {len(routes)} HTTPS forward(s)")
+    return 0
+
+
+def _validate_preview(value: object, policy: dict[str, object]) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise RuntimeError("Invalid live-preview state")
+    name = _validate_name(str(value.get("name", "")), "preview name")
+    owner = _validate_username(value.get("owner"))
+    if owner not in policy["users"]:
+        raise RuntimeError("Live-preview owner is not allowed by policy")
+    unit = value.get("unit")
+    expected_unit = f"{_PREVIEW_UNIT_PREFIX}-{owner}-{name}.service"
+    if unit != expected_unit:
+        raise RuntimeError("Invalid live-preview systemd unit")
+    project = value.get("project")
+    if (
+        not isinstance(project, str)
+        or not os.path.isabs(project)
+        or any(ord(character) < 32 or ord(character) == 127 for character in project)
+    ):
+        raise RuntimeError("Invalid live-preview project path")
+    target_host = value.get("target_host")
+    if target_host != "127.0.0.1":
+        raise RuntimeError("Live previews must target IPv4 loopback")
+    target_port = value.get("target_port")
+    listen = value.get("listen")
+    if (
+        not isinstance(target_port, int)
+        or isinstance(target_port, bool)
+        or not 1024 <= target_port <= 65535
+        or not isinstance(listen, int)
+        or isinstance(listen, bool)
+        or not policy["forward_port_min"] <= listen <= policy["forward_port_max"]
+    ):
+        raise RuntimeError("Invalid live-preview port")
+    profile = value.get("profile")
+    if profile not in _PROFILES:
+        raise RuntimeError("Invalid live-preview profile")
+    health = _validate_health_path(str(value.get("health", "/")))
+    created_at = value.get("created_at")
+    if not isinstance(created_at, str) or not created_at:
+        raise RuntimeError("Invalid live-preview creation time")
+    return {
+        "created_at": created_at,
+        "health": health,
+        "listen": listen,
+        "name": name,
+        "owner": owner,
+        "profile": profile,
+        "project": project,
+        "target_host": target_host,
+        "target_port": target_port,
+        "unit": unit,
+    }
+
+
+def _load_previews(policy: dict[str, object]) -> list[dict[str, object]]:
+    if not os.path.exists(PREVIEW_STATE_FILE):
+        return []
+    value = _read_json(PREVIEW_STATE_FILE, "live-preview state")
+    if not isinstance(value, dict) or value.get("version") != 1:
+        raise RuntimeError("Invalid live-preview state")
+    raw_previews = value.get("previews")
+    if not isinstance(raw_previews, list):
+        raise RuntimeError("Invalid live-preview records")
+    previews = [_validate_preview(preview, policy) for preview in raw_previews]
+    identities = [(str(item["owner"]), str(item["name"])) for item in previews]
+    ports = [int(item["target_port"]) for item in previews]
+    if len(identities) != len(set(identities)) or len(ports) != len(set(ports)):
+        raise RuntimeError("Duplicate live-preview identity or target port")
+    return sorted(previews, key=lambda item: (str(item["owner"]), str(item["name"])))
+
+
+def _write_preview_state(previews: list[dict[str, object]]) -> None:
+    _write_text_atomic(
+        PREVIEW_STATE_FILE,
+        json.dumps({"previews": previews, "version": 1}, indent=2, sort_keys=True) + "\n",
+        0o644,
+    )
+
+
+def _preview_project(value: str, account: pwd.struct_passwd) -> str:
+    if value == "~":
+        value = account.pw_dir
+    elif value.startswith("~/"):
+        value = os.path.join(account.pw_dir, value[2:])
+    elif value.startswith("~"):
+        raise ValueError("--project may not reference another user's home")
+    unresolved = os.path.abspath(value)
+    if os.path.islink(unresolved):
+        raise ValueError("--project may not be a symlink")
+    project = os.path.realpath(unresolved)
+    if not os.path.isdir(project):
+        raise ValueError("--project must be a real directory")
+    if os.stat(project).st_uid != account.pw_uid:
+        raise ValueError("--project must be owned by the requesting user")
+    return project
+
+
+def _select_target_port(
+    requested: str,
+    routes: list[dict[str, object]],
+    previews: list[dict[str, object]],
+) -> int:
+    used = {int(route["target_port"]) for route in routes}
+    used.update(int(preview["target_port"]) for preview in previews)
+    if requested == "auto":
+        for port in range(3000, 8000):
+            if port not in used and _port_available(port):
+                return port
+        raise RuntimeError("No private live-preview port is available")
+    try:
+        port = int(requested)
+    except ValueError as exc:
+        raise ValueError("--port must be 'auto' or an integer") from exc
+    if not 1024 <= port <= 65535:
+        raise ValueError("--port must be an unprivileged TCP port")
+    if port in used or not _port_available(port):
+        raise ValueError(f"Private preview port {port} is already in use")
+    return port
+
+
+def _read_preview_package(project: str) -> dict[str, object]:
+    path = os.path.join(project, "package.json")
+    if not os.path.isfile(path) or os.path.islink(path):
+        raise ValueError("No safe package.json found; provide a command after --")
+    try:
+        with open(path, encoding="utf-8") as file_obj:
+            value = json.load(file_obj)
+    except (OSError, ValueError) as exc:
+        raise ValueError("Could not read package.json") from exc
+    if not isinstance(value, dict):
+        raise ValueError("package.json must contain an object")
+    return value
+
+
+def _automatic_preview_command(project: str, port: int) -> list[str]:
+    package = _read_preview_package(project)
+    scripts = package.get("scripts")
+    dependencies = {
+        key
+        for field in ("dependencies", "devDependencies")
+        for key in (
+            package.get(field).keys() if isinstance(package.get(field), dict) else []
+        )
+    }
+    if "vite" not in dependencies:
+        raise ValueError("Automatic preview currently requires Vite; provide a command after --")
+    if not isinstance(scripts, dict):
+        raise ValueError("package.json has no scripts; provide a command after --")
+    script = next(
+        (name for name in ("dev", "preview") if isinstance(scripts.get(name), str)),
+        None,
+    )
+    if script is None:
+        raise ValueError("No dev or preview script found; provide a command after --")
+    if os.path.isfile(os.path.join(project, "pnpm-lock.yaml")):
+        command = ["corepack", "pnpm", "run", script]
+    elif os.path.isfile(os.path.join(project, "yarn.lock")):
+        command = ["corepack", "yarn", "run", script]
+    else:
+        command = ["npm", "run", script]
+    return [*command, "--", "--host", "127.0.0.1", "--port", str(port), "--strictPort"]
+
+
+def _install_preview_dependencies(project: str, account: pwd.struct_passwd) -> None:
+    if os.path.isdir(os.path.join(project, "node_modules")):
+        return
+    if os.path.isfile(os.path.join(project, "pnpm-lock.yaml")):
+        command = ["corepack", "pnpm", "install", "--frozen-lockfile"]
+    elif os.path.isfile(os.path.join(project, "yarn.lock")):
+        command = ["corepack", "yarn", "install", "--immutable"]
+    elif os.path.isfile(os.path.join(project, "package-lock.json")):
+        command = ["npm", "ci"]
+    else:
+        command = ["npm", "install"]
+    command = _resolve_preview_executable(command, account)
+    runtime_path = ":".join(
+        dict.fromkeys(
+            [
+                os.path.dirname(command[0]),
+                os.path.join(account.pw_dir, ".local", "bin"),
+                "/usr/local/bin",
+                "/usr/bin",
+                "/bin",
+            ]
+        )
+    )
+    result = subprocess.run(
+        [
+            "runuser",
+            "-u",
+            account.pw_name,
+            "--",
+            "env",
+            f"HOME={account.pw_dir}",
+            f"PATH={runtime_path}",
+            *command,
+        ],
+        cwd=project,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Preview dependency installation failed with exit code {result.returncode}"
+        )
+
+
+def _preview_command(raw: list[str], project: str, port: int) -> list[str]:
+    command = raw[1:] if raw and raw[0] == "--" else list(raw)
+    if not command:
+        return _automatic_preview_command(project, port)
+    replaced = [
+        argument.replace("{port}", str(port)).replace("{host}", "127.0.0.1")
+        for argument in command
+    ]
+    if not replaced[0] or any(
+        any(ord(character) < 32 or ord(character) == 127 for character in argument)
+        for argument in replaced
+    ):
+        raise ValueError("Preview command arguments must be non-empty and contain no controls")
+    return replaced
+
+
+def _resolve_preview_executable(
+    command: list[str],
+    account: pwd.struct_passwd,
+    working_directory: str | None = None,
+) -> list[str]:
+    executable = command[0]
+    if os.path.isabs(executable):
+        resolved = os.path.realpath(executable)
+    else:
+        candidates: list[str | None] = []
+        if working_directory is not None and os.path.sep in executable:
+            candidates.append(os.path.join(working_directory, executable))
+        candidates.extend(
+            [
+                shutil.which(executable),
+                os.path.join(account.pw_dir, ".local", "bin", executable),
+                os.path.join(account.pw_dir, ".nvm", "current", "bin", executable),
+                os.path.join("/usr/local/bin", executable),
+                os.path.join("/usr/bin", executable),
+            ]
+        )
+        resolved = next(
+            (
+                os.path.realpath(candidate)
+                for candidate in candidates
+                if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK)
+            ),
+            "",
+        )
+    if not resolved or not os.path.isfile(resolved) or not os.access(resolved, os.X_OK):
+        raise ValueError(f"Preview executable is unavailable: {executable}")
+    return [resolved, *command[1:]]
+
+
+def _systemd_quote(value: str) -> str:
+    if any(ord(character) < 32 or ord(character) == 127 for character in value):
+        raise ValueError("Systemd value contains control characters")
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def render_preview_unit(
+    name: str,
+    account: pwd.struct_passwd,
+    project: str,
+    launcher: str,
+) -> str:
+    """Render a bounded system service that executes only as the requesting user."""
+
+    _validate_name(name, "preview name")
+    group_name = _validate_username(grp.getgrgid(account.pw_gid).gr_name)
+    return f"""[Unit]
+Description=infra_tools live preview: {name} ({account.pw_name})
+After=network.target
+
+[Service]
+Type=simple
+User={account.pw_name}
+Group={group_name}
+WorkingDirectory={_systemd_quote(project)}
+Environment={_systemd_quote('HOME=' + account.pw_dir)}
+ExecStart={_systemd_quote(launcher)}
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=full
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=true
+TasksMax=256
+MemoryMax=1G
+"""
+
+
+def _preview_paths(account: pwd.struct_passwd, name: str) -> tuple[str, str, str]:
+    unit = f"{_PREVIEW_UNIT_PREFIX}-{account.pw_name}-{name}.service"
+    launcher = os.path.join(PREVIEW_RUNTIME_ROOT, f"{account.pw_name}-{name}.sh")
+    unit_path = os.path.join(SYSTEMD_ROOT, unit)
+    return unit, unit_path, launcher
+
+
+def _write_preview_service(
+    account: pwd.struct_passwd,
+    name: str,
+    project: str,
+    command: list[str],
+    port: int,
+) -> tuple[str, str]:
+    if os.path.lexists(PREVIEW_RUNTIME_ROOT) and (
+        os.path.islink(PREVIEW_RUNTIME_ROOT) or not os.path.isdir(PREVIEW_RUNTIME_ROOT)
+    ):
+        raise RuntimeError(f"Refusing unsafe preview runtime root: {PREVIEW_RUNTIME_ROOT}")
+    os.makedirs(PREVIEW_RUNTIME_ROOT, mode=0o755, exist_ok=True)
+    unit, unit_path, launcher = _preview_paths(account, name)
+    for path, label in ((unit_path, "unit"), (launcher, "launcher")):
+        if os.path.lexists(path):
+            raise RuntimeError(f"Refusing existing live-preview {label}: {path}")
+    runtime_path = ":".join(
+        dict.fromkeys(
+            [
+                os.path.dirname(command[0]),
+                os.path.join(account.pw_dir, ".local", "bin"),
+                "/usr/local/bin",
+                "/usr/bin",
+                "/bin",
+            ]
+        )
+    )
+    script = (
+        "#!/bin/sh\n"
+        f"export PATH={shlex.quote(runtime_path)}\n"
+        "export HOST=127.0.0.1\n"
+        f"export PORT={port}\n"
+        f"exec {shlex.join(command)}\n"
+    )
+    try:
+        _write_text_atomic(launcher, script, 0o750)
+        os.chown(launcher, account.pw_uid, account.pw_gid)
+        os.chmod(launcher, 0o700)
+        _write_text_atomic(unit_path, render_preview_unit(name, account, project, launcher), 0o644)
+        _run_checked(["systemctl", "daemon-reload"], "Could not reload systemd")
+        _run_checked(["systemctl", "start", unit], "Could not start live preview")
+    except Exception:
+        for path in (unit_path, launcher):
+            try:
+                os.unlink(path)
+            except FileNotFoundError:
+                pass
+        subprocess.run(["systemctl", "daemon-reload"], check=False, capture_output=True)
+        raise
+    return unit, launcher
+
+
+def _preview_active(unit: str) -> bool:
+    result = subprocess.run(
+        ["systemctl", "is-active", "--quiet", unit],
+        check=False,
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
+def _remove_preview_service(record: dict[str, object]) -> None:
+    unit = str(record["unit"])
+    unit_path = os.path.join(SYSTEMD_ROOT, unit)
+    launcher = os.path.join(
+        PREVIEW_RUNTIME_ROOT,
+        f"{record['owner']}-{record['name']}.sh",
+    )
+    subprocess.run(["systemctl", "stop", unit], check=False, capture_output=True)
+    for path, label in ((unit_path, "unit"), (launcher, "launcher")):
+        if os.path.lexists(path):
+            if os.path.islink(path) or not os.path.isfile(path):
+                raise RuntimeError(f"Refusing unsafe live-preview {label}: {path}")
+            os.unlink(path)
+    subprocess.run(["systemctl", "daemon-reload"], check=False, capture_output=True)
+    subprocess.run(["systemctl", "reset-failed", unit], check=False, capture_output=True)
+
+
+def _preview_for_user(
+    name: str,
+    previews: list[dict[str, object]],
+    username: str,
+) -> dict[str, object]:
+    _validate_name(name, "preview name")
+    record = next(
+        (
+            preview
+            for preview in previews
+            if preview["name"] == name and preview["owner"] == username
+        ),
+        None,
+    )
+    if record is None:
+        raise RuntimeError(f"Live preview does not exist: {name}")
+    return record
+
+
+def _stop_preview_record(
+    record: dict[str, object],
+    policy: dict[str, object],
+    routes: list[dict[str, object]],
+    previews: list[dict[str, object]],
+) -> None:
+    route = next((item for item in routes if item["name"] == record["name"]), None)
+    if route is not None and (
+        route["owner"] != record["owner"]
+        or route["target_host"] != record["target_host"]
+        or route["target_port"] != record["target_port"]
+    ):
+        raise RuntimeError("Live-preview route no longer matches its managed service")
+    updated_routes = [item for item in routes if item is not route]
+    if route is not None:
+        _apply_forwards(updated_routes, policy)
+    _remove_preview_service(record)
+    previews.remove(record)
+    _write_preview_state(previews)
+    routes[:] = updated_routes
+
+
+def _preview_start(args: argparse.Namespace) -> int:
+    if os.geteuid() != 0:
+        raise RuntimeError("Run live-preview mutations with sudo")
+    name = _validate_name(args.name, "preview name")
+    policy = _load_policy()
+    owner = _requesting_username(policy)
+    account = pwd.getpwnam(owner)
+    project = _preview_project(args.project, account)
+    if not 0 < args.wait <= 300:
+        raise ValueError("--wait must be greater than 0 and at most 300 seconds")
+    health = _validate_health_path(args.health)
+    routes = _load_forwards(policy)
+    previews = _load_previews(policy)
+    existing = next(
+        (
+            preview
+            for preview in previews
+            if preview["name"] == name and preview["owner"] == owner
+        ),
+        None,
+    )
+    if existing is not None:
+        if not args.replace:
+            raise RuntimeError(f"Live preview already exists: {name}; use --replace")
+        _stop_preview_record(existing, policy, routes, previews)
+    conflicting_route = next((route for route in routes if route["name"] == name), None)
+    if conflicting_route is not None:
+        raise RuntimeError(f"HTTPS forward already uses the preview name: {name}")
+
+    port = _select_target_port(args.port, routes, previews)
+    if not args.preview_argv:
+        _install_preview_dependencies(project, account)
+    command = _resolve_preview_executable(
+        _preview_command(args.preview_argv, project, port),
+        account,
+        project,
+    )
+    listen = _select_listen_port(args.listen, routes, policy, None)
+    unit = ""
+    launcher = ""
+    route_applied = False
+    try:
+        unit, launcher = _write_preview_service(account, name, project, command, port)
+        _wait_for_upstream("127.0.0.1", port, health, args.wait)
+        route = {
+            "listen": listen,
+            "name": name,
+            "owner": owner,
+            "profile": args.profile,
+            "target_host": "127.0.0.1",
+            "target_port": port,
+        }
+        _apply_forwards([*routes, route], policy)
+        route_applied = True
+        record = {
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "health": health,
+            "listen": listen,
+            "name": name,
+            "owner": owner,
+            "profile": args.profile,
+            "project": project,
+            "target_host": "127.0.0.1",
+            "target_port": port,
+            "unit": unit,
+        }
+        previews.append(record)
+        previews.sort(key=lambda item: (str(item["owner"]), str(item["name"])))
+        _write_preview_state(previews)
+    except Exception:
+        if route_applied:
+            try:
+                _apply_forwards(routes, policy)
+            except Exception:
+                pass
+        if unit:
+            _remove_preview_service(
+                {
+                    "name": name,
+                    "owner": owner,
+                    "unit": unit,
+                }
+            )
+        elif launcher:
+            try:
+                os.unlink(launcher)
+            except FileNotFoundError:
+                pass
+        raise
+    url = _forward_url(str(policy["base_url"]), listen)
+    result = {
+        "listen": listen,
+        "name": name,
+        "ok": True,
+        "project": project,
+        "target_port": port,
+        "unit": unit,
+        "url": url,
+    }
+    if args.json:
+        print(json.dumps(result, sort_keys=True))
+    else:
+        print(f"{name}: {url} (unit {unit}, loopback {port})")
+    if args.open:
+        _open_url(url, owner)
+    return 0
+
+
+def _preview_stop(name: str, as_json: bool) -> int:
+    if os.geteuid() != 0:
+        raise RuntimeError("Run live-preview mutations with sudo")
+    policy = _load_policy()
+    owner = _requesting_username(policy)
+    routes = _load_forwards(policy)
+    previews = _load_previews(policy)
+    record = _preview_for_user(name, previews, owner)
+    _stop_preview_record(record, policy, routes, previews)
+    if as_json:
+        print(json.dumps({"name": name, "removed": True}, sort_keys=True))
+    else:
+        print(f"Stopped and removed live preview {name}")
+    return 0
+
+
+def _preview_list(as_json: bool) -> int:
+    policy = _load_policy()
+    account = pwd.getpwuid(os.getuid())
+    previews = [
+        {
+            **preview,
+            "active": _preview_active(str(preview["unit"])),
+            "url": _forward_url(str(policy["base_url"]), int(preview["listen"])),
+        }
+        for preview in _load_previews(policy)
+        if os.geteuid() == 0 or preview["owner"] == account.pw_name
+    ]
+    if as_json:
+        print(json.dumps({"previews": previews}, sort_keys=True))
+    elif not previews:
+        print("No live previews configured")
+    else:
+        for preview in previews:
+            print(
+                f"{preview['name']}\t{preview['url']}\t{preview['project']}\t"
+                f"{'active' if preview['active'] else 'stopped'}"
+            )
+    return 0
+
+
+def _preview_print_url(name: str) -> int:
+    policy = _load_policy()
+    account = pwd.getpwuid(os.getuid())
+    previews = _load_previews(policy)
+    if os.geteuid() == 0:
+        record = next((item for item in previews if item["name"] == name), None)
+        if record is None:
+            raise RuntimeError(f"Live preview does not exist: {name}")
+    else:
+        record = _preview_for_user(name, previews, account.pw_name)
+    print(_forward_url(str(policy["base_url"]), int(record["listen"])))
+    return 0
+
+
+def _preview_logs(name: str, lines: int) -> int:
+    if not 1 <= lines <= 1000:
+        raise ValueError("--lines must be from 1 through 1000")
+    policy = _load_policy()
+    account = pwd.getpwuid(os.getuid())
+    previews = _load_previews(policy)
+    if os.geteuid() == 0:
+        record = next((item for item in previews if item["name"] == name), None)
+        if record is None:
+            raise RuntimeError(f"Live preview does not exist: {name}")
+    else:
+        record = _preview_for_user(name, previews, account.pw_name)
+    result = subprocess.run(
+        ["journalctl", "-u", str(record["unit"]), "-n", str(lines), "--no-pager"],
+        check=False,
+        text=True,
+    )
+    return result.returncode
+
+
+def _preview_prune(confirmed: bool, as_json: bool) -> int:
+    if os.geteuid() != 0:
+        raise RuntimeError("Run live-preview mutations with sudo")
+    if not confirmed:
+        raise ValueError("Pruning stopped live previews requires --yes")
+    policy = _load_policy()
+    owner = _requesting_username(policy)
+    routes = _load_forwards(policy)
+    previews = _load_previews(policy)
+    removed: list[str] = []
+    for record in list(previews):
+        if record["owner"] != owner or _preview_active(str(record["unit"])):
+            continue
+        _stop_preview_record(record, policy, routes, previews)
+        removed.append(str(record["name"]))
+    if as_json:
+        print(json.dumps({"removed": removed}, sort_keys=True))
+    elif removed:
+        print(f"Removed {len(removed)} stopped preview(s): {', '.join(removed)}")
+    else:
+        print("No stopped previews found")
     return 0
 
 
@@ -901,11 +1810,42 @@ def _publish_godot(args: argparse.Namespace) -> int:
     return godot_web_publish.main(forwarded)
 
 
+def _publish_site(args: argparse.Namespace) -> int:
+    result = static_web_publish.publish(args)
+    if args.json:
+        print(json.dumps(result, sort_keys=True))
+    else:
+        print(f"Published {result['site']} to {result['url']}")
+    if args.open:
+        _open_url(str(result["url"]))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
+    raw_args = list(sys.argv[1:] if argv is None else argv)
+    preview_argv: list[str] = []
+    if raw_args[:2] == ["preview", "start"] and "--" in raw_args:
+        separator = raw_args.index("--")
+        preview_argv = raw_args[separator + 1 :]
+        raw_args = raw_args[:separator]
+    args = _parser().parse_args(raw_args)
+    if args.command == "preview" and args.preview_command == "start":
+        args.preview_argv = preview_argv
     try:
         if args.command == "publish":
-            return _publish_godot(args)
+            if args.publish_kind == "godot":
+                return _publish_godot(args)
+            if args.publish_kind == "site":
+                return _publish_site(args)
+        if args.command == "site":
+            if args.site_command in ("list", "ls"):
+                return _print_sites(args.json)
+            if args.site_command == "url":
+                return _print_site_url(args.name)
+            if args.site_command == "doctor":
+                return _site_doctor(args.name, args.json)
+            if args.site_command == "remove":
+                return _remove_site(args.name, args.yes, args.json)
         if args.command in ("list", "ls"):
             return _print_games(args.json)
         if args.command == "url":
@@ -923,8 +1863,25 @@ def main(argv: list[str] | None = None) -> int:
                 return _forward_remove(args)
             if args.forward_command in ("list", "ls"):
                 return _forward_list(args.json)
+            if args.forward_command == "url":
+                return _forward_print_url(args.name)
+            if args.forward_command == "prune":
+                return _forward_prune(args.yes, args.json)
             if args.forward_command == "reconcile":
                 return _forward_reconcile(args.json)
+        if args.command == "preview":
+            if args.preview_command == "start":
+                return _preview_start(args)
+            if args.preview_command == "stop":
+                return _preview_stop(args.name, args.json)
+            if args.preview_command in ("list", "ls"):
+                return _preview_list(args.json)
+            if args.preview_command == "url":
+                return _preview_print_url(args.name)
+            if args.preview_command == "logs":
+                return _preview_logs(args.name, args.lines)
+            if args.preview_command == "prune":
+                return _preview_prune(args.yes, args.json)
     except (OSError, RuntimeError, ValueError) as exc:
         as_json = bool(getattr(args, "json", False))
         if as_json:

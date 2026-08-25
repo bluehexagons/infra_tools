@@ -275,6 +275,16 @@ class T3CodeWebTest(unittest.TestCase):
             self.assertTrue(os.path.isfile(skill))
             with open(skill, encoding="utf-8") as file_obj:
                 self.assertIn("managed-by: infra_tools", file_obj.read())
+            gateway_skill = os.path.join(
+                temporary,
+                ".agents",
+                "skills",
+                "infra-tools-web-gateway",
+                "SKILL.md",
+            )
+            self.assertTrue(os.path.isfile(gateway_skill))
+            with open(gateway_skill, encoding="utf-8") as file_obj:
+                self.assertIn("managed-by: infra_tools", file_obj.read())
             with open(service_path, encoding="utf-8") as file_obj:
                 service = file_obj.read()
             self.assertIn("User=agent", service)

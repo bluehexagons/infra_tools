@@ -23,6 +23,7 @@ class TestGodotWebHost(unittest.TestCase):
         self.assertIn("listen 8443 ssl", content)
         self.assertIn("Cross-Origin-Opener-Policy \"same-origin\"", content)
         self.assertIn("Cross-Origin-Embedder-Policy \"require-corp\"", content)
+        self.assertIn("location /sites/", content)
         self.assertIn("application/x-x509-ca-cert", content)
         self.assertIn("autoindex on", content)
         self.assertIn("gzip_static on", content)
@@ -69,6 +70,7 @@ class TestGodotWebHost(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_dir:
             web_root = os.path.join(temporary_dir, "web")
             games_root = os.path.join(web_root, "games")
+            sites_root = os.path.join(web_root, "sites")
             url_file = os.path.join(temporary_dir, "config", "base-url")
             ca_cert = os.path.join(temporary_dir, "ca.crt")
             ca_download = os.path.join(web_root, "infra-tools-ca.crt")
@@ -79,6 +81,7 @@ class TestGodotWebHost(unittest.TestCase):
             with (
                 patch.object(godot_web_steps, "GODOT_WEB_ROOT", web_root),
                 patch.object(godot_web_steps, "GODOT_WEB_GAMES_ROOT", games_root),
+                patch.object(godot_web_steps, "INTERNAL_WEB_SITES_ROOT", sites_root),
                 patch.object(godot_web_steps, "GODOT_WEB_URL_FILE", url_file),
                 patch.object(godot_web_steps, "GODOT_WEB_CA_CERT", ca_cert),
                 patch.object(
@@ -114,10 +117,13 @@ class TestGodotWebHost(unittest.TestCase):
 
             self.assertTrue(changed)
             self.assertTrue(os.path.isdir(os.path.join(games_root, "agent")))
+            self.assertTrue(os.path.isdir(os.path.join(sites_root, "agent")))
             with open(os.path.join(web_root, "index.html"), encoding="utf-8") as page:
                 content = page.read()
                 self.assertIn("infra-web publish godot", content)
-                self.assertIn("agent games", content)
+                self.assertIn("infra-web publish site", content)
+                self.assertIn("agent sites", content)
+                self.assertIn(">games</a>", content)
             with open(url_file, encoding="utf-8") as base_url:
                 self.assertEqual(base_url.read(), "https://192.0.2.10:8443\n")
             certificate.assert_called_once_with(

@@ -1,4 +1,4 @@
-"""Configure the shared HTTPS host used by Godot web exports."""
+"""Configure the shared HTTPS host used by internal sites and Godot exports."""
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ from lib.validators import validate_host, validate_username
 
 GODOT_WEB_ROOT = "/srv/infra-tools/web"
 GODOT_WEB_GAMES_ROOT = f"{GODOT_WEB_ROOT}/games"
+INTERNAL_WEB_SITES_ROOT = f"{GODOT_WEB_ROOT}/sites"
 GODOT_WEB_CA_DOWNLOAD = f"{GODOT_WEB_ROOT}/infra-tools-ca.crt"
 GODOT_WEB_PKI_DIR = "/var/lib/infra_tools/internal-web-pki"
 GODOT_WEB_CA_CERT = f"{GODOT_WEB_PKI_DIR}/ca.crt"
@@ -492,6 +493,13 @@ server {{
         add_header Cache-Control "no-cache" always;
     }}
 
+    location /sites/ {{
+        autoindex on;
+        try_files $uri $uri/ =404;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Cache-Control "no-cache" always;
+    }}
+
     location = /infra-tools-ca.crt {{
         default_type application/x-x509-ca-cert;
         try_files /infra-tools-ca.crt =404;
@@ -515,8 +523,9 @@ def _landing_page(base_url: str, local_ca: bool, users: Sequence[str]) -> str:
         else "<p>This endpoint is using an existing publicly trusted certificate.</p>"
     )
     user_items = "".join(
-        f'<li><a href="/games/{html.escape(username)}/">'
-        f"{html.escape(username)} games</a></li>"
+        f'<li><a href="/sites/{html.escape(username)}/">'
+        f"{html.escape(username)} sites</a> · "
+        f'<a href="/games/{html.escape(username)}/">games</a></li>'
         for username in users
     )
     catalogs = f"<ul>{user_items}</ul>" if user_items else ""
@@ -526,8 +535,10 @@ def _landing_page(base_url: str, local_ca: bool, users: Sequence[str]) -> str:
 <title>infra_tools internal web host</title>
 <style>body{{font:16px system-ui,sans-serif;max-width:48rem;margin:3rem auto;padding:0 1rem;line-height:1.5}}code{{background:#eef1f4;padding:.15rem .3rem;border-radius:.2rem}}</style>
 </head><body><main><h1>Internal web host</h1>
+<p>Static sites are available under <a href="/sites/">/sites/</a>.</p>
 <p>Godot exports are available under <a href="/games/">/games/</a>.</p>
 {catalogs}
+<p>Publish a static project with <code>infra-web publish site</code>.</p>
 <p>Publish the current project with <code>infra-web publish godot</code>.</p>
 {trust_note}
 <p>Base URL: <code>{html.escape(base_url)}</code></p>
@@ -547,6 +558,8 @@ def _internal_landing_page(base_url: str, local_ca: bool) -> str:
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>infra_tools internal web host</title>
 </head><body><main><h1>infra_tools internal web host</h1>
+<p>Static sites are available under <a href="/sites/">/sites/</a>.</p>
+<p>Publish the current project with <code>infra-web publish site</code>.</p>
 {trust_note}<p>Base URL: <code>{html.escape(base_url)}</code></p>
 </main></body></html>
 """
@@ -619,21 +632,23 @@ def _ensure_nginx() -> None:
 def _configure_user_roots(users: list[str]) -> bool:
     changed = False
     _ensure_managed_directory(GODOT_WEB_GAMES_ROOT, 0o755)
+    _ensure_managed_directory(INTERNAL_WEB_SITES_ROOT, 0o755)
     for username in users:
         if not validate_username(username):
-            raise ValueError(f"Invalid Godot web-host username: {username}")
+            raise ValueError(f"Invalid internal web-host username: {username}")
         account = pwd.getpwnam(username)
-        user_root = os.path.join(GODOT_WEB_GAMES_ROOT, username)
-        validate_filesystem_path(user_root, must_exist=False)
-        if os.path.lexists(user_root) and (
-            os.path.islink(user_root) or not os.path.isdir(user_root)
-        ):
-            raise RuntimeError(f"Refusing unsafe Godot web root: {user_root}")
-        if not os.path.isdir(user_root):
-            os.mkdir(user_root, mode=0o755)
-            changed = True
-        os.chown(user_root, account.pw_uid, account.pw_gid)
-        os.chmod(user_root, 0o755)
+        for root in (GODOT_WEB_GAMES_ROOT, INTERNAL_WEB_SITES_ROOT):
+            user_root = os.path.join(root, username)
+            validate_filesystem_path(user_root, must_exist=False)
+            if os.path.lexists(user_root) and (
+                os.path.islink(user_root) or not os.path.isdir(user_root)
+            ):
+                raise RuntimeError(f"Refusing unsafe internal web root: {user_root}")
+            if not os.path.isdir(user_root):
+                os.mkdir(user_root, mode=0o755)
+                changed = True
+            os.chown(user_root, account.pw_uid, account.pw_gid)
+            os.chmod(user_root, 0o755)
     return changed
 
 
@@ -912,6 +927,7 @@ def configure_internal_web_host(
     if install_utility:
         _install_infra_web_link()
     if configure_static_site:
+        _configure_user_roots(normalized_users)
         index_path = os.path.join(GODOT_WEB_ROOT, "index.html")
         if os.path.lexists(index_path):
             if os.path.islink(index_path) or not os.path.isfile(index_path):
@@ -942,6 +958,7 @@ def configure_internal_web_host(
 __all__ = [
     "GODOT_WEB_CA_DOWNLOAD",
     "GODOT_WEB_GAMES_ROOT",
+    "INTERNAL_WEB_SITES_ROOT",
     "configure_godot_agent_skills",
     "configure_internal_web_host",
     "configure_godot_web_host",
