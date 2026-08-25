@@ -46,6 +46,7 @@ from lib.validation import (
     validate_hosted_flags,
     validate_network_setup_settings,
     validate_rdp_settings,
+    validate_samba_settings,
     validate_samba_share_credentials,
     validate_samba_share_specs,
     validate_smb_mount_specs,
@@ -1130,6 +1131,7 @@ def prepare_validated_runtime_config(
     validate_scrub_specs(runtime_config.scrub_specs)
     validate_web_interface_settings(runtime_config)
     validate_smb_mount_specs(runtime_config.smb_mounts)
+    validate_samba_settings(runtime_config)
     validate_samba_share_specs(
         runtime_config.samba_shares,
         runtime_config.share_credentials,

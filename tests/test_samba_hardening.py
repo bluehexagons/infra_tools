@@ -112,6 +112,36 @@ class TestConfigureSambaGlobalSettings(unittest.TestCase):
 
         self.assertNotIn("systemctl reload smbd", commands)
 
+    def test_configures_custom_metadata_cache_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            smb_conf = os.path.join(tmpdir, "smb.conf")
+            with open(smb_conf, "w", encoding="utf-8") as file_obj:
+                file_obj.write("[global]\n")
+
+            commands: list[str] = []
+
+            def fake_run(command: str, **_kwargs: object) -> MagicMock:
+                commands.append(command)
+                return MagicMock(returncode=0, stderr="")
+
+            with patch.object(samba_steps, "SMB_CONF_PATH", smb_conf), \
+                 patch.object(samba_steps, "run", side_effect=fake_run):
+                samba_steps.configure_samba_global_settings(
+                    _make_config(
+                        enable_samba=True,
+                        samba_metadata_cache="/srv/ssd/samba-cache",
+                    )
+                )
+
+            with open(smb_conf, encoding="utf-8") as file_obj:
+                configured = file_obj.read()
+
+        self.assertIn("cache directory = /srv/ssd/samba-cache", configured)
+        self.assertIn(
+            "install -d -m 0750 -o root -g root -- /srv/ssd/samba-cache",
+            commands,
+        )
+
 
 class TestSambaFail2banFilter(unittest.TestCase):
     def test_filter_matches_modern_smbd_auth_failure(self) -> None:

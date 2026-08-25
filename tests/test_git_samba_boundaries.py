@@ -52,6 +52,15 @@ class TestGogsSambaPathBoundaries(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must not overlap"):
             validate_gogs_settings(config)
 
+    def test_samba_metadata_cache_inside_gogs_data_is_rejected(self) -> None:
+        config = _config(samba_metadata_cache="/srv/data/gogs/samba-cache")
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "metadata cache must not overlap the live Gogs data",
+        ):
+            validate_gogs_settings(config)
+
 
 class TestGogsConfigPermissions(unittest.TestCase):
     def test_generated_app_config_is_owner_only(self) -> None:

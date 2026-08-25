@@ -379,6 +379,16 @@ def validate_gogs_settings(config: "SetupConfig") -> None:
         validate_filesystem_path(data_path, must_exist=False)
 
     normalized_data_path = os.path.normpath(data_path)
+    if config.samba_metadata_cache:
+        normalized_cache_path = os.path.normpath(config.samba_metadata_cache)
+        common_path = os.path.commonpath(
+            (normalized_data_path, normalized_cache_path)
+        )
+        if common_path in {normalized_data_path, normalized_cache_path}:
+            raise ValueError(
+                "Samba metadata cache must not overlap the live Gogs data "
+                f"path {data_path}"
+            )
     for share_spec in config.samba_shares or []:
         if len(share_spec) < 3:
             continue
@@ -775,6 +785,49 @@ def validate_samba_share_specs(
                 raise ValueError(f"Samba password must not be empty for user: {username}")
             validate_no_control_characters(username, "Samba username")
             validate_no_control_characters(password, "Samba password")
+
+
+def validate_samba_settings(config: "SetupConfig") -> None:
+    """Validate Samba-specific network policy before remote execution."""
+
+    sources = config.samba_sources or []
+    if sources and not config.enable_samba:
+        raise ValueError("--samba-source requires --samba")
+
+    normalized_sources: set[str] = set()
+    for source in sources:
+        normalized = validate_network_ip_or_cidr(source, "Samba source")
+        canonical_source = (
+            str(ipaddress.ip_network(normalized, strict=False))
+            if "/" in normalized
+            else str(ipaddress.ip_address(normalized))
+        )
+        if canonical_source in normalized_sources:
+            raise ValueError(f"Duplicate --samba-source: {canonical_source}")
+        normalized_sources.add(canonical_source)
+
+    cache_path = config.samba_metadata_cache
+    if not cache_path:
+        return
+    if not config.enable_samba:
+        raise ValueError("--samba-metadata-cache requires --samba")
+    if not os.path.isabs(cache_path):
+        raise ValueError(f"Samba metadata cache path must be absolute: {cache_path}")
+    if os.path.normpath(cache_path) == "/":
+        raise ValueError("Samba metadata cache path must not be the filesystem root")
+    validate_filesystem_path(cache_path, must_exist=False)
+
+    normalized_cache = os.path.normpath(cache_path)
+    for share_spec in config.samba_shares or []:
+        if len(share_spec) < 3:
+            continue
+        normalized_share = os.path.normpath(share_spec[2])
+        common_path = os.path.commonpath((normalized_cache, normalized_share))
+        if common_path in {normalized_cache, normalized_share}:
+            raise ValueError(
+                "Samba metadata cache must not overlap share path "
+                f"{share_spec[2]}"
+            )
 
 
 def validate_samba_share_name(share_name: str) -> None:

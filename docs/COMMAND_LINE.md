@@ -250,7 +250,8 @@ pairing endpoints, direct Gogs, and Samba ingress. On `server_proxmox`, they
 populate Proxmox's standard `management` IP set, which covers the web GUI,
 SSH, VNC, and SPICE. Service-specific `--rdp-source`,
 `--web-interface-source`, and `--gogs-source` values remain available and are
-added to the generic set for that service. Cloudflare tunnels and intentionally
+added to the generic set for that service. `--samba-source` provides the same
+service-only addition for SMB ingress. Cloudflare tunnels and intentionally
 public Antistatic endpoints retain their own exposure policy.
 
 Without a generic source or `--rdp-source`, enabling RDP keeps a globally
@@ -782,6 +783,10 @@ probe.
 | Flag | Description |
 |------|-------------|
 | `--samba` | Install and harden Samba for authenticated SMB3 file sharing |
+| `--samba-source IP_OR_CIDR` | Add a Samba-only ingress source; repeatable and combined with generic access sources |
+| `--no-samba-source` | Clear saved Samba-specific ingress sources |
+| `--samba-metadata-cache PATH` | Put Samba's disposable TDB metadata cache in an absolute directory outside share paths |
+| `--no-samba-metadata-cache` | Return Samba metadata caching to `/var/cache/samba` |
 | `--share TYPE NAME PATH USERS` | Configure one Samba directory share |
 | `--credential USERNAME PASSWORD` | Define a password for username-only share entries |
 | `--smbclient` | Install SMB/CIFS client |
@@ -791,8 +796,10 @@ probe.
 | `--notify TYPE TARGET` | Configure notifications |
 
 Samba shares are authenticated and hardened; `TYPE` is `read` or `write`, and
-`PATH` is one absolute directory. See [Samba Shares](./SAMBA_SHARES.md) for
-credentials, access control, fast updates, removals, and SMB client mounts.
+`PATH` is one absolute directory. The metadata-cache option moves only Samba's
+non-persistent TDB state, not share contents. See
+[Samba Shares](./SAMBA_SHARES.md) for credentials, access control, fast
+updates, removals, and SMB client mounts.
 See [Storage operations](./STORAGE_OPERATIONS.md) for sync, parity, schedules,
 mount checks, and logs, and [Notifications](./NOTIFICATIONS.md) for delivery
 targets and failure behavior.

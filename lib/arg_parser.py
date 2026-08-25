@@ -849,6 +849,39 @@ def add_setup_arguments(
                        action=argparse.BooleanOptionalAction if not for_remote else "store_true", 
                        default=None if not for_remote else False,
                        help="Install and configure Samba for SMB file sharing")
+    samba_source_group = parser.add_mutually_exclusive_group()
+    samba_source_group.add_argument(
+        "--samba-source",
+        dest="samba_sources",
+        action="append",
+        metavar="IP_OR_CIDR",
+        help=(
+            "Allow Samba only from this IP or CIDR in addition to generic "
+            "access sources; repeat as needed"
+        ),
+    )
+    samba_source_group.add_argument(
+        "--no-samba-source",
+        dest="clear_samba_sources",
+        action="store_true",
+        help="Clear saved Samba-specific access sources",
+    )
+    samba_cache_group = parser.add_mutually_exclusive_group()
+    samba_cache_group.add_argument(
+        "--samba-metadata-cache",
+        dest="samba_metadata_cache",
+        metavar="PATH",
+        help=(
+            "Store Samba's disposable TDB metadata cache in this absolute "
+            "directory (for example, on SSD storage)"
+        ),
+    )
+    samba_cache_group.add_argument(
+        "--no-samba-metadata-cache",
+        dest="clear_samba_metadata_cache",
+        action="store_true",
+        help="Clear a saved custom Samba metadata-cache directory",
+    )
     parser.add_argument("--share", dest="samba_shares", 
                        action="append", nargs=4, metavar=("ACCESS_TYPE", "SHARE_NAME", "PATH", "USERS"),
                        help="Configure one Samba directory share: access_type (read|write), share_name, absolute path, comma-separated username:password pairs or usernames that resolve via --credential (can be used multiple times)")

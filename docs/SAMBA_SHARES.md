@@ -31,6 +31,7 @@ fail2ban, and creates the requested shares:
 ```bash
 infra-tools setup server_lite fileserver admin \
   --samba \
+  --samba-source 192.168.1.0/24 \
   --share read documents /srv/documents alice,bob \
   --share write dropbox /srv/dropbox alice,carol
 ```
@@ -39,6 +40,30 @@ The target must be Debian and the setup user must have root SSH access. Share
 paths are created when needed. Paths below `/mnt` must already be on a mounted
 filesystem; this prevents accidentally creating a share on the root disk when
 a data drive is missing.
+
+`--samba-source` adds a Samba-only ingress policy. It is combined with any
+generic `--access-source`/`--lan-access` policy but does not restrict SSH,
+Gogs, or other services. Repeat it for each client network. A later patch can
+use `--no-samba-source` to clear the saved Samba-specific list.
+
+Samba also has a small disposable TDB metadata cache. To place that metadata
+on an SSD-backed filesystem, declare an absolute directory that is outside all
+share paths:
+
+```bash
+infra-tools setup server_lite fileserver admin \
+  --samba \
+  --samba-source 192.168.1.0/24 \
+  --samba-metadata-cache /srv/ssd-cache/samba \
+  --share write projects /srv/data/shares/projects alice,bob
+```
+
+This option configures Samba's `cache directory`; it does not cache shared
+file contents. The directory is root-owned, mode `0750`, and its contents may
+be deleted while Samba is stopped. Use `--no-samba-metadata-cache` to return
+to `/var/cache/samba`. For data acceleration shared by Gogs, Git LFS, and
+Samba, use the VM block-cache feature documented in
+[Proxmox](./PROXMOX.md), not this metadata option.
 
 For a NAS with storage maintenance, combine shares with sync and scrub jobs:
 

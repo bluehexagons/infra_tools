@@ -62,7 +62,7 @@ def configure_samba_firewall(config: SetupConfig) -> None:
     for rule in cleanup_rules:
         run(rule, check=False)
 
-    sources = config.effective_access_sources()
+    sources = config.effective_samba_sources()
     desired_comments: set[str] = set()
     if sources:
         for source in sources:
@@ -460,6 +460,10 @@ SAMBA_GLOBAL_HARDENED_SETTINGS: dict[str, str] = {
     "obey pam restrictions": "yes",
     "unix password sync": "yes",
     "pam password change": "yes",
+    # This cache contains disposable Samba TDB metadata, not share contents.
+    # Keep an explicit default so clearing a custom SSD-backed path reliably
+    # reconciles the service back to the distro location.
+    "cache directory": "/var/cache/samba",
 }
 
 
@@ -524,8 +528,13 @@ def _write_validated_smb_config(
     return False
 
 
-def _render_hardened_global_settings(content: str) -> str:
+def _render_hardened_global_settings(
+    content: str,
+    settings: Optional[dict[str, str]] = None,
+) -> str:
     """Update only the [global] section while preserving all share settings."""
+
+    desired_settings = settings or SAMBA_GLOBAL_HARDENED_SETTINGS
 
     section_pattern = re.compile(
         r"(?ims)^(?P<header>[ \t]*\[global\][^\r\n]*)(?:\r?\n|$)"
@@ -534,14 +543,14 @@ def _render_hardened_global_settings(content: str) -> str:
     match = section_pattern.search(content)
     hardened_lines = "".join(
         f"   {key} = {value}\n"
-        for key, value in SAMBA_GLOBAL_HARDENED_SETTINGS.items()
+        for key, value in desired_settings.items()
     )
 
     if not match:
         return "[global]\n" + hardened_lines + "\n" + content
 
     body = match.group("body")
-    for key in SAMBA_GLOBAL_HARDENED_SETTINGS:
+    for key in desired_settings:
         setting_pattern = re.compile(
             r"(?im)^[ \t]*" + re.escape(key) + r"[ \t]*=[^\r\n]*(?:\r?\n|$)"
         )
@@ -553,6 +562,14 @@ def _render_hardened_global_settings(content: str) -> str:
 
 def configure_samba_global_settings(config: SetupConfig) -> None:
     smb_conf = SMB_CONF_PATH
+    cache_path = config.samba_metadata_cache or "/var/cache/samba"
+    settings = dict(SAMBA_GLOBAL_HARDENED_SETTINGS)
+    settings["cache directory"] = cache_path
+
+    run(
+        "install -d -m 0750 -o root -g root -- "
+        f"{shlex.quote(cache_path)}"
+    )
     
     if not os.path.exists(smb_conf):
         run(f"touch {shlex.quote(smb_conf)}")
@@ -560,7 +577,7 @@ def configure_samba_global_settings(config: SetupConfig) -> None:
     with open(smb_conf, 'r') as f:
         content = f.read()
     
-    desired_content = _render_hardened_global_settings(content)
+    desired_content = _render_hardened_global_settings(content, settings)
     if desired_content == content:
         print("  ✓ Global Samba configuration already up to date")
         return

@@ -310,6 +310,10 @@ class SetupConfig:
     is_app_server: bool = False
     deploy_targets: Optional[StrList] = None
     enable_samba: bool = False
+    samba_sources: Optional[StrList] = None
+    clear_samba_sources: bool = False
+    samba_metadata_cache: MaybeStr = None
+    clear_samba_metadata_cache: bool = False
     samba_shares: Optional[NestedStrList] = None
     share_credentials: Optional[NestedStrList] = None
     enable_smbclient: bool = False
@@ -452,6 +456,10 @@ class SetupConfig:
             self.web_interface_sources = None
         if self.clear_rdp_sources:
             self.rdp_allowed_sources = None
+        if self.clear_samba_sources:
+            self.samba_sources = None
+        if self.clear_samba_metadata_cache:
+            self.samba_metadata_cache = None
         if self.disable_browser_automation:
             self.browser_automation = None
         pairing_providers = list(dict.fromkeys(self.device_pairing_providers or []))
@@ -580,6 +588,14 @@ class SetupConfig:
         return _merge_network_sources(
             self.effective_access_sources(),
             self.gogs_sources,
+        )
+
+    def effective_samba_sources(self) -> StrList:
+        """Return generic sources plus Samba-specific additions."""
+
+        return _merge_network_sources(
+            self.effective_access_sources(),
+            self.samba_sources,
         )
 
     def to_remote_args(self) -> StrList:
@@ -811,6 +827,18 @@ class SetupConfig:
         
         if self.enable_samba:
             args.append("--samba")
+        if self.clear_samba_sources:
+            args.append("--no-samba-source")
+        else:
+            for source in self.samba_sources or []:
+                args.append(f"--samba-source {shlex.quote(source)}")
+        if self.clear_samba_metadata_cache:
+            args.append("--no-samba-metadata-cache")
+        elif self.samba_metadata_cache:
+            args.append(
+                "--samba-metadata-cache "
+                f"{shlex.quote(self.samba_metadata_cache)}"
+            )
         
         if self.samba_shares:
             for share_spec in self.samba_shares:
@@ -1243,6 +1271,18 @@ class SetupConfig:
         # Samba
         if self.enable_samba:
             cmd_parts.append("--samba")
+        if self.clear_samba_sources:
+            cmd_parts.append("--no-samba-source")
+        else:
+            for source in self.samba_sources or []:
+                cmd_parts.append(f"--samba-source {shlex.quote(source)}")
+        if self.clear_samba_metadata_cache:
+            cmd_parts.append("--no-samba-metadata-cache")
+        elif self.samba_metadata_cache:
+            cmd_parts.append(
+                "--samba-metadata-cache "
+                f"{shlex.quote(self.samba_metadata_cache)}"
+            )
 
         SHARE_USERS_INDEX = 3
         MIN_SHARE_FIELDS = SHARE_USERS_INDEX + 1
@@ -1698,6 +1738,27 @@ class SetupConfig:
                 else None
             )
         )
+        clear_samba_sources = bool(
+            getattr(args, 'clear_samba_sources', False)
+        )
+        raw_samba_sources = getattr(args, 'samba_sources', None)
+        samba_sources = (
+            None
+            if clear_samba_sources
+            else (
+                raw_samba_sources
+                if isinstance(raw_samba_sources, list) and raw_samba_sources
+                else None
+            )
+        )
+        clear_samba_metadata_cache = bool(
+            getattr(args, 'clear_samba_metadata_cache', False)
+        )
+        samba_metadata_cache = (
+            None
+            if clear_samba_metadata_cache
+            else _optional_str_arg(args, 'samba_metadata_cache')
+        )
         disable_device_pairing = bool(
             getattr(args, 'disable_device_pairing', False)
         )
@@ -1835,6 +1896,10 @@ class SetupConfig:
             is_app_server=is_app_server,
             deploy_targets=getattr(args, 'deploy_targets', None),
             enable_samba=getattr(args, 'enable_samba', False),
+            samba_sources=samba_sources,
+            clear_samba_sources=clear_samba_sources,
+            samba_metadata_cache=samba_metadata_cache,
+            clear_samba_metadata_cache=clear_samba_metadata_cache,
             samba_shares=getattr(args, 'samba_shares', None),
             share_credentials=getattr(args, 'share_credentials', None),
             enable_smbclient=enable_smbclient,

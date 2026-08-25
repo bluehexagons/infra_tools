@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from lib.arg_parser import create_setup_argument_parser
 from lib.config import LAN_ACCESS_SOURCES, SetupConfig
-from lib.validation import validate_web_interface_settings
+from lib.validation import validate_samba_settings, validate_web_interface_settings
 from plugins.proxmox import build_server_proxmox_steps
 from security.security_steps import (
     configure_firewall,
@@ -55,6 +55,7 @@ class TestAccessSourceConfig(unittest.TestCase):
             rdp_allowed_sources=["10.0.0.0/8", "198.51.100.0/24"],
             web_interface_sources=["172.16.0.0/12", "198.51.100.20"],
             gogs_sources=["192.168.0.0/16", "198.51.100.30"],
+            samba_sources=["10.10.0.0/16", "198.51.100.40"],
         )
 
         self.assertEqual(
@@ -67,6 +68,69 @@ class TestAccessSourceConfig(unittest.TestCase):
         )
         self.assertEqual(config.effective_web_interface_sources()[-1], "198.51.100.20")
         self.assertEqual(config.effective_gogs_sources()[-1], "198.51.100.30")
+        self.assertEqual(config.effective_samba_sources()[-1], "198.51.100.40")
+
+    def test_samba_source_and_metadata_cache_round_trip(self) -> None:
+        parser = create_setup_argument_parser("test")
+        args = parser.parse_args(
+            [
+                "host.example.test",
+                "--samba",
+                "--samba-source",
+                "192.168.10.0/24",
+                "--samba-metadata-cache",
+                "/srv/ssd/samba-cache",
+            ]
+        )
+
+        config = SetupConfig.from_args(args, "server_lite")
+
+        self.assertEqual(config.samba_sources, ["192.168.10.0/24"])
+        self.assertEqual(config.samba_metadata_cache, "/srv/ssd/samba-cache")
+        self.assertIn("--samba-source 192.168.10.0/24", config.to_remote_args())
+        self.assertIn(
+            "--samba-metadata-cache /srv/ssd/samba-cache",
+            config.to_remote_args(),
+        )
+
+    def test_samba_specific_options_require_samba(self) -> None:
+        with self.assertRaisesRegex(ValueError, "--samba-source requires --samba"):
+            validate_samba_settings(
+                SetupConfig(
+                    host="host.example.test",
+                    username="admin",
+                    system_type="server_lite",
+                    samba_sources=["192.168.1.0/24"],
+                )
+            )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "--samba-metadata-cache requires --samba",
+        ):
+            validate_samba_settings(
+                SetupConfig(
+                    host="host.example.test",
+                    username="admin",
+                    system_type="server_lite",
+                    samba_metadata_cache="/srv/ssd/samba-cache",
+                )
+            )
+
+    def test_samba_metadata_cache_must_not_overlap_share(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must not overlap share path"):
+            validate_samba_settings(
+                SetupConfig(
+                    host="host.example.test",
+                    username="admin",
+                    system_type="server_lite",
+                    enable_samba=True,
+                    samba_metadata_cache="/srv/data/cache",
+                    samba_shares=[
+                        ["write", "data", "/srv/data", "alice:secret"]
+                    ],
+                )
+            )
 
     def test_generic_source_allows_non_loopback_web_bind(self) -> None:
         config = SetupConfig(
@@ -223,6 +287,27 @@ class TestGenericUfwFiltering(unittest.TestCase):
         )
         self.assertIn("ufw delete allow 445/tcp", commands)
         self.assertIn("ufw --force delete 2", commands)
+
+    @patch("smb.samba_steps.run")
+    def test_samba_source_does_not_restrict_other_services(self, mock_run) -> None:
+        mock_run.return_value = SimpleNamespace(returncode=0, stdout="")
+        config = SetupConfig(
+            host="host.example.test",
+            username="admin",
+            system_type="server_lite",
+            enable_samba=True,
+            samba_sources=["192.168.20.0/24"],
+        )
+
+        configure_samba_firewall(config)
+
+        commands = [call.args[0] for call in mock_run.call_args_list]
+        self.assertIn(
+            "ufw allow from 192.168.20.0/24 to any port 445 proto tcp "
+            "comment 'infra_tools Samba 445/tcp source 192.168.20.0/24'",
+            commands,
+        )
+        self.assertEqual(config.effective_access_sources(), [])
 
     @patch("web.gogs_steps._load_or_create_gogs_secret_key", return_value="secret")
     def test_generic_source_exposes_hostless_gogs_listener(self, _secret) -> None:
