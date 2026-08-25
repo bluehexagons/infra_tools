@@ -98,8 +98,19 @@ HTTPS listener, not processes bound to game-specific ports.
 ### Live HTTPS forwarding
 
 Static game exports share port 8443 and do not consume one port per game. For a
-live development server, API, or WebSocket service, bind the process to a
-loopback address and register a separate managed HTTPS listener:
+live development server, use the supervised preview lifecycle:
+
+```bash
+sudo infra-web preview start my-preview --project . --profile godot -- \
+  my-preview-server --host '{host}' --port '{port}'
+
+infra-web preview list
+infra-web doctor my-preview
+sudo infra-web preview stop my-preview
+```
+
+When another process manager already owns the service, bind it to a loopback
+address and register a low-level managed HTTPS listener:
 
 ```bash
 # In one shell, the application listens only inside the VM.
@@ -115,6 +126,10 @@ infra-web forward list
 infra-web doctor my-preview
 sudo infra-web forward remove my-preview
 ```
+
+See [Internal HTTPS sites and live previews](INTERNAL_WEB.md) for static-site
+publishing, automatic Vite previews, service lifecycle, health waits, logs,
+cleanup, and certificate trust.
 
 The configured account already has the VM setup's non-interactive sudo access;
 only forward mutations require it. `infra-web` allocates TCP 8444–8999 by

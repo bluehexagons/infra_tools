@@ -13,11 +13,56 @@ verification.
 
 ## Choose the hosting mode
 
+- For a built static site, use `infra-web publish site`. It builds common
+  JavaScript projects, atomically publishes their output on the shared HTTPS
+  origin, and does not require a long-running process or dedicated port.
 - For a Godot web export, use `infra-web publish godot` and the
   `infra-tools-godot-web` skill. Nginx serves all static games on the shared
   HTTPS port 8443; static games do not need dedicated ports.
-- For a live HTTP or WebSocket service, bind the service to `127.0.0.1` or
-  `::1` on an unprivileged port, then register a managed forward.
+- For an explicitly requested live project preview, use `sudo infra-web
+  preview start NAME --project PATH`. It supervises the process as the
+  requesting user, allocates its loopback and HTTPS ports, waits for readiness,
+  and rolls back on failure.
+- For a live HTTP or WebSocket service already owned by another service
+  manager, bind it to `127.0.0.1` or `::1` on an unprivileged port, then
+  register a low-level managed forward.
+
+## Static sites
+
+From a Vite or similar project with a build script:
+
+```bash
+infra-web publish site
+infra-web site doctor NAME
+```
+
+Use `--project`, `--output`, or `--no-build` when auto-detection is not enough.
+Published sites are available beneath `/sites/USERNAME/NAME/` on shared HTTPS
+port 8443. Remove one only when explicitly requested, using `infra-web site
+remove NAME --yes`.
+
+## Managed live previews
+
+For Vite, project and command detection is automatic:
+
+```bash
+sudo infra-web preview start NAME --project .
+```
+
+For another server, pass an argv command after `--`; `{host}` and `{port}` are
+replaced without shell evaluation:
+
+```bash
+sudo infra-web preview start NAME --project . -- \
+  ./server --host '{host}' --port '{port}'
+```
+
+Use `infra-web preview list`, `infra-web preview logs NAME`, and `infra-web
+doctor NAME` for inspection. Stop a preview only when explicitly requested:
+
+```bash
+sudo infra-web preview stop NAME
+```
 
 ## Live forwards
 
