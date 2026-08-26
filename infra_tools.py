@@ -62,6 +62,7 @@ from lib.credentials import (
     set_workspace_credential,
     store_cli_credentials,
 )
+from lib.firmware_cli import add_firmware_subparser, run_firmware_command
 from lib.github_maintenance import add_maintenance_subparser, run_maintenance_command
 from lib.display import (
     print_name_and_tags,
@@ -153,6 +154,7 @@ def _build_infra_tools_epilog() -> str:
     maintenance github ...      Audit/prune GitHub releases, artifacts, and caches
     network [subcommand]        Manage generic network inventory profiles
     local [subcommand]          Maintain this local Debian system
+    firmware audit|update       Audit or deliberately update local firmware
     proxmox [subcommand]        Manage Proxmox hosts and containers (interactive shell with no args)
     vm [subcommand]             Manage guests through a provider-neutral command surface
     shell                       Interactive REPL for managing saved configurations
@@ -563,6 +565,7 @@ def create_infra_tools_parser() -> Tuple[argparse.ArgumentParser, argparse.Argum
 
     add_network_subparser(subparsers)
     add_local_subparser(subparsers)
+    add_firmware_subparser(subparsers)
     add_proxmox_subparser(subparsers)
     add_vm_subparser(subparsers)
     add_maintenance_subparser(subparsers)
@@ -1739,6 +1742,8 @@ def main() -> int:
         if not confirm_unsupported_environment("local maintenance"):
             return 1
         return run_local_command(args)
+    elif args.command == "firmware":
+        return run_firmware_command(args)
     elif args.command == "proxmox":
         return run_proxmox_command(args)
     elif args.command == "vm":

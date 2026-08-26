@@ -39,6 +39,7 @@ infra-tools python-tools [options]
 infra-tools bootstrap [options]
 infra-tools self-setup [options]
 infra-tools local [subcommand]
+infra-tools firmware <audit|update> [options]
 infra-tools channel [CHANNEL]
 infra-tools upgrade
 infra-tools user rename <host> <new_username> [options]
@@ -839,6 +840,30 @@ mount checks, and logs, and [Notifications](./NOTIFICATIONS.md) for delivery
 targets and failure behavior.
 
 ## Maintenance and Utilities
+
+### Firmware audit and updates
+
+```text
+infra-tools firmware audit [--no-refresh] [--json] [--install-dependencies]
+infra-tools firmware update [DEVICE_ID] [--no-refresh] [--allow-running-guests] [--install-dependencies] [--yes]
+```
+
+Both commands operate on the local machine through `fwupdmgr`. When it is
+missing, infra-tools offers to install the Debian `fwupd` package with APT;
+`--install-dependencies` records that consent without a separate dependency
+prompt. `audit` reports DMI identity, related package versions, supported
+devices, and available fwupd releases. Metadata is refreshed unless
+`--no-refresh` is supplied.
+
+`update` repeats the audit and requires a separate firmware confirmation. On a
+Proxmox host, running guests block the update unless
+`--allow-running-guests` is explicit, while an incomplete guest-state check
+always blocks it. `--yes` skips the firmware confirmation and forwards
+fwupd's non-interactive consent; it never bypasses the audit or guest check.
+infra-tools always suppresses fwupd's reboot prompt and does not reboot the
+machine. See [Firmware auditing and
+updates](./FIRMWARE.md) for coverage limits, legacy vendor firmware, and
+recovery precautions.
 
 ### Cleaning obsolete local configuration
 

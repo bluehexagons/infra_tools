@@ -17,6 +17,7 @@ references and may describe future work separately from this live contract.
 | --- | --- |
 | [Installation and bootstrap](INSTALLATION.md) | Installing the launcher, preparing an orchestration host, shell completion, and requirements |
 | [Local system maintenance](LOCAL_MAINTENANCE.md) | Focused package, desktop, browser, hostname, IP, and DNS changes |
+| [Firmware auditing and updates](FIRMWARE.md) | Local fwupd inventory, dependency installation, and guarded firmware updates |
 | [Command-line reference](COMMAND_LINE.md) | Setup, patch, targeted updates, and utility flags |
 | [SSH authentication](SSH.md) | Passphrase-protected keys, terminal prompts, SSH agents, and troubleshooting |
 | [Credentials and agent configuration](CREDENTIALS.md) | Workspace passwords, GitHub/Git access, agent auth, non-secret config, sharing, and rotation |

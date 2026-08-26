@@ -88,6 +88,7 @@ details.
 | --- | --- | --- |
 | Setup and CLI | Unified `setup`, `patch`, `shares`, saved-host operations, and utility commands | [Command-line reference](docs/COMMAND_LINE.md) |
 | Installation | User/system bootstrap, orchestration host prerequisites, and completion | [Installation](docs/INSTALLATION.md) |
+| Firmware | Local fwupd inventory, dependency installation, and deliberate guarded updates | [Firmware](docs/FIRMWARE.md) |
 | Control planes | Local VM/container administration tools, SSH/rsync, diagnostics, and optional coding agents | [Installation](docs/INSTALLATION.md), [Workstations](docs/WORKSTATIONS.md), [Credentials](docs/CREDENTIALS.md), [Browser automation](docs/BROWSER_AUTOMATION.md) |
 | Servers | Security hardening, Nginx/SSL, Cloudflare tunnels, language runtimes, deployments, Gogs, and Antistatic | [CLI reference](docs/COMMAND_LINE.md), [Gogs](docs/GOGS.md), [Cloudflare tunnels](docs/CLOUDFLARE.md), [Antistatic](docs/ANTISTATIC.md) |
 | Workstations | XFCE, i3, LXQt, RDP, browsers, and desktop tooling | [Workstations](docs/WORKSTATIONS.md), [XRDP](docs/XRDP.md), [CLI reference](docs/COMMAND_LINE.md) |
@@ -156,6 +157,10 @@ infra-tools shares fileserver \
 infra-tools vm health agent-dev-01
 infra-tools vm stats agent-dev-01
 infra-tools vm autostart agent-dev-01
+
+# Audit local firmware and explicitly apply available updates
+infra-tools firmware audit
+infra-tools firmware update
 ```
 
 Use the [documentation index](docs/README.md) for the complete command and
