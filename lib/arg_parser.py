@@ -9,7 +9,6 @@ from lib.config import (
     AGENT_TOOLS,
     BROWSER_AUTOMATION_PROVIDERS,
     DEVICE_PAIRING_PROVIDERS,
-    DESKTOP_INTERFACES,
     EDITORS,
     GIT_ACCESS_POLICIES,
     GODOT_BUNDLES,
@@ -577,17 +576,6 @@ def add_setup_arguments(
         allowed_values=AGENT_TOOLS,
         metavar="TOOL",
         help="Disable one or more default agent tools",
-    )
-    parser.add_argument(
-        "--desktop-interface",
-        dest="desktop_interfaces",
-        action="append",
-        choices=DESKTOP_INTERFACES,
-        metavar="INTERFACE",
-        help=(
-            "Install an explicit desktop client/interface; repeat as needed "
-            "(currently: t3code)"
-        ),
     )
     parser.add_argument(
         "--t3code-ready",

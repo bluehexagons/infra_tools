@@ -717,7 +717,7 @@ class DevicePairingRemoteSetupTest(unittest.TestCase):
             os.symlink(victim, wrapper)
 
             with self.assertRaisesRegex(RuntimeError, "unsafe managed executable"):
-                _write_passthrough_wrapper(wrapper, temporary, "/opt/t3")
+                _write_passthrough_wrapper(wrapper, temporary)
 
             with open(victim, encoding="utf-8") as file_obj:
                 self.assertEqual(file_obj.read(), "unchanged")
@@ -764,7 +764,7 @@ class DevicePairingRemoteSetupTest(unittest.TestCase):
                 _configure_device_pairing(
                     config,
                     temporary,
-                    "/home/agent/.local/share/infra-tools/t3code/node_modules/.bin/t3",
+                    "/home/agent/.local/bin/infra-tools-t3code-pairing-provider",
                     "0.0.0.0",
                     3773,
                 )
@@ -805,10 +805,8 @@ class DevicePairingRemoteSetupTest(unittest.TestCase):
             ) as file_obj:
                 service = file_obj.read()
             self.assertIn("Environment=T3CODE_PORT=3773", service)
-            self.assertIn(
-                "Wants=network-online.target infra-tools-t3code.service",
-                service,
-            )
+            self.assertIn("Wants=network-online.target", service)
+            self.assertNotIn("infra-tools-t3code.service", service)
             self.assertNotIn("Requires=infra-tools-t3code.service", service)
             self.assertIn("RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6", service)
             configure_ban.assert_called_once_with(

@@ -147,12 +147,13 @@ class TestSetupConfigFromDict(unittest.TestCase):
         config = SetupConfig.from_dict('h', 'server_lite', data)
         self.assertIsNone(config.friendly_name)
 
-    def test_from_dict_ignores_removed_ruby_fields(self):
+    def test_from_dict_ignores_removed_feature_fields(self):
         data = {
             'username': 'u',
             'install_ruby': True,
             'reset_migrations': True,
             'api_subdomain': True,
+            'desktop_interfaces': ['t3code'],
         }
 
         config = SetupConfig.from_dict('h', 'server_web', data)
@@ -160,6 +161,7 @@ class TestSetupConfigFromDict(unittest.TestCase):
         self.assertNotIn('install_ruby', config.to_dict())
         self.assertNotIn('reset_migrations', config.to_dict())
         self.assertNotIn('api_subdomain', config.to_dict())
+        self.assertNotIn('desktop_interfaces', config.to_dict())
 
 
 class TestSetupConfigToRemoteArgs(unittest.TestCase):
@@ -271,7 +273,6 @@ class TestSetupConfigToRemoteArgs(unittest.TestCase):
         self.assertEqual(config.selected_agent_tools(), ['gh', 'codex'])
         self.assertTrue(config.install_gh)
         self.assertTrue(config.install_codex)
-        self.assertIsNone(config.desktop_interfaces)
 
     def test_invalid_agent_tool_fails(self):
         with self.assertRaisesRegex(ValueError, 'Unsupported agent tool'):
@@ -540,8 +541,6 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
             install_codex=True,
             install_claude=True,
             install_opencode=True,
-            desktop_interfaces=['t3code'],
-            include_desktop=True,
             copy_agent_keys=True,
             copy_agent_config=True,
             agent_repos=['https://github.com/user/my_codebase.git'],
@@ -552,7 +551,6 @@ class TestSetupConfigToSetupCommand(unittest.TestCase):
         self.assertIn('--agent-tool codex', parts)
         self.assertIn('--agent-tool claude', parts)
         self.assertIn('--agent-tool opencode', parts)
-        self.assertIn('--desktop-interface t3code', cmd)
         self.assertIn('--repo https://github.com/user/my_codebase.git', cmd)
 
     def test_smb_mount_password_redacted(self):

@@ -42,7 +42,6 @@ class SystemTypeDefinition:
     default_browser: str | None = None
     default_editor: str | None = None
     default_agent_tools: tuple[str, ...] = ()
-    default_desktop_interfaces: tuple[str, ...] = ()
     default_web_interfaces: tuple[str, ...] = ()
     default_device_pairing_providers: tuple[str, ...] = ()
     default_git_access: str = "none"

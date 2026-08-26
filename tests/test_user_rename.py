@@ -79,6 +79,53 @@ class TestUserRenameHelpers(unittest.TestCase):
         self.assertIn("WorkingDirectory=/srv/olduser-data", content)
         self.assertIn("User=newuser", content)
 
+    def test_t3_user_service_paths_follow_a_moved_home(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            old_home = "/home/olduser"
+            new_home = os.path.join(tmpdir, "newuser")
+            service_dir = os.path.join(new_home, ".config", "systemd", "user")
+            drop_in_dir = os.path.join(service_dir, "t3code.service.d")
+            os.makedirs(drop_in_dir)
+            service = os.path.join(service_dir, "t3code.service")
+            drop_in = os.path.join(drop_in_dir, "infra-tools.conf")
+            with open(service, "w", encoding="utf-8") as file_obj:
+                file_obj.write(f"ExecStart={old_home}/.t3/runtime/service-launcher.mjs\n")
+            with open(drop_in, "w", encoding="utf-8") as file_obj:
+                file_obj.write(f"WorkingDirectory={old_home}/repos\n")
+
+            changed = user_rename._rewrite_managed_home_files(old_home, new_home)
+
+            self.assertEqual(set(changed), {service, drop_in})
+            for path in (service, drop_in):
+                with open(path, encoding="utf-8") as file_obj:
+                    content = file_obj.read()
+                self.assertIn(new_home, content)
+                self.assertNotIn(old_home, content)
+
+    def test_t3_user_service_restarts_through_renamed_account(self):
+        with tempfile.TemporaryDirectory() as home:
+            service = os.path.join(
+                home,
+                ".config",
+                "systemd",
+                "user",
+                "t3code.service",
+            )
+            os.makedirs(os.path.dirname(service))
+            with open(service, "w", encoding="utf-8") as file_obj:
+                file_obj.write("# upstream managed\n")
+            completed = type("Completed", (), {"returncode": 0})()
+            with patch.object(user_rename, "_run", return_value=completed) as run:
+                user_rename._restore_t3_user_service("newuser", 1000, home)
+
+            commands = [call.args[0] for call in run.call_args_list]
+            self.assertEqual(commands[0], ["systemctl", "start", "user@1000.service"])
+            self.assertIn("newuser", commands[1])
+            self.assertEqual(
+                commands[-1][-3:],
+                ["is-active", "--quiet", "t3code.service"],
+            )
+
     def test_home_symlink_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             real_home = os.path.join(tmpdir, "real-home")

@@ -29,7 +29,6 @@ CLI_SYSTEMS = [
 ]
 
 AGENT_TOOLS = ("gh", "codex", "claude", "opencode")
-DESKTOP_INTERFACES = ("t3code",)
 WEB_INTERFACES = ("t3code",)
 DEVICE_PAIRING_PROVIDERS = ("t3code",)
 BROWSER_AUTOMATION_PROVIDERS = ("playwright",)
@@ -262,7 +261,6 @@ class SetupConfig:
     install_opencode: bool = False
     agent_tools: Optional[StrList] = None
     agent_tools_removed: Optional[StrList] = None
-    desktop_interfaces: Optional[StrList] = None
     web_interfaces: Optional[StrList] = None
     t3code_ready: bool = False
     disable_web_interface: bool = False
@@ -429,15 +427,10 @@ class SetupConfig:
         self.install_codex = "codex" in selected or self.install_codex
         self.install_claude = "claude" in selected or self.install_claude
         self.install_opencode = "opencode" in selected or self.install_opencode
-        desktop_interfaces = list(dict.fromkeys(self.desktop_interfaces or []))
         web_interfaces = list(dict.fromkeys(self.web_interfaces or []))
-        for interface in desktop_interfaces:
-            if interface not in DESKTOP_INTERFACES:
-                raise ValueError(f"Unsupported desktop interface: {interface}")
         for interface in web_interfaces:
             if interface not in WEB_INTERFACES:
                 raise ValueError(f"Unsupported web interface: {interface}")
-        self.desktop_interfaces = desktop_interfaces or None
         self.web_interfaces = web_interfaces or None
         if self.clear_access_sources:
             self.access_sources = None
@@ -478,16 +471,12 @@ class SetupConfig:
             and not self.device_pairing_auth_username
         ):
             self.device_pairing_auth_username = self.username
-        if self.desktop_interfaces or self.web_interfaces:
+        if self.web_interfaces:
             if not self.install_codex and not self.install_claude and not self.install_opencode:
                 raise ValueError(
                     "T3 Code requires at least one provider CLI: "
                     "--agent-tool codex, claude, or opencode"
                 )
-        if self.desktop_interfaces and not self.include_desktop:
-            raise ValueError(
-                "--desktop-interface requires a desktop-capable setup or --rdp"
-            )
         if self.web_interfaces:
             if self.web_interface_host is None:
                 self.web_interface_host = (
@@ -531,7 +520,6 @@ class SetupConfig:
 
         return bool(
             self.selected_agent_tools()
-            or self.desktop_interfaces
             or self.web_interfaces
             or self.browser_automation
             or self.agent_repos
@@ -747,8 +735,6 @@ class SetupConfig:
         for tool in self.selected_agent_tools():
             args.append(f"--agent-tool {shlex.quote(tool)}")
 
-        for interface in self.desktop_interfaces or []:
-            args.append(f"--desktop-interface {shlex.quote(interface)}")
         for interface in self.web_interfaces or []:
             args.append(f"--web-interface {shlex.quote(interface)}")
         if self.web_interfaces:
@@ -1150,12 +1136,6 @@ class SetupConfig:
             if tool in default_agent_tools:
                 cmd_parts.append(f"--no-agent-tool {shlex.quote(tool)}")
 
-        desktop_interfaces = self.desktop_interfaces or []
-        if desktop_interfaces != list(
-            system_type_defaults.default_desktop_interfaces
-        ):
-            for interface in desktop_interfaces:
-                cmd_parts.append(f"--desktop-interface {shlex.quote(interface)}")
         web_interfaces = self.web_interfaces or []
         web_interfaces_are_default = web_interfaces == list(
             system_type_defaults.default_web_interfaces
@@ -1446,9 +1426,14 @@ class SetupConfig:
         # sensitive live handoff merely because a saved configuration is
         # loaded for deploy, patch, or reconstruction.
         data.pop('activate_network', None)
-        # These fields belonged to the removed Ruby/Rails integration. Ignore
-        # them when loading older saved setup state so upgrades remain usable.
-        for removed_field in ('install_ruby', 'reset_migrations', 'api_subdomain'):
+        # Ignore removed feature fields when loading older saved setup state so
+        # upgrades remain usable.
+        for removed_field in (
+            'install_ruby',
+            'reset_migrations',
+            'api_subdomain',
+            'desktop_interfaces',
+        ):
             data.pop(removed_field, None)
         tags_str = data.get('tags')
         if tags_str and isinstance(tags_str, str):
@@ -1464,10 +1449,6 @@ class SetupConfig:
             data['agent_tools'] = list(system_defaults.default_agent_tools) or None
         if not data.get('browser') and not data.get('browsers'):
             data['browser'] = system_defaults.default_browser
-        if not data.get('desktop_interfaces'):
-            data['desktop_interfaces'] = (
-                list(system_defaults.default_desktop_interfaces) or None
-            )
         if data.get('disable_web_interface'):
             data['web_interfaces'] = None
         elif not data.get('web_interfaces'):
@@ -1635,12 +1616,6 @@ class SetupConfig:
         editor = (
             _optional_str_arg(args, 'editor')
             or system_type_definition.default_editor
-        )
-        raw_desktop_interfaces = getattr(args, 'desktop_interfaces', None)
-        desktop_interfaces = (
-            raw_desktop_interfaces
-            if isinstance(raw_desktop_interfaces, list) and raw_desktop_interfaces
-            else list(system_type_definition.default_desktop_interfaces) or None
         )
         disable_web_interface = bool(getattr(args, 'disable_web_interface', False))
         raw_web_interfaces = getattr(args, 'web_interfaces', None)
@@ -1842,7 +1817,6 @@ class SetupConfig:
             ),
             agent_tools=agent_tools,
             agent_tools_removed=removed_agent_tools or None,
-            desktop_interfaces=desktop_interfaces,
             web_interfaces=web_interfaces,
             t3code_ready=_optional_bool_arg(args, 't3code_ready') is True,
             disable_web_interface=disable_web_interface,

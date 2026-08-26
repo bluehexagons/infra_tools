@@ -16,8 +16,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from common.agent_steps import (
     _chown_path,
-    _download_verified_file,
-    _latest_t3code_asset,
     _copy_payload_directory,
     _copy_secret_file,
     _configure_git_identity,
@@ -30,7 +28,6 @@ from common.agent_steps import (
     install_agent_cli_launcher,
     install_git_lfs_for_agent_repositories,
     install_opencode,
-    install_t3code_desktop,
 )
 from lib.agent_auth import get_agent_auth_status, set_agent_credential
 from lib.agent_cli import (
@@ -68,40 +65,6 @@ class TestOfficialAgentInstallers(unittest.TestCase):
         ])
         self.assertTrue(all('npm' not in command for command in commands))
 
-    def test_latest_t3code_asset_requires_official_digest(self):
-        response = io.BytesIO(
-            b'{"assets":[{"name":"T3-Code-1.2.3-x86_64.AppImage",'
-            b'"browser_download_url":"https://github.com/pingdotgg/t3code/releases/download/v1/file",'
-            b'"digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}'
-        )
-        with patch('urllib.request.urlopen', return_value=response):
-            url, digest = _latest_t3code_asset()
-        self.assertEqual(
-            url,
-            'https://github.com/pingdotgg/t3code/releases/download/v1/file',
-        )
-        self.assertEqual(digest, 'a' * 64)
-
-    def test_latest_t3code_asset_normalizes_digest_case(self):
-        response = io.BytesIO(
-            b'{"assets":[{"name":"T3-Code-1.2.3-x86_64.AppImage",'
-            b'"browser_download_url":"https://github.com/pingdotgg/t3code/releases/download/v1/file",'
-            b'"digest":"sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}]}'
-        )
-        with patch('urllib.request.urlopen', return_value=response):
-            _url, digest = _latest_t3code_asset()
-        self.assertEqual(digest, 'a' * 64)
-
-    def test_latest_t3code_asset_rejects_non_https_downloads(self):
-        response = io.BytesIO(
-            b'{"assets":[{"name":"T3-Code-1.2.3-x86_64.AppImage",'
-            b'"browser_download_url":"http://github.com/pingdotgg/t3code/releases/download/v1/file",'
-            b'"digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}'
-        )
-        with patch('urllib.request.urlopen', return_value=response):
-            with self.assertRaisesRegex(RuntimeError, 'verified'):
-                _latest_t3code_asset()
-
     def test_user_home_comes_from_account_database(self):
         account = type('Account', (), {'pw_dir': '/srv/agent'})()
         with patch('common.agent_steps.pwd.getpwnam', return_value=account):
@@ -129,73 +92,6 @@ class TestOfficialAgentInstallers(unittest.TestCase):
             run_command.call_args.args[0],
             ['chown', '-R', '1201:1202', '/srv/agent/.codex'],
         )
-
-    def test_verified_download_rejects_checksum_mismatch(self):
-        with tempfile.TemporaryDirectory() as directory:
-            destination = os.path.join(directory, 'tool.AppImage')
-            with patch('urllib.request.urlopen', return_value=io.BytesIO(b'payload')):
-                with self.assertRaisesRegex(RuntimeError, 'checksum'):
-                    _download_verified_file('https://github.com/example', 'wrong', destination)
-            self.assertFalse(os.path.exists(destination))
-
-    def test_verified_download_writes_matching_payload(self):
-        payload = b'official-appimage'
-        expected = hashlib.sha256(payload).hexdigest()
-        with tempfile.TemporaryDirectory() as directory:
-            destination = os.path.join(directory, 'tool.AppImage')
-            with patch('urllib.request.urlopen', return_value=io.BytesIO(payload)):
-                _download_verified_file('https://github.com/example', expected, destination)
-            with open(destination, 'rb') as file_obj:
-                self.assertEqual(file_obj.read(), payload)
-
-    def test_verified_download_rejects_symlink_destination(self):
-        with tempfile.TemporaryDirectory() as directory:
-            destination = os.path.join(directory, 'tool.AppImage')
-            victim = os.path.join(directory, 'victim')
-            with open(victim, 'wb') as file_obj:
-                file_obj.write(b'unchanged')
-            os.symlink(victim, destination)
-            with patch('urllib.request.urlopen', return_value=io.BytesIO(b'payload')):
-                with self.assertRaisesRegex(RuntimeError, 'symlinked'):
-                    _download_verified_file('https://github.com/example', 'wrong', destination)
-            with open(victim, 'rb') as file_obj:
-                self.assertEqual(file_obj.read(), b'unchanged')
-
-    def test_t3code_install_adds_minimal_wrapper_and_desktop_entry(self):
-        with tempfile.TemporaryDirectory() as home:
-            def write_appimage(_url, _digest, destination):
-                with open(destination, 'wb') as file_obj:
-                    file_obj.write(b'appimage')
-
-            with (
-                patch('common.agent_steps.platform.machine', return_value='x86_64'),
-                patch('common.agent_steps._user_home', return_value=home),
-                patch('common.agent_steps._tool_available', return_value=False),
-                patch(
-                    'common.agent_steps._latest_t3code_asset',
-                    return_value=('https://github.com/example', 'a' * 64),
-                ),
-                patch(
-                    'common.agent_steps._download_verified_file',
-                    side_effect=write_appimage,
-                ),
-                patch('common.agent_steps._chown_path'),
-                patch('common.agent_steps._ensure_agent_shell_path'),
-            ):
-                install_t3code_desktop(self.config)
-
-            wrapper = os.path.join(home, '.local', 'bin', 't3code')
-            desktop = os.path.join(
-                home,
-                '.local',
-                'share',
-                'applications',
-                't3code.desktop',
-            )
-            with open(wrapper, encoding='utf-8') as file_obj:
-                self.assertIn('APPIMAGE_EXTRACT_AND_RUN', file_obj.read())
-            with open(desktop, encoding='utf-8') as file_obj:
-                self.assertIn(f'Exec={wrapper}', file_obj.read())
 
     def test_git_lfs_is_installed_and_initialized_for_target_user(self):
         completed = type(
@@ -344,18 +240,31 @@ class TestAgentDoctor(unittest.TestCase):
 
     def test_t3code_doctor_reports_managed_checks_without_secrets(self):
         with tempfile.TemporaryDirectory() as home:
-            runtime = os.path.join(
-                home, '.local', 'share', 'infra-tools', 't3code', 'node_modules', '.bin'
+            runtime = os.path.join(home, '.t3', 'runtime')
+            version = '0.0.34'
+            binary_dir = os.path.join(
+                runtime, 'versions', version, 'node_modules', 't3', 'dist'
             )
-            os.makedirs(runtime)
-            t3_binary = os.path.join(runtime, 't3')
+            os.makedirs(binary_dir)
+            t3_binary = os.path.join(binary_dir, 'bin.mjs')
             with open(t3_binary, 'w', encoding='utf-8') as file_obj:
                 file_obj.write('#!/bin/sh\necho t3 0.0.1\n')
             os.chmod(t3_binary, 0o755)
-            wrapper = os.path.join(home, '.local', 'bin', 'infra-tools-t3code-web')
+            with open(
+                os.path.join(runtime, 'service-state.json'),
+                'w',
+                encoding='utf-8',
+            ) as file_obj:
+                json.dump({'protocolVersion': 2, 'activeVersion': version}, file_obj)
+            wrapper = os.path.join(
+                home,
+                '.local',
+                'bin',
+                'infra-tools-t3code-pairing-provider',
+            )
             os.makedirs(os.path.dirname(wrapper))
             with open(wrapper, 'w', encoding='utf-8') as file_obj:
-                file_obj.write('T3CODE_PORT=3773\n')
+                file_obj.write('#!/bin/sh\n')
             os.chmod(wrapper, 0o755)
             with (
                 patch('lib.agent_cli._tool_path', side_effect=lambda tool, _home: t3_binary if tool == 't3' else None),

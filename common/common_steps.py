@@ -61,10 +61,6 @@ _USER_TOOL_SHELL_ENV_RELATIVE_PATH = (
 _USER_TOOL_SHELL_MARKER = "# infra-tools user tool environment"
 _USER_TOOL_SHELL_ENV = '''# Managed by infra-tools for interactive and agent shells.
 case ":$PATH:" in
-    *":$HOME/.local/share/infra-tools/t3code/node_modules/.bin:"*) ;;
-    *) PATH="$HOME/.local/share/infra-tools/t3code/node_modules/.bin:$PATH" ;;
-esac
-case ":$PATH:" in
     *":$HOME/.opencode/bin:"*) ;;
     *) PATH="$HOME/.opencode/bin:$PATH" ;;
 esac

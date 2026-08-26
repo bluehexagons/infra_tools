@@ -348,8 +348,6 @@ def print_setup_summary(config: SetupConfig, description: Optional[str] = None) 
         print(f"Agent repositories: {len(config.agent_repos)}")
         for git_url in config.agent_repos:
             print(f"  - {git_url}")
-    if config.desktop_interfaces:
-        print(f"Desktop interfaces: {', '.join(config.desktop_interfaces)}")
     if config.web_interfaces:
         bind = config.web_interface_host or "127.0.0.1"
         print(

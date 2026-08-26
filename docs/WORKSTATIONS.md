@@ -30,10 +30,10 @@ For agent-controlled page previews and interaction, see
 [Agent browser automation](BROWSER_AUTOMATION.md); it is independent of the
 human-operated browser described in this guide.
 
-T3 Code's desktop AppImage is selected with `--desktop-interface t3code`.
-The headless service is a separate `--web-interface t3code` choice; it is
-documented in [T3_CODE.md](T3_CODE.md) and can be selected alongside the
-desktop interface when both local RDP and remote clients are useful.
+infra-tools manages only T3 Code's server-side `--web-interface t3code` path.
+Install desktop and mobile clients separately using upstream's supported
+distribution. The server, pairing, and update model is documented in
+[T3_CODE.md](T3_CODE.md).
 
 ## Profiles
 
@@ -126,8 +126,8 @@ administrator tools, and the selected repository. Neovim is part of the CLI
 bundle; add `--editor geany` or `--editor vscode` only when the VM needs a
 graphical development editor.
 Repeat `--agent-tool` for any combination
-of `gh`, `codex`, `claude`, and `opencode`. Add `--desktop-interface t3code`
-for the graphical T3 Code client. The RDP password is
+of `gh`, `codex`, `claude`, and `opencode`. Install a graphical T3 Code client
+separately when needed. The RDP password is
 the target Unix
 account's password; provide it through a secret-sourced environment variable,
 not a literal value in shell history. For a local Debian GNOME machine, use

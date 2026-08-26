@@ -123,7 +123,7 @@ other response requested by T3. T3 installs its pinned relay client;
 infra-tools does not download or manage a second relay service.
 
 After authorization, the portal shows a completion message and requests a
-restart of `infra-tools-t3code.service`. T3 then reconciles the saved Connect
+restart of the per-user `t3code.service`. T3 then reconciles the saved Connect
 preference and starts the managed tunnel. The checkbox represents that desired
 startup state; choose **Apply setting** after changing it. Enabling it starts
 the headless authorization flow only when Connect is not already enabled,
@@ -169,9 +169,9 @@ sessions that devices already obtained. Inspect or revoke those with T3's
 native access commands:
 
 ```bash
-t3 auth pairing list
-t3 auth session list
-t3 auth --help
+npx t3@latest auth pairing list
+npx t3@latest auth session list
+npx t3@latest auth --help
 ```
 
 ## Security boundary
@@ -223,7 +223,8 @@ T3 origin.
 ## Files and services
 
 ```text
-infra-tools-t3code.service
+~/.config/systemd/user/t3code.service
+~/.config/systemd/user/t3code.service.d/infra-tools.conf
 infra-tools-device-pairing.service
 infra-tools-t3code-connect.path
 infra-tools-t3code-connect.service
@@ -238,7 +239,8 @@ infra-tools-t3code-connect.service
 Check the local components without revealing pairing credentials:
 
 ```bash
-sudo systemctl status infra-tools-t3code.service infra-tools-device-pairing.service
+systemctl --user status t3code.service
+sudo systemctl status infra-tools-device-pairing.service
 sudo nginx -t
 sudo fail2ban-client status infra-tools-device-pairing
 sudo ss -lntp | grep -E ':(3773|3774)\b'

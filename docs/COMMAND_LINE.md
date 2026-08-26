@@ -374,7 +374,6 @@ rm -f "$HOME/.infra_tools-install.sh"
 | `--t3code-ready` | Add the headless T3 Code-ready profile: GitHub CLI, Codex, read-write Git, T3 web service, and protected pairing |
 | `--agent-tool TOOL[,TOOL...]` | Add one or more provider tools (`gh`, `codex`, `claude`, or `opencode`) to profile defaults |
 | `--no-agent-tool TOOL[,TOOL...]` | Disable one or more profile-default provider tools |
-| `--desktop-interface INTERFACE` | Install an explicit desktop interface; currently `t3code` |
 | `--web-interface INTERFACE` | Install an explicit headless web interface; currently `t3code` |
 | `--web-interface-host IP` | Bind address for the selected web interface; defaults to loopback, or `0.0.0.0` when a source is supplied |
 | `--web-interface-port PORT` | TCP port for the selected web interface; default `3773` |
@@ -449,11 +448,11 @@ work directly from an SSH, desktop, or T3 Code terminal without a separate
 infra-tools installation on the VM. An existing executable with that name is
 retained; setup never overwrites an unmanaged user launcher.
 
-T3 Code is selected explicitly as either `--desktop-interface t3code` or
-`--web-interface t3code`; it is no longer an `--agent-tool` provider. The
-desktop path installs the verified AppImage. The web path installs Node and a
-boot-persistent headless service; see [T3_CODE.md](T3_CODE.md) for LAN access,
-pairing, client choices, and the loopback/HTTPS boundary. The optional
+T3 Code is selected with `--web-interface t3code`; it is not an `--agent-tool`
+provider, and infra-tools no longer installs the desktop AppImage. The server
+path installs Node and T3 Code's upstream per-user background service; see
+[T3_CODE.md](T3_CODE.md) for updates, LAN access, pairing, client choices, and
+the loopback/HTTPS boundary. The optional
 `--device-pairing t3code` portal lets a new device request its own one-time
 link through Nginx Basic Auth. Setup publishes the portal through the managed
 HTTPS gateway by default; see [DEVICE_PAIRING.md](DEVICE_PAIRING.md).
@@ -472,9 +471,11 @@ own and revoke the resulting device session. The direct HTTP mode is limited
 to trusted private source CIDRs and does not encrypt the Basic Auth password.
 
 Codex CLI, Claude Code, OpenCode, and T3 Code are installed from their official
-distribution channels. The Codex installer runs with `CODEX_NON_INTERACTIVE=1`,
+distribution channels. T3 Code uses its documented `npx t3@latest service
+update` workflow, so the same command can update the managed service later.
+The Codex installer runs with `CODEX_NON_INTERACTIVE=1`,
 so setup does not prompt to start Codex or remove a conflicting installation.
-infra-tools does not install these tools with npm. Any
+The other agent tools are not installed with npm. Any
 selected agent installs only that agent's tool and its required installer
 dependencies.
 

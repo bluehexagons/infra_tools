@@ -233,7 +233,6 @@ class TestPluginRegistry(unittest.TestCase):
             install_claude=True,
             install_opencode=True,
             agent_tools=["gh", "codex", "claude", "opencode"],
-            desktop_interfaces=["t3code"],
             web_interfaces=["t3code"],
             agent_payload=True,
             agent_repos=["https://github.com/user/repo.git"],
@@ -246,17 +245,12 @@ class TestPluginRegistry(unittest.TestCase):
         self.assertIn("Installing Codex CLI", step_names)
         self.assertIn("Installing Claude Code", step_names)
         self.assertIn("Installing OpenCode", step_names)
-        self.assertIn("Installing T3 Code desktop interface", step_names)
         self.assertIn("Installing T3 Code web interface", step_names)
         self.assertIn("Copying agent tool configuration", step_names)
         self.assertIn("Cloning agent repositories on target", step_names)
         self.assertLess(
             step_names.index("Installing CLI tools"),
             step_names.index("Installing GitHub CLI"),
-        )
-        self.assertLess(
-            step_names.index("Copying agent tool configuration"),
-            step_names.index("Installing T3 Code desktop interface"),
         )
         self.assertLess(
             step_names.index("Copying agent tool configuration"),

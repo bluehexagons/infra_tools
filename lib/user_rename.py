@@ -590,6 +590,28 @@ def _restore_managed_units(unit_state: Iterable[dict[str, Any]]) -> None:
             _run(["systemctl", "start", unit])
 
 
+def _restore_t3_user_service(username: str, uid: int, home: str) -> None:
+    """Restart an upstream T3 user service after its user manager was stopped."""
+
+    service = os.path.join(home, ".config", "systemd", "user", "t3code.service")
+    if not os.path.lexists(service):
+        return
+    if os.path.islink(service) or not os.path.isfile(service):
+        raise RenameError(f"T3 Code user service is not a regular file: {service}")
+    environment = [
+        "env",
+        f"XDG_RUNTIME_DIR=/run/user/{uid}",
+        f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus",
+    ]
+    _run(["systemctl", "start", f"user@{uid}.service"])
+    prefix = ["runuser", "-u", username, "--", *environment, "systemctl", "--user"]
+    _run([*prefix, "daemon-reload"])
+    _run([*prefix, "enable", "t3code.service"])
+    _run([*prefix, "restart", "t3code.service"])
+    if _run([*prefix, "is-active", "--quiet", "t3code.service"], check=False).returncode:
+        raise RenameError("T3 Code user service did not restart after the rename")
+
+
 def _terminate_user(account: pwd.struct_passwd) -> None:
     _run(["usermod", "-s", "/usr/sbin/nologin", account.pw_name])
     _run(["loginctl", "terminate-user", account.pw_name], check=False)
@@ -811,10 +833,11 @@ def _replace_in_file(path: str, replacements: list[tuple[str, str]]) -> bool:
     updated = pattern.sub(lambda match: replacements_by_old[match.group(0)], text)
     if updated == text:
         return False
-    mode = stat.S_IMODE(os.stat(path, follow_symlinks=False).st_mode)
+    metadata = os.stat(path, follow_symlinks=False)
+    mode = stat.S_IMODE(metadata.st_mode)
     write_text_atomic(path, updated, mode=mode)
     try:
-        os.chown(path, 0, 0)
+        os.chown(path, metadata.st_uid, metadata.st_gid)
     except OSError:
         pass
     return True
@@ -925,6 +948,19 @@ def _rewrite_managed_home_files(old_home: str, new_home: str) -> list[str]:
                 path = os.path.join(directory, filename)
                 if _replace_in_file(path, [(old_home, new_home)]):
                     changed.append(path)
+    for path in (
+        os.path.join(new_home, ".config", "systemd", "user", "t3code.service"),
+        os.path.join(
+            new_home,
+            ".config",
+            "systemd",
+            "user",
+            "t3code.service.d",
+            "infra-tools.conf",
+        ),
+    ):
+        if _replace_in_file(path, [(old_home, new_home)]):
+            changed.append(path)
     return changed
 
 
@@ -944,6 +980,24 @@ def _verify_managed_rewrites(manifest: dict[str, Any], old_home: str) -> None:
         remaining = content.replace(manifest["new_home"], "")
         if old_home in remaining or old_username in remaining:
             raise RenameError(f"Managed unit still references the old account: {path}")
+    new_home = manifest["new_home"]
+    for path in (
+        os.path.join(new_home, ".config", "systemd", "user", "t3code.service"),
+        os.path.join(
+            new_home,
+            ".config",
+            "systemd",
+            "user",
+            "t3code.service.d",
+            "infra-tools.conf",
+        ),
+    ):
+        if not os.path.isfile(path) or os.path.islink(path):
+            continue
+        with open(path, encoding="utf-8") as file_obj:
+            content = file_obj.read()
+        if old_home != new_home and old_home in content:
+            raise RenameError(f"T3 Code user service still references {old_home}: {path}")
 
 
 def _rewrite_sudoers(old_username: str, new_username: str) -> list[str]:
@@ -1212,6 +1266,11 @@ def _run_migration_locked(manifest: dict[str, Any]) -> int:
             _write_status(operation_id, "services-starting", "in_progress")
             _run(["systemctl", "daemon-reload"])
             _restore_managed_units(manifest.get("managed_units", []))
+            _restore_t3_user_service(
+                new_username,
+                int(manifest["old_uid"]),
+                new_home,
+            )
             _write_marker(manifest, "services-reconciled")
             _write_status(operation_id, "services-reconciled", "in_progress")
 

@@ -43,10 +43,11 @@ _BROWSER_DOCTOR_WRAPPER = "/usr/local/bin/infra-tools-playwright-doctor"
 _BROWSER_MCP_SERVER_NAME = "infra-tools-playwright"
 _BROWSER_DOCTOR_TIMEOUT_SECONDS = 210
 _REMOTE_DOCTOR_TIMEOUT_SECONDS = _BROWSER_DOCTOR_TIMEOUT_SECONDS + 90
-_T3_SERVICE_NAME = "infra-tools-t3code.service"
+_T3_SERVICE_NAME = "t3code.service"
 _T3_RUNTIME_RELATIVE = os.path.join(
-    ".local", "share", "infra-tools", "t3code"
+    ".t3", "runtime"
 )
+_T3_VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$")
 _T3_SKILL_RELATIVE = os.path.join(
     ".agents", "skills", "infra-tools-t3code", "SKILL.md"
 )
@@ -782,14 +783,12 @@ def inspect_browser_automation(home: Optional[str] = None) -> JSONDict:
 
 def _t3_environment(home: str) -> dict[str, str]:
     environment = os.environ.copy()
-    runtime = os.path.join(home, _T3_RUNTIME_RELATIVE)
     environment.update(
         {
             "HOME": home,
             "GH_CONFIG_DIR": os.path.join(home, ".config", "gh"),
             "PATH": os.pathsep.join(
                 (
-                    os.path.join(runtime, "node_modules", ".bin"),
                     os.path.join(home, ".opencode", "bin"),
                     os.path.join(home, ".local", "bin"),
                     _UPDATE_SYSTEM_PATH,
@@ -821,9 +820,9 @@ def _run_check(
         return subprocess.CompletedProcess(command, 1, "", "")
 
 
-def _t3_port(wrapper: str) -> int | None:
+def _t3_port(drop_in: str) -> int | None:
     try:
-        with open(wrapper, encoding="utf-8") as file_obj:
+        with open(drop_in, encoding="utf-8") as file_obj:
             match = re.search(r"T3CODE_PORT=(\d+)", file_obj.read())
     except OSError:
         match = None
@@ -834,6 +833,33 @@ def _t3_port(wrapper: str) -> int | None:
     except ValueError:
         return None
     return port if 1 <= port <= 65535 else None
+
+
+def _t3_active_binary(home: str) -> str | None:
+    runtime = os.path.join(home, _T3_RUNTIME_RELATIVE)
+    state_file = os.path.join(runtime, "service-state.json")
+    if os.path.islink(state_file) or not os.path.isfile(state_file):
+        return None
+    try:
+        with open(state_file, encoding="utf-8") as file_obj:
+            state = json.load(file_obj)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(state, dict) or state.get("protocolVersion") != 2:
+        return None
+    version = state.get("activeVersion")
+    if not isinstance(version, str) or _T3_VERSION_RE.fullmatch(version) is None:
+        return None
+    binary = os.path.join(
+        runtime,
+        "versions",
+        version,
+        "node_modules",
+        "t3",
+        "dist",
+        "bin.mjs",
+    )
+    return binary if os.path.isfile(binary) and os.access(binary, os.X_OK) else None
 
 
 def _t3_endpoint_reachable(port: int | None) -> bool:
@@ -866,9 +892,21 @@ def inspect_t3code(home: Optional[str] = None, *, fix: bool = False) -> JSONDict
     """Verify the managed T3 service, Git integration, and user onboarding."""
 
     user_home = os.path.abspath(home or os.path.expanduser("~"))
-    runtime = os.path.join(user_home, _T3_RUNTIME_RELATIVE)
-    t3_binary = os.path.join(runtime, "node_modules", ".bin", "t3")
-    wrapper = os.path.join(user_home, ".local", "bin", "infra-tools-t3code-web")
+    t3_binary = _t3_active_binary(user_home)
+    wrapper = os.path.join(
+        user_home,
+        ".local",
+        "bin",
+        "infra-tools-t3code-pairing-provider",
+    )
+    drop_in = os.path.join(
+        user_home,
+        ".config",
+        "systemd",
+        "user",
+        "t3code.service.d",
+        "infra-tools.conf",
+    )
     pair_wrapper = os.path.join(user_home, ".local", "bin", "t3code-pair")
     skill = os.path.join(user_home, _T3_SKILL_RELATIVE)
     environment = _t3_environment(user_home)
@@ -879,7 +917,9 @@ def inspect_t3code(home: Optional[str] = None, *, fix: bool = False) -> JSONDict
     )
     fixes: list[str] = []
 
-    service = _run_check(["systemctl", "is-active", "--quiet", _T3_SERVICE_NAME])
+    service = _run_check(
+        ["systemctl", "--user", "is-active", "--quiet", _T3_SERVICE_NAME]
+    )
     gh_auth = (
         _run_check(
             [gh_path, "auth", "status", "--hostname", "github.com"],
@@ -926,24 +966,21 @@ def inspect_t3code(home: Optional[str] = None, *, fix: bool = False) -> JSONDict
             fixes.append("configured GitHub HTTPS credential helper")
             credential_helper = True
     if fix and os.path.isfile(wrapper) and service.returncode != 0:
-        restart_command = ["systemctl", "restart", _T3_SERVICE_NAME]
-        if os.geteuid() != 0:
-            restart_command.insert(0, "-n")
-            restart_command.insert(0, "sudo")
+        restart_command = ["systemctl", "--user", "restart", _T3_SERVICE_NAME]
         restarted = _run_check(restart_command)
         if restarted.returncode == 0:
             fixes.append("restarted inactive T3 Code service")
             service = _run_check(
-                ["systemctl", "is-active", "--quiet", _T3_SERVICE_NAME]
+                ["systemctl", "--user", "is-active", "--quiet", _T3_SERVICE_NAME]
             )
 
     checks = {
         "service_active": service.returncode == 0,
-        "runtime": os.path.isfile(t3_binary) and os.access(t3_binary, os.X_OK),
+        "runtime": bool(t3_binary),
         "wrapper": os.path.isfile(wrapper) and os.access(wrapper, os.X_OK),
         "pairing_helper": os.path.isfile(pair_wrapper)
         and os.access(pair_wrapper, os.X_OK),
-        "endpoint": _t3_endpoint_reachable(_t3_port(wrapper)),
+        "endpoint": _t3_endpoint_reachable(_t3_port(drop_in)),
         "git_identity": bool(git_name and git_email),
         "t3_agent_skill": not skill_required or _t3_skill_ready(skill),
     }
@@ -956,7 +993,7 @@ def inspect_t3code(home: Optional[str] = None, *, fix: bool = False) -> JSONDict
         "checks": checks,
         "runtime": t3_binary,
         "version": _tool_version("t3", t3_binary)
-        if checks["runtime"]
+        if checks["runtime"] and t3_binary
         else None,
         "git_identity": {
             "name": git_name or None,

@@ -70,9 +70,11 @@ not uninstall the Ruby packages or stop an existing legacy Rails application.
 GitHub CLI is installed from its APT repository and therefore follows the APT
 job. Explicitly selected Codex CLI, Claude Code, and OpenCode installations
 remain outside recurring root updates; their rebuildable caches are covered
-by the separate user maintenance job. T3 Code's current desktop installation
-has no managed update path. Run `infra-tools agent update --dry-run` and then
-`infra-tools agent update` as the account that owns the tools (for example,
+by the separate user maintenance job. T3 Code's per-user service is also not
+silently updated. Update it deliberately as the target user with `npx
+t3@latest service update`, or rerun setup with `--refresh-packages`. Run
+`infra-tools agent update --dry-run` and then `infra-tools agent update` as the
+account that owns the terminal tools (for example,
 `sudo -u agent -H infra-tools agent update --tool codex`) for a deliberate
 terminal-agent vendor update with before/after verification, a retained prior
 executable, automatic rollback after a broken update, and a private audit

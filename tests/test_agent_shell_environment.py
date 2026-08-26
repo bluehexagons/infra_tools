@@ -30,19 +30,9 @@ class UserToolShellEnvironmentTest(unittest.TestCase):
                 file_obj.write("# login setup\n")
 
             nvm_bin = os.path.join(home, ".nvm", "versions", "node", "v24", "bin")
-            t3_bin = os.path.join(
-                home,
-                ".local",
-                "share",
-                "infra-tools",
-                "t3code",
-                "node_modules",
-                ".bin",
-            )
             opencode_bin = os.path.join(home, ".opencode", "bin")
             local_bin = os.path.join(home, ".local", "bin")
             os.makedirs(nvm_bin)
-            os.makedirs(t3_bin)
             os.makedirs(opencode_bin)
             os.makedirs(local_bin)
             with open(os.path.join(home, ".nvm", "nvm.sh"), "w", encoding="utf-8") as file_obj:
@@ -54,7 +44,6 @@ class UserToolShellEnvironmentTest(unittest.TestCase):
             for path in (
                 os.path.join(nvm_bin, "node"),
                 os.path.join(nvm_bin, "pnpm"),
-                os.path.join(t3_bin, "t3"),
                 os.path.join(opencode_bin, "opencode"),
                 os.path.join(local_bin, "uv"),
             ):
@@ -66,9 +55,9 @@ class UserToolShellEnvironmentTest(unittest.TestCase):
                 _ensure_user_tool_shell_environment("agent", home)
 
             command = (
-                "command -v nvm; command -v node; command -v pnpm; command -v t3; "
+                "command -v nvm; command -v node; command -v pnpm; "
                 "command -v opencode; command -v uv; "
-                "bash -c 'command -v nvm; command -v node; command -v t3; command -v opencode'"
+                "bash -c 'command -v nvm; command -v node; command -v opencode'"
             )
             result = subprocess.run(
                 ["/bin/bash", "-lc", command],
@@ -83,7 +72,6 @@ class UserToolShellEnvironmentTest(unittest.TestCase):
             self.assertEqual(output.count("nvm"), 2)
             self.assertEqual(output.count(os.path.join(nvm_bin, "node")), 2)
             self.assertIn(os.path.join(nvm_bin, "pnpm"), output)
-            self.assertEqual(output.count(os.path.join(t3_bin, "t3")), 2)
             self.assertEqual(output.count(os.path.join(opencode_bin, "opencode")), 2)
             self.assertIn(os.path.join(local_bin, "uv"), output)
             with open(bashrc, encoding="utf-8") as file_obj:

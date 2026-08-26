@@ -28,7 +28,6 @@ PLUGIN = PluginDefinition(
         "install_claude",
         "install_opencode",
         "install_agent_cli_launcher",
-        "install_t3code_desktop",
         "install_t3code_web",
         "copy_agent_tooling_payload",
         "install_browser_automation",
@@ -217,7 +216,6 @@ def extend_agent_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -
         install_codex,
         install_github_cli,
         install_opencode,
-        install_t3code_desktop,
     )
     from common.t3code_steps import install_t3code_web
 
@@ -246,16 +244,10 @@ def extend_agent_steps(config: SetupConfig, steps: list[tuple[str, StepFunc]]) -
     git_needed = bool(
         config.agent_repos
         or config.install_git_lfs
-        or (
-            (config.web_interfaces or config.desktop_interfaces)
-            and config.git_access != "none"
-        )
+        or (config.web_interfaces and config.git_access != "none")
     )
     if git_needed:
         steps.append(("Installing Git for agent repositories", install_git_for_agent_repositories))
-
-    if "t3code" in (config.desktop_interfaces or []):
-        steps.append(("Installing T3 Code desktop interface", install_t3code_desktop))
 
     if "t3code" in (config.web_interfaces or []):
         steps.append(("Installing T3 Code web interface", install_t3code_web))
@@ -317,7 +309,6 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         install_codex,
         install_github_cli,
         install_opencode,
-        install_t3code_desktop,
     )
     from common.t3code_steps import install_t3code_web
     from common.browser_automation_steps import install_browser_automation
@@ -339,7 +330,6 @@ def get_custom_step_functions() -> Mapping[str, StepFunc]:
         "install_claude": install_claude,
         "install_opencode": install_opencode,
         "install_agent_cli_launcher": install_agent_cli_launcher,
-        "install_t3code_desktop": install_t3code_desktop,
         "install_t3code_web": install_t3code_web,
         "copy_agent_tooling_payload": copy_agent_tooling_payload,
         "install_browser_automation": install_browser_automation,

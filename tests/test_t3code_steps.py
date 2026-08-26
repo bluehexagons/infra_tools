@@ -1,19 +1,20 @@
-"""Tests for the explicit T3 Code web-interface setup path."""
+"""Tests for the T3 Code server setup path."""
 
 from __future__ import annotations
 
-import io
+import json
 import os
 import tempfile
 import unittest
-from contextlib import redirect_stdout
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from common.t3code_steps import (
+    _active_t3_binary,
     _configure_firewall,
     _configure_t3_https,
-    _remove_legacy_t3_shim,
+    _install_t3_service,
+    _write_passthrough_wrapper,
     install_t3code_web,
 )
 from lib.config import SetupConfig
@@ -33,18 +34,42 @@ class T3CodeWebTest(unittest.TestCase):
         values.update(overrides)
         return SetupConfig(**values)
 
+    @staticmethod
+    def _write_upstream_runtime(home: str, version: str = "0.0.34") -> str:
+        runtime = os.path.join(home, ".t3", "runtime")
+        binary = os.path.join(
+            runtime,
+            "versions",
+            version,
+            "node_modules",
+            "t3",
+            "dist",
+            "bin.mjs",
+        )
+        os.makedirs(os.path.dirname(binary), exist_ok=True)
+        with open(binary, "w", encoding="utf-8") as file_obj:
+            file_obj.write("#!/usr/bin/env node\n")
+        os.chmod(binary, 0o755)
+        with open(
+            os.path.join(runtime, "service-state.json"),
+            "w",
+            encoding="utf-8",
+        ) as file_obj:
+            json.dump({"protocolVersion": 2, "activeVersion": version}, file_obj)
+        service = os.path.join(home, ".config", "systemd", "user", "t3code.service")
+        os.makedirs(os.path.dirname(service), exist_ok=True)
+        with open(service, "w", encoding="utf-8") as file_obj:
+            file_obj.write("# upstream managed\n")
+        return binary
+
     def test_source_promotes_default_bind_to_all_interfaces(self) -> None:
         config = self._config()
         self.assertEqual(config.web_interface_host, "0.0.0.0")
         validate_web_interface_settings(config)
 
     def test_https_gateway_is_optional_when_managed_utility_is_unavailable(self) -> None:
-        config = self._config()
-        with patch(
-            "common.t3code_steps.os.path.isfile",
-            return_value=False,
-        ):
-            self.assertEqual(_configure_t3_https(config, 3773, None), [])
+        with patch("common.t3code_steps.os.path.isfile", return_value=False):
+            self.assertEqual(_configure_t3_https(self._config(), 3773, None), [])
 
     def test_non_loopback_bind_requires_private_source(self) -> None:
         config = self._config(web_interface_host="0.0.0.0", web_interface_sources=None)
@@ -90,7 +115,9 @@ class T3CodeWebTest(unittest.TestCase):
         with patch("common.t3code_steps.run", side_effect=run_command) as mock_run:
             _configure_firewall(config, 3773, "0.0.0.0")
 
-        self.assertTrue(any("ufw --force delete 1" in call.args[0] for call in mock_run.call_args_list))
+        self.assertTrue(
+            any("ufw --force delete 1" in call.args[0] for call in mock_run.call_args_list)
+        )
 
     def test_firewall_rejects_unmanaged_port_rule(self) -> None:
         config = self._config(web_interface_host="0.0.0.0")
@@ -107,191 +134,216 @@ class T3CodeWebTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Unmanaged UFW allow rules"):
                 _configure_firewall(config, 3773, "0.0.0.0")
 
-    def test_legacy_shim_is_removed_but_unmanaged_launcher_is_preserved(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            shim_dir = os.path.join(
-                temporary, ".local", "share", "infra-tools", "t3code", "shims"
-            )
-            os.makedirs(shim_dir)
-            shim = os.path.join(shim_dir, "gh")
-            with open(shim, "w", encoding="utf-8") as file_obj:
-                file_obj.write("t3code_gh_shim.py\n")
-            self.assertTrue(_remove_legacy_t3_shim(temporary))
-            self.assertFalse(os.path.exists(shim))
+    def test_active_binary_requires_upstream_protocol_and_exact_version(self) -> None:
+        with tempfile.TemporaryDirectory() as home:
+            binary = self._write_upstream_runtime(home)
+            self.assertEqual(_active_t3_binary(home), binary)
+            state_file = os.path.join(home, ".t3", "runtime", "service-state.json")
+            with open(state_file, "w", encoding="utf-8") as file_obj:
+                json.dump(
+                    {"protocolVersion": 2, "activeVersion": "../../escape"},
+                    file_obj,
+                )
+            self.assertIsNone(_active_t3_binary(home))
 
-            os.makedirs(shim_dir)
-            with open(shim, "w", encoding="utf-8") as file_obj:
-                file_obj.write("#!/bin/sh\nexec /usr/bin/gh \"$@\"\n")
-            self.assertFalse(_remove_legacy_t3_shim(temporary))
-            self.assertTrue(os.path.isfile(shim))
+    def test_service_install_uses_upstream_npx_update_and_managed_drop_in(self) -> None:
+        with tempfile.TemporaryDirectory() as home:
+            workspace = os.path.join(home, "repos")
+            os.makedirs(workspace)
+            completed = SimpleNamespace(returncode=0, stdout="", stderr="")
+            commands: list[str] = []
 
-    def test_web_step_writes_service_and_pairing_wrappers(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            account = SimpleNamespace(pw_dir=temporary, pw_uid=os.getuid(), pw_gid=os.getgid())
-            config = self._config(
-                agent_tools=["gh", "codex"],
-                agent_workspace=os.path.join(temporary, "repos"),
+            def run_as_user(_username, _home, command, **_kwargs):
+                commands.append(command)
+                self._write_upstream_runtime(home)
+                return completed
+
+            with (
+                patch("common.t3code_steps.install_package", return_value=True),
+                patch("common.t3code_steps._ensure_user_manager"),
+                patch(
+                    "common.t3code_steps._node_bin_directory",
+                    return_value="/usr/bin",
+                ),
+                patch("common.t3code_steps._run_as_login_user", side_effect=run_as_user),
+                patch("common.t3code_steps._user_systemctl", return_value=completed),
+                patch("common.t3code_steps.os.chown"),
+                patch(
+                    "common.t3code_steps.LEGACY_T3_SERVICE_FILE",
+                    os.path.join(home, "legacy.service"),
+                ),
+            ):
+                binary, changed = _install_t3_service(
+                    home,
+                    "agent",
+                    os.getuid(),
+                    os.getgid(),
+                    workspace,
+                    "0.0.0.0",
+                    3773,
+                )
+
+            self.assertTrue(changed)
+            self.assertEqual(binary, _active_t3_binary(home))
+            self.assertTrue(
+                any("npx --yes t3@latest service update" in command for command in commands)
             )
-            service_path = os.path.join(temporary, "t3code.service")
-            pairing_config_dir = os.path.join(temporary, "device-pairing")
+            drop_in = os.path.join(
+                home,
+                ".config",
+                "systemd",
+                "user",
+                "t3code.service.d",
+                "infra-tools.conf",
+            )
+            with open(drop_in, encoding="utf-8") as file_obj:
+                content = file_obj.read()
+            self.assertIn(f"WorkingDirectory={workspace}", content)
+            self.assertIn("Environment=T3CODE_HOST=0.0.0.0", content)
+            self.assertIn("Environment=T3CODE_PORT=3773", content)
+
+    def test_healthy_service_is_not_silently_updated(self) -> None:
+        with tempfile.TemporaryDirectory() as home:
+            workspace = os.path.join(home, "repos")
+            os.makedirs(workspace)
+            self._write_upstream_runtime(home)
+            completed = SimpleNamespace(returncode=0, stdout="", stderr="")
+            with (
+                patch("common.t3code_steps.install_package", return_value=True),
+                patch("common.t3code_steps._ensure_user_manager"),
+                patch("common.t3code_steps._node_bin_directory", return_value="/usr/bin"),
+                patch("common.t3code_steps._run_as_login_user") as run_as_user,
+                patch("common.t3code_steps._user_systemctl", return_value=completed),
+                patch("common.t3code_steps.os.chown"),
+                patch(
+                    "common.t3code_steps.LEGACY_T3_SERVICE_FILE",
+                    os.path.join(home, "legacy.service"),
+                ),
+            ):
+                _install_t3_service(
+                    home,
+                    "agent",
+                    os.getuid(),
+                    os.getgid(),
+                    workspace,
+                    "127.0.0.1",
+                    3773,
+                )
+            run_as_user.assert_not_called()
+
+    def test_legacy_root_service_is_retired_after_user_service_starts(self) -> None:
+        with tempfile.TemporaryDirectory() as home:
+            workspace = os.path.join(home, "repos")
+            os.makedirs(workspace)
+            self._write_upstream_runtime(home)
+            legacy_service = os.path.join(home, "infra-tools-t3code.service")
+            with open(legacy_service, "w", encoding="utf-8") as file_obj:
+                file_obj.write("# legacy infra-tools unit\n")
+            completed = SimpleNamespace(returncode=0, stdout="", stderr="")
+            with (
+                patch("common.t3code_steps.install_package", return_value=True),
+                patch("common.t3code_steps._ensure_user_manager"),
+                patch("common.t3code_steps._node_bin_directory", return_value="/usr/bin"),
+                patch("common.t3code_steps._run_as_login_user") as run_as_user,
+                patch("common.t3code_steps._user_systemctl", return_value=completed),
+                patch("common.t3code_steps.run", return_value=completed) as run_command,
+                patch("common.t3code_steps.os.chown"),
+                patch(
+                    "common.t3code_steps.LEGACY_T3_SERVICE_FILE",
+                    legacy_service,
+                ),
+            ):
+                _install_t3_service(
+                    home,
+                    "agent",
+                    os.getuid(),
+                    os.getgid(),
+                    workspace,
+                    "127.0.0.1",
+                    3773,
+                )
+
+            run_as_user.assert_not_called()
+            self.assertFalse(os.path.exists(legacy_service))
+            commands = [call.args[0] for call in run_command.call_args_list]
+            self.assertIn(
+                ["systemctl", "stop", "infra-tools-t3code.service"],
+                commands,
+            )
+            self.assertIn(
+                ["systemctl", "disable", "infra-tools-t3code.service"],
+                commands,
+            )
+
+    def test_stable_wrapper_follows_service_selected_version(self) -> None:
+        with tempfile.TemporaryDirectory() as home:
+            bin_dir = os.path.join(home, ".local", "bin")
+            os.makedirs(bin_dir)
+            wrapper = os.path.join(bin_dir, "t3")
+            self.assertTrue(_write_passthrough_wrapper(wrapper, home))
+            with open(wrapper, encoding="utf-8") as file_obj:
+                content = file_obj.read()
+            self.assertIn("service-state.json", content)
+            self.assertIn("versions", content)
+            self.assertIn('exec "$binary" "$@"', content)
+            self.assertNotIn("npx", content)
+
+    def test_web_step_is_server_only_and_uses_upstream_service(self) -> None:
+        with tempfile.TemporaryDirectory() as home:
+            account = SimpleNamespace(
+                pw_dir=home,
+                pw_uid=os.getuid(),
+                pw_gid=os.getgid(),
+            )
+            workspace = os.path.join(home, "repos")
+            os.makedirs(workspace)
+            binary = self._write_upstream_runtime(home)
+            completed = SimpleNamespace(returncode=0, stdout="", stderr="")
             admin_pair_script = os.path.join(
                 os.path.dirname(os.path.dirname(__file__)),
                 "common",
                 "service_tools",
                 "t3code_admin_pair.py",
             )
-            def run_command(command: str, **_kwargs):
-                if command == "ufw status numbered":
-                    return SimpleNamespace(
-                        returncode=0,
-                        stdout=(
-                            "[ 1] 3773/tcp ALLOW IN 192.168.0.0/24 "
-                            "# infra_tools T3 Code 3773/tcp source 192.168.0.0/24\n"
-                        ),
-                    )
-                return SimpleNamespace(returncode=0, stdout="")
-
-            output = io.StringIO()
             with (
-                redirect_stdout(output),
                 patch("common.t3code_steps.pwd.getpwnam", return_value=account),
                 patch("common.t3code_steps.os.chown"),
+                patch("common.t3code_steps._configure_firewall"),
                 patch(
-                    "common.t3code_steps.run",
-                    side_effect=run_command,
+                    "common.t3code_steps._install_t3_service",
+                    return_value=(binary, True),
                 ),
-                patch("common.t3code_steps.install_package", return_value=True),
-                patch(
-                    "common.t3code_steps._run_as_login_user",
-                    return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
-                ),
-                patch(
-                    "common.t3code_steps._configure_t3_https",
-                    return_value=[("https://target:8444/", 8444)],
-                ),
-                patch("common.t3code_steps.T3_SERVICE_FILE", service_path),
-                patch(
-                    "common.t3code_steps.DEVICE_PAIRING_SERVICE_FILE",
-                    os.path.join(temporary, "infra-tools-device-pairing.service"),
-                ),
-                patch(
-                    "common.t3code_steps.DEVICE_PAIRING_CONFIG_DIR",
-                    pairing_config_dir,
-                ),
-                patch(
-                    "common.t3code_steps.DEVICE_PAIRING_AUTH_FILE",
-                    os.path.join(pairing_config_dir, "htpasswd"),
-                ),
-                patch(
-                    "common.t3code_steps.DEVICE_PAIRING_PROVIDERS_FILE",
-                    os.path.join(pairing_config_dir, "providers.json"),
-                ),
-                patch(
-                    "common.t3code_steps.DEVICE_PAIRING_NGINX_SITE",
-                    os.path.join(
-                        temporary,
-                        "nginx",
-                        "sites-available",
-                        "device-pairing",
-                    ),
-                ),
-                patch(
-                    "common.t3code_steps.DEVICE_PAIRING_NGINX_LINK",
-                    os.path.join(
-                        temporary,
-                        "nginx",
-                        "sites-enabled",
-                        "device-pairing",
-                    ),
-                ),
-                patch(
-                    "common.t3code_steps.T3_ADMIN_PAIR_SCRIPT",
-                    admin_pair_script,
-                ),
-                patch("common.t3code_steps.remove_nginx_auth_failure_ban"),
+                patch("common.t3code_steps._user_systemctl", return_value=completed),
+                patch("common.t3code_steps._ensure_t3_agent_skill", return_value=False),
+                patch("common.t3code_steps._remove_connect_restart_units"),
+                patch("common.t3code_steps._remove_device_pairing"),
+                patch("common.t3code_steps._remove_t3_https"),
+                patch("common.t3code_steps._configure_t3_https", return_value=[]),
+                patch("common.t3code_steps.T3_ADMIN_PAIR_SCRIPT", admin_pair_script),
             ):
-                install_t3code_web(config)
+                install_t3code_web(
+                    self._config(
+                        web_interface_sources=None,
+                        web_interface_host="127.0.0.1",
+                        agent_workspace=workspace,
+                    )
+                )
 
-            rendered = output.getvalue()
-            self.assertIn("T3 Code HTTPS endpoint: https://target:8444/", rendered)
-            self.assertIn("T3 Code HTTP compatibility: port 3773", rendered)
-            self.assertNotIn("http://target:3773/", rendered)
-
-            wrapper = os.path.join(temporary, ".local", "bin", "infra-tools-t3code-web")
-            pair_wrapper = os.path.join(temporary, ".local", "bin", "t3code-pair")
-            cli_wrapper = os.path.join(
-                temporary,
+            wrapper = os.path.join(
+                home,
                 ".local",
                 "bin",
                 "infra-tools-t3code-pairing-provider",
             )
-            self.assertTrue(os.path.exists(wrapper))
-            self.assertTrue(os.path.exists(pair_wrapper))
-            self.assertTrue(os.path.exists(cli_wrapper))
-            with open(wrapper, encoding="utf-8") as file_obj:
-                content = file_obj.read()
-            self.assertIn("serve --host 0.0.0.0 --port 3773 --no-browser", content)
-            self.assertIn(
-                f"exec {os.path.join(temporary, '.local', 'share', 'infra-tools', 't3code', 'node_modules', '.bin', 't3')}",
-                content,
+            pair_wrapper = os.path.join(home, ".local", "bin", "t3code-pair")
+            self.assertTrue(os.path.isfile(wrapper))
+            self.assertTrue(os.path.isfile(pair_wrapper))
+            self.assertFalse(
+                os.path.exists(os.path.join(home, ".local", "share", "t3code"))
             )
-            self.assertIn(f"cd {os.path.join(temporary, 'repos')}", content)
-            self.assertNotIn("npx", content)
-            self.assertIn(
-                "$HOME/.local/share/infra-tools/t3code/node_modules/.bin:",
-                content,
+            self.assertFalse(
+                os.path.exists(os.path.join(home, ".local", "share", "applications"))
             )
-            self.assertNotIn("t3code/shims", content)
-            self.assertIn(
-                "$PATH:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-                content,
-            )
-            self.assertIn('export GH_CONFIG_DIR="$HOME/.config/gh"', content)
-            with open(cli_wrapper, encoding="utf-8") as file_obj:
-                cli_content = file_obj.read()
-            self.assertIn(
-                "$PATH:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-                cli_content,
-            )
-            self.assertIn(
-                'export GH_CONFIG_DIR="$HOME/.config/gh"',
-                cli_content,
-            )
-            with open(pair_wrapper, encoding="utf-8") as file_obj:
-                pairing_content = file_obj.read()
-            self.assertIn("t3code_admin_pair.py", pairing_content)
-            self.assertIn("--server-url http://127.0.0.1:3773", pairing_content)
-            self.assertIn("--base-url https://target:8444/", pairing_content)
-            with open(os.path.join(temporary, ".bashrc"), encoding="utf-8") as file_obj:
-                bashrc = file_obj.read()
-            self.assertIn("infra-tools T3 Code runtime", bashrc)
-            skill = os.path.join(
-                temporary,
-                ".agents",
-                "skills",
-                "infra-tools-t3code",
-                "SKILL.md",
-            )
-            self.assertTrue(os.path.isfile(skill))
-            with open(skill, encoding="utf-8") as file_obj:
-                self.assertIn("managed-by: infra_tools", file_obj.read())
-            gateway_skill = os.path.join(
-                temporary,
-                ".agents",
-                "skills",
-                "infra-tools-web-gateway",
-                "SKILL.md",
-            )
-            self.assertTrue(os.path.isfile(gateway_skill))
-            with open(gateway_skill, encoding="utf-8") as file_obj:
-                self.assertIn("managed-by: infra_tools", file_obj.read())
-            with open(service_path, encoding="utf-8") as file_obj:
-                service = file_obj.read()
-            self.assertIn("User=agent", service)
-            self.assertIn(f"RequiresMountsFor={temporary}", service)
-            self.assertIn(f"RequiresMountsFor={os.path.join(temporary, 'repos')}", service)
-            self.assertIn("StandardOutput=null", service)
-            self.assertIn("infra-tools-t3code-web", service)
 
 
 if __name__ == "__main__":

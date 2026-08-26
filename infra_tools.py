@@ -775,8 +775,6 @@ def show_info(pattern: Optional[str] = None, *, compact: bool = False) -> int:
             features.append("Claude Code")
         if args.get("install_opencode"):
             features.append("OpenCode")
-        for interface in args.get("desktop_interfaces", []) or []:
-            features.append(f"Desktop {interface}")
         for interface in args.get("web_interfaces", []) or []:
             features.append(f"Web {interface}")
         for provider in args.get("device_pairing_providers", []) or []:
