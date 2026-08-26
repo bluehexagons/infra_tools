@@ -55,7 +55,7 @@ class T3CodeWebTest(unittest.TestCase):
             "w",
             encoding="utf-8",
         ) as file_obj:
-            json.dump({"protocolVersion": 2, "activeVersion": version}, file_obj)
+            json.dump({"protocol": 2, "activeVersion": version}, file_obj)
         service = os.path.join(home, ".config", "systemd", "user", "t3code.service")
         os.makedirs(os.path.dirname(service), exist_ok=True)
         with open(service, "w", encoding="utf-8") as file_obj:
@@ -141,9 +141,18 @@ class T3CodeWebTest(unittest.TestCase):
             state_file = os.path.join(home, ".t3", "runtime", "service-state.json")
             with open(state_file, "w", encoding="utf-8") as file_obj:
                 json.dump(
-                    {"protocolVersion": 2, "activeVersion": "../../escape"},
+                    {"protocolVersion": 2, "activeVersion": "0.0.34"},
                     file_obj,
                 )
+            self.assertIsNone(_active_t3_binary(home))
+
+            build_binary = self._write_upstream_runtime(
+                home,
+                "1.2.3-nightly.1+build.5",
+            )
+            self.assertEqual(_active_t3_binary(home), build_binary)
+
+            self._write_upstream_runtime(home, "01.2.3")
             self.assertIsNone(_active_t3_binary(home))
 
     def test_service_install_uses_upstream_npx_update_and_managed_drop_in(self) -> None:
@@ -284,6 +293,8 @@ class T3CodeWebTest(unittest.TestCase):
             with open(wrapper, encoding="utf-8") as file_obj:
                 content = file_obj.read()
             self.assertIn("service-state.json", content)
+            self.assertIn('value.get("protocol") == 2', content)
+            self.assertIn('NVM_DIR="$HOME/.nvm"', content)
             self.assertIn("versions", content)
             self.assertIn('exec "$binary" "$@"', content)
             self.assertNotIn("npx", content)

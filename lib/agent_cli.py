@@ -47,7 +47,15 @@ _T3_SERVICE_NAME = "t3code.service"
 _T3_RUNTIME_RELATIVE = os.path.join(
     ".t3", "runtime"
 )
-_T3_VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$")
+_T3_SEMVER_NUMBER = r"(?:0|[1-9][0-9]*)"
+_T3_SEMVER_PRERELEASE = (
+    rf"(?:{_T3_SEMVER_NUMBER}|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
+)
+_T3_VERSION_RE = re.compile(
+    rf"^{_T3_SEMVER_NUMBER}\.{_T3_SEMVER_NUMBER}\.{_T3_SEMVER_NUMBER}"
+    rf"(?:-{_T3_SEMVER_PRERELEASE}(?:\.{_T3_SEMVER_PRERELEASE})*)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
+)
 _T3_SKILL_RELATIVE = os.path.join(
     ".agents", "skills", "infra-tools-t3code", "SKILL.md"
 )
@@ -845,7 +853,7 @@ def _t3_active_binary(home: str) -> str | None:
             state = json.load(file_obj)
     except (OSError, ValueError):
         return None
-    if not isinstance(state, dict) or state.get("protocolVersion") != 2:
+    if not isinstance(state, dict) or state.get("protocol") != 2:
         return None
     version = state.get("activeVersion")
     if not isinstance(version, str) or _T3_VERSION_RE.fullmatch(version) is None:
@@ -892,6 +900,12 @@ def inspect_t3code(home: Optional[str] = None, *, fix: bool = False) -> JSONDict
     """Verify the managed T3 service, Git integration, and user onboarding."""
 
     user_home = os.path.abspath(home or os.path.expanduser("~"))
+    user_bus_environment = os.environ.copy()
+    user_bus_environment.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+    user_bus_environment.setdefault(
+        "DBUS_SESSION_BUS_ADDRESS",
+        f"unix:path=/run/user/{os.getuid()}/bus",
+    )
     t3_binary = _t3_active_binary(user_home)
     wrapper = os.path.join(
         user_home,
@@ -918,7 +932,8 @@ def inspect_t3code(home: Optional[str] = None, *, fix: bool = False) -> JSONDict
     fixes: list[str] = []
 
     service = _run_check(
-        ["systemctl", "--user", "is-active", "--quiet", _T3_SERVICE_NAME]
+        ["systemctl", "--user", "is-active", "--quiet", _T3_SERVICE_NAME],
+        environment=user_bus_environment,
     )
     gh_auth = (
         _run_check(
@@ -967,11 +982,15 @@ def inspect_t3code(home: Optional[str] = None, *, fix: bool = False) -> JSONDict
             credential_helper = True
     if fix and os.path.isfile(wrapper) and service.returncode != 0:
         restart_command = ["systemctl", "--user", "restart", _T3_SERVICE_NAME]
-        restarted = _run_check(restart_command)
+        restarted = _run_check(
+            restart_command,
+            environment=user_bus_environment,
+        )
         if restarted.returncode == 0:
             fixes.append("restarted inactive T3 Code service")
             service = _run_check(
-                ["systemctl", "--user", "is-active", "--quiet", _T3_SERVICE_NAME]
+                ["systemctl", "--user", "is-active", "--quiet", _T3_SERVICE_NAME],
+                environment=user_bus_environment,
             )
 
     checks = {

@@ -255,7 +255,7 @@ class TestAgentDoctor(unittest.TestCase):
                 'w',
                 encoding='utf-8',
             ) as file_obj:
-                json.dump({'protocolVersion': 2, 'activeVersion': version}, file_obj)
+                json.dump({'protocol': 2, 'activeVersion': version}, file_obj)
             wrapper = os.path.join(
                 home,
                 '.local',
@@ -276,6 +276,31 @@ class TestAgentDoctor(unittest.TestCase):
         self.assertFalse(result['healthy'])
         self.assertIn('git_identity', result['checks'])
         self.assertNotIn('secret', str(result))
+
+    def test_t3code_doctor_targets_current_user_systemd_bus(self):
+        completed = type(
+            'Completed',
+            (),
+            {'returncode': 1, 'stdout': '', 'stderr': ''},
+        )()
+        with (
+            tempfile.TemporaryDirectory() as home,
+            patch('lib.agent_cli._run_check', return_value=completed) as run_check,
+            patch('lib.agent_cli._t3_endpoint_reachable', return_value=False),
+        ):
+            inspect_t3code(home)
+
+        systemctl_call = next(
+            call
+            for call in run_check.call_args_list
+            if call.args[0][:2] == ['systemctl', '--user']
+        )
+        environment = systemctl_call.kwargs['environment']
+        self.assertEqual(environment['XDG_RUNTIME_DIR'], f'/run/user/{os.getuid()}')
+        self.assertEqual(
+            environment['DBUS_SESSION_BUS_ADDRESS'],
+            f'unix:path=/run/user/{os.getuid()}/bus',
+        )
 
     def test_inspects_user_tool_and_credentials_without_contents(self):
         with tempfile.TemporaryDirectory() as home:

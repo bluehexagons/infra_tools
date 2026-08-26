@@ -58,7 +58,9 @@ journalctl --user -u t3code.service -n 100 --no-pager
 ```
 
 T3 Code does not silently update after setup. A normal infra-tools rerun keeps
-the active healthy version. Either of these explicit paths updates it:
+the active healthy version. The T3 client can offer an explicit **Update
+server** action for this background service. The following host-side commands
+are also supported:
 
 ```bash
 # As the target user, using T3 Code's documented updater:
@@ -77,8 +79,8 @@ npx t3@CLIENT_VERSION service update
 ```
 
 As of 2026-08-26, infra-tools was checked against T3 Code v0.0.34. That release
-uses service-state protocol 2 and the same Node.js requirement as the previous
-release. See the upstream [background-service documentation](https://github.com/pingdotgg/t3code/blob/main/docs/user/background-service.md),
+uses service-state protocol 2 and requires Node.js `^22.16`, `^23.11`, or
+`>=24.10`, the same requirement as the previous release. See the upstream [background-service documentation](https://github.com/pingdotgg/t3code/blob/main/docs/user/background-service.md),
 [update documentation](https://github.com/pingdotgg/t3code/blob/main/docs/user/updating.md),
 and [v0.0.34 release](https://github.com/pingdotgg/t3code/releases/tag/v0.0.34).
 
@@ -87,6 +89,18 @@ Older infra-tools installations used a root-owned
 stops that service, starts and validates the upstream user service, and only
 then disables and removes the old unit. The old service is restarted if the
 migration fails.
+
+Removing desktop support from infra-tools does not delete an AppImage that an
+older setup placed in a user's home. After confirming the files were not
+replaced with user-managed content, that retired installation can be removed
+manually:
+
+```bash
+rm -- "$HOME/.local/share/t3code/t3code.AppImage"
+rm -- "$HOME/.local/bin/t3code"
+rm -- "$HOME/.local/share/applications/t3code.desktop"
+rmdir --ignore-fail-on-non-empty "$HOME/.local/share/t3code"
+```
 
 ## Network behavior
 

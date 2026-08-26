@@ -30,7 +30,9 @@ infra-tools keeps networking and workspace settings in
 
 ## Updates
 
-T3 Code does not silently update. The supported manual update path is:
+T3 Code does not silently update. A connected T3 client may offer an explicit
+**Update server** action for this background service. The supported host-side
+update path is:
 
 ```bash
 npx t3@latest service update

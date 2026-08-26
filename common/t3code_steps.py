@@ -66,7 +66,15 @@ DEVICE_PAIRING_AUTH_FAILURE_LOG = (
 )
 _UFW_NUMBERED_RULE_RE = re.compile(r"^\[\s*(\d+)\]\s+(.*)$")
 _T3_RUNTIME_RELATIVE_PATH = (".t3", "runtime")
-_T3_VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$")
+_T3_SEMVER_NUMBER = r"(?:0|[1-9][0-9]*)"
+_T3_SEMVER_PRERELEASE = (
+    rf"(?:{_T3_SEMVER_NUMBER}|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
+)
+_T3_VERSION_RE = re.compile(
+    rf"^{_T3_SEMVER_NUMBER}\.{_T3_SEMVER_NUMBER}\.{_T3_SEMVER_NUMBER}"
+    rf"(?:-{_T3_SEMVER_PRERELEASE}(?:\.{_T3_SEMVER_PRERELEASE})*)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
+)
 _T3_GH_CONFIG_EXPORT = 'export GH_CONFIG_DIR="$HOME/.config/gh"'
 
 
@@ -234,7 +242,7 @@ def _active_t3_binary(home: str) -> str | None:
             state = json.load(file_obj)
     except (OSError, ValueError):
         return None
-    if not isinstance(state, dict) or state.get("protocolVersion") != 2:
+    if not isinstance(state, dict) or state.get("protocol") != 2:
         return None
     version = state.get("activeVersion")
     if not isinstance(version, str) or _T3_VERSION_RE.fullmatch(version) is None:
@@ -524,13 +532,15 @@ def _write_passthrough_wrapper(path: str, home: str) -> bool:
         "#!/bin/bash\n"
         "set -eu\n"
         f"export HOME={shlex.quote(home)}\n"
+        'export NVM_DIR="$HOME/.nvm"\n'
+        '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"\n'
         f"{_T3_GH_CONFIG_EXPORT}\n"
         f"state={shlex.quote(os.path.join(runtime, 'service-state.json'))}\n"
         'version=$(/usr/bin/python3 -c \'import json,re,sys; '
         'value=json.load(open(sys.argv[1], encoding="utf-8")); '
-        'assert value.get("protocolVersion") == 2; '
+        'assert value.get("protocol") == 2; '
         'version=value["activeVersion"]; '
-        'assert re.fullmatch(r"[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?", version); '
+        f"assert re.fullmatch({json.dumps(_T3_VERSION_RE.pattern)}, version); "
         'print(version)\' "$state")\n'
         f'binary={shlex.quote(os.path.join(runtime, "versions"))}/"$version"'
         '/node_modules/t3/dist/bin.mjs\n'
