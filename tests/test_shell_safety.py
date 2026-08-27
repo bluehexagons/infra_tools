@@ -1,4 +1,4 @@
-"""Regression tests for shell-hardening changes tracked by REVIEW_1."""
+"""Regression tests for shell-hardening behavior."""
 
 from __future__ import annotations
 

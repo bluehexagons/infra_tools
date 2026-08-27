@@ -11,24 +11,7 @@ release. Until that tag is published, the installer’s `dev` channel tracks
 
 ## Start here
 
-The supported workflow starts with the installer. It keeps the repository
-locally, installs the managed `infra-tools` launcher, and lets you switch
-channels or upgrade later. Choose the path that matches the machine.
-
-The installer needs either `wget` or `curl` to fetch itself. The examples use
-`wget`, which is commonly available on minimal Debian systems. If only `curl`
-is installed, replace the download command with
-`curl --fail --location --connect-timeout 15 --max-time 120 -o "$HOME/.infra_tools-install.sh" URL`.
-If neither command is available, install one first with `sudo apt-get update && sudo apt-get install -y wget ca-certificates`.
-
-The download commands intentionally leave connection diagnostics visible and
-bound retries so a DNS or network failure is not mistaken for a stalled
-installer. Every example downloads to a user-owned file before running the
-installer, keeping password prompts and output connected to the terminal. Run
-each command in order, confirm the download succeeds, and remove the file when
-the installer finishes.
-
-Install the launcher and choose a setup later:
+Install the launcher on the machine that will manage your hosts:
 
 ```bash
 wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
@@ -36,30 +19,11 @@ sh "$HOME/.infra_tools-install.sh"
 rm -f "$HOME/.infra_tools-install.sh"
 ```
 
-Set up a minimal Debian control plane immediately:
-
-```bash
-wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
-sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup control_plane \
-  --agent-tool gh --agent-tool codex --agent-tool claude --agent-tool opencode
-rm -f "$HOME/.infra_tools-install.sh"
-```
-
-Set up a standard Debian GNOME desktop as a graphical control plane. This keeps
-GNOME for local logins, uses XFCE for RDP, and installs the agent-workstation
-defaults (GitHub CLI and Codex CLI):
-
-```bash
-wget --timeout=20 --tries=2 -O "$HOME/.infra_tools-install.sh" https://raw.githubusercontent.com/bluehexagons/infra_tools/main/install.sh
-sudo sh "$HOME/.infra_tools-install.sh" --user "$USER" --local-setup agent_workstation \
-  --control-plane --desktop xfce --rdp --rdp-existing-password
-rm -f "$HOME/.infra_tools-install.sh"
-```
-
-After installation, use `infra-tools setup ...` for remote hosts and
-`infra-tools upgrade` to update the selected channel. See the concise
-[installation guide](docs/INSTALLATION.md) for prerequisites, verification,
-channels, credentials, RDP, and recovery. The [documentation index](docs/README.md)
+The installer needs either `wget` or `curl`; use `infra-tools setup ...` for
+remote hosts and `infra-tools upgrade` to update the selected channel. The
+[installation guide](docs/INSTALLATION.md) covers prerequisites, verification,
+alternate download commands, local control-plane and desktop/RDP profiles,
+channels, credentials, and recovery. The [documentation index](docs/README.md)
 organizes detailed feature and operations guides.
 
 Contributors should also read the [AI agent guidance](.github/ai-agents/README.md)
@@ -165,19 +129,6 @@ infra-tools firmware update
 
 Use the [documentation index](docs/README.md) for the complete command and
 feature map.
-
-Agent VM setup supports narrow profile defaults or explicit tool lists,
-target-side HTTPS repository clones, VM-level Git policy, transient credential
-sources, and credential rotation via `infra-tools agent auth set/status`; see
-the [credential guide](docs/CREDENTIALS.md) and
-[command reference](docs/COMMAND_LINE.md). Codex and OpenCode can receive an
-explicit, isolated Playwright capability described in the
-[browser automation guide](docs/BROWSER_AUTOMATION.md).
-New browsers and T3 clients can be enrolled without live terminal access by
-using the [protected device-pairing portal](docs/DEVICE_PAIRING.md).
-Agent-enabled targets also receive a user-scoped management launcher, and the
-control system can run health checks or deliberate terminal-agent updates with
-`infra-tools agent doctor HOST USER` and `infra-tools agent update HOST USER`.
 
 ## Development checks
 

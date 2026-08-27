@@ -90,7 +90,7 @@ def load_workspace_credentials(workspace: str | None = None) -> dict[str, str]:
 
 
 def save_workspace_credentials(credentials: dict[str, str], workspace: str | None = None) -> None:
-    """Persist workspace credentials using the REVIEW_1 JSON layout."""
+    """Persist workspace credentials using the versioned JSON layout."""
     ensure_workspace_dir(workspace)
     credentials_path = get_credentials_path(workspace)
     normalized_credentials = {
