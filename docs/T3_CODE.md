@@ -55,7 +55,12 @@ login. Inspect it as the target user:
 ```bash
 systemctl --user status t3code.service
 journalctl --user -u t3code.service -n 100 --no-pager
+tail -n 100 ~/.t3/userdata/logs/boot-service.log
 ```
+
+The upstream launcher writes application startup failures, including native
+module load errors, to `~/.t3/userdata/logs/boot-service.log`. systemd's journal
+primarily records the launcher lifecycle.
 
 T3 Code does not silently update after setup. A normal infra-tools rerun keeps
 the active healthy version. The T3 client can offer an explicit **Update
@@ -64,7 +69,9 @@ are also supported:
 
 ```bash
 # As the target user, using T3 Code's documented updater:
-npx t3@latest service update
+npm_config_dangerously_allow_all_scripts=true \
+  npm_config_foreground_scripts=true \
+  npx t3@latest service update
 
 # From infra-tools:
 infra-tools setup server_dev vm.example agent --refresh-packages ...
@@ -75,14 +82,27 @@ both commands operate on the same upstream-managed user service. If the
 desktop client and server differ, update the service to the client version:
 
 ```bash
-npx t3@CLIENT_VERSION service update
+npm_config_dangerously_allow_all_scripts=true \
+  npm_config_foreground_scripts=true \
+  npx t3@CLIENT_VERSION service update
 ```
 
-As of 2026-08-26, infra-tools was checked against T3 Code v0.0.34. That release
+Keep the npm overrides scoped to the trusted T3 updater. npm 12's default
+lifecycle-script policy can otherwise omit T3's Linux `node-pty` build while
+the package installation still exits successfully. infra-tools validates the
+native module, rebuilds an incomplete active runtime, and waits for several
+consecutive healthy service and HTTP checks before setup succeeds. The same
+repair is available after setup:
+
+```bash
+infra-tools agent doctor --capability t3code --fix
+```
+
+As of 2026-08-27, infra-tools was checked against T3 Code v0.0.35. That release
 uses service-state protocol 2 and requires Node.js `^22.16`, `^23.11`, or
 `>=24.10`, the same requirement as the previous release. See the upstream [background-service documentation](https://github.com/pingdotgg/t3code/blob/main/docs/user/background-service.md),
 [update documentation](https://github.com/pingdotgg/t3code/blob/main/docs/user/updating.md),
-and [v0.0.34 release](https://github.com/pingdotgg/t3code/releases/tag/v0.0.34).
+and [v0.0.35 release](https://github.com/pingdotgg/t3code/releases/tag/v0.0.35).
 
 Older infra-tools installations used a root-owned
 `infra-tools-t3code.service` and a separate npm runtime. A subsequent setup
@@ -145,8 +165,9 @@ git config --global --get user.email
 ```
 
 The doctor validates the upstream service-state protocol and selected immutable
-runtime, the user service, endpoint, pairing helper, Git identity, and managed
-agent skill. Add `--fix` to repair GitHub's credential helper or restart an
+runtime, required native terminal module, user service, endpoint, pairing
+helper, Git identity, and managed agent skill. Add `--fix` to rebuild an
+incomplete native runtime, repair GitHub's credential helper, or restart an
 inactive user service.
 
 ## Related documentation

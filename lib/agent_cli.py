@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 import urllib.request
 from datetime import datetime, timezone
 from typing import Optional
@@ -60,6 +61,7 @@ _T3_SKILL_RELATIVE = os.path.join(
     ".agents", "skills", "infra-tools-t3code", "SKILL.md"
 )
 _T3_DEFAULT_PORT = 3773
+_T3_NATIVE_PACKAGES = ("node-pty", "msgpackr-extract")
 _REMOTE_INFRA_TOOLS_PATH = "/opt/infra_tools/infra_tools.py"
 
 _CREDENTIAL_PATHS = {
@@ -870,6 +872,97 @@ def _t3_active_binary(home: str) -> str | None:
     return binary if os.path.isfile(binary) and os.access(binary, os.X_OK) else None
 
 
+def _t3_version_root(binary: str) -> str | None:
+    version_root = os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(binary)))
+    )
+    expected = os.path.join(
+        version_root,
+        "node_modules",
+        "t3",
+        "dist",
+        "bin.mjs",
+    )
+    if os.path.normpath(binary) != os.path.normpath(expected):
+        return None
+    return version_root if os.path.isdir(version_root) else None
+
+
+def _t3_node_binary(drop_in: str) -> str | None:
+    try:
+        with open(drop_in, encoding="utf-8") as file_obj:
+            match = re.search(r"^Environment=PATH=(.+)$", file_obj.read(), re.MULTILINE)
+    except OSError:
+        return None
+    if match is None:
+        return None
+    for directory in match.group(1).split(os.pathsep):
+        if not os.path.isabs(directory):
+            continue
+        node = os.path.join(directory, "node")
+        if os.path.isfile(node) and os.access(node, os.X_OK):
+            return node
+    return None
+
+
+def _t3_native_runtime_healthy(
+    node: str | None,
+    binary: str | None,
+    environment: dict[str, str],
+) -> bool:
+    if node is None or binary is None:
+        return False
+    version_root = _t3_version_root(binary)
+    if version_root is None:
+        return False
+    node_pty = os.path.join(version_root, "node_modules", "node-pty")
+    return _run_check(
+        [node, "-e", "require(process.argv[1])", node_pty],
+        environment=environment,
+    ).returncode == 0
+
+
+def _repair_t3_native_runtime(
+    node: str,
+    binary: str,
+    environment: dict[str, str],
+) -> bool:
+    version_root = _t3_version_root(binary)
+    npm = os.path.join(os.path.dirname(node), "npm")
+    if (
+        version_root is None
+        or not os.path.isfile(npm)
+        or not os.access(npm, os.X_OK)
+    ):
+        return False
+    repair_environment = environment.copy()
+    repair_environment.update(
+        {
+            "npm_config_dangerously_allow_all_scripts": "true",
+            "npm_config_foreground_scripts": "true",
+        }
+    )
+    result = _run_check(
+        [
+            npm,
+            "rebuild",
+            "--dangerously-allow-all-scripts",
+            "--foreground-scripts",
+            "--prefix",
+            version_root,
+            *_T3_NATIVE_PACKAGES,
+        ],
+        environment=repair_environment,
+        cwd=version_root,
+        timeout=300,
+    )
+    return result.returncode == 0 and _t3_native_runtime_healthy(
+        node,
+        binary,
+        environment,
+    )
+
+
 def _t3_endpoint_reachable(port: int | None) -> bool:
     import urllib.error
 
@@ -924,6 +1017,8 @@ def inspect_t3code(home: Optional[str] = None, *, fix: bool = False) -> JSONDict
     pair_wrapper = os.path.join(user_home, ".local", "bin", "t3code-pair")
     skill = os.path.join(user_home, _T3_SKILL_RELATIVE)
     environment = _t3_environment(user_home)
+    node = _t3_node_binary(drop_in)
+    native_runtime = _t3_native_runtime_healthy(node, t3_binary, environment)
     gh_path = _tool_path("gh", user_home)
     git_path = _tool_path("git", user_home) or shutil.which("git")
     skill_required = bool(
@@ -980,7 +1075,18 @@ def inspect_t3code(home: Optional[str] = None, *, fix: bool = False) -> JSONDict
         if setup_git.returncode == 0:
             fixes.append("configured GitHub HTTPS credential helper")
             credential_helper = True
-    if fix and os.path.isfile(wrapper) and service.returncode != 0:
+    if fix and t3_binary and node and not native_runtime:
+        if service.returncode == 0:
+            _run_check(
+                ["systemctl", "--user", "stop", _T3_SERVICE_NAME],
+                environment=user_bus_environment,
+            )
+        native_runtime = _repair_t3_native_runtime(node, t3_binary, environment)
+        if native_runtime:
+            fixes.append("rebuilt T3 Code native runtime")
+        service = subprocess.CompletedProcess([], 1, "", "")
+    restarted_service = False
+    if fix and t3_binary and service.returncode != 0:
         restart_command = ["systemctl", "--user", "restart", _T3_SERVICE_NAME]
         restarted = _run_check(
             restart_command,
@@ -988,18 +1094,30 @@ def inspect_t3code(home: Optional[str] = None, *, fix: bool = False) -> JSONDict
         )
         if restarted.returncode == 0:
             fixes.append("restarted inactive T3 Code service")
-            service = _run_check(
-                ["systemctl", "--user", "is-active", "--quiet", _T3_SERVICE_NAME],
-                environment=user_bus_environment,
-            )
+            restarted_service = True
+
+    port = _t3_port(drop_in)
+    endpoint = False
+    attempts = 10 if restarted_service else 1
+    for attempt in range(attempts):
+        service = _run_check(
+            ["systemctl", "--user", "is-active", "--quiet", _T3_SERVICE_NAME],
+            environment=user_bus_environment,
+        )
+        endpoint = _t3_endpoint_reachable(port)
+        if service.returncode == 0 and endpoint:
+            break
+        if attempt + 1 < attempts:
+            time.sleep(1)
 
     checks = {
         "service_active": service.returncode == 0,
         "runtime": bool(t3_binary),
+        "native_runtime": native_runtime,
         "wrapper": os.path.isfile(wrapper) and os.access(wrapper, os.X_OK),
         "pairing_helper": os.path.isfile(pair_wrapper)
         and os.access(pair_wrapper, os.X_OK),
-        "endpoint": _t3_endpoint_reachable(_t3_port(drop_in)),
+        "endpoint": endpoint,
         "git_identity": bool(git_name and git_email),
         "t3_agent_skill": not skill_required or _t3_skill_ready(skill),
     }
@@ -1018,6 +1136,13 @@ def inspect_t3code(home: Optional[str] = None, *, fix: bool = False) -> JSONDict
             "name": git_name or None,
             "email": git_email or None,
         },
+        "service_log": os.path.join(
+            user_home,
+            ".t3",
+            "userdata",
+            "logs",
+            "boot-service.log",
+        ),
         "fixes": fixes,
     }
 

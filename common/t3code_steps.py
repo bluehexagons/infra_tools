@@ -11,6 +11,9 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import time
+import urllib.error
+import urllib.request
 from typing import Sequence
 
 from common.common_steps import _run_as_login_user
@@ -76,6 +79,9 @@ _T3_VERSION_RE = re.compile(
     r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
 )
 _T3_GH_CONFIG_EXPORT = 'export GH_CONFIG_DIR="$HOME/.config/gh"'
+_T3_NATIVE_PACKAGES = ("node-pty", "msgpackr-extract")
+_T3_READINESS_ATTEMPTS = 20
+_T3_READINESS_STABLE_CHECKS = 3
 
 
 def _user_home(config: SetupConfig) -> str:
@@ -259,6 +265,132 @@ def _active_t3_binary(home: str) -> str | None:
     return binary if os.path.isfile(binary) and os.access(binary, os.X_OK) else None
 
 
+def _t3_version_root(binary: str) -> str:
+    """Return the immutable version root containing an active T3 executable."""
+
+    version_root = os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(binary)))
+    )
+    validate_filesystem_path(version_root, must_exist=True)
+    expected = os.path.join(
+        version_root,
+        "node_modules",
+        "t3",
+        "dist",
+        "bin.mjs",
+    )
+    if os.path.normpath(binary) != os.path.normpath(expected):
+        raise RuntimeError(f"Invalid T3 Code runtime path: {binary}")
+    return version_root
+
+
+def _t3_native_runtime_healthy(
+    username: str,
+    home: str,
+    node_bin: str,
+    binary: str,
+) -> bool:
+    """Load T3's required native terminal module with its service Node.js."""
+
+    node = os.path.join(node_bin, "node")
+    node_pty = os.path.join(_t3_version_root(binary), "node_modules", "node-pty")
+    if not os.path.isfile(node) or not os.access(node, os.X_OK):
+        return False
+    result = _run_as_login_user(
+        username,
+        home,
+        f"{shlex.quote(node)} -e "
+        f"{shlex.quote('require(process.argv[1])')} {shlex.quote(node_pty)}",
+        check=False,
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
+def _rebuild_t3_native_runtime(
+    username: str,
+    home: str,
+    node_bin: str,
+    binary: str,
+) -> None:
+    """Rebuild native dependencies omitted by npm's lifecycle-script policy."""
+
+    npm = os.path.join(node_bin, "npm")
+    if not os.path.isfile(npm) or not os.access(npm, os.X_OK):
+        raise RuntimeError("T3 Code native runtime repair requires npm")
+    version_root = _t3_version_root(binary)
+    packages = " ".join(shlex.quote(package) for package in _T3_NATIVE_PACKAGES)
+    result = _run_as_login_user(
+        username,
+        home,
+        "export npm_config_dangerously_allow_all_scripts=true && "
+        "export npm_config_foreground_scripts=true && "
+        f"{shlex.quote(npm)} rebuild --dangerously-allow-all-scripts "
+        f"--foreground-scripts --prefix {shlex.quote(version_root)} {packages}",
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise RuntimeError(f"T3 Code native runtime repair failed: {detail[-500:]}")
+    if not _t3_native_runtime_healthy(username, home, node_bin, binary):
+        raise RuntimeError(
+            "T3 Code native runtime is incomplete after repair; node-pty did not load"
+        )
+
+
+def _t3_local_endpoint_reachable(host: str, port: int) -> bool:
+    if host == "0.0.0.0":
+        local_host = "127.0.0.1"
+    elif host in {"::", "[::]"}:
+        local_host = "::1"
+    else:
+        local_host = host
+    try:
+        with urllib.request.urlopen(
+            f"http://{_url_host(local_host)}:{port}/",
+            timeout=2,
+        ) as response:
+            return response.status < 500
+    except urllib.error.HTTPError as exc:
+        return exc.code < 500
+    except (OSError, urllib.error.URLError, TimeoutError, ValueError):
+        return False
+
+
+def _wait_for_t3_service(
+    username: str,
+    uid: int,
+    host: str,
+    port: int,
+    home: str,
+) -> None:
+    """Require the user service and endpoint to remain ready across checks."""
+
+    stable_checks = 0
+    for attempt in range(_T3_READINESS_ATTEMPTS):
+        service = _user_systemctl(
+            username,
+            uid,
+            "is-active",
+            "--quiet",
+            T3_SERVICE_NAME,
+        )
+        if service.returncode == 0 and _t3_local_endpoint_reachable(host, port):
+            stable_checks += 1
+            if stable_checks >= _T3_READINESS_STABLE_CHECKS:
+                return
+        else:
+            stable_checks = 0
+        if attempt + 1 < _T3_READINESS_ATTEMPTS:
+            time.sleep(1)
+    service_log = os.path.join(home, ".t3", "userdata", "logs", "boot-service.log")
+    raise RuntimeError(
+        "T3 Code user service did not reach stable readiness; inspect "
+        f"{service_log} and 'journalctl --user -u {T3_SERVICE_NAME}.service'"
+    )
+
+
 def _user_systemctl(
     username: str,
     uid: int,
@@ -386,7 +518,7 @@ def _install_t3_service(
     port: int,
     *,
     refresh: bool = False,
-) -> tuple[str, bool]:
+) -> str:
     """Install or update T3 through its supported per-user service manager."""
 
     for name, package in (
@@ -433,6 +565,8 @@ def _install_t3_service(
                 home,
                 'export NVM_DIR="$HOME/.nvm" && '
                 '[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && '
+                'export npm_config_dangerously_allow_all_scripts=true && '
+                'export npm_config_foreground_scripts=true && '
                 f'export XDG_RUNTIME_DIR=/run/user/{uid} && '
                 f'export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus && '
                 'npx --yes t3@latest service update',
@@ -442,20 +576,30 @@ def _install_t3_service(
             if result.returncode != 0:
                 detail = (result.stderr or result.stdout or "").strip()
                 raise RuntimeError(f"T3 Code service update failed: {detail[-500:]}")
+        binary = _active_t3_binary(home)
+        if binary is None:
+            raise RuntimeError("T3 Code did not create a valid managed runtime")
+        native_repaired = False
+        if not _t3_native_runtime_healthy(username, home, node_bin, binary):
+            _user_systemctl(username, uid, "stop", T3_SERVICE_NAME)
+            _rebuild_t3_native_runtime(username, home, node_bin, binary)
+            native_repaired = True
         daemon_reload = _user_systemctl(username, uid, "daemon-reload")
         if daemon_reload.returncode != 0:
             raise RuntimeError("Could not reload the T3 Code user service")
         enable = _user_systemctl(username, uid, "enable", T3_SERVICE_NAME)
         if enable.returncode != 0:
             raise RuntimeError("Could not enable the T3 Code user service")
-        action = "restart" if drop_in_changed or update_needed else "start"
+        action = (
+            "restart"
+            if drop_in_changed or update_needed or native_repaired
+            else "start"
+        )
         service_result = _user_systemctl(username, uid, action, T3_SERVICE_NAME)
         if service_result.returncode != 0:
             detail = (service_result.stderr or service_result.stdout or "").strip()
             raise RuntimeError(f"Could not {action} the T3 Code user service: {detail}")
-        binary = _active_t3_binary(home)
-        if binary is None:
-            raise RuntimeError("T3 Code did not create a valid managed runtime")
+        _wait_for_t3_service(username, uid, host, port, home)
     except Exception:
         if legacy_present:
             _user_systemctl(username, uid, "stop", T3_SERVICE_NAME)
@@ -489,9 +633,14 @@ def _install_t3_service(
             if ".local/share/infra-tools/t3code" in file_obj.read():
                 os.remove(legacy_wrapper)
 
-    status = "updated" if update_needed else "already healthy"
+    if update_needed:
+        status = "updated"
+    elif native_repaired:
+        status = "repaired"
+    else:
+        status = "already healthy"
     print(f"  ✓ T3 Code user service {status} for {username}")
-    return binary, update_needed or drop_in_changed or legacy_present
+    return binary
 
 
 def _write_executable_if_changed(path: str, content: str) -> bool:
@@ -1239,7 +1388,7 @@ def install_t3code_web(config: SetupConfig) -> None:
 
     os.makedirs(workspace, mode=0o755, exist_ok=True)
     os.makedirs(os.path.join(home, ".local", "bin"), mode=0o755, exist_ok=True)
-    _, runtime_changed = _install_t3_service(
+    _install_t3_service(
         home,
         config.username,
         account.pw_uid,
@@ -1256,9 +1405,9 @@ def install_t3code_web(config: SetupConfig) -> None:
     if os.path.islink(T3_ADMIN_PAIR_SCRIPT) or not os.path.isfile(T3_ADMIN_PAIR_SCRIPT):
         raise RuntimeError(f"T3 administrative pairing helper is missing: {T3_ADMIN_PAIR_SCRIPT}")
     os.chmod(T3_ADMIN_PAIR_SCRIPT, 0o755)
-    t3_cli_wrapper_changed = _write_passthrough_wrapper(t3_cli_wrapper, home)
+    _write_passthrough_wrapper(t3_cli_wrapper, home)
     server_url, base_url = _t3_pairing_urls(config.host, host, port)
-    pair_wrapper_changed = _write_admin_pair_wrapper(
+    _write_admin_pair_wrapper(
         pair_wrapper,
         home,
         workspace,
@@ -1269,20 +1418,10 @@ def install_t3code_web(config: SetupConfig) -> None:
     os.chown(pair_wrapper, account.pw_uid, account.pw_gid)
     os.chown(t3_cli_wrapper, account.pw_uid, account.pw_gid)
     os.chown(workspace, account.pw_uid, account.pw_gid)
-    skill_changed = _ensure_t3_agent_skill(
+    _ensure_t3_agent_skill(
         config.username,
         config.selected_agent_tools(),
     )
-    if runtime_changed or t3_cli_wrapper_changed or skill_changed:
-        active = _user_systemctl(
-            config.username,
-            account.pw_uid,
-            "is-active",
-            "--quiet",
-            T3_SERVICE_NAME,
-        )
-        if active.returncode != 0:
-            raise RuntimeError("T3 Code user service is not active")
 
     if config.device_pairing_providers:
         _configure_device_pairing(config, home, t3_cli_wrapper, host, port)
@@ -1301,14 +1440,14 @@ def install_t3code_web(config: SetupConfig) -> None:
                 raise RuntimeError(
                     "HTTPS gateway returned no T3 Code pairing endpoint"
                 )
-            pair_wrapper_changed = _write_admin_pair_wrapper(
+            _write_admin_pair_wrapper(
                 pair_wrapper,
                 home,
                 workspace,
                 t3_cli_wrapper,
                 server_url,
                 https_urls[0][0],
-            ) or pair_wrapper_changed
+            )
             os.chown(pair_wrapper, account.pw_uid, account.pw_gid)
             _set_pairing_https_port(https_urls[1][1])
     else:
@@ -1317,14 +1456,14 @@ def install_t3code_web(config: SetupConfig) -> None:
         _remove_t3_https(config)
         https_urls = _configure_t3_https(config, port, None)
         if https_urls:
-            pair_wrapper_changed = _write_admin_pair_wrapper(
+            _write_admin_pair_wrapper(
                 pair_wrapper,
                 home,
                 workspace,
                 t3_cli_wrapper,
                 server_url,
                 https_urls[0][0],
-            ) or pair_wrapper_changed
+            )
             os.chown(pair_wrapper, account.pw_uid, account.pw_gid)
     print(f"  T3 Code web service listening on {host}:{port}")
     for index, (https_url, _listen_port) in enumerate(https_urls):

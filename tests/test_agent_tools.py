@@ -302,6 +302,85 @@ class TestAgentDoctor(unittest.TestCase):
             f'unix:path=/run/user/{os.getuid()}/bus',
         )
 
+    def test_t3code_doctor_fix_repairs_native_runtime_before_restart(self):
+        with tempfile.TemporaryDirectory() as home:
+            runtime = os.path.join(home, '.t3', 'runtime')
+            version = '0.0.35'
+            binary_dir = os.path.join(
+                runtime, 'versions', version, 'node_modules', 't3', 'dist'
+            )
+            os.makedirs(binary_dir)
+            t3_binary = os.path.join(binary_dir, 'bin.mjs')
+            with open(t3_binary, 'w', encoding='utf-8') as file_obj:
+                file_obj.write('#!/bin/sh\necho t3 0.0.35\n')
+            os.chmod(t3_binary, 0o755)
+            with open(
+                os.path.join(runtime, 'service-state.json'),
+                'w',
+                encoding='utf-8',
+            ) as file_obj:
+                json.dump({'protocol': 2, 'activeVersion': version}, file_obj)
+
+            node_bin = os.path.join(home, '.nvm', 'bin')
+            os.makedirs(node_bin)
+            node = os.path.join(node_bin, 'node')
+            with open(node, 'w', encoding='utf-8') as file_obj:
+                file_obj.write('#!/bin/sh\n')
+            os.chmod(node, 0o755)
+            drop_in = os.path.join(
+                home,
+                '.config',
+                'systemd',
+                'user',
+                't3code.service.d',
+                'infra-tools.conf',
+            )
+            os.makedirs(os.path.dirname(drop_in))
+            with open(drop_in, 'w', encoding='utf-8') as file_obj:
+                file_obj.write(f'Environment=PATH={node_bin}:/usr/bin\n')
+
+            state = {'active_checks': 0}
+
+            def run_check(command, **_kwargs):
+                if command[:3] == ['systemctl', '--user', 'is-active']:
+                    state['active_checks'] += 1
+                    return type(
+                        'Completed',
+                        (),
+                        {
+                            'returncode': 1 if state['active_checks'] == 1 else 0,
+                            'stdout': '',
+                            'stderr': '',
+                        },
+                    )()
+                return type(
+                    'Completed',
+                    (),
+                    {'returncode': 0, 'stdout': '', 'stderr': ''},
+                )()
+
+            with (
+                patch('lib.agent_cli._tool_path', return_value=None),
+                patch('lib.agent_cli._run_check', side_effect=run_check),
+                patch(
+                    'lib.agent_cli._t3_native_runtime_healthy',
+                    return_value=False,
+                ),
+                patch(
+                    'lib.agent_cli._repair_t3_native_runtime',
+                    return_value=True,
+                ) as repair,
+                patch('lib.agent_cli._t3_endpoint_reachable', return_value=True),
+                patch('lib.agent_cli._tool_version', return_value='t3 v0.0.35'),
+            ):
+                result = inspect_t3code(home, fix=True)
+
+        repair.assert_called_once()
+        self.assertTrue(result['checks']['native_runtime'])
+        self.assertIn('rebuilt T3 Code native runtime', result['fixes'])
+        self.assertIn('restarted inactive T3 Code service', result['fixes'])
+        self.assertTrue(result['service_log'].endswith('boot-service.log'))
+
     def test_inspects_user_tool_and_credentials_without_contents(self):
         with tempfile.TemporaryDirectory() as home:
             bin_dir = os.path.join(home, '.local', 'bin')

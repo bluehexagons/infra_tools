@@ -22,6 +22,7 @@ The server is the upstream-managed per-user service. Inspect it without sudo:
 ```bash
 systemctl --user status t3code.service
 journalctl --user -u t3code.service -n 100 --no-pager
+tail -n 100 ~/.t3/userdata/logs/boot-service.log
 ```
 
 The upstream unit is `~/.config/systemd/user/t3code.service`.
@@ -35,14 +36,26 @@ T3 Code does not silently update. A connected T3 client may offer an explicit
 update path is:
 
 ```bash
-npx t3@latest service update
+npm_config_dangerously_allow_all_scripts=true \
+  npm_config_foreground_scripts=true \
+  npx t3@latest service update
+```
+
+Keep those npm overrides scoped to this trusted T3 update command. npm 12 may
+otherwise report success while blocking native dependency build scripts. After
+an interrupted or older update, repair and verify the managed runtime with:
+
+```bash
+infra-tools agent doctor --capability t3code --fix
 ```
 
 This updates the same service managed by infra-tools. When a desktop client
 requires an exact matching version, use:
 
 ```bash
-npx t3@CLIENT_VERSION service update
+npm_config_dangerously_allow_all_scripts=true \
+  npm_config_foreground_scripts=true \
+  npx t3@CLIENT_VERSION service update
 ```
 
 Do not start a second foreground `npx t3` server on the managed port.

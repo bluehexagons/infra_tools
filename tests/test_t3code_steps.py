@@ -14,6 +14,8 @@ from common.t3code_steps import (
     _configure_firewall,
     _configure_t3_https,
     _install_t3_service,
+    _rebuild_t3_native_runtime,
+    _wait_for_t3_service,
     _write_passthrough_wrapper,
     install_t3code_web,
 )
@@ -175,6 +177,8 @@ class T3CodeWebTest(unittest.TestCase):
                     return_value="/usr/bin",
                 ),
                 patch("common.t3code_steps._run_as_login_user", side_effect=run_as_user),
+                patch("common.t3code_steps._t3_native_runtime_healthy", return_value=True),
+                patch("common.t3code_steps._wait_for_t3_service"),
                 patch("common.t3code_steps._user_systemctl", return_value=completed),
                 patch("common.t3code_steps.os.chown"),
                 patch(
@@ -182,7 +186,7 @@ class T3CodeWebTest(unittest.TestCase):
                     os.path.join(home, "legacy.service"),
                 ),
             ):
-                binary, changed = _install_t3_service(
+                binary = _install_t3_service(
                     home,
                     "agent",
                     os.getuid(),
@@ -192,10 +196,15 @@ class T3CodeWebTest(unittest.TestCase):
                     3773,
                 )
 
-            self.assertTrue(changed)
             self.assertEqual(binary, _active_t3_binary(home))
             self.assertTrue(
                 any("npx --yes t3@latest service update" in command for command in commands)
+            )
+            self.assertTrue(
+                any(
+                    "npm_config_dangerously_allow_all_scripts=true" in command
+                    for command in commands
+                )
             )
             drop_in = os.path.join(
                 home,
@@ -222,6 +231,8 @@ class T3CodeWebTest(unittest.TestCase):
                 patch("common.t3code_steps._ensure_user_manager"),
                 patch("common.t3code_steps._node_bin_directory", return_value="/usr/bin"),
                 patch("common.t3code_steps._run_as_login_user") as run_as_user,
+                patch("common.t3code_steps._t3_native_runtime_healthy", return_value=True),
+                patch("common.t3code_steps._wait_for_t3_service"),
                 patch("common.t3code_steps._user_systemctl", return_value=completed),
                 patch("common.t3code_steps.os.chown"),
                 patch(
@@ -254,6 +265,8 @@ class T3CodeWebTest(unittest.TestCase):
                 patch("common.t3code_steps._ensure_user_manager"),
                 patch("common.t3code_steps._node_bin_directory", return_value="/usr/bin"),
                 patch("common.t3code_steps._run_as_login_user") as run_as_user,
+                patch("common.t3code_steps._t3_native_runtime_healthy", return_value=True),
+                patch("common.t3code_steps._wait_for_t3_service"),
                 patch("common.t3code_steps._user_systemctl", return_value=completed),
                 patch("common.t3code_steps.run", return_value=completed) as run_command,
                 patch("common.t3code_steps.os.chown"),
@@ -284,6 +297,137 @@ class T3CodeWebTest(unittest.TestCase):
                 commands,
             )
 
+    def test_legacy_service_is_restored_when_readiness_does_not_stabilize(self) -> None:
+        with tempfile.TemporaryDirectory() as home:
+            workspace = os.path.join(home, "repos")
+            os.makedirs(workspace)
+            self._write_upstream_runtime(home)
+            legacy_service = os.path.join(home, "infra-tools-t3code.service")
+            with open(legacy_service, "w", encoding="utf-8") as file_obj:
+                file_obj.write("# legacy infra-tools unit\n")
+            completed = SimpleNamespace(returncode=0, stdout="", stderr="")
+            with (
+                patch("common.t3code_steps.install_package", return_value=True),
+                patch("common.t3code_steps._ensure_user_manager"),
+                patch("common.t3code_steps._node_bin_directory", return_value="/usr/bin"),
+                patch("common.t3code_steps._t3_native_runtime_healthy", return_value=True),
+                patch(
+                    "common.t3code_steps._wait_for_t3_service",
+                    side_effect=RuntimeError("readiness failed"),
+                ),
+                patch("common.t3code_steps._user_systemctl", return_value=completed),
+                patch("common.t3code_steps.run", return_value=completed) as run_command,
+                patch("common.t3code_steps.os.chown"),
+                patch(
+                    "common.t3code_steps.LEGACY_T3_SERVICE_FILE",
+                    legacy_service,
+                ),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "readiness failed"):
+                    _install_t3_service(
+                        home,
+                        "agent",
+                        os.getuid(),
+                        os.getgid(),
+                        workspace,
+                        "127.0.0.1",
+                        3773,
+                    )
+
+            self.assertTrue(os.path.isfile(legacy_service))
+            commands = [call.args[0] for call in run_command.call_args_list]
+            self.assertIn(
+                ["systemctl", "start", "infra-tools-t3code.service"],
+                commands,
+            )
+
+    def test_incomplete_native_runtime_is_rebuilt_before_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as home:
+            workspace = os.path.join(home, "repos")
+            os.makedirs(workspace)
+            binary = self._write_upstream_runtime(home)
+            completed = SimpleNamespace(returncode=0, stdout="", stderr="")
+            with (
+                patch("common.t3code_steps.install_package", return_value=True),
+                patch("common.t3code_steps._ensure_user_manager"),
+                patch("common.t3code_steps._node_bin_directory", return_value="/usr/bin"),
+                patch(
+                    "common.t3code_steps._t3_native_runtime_healthy",
+                    return_value=False,
+                ),
+                patch("common.t3code_steps._rebuild_t3_native_runtime") as rebuild,
+                patch("common.t3code_steps._wait_for_t3_service"),
+                patch(
+                    "common.t3code_steps._user_systemctl",
+                    return_value=completed,
+                ) as systemctl,
+                patch("common.t3code_steps.os.chown"),
+                patch(
+                    "common.t3code_steps.LEGACY_T3_SERVICE_FILE",
+                    os.path.join(home, "legacy.service"),
+                ),
+            ):
+                self.assertEqual(
+                    _install_t3_service(
+                        home,
+                        "agent",
+                        os.getuid(),
+                        os.getgid(),
+                        workspace,
+                        "127.0.0.1",
+                        3773,
+                    ),
+                    binary,
+                )
+
+            rebuild.assert_called_once_with("agent", home, "/usr/bin", binary)
+            actions = [call.args[2] for call in systemctl.call_args_list]
+            self.assertIn("stop", actions)
+            self.assertIn("restart", actions)
+
+    def test_native_rebuild_enables_npm_lifecycle_scripts(self) -> None:
+        with tempfile.TemporaryDirectory() as home:
+            binary = self._write_upstream_runtime(home)
+            node_bin = os.path.join(home, "node-bin")
+            os.makedirs(node_bin)
+            for executable in ("node", "npm"):
+                path = os.path.join(node_bin, executable)
+                with open(path, "w", encoding="utf-8") as file_obj:
+                    file_obj.write("#!/bin/sh\n")
+                os.chmod(path, 0o755)
+            completed = SimpleNamespace(returncode=0, stdout="", stderr="")
+            with (
+                patch(
+                    "common.t3code_steps._run_as_login_user",
+                    return_value=completed,
+                ) as run_as_user,
+                patch(
+                    "common.t3code_steps._t3_native_runtime_healthy",
+                    return_value=True,
+                ),
+            ):
+                _rebuild_t3_native_runtime("agent", home, node_bin, binary)
+
+            command = run_as_user.call_args.args[2]
+            self.assertIn("npm_config_dangerously_allow_all_scripts=true", command)
+            self.assertIn("rebuild --dangerously-allow-all-scripts", command)
+            self.assertIn("--foreground-scripts --prefix", command)
+            self.assertIn("node-pty msgpackr-extract", command)
+
+    def test_readiness_requires_three_consecutive_healthy_checks(self) -> None:
+        completed = SimpleNamespace(returncode=0, stdout="", stderr="")
+        with (
+            patch("common.t3code_steps._user_systemctl", return_value=completed),
+            patch(
+                "common.t3code_steps._t3_local_endpoint_reachable",
+                side_effect=[True, False, True, True, True],
+            ) as endpoint,
+            patch("common.t3code_steps.time.sleep"),
+        ):
+            _wait_for_t3_service("agent", 1000, "0.0.0.0", 3773, "/home/agent")
+
+        self.assertEqual(endpoint.call_count, 5)
+
     def test_stable_wrapper_follows_service_selected_version(self) -> None:
         with tempfile.TemporaryDirectory() as home:
             bin_dir = os.path.join(home, ".local", "bin")
@@ -309,7 +453,6 @@ class T3CodeWebTest(unittest.TestCase):
             workspace = os.path.join(home, "repos")
             os.makedirs(workspace)
             binary = self._write_upstream_runtime(home)
-            completed = SimpleNamespace(returncode=0, stdout="", stderr="")
             admin_pair_script = os.path.join(
                 os.path.dirname(os.path.dirname(__file__)),
                 "common",
@@ -322,9 +465,8 @@ class T3CodeWebTest(unittest.TestCase):
                 patch("common.t3code_steps._configure_firewall"),
                 patch(
                     "common.t3code_steps._install_t3_service",
-                    return_value=(binary, True),
+                    return_value=binary,
                 ),
-                patch("common.t3code_steps._user_systemctl", return_value=completed),
                 patch("common.t3code_steps._ensure_t3_agent_skill", return_value=False),
                 patch("common.t3code_steps._remove_connect_restart_units"),
                 patch("common.t3code_steps._remove_device_pairing"),
