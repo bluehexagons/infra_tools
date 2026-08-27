@@ -215,15 +215,17 @@ class TestSetupMainTimingPersistence(unittest.TestCase):
 
 
 class TestRunRemoteSetupArgumentSecurity(unittest.TestCase):
-    def test_copy_project_files_includes_plugins_package(self):
+    def test_copy_project_files_includes_runtime_packages(self):
         from lib import setup_common
 
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with (
+            patch.object(setup_common.shutil, "copytree") as copytree,
+            patch.object(setup_common.shutil, "copy2"),
+        ):
+            tmpdir = "/payload"
             setup_common.copy_project_files(tmpdir)
-            self.assertTrue(os.path.isdir(os.path.join(tmpdir, "plugins")))
-            self.assertTrue(os.path.exists(os.path.join(tmpdir, "plugins", "__init__.py")))
-            self.assertTrue(os.path.isdir(os.path.join(tmpdir, "game")))
-            self.assertTrue(os.path.exists(os.path.join(tmpdir, "game", "__init__.py")))
+        copied_names = {os.path.basename(call.args[0]) for call in copytree.call_args_list}
+        self.assertTrue({"plugins", "game"}.issubset(copied_names))
 
     def test_write_remote_args_file_uses_secure_json_file(self):
         from lib import setup_common

@@ -268,7 +268,8 @@ class TestGodotSetup(unittest.TestCase):
                     archive.writestr(f"templates/{file_name}", file_name.encode())
                 archive.writestr(
                     "templates/linux_release.x86_64",
-                    b"not-installed" * (256 * 1024),
+                    b"not-installed"
+                    * (godot_steps._REMOTE_ZIP_TAIL_SIZE // len(b"not-installed") + 1),
                 )
             archive_size = os.path.getsize(archive_path)
             requested_ranges: list[tuple[int, int]] = []
