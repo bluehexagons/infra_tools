@@ -153,8 +153,9 @@ Supported templates include `{{release_dir}}`, `{{base_dir}}`, `{{name}}`,
 `{{service_name}}`, `{{domain}}`, `{{path}}`, `{{web_user}}`, `{{web_group}}`,
 `{{port}}`, `{{binary}}`, `{{working_dir}}`, `{{env_file}}`, `{{shared_dir}}`,
 and `{{data_dir}}`. Unknown templates fail validation. A health endpoint must
-return a 2xx response; persistent failure rejects the release and restores the
-previous release and service units.
+return a 2xx response within the 30-second activation deadline; persistent
+failure rejects the release and restores the previous release and service
+units.
 
 ## Runtime and update behavior
 
@@ -162,6 +163,9 @@ previous release and service units.
   use incremental builds.
 - Builds run in a temporary sibling release and are accepted only after every
   component build, service activation, and declared health check succeeds.
+- Existing application services are stopped and verified inactive before
+  infra_tools opens a declared SQLite database for its privileged backup; a
+  backup failure restarts the unchanged release.
 - Repository build commands run as an application-specific non-root build
   account that cannot modify another application's active release.
 - Node and uv are provisioned in that application's persistent build home;

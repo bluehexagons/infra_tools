@@ -385,8 +385,10 @@ class DeploymentOrchestrator:
             try:
                 with open(os.path.join(systemd_dir, filename), "r", encoding="utf-8") as handle:
                     snapshots[filename.removesuffix(".service")] = handle.read()
-            except OSError:
-                continue
+            except OSError as exc:
+                raise RuntimeError(
+                    f"Could not snapshot managed service unit {filename}: {exc}"
+                ) from exc
         return snapshots
 
     def _restore_app_units(self, dest_path: str, snapshots: dict[str, str]) -> None:
@@ -520,21 +522,39 @@ class DeploymentOrchestrator:
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         backup_path = os.path.join(backup_dir, f"{component.name}_{stamp}.sqlite3")
         temporary_path = f"{backup_path}.tmp"
+        temporary_created = False
         try:
+            # Reserve the unpredictable temporary name without following a
+            # pre-existing link left by a service from an older, less-isolated
+            # deployment. SQLite can then safely reopen this regular file.
+            temporary_fd = os.open(
+                temporary_path,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+            )
+            temporary_created = True
+            os.close(temporary_fd)
             source = sqlite3.connect(f"file:{database_path}?mode=ro", uri=True)
             try:
                 target = sqlite3.connect(temporary_path)
                 try:
                     source.backup(target)
+                    integrity = target.execute("PRAGMA quick_check").fetchone()
+                    if integrity != ("ok",):
+                        detail = integrity[0] if integrity else "no result"
+                        raise sqlite3.DatabaseError(
+                            f"SQLite backup integrity check failed: {detail}"
+                        )
                 finally:
                     target.close()
             finally:
                 source.close()
         except (OSError, sqlite3.Error):
-            try:
-                os.remove(temporary_path)
-            except OSError:
-                pass
+            if temporary_created:
+                try:
+                    os.remove(temporary_path)
+                except OSError:
+                    pass
             raise
         os.chmod(temporary_path, 0o600)
         os.replace(temporary_path, backup_path)
@@ -646,10 +666,6 @@ class DeploymentOrchestrator:
 
             self._validate_manifest_artifacts(manifest, staging_path)
 
-            for component in manifest.components:
-                if component.is_service:
-                    self._backup_component_sqlite(component, dest_path, domain)
-
             if os.path.exists(dest_path):
                 backup_path = tempfile.mkdtemp(
                     prefix=f".{os.path.basename(dest_path)}.previous-",
@@ -667,7 +683,8 @@ class DeploymentOrchestrator:
                 },
             )
 
-            # Stop services only for the short release swap window.
+            # Quiesce the old application before a privileged database open so
+            # it cannot race path validation by replacing a database entry.
             for unit_name in sorted(unit_snapshots):
                 try:
                     if self._stop_app_unit(unit_name):
@@ -677,6 +694,10 @@ class DeploymentOrchestrator:
                     # uncertain. Reconcile it against the unchanged release.
                     stopped_units.append(unit_name)
                     raise
+
+            for component in manifest.components:
+                if component.is_service:
+                    self._backup_component_sqlite(component, dest_path, domain)
 
             if os.path.exists(dest_path):
                 assert backup_path is not None
@@ -1088,30 +1109,43 @@ class DeploymentOrchestrator:
         if component.health:
             self._poll_health(component)
 
-    def _poll_health(self, component: Component, attempts: int = 30, delay: float = 1.0) -> None:
+    def _poll_health(
+        self,
+        component: Component,
+        timeout: float = 30.0,
+        delay: float = 1.0,
+    ) -> None:
         """Poll a service's health endpoint until it answers, then return.
 
         Only a 2xx response accepts the release. A persistent failure aborts
-        activation so the caller can restore the previous release.
+        activation so the caller can restore the previous release. A monotonic
+        deadline bounds slow connection attempts as well as retry delays.
         """
         import time
         import urllib.error
         import urllib.request
 
         url = f"http://127.0.0.1:{component.port}{component.health}"
-        for _attempt in range(attempts):
+        deadline = time.monotonic() + timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
             try:
-                with urllib.request.urlopen(url, timeout=3) as resp:
+                with urllib.request.urlopen(url, timeout=min(3.0, remaining)) as resp:
                     if 200 <= resp.status < 300:
                         print(f"  ✓ Health check passed for '{component.name}' ({url} → {resp.status})")
                         return
-            except urllib.error.HTTPError as exc:
+            except urllib.error.HTTPError:
                 pass
             except (urllib.error.URLError, OSError):
                 pass
-            time.sleep(delay)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(delay, remaining))
         raise RuntimeError(
-            f"Health check for '{component.name}' did not pass after {attempts} attempts ({url})"
+            f"Health check for '{component.name}' did not pass within {timeout:g} seconds ({url})"
         )
 
     def build_project(self, project_path: str, project_type: str,

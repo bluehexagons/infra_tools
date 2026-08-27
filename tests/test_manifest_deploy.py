@@ -14,6 +14,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+import urllib.error
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -219,6 +220,24 @@ class TestServiceContext(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "already assigned"):
                 self.orch._resolve_manifest_ports(manifest, "/var/www/shop")
 
+    def test_health_check_uses_wall_clock_deadline(self):
+        component = _service_component(health="/health")
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=urllib.error.URLError("not ready"),
+        ) as urlopen, patch(
+            "time.monotonic",
+            side_effect=[100.0, 100.0, 130.0],
+        ), patch("time.sleep") as sleep:
+            with self.assertRaisesRegex(RuntimeError, "within 30 seconds"):
+                self.orch._poll_health(component, timeout=30.0)
+
+        urlopen.assert_called_once_with(
+            "http://127.0.0.1:8090/health",
+            timeout=3.0,
+        )
+        sleep.assert_not_called()
+
     @patch('lib.deployment.run')
     def test_sqlite_backup_uses_online_backup_and_retention(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
@@ -246,6 +265,39 @@ class TestServiceContext(unittest.TestCase):
             restored = sqlite3.connect(os.path.join(backup_dir, backups[0]))
             self.assertEqual(restored.execute("SELECT value FROM values_table").fetchone(), (7,))
             restored.close()
+
+    @patch('lib.deployment.run')
+    def test_sqlite_backup_refuses_preexisting_temporary_path(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        component = _service_component(sqlite_backup="{{data_dir}}/app.sqlite3")
+        with tempfile.TemporaryDirectory() as base_dir:
+            orchestrator = DeploymentOrchestrator(base_dir=base_dir)
+            dest_path = os.path.join(base_dir, "shop")
+            data_dir = orchestrator._component_data_dir(dest_path, component)
+            backup_dir = os.path.join(
+                orchestrator._component_shared_dir(dest_path, component), "backups"
+            )
+            os.makedirs(data_dir)
+            os.makedirs(backup_dir)
+            database = sqlite3.connect(os.path.join(data_dir, "app.sqlite3"))
+            database.execute("CREATE TABLE values_table (value INTEGER)")
+            database.close()
+            temporary_path = os.path.join(
+                backup_dir, "api_20260102_030405_123456.sqlite3.tmp"
+            )
+            with open(temporary_path, "w", encoding="utf-8") as handle:
+                handle.write("untrusted")
+
+            fixed_datetime = MagicMock()
+            fixed_datetime.now.return_value.strftime.return_value = (
+                "20260102_030405_123456"
+            )
+            with patch('lib.deployment.datetime', fixed_datetime):
+                with self.assertRaises(FileExistsError):
+                    orchestrator._backup_component_sqlite(component, dest_path, None)
+
+            with open(temporary_path, encoding="utf-8") as handle:
+                self.assertEqual(handle.read(), "untrusted")
 
     @patch('lib.deployment.run')
     def test_sqlite_backup_rejects_symlink_outside_managed_state(self, mock_run):
@@ -491,6 +543,16 @@ class TestDeployManifest(unittest.TestCase):
             "manifest-operation.json",
         )
 
+    def test_service_unit_snapshot_failure_aborts_closed(self):
+        with patch("lib.deployment.os.path.isdir", return_value=True), patch(
+            "lib.deployment.os.listdir",
+            return_value=["app-example_com-api.service"],
+        ), patch("builtins.open", side_effect=PermissionError("denied")):
+            with self.assertRaisesRegex(RuntimeError, "Could not snapshot managed"):
+                self.orch._app_unit_snapshots(
+                    os.path.join(self.base_dir, "example_com")
+                )
+
     @patch('lib.deployment.run')
     def test_stop_requires_unit_to_be_inactive(self, mock_run):
         mock_run.side_effect = [
@@ -577,6 +639,48 @@ class TestDeployManifest(unittest.TestCase):
         mock_meta.assert_called_once()
         self.assertTrue(os.path.exists(os.path.join(dest, "infra.json")))
         self.assertFalse(os.path.exists(self._operation_marker_path()))
+
+    @patch.object(DeploymentOrchestrator, '_poll_health')
+    @patch('lib.deployment.create_managed_service')
+    @patch('lib.deployment.save_deployment_metadata')
+    @patch('lib.deployment.run')
+    def test_stops_old_service_before_sqlite_backup(
+        self, mock_run, _mock_meta, _mock_service, _mock_health
+    ):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        events = []
+
+        def stop_unit(_unit_name):
+            events.append("stop")
+            return True
+
+        def backup_database(_component, _dest_path, _domain):
+            events.append("backup")
+
+        with patch.object(
+            self.orch,
+            '_app_unit_snapshots',
+            return_value={'app-example_com-api': 'old unit'},
+        ), patch.object(
+            self.orch,
+            '_stop_app_unit',
+            side_effect=stop_unit,
+        ), patch.object(
+            self.orch,
+            '_backup_component_sqlite',
+            side_effect=backup_database,
+        ):
+            self.orch.deploy_manifest(
+                manifest=self.manifest,
+                source_path=self.source,
+                domain="example.com",
+                path="/",
+                git_url="https://git.example.com/shop.git",
+                commit_hash="abc123",
+                keep_source=True,
+            )
+
+        self.assertEqual(events, ["stop", "backup"])
 
     @patch.object(DeploymentOrchestrator, '_poll_health')
     @patch('lib.deployment.create_managed_service')

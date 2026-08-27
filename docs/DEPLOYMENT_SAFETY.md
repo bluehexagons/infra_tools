@@ -27,9 +27,11 @@ know.
   interrupted and incomplete-recovery markers block another deployment.
 - Deployment-owned Nginx files are snapshotted and restored when `nginx -t`
   rejects a generated configuration.
-- Services that declare `sqlite_backup` receive a consistent online backup
-  before replacement, with manifest-controlled retention. Symlinked backup
-  directories are rejected before a privileged backup is written.
+- Services that declare `sqlite_backup` receive a consistent SQLite API backup
+  while the old unit is verified inactive and before replacement, with
+  an integrity check and manifest-controlled retention. Symlinked backup
+  directories and pre-existing temporary backup paths are rejected before a
+  privileged backup is written.
 - Installs a weekly cleanup timer and caps journal growth on server-style
   setups.
 - Uses conservative package-update policy for Node and uv by default.
@@ -62,14 +64,22 @@ the `staging_path`, `backup_path`, `units`, and `errors` recorded in its
 before moving the marker aside for audit. Do not remove or replace a
 `recovery_required` marker merely to make deployment proceed.
 
-Restore a manifest component's latest SQLite backup by stopping its service,
-copying the database back, and starting the service again:
+Restore a manifest component's latest SQLite backup by resolving its generated
+service identity, stopping it, removing stale journal files, installing the
+database with service ownership, checking it, and starting the service again:
 
-```text
-sudo systemctl stop app-<app_name>-<component>.service
-sudo cp /var/www/.infra_tools_shared/<app_name>/<component>/backups/<backup_file> \
-       /var/www/.infra_tools_shared/<app_name>/<component>/data/<database>.sqlite3
-sudo systemctl start app-<app_name>-<component>.service
+```bash
+service_unit="app-<app_name>-<component>.service"
+service_user="$(systemctl show "$service_unit" --property=User --value)"
+database_path="/var/www/.infra_tools_shared/<app_name>/<component>/data/<database>.sqlite3"
+backup_path="/var/www/.infra_tools_shared/<app_name>/<component>/backups/<backup_file>"
+test -n "$service_user" &&
+  sudo systemctl stop "$service_unit" &&
+  sudo rm -f "$database_path-wal" "$database_path-shm" "$database_path-journal" &&
+  sudo install -o "$service_user" -g "$service_user" -m 600 \
+    "$backup_path" "$database_path" &&
+  sudo sqlite3 "$database_path" "PRAGMA quick_check;" | grep -qx ok &&
+  sudo systemctl start "$service_unit"
 ```
 
 ## Maintenance
