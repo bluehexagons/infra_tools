@@ -25,6 +25,22 @@ def _config(**overrides: object) -> SetupConfig:
 
 
 class TestDeploymentPreflight(unittest.TestCase):
+    @patch("lib.setup_common.clone_repository")
+    def test_dry_run_validates_staged_manifest(
+        self, mock_clone: MagicMock
+    ) -> None:
+        config = _config(
+            dry_run=True,
+            deploy_specs=[["example.com", "https://example.com/app.git"]],
+        )
+        with tempfile.TemporaryDirectory() as repo_dir, tempfile.TemporaryDirectory() as target_dir:
+            with open(os.path.join(repo_dir, "infra.json"), "w", encoding="utf-8") as handle:
+                handle.write('{"version": 1, "components": []}\n')
+            mock_clone.return_value = (repo_dir, "abc123")
+
+            with self.assertRaisesRegex(ValueError, "non-empty array"):
+                prepare_deployments(config, target_dir)
+
     @patch("lib.setup_common.clone_repository", return_value=None)
     def test_any_clone_failure_aborts_staging(self, _mock_clone: MagicMock) -> None:
         config = _config(

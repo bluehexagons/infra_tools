@@ -6,6 +6,11 @@ root to describe one or more static sites and services explicitly. The manifest
 is validated before deployment; an invalid file stops deployment instead of
 falling back to automatic detection.
 
+`--dry-run` performs a shallow clone into disposable local staging and validates
+the repository type and `infra.json` without updating the persistent Git cache
+before target setup begins. It does not execute repository build commands;
+projects should run those commands in CI as a separate build preflight.
+
 ## Basic deployment
 
 ```bash
@@ -137,7 +142,7 @@ In addition to the common fields (`name`, `type`, `domain`, `path`, `build`, and
   receive an Nginx route;
 - `sqlite_backup`: optional absolute or templated SQLite database path backed
   up with SQLite's online backup API before release replacement; the resolved
-  path must remain under that component's `{{shared_dir}}`; and
+  path must remain under that component's service-owned `{{data_dir}}`; and
 - `backup_retention`: number of deployment backups to retain, from 1 to 100.
 
 Infra-tools always writes the hardened systemd unit and runs it under the
@@ -173,7 +178,8 @@ previous release and service units.
   begins; one failed fetch aborts the complete setup instead of silently
   dropping that route from the desired deployment set.
 - Each service receives a dedicated system user and persistent writable state
-  under `/var/www/.infra_tools_shared/<app>/<component>`.
+  only under `/var/www/.infra_tools_shared/<app>/<component>/data`. The parent
+  component directory and its `backups` directory remain root-controlled.
 - Service state remains outside the release directory, so replacing a release
   does not remove component data.
 - Manifest deployments are serialized while stable ports are assigned and

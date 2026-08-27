@@ -650,6 +650,40 @@ class TestAgentCredentialStaging(unittest.TestCase):
 
 
 class TestCloneRepository(unittest.TestCase):
+    def test_dry_run_clones_into_disposable_staging_for_preflight(self):
+        from lib import setup_common
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            work_dir = os.path.join(tmpdir, "work")
+            os.makedirs(work_dir)
+            clone_path = os.path.join(work_dir, "repo")
+
+            def clone_result(command, **_kwargs):
+                os.makedirs(clone_path)
+                return MagicMock(returncode=0, stdout="", stderr="")
+
+            with patch("subprocess.run", side_effect=clone_result) as mock_run, \
+                 patch("lib.deploy_utils.get_git_commit_hash", return_value="abc123"):
+                result = setup_common.clone_repository(
+                    "https://git.example.com/repo.git",
+                    work_dir,
+                    cache_dir=os.path.join(tmpdir, "cache"),
+                    dry_run=True,
+                )
+
+        self.assertEqual(result, (clone_path, "abc123"))
+        self.assertEqual(
+            mock_run.call_args.args[0],
+            [
+                "git",
+                "clone",
+                "--depth",
+                "1",
+                "https://git.example.com/repo.git",
+                clone_path,
+            ],
+        )
+
     def test_repository_name_cannot_escape_work_directory(self):
         from lib import setup_common
 

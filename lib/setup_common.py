@@ -132,6 +132,28 @@ def clone_repository(git_url: str, temp_dir: str, cache_dir: Optional[str] = Non
         return None
     
     clone_path = os.path.join(temp_dir, repo_name)
+
+    # A deployment dry run still needs real source files to validate infra.json
+    # and project support. Clone only into the disposable setup staging tree;
+    # do not update or populate the persistent cache.
+    if dry_run:
+        print(f"  [DRY RUN] Cloning {git_url} for deployment preflight...")
+        try:
+            result = subprocess.run(
+                ["git", "clone", "--depth", "1", git_url, clone_path],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            if result.returncode != 0:
+                print(f"  Error cloning repository for preflight: {result.stderr}")
+                return None
+            from lib.deploy_utils import get_git_commit_hash
+
+            return (clone_path, get_git_commit_hash(clone_path))
+        except Exception as exc:
+            print(f"  Error cloning repository for preflight: {exc}")
+            return None
     
     if cache_dir:
         cache_path = _repository_cache_path(cache_dir, git_url, repo_name)
@@ -437,14 +459,19 @@ def prepare_deployments(config: SetupConfig, target_dir: str) -> None:
                 f"Failed to stage {git_url}; no target changes were started"
             )
         clone_path, commit_hash = result
-        if not config.dry_run:
-            from lib.deploy_utils import is_ruby_project
+        from lib.deploy_utils import is_ruby_project
+        from lib.project_manifest import load_manifest
 
-            if is_ruby_project(clone_path):
-                raise RuntimeError(
-                    f"Ruby/Rails repository {git_url} is unsupported by this "
-                    "infra-tools version; use its pinned legacy release"
-                )
+        if is_ruby_project(clone_path):
+            raise RuntimeError(
+                f"Ruby/Rails repository {git_url} is unsupported by this "
+                "infra-tools version; use its pinned legacy release"
+            )
+        manifest = load_manifest(clone_path)
+        if manifest is not None:
+            print(
+                f"  ✓ Validated infra.json ({len(manifest.components)} component(s))"
+            )
         if commit_hash and not config.dry_run:
             repo_name = os.path.basename(clone_path)
             commit_file = os.path.join(target_dir, f"{repo_name}.commit")

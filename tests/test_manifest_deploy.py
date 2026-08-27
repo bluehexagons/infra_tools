@@ -219,7 +219,9 @@ class TestServiceContext(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "already assigned"):
                 self.orch._resolve_manifest_ports(manifest, "/var/www/shop")
 
-    def test_sqlite_backup_uses_online_backup_and_retention(self):
+    @patch('lib.deployment.run')
+    def test_sqlite_backup_uses_online_backup_and_retention(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         component = _service_component(
             sqlite_backup="{{data_dir}}/app.sqlite3",
             backup_retention=2,
@@ -245,7 +247,9 @@ class TestServiceContext(unittest.TestCase):
             self.assertEqual(restored.execute("SELECT value FROM values_table").fetchone(), (7,))
             restored.close()
 
-    def test_sqlite_backup_rejects_symlink_outside_managed_state(self):
+    @patch('lib.deployment.run')
+    def test_sqlite_backup_rejects_symlink_outside_managed_state(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         component = _service_component(sqlite_backup="{{data_dir}}/app.sqlite3")
         with tempfile.TemporaryDirectory() as base_dir:
             orchestrator = DeploymentOrchestrator(base_dir=base_dir)
@@ -258,8 +262,51 @@ class TestServiceContext(unittest.TestCase):
             database.close()
             os.symlink(external_database, os.path.join(data_dir, "app.sqlite3"))
 
-            with self.assertRaisesRegex(RuntimeError, "managed shared directory"):
+            with self.assertRaisesRegex(RuntimeError, "managed data directory"):
                 orchestrator._backup_component_sqlite(component, dest_path, None)
+
+    @patch('lib.deployment.run')
+    def test_sqlite_backup_rejects_symlinked_backup_directory(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        component = _service_component(sqlite_backup="{{data_dir}}/app.sqlite3")
+        with tempfile.TemporaryDirectory() as base_dir:
+            orchestrator = DeploymentOrchestrator(base_dir=base_dir)
+            dest_path = os.path.join(base_dir, "shop")
+            data_dir = orchestrator._component_data_dir(dest_path, component)
+            os.makedirs(data_dir)
+            database = sqlite3.connect(os.path.join(data_dir, "app.sqlite3"))
+            database.execute("CREATE TABLE values_table (value INTEGER)")
+            database.close()
+            external_dir = os.path.join(base_dir, "external-backups")
+            os.makedirs(external_dir)
+            os.symlink(
+                external_dir,
+                os.path.join(orchestrator._component_shared_dir(dest_path, component), "backups"),
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "symlinked backup directory"):
+                orchestrator._backup_component_sqlite(component, dest_path, None)
+
+    @patch('lib.deployment.create_managed_service')
+    @patch('lib.deployment.run')
+    def test_service_install_rejects_symlinked_data_directory(
+        self, mock_run, mock_service
+    ):
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        component = _service_component(binary=None, exec="/bin/true")
+        with tempfile.TemporaryDirectory() as base_dir:
+            orchestrator = DeploymentOrchestrator(base_dir=base_dir)
+            dest_path = os.path.join(base_dir, "shop")
+            shared_dir = orchestrator._component_shared_dir(dest_path, component)
+            external_dir = os.path.join(base_dir, "external-data")
+            os.makedirs(shared_dir)
+            os.makedirs(external_dir)
+            os.symlink(external_dir, os.path.join(shared_dir, "data"))
+
+            with self.assertRaisesRegex(RuntimeError, "symlinked data directory"):
+                orchestrator._install_service_component(component, dest_path)
+
+        mock_service.assert_not_called()
 
     @patch('lib.deployment.create_managed_service')
     @patch('lib.deployment.run')
@@ -503,7 +550,7 @@ class TestDeployManifest(unittest.TestCase):
         self.assertEqual(kwargs['env_file'], "/opt/app/.env")
         self.assertEqual(
             kwargs['writable_paths'],
-            [os.path.join(self.base_dir, ".infra_tools_shared", "example_com", "api")],
+            [os.path.join(self.base_dir, ".infra_tools_shared", "example_com", "api", "data")],
         )
         self.assertEqual(
             kwargs['runtime_env'],
@@ -514,6 +561,10 @@ class TestDeployManifest(unittest.TestCase):
         # The managed, service-owned data dir was created outside the release.
         data_dir = os.path.join(self.base_dir, ".infra_tools_shared", "example_com", "api", "data")
         self.assertTrue(os.path.isdir(data_dir))
+        ownership_commands = [call.args[0] for call in mock_run.call_args_list]
+        self.assertTrue(any("chown root:root" in command for command in ownership_commands))
+        self.assertFalse(any("chown -R" in command and ".infra_tools_shared" in command
+                             for command in ownership_commands))
         # A dedicated service user was ensured (id lookup attempted).
         self.assertTrue(any("id app-example_com-api" in c.args[0] for c in mock_run.call_args_list))
 

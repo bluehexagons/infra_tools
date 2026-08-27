@@ -261,6 +261,22 @@ class DeploymentOrchestrator:
     def _component_data_dir(self, dest_path: str, component: Component) -> str:
         return os.path.join(self._component_shared_dir(dest_path, component), "data")
 
+    def _secure_component_shared_dir(self, component: Component, shared_dir: str) -> None:
+        """Make a stable component boundary root-controlled before using children."""
+        if os.path.islink(shared_dir):
+            raise RuntimeError(
+                f"Component '{component.name}': refusing symlinked shared directory: "
+                f"{shared_dir}"
+            )
+        result = run(
+            f"chown root:root {shlex.quote(shared_dir)} && chmod 0711 {shlex.quote(shared_dir)}",
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Component '{component.name}': could not secure managed shared directory"
+            )
+
     def _ensure_service_user(self, username: str) -> None:
         """Create a locked-down --system, nologin user for a service (idempotent)."""
         result = run(f"id {shlex.quote(username)}", check=False)
@@ -454,10 +470,19 @@ class DeploymentOrchestrator:
         if not component.sqlite_backup:
             return
         context = self._service_context(component, dest_path, deploy_domain)
+        shared_dir = context["shared_dir"]
+        if not os.path.isdir(shared_dir):
+            return
+        self._secure_component_shared_dir(component, shared_dir)
+        if os.path.islink(context["data_dir"]):
+            raise RuntimeError(
+                f"Component '{component.name}': refusing symlinked data directory: "
+                f"{context['data_dir']}"
+            )
         rendered_database_path = render_template(component.sqlite_backup, context)
         validate_filesystem_path(rendered_database_path, must_exist=False)
         database_path = os.path.realpath(rendered_database_path)
-        managed_root = os.path.realpath(context["shared_dir"])
+        managed_root = os.path.realpath(context["data_dir"])
         try:
             inside_managed_root = os.path.commonpath((database_path, managed_root)) == managed_root
         except ValueError:
@@ -465,12 +490,33 @@ class DeploymentOrchestrator:
         if not inside_managed_root:
             raise RuntimeError(
                 f"Component '{component.name}': sqlite_backup must resolve inside "
-                f"its managed shared directory: {managed_root}"
+                f"its managed data directory: {managed_root}"
             )
         if not os.path.isfile(database_path):
             return
-        backup_dir = os.path.join(context["shared_dir"], "backups")
+        backup_dir = os.path.join(shared_dir, "backups")
+        if os.path.islink(backup_dir):
+            raise RuntimeError(
+                f"Component '{component.name}': refusing symlinked backup directory: "
+                f"{backup_dir}"
+            )
         self._ensure_dir(backup_dir)
+        result = run(
+            f"chown root:root {shlex.quote(backup_dir)}",
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Component '{component.name}': could not secure SQLite backup ownership"
+            )
+        result = run(
+            f"chmod 0700 {shlex.quote(backup_dir)}",
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Component '{component.name}': could not secure SQLite backup permissions"
+            )
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         backup_path = os.path.join(backup_dir, f"{component.name}_{stamp}.sqlite3")
         temporary_path = f"{backup_path}.tmp"
@@ -982,13 +1028,31 @@ class DeploymentOrchestrator:
                     f"Component '{component.name}': binary not found after build: {binary_path}"
                 )
 
-        # Dedicated, isolated service user owning only its managed data dir.
+        # The service owns only data_dir. shared_dir remains root-controlled so
+        # sibling infrastructure state such as backups cannot be changed by the
+        # application process.
         self._ensure_service_user(username)
         data_dir = context['data_dir']
         shared_dir = context['shared_dir']
-        self._ensure_dir(data_dir)  # also creates shared_dir + the shared root
-        run(f"chown -R {shlex.quote(username)}:{shlex.quote(username)} {shlex.quote(shared_dir)}", check=False)
-        run(f"chmod 0750 {shlex.quote(shared_dir)} {shlex.quote(data_dir)}", check=False)
+        self._ensure_dir(shared_dir)
+        self._secure_component_shared_dir(component, shared_dir)
+        if os.path.islink(data_dir):
+            raise RuntimeError(
+                f"Component '{component.name}': refusing symlinked data directory: {data_dir}"
+            )
+        self._ensure_dir(data_dir)
+        result = run(
+            f"chown {shlex.quote(username)}:{shlex.quote(username)} {shlex.quote(data_dir)}",
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Could not set managed data ownership for {component.name}")
+        result = run(
+            f"chmod 0750 {shlex.quote(data_dir)}",
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Could not set managed data permissions for {component.name}")
 
         env_file = context.get('env_file')
         if env_file:
@@ -1018,13 +1082,13 @@ class DeploymentOrchestrator:
             env_file=env_file,
             description=f"infra.json service: {component.name}",
             runtime_env=runtime_env,
-            writable_paths=[shared_dir],
+            writable_paths=[data_dir],
         )
 
         if component.health:
             self._poll_health(component)
 
-    def _poll_health(self, component: Component, attempts: int = 10, delay: float = 1.0) -> None:
+    def _poll_health(self, component: Component, attempts: int = 30, delay: float = 1.0) -> None:
         """Poll a service's health endpoint until it answers, then return.
 
         Only a 2xx response accepts the release. A persistent failure aborts

@@ -14,8 +14,10 @@ know.
 - Legacy automatic static and Node builds run beside the active release and
   switch directories atomically only after a successful build. A failed build
   leaves the previous release active.
-- Manifest service components get dedicated runtime users and per-component
-  writable state under `.infra_tools_shared/<app>/<component>`.
+- Manifest service components get dedicated runtime users and writable state
+  only under `.infra_tools_shared/<app>/<component>/data`; the component root
+  and deployment backups remain root-controlled and outside the systemd unit's
+  writable paths.
 - Manifest builds use per-application build users, stable automatic ports, and
   a deployment lock. Existing services continue running during the build.
 - A manifest release is rolled back when service activation or a declared 2xx
@@ -26,7 +28,8 @@ know.
 - Deployment-owned Nginx files are snapshotted and restored when `nginx -t`
   rejects a generated configuration.
 - Services that declare `sqlite_backup` receive a consistent online backup
-  before replacement, with manifest-controlled retention.
+  before replacement, with manifest-controlled retention. Symlinked backup
+  directories are rejected before a privileged backup is written.
 - Installs a weekly cleanup timer and caps journal growth on server-style
   setups.
 - Uses conservative package-update policy for Node and uv by default.
