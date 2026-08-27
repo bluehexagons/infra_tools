@@ -1052,11 +1052,6 @@ class TestAgentPayloadInstallation(unittest.TestCase):
             username='agent',
             system_type='server_dev',
         )
-        completed = type(
-            'Completed',
-            (),
-            {'returncode': 0, 'stdout': '', 'stderr': ''},
-        )()
         with tempfile.TemporaryDirectory() as directory:
             home = os.path.join(directory, 'home')
             source = os.path.join(directory, 'hosts.yml')
@@ -1073,7 +1068,8 @@ class TestAgentPayloadInstallation(unittest.TestCase):
 
             with (
                 patch('common.agent_steps._user_home', return_value=home),
-                patch('common.agent_steps.run', return_value=completed),
+                patch('common.agent_steps._chown_user_directory_chain'),
+                patch('common.agent_steps._chown_path'),
             ):
                 self.assertFalse(_merge_github_credentials(config, source))
 
