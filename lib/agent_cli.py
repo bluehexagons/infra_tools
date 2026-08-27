@@ -10,6 +10,7 @@ import pwd
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.request
@@ -162,6 +163,17 @@ def add_agent_subparser(subparsers: argparse._SubParsersAction) -> None:
         "--fix",
         action="store_true",
         help="Apply safe T3 Code/Git repairs while checking readiness",
+    )
+    doctor_history = doctor.add_mutually_exclusive_group()
+    doctor_history.add_argument(
+        "--record",
+        action="store_true",
+        help="Privately record the redacted result for later comparison",
+    )
+    doctor_history.add_argument(
+        "--last-record",
+        action="store_true",
+        help="Show the last recorded readiness result without running checks",
     )
     doctor.add_argument("-k", "--key", dest="ssh_key", help="SSH private key path")
     update = commands.add_parser(
@@ -1653,6 +1665,34 @@ def _run_remote_agent_lifecycle(
     return result.returncode
 
 
+def _t3_readiness_expected(home: str) -> bool:
+    """Return whether this home contains a managed T3 installation."""
+    return any(
+        os.path.exists(path)
+        for path in (
+            os.path.join(home, _T3_RUNTIME_RELATIVE),
+            os.path.join(home, ".config", "systemd", "user", _T3_SERVICE_NAME),
+        )
+    )
+
+
+def _record_post_update_readiness(tools: StrList) -> JSONDict:
+    """Run and persist the post-update checks appropriate for this agent home."""
+    from lib.agent_readiness import record_agent_readiness
+
+    home = os.path.abspath(os.path.expanduser("~"))
+    tool_results = inspect_agent_tools(tools, home=home)
+    capability_results = [inspect_host_readiness(home)]
+    if _t3_readiness_expected(home):
+        capability_results.append(inspect_t3code(home))
+    return record_agent_readiness(
+        tool_results,
+        capability_results,
+        trigger="agent_update",
+        home=home,
+    )
+
+
 def run_agent_command(args: argparse.Namespace) -> int:
     """Run a local or remote agent-tool command."""
     if args.agent_command == "maintenance":
@@ -1742,6 +1782,13 @@ def run_agent_command(args: argparse.Namespace) -> int:
         except (OSError, RuntimeError, ValueError) as exc:
             print(f"Error: {exc}")
             return 1
+        readiness_record: Optional[JSONDict] = None
+        readiness_error: Optional[str] = None
+        if not args.dry_run:
+            try:
+                readiness_record = _record_post_update_readiness(selected)
+            except (OSError, RuntimeError, ValueError) as exc:
+                readiness_error = str(exc)
         if args.json:
             print(json.dumps(results, indent=2))
         else:
@@ -1772,7 +1819,41 @@ def run_agent_command(args: argparse.Namespace) -> int:
                         f"  ✗ {tool}: {detail}{rollback}"
                         f" at {result.get('path') or 'unknown path'}"
                     )
-        return 0 if all(result["status"] in ("planned", "updated", "current") for result in results) else 1
+            if readiness_record is not None:
+                status = (
+                    "healthy"
+                    if readiness_record.get("healthy") is True
+                    else "UNHEALTHY"
+                )
+                print(f"  {'✓' if status == 'healthy' else '✗'} post-update readiness: {status}")
+        if readiness_error is not None:
+            print(
+                f"Error: post-update readiness could not be recorded: {readiness_error}",
+                file=sys.stderr,
+            )
+        elif (
+            args.json
+            and readiness_record is not None
+            and readiness_record.get("healthy") is not True
+        ):
+            print(
+                "Error: post-update readiness is unhealthy; inspect it with "
+                "infra-tools agent doctor --last-record",
+                file=sys.stderr,
+            )
+        updates_healthy = all(
+            result["status"] in ("planned", "updated", "current")
+            for result in results
+        )
+        readiness_healthy = (
+            args.dry_run
+            or (
+                readiness_error is None
+                and readiness_record is not None
+                and readiness_record.get("healthy") is True
+            )
+        )
+        return 0 if updates_healthy and readiness_healthy else 1
 
     if args.agent_command != "doctor":
         print(
@@ -1782,7 +1863,12 @@ def run_agent_command(args: argparse.Namespace) -> int:
         return 1
 
     requested_tools = getattr(args, "agent_doctor_tools", None)
-    requested_capabilities = getattr(args, "agent_doctor_capabilities", None) or []
+    requested_capabilities = list(
+        getattr(args, "agent_doctor_capabilities", None) or []
+    )
+    capabilities_explicit = bool(requested_capabilities)
+    record_requested = bool(getattr(args, "record", False))
+    last_record_requested = bool(getattr(args, "last_record", False))
     try:
         target = _remote_agent_target(
             args,
@@ -1800,6 +1886,10 @@ def run_agent_command(args: argparse.Namespace) -> int:
             remote_arguments.extend(("--capability", capability))
         if getattr(args, "fix", False):
             remote_arguments.append("--fix")
+        if record_requested:
+            remote_arguments.append("--record")
+        if last_record_requested:
+            remote_arguments.append("--last-record")
         if args.json:
             remote_arguments.append("--json")
         return _run_remote_agent_lifecycle(
@@ -1808,9 +1898,36 @@ def run_agent_command(args: argparse.Namespace) -> int:
             remote_arguments,
             timeout=_REMOTE_DOCTOR_TIMEOUT_SECONDS,
         )
+    if last_record_requested:
+        if requested_tools or requested_capabilities or getattr(args, "fix", False):
+            print("Error: --last-record cannot be combined with checks or --fix")
+            return 1
+        from lib.agent_readiness import (
+            format_agent_readiness_record,
+            load_agent_readiness_record,
+        )
+
+        try:
+            record = load_agent_readiness_record()
+        except (OSError, RuntimeError, ValueError) as exc:
+            print(f"Error: {exc}")
+            return 1
+        if record is None:
+            print("Error: no agent readiness record is available")
+            return 1
+        if args.json:
+            print(json.dumps(record, indent=2))
+        else:
+            print(format_agent_readiness_record(record))
+        return 0 if record.get("healthy") is True and record.get("current_boot") is True else 1
+
+    if record_requested and not requested_capabilities:
+        requested_capabilities.append("host")
+        if _t3_readiness_expected(os.path.abspath(os.path.expanduser("~"))):
+            requested_capabilities.append("t3code")
     if requested_tools:
         selected = list(requested_tools)
-    elif requested_capabilities:
+    elif capabilities_explicit:
         selected = []
     else:
         selected = list(DEFAULT_DOCTOR_TOOLS)
@@ -1825,6 +1942,18 @@ def run_agent_command(args: argparse.Namespace) -> int:
             capability_results.append(
                 inspect_t3code(fix=getattr(args, "fix", False))
             )
+    record_error: Optional[str] = None
+    if record_requested:
+        from lib.agent_readiness import record_agent_readiness
+
+        try:
+            record_agent_readiness(
+                results,
+                capability_results,
+                trigger="manual",
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            record_error = str(exc)
     if args.json:
         print(json.dumps([*results, *capability_results], indent=2))
     else:
@@ -1877,6 +2006,11 @@ def run_agent_command(args: argparse.Namespace) -> int:
                 print("  ✗ browser: local smoke test failed")
             else:
                 print("  ✗ browser: agent MCP registration is missing")
+        if record_requested and record_error is None:
+            print("  ✓ readiness: private record saved")
+
+    if record_error is not None:
+        print(f"Error: readiness could not be recorded: {record_error}", file=sys.stderr)
 
     tools_healthy = all(
         bool(result["installed"])
@@ -1884,4 +2018,4 @@ def run_agent_command(args: argparse.Namespace) -> int:
         for result in results
     )
     capabilities_healthy = all(bool(result["healthy"]) for result in capability_results)
-    return 0 if tools_healthy and capabilities_healthy else 1
+    return 0 if tools_healthy and capabilities_healthy and record_error is None else 1

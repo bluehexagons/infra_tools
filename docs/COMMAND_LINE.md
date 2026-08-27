@@ -513,6 +513,8 @@ infra-tools agent doctor --tool codex --tool claude --json
 infra-tools agent doctor --tool codex --tool opencode --capability browser
 infra-tools agent doctor --capability browser
 infra-tools agent doctor --capability t3code --capability host
+infra-tools agent doctor --capability t3code --capability host --record
+infra-tools agent doctor --last-record --json
 infra-tools agent doctor --capability t3code --fix
 infra-tools agent doctor 10.0.0.10 agent --tool codex --json
 infra-tools agent update --dry-run
@@ -552,6 +554,22 @@ Supplying `HOST USER` runs the same doctor through managed SSH from the control
 system and preserves its text or JSON output and exit status. The target must
 have been configured by infra-tools so `/opt/infra_tools` is present. Add
 `--key PATH` when the VM uses a non-default SSH identity.
+
+Add `--record` after a deliberate update or reboot to replace the private
+readiness record at
+`~/.local/state/infra_tools/agent-readiness.json`. A bare `doctor --record`
+checks the default terminal tools and adds host readiness plus T3 Code when a
+managed T3 installation is present; explicit `--tool` and `--capability`
+selections retain their normal narrowing behavior. The mode-`0600` record
+contains versions, aggregate checks, warnings, and the current Linux boot ID,
+but omits executable and home paths, Git identity, credential contents,
+repository contents, and process details. Use `doctor --last-record` to read it
+without running checks. That command exits nonzero when the record is unhealthy
+or belongs to a previous boot, so it can distinguish fresh post-reboot evidence
+from an older successful audit. Both options support the remote `HOST USER`
+form. Doctor JSON output retains its existing result-array shape when
+`--record` is used; query the saved evidence separately with `--last-record
+--json`.
 
 `agent workspace` provides local task isolation for concurrent agents. `create`
 places a dedicated `agent/TASK` branch below
@@ -598,6 +616,14 @@ downloaded before execution with a size limit and their observed SHA-256 is
 recorded, but upstream does not publish a pinned digest through this installer
 contract, so the hash is audit evidence rather than independent publisher
 verification.
+
+After a non-dry-run update, the command also checks the selected terminal
+tools and host readiness, adds T3 Code readiness when that managed service is
+present, and saves the redacted readiness record described above. An unhealthy
+post-update result or failure to persist it makes the update command exit
+nonzero even when the vendor updater itself succeeded. Inspect the evidence
+with `infra-tools agent doctor --last-record`; update JSON output retains its
+existing per-tool result-array contract.
 
 The optional `HOST USER` form runs that update as the target VM user. Run
 `infra-tools agent update HOST USER --dry-run`, then repeat it without

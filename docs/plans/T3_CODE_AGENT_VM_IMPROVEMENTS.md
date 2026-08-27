@@ -1,8 +1,8 @@
 # T3 Code Agent VM Improvement Plan
 
-Status: active implementation; phases 1 through 3 and the phase 4 restart
-boundary are code-complete as of 2026-08-27, with disposable-VM deployment
-validation still pending.
+Status: active implementation; phases 1 through 3 and the phase 4 restart and
+durable-readiness boundaries are code-complete as of 2026-08-27, with
+disposable-VM deployment validation still pending.
 
 ## Objective
 
@@ -93,9 +93,13 @@ HTTPS listeners, UFW policy, and cleanup.
   existing automatic-restart policy to defer for active agent, build, Git,
   managed-worktree, and terminal-multiplexer workloads. Only category names
   are recorded; command lines and repository paths are never recorded.
-- The managed T3 workflow now requires the existing composite T3 and host
-  readiness audit after a reboot or deliberate T3 update. Automating that
-  audit remains gated on a disposable-VM service lifecycle test.
+- The managed T3 workflow now records the existing composite T3 and host
+  readiness audit after a reboot or deliberate T3 update. Deliberate terminal
+  agent updates record a tools-and-host audit automatically and include T3
+  when installed. The private record carries a boot ID so prior-boot evidence
+  fails closed. An automatic post-boot service remains gated on a disposable-VM
+  lifecycle test; until then, the operator explicitly records the post-reboot
+  audit.
 - Finish desired-versus-observed version channels and artifact-level rollback
   for agent tools only where upstream distribution contracts support them.
   Terminal agents retain the deliberate update, verified executable backup,

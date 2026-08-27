@@ -86,8 +86,17 @@ infra-tools agent maintenance release
 The hold expires after at most 72 hours and does not disable the host's forced
 restart deadline. The restart job separately recognizes active coding agents,
 builds, Git operations, terminal multiplexers, and processes inside managed
-agent worktrees. Run the composite T3 and host doctor again after a deliberate
-T3 update or host reboot.
+agent worktrees. After a deliberate T3 update or host reboot, persist the
+composite result and confirm it belongs to the current boot:
+
+```bash
+infra-tools agent doctor --capability t3code --capability host --record
+infra-tools agent doctor --last-record --json
+```
+
+The record is private and redacted. A healthy prior-boot record still exits
+nonzero. Deliberate `infra-tools agent update` runs record their post-update
+tools-and-host result automatically and include T3 when installed.
 
 ## Browser previews
 

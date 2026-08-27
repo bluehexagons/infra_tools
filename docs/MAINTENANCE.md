@@ -78,15 +78,33 @@ account that owns the terminal tools (for example,
 `sudo -u agent -H infra-tools agent update --tool codex`) for a deliberate
 terminal-agent vendor update with before/after verification, a retained prior
 executable, automatic rollback after a broken update, and a private audit
-record. The update environment is reset to that account's home so a caller's
-working directory and PATH cannot redirect the vendor installer. Setup still
-skips an installer when its command is already present.
+record. After a non-dry-run update, infra-tools also records a redacted
+tools-and-host readiness result, including T3 Code when it is installed. The
+update command exits nonzero if that audit is unhealthy or cannot be saved.
+The update environment is reset to that account's home so a caller's working
+directory and PATH cannot redirect the vendor installer. Setup still skips an
+installer when its command is already present.
 
 From the control system, the equivalent remote workflow is
 `infra-tools agent update HOST USER --dry-run` followed by the same command
 without `--dry-run`; use `--tool` to narrow either operation. Agent-enabled
 setups install the target-user launcher needed for local VM maintenance as
 part of the normal reconciliation.
+
+After a deliberate T3 Code update or host reboot, run and persist the
+composite readiness check as the target account:
+
+```bash
+infra-tools agent doctor --capability t3code --capability host --record
+infra-tools agent doctor --last-record --json
+```
+
+The private mode-`0600` record contains the boot ID and redacted aggregate
+results, not paths, Git identity, credential contents, repository contents, or
+process details. Reading a healthy record from a previous boot still exits
+nonzero, which prevents old evidence from being mistaken for a post-reboot
+check. The same `--record` and `--last-record` options work with the remote
+`HOST USER` doctor form.
 
 If a vendor command is run directly, use the same account and working
 directory, such as `sudo -u agent -H sh -lc 'cd /home/agent && codex update'`.
