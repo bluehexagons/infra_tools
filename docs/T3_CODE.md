@@ -107,8 +107,8 @@ and [v0.0.35 release](https://github.com/pingdotgg/t3code/releases/tag/v0.0.35).
 Older infra-tools installations used a root-owned
 `infra-tools-t3code.service` and a separate npm runtime. A subsequent setup
 stops that service, starts and validates the upstream user service, and only
-then disables and removes the old unit. The old service is restarted if the
-migration fails.
+then disables and removes the old unit and clears its retained failed state.
+The old service is restarted if the migration fails.
 
 Removing desktop support from infra-tools does not delete an AppImage that an
 older setup placed in a user's home. After confirming the files were not

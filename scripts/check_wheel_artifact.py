@@ -5,7 +5,8 @@ from __future__ import annotations
 
 import argparse
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -28,9 +29,27 @@ REQUIRED_WHEEL_PATHS = (
     "web/config/nginx.conf.template",
     "web/service_tools/webhook_manager.py",
 )
+SOURCE_COPY_IGNORE = shutil.ignore_patterns(
+    ".cache",
+    ".codex",
+    ".env",
+    ".env.*",
+    ".git",
+    ".infra_tools",
+    ".nox",
+    ".tox",
+    ".venv",
+    "__pycache__",
+    "*.egg-info",
+    "*.py[cod]",
+    "build",
+    "dist",
+)
 
 
 def _build_wheel(output_dir: Path) -> Path:
+    source_dir = output_dir.parent / "source"
+    shutil.copytree(ROOT, source_dir, ignore=SOURCE_COPY_IGNORE, symlinks=True)
     subprocess.run(
         [
             sys.executable,
@@ -39,10 +58,10 @@ def _build_wheel(output_dir: Path) -> Path:
             "--wheel",
             "--outdir",
             str(output_dir),
-            str(ROOT),
+            str(source_dir),
         ],
         check=True,
-        cwd=ROOT,
+        cwd=source_dir,
     )
     wheels = list(output_dir.glob("*.whl"))
     if len(wheels) != 1:
@@ -57,6 +76,16 @@ def _check_wheel_contents(wheel: Path) -> None:
     if missing:
         raise RuntimeError(
             "Wheel is missing required runtime files: " + ", ".join(missing)
+        )
+    generated = sorted(
+        name
+        for name in names
+        if "__pycache__" in PurePosixPath(name).parts
+        or name.endswith((".pyc", ".pyo"))
+    )
+    if generated:
+        raise RuntimeError(
+            "Wheel contains generated Python artifacts: " + ", ".join(generated[:5])
         )
 
 

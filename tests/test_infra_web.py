@@ -155,6 +155,56 @@ class TestInfraWebForwarding(unittest.TestCase):
         self.assertEqual(result, 0)
         apply_forwards.assert_not_called()
 
+    def test_doctor_accepts_authenticated_forward_challenge(self) -> None:
+        route = {
+            "listen": 8444,
+            "name": "protected",
+            "owner": "agent",
+            "profile": "general",
+            "target_host": "127.0.0.1",
+            "target_port": 3000,
+        }
+        account = SimpleNamespace(pw_name="agent")
+        with tempfile.TemporaryDirectory() as games_root:
+            with (
+                patch.object(infra_web, "_game_account", return_value=account),
+                patch.object(infra_web, "_user_root", return_value=games_root),
+                patch.object(infra_web, "_load_policy", return_value=_policy()),
+                patch.object(infra_web, "_load_forwards", return_value=[route]),
+                patch.object(
+                    infra_web,
+                    "_https_headers",
+                    return_value=(401, {"www-authenticate": 'Basic realm="Protected"'}),
+                ),
+                patch("builtins.print"),
+            ):
+                result = infra_web.main(["doctor", "protected", "--json"])
+
+        self.assertEqual(result, 0)
+
+    def test_doctor_rejects_unauthorized_forward_without_challenge(self) -> None:
+        route = {
+            "listen": 8444,
+            "name": "broken",
+            "owner": "agent",
+            "profile": "general",
+            "target_host": "127.0.0.1",
+            "target_port": 3000,
+        }
+        account = SimpleNamespace(pw_name="agent")
+        with tempfile.TemporaryDirectory() as games_root:
+            with (
+                patch.object(infra_web, "_game_account", return_value=account),
+                patch.object(infra_web, "_user_root", return_value=games_root),
+                patch.object(infra_web, "_load_policy", return_value=_policy()),
+                patch.object(infra_web, "_load_forwards", return_value=[route]),
+                patch.object(infra_web, "_https_headers", return_value=(401, {})),
+                patch("builtins.print"),
+            ):
+                result = infra_web.main(["doctor", "broken", "--json"])
+
+        self.assertEqual(result, 1)
+
 
 class TestInfraWebPreviews(unittest.TestCase):
     def test_automatic_vite_command_is_loopback_only_and_strict(self) -> None:

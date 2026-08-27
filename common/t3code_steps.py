@@ -626,6 +626,11 @@ def _install_t3_service(
             raise RuntimeError("Could not disable the legacy T3 Code service")
         os.remove(LEGACY_T3_SERVICE_FILE)
         run(["systemctl", "daemon-reload"])
+        run(
+            ["systemctl", "reset-failed", f"{LEGACY_T3_SERVICE_NAME}.service"],
+            check=False,
+            capture_output=True,
+        )
     _remove_legacy_shell_path(home, uid, gid)
     legacy_wrapper = os.path.join(home, ".local", "bin", "infra-tools-t3code-web")
     if os.path.isfile(legacy_wrapper) and not os.path.islink(legacy_wrapper):

@@ -51,6 +51,7 @@ test-verbose:
 compile:
 	@echo "Checking Python compilation..."
 	@find . -name "*.py" -not -path "./.git/*" -not -path "*/__pycache__/*" \
+		-not -path "./build/*" -not -path "./dist/*" -not -path "./.venv/*" \
 		-not -path "*.egg-info/*" -print0 | xargs -0 python3 -m py_compile
 	@echo "All Python files compile successfully"
 

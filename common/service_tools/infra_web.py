@@ -829,6 +829,17 @@ def _https_headers(url: str) -> tuple[int, dict[str, str]]:
         raise RuntimeError(f"HTTPS request failed for {url}: {exc}") from exc
 
 
+def _forward_https_status_is_healthy(
+    status: int,
+    headers: dict[str, str],
+) -> bool:
+    """Accept a deliberate HTTP authentication challenge from a live forward."""
+
+    return status < 400 or (
+        status == 401 and bool(headers.get("www-authenticate", "").strip())
+    )
+
+
 def _validate_health_path(value: str) -> str:
     if (
         not value.startswith("/")
@@ -950,7 +961,7 @@ def _doctor(name: str, as_json: bool) -> int:
 
     status, headers = _https_headers(url)
     errors: list[str] = []
-    if status >= 400:
+    if not _forward_https_status_is_healthy(status, headers):
         errors.append(f"HTTPS endpoint returned {status}")
     if profile == "godot":
         if headers.get("cross-origin-opener-policy") != "same-origin":

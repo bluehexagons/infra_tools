@@ -136,7 +136,10 @@ infra-web ca
 ```
 
 Do not disable TLS verification. `site doctor` and the general `doctor`
-command verify the same trusted HTTPS endpoints that browsers should use.
+command verify the same trusted HTTPS endpoints that browsers should use. For
+an authenticated forward, a `401` response with a `WWW-Authenticate` challenge
+confirms that the protected endpoint is reachable; other error responses still
+fail the check.
 
 ## Security and state
 

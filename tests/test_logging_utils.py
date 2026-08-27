@@ -15,6 +15,7 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from lib.logging_utils import (
+    get_service_logger,
     get_standard_formatter,
     get_rotating_logger,
     log_event,
@@ -88,6 +89,21 @@ class TestGetRotatingLogger(unittest.TestCase):
         self.assertIsInstance(logger, logging.Logger)
         self.assertGreater(len(logger.handlers), 0)
         self.assertFalse(os.path.exists(log_file))
+
+
+class TestGetServiceLogger(unittest.TestCase):
+    def test_test_mode_does_not_configure_syslog(self):
+        with (
+            patch.dict(os.environ, {"INFRA_TOOLS_TEST": "1"}),
+            patch("lib.logging_utils.SysLogHandler") as syslog_handler,
+        ):
+            get_service_logger(
+                "test_service_no_syslog",
+                use_syslog=True,
+                console_output=False,
+            )
+
+        syslog_handler.assert_not_called()
 
 
 class TestLogMessage(unittest.TestCase):

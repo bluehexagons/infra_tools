@@ -11,7 +11,7 @@ Key Features:
 - Centralized log directory (/var/log/infra_tools/)
 - Automatic fallback to stderr if file logging fails
 - Service-specific loggers with consistent configuration
-- Test mode: Set INFRA_TOOLS_TEST=1 to disable console output
+- Test mode: Set INFRA_TOOLS_TEST=1 to disable console and syslog output
 """
 
 from __future__ import annotations
@@ -237,7 +237,7 @@ def get_service_logger(
             console_handler.setFormatter(console_formatter)
             logger.addHandler(console_handler)
     
-    if use_syslog:
+    if use_syslog and not _test_mode_enabled():
         try:
             syslog_handler = SysLogHandler(address='/dev/log')
             syslog_handler.setLevel(level)

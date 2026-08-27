@@ -296,6 +296,10 @@ class T3CodeWebTest(unittest.TestCase):
                 ["systemctl", "disable", "infra-tools-t3code.service"],
                 commands,
             )
+            self.assertIn(
+                ["systemctl", "reset-failed", "infra-tools-t3code.service"],
+                commands,
+            )
 
     def test_legacy_service_is_restored_when_readiness_does_not_stabilize(self) -> None:
         with tempfile.TemporaryDirectory() as home:
