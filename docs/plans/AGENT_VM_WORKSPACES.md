@@ -27,7 +27,7 @@ Earlier development versions of the agent-host path combined several concerns:
 
 That model is workable when the controller is also the user's development
 machine, but it is a poor fit for a control system that only manages VMs. The
-The `v2.0.0` release instead lets the controller select explicit target tools,
+`v2.0.0` release instead lets the controller select explicit target tools,
 operate without those tools installed locally, provide public repositories
 without credentials, and select per-VM credentials without putting secret
 values in a saved command.
@@ -395,6 +395,19 @@ explicitly deferred as stated above.
 
 Authenticated providers other than GitHub should be a later adapter project;
 they must not change the host-neutral public repository contract.
+
+### Post-v2 task isolation and support evidence — complete
+
+- Added `agent workspace create/list/status/remove` for dedicated `agent/*`
+  task branches below a private managed worktree root.
+- Made cleanup refuse the primary checkout, unmanaged locations, dirty or
+  untracked files, non-agent branches, and work not merged into the primary
+  checkout's current commit. No force option is provided.
+- Added a redacted support-bundle command that composes stable doctor results
+  and aggregate log metadata without paths, identities, repository state, log
+  contents, session contents, or credentials.
+- Added self-contained workspace, deployment-smoke, and VM-triage skills to
+  the managed T3 Code skill set.
 
 ## Security requirements
 

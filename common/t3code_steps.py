@@ -59,7 +59,10 @@ T3_AGENT_SKILLS_ROOT = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "agent_skills"
 )
 T3_AGENT_SKILL_NAMES = (
+    "infra-tools-agent-workspace",
+    "infra-tools-deploy-smoke",
     "infra-tools-t3code",
+    "infra-tools-vm-triage",
     "infra-tools-web-gateway",
 )
 DEVICE_PAIRING_NGINX_SITE = "/etc/nginx/sites-available/infra-tools-device-pairing"
@@ -815,7 +818,7 @@ def _write_text_if_changed(path: str, content: str, mode: int) -> bool:
 
 
 def _ensure_t3_agent_skill(username: str, agent_tools: Sequence[str]) -> bool:
-    """Install managed T3 and web-gateway skills for compatible agents."""
+    """Install managed agent-VM workflow skills for compatible agents."""
 
     if not {"codex", "opencode"}.intersection(agent_tools):
         return False

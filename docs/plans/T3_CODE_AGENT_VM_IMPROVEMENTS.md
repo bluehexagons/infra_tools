@@ -1,6 +1,6 @@
 # T3 Code Agent VM Improvement Plan
 
-Status: active implementation; phases 1 and 2 are code-complete as of
+Status: active implementation; phases 1 through 3 are code-complete as of
 2026-08-27, with disposable-VM deployment validation still pending.
 
 ## Objective
@@ -70,6 +70,12 @@ rollback state.
 - Add dry-run and real-VM coverage for every cleanup boundary.
 
 ### Phase 3: task isolation and operator evidence
+
+Implemented with a local managed-worktree lifecycle, redacted JSON support
+snapshot, and focused workspace, deployment-smoke, and VM-triage skills. Port
+allocation stays with the existing `infra-web preview start` and `forward add
+--listen auto` paths so the VM has one source of truth for loopback processes,
+HTTPS listeners, UFW policy, and cleanup.
 
 - Add managed per-task Git worktree creation, listing, status, and explicit
   cleanup with safe repository and branch validation.

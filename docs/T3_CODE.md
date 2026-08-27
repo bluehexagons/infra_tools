@@ -40,6 +40,19 @@ infra-tools setup agent_code_vm vm.example agent \
   --browser-automation playwright
 ```
 
+Agent-enabled T3 setups install managed workflow skills for T3 operation,
+isolated Git worktrees, deployment smoke checks, VM triage, and the HTTPS
+gateway. The workspace skill uses the safe local lifecycle command:
+
+```bash
+infra-tools agent workspace create ~/repos/PROJECT TASK --json
+infra-tools agent workspace remove WORKTREE --dry-run --json
+```
+
+The removal path rejects dirty, untracked, or unmerged work and cannot remove
+the primary checkout. For a shareable diagnostic snapshot that omits log and
+credential contents, use `infra-tools agent support-bundle`.
+
 ## Service and update model
 
 infra-tools uses T3 Code's supported per-user background service. Upstream owns
@@ -180,6 +193,7 @@ infra-tools agent doctor --capability t3code --capability host
 gh auth status
 git config --global --get user.name
 git config --global --get user.email
+infra-tools agent support-bundle
 ```
 
 The doctor validates the upstream service-state protocol and selected immutable

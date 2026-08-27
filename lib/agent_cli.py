@@ -62,9 +62,6 @@ _T3_VERSION_RE = re.compile(
     rf"(?:-{_T3_SEMVER_PRERELEASE}(?:\.{_T3_SEMVER_PRERELEASE})*)?"
     r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
 )
-_T3_SKILL_RELATIVE = os.path.join(
-    ".agents", "skills", "infra-tools-t3code", "SKILL.md"
-)
 _T3_DEFAULT_PORT = 3773
 _T3_NATIVE_PACKAGES = ("node-pty", "msgpackr-extract")
 _REMOTE_INFRA_TOOLS_PATH = "/opt/infra_tools/infra_tools.py"
@@ -280,6 +277,57 @@ def add_agent_subparser(subparsers: argparse._SubParsersAction) -> None:
     web_pair.add_argument("agent_web_host", metavar="HOST")
     web_pair.add_argument("agent_web_username", metavar="USER")
     web_pair.add_argument("-k", "--key", dest="ssh_key", help="SSH private key path")
+    workspace = commands.add_parser(
+        "workspace",
+        help="Manage isolated Git worktrees for concurrent agent tasks",
+    )
+    workspace_commands = workspace.add_subparsers(
+        dest="agent_workspace_command",
+        help="Workspace operations",
+    )
+    workspace_create = workspace_commands.add_parser(
+        "create",
+        help="Create an isolated worktree and agent task branch",
+    )
+    workspace_create.add_argument("repository", metavar="REPOSITORY")
+    workspace_create.add_argument("task", metavar="TASK")
+    workspace_create.add_argument("--base", default="HEAD", metavar="REVISION")
+    workspace_create.add_argument("--root", dest="workspace_root", metavar="PATH")
+    workspace_create.add_argument("--json", action="store_true")
+    workspace_list = workspace_commands.add_parser(
+        "list",
+        help="List a repository's registered worktrees",
+    )
+    workspace_list.add_argument("repository", metavar="REPOSITORY")
+    workspace_list.add_argument("--json", action="store_true")
+    workspace_status = workspace_commands.add_parser(
+        "status",
+        help="Show branch and dirty state for one worktree",
+    )
+    workspace_status.add_argument("path", metavar="WORKTREE")
+    workspace_status.add_argument("--json", action="store_true")
+    workspace_remove = workspace_commands.add_parser(
+        "remove",
+        help="Remove a clean task worktree after its branch is merged",
+    )
+    workspace_remove.add_argument("path", metavar="WORKTREE")
+    workspace_remove.add_argument("--root", dest="workspace_root", metavar="PATH")
+    workspace_remove.add_argument("--dry-run", action="store_true")
+    workspace_remove.add_argument("--json", action="store_true")
+    support = commands.add_parser(
+        "support-bundle",
+        help="Collect a redacted local agent-host support snapshot",
+    )
+    support.add_argument(
+        "--output",
+        metavar="PATH",
+        help="Write a new private JSON file below the current user's home",
+    )
+    support.add_argument(
+        "--browser-smoke",
+        action="store_true",
+        help="Also launch the optional Playwright browser smoke test",
+    )
 
 
 def _tool_path(tool: str, home: str) -> Optional[str]:
@@ -774,7 +822,11 @@ def _opencode_browser_registration(home: str) -> bool:
     )
 
 
-def inspect_browser_automation(home: Optional[str] = None) -> JSONDict:
+def inspect_browser_automation(
+    home: Optional[str] = None,
+    *,
+    run_smoke: bool = True,
+) -> JSONDict:
     """Verify local launchers, selected-agent registration, and browser startup."""
     user_home = home or os.path.expanduser("~")
     launchers_installed = all(
@@ -788,8 +840,8 @@ def inspect_browser_automation(home: Optional[str] = None) -> JSONDict:
     if _tool_path("opencode", user_home):
         registrations["opencode"] = _opencode_browser_registration(user_home)
 
-    smoke_test = False
-    if launchers_installed:
+    smoke_test: bool | None = None
+    if launchers_installed and run_smoke:
         environment = os.environ.copy()
         environment["HOME"] = user_home
         try:
@@ -806,17 +858,18 @@ def inspect_browser_automation(home: Optional[str] = None) -> JSONDict:
         except (OSError, subprocess.TimeoutExpired):
             smoke_test = False
 
-    healthy = bool(
+    configured = bool(
         launchers_installed
-        and smoke_test
         and registrations
         and all(bool(value) for value in registrations.values())
     )
+    healthy = configured and smoke_test if run_smoke else None
     return {
         "capability": "browser",
         "installed": launchers_installed,
         "path": _BROWSER_MCP_WRAPPER if launchers_installed else None,
         "registrations": registrations,
+        "configured": configured,
         "smoke_test": smoke_test,
         "healthy": healthy,
     }
@@ -1269,6 +1322,18 @@ def _t3_skill_ready(path: str) -> bool:
         return False
 
 
+def _t3_agent_skills_ready(home: str) -> bool:
+    """Verify every workflow skill selected by the managed T3 setup."""
+    from common.t3code_steps import T3_AGENT_SKILL_NAMES
+
+    return all(
+        _t3_skill_ready(
+            os.path.join(home, ".agents", "skills", skill_name, "SKILL.md")
+        )
+        for skill_name in T3_AGENT_SKILL_NAMES
+    )
+
+
 def inspect_t3code(home: Optional[str] = None, *, fix: bool = False) -> JSONDict:
     """Verify the managed T3 service, Git integration, and user onboarding."""
 
@@ -1295,7 +1360,6 @@ def inspect_t3code(home: Optional[str] = None, *, fix: bool = False) -> JSONDict
         "infra-tools.conf",
     )
     pair_wrapper = os.path.join(user_home, ".local", "bin", "t3code-pair")
-    skill = os.path.join(user_home, _T3_SKILL_RELATIVE)
     environment = _t3_environment(user_home)
     node = _t3_node_binary(drop_in)
     native_runtime = _t3_native_runtime_healthy(node, t3_binary, environment)
@@ -1399,7 +1463,7 @@ def inspect_t3code(home: Optional[str] = None, *, fix: bool = False) -> JSONDict
         and os.access(pair_wrapper, os.X_OK),
         "endpoint": endpoint,
         "git_identity": bool(git_name and git_email),
-        "t3_agent_skill": not skill_required or _t3_skill_ready(skill),
+        "t3_agent_skill": not skill_required or _t3_agent_skills_ready(user_home),
     }
     if gh_path:
         checks["gh_authenticated"] = gh_auth
@@ -1528,6 +1592,16 @@ def _run_remote_agent_lifecycle(
 
 def run_agent_command(args: argparse.Namespace) -> int:
     """Run a local or remote agent-tool command."""
+    if args.agent_command == "workspace":
+        from lib.agent_workspace import run_agent_workspace_command
+
+        return run_agent_workspace_command(args)
+
+    if args.agent_command == "support-bundle":
+        from lib.agent_support import run_agent_support_command
+
+        return run_agent_support_command(args)
+
     if args.agent_command == "web":
         if args.agent_web_command == "pair":
             return run_agent_web_pair(args)
@@ -1611,7 +1685,10 @@ def run_agent_command(args: argparse.Namespace) -> int:
         return 0 if all(result["status"] in ("planned", "updated", "current") for result in results) else 1
 
     if args.agent_command != "doctor":
-        print("Error: agent command required (doctor or update)")
+        print(
+            "Error: agent command required "
+            "(doctor, update, auth, web, workspace, or support-bundle)"
+        )
         return 1
 
     requested_tools = getattr(args, "agent_doctor_tools", None)

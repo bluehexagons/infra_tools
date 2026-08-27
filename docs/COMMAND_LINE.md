@@ -48,6 +48,8 @@ infra-tools agent update [HOST USER] [options]
 infra-tools agent auth set HOST USER --tool TOOL --file PATH
 infra-tools agent auth status HOST USER [--tool TOOL]
 infra-tools agent web pair HOST USER [-k PATH]
+infra-tools agent workspace <create|list|status|remove> ...
+infra-tools agent support-bundle [--output PATH] [--browser-smoke]
 infra-tools gogs health HOST [--json] [--min-free-bytes N] [--min-free-inodes N]
 infra-tools cicd connect BUILD APP [options]
 infra-tools cicd status BUILD [--json]
@@ -489,8 +491,9 @@ Credential seeding and config copy are intentionally tool-scoped and transient:
 - `--git-auth`/`--git-auth-file` seed only a missing selected GitHub host entry, preserve target-managed credentials on rerun, and run `gh auth setup-git`.
 - `--agent-auth`/`--agent-auth-file` seed missing Codex, Claude Code, or OpenCode credentials without requiring those tools on the controller; active `gh` requires controller `gh` only when its token is keyring-backed.
 - `--agent-config active` copies known non-secret configuration from the active controller user.
-- T3 Code receives only managed launchers and the non-secret T3 workflow skill;
-  infra-tools does not copy T3 Code credentials.
+- T3 Code receives only managed launchers and non-secret T3, workspace,
+  deployment-smoke, VM-triage, and HTTPS-gateway skills; infra-tools does not
+  copy T3 Code credentials.
 
 The root-only upload payload is removed after selected config is applied and
 missing credentials are seeded. Repositories are never cloned or cached on the
@@ -515,6 +518,10 @@ infra-tools agent update --dry-run
 infra-tools agent update --tool codex --tool claude
 infra-tools agent update --json
 infra-tools agent update 10.0.0.10 agent --tool codex --dry-run
+infra-tools agent workspace create ~/repos/project api-check --base HEAD --json
+infra-tools agent workspace list ~/repos/project --json
+infra-tools agent workspace remove WORKTREE --dry-run --json
+infra-tools agent support-bundle --output ~/agent-support.json
 ```
 
 The default doctor check covers GitHub CLI, Codex CLI, Claude Code, and OpenCode.
@@ -541,6 +548,25 @@ Supplying `HOST USER` runs the same doctor through managed SSH from the control
 system and preserves its text or JSON output and exit status. The target must
 have been configured by infra-tools so `/opt/infra_tools` is present. Add
 `--key PATH` when the VM uses a non-default SSH identity.
+
+`agent workspace` provides local task isolation for concurrent agents. `create`
+places a dedicated `agent/TASK` branch below
+`~/.local/share/infra_tools/worktrees`, leaving the primary checkout's files
+untouched. `list` and `status` report branch, commit, and dirty state without
+printing changed file names. `remove` accepts only a registered worktree below
+that managed root, refuses dirty or untracked work, requires an `agent/*`
+branch merged into the primary checkout's current `HEAD`, and never has a
+force mode. Use its `--dry-run` before cleanup.
+
+`agent support-bundle` composes a stable local JSON snapshot from the agent,
+T3 Code, browser, host, and maintenance diagnostics. It includes aggregate T3
+log sizes and counts, not log text. Tool paths, home paths, Git identity,
+repository contents and status names, prompts, sessions, and credential
+contents are omitted. Without `--output` it prints JSON; an output path must be
+a new file below the current user's home and is written with mode `0600`.
+Browser configuration is inventoried without starting Chromium; add
+`--browser-smoke` when exercising an explicitly installed Playwright fallback
+is relevant to the report.
 
 `agent update` deliberately updates the three user-installed terminal agents;
 it is never run by an automatic host timer. The command uses each vendor's
