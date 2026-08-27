@@ -75,6 +75,22 @@ class TestUserCacheHelpers(unittest.TestCase):
                 user_cache_maintenance.is_safe_managed_path(context, home, "tool")
             )
 
+    def test_managed_path_rejects_an_intermediate_symlink(self):
+        with tempfile.TemporaryDirectory() as home:
+            context = self._context(home)
+            real_cache = os.path.join(home, "real-cache")
+            linked_cache = os.path.join(home, ".cache")
+            os.mkdir(real_cache)
+            os.symlink(real_cache, linked_cache)
+
+            self.assertFalse(
+                user_cache_maintenance.is_safe_managed_path(
+                    context,
+                    os.path.join(linked_cache, "tool"),
+                    "tool",
+                )
+            )
+
     @patch("common.service_tools.user_cache_maintenance.subprocess.run")
     def test_tool_command_loads_home_scoped_nvm(self, mock_run):
         mock_run.return_value = subprocess.CompletedProcess([], 0, "", "")
@@ -128,6 +144,33 @@ class TestUserCacheHelpers(unittest.TestCase):
             )
             self.assertFalse(
                 user_cache_maintenance.tool_is_active(("opencode",), proc_root=proc_root)
+            )
+
+            with open(os.path.join(process_dir, "comm"), "w", encoding="utf-8") as handle:
+                handle.write("npm exec t3\n")
+            self.assertTrue(
+                user_cache_maintenance.tool_is_active(("npm",), proc_root=proc_root)
+            )
+
+    def test_process_path_detection_checks_cwd_and_individual_arguments(self):
+        with tempfile.TemporaryDirectory() as proc_root, tempfile.TemporaryDirectory() as home:
+            npx_path = os.path.join(home, ".npm", "_npx")
+            process_dir = os.path.join(proc_root, "123")
+            os.mkdir(process_dir)
+            os.symlink(npx_path, os.path.join(process_dir, "cwd"))
+            with open(os.path.join(process_dir, "cmdline"), "wb") as handle:
+                handle.write(b"node\0")
+
+            self.assertTrue(
+                user_cache_maintenance.process_uses_path(npx_path, proc_root=proc_root)
+            )
+
+            os.unlink(os.path.join(process_dir, "cwd"))
+            os.symlink(home, os.path.join(process_dir, "cwd"))
+            with open(os.path.join(process_dir, "cmdline"), "wb") as handle:
+                handle.write(os.fsencode(f"{npx_path}/package/bin.js") + b"\0--serve\0")
+            self.assertTrue(
+                user_cache_maintenance.process_uses_path(npx_path, proc_root=proc_root)
             )
 
     @patch("common.service_tools.user_cache_maintenance.tool_is_active", return_value=False)
@@ -230,18 +273,72 @@ class TestUserCacheHelpers(unittest.TestCase):
             self.assertTrue(os.path.exists(fresh_file))
             self.assertTrue(os.path.islink(linked_file))
 
+    def test_t3_log_cleanup_prunes_only_numbered_rotations(self):
+        with tempfile.TemporaryDirectory() as home:
+            context = self._context(home)
+            log_dir = os.path.join(home, ".t3", "userdata", "logs", "provider")
+            os.makedirs(log_dir)
+            current = os.path.join(log_dir, "events.session.log")
+            old_rotation = os.path.join(log_dir, "events.session.log.1")
+            newer_rotation = os.path.join(log_dir, "events.session.log.2")
+            unrelated = os.path.join(log_dir, "notes.txt.1")
+            for path in (current, old_rotation, newer_rotation, unrelated):
+                with open(path, "w", encoding="utf-8") as handle:
+                    handle.write("12345")
+            old_time = time.time() - (20 * 24 * 60 * 60)
+            os.utime(old_rotation, (old_time, old_time))
+
+            failures = user_cache_maintenance.cleanup_t3_rotated_logs(
+                context,
+                dry_run=False,
+                max_bytes=5,
+                max_age_days=14,
+            )
+
+            self.assertEqual(failures, [])
+            self.assertTrue(os.path.exists(current))
+            self.assertFalse(os.path.exists(old_rotation))
+            self.assertTrue(os.path.exists(newer_rotation))
+            self.assertTrue(os.path.exists(unrelated))
+
+    def test_t3_log_cleanup_preserves_links_and_honors_dry_run(self):
+        with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as outside:
+            context = self._context(home)
+            log_root = os.path.join(home, ".t3", "userdata", "logs")
+            os.makedirs(log_root)
+            rotation = os.path.join(log_root, "server.trace.ndjson.1")
+            with open(rotation, "w", encoding="utf-8") as handle:
+                handle.write("12345")
+            linked_rotation = os.path.join(log_root, "linked.log.1")
+            os.symlink(os.path.join(outside, "target"), linked_rotation)
+
+            failures = user_cache_maintenance.cleanup_t3_rotated_logs(
+                context,
+                dry_run=True,
+                max_bytes=0,
+                max_age_days=14,
+            )
+
+            self.assertEqual(failures, [])
+            self.assertTrue(os.path.exists(rotation))
+            self.assertTrue(os.path.islink(linked_rotation))
+
 
 class TestUserCachePolicies(unittest.TestCase):
     def setUp(self):
         self.context = user_cache_maintenance.UserContext("agent", "/home/agent", 1000)
 
     @patch("common.service_tools.user_cache_maintenance.run_cleanup_command", return_value=None)
+    @patch("common.service_tools.user_cache_maintenance.process_uses_path", return_value=False)
+    @patch("common.service_tools.user_cache_maintenance.cleanup_managed_directory", return_value=[])
     @patch("common.service_tools.user_cache_maintenance.inventory_cache")
     @patch("common.service_tools.user_cache_maintenance.query_cache_path")
     def test_npm_verifies_and_cleans_only_when_oversized(
         self,
         mock_query,
         mock_inventory,
+        mock_directory_cleanup,
+        _path_active,
         mock_cleanup,
     ):
         mock_query.return_value = ("/home/agent/.npm", "npm", None)
@@ -254,6 +351,15 @@ class TestUserCachePolicies(unittest.TestCase):
         failures = user_cache_maintenance.cleanup_npm_cache(self.context, dry_run=False)
 
         self.assertEqual(failures, [])
+        mock_directory_cleanup.assert_called_once_with(
+            self.context,
+            label="npm npx workspaces",
+            path="/home/agent/.npm/_npx",
+            max_bytes=user_cache_maintenance.NPM_NPX_CACHE_MAX_BYTES,
+            max_age_days=user_cache_maintenance.STALE_NPX_CACHE_MAX_AGE_DAYS,
+            process_names=("npm", "npx"),
+            dry_run=False,
+        )
         self.assertEqual(mock_cleanup.call_count, 2)
         self.assertEqual(mock_cleanup.call_args_list[0].args[1], ["npm", "cache", "verify"])
         self.assertEqual(
@@ -262,12 +368,16 @@ class TestUserCachePolicies(unittest.TestCase):
         )
 
     @patch("common.service_tools.user_cache_maintenance.run_cleanup_command", return_value=None)
+    @patch("common.service_tools.user_cache_maintenance.process_uses_path", return_value=False)
+    @patch("common.service_tools.user_cache_maintenance.cleanup_managed_directory", return_value=[])
     @patch("common.service_tools.user_cache_maintenance.inventory_cache")
     @patch("common.service_tools.user_cache_maintenance.query_cache_path")
     def test_npm_remeasures_after_verify_before_forced_cleanup(
         self,
         mock_query,
         mock_inventory,
+        _directory_cleanup,
+        _path_active,
         mock_cleanup,
     ):
         mock_query.return_value = ("/home/agent/.npm", "npm", None)

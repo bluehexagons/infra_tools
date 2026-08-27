@@ -135,13 +135,18 @@ environment without loading interactive login profiles, and apply these
 bounded policies:
 
 - npm runs its supported verification and garbage collection, then uses a
-  forced clean only if the cache still exceeds 2 GiB;
+  forced clean only if the cache still exceeds 2 GiB. Its separately
+  rebuildable `_npx` workspaces are removed when they exceed 1 GiB or have had
+  no activity for 30 days, and only while npm and npx are idle;
 - pip purges only above 2 GiB, uv runs its supported prune operation, and Go
   cleans build and module caches only above 2 GiB and 5 GiB respectively; and
 - OpenCode and Codex cleanup is restricted to rebuildable cache directories.
   The OpenCode cache limit is 2 GiB and the Codex cache limit is 1 GiB; either
   cache may also be removed after 90 days without activity. Codex temporary
   entries older than seven days are removed individually.
+- T3 Code numbered provider and trace log rotations are retained up to 256 MiB
+  and 14 days. Current logs, terminal logs, non-numbered files, and symbolic
+  links are never selected by this policy.
 
 Agent cache cleanup is deferred while the matching tool is running. Symbolic
 links and paths outside the configured user's home are never followed or

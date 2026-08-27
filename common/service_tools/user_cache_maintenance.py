@@ -6,8 +6,10 @@ from __future__ import annotations
 import argparse
 import os
 import pwd
+import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -23,10 +25,14 @@ from lib.maintenance_defaults import (
     GO_BUILD_CACHE_MAX_BYTES,
     GO_MODULE_CACHE_MAX_BYTES,
     NPM_CACHE_MAX_BYTES,
+    NPM_NPX_CACHE_MAX_BYTES,
     OPENCODE_CACHE_MAX_BYTES,
     PIP_CACHE_MAX_BYTES,
+    STALE_NPX_CACHE_MAX_AGE_DAYS,
     STALE_USER_TOOL_CACHE_MAX_AGE_DAYS,
     STALE_USER_TOOL_TMP_MAX_AGE_DAYS,
+    T3_ROTATED_LOG_MAX_AGE_DAYS,
+    T3_ROTATED_LOG_MAX_BYTES,
 )
 from lib.types import BYTES_PER_MB
 from lib.validation import validate_filesystem_path
@@ -51,6 +57,20 @@ class CacheUsage:
 
     size_bytes: int
     newest_mtime: float | None
+
+
+@dataclass(frozen=True)
+class RotatedLog:
+    """One regular rotated log selected from the T3 log tree."""
+
+    path: str
+    size_bytes: int
+    mtime: float
+    device: int
+    inode: int
+
+
+_T3_ROTATED_LOG_PATTERN = re.compile(r".+\.(?:log|ndjson)\.[1-9][0-9]*$")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -232,14 +252,23 @@ def is_safe_managed_path(context: UserContext, path: str, label: str) -> bool:
         validate_filesystem_path(path, must_exist=False)
         if not os.path.isabs(path):
             raise ValueError("path is not absolute")
+        absolute_home = os.path.abspath(context.home)
+        absolute_path = os.path.abspath(path)
+        if absolute_path == absolute_home:
+            raise ValueError("path is the user home")
+        if os.path.commonpath((absolute_home, absolute_path)) != absolute_home:
+            raise ValueError("path is outside the user home")
         resolved_home = os.path.realpath(context.home)
         resolved_path = os.path.realpath(path)
         if resolved_path == resolved_home:
             raise ValueError("path resolves to the user home")
         if os.path.commonpath((resolved_home, resolved_path)) != resolved_home:
             raise ValueError("path resolves outside the user home")
-        if os.path.islink(path):
-            raise ValueError("path is a symbolic link")
+        current_path = absolute_home
+        for component in os.path.relpath(absolute_path, absolute_home).split(os.path.sep):
+            current_path = os.path.join(current_path, component)
+            if os.path.lexists(current_path) and os.path.islink(current_path):
+                raise ValueError(f"path contains a symbolic link: {current_path}")
     except (OSError, ValueError) as exc:
         log_event(
             logger,
@@ -334,10 +363,47 @@ def tool_is_active(process_names: tuple[str, ...], proc_root: str = "/proc") -> 
             except OSError:
                 continue
             if any(
-                process_name == name or process_name.startswith(f"{name}-")
+                process_name == name
+                or process_name.startswith(f"{name}-")
+                or process_name.startswith(f"{name} ")
                 for name in process_names
             ):
                 return True
+    return False
+
+
+def process_uses_path(path: str, proc_root: str = "/proc") -> bool:
+    """Detect current-user processes whose cwd or argument vector names a path."""
+    current_uid = os.getuid()
+    absolute_path = os.path.abspath(path)
+    encoded_path = os.fsencode(absolute_path)
+    try:
+        process_entries = os.scandir(proc_root)
+    except OSError:
+        return True
+
+    with process_entries:
+        for entry in process_entries:
+            if not entry.name.isdigit():
+                continue
+            try:
+                if entry.stat(follow_symlinks=False).st_uid != current_uid:
+                    continue
+                cwd = os.readlink(os.path.join(entry.path, "cwd"))
+                if os.path.commonpath((os.path.abspath(cwd), absolute_path)) == absolute_path:
+                    return True
+            except (OSError, ValueError):
+                pass
+            try:
+                with open(os.path.join(entry.path, "cmdline"), "rb") as handle:
+                    arguments = handle.read()
+                if any(
+                    argument == encoded_path or argument.startswith(encoded_path + os.sep.encode())
+                    for argument in arguments.split(b"\0")
+                ):
+                    return True
+            except OSError:
+                continue
     return False
 
 
@@ -497,8 +563,27 @@ def cleanup_npm_cache(context: UserContext, *, dry_run: bool) -> list[str]:
     if path is None or executable is None:
         return []
 
+    npx_path = os.path.join(path, "_npx")
+    if process_uses_path(npx_path):
+        log_event(
+            logger,
+            "npm npx workspace cleanup deferred while path is in use",
+            path=npx_path,
+        )
+        failures: list[str] = []
+    else:
+        failures = cleanup_managed_directory(
+            context,
+            label="npm npx workspaces",
+            path=npx_path,
+            max_bytes=NPM_NPX_CACHE_MAX_BYTES,
+            max_age_days=STALE_NPX_CACHE_MAX_AGE_DAYS,
+            process_names=("npm", "npx"),
+            dry_run=dry_run,
+        )
     usage, inventory_failure = inventory_cache(context, "npm", path)
-    failures = [inventory_failure] if inventory_failure else []
+    if inventory_failure:
+        failures.append(inventory_failure)
     if usage is None:
         return failures
     verify_failure = run_cleanup_command(
@@ -528,6 +613,150 @@ def cleanup_npm_cache(context: UserContext, *, dry_run: bool) -> list[str]:
         )
         if clean_failure:
             failures.append(clean_failure)
+    return failures
+
+
+def _t3_rotated_logs(
+    context: UserContext,
+    log_root: str,
+) -> tuple[list[RotatedLog], str | None]:
+    """Inventory regular T3 rotated logs without traversing symbolic links."""
+    if not is_safe_managed_path(context, log_root, "T3 rotated logs"):
+        return [], None
+    if not os.path.exists(log_root):
+        return [], None
+
+    logs: list[RotatedLog] = []
+    try:
+        for current_root, directories, filenames in os.walk(
+            log_root,
+            topdown=True,
+            followlinks=False,
+        ):
+            directories[:] = [
+                name
+                for name in directories
+                if not os.path.islink(os.path.join(current_root, name))
+            ]
+            for filename in filenames:
+                if not _T3_ROTATED_LOG_PATTERN.fullmatch(filename):
+                    continue
+                path = os.path.join(current_root, filename)
+                stat_result = os.lstat(path)
+                if not stat.S_ISREG(stat_result.st_mode):
+                    continue
+                logs.append(
+                    RotatedLog(
+                        path=path,
+                        size_bytes=stat_result.st_size,
+                        mtime=stat_result.st_mtime,
+                        device=stat_result.st_dev,
+                        inode=stat_result.st_ino,
+                    )
+                )
+    except OSError as exc:
+        details = str(exc)
+        log_event(
+            logger,
+            "Could not inspect T3 rotated logs",
+            level=WARNING,
+            path=log_root,
+            error=details,
+        )
+        return [], f"T3 rotated log inventory: {details}"
+    return logs, None
+
+
+def cleanup_t3_rotated_logs(
+    context: UserContext,
+    *,
+    dry_run: bool,
+    max_bytes: int = T3_ROTATED_LOG_MAX_BYTES,
+    max_age_days: int = T3_ROTATED_LOG_MAX_AGE_DAYS,
+) -> list[str]:
+    """Prune only numbered T3 log rotations by age and total retained size."""
+    log_root = os.path.join(context.home, ".t3", "userdata", "logs")
+    logs, failure = _t3_rotated_logs(context, log_root)
+    if failure:
+        return [failure]
+    if not logs:
+        return []
+
+    cutoff = time.time() - (max_age_days * 24 * 60 * 60)
+    selected_paths = {entry.path for entry in logs if entry.mtime < cutoff}
+    retained_bytes = sum(
+        entry.size_bytes for entry in logs if entry.path not in selected_paths
+    )
+    if retained_bytes > max_bytes:
+        for entry in sorted(logs, key=lambda candidate: candidate.mtime):
+            if entry.path in selected_paths:
+                continue
+            selected_paths.add(entry.path)
+            retained_bytes -= entry.size_bytes
+            if retained_bytes <= max_bytes:
+                break
+
+    selected = [entry for entry in logs if entry.path in selected_paths]
+    log_event(
+        logger,
+        "T3 rotated log inventory",
+        path=log_root,
+        rotated_count=len(logs),
+        rotated_size_mb=round(sum(entry.size_bytes for entry in logs) / BYTES_PER_MB, 1),
+        selected_count=len(selected),
+        selected_size_mb=round(
+            sum(entry.size_bytes for entry in selected) / BYTES_PER_MB,
+            1,
+        ),
+    )
+    if dry_run:
+        if selected:
+            log_event(
+                logger,
+                "Would prune T3 rotated logs",
+                path=log_root,
+                removed_count=len(selected),
+                removed_size_mb=round(
+                    sum(entry.size_bytes for entry in selected) / BYTES_PER_MB,
+                    1,
+                ),
+            )
+        return []
+
+    failures: list[str] = []
+    removed_count = 0
+    removed_bytes = 0
+    for entry in selected:
+        try:
+            current_stat = os.lstat(entry.path)
+            if (
+                not stat.S_ISREG(current_stat.st_mode)
+                or current_stat.st_dev != entry.device
+                or current_stat.st_ino != entry.inode
+            ):
+                raise OSError("rotated log changed during cleanup")
+            os.unlink(entry.path)
+            removed_count += 1
+            removed_bytes += entry.size_bytes
+        except OSError as exc:
+            details = str(exc)
+            log_event(
+                logger,
+                "Failed to prune T3 rotated log",
+                level=WARNING,
+                path=entry.path,
+                error=details,
+            )
+            failures.append(f"{entry.path}: {details}")
+
+    if removed_count:
+        log_event(
+            logger,
+            "Pruned T3 rotated logs",
+            path=log_root,
+            removed_count=removed_count,
+            removed_size_mb=round(removed_bytes / BYTES_PER_MB, 1),
+        )
     return failures
 
 
@@ -684,6 +913,7 @@ def run_user_cache_maintenance(context: UserContext, *, dry_run: bool) -> list[s
         )
     )
     failures.extend(cleanup_agent_caches(context, dry_run=dry_run))
+    failures.extend(cleanup_t3_rotated_logs(context, dry_run=dry_run))
     return failures
 
 

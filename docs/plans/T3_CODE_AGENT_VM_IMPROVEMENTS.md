@@ -1,6 +1,7 @@
 # T3 Code Agent VM Improvement Plan
 
-Status: active implementation, started 2026-08-27.
+Status: active implementation; phases 1 and 2 are code-complete as of
+2026-08-27, with disposable-VM deployment validation still pending.
 
 ## Objective
 
@@ -37,6 +38,8 @@ These observations lead to four rules:
 
 ### Phase 1: profile and diagnostic baseline
 
+Completed in `6c050dc`.
+
 - Remove Playwright from the implicit `agent_code_vm` defaults while retaining
   the existing explicit browser-automation flag.
 - Add a stable `agent doctor --capability host` text and JSON result covering
@@ -49,11 +52,19 @@ These observations lead to four rules:
 
 ### Phase 2: bounded storage lifecycle
 
+Implemented with conservative ownership boundaries. npm `_npx` workspaces and
+numbered T3 log rotations are now bounded by the user maintenance job.
+Playwright already records every consuming installation in its shared `.links`
+registry and performs reference-aware garbage collection; infra-tools will not
+add a competing directory-deletion mechanism that could remove another
+client's browser. Codex standalone releases remain diagnostic-only vendor
+rollback state.
+
 - Bound stale npm `npx` workspaces independently of npm's content cache.
 - Prune only rotated T3 provider and trace logs, retaining current log files
   and recent diagnostic history.
-- Record which Playwright browser directories infra-tools installed and remove
-  only obsolete directories from that managed set after successful upgrades.
+- Preserve Playwright's reference-aware shared-browser lifecycle and verify its
+  garbage collection during pinned version upgrades.
 - Report extra Codex standalone releases without deleting vendor-managed
   rollback state automatically.
 - Add dry-run and real-VM coverage for every cleanup boundary.
