@@ -379,15 +379,22 @@ class TestOperationQueue(unittest.TestCase):
         """dequeue() should return None after shutdown."""
         q = OperationQueue(max_size=10)
         result = [None]
+        waiting = threading.Event()
+        original_wait = q._condition.wait
 
         def dequeue_thread():
             result[0] = q.dequeue()  # type: ignore[call-overload]  # dequeue returns Operation | None
 
-        t = threading.Thread(target=dequeue_thread, daemon=True)
-        t.start()
-        time.sleep(0.1)
-        q.shutdown()
-        t.join(timeout=3.0)
+        def record_wait(*args, **kwargs):
+            waiting.set()
+            return original_wait(*args, **kwargs)
+
+        with patch.object(q._condition, "wait", side_effect=record_wait):
+            t = threading.Thread(target=dequeue_thread, daemon=True)
+            t.start()
+            self.assertTrue(waiting.wait(timeout=1.0))
+            q.shutdown()
+            t.join(timeout=3.0)
         self.assertFalse(t.is_alive())
         self.assertIsNone(result[0])
 
@@ -533,29 +540,32 @@ class TestConcurrentOperationManager(unittest.TestCase):
     def test_wait_until_idle_timeout(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             mgr = self._make_manager(tmpdir)
-            # Enqueue a long-running operation
             started = threading.Event()
+            release = threading.Event()
             logger = _make_logger(tmpdir)
 
             def slow_callback():
                 started.set()
-                time.sleep(10)
+                release.wait()
 
-            mgr.submit_operation(
-                operation_id='slow-1',
-                operation_type=OperationType.SYNC,
-                priority=OperationPriority.NORMAL,
-                resource_req=ResourceRequirement(memory_mb=64, cpu_percent=10.0),
-                paths=[os.path.join(tmpdir, 'slow-path')],
-                callback=slow_callback,
-                logger=logger,
-            )
-            # Wait for the operation to actually start executing
-            started.wait(timeout=5.0)
-            # Should time out because operation is still running
-            result = mgr.wait_until_idle(timeout=0.5)
-            self.assertFalse(result)
-            mgr.shutdown()
+            try:
+                mgr.submit_operation(
+                    operation_id='slow-1',
+                    operation_type=OperationType.SYNC,
+                    priority=OperationPriority.NORMAL,
+                    resource_req=ResourceRequirement(memory_mb=64, cpu_percent=10.0),
+                    paths=[os.path.join(tmpdir, 'slow-path')],
+                    callback=slow_callback,
+                    logger=logger,
+                )
+                self.assertTrue(started.wait(timeout=1.0))
+                # Should time out because operation is still running.
+                self.assertFalse(mgr.wait_until_idle(timeout=0.1))
+                release.set()
+                self.assertTrue(mgr.wait_until_idle(timeout=1.0))
+            finally:
+                release.set()
+                mgr.shutdown()
 
     def test_memory_throttle_blocks_operation(self):
         """Operations should be re-queued under memory pressure."""
@@ -565,22 +575,33 @@ class TestConcurrentOperationManager(unittest.TestCase):
             mgr.memory_monitor.get_memory_pressure_level.return_value = 'critical'  # type: ignore[attr-defined]  # MagicMock attribute
 
             executed = threading.Event()
+            processed = threading.Event()
+            original_can_run = mgr._can_run_operation
+
+            def record_can_run(operation: Operation) -> bool:
+                result = original_can_run(operation)
+                processed.set()
+                return result
+
+            mgr._can_run_operation = record_can_run  # type: ignore[method-assign]
             logger = _make_logger(tmpdir)
-            mgr.submit_operation(
-                operation_id='throttled-1',
-                operation_type=OperationType.SYNC,
-                priority=OperationPriority.NORMAL,
-                resource_req=ResourceRequirement(memory_mb=64, cpu_percent=10.0),
-                paths=[os.path.join(tmpdir, 'throttle-path')],
-                callback=lambda: executed.set(),
-                logger=logger,
-            )
-            # Give worker a moment to try and re-queue
-            time.sleep(1.5)
-            # Should NOT have executed
-            self.assertFalse(executed.is_set())
-            self.assertGreaterEqual(mgr._metrics['memory_throttles'], 1)
-            mgr.shutdown()
+            try:
+                mgr.submit_operation(
+                    operation_id='throttled-1',
+                    operation_type=OperationType.SYNC,
+                    priority=OperationPriority.NORMAL,
+                    resource_req=ResourceRequirement(memory_mb=64, cpu_percent=10.0),
+                    paths=[os.path.join(tmpdir, 'throttle-path')],
+                    callback=lambda: executed.set(),
+                    logger=logger,
+                )
+
+                self.assertTrue(processed.wait(timeout=1.0))
+                # Should NOT have executed.
+                self.assertFalse(executed.is_set())
+                self.assertGreaterEqual(mgr._metrics['memory_throttles'], 1)
+            finally:
+                mgr.shutdown()
 
     def test_submit_full_queue_fails(self):
         with tempfile.TemporaryDirectory() as tmpdir:

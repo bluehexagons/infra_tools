@@ -301,6 +301,7 @@ class ConcurrentOperationManager:
         self._idle_condition = threading.Condition(self._operation_lock)
         self._pending_operations = 0
         self._shutdown = False
+        self._shutdown_event = threading.Event()
         
         self._metrics = {
             'operations_started': 0,
@@ -324,13 +325,12 @@ class ConcurrentOperationManager:
             try:
                 execution_context = self._get_execution_context()
                 if not execution_context:
-                    time.sleep(1.0)
                     continue
 
                 if not self._can_run_operation(execution_context):
                     if not self.queue.enqueue(execution_context):
                         self._mark_operation_finished()
-                    time.sleep(1.0)
+                    self._shutdown_event.wait(timeout=1.0)
                     continue
                 
                 with self._operation_lock:
@@ -345,7 +345,7 @@ class ConcurrentOperationManager:
                         execution_context.started_at = None
                     if not self.queue.enqueue(execution_context):
                         self._mark_operation_finished()
-                    time.sleep(2.0)
+                    self._shutdown_event.wait(timeout=2.0)
                     continue
                 
                 try:
@@ -378,7 +378,7 @@ class ConcurrentOperationManager:
                         
             except Exception as e:
                 print(f"Worker thread error: {e}")
-                time.sleep(1.0)
+                self._shutdown_event.wait(timeout=1.0)
     
     def wait_until_idle(self, timeout: float = 0.0) -> bool:
         """Wait until all operations are completed and queue is empty."""
@@ -521,6 +521,7 @@ class ConcurrentOperationManager:
     
     def shutdown(self) -> None:
         self._shutdown = True
+        self._shutdown_event.set()
         self.queue.shutdown()
         for worker in self._workers:
             worker.join(timeout=5.0)
