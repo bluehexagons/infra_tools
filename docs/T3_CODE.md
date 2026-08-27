@@ -87,6 +87,14 @@ npm_config_dangerously_allow_all_scripts=true \
   npx t3@CLIENT_VERSION service update
 ```
 
+During a refresh, an upstream updater failure does not take down a previously
+working installation. If the managed service file and active runtime remain
+valid, infra-tools restarts and health-checks that runtime, reports that the
+runtime was retained instead of updated, and continues setup. A first install,
+a damaged runtime, or a failed readiness check remains fatal. Updater failures
+include bounded diagnostics from both the beginning and end of npm's output so
+an earlier npm error is not hidden by a later successful native-build message.
+
 Keep the npm overrides scoped to the trusted T3 updater. npm 12's default
 lifecycle-script policy can otherwise omit T3's Linux `node-pty` build while
 the package installation still exits successfully. infra-tools validates the

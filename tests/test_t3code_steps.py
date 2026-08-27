@@ -251,6 +251,122 @@ class T3CodeWebTest(unittest.TestCase):
                 )
             run_as_user.assert_not_called()
 
+    def test_refresh_retains_valid_runtime_when_updater_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as home:
+            workspace = os.path.join(home, "repos")
+            os.makedirs(workspace)
+            binary = self._write_upstream_runtime(home)
+            update_failed = SimpleNamespace(
+                returncode=1,
+                stdout="",
+                stderr="npm error update failed\ngyp info ok",
+            )
+            completed = SimpleNamespace(returncode=0, stdout="", stderr="")
+            with (
+                patch("common.t3code_steps.install_package", return_value=True),
+                patch("common.t3code_steps._ensure_user_manager"),
+                patch(
+                    "common.t3code_steps._node_bin_directory",
+                    return_value="/usr/bin",
+                ),
+                patch(
+                    "common.t3code_steps._run_as_login_user",
+                    return_value=update_failed,
+                ),
+                patch(
+                    "common.t3code_steps._t3_native_runtime_healthy",
+                    return_value=True,
+                ),
+                patch("common.t3code_steps._wait_for_t3_service"),
+                patch(
+                    "common.t3code_steps._user_systemctl",
+                    return_value=completed,
+                ) as systemctl,
+                patch("common.t3code_steps.os.chown"),
+                patch("builtins.print") as print_message,
+                patch(
+                    "common.t3code_steps.LEGACY_T3_SERVICE_FILE",
+                    os.path.join(home, "legacy.service"),
+                ),
+            ):
+                self.assertEqual(
+                    _install_t3_service(
+                        home,
+                        "agent",
+                        os.getuid(),
+                        os.getgid(),
+                        workspace,
+                        "127.0.0.1",
+                        3773,
+                        refresh=True,
+                    ),
+                    binary,
+                )
+
+            actions = [call.args[2] for call in systemctl.call_args_list]
+            self.assertIn("restart", actions)
+            messages = [call.args[0] for call in print_message.call_args_list]
+            self.assertTrue(
+                any("retaining the valid" in message for message in messages)
+            )
+            self.assertTrue(
+                any("npm error update failed" in message for message in messages)
+            )
+            self.assertTrue(
+                any(
+                    "retained and validated after updater failure" in message
+                    for message in messages
+                )
+            )
+
+    def test_failed_first_install_reports_start_and_end_of_updater_output(self) -> None:
+        with tempfile.TemporaryDirectory() as home:
+            workspace = os.path.join(home, "repos")
+            os.makedirs(workspace)
+            update_failed = SimpleNamespace(
+                returncode=17,
+                stdout="npm stdout context",
+                stderr=(
+                    "npm error actual failure\n"
+                    + ("intermediate build output\n" * 100)
+                    + "gyp info ok"
+                ),
+            )
+            with (
+                patch("common.t3code_steps.install_package", return_value=True),
+                patch("common.t3code_steps._ensure_user_manager"),
+                patch(
+                    "common.t3code_steps._node_bin_directory",
+                    return_value="/usr/bin",
+                ),
+                patch(
+                    "common.t3code_steps._run_as_login_user",
+                    return_value=update_failed,
+                ),
+                patch("common.t3code_steps.os.chown"),
+                patch(
+                    "common.t3code_steps.LEGACY_T3_SERVICE_FILE",
+                    os.path.join(home, "legacy.service"),
+                ),
+            ):
+                with self.assertRaises(RuntimeError) as raised:
+                    _install_t3_service(
+                        home,
+                        "agent",
+                        os.getuid(),
+                        os.getgid(),
+                        workspace,
+                        "127.0.0.1",
+                        3773,
+                    )
+
+            message = str(raised.exception)
+            self.assertIn("exit code 17", message)
+            self.assertIn("npm error actual failure", message)
+            self.assertIn("... output omitted ...", message)
+            self.assertIn("gyp info ok", message)
+            self.assertIn("npm stdout context", message)
+
     def test_legacy_root_service_is_retired_after_user_service_starts(self) -> None:
         with tempfile.TemporaryDirectory() as home:
             workspace = os.path.join(home, "repos")

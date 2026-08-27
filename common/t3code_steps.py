@@ -82,6 +82,7 @@ _T3_GH_CONFIG_EXPORT = 'export GH_CONFIG_DIR="$HOME/.config/gh"'
 _T3_NATIVE_PACKAGES = ("node-pty", "msgpackr-extract")
 _T3_READINESS_ATTEMPTS = 20
 _T3_READINESS_STABLE_CHECKS = 3
+_T3_COMMAND_OUTPUT_EXCERPT_LIMIT = 1200
 
 
 def _user_home(config: SetupConfig) -> str:
@@ -307,6 +308,31 @@ def _t3_native_runtime_healthy(
     return result.returncode == 0
 
 
+def _t3_command_failure_detail(
+    result: subprocess.CompletedProcess[str],
+) -> str:
+    """Return bounded diagnostics without discarding the start of command output."""
+
+    def excerpt(value: str | None) -> str:
+        text = (value or "").strip()
+        if len(text) <= _T3_COMMAND_OUTPUT_EXCERPT_LIMIT:
+            return text
+        head_length = _T3_COMMAND_OUTPUT_EXCERPT_LIMIT // 2
+        tail_length = _T3_COMMAND_OUTPUT_EXCERPT_LIMIT - head_length
+        return (
+            f"{text[:head_length].rstrip()}\n"
+            "... output omitted ...\n"
+            f"{text[-tail_length:].lstrip()}"
+        )
+
+    parts = [f"exit code {result.returncode}"]
+    for label, output in (("stderr", result.stderr), ("stdout", result.stdout)):
+        bounded = excerpt(output)
+        if bounded:
+            parts.append(f"{label}:\n{bounded}")
+    return "\n".join(parts)
+
+
 def _rebuild_t3_native_runtime(
     username: str,
     home: str,
@@ -331,8 +357,8 @@ def _rebuild_t3_native_runtime(
         capture_output=True,
     )
     if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "").strip()
-        raise RuntimeError(f"T3 Code native runtime repair failed: {detail[-500:]}")
+        detail = _t3_command_failure_detail(result)
+        raise RuntimeError(f"T3 Code native runtime repair failed:\n{detail}")
     if not _t3_native_runtime_healthy(username, home, node_bin, binary):
         raise RuntimeError(
             "T3 Code native runtime is incomplete after repair; node-pty did not load"
@@ -541,7 +567,10 @@ def _install_t3_service(
     )
     service_file = _t3_service_file(home)
     binary = _active_t3_binary(home)
+    previous_binary = binary
+    service_was_present = os.path.isfile(service_file)
     update_needed = refresh or binary is None or not os.path.isfile(service_file)
+    update_failed = False
 
     legacy_present = os.path.lexists(LEGACY_T3_SERVICE_FILE)
     if legacy_present and (
@@ -574,8 +603,28 @@ def _install_t3_service(
                 capture_output=True,
             )
             if result.returncode != 0:
-                detail = (result.stderr or result.stdout or "").strip()
-                raise RuntimeError(f"T3 Code service update failed: {detail[-500:]}")
+                detail = _t3_command_failure_detail(result)
+                binary = _active_t3_binary(home)
+                can_retain_runtime = (
+                    refresh
+                    and previous_binary is not None
+                    and service_was_present
+                    and binary is not None
+                    and os.path.isfile(service_file)
+                )
+                if not can_retain_runtime:
+                    raise RuntimeError(f"T3 Code service update failed:\n{detail}")
+                update_failed = True
+                print(
+                    "  ⚠ T3 Code updater failed "
+                    f"(exit code {result.returncode}); retaining the valid "
+                    "managed runtime"
+                )
+                print(
+                    "\n".join(
+                        f"    {line}" for line in detail.splitlines()
+                    )
+                )
         binary = _active_t3_binary(home)
         if binary is None:
             raise RuntimeError("T3 Code did not create a valid managed runtime")
@@ -638,7 +687,11 @@ def _install_t3_service(
             if ".local/share/infra-tools/t3code" in file_obj.read():
                 os.remove(legacy_wrapper)
 
-    if update_needed:
+    if update_failed and native_repaired:
+        status = "retained and repaired after updater failure"
+    elif update_failed:
+        status = "retained and validated after updater failure"
+    elif update_needed:
         status = "updated"
     elif native_repaired:
         status = "repaired"
