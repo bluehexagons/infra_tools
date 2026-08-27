@@ -177,12 +177,40 @@ use current-user-owned, mode-`0700` lock directories under
 persistent inode to prevent overlapping runs. Invalid specifications or
 unavailable mounts fail visibly so the next scheduled run can retry them.
 
+## Agent Maintenance Holds
+
+Before starting agent work that must survive the normal automatic-restart
+window, create a bounded hold as the account that owns the agent tools:
+
+```bash
+infra-tools agent maintenance hold --hours 8
+infra-tools agent maintenance status
+infra-tools agent maintenance release
+```
+
+The hold is a private, atomic file below the account's home and expires without
+manual cleanup. Durations are limited to 1–72 hours. Creating another hold
+renews it; release is idempotent. The same operation can be requested from a
+control system with `infra-tools agent maintenance hold HOST USER --hours 8`.
+
+When a restart is pending, the existing restart job also defers for recognized
+coding-agent, build, Git, terminal-multiplexer, and managed agent-worktree
+processes owned by the configured setup account. It records only workload
+categories: process command lines, prompts, and repository contents are not
+read, while working directories are used only to test membership in the fixed
+managed-worktree root and are never recorded. An invalid hold fails safe and
+is visible in `infra-tools agent doctor --capability host`; release and
+recreate it. The configured forced-restart deadline still overrides sessions,
+holds, and workloads after its maximum deferral period.
+
 ## Related Configuration
 
 - `--auto-restart` / `--no-auto-restart` controls normal automatic restarts.
 - `--auto-restart-force-days N` sets the maximum deferral period; `0` disables
   forced restarts.
 - `--auto-restart-grace N` sets the warning period before a restart.
+- `infra-tools agent maintenance hold|status|release` manages a temporary,
+  per-user automatic-restart hold without changing the host's saved policy.
 - Notification targets configured with `--notify` receive important maintenance
   failures and successes where the service supports notifications.
 - Security monitoring always collects and logs locally. Without `--notify`, it

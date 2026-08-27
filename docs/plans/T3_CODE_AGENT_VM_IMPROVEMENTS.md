@@ -1,7 +1,8 @@
 # T3 Code Agent VM Improvement Plan
 
-Status: active implementation; phases 1 through 3 are code-complete as of
-2026-08-27, with disposable-VM deployment validation still pending.
+Status: active implementation; phases 1 through 3 and the phase 4 restart
+boundary are code-complete as of 2026-08-27, with disposable-VM deployment
+validation still pending.
 
 ## Objective
 
@@ -88,17 +89,22 @@ HTTPS listeners, UFW policy, and cleanup.
 
 ### Phase 4: disruptive maintenance and version policy
 
-- Add an agent-host maintenance hold/drain marker and teach automatic restart
-  policy to defer for active agent, build, worktree, and terminal-multiplexer
-  workloads.
-- Run the composite readiness audit after reboot or a deliberate agent update.
+- Implemented a private 1–72 hour agent-host maintenance hold and taught the
+  existing automatic-restart policy to defer for active agent, build, Git,
+  managed-worktree, and terminal-multiplexer workloads. Only category names
+  are recorded; command lines and repository paths are never recorded.
+- The managed T3 workflow now requires the existing composite T3 and host
+  readiness audit after a reboot or deliberate T3 update. Automating that
+  audit remains gated on a disposable-VM service lifecycle test.
 - Finish desired-versus-observed version channels and artifact-level rollback
-  for agent tools where upstream distribution contracts support them.
+  for agent tools only where upstream distribution contracts support them.
+  Terminal agents retain the deliberate update, verified executable backup,
+  and automatic rollback path already implemented. T3 retains its upstream
+  explicit service updater rather than adding a competing version manager.
 
-Phase 4 changes host restart and vendor-version policy and therefore remains a
-separate implementation slice requiring disposable-VM validation. It should
-reuse the existing restart and update mechanisms rather than introduce a
-parallel scheduler.
+The phase 4 restart behavior reuses the existing restart job and forced
+deadline rather than introducing a parallel scheduler. Real-VM validation is
+still required before the phase is considered complete.
 
 ## Acceptance criteria
 

@@ -129,6 +129,7 @@ def build_agent_support_bundle(
             },
             "t3_service": host["t3_service"],
             "maintenance": host["maintenance"],
+            "maintenance_hold": host["maintenance_hold"],
             "reboot_pending": host["reboot_pending"],
             "warnings": host["warnings"],
             "errors": host["errors"],

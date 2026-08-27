@@ -67,6 +67,28 @@ npm_config_dangerously_allow_all_scripts=true \
 
 Do not start a second foreground `npx t3` server on the managed port.
 
+## Disruptive maintenance
+
+For a long agent or build session that must cross the host's normal restart
+window, create a bounded hold as the agent account:
+
+```bash
+infra-tools agent maintenance hold --hours 8
+infra-tools agent maintenance status
+```
+
+Release it promptly when the protected work is complete:
+
+```bash
+infra-tools agent maintenance release
+```
+
+The hold expires after at most 72 hours and does not disable the host's forced
+restart deadline. The restart job separately recognizes active coding agents,
+builds, Git operations, terminal multiplexers, and processes inside managed
+agent worktrees. Run the composite T3 and host doctor again after a deliberate
+T3 update or host reboot.
+
 ## Browser previews
 
 Prefer T3 Code's collaborative preview tools when they are available in the

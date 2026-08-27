@@ -5,7 +5,9 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
@@ -14,6 +16,116 @@ from common.service_tools import auto_restart_if_needed
 
 
 class TestAutoRestartIfNeeded(unittest.TestCase):
+    def test_detects_agent_build_multiplexer_and_managed_worktree_categories(self):
+        with (
+            tempfile.TemporaryDirectory() as home,
+            tempfile.TemporaryDirectory() as proc_root,
+        ):
+            managed = os.path.join(
+                home,
+                ".local",
+                "share",
+                "infra_tools",
+                "worktrees",
+                "project",
+            )
+            os.makedirs(managed)
+            processes = (
+                ("101", "codex\n", home),
+                ("102", "cargo\n", home),
+                ("103", "tmux: server\n", home),
+                ("104", "node\n", managed),
+            )
+            for pid, command, working_directory in processes:
+                process = os.path.join(proc_root, pid)
+                os.mkdir(process)
+                with open(
+                    os.path.join(process, "comm"),
+                    "w",
+                    encoding="utf-8",
+                ) as file_obj:
+                    file_obj.write(command)
+                os.symlink(working_directory, os.path.join(process, "cwd"))
+
+            account = SimpleNamespace(pw_uid=os.getuid(), pw_dir=home)
+            with (
+                patch(
+                    "common.service_tools.auto_restart_if_needed._configured_agent_account",
+                    return_value=account,
+                ),
+                patch(
+                    "common.service_tools.auto_restart_if_needed.inspect_agent_maintenance",
+                    return_value={"status": "inactive"},
+                ),
+            ):
+                categories = auto_restart_if_needed.get_active_agent_workloads(
+                    proc_root=proc_root
+                )
+
+        self.assertEqual(
+            categories,
+            [
+                "build or Git process",
+                "coding agent process",
+                "managed agent worktree process",
+                "terminal multiplexer process",
+            ],
+        )
+
+    def test_active_maintenance_hold_is_a_restart_blocker(self):
+        account = SimpleNamespace(pw_uid=os.getuid(), pw_dir="/home/agent")
+        with (
+            tempfile.TemporaryDirectory() as proc_root,
+            patch(
+                "common.service_tools.auto_restart_if_needed._configured_agent_account",
+                return_value=account,
+            ),
+            patch(
+                "common.service_tools.auto_restart_if_needed.inspect_agent_maintenance",
+                return_value={"status": "active"},
+            ),
+        ):
+            self.assertEqual(
+                auto_restart_if_needed.get_active_agent_workloads(
+                    proc_root=proc_root
+                ),
+                ["agent maintenance hold"],
+            )
+
+    @patch("common.service_tools.auto_restart_if_needed.perform_restart")
+    @patch("common.service_tools.auto_restart_if_needed.record_deferral")
+    @patch(
+        "common.service_tools.auto_restart_if_needed.get_active_agent_workloads",
+        return_value=["coding agent process"],
+    )
+    @patch("common.service_tools.auto_restart_if_needed.get_active_sessions", return_value=[])
+    @patch("common.service_tools.auto_restart_if_needed.get_uptime_seconds", return_value=3600)
+    @patch("common.service_tools.auto_restart_if_needed.can_restart_system", return_value=True)
+    @patch("common.service_tools.auto_restart_if_needed.force_deadline_reached", return_value=False)
+    @patch("common.service_tools.auto_restart_if_needed.load_restart_policy", return_value={"auto_restart": True, "force_days": 7, "grace": 5})
+    @patch("common.service_tools.auto_restart_if_needed.check_restart_required", return_value=True)
+    @patch("common.service_tools.auto_restart_if_needed.load_notification_configs_from_state", return_value=["cfg"])
+    def test_defers_for_agent_workloads(
+        self,
+        _load,
+        _check,
+        _policy,
+        _deadline,
+        _can_restart,
+        _uptime,
+        _sessions,
+        _workloads,
+        mock_defer,
+        mock_restart,
+    ):
+        self.assertEqual(auto_restart_if_needed.main(), 0)
+        mock_defer.assert_called_once_with(
+            "active agent workloads detected",
+            ["cfg"],
+            "coding agent process",
+        )
+        mock_restart.assert_not_called()
+
     @patch("common.service_tools.auto_restart_if_needed.perform_restart")
     @patch("common.service_tools.auto_restart_if_needed.record_deferral")
     @patch("common.service_tools.auto_restart_if_needed.get_uptime_seconds", return_value=None)

@@ -17,6 +17,11 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from lib.atomic_io import write_json_atomic
+from lib.agent_maintenance import (
+    DEFAULT_HOLD_HOURS,
+    MAX_HOLD_HOURS,
+    inspect_agent_maintenance,
+)
 from lib.agent_auth import AGENT_AUTH_TOOLS
 from lib.agent_credentials import (
     codex_auth_is_healthy,
@@ -314,6 +319,53 @@ def add_agent_subparser(subparsers: argparse._SubParsersAction) -> None:
     workspace_remove.add_argument("--root", dest="workspace_root", metavar="PATH")
     workspace_remove.add_argument("--dry-run", action="store_true")
     workspace_remove.add_argument("--json", action="store_true")
+    maintenance = commands.add_parser(
+        "maintenance",
+        help="Hold or release disruptive host maintenance during agent work",
+    )
+    maintenance_commands = maintenance.add_subparsers(
+        dest="agent_maintenance_command",
+        help="Maintenance hold operations",
+    )
+    for action in ("hold", "status", "release"):
+        action_parser = maintenance_commands.add_parser(
+            action,
+            help={
+                "hold": "Create or renew a bounded automatic-restart hold",
+                "status": "Show the current automatic-restart hold",
+                "release": "Release the automatic-restart hold",
+            }[action],
+        )
+        action_parser.add_argument(
+            "agent_maintenance_host",
+            nargs="?",
+            metavar="HOST",
+            help="Remote agent VM; omit HOST and USER for a local operation",
+        )
+        action_parser.add_argument(
+            "agent_maintenance_username",
+            nargs="?",
+            metavar="USER",
+            help="Remote agent VM user",
+        )
+        if action == "hold":
+            action_parser.add_argument(
+                "--hours",
+                type=int,
+                default=DEFAULT_HOLD_HOURS,
+                metavar="N",
+                help=(
+                    f"Hold duration from 1 to {MAX_HOLD_HOURS} hours "
+                    f"(default: {DEFAULT_HOLD_HOURS})"
+                ),
+            )
+        action_parser.add_argument("--json", action="store_true")
+        action_parser.add_argument(
+            "-k",
+            "--key",
+            dest="ssh_key",
+            help="SSH private key path",
+        )
     support = commands.add_parser(
         "support-bundle",
         help="Collect a redacted local agent-host support snapshot",
@@ -1100,6 +1152,16 @@ def inspect_host_readiness(
     maintenance = _maintenance_status()
     warnings.extend(str(item) for item in maintenance["warnings"])
     errors.extend(str(item) for item in maintenance["errors"])
+    maintenance_hold = inspect_agent_maintenance(user_home)
+    if maintenance_hold["status"] == "active":
+        warnings.append(
+            "automatic restarts are held until "
+            f"{maintenance_hold['expires_at']}"
+        )
+    elif maintenance_hold["status"] == "invalid":
+        warnings.append(
+            "agent maintenance hold state is invalid; release and recreate it"
+        )
     reboot_pending = os.path.exists("/var/run/reboot-required")
     if reboot_pending:
         warnings.append("a host reboot is pending")
@@ -1118,6 +1180,7 @@ def inspect_host_readiness(
         "agent_storage": storage,
         "t3_service": t3_resources,
         "maintenance": maintenance["units"],
+        "maintenance_hold": maintenance_hold,
         "reboot_pending": reboot_pending,
         "warnings": warnings,
         "errors": errors,
@@ -1592,6 +1655,33 @@ def _run_remote_agent_lifecycle(
 
 def run_agent_command(args: argparse.Namespace) -> int:
     """Run a local or remote agent-tool command."""
+    if args.agent_command == "maintenance":
+        try:
+            target = _remote_agent_target(
+                args,
+                host_attribute="agent_maintenance_host",
+                username_attribute="agent_maintenance_username",
+            )
+        except ValueError as exc:
+            print(f"Error: {exc}")
+            return 1
+        if target is not None:
+            remote_arguments = [str(args.agent_maintenance_command or "")]
+            if args.agent_maintenance_command == "hold":
+                remote_arguments.extend(("--hours", str(args.hours)))
+            if args.json:
+                remote_arguments.append("--json")
+            return _run_remote_agent_lifecycle(
+                target,
+                "maintenance",
+                remote_arguments,
+                timeout=60,
+            )
+
+        from lib.agent_maintenance import run_agent_maintenance_command
+
+        return run_agent_maintenance_command(args)
+
     if args.agent_command == "workspace":
         from lib.agent_workspace import run_agent_workspace_command
 
@@ -1687,7 +1777,7 @@ def run_agent_command(args: argparse.Namespace) -> int:
     if args.agent_command != "doctor":
         print(
             "Error: agent command required "
-            "(doctor, update, auth, web, workspace, or support-bundle)"
+            "(doctor, update, auth, web, workspace, maintenance, or support-bundle)"
         )
         return 1
 

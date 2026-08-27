@@ -132,6 +132,13 @@ class AgentSupportTests(unittest.TestCase):
             },
             "t3_service": {"memory_current_bytes": 4},
             "maintenance": {},
+            "maintenance_hold": {
+                "status": "active",
+                "active": True,
+                "created_at": "2026-08-27T12:00:00Z",
+                "expires_at": "2026-08-27T20:00:00Z",
+                "remaining_seconds": 28_800,
+            },
             "reboot_pending": False,
             "warnings": ["capacity warning"],
             "errors": [],
@@ -188,6 +195,7 @@ class AgentSupportTests(unittest.TestCase):
             self.assertNotIn("Private Name", rendered)
             self.assertNotIn("private@example.test", rendered)
             self.assertFalse(bundle["privacy"]["log_contents_included"])
+            self.assertEqual(bundle["host"]["maintenance_hold"]["status"], "active")
 
     def test_support_bundle_writes_new_private_file_below_home(self) -> None:
         with tempfile.TemporaryDirectory() as home:

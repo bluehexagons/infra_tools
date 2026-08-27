@@ -49,6 +49,7 @@ infra-tools agent auth set HOST USER --tool TOOL --file PATH
 infra-tools agent auth status HOST USER [--tool TOOL]
 infra-tools agent web pair HOST USER [-k PATH]
 infra-tools agent workspace <create|list|status|remove> ...
+infra-tools agent maintenance <hold|status|release> [HOST USER] [options]
 infra-tools agent support-bundle [--output PATH] [--browser-smoke]
 infra-tools gogs health HOST [--json] [--min-free-bytes N] [--min-free-inodes N]
 infra-tools cicd connect BUILD APP [options]
@@ -521,6 +522,9 @@ infra-tools agent update 10.0.0.10 agent --tool codex --dry-run
 infra-tools agent workspace create ~/repos/project api-check --base HEAD --json
 infra-tools agent workspace list ~/repos/project --json
 infra-tools agent workspace remove WORKTREE --dry-run --json
+infra-tools agent maintenance hold --hours 8
+infra-tools agent maintenance status --json
+infra-tools agent maintenance release 10.0.0.10 agent
 infra-tools agent support-bundle --output ~/agent-support.json
 ```
 
@@ -539,9 +543,9 @@ configure the GitHub HTTPS helper after a successful login, and restart an
 inactive managed service.
 `--capability host` reports memory and swap headroom, filesystem and bounded
 agent-storage use, T3 service cgroup pressure, recurring maintenance timer
-state, and pending reboots. Advisory pressure appears as warnings; critical
-filesystem pressure or a recorded maintenance failure makes the capability
-unhealthy.
+state, the agent maintenance hold, and pending reboots. Advisory pressure
+appears as warnings; critical filesystem pressure or a recorded maintenance
+failure makes the capability unhealthy.
 When `--capability` is supplied without `--tool`, doctor checks only the
 requested capability instead of requiring the default set of terminal agents.
 Supplying `HOST USER` runs the same doctor through managed SSH from the control
@@ -557,6 +561,14 @@ printing changed file names. `remove` accepts only a registered worktree below
 that managed root, refuses dirty or untracked work, requires an `agent/*`
 branch merged into the primary checkout's current `HEAD`, and never has a
 force mode. Use its `--dry-run` before cleanup.
+
+`agent maintenance hold` creates or renews a private automatic-restart hold
+for 8 hours by default. `--hours N` accepts 1–72 hours, `status` reports the
+active or expired deadline, and `release` is idempotent. An invalid marker
+fails safe and should be released and recreated. The optional `HOST USER` form
+runs the same operation as the target account through managed SSH. A hold does
+not override `--auto-restart-force-days`; once that deadline is reached, the
+restart proceeds even if a session, hold, or recognized workload remains.
 
 `agent support-bundle` composes a stable local JSON snapshot from the agent,
 T3 Code, browser, host, and maintenance diagnostics. It includes aggregate T3
@@ -637,10 +649,13 @@ dates, and the GitHub authentication check; it never prints credential
 contents, token strings, or Codex account IDs. Normal setup is seed-only;
 `auth set` is the deliberate replacement path.
 
-The normal restart policy can force a reboot after seven days of active-session
-deferrals. For a host running long unattended agent tasks, use both
-`--no-auto-restart` and `--auto-restart-force-days 0` if automatic restarts must
-be fully disabled, then manage pending security reboots explicitly.
+The normal restart policy defers for active login sessions, coding agents,
+build and Git processes, terminal multiplexers, maintenance holds, and
+processes running in an infra-tools-managed agent worktree. It can still force
+a reboot after seven days by default. For a host running long unattended agent
+tasks, use both `--no-auto-restart` and `--auto-restart-force-days 0` only if
+automatic restarts must be fully disabled, then manage pending security
+reboots explicitly.
 
 ### Proxmox provisioning flags
 

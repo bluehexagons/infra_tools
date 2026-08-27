@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import pwd
 import shutil
 import subprocess
 import sys
@@ -18,6 +19,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../
 
 from lib.logging_utils import get_service_logger, log_event
 from lib.atomic_io import write_json_atomic
+from lib.agent_maintenance import inspect_agent_maintenance
 from lib.machine_state import can_restart_system, load_setup_config
 from lib.notifications import load_notification_configs_from_state, send_notification_safe
 from lib.plugin_registry import get_system_type_definition
@@ -28,6 +30,33 @@ logger = get_service_logger('auto_restart_if_needed', 'common', use_syslog=True)
 STATE_FILE = "/var/lib/infra_tools/auto_restart_state.json"
 MIN_UPTIME_SECONDS = 30 * 60
 NOTIFICATION_INTERVAL_SECONDS = 24 * 60 * 60
+_AGENT_PROCESS_NAMES = frozenset(("claude", "codex", "opencode"))
+_BUILD_PROCESS_NAMES = frozenset(
+    (
+        "bun",
+        "cargo",
+        "cc",
+        "cc1",
+        "cc1plus",
+        "clang",
+        "clang++",
+        "cmake",
+        "deno",
+        "g++",
+        "gcc",
+        "git",
+        "go",
+        "ld",
+        "make",
+        "meson",
+        "ninja",
+        "npm",
+        "npx",
+        "pnpm",
+        "rustc",
+        "yarn",
+    )
+)
 
 
 def check_restart_required() -> bool:
@@ -58,6 +87,106 @@ def get_active_sessions() -> list[str] | None:
     if result.returncode != 0:
         return None
     return [line for line in result.stdout.splitlines() if line.strip()]
+
+
+def _configured_agent_account() -> pwd.struct_passwd | None:
+    """Return the setup account used for user-scoped agent work."""
+    config = load_setup_config() or {}
+    username = config.get("username")
+    if not isinstance(username, str) or not username:
+        return None
+    try:
+        account = pwd.getpwnam(username)
+    except KeyError:
+        return None
+    return account if os.path.isabs(account.pw_dir) else None
+
+
+def _within(path: str, parent: str) -> bool:
+    try:
+        resolved_parent = os.path.realpath(parent)
+        return os.path.commonpath(
+            (os.path.realpath(path), resolved_parent)
+        ) == resolved_parent
+    except ValueError:
+        return False
+
+
+def _process_workload_category(command_name: str) -> str | None:
+    normalized = command_name.strip().lower()
+    first_word = normalized.split(maxsplit=1)[0] if normalized else ""
+    if first_word in _AGENT_PROCESS_NAMES:
+        return "coding agent process"
+    if first_word in _BUILD_PROCESS_NAMES:
+        return "build or Git process"
+    if first_word.startswith("tmux") or first_word in {"screen", "screen-4.9.0"}:
+        return "terminal multiplexer process"
+    return None
+
+
+def get_active_agent_workloads(
+    *,
+    proc_root: str = "/proc",
+) -> list[str] | None:
+    """Return category-only blockers for the configured agent account.
+
+    Process command lines and repository contents are deliberately not read or
+    logged. A disappearing process is an expected race and is skipped.
+    """
+    account = _configured_agent_account()
+    if account is None:
+        return []
+
+    categories: set[str] = set()
+    hold = inspect_agent_maintenance(account.pw_dir)
+    if hold["status"] == "active":
+        categories.add("agent maintenance hold")
+    elif hold["status"] == "invalid":
+        categories.add("invalid agent maintenance hold")
+
+    managed_worktrees = os.path.join(
+        account.pw_dir,
+        ".local",
+        "share",
+        "infra_tools",
+        "worktrees",
+    )
+    try:
+        processes = list(os.scandir(proc_root))
+    except OSError:
+        return None
+
+    for process in processes:
+        if not process.name.isdigit():
+            continue
+        try:
+            if (
+                not process.is_dir(follow_symlinks=False)
+                or process.stat(follow_symlinks=False).st_uid != account.pw_uid
+            ):
+                continue
+            with open(
+                os.path.join(process.path, "comm"),
+                encoding="utf-8",
+            ) as file_obj:
+                command_name = file_obj.read(128)
+        except (OSError, UnicodeError):
+            continue
+
+        category = _process_workload_category(command_name)
+        if category:
+            categories.add(category)
+        try:
+            working_directory = os.readlink(os.path.join(process.path, "cwd"))
+        except OSError:
+            continue
+        if working_directory != managed_worktrees and _within(
+            working_directory,
+            managed_worktrees,
+        ):
+            categories.add("managed agent worktree process")
+
+    return sorted(categories)
 
 
 def _nonnegative_int(value: Any, default: int) -> int:
@@ -230,6 +359,10 @@ def main() -> int:
     if sessions is None:
         record_deferral("active sessions could not be determined", notification_configs)
         return 0
+    agent_workloads = get_active_agent_workloads()
+    if agent_workloads is None:
+        record_deferral("agent workloads could not be determined", notification_configs)
+        return 0
     forced = force_deadline_reached(policy)
     if not policy["auto_restart"] and not forced:
         record_deferral("automatic restarts are disabled", notification_configs)
@@ -238,6 +371,19 @@ def main() -> int:
     if sessions and not forced:
         log_event(logger, "Active sessions detected, skipping restart")
         record_deferral("active sessions detected", notification_configs, "\n".join(sessions))
+        return 0
+
+    if agent_workloads and not forced:
+        log_event(
+            logger,
+            "Active agent workloads detected, skipping restart",
+            category_count=len(agent_workloads),
+        )
+        record_deferral(
+            "active agent workloads detected",
+            notification_configs,
+            "\n".join(agent_workloads),
+        )
         return 0
 
     return perform_restart(notification_configs, int(policy["grace"]), forced=forced)
