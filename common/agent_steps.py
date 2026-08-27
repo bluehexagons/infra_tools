@@ -487,7 +487,7 @@ def _configure_github_git_credentials(config: SetupConfig) -> None:
     if result.returncode == 0:
         print("  Configured git to use GitHub CLI credentials")
     elif result.returncode == 2:
-        print("  GitHub CLI credentials copied, but gh auth status did not pass")
+        print("  GitHub CLI credentials are present, but gh auth status did not pass")
     else:
         print("  Warning: failed to configure git for GitHub CLI credentials")
 
@@ -662,9 +662,9 @@ def _merge_github_credentials(config: SetupConfig, source: str) -> bool:
     _chown_user_directory_chain(config, user_home, os.path.dirname(destination))
     new_entry = _payload_host_entry(source, config.git_host)
     existing = ""
-    if os.path.exists(destination):
-        if os.path.islink(destination):
-            raise RuntimeError(f"Refusing symlinked GitHub credentials: {destination}")
+    if os.path.lexists(destination):
+        if os.path.islink(destination) or not os.path.isfile(destination):
+            raise RuntimeError(f"Refusing unsafe GitHub credentials: {destination}")
         with open(destination, encoding="utf-8") as file_obj:
             existing = file_obj.read()
 

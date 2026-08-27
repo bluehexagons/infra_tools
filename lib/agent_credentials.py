@@ -39,7 +39,13 @@ def _jwt_timestamp(token: object, claim: str) -> datetime | None:
     try:
         encoded = parts[1] + "=" * (-len(parts[1]) % 4)
         payload = json.loads(base64.urlsafe_b64decode(encoded).decode("utf-8"))
-    except (binascii.Error, UnicodeDecodeError, ValueError, json.JSONDecodeError):
+    except (
+        binascii.Error,
+        UnicodeDecodeError,
+        ValueError,
+        json.JSONDecodeError,
+        RecursionError,
+    ):
         return None
     value = payload.get(claim) if isinstance(payload, dict) else None
     if not isinstance(value, (int, float)) or isinstance(value, bool):
@@ -69,7 +75,7 @@ def inspect_codex_auth_payload(
     observed_at = observed_at.astimezone(timezone.utc)
     try:
         value = json.loads(payload.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
         return {
             "status": "invalid",
             "auth_mode": None,
@@ -85,16 +91,25 @@ def inspect_codex_auth_payload(
     tokens = value.get("tokens")
     if not isinstance(tokens, dict):
         tokens = {}
-    auth_mode = value.get("auth_mode")
-    if not isinstance(auth_mode, str):
-        auth_mode = "chatgpt" if tokens else None
+    raw_auth_mode = value.get("auth_mode")
+    api_key = value.get("OPENAI_API_KEY")
+    api_key_present = isinstance(api_key, str) and bool(api_key.strip())
+    # Emit fixed classifications only; auth files are secret-bearing input.
+    if raw_auth_mode == "chatgpt" or tokens:
+        auth_mode = "chatgpt"
+    elif api_key_present:
+        auth_mode = "api_key"
+    else:
+        auth_mode = None
 
     last_refresh = _utc_datetime(value.get("last_refresh"))
     access_token = tokens.get("access_token")
     issued_at = _jwt_timestamp(access_token, "iat")
     expires_at = _jwt_timestamp(access_token, "exp")
-    refresh_token_present = bool(tokens.get("refresh_token"))
-    api_key_present = bool(value.get("OPENAI_API_KEY"))
+    refresh_token = tokens.get("refresh_token")
+    refresh_token_present = isinstance(refresh_token, str) and bool(
+        refresh_token.strip()
+    )
     access_token_expired = (
         observed_at >= expires_at if expires_at is not None else None
     )

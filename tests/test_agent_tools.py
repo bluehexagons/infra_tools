@@ -31,7 +31,11 @@ from common.agent_steps import (
     install_git_lfs_for_agent_repositories,
     install_opencode,
 )
-from lib.agent_auth import get_agent_auth_status, set_agent_credential
+from lib.agent_auth import (
+    _remote_set_script,
+    get_agent_auth_status,
+    set_agent_credential,
+)
 from lib.agent_credentials import inspect_codex_auth_payload
 from lib.agent_cli import (
     _t3_port,
@@ -111,6 +115,52 @@ class TestCodexCredentialMetadata(unittest.TestCase):
 
         self.assertEqual(result["status"], "invalid")
         self.assertNotIn("not-json-secret", json.dumps(result))
+
+    def test_untrusted_auth_mode_is_not_returned_as_metadata(self):
+        auth_mode = "never-print-auth-mode-secret"
+        result = inspect_codex_auth_payload(
+            json.dumps({"auth_mode": auth_mode}).encode("utf-8")
+        )
+
+        self.assertIsNone(result["auth_mode"])
+        self.assertNotIn(auth_mode, json.dumps(result))
+
+    def test_api_key_auth_reports_presence_without_key_contents(self):
+        api_key = "never-print-api-key"
+        result = inspect_codex_auth_payload(
+            json.dumps(
+                {
+                    "auth_mode": "apikey",
+                    "OPENAI_API_KEY": api_key,
+                }
+            ).encode("utf-8")
+        )
+
+        self.assertEqual(result["status"], "current")
+        self.assertEqual(result["auth_mode"], "api_key")
+        self.assertTrue(result["api_key_present"])
+        self.assertNotIn(api_key, json.dumps(result))
+
+    def test_non_string_credentials_are_not_treated_as_present(self):
+        secret = "never-print-nested-credential"
+        result = inspect_codex_auth_payload(
+            json.dumps(
+                {
+                    "OPENAI_API_KEY": {"value": secret},
+                    "tokens": {"refresh_token": {"value": secret}},
+                }
+            ).encode("utf-8")
+        )
+
+        self.assertFalse(result["api_key_present"])
+        self.assertFalse(result["refresh_token_present"])
+        self.assertNotIn(secret, json.dumps(result))
+
+    def test_excessively_nested_auth_payload_is_invalid(self):
+        with patch("lib.agent_credentials.json.loads", side_effect=RecursionError):
+            result = inspect_codex_auth_payload(b"{}")
+
+        self.assertEqual(result["status"], "invalid")
 
 
 class TestOfficialAgentInstallers(unittest.TestCase):
@@ -642,6 +692,18 @@ class TestAgentCredentialRotation(unittest.TestCase):
             self.assertNotIn(b"unrelated-token", payload)
             self.assertNotIn(b"selected-token", remote.call_args.args[3].encode())
 
+    def test_set_script_rejects_non_regular_remote_destination(self):
+        with tempfile.TemporaryDirectory() as home:
+            destination = os.path.join(home, ".codex", "auth.json")
+            os.makedirs(destination)
+
+            with patch.dict(os.environ, {"HOME": home}):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "unsafe credential destination",
+                ):
+                    exec(_remote_set_script("codex", "github.com"), {})
+
     def test_active_github_auth_reads_keyring_token_through_gh(self):
         with tempfile.TemporaryDirectory() as directory:
             source = os.path.join(directory, "hosts.yml")
@@ -1075,6 +1137,57 @@ class TestAgentPayloadInstallation(unittest.TestCase):
 
             with open(destination, encoding='utf-8') as file_obj:
                 self.assertEqual(file_obj.read(), target_content)
+
+    def test_github_credentials_reject_broken_symlink_destination(self):
+        config = SetupConfig(
+            host='host',
+            username='agent',
+            system_type='server_dev',
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            home = os.path.join(directory, 'home')
+            source = os.path.join(directory, 'hosts.yml')
+            destination = os.path.join(home, '.config', 'gh', 'hosts.yml')
+            os.makedirs(os.path.dirname(destination))
+            with open(source, 'w', encoding='utf-8') as file_obj:
+                file_obj.write('github.com:\n  oauth_token: source-token\n')
+            os.symlink(os.path.join(directory, 'missing'), destination)
+
+            with (
+                patch('common.agent_steps._user_home', return_value=home),
+                patch('common.agent_steps._chown_user_directory_chain'),
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    'unsafe GitHub credentials',
+                ):
+                    _merge_github_credentials(config, source)
+
+            self.assertTrue(os.path.islink(destination))
+
+    def test_github_credentials_reject_non_regular_destination(self):
+        config = SetupConfig(
+            host='host',
+            username='agent',
+            system_type='server_dev',
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            home = os.path.join(directory, 'home')
+            source = os.path.join(directory, 'hosts.yml')
+            destination = os.path.join(home, '.config', 'gh', 'hosts.yml')
+            os.makedirs(destination)
+            with open(source, 'w', encoding='utf-8') as file_obj:
+                file_obj.write('github.com:\n  oauth_token: source-token\n')
+
+            with (
+                patch('common.agent_steps._user_home', return_value=home),
+                patch('common.agent_steps._chown_user_directory_chain'),
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    'unsafe GitHub credentials',
+                ):
+                    _merge_github_credentials(config, source)
 
     def test_existing_codex_credentials_are_retained_on_setup(self):
         config = SetupConfig(

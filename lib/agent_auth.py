@@ -105,8 +105,10 @@ def ensure_directory(path):
             os.mkdir(current, 0o700)
 
 ensure_directory(parent)
-if os.path.lexists(destination) and os.path.islink(destination):
-    raise RuntimeError('refusing symlinked credential destination')
+if os.path.lexists(destination) and (
+    os.path.islink(destination) or not os.path.isfile(destination)
+):
+    raise RuntimeError('refusing unsafe credential destination')
 
 descriptor, temporary = tempfile.mkstemp(dir=parent, prefix='.infra-tools-auth-')
 try:
