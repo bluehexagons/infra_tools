@@ -10,9 +10,10 @@ system types provide a narrow GitHub CLI plus Codex default; supplying
 `--agent-tool` options adds to that provider set, while `--no-agent-tool`
 removes individual defaults. The first two are narrow
 terminal and graphical bases. `agent_code_vm` composes the separately managed
-Geany, T3 Code web, Playwright, RDP, private-source, pairing, and Git/auth
+Geany, T3 Code web, RDP, private-source, pairing, and Git/auth
 defaults without selecting every agent, language runtime, or provisioning
-setting.
+setting. Playwright is an explicit fallback for SSH-only or standalone agent
+sessions rather than an implicit T3 profile dependency.
 
 ## Problem
 
@@ -84,9 +85,10 @@ individual defaults can be disabled explicitly. Selecting one tool installs that
 and only the dependencies required by its installer. The narrow `agent_vm` and
 `agent_workstation` profiles do not select language runtimes, browser
 automation, editors, or a large coding-utility bundle. The explicitly
-opinionated `agent_code_vm` composition adds Playwright, Geany, and T3 Code web
-while retaining the same narrow provider default. Optional packages remain
-available through the normal package options.
+opinionated `agent_code_vm` composition adds Geany and T3 Code web while
+retaining the same narrow provider default. Playwright remains available with
+`--browser-automation playwright`. Optional packages remain available through
+the normal package options.
 
 The implementation uses one tool registry. A tool entry owns its
 installer, target configuration paths, credential path/format, authentication
@@ -353,8 +355,8 @@ explicitly deferred as stated above.
 - Added `agent_vm` and `agent_workstation` as narrow `gh` plus `codex`
   shorthands while preserving explicit-list replacement behavior.
 - Added `agent_code_vm` as an opt-in high-capability composition of the
-  graphical workstation, Geany, T3 Code web, and Playwright defaults while
-  retaining explicit provisioning, access, credential, and project-runtime
+  graphical workstation, Geany, and T3 Code web while retaining explicit
+  provisioning, access, credential, browser-fallback, and project-runtime
   options.
 
 ### Phase 2: VM-level Git credentials and target-side repositories — complete

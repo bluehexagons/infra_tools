@@ -96,7 +96,7 @@ tools, not for an LXC container.
 | `control_plane` | Debian infrastructure control plane with administrator tools |
 | `agent_vm` | Headless agent coding VM; defaults to GitHub CLI and Codex |
 | `agent_workstation` | Graphical agent coding workstation; adds Firefox ESR |
-| `agent_code_vm` | Full graphical agent VM with T3 Code, Playwright, and Geany |
+| `agent_code_vm` | Full graphical agent VM with T3 Code and Geany; Playwright is opt-in |
 | `workstation_desktop` | Desktop workstation with GUI |
 | `workstation_dev` | Developer workstation |
 | `pc_dev` | PC development environment |
@@ -299,8 +299,10 @@ See [`GODOT.md`](./GODOT.md) for the artifact and headless-use contract, and
 These flags prepare a Debian VM or local control plane for agentic coding. They
 work with any setup type. `agent_vm` is the recommended terminal-only profile,
 `agent_workstation` adds a desktop and Firefox ESR, and `agent_code_vm` adds
-the common T3 Code web service, Playwright automation, Geany, RDP, private
-source ranges, protected T3 pairing, read-write Git, and active auth sources.
+the common T3 Code web service, Geany, RDP, private source ranges, protected T3
+pairing, read-write Git, and active auth sources. Playwright remains an explicit
+fallback through `--browser-automation playwright` for SSH-only or standalone
+Codex and OpenCode sessions.
 All three default to GitHub CLI and Codex. `--agent-tool` values add to those
 defaults and accept comma-separated lists; use `--no-agent-tool` to remove a
 default. The full profile does not choose Proxmox capacity. It installs Node.js
@@ -341,8 +343,8 @@ infra-tools setup agent_code_vm 10.0.0.11 agentuser \
   --agent-tool opencode --lan-access
 ```
 
-The profile supplies T3 Code, Playwright, Geany, RDP, read-write Git, active
-auth sources, and T3 pairing. Access sources are deliberately explicit; the
+The profile supplies T3 Code, Geany, RDP, read-write Git, active auth sources,
+and T3 pairing. Access sources are deliberately explicit; the
 example uses `--lan-access`, while a narrower deployment can use
 `--access-source` or the service-specific source flags. Passwords omitted from
 the command are requested with hidden prompts;
@@ -506,6 +508,7 @@ infra-tools agent doctor
 infra-tools agent doctor --tool codex --tool claude --json
 infra-tools agent doctor --tool codex --tool opencode --capability browser
 infra-tools agent doctor --capability browser
+infra-tools agent doctor --capability t3code --capability host
 infra-tools agent doctor --capability t3code --fix
 infra-tools agent doctor 10.0.0.10 agent --tool codex --json
 infra-tools agent update --dry-run
@@ -527,6 +530,11 @@ endpoint, provider authentication, Git identity and credential helper, and the
 managed agent skill. Its `--fix` mode can rebuild blocked native dependencies,
 configure the GitHub HTTPS helper after a successful login, and restart an
 inactive managed service.
+`--capability host` reports memory and swap headroom, filesystem and bounded
+agent-storage use, T3 service cgroup pressure, recurring maintenance timer
+state, and pending reboots. Advisory pressure appears as warnings; critical
+filesystem pressure or a recorded maintenance failure makes the capability
+unhealthy.
 When `--capability` is supplied without `--tool`, doctor checks only the
 requested capability instead of requiring the default set of terminal agents.
 Supplying `HOST USER` runs the same doctor through managed SSH from the control

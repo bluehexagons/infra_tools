@@ -53,14 +53,14 @@ class TestAgentProfiles(unittest.TestCase):
         self.assertIn("Installing GitHub CLI", step_names)
         self.assertIn("Installing Codex CLI", step_names)
 
-    def test_agent_code_vm_adds_t3_playwright_and_geany(self) -> None:
+    def test_agent_code_vm_adds_t3_and_geany_without_browser_fallback(self) -> None:
         config = SetupConfig.from_args(_setup_args(), "agent_code_vm")
 
         self.assertEqual(config.selected_agent_tools(), ["gh", "codex"])
         self.assertEqual(config.browser, "firefox")
         self.assertEqual(config.editor, "geany")
         self.assertEqual(config.web_interfaces, ["t3code"])
-        self.assertEqual(config.browser_automation, "playwright")
+        self.assertIsNone(config.browser_automation)
         self.assertTrue(config.include_desktop)
         self.assertTrue(config.enable_rdp)
         self.assertTrue(config.install_node)
@@ -75,7 +75,7 @@ class TestAgentProfiles(unittest.TestCase):
         step_names = [name for name, _step in get_steps_for_system_type(config)]
         self.assertIn("Installing workstation editor", step_names)
         self.assertIn("Installing T3 Code web interface", step_names)
-        self.assertIn("Installing agent browser automation", step_names)
+        self.assertNotIn("Installing agent browser automation", step_names)
         self.assertNotIn("Installing data-analysis tools", step_names)
 
         command = " ".join(config.to_setup_command())
@@ -84,6 +84,17 @@ class TestAgentProfiles(unittest.TestCase):
         self.assertNotIn("--browser-automation", command)
         self.assertNotIn("--web-interface-source", command)
         self.assertNotIn("--rdp-source", command)
+
+    def test_agent_code_vm_accepts_explicit_playwright_fallback(self) -> None:
+        config = SetupConfig.from_args(
+            _setup_args(browser_automation="playwright"),
+            "agent_code_vm",
+        )
+
+        self.assertEqual(config.browser_automation, "playwright")
+        step_names = [name for name, _step in get_steps_for_system_type(config)]
+        self.assertIn("Installing agent browser automation", step_names)
+        self.assertIn("--browser-automation playwright", config.to_setup_command())
 
     def test_agent_code_vm_accepts_optional_go_runtime(self) -> None:
         config = SetupConfig.from_args(
@@ -214,7 +225,7 @@ class TestAgentProfiles(unittest.TestCase):
 
         self.assertEqual(config.editor, "geany")
         self.assertEqual(config.web_interfaces, ["t3code"])
-        self.assertEqual(config.browser_automation, "playwright")
+        self.assertIsNone(config.browser_automation)
         self.assertTrue(config.install_node)
         self.assertFalse(config.install_go)
         self.assertIsNone(config.web_interface_sources)

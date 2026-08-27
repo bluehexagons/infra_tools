@@ -30,6 +30,16 @@ Generate a one-time URL from the control system:
 infra-tools agent web pair vm.example agent
 ```
 
+T3 Code sessions can expose collaborative preview tools through the client.
+Prefer those tools for interactive page inspection when available. To retain a
+VM-local Chromium fallback for SSH-only Codex or OpenCode sessions, request it
+explicitly during setup:
+
+```bash
+infra-tools setup agent_code_vm vm.example agent \
+  --browser-automation playwright
+```
+
 ## Service and update model
 
 infra-tools uses T3 Code's supported per-user background service. Upstream owns
@@ -166,7 +176,7 @@ home and configured workspace.
 Useful checks:
 
 ```bash
-infra-tools agent doctor --capability t3code
+infra-tools agent doctor --capability t3code --capability host
 gh auth status
 git config --global --get user.name
 git config --global --get user.email
@@ -176,7 +186,10 @@ The doctor validates the upstream service-state protocol and selected immutable
 runtime, required native terminal module, user service, endpoint, pairing
 helper, Git identity, and managed agent skill. Add `--fix` to rebuild an
 incomplete native runtime, repair GitHub's credential helper, or restart an
-inactive user service.
+inactive user service. The separate host capability reports memory, swap,
+filesystem and agent-storage headroom, T3 cgroup usage, recurring maintenance
+state, and pending reboots. Capacity warnings do not make an otherwise healthy
+service fail; critical disk pressure and recorded maintenance failures do.
 
 ## Related documentation
 

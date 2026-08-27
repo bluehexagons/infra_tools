@@ -24,13 +24,13 @@ from lib.agent_credentials import (
     inspect_codex_auth_file,
 )
 from lib.ssh_utils import build_ssh_command, shell_join, ssh_batch_mode
-from lib.types import JSONDict, StrList
+from lib.types import BYTES_PER_GB, BYTES_PER_MB, JSONDict, StrList
 from lib.validation import validate_filesystem_path, validate_package_name
 from lib.validators import validate_host, validate_username
 
 
 AGENT_DOCTOR_TOOLS = ("gh", "codex", "claude", "opencode")
-AGENT_DOCTOR_CAPABILITIES = ("browser", "t3code")
+AGENT_DOCTOR_CAPABILITIES = ("browser", "host", "t3code")
 DEFAULT_DOCTOR_TOOLS = ("gh", "codex", "claude", "opencode")
 AGENT_UPDATE_TOOLS = ("codex", "claude", "opencode")
 DEFAULT_UPDATE_TOOLS = AGENT_UPDATE_TOOLS
@@ -68,6 +68,24 @@ _T3_SKILL_RELATIVE = os.path.join(
 _T3_DEFAULT_PORT = 3773
 _T3_NATIVE_PACKAGES = ("node-pty", "msgpackr-extract")
 _REMOTE_INFRA_TOOLS_PATH = "/opt/infra_tools/infra_tools.py"
+_AGENT_HOST_MAINTENANCE_UNITS = (
+    "security-monitor",
+    "auto-update-apt",
+    "cleanup-maintenance",
+    "user-cache-maintenance",
+    "auto-restart-if-needed",
+)
+_AGENT_HOST_MIN_RECOMMENDED_MEMORY = 4 * BYTES_PER_GB
+_AGENT_HOST_LOW_AVAILABLE_MEMORY = 512 * BYTES_PER_MB
+_AGENT_HOST_DISK_WARNING_PERCENT = 80
+_AGENT_HOST_DISK_CRITICAL_PERCENT = 90
+_AGENT_HOST_DISK_WARNING_FREE = 4 * BYTES_PER_GB
+_AGENT_HOST_DISK_CRITICAL_FREE = BYTES_PER_GB
+_AGENT_STORAGE_WARNING_BYTES = {
+    "npm_cache": 2 * BYTES_PER_GB,
+    "browser_cache": 2 * BYTES_PER_GB,
+    "t3_logs": 512 * BYTES_PER_MB,
+}
 
 _CREDENTIAL_PATHS = {
     "gh": ".config/gh/hosts.yml",
@@ -804,6 +822,255 @@ def inspect_browser_automation(home: Optional[str] = None) -> JSONDict:
     }
 
 
+def _read_meminfo(path: str = "/proc/meminfo") -> dict[str, int]:
+    """Read byte values from Linux meminfo without relying on locale output."""
+    values: dict[str, int] = {}
+    try:
+        with open(path, encoding="utf-8") as file_obj:
+            for line in file_obj:
+                key, separator, raw_value = line.partition(":")
+                if not separator:
+                    continue
+                fields = raw_value.split()
+                if not fields:
+                    continue
+                try:
+                    value = int(fields[0])
+                except ValueError:
+                    continue
+                if len(fields) > 1 and fields[1].lower() == "kb":
+                    value *= 1024
+                values[key] = value
+    except OSError:
+        return {}
+    return values
+
+
+def _directory_size_bytes(path: str) -> int:
+    """Return regular-file bytes below one user path without following links."""
+    if os.path.islink(path) or not os.path.isdir(path):
+        return 0
+    total = 0
+    for root, directories, files in os.walk(path, followlinks=False):
+        directories[:] = [
+            name
+            for name in directories
+            if not os.path.islink(os.path.join(root, name))
+        ]
+        for filename in files:
+            candidate = os.path.join(root, filename)
+            try:
+                if os.path.islink(candidate):
+                    continue
+                total += os.stat(candidate, follow_symlinks=False).st_size
+            except OSError:
+                continue
+    return total
+
+
+def _systemd_properties(
+    unit: str,
+    properties: tuple[str, ...],
+    *,
+    user: bool = False,
+) -> dict[str, str]:
+    command = ["systemctl"]
+    if user:
+        command.append("--user")
+    command.extend(["show", unit])
+    command.extend(f"--property={property_name}" for property_name in properties)
+    result = _run_check(command)
+    if result.returncode != 0:
+        return {}
+    observed: dict[str, str] = {}
+    for line in (result.stdout or "").splitlines():
+        key, separator, value = line.partition("=")
+        if separator:
+            observed[key] = value
+    return observed
+
+
+def _optional_systemd_integer(value: Optional[str]) -> Optional[int]:
+    try:
+        return int(value) if value not in (None, "", "[not set]") else None
+    except ValueError:
+        return None
+
+
+def _maintenance_status() -> JSONDict:
+    units: JSONDict = {}
+    warnings: list[str] = []
+    errors: list[str] = []
+    for service_name in _AGENT_HOST_MAINTENANCE_UNITS:
+        timer_name = f"{service_name}.timer"
+        timer = _systemd_properties(
+            timer_name,
+            ("LoadState", "ActiveState", "UnitFileState", "NextElapseUSecRealtime"),
+        )
+        service = _systemd_properties(
+            f"{service_name}.service",
+            ("LoadState", "ActiveState", "Result", "ExecMainStatus"),
+        )
+        loaded = timer.get("LoadState") == "loaded"
+        enabled = timer.get("UnitFileState") in {"enabled", "enabled-runtime"}
+        active = timer.get("ActiveState") == "active"
+        result = service.get("Result")
+        units[service_name] = {
+            "loaded": loaded,
+            "enabled": enabled,
+            "active": active,
+            "last_result": result or None,
+            "last_exit_status": _optional_systemd_integer(
+                service.get("ExecMainStatus")
+            ),
+            "next_run": timer.get("NextElapseUSecRealtime") or None,
+        }
+        if result == "failed" or service.get("ActiveState") == "failed":
+            errors.append(f"{service_name} maintenance last failed")
+        elif not loaded or not enabled or not active:
+            warnings.append(f"{timer_name} is not enabled and active")
+    return {
+        "units": units,
+        "warnings": warnings,
+        "errors": errors,
+    }
+
+
+def _agent_storage_inventory(home: str) -> JSONDict:
+    paths = {
+        "npm_cache": os.path.join(home, ".npm"),
+        "browser_cache": os.path.join(home, ".cache", "ms-playwright"),
+        "t3_logs": os.path.join(home, ".t3", "userdata", "logs"),
+        "codex_packages": os.path.join(home, ".codex", "packages"),
+        "workspace": os.path.join(home, "repos"),
+    }
+    sizes = {name: _directory_size_bytes(path) for name, path in paths.items()}
+    releases = os.path.join(home, ".codex", "packages", "standalone", "releases")
+    release_count = 0
+    if not os.path.islink(releases) and os.path.isdir(releases):
+        try:
+            release_count = sum(
+                1
+                for entry in os.scandir(releases)
+                if entry.is_dir(follow_symlinks=False)
+            )
+        except OSError:
+            release_count = 0
+    return {
+        "paths": paths,
+        "size_bytes": sizes,
+        "codex_release_count": release_count,
+    }
+
+
+def inspect_host_readiness(
+    home: Optional[str] = None,
+    *,
+    meminfo_path: str = "/proc/meminfo",
+) -> JSONDict:
+    """Report resource headroom and recurring-maintenance health for an agent VM."""
+    user_home = os.path.abspath(home or os.path.expanduser("~"))
+    warnings: list[str] = []
+    errors: list[str] = []
+    meminfo = _read_meminfo(meminfo_path)
+    memory_total = meminfo.get("MemTotal", 0)
+    memory_available = meminfo.get("MemAvailable", 0)
+    swap_total = meminfo.get("SwapTotal", 0)
+    swap_free = meminfo.get("SwapFree", 0)
+    swap_used = max(0, swap_total - swap_free)
+    if memory_total and memory_total < _AGENT_HOST_MIN_RECOMMENDED_MEMORY:
+        warnings.append(
+            "memory is below the 4 GiB recommendation for T3 Code with browser or build workloads"
+        )
+    if memory_available and memory_available < _AGENT_HOST_LOW_AVAILABLE_MEMORY:
+        warnings.append("available memory is below 512 MiB")
+    if swap_total and swap_used * 4 >= swap_total:
+        warnings.append("at least 25% of swap is in use")
+
+    try:
+        disk = shutil.disk_usage(user_home)
+        disk_usage_percent = int((disk.used * 100) / disk.total) if disk.total else 0
+        disk_details: JSONDict = {
+            "path": user_home,
+            "total_bytes": disk.total,
+            "used_bytes": disk.used,
+            "free_bytes": disk.free,
+            "usage_percent": disk_usage_percent,
+        }
+        if (
+            disk_usage_percent >= _AGENT_HOST_DISK_CRITICAL_PERCENT
+            or disk.free < _AGENT_HOST_DISK_CRITICAL_FREE
+        ):
+            errors.append("agent filesystem has critical free-space pressure")
+        elif (
+            disk_usage_percent >= _AGENT_HOST_DISK_WARNING_PERCENT
+            or disk.free < _AGENT_HOST_DISK_WARNING_FREE
+        ):
+            warnings.append("agent filesystem has low free-space headroom")
+    except OSError:
+        disk_details = {"path": user_home, "available": False}
+        warnings.append("agent filesystem usage could not be inspected")
+
+    storage = _agent_storage_inventory(user_home)
+    for name, threshold in _AGENT_STORAGE_WARNING_BYTES.items():
+        size = int(storage["size_bytes"].get(name, 0))
+        if size > threshold:
+            warnings.append(f"{name} exceeds its diagnostic size threshold")
+    if int(storage["codex_release_count"]) > 2:
+        warnings.append("more than two Codex standalone releases are retained")
+
+    t3_properties = _systemd_properties(
+        _T3_SERVICE_NAME,
+        ("MemoryCurrent", "MemoryPeak", "TasksCurrent"),
+        user=True,
+    )
+    t3_resources = {
+        "memory_current_bytes": _optional_systemd_integer(
+            t3_properties.get("MemoryCurrent")
+        ),
+        "memory_peak_bytes": _optional_systemd_integer(t3_properties.get("MemoryPeak")),
+        "tasks_current": _optional_systemd_integer(t3_properties.get("TasksCurrent")),
+    }
+    if (
+        memory_total
+        and t3_resources["memory_current_bytes"] is not None
+        and int(t3_resources["memory_current_bytes"]) * 5 >= memory_total * 4
+    ):
+        warnings.append("T3 Code currently accounts for at least 80% of guest memory")
+    if (
+        memory_total
+        and t3_resources["memory_peak_bytes"] is not None
+        and int(t3_resources["memory_peak_bytes"]) > memory_total
+    ):
+        warnings.append("T3 Code's recorded memory peak exceeded guest memory")
+
+    maintenance = _maintenance_status()
+    warnings.extend(str(item) for item in maintenance["warnings"])
+    errors.extend(str(item) for item in maintenance["errors"])
+    reboot_pending = os.path.exists("/var/run/reboot-required")
+    if reboot_pending:
+        warnings.append("a host reboot is pending")
+
+    return {
+        "capability": "host",
+        "healthy": not errors,
+        "status": "error" if errors else "warning" if warnings else "ok",
+        "memory": {
+            "total_bytes": memory_total or None,
+            "available_bytes": memory_available or None,
+            "swap_total_bytes": swap_total,
+            "swap_used_bytes": swap_used,
+        },
+        "disk": disk_details,
+        "agent_storage": storage,
+        "t3_service": t3_resources,
+        "maintenance": maintenance["units"],
+        "reboot_pending": reboot_pending,
+        "warnings": warnings,
+        "errors": errors,
+    }
+
+
 def _t3_environment(home: str) -> dict[str, str]:
     environment = os.environ.copy()
     environment.update(
@@ -1381,16 +1648,16 @@ def run_agent_command(args: argparse.Namespace) -> int:
     else:
         selected = list(DEFAULT_DOCTOR_TOOLS)
     results = inspect_agent_tools(selected)
-    capability_results = [
-        inspect_browser_automation()
-        for capability in requested_capabilities
-        if capability == "browser"
-    ]
-    capability_results.extend(
-        inspect_t3code(fix=getattr(args, "fix", False))
-        for capability in requested_capabilities
-        if capability == "t3code"
-    )
+    capability_results: list[JSONDict] = []
+    for capability in requested_capabilities:
+        if capability == "browser":
+            capability_results.append(inspect_browser_automation())
+        elif capability == "host":
+            capability_results.append(inspect_host_readiness())
+        elif capability == "t3code":
+            capability_results.append(
+                inspect_t3code(fix=getattr(args, "fix", False))
+            )
     if args.json:
         print(json.dumps([*results, *capability_results], indent=2))
     else:
@@ -1425,6 +1692,16 @@ def run_agent_command(args: argparse.Namespace) -> int:
                             print(f"      {check}: failed")
                 for fix in result.get("fixes", []):
                     print(f"      repaired: {fix}")
+            elif result["capability"] == "host":
+                status = str(result["status"])
+                marker = (
+                    "✓" if status == "ok" else "⚠" if status == "warning" else "✗"
+                )
+                print(f"  {marker} host: {status}")
+                for warning in result["warnings"]:
+                    print(f"      warning: {warning}")
+                for error in result["errors"]:
+                    print(f"      error: {error}")
             elif result["healthy"]:
                 print(f"  ✓ browser: {result['path']} (smoke test passed)")
             elif not result["installed"]:

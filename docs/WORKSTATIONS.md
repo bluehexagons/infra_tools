@@ -43,7 +43,7 @@ distribution. The server, pairing, and update model is documented in
 | `pc_dev` | Desktop, Firefox ESR, LibreOffice, SMB client packages, Remmina, and CLI tools |
 | `workstation_dev` | Desktop, Firefox ESR, and CLI tools including Neovim |
 | `agent_workstation` | Developer workstation defaults plus GitHub CLI and Codex |
-| `agent_code_vm` | Agent workstation plus Geany, T3 Code web, Playwright, RDP, pairing, and read-write Git/auth defaults |
+| `agent_code_vm` | Agent workstation plus Geany, T3 Code web, RDP, pairing, and read-write Git/auth defaults |
 
 The default desktop is XFCE. All workstation profiles use Debian's Firefox ESR
 by default. A browser selected with `--browser` becomes the default for the
@@ -75,17 +75,17 @@ comma-separated list. Use `--no-agent-tool gh` to remove a profile default.
 ### High-capability graphical agent VM
 
 Use `agent_code_vm` for the recurring combination of a graphical coding
-desktop, Firefox ESR, Geany, T3 Code's headless web service, Playwright browser
-automation, GitHub CLI, Codex, RDP, protected pairing, and read-write Git/auth
-defaults. Provisioning capacity, project language runtimes, and network access
+desktop, Firefox ESR, Geany, T3 Code's headless web service, GitHub CLI, Codex,
+RDP, protected pairing, and read-write Git/auth defaults. Provisioning
+capacity, project language runtimes, browser fallback, and network access
 remain operator choices:
 
 ```bash
 infra-tools setup agent_code_vm 10.0.0.25 agent \
   --provision-on pve1 --name agent-1 \
   --image-storage local-lvm \
-  --memory 4G --balloon-min 1G --cores 4 \
-  --storage root local-lvm 32G \
+  --memory 4G --cores 4 \
+  --storage root local-lvm 64G \
   --lan-access \
   --agent-tool opencode
 ```
@@ -106,6 +106,18 @@ Matplotlib, JupyterLab, and csvkit stack; the flag also enables Python tooling.
 The guided `infra-tools shell` workstation-development flow offers the same
 bundle as a separate, default-off choice and uses the saved choice as the
 default when starting from a template.
+
+T3 Code sessions should prefer the client's collaborative preview tools when
+they are available. Add `--browser-automation playwright` when Codex or
+OpenCode also needs a VM-local Chromium fallback, including SSH-only sessions:
+
+```bash
+infra-tools setup agent_code_vm 10.0.0.25 agent \
+  --browser-automation playwright
+```
+
+The fallback remains saved and restored on rerun. It is intentionally opt-in
+because its matching browser downloads can consume more than a gigabyte.
 
 ### Desktop agentic coding workstation with RDP
 

@@ -76,7 +76,6 @@ PLUGIN = PluginDefinition(
             default_git_access="read-write",
             default_git_auth_source="active",
             default_agent_auth_source="active",
-            default_browser_automation="playwright",
             step_builder="plugins.workstation:build_workstation_steps",
         ),
     ),

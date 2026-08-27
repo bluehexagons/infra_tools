@@ -14,8 +14,15 @@ Use this skill for the T3 Code server installed by infra-tools.
 Start with:
 
 ```bash
-infra-tools agent doctor --capability t3code --json
+infra-tools agent doctor --capability t3code --capability host --json
 ```
+
+Treat a healthy T3 service and host-pressure warnings as separate results. The
+host capability reports memory, swap, disk, agent-storage, service cgroup,
+maintenance, and pending-reboot state without reading prompts, credentials, or
+repository contents. Resolve critical disk pressure or failed maintenance
+before starting a long build; low capacity is advisory when the service itself
+is healthy.
 
 The server is the upstream-managed per-user service. Inspect it without sudo:
 
@@ -59,6 +66,23 @@ npm_config_dangerously_allow_all_scripts=true \
 ```
 
 Do not start a second foreground `npx t3` server on the managed port.
+
+## Browser previews
+
+Prefer T3 Code's collaborative preview tools when they are available in the
+current session. They keep navigation and evidence visible to the connected
+user and do not require a second VM-local browser runtime.
+
+Some SSH-only Codex or OpenCode sessions need an independent fallback. It is
+installed only when the VM setup explicitly includes:
+
+```bash
+--browser-automation playwright
+```
+
+For that fallback, verify it with `infra-tools agent doctor --capability
+browser`. Do not assume a missing Playwright capability is an error on a
+T3-focused VM that uses collaborative preview.
 
 ## Pairing
 

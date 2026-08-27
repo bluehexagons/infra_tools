@@ -139,11 +139,13 @@ firewall details.
 The `agent_vm`, `agent_workstation`, and `agent_code_vm` profiles default to
 GitHub CLI and Codex. `--agent-tool` values add to those defaults and accept
 comma-separated lists; use `--no-agent-tool` to remove a default. The
-`agent_code_vm` profile additionally defaults to Geany, T3 Code, Playwright,
-RDP, T3 pairing, read-write Git, and active auth sources. It does not assume a
+`agent_code_vm` profile additionally defaults to Geany, T3 Code, RDP, T3
+pairing, read-write Git, and active auth sources. It does not assume a
 management network; add `--lan-access`, `--access-source`, or service-specific
 source flags explicitly. Node.js is installed automatically because T3 Code
-requires it. Go, Python, and other project runtimes remain optional. Use
+requires it. Playwright remains available explicitly with
+`--browser-automation playwright` for SSH-only and standalone-agent browser
+automation. Go, Python, and other project runtimes remain optional. Use
 `--agent-config active`, `--git-auth active`, or the specified-file credential
 options when the control plane should transfer selected settings or
 credentials. Active GitHub auth can use the controller's `gh auth token`
