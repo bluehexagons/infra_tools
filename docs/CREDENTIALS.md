@@ -13,7 +13,7 @@ concerns separate:
 | Browser website sessions | Credentials and cookies for sites visited through agent browser automation | Not copied by infra-tools; use a task-specific, scoped secret flow |
 | Device enrollment | Basic Auth account used to request short-lived provider pairing links | A specified htpasswd file, transient password option, or hidden interactive prompts |
 
-The credentials copied to a VM are optional. Agent tools can be installed
+The credentials seeded on a VM are optional. Agent tools can be installed
 without authentication, and public HTTPS repositories can be cloned without
 authentication. Authentication is needed only when the selected work requires
 it, such as a private GitHub repository or an agent account.
@@ -39,7 +39,7 @@ infra-tools setup agent_workstation 192.168.0.41 \
 ```
 
 This declares that the VM should have the selected tools and a read-only Git
-working policy. It does not by itself copy credentials. Add one of the
+working policy. It does not by itself seed credentials. Add one of the
 credential source options below when the VM needs authenticated access.
 
 `--git-access` is a VM/user declaration, not a replacement for provider-side
@@ -87,7 +87,6 @@ Profile defaults can be disabled explicitly, for example:
 ```text
 --no-agent-tool gh --git-access none --git-auth none --agent-auth none
 ```
-```
 
 The currently supported tool names are:
 
@@ -99,13 +98,13 @@ The currently supported tool names are:
 | `opencode` | Yes | Yes |
 
 Authentication and configuration are independent. Selecting a tool does not
-copy its credentials, and selecting `--agent-config active` does not copy
+seed its credentials, and selecting `--agent-config active` does not copy
 secret auth files.
 
 ## Agent authentication files
 
-The supported authentication payloads are copied into the target user's
-canonical locations:
+The supported authentication payloads seed the target user's canonical
+locations only when that credential is missing:
 
 | Tool | Target path |
 | --- | --- |
@@ -121,6 +120,12 @@ of in `hosts.yml`. In that case infra-tools asks the controller's `gh` command
 for the token. A specified file can use any controller-local path, but it is
 still installed at the canonical target path.
 
+Credential files are mutable, target-owned state. Codex and other tools may
+refresh or rotate them while they run, so an ordinary setup rerun never
+replaces an existing target credential with the staged controller copy. The
+same rule applies to an existing selected GitHub host entry. Use the explicit
+`infra-tools agent auth set` command when replacement or rotation is intended.
+
 These are the standard Linux paths used by infra-tools. Vendor settings that
 relocate a tool's home or data directory are not discovered by the active
 source; use a specified file when the credentials live elsewhere.
@@ -130,7 +135,7 @@ does not need the corresponding tool installed on the controller in order to
 receive a credential file. For example, a controller without Codex installed
 can still use `--agent-auth-file codex PATH` to stage a Codex auth file.
 
-### Copy from the active user's configuration
+### Seed from the active user's configuration
 
 Use the active source when the controller user already has the relevant
 configuration in its standard location:
@@ -149,7 +154,7 @@ account name and Git protocol metadata. This requires `gh` to be installed and
 already authenticated on the controller; infra-tools does not force GitHub CLI
 into insecure plaintext storage.
 
-`--agent-auth active` copies known credentials for the selected supported
+`--agent-auth active` seeds known credentials for the selected supported
 agent tools. Codex, Claude Code, and OpenCode use their standard file-backed
 paths; those files must exist. The `gh` selection uses the same `gh auth token`
 keyring fallback as `--git-auth active`. No other agent command is run on the
@@ -157,8 +162,11 @@ controller to create credentials.
 
 The active user is the invoking user, or the original user when setup is run
 through `sudo`. The options are convenience sources, not VM-specific
-credentials: using them for several VMs can give every VM the same provider
-identity.
+credentials. In particular, a Codex ChatGPT `auth.json` contains renewable
+OAuth state and should not be used concurrently by the controller and several
+VMs. Prefer a separately authenticated file or a distinct API key for each VM.
+infra-tools reports stale Codex access-token and refresh metadata before
+staging, but it cannot make one OAuth session independent merely by copying it.
 
 The high-capability `agent_code_vm` profile selects active GitHub and agent
 credential sources automatically. If either identity should be omitted, use
@@ -173,7 +181,7 @@ Do not combine an active source with its specified-file alternative:
 --agent-auth active     conflicts with --agent-auth-file TOOL PATH
 ```
 
-### Copy from specified files
+### Seed from specified files
 
 Use a specified file when credentials are kept outside the active user's
 standard configuration, when the controller does not have the agent installed,
@@ -194,9 +202,9 @@ canonical; the target receives the canonical filename shown above. For
 example, `codex-auth.json` becomes `~/.codex/auth.json`.
 
 The source must be a regular, non-symlink file, must not be group- or
-world-writable, and must be no larger than 4 MiB. The source is copied; it is
-not removed from the controller. The target file is installed for the target
-user with mode `0600`.
+world-writable, and must be no larger than 4 MiB. The source is not removed
+from the controller. A missing target file is seeded for the target user with
+mode `0600`; an existing target file is retained.
 
 Use `--agent-auth-file gh` as the alternative to `--git-auth`,
 `--git-auth-file`, or a GitHub token. Do not supply two GitHub credential
@@ -217,8 +225,10 @@ the GitHub processing, but authenticated GitHub setup currently accepts only
 currently the only authenticated Git-host flow; credentials for other Git
 hosts can be added later without changing the public-repository flow.
 
-During initial VM setup, the selected GitHub host entry is merged into the
-target user's existing `gh` hosts file, preserving entries for other hosts.
+During initial VM setup, a missing selected GitHub host entry is appended to
+the target user's existing `gh` hosts file, preserving entries for other hosts.
+An existing selected host entry is also retained because `gh` may have updated
+its token on the VM.
 When the target can authenticate successfully, setup also runs `gh auth
 setup-git` for that host so HTTPS Git operations use the GitHub CLI
 credential. Setup also fills missing global Git `user.name` and `user.email`
@@ -241,9 +251,9 @@ hardware-backed credential automatically.
 | Tool | Active-source behavior | File-copy guidance |
 | --- | --- | --- |
 | GitHub CLI (`gh`) | Uses the selected `hosts.yml` token, or asks the installed controller `gh` for `gh auth token` when the token is keyring-backed | `hosts.yml` with a token or a one-line token file works; copying a keyring-only `hosts.yml` is not sufficient |
-| Codex | Reads `~/.codex/auth.json` only | Codex documents file-backed auth at this path. If it uses `cli_auth_credentials_store = "keyring"` or `"auto"` and no file exists, configure the file backend and authenticate, or provide a separate auth file |
+| Codex | Reads `~/.codex/auth.json` only | Treat ChatGPT auth as renewable per-machine state. Seed a dedicated file once, then let that VM write refreshes back; do not repeatedly distribute one active `auth.json` across concurrently running machines. If Codex uses `cli_auth_credentials_store = "keyring"` or `"auto"` and no file exists, configure the file backend and authenticate, or provide a separate auth file |
 | Claude Code | Reads `~/.claude/.credentials.json` when that file exists | Linux and Windows use a credentials file, but macOS commonly uses Keychain. A macOS keychain session cannot be made portable by copying this file; use a separately supplied token/file or authenticate on the VM |
-| OpenCode | Reads `~/.local/share/opencode/auth.json` when that file exists | The current auth file is plain JSON and is copied as-is. That layout appears portable, but OpenCode does not provide a general cross-machine portability guarantee, so test the target and use separate files for separate identities |
+| OpenCode | Reads `~/.local/share/opencode/auth.json` when that file exists | The current auth file is plain JSON and is seeded as-is when missing. That layout appears portable, but OpenCode does not provide a general cross-machine portability guarantee, so test the target and use separate files for separate identities |
 
 Codex's documented headless options include device-code login and API-key or
 environment-based automation. Claude Code documents `CLAUDE_CODE_OAUTH_TOKEN`,
@@ -255,6 +265,7 @@ manually on the target when they are preferable to copying a file.
 For the vendor details behind these behaviors, see the official
 [GitHub CLI authentication documentation](https://cli.github.com/manual/gh_auth_login),
 [Codex authentication documentation](https://developers.openai.com/codex/auth),
+[Codex CI/CD authentication guidance](https://learn.chatgpt.com/docs/auth/ci-cd-auth),
 [OpenCode provider authentication documentation](https://opencode.ai/docs/providers/),
 and [Claude Code authentication documentation](https://code.claude.com/docs/en/authentication).
 
@@ -388,23 +399,30 @@ infra-tools agent auth status 192.168.0.41 agent-1 --tool codex --json
 ```
 
 Status can report whether a supported auth file is present, its owner and
-permissions, its age, and the `gh` authentication result. It does not display
-tokens or file contents. Rotation writes the target file atomically with
-restrictive permissions and rejects unsafe source files. For `gh`, rotation
-replaces the target `hosts.yml` with the selected host payload; use the setup
-flow when preserving other target host entries matters.
+permissions, its age, and the `gh` authentication result. For Codex ChatGPT
+auth it also reports `last_refresh`, unverified cached access-token issued-at
+and expiry dates, refresh-token presence, and a freshness status. It never
+displays tokens, account IDs, or file contents. Rotation writes the target file
+atomically with restrictive permissions and rejects unsafe source files. For
+`gh`, rotation replaces the target `hosts.yml` with the selected host payload.
+Unlike setup, `agent auth set` deliberately replaces an existing credential.
 
 ## Sharing credentials between VMs
 
-The same active or specified source can be copied to multiple VMs. Each VM
-gets its own file, but all of those files represent the same provider account
-or token. This is supported when a shared identity is intentional, but it
-means:
+Static provider tokens can be seeded to multiple VMs when a shared identity is
+intentional. Each VM gets its own file, but those files represent the same
+provider account or token. This means:
 
 - revoking or rotating the token affects every VM using it;
 - provider audit logs identify the same identity rather than an individual VM;
 - the token's full repository and service scope is available from every VM;
 - one compromised VM can expose access intended for the others.
+
+Do not apply that pattern to renewable Codex ChatGPT `auth.json` state. Codex
+refreshes and writes the file back, and concurrent copies can diverge or rotate
+one another's refresh credentials. Keep one independently authenticated stream
+per machine (or serialized job stream), and use a dedicated API key or secret
+manager for automation where appropriate.
 
 For independent access, use separate provider tokens or auth files and pass a
 different `--git-auth-file` or `--agent-auth-file` for each VM. A common
@@ -426,6 +444,7 @@ operator or provisioning service.
   directories.
 - Use the smallest provider scope that supports the VM's work. Treat a
   read-write token as read-write even if the setup declaration says `read`.
+- Ordinary setup is seed-only and preserves credentials refreshed on the VM.
 - Rotate credentials with `agent auth set` when a token expires, a VM changes
   ownership, or a VM is retired. Revoke the provider token as well when it may
   have been exposed.
@@ -453,6 +472,13 @@ temporary or secret-management path rather than a repository file.
 authentication, and non-secret configuration are separate. Add the relevant
 auth option and, if needed, `--agent-config active`, then rotate with
 `agent auth set` for an existing VM.
+
+**Codex reports an expired authentication token.** Run `infra-tools agent
+doctor HOST USER --tool codex --json` or `infra-tools agent auth status HOST
+USER --tool codex --json`. If the cached access token is expired and
+`last_refresh` is overdue, authenticate that VM independently or explicitly
+replace it with `agent auth set`. Updating a controller source does not replace
+an existing target file during an ordinary setup rerun.
 
 **An agent installer reports permission denied under `~/.local/bin`.** Current
 setup repairs ownership of the target user's `.local` tree before running

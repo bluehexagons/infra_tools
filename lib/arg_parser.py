@@ -748,20 +748,26 @@ def add_setup_arguments(
             "--git-auth",
             dest="git_auth_source",
             choices=("active", "none"),
-            help="Use active GitHub CLI credentials, or none to disable profile defaults",
+            help=(
+                "Seed missing active GitHub CLI credentials, or none to "
+                "disable profile defaults"
+            ),
         )
         git_auth_group.add_argument(
             "--git-auth-file",
             dest="git_auth_file",
             metavar="PATH",
-            help="Copy GitHub CLI credentials from a controller-local file",
+            help="Seed missing GitHub CLI credentials from a controller-local file",
         )
         agent_auth_group = parser.add_mutually_exclusive_group()
         agent_auth_group.add_argument(
             "--agent-auth",
             dest="agent_auth_source",
             choices=("active", "none"),
-            help="Use active agent credentials, or none to disable profile defaults",
+            help=(
+                "Seed missing active agent credentials, or none to disable "
+                "profile defaults"
+            ),
         )
         agent_auth_group.add_argument(
             "--agent-auth-file",
@@ -769,7 +775,10 @@ def add_setup_arguments(
             action="append",
             nargs=2,
             metavar=("TOOL", "PATH"),
-            help="Copy one selected agent credential file; repeat for different tools",
+            help=(
+                "Seed one missing selected agent credential file; repeat for "
+                "different tools"
+            ),
         )
         parser.add_argument(
             "--agent-config",

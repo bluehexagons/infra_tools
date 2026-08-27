@@ -10,6 +10,10 @@ import shlex
 import subprocess
 from typing import Any, Optional
 
+from lib.agent_credentials import (
+    codex_auth_warning,
+    inspect_codex_auth_payload,
+)
 from lib.ssh_utils import build_ssh_command, ssh_batch_mode
 
 
@@ -152,7 +156,7 @@ def _remote_status_script(tool: str, git_host: str) -> str:
     path_literal = json.dumps(_AUTH_PATHS[tool])
     host_literal = json.dumps(git_host)
     return f"""
-import json, os, shutil, subprocess, time
+import json, os, shutil, subprocess, sys, time
 
 tool = {json.dumps(tool)}
 relative_path = {path_literal}
@@ -172,6 +176,17 @@ try:
     }})
 except OSError:
     pass
+
+if tool == 'codex' and credential['present']:
+    try:
+        sys.path.insert(0, '/opt/infra_tools')
+        from lib.agent_credentials import inspect_codex_auth_file
+        credential['details'] = inspect_codex_auth_file(credential_path)
+    except (ImportError, OSError, ValueError):
+        credential['details'] = {{
+            'status': 'unavailable',
+            'warnings': ['metadata_unavailable'],
+        }}
 
 authentication = None
 if tool == 'gh' and tool_path and credential['present']:
@@ -248,6 +263,16 @@ def set_agent_credential(
         token,
         use_active=use_active,
     )
+    if tool == "codex":
+        metadata = inspect_codex_auth_payload(payload)
+        if metadata.get("auth_mode") == "chatgpt":
+            print(
+                "Note: Codex ChatGPT auth is renewable per-machine state; "
+                "use a dedicated source for this VM"
+            )
+        warning = codex_auth_warning(metadata)
+        if warning:
+            print(f"Warning: source: {warning}")
     result = _run_remote_script(
         host,
         username,
@@ -337,6 +362,12 @@ def run_agent_auth_status(args: Any) -> int:
             auth_detail = "; authentication passed"
         elif auth is False:
             auth_detail = "; authentication failed"
+        if result.get("tool") == "codex" and isinstance(credential, dict):
+            details = credential.get("details")
+            if isinstance(details, dict):
+                warning = codex_auth_warning(details)
+                if warning:
+                    auth_detail += f"; {warning}"
         print(
             f"  {'✓' if result.get('installed') else '✗'} {result.get('tool')}: "
             f"{'installed' if result.get('installed') else 'not installed'}, "

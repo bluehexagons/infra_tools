@@ -18,6 +18,11 @@ from typing import Optional
 
 from lib.atomic_io import write_json_atomic
 from lib.agent_auth import AGENT_AUTH_TOOLS
+from lib.agent_credentials import (
+    codex_auth_is_healthy,
+    codex_auth_warning,
+    inspect_codex_auth_file,
+)
 from lib.ssh_utils import build_ssh_command, shell_join, ssh_batch_mode
 from lib.types import JSONDict, StrList
 from lib.validation import validate_filesystem_path, validate_package_name
@@ -679,17 +684,25 @@ def inspect_agent_tools(tools: StrList, home: Optional[str] = None) -> list[JSON
     for tool in tools:
         path = _tool_path(tool, user_home)
         credential_relative = _CREDENTIAL_PATHS.get(tool)
+        credential_path = (
+            os.path.join(user_home, credential_relative)
+            if credential_relative
+            else None
+        )
+        credential_present = bool(credential_path and os.path.exists(credential_path))
         result: JSONDict = {
             "tool": tool,
             "installed": path is not None,
             "path": path,
             "version": _tool_version(tool, path) if path else None,
-            "credential": (
-                os.path.exists(os.path.join(user_home, credential_relative))
-                if credential_relative
-                else None
-            ),
+            "credential": credential_present if credential_relative else None,
         }
+        if tool == "codex" and credential_present and credential_path:
+            credential_status = inspect_codex_auth_file(credential_path)
+            result["credential_status"] = credential_status
+            result["credential_healthy"] = codex_auth_is_healthy(
+                credential_status
+            )
         results.append(result)
     return results
 
@@ -1393,6 +1406,11 @@ def run_agent_command(args: argparse.Namespace) -> int:
             credential = result.get("credential")
             if credential is True:
                 print("      credentials: present")
+                credential_status = result.get("credential_status")
+                if isinstance(credential_status, dict):
+                    warning = codex_auth_warning(credential_status)
+                    if warning:
+                        print(f"      warning: {warning}")
             elif credential is False:
                 print("      credentials: not found; run the tool to sign in")
 
@@ -1416,6 +1434,10 @@ def run_agent_command(args: argparse.Namespace) -> int:
             else:
                 print("  ✗ browser: agent MCP registration is missing")
 
-    tools_healthy = all(bool(result["installed"]) for result in results)
+    tools_healthy = all(
+        bool(result["installed"])
+        and result.get("credential_healthy") is not False
+        for result in results
+    )
     capabilities_healthy = all(bool(result["healthy"]) for result in capability_results)
     return 0 if tools_healthy and capabilities_healthy else 1

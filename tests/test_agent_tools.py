@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import io
 import json
@@ -10,6 +11,7 @@ import os
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -30,6 +32,7 @@ from common.agent_steps import (
     install_opencode,
 )
 from lib.agent_auth import get_agent_auth_status, set_agent_credential
+from lib.agent_credentials import inspect_codex_auth_payload
 from lib.agent_cli import (
     _t3_port,
     _tool_path,
@@ -41,6 +44,73 @@ from lib.agent_cli import (
 )
 from lib.agent_cli import _download_codex_installer, _invoke_agent_update
 from lib.config import SetupConfig
+
+
+def _test_jwt(claims: dict[str, object]) -> str:
+    def encode(value: dict[str, object]) -> str:
+        payload = json.dumps(value, separators=(",", ":")).encode("utf-8")
+        return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+    return f"{encode({'alg': 'none'})}.{encode(claims)}.test-signature"
+
+
+class TestCodexCredentialMetadata(unittest.TestCase):
+    def test_expired_chatgpt_auth_reports_dates_without_tokens(self):
+        access_token = _test_jwt({"iat": 1786789824, "exp": 1787653824})
+        payload = json.dumps(
+            {
+                "auth_mode": "chatgpt",
+                "last_refresh": "2026-08-15T10:30:24Z",
+                "tokens": {
+                    "access_token": access_token,
+                    "refresh_token": "never-print-refresh-token",
+                    "account_id": "never-print-account-id",
+                },
+            }
+        ).encode("utf-8")
+
+        result = inspect_codex_auth_payload(
+            payload,
+            now=datetime(2026, 8, 27, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(result["status"], "refresh_required")
+        self.assertTrue(result["access_token_expired"])
+        self.assertEqual(result["access_token_expires_at"], "2026-08-25T10:30:24Z")
+        self.assertIn("refresh_overdue", result["warnings"])
+        rendered = json.dumps(result)
+        self.assertNotIn(access_token, rendered)
+        self.assertNotIn("never-print-refresh-token", rendered)
+        self.assertNotIn("never-print-account-id", rendered)
+
+    def test_current_chatgpt_auth_reports_refresh_metadata(self):
+        payload = json.dumps(
+            {
+                "auth_mode": "chatgpt",
+                "last_refresh": "2026-08-26T10:30:24Z",
+                "tokens": {
+                    "access_token": _test_jwt(
+                        {"iat": 1787740224, "exp": 1788604224}
+                    ),
+                    "refresh_token": "refresh-token",
+                },
+            }
+        ).encode("utf-8")
+
+        result = inspect_codex_auth_payload(
+            payload,
+            now=datetime(2026, 8, 27, tzinfo=timezone.utc),
+        )
+
+        self.assertEqual(result["status"], "current")
+        self.assertEqual(result["warnings"], [])
+        self.assertTrue(result["refresh_token_present"])
+
+    def test_malformed_codex_auth_is_invalid_without_echoing_input(self):
+        result = inspect_codex_auth_payload(b"not-json-secret")
+
+        self.assertEqual(result["status"], "invalid")
+        self.assertNotIn("not-json-secret", json.dumps(result))
 
 
 class TestOfficialAgentInstallers(unittest.TestCase):
@@ -398,7 +468,33 @@ class TestAgentDoctor(unittest.TestCase):
         self.assertTrue(result[0]['installed'])
         self.assertEqual(result[0]['version'], 'codex 1.2.3')
         self.assertTrue(result[0]['credential'])
+        self.assertTrue(result[0]['credential_healthy'])
+        self.assertEqual(result[0]['credential_status']['status'], 'unknown')
         self.assertNotIn('never-print-this', str(result))
+
+    def test_known_unhealthy_codex_credentials_fail_doctor(self):
+        args = argparse.Namespace(
+            agent_command='doctor',
+            agent_doctor_host=None,
+            agent_doctor_username=None,
+            agent_doctor_tools=['codex'],
+            agent_doctor_capabilities=None,
+            ssh_key=None,
+            fix=False,
+            json=True,
+        )
+        with patch('lib.agent_cli.inspect_agent_tools', return_value=[
+            {
+                'tool': 'codex',
+                'installed': True,
+                'path': '/home/agent/.local/bin/codex',
+                'version': 'codex 1.2.3',
+                'credential': True,
+                'credential_healthy': False,
+                'credential_status': {'status': 'refresh_required'},
+            }
+        ]):
+            self.assertEqual(run_agent_command(args), 1)
 
     def test_explicit_missing_tool_is_unhealthy(self):
         args = argparse.Namespace(
@@ -949,6 +1045,76 @@ class TestAgentPayloadInstallation(unittest.TestCase):
                 ],
             )
             self.assertEqual(os.stat(destination).st_mode & 0o777, 0o600)
+
+    def test_existing_github_host_credentials_are_retained(self):
+        config = SetupConfig(
+            host='host',
+            username='agent',
+            system_type='server_dev',
+        )
+        completed = type(
+            'Completed',
+            (),
+            {'returncode': 0, 'stdout': '', 'stderr': ''},
+        )()
+        with tempfile.TemporaryDirectory() as directory:
+            home = os.path.join(directory, 'home')
+            source = os.path.join(directory, 'hosts.yml')
+            destination = os.path.join(home, '.config', 'gh', 'hosts.yml')
+            os.makedirs(os.path.dirname(destination))
+            target_content = (
+                'github.com:\n  oauth_token: target-refreshed-token\n'
+                'gitlab.com:\n  oauth_token: unrelated-token\n'
+            )
+            with open(source, 'w', encoding='utf-8') as file_obj:
+                file_obj.write('github.com:\n  oauth_token: source-token\n')
+            with open(destination, 'w', encoding='utf-8') as file_obj:
+                file_obj.write(target_content)
+
+            with (
+                patch('common.agent_steps._user_home', return_value=home),
+                patch('common.agent_steps.run', return_value=completed),
+            ):
+                self.assertFalse(_merge_github_credentials(config, source))
+
+            with open(destination, encoding='utf-8') as file_obj:
+                self.assertEqual(file_obj.read(), target_content)
+
+    def test_existing_codex_credentials_are_retained_on_setup(self):
+        config = SetupConfig(
+            host='host',
+            username='agent',
+            system_type='server_dev',
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            source = os.path.join(directory, 'source-auth.json')
+            home = os.path.join(directory, 'home')
+            destination = os.path.join(home, '.codex', 'auth.json')
+            os.makedirs(os.path.dirname(destination))
+            with open(source, 'w', encoding='utf-8') as file_obj:
+                file_obj.write('{"token":"stale-controller-token"}\n')
+            with open(destination, 'w', encoding='utf-8') as file_obj:
+                file_obj.write('{"token":"target-refreshed-token"}\n')
+
+            with (
+                patch('common.agent_steps._user_home', return_value=home),
+                patch('common.agent_steps._chown_user_directory_chain'),
+                patch('common.agent_steps._chown_path'),
+            ):
+                copied = _copy_secret_file(
+                    config,
+                    source,
+                    destination,
+                    'Codex',
+                    credential_tool='codex',
+                )
+
+            self.assertFalse(copied)
+            with open(destination, encoding='utf-8') as file_obj:
+                self.assertEqual(
+                    file_obj.read(),
+                    '{"token":"target-refreshed-token"}\n',
+                )
 
     def test_git_identity_fills_missing_fields_from_staged_controller_values(self):
         config = SetupConfig(

@@ -25,6 +25,7 @@ except ImportError:
     argcomplete = None
 
 from lib.atomic_io import write_json_atomic
+from lib.agent_credentials import codex_auth_warning, inspect_codex_auth_file
 from lib.config import DEFAULT_MACHINE_TYPE, SetupConfig, _normalize_nested_specs
 from lib.credentials import prepare_runtime_config, store_cli_credentials
 from lib.network_transition import finish_network_transition
@@ -525,6 +526,18 @@ def _stage_secret_file(source: str, destination: str, label: str) -> None:
     print(f"  Staged {label}")
 
 
+def _warn_for_codex_auth_source(source: str) -> None:
+    metadata = inspect_codex_auth_file(source)
+    if metadata.get("auth_mode") == "chatgpt":
+        print(
+            "  Note: Codex ChatGPT auth is renewable per-machine state; "
+            "use a dedicated source for each VM"
+        )
+    warning = codex_auth_warning(metadata)
+    if warning:
+        print(f"  Warning: staged source: {warning}")
+
+
 def _validate_htpasswd_content(content: bytes) -> None:
     """Validate the narrow Nginx password-file format accepted by pairing."""
 
@@ -773,6 +786,8 @@ def _stage_active_agent_credential(
     source = os.path.join(local_home, relative_path)
     if not os.path.exists(source):
         raise ValueError(_active_agent_credential_error(tool, source))
+    if tool == "codex":
+        _warn_for_codex_auth_source(source)
     _stage_secret_file(
         source,
         os.path.join(payload_dir, "secrets", tool, os.path.basename(relative_path)),
@@ -913,6 +928,8 @@ def prepare_agent_payload(config: SetupConfig, payload_dir: str) -> None:
                 os.path.join(payload_dir, "secrets", "gh", "hosts.yml"),
             )
         else:
+            if tool == "codex":
+                _warn_for_codex_auth_source(source)
             _stage_secret_file(
                 source,
                 os.path.join(payload_dir, "secrets", tool, _AGENT_AUTH_FILENAMES[tool]),

@@ -60,9 +60,10 @@ infra-tools ssh-key enroll <host> [--port PORT] [--yes]
 ```
 
 Use `infra-tools agent doctor --capability t3code` to check the managed T3
-service, provider authentication, Git identity, pairing helper, endpoint, and
-agent skill. Add `--fix` to configure the GitHub HTTPS credential helper after
-a successful login and restart an inactive managed service.
+service, native runtime, provider authentication, Git identity, pairing helper,
+endpoint, and agent skill. Add `--fix` to rebuild missing native dependencies,
+configure the GitHub HTTPS credential helper after a successful login, and
+restart an inactive managed service.
 
 ### Bootstrap and self-setup flags
 
@@ -393,10 +394,10 @@ rm -f "$HOME/.infra_tools-install.sh"
 | `--refresh-packages` | Force the APT update/upgrade and versioned runtime checks that normal reruns skip when their completion state is already present |
 | `--git-access POLICY` | Set the VM's declared agent Git policy: `none`, `read`, or `read-write` |
 | `--git-host HOST` | Select the Git host for credentials; GitHub auth currently uses `github.com` |
-| `--git-auth active\|none` | Copy active GitHub CLI credentials, or disable a profile auth default |
-| `--git-auth-file PATH` | Copy a selected-host `hosts.yml` entry or a one-line GitHub token from a controller-local file |
-| `--agent-auth active\|none` | Copy selected active agent credentials, or disable a profile auth default |
-| `--agent-auth-file TOOL PATH` | Copy one selected agent credential from a specified controller-local file to its canonical target path; `gh` accepts a hosts file or one-line token; repeatable |
+| `--git-auth active\|none` | Seed missing active GitHub CLI host credentials, or disable a profile auth default |
+| `--git-auth-file PATH` | Seed a missing selected-host `hosts.yml` entry or one-line GitHub token from a controller-local file |
+| `--agent-auth active\|none` | Seed missing selected agent credentials, or disable a profile auth default |
+| `--agent-auth-file TOOL PATH` | Seed one missing selected agent credential from a controller-local file at its canonical target path; `gh` accepts a hosts file or one-line token; repeatable |
 | `--agent-config active` | Copy known non-secret config from the active controller; does not copy auth files |
 | `--interactive` | Prompt for tools, HTTPS repositories, Git policy, and credential sources |
 | `--repo GIT_URL` | Clone an HTTPS repository below the selected agent workspace; repeatable |
@@ -472,25 +473,27 @@ own and revoke the resulting device session. The direct HTTP mode is limited
 to trusted private source CIDRs and does not encrypt the Basic Auth password.
 
 Codex CLI, Claude Code, OpenCode, and T3 Code are installed from their official
-distribution channels. T3 Code uses its documented `npx t3@latest service
-update` workflow, so the same command can update the managed service later.
+distribution channels. T3 Code uses its documented background-service updater
+with lifecycle scripts enabled only for that trusted update; see
+[T3_CODE.md](T3_CODE.md) for the exact host-side command and recovery path.
 The Codex installer runs with `CODEX_NON_INTERACTIVE=1`,
 so setup does not prompt to start Codex or remove a conflicting installation.
 The other agent tools are not installed with npm. Any
 selected agent installs only that agent's tool and its required installer
 dependencies.
 
-Credential/config copy is intentionally tool-scoped and transient:
+Credential seeding and config copy are intentionally tool-scoped and transient:
 
-- `--git-auth`/`--git-auth-file` copy only the selected GitHub host entry, merge it into the target user's existing `gh` hosts file, and run `gh auth setup-git`.
-- `--agent-auth`/`--agent-auth-file` copy Codex, Claude Code, or OpenCode credentials without requiring those tools on the controller; active `gh` requires controller `gh` only when its token is keyring-backed.
+- `--git-auth`/`--git-auth-file` seed only a missing selected GitHub host entry, preserve target-managed credentials on rerun, and run `gh auth setup-git`.
+- `--agent-auth`/`--agent-auth-file` seed missing Codex, Claude Code, or OpenCode credentials without requiring those tools on the controller; active `gh` requires controller `gh` only when its token is keyring-backed.
 - `--agent-config active` copies known non-secret configuration from the active controller user.
 - T3 Code receives only managed launchers and the non-secret T3 workflow skill;
   infra-tools does not copy T3 Code credentials.
 
-The root-only upload payload is removed after the selected config and credentials
-are copied. Repositories are never cloned or cached on the controller: the
-target VM performs each HTTPS clone after GitHub credentials are configured.
+The root-only upload payload is removed after selected config is applied and
+missing credentials are seeded. Repositories are never cloned or cached on the
+controller: the target VM performs each HTTPS clone after GitHub credentials
+are configured.
 Public repositories on any reachable Git host work without credentials. Agent
 repository URLs with embedded credentials, SSH/scp syntax, and non-HTTPS schemes
 are rejected. A requested repository that cannot be cloned stops setup, while an
@@ -513,14 +516,17 @@ infra-tools agent update 10.0.0.10 agent --tool codex --dry-run
 
 The default doctor check covers GitHub CLI, Codex CLI, Claude Code, and OpenCode.
 Missing credential files are reported as sign-in reminders but do not make an
-otherwise installed tool unhealthy.
+otherwise installed tool unhealthy. A present Codex file also gets a non-secret
+freshness check; known invalid or refresh-overdue ChatGPT credentials make the
+Codex doctor result unhealthy.
 `--capability browser` additionally verifies managed launchers, MCP registration
 for installed compatible agents, and a local Chromium interaction/rendering
 smoke test.
-`--capability t3code` checks the managed service, runtime, pairing helper,
+`--capability t3code` checks the managed service, native runtime, pairing helper,
 endpoint, provider authentication, Git identity and credential helper, and the
-managed agent skill. Its `--fix` mode only configures the GitHub HTTPS helper
-after a successful login and restarts an inactive managed service.
+managed agent skill. Its `--fix` mode can rebuild blocked native dependencies,
+configure the GitHub HTTPS helper after a successful login, and restart an
+inactive managed service.
 When `--capability` is supplied without `--tool`, doctor checks only the
 requested capability instead of requiring the default set of terminal agents.
 Supplying `HOST USER` runs the same doctor through managed SSH from the control
@@ -592,8 +598,10 @@ token through the controller's `gh auth token`; active Codex, Claude Code, and
 OpenCode rotation still requires their file-backed credential paths. GitHub
 input is filtered to `github.com` and is installed with an atomic mode-`0600`
 replacement. Status reports only tool
-installation, credential presence/metadata, and the GitHub authentication
-check; it never prints credential contents.
+installation, credential presence/metadata, safe Codex refresh and cached-token
+dates, and the GitHub authentication check; it never prints credential
+contents, token strings, or Codex account IDs. Normal setup is seed-only;
+`auth set` is the deliberate replacement path.
 
 The normal restart policy can force a reboot after seven days of active-session
 deferrals. For a host running long unattended agent tasks, use both

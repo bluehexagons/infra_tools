@@ -198,6 +198,41 @@ class TestAgentPayloadPreparation(unittest.TestCase):
             with open(canonical, encoding='utf-8') as file_obj:
                 self.assertEqual(file_obj.read(), '{"token":"secret"}\n')
 
+    def test_stale_codex_source_warns_without_printing_tokens(self):
+        with (
+            tempfile.TemporaryDirectory() as home,
+            tempfile.TemporaryDirectory() as payload_dir,
+        ):
+            source = os.path.join(home, 'codex-auth.json')
+            with open(source, 'w', encoding='utf-8') as file_obj:
+                json.dump(
+                    {
+                        'auth_mode': 'chatgpt',
+                        'last_refresh': '2020-01-01T00:00:00Z',
+                        'tokens': {'refresh_token': 'never-print-this-token'},
+                    },
+                    file_obj,
+                )
+            os.chmod(source, 0o600)
+            config = SetupConfig(
+                host='10.0.0.10',
+                username='agentuser',
+                system_type='server_dev',
+                agent_tools=['codex'],
+                agent_auth_files=[['codex', source]],
+                copy_agent_keys=True,
+            )
+
+            with (
+                patch.dict(os.environ, {'HOME': home, 'SUDO_USER': ''}),
+                patch('builtins.print') as output,
+            ):
+                prepare_agent_payload(config, payload_dir)
+
+            rendered = '\n'.join(str(call.args[0]) for call in output.call_args_list)
+            self.assertIn('last refresh was 2020-01-01T00:00:00Z', rendered)
+            self.assertNotIn('never-print-this-token', rendered)
+
     def test_rejects_symlinked_agent_config_file(self):
         with (
             tempfile.TemporaryDirectory() as home,

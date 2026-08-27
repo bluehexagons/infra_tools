@@ -9,6 +9,7 @@ import shlex
 import shutil
 import tempfile
 
+from lib.agent_credentials import codex_auth_warning, inspect_codex_auth_file
 from lib.config import SetupConfig
 from lib.remote_utils import install_package, is_dry_run, run
 from lib.validation import (
@@ -421,7 +422,16 @@ def _copy_payload_directory(config: SetupConfig, source: str, destination: str, 
     print(f"  Copied {label} config")
 
 
-def _copy_secret_file(config: SetupConfig, source: str, destination: str, label: str) -> bool:
+def _copy_secret_file(
+    config: SetupConfig,
+    source: str,
+    destination: str,
+    label: str,
+    *,
+    credential_tool: str | None = None,
+) -> bool:
+    """Seed a missing credential without replacing target-maintained auth state."""
+
     if not os.path.isfile(source):
         print(f"  No {label} credential payload found")
         return False
@@ -431,8 +441,22 @@ def _copy_secret_file(config: SetupConfig, source: str, destination: str, label:
     _ensure_agent_directory(destination_parent)
     _reject_symlinked_agent_destination(destination)
     _chown_user_directory_chain(config, _user_home(config), destination_parent)
+    if os.path.lexists(destination):
+        if os.path.islink(destination) or not os.path.isfile(destination):
+            raise RuntimeError(f"Refusing unsafe agent credential: {destination}")
+        os.chmod(destination, 0o600)
+        _chown_path(config, destination)
+        if credential_tool == "codex":
+            warning = codex_auth_warning(inspect_codex_auth_file(destination))
+            if warning:
+                print(f"  Warning: existing target: {warning}")
+        print(
+            f"  Existing {label} credentials retained; setup seeds missing "
+            "credentials only"
+        )
+        return False
 
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     file_descriptor = os.open(destination, flags, 0o600)
     try:
         with open(source, "rb") as source_file, os.fdopen(file_descriptor, "wb") as destination_file:
@@ -443,7 +467,7 @@ def _copy_secret_file(config: SetupConfig, source: str, destination: str, label:
             os.close(file_descriptor)
     os.chmod(destination, 0o600)
     _chown_path(config, destination)
-    print(f"  Copied {label} credentials")
+    print(f"  Seeded {label} credentials")
     return True
 
 
@@ -630,7 +654,7 @@ def _payload_host_entry(source: str, host: str) -> str:
 
 
 def _merge_github_credentials(config: SetupConfig, source: str) -> bool:
-    """Replace only the selected host entry in the target gh hosts file."""
+    """Seed a missing selected host without replacing target-maintained auth."""
     user_home = _user_home(config)
     destination = os.path.join(user_home, ".config", "gh", "hosts.yml")
     _reject_symlinked_agent_destination(os.path.dirname(destination))
@@ -645,23 +669,25 @@ def _merge_github_credentials(config: SetupConfig, source: str) -> bool:
             existing = file_obj.read()
 
     lines = existing.splitlines(keepends=True)
-    start = None
-    for index, line in enumerate(lines):
-        if line.startswith(f"{config.git_host}:") or line.startswith(f"'{config.git_host}':") or line.startswith(f'"{config.git_host}":'):
-            start = index
-            break
-    if start is None:
-        merged = existing.rstrip("\n")
-        if merged:
-            merged += "\n"
-        merged += new_entry
-    else:
-        end = len(lines)
-        for index in range(start + 1, len(lines)):
-            if lines[index].strip() and not lines[index][0].isspace() and not lines[index].lstrip().startswith("#"):
-                end = index
-                break
-        merged = "".join(lines[:start]) + new_entry + "".join(lines[end:])
+    selected_host_present = any(
+        line.startswith(f"{config.git_host}:")
+        or line.startswith(f"'{config.git_host}':")
+        or line.startswith(f'"{config.git_host}":')
+        for line in lines
+    )
+    if selected_host_present:
+        os.chmod(destination, 0o600)
+        _chown_path(config, destination)
+        print(
+            "  Existing GitHub CLI credentials retained; setup seeds missing "
+            "host credentials only"
+        )
+        return False
+
+    merged = existing.rstrip("\n")
+    if merged:
+        merged += "\n"
+    merged += new_entry
 
     descriptor, temporary = tempfile.mkstemp(
         dir=os.path.dirname(destination),
@@ -682,13 +708,13 @@ def _merge_github_credentials(config: SetupConfig, source: str) -> bool:
 
 
 def copy_agent_tooling_payload(config: SetupConfig) -> None:
-    """Install uploaded config and credential payloads, then remove the payload."""
+    """Apply uploaded config, seed missing credentials, and remove the payload."""
     if not os.path.isdir(REMOTE_AGENT_PAYLOAD_DIR):
         print("  No agent configuration payload found")
         return
 
     if is_dry_run():
-        print("  [DRY-RUN] Would copy selected agent tool config and credentials")
+        print("  [DRY-RUN] Would apply agent config and seed missing credentials")
         return
 
     user_home = _user_home(config)
@@ -708,6 +734,7 @@ def copy_agent_tooling_payload(config: SetupConfig) -> None:
                 _payload_path("secrets", "codex", "auth.json"),
                 os.path.join(user_home, ".codex", "auth.json"),
                 "Codex",
+                credential_tool="codex",
             )
 
         if config.install_claude:
@@ -752,9 +779,9 @@ def copy_agent_tooling_payload(config: SetupConfig) -> None:
 
         gh_credentials = _payload_path("secrets", "gh", "hosts.yml")
         if config.install_gh and os.path.isfile(gh_credentials):
-            if _merge_github_credentials(config, gh_credentials):
-                _configure_github_git_credentials(config)
-                _configure_git_identity(config)
+            _merge_github_credentials(config, gh_credentials)
+            _configure_github_git_credentials(config)
+            _configure_git_identity(config)
     finally:
         if os.path.isdir(REMOTE_AGENT_PAYLOAD_DIR):
             shutil.rmtree(REMOTE_AGENT_PAYLOAD_DIR)
