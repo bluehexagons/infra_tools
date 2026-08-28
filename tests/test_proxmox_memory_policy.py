@@ -16,6 +16,7 @@ from common.proxmox_steps import (
 from lib.arg_parser import create_setup_argument_parser
 from lib.config import SetupConfig
 from lib.proxmox_memory import (
+    SWAPON_STATUS_COMMAND,
     calculate_balloon_target,
     parse_swapon_output,
     parse_guest_memory_config,
@@ -149,9 +150,15 @@ class TestConfigureBalloonTarget(unittest.TestCase):
 
 
 class TestHostMemorySafety(unittest.TestCase):
+    def test_requests_explicit_swapon_columns(self):
+        self.assertEqual(
+            SWAPON_STATUS_COMMAND,
+            "swapon --show=NAME,TYPE,SIZE,USED --bytes --noheadings --raw",
+        )
+
     def test_parses_partition_and_zfs_swap_devices(self):
         devices = parse_swapon_output(
-            "/dev/dm-0 partition 8053063680 0\n"
+            "/dev/dm-0 partition 8053063680 0 -2\n"
             "/dev/zvol/rpool/swap partition 2147483648 1024\n"
         )
 

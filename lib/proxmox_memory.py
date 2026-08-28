@@ -11,8 +11,7 @@ MAX_AUTOMATIC_BALLOON_TARGET_PERCENT = 80
 MIN_AUTOMATIC_BALLOON_TARGET_PERCENT = 50
 MIN_HOST_RESERVE_MIB = 2048
 SWAPON_STATUS_COMMAND = (
-    "swapon --show --bytes --noheadings --raw "
-    "--output NAME,TYPE,SIZE,USED"
+    "swapon --show=NAME,TYPE,SIZE,USED --bytes --noheadings --raw"
 )
 
 
@@ -98,7 +97,7 @@ def parse_swapon_output(output: str) -> list[HostSwapDevice]:
     devices: list[HostSwapDevice] = []
     for line in output.splitlines():
         fields = line.split()
-        if len(fields) != 4:
+        if len(fields) < 4:
             continue
         try:
             size_bytes = int(fields[2])
